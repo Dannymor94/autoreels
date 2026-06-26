@@ -14,3 +14,8 @@ presets:
   shorts: { min: 15, max: 59 }
   reels:  { min: 15, max: 90 }
   tiktok: { min: 15, max: 180 }
+
+# Пути к рантайм-промптам R0 (не хардкод в коде — берутся отсюда).
+prompts:
+  system: prompts/r0_system.md
+  fewshot: prompts/r0_fewshot.json
