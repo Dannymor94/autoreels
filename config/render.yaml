@@ -1,0 +1,21 @@
+# Параметры локального рендера ffmpeg. Ноль магических чисел в коде.
+scale: [1080, 1920]            # целевое вертикальное разрешение 9:16
+
+encoder:
+  codec: h264_nvenc           # NVENC где доступен; fallback — libx264
+  fallback_codec: libx264
+  preset: p5                  # NVENC preset
+  cq: 23
+
+audio:
+  codec: aac
+  bitrate: 160k
+
+subtitles:
+  # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
+  font: Montserrat
+  font_size: 72
+  margin_v: 300               # сажает текст в нижнюю треть (зона над UI платформы)
+  words_per_line: [2, 4]      # группировка поп-апа по словам (\k)
+  # font_dir — путь к шрифтам для ffmpeg (fontsdir). Заполняется под машину рендера.
+  font_dir: null

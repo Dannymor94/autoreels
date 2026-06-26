@@ -1,0 +1,16 @@
+# R0 — конфиг выбора моментов. Всё, что вынесено из кода (R0_SPEC §10).
+duration_preset: shorts        # shorts | reels | tiktok
+min_score: 65
+max_reels: null                # null = все прошедшие порог
+chunk_tokens: 3500
+chunk_overlap_sec: 60
+dedup_overlap_threshold: 0.5
+title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
+language: ru                   # язык вывода LLM
+prompt_language: en            # system-промпт на английском (крепче grounding)
+
+# Пресеты длины (сек) — PROJECT_GUIDE / R0_SPEC §3. Код-валидатор ставит too_long/too_short.
+presets:
+  shorts: { min: 15, max: 59 }
+  reels:  { min: 15, max: 90 }
+  tiktok: { min: 15, max: 180 }

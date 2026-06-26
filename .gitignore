@@ -1,0 +1,20 @@
+# рантайм-данные (PROJECT_STRUCTURE: data/ gitignored)
+data/cache/
+data/runs/
+data/outputs/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# секреты провайдеров (Groq / OpenRouter ключи)
+.env
+
+# локальный конфиг харнесса
+.claude/
