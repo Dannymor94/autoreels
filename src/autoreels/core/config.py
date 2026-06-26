@@ -92,6 +92,17 @@ class Audio(BaseModel):
     bitrate: str
 
 
+class AudioExtract(BaseModel):
+    """Параметры извлечения аудиодорожки под Whisper (cloud/extract_audio.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sample_rate: int
+    channels: int
+    codec: str
+    format: str
+
+
 class SubtitleStyle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -110,6 +121,7 @@ class RenderConfig(BaseModel):
     scale: list[int]
     encoder: Encoder
     audio: Audio
+    audio_extract: AudioExtract
     subtitles: SubtitleStyle
 
 

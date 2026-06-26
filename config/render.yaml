@@ -11,6 +11,14 @@ audio:
   codec: aac
   bitrate: 160k
 
+# Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
+# 16kHz mono PCM — то, что ждёт faster-whisper; wav читается stdlib без ffprobe.
+audio_extract:
+  sample_rate: 16000
+  channels: 1
+  codec: pcm_s16le
+  format: wav
+
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
   font: Montserrat
