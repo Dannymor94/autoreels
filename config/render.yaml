@@ -2,9 +2,11 @@
 scale: [1080, 1920]            # целевое вертикальное разрешение 9:16
 
 encoder:
-  codec: h264_nvenc           # NVENC где доступен; fallback — libx264
+  # Энкодер — env-параметр (RENDER_ENCODER), дефолт libx264 (везде работает, без GPU).
+  # prod на AMD → h264_vaapi (Linux) / h264_amf (Windows), НЕ NVENC. Выбор — на шаге 6.
+  codec: libx264
   fallback_codec: libx264
-  preset: p5                  # NVENC preset
+  preset: medium              # пресет libx264; для VAAPI/AMF переопределяется на шаге 6
   cq: 23
 
 audio:

@@ -14,8 +14,10 @@ from autoreels.core.config import (
     ConfigError,
     R0Config,
     RenderConfig,
+    TranscribeConfig,
     load_r0_config,
     load_render_config,
+    load_transcribe_config,
     load_profile,
 )
 from autoreels.core.models import SetupProfile
@@ -23,6 +25,7 @@ from autoreels.core.models import SetupProfile
 ROOT = Path(__file__).resolve().parents[1]
 R0_YAML = ROOT / "config" / "r0.yaml"
 RENDER_YAML = ROOT / "config" / "render.yaml"
+TRANSCRIBE_YAML = ROOT / "config" / "transcribe.yaml"
 PROFILE_JSON = ROOT / "profiles" / "tearoom_main.json"
 
 
@@ -49,6 +52,13 @@ def test_load_render_config_returns_typed_object():
     assert isinstance(cfg, RenderConfig)
     assert cfg.scale == [1080, 1920]
     assert cfg.subtitles.font == "Montserrat"
+
+
+def test_load_transcribe_config_defaults_to_groq():
+    cfg = load_transcribe_config(TRANSCRIBE_YAML)
+    assert isinstance(cfg, TranscribeConfig)
+    assert cfg.backend == "groq"                      # дефолт — Groq везде
+    assert cfg.groq.model == "whisper-large-v3"
 
 
 def test_load_profile_returns_setup_profile():

@@ -12,6 +12,7 @@ from autoreels.core.models import (
     SetupProfile,
     Crop,
     Word,
+    Transcript,
     ProjectStatus,
 )
 
@@ -74,6 +75,23 @@ def test_status_defaults_pending_and_has_two_phase_boundary():
     # Граница Phase 1/Phase 2 выражена в типах.
     assert ProjectStatus.awaiting_review in set(ProjectStatus)
     assert ProjectStatus.approved in set(ProjectStatus)
+
+
+def test_transcript_word_level_round_trip():
+    # Транскрипт несёт word-level (та же форма Word, что и subtitles манифеста).
+    tr = Transcript(
+        language="russian",
+        words=[Word(word="привет", t0=0.0, t1=0.5), Word(word="мир", t0=0.5, t1=0.9)],
+    )
+    restored = Transcript.model_validate_json(tr.model_dump_json())
+    assert restored == tr
+    assert restored.words[0].word == "привет"
+
+
+def test_transcript_empty_words_is_valid_default():
+    # Тишина/пустой транскрипт — валиден, без валидатора непустоты.
+    tr = Transcript(language="russian")
+    assert tr.words == []
 
 
 def test_manifest_json_round_trip():

@@ -1,0 +1,13 @@
+# Транскрипция. backend выбирается отсюда; env TRANSCRIBE_BACKEND перебивает (ad-hoc).
+# API-ключ (GROQ_API_KEY) — ТОЛЬКО в окружении/.env, никогда не здесь.
+backend: groq                  # groq (дефолт, dev и prod) | faster_whisper
+language: ru                   # язык транскрипции
+
+groq:
+  model: whisper-large-v3      # word-level таймкосы обязательны (R1 snap, R3 субтитры)
+
+# Необязательный CPU-fallback (offline). НЕ дефолт: prod на AMD-GPU без CUDA → только CPU.
+faster_whisper:
+  model_size: large-v3
+  device: cpu
+  compute_type: int8

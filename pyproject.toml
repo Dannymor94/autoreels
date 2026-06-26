@@ -10,13 +10,17 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",
     "pyyaml>=6.0",
-    "faster-whisper>=1.0",   # локальная транскрипция (word-level), узел CLOUD-тира
-    "httpx>=0.27",           # провайдер-слой: Groq → OpenRouter
+    "httpx>=0.27",           # Groq Whisper + провайдер-слой R0 (Groq → OpenRouter)
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+]
+# Необязательный CPU-fallback транскрипции (offline). НЕ дефолт: prod на AMD-GPU без CUDA,
+# CTranslate2 идёт только на CPU. Дефолт везде — Groq Whisper API. См. cloud/transcribe.py.
+faster-whisper = [
+    "faster-whisper>=1.0",
 ]
 
 [project.scripts]
@@ -28,3 +32,9 @@ packages = ["src/autoreels"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# integration-тесты (реальные модели/сеть) пропускаются по умолчанию; гонять явно:
+#   pytest -m integration   (только на системнике, где есть смысл реального прогона)
+addopts = "-m 'not integration'"
+markers = [
+    "integration: реальный внешний прогон (faster-whisper/сеть); skip по умолчанию",
+]

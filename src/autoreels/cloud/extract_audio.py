@@ -12,31 +12,16 @@
 """
 from __future__ import annotations
 
-import hashlib
 import shutil
 import subprocess
 from pathlib import Path
 
+from autoreels.core import state
 from autoreels.core.config import AudioExtract
-
-_HASH_CHUNK = 1 << 20  # 1 МиБ
 
 
 class ExtractAudioError(Exception):
     """Извлечение аудио не удалось (нет файла, нет ffmpeg, ffmpeg вернул ошибку)."""
-
-
-def _source_hash(path: Path) -> str:
-    """sha256 содержимого источника. Ключ кэша/имени — почва под идемпотентность (шаг 3).
-
-    Хэширование живёт здесь временно; на шаге 3 ключи идемпотентности консолидируются
-    в core/state.py (хэш аудио + ключ прогона).
-    """
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(_HASH_CHUNK), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def extract_audio(
@@ -63,7 +48,7 @@ def extract_audio(
 
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    out = cache_dir / f"{_source_hash(source)}.{audio_cfg.format}"
+    out = cache_dir / f"{state.file_sha256(source)}.{audio_cfg.format}"
 
     cmd = [
         ffmpeg_bin, "-y", "-loglevel", "error",

@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from autoreels.core.models import SetupProfile
 
@@ -125,6 +125,33 @@ class RenderConfig(BaseModel):
     subtitles: SubtitleStyle
 
 
+# --------------------------------------------------------------------- Transcribe
+
+class GroqWhisper(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = "whisper-large-v3"
+
+
+class FasterWhisperParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_size: str = "large-v3"
+    device: str = "cpu"
+    compute_type: str = "int8"
+
+
+class TranscribeConfig(BaseModel):
+    """Типизированный config/transcribe.yaml. backend отсюда, ключ — из env."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str = "groq"
+    language: str = "ru"
+    groq: GroqWhisper = Field(default_factory=GroqWhisper)
+    faster_whisper: FasterWhisperParams = Field(default_factory=FasterWhisperParams)
+
+
 # ------------------------------------------------------------------------ readers
 
 def _read_yaml(path: Path) -> dict:
@@ -180,6 +207,15 @@ def load_render_config(path: str | Path) -> RenderConfig:
         return RenderConfig.model_validate(data)
     except ValidationError as e:
         raise ConfigError(f"невалидный render-конфиг {path}:\n{e}") from e
+
+
+def load_transcribe_config(path: str | Path) -> TranscribeConfig:
+    """config/transcribe.yaml → TranscribeConfig."""
+    data = _read_yaml(Path(path))
+    try:
+        return TranscribeConfig.model_validate(data)
+    except ValidationError as e:
+        raise ConfigError(f"невалидный transcribe-конфиг {path}:\n{e}") from e
 
 
 def load_profile(path: str | Path) -> SetupProfile:

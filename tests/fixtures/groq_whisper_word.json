@@ -1,0 +1,28 @@
+{
+  "_comment": "Representative Groq Whisper verbose_json (response_format=verbose_json, timestamp_granularities=['word']). Форма реальная (OpenAI-совместимая); ЗАМЕНИТЬ захваченным ответом на своём контенте при первом прогоне M0.",
+  "task": "transcribe",
+  "language": "russian",
+  "duration": 5.0,
+  "text": "Самый важный момент в работе с травмой это не сама травма",
+  "words": [
+    { "word": "Самый", "start": 0.12, "end": 0.46 },
+    { "word": "важный", "start": 0.46, "end": 0.88 },
+    { "word": "момент", "start": 0.88, "end": 1.30 },
+    { "word": "в", "start": 1.30, "end": 1.38 },
+    { "word": "работе", "start": 1.38, "end": 1.82 },
+    { "word": "с", "start": 1.82, "end": 1.90 },
+    { "word": "травмой", "start": 1.90, "end": 2.44 },
+    { "word": "это", "start": 2.60, "end": 2.86 },
+    { "word": "не", "start": 2.86, "end": 3.02 },
+    { "word": "сама", "start": 3.02, "end": 3.38 },
+    { "word": "травма", "start": 3.38, "end": 3.92 }
+  ],
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.12,
+      "end": 3.92,
+      "text": "Самый важный момент в работе с травмой это не сама травма"
+    }
+  ]
+}

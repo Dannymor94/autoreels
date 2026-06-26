@@ -71,6 +71,20 @@ class Word(BaseModel):
     t1: float
 
 
+class Transcript(BaseModel):
+    """Word-level транскрипт аудио (выход cloud/transcribe.py).
+
+    Внутренний контракт облачного тира (transcribe → compress → select), кэшируется по
+    хэшу аудио. Слова — та же форма `Word{word,t0,t1}`, что переживает до субтитров R3.
+    Пустой `words` валиден (тишина — не ошибка).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    language: str
+    words: list[Word] = Field(default_factory=list)
+
+
 class Reel(BaseModel):
     """Один кандидат-клип. Без crop/scale — наследует их из `manifest.setup`."""
 
