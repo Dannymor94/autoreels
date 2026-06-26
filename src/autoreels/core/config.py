@@ -57,6 +57,7 @@ class R0Config(BaseModel):
     chunk_tokens: int
     chunk_overlap_sec: int
     dedup_overlap_threshold: float
+    sentence_pause_sec: float
     title_style: str
     language: str
     prompt_language: str

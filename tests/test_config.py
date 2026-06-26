@@ -47,6 +47,12 @@ def test_preset_resolves_shorts_to_15_59():
     assert cfg.max_duration == 59
 
 
+def test_r0_config_has_sentence_pause_threshold():
+    # Порог паузы для склейки предложений — из конфига, не хардкод в compress.
+    cfg = load_r0_config(R0_YAML)
+    assert cfg.sentence_pause_sec == 0.6
+
+
 def test_load_render_config_returns_typed_object():
     cfg = load_render_config(RENDER_YAML)
     assert isinstance(cfg, RenderConfig)

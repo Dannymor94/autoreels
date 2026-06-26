@@ -5,6 +5,8 @@ max_reels: null                # null = все прошедшие порог
 chunk_tokens: 3500
 chunk_overlap_sec: 60
 dedup_overlap_threshold: 0.5
+sentence_pause_sec: 0.6         # склейка предложений: пауза > порога рвёт предложение
+                                # (Whisper на русском часто роняет пунктуацию)
 title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
 language: ru                   # язык вывода LLM
 prompt_language: en            # system-промпт на английском (крепче grounding)
