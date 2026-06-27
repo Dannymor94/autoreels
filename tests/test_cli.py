@@ -17,6 +17,8 @@ from pathlib import Path
 import pytest
 
 from autoreels import __main__ as cli
+from autoreels.core import state
+from autoreels.core.calibration import CalibrationError, save_calibration
 from autoreels.core.models import Crop, Manifest, Reel, SetupProfile
 from autoreels.local.render import RenderError
 
@@ -55,6 +57,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
             return ret
         return f
 
+    monkeypatch.setattr(cli, "load_calibration", lambda d, s: _setup())   # калибровка есть
     monkeypatch.setattr(cli, "_stage_extract_audio", rec("extract", tmp_path / "a.wav"))
     monkeypatch.setattr(cli, "_stage_transcribe", rec("transcribe", "TRANSCRIPT"))
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
@@ -64,38 +67,52 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
-    cli.cmd_run(video, setup="tearoom_main", root=REPO_ROOT, manifests_dir=tmp_path)
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
 
     assert order == ["extract", "transcribe", "compress", "select", "assemble", "write"]
 
 
+def test_run_stops_with_calibration_error_when_uncalibrated(monkeypatch, tmp_path):
+    # Нет калибровки → CalibrationError ДО конвейера. Доказываем: НИ ОДИН этап не запустился
+    # (это останавливает run, а не «предупредить и продолжить без кропа»).
+    ran = []
+    for name in ("_stage_extract_audio", "_stage_transcribe", "_stage_compress", "_stage_select"):
+        monkeypatch.setattr(cli, name, lambda *a, _n=name, **k: ran.append(_n))
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    with pytest.raises(CalibrationError):
+        cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=tmp_path / "calibrations",
+                    manifests_dir=tmp_path)
+
+    assert ran == []                                  # конвейер не стартовал — run остановлен
+    assert not (tmp_path / "manifest.json").exists()  # манифест не собран
+
+
 # ------------------------------------------------- run: манифест собран ИЗ профиля
 
-def test_run_assembles_manifest_with_setup_and_crop_from_profile(monkeypatch, tmp_path):
-    # облачные этапы замокать, assemble+write — настоящие
+def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path):
+    # облачные этапы замокать, assemble+write — настоящие; кроп тянется из calibrations/<sha>
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: "T")
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
 
-    profile = tmp_path / "myroom.json"
-    profile.write_text(json.dumps({
-        "setup_id": "my_room",
-        "crop": {"x": 100, "y": 50, "w": 900, "h": 1600},
-        "scale": [1080, 1920],
-        "frame": [3840, 2160],
-    }), encoding="utf-8")
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"hello-bytes")
+    calib = tmp_path / "calibrations"
+    save_calibration(
+        calib, source_name="lecture.mp4", source_sha256=state.file_sha256(video),
+        crop=Crop(x=100, y=50, w=900, h=1600), frame=[3840, 2160], setup_label="my_room",
+    )
     manifests = tmp_path / "manifests"
 
-    cli.cmd_run(video, profile=profile, root=REPO_ROOT, manifests_dir=manifests)
+    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
 
     m = Manifest.model_validate_json((manifests / "manifest.json").read_text(encoding="utf-8"))
-    # setup_id и кроп — из профиля, НЕ хардкод
+    # кроп и setup_id — из калибровки этого файла (per-file), не хардкод
     assert m.setup.setup_id == "my_room"
     assert m.setup.crop.model_dump() == {"x": 100, "y": 50, "w": 900, "h": 1600}
-    # source = имя реального файла; sha256 — от его содержимого
     assert m.source == "lecture.mp4"
     assert len(m.source_sha256) == 64
     assert len(m.reels) == 1
@@ -185,3 +202,18 @@ def test_main_wraps_stage_error_as_clean_message(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "ffmpeg не найден в PATH" in err          # внятное сообщение
     assert "Traceback" not in err                    # не голый traceback
+
+
+def test_main_run_uncalibrated_returns_1_with_calibrate_hint(tmp_path, capsys, monkeypatch):
+    # Через main: run на неоткалиброванном файле → код 1 + подсказка calibrate, не traceback.
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    monkeypatch.setattr(cli, "_stage_extract_audio",
+                        lambda *a, **k: pytest.fail("конвейер не должен стартовать"))
+
+    rc = cli.main(["run", str(video), "--ffmpeg", "ffmpeg"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "calibrate" in err.lower()                # «сначала: autoreels calibrate <video>»
+    assert "Traceback" not in err

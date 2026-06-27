@@ -24,9 +24,9 @@ from autoreels.cloud.providers import GroqLLM, ProviderError
 from autoreels.cloud.select import SelectError, select
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.core import state
+from autoreels.core.calibration import CalibrationError, load_calibration
 from autoreels.core.config import (
     ConfigError,
-    load_profile,
     load_r0_config,
     load_render_config,
     load_transcribe_config,
@@ -42,6 +42,7 @@ _KNOWN_ERRORS = (
     SelectError,
     RenderError,
     ConfigError,
+    CalibrationError,
     FileNotFoundError,
 )
 
@@ -97,14 +98,13 @@ def _stage_select(compressed, *, r0_cfg, root):
     )
 
 
-def _assemble_manifest(video, reels, *, profile, duration_preset):
-    """Собрать манифест: setup_id И кроп берутся ИЗ профиля, source_sha256 — от файла."""
-    sha = state.file_sha256(video)
+def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
+    """Собрать манифест: кроп/setup_id — из калибровки (setup), source_sha256 — от файла."""
     return Manifest(
         source=Path(video).name,
         source_sha256=sha,
         duration_preset=duration_preset,
-        setup=profile,                      # весь профиль сетапа (id + crop) — отсюда
+        setup=setup,                        # SetupProfile из calibrations/<sha>.json
         run_key=_run_key(sha, duration_preset),
         reels=reels,
     )
@@ -123,37 +123,39 @@ def _write_manifest(manifest, manifests_dir) -> Path:
 def cmd_run(
     video,
     *,
-    setup: str = "tearoom_main",
-    profile=None,
     root=".",
+    calibrations_dir=None,
     manifests_dir=None,
     cache_dir=None,
     ffmpeg: str = "ffmpeg",
 ) -> Path:
     """ОБЛАЧНЫЙ тир: видео → manifests/manifest.json (extract→transcribe→compress→select).
 
-    Кроп и setup_id берутся из `profiles/<setup>.json` (или `--profile`), НЕ хардкод и НЕ из
-    старого манифеста — это чинит расхождение setup_id (pxl_sasha vs tearoom_main).
+    Кроп per-file: берётся из `calibrations/<sha256>.json` (его пишет `autoreels calibrate`).
+    Калибровки нет → CalibrationError ДО конвейера: run останавливается с подсказкой
+    «сначала: autoreels calibrate <video>», а не молча продолжает без кропа.
     """
     root = Path(root)
     cfg = root / "config"
     render_cfg = load_render_config(cfg / "render.yaml")
     r0_cfg = load_r0_config(cfg / "r0.yaml")
     transcribe_cfg = load_transcribe_config(cfg / "transcribe.yaml")
-
-    profile_path = Path(profile) if profile else root / "profiles" / f"{setup}.json"
-    profile_obj = load_profile(profile_path)
-
+    calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
 
-    print(f"=== run: {Path(video).name} (setup={profile_obj.setup_id}) ===", flush=True)
+    # Идентичность файла + кроп ДО запуска конвейера. Нет калибровки → стоп (fail-fast),
+    # ни один облачный этап не дёргается (не жжём Groq на видео без кропа).
+    sha = state.file_sha256(video)
+    setup = load_calibration(calibrations_dir, sha)
+
+    print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
     audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir, ffmpeg=ffmpeg)
     transcript = _stage_transcribe(audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
     manifest = _assemble_manifest(
-        video, reels, profile=profile_obj, duration_preset=r0_cfg.duration_preset
+        video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )
     path = _write_manifest(manifest, manifests_dir)
     print(f"манифест собран: {len(manifest.reels)} reels → {path}", flush=True)
@@ -205,8 +207,7 @@ def _build_parser():
 
     pr = sub.add_parser("run", help="облачный тир: видео → manifests/manifest.json")
     pr.add_argument("video", help="путь к исходному видео (Mac)")
-    pr.add_argument("--setup", default="tearoom_main", help="профиль сетапа из profiles/")
-    pr.add_argument("--profile", default=None, help="путь к профилю (перебивает --setup)")
+    # Кроп per-file берётся из calibrations/<sha>.json (см. autoreels calibrate), не из --setup.
     pr.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю")
 
     pd = sub.add_parser("render", help="локальный тир: manifest.json → reels-out/")
@@ -222,7 +223,7 @@ def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         if args.cmd == "run":
-            cmd_run(args.video, setup=args.setup, profile=args.profile, ffmpeg=args.ffmpeg)
+            cmd_run(args.video, ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
     except _KNOWN_ERRORS as e:

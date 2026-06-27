@@ -8,6 +8,10 @@ data/outputs/
 inputs/
 reels-out/
 
+# per-file кроп-калибровки (calibrations/<sha>.json) — машинно-локальные, привязаны к
+# конкретным файлам; кроп уезжает на системник внутри манифеста, не отдельным файлом
+calibrations/
+
 # python
 __pycache__/
 *.py[cod]
