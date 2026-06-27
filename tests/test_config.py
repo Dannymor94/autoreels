@@ -47,10 +47,14 @@ def test_preset_resolves_shorts_to_15_59():
     assert cfg.max_duration == 59
 
 
-def test_r0_config_has_sentence_pause_threshold():
-    # Порог паузы для склейки предложений — из конфига, не хардкод в compress.
+def test_r0_config_segmentation_params_tied_to_preset():
+    # Параметры сегментации compress — из конфига, не хардкод.
     cfg = load_r0_config(R0_YAML)
-    assert cfg.sentence_pause_sec == 0.6
+    assert cfg.sentence_pause_sec == 0.35              # снижен с 0.6 → больше границ
+    # max_sentence_sec привязан к пресету: >= max_duration, чтобы не рубить легальные
+    # моменты 30–59с; дробятся только гиганты (> max_duration + запас).
+    assert cfg.max_sentence_sec >= cfg.max_duration
+    assert cfg.max_sentence_sec == cfg.max_duration + 30   # запас ~30с → shorts ≈ 89с
 
 
 def test_load_render_config_returns_typed_object():

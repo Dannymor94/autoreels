@@ -58,6 +58,7 @@ class R0Config(BaseModel):
     chunk_overlap_sec: int
     dedup_overlap_threshold: float
     sentence_pause_sec: float
+    max_sentence_buffer_sec: float
     title_style: str
     language: str
     prompt_language: str
@@ -73,6 +74,15 @@ class R0Config(BaseModel):
     def max_duration(self) -> int:
         """Верхняя граница длины клипа (сек) активного пресета."""
         return self.presets[self.duration_preset].max
+
+    @property
+    def max_sentence_sec(self) -> float:
+        """Порог дробления строк compress: max_duration пресета + запас.
+
+        Привязан к пресету, чтобы НЕ рубить легальные моменты длиной до max_duration;
+        дробятся только строки-гиганты длиннее этого порога.
+        """
+        return self.max_duration + self.max_sentence_buffer_sec
 
 
 # ------------------------------------------------------------------------ Render
