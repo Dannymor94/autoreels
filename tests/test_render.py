@@ -48,10 +48,10 @@ def _setup() -> SetupProfile:
     )
 
 
-def _reel(rid: str, start: float, end: float) -> Reel:
+def _reel(rid: str, start: float, end: float, title: str = "t", description: str = "d") -> Reel:
     return Reel(
         id=rid, start=start, end=end, score=80,
-        hook="h", title="t", description="d", reason="r", topic="x",
+        hook="h", title=title, description=description, reason="r", topic="x",
     )
 
 
@@ -393,3 +393,50 @@ def test_crop_resolves_local_source_ignoring_mac_path(tmp_path, render_cfg, fake
 
     assert _val_after(fake_ffmpeg[0], "-i") == str(inputs / "real.mp4")
     assert mac_path not in fake_ffmpeg[0]
+
+
+def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffmpeg):
+    # Текст публикации (title/description) кладётся РЯДОМ с клипом, НЕ вшивается в видео.
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"sidecar-text-video")
+    out_dir = tmp_path / "out"
+    reel = _reel("r01", 10.0, 40.0, title="ЗА ТРАВМОЙ скрыт ДАР 🫀…",
+                 description="Контринтуитивный момент 🫀 #травма #психология")
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+
+    txt = out_dir / "r01.txt"
+    assert txt.exists()
+    content = txt.read_text(encoding="utf-8")
+    assert "ЗА ТРАВМОЙ скрыт ДАР 🫀…" in content
+    assert "#травма #психология" in content
+
+
+def test_crop_sidecar_txt_format_is_title_blankline_description_utf8(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"sidecar-format-video")
+    out_dir = tmp_path / "out"
+    reel = _reel("r01", 0.0, 5.0, title="Заголовок", description="Описание #тег")
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+
+    # формат: заголовок, пустая строка, описание; utf-8 (декодируем явно из байтов)
+    raw = (out_dir / "r01.txt").read_bytes()
+    assert raw.decode("utf-8") == "Заголовок\n\nОписание #тег\n"
+
+
+def test_crop_sidecar_txt_per_reel(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"sidecar-per-reel-video")
+    out_dir = tmp_path / "out"
+    m = _manifest("v.mp4", sha, [
+        _reel("r01", 0.0, 5.0, title="Первый", description="Опис 1"),
+        _reel("r02", 10.0, 15.0, title="Второй", description="Опис 2"),
+    ], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+
+    assert (out_dir / "r01.txt").read_text(encoding="utf-8").startswith("Первый\n\nОпис 1")
+    assert (out_dir / "r02.txt").read_text(encoding="utf-8").startswith("Второй\n\nОпис 2")

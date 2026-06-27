@@ -185,10 +185,12 @@ def _render_segments(
     vf: str | None,
     suffix: str,
     progress: Callable[[str], None] | None = None,
+    emit_text: bool = False,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
-    `progress` — колбэк, вызывается с id reel перед его рендером (видимый прогресс CLI)."""
+    `progress` — колбэк, вызывается с id reel перед его рендером (видимый прогресс CLI).
+    `emit_text` — класть рядом с клипом <id>.txt (title/description для публикации)."""
     source = resolve_source(manifest, inputs_dir)
 
     ffmpeg_bin = shutil.which(ffmpeg)
@@ -225,7 +227,21 @@ def _render_segments(
                 f"({_ts(reel.start)}→{_ts(reel.end)}, код {proc.returncode}): {stderr}"
             )
         outputs.append(out)
+        if emit_text:
+            _write_sidecar_text(out, reel)
     return outputs
+
+
+def _write_sidecar_text(clip_path: Path, reel) -> None:
+    """Текст публикации рядом с клипом: <id>.txt = title, пустая строка, description.
+
+    Это НЕ субтитры (их вшивает R3) — это заголовок и описание поста (description уже
+    несёт хэштеги по схеме R0). utf-8. Пусто и там, и там — файл не создаём.
+    """
+    if not (reel.title or reel.description):
+        return
+    txt_path = clip_path.with_suffix(".txt")
+    txt_path.write_text(f"{reel.title}\n\n{reel.description}\n", encoding="utf-8")
 
 
 def render_cut(
@@ -267,5 +283,6 @@ def render_crop(
     """
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="", progress=progress,
+        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
+        progress=progress, emit_text=True,
     )
