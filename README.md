@@ -100,3 +100,7 @@ python -m autoreels run video.mp4 --setup tearoom_main
 ## Технологии
 
 Python 3.11+ · Pydantic · Groq (Whisper large-v3 + Qwen3-32B) · faster-whisper (опц. CPU-fallback) · ffmpeg · pytest
+
+## Лицензия
+
+[MIT](LICENSE) © 2026 Dannymor94
