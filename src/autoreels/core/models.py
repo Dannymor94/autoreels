@@ -110,7 +110,12 @@ class Manifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # `source` — провенанс с машины облака (Mac-путь/имя): подсказка и человекочитаемая
+    # метка, НЕ путь для доступа к файлу на машине рендера (он там невалиден).
     source: str
+    # Идентичность исходника = sha256 содержимого. Локальный тир ищет файл в inputs/
+    # по этому хэшу, а не по `source`. Тот же хэш — основа ключа идемпотентности (state.py).
+    source_sha256: str
     duration_preset: str
     setup: SetupProfile
     # Ключ идемпотентности = хэш(source + preset + версия рубрики). Ставит state.py.

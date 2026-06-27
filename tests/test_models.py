@@ -52,7 +52,7 @@ def test_empty_reels_is_valid_default():
     # «Хороших моментов нет» — валидный исход. reels по дефолту [], без min_items.
     m = Manifest(
         source="lecture.mp4", duration_preset="shorts",
-        setup=_setup(), run_key="abc123",
+        setup=_setup(), run_key="abc123", source_sha256="a" * 64,
     )
     assert m.reels == []
 
@@ -69,12 +69,25 @@ def test_empty_subtitles_and_flags_default():
 def test_status_defaults_pending_and_has_two_phase_boundary():
     m = Manifest(
         source="lecture.mp4", duration_preset="shorts",
-        setup=_setup(), run_key="abc123",
+        setup=_setup(), run_key="abc123", source_sha256="a" * 64,
     )
     assert m.status == ProjectStatus.pending
     # Граница Phase 1/Phase 2 выражена в типах.
     assert ProjectStatus.awaiting_review in set(ProjectStatus)
     assert ProjectStatus.approved in set(ProjectStatus)
+
+
+def test_manifest_carries_source_sha256_for_local_resolution():
+    # Локальный тир ищет исходник в inputs/ по sha256, а не по Mac-пути из source.
+    # Значит контент-хэш источника обязан жить в манифесте (grounding идентичности).
+    m = Manifest(
+        source="/Users/danny/Documents/inputs/lecture.mp4", duration_preset="shorts",
+        setup=_setup(), run_key="abc123",
+        source_sha256="a" * 64,
+    )
+    assert m.source_sha256 == "a" * 64
+    # source — провенанс/подсказка по имени; идентичность несёт хэш.
+    assert "source_sha256" in Manifest.model_fields
 
 
 def test_transcript_word_level_round_trip():
@@ -97,7 +110,7 @@ def test_transcript_empty_words_is_valid_default():
 def test_manifest_json_round_trip():
     m = Manifest(
         source="lecture.mp4", duration_preset="shorts",
-        setup=_setup(), run_key="abc123",
+        setup=_setup(), run_key="abc123", source_sha256="a" * 64,
         status=ProjectStatus.awaiting_review,
         reels=[
             Reel(
