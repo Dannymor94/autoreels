@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "auto-reels"
+name = "autoreels"
 version = "0.0.0"
-description = "Длинное горизонтальное видео → вертикальные рилсы 9:16 с субтитрами. Облако выбирает моменты (текст), локаль рендерит (ffmpeg)."
+description = "CLI: длинное горизонтальное talking-head видео → вертикальные Reels 9:16 с выжженными субтитрами и кликбейт-заголовками. Облако выбирает моменты (LLM по тексту), локаль рендерит (ffmpeg). Полностью автоматически, только бесплатные API."
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",
