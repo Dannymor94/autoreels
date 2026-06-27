@@ -24,6 +24,7 @@ from autoreels.local import render
 from autoreels.local.render import (
     RenderError,
     build_cut_cmd,
+    load_manifest,
     resolve_source,
     render_cut,
 )
@@ -73,6 +74,45 @@ def _val_after(cmd: list[str], flag: str) -> str:
     """Значение аргумента, идущего сразу за `flag` в команде."""
     i = cmd.index(flag)
     return cmd[i + 1]
+
+
+# ------------------------------------------------ чтение manifest.json из manifests/
+
+def test_load_manifest_reads_and_validates_json(tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    m = _manifest("/Users/danny/inputs/lecture.mp4", "a" * 64, [_reel("r01", 1.0, 5.0)])
+    (manifests / "manifest.json").write_text(m.model_dump_json(), encoding="utf-8")
+
+    loaded = load_manifest(manifests)
+    assert loaded == m
+    assert loaded.source_sha256 == "a" * 64
+    assert loaded.reels[0].id == "r01"
+
+
+def test_load_manifest_missing_file_raises(tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    with pytest.raises(RenderError) as e:
+        load_manifest(manifests)
+    assert "манифест" in str(e.value).lower() or "manifest" in str(e.value).lower()
+
+
+def test_load_manifest_invalid_json_raises(tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "manifest.json").write_text("{ not valid json", encoding="utf-8")
+    with pytest.raises(RenderError):
+        load_manifest(manifests)
+
+
+def test_load_manifest_schema_violation_raises(tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    # валидный JSON, но не схема манифеста (нет обязательных полей)
+    (manifests / "manifest.json").write_text('{"source": "x.mp4"}', encoding="utf-8")
+    with pytest.raises(RenderError):
+        load_manifest(manifests)
 
 
 # --------------------------------------------------------------- сборка команды

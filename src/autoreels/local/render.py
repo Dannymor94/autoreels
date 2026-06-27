@@ -22,9 +22,14 @@ import shutil
 import subprocess
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from pydantic import ValidationError
+
 from autoreels.core import state
 from autoreels.core.config import RenderConfig
 from autoreels.core.models import Manifest
+
+# Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
+_MANIFEST_NAME = "manifest.json"
 
 # Кодеки, для которых -preset/-crf — родной rate-control. Для аппаратных энкодеров
 # (h264_amf/h264_vaapi/nvenc) эти флаги невалидны; их настройка — шаг 6.
@@ -36,6 +41,25 @@ _ENCODER_ENV = "RENDER_ENCODER"
 
 class RenderError(Exception):
     """Рендер не удался (нет исходника/inputs/, нет ffmpeg, ffmpeg вернул ошибку)."""
+
+
+def load_manifest(manifests_dir: str | Path, *, name: str = _MANIFEST_NAME) -> Manifest:
+    """Прочитать и провалидировать manifest.json из папки `manifests/`.
+
+    Манифест — единственный контракт ОБЛАКО→ЛОКАЛЬ; приходит по Syncthing. Битый/неполный
+    файл или нарушение схемы → RenderError на загрузке (fail-fast), без голого traceback.
+    """
+    path = Path(manifests_dir) / name
+    if not path.is_file():
+        raise RenderError(f"манифест не найден: {path}")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise RenderError(f"не удалось прочитать манифест {path}: {e}") from e
+    try:
+        return Manifest.model_validate_json(text)
+    except ValidationError as e:
+        raise RenderError(f"невалидный манифест {path}:\n{e}") from e
 
 
 def _ts(seconds: float) -> str:
