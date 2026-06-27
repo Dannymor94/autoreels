@@ -26,6 +26,7 @@ from autoreels.local.render import (
     build_cut_cmd,
     load_manifest,
     resolve_source,
+    render_crop,
     render_cut,
 )
 
@@ -63,10 +64,10 @@ def _make_source(inputs_dir: Path, name: str, content: bytes) -> str:
     return state.file_sha256(p)
 
 
-def _manifest(source: str, sha: str, reels: list[Reel]) -> Manifest:
+def _manifest(source: str, sha: str, reels: list[Reel], setup: SetupProfile | None = None) -> Manifest:
     return Manifest(
         source=source, source_sha256=sha, duration_preset="shorts",
-        setup=_setup(), run_key="rk1", reels=reels,
+        setup=setup or _setup(), run_key="rk1", reels=reels,
     )
 
 
@@ -310,3 +311,85 @@ def test_render_cut_ffmpeg_not_found_raises(tmp_path, render_cfg, monkeypatch):
     with pytest.raises(RenderError) as e:
         render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
     assert "ffmpeg" in str(e.value).lower()
+
+
+# ------------------------------------------------------------ render_crop (R1b)
+
+def _crop_setup() -> SetupProfile:
+    # Профиль из R1b: вертикальный кроп 9:16 из 4K-кадра.
+    return SetupProfile(
+        setup_id="pxl_test",
+        crop=Crop(x=1240, y=0, w=1215, h=2160),
+        scale=[1080, 1920],
+        frame=[3840, 2160],
+    )
+
+
+def test_crop_cmd_has_crop_and_scale_from_setup(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"crop-from-setup-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    # crop=w:h:x:y из setup.crop, затем scale=1080:1920 из setup.scale.
+    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+
+
+def test_crop_numbers_come_from_setup_not_reel(tmp_path, render_cfg, fake_ffmpeg):
+    # Разные reel'ы — один и тот же кроп (он на уровне setup манифеста, не reel).
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"setup-level-crop-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 5.0), _reel("r02", 99.0, 130.0)],
+                  setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    vf0 = _val_after(fake_ffmpeg[0], "-vf")
+    vf1 = _val_after(fake_ffmpeg[1], "-vf")
+    assert vf0 == vf1 == "crop=1215:2160:1240:0,scale=1080:1920"
+    # окно реза по-прежнему разное у разных reel — кроп его не подменяет
+    assert _val_after(fake_ffmpeg[1], "-ss") == "99.000"
+
+
+def test_crop_output_is_vertical_id_mp4_not_raw(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"vertical-output-video")
+    out_dir = tmp_path / "out"
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 5.0), _reel("r02", 10.0, 15.0)],
+                  setup=_crop_setup())
+
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+
+    # вертикальный выход <id>.mp4 — отдельно от <id>_raw.mp4 из R1a
+    assert outputs == [out_dir / "r01.mp4", out_dir / "r02.mp4"]
+    assert all(isinstance(p, Path) and "_raw" not in p.name for p in outputs)
+    assert fake_ffmpeg[0][-1] == str(out_dir / "r01.mp4")
+
+
+def test_crop_cuts_window_and_passes_encoder(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
+    # Кроп-сегмент тоже режет окно start→end и слушает тот же рантайм-энкодер.
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"crop-window-encoder-video")
+    monkeypatch.setenv("RENDER_ENCODER", "h264_amf")
+    m = _manifest("v.mp4", sha, [_reel("r01", 284.5, 341.5)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    cmd = fake_ffmpeg[0]
+    assert _val_after(cmd, "-ss") == "284.500"
+    assert _val_after(cmd, "-t") == "57.000"
+    assert _val_after(cmd, "-c:v") == "h264_amf"
+
+
+def test_crop_resolves_local_source_ignoring_mac_path(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "real.mp4", b"crop-resolve-video")
+    mac_path = "/Users/danny/Загрузки/Саша/PXL_20260621_122006193.mp4"
+    m = _manifest(mac_path, sha, [_reel("r01", 0.0, 5.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    assert _val_after(fake_ffmpeg[0], "-i") == str(inputs / "real.mp4")
+    assert mac_path not in fake_ffmpeg[0]

@@ -26,7 +26,7 @@ from pydantic import ValidationError
 
 from autoreels.core import state
 from autoreels.core.config import RenderConfig
-from autoreels.core.models import Manifest
+from autoreels.core.models import Manifest, SetupProfile
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
 _MANIFEST_NAME = "manifest.json"
@@ -138,11 +138,14 @@ def build_cut_cmd(
     cq: int,
     audio_codec: str,
     audio_bitrate: str,
+    vf: str | None = None,
 ) -> list[str]:
-    """Собрать команду ffmpeg: вырезать окно start→end из `source` КАК ЕСТЬ (без кропа).
+    """Собрать команду ffmpeg: вырезать окно start→end из `source`.
 
-    Чистая функция (без обращений к ФС) — единица, которую проверяют тесты сборки команды.
-    Seek по входу (`-ss` до `-i`) + `-t` (длительность) — быстрый рез с перекодированием.
+    Без `vf` — рез КАК ЕСТЬ (R1a, горизонтальный <id>_raw.mp4). С `vf` — добавляется
+    видеофильтр (R1b: `crop=…,scale=…` → вертикальный <id>.mp4). Чистая функция (без ФС) —
+    единица, которую проверяют тесты сборки команды. Seek по входу (`-ss` до `-i`) +
+    `-t` (длительность) — быстрый рез с перекодированием.
     """
     duration = round(end - start, 3)
     return [
@@ -150,6 +153,7 @@ def build_cut_cmd(
         "-ss", _ts(start),
         "-i", str(source),
         "-t", _ts(duration),
+        *(["-vf", vf] if vf else []),
         "-c:v", codec,
         *_video_quality_args(codec, preset, cq),
         "-c:a", audio_codec,
@@ -158,20 +162,30 @@ def build_cut_cmd(
     ]
 
 
-def render_cut(
+def _crop_vf(setup: SetupProfile) -> str:
+    """Видеофильтр кропа+скейла из профиля сетапа: `crop=w:h:x:y,scale=SW:SH`.
+
+    Числа — данные манифеста (`setup.crop` + `setup.scale`), НЕ хардкод в коде. Кроп один
+    на все клипы (уровень манифеста, не reel — как в схеме models.py).
+    """
+    c = setup.crop
+    sw, sh = setup.scale
+    return f"crop={c.w}:{c.h}:{c.x}:{c.y},scale={sw}:{sh}"
+
+
+def _render_segments(
     manifest: Manifest,
     *,
     inputs_dir: str | Path,
     out_dir: str | Path,
     render_cfg: RenderConfig,
-    ffmpeg: str = "ffmpeg",
-    encoder: str | None = None,
+    ffmpeg: str,
+    encoder: str | None,
+    vf: str | None,
+    suffix: str,
 ) -> list[Path]:
-    """Для каждого reel вырезать окно из локального исходника → `out_dir`/<id>_raw.mp4.
-
-    Энкодер: явный `encoder` > env `RENDER_ENCODER` > `render_cfg.encoder.codec`. Возвращает
-    пути готовых сырых клипов (горизонтальный исходник, без кропа и субтитров).
-    """
+    """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
+    `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального)."""
     source = resolve_source(manifest, inputs_dir)
 
     ffmpeg_bin = shutil.which(ffmpeg)
@@ -190,19 +204,61 @@ def render_cut(
 
     outputs: list[Path] = []
     for reel in manifest.reels:
-        out = out_dir / f"{reel.id}_raw.mp4"
+        out = out_dir / f"{reel.id}{suffix}.mp4"
         cmd = build_cut_cmd(
             ffmpeg_bin, source, reel.start, reel.end, out,
             codec=codec, preset=enc.preset, cq=enc.cq,
             audio_codec=aud.codec, audio_bitrate=aud.bitrate,
+            vf=vf,
         )
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             out.unlink(missing_ok=True)             # не оставлять битый частичный выход
             stderr = proc.stderr.strip() or "(пустой stderr)"
             raise RenderError(
-                f"ffmpeg не смог вырезать reel {reel.id} "
+                f"ffmpeg не смог обработать reel {reel.id} "
                 f"({_ts(reel.start)}→{_ts(reel.end)}, код {proc.returncode}): {stderr}"
             )
         outputs.append(out)
     return outputs
+
+
+def render_cut(
+    manifest: Manifest,
+    *,
+    inputs_dir: str | Path,
+    out_dir: str | Path,
+    render_cfg: RenderConfig,
+    ffmpeg: str = "ffmpeg",
+    encoder: str | None = None,
+) -> list[Path]:
+    """R1a: для каждого reel вырезать окно из исходника КАК ЕСТЬ → `out_dir`/<id>_raw.mp4.
+
+    Энкодер: явный `encoder` > env `RENDER_ENCODER` > `render_cfg.encoder.codec`. Возвращает
+    пути готовых сырых клипов (горизонтальный исходник, без кропа и субтитров).
+    """
+    return _render_segments(
+        manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+        ffmpeg=ffmpeg, encoder=encoder, vf=None, suffix="_raw",
+    )
+
+
+def render_crop(
+    manifest: Manifest,
+    *,
+    inputs_dir: str | Path,
+    out_dir: str | Path,
+    render_cfg: RenderConfig,
+    ffmpeg: str = "ffmpeg",
+    encoder: str | None = None,
+) -> list[Path]:
+    """R1b: вырезать окно и применить кроп-профиль манифеста → `out_dir`/<id>.mp4.
+
+    Кроп+скейл (`setup.crop` + `setup.scale`) — данные манифеста, один на все клипы.
+    Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a). Энкодер — тот же
+    рантайм-параметр. Субтитры (R3) здесь не накладываются.
+    """
+    return _render_segments(
+        manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
+    )
