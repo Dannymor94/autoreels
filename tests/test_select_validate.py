@@ -68,14 +68,18 @@ def test_build_prompt_substitutes_config_variables(fewshot, r0_cfg):
 # ----------------------------------------------------------------- парсинг
 
 def test_parse_valid_contract_to_reels():
-    # Против РЕАЛЬНОГО ответа Qwen (захвачен в 5b): 1 сегмент.
+    # Против РЕАЛЬНОГО multi-segment ответа Qwen (снимок 5b). Проверяем ПАРСИНГ формы;
+    # len меняется только если сломан парсер (фикстура статична), не «5 как качество».
     content = QWEN_FIXTURE.read_text(encoding="utf-8")
     segments = S.parse_segments(content)
     reels = S.segments_to_reels(segments)
-    assert [r.id for r in reels] == ["r01"]
+    assert len(reels) == 5
+    assert [r.id for r in reels] == ["r01", "r02", "r03", "r04", "r05"]  # порядок фикстуры
     assert isinstance(reels[0], Reel)
-    assert reels[0].start == 237.0 and reels[0].score == 82
-    assert reels[0].title.startswith("ПОЧЕМУ НЕЛЬЗЯ")
+    assert reels[0].start == 284.5 and reels[0].end == 341.5 and reels[0].score == 78
+    assert reels[1].start == 432.1 and reels[1].score == 85
+    assert reels[4].start == 590.0 and reels[4].score == 80
+    assert reels[0].title.startswith("ПОЧЕМУ ДЫШ")
 
 
 def test_invalid_json_retries_then_errors(fewshot, r0_cfg):
@@ -92,7 +96,18 @@ def test_invalid_then_valid_recovers(fewshot, r0_cfg):
     reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                      provider=provider, r0_cfg=r0_cfg)
     assert provider.calls == 2
-    assert len(reels) == 1
+    assert len(reels) == 5
+
+
+def test_real_fixture_flags_too_long(fewshot, r0_cfg):
+    # Инвариант 6 на РЕАЛЬНЫХ данных: 590.0–651.8 (61.8с > 59 shorts) код метит too_long;
+    # сегмент в пределах пресета — без флага. Ставит код, не модель.
+    content = QWEN_FIXTURE.read_text(encoding="utf-8")
+    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                     provider=_MockLLM([content]), r0_cfg=r0_cfg)
+    by_start = {r.start: r for r in reels}
+    assert "too_long" in by_start[590.0].flags     # 61.8с — за пресетом
+    assert by_start[432.1].flags == []             # 52.5с — в пределах
 
 
 # ----------------------------------------------------------- валидаторы (код, не модель)
