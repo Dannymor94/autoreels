@@ -68,13 +68,14 @@ def test_build_prompt_substitutes_config_variables(fewshot, r0_cfg):
 # ----------------------------------------------------------------- парсинг
 
 def test_parse_valid_contract_to_reels():
+    # Против РЕАЛЬНОГО ответа Qwen (захвачен в 5b): 1 сегмент.
     content = QWEN_FIXTURE.read_text(encoding="utf-8")
     segments = S.parse_segments(content)
     reels = S.segments_to_reels(segments)
-    assert [r.id for r in reels] == ["r01", "r02"]
+    assert [r.id for r in reels] == ["r01"]
     assert isinstance(reels[0], Reel)
-    assert reels[0].start == 131.0 and reels[0].score == 88
-    assert reels[0].title.startswith("ЗА ТРАВМОЙ")
+    assert reels[0].start == 237.0 and reels[0].score == 82
+    assert reels[0].title.startswith("ПОЧЕМУ НЕЛЬЗЯ")
 
 
 def test_invalid_json_retries_then_errors(fewshot, r0_cfg):
@@ -91,7 +92,7 @@ def test_invalid_then_valid_recovers(fewshot, r0_cfg):
     reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                      provider=provider, r0_cfg=r0_cfg)
     assert provider.calls == 2
-    assert len(reels) == 2
+    assert len(reels) == 1
 
 
 # ----------------------------------------------------------- валидаторы (код, не модель)
@@ -133,9 +134,14 @@ def test_empty_segments_is_valid_result(fewshot, r0_cfg):
 
 
 def test_select_ranks_by_score_and_assigns_ids(fewshot, r0_cfg):
-    content = QWEN_FIXTURE.read_text(encoding="utf-8")
-    provider = _MockLLM([content])
+    # Ранжирование/нумерация — логика кода, не форма Groq (её проверяет тест парсинга
+    # на реальной фикстуре). Здесь синтетический многосегментный ответ.
+    raw = json.dumps({"segments": [
+        {"start": 100.0, "end": 130.0, "score": 72, "hook": "h", "title": "t1", "description": "d"},
+        {"start": 200.0, "end": 230.0, "score": 90, "hook": "h", "title": "t2", "description": "d"},
+    ]})
+    provider = _MockLLM([raw])
     reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                      provider=provider, r0_cfg=r0_cfg)
-    assert [r.score for r in reels] == [88, 72]   # ранжировано по score
+    assert [r.score for r in reels] == [90, 72]   # ранжировано по score (убыв.)
     assert [r.id for r in reels] == ["r01", "r02"]

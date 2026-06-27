@@ -65,13 +65,16 @@ def test_env_overrides_config(monkeypatch):
 # ------------------------------------------------------ детерминированные парсеры
 
 def test_parse_groq_response_to_word_level():
+    # Против РЕАЛЬНОЙ формы Groq Whisper (захвачена в 5b): language с заглавной,
+    # start бывает int (0), segments=null, есть x_groq — парсер всё это переваривает.
     data = json.loads(GROQ_FIXTURE.read_text(encoding="utf-8"))
     tr = T.parse_groq_response(data)
     assert isinstance(tr, Transcript)
-    assert tr.language == "russian"
-    assert len(tr.words) == 11
+    assert tr.language == "Russian"
+    assert len(tr.words) == 78
     first = tr.words[0]
-    assert (first.word, first.t0, first.t1) == ("Самый", 0.12, 0.46)
+    assert (first.word, first.t0, first.t1) == ("я", 0.0, 0.62)   # int 0 → float 0.0
+    assert isinstance(first.t0, float)
 
 
 def test_parse_faster_whisper_segments():
@@ -96,7 +99,7 @@ def test_groq_backend_uses_injected_request():
     backend = T.GroqBackend(request_fn=lambda audio_path, language: data)
     tr = backend.transcribe(Path("whatever.wav"), language="ru")
     assert isinstance(tr, Transcript)
-    assert tr.words[0].word == "Самый"
+    assert tr.words[0].word == "я"
 
 
 # ------------------------------------------------------ кэш / идемпотентность
