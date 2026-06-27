@@ -32,6 +32,7 @@ from autoreels.core.config import (
     load_transcribe_config,
 )
 from autoreels.core.models import Manifest
+from autoreels.local.calibrate import CalibrateError, cmd_calibrate
 from autoreels.local.render import RenderError, load_manifest, render_crop
 
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
@@ -43,6 +44,7 @@ _KNOWN_ERRORS = (
     RenderError,
     ConfigError,
     CalibrationError,
+    CalibrateError,
     FileNotFoundError,
 )
 
@@ -205,6 +207,13 @@ def _build_parser():
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    pc = sub.add_parser("calibrate", help="визуальная калибровка кропа для файла (per-file)")
+    pc.add_argument("video", help="путь к видео для калибровки")
+    pc.add_argument("--setup", default=None, help="метка сетапа (→ setup_id манифеста)")
+    pc.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю")
+    pc.add_argument("--ffprobe", default="ffprobe", help="путь к ffprobe-бинарю")
+    pc.add_argument("--port", type=int, default=8765, help="порт localhost-сервера калибровки")
+
     pr = sub.add_parser("run", help="облачный тир: видео → manifests/manifest.json")
     pr.add_argument("video", help="путь к исходному видео (Mac)")
     # Кроп per-file берётся из calibrations/<sha>.json (см. autoreels calibrate), не из --setup.
@@ -222,7 +231,10 @@ def main(argv=None) -> int:
     _load_env()
     args = _build_parser().parse_args(argv)
     try:
-        if args.cmd == "run":
+        if args.cmd == "calibrate":
+            cmd_calibrate(args.video, setup_label=args.setup, ffmpeg=args.ffmpeg,
+                          ffprobe=args.ffprobe, port=args.port)
+        elif args.cmd == "run":
             cmd_run(args.video, ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
