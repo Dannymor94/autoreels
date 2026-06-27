@@ -59,6 +59,8 @@ class R0Config(BaseModel):
     dedup_overlap_threshold: float
     sentence_pause_sec: float
     max_sentence_buffer_sec: float
+    tail_sec: float            # хвост после последнего слова при snap границ (R4)
+    snap_window_sec: float     # окно поиска границы слова/паузы при snap (±сек)
     title_style: str
     language: str
     prompt_language: str

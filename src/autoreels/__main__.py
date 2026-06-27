@@ -22,6 +22,7 @@ from autoreels.cloud.compress import compress_transcript
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import GroqLLM, ProviderError
 from autoreels.cloud.select import SelectError, select
+from autoreels.cloud.snap import snap_segments
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.core import state
 from autoreels.core.calibration import CalibrationError, load_calibration
@@ -100,6 +101,17 @@ def _stage_select(compressed, *, r0_cfg, root):
     )
 
 
+def _stage_snap(reels, transcript, *, r0_cfg):
+    """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM)."""
+    print("подтяжка границ к словам…", flush=True)
+    snap_segments(
+        reels, transcript.words,
+        tail_sec=r0_cfg.tail_sec, window_sec=r0_cfg.snap_window_sec,
+        pause_sec=r0_cfg.sentence_pause_sec, max_duration=r0_cfg.max_duration,
+    )
+    return reels
+
+
 def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
     """Собрать манифест: кроп/setup_id — из калибровки (setup), source_sha256 — от файла."""
     return Manifest(
@@ -156,6 +168,7 @@ def cmd_run(
     transcript = _stage_transcribe(audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
+    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)   # код подтягивает границы LLM к словам
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )

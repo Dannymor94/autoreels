@@ -19,7 +19,7 @@ import pytest
 from autoreels import __main__ as cli
 from autoreels.core import state
 from autoreels.core.calibration import CalibrationError, save_calibration
-from autoreels.core.models import Crop, Manifest, Reel, SetupProfile
+from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Transcript, Word
 from autoreels.local.render import RenderError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +62,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_transcribe", rec("transcribe", "TRANSCRIPT"))
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
     monkeypatch.setattr(cli, "_stage_select", rec("select", [_reel()]))
+    monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
     monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "manifest.json"))
 
@@ -69,7 +70,8 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     video.write_bytes(b"x")
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
 
-    assert order == ["extract", "transcribe", "compress", "select", "assemble", "write"]
+    # snap (R4-min) встаёт между select и сборкой манифеста — границы подтягиваются к словам
+    assert order == ["extract", "transcribe", "compress", "select", "snap", "assemble", "write"]
 
 
 def test_run_stops_with_calibration_error_when_uncalibrated(monkeypatch, tmp_path):
@@ -94,7 +96,7 @@ def test_run_stops_with_calibration_error_when_uncalibrated(monkeypatch, tmp_pat
 def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path):
     # облачные этапы замокать, assemble+write — настоящие; кроп тянется из calibrations/<sha>
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
-    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: "T")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
 
@@ -116,6 +118,31 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
     assert m.source == "lecture.mp4"
     assert len(m.source_sha256) == 64
     assert len(m.reels) == 1
+
+
+def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
+    # LLM-сегмент с end в СЕРЕДИНЕ слова → run должен подтянуть его к паузе + хвост (R4-min).
+    words = [Word(word="a", t0=30.0, t1=30.4), Word(word="b", t0=30.5, t1=31.0),
+             Word(word="стоп", t0=31.1, t1=31.6), Word(word="далее", t0=33.0, t1=33.5)]
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=words))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
+                   description="d", reason="r", topic="x")        # end=31.3 в середине «стоп»
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [midword])
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"vid")
+    calib = tmp_path / "calibrations"
+    save_calibration(calib, source_name="v.mp4", source_sha256=state.file_sha256(video),
+                     crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], setup_label="t")
+    manifests = tmp_path / "manifests"
+
+    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
+
+    m = Manifest.model_validate_json((manifests / "manifest.json").read_text(encoding="utf-8"))
+    # пауза после «стоп» = 31.6; + tail_sec(0.3) из r0.yaml = 31.9 (не обрыв на 31.3)
+    assert abs(m.reels[0].end - 31.9) < 1e-6
 
 
 # --------------------------------------------------------------- render: читает манифест
