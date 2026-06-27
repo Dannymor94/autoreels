@@ -86,6 +86,21 @@ Reference style: ЗА ТРАВМОЙ скрыт ДАР: почему «бегл�
 1-2 Russian sentences restating the hook WITHOUT revealing the payoff,
 + 1 emoji + 3-5 relevant hashtags.
 
+# COVERAGE — return ALL qualifying moments, not just the best
+Scan the transcript from start to finish. Evaluate every distinct moment on its
+own merits. This is NOT a "pick the single best clip" task — a 10+ minute talk
+typically contains several independent clip-worthy moments.
+
+- Include EVERY segment that independently clears the bar ({{min_score}}+).
+- Selecting one strong moment does NOT reduce the need to include others.
+  Segments do not compete — each stands alone.
+- Do NOT stop after one or two. Continue evaluating to the end of the transcript.
+- Do NOT cap the count. If six moments qualify, return six.
+
+This does NOT lower the bar. Exhaustiveness means "miss nothing that qualifies",
+NOT "pad with weak material to reach a number". A weak segment is still rejected;
+an empty result is still valid when nothing clears the bar.
+
 # DEDUP
 Within this chunk, do not return two segments covering the same moment.
 (Cross-chunk dedup is handled downstream — just don't self-overlap.)
