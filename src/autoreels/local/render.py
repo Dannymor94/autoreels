@@ -21,6 +21,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Callable
 
 from pydantic import ValidationError
 
@@ -183,9 +184,11 @@ def _render_segments(
     encoder: str | None,
     vf: str | None,
     suffix: str,
+    progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
-    `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального)."""
+    `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
+    `progress` — колбэк, вызывается с id reel перед его рендером (видимый прогресс CLI)."""
     source = resolve_source(manifest, inputs_dir)
 
     ffmpeg_bin = shutil.which(ffmpeg)
@@ -204,6 +207,8 @@ def _render_segments(
 
     outputs: list[Path] = []
     for reel in manifest.reels:
+        if progress is not None:
+            progress(reel.id)
         out = out_dir / f"{reel.id}{suffix}.mp4"
         cmd = build_cut_cmd(
             ffmpeg_bin, source, reel.start, reel.end, out,
@@ -231,6 +236,7 @@ def render_cut(
     render_cfg: RenderConfig,
     ffmpeg: str = "ffmpeg",
     encoder: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """R1a: для каждого reel вырезать окно из исходника КАК ЕСТЬ → `out_dir`/<id>_raw.mp4.
 
@@ -239,7 +245,7 @@ def render_cut(
     """
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, vf=None, suffix="_raw",
+        ffmpeg=ffmpeg, encoder=encoder, vf=None, suffix="_raw", progress=progress,
     )
 
 
@@ -251,6 +257,7 @@ def render_crop(
     render_cfg: RenderConfig,
     ffmpeg: str = "ffmpeg",
     encoder: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """R1b: вырезать окно и применить кроп-профиль манифеста → `out_dir`/<id>.mp4.
 
@@ -260,5 +267,5 @@ def render_crop(
     """
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
+        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="", progress=progress,
     )
