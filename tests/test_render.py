@@ -18,8 +18,9 @@ from autoreels.core.models import (
     Manifest,
     Reel,
     SetupProfile,
+    Word,
 )
-from autoreels.core.config import load_render_config
+from autoreels.core.config import load_render_config, load_subtitles_config
 from autoreels.local import render
 from autoreels.local.render import (
     RenderError,
@@ -393,6 +394,37 @@ def test_crop_resolves_local_source_ignoring_mac_path(tmp_path, render_cfg, fake
 
     assert _val_after(fake_ffmpeg[0], "-i") == str(inputs / "real.mp4")
     assert mac_path not in fake_ffmpeg[0]
+
+
+def test_crop_burns_subtitles_ass_after_crop_scale(tmp_path, render_cfg, fake_ffmpeg):
+    # R3: при subtitles_cfg + словах у reel — ass-фильтр ПОСЛЕ crop/scale, .ass рядом записан
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"subs-video")
+    out_dir = tmp_path / "out"
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4), Word(word="мир", t0=11.5, t1=12.0)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg, subtitles_cfg=subs_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert "ass=" in vf
+    assert vf.index("ass=") > vf.index("scale=")      # субтитры в координатах финального кадра
+    assert (out_dir / "r01.ass").exists()
+
+
+def test_crop_no_subtitles_when_cfg_absent(tmp_path, render_cfg, fake_ffmpeg):
+    # без subtitles_cfg — vf только crop/scale (R1a/R1b не задеты)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"no-subs-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    assert "ass=" not in _val_after(fake_ffmpeg[0], "-vf")
 
 
 def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffmpeg):

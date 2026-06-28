@@ -63,6 +63,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
     monkeypatch.setattr(cli, "_stage_select", rec("select", [_reel()]))
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
+    monkeypatch.setattr(cli, "_stage_subtitles", rec("subtitles", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
     monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "manifest.json"))
 
@@ -70,8 +71,9 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     video.write_bytes(b"x")
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
 
-    # snap (R4-min) встаёт между select и сборкой манифеста — границы подтягиваются к словам
-    assert order == ["extract", "transcribe", "compress", "select", "snap", "assemble", "write"]
+    # snap (R4) и subtitles (R3) встают блоками между select и сборкой манифеста
+    assert order == ["extract", "transcribe", "compress", "select", "snap",
+                     "subtitles", "assemble", "write"]
 
 
 def test_run_stops_with_calibration_error_when_uncalibrated(monkeypatch, tmp_path):

@@ -26,8 +26,9 @@ from typing import Callable
 from pydantic import ValidationError
 
 from autoreels.core import state
-from autoreels.core.config import RenderConfig
+from autoreels.core.config import RenderConfig, SubtitlesConfig
 from autoreels.core.models import Manifest, SetupProfile
+from autoreels.local.subtitles import build_ass
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
 _MANIFEST_NAME = "manifest.json"
@@ -174,6 +175,11 @@ def _crop_vf(setup: SetupProfile) -> str:
     return f"crop={c.w}:{c.h}:{c.x}:{c.y},scale={sw}:{sh}"
 
 
+def _escape_ass_path(path: Path) -> str:
+    """Путь к .ass для фильтрграфа ffmpeg: экранируем ':' (Windows D:\\…), слэши — прямые."""
+    return str(path).replace("\\", "/").replace(":", "\\:")
+
+
 def _render_segments(
     manifest: Manifest,
     *,
@@ -186,6 +192,7 @@ def _render_segments(
     suffix: str,
     progress: Callable[[str], None] | None = None,
     emit_text: bool = False,
+    subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
@@ -212,11 +219,22 @@ def _render_segments(
         if progress is not None:
             progress(reel.id)
         out = out_dir / f"{reel.id}{suffix}.mp4"
+        # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale (в координатах
+        # финального кадра 1080×1920). Слова берутся из reel.subtitles (их кладёт run).
+        reel_vf = vf
+        if subtitles_cfg is not None and reel.subtitles:
+            ass_path = out_dir / f"{reel.id}.ass"
+            ass_path.write_text(
+                build_ass(reel.subtitles, cfg=subtitles_cfg, clip_start=reel.start),
+                encoding="utf-8",
+            )
+            ass_filter = f"ass={_escape_ass_path(ass_path)}"
+            reel_vf = f"{vf},{ass_filter}" if vf else ass_filter
         cmd = build_cut_cmd(
             ffmpeg_bin, source, reel.start, reel.end, out,
             codec=codec, preset=enc.preset, cq=enc.cq,
             audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-            vf=vf,
+            vf=reel_vf,
         )
         proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
@@ -274,15 +292,16 @@ def render_crop(
     ffmpeg: str = "ffmpeg",
     encoder: str | None = None,
     progress: Callable[[str], None] | None = None,
+    subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
-    """R1b: вырезать окно и применить кроп-профиль манифеста → `out_dir`/<id>.mp4.
+    """R1b+R3: вырезать окно, применить кроп-профиль и (опц.) выжечь субтитры → <id>.mp4.
 
-    Кроп+скейл (`setup.crop` + `setup.scale`) — данные манифеста, один на все клипы.
-    Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a). Энкодер — тот же
-    рантайм-параметр. Субтитры (R3) здесь не накладываются.
+    Кроп+скейл (`setup.crop` + `setup.scale`) — данные манифеста, один на все клипы. Если
+    передан `subtitles_cfg` и у reel есть слова — на клип накладывается ASS (после crop/scale).
+    Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a). Энкодер — тот же параметр.
     """
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
-        progress=progress, emit_text=True,
+        progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
     )

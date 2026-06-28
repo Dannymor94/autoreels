@@ -1,0 +1,26 @@
+# Стиль выжигаемых субтитров (R3). Все параметры — числами, чтобы крутить без кода.
+# UI-редактор стиля осознанно отложен: сначала субтитры доказаны, потом крутилка.
+
+# font: референс — Montserrat (CAPS, жирный). На этой машине Montserrat НЕ установлен,
+# поэтому дефолт — Arial (есть и на Mac, и на Windows; кириллица). Поставишь Montserrat —
+# впиши сюда. libass подставит фолбэк, если шрифт не найден.
+font: Arial
+font_size: 72
+text_color: "FFFFFF"          # RRGGBB; в ASS уйдёт как &H00BBGGRR (порядок байт инвертируется)
+bold: true
+uppercase: true               # CAPS как в референсе
+outline_color: "000000"
+outline_width: 3
+shadow: 2
+
+fill_enabled: false           # подложка-бокс под текстом вкл/выкл
+fill_color: "000000"
+fill_opacity: 60              # % непрозрачности бокса (если fill_enabled)
+
+position_v: 300               # MarginV: подъём от низа кадра 1080x1920 (нижняя треть)
+words_per_line: 3
+alignment: center             # center | left | right (нижний ряд ASS \an2/1/3)
+
+# Детерминированная подгонка по ширине (правило «не влезает в строку → меньше слов»):
+char_width_ratio: 0.55        # доля font_size на символ (оценка ширины без рендера)
+max_text_width_px: 1000       # макс. ширина строки в px (< 1080 с боковыми полями)

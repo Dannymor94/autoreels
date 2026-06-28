@@ -30,11 +30,13 @@ from autoreels.core.config import (
     ConfigError,
     load_r0_config,
     load_render_config,
+    load_subtitles_config,
     load_transcribe_config,
 )
 from autoreels.core.models import Manifest
 from autoreels.local.calibrate import CalibrateError, cmd_calibrate
 from autoreels.local.render import RenderError, load_manifest, render_crop
+from autoreels.local.subtitles import words_in_window
 
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
 _KNOWN_ERRORS = (
@@ -112,6 +114,17 @@ def _stage_snap(reels, transcript, *, r0_cfg):
     return reels
 
 
+def _stage_subtitles(reels, transcript):
+    """R3: привязать word-level транскрипта к каждому reel (слова в окне start-end).
+
+    Кладёт сырой word-level в reel.subtitles; группировку в строки и ASS делает render (R3),
+    не схема. Это блок между snap и сборкой манифеста (run собран блоками)."""
+    print("субтитры: привязка слов к сегментам…", flush=True)
+    for reel in reels:
+        reel.subtitles = words_in_window(transcript.words, reel.start, reel.end)
+    return reels
+
+
 def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
     """Собрать манифест: кроп/setup_id — из калибровки (setup), source_sha256 — от файла."""
     return Manifest(
@@ -169,6 +182,7 @@ def cmd_run(
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)   # код подтягивает границы LLM к словам
+    reels = _stage_subtitles(reels, transcript)             # word-level в reel.subtitles (R3)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )
@@ -193,6 +207,7 @@ def cmd_render(
     """
     root = Path(root)
     render_cfg = load_render_config(root / "config" / "render.yaml")
+    subtitles_cfg = load_subtitles_config(root / "config" / "subtitles.yaml")
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
@@ -203,7 +218,8 @@ def cmd_render(
 
     outputs = render_crop(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, progress=lambda rid: print(f"рендер {rid}…", flush=True),
+        ffmpeg=ffmpeg, encoder=encoder, subtitles_cfg=subtitles_cfg,
+        progress=lambda rid: print(f"рендер {rid}…", flush=True),
     )
     print(f"готово: {len(outputs)} клипов → {out_dir}", flush=True)
     return outputs

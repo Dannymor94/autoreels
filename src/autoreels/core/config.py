@@ -138,6 +138,35 @@ class RenderConfig(BaseModel):
     subtitles: SubtitleStyle
 
 
+# ----------------------------------------------------------------------- Subtitles
+
+class SubtitlesConfig(BaseModel):
+    """Типизированный config/subtitles.yaml — стиль выжигаемых субтитров (R3).
+
+    Все параметры числами/строками-числами, чтобы крутить стиль без кода (UI-крутилку
+    осознанно отложили). Цвета — RRGGBB; в ASS уходят как &HAABBGGRR (см. subtitles.ass_color).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    font: str
+    font_size: int
+    text_color: str
+    bold: bool
+    uppercase: bool
+    outline_color: str
+    outline_width: int
+    shadow: int
+    fill_enabled: bool
+    fill_color: str
+    fill_opacity: int          # % непрозрачности подложки-бокса (если fill_enabled)
+    position_v: int            # MarginV — подъём от низа кадра
+    words_per_line: int
+    alignment: str             # center | left | right
+    char_width_ratio: float    # оценка ширины символа (доля font_size) для подгонки строки
+    max_text_width_px: int     # макс. ширина строки в px
+
+
 # --------------------------------------------------------------------- Transcribe
 
 class GroqWhisper(BaseModel):
@@ -220,6 +249,15 @@ def load_render_config(path: str | Path) -> RenderConfig:
         return RenderConfig.model_validate(data)
     except ValidationError as e:
         raise ConfigError(f"невалидный render-конфиг {path}:\n{e}") from e
+
+
+def load_subtitles_config(path: str | Path) -> SubtitlesConfig:
+    """config/subtitles.yaml → SubtitlesConfig."""
+    data = _read_yaml(Path(path))
+    try:
+        return SubtitlesConfig.model_validate(data)
+    except ValidationError as e:
+        raise ConfigError(f"невалидный subtitles-конфиг {path}:\n{e}") from e
 
 
 def load_transcribe_config(path: str | Path) -> TranscribeConfig:
