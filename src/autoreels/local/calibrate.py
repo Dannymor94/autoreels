@@ -235,10 +235,13 @@ class ManualCalibrator:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
+            print(f"Открой в браузере: {url}", flush=True)
             if self.open_browser:
-                webbrowser.open(url)
-            print(f"калибровка открыта: {url}  (Save в браузере сохранит кроп; Ctrl-C — отмена)",
-                  flush=True)
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    pass          # Git Bash / headless — браузер не открылся, URL уже напечатан
+            print(f"(Save в браузере сохранит кроп; Ctrl-C — отмена)", flush=True)
             if not done.wait(self.timeout_sec):
                 raise CalibrateError(
                     f"калибровка не завершена за {self.timeout_sec:.0f}с (не было Save)"

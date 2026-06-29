@@ -171,6 +171,64 @@ def test_cmd_calibrate_saves_finalized_calibration(tmp_path, monkeypatch):
 
 # --------------------------------------------------------------------------- helpers
 
+# --------------------------------------------------- webbrowser: URL в stdout всегда
+
+def test_propose_prints_url_even_when_webbrowser_raises(tmp_path, capsys, monkeypatch):
+    """URL должен появиться в stdout НЕЗАВИСИМО от webbrowser.open() — даже если тот падает."""
+    import autoreels.local.calibrate as _cal_mod
+
+    frame_png = tmp_path / "f.png"
+    frame_png.write_bytes(b"\x89PNG fake")
+    cal_obj = ManualCalibrator(
+        sha="d" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
+        host="127.0.0.1", port=0, timeout_sec=5, open_browser=True,
+    )
+
+    monkeypatch.setattr(_cal_mod.webbrowser, "open", lambda url: (_ for _ in ()).throw(OSError("no browser")))
+
+    result = {}
+    th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+    th.start()
+    try:
+        base = _wait_for_server(cal_obj)
+        httpx.post(base + "/save", json={
+            "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+            "display_size": [1920, 1080], "frame_size": [3840, 2160],
+        }, timeout=5)
+    finally:
+        th.join(timeout=5)
+
+    captured = capsys.readouterr()
+    assert "127.0.0.1" in captured.out
+
+
+def test_propose_prints_url_before_webbrowser_call(tmp_path, capsys, monkeypatch):
+    """URL должен быть напечатан явно — не только через webbrowser.open()."""
+    import autoreels.local.calibrate as _cal_mod
+
+    frame_png = tmp_path / "f.png"
+    frame_png.write_bytes(b"\x89PNG fake")
+    cal_obj = ManualCalibrator(
+        sha="e" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
+        host="127.0.0.1", port=0, timeout_sec=5, open_browser=False,
+    )
+
+    result = {}
+    th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+    th.start()
+    try:
+        base = _wait_for_server(cal_obj)
+        httpx.post(base + "/save", json={
+            "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+            "display_size": [1920, 1080], "frame_size": [3840, 2160],
+        }, timeout=5)
+    finally:
+        th.join(timeout=5)
+
+    captured = capsys.readouterr()
+    assert "http://127.0.0.1" in captured.out
+
+
 def _wait_for_server(cal_obj, timeout=5.0) -> str:
     """Дождаться, пока propose поднимет сервер, вернуть базовый URL."""
     deadline = time.monotonic() + timeout
