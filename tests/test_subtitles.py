@@ -168,6 +168,38 @@ def test_ass_pause_between_groups_not_stretched():
     assert dlg[1][0] == "0:00:03.00"                 # вторая стартует на 3.0 (пауза пустая)
 
 
+# ------------------------------------------------------ fade-in/out групп (R3 косметика)
+
+def test_ass_fade_tag_uses_config_values_for_long_group():
+    # длинная группа: бюджет 0.4·dur велик → fade полный из конфига
+    cfg = CFG.model_copy(update={"words_per_line": 2, "fade_in_ms": 150, "fade_out_ms": 100})
+    words = [_w(0.0, 0.4, "a"), _w(0.5, 2.0, "b")]          # длительность 2.0с → бюджет 800мс
+    text = _dialogues(build_ass(words, cfg=cfg, clip_start=0.0))[0][2]
+    assert r"{\fad(150,100)}" in text                       # полный fade из конфига
+
+
+def test_ass_fade_shortened_for_short_group():
+    # короткая группа: fade_in+fade_out > dur·0.4 → ужать пропорционально под бюджет
+    cfg = CFG.model_copy(update={"fade_in_ms": 150, "fade_out_ms": 100})
+    words = [_w(0.0, 0.5, "x")]                              # 0.5с → бюджет 200мс; 250>200 → scale 0.8
+    text = _dialogues(build_ass(words, cfg=cfg, clip_start=0.0))[0][2]
+    assert r"{\fad(120,80)}" in text                         # 150·0.8=120, 100·0.8=80; сумма=200=бюджет
+
+
+def test_ass_fade_full_when_group_long_enough():
+    # группа достаточно длинная (5с) → fade ровно из конфига, без укорачивания
+    cfg = CFG.model_copy(update={"fade_in_ms": 150, "fade_out_ms": 100})
+    text = _dialogues(build_ass([_w(0.0, 5.0, "x")], cfg=cfg, clip_start=0.0))[0][2]
+    assert r"{\fad(150,100)}" in text
+
+
+def test_ass_fade_disabled_when_both_zero():
+    # fade_in=fade_out=0 → тега \fad нет (отключаемо)
+    cfg = CFG.model_copy(update={"fade_in_ms": 0, "fade_out_ms": 0})
+    text = _dialogues(build_ass([_w(0.0, 2.0, "x")], cfg=cfg, clip_start=0.0))[0][2]
+    assert r"\fad" not in text
+
+
 def test_ass_borderstyle_outline_when_fill_disabled():
     ass = build_ass([_w(0.0, 0.5, "x")], cfg=CFG.model_copy(update={"fill_enabled": False}),
                     clip_start=0.0)

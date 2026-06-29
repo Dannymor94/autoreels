@@ -67,6 +67,24 @@ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: in
     return groups
 
 
+# Макс. доля длительности группы под суммарный fade — чтобы короткие группы не «мигали»
+# полупрозрачными (fade не успевает раскрыться). Сверх неё fade ужимается пропорционально.
+_FADE_MAX_SHARE = 0.4
+
+
+def _fade_ms(group_duration_sec: float, fade_in_ms: int, fade_out_ms: int) -> tuple[int, int]:
+    """fade_in/out (мс) под длительность группы. Если сумма > dur·_FADE_MAX_SHARE — ужать оба
+    пропорционально под бюджет (детерминированно, не на глаз). 0/0 → (0, 0)."""
+    total = fade_in_ms + fade_out_ms
+    if total <= 0:
+        return 0, 0
+    budget = group_duration_sec * 1000 * _FADE_MAX_SHARE
+    if total > budget:
+        scale = budget / total
+        return round(fade_in_ms * scale), round(fade_out_ms * scale)
+    return fade_in_ms, fade_out_ms
+
+
 def _ass_time(seconds: float) -> str:
     """Секунды → H:MM:SS.cc (центисекунды) — формат времени ASS."""
     cs = int(round(max(0.0, seconds) * 100))
@@ -129,5 +147,8 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
             text = text.upper()
         start = _ass_time(g[0].t0 - clip_start)
         end = _ass_time(g[-1].t1 - clip_start)
+        fade_in, fade_out = _fade_ms(g[-1].t1 - g[0].t0, cfg.fade_in_ms, cfg.fade_out_ms)
+        if fade_in or fade_out:
+            text = f"{{\\fad({fade_in},{fade_out})}}" + text   # override-блок перед текстом группы
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
     return "\n".join(lines) + "\n"
