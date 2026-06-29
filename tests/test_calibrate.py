@@ -173,8 +173,15 @@ def test_cmd_calibrate_saves_finalized_calibration(tmp_path, monkeypatch):
 
 # --------------------------------------------------- webbrowser: URL в stdout всегда
 
-def test_propose_prints_url_even_when_webbrowser_raises(tmp_path, capsys, monkeypatch):
-    """URL должен появиться в stdout НЕЗАВИСИМО от webbrowser.open() — даже если тот падает."""
+def _post_save(base: str):
+    return httpx.post(base + "/save", json={
+        "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+        "display_size": [1920, 1080], "frame_size": [3840, 2160],
+    }, timeout=5)
+
+
+def test_propose_prints_url_prominently_even_when_webbrowser_raises(tmp_path, capsys, monkeypatch):
+    """URL должен появиться в stdout с маркером >>> — даже если webbrowser.open() падает."""
     import autoreels.local.calibrate as _cal_mod
 
     frame_png = tmp_path / "f.png"
@@ -183,7 +190,6 @@ def test_propose_prints_url_even_when_webbrowser_raises(tmp_path, capsys, monkey
         sha="d" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
         host="127.0.0.1", port=0, timeout_sec=5, open_browser=True,
     )
-
     monkeypatch.setattr(_cal_mod.webbrowser, "open", lambda url: (_ for _ in ()).throw(OSError("no browser")))
 
     result = {}
@@ -191,21 +197,41 @@ def test_propose_prints_url_even_when_webbrowser_raises(tmp_path, capsys, monkey
     th.start()
     try:
         base = _wait_for_server(cal_obj)
-        httpx.post(base + "/save", json={
-            "display": {"x": 685, "y": 140, "w": 478, "h": 850},
-            "display_size": [1920, 1080], "frame_size": [3840, 2160],
-        }, timeout=5)
+        _post_save(base)
     finally:
         th.join(timeout=5)
 
-    captured = capsys.readouterr()
-    assert "127.0.0.1" in captured.out
+    out = capsys.readouterr().out
+    assert ">>>" in out, "URL-маркер >>> не найден в stdout"
+    assert "http://127.0.0.1" in out
 
 
-def test_propose_prints_url_before_webbrowser_call(tmp_path, capsys, monkeypatch):
-    """URL должен быть напечатан явно — не только через webbrowser.open()."""
-    import autoreels.local.calibrate as _cal_mod
+def test_propose_url_contains_real_port(tmp_path, capsys):
+    """URL в stdout должен содержать РЕАЛЬНЫЙ порт (не хардкод 8765)."""
+    frame_png = tmp_path / "f.png"
+    frame_png.write_bytes(b"\x89PNG fake")
+    cal_obj = ManualCalibrator(
+        sha="f" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
+        host="127.0.0.1", port=0,          # port=0 → ОС выдаст случайный порт, точно не 8765
+        timeout_sec=5, open_browser=False,
+    )
 
+    result = {}
+    th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+    th.start()
+    try:
+        base = _wait_for_server(cal_obj)
+        real_port = cal_obj.port
+        _post_save(base)
+    finally:
+        th.join(timeout=5)
+
+    out = capsys.readouterr().out
+    assert str(real_port) in out, f"реальный порт {real_port} не найден в stdout: {out!r}"
+
+
+def test_propose_prints_url_without_browser_open(tmp_path, capsys):
+    """URL напечатан явно при open_browser=False — не зависит от webbrowser."""
     frame_png = tmp_path / "f.png"
     frame_png.write_bytes(b"\x89PNG fake")
     cal_obj = ManualCalibrator(
@@ -218,15 +244,12 @@ def test_propose_prints_url_before_webbrowser_call(tmp_path, capsys, monkeypatch
     th.start()
     try:
         base = _wait_for_server(cal_obj)
-        httpx.post(base + "/save", json={
-            "display": {"x": 685, "y": 140, "w": 478, "h": 850},
-            "display_size": [1920, 1080], "frame_size": [3840, 2160],
-        }, timeout=5)
+        _post_save(base)
     finally:
         th.join(timeout=5)
 
-    captured = capsys.readouterr()
-    assert "http://127.0.0.1" in captured.out
+    out = capsys.readouterr().out
+    assert "http://127.0.0.1" in out
 
 
 def _wait_for_server(cal_obj, timeout=5.0) -> str:

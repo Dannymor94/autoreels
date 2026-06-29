@@ -234,14 +234,16 @@ class ManualCalibrator:
 
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+        # Печатаем URL СРАЗУ после старта треда, до ожидания POST.
+        # Формат заметный: >>> на отдельной строке + flush — Windows буферизует stdout.
+        print(f"\n>>> Открой в браузере: {url}\n", flush=True)
         try:
-            print(f"Открой в браузере: {url}", flush=True)
             if self.open_browser:
                 try:
                     webbrowser.open(url)
                 except Exception:
                     pass          # Git Bash / headless — браузер не открылся, URL уже напечатан
-            print(f"(Save в браузере сохранит кроп; Ctrl-C — отмена)", flush=True)
+            print("(Save в браузере сохранит кроп; Ctrl-C — отмена)", flush=True)
             if not done.wait(self.timeout_sec):
                 raise CalibrateError(
                     f"калибровка не завершена за {self.timeout_sec:.0f}с (не было Save)"
