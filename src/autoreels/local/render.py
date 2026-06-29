@@ -236,7 +236,7 @@ def _render_segments(
             audio_codec=aud.codec, audio_bitrate=aud.bitrate,
             vf=reel_vf,
         )
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         if proc.returncode != 0:
             out.unlink(missing_ok=True)             # не оставлять битый частичный выход
             stderr = proc.stderr.strip() or "(пустой stderr)"

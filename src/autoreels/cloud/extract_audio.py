@@ -60,7 +60,7 @@ def extract_audio(
         "-f", audio_cfg.format,
         str(out),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         out.unlink(missing_ok=True)             # не оставлять битый частичный выход
         stderr = proc.stderr.strip() or "(пустой stderr)"

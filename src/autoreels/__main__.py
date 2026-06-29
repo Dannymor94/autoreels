@@ -257,14 +257,21 @@ def _build_parser():
 
 def main(argv=None) -> int:
     """Точка входа CLI. Автоподхват .env, диспетч по команде, ошибки тиров → код 1 + сообщение."""
+    # Windows: консоль по умолчанию cp1251 → кириллица ломается. Форсируем utf-8.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except AttributeError:
+            pass  # не TextIOWrapper (pytest capture, pipe) — не трогаем
+
     _load_env()
     args = _build_parser().parse_args(argv)
     try:
         if args.cmd == "calibrate":
-            cmd_calibrate(args.video, setup_label=args.setup, ffmpeg=args.ffmpeg,
+            cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
                           ffprobe=args.ffprobe, port=args.port)
         elif args.cmd == "run":
-            cmd_run(args.video, ffmpeg=args.ffmpeg)
+            cmd_run(Path(args.video), ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
     except _KNOWN_ERRORS as e:

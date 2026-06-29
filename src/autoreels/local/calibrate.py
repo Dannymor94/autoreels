@@ -72,7 +72,7 @@ def probe_frame(video, *, ffprobe: str = "ffprobe") -> tuple[int, int, float]:
     binary = shutil.which(ffprobe)
     if binary is None:
         raise CalibrateError(f"ffprobe не найден (искали '{ffprobe}')")
-    proc = subprocess.run(build_probe_cmd(binary, video), capture_output=True, text=True)
+    proc = subprocess.run(build_probe_cmd(binary, video), capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
         raise CalibrateError(f"ffprobe не смог прочитать {video}: {proc.stderr.strip()}")
     return parse_probe(proc.stdout)
@@ -85,7 +85,7 @@ def extract_reference_frame(video, out_png, *, at_seconds: float, ffmpeg: str = 
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
-        build_frame_cmd(binary, video, out_png, at_seconds), capture_output=True, text=True
+        build_frame_cmd(binary, video, out_png, at_seconds), capture_output=True, text=True, encoding="utf-8"
     )
     if proc.returncode != 0:
         raise CalibrateError(f"ffmpeg не извлёк кадр из {video}: {proc.stderr.strip()}")

@@ -472,3 +472,26 @@ def test_crop_sidecar_txt_per_reel(tmp_path, render_cfg, fake_ffmpeg):
 
     assert (out_dir / "r01.txt").read_text(encoding="utf-8").startswith("Первый\n\nОпис 1")
     assert (out_dir / "r02.txt").read_text(encoding="utf-8").startswith("Второй\n\nОпис 2")
+
+
+# ------------------------------------------------- Windows: subprocess encoding
+
+def test_render_subprocess_uses_utf8_encoding(tmp_path, render_cfg, monkeypatch):
+    """subprocess.run должен получать encoding='utf-8' — иначе Windows cp1251 ломает stderr."""
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"bytes")
+    kwargs_seen = []
+
+    def fake_run(cmd, *a, **k):
+        kwargs_seen.append(k)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "run", fake_run)
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
+    render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    assert kwargs_seen, "subprocess.run не вызван"
+    assert kwargs_seen[0].get("encoding") == "utf-8", (
+        f"subprocess.run вызван без encoding='utf-8': {kwargs_seen[0]}"
+    )
