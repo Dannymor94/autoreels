@@ -54,14 +54,14 @@ def test_ass_color_alpha_prefix():
 def test_group_words_by_count():
     words = [_w(i, i + 0.4, "x") for i in range(6)]
     groups = group_words(words, words_per_line=3, max_text_width_px=1000,
-                         font_size=72, char_width_ratio=0.55)
+                         font_size=72, char_width_ratio=0.55, break_pause_sec=1.0)
     assert [len(g) for g in groups] == [3, 3]
 
 
 def test_group_timing_first_to_last_word():
     words = [_w(10.0, 10.4, "a"), _w(10.5, 11.0, "b"), _w(11.1, 11.6, "c")]
     [g] = group_words(words, words_per_line=3, max_text_width_px=1000,
-                     font_size=72, char_width_ratio=0.55)
+                     font_size=72, char_width_ratio=0.55, break_pause_sec=0.4)
     assert g[0].t0 == 10.0 and g[-1].t1 == 11.6      # окно группы = первое.t0 … последнее.t1
 
 
@@ -69,7 +69,7 @@ def test_wide_group_uses_fewer_words():
     # длинные слова: трое в строку не влезают в max_text_width_px → группа дробится
     words = [_w(i, i + 0.4, "оченьдлинноеслово") for i in range(3)]
     groups = group_words(words, words_per_line=3, max_text_width_px=500,
-                        font_size=72, char_width_ratio=0.55)
+                        font_size=72, char_width_ratio=0.55, break_pause_sec=1.0)
     assert all(len(g) < 3 for g in groups)           # детерминированно меньше слов
     assert sum(len(g) for g in groups) == 3          # ни одно слово не потеряно
 
@@ -78,8 +78,45 @@ def test_single_overlong_word_kept_alone():
     # одно слово шире лимита нельзя разбить — остаётся как есть (не ломаем)
     words = [_w(0.0, 0.5, "архисупердлинноенеделимоеслово")]
     groups = group_words(words, words_per_line=3, max_text_width_px=200,
-                        font_size=72, char_width_ratio=0.55)
+                        font_size=72, char_width_ratio=0.55, break_pause_sec=0.4)
     assert groups == [words]
+
+
+# ----------------------------------------------- группировка: разрыв по паузе (R3-fix)
+
+def test_group_breaks_on_pause():
+    # большая пауза между словами → они в РАЗНЫХ группах (граница фразы), не склейка
+    words = [_w(0.0, 0.5, "конецфразы"), _w(2.0, 2.5, "началофразы")]   # пауза 1.5с
+    groups = group_words(words, words_per_line=3, max_text_width_px=1000,
+                         font_size=72, char_width_ratio=0.55, break_pause_sec=0.4)
+    assert [len(g) for g in groups] == [1, 1]           # не [2]
+
+
+def test_no_pause_groups_by_count():
+    # слова подряд без паузы → группируются по words_per_line как раньше
+    words = [_w(i * 0.5, i * 0.5 + 0.5, "x") for i in range(6)]   # стык в стык, пауза 0
+    groups = group_words(words, words_per_line=3, max_text_width_px=1000,
+                         font_size=72, char_width_ratio=0.55, break_pause_sec=0.4)
+    assert [len(g) for g in groups] == [3, 3]
+
+
+def test_pause_breaks_group_before_words_per_line():
+    # конец фразы (пауза) обрывает группу, даже если в ней меньше words_per_line слов
+    words = [_w(0.0, 0.3, "a"), _w(0.4, 0.7, "b"),      # a,b подряд (пауза 0.1 < порог)
+             _w(2.0, 2.3, "c")]                          # c после паузы 1.3с → новая группа
+    groups = group_words(words, words_per_line=3, max_text_width_px=1000,
+                         font_size=72, char_width_ratio=0.55, break_pause_sec=0.4)
+    assert [len(g) for g in groups] == [2, 1]           # [a,b] | [c], не [a,b,c]
+
+
+def test_width_and_pause_whichever_first():
+    # ширина + пауза вместе: что наступит раньше, то и обрывает.
+    # короткие слова (по ширине влезли бы 4), но пауза после 2-го рубит раньше ширины
+    words = [_w(0.0, 0.3, "a"), _w(0.35, 0.6, "b"),
+             _w(2.0, 2.3, "c"), _w(2.35, 2.6, "d")]      # пауза 1.4с после b
+    groups = group_words(words, words_per_line=4, max_text_width_px=2000,
+                         font_size=72, char_width_ratio=0.55, break_pause_sec=0.4)
+    assert [len(g) for g in groups] == [2, 2]           # пауза наступила раньше переполнения
 
 
 # --------------------------------------------------- отбор слов сегмента по окну

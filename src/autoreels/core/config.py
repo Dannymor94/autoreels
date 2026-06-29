@@ -162,6 +162,7 @@ class SubtitlesConfig(BaseModel):
     fill_opacity: int          # % непрозрачности подложки-бокса (если fill_enabled)
     position_v: int            # MarginV — подъём от низа кадра
     words_per_line: int
+    subtitle_break_pause_sec: float   # пауза-граница фразы рвёт группу субтитров (R3-fix)
     alignment: str             # center | left | right
     char_width_ratio: float    # оценка ширины символа (доля font_size) для подгонки строки
     max_text_width_px: int     # макс. ширина строки в px

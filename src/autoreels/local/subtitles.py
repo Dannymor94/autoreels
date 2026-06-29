@@ -38,10 +38,13 @@ def _estimate_width(text: str, font_size: int, char_width_ratio: float) -> float
 
 
 def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: int,
-                font_size: int, char_width_ratio: float) -> list[list[Word]]:
-    """Слова → группы по `words_per_line`, но меньше, если строка не влезает по ширине.
+                font_size: int, char_width_ratio: float, break_pause_sec: float) -> list[list[Word]]:
+    """Слова → группы по `words_per_line`; группа обрывается раньше, если:
 
-    Одно слово шире лимита разбить нельзя — остаётся в группе одно (не ломаем).
+    - пауза до следующего слова `(next.t0 − cur.t1) > break_pause_sec` (граница фразы) — слово
+      после паузы начинает НОВУЮ группу, чтобы хвост одной фразы не липнул к началу следующей;
+    - строка не влезает по ширине (оценка без рендера).
+    Что наступит раньше, то и рвёт. Одно слово шире лимита разбить нельзя — остаётся одно.
     """
     groups: list[list[Word]] = []
     i = 0
@@ -51,12 +54,14 @@ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: in
         for j in range(words_per_line):
             if i + j >= n:
                 break
-            candidate = group + [words[i + j]]
-            text = " ".join(w.word for w in candidate)
-            too_wide = _estimate_width(text, font_size, char_width_ratio) > max_text_width_px
-            if too_wide and group:          # добавление слова переполняет → закрываем группу
-                break
-            group.append(words[i + j])      # одно слово влезает всегда (пустую группу не создаём)
+            w = words[i + j]
+            if group:                       # для первого слова группы проверок нет — оно влезает всегда
+                if w.t0 - group[-1].t1 > break_pause_sec:
+                    break                   # пауза = граница фразы → закрываем группу
+                text = " ".join(x.word for x in group + [w])
+                if _estimate_width(text, font_size, char_width_ratio) > max_text_width_px:
+                    break                   # добавление слова переполняет строку → закрываем группу
+            group.append(w)
         groups.append(group)
         i += len(group)
     return groups
@@ -100,6 +105,7 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
     groups = group_words(
         words, words_per_line=cfg.words_per_line, max_text_width_px=cfg.max_text_width_px,
         font_size=cfg.font_size, char_width_ratio=cfg.char_width_ratio,
+        break_pause_sec=cfg.subtitle_break_pause_sec,
     )
     lines = [
         "[Script Info]",
