@@ -3,11 +3,11 @@
 Инварианты, которые тесты защищают:
 - `run` гонит этапы конвейера в правильном порядке (extract→transcribe→compress→select→
   assemble→write) — этапы как блоки, чтобы R3 потом вставился одним блоком;
-- манифест собирается с setup_id И кропом ИЗ профиля (чинит расхождение pxl_sasha vs
-  tearoom_main), не из хардкода и не из старого манифеста;
-- `render` читает manifest.json и дёргает render_crop;
-- .env подхватывается автоматически (dotenv) — больше не нужен ручной `source .env`;
-- дефолтные пути (inputs/ reels-out/ manifests/) применяются без аргументов;
+- манифест называется <stem>.json (не manifest.json) — batch-совместимость;
+- `render` глобит manifests/*.json и обрабатывает все по очереди;
+- run/render архивируют исходник в inputs-archive/ после успеха (идемпотентно);
+- batch: один файл упал → остальные продолжают, summary в конце;
+- .env подхватывается автоматически (dotenv);
 - ошибка этапа → внятное сообщение, не голый traceback.
 """
 import json
@@ -39,9 +39,9 @@ def _reel(rid="r01") -> Reel:
                 hook="h", title="t", description="d", reason="r", topic="x")
 
 
-def _manifest(reels=None) -> Manifest:
+def _manifest(reels=None, source="v.mp4") -> Manifest:
     return Manifest(
-        source="v.mp4", source_sha256="a" * 64, duration_preset="shorts",
+        source=source, source_sha256="a" * 64, duration_preset="shorts",
         setup=_setup(), run_key="rk1", reels=reels if reels is not None else [_reel()],
     )
 
@@ -65,26 +65,22 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
     monkeypatch.setattr(cli, "_stage_subtitles", rec("subtitles", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
-    monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "manifest.json"))
+    monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "v.json"))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
 
-    # snap (R4) и subtitles (R3) встают блоками между select и сборкой манифеста
     assert order == ["extract", "transcribe", "compress", "select", "snap",
                      "subtitles", "assemble", "write"]
 
 
 def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
-    # Нет калибровки → авто-кроп по центру, run продолжается (не CalibrationError).
-    # ffprobe мокается чтобы не требовать реальное видео.
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
 
-    # Мокаем probe чтобы «видео» 3840×2160 без реального файла
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **kw: (3840, 2160))
 
     video = tmp_path / "v.mp4"
@@ -94,17 +90,35 @@ def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
 
     cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
 
-    m = Manifest.model_validate_json((manifests / "manifest.json").read_text(encoding="utf-8"))
-    # Авто-кроп: w/h = 9/16, по центру
+    # Манифест теперь <stem>.json
+    m = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
     assert abs(m.setup.crop.w / m.setup.crop.h - 9 / 16) < 0.002
     assert m.setup.crop.x == (3840 - m.setup.crop.w) // 2
     assert m.setup.crop.y == 0
 
 
+# ------------------------------------------------- run: манифест называется <stem>.json
+
+def test_run_writes_manifest_named_by_stem(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+
+    video = tmp_path / "PXL_20260621.mp4"
+    video.write_bytes(b"x")
+    manifests = tmp_path / "manifests"
+
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=manifests)
+
+    assert (manifests / "PXL_20260621.json").is_file()
+    assert not (manifests / "manifest.json").exists()
+
+
 # ------------------------------------------------- run: манифест собран ИЗ профиля
 
 def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path):
-    # облачные этапы замокать, assemble+write — настоящие; кроп тянется из calibrations/<sha>
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
@@ -121,8 +135,8 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
 
     cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
 
-    m = Manifest.model_validate_json((manifests / "manifest.json").read_text(encoding="utf-8"))
-    # кроп и setup_id — из калибровки этого файла (per-file), не хардкод
+    # Манифест → lecture.json (stem от lecture.mp4)
+    m = Manifest.model_validate_json((manifests / "lecture.json").read_text(encoding="utf-8"))
     assert m.setup.setup_id == "my_room"
     assert m.setup.crop.model_dump() == {"x": 100, "y": 50, "w": 900, "h": 1600}
     assert m.source == "lecture.mp4"
@@ -131,14 +145,13 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
 
 
 def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
-    # LLM-сегмент с end в СЕРЕДИНЕ слова → run должен подтянуть его к паузе + хвост (R4-min).
     words = [Word(word="a", t0=30.0, t1=30.4), Word(word="b", t0=30.5, t1=31.0),
              Word(word="стоп", t0=31.1, t1=31.6), Word(word="далее", t0=33.0, t1=33.5)]
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=words))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
-                   description="d", reason="r", topic="x")        # end=31.3 в середине «стоп»
+                   description="d", reason="r", topic="x")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [midword])
 
     video = tmp_path / "v.mp4"
@@ -150,20 +163,157 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
 
     cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
 
-    m = Manifest.model_validate_json((manifests / "manifest.json").read_text(encoding="utf-8"))
-    # пауза после «стоп» = 31.6; + tail_sec(0.3) из r0.yaml = 31.9 (не обрыв на 31.3)
+    m = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
     assert abs(m.reels[0].end - 31.9) < 1e-6
 
 
-# --------------------------------------------------------------- render: читает манифест
+# ------------------------------------------------------------------ run: архив
+
+def test_run_archives_video_after_success(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    archive = tmp_path / "inputs-archive"
+
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "manifests",
+                archive_dir=archive)
+
+    assert not video.exists()                    # перемещён из inputs/
+    assert (archive / "v.mp4").exists()          # находится в архиве
+
+
+def test_run_does_not_archive_on_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio",
+                        lambda *a, **k: (_ for _ in ()).throw(Exception("boom")))
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    archive = tmp_path / "inputs-archive"
+
+    with pytest.raises(Exception, match="boom"):
+        cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "manifests",
+                    archive_dir=archive)
+
+    assert video.exists()                        # не архивирован — ошибка на этапе
+
+
+# ------------------------------------------------------------------ _archive_video
+
+def test_archive_video_moves_to_archive_dir(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"data")
+    archive = tmp_path / "inputs-archive"
+
+    cli._archive_video(video, archive)
+
+    assert not video.exists()
+    assert (archive / "v.mp4").read_bytes() == b"data"
+
+
+def test_archive_video_idempotent_when_dest_exists(tmp_path):
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    (archive / "v.mp4").write_bytes(b"old")
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"new")
+
+    cli._archive_video(video, archive)
+
+    assert (archive / "v.mp4").read_bytes() == b"old"   # не перезаписан
+    assert video.exists()                                # источник не тронут
+
+
+def test_archive_video_noop_when_source_missing(tmp_path):
+    archive = tmp_path / "inputs-archive"
+    cli._archive_video(tmp_path / "ghost.mp4", archive)   # не должен падать
+    assert not archive.exists()                            # dir не создан зря
+
+
+# ------------------------------------------------------------------ run: batch
+
+def _mock_pipeline(monkeypatch, tmp_path):
+    """Общие моки конвейера для batch-тестов."""
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+
+
+def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+    manifests = tmp_path / "manifests"
+
+    ok, failed = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=manifests,
+        archive_dir=tmp_path / "inputs-archive",
+    )
+
+    assert sorted(ok) == ["a.mp4", "b.mp4"]
+    assert failed == []
+    assert (manifests / "a.json").is_file()
+    assert (manifests / "b.json").is_file()
+
+
+def test_run_batch_continues_after_failure(monkeypatch, tmp_path):
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    # Первый файл в алфавитном порядке упадёт на extract_audio
+    original_extract = cli._stage_extract_audio
+    calls = []
+    def selective_extract(video, **k):
+        calls.append(Path(video).name)
+        if Path(video).name == "bad.mp4":
+            raise Exception("forced failure")
+        return tmp_path / "a.wav"
+    monkeypatch.setattr(cli, "_stage_extract_audio", selective_extract)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "bad.mp4").write_bytes(b"x")
+    (inputs / "good.mp4").write_bytes(b"x")
+
+    ok, failed = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "manifests",
+        archive_dir=tmp_path / "inputs-archive",
+    )
+
+    assert ok == ["good.mp4"]
+    assert len(failed) == 1
+    assert failed[0][0] == "bad.mp4"
+    assert (inputs / "bad.mp4").exists()     # не архивирован (упал)
+    assert not (inputs / "good.mp4").exists() # архивирован (успех)
+
+
+def test_run_batch_empty_inputs_returns_empty(monkeypatch, tmp_path):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+
+    ok, failed = cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs,
+                                   manifests_dir=tmp_path / "m", archive_dir=tmp_path / "a")
+
+    assert ok == [] and failed == []
+
+
+# --------------------------------------------------------------- render: глобит manifests/
 
 def test_render_reads_manifest_and_calls_render_crop(monkeypatch, tmp_path):
     manifests = tmp_path / "manifests"
     manifests.mkdir()
-    (manifests / "manifest.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
 
     called = {}
-
     def fake_crop(manifest, **k):
         called["manifest"] = manifest
         called["kwargs"] = k
@@ -173,21 +323,53 @@ def test_render_reads_manifest_and_calls_render_crop(monkeypatch, tmp_path):
 
     out = cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT)
 
-    assert called["manifest"].source == "v.mp4"        # пришёл из manifest.json
+    assert called["manifest"].source == "v.mp4"
     assert out == [Path("reels-out/r01.mp4")]
-    # out_dir передан как reels-out/<stem>
     assert called["kwargs"]["out_dir"].name == "v"
 
 
+def test_render_batch_processes_multiple_manifests(monkeypatch, tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "a.json").write_text(_manifest(source="a.mp4").model_dump_json(), encoding="utf-8")
+    (manifests / "b.json").write_text(_manifest(source="b.mp4").model_dump_json(), encoding="utf-8")
+
+    processed = []
+    monkeypatch.setattr(cli, "render_crop",
+                        lambda m, **k: processed.append(m.source) or [Path(f"out/{m.source}")])
+
+    out = cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT)
+
+    assert sorted(processed) == ["a.mp4", "b.mp4"]
+    assert len(out) == 2   # оба mp4 в плоском списке
+
+
+def test_render_batch_continues_after_failure(monkeypatch, tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "bad.json").write_text(_manifest(source="bad.mp4").model_dump_json(), encoding="utf-8")
+    (manifests / "good.json").write_text(_manifest(source="good.mp4").model_dump_json(), encoding="utf-8")
+
+    def selective_crop(manifest, **k):
+        if manifest.source == "bad.mp4":
+            raise RenderError("ffmpeg упал")
+        return [Path("out/good.mp4")]
+
+    monkeypatch.setattr(cli, "render_crop", selective_crop)
+
+    out = cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT)
+
+    assert out == [Path("out/good.mp4")]   # только успешные попали в результат
+
+
 def test_render_out_dir_uses_stem_from_manifest_source(monkeypatch, tmp_path):
-    """render_crop получает out_dir = reels-out/<stem>, не корень reels-out/."""
     manifests = tmp_path / "manifests"
     manifests.mkdir()
     m = Manifest(
         source="PXL_20260621_122006193.mp4", source_sha256="b" * 64,
         duration_preset="shorts", setup=_setup(), run_key="rk2", reels=[_reel()],
     )
-    (manifests / "manifest.json").write_text(m.model_dump_json(), encoding="utf-8")
+    (manifests / "PXL_20260621_122006193.json").write_text(m.model_dump_json(), encoding="utf-8")
 
     seen_out: list[Path] = []
     monkeypatch.setattr(cli, "render_crop", lambda manifest, *, out_dir, **k: seen_out.append(Path(out_dir)) or [])
@@ -201,7 +383,7 @@ def test_render_out_dir_uses_stem_from_manifest_source(monkeypatch, tmp_path):
 def test_render_passes_encoder_through(monkeypatch, tmp_path):
     manifests = tmp_path / "manifests"
     manifests.mkdir()
-    (manifests / "manifest.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
 
     seen = {}
     monkeypatch.setattr(cli, "render_crop",
@@ -210,28 +392,83 @@ def test_render_passes_encoder_through(monkeypatch, tmp_path):
     assert seen["encoder"] == "h264_amf"
 
 
+# ------------------------------------------------------------------ render: архив
+
+def test_render_archives_source_after_success(monkeypatch, tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "v.mp4").write_bytes(b"video")
+    archive = tmp_path / "inputs-archive"
+
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: [Path("out/r01.mp4")])
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
+                   inputs_dir=inputs, archive_dir=archive)
+
+    assert not (inputs / "v.mp4").exists()
+    assert (archive / "v.mp4").exists()
+
+
+def test_render_archive_idempotent_when_already_in_archive(monkeypatch, tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    (archive / "v.mp4").write_bytes(b"original")  # уже заархивирован
+
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: [])
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
+                   inputs_dir=inputs, archive_dir=archive)
+
+    assert (archive / "v.mp4").read_bytes() == b"original"  # не перезаписан
+
+
+def test_render_does_not_archive_on_failure(monkeypatch, tmp_path):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "v.mp4").write_bytes(b"video")
+    archive = tmp_path / "inputs-archive"
+
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: (_ for _ in ()).throw(RenderError("ffmpeg")))
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
+                   inputs_dir=inputs, archive_dir=archive)
+
+    assert (inputs / "v.mp4").exists()   # не архивирован — рендер упал
+    assert not archive.exists()
+
+
 # ------------------------------------------------------------------ дефолтные пути
 
-def test_render_uses_default_paths_without_args(monkeypatch):
+def test_render_uses_default_paths_without_args(monkeypatch, tmp_path):
+    # Пишем реальный файл манифеста — render глобит manifests/*.json
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+
     seen = {}
-
-    def fake_load_manifest(d):
-        seen["manifests"] = Path(d)
-        return _manifest()
-
-    monkeypatch.setattr(cli, "load_manifest", fake_load_manifest)
-
     def fake_crop(manifest, *, inputs_dir, out_dir, **k):
         seen["inputs"] = Path(inputs_dir)
         seen["out"] = Path(out_dir)
         return []
 
     monkeypatch.setattr(cli, "render_crop", fake_crop)
-    cli.cmd_render()  # без аргументов
+    cli.cmd_render(manifests_dir=manifests)
 
-    assert seen["manifests"].name == "manifests"
     assert seen["inputs"].name == "inputs"
-    # out_dir передаётся как reels-out/<stem> (stem = Path(manifest.source).stem = "v")
     assert seen["out"].parent.name == "reels-out"
     assert seen["out"].name == "v"
 
@@ -258,22 +495,21 @@ def test_main_wraps_stage_error_as_clean_message(monkeypatch, capsys):
     monkeypatch.setattr(cli, "cmd_render", boom)
     rc = cli.main(["render"])
 
-    assert rc == 1                                   # ненулевой код возврата
+    assert rc == 1
     err = capsys.readouterr().err
-    assert "ffmpeg не найден в PATH" in err          # внятное сообщение
-    assert "Traceback" not in err                    # не голый traceback
+    assert "ffmpeg не найден в PATH" in err
+    assert "Traceback" not in err
 
 
-def test_main_run_uncalibrated_returns_1_with_calibrate_hint(tmp_path, capsys, monkeypatch):
-    # Через main: run на неоткалиброванном файле → код 1 + подсказка calibrate, не traceback.
+def test_main_run_bad_video_returns_1_with_clean_message(tmp_path, capsys, monkeypatch):
+    # run с фейковым видео (b"x") → ffprobe или extract_audio падает → код 1, нет traceback.
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
     monkeypatch.setattr(cli, "_stage_extract_audio",
-                        lambda *a, **k: pytest.fail("конвейер не должен стартовать"))
+                        lambda *a, **k: pytest.fail("конвейер не должен добраться до extract"))
 
     rc = cli.main(["run", str(video), "--ffmpeg", "ffmpeg"])
 
     assert rc == 1
     err = capsys.readouterr().err
-    assert "calibrate" in err.lower()                # «сначала: autoreels calibrate <video>»
     assert "Traceback" not in err

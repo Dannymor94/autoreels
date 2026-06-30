@@ -4,17 +4,21 @@
 `source .env`, невидимый прогресс). Без субтитров — R3 встанет одним блоком между select
 и render (этапы `run` оформлены как отдельные функции-блоки именно ради этого).
 
-    autoreels run <video> --setup tearoom_main   # Mac: видео → manifests/manifest.json
-    autoreels render                              # системник: manifest.json → reels-out/
+    autoreels run [video]            # без аргумента → batch: все inputs/*.mp4
+    autoreels render                 # системник: manifests/*.json → reels-out/
 
 Граница тиров: `run` живёт в облачном конвейере (аудио/текст), `render` — локальный ffmpeg.
 Видео между тирами не ходит: манифест несёт source_sha256, render ищет файл в inputs/.
+
+Манифест: manifests/<stem>.json (имя по видео, batch-совместимость).
+Архив: inputs-archive/ — после успеха видео перемещается, идемпотентно.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -56,17 +60,11 @@ _KNOWN_ERRORS = (
     FileNotFoundError,
 )
 
-MANIFEST_NAME = "manifest.json"
-
 
 # --------------------------------------------------------------------------- .env
 
 def _load_env(dotenv_path: str | Path | None = None) -> None:
-    """Подхватить .env в окружение (закрывает ручной `source .env`, долг 5a).
-
-    Без аргумента — авто-поиск .env в cwd/родителях; с путём — конкретный файл (тест).
-    Существующие переменные окружения не перетираются (приоритет реального окружения).
-    """
+    """Подхватить .env в окружение (закрывает ручной `source .env`, долг 5a)."""
     from dotenv import load_dotenv
 
     load_dotenv(str(dotenv_path) if dotenv_path is not None else None)
@@ -75,6 +73,19 @@ def _load_env(dotenv_path: str | Path | None = None) -> None:
 def _run_key(source_sha256: str, duration_preset: str) -> str:
     """Детерминированный ключ прогона от source+preset (полноценная версия рубрики — M1)."""
     return hashlib.sha256(f"{source_sha256}:{duration_preset}".encode()).hexdigest()[:16]
+
+
+# ----------------------------------------------------- архив (общий хелпер)
+
+def _archive_video(video: Path, archive_dir: Path) -> None:
+    """Переместить видео в inputs-archive/ после успеха. Идемпотентно: уже там → skip."""
+    dest = archive_dir / video.name
+    if dest.exists():
+        return
+    if video.exists():
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(video), str(dest))
+        print(f"архивирован: {video.name} → {archive_dir}", flush=True)
 
 
 # ----------------------------------------------------- этапы конвейера `run` (блоки)
@@ -120,10 +131,7 @@ def _stage_snap(reels, transcript, *, r0_cfg):
 
 
 def _stage_subtitles(reels, transcript):
-    """R3: привязать word-level транскрипта к каждому reel (слова в окне start-end).
-
-    Кладёт сырой word-level в reel.subtitles; группировку в строки и ASS делает render (R3),
-    не схема. Это блок между snap и сборкой манифеста (run собран блоками)."""
+    """R3: привязать word-level транскрипта к каждому reel."""
     print("субтитры: привязка слов к сегментам…", flush=True)
     for reel in reels:
         reel.subtitles = words_in_window(transcript.words, reel.start, reel.end)
@@ -136,16 +144,18 @@ def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
         source=Path(video).name,
         source_sha256=sha,
         duration_preset=duration_preset,
-        setup=setup,                        # SetupProfile из calibrations/<sha>.json
+        setup=setup,
         run_key=_run_key(sha, duration_preset),
         reels=reels,
     )
 
 
 def _write_manifest(manifest, manifests_dir) -> Path:
+    """Записать манифест как manifests/<stem>.json (имя по видео, batch-совместимость)."""
     manifests_dir = Path(manifests_dir)
     manifests_dir.mkdir(parents=True, exist_ok=True)
-    path = manifests_dir / MANIFEST_NAME
+    stem = Path(manifest.source).stem
+    path = manifests_dir / f"{stem}.json"
     path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
     return path
 
@@ -159,13 +169,14 @@ def cmd_run(
     calibrations_dir=None,
     manifests_dir=None,
     cache_dir=None,
+    archive_dir=None,
     ffmpeg: str = "ffmpeg",
 ) -> Path:
-    """ОБЛАЧНЫЙ тир: видео → manifests/manifest.json (extract→transcribe→compress→select).
+    """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
 
     Кроп per-file: берётся из `calibrations/<sha256>.json` (пишет `autoreels calibrate`).
-    Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением;
-    запускается `autoreels calibrate <video>` для ручной замены.
+    Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением.
+    После записи манифеста видео перемещается в inputs-archive/.
     """
     root = Path(root)
     cfg = root / "config"
@@ -175,8 +186,8 @@ def cmd_run(
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
+    archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
 
-    # Идентичность файла + кроп ДО запуска конвейера.
     size_gb = Path(video).stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
     sha = state.file_sha256_cached(video, cache_dir)
@@ -191,14 +202,55 @@ def cmd_run(
     transcript = _stage_transcribe(audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
-    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)   # код подтягивает границы LLM к словам
-    reels = _stage_subtitles(reels, transcript)             # word-level в reel.subtitles (R3)
+    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
+    reels = _stage_subtitles(reels, transcript)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )
     path = _write_manifest(manifest, manifests_dir)
     print(f"манифест собран: {len(manifest.reels)} reels → {path}", flush=True)
+    _archive_video(Path(video), archive_dir)
     return path
+
+
+def cmd_run_batch(
+    *,
+    root=".",
+    inputs_dir=None,
+    calibrations_dir=None,
+    manifests_dir=None,
+    cache_dir=None,
+    archive_dir=None,
+    ffmpeg: str = "ffmpeg",
+) -> tuple[list[str], list[tuple[str, Exception]]]:
+    """Batch: обработать все *.mp4 в inputs/ по очереди. Один упал → остальные продолжают.
+
+    Возвращает (ok_names, failed_list) где failed_list = [(name, exc), ...].
+    """
+    root = Path(root)
+    inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+    videos = sorted(inputs_dir.glob("*.mp4"))
+    if not videos:
+        print("inputs/ пуст — нечего обрабатывать", flush=True)
+        return [], []
+
+    ok: list[str] = []
+    failed: list[tuple[str, Exception]] = []
+    for v in videos:
+        try:
+            cmd_run(
+                v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
+                cache_dir=cache_dir, archive_dir=archive_dir, ffmpeg=ffmpeg,
+            )
+            ok.append(v.name)
+        except Exception as e:  # noqa: BLE001
+            print(f"\n[ОШИБКА] {v.name}: {e}", file=sys.stderr, flush=True)
+            failed.append((v.name, e))
+
+    print(f"\n=== batch run: {len(ok)} ok / {len(failed)} failed ===", flush=True)
+    for name, err in failed:
+        print(f"  ✗ {name}: {err}", file=sys.stderr)
+    return ok, failed
 
 
 def cmd_render(
@@ -206,14 +258,15 @@ def cmd_render(
     manifests_dir=None,
     inputs_dir=None,
     out_dir=None,
+    archive_dir=None,
     root=".",
     ffmpeg: str = "ffmpeg",
     encoder=None,
 ) -> list[Path]:
-    """ЛОКАЛЬНЫЙ тир: manifests/manifest.json → reels-out/ (render_crop, вертикальный 9:16).
+    """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
-    Энкодер: `--encoder` > env RENDER_ENCODER > render.yaml (на системнике h264_amf).
-    Путь ffmpeg конфигурируем. Пути inputs/ reels-out/ manifests/ — дефолтные, без аргументов.
+    Каждый манифест рендерится независимо; упавший → остальные продолжают.
+    После успеха источник перемещается в inputs-archive/ (идемпотентно).
     """
     root = Path(root)
     render_cfg = load_render_config(root / "config" / "render.yaml")
@@ -221,19 +274,41 @@ def cmd_render(
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
+    archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
 
-    manifest = load_manifest(manifests_dir)
-    stem = Path(manifest.source).stem
-    out_dir_final = out_dir / stem       # reels-out/<stem>/ — отдельная папка на видео
+    manifest_files = sorted(manifests_dir.glob("*.json"))
+    if not manifest_files:
+        print("manifests/ пуст — нечего рендерить", flush=True)
+        return []
+
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
-    print(f"=== render: {len(manifest.reels)} клипов, энкодер {enc} → {out_dir_final} ===", flush=True)
+    all_outputs: list[Path] = []
+    failed: list[tuple[str, Exception]] = []
 
-    outputs = render_crop(
-        manifest, inputs_dir=inputs_dir, out_dir=out_dir_final, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, subtitles_cfg=subtitles_cfg,
-    )
-    print(f"\nготово: {len(outputs)} клипов → {out_dir_final}", flush=True)
-    return outputs
+    for mf in manifest_files:
+        try:
+            manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+            stem = Path(manifest.source).stem
+            out_dir_final = out_dir / stem
+            print(f"=== render: {mf.name} ({len(manifest.reels)} клипов, {enc}) → {out_dir_final} ===",
+                  flush=True)
+            outputs = render_crop(
+                manifest, inputs_dir=inputs_dir, out_dir=out_dir_final, render_cfg=render_cfg,
+                ffmpeg=ffmpeg, encoder=encoder, subtitles_cfg=subtitles_cfg,
+            )
+            all_outputs.extend(outputs)
+            print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
+            _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
+        except Exception as e:  # noqa: BLE001
+            print(f"\n[ОШИБКА] {mf.name}: {e}", file=sys.stderr, flush=True)
+            failed.append((mf.name, e))
+
+    if len(manifest_files) > 1 or failed:
+        print(f"\n=== batch render: {len(manifest_files) - len(failed)} ok / {len(failed)} failed ===",
+              flush=True)
+        for name, err in failed:
+            print(f"  ✗ {name}: {err}", file=sys.stderr)
+    return all_outputs
 
 
 # ----------------------------------------------------------------------------- main
@@ -254,12 +329,12 @@ def _build_parser():
     pc.add_argument("--ffprobe", default="ffprobe", help="путь к ffprobe-бинарю")
     pc.add_argument("--port", type=int, default=8765, help="порт localhost-сервера калибровки")
 
-    pr = sub.add_parser("run", help="облачный тир: видео → manifests/manifest.json")
-    pr.add_argument("video", help="путь к исходному видео (Mac)")
-    # Кроп per-file берётся из calibrations/<sha>.json (см. autoreels calibrate), не из --setup.
+    pr = sub.add_parser("run", help="облачный тир: видео → manifests/<stem>.json")
+    pr.add_argument("video", nargs="?", default=None,
+                    help="путь к видео; без аргумента — batch: все *.mp4 из inputs/")
     pr.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю")
 
-    pd = sub.add_parser("render", help="локальный тир: manifest.json → reels-out/")
+    pd = sub.add_parser("render", help="локальный тир: manifests/*.json → reels-out/")
     pd.add_argument("--encoder", default=None, help="видеоэнкодер (на системнике h264_amf)")
     pd.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin)")
 
@@ -268,12 +343,11 @@ def _build_parser():
 
 def main(argv=None) -> int:
     """Точка входа CLI. Автоподхват .env, диспетч по команде, ошибки тиров → код 1 + сообщение."""
-    # Windows: консоль по умолчанию cp1251 → кириллица ломается. Форсируем utf-8.
     for _stream in (sys.stdout, sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except AttributeError:
-            pass  # не TextIOWrapper (pytest capture, pipe) — не трогаем
+            pass
 
     _load_env()
     args = _build_parser().parse_args(argv)
@@ -282,7 +356,12 @@ def main(argv=None) -> int:
             cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
                           ffprobe=args.ffprobe, port=args.port)
         elif args.cmd == "run":
-            cmd_run(Path(args.video), ffmpeg=args.ffmpeg)
+            if args.video:
+                cmd_run(Path(args.video), ffmpeg=args.ffmpeg)
+            else:
+                _, failed = cmd_run_batch(ffmpeg=args.ffmpeg)
+                if failed:
+                    return 1
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
     except _KNOWN_ERRORS as e:
