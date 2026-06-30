@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -21,6 +22,16 @@ from autoreels.core.models import Transcript, Word
 DEFAULT_BACKEND = "groq"
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_WHISPER_MODEL = "whisper-large-v3"
+
+# Groq Whisper: жёсткий лимит 25 МБ на запрос. Используем 24 МБ как безопасный порог,
+# чтобы успеть дать внятную ошибку до разрыва соединения.
+GROQ_MAX_AUDIO_BYTES = 24 * 1024 * 1024   # 24 МБ
+# 16 кГц моно pcm_s16le (наш формат extract_audio): 32 000 байт/с → ~13.1 мин до лимита.
+_PCM16_BYTES_PER_SEC = 32_000
+
+# Retry: пробуем на transient-ошибках (disconnect, 5xx) до N раз с backoff.
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF = [2.0, 6.0]   # пауза между попытками 1→2, 2→3 (сек)
 
 
 class TranscriptionError(Exception):
@@ -83,6 +94,18 @@ class GroqBackend:
             raise TranscriptionError(
                 "нет GROQ_API_KEY — задайте ключ Groq в окружении для транскрипции"
             )
+
+        # Pre-flight: проверяем размер ДО отправки — Groq обрывает соединение на >25 МБ.
+        size = audio_path.stat().st_size
+        if size > GROQ_MAX_AUDIO_BYTES:
+            approx_min = size / _PCM16_BYTES_PER_SEC / 60
+            limit_min = GROQ_MAX_AUDIO_BYTES / _PCM16_BYTES_PER_SEC / 60
+            raise TranscriptionError(
+                f"аудио {approx_min:.0f} мин ({size // (1024*1024)} МБ) превышает лимит "
+                f"Groq Whisper за запрос (~{limit_min:.0f} мин / 25 МБ). "
+                f"Нужен чанкинг (M1) — пока используй короткое видео (≤{limit_min:.0f} мин)."
+            )
+
         data = {
             "model": self._model,
             "response_format": "verbose_json",
@@ -90,19 +113,41 @@ class GroqBackend:
         }
         if language:
             data["language"] = language
-        try:
-            with audio_path.open("rb") as f:
-                resp = httpx.post(
-                    GROQ_TRANSCRIBE_URL,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    data=data,
-                    files={"file": (audio_path.name, f, "application/octet-stream")},
-                    timeout=600,
-                )
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPError as e:
-            raise TranscriptionError(f"Groq Whisper API ошибка: {e}") from e
+
+        last_exc: Exception | None = None
+        for attempt in range(_RETRY_ATTEMPTS):
+            try:
+                with audio_path.open("rb") as f:
+                    resp = httpx.post(
+                        GROQ_TRANSCRIBE_URL,
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        data=data,
+                        files={"file": (audio_path.name, f, "application/octet-stream")},
+                        timeout=600,
+                    )
+                # 429 / 5xx — transient, ретраим; 4xx (кроме 429) — постоянная ошибка
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    last_exc = TranscriptionError(
+                        f"Groq Whisper API: HTTP {resp.status_code} (попытка {attempt + 1})"
+                    )
+                    if attempt < _RETRY_ATTEMPTS - 1:
+                        time.sleep(_RETRY_BACKOFF[attempt])
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.RemoteProtocolError, httpx.ConnectError) as e:
+                # Разрыв соединения — transient, ретраим
+                last_exc = e
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    time.sleep(_RETRY_BACKOFF[attempt])
+            except httpx.HTTPStatusError as e:
+                raise TranscriptionError(f"Groq Whisper API ошибка {e.response.status_code}: {e}") from e
+            except httpx.HTTPError as e:
+                raise TranscriptionError(f"Groq Whisper API ошибка: {e}") from e
+
+        raise TranscriptionError(
+            f"Groq Whisper не ответил после {_RETRY_ATTEMPTS} попыток: {last_exc}"
+        ) from last_exc
 
 
 class FasterWhisperBackend:

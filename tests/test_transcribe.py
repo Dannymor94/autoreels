@@ -157,6 +157,76 @@ def test_transcribe_force_bypasses_cache(tmp_path):
     assert spy.calls == 2            # force обходит кэш
 
 
+# ------------------------------------------------------ Groq pre-flight + retry
+
+def test_groq_default_request_raises_on_oversized_audio(tmp_path, monkeypatch):
+    """Аудио больше 24 МБ → внятная ошибка ДО отправки (не «Server disconnected»)."""
+    audio = tmp_path / "big.wav"
+    # Создаём файл > GROQ_MAX_AUDIO_BYTES (размер реального файла, содержимое не важно)
+    oversized = T.GROQ_MAX_AUDIO_BYTES + 1
+    audio.write_bytes(b"\x00" * oversized)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+
+    backend = T.GroqBackend()
+    with pytest.raises(T.TranscriptionError) as exc:
+        backend._default_request(audio, "ru")
+
+    assert "лимит" in str(exc.value).lower() or "limit" in str(exc.value).lower() or "мин" in str(exc.value)
+    assert "чанкинг" in str(exc.value).lower() or "M1" in str(exc.value)
+
+
+def test_groq_default_request_retries_on_disconnect(tmp_path, monkeypatch):
+    """RemoteProtocolError (разрыв соединения) → retry, после успешного ответа возвращает данные."""
+    import httpx
+
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"\x00" * 1024)   # маленький файл — pre-flight не срабатывает
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+
+    data = {"language": "Russian", "words": [{"word": "тест", "start": 0.0, "end": 0.5}]}
+    call_count = 0
+
+    class _FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return data
+
+    def _fake_post(*a, **k):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise httpx.RemoteProtocolError("Server disconnected", request=None)
+        return _FakeResp()
+
+    monkeypatch.setattr(T, "time", type("T", (), {"sleep": staticmethod(lambda _: None)})())
+    monkeypatch.setattr("httpx.post", _fake_post)
+
+    backend = T.GroqBackend()
+    result = backend._default_request(audio, "ru")
+    assert result == data
+    assert call_count == 2   # первая попытка упала, вторая успешна
+
+
+def test_groq_default_request_raises_after_all_retries_exhausted(tmp_path, monkeypatch):
+    """Если все retry исчерпаны → TranscriptionError, не голый RemoteProtocolError."""
+    import httpx
+
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"\x00" * 1024)
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+
+    monkeypatch.setattr(T, "time", type("T", (), {"sleep": staticmethod(lambda _: None)})())
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda *a, **k: (_ for _ in ()).throw(httpx.RemoteProtocolError("Server disconnected", request=None)),
+    )
+
+    backend = T.GroqBackend()
+    with pytest.raises(T.TranscriptionError) as exc:
+        backend._default_request(audio, "ru")
+    assert "попыт" in str(exc.value).lower()   # «попыток» или «попытки»
+
+
 # ------------------------------------------------------ integration (только системник)
 
 @pytest.mark.integration
