@@ -20,6 +20,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+import threading
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
@@ -39,6 +41,69 @@ _SOFTWARE_X26X = {"libx264", "libx265"}
 
 # env-переопределение энкодера (рантайм-конфиг машины рендера поверх render.yaml).
 _ENCODER_ENV = "RENDER_ENCODER"
+
+
+def _fmt_time(sec: float) -> str:
+    """Секунды → M:SS или H:MM:SS для прогресс-строки."""
+    m, s = divmod(int(sec), 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def _run_ffmpeg_with_progress(
+    cmd: list[str],
+    *,
+    reel_id: str,
+    idx: int,
+    total: int,
+    duration_sec: float,
+) -> tuple[int, str]:
+    """Запустить ffmpeg с отображением прогресса через -progress pipe:1.
+
+    Печатает «клип N/M: id (D:DD)…» затем обновляемую строку «\\r  T/D (P%)».
+    Возвращает (returncode, stderr_text).
+    """
+    prog_cmd = [cmd[0], "-progress", "pipe:1"] + cmd[1:]
+    stderr_chunks: list[str] = []
+
+    proc = subprocess.Popen(
+        prog_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+
+    def _drain_stderr() -> None:
+        for line in proc.stderr:
+            stderr_chunks.append(line)
+
+    t = threading.Thread(target=_drain_stderr, daemon=True)
+    t.start()
+
+    print(f"\nклип {idx}/{total}: {reel_id} ({_fmt_time(duration_sec)})…", flush=True)
+    for line in proc.stdout:
+        key, _, val = line.strip().partition("=")
+        if key == "out_time_ms":
+            try:
+                elapsed = max(0.0, int(val) / 1_000_000)
+                pct = min(100, int(elapsed / duration_sec * 100)) if duration_sec > 0 else 0
+                print(
+                    f"\r  {_fmt_time(elapsed)}/{_fmt_time(duration_sec)} ({pct}%)",
+                    end="", flush=True,
+                )
+            except (ValueError, ZeroDivisionError):
+                pass
+        elif key == "progress" and val.strip() == "end":
+            print(
+                f"\r  {_fmt_time(duration_sec)}/{_fmt_time(duration_sec)} (100%)",
+                end="", flush=True,
+            )
+
+    proc.wait()
+    t.join(timeout=2)
+    print(flush=True)
+    return proc.returncode, "".join(stderr_chunks)
 
 
 class RenderError(Exception):
@@ -214,40 +279,47 @@ def _render_segments(
     enc = render_cfg.encoder
     aud = render_cfg.audio
 
-    outputs: list[Path] = []
-    for reel in manifest.reels:
-        if progress is not None:
-            progress(reel.id)
-        out = out_dir / f"{reel.id}{suffix}.mp4"
-        # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale (в координатах
-        # финального кадра 1080×1920). Слова берутся из reel.subtitles (их кладёт run).
-        reel_vf = vf
-        if subtitles_cfg is not None and reel.subtitles:
-            ass_path = out_dir / f"{reel.id}.ass"
-            ass_path.write_text(
-                build_ass(reel.subtitles, cfg=subtitles_cfg, clip_start=reel.start),
-                encoding="utf-8",
+    # .ass живут в tempdir: после ffmpeg убираются автоматически, в out_dir не остаются.
+    with tempfile.TemporaryDirectory(prefix="autoreels_ass_") as _tmp_ass:
+        tmp_ass_dir = Path(_tmp_ass)
+        outputs: list[Path] = []
+        total = len(manifest.reels)
+        for idx, reel in enumerate(manifest.reels, 1):
+            if progress is not None:
+                progress(reel.id)
+            out = out_dir / f"{reel.id}{suffix}.mp4"
+            # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale
+            # (в координатах финального кадра 1080×1920). Слова берутся из reel.subtitles.
+            reel_vf = vf
+            if subtitles_cfg is not None and reel.subtitles:
+                ass_path = tmp_ass_dir / f"{reel.id}.ass"
+                ass_path.write_text(
+                    build_ass(reel.subtitles, cfg=subtitles_cfg, clip_start=reel.start),
+                    encoding="utf-8",
+                )
+                ass_filter = f"ass={_escape_ass_path(ass_path)}"
+                reel_vf = f"{vf},{ass_filter}" if vf else ass_filter
+            cmd = build_cut_cmd(
+                ffmpeg_bin, source, reel.start, reel.end, out,
+                codec=codec, preset=enc.preset, cq=enc.cq,
+                audio_codec=aud.codec, audio_bitrate=aud.bitrate,
+                vf=reel_vf,
             )
-            ass_filter = f"ass={_escape_ass_path(ass_path)}"
-            reel_vf = f"{vf},{ass_filter}" if vf else ass_filter
-        cmd = build_cut_cmd(
-            ffmpeg_bin, source, reel.start, reel.end, out,
-            codec=codec, preset=enc.preset, cq=enc.cq,
-            audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-            vf=reel_vf,
-        )
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-        if proc.returncode != 0:
-            out.unlink(missing_ok=True)             # не оставлять битый частичный выход
-            stderr = proc.stderr.strip() or "(пустой stderr)"
-            raise RenderError(
-                f"ffmpeg не смог обработать reel {reel.id} "
-                f"({_ts(reel.start)}→{_ts(reel.end)}, код {proc.returncode}): {stderr}"
+            returncode, stderr_text = _run_ffmpeg_with_progress(
+                cmd, reel_id=reel.id, idx=idx, total=total,
+                duration_sec=reel.end - reel.start,
             )
-        outputs.append(out)
-        if emit_text:
-            _write_sidecar_text(out, reel)
-    return outputs
+            if returncode != 0:
+                out.unlink(missing_ok=True)         # не оставлять битый частичный выход
+                stderr = stderr_text.strip() or "(пустой stderr)"
+                raise RenderError(
+                    f"ffmpeg не смог обработать reel {reel.id} "
+                    f"({_ts(reel.start)}→{_ts(reel.end)}, код {returncode}): {stderr}"
+                )
+            outputs.append(out)
+            if emit_text:
+                _write_sidecar_text(out, reel)
+        return outputs
 
 
 def _write_sidecar_text(clip_path: Path, reel) -> None:

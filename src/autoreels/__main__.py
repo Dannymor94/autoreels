@@ -216,15 +216,16 @@ def cmd_render(
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
 
     manifest = load_manifest(manifests_dir)
+    stem = Path(manifest.source).stem
+    out_dir_final = out_dir / stem       # reels-out/<stem>/ — отдельная папка на видео
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
-    print(f"=== render: {len(manifest.reels)} клипов, энкодер {enc} ===", flush=True)
+    print(f"=== render: {len(manifest.reels)} клипов, энкодер {enc} → {out_dir_final} ===", flush=True)
 
     outputs = render_crop(
-        manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+        manifest, inputs_dir=inputs_dir, out_dir=out_dir_final, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, subtitles_cfg=subtitles_cfg,
-        progress=lambda rid: print(f"рендер {rid}…", flush=True),
     )
-    print(f"готово: {len(outputs)} клипов → {out_dir}", flush=True)
+    print(f"\nготово: {len(outputs)} клипов → {out_dir_final}", flush=True)
     return outputs
 
 

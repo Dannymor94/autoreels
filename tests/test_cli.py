@@ -167,6 +167,27 @@ def test_render_reads_manifest_and_calls_render_crop(monkeypatch, tmp_path):
 
     assert called["manifest"].source == "v.mp4"        # пришёл из manifest.json
     assert out == [Path("reels-out/r01.mp4")]
+    # out_dir передан как reels-out/<stem>
+    assert called["kwargs"]["out_dir"].name == "v"
+
+
+def test_render_out_dir_uses_stem_from_manifest_source(monkeypatch, tmp_path):
+    """render_crop получает out_dir = reels-out/<stem>, не корень reels-out/."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    m = Manifest(
+        source="PXL_20260621_122006193.mp4", source_sha256="b" * 64,
+        duration_preset="shorts", setup=_setup(), run_key="rk2", reels=[_reel()],
+    )
+    (manifests / "manifest.json").write_text(m.model_dump_json(), encoding="utf-8")
+
+    seen_out: list[Path] = []
+    monkeypatch.setattr(cli, "render_crop", lambda manifest, *, out_dir, **k: seen_out.append(Path(out_dir)) or [])
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, out_dir=tmp_path / "reels-out")
+
+    assert len(seen_out) == 1
+    assert seen_out[0].name == "PXL_20260621_122006193"
+    assert seen_out[0].parent.name == "reels-out"
 
 
 def test_render_passes_encoder_through(monkeypatch, tmp_path):
@@ -202,7 +223,9 @@ def test_render_uses_default_paths_without_args(monkeypatch):
 
     assert seen["manifests"].name == "manifests"
     assert seen["inputs"].name == "inputs"
-    assert seen["out"].name == "reels-out"
+    # out_dir передаётся как reels-out/<stem> (stem = Path(manifest.source).stem = "v")
+    assert seen["out"].parent.name == "reels-out"
+    assert seen["out"].name == "v"
 
 
 # ------------------------------------------------------------------ .env автоподхват

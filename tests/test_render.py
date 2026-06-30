@@ -205,15 +205,21 @@ def test_resolve_source_basename_hint_handles_windows_path(tmp_path):
 
 @pytest.fixture
 def fake_ffmpeg(monkeypatch):
-    """Мокает ffmpeg: shutil.which находит бинарь, subprocess.run пишет вызовы и 'успешен'."""
+    """Мокает ffmpeg: shutil.which находит бинарь, subprocess.Popen пишет вызовы и 'успешен'."""
     calls = []
 
-    def fake_run(cmd, *a, **k):
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    class _FakeProc:
+        def __init__(self, cmd, **kwargs):
+            calls.append(cmd)
+            self.returncode = 0
+            self.stdout = iter([])   # нет progress-строк
+            self.stderr = iter([])
+
+        def wait(self):
+            return 0
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/bin/ffmpeg")
-    monkeypatch.setattr(render.subprocess, "run", fake_run)
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
     return calls
 
 
@@ -294,10 +300,17 @@ def test_render_cut_ffmpeg_failure_raises(tmp_path, render_cfg, monkeypatch):
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "lecture.mp4", b"ffmpeg-fails-video")
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/bin/ffmpeg")
-    monkeypatch.setattr(
-        render.subprocess, "run",
-        lambda cmd, *a, **k: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom"),
-    )
+
+    class _FailProc:
+        def __init__(self, cmd, **kwargs):
+            self.returncode = 1
+            self.stdout = iter([])
+            self.stderr = iter(["boom\n"])
+
+        def wait(self):
+            return 1
+
+    monkeypatch.setattr(render.subprocess, "Popen", _FailProc)
     m = _manifest("lecture.mp4", sha, [_reel("r01", 0.0, 5.0)])
     with pytest.raises(RenderError) as e:
         render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
@@ -397,7 +410,7 @@ def test_crop_resolves_local_source_ignoring_mac_path(tmp_path, render_cfg, fake
 
 
 def test_crop_burns_subtitles_ass_after_crop_scale(tmp_path, render_cfg, fake_ffmpeg):
-    # R3: при subtitles_cfg + словах у reel — ass-фильтр ПОСЛЕ crop/scale, .ass рядом записан
+    # R3: при subtitles_cfg + словах у reel — ass-фильтр ПОСЛЕ crop/scale
     subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "v.mp4", b"subs-video")
@@ -411,7 +424,8 @@ def test_crop_burns_subtitles_ass_after_crop_scale(tmp_path, render_cfg, fake_ff
     vf = _val_after(fake_ffmpeg[0], "-vf")
     assert "ass=" in vf
     assert vf.index("ass=") > vf.index("scale=")      # субтитры в координатах финального кадра
-    assert (out_dir / "r01.ass").exists()
+    # .ass убирается из tempdir после рендера — в out_dir его быть не должно
+    assert not (out_dir / "r01.ass").exists()
 
 
 def test_crop_no_subtitles_when_cfg_absent(tmp_path, render_cfg, fake_ffmpeg):
@@ -476,22 +490,28 @@ def test_crop_sidecar_txt_per_reel(tmp_path, render_cfg, fake_ffmpeg):
 
 # ------------------------------------------------- Windows: subprocess encoding
 
-def test_render_subprocess_uses_utf8_encoding(tmp_path, render_cfg, monkeypatch):
-    """subprocess.run должен получать encoding='utf-8' — иначе Windows cp1251 ломает stderr."""
+def test_render_popen_uses_utf8_encoding(tmp_path, render_cfg, monkeypatch):
+    """subprocess.Popen должен получать encoding='utf-8' — иначе Windows cp1251 ломает stderr."""
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "v.mp4", b"bytes")
     kwargs_seen = []
 
-    def fake_run(cmd, *a, **k):
-        kwargs_seen.append(k)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    class _FakeProc:
+        def __init__(self, cmd, **kwargs):
+            kwargs_seen.append(kwargs)
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+
+        def wait(self):
+            return 0
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
-    monkeypatch.setattr(render.subprocess, "run", fake_run)
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
     m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
     render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
-    assert kwargs_seen, "subprocess.run не вызван"
+    assert kwargs_seen, "subprocess.Popen не вызван"
     assert kwargs_seen[0].get("encoding") == "utf-8", (
-        f"subprocess.run вызван без encoding='utf-8': {kwargs_seen[0]}"
+        f"subprocess.Popen вызван без encoding='utf-8': {kwargs_seen[0]}"
     )
