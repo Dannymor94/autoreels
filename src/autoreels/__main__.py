@@ -173,7 +173,10 @@ def cmd_run(
 
     # Идентичность файла + кроп ДО запуска конвейера. Нет калибровки → стоп (fail-fast),
     # ни один облачный этап не дёргается (не жжём Groq на видео без кропа).
-    sha = state.file_sha256(video)
+    size_gb = Path(video).stat().st_size / (1 << 30)
+    print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
+    sha = state.file_sha256_cached(video, cache_dir)
+    print("хэш готов.", flush=True)
     setup = load_calibration(calibrations_dir, sha)
 
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)

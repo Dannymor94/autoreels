@@ -24,6 +24,32 @@ def file_sha256(path: str | Path) -> str:
     return h.hexdigest()
 
 
+def _sha256_cache_key(path: Path) -> str:
+    """Ключ записи кэша хэша: sha256(resolved_path + size + mtime_ns)."""
+    st = path.stat()
+    raw = f"{path.resolve()!s}\0{st.st_size}\0{st.st_mtime_ns}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def file_sha256_cached(path: str | Path, cache_dir: str | Path) -> str:
+    """sha256 содержимого файла с диск-кэшем по (путь, размер, mtime).
+
+    Кэш: cache_dir/sha256/<key>.txt. При совпадении ключа (файл не изменился)
+    возвращает сохранённый хэш без перечитывания — критично для многогигабайтных видео.
+    """
+    path = Path(path)
+    sha_cache = Path(cache_dir) / "sha256"
+    sha_cache.mkdir(parents=True, exist_ok=True)
+    entry = sha_cache / f"{_sha256_cache_key(path)}.txt"
+    if entry.is_file():
+        cached = entry.read_text().strip()
+        if len(cached) == 64:  # валидный sha256 hex
+            return cached
+    result = file_sha256(path)
+    entry.write_text(result)
+    return result
+
+
 def audio_hash(path: str | Path) -> str:
     """Ключ кэша транскрипта = хэш содержимого аудио (R0_SPEC §9)."""
     return file_sha256(path)

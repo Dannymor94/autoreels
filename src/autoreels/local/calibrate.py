@@ -271,6 +271,7 @@ def cmd_calibrate(
     port: int = 8765,
     calibrator=None,
     timeout_sec: float = 600.0,
+    cache_dir=None,
 ) -> Path:
     """Откалибровать кроп для `video` → calibrations/<sha>.json. Отдельно ПЕРЕД run."""
     root = Path(root)
@@ -279,7 +280,12 @@ def cmd_calibrate(
         raise CalibrateError(f"видео не найдено: {video}")
 
     w, h, duration = probe_frame(video, ffprobe=ffprobe)
-    sha = state.file_sha256(video)
+
+    _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+    size_gb = video.stat().st_size / (1 << 30)
+    print(f"считаю хэш видео ({size_gb:.1f} ГБ, может занять ~{max(1, int(size_gb * 2))} с)…", flush=True)
+    sha = state.file_sha256_cached(video, _cache_dir)
+    print("хэш готов.", flush=True)
     calib_dir = root / "calibrations"
     work = calib_dir / "_work"
     work.mkdir(parents=True, exist_ok=True)
