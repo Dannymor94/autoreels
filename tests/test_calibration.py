@@ -95,3 +95,72 @@ def test_calibration_keyed_by_sha_not_name(tmp_path):
     assert load_calibration(tmp_path, SHA_A) is not None
     with pytest.raises(CalibrationError):
         load_calibration(tmp_path, SHA_B)
+
+
+# --------------------------------------------------------------- авто-кроп (centre)
+
+from autoreels.core.calibration import auto_crop, load_or_auto_calibrate  # noqa: E402
+
+
+def test_auto_crop_is_centered_horizontally():
+    # 3840×2160: ширина кропа = round(2160 * 9/16) = 1215, x = (3840-1215)//2 = 1312
+    c = auto_crop((3840, 2160))
+    assert c.x == (3840 - c.w) // 2
+    assert c.y == 0
+    assert c.h == 2160
+
+
+def test_auto_crop_exact_9_16_aspect():
+    c = auto_crop((3840, 2160))
+    assert abs(c.w / c.h - 1080 / 1920) < 0.002
+
+
+def test_auto_crop_full_height():
+    for frame in [(1920, 1080), (3840, 2160), (2560, 1440)]:
+        c = auto_crop(frame)
+        assert c.h == frame[1]
+
+
+def test_load_or_auto_calibrate_uses_manual_if_exists(tmp_path):
+    crop = Crop(x=1370, y=280, w=956, h=1700)
+    save_calibration(tmp_path, source_name="v.mp4", source_sha256=SHA_A,
+                     crop=crop, frame=[3840, 2160], setup_label="my_room")
+    called = []
+    setup = load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
+                                   get_frame_size=lambda: called.append(1) or (3840, 2160))
+    assert called == []            # ffprobe не вызван: ручная калибровка есть
+    assert setup.crop.model_dump() == {"x": 1370, "y": 280, "w": 956, "h": 1700}
+    assert setup.setup_id == "my_room"
+
+
+def test_load_or_auto_calibrate_creates_center_crop_when_no_calibration(tmp_path):
+    setup = load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
+                                   get_frame_size=lambda: (3840, 2160))
+    expected = auto_crop((3840, 2160))
+    assert setup.crop.model_dump() == expected.model_dump()
+    assert setup.frame == [3840, 2160]
+    # и файл сохранён — повторный load_calibration работает
+    from autoreels.core.calibration import load_calibration as _lc
+    assert _lc(tmp_path, SHA_A).crop.model_dump() == expected.model_dump()
+
+
+def test_auto_calibration_saved_with_auto_flag(tmp_path):
+    import json
+    from autoreels.core.calibration import calibration_path
+    load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
+                           get_frame_size=lambda: (3840, 2160))
+    rec = json.loads(calibration_path(tmp_path, SHA_A).read_text(encoding="utf-8"))
+    assert rec.get("auto") is True
+
+
+def test_manual_calibrate_overwrites_auto(tmp_path):
+    # сначала авто-кроп
+    load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
+                           get_frame_size=lambda: (3840, 2160))
+    # потом ручная перезаписывает
+    manual_crop = Crop(x=100, y=50, w=900, h=1600)
+    save_calibration(tmp_path, source_name="v.mp4", source_sha256=SHA_A,
+                     crop=manual_crop, frame=[3840, 2160], setup_label="manual")
+    setup = load_calibration(tmp_path, SHA_A)
+    assert setup.crop.model_dump() == {"x": 100, "y": 50, "w": 900, "h": 1600}
+    assert setup.setup_id == "manual"

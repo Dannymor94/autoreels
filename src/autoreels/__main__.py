@@ -25,7 +25,12 @@ from autoreels.cloud.select import SelectError, select
 from autoreels.cloud.snap import snap_segments
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.core import state
-from autoreels.core.calibration import CalibrationError, load_calibration
+from autoreels.core.calibration import (
+    CalibrationError,
+    _probe_frame_size_for_auto,
+    load_calibration,
+    load_or_auto_calibrate,
+)
 from autoreels.core.config import (
     ConfigError,
     load_r0_config,
@@ -158,9 +163,9 @@ def cmd_run(
 ) -> Path:
     """ОБЛАЧНЫЙ тир: видео → manifests/manifest.json (extract→transcribe→compress→select).
 
-    Кроп per-file: берётся из `calibrations/<sha256>.json` (его пишет `autoreels calibrate`).
-    Калибровки нет → CalibrationError ДО конвейера: run останавливается с подсказкой
-    «сначала: autoreels calibrate <video>», а не молча продолжает без кропа.
+    Кроп per-file: берётся из `calibrations/<sha256>.json` (пишет `autoreels calibrate`).
+    Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением;
+    запускается `autoreels calibrate <video>` для ручной замены.
     """
     root = Path(root)
     cfg = root / "config"
@@ -171,13 +176,15 @@ def cmd_run(
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
 
-    # Идентичность файла + кроп ДО запуска конвейера. Нет калибровки → стоп (fail-fast),
-    # ни один облачный этап не дёргается (не жжём Groq на видео без кропа).
+    # Идентичность файла + кроп ДО запуска конвейера.
     size_gb = Path(video).stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
     sha = state.file_sha256_cached(video, cache_dir)
     print("хэш готов.", flush=True)
-    setup = load_calibration(calibrations_dir, sha)
+    setup = load_or_auto_calibrate(
+        calibrations_dir, sha, Path(video).name,
+        get_frame_size=lambda: _probe_frame_size_for_auto(video),
+    )
 
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
     audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir, ffmpeg=ffmpeg)

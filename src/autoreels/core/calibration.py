@@ -19,9 +19,10 @@ Downloads/). Это компромисс из-за serverless HTML без бэк
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from pydantic import ValidationError
 
@@ -122,7 +123,7 @@ def save_calibration(
 def load_calibration(calibrations_dir: str | Path, source_sha256: str) -> SetupProfile:
     """Прочитать калибровку видео по sha256 → SetupProfile для манифеста.
 
-    Нет файла → CalibrationError с подсказкой откалибровать (это и ОСТАНАВЛИВАЕТ run).
+    Нет файла → CalibrationError с подсказкой откалибровать.
     """
     path = calibration_path(calibrations_dir, source_sha256)
     if not path.is_file():
@@ -143,3 +144,71 @@ def load_calibration(calibrations_dir: str | Path, source_sha256: str) -> SetupP
         )
     except (KeyError, ValidationError) as e:
         raise CalibrationError(f"невалидная калибровка {path}: {e}") from e
+
+
+# ----------------------------------------------------------------- авто-кроп (центр)
+
+def auto_crop(frame_size: tuple[int, int]) -> Crop:
+    """Центральный кроп 9:16 из кадра: полная высота, ширина под аспект, x по центру."""
+    W, H = frame_size
+    w = round(H * _ASPECT)
+    x = (W - w) // 2
+    return Crop(x=x, y=0, w=w, h=H)
+
+
+def _probe_frame_size_for_auto(video: str | Path, *, ffprobe: str = "ffprobe") -> tuple[int, int]:
+    """ffprobe → (width, height) исходника. Точка подмены в тестах."""
+    proc = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height",
+         "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True, check=False,
+    )
+    try:
+        parts = proc.stdout.strip().split(",")
+        return int(parts[0]), int(parts[1])
+    except (IndexError, ValueError) as e:
+        raise CalibrationError(f"не удалось определить размер кадра {video}: {proc.stderr.strip()}") from e
+
+
+def load_or_auto_calibrate(
+    calibrations_dir: str | Path,
+    source_sha256: str,
+    source_name: str,
+    *,
+    get_frame_size: Callable[[], tuple[int, int]],
+) -> SetupProfile:
+    """Вернуть SetupProfile: ручная калибровка (если есть) или авто-кроп по центру.
+
+    Авто-кроп сохраняется с `"auto": true` — ручной `calibrate` его перезапишет.
+    Сообщение пользователю: чтобы не молчать про центр-кроп.
+    """
+    calibrations_dir = Path(calibrations_dir)
+    path = calibration_path(calibrations_dir, source_sha256)
+    if path.is_file():
+        return load_calibration(calibrations_dir, source_sha256)
+
+    print(
+        "кроп не откалиброван → авто-кроп по центру "
+        "(autoreels calibrate <video> для ручной настройки)",
+        flush=True,
+    )
+    frame_size = get_frame_size()
+    crop = auto_crop(frame_size)
+    calibrations_dir.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "source_name": source_name,
+        "source_sha256": source_sha256,
+        "setup_label": "auto",
+        "crop": crop.model_dump(),
+        "scale": TARGET_SCALE,
+        "frame": list(frame_size),
+        "auto": True,
+    }
+    path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    return SetupProfile(
+        setup_id="auto",
+        crop=crop,
+        scale=TARGET_SCALE,
+        frame=list(frame_size),
+    )

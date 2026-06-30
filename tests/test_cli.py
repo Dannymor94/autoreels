@@ -18,7 +18,7 @@ import pytest
 
 from autoreels import __main__ as cli
 from autoreels.core import state
-from autoreels.core.calibration import CalibrationError, save_calibration
+from autoreels.core.calibration import save_calibration
 from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Transcript, Word
 from autoreels.local.render import RenderError
 
@@ -57,7 +57,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
             return ret
         return f
 
-    monkeypatch.setattr(cli, "load_calibration", lambda d, s: _setup())   # калибровка есть
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
     monkeypatch.setattr(cli, "_stage_extract_audio", rec("extract", tmp_path / "a.wav"))
     monkeypatch.setattr(cli, "_stage_transcribe", rec("transcribe", "TRANSCRIPT"))
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
@@ -76,21 +76,29 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
                      "subtitles", "assemble", "write"]
 
 
-def test_run_stops_with_calibration_error_when_uncalibrated(monkeypatch, tmp_path):
-    # Нет калибровки → CalibrationError ДО конвейера. Доказываем: НИ ОДИН этап не запустился
-    # (это останавливает run, а не «предупредить и продолжить без кропа»).
-    ran = []
-    for name in ("_stage_extract_audio", "_stage_transcribe", "_stage_compress", "_stage_select"):
-        monkeypatch.setattr(cli, name, lambda *a, _n=name, **k: ran.append(_n))
+def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
+    # Нет калибровки → авто-кроп по центру, run продолжается (не CalibrationError).
+    # ffprobe мокается чтобы не требовать реальное видео.
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
+
+    # Мокаем probe чтобы «видео» 3840×2160 без реального файла
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **kw: (3840, 2160))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
-    with pytest.raises(CalibrationError):
-        cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=tmp_path / "calibrations",
-                    manifests_dir=tmp_path)
+    calib = tmp_path / "calibrations"
+    manifests = tmp_path / "manifests"
 
-    assert ran == []                                  # конвейер не стартовал — run остановлен
-    assert not (tmp_path / "manifest.json").exists()  # манифест не собран
+    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
+
+    m = Manifest.model_validate_json((manifests / "manifest.json").read_text(encoding="utf-8"))
+    # Авто-кроп: w/h = 9/16, по центру
+    assert abs(m.setup.crop.w / m.setup.crop.h - 9 / 16) < 0.002
+    assert m.setup.crop.x == (3840 - m.setup.crop.w) // 2
+    assert m.setup.crop.y == 0
 
 
 # ------------------------------------------------- run: манифест собран ИЗ профиля
