@@ -26,8 +26,6 @@ GROQ_WHISPER_MODEL = "whisper-large-v3"
 # Groq Whisper: жёсткий лимит 25 МБ на запрос. Используем 24 МБ как безопасный порог,
 # чтобы успеть дать внятную ошибку до разрыва соединения.
 GROQ_MAX_AUDIO_BYTES = 24 * 1024 * 1024   # 24 МБ
-# 16 кГц моно pcm_s16le (наш формат extract_audio): 32 000 байт/с → ~13.1 мин до лимита.
-_PCM16_BYTES_PER_SEC = 32_000
 
 # Retry: пробуем на transient-ошибках (disconnect, 5xx) до N раз с backoff.
 _RETRY_ATTEMPTS = 3
@@ -95,15 +93,12 @@ class GroqBackend:
                 "нет GROQ_API_KEY — задайте ключ Groq в окружении для транскрипции"
             )
 
-        # Pre-flight: проверяем размер ДО отправки — Groq обрывает соединение на >25 МБ.
+        # Pre-flight: проверяем РЕАЛЬНЫЙ РАЗМЕР файла ДО отправки — Groq рвёт по байтам.
         size = audio_path.stat().st_size
         if size > GROQ_MAX_AUDIO_BYTES:
-            approx_min = size / _PCM16_BYTES_PER_SEC / 60
-            limit_min = GROQ_MAX_AUDIO_BYTES / _PCM16_BYTES_PER_SEC / 60
             raise TranscriptionError(
-                f"аудио {approx_min:.0f} мин ({size // (1024*1024)} МБ) превышает лимит "
-                f"Groq Whisper за запрос (~{limit_min:.0f} мин / 25 МБ). "
-                f"Нужен чанкинг (M1) — пока используй короткое видео (≤{limit_min:.0f} мин)."
+                f"аудио {size // (1024 * 1024)} МБ превышает лимит Groq Whisper (25 МБ/запрос). "
+                f"Нужен чанкинг (M1) — см. PLAN.md."
             )
 
         data = {

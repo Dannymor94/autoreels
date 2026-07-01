@@ -114,6 +114,7 @@ class AudioExtract(BaseModel):
     channels: int
     codec: str
     format: str
+    bitrate: str | None = None   # напр. "64k" для mp3; None для PCM (bitrate неприменим)
 
 
 class SubtitleStyle(BaseModel):

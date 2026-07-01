@@ -14,12 +14,14 @@ audio:
   bitrate: 160k
 
 # Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
-# 16kHz mono PCM — то, что ждёт faster-whisper; wav читается stdlib без ffprobe.
+# mp3 64k mono 16kHz: 8 000 байт/с → 46 мин = ~22 МБ (под лимит Groq 25 МБ).
+# PCM 16kHz mono было 32 000 байт/с → предел ~13 мин; mp3 разблокирует 46 мин без чанкинга.
 audio_extract:
   sample_rate: 16000
   channels: 1
-  codec: pcm_s16le
-  format: wav
+  codec: libmp3lame
+  format: mp3
+  bitrate: 64k
 
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
