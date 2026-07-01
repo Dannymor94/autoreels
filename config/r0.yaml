@@ -37,7 +37,8 @@ chunking:
   whisper_threshold_bytes: 20971520    # 20 МБ — второй гард по размеру аудио
   silence_window_sec: 30               # окно VAD поиска тишины вокруг target-границы (±сек)
   silence_threshold_db: -40            # порог silencedetect
-  r0_chunk_tokens: 3000                # токены на R0-чанк транскрипта
+  r0_chunk_tokens: 2000                # токены на R0-чанк транскрипта (уменьшено с 3000 из-за 413)
   r0_overlap_tokens: 300               # перекрытие R0-чанков (≈60с речи)
+  r0_chunk_delay_sec: 2.0              # пауза между R0-чанками (избежать 429 TPM Groq)
   dedup_overlap_ratio: 0.5             # порог дедупа рилов из разных R0-чанков
   fail_fast: false                     # false → продолжать при провале одного чанка

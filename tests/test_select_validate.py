@@ -235,6 +235,59 @@ def test_select_chunked_dedup_overlap_reels(fewshot, r0_cfg):
     assert len(matching) == 1
 
 
+def test_select_chunked_delays_between_chunks(fewshot, r0_cfg, monkeypatch):
+    """select_chunked делает паузу r0_chunk_delay_sec между R0-чанками."""
+    import autoreels.cloud.select as sel_mod
+    sleeps = []
+    monkeypatch.setattr(sel_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    provider = _MockLLM(['{"segments": []}'])
+    compressed = _make_compressed(300, line_chars=60)  # гарантированно > chunk_tokens → ≥2 чанка
+    S.select(compressed, system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
+
+    # Между N чанками должно быть N-1 пауз
+    assert len(sleeps) >= 1, "нет пауз между R0-чанками"
+    expected_delay = r0_cfg.chunking.r0_chunk_delay_sec
+    assert all(s == expected_delay for s in sleeps), f"неверная пауза: {sleeps}"
+
+
+def test_select_chunked_no_delay_after_last_chunk(fewshot, r0_cfg, monkeypatch):
+    """После последнего чанка паузы не должно быть (только между чанками)."""
+    import autoreels.cloud.select as sel_mod
+    sleeps = []
+    monkeypatch.setattr(sel_mod.time, "sleep", lambda s: sleeps.append(s))
+
+    provider = _MockLLM(['{"segments": []}'])
+    compressed = _make_compressed(300, line_chars=60)
+    S.select(compressed, system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
+
+    # N чанков → N-1 пауз (не N)
+    chunks = S.split_compressed(
+        compressed, r0_cfg.chunking.r0_chunk_tokens, r0_cfg.chunking.r0_overlap_tokens
+    )
+    assert len(sleeps) == len(chunks) - 1
+
+
+def test_split_compressed_uses_prompt_aware_budget(fewshot, r0_cfg):
+    """Бюджет чанка уменьшается на размер промпта (system + few-shot)."""
+    system_text = "x" * 400   # ~100 токенов
+    fewshot_small = {"examples": []}
+
+    compressed = _make_compressed(100, line_chars=60)
+    budget_full = r0_cfg.chunking.r0_chunk_tokens
+
+    # При маленьком промпте (0 токенов) → много строк на чанк
+    chunks_no_overhead = S.split_compressed(compressed, budget_full, r0_cfg.chunking.r0_overlap_tokens)
+    # При большом промпте (~100 токенов) → меньше строк на чанк → больше чанков
+    # Симулируем: вызов select_chunked передаёт эффективный бюджет = chunk_tokens - prompt_tokens
+    effective = S._effective_chunk_tokens(system_text, fewshot_small, budget_full)
+    chunks_with_overhead = S.split_compressed(compressed, effective, r0_cfg.chunking.r0_overlap_tokens)
+
+    # prompt_tokens > 0 → effective < full → больше чанков (или равно, но не меньше)
+    assert effective < budget_full
+    assert len(chunks_with_overhead) >= len(chunks_no_overhead)
+
+
 def test_select_chunked_renumbers_sequentially(fewshot, r0_cfg):
     """После смержа чанков id рилов сквозные: r01, r02, …"""
     def _seg(start, end, score):

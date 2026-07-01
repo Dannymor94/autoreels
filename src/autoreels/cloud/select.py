@@ -9,6 +9,7 @@ MVP-0 (5a): без чанкинга и snap к словам (это M1/шаг 6)
 from __future__ import annotations
 
 import json
+import time
 
 from autoreels.cloud.providers import LLMProvider
 from autoreels.core.models import Reel
@@ -36,7 +37,7 @@ def split_compressed(compressed: str, chunk_tokens: int, overlap_tokens: int) ->
         return [compressed]
 
     chunks: list[str] = []
-    i = 0
+    i: int = 0
     while i < len(lines):
         # Набираем строки до chunk_tokens
         j = i
@@ -66,6 +67,20 @@ def split_compressed(compressed: str, chunk_tokens: int, overlap_tokens: int) ->
         i = max(i + 1, back)
 
     return chunks if chunks else [compressed]
+
+
+def _effective_chunk_tokens(system_text: str, fewshot: dict, chunk_tokens: int) -> int:
+    """Эффективный бюджет чанка = chunk_tokens − оценка токенов промпта (system + few-shot).
+
+    Предотвращает 413: суммарный запрос (промпт + чанк) не должен превышать лимит Groq.
+    Минимум 500 токенов оставляем, чтобы чанкинг не зациклился.
+    """
+    prompt_tokens = _count_tokens(system_text)
+    for ex in fewshot.get("examples", []):
+        prompt_tokens += _count_tokens(ex.get("input", ""))
+        prompt_tokens += _count_tokens(json.dumps(ex.get("output", ""), ensure_ascii=False))
+    return max(500, chunk_tokens - prompt_tokens)
+
 
 # Чек-флаги длины (ставит код, не модель — CLAUDE.md инвариант 6).
 FLAG_TOO_LONG = "too_long"
@@ -224,10 +239,13 @@ def select_chunked(
     from autoreels.cloud.chunk_transcribe import dedup_reels, renumber_reels
 
     chunking = r0_cfg.chunking
-    chunks = split_compressed(compressed, chunking.r0_chunk_tokens, chunking.r0_overlap_tokens)
+    effective_tokens = _effective_chunk_tokens(system_text, fewshot, chunking.r0_chunk_tokens)
+    chunks = split_compressed(compressed, effective_tokens, chunking.r0_overlap_tokens)
 
     all_reels: list[Reel] = []
     for i, chunk in enumerate(chunks):
+        if i > 0:
+            time.sleep(chunking.r0_chunk_delay_sec)
         print(f"  R0 чанк {i + 1}/{len(chunks)}…", flush=True)
         messages = build_prompt(
             system_text, fewshot, chunk,

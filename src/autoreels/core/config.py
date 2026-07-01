@@ -57,8 +57,9 @@ class ChunkingConfig(BaseModel):
     whisper_threshold_bytes: int = 20 * 1024 * 1024  # порог «чанкить по размеру» (20 МБ)
     silence_window_sec: float = 30              # окно поиска тишины вокруг target-границы
     silence_threshold_db: float = -40           # порог silencedetect (дБ)
-    r0_chunk_tokens: int = 3000                 # целевой размер R0-чанка транскрипта (токены)
+    r0_chunk_tokens: int = 2000                 # целевой размер R0-чанка транскрипта (токены)
     r0_overlap_tokens: int = 300                # перекрытие R0-чанков (≥60с)
+    r0_chunk_delay_sec: float = 2.0             # пауза между R0-чанками (избежать 429 TPM)
     dedup_overlap_ratio: float = 0.5            # порог дедупа рилов из разных R0-чанков
     fail_fast: bool = False                     # False → продолжать при провале чанка
 
