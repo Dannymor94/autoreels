@@ -148,6 +148,107 @@ def test_empty_segments_is_valid_result(fewshot, r0_cfg):
     assert reels == []                 # «хороших моментов нет» — НЕ ошибка
 
 
+# ----------------------------------------------------------- R0 chunking
+
+def _make_compressed(n_lines: int, line_chars: int = 60) -> str:
+    """Синтетический сжатый транскрипт: n строк по line_chars символов."""
+    lines = []
+    for i in range(n_lines):
+        t0 = i * 5.0
+        t1 = t0 + 4.0
+        text = ("слово " * 8).strip()[:line_chars - 20]
+        lines.append(f"[{t0:06.1f}-{t1:06.1f}] {text}")
+    return "\n".join(lines)
+
+
+def test_split_compressed_single_chunk_when_short():
+    """Короткий текст помещается в один чанк — дополнительного чанкинга нет."""
+    compressed = _make_compressed(5)    # 5 строк, ~300 символов ≈ 75 токенов
+    chunks = S.split_compressed(compressed, chunk_tokens=500, overlap_tokens=50)
+    assert len(chunks) == 1
+    assert chunks[0] == compressed
+
+
+def test_split_compressed_produces_multiple_chunks():
+    """Длинный текст → несколько чанков; каждый не превышает лимит по токенам."""
+    compressed = _make_compressed(100)   # 100 строк
+    # chunk_tokens=120 → примерно каждые 8 строк
+    chunks = S.split_compressed(compressed, chunk_tokens=120, overlap_tokens=30)
+    assert len(chunks) >= 3
+    for c in chunks:
+        # каждый чанк в пределах chunk + 1 строка (последняя строка может слегка превысить)
+        assert S._count_tokens(c) <= 150   # с небольшим запасом
+
+
+def test_split_compressed_overlap_lines_repeated():
+    """Последние строки чанка i входят в начало чанка i+1 (overlap)."""
+    compressed = _make_compressed(40, line_chars=40)
+    chunks = S.split_compressed(compressed, chunk_tokens=100, overlap_tokens=40)
+    assert len(chunks) >= 2
+    # Последняя строка чанка 0 должна быть где-то в начале чанка 1
+    last_line_of_chunk0 = chunks[0].splitlines()[-1]
+    assert last_line_of_chunk0 in chunks[1], "overlap не работает: последняя строка чанка 0 не в чанке 1"
+
+
+def test_split_compressed_empty():
+    """Пустой текст → пустой список, без ошибки."""
+    assert S.split_compressed("", chunk_tokens=500, overlap_tokens=50) == []
+
+
+def test_split_compressed_no_infinite_loop():
+    """Гарантия выхода: алгоритм не зависает даже на одной строке с overlap > chunk."""
+    line = "[0000.0-0005.0] " + "слово " * 20
+    compressed = "\n".join([line] * 5)
+    chunks = S.split_compressed(compressed, chunk_tokens=10, overlap_tokens=10)
+    assert len(chunks) >= 1   # завершился (не завис)
+
+
+def test_select_single_llm_call_when_short(fewshot, r0_cfg):
+    """Короткий транскрипт (< chunk_tokens) → ровно 1 вызов LLM."""
+    provider = _MockLLM(['{"segments": []}'])
+    S.select("[0000.0-0005.0] короткий текст",
+             system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
+    assert provider.calls == 1
+
+
+def test_select_chunked_multiple_llm_calls_when_long(fewshot, r0_cfg):
+    """Длинный транскрипт (> chunk_tokens) → несколько вызовов LLM."""
+    # Создаём транскрипт, который точно превышает r0_cfg.chunking.r0_chunk_tokens
+    compressed = _make_compressed(300, line_chars=60)   # ~300 строк * 60 символов ≈ 4500 токенов
+    provider = _MockLLM(['{"segments": []}'])
+    S.select(compressed, system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
+    assert provider.calls >= 2
+
+
+def test_select_chunked_dedup_overlap_reels(fewshot, r0_cfg):
+    """Один и тот же момент найден в 2 чанках → после дедупа остаётся 1 рил."""
+    reel_json = json.dumps({"segments": [
+        {"start": 100.0, "end": 130.0, "score": 85, "hook": "h", "title": "t", "description": "d"},
+    ]})
+    # Оба чанка возвращают одинаковый рил (overlap zone)
+    provider = _MockLLM([reel_json, reel_json])
+    compressed = _make_compressed(300, line_chars=60)
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
+                     provider=provider, r0_cfg=r0_cfg)
+    # Дедуп должен оставить ровно 1 рил, не 2
+    matching = [r for r in reels if abs(r.start - 100.0) < 1.0]
+    assert len(matching) == 1
+
+
+def test_select_chunked_renumbers_sequentially(fewshot, r0_cfg):
+    """После смержа чанков id рилов сквозные: r01, r02, …"""
+    def _seg(start, end, score):
+        return {"start": start, "end": end, "score": score,
+                "hook": "h", "title": "t", "description": "d"}
+    r1 = json.dumps({"segments": [_seg(0, 40, 85), _seg(50, 90, 75)]})
+    r2 = json.dumps({"segments": [_seg(600, 640, 80)]})
+    provider = _MockLLM([r1, r2])
+    compressed = _make_compressed(300, line_chars=60)
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
+                     provider=provider, r0_cfg=r0_cfg)
+    assert [r.id for r in reels] == [f"r{i:02d}" for i in range(1, len(reels) + 1)]
+
+
 def test_select_ranks_by_score_and_assigns_ids(fewshot, r0_cfg):
     # Ранжирование/нумерация — логика кода, не форма Groq (её проверяет тест парсинга
     # на реальной фикстуре). Здесь синтетический многосегментный ответ.

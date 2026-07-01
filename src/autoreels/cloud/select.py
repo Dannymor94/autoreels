@@ -13,6 +13,60 @@ import json
 from autoreels.cloud.providers import LLMProvider
 from autoreels.core.models import Reel
 
+
+# ----------------------------------------------------------------- токены/чанкинг
+
+def _count_tokens(text: str) -> int:
+    """Грубая оценка числа токенов: 4 символа ≈ 1 токен. Достаточно для чанкинга."""
+    return max(1, len(text) // 4)
+
+
+def split_compressed(compressed: str, chunk_tokens: int, overlap_tokens: int) -> list[str]:
+    """Разбить сжатый транскрипт на перекрывающиеся чанки по строкам (предложениям).
+
+    Каждый чанк — целые строки `[t0-t1] текст`, общий размер ≤ chunk_tokens (грубо).
+    Чанк i+1 начинается с последних overlap_tokens строк чанка i (overlap-зона).
+    Если весь текст помещается в chunk_tokens — возвращается [compressed].
+    Гарантия завершения: позиция всегда движется вперёд (min +1 строка за итерацию).
+    """
+    lines = [ln for ln in compressed.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    if _count_tokens(compressed) <= chunk_tokens:
+        return [compressed]
+
+    chunks: list[str] = []
+    i = 0
+    while i < len(lines):
+        # Набираем строки до chunk_tokens
+        j = i
+        tokens = 0
+        while j < len(lines):
+            t = _count_tokens(lines[j])
+            if tokens + t > chunk_tokens and j > i:
+                break
+            tokens += t
+            j += 1
+
+        chunks.append("\n".join(lines[i:j]))
+        if j >= len(lines):
+            break
+
+        # Вычисляем overlap: идём назад от j, пока не наберём overlap_tokens
+        back = j
+        ov = 0
+        while back > i:
+            t = _count_tokens(lines[back - 1])
+            if ov + t > overlap_tokens:
+                break
+            ov += t
+            back -= 1
+
+        # Следующий чанк начинается с back, но минимум на 1 строку вперёд от i
+        i = max(i + 1, back)
+
+    return chunks if chunks else [compressed]
+
 # Чек-флаги длины (ставит код, не модель — CLAUDE.md инвариант 6).
 FLAG_TOO_LONG = "too_long"
 FLAG_TOO_SHORT = "too_short"
@@ -131,18 +185,9 @@ def _complete_and_parse(provider: LLMProvider, messages: list[dict]) -> list[dic
     raise SelectError(f"LLM вернул невалидный JSON после ретрая: {last_err}")
 
 
-def select(
-    compressed: str,
-    *,
-    system_text: str,
-    fewshot: dict,
-    provider: LLMProvider,
-    r0_cfg,
-) -> list[Reel]:
-    """R0 end-to-end: промпт → LLM → парсинг → флаги → отбраковка → дедуп → ранжирование.
-
-    Возвращает отранжированные по score Reel-объекты (или [] — валидный результат).
-    """
+def _select_one(compressed: str, *, system_text: str, fewshot: dict,
+                provider: LLMProvider, r0_cfg) -> list[Reel]:
+    """Одиночный R0-запрос (без чанкинга): промпт → LLM → валидация → дедуп."""
     messages = build_prompt(
         system_text, fewshot, compressed,
         min_score=r0_cfg.min_score,
@@ -151,14 +196,79 @@ def select(
     )
     segments = _complete_and_parse(provider, messages)
     reels = segments_to_reels(segments)
-
     flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
     reels = filter_by_score(reels, min_score=r0_cfg.min_score)
     reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold)
     reels.sort(key=lambda r: -r.score)
     if r0_cfg.max_reels is not None:
-        reels = reels[: r0_cfg.max_reels]
-
-    for i, r in enumerate(reels, 1):  # финальные id в порядке ранжирования
+        reels = reels[:r0_cfg.max_reels]
+    for i, r in enumerate(reels, 1):
         r.id = f"r{i:02d}"
     return reels
+
+
+def select_chunked(
+    compressed: str,
+    *,
+    system_text: str,
+    fewshot: dict,
+    provider: LLMProvider,
+    r0_cfg,
+) -> list[Reel]:
+    """R0 с чанкингом: транскрипт → чанки → LLM на каждый → смерж + дедуп по t0.
+
+    Чанки перекрываются (overlap_tokens) → один и тот же момент может попасть в два
+    соседних чанка. После смержа: cross-chunk dedup_reels (первый по t0), затем
+    ранжирование по score и сквозная нумерация.
+    """
+    from autoreels.cloud.chunk_transcribe import dedup_reels, renumber_reels
+
+    chunking = r0_cfg.chunking
+    chunks = split_compressed(compressed, chunking.r0_chunk_tokens, chunking.r0_overlap_tokens)
+
+    all_reels: list[Reel] = []
+    for i, chunk in enumerate(chunks):
+        print(f"  R0 чанк {i + 1}/{len(chunks)}…", flush=True)
+        messages = build_prompt(
+            system_text, fewshot, chunk,
+            min_score=r0_cfg.min_score,
+            min_duration=r0_cfg.min_duration,
+            max_duration=r0_cfg.max_duration,
+        )
+        try:
+            segs = _complete_and_parse(provider, messages)
+        except SelectError as e:
+            print(f"  ⚠ R0 чанк {i + 1} провалился: {e}", flush=True)
+            continue
+        reels = segments_to_reels(segs)
+        flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
+        all_reels.extend(filter_by_score(reels, min_score=r0_cfg.min_score))
+
+    # Дедуп по t0 (первый по хронологии при пересечении > порога)
+    all_reels = dedup_reels(all_reels, chunking.dedup_overlap_ratio)
+    all_reels.sort(key=lambda r: -r.score)
+    if r0_cfg.max_reels is not None:
+        all_reels = all_reels[:r0_cfg.max_reels]
+    return renumber_reels(all_reels)
+
+
+def select(
+    compressed: str,
+    *,
+    system_text: str,
+    fewshot: dict,
+    provider: LLMProvider,
+    r0_cfg,
+) -> list[Reel]:
+    """R0 end-to-end: диспетчер одиночного запроса или чанкинга.
+
+    Если chunking включён и транскрипт превышает r0_chunk_tokens → select_chunked.
+    Иначе (или если chunking не сконфигурирован) → одиночный запрос.
+    Возвращает отранжированные по score Reel-объекты ([] — валидный результат).
+    """
+    chunking = getattr(r0_cfg, "chunking", None)
+    if chunking and chunking.enabled and _count_tokens(compressed) > chunking.r0_chunk_tokens:
+        return select_chunked(compressed, system_text=system_text, fewshot=fewshot,
+                              provider=provider, r0_cfg=r0_cfg)
+    return _select_one(compressed, system_text=system_text, fewshot=fewshot,
+                       provider=provider, r0_cfg=r0_cfg)
