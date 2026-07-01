@@ -171,8 +171,10 @@ def resolve_source(manifest: Manifest, inputs_dir: str | Path) -> Path:
         if p.is_file() and p != by_name:
             ordered.append(p)
 
+    scheme = getattr(manifest, "source_hash_scheme", "full")
+    hash_fn = state.file_sha256_partial if scheme == "partial-p1" else state.file_sha256
     for p in ordered:
-        if state.file_sha256(p) == want:
+        if hash_fn(p) == want:
             return p
 
     raise RenderError(

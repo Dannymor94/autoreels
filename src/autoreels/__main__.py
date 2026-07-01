@@ -90,9 +90,10 @@ def _archive_video(video: Path, archive_dir: Path) -> None:
 
 # ----------------------------------------------------- этапы конвейера `run` (блоки)
 
-def _stage_extract_audio(video, *, render_cfg, cache_dir, ffmpeg):
+def _stage_extract_audio(video, *, render_cfg, cache_dir, ffmpeg, source_sha=None):
     print("извлекаю аудио…", flush=True)
-    return extract_audio(video, render_cfg.audio_extract, cache_dir, ffmpeg=ffmpeg)
+    return extract_audio(video, render_cfg.audio_extract, cache_dir,
+                         ffmpeg=ffmpeg, source_sha=source_sha)
 
 
 def _stage_transcribe(audio, *, transcribe_cfg, cache_dir):
@@ -143,6 +144,7 @@ def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
     return Manifest(
         source=Path(video).name,
         source_sha256=sha,
+        source_hash_scheme="partial-p1",
         duration_preset=duration_preset,
         setup=setup,
         run_key=_run_key(sha, duration_preset),
@@ -190,7 +192,7 @@ def cmd_run(
 
     size_gb = Path(video).stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
-    sha = state.file_sha256_cached(video, cache_dir)
+    sha = state.file_sha256_cached_fast(video, cache_dir)
     print("хэш готов.", flush=True)
     setup = load_or_auto_calibrate(
         calibrations_dir, sha, Path(video).name,
@@ -198,7 +200,8 @@ def cmd_run(
     )
 
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
-    audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir, ffmpeg=ffmpeg)
+    audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir,
+                                 ffmpeg=ffmpeg, source_sha=sha)
     transcript = _stage_transcribe(audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)

@@ -56,19 +56,21 @@ def _reel(rid: str, start: float, end: float, title: str = "t", description: str
     )
 
 
-def _make_source(inputs_dir: Path, name: str, content: bytes) -> str:
-    """Создаёт фейковый видеофайл в inputs/, возвращает его sha256."""
+def _make_source(inputs_dir: Path, name: str, content: bytes, *,
+                 scheme: str = "partial-p1") -> str:
+    """Создаёт фейковый видеофайл в inputs/, возвращает его хэш по указанной схеме."""
     from autoreels.core import state
     inputs_dir.mkdir(parents=True, exist_ok=True)
     p = inputs_dir / name
     p.write_bytes(content)
-    return state.file_sha256(p)
+    return state.file_sha256_partial(p) if scheme == "partial-p1" else state.file_sha256(p)
 
 
-def _manifest(source: str, sha: str, reels: list[Reel], setup: SetupProfile | None = None) -> Manifest:
+def _manifest(source: str, sha: str, reels: list[Reel], setup: SetupProfile | None = None,
+              scheme: str = "partial-p1") -> Manifest:
     return Manifest(
-        source=source, source_sha256=sha, duration_preset="shorts",
-        setup=setup or _setup(), run_key="rk1", reels=reels,
+        source=source, source_sha256=sha, source_hash_scheme=scheme,
+        duration_preset="shorts", setup=setup or _setup(), run_key="rk1", reels=reels,
     )
 
 
@@ -199,6 +201,83 @@ def test_resolve_source_basename_hint_handles_windows_path(tmp_path):
     assert PureWindowsPath(win_source).name == "clip.mp4"
     m = _manifest(win_source, sha, [])
     assert resolve_source(m, inputs) == inputs / "clip.mp4"
+
+
+def test_resolve_source_uses_partial_hash_when_scheme_is_partial(tmp_path):
+    """hash_scheme='partial-p1' → resolve_source хэширует файл через file_sha256_partial."""
+    from autoreels.core import state as st
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    p = inputs / "v.mp4"
+    p.write_bytes(b"video-content-partial")
+    partial_sha = st.file_sha256_partial(p)
+
+    m = Manifest(
+        source="v.mp4", source_sha256=partial_sha, source_hash_scheme="partial-p1",
+        duration_preset="shorts", setup=_setup(), run_key="rk", reels=[],
+    )
+    assert resolve_source(m, inputs) == p
+
+
+def test_resolve_source_uses_full_hash_when_scheme_is_full(tmp_path):
+    """hash_scheme='full' (или отсутствует) → обратная совместимость: полный sha256."""
+    from autoreels.core import state as st
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    p = inputs / "v.mp4"
+    p.write_bytes(b"video-content-full")
+    full_sha = st.file_sha256(p)
+
+    m = Manifest(
+        source="v.mp4", source_sha256=full_sha, source_hash_scheme="full",
+        duration_preset="shorts", setup=_setup(), run_key="rk", reels=[],
+    )
+    assert resolve_source(m, inputs) == p
+
+
+def test_manifest_model_default_scheme_is_full_for_compat():
+    """Дефолт модели 'full' — чтобы старые JSON без поля читались корректно."""
+    m = Manifest(
+        source="v.mp4", source_sha256="a" * 64, duration_preset="shorts",
+        setup=_setup(), run_key="rk", reels=[],
+    )
+    assert m.source_hash_scheme == "full"
+
+
+def test_new_manifests_from_assemble_use_partial_scheme():
+    """_assemble_manifest явно ставит partial-p1 — новые манифесты не зависят от дефолта модели."""
+    import autoreels.__main__ as cli
+    from pathlib import Path
+    m = cli._assemble_manifest(
+        "v.mp4", [], sha="x" * 64, setup=_setup(), duration_preset="shorts"
+    )
+    assert m.source_hash_scheme == "partial-p1"
+
+
+def test_manifest_hash_scheme_survives_json_roundtrip(tmp_path):
+    m = Manifest(
+        source="v.mp4", source_sha256="b" * 64, source_hash_scheme="partial-p1",
+        duration_preset="shorts", setup=_setup(), run_key="rk", reels=[],
+    )
+    loaded = Manifest.model_validate_json(m.model_dump_json())
+    assert loaded.source_hash_scheme == "partial-p1"
+
+
+def test_old_manifest_without_hash_scheme_treated_as_full(tmp_path):
+    """Старые манифесты не имеют hash_scheme → трактуем как 'full' (обратная совместимость)."""
+    # Симулируем старый JSON без поля source_hash_scheme
+    old_json = """{
+        "source": "v.mp4",
+        "source_sha256": "aabbcc0000000000000000000000000000000000000000000000000000000000",
+        "duration_preset": "shorts",
+        "setup": {"setup_id": "s", "crop": {"x":0,"y":0,"w":1080,"h":1920},
+                  "scale":[1080,1920],"frame":[3840,2160]},
+        "run_key": "rk",
+        "status": "pending",
+        "reels": []
+    }"""
+    m = Manifest.model_validate_json(old_json)
+    assert m.source_hash_scheme == "full"
 
 
 # ----------------------------------------------------------- render_cut (моки)

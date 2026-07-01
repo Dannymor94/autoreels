@@ -55,6 +55,53 @@ def audio_hash(path: str | Path) -> str:
     return file_sha256(path)
 
 
+_PARTIAL_HEAD = 8 * 1024 * 1024   # 8 МБ с начала
+_PARTIAL_MID  = 1 * 1024 * 1024   # 1 МБ из середины (страховка от одинаковых заголовков)
+_PARTIAL_TAIL = 8 * 1024 * 1024   # 8 МБ с конца
+
+
+def file_sha256_partial(path: str | Path) -> str:
+    """Быстрый хэш крупного файла: sha256(head‖mid‖tail‖size_le64).
+
+    Читает начало, середину и конец — несколько МБ вместо всего файла.
+    Середина защищает от сценария «одна камера, разные сессии» с общим заголовком.
+    """
+    path = Path(path)
+    size = path.stat().st_size
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        h.update(f.read(min(_PARTIAL_HEAD, size)))
+        mid_offset = max(0, size // 2 - _PARTIAL_MID // 2)
+        if mid_offset > _PARTIAL_HEAD:
+            f.seek(mid_offset)
+            h.update(f.read(_PARTIAL_MID))
+        tail_offset = max(0, size - _PARTIAL_TAIL)
+        if tail_offset > mid_offset + _PARTIAL_MID or tail_offset > _PARTIAL_HEAD:
+            f.seek(tail_offset)
+            h.update(f.read(_PARTIAL_TAIL))
+    h.update(size.to_bytes(8, "little"))
+    return h.hexdigest()
+
+
+def file_sha256_cached_fast(path: str | Path, cache_dir: str | Path) -> str:
+    """Частичный хэш с диск-кэшем (как file_sha256_cached, но partial-алгоритм).
+
+    Кэш-файл содержит 'p1:<hex>' — отличает от старых full-sha записей при чтении.
+    Возвращает только 64-char hex — именно это кладётся в манифест/калибровку.
+    """
+    path = Path(path)
+    sha_cache = Path(cache_dir) / "sha256"
+    sha_cache.mkdir(parents=True, exist_ok=True)
+    entry = sha_cache / f"{_sha256_cache_key(path)}.txt"
+    if entry.is_file():
+        cached = entry.read_text().strip()
+        if cached.startswith("p1:") and len(cached) == 67:   # "p1:" + 64 hex
+            return cached[3:]
+    result = file_sha256_partial(path)
+    entry.write_text(f"p1:{result}")
+    return result
+
+
 def transcript_cache_path(cache_dir: str | Path, audio_path: str | Path) -> Path:
     """Путь к кэшу транскрипта: <cache_dir>/<audio_hash>.transcript.json."""
     return Path(cache_dir) / f"{audio_hash(audio_path)}.transcript.json"

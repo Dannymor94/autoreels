@@ -116,6 +116,12 @@ class Manifest(BaseModel):
     # Идентичность исходника = sha256 содержимого. Локальный тир ищет файл в inputs/
     # по этому хэшу, а не по `source`. Тот же хэш — основа ключа идемпотентности (state.py).
     source_sha256: str
+    # Схема хэширования source_sha256:
+    #   "partial-p1" — sha256(head‖mid‖tail‖size), быстро для многогигабайтных видео;
+    #   "full"       — полный sha256 содержимого (дефолт для обратной совместимости).
+    # Дефолт "full" означает: старые манифесты без поля читаются корректно.
+    # _assemble_manifest (run) явно ставит "partial-p1" для новых манифестов.
+    source_hash_scheme: str = "full"
     duration_preset: str
     setup: SetupProfile
     # Ключ идемпотентности = хэш(source + preset + версия рубрики). Ставит state.py.

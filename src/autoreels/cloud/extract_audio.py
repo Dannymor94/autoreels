@@ -52,10 +52,12 @@ def extract_audio(
     cache_dir: str | Path,
     *,
     ffmpeg: str = "ffmpeg",
+    source_sha: str | None = None,
 ) -> Path:
     """Извлечь аудиодорожку из `source` в `cache_dir`/<sha256>.<format>.
 
-    Возвращает путь к извлечённому аудио. Имя детерминировано по хэшу содержимого.
+    `source_sha` — уже вычисленный хэш источника (напр. из cmd_run). Если не передан,
+    вычисляется полным sha256 аудио (аудио мало — это быстро). Имя выхода детерминировано.
     """
     source = Path(source)
     if not source.is_file():
@@ -69,7 +71,8 @@ def extract_audio(
 
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    out = cache_dir / f"{state.file_sha256(source)}.{audio_cfg.format}"
+    sha = source_sha if source_sha is not None else state.file_sha256(source)
+    out = cache_dir / f"{sha}.{audio_cfg.format}"
 
     cmd = build_extract_cmd(ffmpeg_bin, source, out, audio_cfg)
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")

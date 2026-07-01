@@ -128,7 +128,7 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
     video.write_bytes(b"hello-bytes")
     calib = tmp_path / "calibrations"
     save_calibration(
-        calib, source_name="lecture.mp4", source_sha256=state.file_sha256(video),
+        calib, source_name="lecture.mp4", source_sha256=state.file_sha256_partial(video),
         crop=Crop(x=100, y=50, w=900, h=1600), frame=[3840, 2160], setup_label="my_room",
     )
     manifests = tmp_path / "manifests"
@@ -157,7 +157,7 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
     video = tmp_path / "v.mp4"
     video.write_bytes(b"vid")
     calib = tmp_path / "calibrations"
-    save_calibration(calib, source_name="v.mp4", source_sha256=state.file_sha256(video),
+    save_calibration(calib, source_name="v.mp4", source_sha256=state.file_sha256_partial(video),
                      crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], setup_label="t")
     manifests = tmp_path / "manifests"
 
