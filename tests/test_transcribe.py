@@ -159,6 +159,34 @@ def test_transcribe_force_bypasses_cache(tmp_path):
 
 # ------------------------------------------------------ Groq pre-flight + retry
 
+def test_groq_api_key_stripped_of_whitespace(tmp_path, monkeypatch):
+    """Ключ с trailing \\r\\n (CRLF из .env на Windows) strip'ается — не отправляется как мусор."""
+    import httpx
+
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+    monkeypatch.setenv("GROQ_API_KEY", "real-key\r\n")   # CRLF как в .env Windows
+
+    captured_headers = {}
+
+    class _FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"language": "ru", "words": []}
+
+    def _fake_post(url, *, headers, **k):
+        captured_headers.update(headers)
+        return _FakeResp()
+
+    monkeypatch.setattr("httpx.post", _fake_post)
+
+    backend = T.GroqBackend()
+    backend._default_request(audio, "ru")
+
+    auth = captured_headers.get("Authorization", "")
+    assert auth == "Bearer real-key"   # без \r\n
+
+
 def test_groq_default_request_raises_on_oversized_audio(tmp_path, monkeypatch):
     """Аудио больше 24 МБ → внятная ошибка ДО отправки (не «Server disconnected»)."""
     audio = tmp_path / "big.wav"

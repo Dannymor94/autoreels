@@ -87,7 +87,7 @@ class GroqBackend:
     def _default_request(self, audio_path: Path, language: str | None) -> dict:
         import httpx  # ленивый импорт: модуль грузится без сетевого стека
 
-        api_key = self._api_key or os.environ.get("GROQ_API_KEY")
+        api_key = (self._api_key or os.environ.get("GROQ_API_KEY", "")).strip()
         if not api_key:
             raise TranscriptionError(
                 "нет GROQ_API_KEY — задайте ключ Groq в окружении для транскрипции"
