@@ -317,6 +317,86 @@ def test_groq_401_raises_key_error_immediately(tmp_path, monkeypatch):
     assert call_count == 1   # нет ретраев
 
 
+# ------------------------------------------------------ chunking dispatch
+
+def test_transcribe_routes_to_chunked_when_over_threshold(tmp_path, monkeypatch):
+    """transcribe() на аудио >порога → вызывает transcribe_chunked, НЕ backend.transcribe."""
+    from autoreels.core.config import AudioExtract, ChunkingConfig
+    from autoreels.core.models import Transcript, Word
+    from autoreels.cloud import chunk_transcribe as CT
+
+    audio = tmp_path / "long.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+
+    # Мок: длительность = 20 мин (> 15 мин порог)
+    monkeypatch.setattr(CT, "_probe_duration", lambda path, ffmpeg: 20 * 60.0)
+
+    chunked_called = []
+
+    def _fake_transcribe_chunked(path, cfg, acfg, cache_dir, backend, **kw):
+        chunked_called.append(True)
+        return Transcript(language="ru", words=[Word(word="ок", t0=0.0, t1=0.5)]), []
+
+    monkeypatch.setattr(CT, "transcribe_chunked", _fake_transcribe_chunked)
+
+    chunking_cfg = ChunkingConfig(whisper_threshold_minutes=15)
+    audio_cfg    = AudioExtract(sample_rate=16000, channels=1,
+                                codec="libmp3lame", format="mp3", bitrate="64k")
+
+    result = T.transcribe(audio, tmp_path,
+                          chunking_cfg=chunking_cfg, audio_cfg=audio_cfg)
+
+    assert chunked_called, "transcribe_chunked не был вызван для длинного аудио"
+    assert result.words[0].word == "ок"
+
+
+def test_transcribe_single_request_when_under_threshold(tmp_path, monkeypatch):
+    """transcribe() на аудио <=порога → одиночный backend.transcribe, не chunked."""
+    from autoreels.core.config import AudioExtract, ChunkingConfig
+    from autoreels.core.models import Transcript, Word
+    from autoreels.cloud import chunk_transcribe as CT
+
+    audio = tmp_path / "short.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+
+    # Мок: длительность = 5 мин (< 15 мин порог)
+    monkeypatch.setattr(CT, "_probe_duration", lambda path, ffmpeg: 5 * 60.0)
+
+    chunked_called = []
+    monkeypatch.setattr(CT, "transcribe_chunked",
+                        lambda *a, **k: chunked_called.append(True) or (Transcript(language="ru", words=[]), []))
+
+    class _Backend:
+        def transcribe(self, path, *, language=None):
+            return Transcript(language="ru", words=[Word(word="коротко", t0=0.0, t1=0.5)])
+
+    chunking_cfg = ChunkingConfig(whisper_threshold_minutes=15)
+    audio_cfg    = AudioExtract(sample_rate=16000, channels=1,
+                                codec="libmp3lame", format="mp3", bitrate="64k")
+
+    result = T.transcribe(audio, tmp_path,
+                          backend=_Backend(),
+                          chunking_cfg=chunking_cfg, audio_cfg=audio_cfg)
+
+    assert not chunked_called, "transcribe_chunked не должен вызываться для короткого аудио"
+    assert result.words[0].word == "коротко"
+
+
+def test_transcribe_no_chunking_cfg_uses_single_request(tmp_path):
+    """transcribe() без chunking_cfg → всегда одиночный запрос (обратная совместимость)."""
+    from autoreels.core.models import Transcript, Word
+
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+
+    class _Backend:
+        def transcribe(self, path, *, language=None):
+            return Transcript(language="ru", words=[Word(word="тест", t0=0.0, t1=0.5)])
+
+    result = T.transcribe(audio, tmp_path, backend=_Backend())
+    assert result.words[0].word == "тест"
+
+
 # ------------------------------------------------------ integration (только системник)
 
 @pytest.mark.integration

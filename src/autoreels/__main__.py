@@ -96,10 +96,18 @@ def _stage_extract_audio(video, *, render_cfg, cache_dir, ffmpeg, source_sha=Non
                          ffmpeg=ffmpeg, source_sha=source_sha)
 
 
-def _stage_transcribe(audio, *, transcribe_cfg, cache_dir):
+def _stage_transcribe(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cfg=None, ffmpeg="ffmpeg"):
     print("транскрипция…", flush=True)
     backend = get_backend(transcribe_cfg)
-    return transcribe(audio, cache_dir, backend=backend, language=transcribe_cfg.language)
+    chunking_cfg = r0_cfg.chunking if r0_cfg is not None else None
+    return transcribe(
+        audio, cache_dir,
+        backend=backend,
+        language=transcribe_cfg.language,
+        chunking_cfg=chunking_cfg,
+        audio_cfg=audio_cfg,
+        ffmpeg=ffmpeg,
+    )
 
 
 def _stage_compress(transcript, *, r0_cfg):
@@ -202,7 +210,10 @@ def cmd_run(
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
     audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir,
                                  ffmpeg=ffmpeg, source_sha=sha)
-    transcript = _stage_transcribe(audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir)
+    transcript = _stage_transcribe(
+        audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir,
+        r0_cfg=r0_cfg, audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg,
+    )
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)

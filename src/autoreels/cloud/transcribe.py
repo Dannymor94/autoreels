@@ -208,12 +208,25 @@ def transcribe(
     backend: TranscriptionBackend | None = None,
     language: str | None = "ru",
     force: bool = False,
+    chunking_cfg=None,
+    audio_cfg=None,
+    ffmpeg: str = "ffmpeg",
 ) -> Transcript:
     """Транскрибировать аудио с кэшем по хэшу аудио (идемпотентность, R0_SPEC §9).
 
-    Кэш-хит (и не `force`) → читаем JSON, бэкенд не дёргаем. Иначе — транскрибируем
-    выбранным/переданным бэкендом и пишем кэш.
+    Если `chunking_cfg` передан и аудио превышает порог (>15мин или >20МБ) →
+    автоматический Whisper-чанкинг через chunk_transcribe.transcribe_chunked.
+    Без `chunking_cfg` → одиночный запрос (обратная совместимость с короткими видео).
+
+    Кэш-хит → возвращаем без вызова бэкенда. После транскрипции кэшируем результат
+    (и для одиночного запроса, и для склеенного чанкинга) по тому же ключу.
     """
+    from autoreels.cloud.chunk_transcribe import (
+        _probe_duration,
+        should_chunk,
+        transcribe_chunked,
+    )
+
     audio_path = Path(audio_path)
     if not audio_path.is_file():
         raise TranscriptionError(f"аудиофайл не найден: {audio_path}")
@@ -225,8 +238,22 @@ def transcribe(
         return Transcript.model_validate_json(cache_path.read_text(encoding="utf-8"))
 
     backend = backend or get_backend()
-    tr = backend.transcribe(audio_path, language=language)
 
+    # Чанкинг: если конфиг передан и аудио превышает порог
+    if chunking_cfg is not None and chunking_cfg.enabled:
+        size     = audio_path.stat().st_size
+        duration = _probe_duration(audio_path, ffmpeg)
+        if should_chunk(size, duration, chunking_cfg):
+            tr, _warns = transcribe_chunked(
+                audio_path, chunking_cfg, audio_cfg, Path(cache_dir),
+                backend, ffmpeg=ffmpeg, language=language or "ru",
+            )
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(tr.model_dump_json(), encoding="utf-8")
+            return tr
+
+    # Одиночный запрос (короткое аудио или chunking_cfg не передан)
+    tr = backend.transcribe(audio_path, language=language)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(tr.model_dump_json(), encoding="utf-8")
     return tr
