@@ -94,31 +94,63 @@ def test_timestamp_offset_zero():
     assert result.words[0].t0 == pytest.approx(5.0)
 
 
-# ====================================================== TEST 2: overlap zone consistency
+# ====================================================== TEST 2: overlap zone consistency (e2e)
 
-def test_overlap_zone_consistency():
-    """Слово у границы чанка → одинаковое абсолютное время из чанка i и i+1.
+def test_overlap_zone_consistency(tmp_path, monkeypatch):
+    """СКВОЗНОЙ тест: VAD-срез на 598с (target=600) → слова получают offset=598, НЕ 600.
 
-    Главный баг чанкинга: offset_{i+1} берётся по TARGET (600), а не по реальному
-    VAD-срезу (598) → слова смещаются на 2с. Тест ловит это.
+    Сценарий: аудио 1200с, target-граница 600с, тишина на [597.5, 598.5] → реальный срез 598с.
+    Чанк 0 возвращает слово «тест» у самого конца (relative t0=598.5).
+    Чанк 1 возвращает слово «тест» у самого начала (relative t0=0.5).
+    Обе копии слова должны получить одинаковое абсолютное время 598+0.5=598.5.
 
-    chunk_i:   offset=0,   word «тест» в relative [598.5, 599.5] → absolute [598.5, 599.5]
-    chunk_i+1: offset=598, word «тест» в relative [0.5,   1.5]   → absolute [598.5, 599.5]
+    Если оркестратор передаст target (600) вместо VAD-среза (598) как offset:
+      chunk1_word.t0 = 600 + 0.5 = 600.5 ≠ 598.5 → тест ПАДАЕТ.
+    Только верный offset=598 даёт chunk1_word.t0=598.5 == chunk0_word.t0=598.5.
     """
-    from_i    = CT.apply_offset(_tr(("тест", 598.5, 599.5)), 0.0)
-    from_next = CT.apply_offset(_tr(("тест", 0.5,   1.5)),   598.0)
+    from autoreels.core.config import AudioExtract
 
-    assert from_i.words[0].t0 == pytest.approx(from_next.words[0].t0)
-    assert from_i.words[0].t1 == pytest.approx(from_next.words[0].t1)
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"\x00" * 100)
 
+    # Мок: длительность аудио = 1200с (2 чанка, target-граница = 600с)
+    monkeypatch.setattr(CT, "_probe_duration", lambda path, ffmpeg: 1200.0)
 
-def test_overlap_zone_wrong_offset_differs():
-    """Если offset_i+1 = 600 (target) вместо 598 (VAD) → времена расходятся на 2с."""
-    from_i          = CT.apply_offset(_tr(("тест", 598.5, 599.5)), 0.0)
-    from_next_wrong = CT.apply_offset(_tr(("тест", 0.5,   1.5)),   600.0)   # ← неправильный offset
+    # Мок: VAD находит тишину [597.5, 598.5] → find_split_point → 598.0 (НЕ 600!)
+    monkeypatch.setattr(CT, "detect_silences", lambda *a, **k: [(597.5, 598.5)])
 
-    # Должны ОТЛИЧАТЬСЯ — это именно тот баг, который тест 2 должен ловить
-    assert abs(from_i.words[0].t0 - from_next_wrong.words[0].t0) == pytest.approx(2.0)
+    # Мок: split_audio_chunk создаёт файлы с разным содержимым (разный sha → разный кэш)
+    def _fake_split(src, start, end, out, audio_cfg, *, ffmpeg="ffmpeg"):
+        out.write_bytes(bytes([int(start) % 256, 0, 0]) * 10)
+    monkeypatch.setattr(CT, "split_audio_chunk", _fake_split)
+
+    # Бэкенд: чанк 0 → слово у конца чанка (relative 598.5); чанк 1 → слово у начала (relative 0.5)
+    call_idx = [0]
+    class _BoundaryBackend:
+        def transcribe(self, path, *, language=None):
+            i = call_idx[0]; call_idx[0] += 1
+            if i == 0:
+                return Transcript(language="ru", words=[_w("тест", 598.5, 599.0)])
+            return Transcript(language="ru", words=[_w("тест", 0.5, 1.0)])
+
+    audio_cfg = AudioExtract(sample_rate=16000, channels=1, codec="libmp3lame",
+                             format="mp3", bitrate="64k")
+    cfg = _make_chunking_cfg(whisper_chunk_duration_sec=600, whisper_threshold_minutes=15,
+                             silence_window_sec=30)
+
+    transcript, _ = CT.transcribe_chunked(
+        audio, cfg, audio_cfg, tmp_path, _BoundaryBackend()
+    )
+
+    # chunk 0, слово у конца: offset=0, absolute = 0 + 598.5 = 598.5
+    chunk0_word_t0 = transcript.words[0].t0
+    # chunk 1, слово у начала: offset должен быть 598 (VAD), absolute = 598 + 0.5 = 598.5
+    chunk1_word_t0 = transcript.words[1].t0
+
+    assert chunk0_word_t0 == pytest.approx(598.5)
+    assert chunk1_word_t0 == pytest.approx(598.5), (
+        f"offset был target=600 вместо VAD=598: слово получило t0={chunk1_word_t0:.1f} вместо 598.5"
+    )
 
 
 # ====================================================== TEST 3: merge continuity
@@ -190,13 +222,14 @@ def test_chunking_threshold_exactly_on_limit():
 # ====================================================== TEST 5: dedup heavy overlap
 
 def test_dedup_heavy_overlap():
-    """2 рила с 80% пересечением → остаётся первый по t0."""
+    """2 рила с 80% пересечением → остаётся ранний по t0, независимо от порядка во входном списке."""
     # r1: [0, 60], r2: [5, 65] → intersection=55, min_dur=60 → ratio=55/60≈0.92 > 0.5
     r1 = _reel("r01", 0.0,  60.0)
     r2 = _reel("r02", 5.0,  65.0)
-    result = CT.dedup_reels([r1, r2], threshold=0.5)
+    # Подаём в обратном порядке: r2 первый. После сортировки по t0 → r1 первый → r1 остаётся
+    result = CT.dedup_reels([r2, r1], threshold=0.5)
     assert len(result) == 1
-    assert result[0].id == "r01"
+    assert result[0].id == "r01"   # ранний по t0, НЕ первый в списке входа
 
 
 def test_dedup_exact_threshold_kept():
@@ -218,12 +251,15 @@ def test_dedup_no_overlap():
     assert len(result) == 2
 
 
-def test_dedup_order_preserved():
-    """dedup_reels сохраняет порядок по t0 (не сортирует по score)."""
+def test_dedup_sorted_by_t0_not_score():
+    """dedup_reels сортирует по t0 перед дедупом: ранний рил остаётся, даже если score ниже."""
+    # r1 у конца (start=100), r2 в начале (start=0) с высоким score
+    # После сортировки по t0: r2 идёт первым → при дедупе r2 остаётся, не r1
     r1 = _reel("r01", 100.0, 160.0, score=70)
     r2 = _reel("r02", 0.0,   60.0,  score=90)
     result = CT.dedup_reels([r1, r2], threshold=0.5)
-    assert [r.id for r in result] == ["r01", "r02"]   # порядок входного списка
+    # Нет пересечения → оба остаются, в порядке t0 (r2 раньше)
+    assert [r.id for r in result] == ["r02", "r01"]
 
 
 # ====================================================== TEST 7: partial failure, continue
