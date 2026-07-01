@@ -46,6 +46,23 @@ class PromptPaths(BaseModel):
     fewshot: str
 
 
+class ChunkingConfig(BaseModel):
+    """Параметры чанкинга: Whisper-чанкинг аудио + R0-чанкинг транскрипта."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    whisper_chunk_duration_sec: int = 600       # целевая длина одного аудио-чанка (10 мин)
+    whisper_threshold_minutes: float = 15       # порог «чанкить по длительности»
+    whisper_threshold_bytes: int = 20 * 1024 * 1024  # порог «чанкить по размеру» (20 МБ)
+    silence_window_sec: float = 30              # окно поиска тишины вокруг target-границы
+    silence_threshold_db: float = -40           # порог silencedetect (дБ)
+    r0_chunk_tokens: int = 3000                 # целевой размер R0-чанка транскрипта (токены)
+    r0_overlap_tokens: int = 300                # перекрытие R0-чанков (≥60с)
+    dedup_overlap_ratio: float = 0.5            # порог дедупа рилов из разных R0-чанков
+    fail_fast: bool = False                     # False → продолжать при провале чанка
+
+
 class R0Config(BaseModel):
     """Типизированный config/r0.yaml. Пресет резолвится в числа через свойства ниже."""
 
@@ -66,6 +83,7 @@ class R0Config(BaseModel):
     prompt_language: str
     presets: dict[str, Preset]
     prompts: PromptPaths
+    chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
 
     @property
     def min_duration(self) -> int:
