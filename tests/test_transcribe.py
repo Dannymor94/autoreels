@@ -227,6 +227,68 @@ def test_groq_default_request_raises_after_all_retries_exhausted(tmp_path, monke
     assert "попыт" in str(exc.value).lower()   # «попыток» или «попытки»
 
 
+def test_groq_403_raises_key_error_immediately(tmp_path, monkeypatch):
+    """HTTP 403 → внятная ошибка про ключ, без ретраев."""
+    import httpx
+
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+    monkeypatch.setenv("GROQ_API_KEY", "bad-key")
+
+    call_count = 0
+
+    class _FakeResp:
+        status_code = 403
+        def raise_for_status(self): pass
+        def json(self): return {}
+
+    def _fake_post(*a, **k):
+        nonlocal call_count
+        call_count += 1
+        return _FakeResp()
+
+    monkeypatch.setattr("httpx.post", _fake_post)
+
+    backend = T.GroqBackend()
+    with pytest.raises(T.TranscriptionError) as exc:
+        backend._default_request(audio, "ru")
+
+    assert "403" in str(exc.value)
+    assert "GROQ_API_KEY" in str(exc.value)
+    assert call_count == 1   # нет ретраев
+
+
+def test_groq_401_raises_key_error_immediately(tmp_path, monkeypatch):
+    """HTTP 401 → внятная ошибка про ключ, без ретраев."""
+    import httpx
+
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+    monkeypatch.setenv("GROQ_API_KEY", "bad-key")
+
+    call_count = 0
+
+    class _FakeResp:
+        status_code = 401
+        def raise_for_status(self): pass
+        def json(self): return {}
+
+    def _fake_post(*a, **k):
+        nonlocal call_count
+        call_count += 1
+        return _FakeResp()
+
+    monkeypatch.setattr("httpx.post", _fake_post)
+
+    backend = T.GroqBackend()
+    with pytest.raises(T.TranscriptionError) as exc:
+        backend._default_request(audio, "ru")
+
+    assert "401" in str(exc.value)
+    assert "GROQ_API_KEY" in str(exc.value)
+    assert call_count == 1   # нет ретраев
+
+
 # ------------------------------------------------------ integration (только системник)
 
 @pytest.mark.integration

@@ -120,7 +120,13 @@ class GroqBackend:
                         files={"file": (audio_path.name, f, "application/octet-stream")},
                         timeout=600,
                     )
-                # 429 / 5xx — transient, ретраим; 4xx (кроме 429) — постоянная ошибка
+                # 401/403 — ошибка ключа, ретраить бесполезно
+                if resp.status_code in (401, 403):
+                    raise TranscriptionError(
+                        f"Groq отклонил ключ (HTTP {resp.status_code}): "
+                        f"проверь GROQ_API_KEY в .env — невалиден, истёк или превышен лимит аккаунта"
+                    )
+                # 429 / 5xx — transient, ретраим
                 if resp.status_code == 429 or resp.status_code >= 500:
                     last_exc = TranscriptionError(
                         f"Groq Whisper API: HTTP {resp.status_code} (попытка {attempt + 1})"
@@ -135,6 +141,8 @@ class GroqBackend:
                 last_exc = e
                 if attempt < _RETRY_ATTEMPTS - 1:
                     time.sleep(_RETRY_BACKOFF[attempt])
+            except TranscriptionError:
+                raise
             except httpx.HTTPStatusError as e:
                 raise TranscriptionError(f"Groq Whisper API ошибка {e.response.status_code}: {e}") from e
             except httpx.HTTPError as e:
