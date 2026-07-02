@@ -271,7 +271,9 @@ def _render_segments(
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
     `progress` — колбэк, вызывается с id reel перед его рендером (видимый прогресс CLI).
     `emit_text` — класть рядом с клипом <id>.txt (title/description для публикации)."""
-    source = resolve_source(manifest, inputs_dir)
+    # Абсолютные пути обязательны: при cwd=tmp_ass_dir (ass-фильтр) ffmpeg резолвит
+    # относительные пути от tmp_ass_dir, а не от рабочей директории autoreels.
+    source = resolve_source(manifest, inputs_dir).resolve()
 
     ffmpeg_bin = shutil.which(ffmpeg)
     if ffmpeg_bin is None:
@@ -280,7 +282,7 @@ def _render_segments(
             f"(Windows: D:\\ffmpeg\\bin\\ffmpeg.exe) или добавьте его в PATH"
         )
 
-    out_dir = Path(out_dir)
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     codec = encoder or os.environ.get(_ENCODER_ENV) or render_cfg.encoder.codec

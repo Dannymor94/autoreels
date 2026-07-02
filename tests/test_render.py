@@ -642,6 +642,50 @@ def test_ass_filter_contains_only_filename_no_path(tmp_path, render_cfg, monkeyp
     assert ass_arg.endswith("r01.ass"), f"ожидали 'r01.ass', получили {ass_arg!r}"
 
 
+def test_source_path_is_absolute_when_cwd_is_set(tmp_path, render_cfg, monkeypatch):
+    """ffmpeg получает АБСОЛЮТНЫЙ путь к исходнику даже когда cwd=tmp_ass_dir.
+
+    Когда Popen запускается с cwd, относительный путь к исходнику (inputs/1.mp4)
+    резолвится относительно tmp_ass_dir, а не рабочей директории autoreels → файл не найден.
+    Симулируем Windows-сценарий: inputs_dir передаётся относительным путём.
+    """
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs_abs = tmp_path / "inputs"
+    sha = _make_source(inputs_abs, "v.mp4", b"abs-path-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="тест", t0=11.0, t1=11.5)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    cmds_seen: list[list[str]] = []
+
+    class _FakeProc:
+        def __init__(self, cmd, **kwargs):
+            cmds_seen.append(cmd)
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
+    # Передаём inputs_dir как ОТНОСИТЕЛЬНЫЙ путь — именно так на Windows при root="."
+    monkeypatch.chdir(tmp_path)
+    inputs_rel = Path("inputs")   # относительный, как "inputs" в рабочей директории
+
+    render_crop(m, inputs_dir=inputs_rel, out_dir=Path("out"),
+                render_cfg=render_cfg, subtitles_cfg=subs_cfg)
+
+    assert cmds_seen, "ffmpeg не вызван"
+    cmd = cmds_seen[0]
+    source_arg = _val_after(cmd, "-i")
+    assert Path(source_arg).is_absolute(), (
+        f"путь к исходнику не абсолютный: {source_arg!r} — "
+        f"при cwd=tmp_ass_dir относительный путь ведёт не туда"
+    )
+
+
 def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, monkeypatch):
     """subprocess.Popen вызывается с cwd= указывающим на директорию с .ass файлом.
 
