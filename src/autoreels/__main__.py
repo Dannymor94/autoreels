@@ -395,30 +395,146 @@ def cmd_render(
 
 # ----------------------------------------------------------------------------- main
 
+_CHEATSHEET = """\
+autoreels — длинное видео → вертикальные Reels 9:16
+
+Команды:
+  calibrate <видео>   визуальная калибровка кропа (браузер, per-file)
+  run <видео>         анализ: транскрипция + выбор моментов → манифест (нужен Groq)
+  render              рендер по манифесту → reels-out/ (системник: --encoder h264_amf)
+  help                расширенная справка с описанием всего цикла
+
+Рабочий цикл:
+  1. autoreels calibrate inputs/видео.mp4     # настроить кадр (или пропустить → автокроп)
+  2. autoreels run inputs/видео.mp4           # → manifests/<имя>.json
+  3. autoreels render --encoder h264_amf      # → reels-out/<имя>/
+
+Папки: inputs/ (исходники) · manifests/ (задания) · reels-out/ (готовые рилсы)
+
+autoreels <команда> --help — подробнее по команде.\
+"""
+
+_HELP_EXTENDED = """\
+autoreels — длинное talking-head видео → вертикальные Reels 9:16
+
+━━━ КОМАНДЫ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  calibrate <видео> [--setup МЕТКА] [--port 8765] [--ffmpeg путь] [--ffprobe путь]
+    Визуальная калибровка кропа для конкретного видео. Открывает браузер с UI,
+    сохраняет profil в calibrations/<sha256>.json. Без калибровки run делает
+    автокроп 9:16 по центру кадра.
+
+  run [видео] [--ffmpeg путь]
+    Облачный тир: аудио → Groq Whisper → транскрипт → Groq LLM → манифест.
+    Без аргумента: batch по всем inputs/*.mp4.
+    Нужен: GROQ_API_KEY в .env. После успеха видео архивируется в inputs-archive/.
+
+  render [--encoder КОДЕК] [--ffmpeg путь]
+    Локальный тир: manifests/*.json → reels-out/<стем>/<id>.mp4.
+    На системнике Windows: --encoder h264_amf (AMD) или h264_nvenc (NVIDIA).
+    Идемпотентен: уже готовые mp4 пропускаются; нет видео — предупреждение.
+
+━━━ РАБОЧИЙ ЦИКЛ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. [Mac, опционально]
+     autoreels calibrate inputs/видео.mp4 --setup tearoom_main
+
+  2. [Mac, нужен Groq]
+     autoreels run inputs/видео.mp4
+     # → manifests/видео.json (git commit + push на системник)
+
+  3. [Системник, после git pull]
+     autoreels render --encoder h264_amf
+     # → reels-out/видео/r01.mp4, r02.mp4, ...
+
+━━━ ПАПКИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  inputs/           исходные видео (mp4, gitignore — гигабайты)
+  inputs-archive/   видео после обработки (перемещаются автоматически)
+  manifests/        JSON-задания для рендера (git-tracked, Mac→системник)
+  reels-out/        готовые вертикальные клипы (gitignore)
+  calibrations/     профили кропа по sha256 (gitignore)
+  data/cache/       кэш аудио и транскриптов (gitignore)
+  config/           r0.yaml, render.yaml, subtitles.yaml — все настройки
+
+━━━ ЧАСТЫЕ СЛУЧАИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Длинное видео (>15 мин или >20 МБ аудио) → чанкинг Whisper включается автоматически.
+  Нет калибровки → автокроп 9:16 по центру, логируется предупреждение.
+  Groq недоступен на системнике → run запустить на Mac, манифест передать через git.
+  429/413 от Groq → пауза между чанками (r0_chunk_delay_sec в config/r0.yaml).
+  Сегменты >59 с → обрезаются по паузе (too_long_policy: trim в config/r0.yaml).
+\
+"""
+
+
 def _build_parser():
     import argparse
 
     p = argparse.ArgumentParser(
         prog="autoreels",
-        description="Длинное talking-head видео → вертикальные Reels 9:16 (две команды по тирам).",
+        description="Длинное talking-head видео → вертикальные Reels 9:16.",
+        add_help=True,
     )
-    sub = p.add_subparsers(dest="cmd", required=True)
+    sub = p.add_subparsers(dest="cmd", required=False)
 
-    pc = sub.add_parser("calibrate", help="визуальная калибровка кропа для файла (per-file)")
+    sub.add_parser("help", help="расширенная справка: полный цикл, папки, частые случаи")
+
+    pc = sub.add_parser(
+        "calibrate",
+        help="визуальная калибровка кропа для файла (браузер, per-file)",
+        description=(
+            "Открывает UI в браузере для настройки кадра кропа (9:16) конкретного видео.\n"
+            "Сохраняет профиль в calibrations/<sha256>.json.\n"
+            "Без калибровки run делает автокроп 9:16 по центру кадра с предупреждением.\n\n"
+            "Пример: autoreels calibrate inputs/лекция.mp4 --setup tearoom_main"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     pc.add_argument("video", help="путь к видео для калибровки")
-    pc.add_argument("--setup", default=None, help="метка сетапа (→ setup_id манифеста)")
-    pc.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю")
-    pc.add_argument("--ffprobe", default="ffprobe", help="путь к ffprobe-бинарю")
-    pc.add_argument("--port", type=int, default=8765, help="порт localhost-сервера калибровки")
+    pc.add_argument("--setup", default=None,
+                    help="метка сетапа — имя позиции съёмки (→ setup_id в манифесте)")
+    pc.add_argument("--ffmpeg", default="ffmpeg",
+                    help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
+    pc.add_argument("--ffprobe", default="ffprobe",
+                    help="путь к ffprobe (по умолчанию: ffprobe из PATH)")
+    pc.add_argument("--port", type=int, default=8765,
+                    help="порт localhost-сервера калибровки (по умолчанию: 8765)")
 
-    pr = sub.add_parser("run", help="облачный тир: видео → manifests/<stem>.json")
+    pr = sub.add_parser(
+        "run",
+        help="транскрипция + выбор моментов → manifests/<стем>.json (облачный тир, нужен Groq)",
+        description=(
+            "Облачный тир: видео → аудио → Groq Whisper → транскрипт → Groq LLM → манифест.\n"
+            "Нужен GROQ_API_KEY в .env. Видео за пределы машины не уходит.\n"
+            "Без <видео>: batch-обработка всех inputs/*.mp4.\n"
+            "После успеха видео перемещается в inputs-archive/.\n\n"
+            "Пример: autoreels run inputs/лекция.mp4\n"
+            "Batch:   autoreels run"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     pr.add_argument("video", nargs="?", default=None,
                     help="путь к видео; без аргумента — batch: все *.mp4 из inputs/")
-    pr.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю")
+    pr.add_argument("--ffmpeg", default="ffmpeg",
+                    help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
 
-    pd = sub.add_parser("render", help="локальный тир: manifests/*.json → reels-out/")
-    pd.add_argument("--encoder", default=None, help="видеоэнкодер (на системнике h264_amf)")
-    pd.add_argument("--ffmpeg", default="ffmpeg", help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin)")
+    pd = sub.add_parser(
+        "render",
+        help="manifests/*.json → reels-out/ (локальный тир, ffmpeg)",
+        description=(
+            "Локальный тир: все манифесты в manifests/ → вертикальные mp4 в reels-out/.\n"
+            "Идемпотентен: уже готовые клипы пропускаются; нет видео — предупреждение ⊘.\n"
+            "На системнике Windows: --encoder h264_amf (AMD) или h264_nvenc (NVIDIA).\n\n"
+            "Пример: autoreels render --encoder h264_amf\n"
+            "Windows: autoreels render --encoder h264_amf --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pd.add_argument("--encoder", default=None,
+                    help="видеокодек ffmpeg (h264_amf — AMD Windows, h264_nvenc — NVIDIA, libx264 — CPU)")
+    pd.add_argument("--ffmpeg", default="ffmpeg",
+                    help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin\\ffmpeg.exe)")
 
     return p
 
@@ -433,6 +549,15 @@ def main(argv=None) -> int:
 
     _load_env()
     args = _build_parser().parse_args(argv)
+
+    if args.cmd is None:
+        print(_CHEATSHEET)
+        return 0
+
+    if args.cmd == "help":
+        print(_HELP_EXTENDED)
+        return 0
+
     try:
         if args.cmd == "calibrate":
             cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,

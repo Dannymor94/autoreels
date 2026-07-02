@@ -618,3 +618,72 @@ def test_main_run_bad_video_returns_1_with_clean_message(tmp_path, capsys, monke
     assert rc == 1
     err = capsys.readouterr().err
     assert "Traceback" not in err
+
+
+# ------------------------------------------------------------------ шпаргалка (без аргументов)
+
+def test_no_args_prints_cheatsheet_and_exits_0(capsys):
+    rc = cli.main([])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "calibrate" in out
+    assert "run" in out
+    assert "render" in out
+    assert "цикл" in out.lower() or "рабочий" in out.lower()
+
+
+def test_no_args_cheatsheet_mentions_folders(capsys):
+    rc = cli.main([])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "inputs/" in out
+    assert "manifests/" in out
+    assert "reels-out/" in out
+
+
+def test_no_args_cheatsheet_hints_subcommand_help(capsys):
+    rc = cli.main([])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "--help" in out
+
+
+# ------------------------------------------------------------------ autoreels help
+
+def test_help_command_exits_0(capsys):
+    rc = cli.main(["help"])
+    assert rc == 0
+
+
+def test_help_command_shows_extended_info(capsys):
+    rc = cli.main(["help"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "calibrate" in out
+    assert "run" in out
+    assert "render" in out
+    assert "inputs/" in out
+
+
+# ------------------------------------------------------------------ описания флагов в --help
+
+def test_render_help_mentions_encoder_flag(capsys):
+    import argparse
+    p = cli._build_parser()
+    try:
+        p.parse_args(["render", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "--encoder" in out
+
+
+def test_calibrate_help_mentions_setup_flag(capsys):
+    import argparse
+    p = cli._build_parser()
+    try:
+        p.parse_args(["calibrate", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "--setup" in out
