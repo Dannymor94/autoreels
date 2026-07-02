@@ -63,6 +63,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
     monkeypatch.setattr(cli, "_stage_select", rec("select", [_reel()]))
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
+    monkeypatch.setattr(cli, "_stage_trim", rec("trim", [_reel()]))
     monkeypatch.setattr(cli, "_stage_subtitles", rec("subtitles", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
     monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "v.json"))
@@ -71,7 +72,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     video.write_bytes(b"x")
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
 
-    assert order == ["extract", "transcribe", "compress", "select", "snap",
+    assert order == ["extract", "transcribe", "compress", "select", "snap", "trim",
                      "subtitles", "assemble", "write"]
 
 

@@ -14,6 +14,7 @@ max_sentence_buffer_sec: 30     # запас сверх max_duration пресе�
                                 # дробления = max_duration + запас (shorts ≈ 89с). Гиганты
                                 # режутся по самым длинным внутренним паузам; легальные
                                 # моменты 30–59с остаются целыми (см. R0Config.max_sentence_sec)
+too_long_policy: trim              # trim | drop | keep (что делать с сегментами >max_duration)
 title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
 language: ru                   # язык вывода LLM
 prompt_language: en            # system-промпт на английском (крепче grounding)

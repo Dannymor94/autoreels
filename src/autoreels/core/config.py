@@ -79,6 +79,7 @@ class R0Config(BaseModel):
     max_sentence_buffer_sec: float
     tail_sec: float            # хвост после последнего слова при snap границ (R4)
     snap_window_sec: float     # окно поиска границы слова/паузы при snap (±сек)
+    too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str
     prompt_language: str

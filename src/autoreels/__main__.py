@@ -27,6 +27,7 @@ from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import GroqLLM, ProviderError
 from autoreels.cloud.select import SelectError, select
 from autoreels.cloud.snap import snap_segments
+from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.core import state
 from autoreels.core.calibration import (
@@ -139,6 +140,27 @@ def _stage_snap(reels, transcript, *, r0_cfg):
     return reels
 
 
+def _stage_trim(reels, transcript, *, r0_cfg):
+    """Политика too_long: trim/drop/keep сегменты длиннее max_duration (код, не LLM)."""
+    policy = getattr(r0_cfg, "too_long_policy", "keep")
+    if policy == "keep":
+        return reels
+    n_before = len(reels)
+    trim_too_long(
+        reels, transcript.words,
+        max_duration=r0_cfg.max_duration,
+        pause_sec=r0_cfg.sentence_pause_sec,
+        policy=policy,
+    )
+    n_after = len(reels)
+    if policy == "drop" and n_after < n_before:
+        print(f"too_long drop: убрано {n_before - n_after} сегментов", flush=True)
+    elif policy == "trim":
+        trimmed = sum(1 for r in reels if "too_long" not in r.flags)
+        print(f"too_long trim: обрезано по паузе", flush=True)
+    return reels
+
+
 def _stage_subtitles(reels, transcript):
     """R3: привязать word-level транскрипта к каждому reel."""
     print("субтитры: привязка слов к сегментам…", flush=True)
@@ -217,6 +239,7 @@ def cmd_run(
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
+    reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_subtitles(reels, transcript)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
