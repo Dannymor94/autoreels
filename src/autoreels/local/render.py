@@ -110,6 +110,14 @@ class RenderError(Exception):
     """Рендер не удался (нет исходника/inputs/, нет ffmpeg, ffmpeg вернул ошибку)."""
 
 
+class SourceNotFoundError(RenderError):
+    """Исходник для манифеста не найден в inputs/ — видео заархивировано или удалено.
+
+    Отдельный тип: cmd_render перехватывает его до общего RenderError и пропускает
+    манифест с предупреждением, а не считает его ошибкой рендера.
+    """
+
+
 def load_manifest(manifests_dir: str | Path, *, name: str = _MANIFEST_NAME) -> Manifest:
     """Прочитать и провалидировать manifest.json из папки `manifests/`.
 
@@ -177,7 +185,7 @@ def resolve_source(manifest: Manifest, inputs_dir: str | Path) -> Path:
         if hash_fn(p) == want:
             return p
 
-    raise RenderError(
+    raise SourceNotFoundError(
         f"исходник не найден в {inputs_dir}: нет файла с sha256={want[:12]}… "
         f"(имя-подсказка из манифеста: {hint!r})"
     )

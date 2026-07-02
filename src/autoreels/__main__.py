@@ -44,7 +44,7 @@ from autoreels.core.config import (
 )
 from autoreels.core.models import Manifest
 from autoreels.local.calibrate import CalibrateError, cmd_calibrate
-from autoreels.local.render import RenderError, load_manifest, render_crop
+from autoreels.local.render import RenderError, SourceNotFoundError, load_manifest, render_crop
 from autoreels.local.subtitles import words_in_window
 
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
@@ -267,20 +267,40 @@ def cmd_run_batch(
     return ok, failed
 
 
+def _archive_manifest(mf: Path, manifests_archive_dir: Path) -> None:
+    """Переместить манифест в manifests-archive/ после успешного рендера.
+
+    Идемпотентно: если там уже есть файл с таким именем — не перезаписываем, просто удаляем
+    источник. Это обеспечивает безопасность при повторном запуске без риска потери оригинала.
+    """
+    manifests_archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = manifests_archive_dir / mf.name
+    if dest.exists():
+        mf.unlink()
+    else:
+        mf.rename(dest)
+
+
 def cmd_render(
     *,
     manifests_dir=None,
     inputs_dir=None,
     out_dir=None,
     archive_dir=None,
+    manifests_archive_dir=None,
     root=".",
     ffmpeg: str = "ffmpeg",
     encoder=None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
-    Каждый манифест рендерится независимо; упавший → остальные продолжают.
-    После успеха источник перемещается в inputs-archive/ (идемпотентно).
+    Каждый манифест рендерится независимо. Три исхода:
+    - успех → видео-исходник архивируется в inputs-archive/, манифест → manifests-archive/;
+    - пропуск (SourceNotFoundError) → исходник заархивирован/удалён, манифест остаётся;
+    - ошибка рендера → оба файла остаются, имя попадает в сводку.
+
+    manifests-archive/ — локальная папка (не в git): предотвращает повторный рендер уже
+    готовых манифестов при следующем вызове render.
     """
     root = Path(root)
     render_cfg = load_render_config(root / "config" / "render.yaml")
@@ -289,6 +309,9 @@ def cmd_render(
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
+    manifests_archive_dir = (
+        Path(manifests_archive_dir) if manifests_archive_dir else root / "manifests-archive"
+    )
 
     manifest_files = sorted(manifests_dir.glob("*.json"))
     if not manifest_files:
@@ -297,6 +320,7 @@ def cmd_render(
 
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
     all_outputs: list[Path] = []
+    skipped: list[str] = []
     failed: list[tuple[str, Exception]] = []
 
     for mf in manifest_files:
@@ -313,13 +337,24 @@ def cmd_render(
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
             _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
+            _archive_manifest(mf, manifests_archive_dir)
+        except SourceNotFoundError:
+            print(f"⊘ пропущен {mf.stem}: исходник не найден в inputs/ "
+                  f"(видео заархивировано или удалено)", flush=True)
+            skipped.append(mf.name)
         except Exception as e:  # noqa: BLE001
             print(f"\n[ОШИБКА] {mf.name}: {e}", file=sys.stderr, flush=True)
             failed.append((mf.name, e))
 
-    if len(manifest_files) > 1 or failed:
-        print(f"\n=== batch render: {len(manifest_files) - len(failed)} ok / {len(failed)} failed ===",
-              flush=True)
+    total = len(manifest_files)
+    if total > 1 or failed or skipped:
+        ok = total - len(failed) - len(skipped)
+        parts = [f"{ok} отрендерено"]
+        if skipped:
+            parts.append(f"{len(skipped)} пропущено ({', '.join(s.removesuffix('.json') for s in skipped)})")
+        if failed:
+            parts.append(f"{len(failed)} ошибок")
+        print(f"\n=== batch render: {' / '.join(parts)} ===", flush=True)
         for name, err in failed:
             print(f"  ✗ {name}: {err}", file=sys.stderr)
     return all_outputs
