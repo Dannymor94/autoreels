@@ -57,6 +57,7 @@ def _run_ffmpeg_with_progress(
     idx: int,
     total: int,
     duration_sec: float,
+    cwd: str | None = None,
 ) -> tuple[int, str]:
     """Запустить ffmpeg с отображением прогресса через -progress pipe:1.
 
@@ -72,6 +73,7 @@ def _run_ffmpeg_with_progress(
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        cwd=cwd,
     )
 
     def _drain_stderr() -> None:
@@ -250,10 +252,6 @@ def _crop_vf(setup: SetupProfile) -> str:
     return f"crop={c.w}:{c.h}:{c.x}:{c.y},scale={sw}:{sh}"
 
 
-def _escape_ass_path(path: Path) -> str:
-    """Путь к .ass для фильтрграфа ffmpeg: экранируем ':' (Windows D:\\…), слэши — прямые."""
-    return str(path).replace("\\", "/").replace(":", "\\:")
-
 
 def _render_segments(
     manifest: Manifest,
@@ -301,14 +299,20 @@ def _render_segments(
             # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale
             # (в координатах финального кадра 1080×1920). Слова берутся из reel.subtitles.
             reel_vf = vf
+            ass_cwd: str | None = None
             if subtitles_cfg is not None and reel.subtitles:
-                ass_path = tmp_ass_dir / f"{reel.id}.ass"
+                ass_filename = f"{reel.id}.ass"
+                ass_path = tmp_ass_dir / ass_filename
                 ass_path.write_text(
                     build_ass(reel.subtitles, cfg=subtitles_cfg, clip_start=reel.start),
                     encoding="utf-8",
                 )
-                ass_filter = f"ass={_escape_ass_path(ass_path)}"
+                # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.
+                # Абсолютный путь в ass= фильтре ломается на Windows: двоеточие (C:)
+                # и бэкслэши — синтаксис filtergraph; относительный путь безопасен.
+                ass_filter = f"ass={ass_filename}"
                 reel_vf = f"{vf},{ass_filter}" if vf else ass_filter
+                ass_cwd = str(tmp_ass_dir)
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
                 codec=codec, preset=enc.preset, cq=enc.cq,
@@ -318,6 +322,7 @@ def _render_segments(
             returncode, stderr_text = _run_ffmpeg_with_progress(
                 cmd, reel_id=reel.id, idx=idx, total=total,
                 duration_sec=reel.end - reel.start,
+                cwd=ass_cwd,
             )
             if returncode != 0:
                 out.unlink(missing_ok=True)         # не оставлять битый частичный выход

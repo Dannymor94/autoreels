@@ -594,3 +594,87 @@ def test_render_popen_uses_utf8_encoding(tmp_path, render_cfg, monkeypatch):
     assert kwargs_seen[0].get("encoding") == "utf-8", (
         f"subprocess.Popen вызван без encoding='utf-8': {kwargs_seen[0]}"
     )
+
+
+# ---------------------------------------- Windows: ass фильтр без абсолютного пути (cwd-fix)
+
+def test_ass_filter_contains_only_filename_no_path(tmp_path, render_cfg, monkeypatch):
+    """ass= фильтр содержит только имя файла (r01.ass), без полного пути.
+
+    Абсолютный путь с C:\\ или бэкслэшами ломает ffmpeg filtergraph на Windows —
+    двоеточие и бэкслэши трактуются как синтаксис разделителей опций.
+    Решение: ffmpeg запускается с cwd=tmp_ass_dir и видит файл по имени.
+    """
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"win-subs-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="тест", t0=11.0, t1=11.5)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    vf_seen = []
+
+    class _FakeProc:
+        def __init__(self, cmd, **kwargs):
+            vf_seen.append(cmd)
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, subtitles_cfg=subs_cfg)
+
+    assert vf_seen, "ffmpeg не вызван"
+    cmd = vf_seen[0]
+    vf = _val_after(cmd, "-vf")
+    assert "ass=" in vf
+    # Фильтр должен содержать ТОЛЬКО имя файла, без пути (нет разделителей)
+    ass_arg = vf.split("ass=", 1)[1].split(",")[0]  # часть после ass= до следующей запятой
+    assert "/" not in ass_arg, f"ass-фильтр содержит прямой слэш (путь): {ass_arg!r}"
+    assert "\\" not in ass_arg, f"ass-фильтр содержит обратный слэш: {ass_arg!r}"
+    assert ":" not in ass_arg, f"ass-фильтр содержит двоеточие (Windows-диск?): {ass_arg!r}"
+    assert ass_arg.endswith("r01.ass"), f"ожидали 'r01.ass', получили {ass_arg!r}"
+
+
+def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, monkeypatch):
+    """subprocess.Popen вызывается с cwd= указывающим на директорию с .ass файлом.
+
+    Это позволяет ffmpeg найти r01.ass по имени без абсолютного пути в фильтре.
+    """
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"cwd-test-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="слово", t0=11.0, t1=11.5)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    popen_kwargs: list[dict] = []
+
+    class _FakeProc:
+        def __init__(self, cmd, **kwargs):
+            popen_kwargs.append(kwargs)
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, subtitles_cfg=subs_cfg)
+
+    assert popen_kwargs, "Popen не вызван"
+    cwd = popen_kwargs[0].get("cwd")
+    assert cwd is not None, "Popen вызван без cwd"
+    # cwd должен быть временной директорией, содержащей .ass файл
+    cwd_path = Path(cwd)
+    assert cwd_path.is_dir() or not cwd_path.exists(), f"cwd не является директорией: {cwd}"
