@@ -490,77 +490,69 @@ def test_render_missing_source_not_counted_as_failure(monkeypatch, tmp_path):
     assert out == []
 
 
-# --------------------------------------------------- render: архив манифеста после рендера
+# --------------------------------------------------- render: идемпотентность по выходным файлам
 
-def test_render_archives_manifest_after_success(monkeypatch, tmp_path):
-    """После успешного рендера манифест перемещается в manifests-archive/."""
+def test_render_skips_when_all_reels_done(monkeypatch, tmp_path, capsys):
+    """Все mp4 уже есть в reels-out/<stem>/ → пропуск с ✓-сообщением, render_crop не вызывается."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    m = _manifest(reels=[_reel("r01"), _reel("r02")])
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+
+    out_dir = tmp_path / "reels-out" / "v"
+    out_dir.mkdir(parents=True)
+    (out_dir / "r01.mp4").write_bytes(b"x")
+    (out_dir / "r02.mp4").write_bytes(b"x")
+
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(1) or [])
+
+    result = cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, out_dir=tmp_path / "reels-out")
+
+    assert called == [], "render_crop не должен вызываться если всё готово"
+    captured = capsys.readouterr()
+    assert "✓" in captured.out or "уже" in captured.out
+    assert "v" in captured.out
+    assert result == []
+
+
+def test_render_rerenders_partial_completion(monkeypatch, tmp_path):
+    """Один mp4 из двух есть → render вызывается с одним недостающим reel."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    m = _manifest(reels=[_reel("r01"), _reel("r02")])
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+
+    out_dir = tmp_path / "reels-out" / "v"
+    out_dir.mkdir(parents=True)
+    (out_dir / "r01.mp4").write_bytes(b"x")   # r01 готов, r02 нет
+
+    seen_reels = []
+    def fake_crop(manifest, **k):
+        seen_reels.extend(r.id for r in manifest.reels)
+        return [out_dir / "r02.mp4"]
+
+    monkeypatch.setattr(cli, "render_crop", fake_crop)
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, out_dir=tmp_path / "reels-out")
+
+    assert seen_reels == ["r02"], f"ожидали только r02, получили {seen_reels}"
+
+
+def test_render_does_not_touch_manifests(monkeypatch, tmp_path):
+    """render не трогает файлы манифестов — ни после успеха, ни при пропуске."""
     manifests = tmp_path / "manifests"
     manifests.mkdir()
     mf = manifests / "v.json"
-    mf.write_text(_manifest().model_dump_json(), encoding="utf-8")
+    content = _manifest().model_dump_json()
+    mf.write_text(content, encoding="utf-8")
 
     monkeypatch.setattr(cli, "render_crop", lambda m, **k: [])
 
-    manifests_archive = tmp_path / "manifests-archive"
-    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
-                   manifests_archive_dir=manifests_archive)
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT)
 
-    assert not mf.exists(), "манифест должен быть перемещён из manifests/"
-    assert (manifests_archive / "v.json").exists(), "манифест должен быть в manifests-archive/"
-
-
-def test_render_does_not_archive_manifest_on_failure(monkeypatch, tmp_path):
-    """Рендер упал → манифест остаётся в manifests/, не перемещается."""
-    manifests = tmp_path / "manifests"
-    manifests.mkdir()
-    mf = manifests / "v.json"
-    mf.write_text(_manifest().model_dump_json(), encoding="utf-8")
-
-    monkeypatch.setattr(cli, "render_crop",
-                        lambda m, **k: (_ for _ in ()).throw(RenderError("ffmpeg")))
-
-    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
-                   manifests_archive_dir=tmp_path / "manifests-archive")
-
-    assert mf.exists(), "манифест должен остаться в manifests/ при ошибке рендера"
-
-
-def test_render_does_not_archive_manifest_when_source_skipped(monkeypatch, tmp_path):
-    """Пропуск (исходник отсутствует) → манифест остаётся в manifests/ (не трогаем)."""
-    manifests = tmp_path / "manifests"
-    manifests.mkdir()
-    mf = manifests / "v.json"
-    mf.write_text(_manifest().model_dump_json(), encoding="utf-8")
-
-    monkeypatch.setattr(cli, "render_crop",
-                        lambda m, **k: (_ for _ in ()).throw(SourceNotFoundError("нет")))
-
-    manifests_archive = tmp_path / "manifests-archive"
-    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
-                   manifests_archive_dir=manifests_archive)
-
-    assert mf.exists(), "манифест не должен архивироваться при пропуске"
-
-
-def test_render_manifest_archive_idempotent(monkeypatch, tmp_path):
-    """Манифест уже в archive → не падать, не перезаписывать."""
-    manifests = tmp_path / "manifests"
-    manifests.mkdir()
-    mf = manifests / "v.json"
-    mf.write_text(_manifest().model_dump_json(), encoding="utf-8")
-
-    manifests_archive = tmp_path / "manifests-archive"
-    manifests_archive.mkdir()
-    already = manifests_archive / "v.json"
-    already.write_text("OLD", encoding="utf-8")
-
-    monkeypatch.setattr(cli, "render_crop", lambda m, **k: [])
-
-    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT,
-                   manifests_archive_dir=manifests_archive)
-
-    # Старая копия в archive не перезаписана
-    assert already.read_text() == "OLD"
+    assert mf.exists(), "манифест должен остаться в manifests/"
+    assert mf.read_text(encoding="utf-8") == content, "содержимое манифеста не должно меняться"
 
 
 # ------------------------------------------------------------------ дефолтные пути

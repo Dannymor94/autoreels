@@ -267,18 +267,12 @@ def cmd_run_batch(
     return ok, failed
 
 
-def _archive_manifest(mf: Path, manifests_archive_dir: Path) -> None:
-    """Переместить манифест в manifests-archive/ после успешного рендера.
+def _missing_reels(manifest: Manifest, out_dir: Path) -> list:
+    """Вернуть reel-объекты из манифеста, для которых ещё нет выходного mp4.
 
-    Идемпотентно: если там уже есть файл с таким именем — не перезаписываем, просто удаляем
-    источник. Это обеспечивает безопасность при повторном запуске без риска потери оригинала.
+    Выходной файл: out_dir/<reel.id>.mp4  (render_crop без суффикса — вертикальный рез).
     """
-    manifests_archive_dir.mkdir(parents=True, exist_ok=True)
-    dest = manifests_archive_dir / mf.name
-    if dest.exists():
-        mf.unlink()
-    else:
-        mf.rename(dest)
+    return [r for r in manifest.reels if not (out_dir / f"{r.id}.mp4").exists()]
 
 
 def cmd_render(
@@ -287,7 +281,6 @@ def cmd_render(
     inputs_dir=None,
     out_dir=None,
     archive_dir=None,
-    manifests_archive_dir=None,
     root=".",
     ffmpeg: str = "ffmpeg",
     encoder=None,
@@ -295,12 +288,12 @@ def cmd_render(
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
     Каждый манифест рендерится независимо. Три исхода:
-    - успех → видео-исходник архивируется в inputs-archive/, манифест → manifests-archive/;
-    - пропуск (SourceNotFoundError) → исходник заархивирован/удалён, манифест остаётся;
-    - ошибка рендера → оба файла остаются, имя попадает в сводку.
+    - все клипы уже есть в reels-out/<stem>/ → пропуск «✓ уже готово»;
+    - исходник не найден в inputs/ → пропуск «⊘ нет видео»;
+    - рендер упал → ошибка в сводке.
 
-    manifests-archive/ — локальная папка (не в git): предотвращает повторный рендер уже
-    готовых манифестов при следующем вызове render.
+    Манифесты в manifests/ НЕ трогаются — git ими управляет (Mac→системник через pull).
+    Идемпотентность обеспечивается проверкой выходных файлов, а не перемещением манифеста.
     """
     root = Path(root)
     render_cfg = load_render_config(root / "config" / "render.yaml")
@@ -309,9 +302,6 @@ def cmd_render(
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
-    manifests_archive_dir = (
-        Path(manifests_archive_dir) if manifests_archive_dir else root / "manifests-archive"
-    )
 
     manifest_files = sorted(manifests_dir.glob("*.json"))
     if not manifest_files:
@@ -320,7 +310,8 @@ def cmd_render(
 
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
     all_outputs: list[Path] = []
-    skipped: list[str] = []
+    skipped_no_video: list[str] = []
+    skipped_done: list[str] = []
     failed: list[tuple[str, Exception]] = []
 
     for mf in manifest_files:
@@ -328,30 +319,49 @@ def cmd_render(
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
             stem = Path(manifest.source).stem
             out_dir_final = out_dir / stem
-            print(f"=== render: {mf.name} ({len(manifest.reels)} клипов, {enc}) → {out_dir_final} ===",
-                  flush=True)
+
+            # Идемпотентность: пропускаем манифесты, для которых все клипы уже есть
+            missing = _missing_reels(manifest, out_dir_final)
+            if not missing:
+                print(f"✓ {stem}: все {len(manifest.reels)} клипов уже готовы — пропуск",
+                      flush=True)
+                skipped_done.append(mf.name)
+                continue
+
+            # Рендерим только недостающие клипы (при частичном завершении)
+            render_manifest = manifest if len(missing) == len(manifest.reels) else (
+                manifest.model_copy(update={"reels": missing})
+            )
+            n_missing = len(missing)
+            n_total = len(manifest.reels)
+            label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
+            print(f"=== render: {mf.name} ({label}, {enc}) → {out_dir_final} ===", flush=True)
             outputs = render_crop(
-                manifest, inputs_dir=inputs_dir, out_dir=out_dir_final, render_cfg=render_cfg,
-                ffmpeg=ffmpeg, encoder=encoder, subtitles_cfg=subtitles_cfg,
+                render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
+                render_cfg=render_cfg, ffmpeg=ffmpeg, encoder=encoder,
+                subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
             _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
-            _archive_manifest(mf, manifests_archive_dir)
         except SourceNotFoundError:
-            print(f"⊘ пропущен {mf.stem}: исходник не найден в inputs/ "
-                  f"(видео заархивировано или удалено)", flush=True)
-            skipped.append(mf.name)
+            print(f"⊘ пропущен {mf.stem}: исходник не найден в inputs/", flush=True)
+            skipped_no_video.append(mf.name)
         except Exception as e:  # noqa: BLE001
             print(f"\n[ОШИБКА] {mf.name}: {e}", file=sys.stderr, flush=True)
             failed.append((mf.name, e))
 
     total = len(manifest_files)
+    skipped = skipped_no_video + skipped_done
     if total > 1 or failed or skipped:
         ok = total - len(failed) - len(skipped)
         parts = [f"{ok} отрендерено"]
-        if skipped:
-            parts.append(f"{len(skipped)} пропущено ({', '.join(s.removesuffix('.json') for s in skipped)})")
+        if skipped_done:
+            names = ", ".join(s.removesuffix(".json") for s in skipped_done)
+            parts.append(f"{len(skipped_done)} уже готово ({names})")
+        if skipped_no_video:
+            names = ", ".join(s.removesuffix(".json") for s in skipped_no_video)
+            parts.append(f"{len(skipped_no_video)} нет видео ({names})")
         if failed:
             parts.append(f"{len(failed)} ошибок")
         print(f"\n=== batch render: {' / '.join(parts)} ===", flush=True)
