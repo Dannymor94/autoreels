@@ -393,6 +393,67 @@ def cmd_render(
     return all_outputs
 
 
+# --------------------------------------------------------------------------- status
+
+def cmd_status(*, root=".") -> int:
+    """Сводка текущего состояния проекта: inputs / manifests / reels-out / archive + предупреждения."""
+    root = Path(root)
+    inputs_dir      = root / "inputs"
+    manifests_dir   = root / "manifests"
+    reels_out_dir   = root / "reels-out"
+    archive_dir     = root / "inputs-archive"
+    calibrations_dir = root / "calibrations"
+
+    inputs    = sorted(inputs_dir.glob("*.mp4"))      if inputs_dir.is_dir()    else []
+    manifests = sorted(manifests_dir.glob("*.json"))  if manifests_dir.is_dir() else []
+    rendered  = [d for d in reels_out_dir.iterdir() if d.is_dir()] \
+                if reels_out_dir.is_dir() else []
+    archived  = sorted(archive_dir.glob("*.mp4"))     if archive_dir.is_dir()   else []
+
+    print("─── autoreels status ───────────────────────────────")
+    print(f"  inputs/          {len(inputs):>3} видео  (ждут run)")
+    print(f"  manifests/       {len(manifests):>3} манифеста  (готовы к рендеру)")
+    print(f"  reels-out/       {len(rendered):>3} папок  (отрендеренные видео)")
+    print(f"  inputs-archive/  {len(archived):>3} архивных видео")
+
+    # Предупреждения
+    warnings: list[str] = []
+
+    # Манифесты без видео в inputs/
+    input_stems = {v.stem for v in inputs}
+    for mf in manifests:
+        try:
+            m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+            stem = Path(m.source).stem
+            if stem not in input_stems:
+                warnings.append(f"  ⚠ манифест без видео: {mf.name} (нет inputs/{m.source})")
+        except Exception:  # noqa: BLE001
+            warnings.append(f"  ⚠ битый манифест: {mf.name}")
+
+    # Видео без калибровки
+    if calibrations_dir.is_dir():
+        calibrated_shas = {p.stem for p in calibrations_dir.glob("*.json")}
+    else:
+        calibrated_shas = set()
+
+    cache_dir = root / "data" / "cache"
+    for v in inputs:
+        try:
+            sha = state.file_sha256_cached_fast(v, cache_dir)
+            if sha not in calibrated_shas:
+                warnings.append(f"  ℹ без калибровки: {v.name} (будет автокроп)")
+        except Exception:  # noqa: BLE001
+            warnings.append(f"  ℹ без калибровки: {v.name} (хэш не вычислен — будет автокроп)")
+
+    if warnings:
+        print()
+        for w in warnings:
+            print(w)
+
+    print("────────────────────────────────────────────────────")
+    return 0
+
+
 # ----------------------------------------------------------------------------- main
 
 _CHEATSHEET = """\
@@ -480,6 +541,22 @@ def _build_parser():
 
     sub.add_parser("help", help="расширенная справка: полный цикл, папки, частые случаи")
 
+    ps = sub.add_parser(
+        "status",
+        help="сводка состояния: inputs / manifests / reels-out / archive + предупреждения",
+        description=(
+            "Показывает текущее состояние проекта:\n"
+            "  • сколько видео ждут run (inputs/)\n"
+            "  • сколько манифестов готовы к рендеру (manifests/)\n"
+            "  • сколько папок уже отрендерено (reels-out/)\n"
+            "  • сколько видео заархивировано (inputs-archive/)\n"
+            "  • предупреждения: манифесты без видео, видео без калибровки\n\n"
+            "Пример: autoreels status"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ps.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+
     pc = sub.add_parser(
         "calibrate",
         help="визуальная калибровка кропа для файла (браузер, per-file)",
@@ -557,6 +634,9 @@ def main(argv=None) -> int:
     if args.cmd == "help":
         print(_HELP_EXTENDED)
         return 0
+
+    if args.cmd == "status":
+        return cmd_status(root=args.root)
 
     try:
         if args.cmd == "calibrate":

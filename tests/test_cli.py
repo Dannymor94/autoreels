@@ -687,3 +687,135 @@ def test_calibrate_help_mentions_setup_flag(capsys):
         pass
     out = capsys.readouterr().out
     assert "--setup" in out
+
+
+# ------------------------------------------------------------------ autoreels status
+
+def _write_manifest_file(path: Path, manifest: Manifest) -> None:
+    path.write_text(manifest.model_dump_json(), encoding="utf-8")
+
+
+def test_status_counts_inputs(tmp_path, capsys):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2" in out
+    assert "input" in out.lower() or "ждут" in out.lower() or "inputs" in out.lower()
+
+
+def test_status_counts_manifests(tmp_path, capsys):
+    (tmp_path / "manifests").mkdir()
+    _write_manifest_file(tmp_path / "manifests" / "a.json", _manifest(source="a.mp4"))
+    _write_manifest_file(tmp_path / "manifests" / "b.json", _manifest(source="b.mp4"))
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2" in out
+    assert "manifest" in out.lower() or "рендер" in out.lower() or "manifests" in out.lower()
+
+
+def test_status_counts_reels_out_folders(tmp_path, capsys):
+    reels_out = tmp_path / "reels-out"
+    (reels_out / "video1").mkdir(parents=True)
+    (reels_out / "video1" / "r01.mp4").write_bytes(b"x")
+    (reels_out / "video2").mkdir(parents=True)
+    (reels_out / "video2" / "r01.mp4").write_bytes(b"x")
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2" in out
+
+
+def test_status_counts_archive(tmp_path, capsys):
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    (archive / "old.mp4").write_bytes(b"x")
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "1" in out
+    assert "archi" in out.lower() or "архив" in out.lower()
+
+
+def test_status_warns_manifest_without_video(tmp_path, capsys):
+    (tmp_path / "manifests").mkdir()
+    _write_manifest_file(tmp_path / "manifests" / "gone.json", _manifest(source="gone.mp4"))
+    # inputs/ пуст — видео нет
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "gone" in out
+
+
+def test_status_warns_video_without_calibration(tmp_path, capsys):
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "uncal.mp4").write_bytes(b"x")
+    # calibrations/ пуст — нет профиля
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "uncal" in out or "калибр" in out.lower()
+
+
+def test_status_no_warnings_when_calibrated(tmp_path, capsys):
+    """Если для видео есть калибровка — не предупреждать об отсутствии калибровки."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "cal.mp4"
+    video.write_bytes(b"x")
+
+    # сохранить калибровку через реальный sha
+    from autoreels.core import state
+    from autoreels.core.calibration import save_calibration as _save_cal
+    sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
+    setup = _setup()
+    _save_cal(
+        tmp_path / "calibrations",
+        source_name="cal.mp4",
+        source_sha256=sha,
+        crop=setup.crop,
+        frame=setup.frame,
+    )
+
+    rc = cli.cmd_status(root=tmp_path)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    # предупреждение о некалиброванном видео не должно появляться
+    assert "без калибр" not in out.lower() and "uncalibrated" not in out.lower()
+
+
+def test_status_empty_project(tmp_path, capsys):
+    """Все папки пусты/отсутствуют → нули, не ошибка."""
+    rc = cli.cmd_status(root=tmp_path)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "0" in out
+
+
+def test_status_registered_as_subcommand(capsys):
+    p = cli._build_parser()
+    args = p.parse_args(["status"])
+    assert args.cmd == "status"
+
+
+def test_main_status_exits_0(tmp_path, capsys):
+    rc = cli.main(["status", "--root", str(tmp_path)])
+    assert rc == 0
