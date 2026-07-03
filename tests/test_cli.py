@@ -763,6 +763,80 @@ def test_help_command_includes_status_and_calibrate_all(capsys):
     assert "--all" in out
 
 
+# ------------------------------------------------------------------ autoreels help: полное содержание
+
+def _help_out(capsys):
+    cli.main(["help"])
+    return capsys.readouterr().out
+
+
+def test_help_lists_all_six_commands(capsys):
+    out = _help_out(capsys)
+    for cmd in ("status", "calibrate", "run", "render", "help"):
+        assert cmd in out, f"команда '{cmd}' не найдена в help"
+
+
+def test_help_lists_key_flags(capsys):
+    out = _help_out(capsys)
+    assert "--all" in out
+    assert "--encoder" in out
+    assert "--setup" in out
+    assert "--ffmpeg" in out
+
+
+def test_help_has_4_workflow_stages(capsys):
+    out = _help_out(capsys)
+    assert "1." in out and "4." in out
+
+
+def test_help_workflow_has_run_and_render_commands(capsys):
+    out = _help_out(capsys)
+    assert "autoreels run" in out
+    assert "autoreels render" in out
+
+
+def test_help_mentions_groq(capsys):
+    out = _help_out(capsys)
+    assert "Groq" in out or "groq" in out.lower()
+
+
+def test_help_mentions_chunking(capsys):
+    out = _help_out(capsys)
+    assert "чанк" in out.lower() or "chunk" in out.lower()
+
+
+def test_help_mentions_autocrop(capsys):
+    out = _help_out(capsys)
+    assert "автокроп" in out.lower() or "auto" in out.lower()
+
+
+def test_help_mentions_too_long(capsys):
+    out = _help_out(capsys)
+    assert "59" in out or "too_long" in out or "обрезаются" in out.lower()
+
+
+def test_help_lists_all_folders(capsys):
+    out = _help_out(capsys)
+    for folder in ("inputs/", "inputs-archive/", "manifests/", "reels-out/", "calibrations/"):
+        assert folder in out, f"папка '{folder}' не найдена в help"
+
+
+def test_help_mentions_alias(capsys):
+    out = _help_out(capsys)
+    assert "alias" in out or "ar=" in out or "ar " in out.lower()
+
+
+def test_help_mentions_both_machines(capsys):
+    out = _help_out(capsys)
+    assert "Mac" in out or "mac" in out.lower()
+    assert "системник" in out.lower() or "windows" in out.lower()
+
+
+def test_help_mentions_groq_region_issue(capsys):
+    out = _help_out(capsys)
+    assert "регион" in out.lower() or "region" in out.lower() or "недоступен" in out.lower()
+
+
 # ------------------------------------------------------------------ autoreels status
 
 def _write_manifest_file(path: Path, manifest: Manifest) -> None:

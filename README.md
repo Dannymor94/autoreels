@@ -70,6 +70,18 @@ python -m autoreels run video.mp4 --setup tearoom_main
 
 → папка с mp4-рилсами + `manifest.json`.
 
+## Короткий алиас
+
+```bash
+# Mac (~/.zshrc):
+alias ar='autoreels'
+
+# Windows Git Bash (~/.bashrc):
+alias ar='autoreels'
+```
+
+После этого: `ar status` · `ar calibrate --all` · `ar run` · `ar render --encoder h264_amf`
+
 ## Статус
 
 Идёт **M0** — вертикальный слайс «один клип end-to-end», по TDD.
