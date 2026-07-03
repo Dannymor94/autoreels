@@ -548,19 +548,21 @@ _CHEATSHEET = """\
 autoreels — длинное видео → вертикальные Reels 9:16
 
 Команды:
-  calibrate <видео>   визуальная калибровка кропа (браузер, per-file)
-  run <видео>         анализ: транскрипция + выбор моментов → манифест (нужен Groq)
-  render              рендер по манифесту → reels-out/ (системник: --encoder h264_amf)
-  help                расширенная справка с описанием всего цикла
+  status              состояние: исходники, кроп, манифесты, готовые рилсы
+  calibrate <видео>   визуальная калибровка кропа (браузер)
+  calibrate --all     пройтись по всем некалиброванным (интерактивно)
+  run <видео>         анализ → манифест (Mac, нужен Groq; длинное → чанкинг авто)
+  render              рендер по манифесту → reels-out/ (системник, AMF)
+  help                расширенная справка: цикл, папки, частые случаи
 
 Рабочий цикл:
-  1. autoreels calibrate inputs/видео.mp4     # настроить кадр (или пропустить → автокроп)
-  2. autoreels run inputs/видео.mp4           # → manifests/<имя>.json
-  3. autoreels render --encoder h264_amf      # → reels-out/<имя>/
+  1. autoreels status                         # что где, нужен ли кроп
+  2. autoreels calibrate --all                # настроить кадры (или пропустить → автокроп)
+  3. autoreels run inputs/видео.mp4           # → manifests/<имя>.json
+  4. autoreels render --encoder h264_amf      # → reels-out/<имя>/
 
-Папки: inputs/ (исходники) · manifests/ (задания) · reels-out/ (готовые рилсы)
-
-autoreels <команда> --help — подробнее по команде.\
+Папки: inputs/ · manifests/ · reels-out/ · inputs-archive/
+autoreels <команда> --help — детали и флаги.\
 """
 
 _HELP_EXTENDED = """\
@@ -568,39 +570,45 @@ autoreels — длинное talking-head видео → вертикальны�
 
 ━━━ КОМАНДЫ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  calibrate <видео> [--setup МЕТКА] [--port 8765] [--ffmpeg путь] [--ffprobe путь]
-    Визуальная калибровка кропа для конкретного видео. Открывает браузер с UI,
-    сохраняет profil в calibrations/<sha256>.json. Без калибровки run делает
-    автокроп 9:16 по центру кадра.
+  status [--root .]
+    Сводка состояния проекта: inputs/ (ждут run), manifests/ (готовы к рендеру),
+    reels-out/ (готовые рилсы), inputs-archive/ (заархивированные).
+    Per-file таблица кропа для inputs/: ✓ ручной / ⚙ автокроп.
+
+  calibrate <видео> [--setup МЕТКА] [--all] [--port 8765] [--ffmpeg] [--ffprobe]
+    Визуальная калибровка кропа (9:16) конкретного видео — браузер с UI.
+    --all / --pending: интерактивный обход inputs/*.mp4. Для каждого без ручной
+    калибровки спрашивает: [к]алибровать / [а]втокроп / [п]ропустить.
+    Откалиброванные вручную — пропускаются молча.
+    Без калибровки run делает автокроп 9:16 по центру кадра (молча).
 
   run [видео] [--ffmpeg путь]
-    Облачный тир: аудио → Groq Whisper → транскрипт → Groq LLM → манифест.
+    Облачный тир (Mac): аудио → Groq Whisper → транскрипт → Groq LLM → манифест.
+    Нужен: GROQ_API_KEY в .env. Видео за пределы машины не уходит.
+    Длинное видео (>15 мин / >20 МБ аудио) → чанкинг включается автоматически.
     Без аргумента: batch по всем inputs/*.mp4.
-    Нужен: GROQ_API_KEY в .env. После успеха видео архивируется в inputs-archive/.
+    После успеха видео перемещается в inputs-archive/.
 
   render [--encoder КОДЕК] [--ffmpeg путь]
-    Локальный тир: manifests/*.json → reels-out/<стем>/<id>.mp4.
-    На системнике Windows: --encoder h264_amf (AMD) или h264_nvenc (NVIDIA).
-    Идемпотентен: уже готовые mp4 пропускаются; нет видео — предупреждение.
+    Локальный тир (системник): manifests/*.json → reels-out/<стем>/<id>.mp4.
+    Системник Windows: --encoder h264_amf (AMD) или h264_nvenc (NVIDIA).
+    Идемпотентен: уже готовые mp4 пропускаются; нет видео — предупреждение ⊘.
 
 ━━━ РАБОЧИЙ ЦИКЛ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  1. [Mac, опционально]
-     autoreels calibrate inputs/видео.mp4 --setup tearoom_main
-
-  2. [Mac, нужен Groq]
-     autoreels run inputs/видео.mp4
-     # → manifests/видео.json (git commit + push на системник)
-
-  3. [Системник, после git pull]
-     autoreels render --encoder h264_amf
-     # → reels-out/видео/r01.mp4, r02.mp4, ...
+  1. autoreels status                         # проверить что где
+  2. autoreels calibrate --all                # пройтись по кропам (к/а/п per-file)
+  3. [Mac, нужен Groq]
+     autoreels run inputs/видео.mp4           # → manifests/видео.json
+     # git commit manifests/ + push → системник pull
+  4. [Системник, после git pull]
+     autoreels render --encoder h264_amf      # → reels-out/видео/r01.mp4, ...
 
 ━━━ ПАПКИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   inputs/           исходные видео (mp4, gitignore — гигабайты)
   inputs-archive/   видео после обработки (перемещаются автоматически)
-  manifests/        JSON-задания для рендера (git-tracked, Mac→системник)
+  manifests/        JSON-задания для рендера (git-tracked, Mac → системник)
   reels-out/        готовые вертикальные клипы (gitignore)
   calibrations/     профили кропа по sha256 (gitignore)
   data/cache/       кэш аудио и транскриптов (gitignore)
@@ -608,11 +616,11 @@ autoreels — длинное talking-head видео → вертикальны�
 
 ━━━ ЧАСТЫЕ СЛУЧАИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Длинное видео (>15 мин или >20 МБ аудио) → чанкинг Whisper включается автоматически.
-  Нет калибровки → автокроп 9:16 по центру, логируется предупреждение.
-  Groq недоступен на системнике → run запустить на Mac, манифест передать через git.
-  429/413 от Groq → пауза между чанками (r0_chunk_delay_sec в config/r0.yaml).
-  Сегменты >59 с → обрезаются по паузе (too_long_policy: trim в config/r0.yaml).
+  Нет калибровки → автокроп 9:16 по центру (run молча, calibrate --all явно спрашивает).
+  Длинное видео → чанкинг Whisper автоматически (config: chunking.whisper_threshold_minutes).
+  429/413 от Groq → пауза между чанками (config: chunking.r0_chunk_delay_sec).
+  Сегменты >59 с → обрезаются по паузе (config: r0.yaml too_long_policy: trim).
+  Groq недоступен на системнике → run на Mac, манифест через git push/pull.
 \
 """
 

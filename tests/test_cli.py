@@ -689,6 +689,80 @@ def test_calibrate_help_mentions_setup_flag(capsys):
     assert "--setup" in out
 
 
+# ------------------------------------------------------------------ шпаргалка: новые команды
+
+def test_cheatsheet_includes_status_command(capsys):
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "status" in out
+
+
+def test_cheatsheet_includes_calibrate_all(capsys):
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "--all" in out
+
+
+def test_cheatsheet_has_4_step_cycle(capsys):
+    cli.main([])
+    out = capsys.readouterr().out
+    # Рабочий цикл должен содержать 4 шага (status + calibrate + run + render)
+    assert "1." in out and "4." in out
+
+
+def test_cheatsheet_mentions_inputs_archive(capsys):
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "inputs-archive/" in out
+
+
+def test_cheatsheet_mentions_mac_and_system(capsys):
+    """Шпаргалка содержит пометки Mac / системник."""
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "Mac" in out or "mac" in out.lower()
+    assert "системник" in out.lower() or "amf" in out.lower()
+
+
+# ------------------------------------------------------------------ --help каждой команды
+
+def test_calibrate_help_mentions_all_flag(capsys):
+    p = cli._build_parser()
+    try:
+        p.parse_args(["calibrate", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "--all" in out
+
+
+def test_run_help_mentions_groq(capsys):
+    p = cli._build_parser()
+    try:
+        p.parse_args(["run", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "Groq" in out or "groq" in out.lower()
+
+
+def test_render_help_mentions_windows_or_encoder_hint(capsys):
+    p = cli._build_parser()
+    try:
+        p.parse_args(["render", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "h264_amf" in out or "Windows" in out or "системник" in out.lower()
+
+
+def test_help_command_includes_status_and_calibrate_all(capsys):
+    cli.main(["help"])
+    out = capsys.readouterr().out
+    assert "status" in out
+    assert "--all" in out
+
+
 # ------------------------------------------------------------------ autoreels status
 
 def _write_manifest_file(path: Path, manifest: Manifest) -> None:
