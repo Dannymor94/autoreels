@@ -72,15 +72,21 @@ python -m autoreels run video.mp4 --setup tearoom_main
 
 ## Короткий алиас
 
-```bash
-# Mac (~/.zshrc):
-alias ar='autoreels'
+Один раз на каждой машине:
 
-# Windows Git Bash (~/.bashrc):
-alias ar='autoreels'
+```bash
+autoreels install-aliases    # сам допишет source-строку в ~/.zshrc или ~/.bashrc
 ```
 
-После этого: `ar status` · `ar calibrate --all` · `ar run` · `ar render --encoder h264_amf`
+Или вручную — добавь в `~/.zshrc` (Mac) / `~/.bashrc` (Windows Git Bash):
+
+```bash
+source /путь/к/autoreels/aliases.sh
+```
+
+Дальше алиасы обновляются через `git pull` — правишь [`aliases.sh`](aliases.sh), коммитишь, на других машинах пулл подтягивает.
+
+После установки: `ar status` · `ar calibrate --all` · `ar run` · `ar render --encoder h264_amf`
 
 ## Статус
 

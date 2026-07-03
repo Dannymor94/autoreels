@@ -1337,3 +1337,77 @@ def test_run_does_not_call_ask_batch_action(monkeypatch, tmp_path):
     video.write_bytes(b"x")
     # Не должно кинуть AssertionError — run не интерактивен
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
+
+
+# -------------------------------------------------- install-aliases
+
+def test_install_aliases_registered_as_subcommand():
+    p = cli._build_parser()
+    args = p.parse_args(["install-aliases", "--dry-run"])
+    assert args.cmd == "install-aliases"
+
+
+def test_install_aliases_dry_run_prints_source_line(tmp_path, capsys):
+    profile = tmp_path / ".zshrc"
+    profile.write_text("", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"
+    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+
+    rc = cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, dry_run=True)
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "source" in out
+    assert str(aliases) in out
+
+
+def test_install_aliases_appends_source_line(tmp_path):
+    profile = tmp_path / ".zshrc"
+    profile.write_text("export PATH=$PATH\n", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"
+    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+
+    cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, dry_run=False, confirm=False)
+
+    content = profile.read_text(encoding="utf-8")
+    assert f"source {aliases}" in content
+
+
+def test_install_aliases_idempotent(tmp_path):
+    profile = tmp_path / ".zshrc"
+    aliases = tmp_path / "aliases.sh"
+    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+    source_line = f"source {aliases}"
+    profile.write_text(f"export PATH=$PATH\n{source_line}\n", encoding="utf-8")
+
+    cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, dry_run=False, confirm=False)
+
+    content = profile.read_text(encoding="utf-8")
+    assert content.count(source_line) == 1, "source-строка добавлена дважды"
+
+
+def test_install_aliases_missing_aliases_file_errors(tmp_path, capsys):
+    profile = tmp_path / ".zshrc"
+    profile.write_text("", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"  # не создаём
+
+    rc = cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, dry_run=False, confirm=False)
+
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "aliases.sh" in err or "не найден" in err.lower()
+
+
+def test_install_aliases_main_dispatch_dry_run(tmp_path, capsys, monkeypatch):
+    profile = tmp_path / ".zshrc"
+    profile.write_text("", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"
+    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+
+    monkeypatch.setattr(cli, "_detect_shell_profile", lambda: profile)
+    monkeypatch.setattr(cli, "_find_aliases_sh", lambda: aliases)
+
+    rc = cli.main(["install-aliases", "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "source" in out

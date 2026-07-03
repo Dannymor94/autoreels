@@ -552,6 +552,69 @@ def cmd_status(*, root=".") -> int:
     return 0
 
 
+# ----------------------------------------------------------------------- install-aliases
+
+def _find_aliases_sh() -> Path:
+    """Найти aliases.sh рядом с пакетом (корень репо)."""
+    return Path(__file__).parent.parent.parent / "aliases.sh"
+
+
+def _detect_shell_profile() -> Path:
+    """Угадать профиль shell по $SHELL; фолбэк — ~/.bashrc."""
+    shell = os.environ.get("SHELL", "")
+    if "zsh" in shell:
+        return Path.home() / ".zshrc"
+    return Path.home() / ".bashrc"
+
+
+def cmd_install_aliases(
+    *,
+    profile_path: Path | None = None,
+    aliases_path: Path | None = None,
+    dry_run: bool = False,
+    confirm: bool = True,
+) -> int:
+    """Дописать source-строку в профиль shell (один раз на машину).
+
+    После этого алиасы из aliases.sh обновляются через git pull — без
+    ручной правки профиля.
+    """
+    if aliases_path is None:
+        aliases_path = _find_aliases_sh()
+    if profile_path is None:
+        profile_path = _detect_shell_profile()
+
+    if not aliases_path.is_file():
+        print(f"ошибка: aliases.sh не найден: {aliases_path}", file=sys.stderr)
+        return 1
+
+    source_line = f"source {aliases_path.resolve()}"
+
+    if dry_run:
+        print(f"Добавит в {profile_path}:")
+        print(f"  {source_line}")
+        return 0
+
+    existing = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
+    if source_line in existing:
+        print(f"✓ уже установлено в {profile_path}")
+        return 0
+
+    if confirm:
+        print(f"Добавить в {profile_path}:")
+        print(f"  {source_line}")
+        ans = input("Продолжить? [д/н]: ").strip().lower()
+        if ans not in ("д", "y", "yes", "д"):
+            print("отменено")
+            return 0
+
+    with profile_path.open("a", encoding="utf-8") as f:
+        f.write(f"\n{source_line}\n")
+    print(f"✓ добавлено в {profile_path}")
+    print(f"  Перезапусти shell или выполни: source {profile_path}")
+    return 0
+
+
 # ----------------------------------------------------------------------------- main
 
 _CHEATSHEET = """\
@@ -653,9 +716,12 @@ autoreels — длинное talking-head видео → вертикальны�
 
 ━━━ КОРОТКИЙ АЛИАС ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Mac (~/.zshrc):             alias ar='autoreels'
-  Windows Git Bash (~/.bashrc): alias ar='autoreels'
+  Один раз на каждой машине:
+    autoreels install-aliases           # сам допишет source-строку в ~/.zshrc
+  Или вручную добавь в ~/.zshrc (Mac) / ~/.bashrc (Windows Git Bash):
+    source /путь/к/autoreels/aliases.sh
 
+  Дальше алиасы обновляются через git pull (правишь aliases.sh, коммитишь).
   Затем: ar status · ar calibrate --all · ar run · ar render --encoder h264_amf
 \
 """
@@ -755,6 +821,24 @@ def _build_parser():
     pd.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin\\ffmpeg.exe)")
 
+    pi = sub.add_parser(
+        "install-aliases",
+        help="дописать source aliases.sh в профиль shell (~/.zshrc / ~/.bashrc)",
+        description=(
+            "Один раз на каждой машине: дописывает строку\n"
+            "  source /путь/к/autoreels/aliases.sh\n"
+            "в профиль shell (~/.zshrc на Mac, ~/.bashrc на Windows Git Bash).\n"
+            "После этого алиасы (alias ar='autoreels') обновляются через git pull.\n\n"
+            "Пример: autoreels install-aliases\n"
+            "Без изменений: autoreels install-aliases --dry-run"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pi.add_argument("--dry-run", action="store_true", default=False,
+                    help="показать что добавит, ничего не менять")
+    pi.add_argument("--yes", action="store_true", default=False,
+                    help="не спрашивать подтверждения")
+
     return p
 
 
@@ -799,6 +883,13 @@ def main(argv=None) -> int:
                     return 1
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
+        elif args.cmd == "install-aliases":
+            return cmd_install_aliases(
+                aliases_path=_find_aliases_sh(),
+                profile_path=_detect_shell_profile(),
+                dry_run=args.dry_run,
+                confirm=not args.yes,
+            )
     except _KNOWN_ERRORS as e:
         print(f"ошибка: {e}", file=sys.stderr)
         return 1
