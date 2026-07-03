@@ -33,8 +33,11 @@ from autoreels.core import state
 from autoreels.core.calibration import (
     CalibrationError,
     _probe_frame_size_for_auto,
+    auto_crop,
+    calibration_path,
     load_calibration,
     load_or_auto_calibrate,
+    save_calibration,
 )
 from autoreels.core.config import (
     ConfigError,
@@ -393,6 +396,89 @@ def cmd_render(
     return all_outputs
 
 
+# ---------------------------------------------------------------------- калибровка (batch)
+
+def _calibration_kind(calibrations_dir: Path, sha: str) -> str:
+    """Вернуть 'manual', 'auto' или 'none' для видео по sha256."""
+    path = calibration_path(calibrations_dir, sha)
+    if not path.is_file():
+        return "none"
+    try:
+        import json as _json
+        rec = _json.loads(path.read_text(encoding="utf-8"))
+        return "auto" if rec.get("auto") or rec.get("setup_label") == "auto" else "manual"
+    except Exception:  # noqa: BLE001
+        return "none"
+
+
+def _ask_batch_action(name: str) -> str:
+    """Интерактивный промпт для одного видео в calibrate --all. Точка подмены в тестах."""
+    while True:
+        ans = input(f"  {name}: кропа нет. [к]алибровать / [а]втокроп / [п]ропустить? ").strip().lower()
+        if ans in ("к", "а", "п", "k", "a", "p"):
+            # нормализовать латиницу → кириллица
+            return {"k": "к", "a": "а", "p": "п"}.get(ans, ans)
+        print("  введите к, а или п")
+
+
+def cmd_calibrate_batch(
+    *,
+    root=".",
+    inputs_dir=None,
+    calibrations_dir=None,
+    cache_dir=None,
+    ffmpeg: str = "ffmpeg",
+    ffprobe: str = "ffprobe",
+) -> None:
+    """Интерактивная калибровка пачки: проходит по inputs/*.mp4, пропускает ручные.
+
+    Для каждого видео без ручной калибровки спрашивает: к/а/п.
+    к → браузер-калибратор; а → сохранить автокроп; п → пропустить.
+    """
+    root = Path(root)
+    inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+    calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+
+    videos = sorted(inputs_dir.glob("*.mp4")) if inputs_dir.is_dir() else []
+    if not videos:
+        print("inputs/ пуст — нечего калибровать")
+        return
+
+    for video in videos:
+        sha = state.file_sha256_cached_fast(video, cache_dir)
+        kind = _calibration_kind(calibrations_dir, sha)
+        if kind == "manual":
+            continue  # уже откалиброван вручную — пропуск молча
+
+        action = _ask_batch_action(video.name)
+
+        if action == "п":
+            continue
+
+        if action == "а":
+            frame_size = _probe_frame_size_for_auto(video, ffprobe=ffprobe)
+            crop = auto_crop(frame_size)
+            import json as _json
+            calibrations_dir.mkdir(parents=True, exist_ok=True)
+            rec = {
+                "source_name": video.name,
+                "source_sha256": sha,
+                "setup_label": "auto",
+                "crop": crop.model_dump(),
+                "scale": [1080, 1920],
+                "frame": list(frame_size),
+                "auto": True,
+            }
+            calibration_path(calibrations_dir, sha).write_text(
+                _json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            print(f"  ⚙ автокроп зафиксирован: {video.name}")
+
+        elif action == "к":
+            cmd_calibrate(video, setup_label=None, ffmpeg=ffmpeg, ffprobe=ffprobe)
+
+
 # --------------------------------------------------------------------------- status
 
 def cmd_status(*, root=".") -> int:
@@ -416,10 +502,27 @@ def cmd_status(*, root=".") -> int:
     print(f"  reels-out/       {len(rendered):>3} папок  (отрендеренные видео)")
     print(f"  inputs-archive/  {len(archived):>3} архивных видео")
 
-    # Предупреждения
-    warnings: list[str] = []
+    cache_dir = root / "data" / "cache"
 
-    # Манифесты без видео в inputs/
+    # Per-file таблица кропа
+    if inputs:
+        print()
+        print("  ┌─ inputs/ ────────────────────────────────────────")
+        for v in inputs:
+            try:
+                sha = state.file_sha256_cached_fast(v, cache_dir)
+                kind = _calibration_kind(calibrations_dir, sha)
+            except Exception:  # noqa: BLE001
+                kind = "none"
+            if kind == "manual":
+                mark = "✓ кроп откалиброван (ручной)"
+            else:
+                mark = "⚙ автокроп (калибровки нет)" if kind == "none" else "⚙ автокроп (зафиксирован)"
+            print(f"  │ {v.name:<30}  {mark}")
+        print("  └──────────────────────────────────────────────────")
+
+    # Предупреждения: манифесты без видео
+    warnings: list[str] = []
     input_stems = {v.stem for v in inputs}
     for mf in manifests:
         try:
@@ -429,21 +532,6 @@ def cmd_status(*, root=".") -> int:
                 warnings.append(f"  ⚠ манифест без видео: {mf.name} (нет inputs/{m.source})")
         except Exception:  # noqa: BLE001
             warnings.append(f"  ⚠ битый манифест: {mf.name}")
-
-    # Видео без калибровки
-    if calibrations_dir.is_dir():
-        calibrated_shas = {p.stem for p in calibrations_dir.glob("*.json")}
-    else:
-        calibrated_shas = set()
-
-    cache_dir = root / "data" / "cache"
-    for v in inputs:
-        try:
-            sha = state.file_sha256_cached_fast(v, cache_dir)
-            if sha not in calibrated_shas:
-                warnings.append(f"  ℹ без калибровки: {v.name} (будет автокроп)")
-        except Exception:  # noqa: BLE001
-            warnings.append(f"  ℹ без калибровки: {v.name} (хэш не вычислен — будет автокроп)")
 
     if warnings:
         print()
@@ -559,16 +647,24 @@ def _build_parser():
 
     pc = sub.add_parser(
         "calibrate",
-        help="визуальная калибровка кропа для файла (браузер, per-file)",
+        help="визуальная калибровка кропа (per-file или --all для пачки)",
         description=(
             "Открывает UI в браузере для настройки кадра кропа (9:16) конкретного видео.\n"
             "Сохраняет профиль в calibrations/<sha256>.json.\n"
             "Без калибровки run делает автокроп 9:16 по центру кадра с предупреждением.\n\n"
-            "Пример: autoreels calibrate inputs/лекция.mp4 --setup tearoom_main"
+            "--all / --pending: интерактивный обход inputs/*.mp4 — спрашивает только для\n"
+            "видео без ручной калибровки (к=браузер / а=автокроп / п=пропустить).\n\n"
+            "Пример: autoreels calibrate inputs/лекция.mp4 --setup tearoom_main\n"
+            "Пачка:  autoreels calibrate --all"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    pc.add_argument("video", help="путь к видео для калибровки")
+    pc.add_argument("video", nargs="?", default=None,
+                    help="путь к видео для калибровки (не нужен с --all)")
+    pc.add_argument("--all", dest="all", action="store_true", default=False,
+                    help="интерактивный обход всех inputs/*.mp4 без ручной калибровки")
+    pc.add_argument("--pending", dest="all", action="store_true",
+                    help="псевдоним --all")
     pc.add_argument("--setup", default=None,
                     help="метка сетапа — имя позиции съёмки (→ setup_id в манифесте)")
     pc.add_argument("--ffmpeg", default="ffmpeg",
@@ -640,8 +736,14 @@ def main(argv=None) -> int:
 
     try:
         if args.cmd == "calibrate":
-            cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
-                          ffprobe=args.ffprobe, port=args.port)
+            if args.all:
+                cmd_calibrate_batch(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
+            elif args.video:
+                cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
+                              ffprobe=args.ffprobe, port=args.port)
+            else:
+                print("ошибка: укажите видео или используйте --all", file=sys.stderr)
+                return 1
         elif args.cmd == "run":
             if args.video:
                 cmd_run(Path(args.video), ffmpeg=args.ffmpeg)

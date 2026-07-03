@@ -819,3 +819,273 @@ def test_status_registered_as_subcommand(capsys):
 def test_main_status_exits_0(tmp_path, capsys):
     rc = cli.main(["status", "--root", str(tmp_path)])
     assert rc == 0
+
+
+# --------------------------------------------------------- status: per-file crop table
+
+def _save_manual_cal(tmp_path, video):
+    """Сохранить ручную калибровку для видео (setup_label != 'auto')."""
+    from autoreels.core import state
+    from autoreels.core.calibration import save_calibration as _save_cal
+    sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
+    setup = _setup()
+    _save_cal(
+        tmp_path / "calibrations",
+        source_name=video.name,
+        source_sha256=sha,
+        crop=setup.crop,
+        frame=setup.frame,
+        setup_label="tearoom_main",
+    )
+    return sha
+
+
+def test_status_shows_calibrated_mark_for_each_video(tmp_path, capsys):
+    """Видео с ручной калибровкой → ✓ в таблице."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "cal.mp4"
+    video.write_bytes(b"x")
+    _save_manual_cal(tmp_path, video)
+
+    cli.cmd_status(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "cal.mp4" in out
+    assert "✓" in out
+
+
+def test_status_shows_auto_mark_for_uncalibrated(tmp_path, capsys):
+    """Видео без калибровки → ⚙ автокроп в таблице."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "raw.mp4").write_bytes(b"x")
+
+    cli.cmd_status(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "raw.mp4" in out
+    assert "⚙" in out
+
+
+def test_status_shows_both_marks_for_mixed_inputs(tmp_path, capsys):
+    """Часть откалиброванных, часть нет — оба маркера в таблице."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    cal = inputs / "cal.mp4"
+    cal.write_bytes(b"calibrated-content")
+    _save_manual_cal(tmp_path, cal)
+    (inputs / "raw.mp4").write_bytes(b"raw-content")
+
+    cli.cmd_status(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "✓" in out
+    assert "⚙" in out
+    assert "cal.mp4" in out
+    assert "raw.mp4" in out
+
+
+def test_status_no_per_file_table_when_inputs_empty(tmp_path, capsys):
+    """inputs/ пуст → таблицы нет, не ошибка."""
+    (tmp_path / "inputs").mkdir()
+    cli.cmd_status(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "✓" not in out
+    assert "⚙" not in out
+
+
+# ------------------------------------------ calibrate --all: базовый флаг и регистрация
+
+def test_calibrate_all_flag_registered_in_parser():
+    p = cli._build_parser()
+    args = p.parse_args(["calibrate", "--all", "dummy.mp4"])
+    assert args.all is True
+
+
+def test_calibrate_all_without_video_arg_is_valid():
+    """calibrate --all без позиционного аргумента — допустимо (batch по inputs/)."""
+    p = cli._build_parser()
+    args = p.parse_args(["calibrate", "--all"])
+    assert args.all is True
+    assert args.video is None
+
+
+# ------------------------------------------ calibrate --all: логика пачки
+
+def _write_auto_cal(tmp_path, video):
+    """Записать автокалибровку (setup_label='auto', auto=True)."""
+    from autoreels.core import state
+    from autoreels.core.calibration import calibration_path, auto_crop
+    import json
+    sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
+    cal_dir = tmp_path / "calibrations"
+    cal_dir.mkdir(parents=True, exist_ok=True)
+    crop = auto_crop((3840, 2160))
+    rec = {
+        "source_name": video.name,
+        "source_sha256": sha,
+        "setup_label": "auto",
+        "crop": crop.model_dump(),
+        "scale": [1080, 1920],
+        "frame": [3840, 2160],
+        "auto": True,
+    }
+    calibration_path(cal_dir, sha).write_text(
+        json.dumps(rec, ensure_ascii=False), encoding="utf-8"
+    )
+    return sha
+
+
+def test_calibrate_all_skips_manually_calibrated(tmp_path, monkeypatch, capsys):
+    """Видео с ручной калибровкой пропускается молча — _ask_batch_action не вызывается."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "manual.mp4"
+    video.write_bytes(b"x")
+    _save_manual_cal(tmp_path, video)
+
+    asked = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    assert asked == [], "ручная калибровка не должна переспрашиваться"
+
+
+def test_calibrate_all_prompts_for_uncalibrated(tmp_path, monkeypatch):
+    """Видео без калибровки → _ask_batch_action вызывается с именем файла."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "raw.mp4").write_bytes(b"x")
+
+    asked = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    assert asked == ["raw.mp4"]
+
+
+def test_calibrate_all_prompts_for_auto_calibrated(tmp_path, monkeypatch):
+    """Видео с авто-калибровкой (setup_label='auto') тоже переспрашивается."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "auto.mp4"
+    video.write_bytes(b"x")
+    _write_auto_cal(tmp_path, video)
+
+    asked = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    assert asked == ["auto.mp4"]
+
+
+def test_calibrate_all_action_a_saves_auto_crop(tmp_path, monkeypatch):
+    """Выбор 'а' → сохраняет автокроп, файл калибровки создаётся."""
+    from autoreels.core.calibration import calibration_path
+    from autoreels.core import state
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "raw.mp4"
+    video.write_bytes(b"x")
+    sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
+
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: "а")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    cal_path = calibration_path(tmp_path / "calibrations", sha)
+    assert cal_path.is_file(), "автокроп должен быть сохранён"
+
+
+def test_calibrate_all_action_p_skips_without_saving(tmp_path, monkeypatch):
+    """Выбор 'п' → файл калибровки НЕ создаётся."""
+    from autoreels.core.calibration import calibration_path
+    from autoreels.core import state
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "raw.mp4"
+    video.write_bytes(b"x")
+    sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
+
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: "п")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    cal_path = calibration_path(tmp_path / "calibrations", sha)
+    assert not cal_path.exists(), "пропуск не должен создавать калибровку"
+
+
+def test_calibrate_all_action_k_calls_cmd_calibrate(tmp_path, monkeypatch):
+    """Выбор 'к' → вызывается cmd_calibrate для этого видео."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "raw.mp4").write_bytes(b"x")
+
+    called = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: "к")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+    monkeypatch.setattr(cli, "cmd_calibrate",
+                        lambda video, **k: called.append(Path(video).name))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    assert called == ["raw.mp4"]
+
+
+def test_calibrate_all_mixed_batch(tmp_path, monkeypatch):
+    """Пачка: ручная (пропуск) + некалиброванная (спросить) + автокроп (спросить)."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+
+    manual = inputs / "manual.mp4"
+    manual.write_bytes(b"manual-content")
+    _save_manual_cal(tmp_path, manual)
+
+    raw = inputs / "raw.mp4"
+    raw.write_bytes(b"raw-content")
+
+    auto_v = inputs / "autocrop.mp4"
+    auto_v.write_bytes(b"auto-content")
+    _write_auto_cal(tmp_path, auto_v)
+
+    asked = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    assert "manual.mp4" not in asked
+    assert "raw.mp4" in asked
+    assert "autocrop.mp4" in asked
+
+
+# ------------------------------------------ run: не интерактивен
+
+def test_run_does_not_call_ask_batch_action(monkeypatch, tmp_path):
+    """cmd_run не должен вызывать интерактивный промпт ни при каких условиях."""
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe",
+                        lambda *a, **k: __import__("autoreels.core.models", fromlist=["Transcript"])
+                        .Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+
+    if hasattr(cli, "_ask_batch_action"):
+        called = []
+        monkeypatch.setattr(cli, "_ask_batch_action",
+                            lambda name: called.append(name) or (_ for _ in ()).throw(
+                                AssertionError(f"run вызвал интерактив для {name}")))
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    # Не должно кинуть AssertionError — run не интерактивен
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
