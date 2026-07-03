@@ -1017,7 +1017,7 @@ def test_calibrate_all_skips_manually_calibrated(tmp_path, monkeypatch, capsys):
     _save_manual_cal(tmp_path, video)
 
     asked = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "п")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
@@ -1032,7 +1032,7 @@ def test_calibrate_all_prompts_for_uncalibrated(tmp_path, monkeypatch):
     (inputs / "raw.mp4").write_bytes(b"x")
 
     asked = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "п")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
@@ -1049,7 +1049,7 @@ def test_calibrate_all_prompts_for_auto_calibrated(tmp_path, monkeypatch):
     _write_auto_cal(tmp_path, video)
 
     asked = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "п")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
@@ -1068,7 +1068,7 @@ def test_calibrate_all_action_a_saves_auto_crop(tmp_path, monkeypatch):
     video.write_bytes(b"x")
     sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
 
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: "а")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "а")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
@@ -1088,7 +1088,7 @@ def test_calibrate_all_action_p_skips_without_saving(tmp_path, monkeypatch):
     video.write_bytes(b"x")
     sha = state.file_sha256_cached_fast(video, tmp_path / "cache")
 
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: "п")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "п")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
@@ -1104,7 +1104,7 @@ def test_calibrate_all_action_k_calls_cmd_calibrate(tmp_path, monkeypatch):
     (inputs / "raw.mp4").write_bytes(b"x")
 
     called = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: "к")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "к")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
     monkeypatch.setattr(cli, "cmd_calibrate",
                         lambda video, **k: called.append(Path(video).name))
@@ -1131,7 +1131,7 @@ def test_calibrate_all_mixed_batch(tmp_path, monkeypatch):
     _write_auto_cal(tmp_path, auto_v)
 
     asked = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name: asked.append(name) or "п")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "п")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
@@ -1139,6 +1139,106 @@ def test_calibrate_all_mixed_batch(tmp_path, monkeypatch):
     assert "manual.mp4" not in asked
     assert "raw.mp4" in asked
     assert "autocrop.mp4" in asked
+
+
+# ------------------------------------------ новые тесты: исправления багов
+
+def test_calibration_kind_returns_corrupt_for_broken_json(tmp_path):
+    """Повреждённый JSON → 'corrupt', не 'none'."""
+    cal_dir = tmp_path / "calibrations"
+    cal_dir.mkdir()
+    sha = "a" * 64
+    cli.calibration_path(cal_dir, sha).write_text("{ broken json", encoding="utf-8")
+    assert cli._calibration_kind(cal_dir, sha) == "corrupt"
+
+
+def test_calibrate_all_skips_corrupt_without_overwriting(tmp_path, monkeypatch, capsys):
+    """Повреждённый файл калибровки → предупреждение и пропуск без перезаписи."""
+    inputs_dir = tmp_path / "inputs"
+    cal_dir    = tmp_path / "calibrations"
+    inputs_dir.mkdir()
+    cal_dir.mkdir()
+
+    video = inputs_dir / "bad.mp4"
+    video.write_bytes(b"x")
+    sha = "b" * 64
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast", lambda v, c: sha)
+    cli.calibration_path(cal_dir, sha).write_text("{ broken", encoding="utf-8")
+
+    asked = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "а")
+
+    cli.cmd_calibrate_batch(root=tmp_path, inputs_dir=inputs_dir, calibrations_dir=cal_dir,
+                            cache_dir=tmp_path / "cache")
+
+    assert not asked, "corrupt-файл не должен вызывать промпт"
+    out = capsys.readouterr().out
+    assert "повреждённый" in out
+
+
+def test_status_no_warning_for_archived_video(tmp_path, capsys):
+    """Манифест чьё видео в inputs-archive/ → НЕ выдаёт предупреждение."""
+    (tmp_path / "inputs").mkdir()
+    archive_dir = tmp_path / "inputs-archive"
+    archive_dir.mkdir()
+    (archive_dir / "done.mp4").write_bytes(b"x")
+
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    m = _manifest(source="done.mp4")
+    (manifests_dir / "done.json").write_text(m.model_dump_json(), encoding="utf-8")
+
+    cli.cmd_status(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "⚠" not in out, "архивное видео не должно давать предупреждение"
+
+
+def test_calibrate_all_root_flag_registered():
+    """calibrate --all должен принимать флаг --root."""
+    p = cli._build_parser()
+    args = p.parse_args(["calibrate", "--all", "--root", "/some/path"])
+    assert args.root == "/some/path"
+
+
+def test_ask_batch_action_auto_prompt_differs_from_none(monkeypatch):
+    """Для kind='auto' промпт содержит 'автокроп уже зафиксирован', не 'кропа нет'."""
+    inputs_given = []
+    monkeypatch.setattr("builtins.input", lambda prompt: inputs_given.append(prompt) or "п")
+    cli._ask_batch_action("video.mp4", "auto")
+    assert "автокроп уже зафиксирован" in inputs_given[0]
+    assert "кропа нет" not in inputs_given[0]
+
+
+def test_ask_batch_action_none_prompt_says_no_crop(monkeypatch):
+    """Для kind='none' промпт содержит 'кропа нет'."""
+    inputs_given = []
+    monkeypatch.setattr("builtins.input", lambda prompt: inputs_given.append(prompt) or "п")
+    cli._ask_batch_action("video.mp4", "none")
+    assert "кропа нет" in inputs_given[0]
+
+
+def test_calibrate_batch_action_a_uses_save_calibration(tmp_path, monkeypatch):
+    """Ветка 'а' вызывает save_calibration вместо ручной сборки JSON."""
+    inputs_dir = tmp_path / "inputs"
+    inputs_dir.mkdir()
+    (inputs_dir / "v.mp4").write_bytes(b"x")
+    sha = "c" * 64
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast", lambda v, c: sha)
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, ffprobe="ffprobe": (1920, 1080))
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "а")
+    saved = []
+    real_save = cli.save_calibration
+    def mock_save(cal_dir, *, source_name, source_sha256, crop, frame, setup_label=None):
+        saved.append({"source_name": source_name, "setup_label": setup_label})
+        return real_save(cal_dir, source_name=source_name, source_sha256=source_sha256,
+                         crop=crop, frame=frame, setup_label=setup_label)
+    monkeypatch.setattr(cli, "save_calibration", mock_save)
+
+    cli.cmd_calibrate_batch(root=tmp_path, inputs_dir=inputs_dir,
+                            calibrations_dir=tmp_path / "calibrations",
+                            cache_dir=tmp_path / "cache")
+    assert saved, "save_calibration должна была быть вызвана"
+    assert saved[0]["setup_label"] == "auto"
 
 
 # ------------------------------------------ run: не интерактивен
@@ -1156,7 +1256,7 @@ def test_run_does_not_call_ask_batch_action(monkeypatch, tmp_path):
     if hasattr(cli, "_ask_batch_action"):
         called = []
         monkeypatch.setattr(cli, "_ask_batch_action",
-                            lambda name: called.append(name) or (_ for _ in ()).throw(
+                            lambda name, kind: called.append(name) or (_ for _ in ()).throw(
                                 AssertionError(f"run вызвал интерактив для {name}")))
 
     video = tmp_path / "v.mp4"

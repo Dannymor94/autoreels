@@ -399,26 +399,34 @@ def cmd_render(
 # ---------------------------------------------------------------------- калибровка (batch)
 
 def _calibration_kind(calibrations_dir: Path, sha: str) -> str:
-    """Вернуть 'manual', 'auto' или 'none' для видео по sha256."""
+    """Вернуть 'manual', 'auto', 'none' или 'corrupt' для видео по sha256."""
     path = calibration_path(calibrations_dir, sha)
     if not path.is_file():
         return "none"
     try:
-        import json as _json
-        rec = _json.loads(path.read_text(encoding="utf-8"))
+        rec = json.loads(path.read_text(encoding="utf-8"))
         return "auto" if rec.get("auto") or rec.get("setup_label") == "auto" else "manual"
     except Exception:  # noqa: BLE001
-        return "none"
+        return "corrupt"
 
 
-def _ask_batch_action(name: str) -> str:
+def _ask_batch_action(name: str, kind: str) -> str:
     """Интерактивный промпт для одного видео в calibrate --all. Точка подмены в тестах."""
+    if kind == "auto":
+        prompt = f"  {name}: автокроп уже зафиксирован. [к]алибровать вручную / [п]ропустить? "
+        valid = ("к", "п", "k", "p")
+        norm = {"k": "к", "p": "п"}
+        hint = "введите к или п"
+    else:
+        prompt = f"  {name}: кропа нет. [к]алибровать / [а]втокроп / [п]ропустить? "
+        valid = ("к", "а", "п", "k", "a", "p")
+        norm = {"k": "к", "a": "а", "p": "п"}
+        hint = "введите к, а или п"
     while True:
-        ans = input(f"  {name}: кропа нет. [к]алибровать / [а]втокроп / [п]ропустить? ").strip().lower()
-        if ans in ("к", "а", "п", "k", "a", "p"):
-            # нормализовать латиницу → кириллица
-            return {"k": "к", "a": "а", "p": "п"}.get(ans, ans)
-        print("  введите к, а или п")
+        ans = input(prompt).strip().lower()
+        if ans in valid:
+            return norm.get(ans, ans)
+        print(f"  {hint}")
 
 
 def cmd_calibrate_batch(
@@ -450,8 +458,12 @@ def cmd_calibrate_batch(
         kind = _calibration_kind(calibrations_dir, sha)
         if kind == "manual":
             continue  # уже откалиброван вручную — пропуск молча
+        if kind == "corrupt":
+            print(f"  ⚠ {video.name}: повреждённый файл калибровки — пропуск "
+                  f"(удалите {calibration_path(calibrations_dir, sha)} и повторите)")
+            continue
 
-        action = _ask_batch_action(video.name)
+        action = _ask_batch_action(video.name, kind)
 
         if action == "п":
             continue
@@ -459,19 +471,13 @@ def cmd_calibrate_batch(
         if action == "а":
             frame_size = _probe_frame_size_for_auto(video, ffprobe=ffprobe)
             crop = auto_crop(frame_size)
-            import json as _json
-            calibrations_dir.mkdir(parents=True, exist_ok=True)
-            rec = {
-                "source_name": video.name,
-                "source_sha256": sha,
-                "setup_label": "auto",
-                "crop": crop.model_dump(),
-                "scale": [1080, 1920],
-                "frame": list(frame_size),
-                "auto": True,
-            }
-            calibration_path(calibrations_dir, sha).write_text(
-                _json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8"
+            save_calibration(
+                calibrations_dir,
+                source_name=video.name,
+                source_sha256=sha,
+                crop=crop,
+                frame=frame_size,
+                setup_label="auto",
             )
             print(f"  ⚙ автокроп зафиксирован: {video.name}")
 
@@ -516,14 +522,18 @@ def cmd_status(*, root=".") -> int:
                 kind = "none"
             if kind == "manual":
                 mark = "✓ кроп откалиброван (ручной)"
+            elif kind == "auto":
+                mark = "⚙ автокроп (зафиксирован)"
+            elif kind == "corrupt":
+                mark = "⚠ калибровка повреждена"
             else:
-                mark = "⚙ автокроп (калибровки нет)" if kind == "none" else "⚙ автокроп (зафиксирован)"
+                mark = "⚙ автокроп (калибровки нет)"
             print(f"  │ {v.name:<30}  {mark}")
         print("  └──────────────────────────────────────────────────")
 
     # Предупреждения: манифесты без видео
     warnings: list[str] = []
-    input_stems = {v.stem for v in inputs}
+    input_stems = {v.stem for v in inputs} | {v.stem for v in archived}
     for mf in manifests:
         try:
             m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
@@ -679,6 +689,8 @@ def _build_parser():
                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
     pc.add_argument("--ffprobe", default="ffprobe",
                     help="путь к ffprobe (по умолчанию: ffprobe из PATH)")
+    pc.add_argument("--root", default=".",
+                    help="корень проекта (по умолчанию: .)")
     pc.add_argument("--port", type=int, default=8765,
                     help="порт localhost-сервера калибровки (по умолчанию: 8765)")
 
@@ -745,7 +757,7 @@ def main(argv=None) -> int:
     try:
         if args.cmd == "calibrate":
             if args.all:
-                cmd_calibrate_batch(ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
+                cmd_calibrate_batch(root=args.root, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
             elif args.video:
                 cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
                               ffprobe=args.ffprobe, port=args.port)
