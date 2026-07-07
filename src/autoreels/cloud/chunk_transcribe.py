@@ -254,13 +254,17 @@ def transcribe_chunks(
       results — list[Transcript|None] в том же порядке (None = провал)
       warnings — список строк для пользователя о пропущенных диапазонах
     """
+    from autoreels.core.progress import chunk_progress
+
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    total = len(chunks_info)
     results: list[Transcript | None] = []
     warnings: list[str] = []
 
     for i, (chunk_path, start_sec, end_sec) in enumerate(chunks_info):
+        chunk_progress("транскрипция", i + 1, total)
         cache_path = _chunk_cache_path(cache_dir, chunk_path)
 
         # Кэш-хит
@@ -285,6 +289,7 @@ def transcribe_chunks(
             )
             results.append(None)
 
+    chunk_progress("транскрипция", total, total, done=True)
     return results, warnings
 
 
@@ -310,11 +315,15 @@ def transcribe_chunked(
     Инвариант: offset чанка i = real_start_sec[i] (точка -ss, которую получил ffmpeg),
     а не target_sec[i] = i * chunk_duration. Разница target vs actual = смещение слов у границ.
     """
+    from autoreels.core.progress import chunk_start
+
     audio_path = Path(audio_path)
     cache_dir  = Path(cache_dir)
 
     duration = _probe_duration(audio_path, ffmpeg)
     n_chunks = max(1, math.ceil(duration / cfg.whisper_chunk_duration_sec))
+    # Groq Whisper: ~30с на 10-мин чанк
+    chunk_start("транскрипция", n_chunks, est_sec=n_chunks * 30)
 
     # target-границы: точки, где хотим нарезать
     target_splits = [i * cfg.whisper_chunk_duration_sec for i in range(1, n_chunks)]

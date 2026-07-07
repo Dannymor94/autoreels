@@ -87,7 +87,10 @@ class GroqLLM:
             # Основное лечение 413 — reasoning=none + R0-чанкинг (M1.3).
             if resp.status_code in (429, 413):
                 last_status = resp.status_code
-                time.sleep(float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC)))
+                wait = float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC))
+                from autoreels.core.progress import throttle_wait as _throttle_wait
+                _throttle_wait(wait)
+                time.sleep(wait)
                 continue
             try:
                 resp.raise_for_status()

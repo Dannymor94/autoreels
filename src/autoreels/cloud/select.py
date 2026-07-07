@@ -237,16 +237,23 @@ def select_chunked(
     ранжирование по score и сквозная нумерация.
     """
     from autoreels.cloud.chunk_transcribe import dedup_reels, renumber_reels
+    from autoreels.core.progress import chunk_progress, chunk_start, throttle_wait
 
     chunking = r0_cfg.chunking
     effective_tokens = _effective_chunk_tokens(system_text, fewshot, chunking.r0_chunk_tokens)
     chunks = split_compressed(compressed, effective_tokens, chunking.r0_overlap_tokens)
 
+    # ~15с на LLM + задержка между чанками
+    est_sec = len(chunks) * (chunking.r0_chunk_delay_sec + 15)
+    chunk_start("R0", len(chunks), est_sec=est_sec)
+
     all_reels: list[Reel] = []
     for i, chunk in enumerate(chunks):
         if i > 0:
+            throttle_wait(chunking.r0_chunk_delay_sec)
             time.sleep(chunking.r0_chunk_delay_sec)
-        print(f"  R0 чанк {i + 1}/{len(chunks)}…", flush=True)
+        chunk_progress("R0", i + 1, len(chunks),
+                       extra=f"найдено {len(all_reels)} моментов")
         messages = build_prompt(
             system_text, fewshot, chunk,
             min_score=r0_cfg.min_score,
@@ -256,11 +263,14 @@ def select_chunked(
         try:
             segs = _complete_and_parse(provider, messages)
         except SelectError as e:
-            print(f"  ⚠ R0 чанк {i + 1} провалился: {e}", flush=True)
+            print(f"\n  ⚠ R0 чанк {i + 1} провалился: {e}", flush=True)
             continue
         reels = segments_to_reels(segs)
         flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
         all_reels.extend(filter_by_score(reels, min_score=r0_cfg.min_score))
+
+    chunk_progress("R0", len(chunks), len(chunks),
+                   extra=f"найдено {len(all_reels)} моментов", done=True)
 
     # Дедуп по t0 (первый по хронологии при пересечении > порога)
     all_reels = dedup_reels(all_reels, chunking.dedup_overlap_ratio)
