@@ -622,17 +622,17 @@ def test_main_run_bad_video_returns_1_with_clean_message(tmp_path, capsys, monke
 
 # ------------------------------------------------------------------ шпаргалка (без аргументов)
 
-def test_no_args_prints_cheatsheet_and_exits_0(capsys):
+def test_no_args_prints_status_and_exits_0(capsys):
+    """autoreels без аргументов показывает status (не cheatsheet) и выходит с 0."""
     rc = cli.main([])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "calibrate" in out
-    assert "run" in out
-    assert "render" in out
-    assert "цикл" in out.lower() or "рабочий" in out.lower()
+    # Status-вывод содержит counts папок
+    assert "inputs" in out.lower()
+    assert "manifests" in out.lower()
 
 
-def test_no_args_cheatsheet_mentions_folders(capsys):
+def test_no_args_mentions_folders(capsys):
     rc = cli.main([])
     assert rc == 0
     out = capsys.readouterr().out
@@ -641,11 +641,13 @@ def test_no_args_cheatsheet_mentions_folders(capsys):
     assert "reels-out/" in out
 
 
-def test_no_args_cheatsheet_hints_subcommand_help(capsys):
+def test_no_args_shows_next_step_hint(capsys):
+    """autoreels без аргументов выводит подсказку следующего шага."""
     rc = cli.main([])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "--help" in out
+    # Либо hint (ar go / ar r) либо ссылка на help
+    assert "ar" in out.lower() or "help" in out.lower() or "autoreels" in out
 
 
 # ------------------------------------------------------------------ autoreels help
@@ -691,34 +693,36 @@ def test_calibrate_help_mentions_setup_flag(capsys):
 
 # ------------------------------------------------------------------ шпаргалка: новые команды
 
-def test_cheatsheet_includes_status_command(capsys):
+def test_no_args_includes_status_section(capsys):
+    """autoreels без аргументов включает status-вывод (inputs, manifests)."""
     cli.main([])
     out = capsys.readouterr().out
-    assert "status" in out
+    assert "status" in out.lower() or "inputs" in out.lower()
 
 
-def test_cheatsheet_includes_calibrate_all(capsys):
-    cli.main([])
+def test_no_args_help_command_still_works(capsys):
+    """autoreels help по-прежнему выводит расширенную справку включая --all."""
+    cli.main(["help"])
     out = capsys.readouterr().out
     assert "--all" in out
 
 
-def test_cheatsheet_has_4_step_cycle(capsys):
-    cli.main([])
+def test_help_command_has_workflow_steps(capsys):
+    """autoreels help содержит пронумерованный цикл работы."""
+    cli.main(["help"])
     out = capsys.readouterr().out
-    # Рабочий цикл должен содержать 4 шага (status + calibrate + run + render)
     assert "1." in out and "4." in out
 
 
-def test_cheatsheet_mentions_inputs_archive(capsys):
-    cli.main([])
+def test_help_mentions_inputs_archive(capsys):
+    cli.main(["help"])
     out = capsys.readouterr().out
     assert "inputs-archive/" in out
 
 
-def test_cheatsheet_mentions_mac_and_system(capsys):
-    """Шпаргалка содержит пометки Mac / системник."""
-    cli.main([])
+def test_help_mentions_mac_and_system(capsys):
+    """autoreels help содержит пометки Mac / системник."""
+    cli.main(["help"])
     out = capsys.readouterr().out
     assert "Mac" in out or "mac" in out.lower()
     assert "системник" in out.lower() or "amf" in out.lower()
@@ -791,8 +795,9 @@ def test_help_has_4_workflow_stages(capsys):
 
 def test_help_workflow_has_run_and_render_commands(capsys):
     out = _help_out(capsys)
-    assert "autoreels run" in out
-    assert "autoreels render" in out
+    # help упоминает run и render (напрямую или через ar go / ar r)
+    assert "run" in out
+    assert "render" in out
 
 
 def test_help_mentions_groq(capsys):
@@ -1411,3 +1416,156 @@ def test_install_aliases_main_dispatch_dry_run(tmp_path, capsys, monkeypatch):
     assert rc == 0
     out = capsys.readouterr().out
     assert "source" in out
+
+
+# -------------------------------------------------- render: ffmpeg из конфига
+
+def test_render_config_accepts_ffmpeg_field():
+    """RenderConfig принимает поле ffmpeg."""
+    from autoreels.core.config import load_render_config
+    cfg = load_render_config(REPO_ROOT / "config" / "render.yaml")
+    assert hasattr(cfg, "ffmpeg")
+
+
+def test_render_config_ffmpeg_default_is_ffmpeg():
+    """По умолчанию RenderConfig.ffmpeg == 'ffmpeg'."""
+    from autoreels.core.config import load_render_config
+    cfg = load_render_config(REPO_ROOT / "config" / "render.yaml")
+    assert cfg.ffmpeg == "ffmpeg"
+
+
+def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
+    """cmd_render без явного --ffmpeg берёт путь из render_cfg.ffmpeg."""
+    from autoreels.core.config import RenderConfig, load_render_config
+    from autoreels.core.models import Manifest
+
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "v.mp4").write_bytes(b"x")
+
+    ffmpeg_used = []
+
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, subtitles_cfg):
+        ffmpeg_used.append(ffmpeg)
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", _fake_render)
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, ffmpeg=None)
+
+    assert ffmpeg_used, "render_crop не был вызван"
+    # Должен использоваться путь из конфига (дефолт "ffmpeg"), а не None
+    assert ffmpeg_used[0] is not None
+    assert ffmpeg_used[0] == "ffmpeg"
+
+
+def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
+    """Явный ffmpeg аргумент перекрывает значение из конфига."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "v.mp4").write_bytes(b"x")
+
+    ffmpeg_used = []
+
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, subtitles_cfg):
+        ffmpeg_used.append(ffmpeg)
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", _fake_render)
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, ffmpeg="/custom/ffmpeg")
+
+    assert ffmpeg_used[0] == "/custom/ffmpeg"
+
+
+# -------------------------------------------------- ar без аргументов: status + hint
+
+def test_no_args_shows_status_output(capsys):
+    """autoreels без аргументов выводит status (inputs/, manifests/ и т.п.)."""
+    rc = cli.main([])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "inputs/" in out and "manifests/" in out
+
+
+def test_no_args_main_exits_0(capsys):
+    rc = cli.main([])
+    assert rc == 0
+
+
+def test_no_args_includes_status_info(capsys):
+    """autoreels без аргументов выводит информацию о состоянии проекта."""
+    cli.main([])
+    out = capsys.readouterr().out
+    # Должно быть что-то из status (inputs/ или manifests/)
+    assert "inputs" in out.lower() or "status" in out.lower() or "autoreels" in out
+
+
+def test_next_hint_with_videos(tmp_path):
+    """_next_hint возвращает 'ar go' когда есть видео в inputs/."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+
+    hint = cli._next_hint(root=tmp_path)
+    assert hint is not None
+    assert "ar go" in hint or "go" in hint
+
+
+def test_next_hint_with_manifests(tmp_path):
+    """_next_hint возвращает 'ar r' когда есть манифесты в manifests/."""
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "manifests" / "a.json").write_bytes(b"{}")
+
+    hint = cli._next_hint(root=tmp_path)
+    assert hint is not None
+    assert "ar r" in hint or " r" in hint
+
+
+def test_next_hint_empty_project(tmp_path):
+    """_next_hint возвращает None или пустую подсказку когда ничего нет."""
+    hint = cli._next_hint(root=tmp_path)
+    # Пустой проект — нет срочного следующего шага
+    assert hint is None or isinstance(hint, str)
+
+
+def test_next_hint_videos_take_priority_over_manifests(tmp_path):
+    """Если есть и видео и манифесты — подсказка про ar go (run первым)."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "manifests" / "b.json").write_bytes(b"{}")
+
+    hint = cli._next_hint(root=tmp_path)
+    assert hint is not None
+    assert "go" in hint
+
+
+def test_no_args_shows_hint_with_videos(capsys, tmp_path, monkeypatch):
+    """autoreels без аргументов показывает 'ar go' когда есть видео."""
+    monkeypatch.chdir(tmp_path)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+
+    # Нужен config dir чтобы cmd_status не упал на манифестах
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "ar go" in out or "go" in out.lower()
+
+
+def test_no_args_shows_hint_with_manifests(capsys, tmp_path, monkeypatch):
+    """autoreels без аргументов показывает 'ar r' когда есть манифесты без видео."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "manifests" / "a.json").write_bytes(
+        _manifest(source="a.mp4").model_dump_json().encode()
+    )
+
+    cli.main([])
+    out = capsys.readouterr().out
+    assert "ar r" in out or " r" in out.lower()

@@ -308,7 +308,7 @@ def cmd_render(
     out_dir=None,
     archive_dir=None,
     root=".",
-    ffmpeg: str = "ffmpeg",
+    ffmpeg: str | None = None,
     encoder=None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
@@ -335,6 +335,7 @@ def cmd_render(
         return []
 
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
+    effective_ffmpeg = ffmpeg or render_cfg.ffmpeg
     all_outputs: list[Path] = []
     skipped_no_video: list[str] = []
     skipped_done: list[str] = []
@@ -364,7 +365,7 @@ def cmd_render(
             print(f"=== render: {mf.name} ({label}, {enc}) → {out_dir_final} ===", flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
-                render_cfg=render_cfg, ffmpeg=ffmpeg, encoder=encoder,
+                render_cfg=render_cfg, ffmpeg=effective_ffmpeg, encoder=encoder,
                 subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
@@ -552,6 +553,27 @@ def cmd_status(*, root=".") -> int:
     return 0
 
 
+# ----------------------------------------------------------------------- smart hint
+
+def _next_hint(root=".") -> str | None:
+    """Подсказка следующего шага по состоянию проекта.
+
+    Возвращает одну строку вида «→ ar go» или None если не очевидно что делать.
+    Видео в inputs/ приоритетнее манифестов: сначала run, потом render.
+    """
+    root = Path(root)
+    inputs = list((root / "inputs").glob("*.mp4")) if (root / "inputs").is_dir() else []
+    manifests = list((root / "manifests").glob("*.json")) if (root / "manifests").is_dir() else []
+
+    if inputs:
+        n = len(inputs)
+        return f"→ {n} видео ждут обработки:  ar go"
+    if manifests:
+        n = len(manifests)
+        return f"→ {n} манифест(а) готовы к рендеру:  ar r  (на системнике)"
+    return None
+
+
 # ----------------------------------------------------------------------- install-aliases
 
 def _find_aliases_sh() -> Path:
@@ -641,7 +663,22 @@ autoreels <команда> --help — детали и флаги.\
 _HELP_EXTENDED = """\
 autoreels — длинное talking-head видео → вертикальные Reels 9:16
 
-━━━ КОМАНДЫ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ КОРОТКИЕ КОМАНДЫ (после source aliases.sh) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ar              status + подсказка следующего шага
+  ar go           run всех видео + git push манифестов  (Mac, нужен Groq)
+  ar go --no-push run без push
+  ar r            git pull + render                      (системник)
+  ar s            status
+  ar c            calibrate --all
+  ar h            эта справка
+  ar <...>        передаёт команду в autoreels напрямую
+
+  Энкодер и путь к ffmpeg — в config/render.yaml (не нужны флаги):
+    ffmpeg: ffmpeg              # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe
+    encoder → codec: h264_amf  # Windows AMD; h264_nvenc NVIDIA; libx264 CPU
+
+━━━ ВСЕ КОМАНДЫ autoreels ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   status [--root .]
     Сводка состояния: inputs/ (ждут run), manifests/ (готовы к рендеру),
@@ -660,15 +697,16 @@ autoreels — длинное talking-head видео → вертикальны�
   run [видео] [--ffmpeg путь]
     Облачный тир (Mac, нужен Groq): аудио → Groq Whisper → транскрипт →
     Groq LLM → manifests/<имя>.json. GROQ_API_KEY задаётся в .env.
-    Видео за пределы машины не уходит — только аудио и текст в облако.
     Без аргумента: batch по всем inputs/*.mp4.
     После успеха видео перемещается в inputs-archive/.
 
   render [--encoder КОДЕК] [--ffmpeg путь]
     Локальный тир (системник): manifests/*.json → reels-out/<стем>/<id>.mp4.
-    Каждый рилс: mp4 + txt с текстом поста.
+    Без флагов — берёт encoder и ffmpeg из config/render.yaml.
     Идемпотентен: уже готовые mp4 пропускаются; нет видео → предупреждение ⊘.
-    Windows AMD: --encoder h264_amf   Windows NVIDIA: --encoder h264_nvenc
+
+  install-aliases [--dry-run] [--yes]
+    Дописать source aliases.sh в профиль shell (~/.zshrc / ~/.bashrc).
 
   help
     Эта справка.
@@ -678,18 +716,17 @@ autoreels — длинное talking-head видео → вертикальны�
   ЭТАП 1 — подготовка (обычно Mac):
 
     1. Положить видео в inputs/
-    2. autoreels status                       # что видит: исходники, кропы, манифесты
-    3. autoreels calibrate --all              # настроить кадры (или пропустить → автокроп)
+    2. ar s                 # (= autoreels status) — что видит: исходники, кропы
+    3. ar c                 # (= calibrate --all)  — настроить кадры
 
   ЭТАП 2 — анализ (Mac, нужен Groq):
 
-    4. autoreels run                          # все inputs/*.mp4 → manifests/
+    4. ar go                # run всех видео → manifests/ + git push
        # (длинное >15 мин → чанкинг Whisper автоматически)
-       # git commit manifests/ && git push    # передать манифест на системник
 
-  ЭТАП 3 — рендер (системник Windows, после git pull):
+  ЭТАП 3 — рендер (системник Windows):
 
-    5. autoreels render --encoder h264_amf   # → reels-out/<имя>/
+    5. ar r                 # git pull + render → reels-out/<имя>/
        # каждый клип: <id>.mp4 + <id>.txt с текстом поста
 
 ━━━ ВАЖНЫЕ ЗАМЕТКИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -699,9 +736,7 @@ autoreels — длинное talking-head видео → вертикальны�
   • Видео нужно на ОБЕИХ машинах: Mac (для run) и системник (для render).
     Манифест передаётся через git push/pull или Syncthing — видео не передаётся.
   • Нет ручной калибровки → автокроп 9:16 по центру кадра (run — молча).
-    calibrate --all явно спрашивает; ответ «а» фиксирует автокроп.
   • Длинное видео → чанкинг включается автоматически (порог: 15 мин или 20 МБ).
-    429/413 от Groq → пауза между чанками (config: chunking.r0_chunk_delay_sec).
   • Сегменты >59 с → обрезаются по ближайшей паузе (config: too_long_policy: trim).
 
 ━━━ ПАПКИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -854,7 +889,12 @@ def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
 
     if args.cmd is None:
-        print(_CHEATSHEET)
+        cmd_status()
+        hint = _next_hint()
+        if hint:
+            print(f"\n{hint}")
+        else:
+            print("\nautoreels help — полная справка и цикл работы")
         return 0
 
     if args.cmd == "help":

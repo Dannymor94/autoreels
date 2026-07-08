@@ -1,4 +1,7 @@
 # Параметры локального рендера ffmpeg. Ноль магических чисел в коде.
+# ffmpeg: путь к бинарю. На Windows задать под машину: D:\ffmpeg\bin\ffmpeg.exe
+ffmpeg: ffmpeg                 # Mac/Linux: ffmpeg из PATH
+
 scale: [1080, 1920]            # целевое вертикальное разрешение 9:16
 
 encoder:

@@ -70,23 +70,40 @@ python -m autoreels run video.mp4 --setup tearoom_main
 
 → папка с mp4-рилсами + `manifest.json`.
 
-## Короткий алиас
+## Короткие команды (`ar`)
 
 Один раз на каждой машине:
 
 ```bash
-autoreels install-aliases    # сам допишет source-строку в ~/.zshrc или ~/.bashrc
+autoreels install-aliases    # допишет source-строку в ~/.zshrc или ~/.bashrc
 ```
 
-Или вручную — добавь в `~/.zshrc` (Mac) / `~/.bashrc` (Windows Git Bash):
+Или вручную добавь в `~/.zshrc` (Mac) / `~/.bashrc` (Windows Git Bash):
 
 ```bash
 source /путь/к/autoreels/aliases.sh
 ```
 
-Дальше алиасы обновляются через `git pull` — правишь [`aliases.sh`](aliases.sh), коммитишь, на других машинах пулл подтягивает.
+После этого доступны короткие команды:
 
-После установки: `ar status` · `ar calibrate --all` · `ar run` · `ar render --encoder h264_amf`
+| Команда | Что делает |
+|---|---|
+| `ar` | status + подсказка следующего шага |
+| `ar go` | run всех видео + git push манифестов (Mac) |
+| `ar go --no-push` | run без push |
+| `ar r` | git pull + render (системник) |
+| `ar s` | status |
+| `ar c` | calibrate --all |
+| `ar h` | help |
+
+**Энкодер и путь к ffmpeg** — в [`config/render.yaml`](config/render.yaml), не флаги:
+```yaml
+ffmpeg: ffmpeg                   # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe
+encoder:
+  codec: h264_amf                # Windows AMD; h264_nvenc NVIDIA; libx264 CPU
+```
+
+Алиасы обновляются через `git pull` — правишь [`aliases.sh`](aliases.sh), коммитишь.
 
 ## Статус
 

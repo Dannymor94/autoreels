@@ -157,6 +157,7 @@ class RenderConfig(BaseModel):
     audio: Audio
     audio_extract: AudioExtract
     subtitles: SubtitleStyle
+    ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
 
 
 # ----------------------------------------------------------------------- Subtitles
