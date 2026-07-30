@@ -614,6 +614,7 @@ def test_main_wraps_stage_error_as_clean_message(monkeypatch, capsys):
 
 def test_main_run_bad_video_returns_1_with_clean_message(tmp_path, capsys, monkeypatch):
     # run с фейковым видео (b"x") → ffprobe или extract_audio падает → код 1, нет traceback.
+    monkeypatch.chdir(tmp_path)   # «inputs» приёма — под tmp, не засорять реальный inputs/ репо
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
     monkeypatch.setattr(cli, "_stage_extract_audio",
@@ -2662,3 +2663,103 @@ def test_transcribe_passes_source_sha_for_shared_audio_cache(monkeypatch, tmp_pa
     assert seen["source_sha"] is not None
     # совпадает с ключом, который использует run (partial-хэш содержимого)
     assert seen["source_sha"] == cli.state.file_sha256_cached_fast(src, tmp_path / "c")
+
+
+# -------------------------------------------------- migrate-calibrations (рекей ручных)
+
+def test_migrate_calibrations_rekeys_manual_to_partial(tmp_path):
+    """Ручная калибровка под старым (полным) ключом переносится на актуальный partial-p1."""
+    from autoreels.core import state
+    from autoreels.core.calibration import Crop, load_calibration, save_calibration
+
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    video = archive / "lecture.mp4"
+    video.write_bytes(b"videobytes" * 2000)
+    calib = tmp_path / "calibrations"
+
+    full = state.file_sha256(video)
+    partial = state.file_sha256_cached_fast(video, tmp_path / "c")
+    assert full != partial
+    save_calibration(calib, source_name="lecture.mp4", source_sha256=full,
+                     crop=Crop(x=1194, y=0, w=1215, h=2160), frame=[3840, 2160],
+                     setup_label="main")
+    assert not (calib / f"{partial}.json").exists()   # run-ключ пуст → был бы автокроп
+
+    cli.cmd_migrate_calibrations(root=tmp_path, archive_dir=archive,
+                                 calibrations_dir=calib, cache_dir=tmp_path / "c")
+
+    setup = load_calibration(calib, partial)          # теперь находится по run-ключу
+    assert setup.crop.x == 1194
+    assert setup.setup_id == "main"
+
+
+def test_migrate_calibrations_overwrites_auto_with_manual(tmp_path):
+    """Если под partial-ключом лежит автокроп, ручная (важнее) его перекрывает."""
+    from autoreels.core import state
+    from autoreels.core.calibration import Crop, load_calibration, save_calibration
+
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    video = archive / "v.mp4"
+    video.write_bytes(b"content" * 3000)
+    calib = tmp_path / "calibrations"
+
+    full = state.file_sha256(video)
+    partial = state.file_sha256_cached_fast(video, tmp_path / "c")
+    # авто под правильным ключом (как поставил run), ручная под полным
+    save_calibration(calib, source_name="v.mp4", source_sha256=partial,
+                     crop=Crop(x=1312, y=0, w=1215, h=2160), frame=[3840, 2160], setup_label="auto")
+    save_calibration(calib, source_name="v.mp4", source_sha256=full,
+                     crop=Crop(x=1194, y=0, w=1215, h=2160), frame=[3840, 2160], setup_label="main")
+
+    cli.cmd_migrate_calibrations(root=tmp_path, archive_dir=archive,
+                                 calibrations_dir=calib, cache_dir=tmp_path / "c")
+
+    setup = load_calibration(calib, partial)
+    assert setup.crop.x == 1194 and setup.setup_id == "main"   # ручная победила
+
+
+def test_migrate_calibrations_skips_auto_only(tmp_path):
+    """Авто-калибровка под чужим ключом НЕ мигрируется (мигрируем только ручные)."""
+    from autoreels.core import state
+    from autoreels.core.calibration import Crop, save_calibration
+
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    video = archive / "v.mp4"
+    video.write_bytes(b"xyz" * 4000)
+    calib = tmp_path / "calibrations"
+
+    full = state.file_sha256(video)
+    partial = state.file_sha256_cached_fast(video, tmp_path / "c")
+    save_calibration(calib, source_name="v.mp4", source_sha256=full,
+                     crop=Crop(x=1, y=0, w=1215, h=2160), frame=[3840, 2160], setup_label="auto")
+
+    cli.cmd_migrate_calibrations(root=tmp_path, archive_dir=archive,
+                                 calibrations_dir=calib, cache_dir=tmp_path / "c")
+    assert not (calib / f"{partial}.json").exists()   # авто не перенесена
+
+
+def test_migrate_calibrations_idempotent(tmp_path, capsys):
+    """Калибровка уже под актуальным ключом → миграция ничего не делает."""
+    from autoreels.core import state
+    from autoreels.core.calibration import Crop, save_calibration
+
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    video = archive / "v.mp4"
+    video.write_bytes(b"abc" * 5000)
+    calib = tmp_path / "calibrations"
+    partial = state.file_sha256_cached_fast(video, tmp_path / "c")
+    save_calibration(calib, source_name="v.mp4", source_sha256=partial,
+                     crop=Crop(x=1194, y=0, w=1215, h=2160), frame=[3840, 2160], setup_label="main")
+
+    cli.cmd_migrate_calibrations(root=tmp_path, archive_dir=archive,
+                                 calibrations_dir=calib, cache_dir=tmp_path / "c")
+    assert "уже на актуальных" in capsys.readouterr().out.lower()
+
+
+def test_migrate_calibrations_subcommand_registered():
+    args = cli._build_parser().parse_args(["migrate-calibrations"])
+    assert args.cmd == "migrate-calibrations"

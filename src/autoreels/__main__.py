@@ -920,6 +920,64 @@ def cmd_resume(*, root=".", ffmpeg=None, encoder=None) -> int:
     return 0
 
 
+def cmd_migrate_calibrations(
+    *,
+    root=".",
+    inputs_dir=None,
+    archive_dir=None,
+    calibrations_dir=None,
+    cache_dir=None,
+) -> int:
+    """Перенести РУЧНЫЕ калибровки со старого ключа (полный sha256) на актуальный partial-p1.
+
+    До фикса cmd_calibrate писал кроп под полным sha256, а run ищет по partial-p1 → ручной
+    кроп игнорировался (автокроп). Эта миграция находит видео по source_name (в inputs/ и
+    inputs-archive/), считает его partial-ключ и перекладывает ручную калибровку туда
+    (перекрывая автокроп — ручная важнее). Авто-калибровки не трогает. Идемпотентно.
+    """
+    root = Path(root)
+    inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+    archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
+    calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+
+    # Имя файла → путь (inputs приоритетнее архива, но по содержимому они одинаковы).
+    videos: dict[str, Path] = {}
+    for d in (archive_dir, inputs_dir):
+        if d.is_dir():
+            for v in d.glob("*.mp4"):
+                videos[v.name] = v
+
+    migrated = 0
+    for cf in sorted(calibrations_dir.glob("*.json")):
+        try:
+            rec = json.loads(cf.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if rec.get("auto") or rec.get("setup_label") == "auto":
+            continue  # авто не мигрируем
+        name = rec.get("source_name")
+        video = videos.get(name) if name else None
+        if video is None:
+            continue  # видео недоступно — сопоставить ключ не с чем
+        partial = state.file_sha256_cached_fast(video, cache_dir)
+        if cf.stem == partial:
+            continue  # уже под актуальным ключом
+        rec["source_sha256"] = partial
+        (calibrations_dir / f"{partial}.json").write_text(
+            json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"  ✓ {name}: ручная калибровка → актуальный ключ {partial[:12]}…", flush=True)
+        migrated += 1
+
+    if migrated == 0:
+        print("миграция калибровок: всё уже на актуальных ключах.", flush=True)
+    else:
+        print(f"миграция калибровок: перенесено {migrated}. "
+              f"Перепроверь run/render — теперь возьмётся ручной кроп.", flush=True)
+    return 0
+
+
 # ---------------------------------------------------------------------- калибровка (batch)
 
 def _calibration_kind(calibrations_dir: Path, sha: str) -> str:
@@ -1594,6 +1652,18 @@ def _build_parser():
     prs.add_argument("--encoder", default=None, help="видеокодек ffmpeg (как у render)")
     prs.add_argument("--ffmpeg", default=None, help="путь к ffmpeg (иначе из render.yaml)")
 
+    sub.add_parser(
+        "migrate-calibrations",
+        help="перенести ручные калибровки со старого ключа (полный sha) на актуальный",
+        description=(
+            "Разовая миграция: ручные калибровки, сохранённые до фикса ключа (под полным\n"
+            "sha256), переносятся на актуальный partial-p1 ключ — чтобы run брал ручной\n"
+            "кроп, а не автокроп. Видео ищутся по имени в inputs/ и inputs-archive/.\n\n"
+            "Пример: autoreels migrate-calibrations"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
     pi = sub.add_parser(
         "install-aliases",
         help="дописать source aliases.sh в профиль shell (~/.zshrc / ~/.bashrc)",
@@ -1690,6 +1760,8 @@ def main(argv=None) -> int:
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
         elif args.cmd == "resume":
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg)
+        elif args.cmd == "migrate-calibrations":
+            return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":
             return cmd_install_aliases(
                 aliases_path=_find_aliases_sh(),
