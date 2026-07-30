@@ -857,6 +857,47 @@ def cmd_render(
     return all_outputs
 
 
+def cmd_resume(*, root=".", ffmpeg=None, encoder=None) -> int:
+    """Продолжить прерванное: доделать рендер недостающих клипов + сообщить о недокачках.
+
+    Тяжёлые шаги проекта идемпотентны и «продолжаемы» by design: render дорисовывает
+    недостающие клипы, докачка Я.Диска возобновляется по той же ссылке, run переиспользует
+    кэш. Эта команда сводит их: локально чинит рендер, а по остальному даёт подсказку.
+    """
+    root = Path(root)
+    inputs = root / "inputs"
+    manifests_dir = root / "manifests"
+    out_root = root / "reels-out"
+    did_something = False
+
+    parts = sorted(inputs.glob("*.part")) if inputs.is_dir() else []
+    if parts:
+        did_something = True
+        print(f"⚠ прерванные загрузки: {len(parts)} .part-файл(ов) в inputs/ —", flush=True)
+        print("  повтори ту же ссылку (меню п.5 или ar run <url>): "
+              "докачается с места обрыва.", flush=True)
+        for p in parts:
+            print(f"   • {p.name}", flush=True)
+
+    pending: list[str] = []
+    for mf in (sorted(manifests_dir.glob("*.json")) if manifests_dir.is_dir() else []):
+        try:
+            m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+            if _missing_reels(m, out_root / Path(m.source).stem):
+                pending.append(mf.name)
+        except Exception:  # noqa: BLE001
+            continue
+    if pending:
+        did_something = True
+        print(f"дорендериваю {len(pending)} манифест(ов) с недостающими клипами…", flush=True)
+        cmd_render(root=root, ffmpeg=ffmpeg, encoder=encoder)
+
+    if not did_something:
+        print("нечего продолжать — всё готово (нет .part и недорендеренных манифестов).",
+              flush=True)
+    return 0
+
+
 # ---------------------------------------------------------------------- калибровка (batch)
 
 def _calibration_kind(calibrations_dir: Path, sha: str) -> str:
@@ -1047,7 +1088,9 @@ _MENU_ITEMS: list[tuple[str, str, str, str]] = [
                         "URL, Яндекс.Диск, YouTube или файл на диске"),
     ("6", "transcribe", "Транскрибировать (для контента)",
                         "источник: ссылка или файл → текст"),
-    ("7", "help",       "Справка",                       ""),
+    ("7", "resume",     "Продолжить прерванное",
+                        "доделать рендер, докачки"),
+    ("8", "help",       "Справка",                       ""),
     ("0", "quit",       "Выход",                         ""),
 ]
 
@@ -1293,6 +1336,10 @@ autoreels — длинное talking-head видео → вертикальны�
     Без флагов — берёт encoder и ffmpeg из config/render.yaml.
     Идемпотентен: уже готовые mp4 пропускаются; нет видео → предупреждение ⊘.
 
+  resume
+    Продолжить прерванное: дорендеривает манифесты с недостающими клипами
+    и сообщает о недокачанных .part в inputs/ (повтори ту же ссылку — докачается).
+
   install-aliases [--dry-run] [--yes]
     Дописать source aliases.sh в профиль shell (~/.zshrc / ~/.bashrc).
 
@@ -1326,6 +1373,8 @@ autoreels — длинное talking-head видео → вертикальны�
   • Нет ручной калибровки → автокроп 9:16 по центру кадра (run — молча).
   • Длинное видео → чанкинг включается автоматически (порог: 15 мин или 20 МБ).
   • Сегменты >59 с → обрезаются по ближайшей паузе (config: too_long_policy: trim).
+  • Прогресс скачивания обновляет одну строку (\\r). Если терминал плодит строки —
+    AUTOREELS_FORCE_TTY=1; для лога в файл — AUTOREELS_NO_TTY=1.
 
 ━━━ ПАПКИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -1495,6 +1544,20 @@ def _build_parser():
     pd.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin\\ffmpeg.exe)")
 
+    prs = sub.add_parser(
+        "resume",
+        help="продолжить прерванное: доделать рендер недостающих клипов + подсказки по докачкам",
+        description=(
+            "Продолжает прерванную работу за счёт идемпотентности проекта:\n"
+            "  • дорендеривает манифесты с недостающими клипами (render идемпотентен);\n"
+            "  • сообщает о .part в inputs/ (недокачанные — повтори ту же ссылку).\n\n"
+            "Пример: autoreels resume"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    prs.add_argument("--encoder", default=None, help="видеокодек ffmpeg (как у render)")
+    prs.add_argument("--ffmpeg", default=None, help="путь к ffmpeg (иначе из render.yaml)")
+
     pi = sub.add_parser(
         "install-aliases",
         help="дописать source aliases.sh в профиль shell (~/.zshrc / ~/.bashrc)",
@@ -1589,6 +1652,8 @@ def main(argv=None) -> int:
             cmd_transcribe(src, fmt=args.format, ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
+        elif args.cmd == "resume":
+            return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg)
         elif args.cmd == "install-aliases":
             return cmd_install_aliases(
                 aliases_path=_find_aliases_sh(),

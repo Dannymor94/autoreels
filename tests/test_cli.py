@@ -1699,7 +1699,8 @@ def test_menu_action_maps_digits_to_actions():
     assert cli._menu_action("4") == "calibrate"
     assert cli._menu_action("5") == "path"
     assert cli._menu_action("6") == "transcribe"
-    assert cli._menu_action("7") == "help"
+    assert cli._menu_action("7") == "resume"
+    assert cli._menu_action("8") == "help"
     assert cli._menu_action("0") == "quit"
 
 
@@ -1771,9 +1772,48 @@ def test_menu_render_shows_state_header(tmp_path):
 def test_menu_render_lists_all_items(tmp_path):
     """Меню перечисляет все пункты с их цифрами."""
     out = cli._menu_render(root=tmp_path)
-    for num in ("1", "2", "3", "4", "5", "6", "7", "0"):
+    for num in ("1", "2", "3", "4", "5", "6", "7", "8", "0"):
         assert f"{num})" in out
     assert "Выход" in out
+
+
+def test_menu_render_has_resume_item(tmp_path):
+    """В меню есть пункт «Продолжить прерванное»."""
+    out = cli._menu_render(root=tmp_path)
+    assert "родолж" in out
+
+
+# -------------------------------------------------- resume: продолжить прерванное
+
+def test_resume_reports_interrupted_downloads(tmp_path, capsys, monkeypatch):
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "big.mp4.part").write_bytes(b"partial")
+    monkeypatch.setattr(cli, "cmd_render", lambda **k: [])
+    cli.cmd_resume(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "big.mp4.part" in out
+    assert "прерван" in out.lower() or "докач" in out.lower()
+
+
+def test_resume_renders_pending_manifests(tmp_path, monkeypatch):
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    called = {}
+    monkeypatch.setattr(cli, "cmd_render", lambda **k: called.setdefault("rendered", True) or [])
+    cli.cmd_resume(root=tmp_path)
+    assert called.get("rendered")
+
+
+def test_resume_nothing_to_do(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "cmd_render", lambda **k: pytest.fail("render не нужен — нечего"))
+    cli.cmd_resume(root=tmp_path)
+    assert "нечего продолжать" in capsys.readouterr().out.lower()
+
+
+def test_resume_subcommand_registered():
+    args = cli._build_parser().parse_args(["resume"])
+    assert args.cmd == "resume"
 
 
 def test_menu_render_has_transcribe_item(tmp_path):

@@ -11,15 +11,25 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 import sys
 
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _DONE = "✓"
 _LINE_WIDTH = 72   # минимальная ширина строки (заполняется пробелами на TTY)
+_CLEAR_EOL = "\033[K"   # ANSI «стереть до конца строки» — вместо добивки пробелами
 
 
 def is_tty() -> bool:
-    """True если stdout — интерактивный терминал."""
+    """True если вывод — интерактивный терминал (обновляем строку через \\r).
+
+    Страховка от неверного автодетекта: AUTOREELS_FORCE_TTY=1 форсит перезапись,
+    AUTOREELS_NO_TTY=1 форсит построчный вывод (для пайпа в файл).
+    """
+    if os.environ.get("AUTOREELS_NO_TTY") == "1":
+        return False
+    if os.environ.get("AUTOREELS_FORCE_TTY") == "1":
+        return True
     return sys.stdout.isatty()
 
 
@@ -135,18 +145,26 @@ def format_download_done(total_bytes: int, elapsed_sec: float) -> str:
 
 
 def print_download_progress(downloaded: int, total: int | None, speed_bps: float) -> None:
-    """Напечатать строку прогресса скачивания. TTY: перезапись через \\r; иначе — строкой."""
+    """Обновить ОДНУ строку прогресса скачивания.
+
+    TTY: `\\r` + очистка до конца строки (`\\033[K`) + текст, БЕЗ `\\n` — курсор в начало,
+    хвост прошлой строки стёрт, следующее обновление перезапишет на месте (без переноса,
+    в отличие от добивки пробелами до фикс. ширины — та переносилась на узких терминалах).
+    Не-TTY (пайп/файл): обычная строка с `\\n`.
+    """
     line = format_download_line(downloaded, total, speed_bps)
     if is_tty():
-        print(f"\r{line:<{_LINE_WIDTH}}", end="", flush=True)
+        sys.stdout.write(f"\r{_CLEAR_EOL}{line}")
+        sys.stdout.flush()
     else:
         print(line, flush=True)
 
 
 def print_download_done(total_bytes: int, elapsed_sec: float) -> None:
-    """Напечатать итог скачивания (на TTY — закрывает \\r-строку новой строкой)."""
+    """Напечатать итог скачивания. TTY: закрывает перезаписываемую строку через `\\n`."""
     line = format_download_done(total_bytes, elapsed_sec)
     if is_tty():
-        print(f"\r{line:<{_LINE_WIDTH}}".rstrip(), flush=True)
+        sys.stdout.write(f"\r{_CLEAR_EOL}{line}\n")
+        sys.stdout.flush()
     else:
         print(line, flush=True)

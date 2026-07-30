@@ -375,3 +375,52 @@ def test_format_download_done():
     assert s.startswith("✓")
     assert "12.0 ГБ" in s
     assert "1:48:00" in s
+
+
+# ------------------------------------------------------------------ download: \r-перезапись
+
+def test_print_download_progress_tty_overwrites_no_newline(monkeypatch, capsys):
+    """TTY: одно обновление = \\r + очистка до конца строки, БЕЗ \\n (перезапись на месте)."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.print_download_progress(3 * (1 << 30), 12 * (1 << 30), 2 * (1 << 20))
+    out = capsys.readouterr().out
+    assert out.startswith("\r")
+    assert "\033[K" in out          # очистка до конца строки — нет «хвоста» и переноса
+    assert not out.endswith("\n")   # без перевода строки — следующее обновление перезапишет
+    assert "25%" in out
+
+
+def test_print_download_progress_no_fixed_width_padding(monkeypatch, capsys):
+    """Нет добивки пробелами до фикс. ширины (её и не должно быть — иначе перенос/лесенка)."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.print_download_progress(3 * (1 << 30), 12 * (1 << 30), 2 * (1 << 20))
+    out = capsys.readouterr().out
+    assert "   " not in out          # нет длинного хвоста пробелов
+
+
+def test_print_download_progress_non_tty_plain_line(monkeypatch, capsys):
+    """Не-TTY (пайп/файл): обычная строка с \\n, без управляющих символов."""
+    monkeypatch.setattr(P, "is_tty", lambda: False)
+    P.print_download_progress(3 * (1 << 30), 12 * (1 << 30), 2 * (1 << 20))
+    out = capsys.readouterr().out
+    assert out.endswith("\n")
+    assert "\r" not in out and "\033[K" not in out
+
+
+def test_print_download_done_tty_ends_with_newline(monkeypatch, capsys):
+    """Финал на TTY: \\r + очистка + строка + \\n (закрывает перезаписываемую строку)."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.print_download_done(12 * (1 << 30), 6480)
+    out = capsys.readouterr().out
+    assert out.startswith("\r")
+    assert out.endswith("\n")
+    assert "✓" in out
+
+
+def test_is_tty_env_override(monkeypatch):
+    """AUTOREELS_FORCE_TTY=1 → is_tty True даже если stdout не терминал (страховка)."""
+    monkeypatch.setenv("AUTOREELS_FORCE_TTY", "1")
+    assert P.is_tty() is True
+    monkeypatch.setenv("AUTOREELS_FORCE_TTY", "0")
+    monkeypatch.setenv("AUTOREELS_NO_TTY", "1")
+    assert P.is_tty() is False

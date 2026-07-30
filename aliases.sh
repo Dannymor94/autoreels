@@ -34,6 +34,7 @@ _ar_menu() {
                 autoreels menu --classify "$_src"     # покажет, что распознано
                 ar t "$_src"
                 ;;
+            resume)    autoreels resume ;;
             help)      ar h ;;
             quit)      echo "пока!"; return 0 ;;
             *)
