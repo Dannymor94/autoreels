@@ -52,12 +52,32 @@
 - **ffmpeg** в `PATH` — извлечение аудио и весь локальный рендер. macOS: `brew install ffmpeg`.
 - **`GROQ_API_KEY`** в окружении (см. [`.env.example`](.env.example)) — Whisper + R0-выборка.
 
-## Установка и тесты
+## Запуск одной командой
+
+```bash
+source start.sh        # (или коротко: . start.sh)
+```
+
+Поднимает всё окружение и открывает меню: определяет корень проекта, активирует
+`.venv` (Mac `bin/` / Windows Git Bash `Scripts/`), при первом запуске **сам** создаёт
+venv и ставит `autoreels`, подключает короткие команды `ar`, предупреждает если в `.env`
+нет `GROQ_API_KEY`, показывает статус и запускает меню.
+
+> Запускать через **`source`** (не `./start.sh`), чтобы venv и команды `ar` остались
+> в текущем shell после выхода из меню. Двойным кликом: **`start.command`** (macOS) /
+> **`start.bat`** (Windows) — откроют терминал с готовым окружением.
+
+Удобный алиас (один раз в `~/.zshrc` / `~/.bashrc`):
+```bash
+alias start='source /путь/к/autoreels/start.sh'
+```
+
+## Установка и тесты (вручную)
 
 ```bash
 python3.13 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest          # 65 passed
+.venv/bin/python -m pytest
 ```
 
 ## Запуск (цель M0)
