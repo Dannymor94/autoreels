@@ -7,6 +7,9 @@
 # BASH_SOURCE[0] в bash; $0 в zsh при source.
 _AR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 
+# Принудительно UTF-8 для Python-вывода (важно на Windows Git Bash, где дефолт — cp1251/cp866).
+export PYTHONUTF8=1
+
 # Интерактивное меню (цикл в bash, «мозги» — autoreels menu на Python).
 # Рисует адаптивное меню, читает цифру, запускает пункт, возвращается — до «Выход».
 _ar_menu() {

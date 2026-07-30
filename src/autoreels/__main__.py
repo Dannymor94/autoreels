@@ -1256,26 +1256,36 @@ def _menu_render(root=".", *, platform: str | None = None) -> str:
     st = _menu_state(root)
     rec = _recommended_action(st)
     is_mac = platform == "darwin"
+    is_win = platform == "win32"
+
+    if is_win:
+        border_top = "=== autoreels ======================================="
+        border_mid = "---------------------------------------------------"
+        marker_char = ">"
+    else:
+        border_top = "═══ autoreels ═══════════════════════════════════════"
+        border_mid = "─────────────────────────────────────────────────────"
+        marker_char = "▶"
 
     lines: list[str] = []
-    lines.append("═══ autoreels ═══════════════════════════════════════")
+    lines.append(border_top)
     lines.append(
         f"  inputs: {st['inputs']} ждут  |  манифесты: {st['manifests']}  |  "
         f"готово: {st['rendered']}"
     )
     lines.append("")
     for num, action, label, hint in _MENU_ITEMS:
-        marker = "▶" if action == rec else " "
+        marker = marker_char if action == rec else " "
         note = f"  ({hint})" if hint else ""
         # Пометка неактуальных машине пунктов (не блокируем — только подсказка).
         if action == "go" and not is_mac:
             note += "  · нужен Groq (обычно Mac)"
         elif action == "render" and is_mac:
             note += "  · рендер обычно на системнике"
-        rec_tag = "  ← рекомендую" if action == rec else ""
+        rec_tag = "  <- рекомендую" if (action == rec and is_win) else ("  ← рекомендую" if action == rec else "")
         lines.append(f"  {marker} {num}) {label}{note}{rec_tag}")
     lines.append("")
-    lines.append("─────────────────────────────────────────────────────")
+    lines.append(border_mid)
     return "\n".join(lines)
 
 

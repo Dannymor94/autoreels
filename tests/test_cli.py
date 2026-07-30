@@ -1878,7 +1878,7 @@ def test_menu_render_highlights_recommended_with_videos(tmp_path):
     (tmp_path / "inputs").mkdir()
     (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
 
-    out = cli._menu_render(root=tmp_path)
+    out = cli._menu_render(root=tmp_path, platform="darwin")
     line = next(l for l in out.splitlines() if "Обработать видео" in l)
     assert "▶" in line
 
@@ -1888,11 +1888,35 @@ def test_menu_render_highlights_render_when_manifests(tmp_path):
     (tmp_path / "manifests").mkdir()
     (tmp_path / "manifests" / "a.json").write_text("{}", encoding="utf-8")
 
-    out = cli._menu_render(root=tmp_path)
+    out = cli._menu_render(root=tmp_path, platform="darwin")
     render_line = next(l for l in out.splitlines() if "рендер" in l.lower() or "Отрендер" in l)
     go_line = next(l for l in out.splitlines() if "Обработать видео" in l)
     assert "▶" in render_line
     assert "▶" not in go_line
+
+
+def test_menu_render_win32_uses_ascii_border(tmp_path):
+    """На win32 рамки меню из ASCII — нет Unicode box-drawing chars (═, ─)."""
+    out = cli._menu_render(root=tmp_path, platform="win32")
+    assert "═" not in out
+    assert "─" not in out
+
+
+def test_menu_render_win32_uses_ascii_marker(tmp_path):
+    """На win32 маркер рекомендуемого пункта ASCII '>' а не '▶'."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
+    out = cli._menu_render(root=tmp_path, platform="win32")
+    assert "▶" not in out
+    line = next(l for l in out.splitlines() if "Обработать видео" in l)
+    assert ">" in line
+
+
+def test_menu_render_win32_still_has_all_items(tmp_path):
+    """На win32 все пункты меню присутствуют — только символы другие."""
+    out = cli._menu_render(root=tmp_path, platform="win32")
+    for num in ("1", "2", "3", "4", "5", "6", "7", "8", "0"):
+        assert f"{num})" in out
 
 
 # -------------------------------------------------- меню: CLI-субкоманда
