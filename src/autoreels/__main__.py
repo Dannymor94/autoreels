@@ -146,6 +146,112 @@ def _ingest_source(video: Path, inputs_dir: Path) -> Path:
     return dest
 
 
+# ----------------------------------------------------- приём по URL (yt-dlp → inputs/)
+
+def _is_url(arg: str) -> bool:
+    """http/https-ссылка → True; всё остальное (пути, C:\\…, file://, ftp://) → локальный путь."""
+    from urllib.parse import urlparse
+
+    try:
+        return urlparse(arg).scheme in ("http", "https")
+    except (ValueError, AttributeError):
+        return False
+
+
+def _sanitize_filename(title: str, *, maxlen: int = 80) -> str:
+    """Заголовок ролика → безопасное имя файла.
+
+    Оставляем буквы (в т.ч. кириллицу — `str.isalnum` их пропускает), цифры, `_` и `-`.
+    Эмодзи/слэши/спецсимволы/пробелы → разделитель, схлопываются в один `_`, обрезка до
+    `maxlen`. Заголовок целиком из эмодзи → пустая строка (вызывающий откатится на id).
+    """
+    import re
+
+    kept: list[str] = []
+    for ch in title:
+        if ch in "_-" or ch.isalnum():
+            kept.append(ch)
+        else:
+            kept.append(" ")           # всё небезопасное (вкл. эмодзи, /, пробелы) → разрыв
+    s = re.sub(r"\s+", "_", "".join(kept).strip())
+    s = re.sub(r"_+", "_", s).strip("_-")
+    return s[:maxlen].strip("_-")
+
+
+def _download_url(
+    url: str,
+    inputs_dir: Path,
+    *,
+    ytdlp: str = "yt-dlp",
+    which=None,
+    run=None,
+) -> Path:
+    """Скачать видео по ссылке в `inputs/` и вернуть путь (дальше — обычный конвейер).
+
+    yt-dlp — опциональная внешняя зависимость (`pip install 'autoreels[url]'`); зовём как
+    подпроцесс. Ограничение 1080p (вертикаль всё равно кропается — 4K избыточен),
+    `--no-playlist` (строго одно видео). Прогресс yt-dlp идёт в stderr → виден вживую;
+    stdout несёт путь и заголовок (`--print`) для переименования.
+
+    Имя: `<санитизированный_заголовок>_<id>.<ext>` (заголовок всё из эмодзи → просто `<id>`).
+    yt-dlp вернул код ≠ 0 (битая/приватная/гео-блок ссылка, не видео) → RunError.
+    """
+    import subprocess
+
+    which = which or shutil.which
+    run = run or subprocess.run
+
+    exe = which(ytdlp)
+    if exe is None:
+        raise RunError(
+            "URL-режим требует yt-dlp. Установите: pip install 'autoreels[url]' "
+            "(или pip install yt-dlp)"
+        )
+
+    inputs_dir = Path(inputs_dir)
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    out_tmpl = str(inputs_dir / "%(id)s.%(ext)s")
+
+    cmd = [
+        exe,
+        "--no-playlist",
+        "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+        "--merge-output-format", "mp4",
+        "-o", out_tmpl,
+        "--print", "after_move:filepath",
+        "--print", "after_move:%(title)s",
+        url,
+    ]
+
+    print(f"скачиваю: {url}", flush=True)
+    # stdout=PIPE — ловим путь+заголовок; stderr наследуется → прогресс yt-dlp виден вживую.
+    result = run(cmd, stdout=subprocess.PIPE, text=True, encoding="utf-8")
+
+    if result.returncode != 0:
+        raise RunError(
+            f"yt-dlp не смог скачать {url} (код {result.returncode}) — "
+            f"проверьте ссылку: битая / недоступна / приватная / гео-блок / не видео"
+        )
+
+    lines = [ln for ln in (result.stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        raise RunError(f"yt-dlp не сообщил путь скачанного файла для {url}")
+
+    id_path = Path(lines[0].strip())
+    if not id_path.exists():
+        raise RunError(f"yt-dlp сообщил путь, которого нет: {id_path}")
+    title = lines[1].strip() if len(lines) > 1 else ""
+
+    safe = _sanitize_filename(title)
+    stem = id_path.stem                       # это <id> (из шаблона %(id)s)
+    new_name = f"{safe}_{stem}{id_path.suffix}" if safe else id_path.name
+    final = inputs_dir / new_name
+    if final != id_path:
+        id_path.replace(final)                # перезаписывает при повторе — идемпотентно
+    print(f"скачано → inputs/{final.name}", flush=True)
+    return final
+
+
 # ----------------------------------------------------- архив (общий хелпер)
 
 def _archive_video(video: Path, archive_dir: Path) -> None:
@@ -851,11 +957,13 @@ autoreels — длинное talking-head видео → вертикальны�
     Для каждого спрашивает: [к]алибровать (браузер) / [а]втокроп / [п]ропустить.
     Уже откалиброванные вручную — пропускаются молча.
 
-  run [видео] [--ffmpeg путь]
+  run [видео|url] [--ffmpeg путь]
     Облачный тир (Mac, нужен Groq): аудио → Groq Whisper → транскрипт →
     Groq LLM → manifests/<имя>.json. GROQ_API_KEY задаётся в .env.
-    Аргумент-видео — путь куда угодно (напр. ~/Downloads/лекция.mp4):
-    файл копируется в inputs/ (оригинал остаётся), дальше обычный конвейер.
+    Аргумент — путь куда угодно (напр. ~/Downloads/лекция.mp4): файл копируется
+    в inputs/ (оригинал остаётся), дальше обычный конвейер.
+    Аргумент — http/https-ссылка: скачивается yt-dlp в inputs/ (1080p max,
+    --no-playlist), затем обычный конвейер. Нужен pip install 'autoreels[url]'.
     Без аргумента: batch по всем inputs/*.mp4.
     После успеха видео перемещается в inputs-archive/.
 
@@ -1004,17 +1112,20 @@ def _build_parser():
             "Нужен GROQ_API_KEY в .env. Видео за пределы машины не уходит.\n"
             "<видео> — путь куда угодно: файл вне inputs/ копируется в inputs/ (оригинал\n"
             "остаётся на месте), дальше обычный конвейер.\n"
-            "Без <видео>: batch-обработка всех inputs/*.mp4.\n"
+            "<url> — http/https-ссылка: скачивается yt-dlp в inputs/ (1080p max,\n"
+            "--no-playlist), затем конвейер. Нужен pip install 'autoreels[url]'.\n"
+            "Без аргумента: batch-обработка всех inputs/*.mp4.\n"
             "После успеха видео перемещается в inputs-archive/.\n\n"
             "Пример: autoreels run inputs/лекция.mp4\n"
             "Извне:  autoreels run ~/Downloads/лекция.mp4\n"
+            "Ссылка: autoreels run https://youtu.be/XXXX\n"
             "Batch:   autoreels run"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    pr.add_argument("video", nargs="?", default=None,
-                    help="путь к видео (в т.ч. вне inputs/ — скопируется); "
-                         "без аргумента — batch: все *.mp4 из inputs/")
+    pr.add_argument("video", nargs="?", default=None, metavar="видео|url",
+                    help="путь к видео (в т.ч. вне inputs/ — скопируется) или http/https-"
+                         "ссылка (yt-dlp); без аргумента — batch: все *.mp4 из inputs/")
     pr.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
 
@@ -1102,7 +1213,10 @@ def main(argv=None) -> int:
                 return 1
         elif args.cmd == "run":
             if args.video:
-                video = _ingest_source(Path(args.video), Path("inputs"))
+                if _is_url(args.video):
+                    video = _download_url(args.video, Path("inputs"))
+                else:
+                    video = _ingest_source(Path(args.video), Path("inputs"))
                 cmd_run(video, ffmpeg=args.ffmpeg)
             else:
                 _, failed = cmd_run_batch(ffmpeg=args.ffmpeg)

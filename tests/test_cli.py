@@ -1831,3 +1831,181 @@ def test_menu_resolve_invalid_prints_invalid(capsys, tmp_path, monkeypatch):
     cli.main(["menu", "--resolve", "9"])
     out = capsys.readouterr().out.strip()
     assert out == "invalid"
+
+
+# -------------------------------------------------- URL-режим: определение url
+
+def test_is_url_detects_http_and_https():
+    assert cli._is_url("http://example.com/v.mp4") is True
+    assert cli._is_url("https://youtu.be/abc123") is True
+
+
+def test_is_url_rejects_local_paths():
+    for p in ("/Users/danny/v.mp4", "~/Downloads/v.mp4", "inputs/v.mp4",
+              "v.mp4", "C:\\video.mp4", "file:///x.mp4", "ftp://h/x"):
+        assert cli._is_url(p) is False, p
+
+
+# -------------------------------------------------- URL-режим: санитизация имени
+
+def test_sanitize_filename_removes_emoji_and_special():
+    """Эмодзи, слэши, спецсимволы → безопасное имя; пробелы → _."""
+    out = cli._sanitize_filename("Как варить чай 🍵 / Часть 1!")
+    assert "🍵" not in out
+    assert "/" not in out
+    assert "!" not in out
+    assert " " not in out
+    assert out == "Как_варить_чай_Часть_1"
+
+
+def test_sanitize_filename_keeps_cyrillic_and_alnum():
+    assert cli._sanitize_filename("Лекция_2024-раз") == "Лекция_2024-раз"
+
+
+def test_sanitize_filename_collapses_and_trims():
+    assert cli._sanitize_filename("  //  a   b  // ") == "a_b"
+
+
+def test_sanitize_filename_all_emoji_is_empty():
+    assert cli._sanitize_filename("😀😀😀") == ""
+
+
+def test_sanitize_filename_truncates_to_maxlen():
+    out = cli._sanitize_filename("a" * 200)
+    assert len(out) <= 80
+
+
+# -------------------------------------------------- URL-режим: команда yt-dlp
+
+def _fake_which_yes(_name):
+    return "/usr/bin/yt-dlp"
+
+
+def test_download_url_builds_correct_command(tmp_path):
+    """Команда yt-dlp: --no-playlist, лимит 1080p, вывод в inputs/."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        # эмулируем успешную загрузку: кладём <id>.mp4 и печатаем filepath+title
+        id_path = tmp_path / "inputs" / "abc123.mp4"
+        id_path.parent.mkdir(parents=True, exist_ok=True)
+        id_path.write_bytes(b"video")
+
+        class R:
+            returncode = 0
+            stdout = f"{id_path}\nТест ролик"
+        return R()
+
+    cli._download_url("https://youtu.be/abc123", tmp_path / "inputs",
+                      which=_fake_which_yes, run=fake_run)
+
+    cmd = captured["cmd"]
+    assert "--no-playlist" in cmd
+    assert any("height<=1080" in c for c in cmd)
+    # -o шаблон указывает в inputs/
+    o_idx = cmd.index("-o")
+    assert str(tmp_path / "inputs") in cmd[o_idx + 1]
+    assert "https://youtu.be/abc123" in cmd
+
+
+def test_download_url_renames_with_sanitized_title(tmp_path):
+    """После загрузки файл переименован в <sanitized>_<id>.mp4."""
+    def fake_run(cmd, **kwargs):
+        id_path = tmp_path / "inputs" / "abc123.mp4"
+        id_path.parent.mkdir(parents=True, exist_ok=True)
+        id_path.write_bytes(b"video")
+
+        class R:
+            returncode = 0
+            stdout = f"{id_path}\nЧай 🍵 / Часть 1"
+        return R()
+
+    result = cli._download_url("https://youtu.be/abc123", tmp_path / "inputs",
+                               which=_fake_which_yes, run=fake_run)
+
+    assert result.parent == (tmp_path / "inputs")
+    assert result.name == "Чай_Часть_1_abc123.mp4"
+    assert result.exists()
+
+
+def test_download_url_missing_ytdlp_raises(tmp_path):
+    """yt-dlp не установлен → внятная ошибка с подсказкой про установку."""
+    with pytest.raises(cli.RunError) as exc:
+        cli._download_url("https://youtu.be/x", tmp_path / "inputs",
+                          which=lambda _n: None, run=lambda *a, **k: None)
+    assert "yt-dlp" in str(exc.value)
+
+
+def test_download_url_failed_download_raises(tmp_path):
+    """Битая ссылка / гео-блок → yt-dlp код ≠ 0 → RunError, не краш."""
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 1
+            stdout = ""
+        return R()
+
+    with pytest.raises(cli.RunError) as exc:
+        cli._download_url("https://youtu.be/broken", tmp_path / "inputs",
+                          which=_fake_which_yes, run=fake_run)
+    assert "broken" in str(exc.value) or "yt-dlp" in str(exc.value)
+
+
+def test_download_url_all_emoji_title_falls_back_to_id(tmp_path):
+    """Заголовок целиком из эмодзи → имя = <id>.mp4 (без ведущего _)."""
+    def fake_run(cmd, **kwargs):
+        id_path = tmp_path / "inputs" / "xyz789.mp4"
+        id_path.parent.mkdir(parents=True, exist_ok=True)
+        id_path.write_bytes(b"v")
+
+        class R:
+            returncode = 0
+            stdout = f"{id_path}\n😀😀😀"
+        return R()
+
+    result = cli._download_url("https://youtu.be/xyz789", tmp_path / "inputs",
+                               which=_fake_which_yes, run=fake_run)
+    assert result.name == "xyz789.mp4"
+
+
+# -------------------------------------------------- URL-режим: диспетч main()
+
+def test_run_dispatch_url_calls_download(monkeypatch, tmp_path):
+    """main('run <url>') идёт по ветке скачивания, не _ingest_source."""
+    monkeypatch.chdir(tmp_path)
+    calls = {}
+
+    def fake_download(url, inputs_dir, **kwargs):
+        calls["url"] = url
+        p = tmp_path / "inputs" / "dl.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"v")
+        return p
+
+    def fake_cmd_run(video, **kwargs):
+        calls["video"] = Path(video)
+        return tmp_path / "manifests" / "dl.json"
+
+    monkeypatch.setattr(cli, "_download_url", fake_download)
+    monkeypatch.setattr(cli, "cmd_run", fake_cmd_run)
+    monkeypatch.setattr(cli, "_ingest_source",
+                        lambda *a, **k: pytest.fail("ingest не должен вызываться для url"))
+
+    rc = cli.main(["run", "https://youtu.be/dl"])
+
+    assert rc == 0
+    assert calls["url"] == "https://youtu.be/dl"
+    assert calls["video"] == (tmp_path / "inputs" / "dl.mp4")
+
+
+def test_run_dispatch_url_download_error_returns_1(monkeypatch, tmp_path, capsys):
+    """Ошибка скачивания → код 1 + внятное сообщение."""
+    monkeypatch.chdir(tmp_path)
+
+    def fake_download(url, inputs_dir, **kwargs):
+        raise cli.RunError("yt-dlp не смог скачать https://youtu.be/bad")
+
+    monkeypatch.setattr(cli, "_download_url", fake_download)
+    rc = cli.main(["run", "https://youtu.be/bad"])
+    assert rc == 1
+    assert "bad" in capsys.readouterr().err

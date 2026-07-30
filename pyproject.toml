@@ -23,6 +23,11 @@ dev = [
 faster-whisper = [
     "faster-whisper>=1.0",
 ]
+# Приём исходника по ссылке: `ar run <url>`. НЕ дефолт — нужен только для url-режима.
+# Ставится отдельно: pip install 'autoreels[url]'. См. _download_url в __main__.py.
+url = [
+    "yt-dlp>=2024.1",
+]
 
 [project.scripts]
 autoreels = "autoreels.__main__:main"
