@@ -25,6 +25,11 @@ _ar_menu() {
                 read -r _src
                 [ -n "$_src" ] && ar run "$_src"
                 ;;
+            transcribe)
+                printf "Путь к видео/аудио или URL: "
+                read -r _src
+                [ -n "$_src" ] && ar t "$_src"
+                ;;
             help)      ar h ;;
             quit)      echo "пока!"; return 0 ;;
             *)
@@ -49,6 +54,7 @@ _ar_menu() {
 #   ar r         → git pull + render (системник)
 #   ar s         → status
 #   ar c         → calibrate --all
+#   ar t <ист>   → transcribe (видео/аудио/url → текст для контента)
 #   ar h         → help
 #   ar <...>     → передать в autoreels напрямую
 ar() {
@@ -94,6 +100,11 @@ ar() {
             ;;
         c)
             autoreels calibrate --all
+            ;;
+        t)
+            # ar t <видео|аудио|url>: транскрибация для контента
+            shift
+            autoreels transcribe "$@"
             ;;
         h)
             autoreels help

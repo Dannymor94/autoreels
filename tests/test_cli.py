@@ -1698,7 +1698,8 @@ def test_menu_action_maps_digits_to_actions():
     assert cli._menu_action("3") == "status"
     assert cli._menu_action("4") == "calibrate"
     assert cli._menu_action("5") == "path"
-    assert cli._menu_action("6") == "help"
+    assert cli._menu_action("6") == "transcribe"
+    assert cli._menu_action("7") == "help"
     assert cli._menu_action("0") == "quit"
 
 
@@ -1770,9 +1771,15 @@ def test_menu_render_shows_state_header(tmp_path):
 def test_menu_render_lists_all_items(tmp_path):
     """Меню перечисляет все пункты с их цифрами."""
     out = cli._menu_render(root=tmp_path)
-    for num in ("1", "2", "3", "4", "5", "6", "0"):
+    for num in ("1", "2", "3", "4", "5", "6", "7", "0"):
         assert f"{num})" in out
     assert "Выход" in out
+
+
+def test_menu_render_has_transcribe_item(tmp_path):
+    """В меню есть пункт транскрибации для контента."""
+    out = cli._menu_render(root=tmp_path)
+    assert "ранскриб" in out
 
 
 def test_menu_render_highlights_recommended_with_videos(tmp_path):
@@ -2214,3 +2221,154 @@ def test_run_dispatch_yandex_calls_yandex_downloader(monkeypatch, tmp_path):
     assert rc == 0
     assert calls["url"] == "https://disk.yandex.ru/i/abc"
     assert calls["video"] == (tmp_path / "inputs" / "y.mp4")
+
+
+# -------------------------------------------------- transcribe: приём медиа (аудио тоже)
+
+def test_validate_media_accepts_audio(tmp_path):
+    a = tmp_path / "x.mp3"
+    a.write_bytes(b"a")
+    assert cli._validate_media(a, exts=cli._MEDIA_EXTS) == a.resolve()
+
+
+def test_ingest_source_still_rejects_audio(tmp_path):
+    a = tmp_path / "x.mp3"
+    a.write_bytes(b"a")
+    with pytest.raises(cli.RunError):
+        cli._ingest_source(a, tmp_path / "inputs")
+
+
+# -------------------------------------------------- transcribe: команда
+
+def _transcript_two_paragraphs():
+    return Transcript(language="ru", words=[
+        Word(word="Первая", t0=0.0, t1=0.4), Word(word="мысль.", t0=0.5, t1=0.9),
+        Word(word="Вторая", t0=4.0, t1=4.4), Word(word="мысль.", t0=4.5, t1=4.9),
+    ])
+
+
+def test_transcribe_writes_clean_text_without_timecodes(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+
+    out = cli.cmd_transcribe(video, fmt="text", root=REPO_ROOT,
+                             out_dir=tmp_path / "transcripts", cache_dir=tmp_path / "c")
+
+    assert out == tmp_path / "transcripts" / "lecture.txt"
+    txt = out.read_text(encoding="utf-8")
+    assert "Первая мысль." in txt
+    assert "\n\n" in txt                       # абзацы по паузе
+    assert "[" not in txt and "-->" not in txt  # без таймкодов
+
+
+def test_transcribe_srt_format_has_timecodes(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    out = cli.cmd_transcribe(video, fmt="srt", root=REPO_ROOT,
+                             out_dir=tmp_path / "t", cache_dir=tmp_path / "c")
+    assert out.suffix == ".srt"
+    assert "-->" in out.read_text(encoding="utf-8")
+
+
+def test_transcribe_json_format_is_word_level(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    out = cli.cmd_transcribe(video, fmt="json", root=REPO_ROOT,
+                             out_dir=tmp_path / "t", cache_dir=tmp_path / "c")
+    assert out.suffix == ".json"
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data[0] == {"word": "Первая", "t0": 0.0, "t1": 0.4}
+
+
+def test_transcribe_passes_chunking_cfg_to_stage(monkeypatch, tmp_path):
+    """Длинное видео проходит через чанкинг: _stage_transcribe получает r0_cfg с chunking."""
+    seen = {}
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+
+    def fake_ts(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cfg=None, ffmpeg="ffmpeg"):
+        seen["r0_cfg"] = r0_cfg
+        return _transcript_two_paragraphs()
+
+    monkeypatch.setattr(cli, "_stage_transcribe", fake_ts)
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+
+    cli.cmd_transcribe(video, fmt="text", root=REPO_ROOT,
+                       out_dir=tmp_path / "t", cache_dir=tmp_path / "c")
+    assert seen["r0_cfg"] is not None
+    assert seen["r0_cfg"].chunking is not None   # чанкинг-конфиг прокинут
+
+
+def test_transcribe_subcommand_registered():
+    parser = cli._build_parser()
+    args = parser.parse_args(["transcribe", "v.mp4"])
+    assert args.cmd == "transcribe"
+    assert args.format == "text"                 # дефолт — text (под контент)
+
+
+def test_transcribe_format_choices():
+    parser = cli._build_parser()
+    for f in ("text", "srt", "vtt", "json"):
+        assert parser.parse_args(["transcribe", "v.mp4", "--format", f]).format == f
+
+
+def test_transcribe_dispatch_local_processed_in_place(monkeypatch, tmp_path):
+    """transcribe локального файла НЕ копирует его в inputs/ (нет рендера — не нужно)."""
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"v")
+    seen = {}
+
+    def fake_cmd(source, **kwargs):
+        seen["source"] = Path(source)
+        return tmp_path / "transcripts" / "clip.txt"
+
+    monkeypatch.setattr(cli, "cmd_transcribe", fake_cmd)
+    monkeypatch.setattr(cli, "_ingest_source",
+                        lambda *a, **k: pytest.fail("transcribe не копирует в inputs/"))
+
+    rc = cli.main(["transcribe", str(src)])
+    assert rc == 0
+    assert seen["source"] == src.resolve()
+
+
+def test_transcribe_dispatch_accepts_audio(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "podcast.mp3"
+    src.write_bytes(b"a")
+    monkeypatch.setattr(cli, "cmd_transcribe", lambda source, **k: tmp_path / "t" / "p.txt")
+    assert cli.main(["transcribe", str(src)]) == 0
+
+
+def test_transcribe_dispatch_bad_source_errors(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    rc = cli.main(["transcribe", str(tmp_path / "ghost.mp4")])
+    assert rc == 1
+    assert "ghost" in capsys.readouterr().err
+
+
+def test_transcribe_dispatch_url_downloads(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    def fake_dl(url, inputs_dir, **k):
+        seen["url"] = url
+        p = tmp_path / "inputs" / "d.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"v")
+        return p
+
+    monkeypatch.setattr(cli, "_download_url", fake_dl)
+    monkeypatch.setattr(cli, "cmd_transcribe", lambda source, **k: tmp_path / "t" / "d.txt")
+
+    rc = cli.main(["transcribe", "https://youtu.be/d"])
+    assert rc == 0
+    assert seen["url"] == "https://youtu.be/d"

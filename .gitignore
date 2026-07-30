@@ -8,6 +8,7 @@ data/outputs/
 inputs/
 inputs-archive/
 reels-out/
+transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
 
 # per-file кроп-калибровки (calibrations/<sha>.json) — машинно-локальные, привязаны к
 # конкретным файлам; кроп уезжает на системник внутри манифеста, не отдельным файлом

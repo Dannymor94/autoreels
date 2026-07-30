@@ -29,6 +29,7 @@ from autoreels.cloud.select import SelectError, select
 from autoreels.cloud.snap import snap_segments
 from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
+from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
 from autoreels.core import state
 from autoreels.core.calibration import (
     CalibrationError,
@@ -79,6 +80,29 @@ _VIDEO_EXTS = {
     ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
     ".flv", ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts",
 }
+# Аудио — принимает только `transcribe` (для контента из подкастов/записей). `run`/`render`
+# работают с видео, поэтому `_ingest_source` держит планку `_VIDEO_EXTS`.
+_AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wma"}
+_MEDIA_EXTS = _VIDEO_EXTS | _AUDIO_EXTS
+
+
+def _validate_media(path: Path, *, exts: set[str]) -> Path:
+    """Проверить, что путь — существующий файл с медиа-расширением; вернуть resolve().
+
+    Общая валидация для `_ingest_source` (видео) и `transcribe` (видео+аудио). Ошибки:
+    нет файла / каталог → FileNotFoundError; чужое расширение → RunError.
+    """
+    path = Path(path).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"файл не найден: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"не файл (это каталог?): {path}")
+    if path.suffix.lower() not in exts:
+        raise RunError(
+            f"не похоже на медиа: {path.name} "
+            f"(ожидалось расширение из {', '.join(sorted(exts))})"
+        )
+    return path.resolve()
 
 
 # --------------------------------------------------------------------------- .env
@@ -110,18 +134,7 @@ def _ingest_source(video: Path, inputs_dir: Path) -> Path:
     - расширение не видео → RunError (ранний отсев до ffmpeg);
     - в `inputs/` уже другой файл с тем же именем → RunError (без тихой перезаписи).
     """
-    video = Path(video).expanduser()
-    if not video.exists():
-        raise FileNotFoundError(f"файл не найден: {video}")
-    if not video.is_file():
-        raise FileNotFoundError(f"не файл (это каталог?): {video}")
-    if video.suffix.lower() not in _VIDEO_EXTS:
-        raise RunError(
-            f"не похоже на видео: {video.name} "
-            f"(ожидалось расширение из {', '.join(sorted(_VIDEO_EXTS))})"
-        )
-
-    video = video.resolve()
+    video = _validate_media(video, exts=_VIDEO_EXTS)
     inputs_dir = Path(inputs_dir).resolve()
 
     # Уже внутри inputs/ → ничего не копируем.
@@ -587,6 +600,66 @@ def cmd_run(
     return path
 
 
+# Расширение выходного файла по формату транскрипта.
+_TRANSCRIBE_EXT = {"text": "txt", "srt": "srt", "vtt": "vtt", "json": "json"}
+
+
+def _render_transcript(transcript, *, fmt: str, r0_cfg) -> str:
+    """Транскрипт → строка выбранного формата (детерминированный код, без LLM)."""
+    sent_pause = r0_cfg.sentence_pause_sec
+    # Абзац = смена мысли: пауза заметно длиннее, чем разрыв предложений. Конфига под это
+    # нет → берём кратно sentence_pause_sec (эвристика, отдельный порог не плодим).
+    para_pause = getattr(r0_cfg, "paragraph_pause_sec", None) or sent_pause * 5
+    if fmt == "text":
+        return to_text(transcript, sentence_pause_sec=sent_pause, paragraph_pause_sec=para_pause)
+    if fmt == "srt":
+        return to_srt(transcript, sentence_pause_sec=sent_pause)
+    if fmt == "vtt":
+        return to_vtt(transcript, sentence_pause_sec=sent_pause)
+    if fmt == "json":
+        return to_json(transcript)
+    raise RunError(f"неизвестный формат транскрипта: {fmt}")
+
+
+def cmd_transcribe(
+    source,
+    *,
+    fmt: str = "text",
+    root=".",
+    out_dir=None,
+    cache_dir=None,
+    ffmpeg: str = "ffmpeg",
+) -> Path:
+    """Отдельная транскрибация: видео/аудио → чистый текст (или srt/vtt/json) для контента.
+
+    Переиспользует облачный конвейер извлечения аудио + Whisper (чанкинг длинных видео —
+    внутри `transcribe`). Рендер не задействован: источник читается на месте, результат —
+    в `transcripts/<stem>.<ext>`. Дефолт `text` — связный текст с абзацами, без таймкодов.
+    """
+    root = Path(root)
+    cfg = root / "config"
+    render_cfg = load_render_config(cfg / "render.yaml")
+    r0_cfg = load_r0_config(cfg / "r0.yaml")
+    transcribe_cfg = load_transcribe_config(cfg / "transcribe.yaml")
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+    out_dir = Path(out_dir) if out_dir else root / "transcripts"
+    source = Path(source)
+
+    print(f"=== transcribe: {source.name} (format={fmt}) ===", flush=True)
+    audio = _stage_extract_audio(source, render_cfg=render_cfg, cache_dir=cache_dir, ffmpeg=ffmpeg)
+    transcript = _stage_transcribe(
+        audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir,
+        r0_cfg=r0_cfg, audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg,
+    )
+    rendered = _render_transcript(transcript, fmt=fmt, r0_cfg=r0_cfg)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{source.stem}.{_TRANSCRIBE_EXT[fmt]}"
+    out.write_text(rendered, encoding="utf-8")
+    print(f"транскрипт готов ({len(transcript.words)} слов) → {out}", flush=True)
+    return out
+
+
 def cmd_run_batch(
     *,
     root=".",
@@ -913,13 +986,14 @@ def _next_hint(root=".") -> str | None:
 # Пункты меню: (цифра, action-токен, подпись, короткая подсказка). Нумерация СТАБИЛЬНА —
 # адаптивность (подсветка/пометки) влияет только на оформление, не на digit→action.
 _MENU_ITEMS: list[tuple[str, str, str, str]] = [
-    ("1", "go",        "Обработать видео из inputs/", "run всех + git push"),
-    ("2", "render",    "Отрендерить манифесты",       "git pull + render"),
-    ("3", "status",    "Статус",                       ""),
-    ("4", "calibrate", "Калибровка кропа (все)",       ""),
-    ("5", "path",      "Обработать по пути/URL",        ""),
-    ("6", "help",      "Справка",                       ""),
-    ("0", "quit",      "Выход",                         ""),
+    ("1", "go",         "Обработать видео из inputs/", "run всех + git push"),
+    ("2", "render",     "Отрендерить манифесты",       "git pull + render"),
+    ("3", "status",     "Статус",                       ""),
+    ("4", "calibrate",  "Калибровка кропа (все)",       ""),
+    ("5", "path",       "Обработать по пути/URL",        ""),
+    ("6", "transcribe", "Транскрибировать (для контента)", "чистый текст из речи"),
+    ("7", "help",       "Справка",                       ""),
+    ("0", "quit",       "Выход",                         ""),
 ]
 
 # Текстовые псевдонимы выхода (кроме цифры 0) — удобство: q/exit/quit/выход.
@@ -1092,6 +1166,7 @@ autoreels — длинное talking-head видео → вертикальны�
   ar r            git pull + render                      (системник)
   ar s            status
   ar c            calibrate --all
+  ar t <ист>      транскрибация (видео/аудио/url → текст для контента)
   ar h            эта справка
   ar <...>        передаёт команду в autoreels напрямую
 
@@ -1129,6 +1204,13 @@ autoreels — длинное talking-head видео → вертикальны�
         только файлы /i/, не папки /d/; большие файлы Я.Диск троттлит — качается долго).
     Без аргумента: batch по всем inputs/*.mp4.
     После успеха видео перемещается в inputs-archive/.
+
+  transcribe <видео|аудио|url> [--format text|srt|vtt|json] [--ffmpeg путь]
+    Отдельная транскрибация под контент (посты/статьи из сказанного).
+    Источник — как у run (путь/аудио/http/Яндекс.Диск); длинное чанкится.
+    text (дефолт) — связный текст, абзацы по паузам, без таймкодов;
+    srt/vtt — субтитры с таймкодами; json — сырой word-level.
+    Результат → transcripts/<имя>.<ext>. Нужен GROQ_API_KEY.
 
   render [--encoder КОДЕК] [--ffmpeg путь]
     Локальный тир (системник): manifests/*.json → reels-out/<стем>/<id>.mp4.
@@ -1294,6 +1376,30 @@ def _build_parser():
     pr.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
 
+    ptx = sub.add_parser(
+        "transcribe",
+        help="видео/аудио/url → чистый текст (или srt/vtt/json) для генерации контента",
+        description=(
+            "Отдельная транскрибация под контент (посты/статьи из сказанного).\n"
+            "Источник — как у run: путь (в т.ч. аудио), http/https, Яндекс.Диск.\n"
+            "Длинное видео чанкится автоматически. Нужен GROQ_API_KEY.\n\n"
+            "Форматы (--format):\n"
+            "  text (дефолт) — связный текст, абзацы по паузам, БЕЗ таймкодов;\n"
+            "  srt / vtt     — субтитры с таймкодами (плееры/YouTube);\n"
+            "  json          — сырой word-level {word,t0,t1}.\n"
+            "Результат → transcripts/<имя>.<ext>.\n\n"
+            "Пример: autoreels transcribe inputs/лекция.mp4\n"
+            "Субтитры: autoreels transcribe podcast.mp3 --format srt"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ptx.add_argument("source", metavar="видео|аудио|url",
+                     help="путь к видео/аудио, http/https или ссылка Яндекс.Диска")
+    ptx.add_argument("--format", choices=["text", "srt", "vtt", "json"], default="text",
+                     help="формат вывода (по умолчанию: text — под контент)")
+    ptx.add_argument("--ffmpeg", default="ffmpeg",
+                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
+
     pd = sub.add_parser(
         "render",
         help="manifests/*.json → reels-out/ (локальный тир, ffmpeg)",
@@ -1390,6 +1496,17 @@ def main(argv=None) -> int:
                 _, failed = cmd_run_batch(ffmpeg=args.ffmpeg)
                 if failed:
                     return 1
+        elif args.cmd == "transcribe":
+            # Источник — как у run, но локальный файл читается НА МЕСТЕ (рендера нет →
+            # копировать в inputs/ незачем); url/Яндекс.Диск скачиваются в inputs/.
+            if _is_url(args.source):
+                if _is_yandex_disk(args.source):
+                    src = _download_yandex_disk(args.source, Path("inputs"))
+                else:
+                    src = _download_url(args.source, Path("inputs"))
+            else:
+                src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
+            cmd_transcribe(src, fmt=args.format, ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
         elif args.cmd == "install-aliases":
