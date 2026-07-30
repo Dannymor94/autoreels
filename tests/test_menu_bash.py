@@ -30,6 +30,55 @@ def _run_menu(keys: str) -> subprocess.CompletedProcess:
     )
 
 
+# -------------------- фолбэк CLI: прямой autoreels сломан → python -m autoreels
+
+def test_ar_cli_falls_back_to_module_when_direct_broken(tmp_path):
+    """Прямой `autoreels` не запускается (как на Windows Py3.14) → зовём python -m autoreels.
+
+    Кладём фейковый `autoreels` (exit 1) первым в PATH — он затеняет рабочий console-script.
+    Проба `autoreels --help` падает → _ar_cli переключается в module-режим. venv-`python`
+    доступен (VENV_BIN в PATH), поэтому `python -m autoreels menu --resolve 3` → 'status'.
+    """
+    fake = tmp_path / "autoreels"
+    fake.write_text("#!/usr/bin/env bash\nexit 1\n")
+    fake.chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp_path}{os.pathsep}{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
+    r = subprocess.run(
+        ["bash", "-c", f'source "{ALIASES}"; _ar_cli menu --resolve 3'],
+        capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
+    )
+    assert r.stdout.strip() == "status", (r.stdout, r.stderr)
+
+
+def test_ar_cli_uses_direct_when_available():
+    """Когда прямой `autoreels` работает — используется он (module-фолбэк не нужен)."""
+    env = dict(os.environ)
+    env["PATH"] = f"{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
+    r = subprocess.run(
+        ["bash", "-c", f'source "{ALIASES}"; _ar_cli menu --resolve 3; echo "mode=$_AR_CLI_MODE"'],
+        capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
+    )
+    assert "status" in r.stdout
+    assert "mode=direct" in r.stdout, (r.stdout, r.stderr)
+
+
+def test_ar_menu_works_via_module_fallback(tmp_path):
+    """Меню целиком работает через python -m, когда прямой autoreels сломан."""
+    fake = tmp_path / "autoreels"
+    fake.write_text("#!/usr/bin/env bash\nexit 1\n")
+    fake.chmod(0o755)
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp_path}{os.pathsep}{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
+    r = subprocess.run(
+        ["bash", "-c", f'source "{ALIASES}"; _ar_menu'],
+        input="3\n\n0\n", capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
+    )
+    # шапка меню отрисовалась (python -m autoreels menu отработал)
+    assert "autoreels" in (r.stdout + r.stderr).lower()
+    assert "inputs:" in (r.stdout + r.stderr)
+
+
 def test_menu_path_item_prompts_for_source():
     """Пункт 5 после выбора спрашивает ссылку/путь."""
     r = _run_menu("5\n\n0\n")            # выбрать 5, пустой ввод, затем выход
