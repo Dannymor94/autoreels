@@ -338,32 +338,68 @@ def _yandex_download_href(url: str, *, get_json=None, token: str | None = None) 
     return href
 
 
+def _httpx_stream_download(href: str, part_path: Path, *, resume_from: int, total: int | None) -> None:
+    """Скачать `href` в `part_path` потоково (httpx), с читаемым прогрессом (%/ГБ/скорость/ETA).
+
+    resume_from>0 → докачка: заголовок `Range: bytes=N-`, дозапись в конец. Если сервер
+    проигнорировал Range (ответ 200, не 206) — начинаем файл заново (иначе дублируем байты).
+    Полный контроль над форматом прогресса (в отличие от сырой таблицы curl). HTTP≥400 → RunError.
+    """
+    import time
+
+    import httpx
+
+    from autoreels.core.progress import print_download_progress
+
+    headers = {"Range": f"bytes={resume_from}-"} if resume_from else {}
+    with httpx.stream("GET", href, headers=headers, timeout=None, follow_redirects=True) as resp:
+        if resp.status_code >= 400:
+            raise RunError(f"скачивание не удалось: HTTP {resp.status_code}")
+        # Сервер отдал полный файл вместо диапазона → пишем с нуля, не дописываем.
+        resuming = resume_from > 0 and resp.status_code == 206
+        mode = "ab" if resuming else "wb"
+        downloaded = resume_from if resuming else 0
+
+        start = time.monotonic()
+        last_print = 0.0
+        with open(part_path, mode) as f:
+            for chunk in resp.iter_bytes(chunk_size=1 << 20):
+                f.write(chunk)
+                downloaded += len(chunk)
+                now = time.monotonic()
+                if now - last_print >= 0.5:
+                    elapsed = now - start
+                    speed = (downloaded - (resume_from if resuming else 0)) / elapsed if elapsed > 0 else 0
+                    print_download_progress(downloaded, total, speed)
+                    last_print = now
+
+
 def _download_yandex_disk(
     url: str,
     inputs_dir: Path,
     *,
     get_json=None,
-    run=None,
-    which=None,
+    download=None,
     token: str | None = None,
     max_attempts: int = 3,
 ) -> Path:
-    """Скачать файл с публичной ссылки Я.Диска в `inputs/` (curl) → путь для конвейера.
+    """Скачать файл с публичной ссылки Я.Диска в `inputs/` (httpx-стрим) → путь для конвейера.
 
     Поток: метаданные (тип/видео/размер, дёшево до гигабайтов) → цикл попыток, где на
     КАЖДОЙ попытке берётся СВЕЖИЙ временный download URL (старый протухает на 31 ГБ) и
-    `curl -L -C -` дописывает `.part` с этого нового URL. Целостность — по размеру из
-    метаданных. Скачивание идёт curl-подпроцессом: его нативный прогресс не глушим.
+    поток докачивает `.part` с текущего смещения (`Range`). Целостность — по размеру из
+    метаданных. Прогресс — читаемая строка (%/ГБ/скорость/ETA), не сырой curl.
 
     Только файлы (/i/). Папка (/d/, type=='dir') — предупредить и выйти (batch — будущее).
     Публичные ссылки Я.Диск троттлит → предупреждаем о возможном долгом скачивании.
     """
     import os
-    import subprocess
+    import time
+
+    from autoreels.core.progress import print_download_done
 
     get_json = get_json or _yandex_api_get
-    run = run or subprocess.run
-    which = which or shutil.which
+    download = download or _httpx_stream_download
     token = token or os.environ.get("YANDEX_DISK_TOKEN")
 
     meta = _yandex_public_meta(url, get_json=get_json, token=token)
@@ -381,12 +417,6 @@ def _download_yandex_disk(
     if not (mime.startswith("video/") or Path(name).suffix.lower() in _VIDEO_EXTS):
         raise RunError(f"файл по ссылке Я.Диска не видео: {name} (mime {mime!r})")
 
-    curl = which("curl")
-    if curl is None:
-        raise RunError(
-            "скачивание с Я.Диска требует curl (обычно есть в macOS и Windows 10+)"
-        )
-
     inputs_dir = Path(inputs_dir)
     inputs_dir.mkdir(parents=True, exist_ok=True)
     dest = inputs_dir / _yandex_filename(name, url)
@@ -395,28 +425,30 @@ def _download_yandex_disk(
         return dest
     part = dest.with_name(dest.name + ".part")
 
-    size = meta.get("size")
-    if isinstance(size, int) and size > (1 << 30):     # >1 ГБ — честно предупредить
+    size = meta.get("size") if isinstance(meta.get("size"), int) else None
+    if size and size > (1 << 30):     # >1 ГБ — честно предупредить про троттлинг
         print(
             f"файл {name}: {size / (1 << 30):.1f} ГБ. Публичные ссылки Я.Диск троттлит — "
             f"большой файл может качаться долго.",
             flush=True,
         )
 
+    started = time.monotonic()
     for attempt in range(1, max_attempts + 1):
         href = _yandex_download_href(url, get_json=get_json, token=token)   # свежий каждый раз
+        resume_from = part.stat().st_size if part.exists() else 0
         if attempt > 1:
             print(f"докачка (попытка {attempt}/{max_attempts}) со свежей ссылкой…", flush=True)
-        # -L следуем редиректам; -C - докачка с уже скачанного смещения; --fail: HTTP≥400 → код≠0.
-        # stderr наследуется → нативный прогресс curl виден вживую.
-        cmd = [curl, "-L", "--fail", "-C", "-", "-o", str(part), href]
-        result = run(cmd)
-        rc = getattr(result, "returncode", result)
-        complete = part.exists() and (
-            size == part.stat().st_size if isinstance(size, int) else rc == 0
-        )
-        if rc == 0 and complete:
+        try:
+            download(href, part, resume_from=resume_from, total=size)
+        except (RunError, OSError) as e:
+            print(f"обрыв: {e}", flush=True)
+            continue
+
+        got = part.stat().st_size if part.exists() else 0
+        if part.exists() and (size is None or got == size):
             part.replace(dest)
+            print_download_done(got, time.monotonic() - started)
             print(f"скачано → inputs/{dest.name}", flush=True)
             return dest
 

@@ -81,3 +81,72 @@ def chunk_start(label: str, total: int, est_sec: float | None = None) -> None:
         print(f"  {label}: {total} чанков, ~{est_min:.0f} мин", flush=True)
     else:
         print(f"  {label}: {total} чанков", flush=True)
+
+
+# ------------------------------------------------------------------- скачивание (байтовый прогресс)
+
+def format_duration(sec: float) -> str:
+    """Секунды → «H:MM:SS» (с часами) или «M:SS» (без) — для ETA и итога."""
+    total = int(max(0, round(sec)))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def format_speed(bytes_per_sec: float) -> str:
+    """Скорость в МБ/с (≥1 МБ/с) или КБ/с (медленнее)."""
+    mb = bytes_per_sec / (1 << 20)
+    if mb >= 1:
+        return f"{mb:.1f} МБ/с"
+    return f"{bytes_per_sec / (1 << 10):.0f} КБ/с"
+
+
+def _gb(nbytes: float) -> str:
+    return f"{nbytes / (1 << 30):.1f}"
+
+
+def eta_seconds(total: int | None, downloaded: int, speed_bps: float) -> float | None:
+    """Оценка «осталось» = (всего − скачано) / скорость. None если неизвестно/готово."""
+    if not total or speed_bps <= 0 or total <= downloaded:
+        return None
+    return (total - downloaded) / speed_bps
+
+
+def format_download_line(downloaded: int, total: int | None, speed_bps: float) -> str:
+    """Читаемая строка прогресса скачивания.
+
+    Известен размер: «↓ скачивание: 26% | 3.3/12.5 ГБ | 2.0 МБ/с | осталось ~1:19:00».
+    Размер неизвестен: «↓ скачивание: 3.3 ГБ | 2.0 МБ/с» (без % и ETA).
+    """
+    speed = format_speed(speed_bps)
+    if total:
+        pct = int(100 * downloaded / total) if total > 0 else 0
+        parts = [f"↓ скачивание: {pct}%", f"{_gb(downloaded)}/{_gb(total)} ГБ", speed]
+        eta = eta_seconds(total, downloaded, speed_bps)
+        if eta is not None:
+            parts.append(f"осталось ~{format_duration(eta)}")
+        return " | ".join(parts)
+    return f"↓ скачивание: {_gb(downloaded)} ГБ | {speed}"
+
+
+def format_download_done(total_bytes: int, elapsed_sec: float) -> str:
+    """Итоговая строка: «✓ скачано 12.5 ГБ за 1:48:00»."""
+    return f"✓ скачано {_gb(total_bytes)} ГБ за {format_duration(elapsed_sec)}"
+
+
+def print_download_progress(downloaded: int, total: int | None, speed_bps: float) -> None:
+    """Напечатать строку прогресса скачивания. TTY: перезапись через \\r; иначе — строкой."""
+    line = format_download_line(downloaded, total, speed_bps)
+    if is_tty():
+        print(f"\r{line:<{_LINE_WIDTH}}", end="", flush=True)
+    else:
+        print(line, flush=True)
+
+
+def print_download_done(total_bytes: int, elapsed_sec: float) -> None:
+    """Напечатать итог скачивания (на TTY — закрывает \\r-строку новой строкой)."""
+    line = format_download_done(total_bytes, elapsed_sec)
+    if is_tty():
+        print(f"\r{line:<{_LINE_WIDTH}}".rstrip(), flush=True)
+    else:
+        print(line, flush=True)

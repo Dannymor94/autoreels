@@ -2082,8 +2082,8 @@ def test_yandex_folder_link_raises(tmp_path):
         return {"type": "dir", "name": "folder"}
     with pytest.raises(cli.RunError) as exc:
         cli._download_yandex_disk("https://disk.yandex.ru/d/abc", tmp_path / "inputs",
-                                  get_json=fake_get_json, run=lambda *a, **k: None,
-                                  which=lambda _n: "/usr/bin/curl")
+                                  get_json=fake_get_json,
+                                  download=lambda *a, **k: None)
     assert "папк" in str(exc.value).lower()
 
 
@@ -2093,12 +2093,12 @@ def test_yandex_non_video_raises(tmp_path):
         return {"type": "file", "name": "archive.zip", "mime_type": "application/zip"}
     with pytest.raises(cli.RunError) as exc:
         cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
-                                  get_json=fake_get_json, run=lambda *a, **k: None,
-                                  which=lambda _n: "/usr/bin/curl")
+                                  get_json=fake_get_json,
+                                  download=lambda *a, **k: None)
     assert "видео" in str(exc.value).lower()
 
 
-# -------------------------------------------------- Я.Диск: скачивание (curl мокается)
+# -------------------------------------------------- Я.Диск: скачивание (httpx-стрим мокается)
 
 def _yandex_meta_video(size=4):
     def fake_get_json(suffix, public_key, *, token=None):
@@ -2110,41 +2110,35 @@ def _yandex_meta_video(size=4):
 
 
 def test_yandex_download_happy_path(tmp_path):
-    def fake_run(cmd, **k):
-        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"data")   # 4 байта == size
-        class R:
-            returncode = 0
-        return R()
+    def fake_download(href, part, *, resume_from, total):
+        part.write_bytes(b"data")   # 4 байта == size
 
     out = cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
-                                    get_json=_yandex_meta_video(size=4), run=fake_run,
-                                    which=lambda _n: "/usr/bin/curl")
+                                    get_json=_yandex_meta_video(size=4), download=fake_download)
     assert out.exists()
     assert out.parent == (tmp_path / "inputs")
     assert out.suffix == ".mp4" and "Лекция" in out.name
 
 
-def test_yandex_curl_command_has_resume_and_output(tmp_path):
+def test_yandex_download_passes_fresh_href_and_zero_resume(tmp_path):
+    """Первая попытка: скачиваем со свежего API-href, resume_from=0."""
     captured = {}
 
-    def fake_run(cmd, **k):
-        captured["cmd"] = cmd
-        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"data")
-        class R:
-            returncode = 0
-        return R()
+    def fake_download(href, part, *, resume_from, total):
+        captured["href"] = href
+        captured["resume_from"] = resume_from
+        captured["total"] = total
+        part.write_bytes(b"data")
 
     cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
-                              get_json=_yandex_meta_video(size=4), run=fake_run,
-                              which=lambda _n: "/usr/bin/curl")
-    cmd = captured["cmd"]
-    assert "-C" in cmd and "-" in cmd            # докачка curl -C -
-    assert "-o" in cmd
-    assert cmd[-1] == "https://downloader.disk.yandex.ru/x"   # download URL из API
+                              get_json=_yandex_meta_video(size=4), download=fake_download)
+    assert captured["href"] == "https://downloader.disk.yandex.ru/x"
+    assert captured["resume_from"] == 0
+    assert captured["total"] == 4
 
 
-def test_yandex_retry_fetches_fresh_url_on_break(tmp_path):
-    """Обрыв (неполный размер) → повтор со СВЕЖИМ download URL, не старым."""
+def test_yandex_retry_fetches_fresh_url_and_resumes(tmp_path):
+    """Обрыв (неполный размер) → повтор со СВЕЖИМ href и докачкой с текущего смещения."""
     href_calls = {"n": 0}
 
     def fake_get_json(suffix, public_key, *, token=None):
@@ -2154,35 +2148,37 @@ def test_yandex_retry_fetches_fresh_url_on_break(tmp_path):
         return {"href": f"https://downloader/{href_calls['n']}"}
 
     attempts = {"n": 0}
+    resumes = []
 
-    def fake_run(cmd, **k):
+    def fake_download(href, part, *, resume_from, total):
         attempts["n"] += 1
-        part = Path(cmd[cmd.index("-o") + 1])
+        resumes.append(resume_from)
         if attempts["n"] == 1:
             part.write_bytes(b"xx")        # неполный (2 < 5) → обрыв
         else:
             part.write_bytes(b"xxxxx")     # полный
-        class R:
-            returncode = 0
-        return R()
 
     out = cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
-                                    get_json=fake_get_json, run=fake_run,
-                                    which=lambda _n: "/usr/bin/curl")
+                                    get_json=fake_get_json, download=fake_download)
     assert out.exists()
     assert href_calls["n"] == 2            # свежий URL на каждую попытку
+    assert resumes == [0, 2]               # вторая попытка докачивает с 2 байт
 
 
-def test_yandex_missing_curl_raises(tmp_path):
+def test_yandex_download_fails_after_max_attempts(tmp_path):
+    """Постоянный обрыв (недокачка) → RunError после N попыток, не бесконечно."""
+    def fake_download(href, part, *, resume_from, total):
+        part.write_bytes(b"xx")            # всегда неполный (2 < 5)
+
     with pytest.raises(cli.RunError) as exc:
         cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
-                                  get_json=_yandex_meta_video(), run=lambda *a, **k: None,
-                                  which=lambda _n: None)
-    assert "curl" in str(exc.value)
+                                  get_json=_yandex_meta_video(size=5), download=fake_download,
+                                  max_attempts=3)
+    assert "попыт" in str(exc.value).lower()
 
 
 def test_yandex_idempotent_when_dest_exists(tmp_path):
-    """Файл уже скачан (dest есть) → curl не зовём, возвращаем существующий."""
+    """Файл уже скачан (dest есть) → download не зовём, возвращаем существующий."""
     url = "https://disk.yandex.ru/i/abc"
     inputs = tmp_path / "inputs"
     inputs.mkdir()
@@ -2191,10 +2187,78 @@ def test_yandex_idempotent_when_dest_exists(tmp_path):
 
     out = cli._download_yandex_disk(
         url, inputs, get_json=_yandex_meta_video(),
-        run=lambda *a, **k: pytest.fail("curl не должен зваться — файл уже есть"),
-        which=lambda _n: "/usr/bin/curl",
+        download=lambda *a, **k: pytest.fail("download не должен зваться — файл уже есть"),
     )
     assert out == dest
+
+
+# -------------------------------------------------- httpx-стрим: запись/докачка
+
+class _FakeStreamResp:
+    def __init__(self, chunks, status_code=206):
+        self._chunks = chunks
+        self.status_code = status_code
+        self.headers = {}
+
+    def iter_bytes(self, chunk_size=None):
+        yield from self._chunks
+
+
+class _FakeStreamCM:
+    def __init__(self, resp, captured):
+        self._resp = resp
+        self._captured = captured
+
+    def __enter__(self):
+        return self._resp
+
+    def __exit__(self, *a):
+        return False
+
+
+def _patch_stream(monkeypatch, resp):
+    import httpx
+    captured = {}
+
+    def fake_stream(method, href, *, headers=None, **kwargs):
+        captured["headers"] = headers or {}
+        captured["href"] = href
+        return _FakeStreamCM(resp, captured)
+
+    monkeypatch.setattr(httpx, "stream", fake_stream)
+    return captured
+
+
+def test_httpx_stream_download_writes_bytes(monkeypatch, tmp_path):
+    cap = _patch_stream(monkeypatch, _FakeStreamResp([b"ab", b"cd", b"ef"], status_code=200))
+    part = tmp_path / "f.part"
+    cli._httpx_stream_download("https://dl/x", part, resume_from=0, total=6)
+    assert part.read_bytes() == b"abcdef"
+    assert "Range" not in cap["headers"]           # с нуля — без Range
+
+
+def test_httpx_stream_download_resumes_with_range(monkeypatch, tmp_path):
+    cap = _patch_stream(monkeypatch, _FakeStreamResp([b"cd", b"ef"], status_code=206))
+    part = tmp_path / "f.part"
+    part.write_bytes(b"ab")                          # уже скачано 2 байта
+    cli._httpx_stream_download("https://dl/x", part, resume_from=2, total=6)
+    assert part.read_bytes() == b"abcdef"            # докачка дописала
+    assert cap["headers"].get("Range") == "bytes=2-"
+
+
+def test_httpx_stream_download_restarts_when_server_ignores_range(monkeypatch, tmp_path):
+    """Сервер отдал 200 (не 206) на Range → не дублируем, качаем заново с нуля."""
+    _patch_stream(monkeypatch, _FakeStreamResp([b"abcdef"], status_code=200))
+    part = tmp_path / "f.part"
+    part.write_bytes(b"XX")                          # старый огрызок
+    cli._httpx_stream_download("https://dl/x", part, resume_from=2, total=6)
+    assert part.read_bytes() == b"abcdef"            # перезаписан, не XXabcdef
+
+
+def test_httpx_stream_download_http_error_raises(monkeypatch, tmp_path):
+    _patch_stream(monkeypatch, _FakeStreamResp([], status_code=404))
+    with pytest.raises(cli.RunError):
+        cli._httpx_stream_download("https://dl/x", tmp_path / "f.part", resume_from=0, total=6)
 
 
 # -------------------------------------------------- Я.Диск: диспетч main()

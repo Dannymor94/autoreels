@@ -319,3 +319,59 @@ def test_transcribe_chunks_prints_progress(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out
     assert "транскрипци" in out.lower() or "чанк" in out.lower()
     assert "1/3" in out or "1/" in out
+
+
+# ------------------------------------------------------------------ download: расчёт ETA
+
+def test_eta_seconds_basic():
+    # осталось 60 байт при 20 байт/с → 3 с
+    assert P.eta_seconds(total=100, downloaded=40, speed_bps=20) == pytest.approx(3.0)
+
+
+def test_eta_seconds_zero_speed_is_none():
+    assert P.eta_seconds(total=100, downloaded=40, speed_bps=0) is None
+
+
+def test_eta_seconds_complete_is_none():
+    assert P.eta_seconds(total=100, downloaded=100, speed_bps=20) is None
+
+
+def test_eta_seconds_unknown_total_is_none():
+    assert P.eta_seconds(total=None, downloaded=40, speed_bps=20) is None
+
+
+# ------------------------------------------------------------------ download: форматирование
+
+def test_format_duration_hms():
+    assert P.format_duration(6480) == "1:48:00"   # 1ч 48м
+    assert P.format_duration(225) == "3:45"       # без часов
+
+
+def test_format_speed_switches_units():
+    assert P.format_speed(2 * (1 << 20)) == "2.0 МБ/с"
+    assert P.format_speed(500 * (1 << 10)) == "500 КБ/с"
+
+
+def test_format_download_line_has_pct_bytes_speed_eta():
+    line = P.format_download_line(
+        downloaded=3 * (1 << 30), total=12 * (1 << 30), speed_bps=2 * (1 << 20)
+    )
+    assert line.startswith("↓")
+    assert "25%" in line
+    assert "3.0/12.0 ГБ" in line
+    assert "2.0 МБ/с" in line
+    assert "осталось" in line
+
+
+def test_format_download_line_unknown_total_omits_pct_and_eta():
+    line = P.format_download_line(downloaded=3 * (1 << 30), total=None, speed_bps=2 * (1 << 20))
+    assert "%" not in line
+    assert "осталось" not in line
+    assert "3.0 ГБ" in line
+
+
+def test_format_download_done():
+    s = P.format_download_done(total_bytes=12 * (1 << 30), elapsed_sec=6480)
+    assert s.startswith("✓")
+    assert "12.0 ГБ" in s
+    assert "1:48:00" in s
