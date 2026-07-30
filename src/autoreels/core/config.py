@@ -268,9 +268,34 @@ def load_r0_config(path: str | Path) -> R0Config:
     return cfg
 
 
-def load_render_config(path: str | Path) -> RenderConfig:
-    """config/render.yaml → RenderConfig."""
-    data = _read_yaml(Path(path))
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Рекурсивно наложить override на base: вложенные маппинги мержатся по ключам,
+    скаляры/списки заменяются целиком. Не мутирует аргументы."""
+    result = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def load_render_config(path: str | Path, *, local_path: str | Path | None = None) -> RenderConfig:
+    """config/render.yaml → RenderConfig.
+
+    Машинно-локальные настройки (путь к ffmpeg, кодек энкодера, font_dir) кладутся в
+    сосед `render.local.yaml` (в .gitignore) и накладываются поверх общего render.yaml
+    через deep-merge. Так машинный путь ffmpeg не уезжает в git и не ломает другую машину
+    (у Mac свой ffmpeg из PATH). Override частичный — задаются только отличающиеся ключи.
+    """
+    path = Path(path)
+    data = _read_yaml(path)
+    if local_path is None:
+        local_path = path.with_name(f"{path.stem}.local{path.suffix}")
+    else:
+        local_path = Path(local_path)
+    if local_path.is_file():
+        data = _deep_merge(data, _read_yaml(local_path))
     try:
         return RenderConfig.model_validate(data)
     except ValidationError as e:

@@ -1,5 +1,7 @@
 # Параметры локального рендера ffmpeg. Ноль магических чисел в коде.
-# ffmpeg: путь к бинарю. На Windows задать под машину: D:\ffmpeg\bin\ffmpeg.exe
+# ОБЩИЙ конфиг (в git). Машинные настройки (путь к ffmpeg, кодек энкодера) — НЕ здесь,
+# а в render.local.yaml (в .gitignore, накладывается поверх). См. render.local.yaml.example.
+# ffmpeg: путь к бинарю. Дефолт — из PATH; машинный путь задавать в render.local.yaml.
 ffmpeg: ffmpeg                 # Mac/Linux: ffmpeg из PATH
 
 scale: [1080, 1920]            # целевое вертикальное разрешение 9:16

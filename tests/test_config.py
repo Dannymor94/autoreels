@@ -64,6 +64,44 @@ def test_load_render_config_returns_typed_object():
     assert cfg.subtitles.font == "Montserrat"
 
 
+# ---- render.local.yaml: машинный override поверх общего render.yaml (в .gitignore) ----
+
+def test_render_local_yaml_overrides_ffmpeg(tmp_path):
+    """render.local.yaml задаёт машинный путь к ffmpeg — накладывается на общий конфиг."""
+    base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
+    _write(tmp_path, "render.local.yaml", "ffmpeg: D:\\ffmpeg\\bin\\ffmpeg.exe\n")
+    cfg = load_render_config(base)
+    assert cfg.ffmpeg == "D:\\ffmpeg\\bin\\ffmpeg.exe"
+
+
+def test_render_local_yaml_deep_merges_encoder(tmp_path):
+    """Локальный override меняет только encoder.codec — остальные поля encoder из базы."""
+    base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
+    base_cfg = load_render_config(base)                      # cq/preset из базы
+    _write(tmp_path, "render.local.yaml", "encoder:\n  codec: h264_amf\n")
+    cfg = load_render_config(base)
+    assert cfg.encoder.codec == "h264_amf"                  # переопределено
+    assert cfg.encoder.cq == base_cfg.encoder.cq            # не тронуто
+    assert cfg.encoder.preset == base_cfg.encoder.preset
+
+
+def test_render_no_local_yaml_uses_base(tmp_path):
+    """Нет render.local.yaml → значения из базового render.yaml (ffmpeg по умолчанию)."""
+    base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
+    cfg = load_render_config(base)
+    assert cfg.ffmpeg == "ffmpeg"
+
+
+def test_render_local_yaml_partial_keeps_other_sections(tmp_path):
+    """Частичный override (только ffmpeg) сохраняет прочие секции базы (subtitles, audio)."""
+    base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
+    _write(tmp_path, "render.local.yaml", "ffmpeg: /opt/ffmpeg\n")
+    cfg = load_render_config(base)
+    assert cfg.ffmpeg == "/opt/ffmpeg"
+    assert cfg.subtitles.font == "Montserrat"               # секция subtitles цела
+    assert cfg.audio.codec == "aac"
+
+
 def test_load_transcribe_config_defaults_to_groq():
     cfg = load_transcribe_config(TRANSCRIBE_YAML)
     assert isinstance(cfg, TranscribeConfig)

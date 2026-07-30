@@ -150,12 +150,22 @@ ar t https://youtu.be/XXXX --format json
 Транскрипт кэшируется по хэшу аудио (`data/cache/`), кэш общий для `run` и
 `transcribe`: повторный прогон не гоняет Whisper заново.
 
-**Энкодер и путь к ffmpeg** — в [`config/render.yaml`](config/render.yaml), не флаги:
-```yaml
-ffmpeg: ffmpeg                   # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe
-encoder:
-  codec: h264_amf                # Windows AMD; h264_nvenc NVIDIA; libx264 CPU
+**Энкодер и путь к ffmpeg** — не флаги. Общие дефолты в [`config/render.yaml`](config/render.yaml)
+(в git), **машинные** настройки — в `config/render.local.yaml` (в `.gitignore`, накладывается
+поверх через deep-merge), чтобы путь ffmpeg на Windows не уезжал на Mac:
+
+```bash
+cp config/render.local.yaml.example config/render.local.yaml   # один раз на машине
 ```
+```yaml
+# config/render.local.yaml — только машинные отличия
+ffmpeg: D:\ffmpeg\bin\ffmpeg.exe   # Windows: ffmpeg вне PATH
+encoder:
+  codec: h264_amf                  # Windows AMD; h264_nvenc NVIDIA; libx264 CPU
+```
+
+Тогда `python -m autoreels render` (без флагов) работает как есть. Альтернатива без файла —
+env `RENDER_FFMPEG` / `RENDER_ENCODER`. Приоритет: флаг > env > `render.local.yaml` > `render.yaml`.
 
 Алиасы обновляются через `git pull` — правишь [`aliases.sh`](aliases.sh), коммитишь.
 

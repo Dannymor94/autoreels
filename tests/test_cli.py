@@ -399,6 +399,32 @@ def test_render_passes_encoder_through(monkeypatch, tmp_path):
     assert seen["encoder"] == "h264_amf"
 
 
+def test_render_ffmpeg_from_env(monkeypatch, tmp_path):
+    """RENDER_FFMPEG задаёт путь к ffmpeg без флага (симметрично RENDER_ENCODER)."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+    monkeypatch.setenv("RENDER_FFMPEG", "/opt/ffmpeg/bin/ffmpeg")
+
+    seen = {}
+    monkeypatch.setattr(cli, "render_crop", lambda manifest, **k: seen.update(k) or [])
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT)
+    assert seen["ffmpeg"] == "/opt/ffmpeg/bin/ffmpeg"
+
+
+def test_render_ffmpeg_flag_beats_env(monkeypatch, tmp_path):
+    """Явный --ffmpeg приоритетнее RENDER_FFMPEG."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+    monkeypatch.setenv("RENDER_FFMPEG", "/opt/ffmpeg/bin/ffmpeg")
+
+    seen = {}
+    monkeypatch.setattr(cli, "render_crop", lambda manifest, **k: seen.update(k) or [])
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, ffmpeg="/custom/ffmpeg")
+    assert seen["ffmpeg"] == "/custom/ffmpeg"
+
+
 # ------------------------------------------------------------------ render: архив
 
 def test_render_archives_source_after_success(monkeypatch, tmp_path):

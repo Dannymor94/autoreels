@@ -1,0 +1,20 @@
+# Машинные настройки рендера — ПРИМЕР. Скопируй в render.local.yaml (без .example)
+# на конкретной машине. render.local.yaml в .gitignore: машинный путь ffmpeg
+# не уезжает в git и не ломает другую машину (у Mac свой ffmpeg из PATH).
+#
+#   cp config/render.local.yaml.example config/render.local.yaml
+#
+# Файл накладывается ПОВЕРХ общего config/render.yaml через deep-merge — задавай
+# ТОЛЬКО отличающиеся ключи, остальное берётся из базового render.yaml.
+#
+# Тогда `python -m autoreels render` (без флагов --ffmpeg/--encoder) работает как есть.
+
+# --- Системник Windows (AMD, ffmpeg вне PATH) ---
+# ffmpeg: D:\ffmpeg\bin\ffmpeg.exe    # путь к бинарю; на Windows часто вне PATH
+# encoder:
+#   codec: h264_amf                   # AMD-энкодер (NVIDIA → h264_nvenc; CPU → libx264)
+
+# Альтернатива без файла — переменные окружения (симметрично):
+#   RENDER_FFMPEG=D:\ffmpeg\bin\ffmpeg.exe
+#   RENDER_ENCODER=h264_amf
+# Приоритет: флаг CLI > env > render.local.yaml > render.yaml.

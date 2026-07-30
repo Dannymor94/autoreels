@@ -27,6 +27,12 @@ venv/
 # секреты провайдеров (Groq / OpenRouter ключи)
 .env
 
+# машинные настройки рендера (путь к ffmpeg, кодек энкодера) — накладываются поверх
+# общего config/render.yaml через deep-merge. Машинный путь ffmpeg (Windows:
+# D:\ffmpeg\bin\ffmpeg.exe) НЕ должен уезжать в git и ломать другую машину. См.
+# config/render.local.yaml.example. Общий render.yaml остаётся версионируемым.
+config/render.local.yaml
+
 # локальный конфиг харнесса
 .claude/
 

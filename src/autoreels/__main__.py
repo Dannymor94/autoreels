@@ -817,7 +817,8 @@ def cmd_render(
         return []
 
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
-    effective_ffmpeg = ffmpeg or render_cfg.ffmpeg
+    # ffmpeg: флаг > env RENDER_FFMPEG > render.yaml (+ render.local.yaml override).
+    effective_ffmpeg = ffmpeg or os.environ.get("RENDER_FFMPEG") or render_cfg.ffmpeg
     all_outputs: list[Path] = []
     skipped_no_video: list[str] = []
     skipped_done: list[str] = []
