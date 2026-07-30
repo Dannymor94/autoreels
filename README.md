@@ -88,13 +88,17 @@ source /путь/к/autoreels/aliases.sh
 
 | Команда | Что делает |
 |---|---|
-| `ar` | status + подсказка следующего шага |
+| `ar` / `ar menu` | интерактивное меню (выбор цифрой) |
 | `ar go` | run всех видео + git push манифестов (Mac) |
 | `ar go --no-push` | run без push |
 | `ar r` | git pull + render (системник) |
 | `ar s` | status |
 | `ar c` | calibrate --all |
 | `ar h` | help |
+
+`ar` без аргумента открывает **меню**: в шапке — состояние проекта,
+▶ помечает рекомендуемый шаг, пункты запускаются цифрой. `ar run <путь|URL>`
+(пункт 5 меню) принимает и файл вне `inputs/` (копируется внутрь).
 
 **Энкодер и путь к ffmpeg** — в [`config/render.yaml`](config/render.yaml), не флаги:
 ```yaml

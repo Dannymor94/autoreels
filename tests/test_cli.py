@@ -1687,3 +1687,147 @@ def test_run_dispatch_bad_path_returns_error(monkeypatch, tmp_path, capsys):
     assert rc == 1
     err = capsys.readouterr().err
     assert "nope.mp4" in err
+
+
+# -------------------------------------------------- меню: парсинг выбора
+
+def test_menu_action_maps_digits_to_actions():
+    """Каждая цифра меню → свой action-токен (стабильная нумерация)."""
+    assert cli._menu_action("1") == "go"
+    assert cli._menu_action("2") == "render"
+    assert cli._menu_action("3") == "status"
+    assert cli._menu_action("4") == "calibrate"
+    assert cli._menu_action("5") == "path"
+    assert cli._menu_action("6") == "help"
+    assert cli._menu_action("0") == "quit"
+
+
+def test_menu_action_accepts_quit_aliases():
+    """q / exit / quit / выход (в любом регистре) → quit."""
+    for c in ("q", "Q", "exit", "quit", "выход", "ВЫХОД"):
+        assert cli._menu_action(c) == "quit"
+
+
+def test_menu_action_strips_whitespace():
+    """Пробелы вокруг цифры игнорируются."""
+    assert cli._menu_action("  1  ") == "go"
+
+
+def test_menu_action_invalid_returns_none():
+    """Пустой ввод / вне диапазона / мусор → None (меню повторит запрос)."""
+    for c in ("", "9", "abc", "  ", "12"):
+        assert cli._menu_action(c) is None
+
+
+# -------------------------------------------------- меню: состояние и рекомендация
+
+def test_menu_state_counts_filesystem(tmp_path):
+    """_menu_state считает inputs/manifests/reels-out."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
+    (tmp_path / "inputs" / "b.mp4").write_bytes(b"x")
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "manifests" / "a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "reels-out" / "a").mkdir(parents=True)
+
+    st = cli._menu_state(root=tmp_path)
+    assert st == {"inputs": 2, "manifests": 1, "rendered": 1}
+
+
+def test_menu_state_empty_project(tmp_path):
+    """Пустой проект → все нули, без падения."""
+    assert cli._menu_state(root=tmp_path) == {"inputs": 0, "manifests": 0, "rendered": 0}
+
+
+def test_recommended_action_prefers_inputs():
+    """Есть видео → рекомендуем go (даже если есть манифесты)."""
+    assert cli._recommended_action({"inputs": 2, "manifests": 3, "rendered": 0}) == "go"
+
+
+def test_recommended_action_render_when_only_manifests():
+    """Видео нет, манифесты есть → рекомендуем render."""
+    assert cli._recommended_action({"inputs": 0, "manifests": 3, "rendered": 0}) == "render"
+
+
+def test_recommended_action_none_when_empty():
+    """Ни видео, ни манифестов → нет рекомендации."""
+    assert cli._recommended_action({"inputs": 0, "manifests": 0, "rendered": 5}) is None
+
+
+# -------------------------------------------------- меню: рендер
+
+def test_menu_render_shows_state_header(tmp_path):
+    """Шапка меню показывает счётчики состояния."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
+    (tmp_path / "inputs" / "b.mp4").write_bytes(b"x")
+
+    out = cli._menu_render(root=tmp_path)
+    assert "inputs: 2" in out
+    assert "манифест" in out.lower()
+
+
+def test_menu_render_lists_all_items(tmp_path):
+    """Меню перечисляет все пункты с их цифрами."""
+    out = cli._menu_render(root=tmp_path)
+    for num in ("1", "2", "3", "4", "5", "6", "0"):
+        assert f"{num})" in out
+    assert "Выход" in out
+
+
+def test_menu_render_highlights_recommended_with_videos(tmp_path):
+    """Есть видео → пункт «Обработать видео» подсвечен маркером ▶."""
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
+
+    out = cli._menu_render(root=tmp_path)
+    line = next(l for l in out.splitlines() if "Обработать видео" in l)
+    assert "▶" in line
+
+
+def test_menu_render_highlights_render_when_manifests(tmp_path):
+    """Видео нет, манифесты есть → подсвечен пункт рендера, не обработки."""
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "manifests" / "a.json").write_text("{}", encoding="utf-8")
+
+    out = cli._menu_render(root=tmp_path)
+    render_line = next(l for l in out.splitlines() if "рендер" in l.lower() or "Отрендер" in l)
+    go_line = next(l for l in out.splitlines() if "Обработать видео" in l)
+    assert "▶" in render_line
+    assert "▶" not in go_line
+
+
+# -------------------------------------------------- меню: CLI-субкоманда
+
+def test_menu_subcommand_registered():
+    """menu зарегистрирован как подкоманда."""
+    parser = cli._build_parser()
+    args = parser.parse_args(["menu"])
+    assert args.cmd == "menu"
+
+
+def test_menu_subcommand_prints_menu(capsys, tmp_path, monkeypatch):
+    """autoreels menu печатает меню."""
+    monkeypatch.chdir(tmp_path)
+    rc = cli.main(["menu"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Выход" in out
+    assert "0)" in out
+
+
+def test_menu_resolve_prints_action_token(capsys, tmp_path, monkeypatch):
+    """autoreels menu --resolve 1 → печатает 'go' (для bash-диспетча)."""
+    monkeypatch.chdir(tmp_path)
+    rc = cli.main(["menu", "--resolve", "1"])
+    out = capsys.readouterr().out.strip()
+    assert rc == 0
+    assert out == "go"
+
+
+def test_menu_resolve_invalid_prints_invalid(capsys, tmp_path, monkeypatch):
+    """autoreels menu --resolve <мусор> → печатает 'invalid' (bash попадёт в *)."""
+    monkeypatch.chdir(tmp_path)
+    cli.main(["menu", "--resolve", "9"])
+    out = capsys.readouterr().out.strip()
+    assert out == "invalid"

@@ -7,11 +7,43 @@
 # BASH_SOURCE[0] в bash; $0 в zsh при source.
 _AR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 
+# Интерактивное меню (цикл в bash, «мозги» — autoreels menu на Python).
+# Рисует адаптивное меню, читает цифру, запускает пункт, возвращается — до «Выход».
+_ar_menu() {
+    while true; do
+        autoreels menu
+        printf "Выбор [цифра, Enter — обновить]: "
+        read -r _choice
+        _action="$(autoreels menu --resolve "$_choice")"
+        case "$_action" in
+            go)        ar go ;;
+            render)    ar r ;;
+            status)    ar s ;;
+            calibrate) ar c ;;
+            path)
+                printf "Путь к файлу или URL: "
+                read -r _src
+                [ -n "$_src" ] && ar run "$_src"
+                ;;
+            help)      ar h ;;
+            quit)      echo "пока!"; return 0 ;;
+            *)
+                # Пустой ввод или мусор → просто перерисовать меню, без паузы.
+                [ -n "$_choice" ] && echo "  неизвестный пункт: $_choice"
+                continue
+                ;;
+        esac
+        printf "\n[Enter] — назад в меню… "
+        read -r _
+    done
+}
+
 # ar: активировать venv проекта (если ещё не активен), затем диспетчер команд.
 # Mac/Linux: .venv/bin/activate   Windows Git Bash: .venv/Scripts/activate
 #
 # КОРОТКИЕ КОМАНДЫ:
-#   ar           → status + подсказка следующего шага
+#   ar           → интерактивное меню (цифрами)
+#   ar menu      → то же меню
 #   ar go        → run всех видео + git push манифестов (Mac, нужен Groq)
 #   ar go --no-push → run без git push
 #   ar r         → git pull + render (системник)
@@ -33,9 +65,9 @@ ar() {
 
     # Диспетчер
     case "$1" in
-        "")
-            # ar без аргумента → status + подсказка следующего шага
-            autoreels
+        ""|menu)
+            # ar / ar menu → интерактивное меню
+            _ar_menu
             ;;
         go)
             # ar go [--no-push]: run всех видео → git push манифестов

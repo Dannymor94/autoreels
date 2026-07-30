@@ -641,6 +641,92 @@ def _next_hint(root=".") -> str | None:
     return None
 
 
+# ----------------------------------------------------------------------------- меню
+
+# Пункты меню: (цифра, action-токен, подпись, короткая подсказка). Нумерация СТАБИЛЬНА —
+# адаптивность (подсветка/пометки) влияет только на оформление, не на digit→action.
+_MENU_ITEMS: list[tuple[str, str, str, str]] = [
+    ("1", "go",        "Обработать видео из inputs/", "run всех + git push"),
+    ("2", "render",    "Отрендерить манифесты",       "git pull + render"),
+    ("3", "status",    "Статус",                       ""),
+    ("4", "calibrate", "Калибровка кропа (все)",       ""),
+    ("5", "path",      "Обработать по пути/URL",        ""),
+    ("6", "help",      "Справка",                       ""),
+    ("0", "quit",      "Выход",                         ""),
+]
+
+# Текстовые псевдонимы выхода (кроме цифры 0) — удобство: q/exit/quit/выход.
+_MENU_QUIT_ALIASES = {"q", "quit", "exit", "выход"}
+
+
+def _menu_action(choice: str) -> str | None:
+    """Парсинг выбора пользователя → action-токен (или None, если ввод невалиден).
+
+    Стабильная карта: цифра пункта → его action; q/exit/quit/выход → quit. Мусор,
+    пустая строка, число вне диапазона → None (bash повторит запрос / попадёт в *).
+    """
+    c = (choice or "").strip().lower()
+    if c in _MENU_QUIT_ALIASES:
+        return "quit"
+    for num, action, _label, _hint in _MENU_ITEMS:
+        if c == num:
+            return action
+    return None
+
+
+def _menu_state(root=".") -> dict[str, int]:
+    """Счётчики состояния для шапки меню: inputs / manifests / rendered."""
+    root = Path(root)
+    inputs = len(list((root / "inputs").glob("*.mp4"))) if (root / "inputs").is_dir() else 0
+    manifests = len(list((root / "manifests").glob("*.json"))) if (root / "manifests").is_dir() else 0
+    reels_out = root / "reels-out"
+    rendered = len([d for d in reels_out.iterdir() if d.is_dir()]) if reels_out.is_dir() else 0
+    return {"inputs": inputs, "manifests": manifests, "rendered": rendered}
+
+
+def _recommended_action(state: dict[str, int]) -> str | None:
+    """Рекомендуемый следующий шаг по состоянию: видео → go; иначе манифесты → render."""
+    if state.get("inputs", 0) > 0:
+        return "go"
+    if state.get("manifests", 0) > 0:
+        return "render"
+    return None
+
+
+def _menu_render(root=".", *, platform: str | None = None) -> str:
+    """Собрать текст адаптивного меню: шапка-состояние + пункты с подсветкой ▶.
+
+    `platform` (sys.platform, инъекция для тестов) помечает пункты, неактуальные машине:
+    run/go нужен Groq (обычно Mac), render — обычно системник Windows.
+    """
+    if platform is None:
+        platform = sys.platform
+    st = _menu_state(root)
+    rec = _recommended_action(st)
+    is_mac = platform == "darwin"
+
+    lines: list[str] = []
+    lines.append("═══ autoreels ═══════════════════════════════════════")
+    lines.append(
+        f"  inputs: {st['inputs']} ждут  |  манифесты: {st['manifests']}  |  "
+        f"готово: {st['rendered']}"
+    )
+    lines.append("")
+    for num, action, label, hint in _MENU_ITEMS:
+        marker = "▶" if action == rec else " "
+        note = f"  ({hint})" if hint else ""
+        # Пометка неактуальных машине пунктов (не блокируем — только подсказка).
+        if action == "go" and not is_mac:
+            note += "  · нужен Groq (обычно Mac)"
+        elif action == "render" and is_mac:
+            note += "  · рендер обычно на системнике"
+        rec_tag = "  ← рекомендую" if action == rec else ""
+        lines.append(f"  {marker} {num}) {label}{note}{rec_tag}")
+    lines.append("")
+    lines.append("─────────────────────────────────────────────────────")
+    return "\n".join(lines)
+
+
 # ----------------------------------------------------------------------- install-aliases
 
 def _find_aliases_sh() -> Path:
@@ -732,7 +818,8 @@ autoreels — длинное talking-head видео → вертикальны�
 
 ━━━ КОРОТКИЕ КОМАНДЫ (после source aliases.sh) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ar              status + подсказка следующего шага
+  ar              интерактивное меню (выбор цифрой, без ввода команд)
+  ar menu         то же меню
   ar go           run всех видео + git push манифестов  (Mac, нужен Groq)
   ar go --no-push run без push
   ar r            git pull + render                      (системник)
@@ -740,6 +827,9 @@ autoreels — длинное talking-head видео → вертикальны�
   ar c            calibrate --all
   ar h            эта справка
   ar <...>        передаёт команду в autoreels напрямую
+
+  Меню адаптивно: в шапке — состояние (inputs/манифесты/готово), ▶ помечает
+  рекомендуемый шаг. Пункт 5 спрашивает путь/URL. «0» или q — выход.
 
   Энкодер и путь к ffmpeg — в config/render.yaml (не нужны флаги):
     ffmpeg: ffmpeg              # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe
@@ -842,6 +932,22 @@ def _build_parser():
     sub = p.add_subparsers(dest="cmd", required=False)
 
     sub.add_parser("help", help="расширенная справка: полный цикл, папки, частые случаи")
+
+    pm = sub.add_parser(
+        "menu",
+        help="печать интерактивного меню (цикл рисует bash-обёртка ar menu)",
+        description=(
+            "Печатает адаптивное меню (шапка-состояние + пункты с подсветкой ▶).\n"
+            "Сам цикл (чтение цифры, запуск операций, возврат) — в bash-функции ar menu;\n"
+            "эта подкоманда — «мозги»: рендер меню и разбор выбора.\n\n"
+            "  autoreels menu                 — напечатать меню\n"
+            "  autoreels menu --resolve 1     — цифра → action-токен (go/render/…/quit)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pm.add_argument("--resolve", default=None,
+                    help="разобрать выбор пользователя в action-токен и выйти")
+    pm.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
     ps = sub.add_parser(
         "status",
@@ -972,6 +1078,13 @@ def main(argv=None) -> int:
 
     if args.cmd == "help":
         print(_HELP_EXTENDED)
+        return 0
+
+    if args.cmd == "menu":
+        if args.resolve is not None:
+            print(_menu_action(args.resolve) or "invalid")
+        else:
+            print(_menu_render(root=args.root))
         return 0
 
     if args.cmd == "status":
