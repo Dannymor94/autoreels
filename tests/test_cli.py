@@ -2159,22 +2159,42 @@ def test_yandex_retry_fetches_fresh_url_and_resumes(tmp_path):
             part.write_bytes(b"xxxxx")     # полный
 
     out = cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
-                                    get_json=fake_get_json, download=fake_download)
+                                    get_json=fake_get_json, download=fake_download,
+                                    retry_pause_sec=0)
     assert out.exists()
     assert href_calls["n"] == 2            # свежий URL на каждую попытку
     assert resumes == [0, 2]               # вторая попытка докачивает с 2 байт
 
 
-def test_yandex_download_fails_after_max_attempts(tmp_path):
-    """Постоянный обрыв (недокачка) → RunError после N попыток, не бесконечно."""
+def test_yandex_retry_survives_httpx_connection_reset(tmp_path):
+    """Обрыв соединения (httpx.HTTPError, как curl 56) ловится и докачивается, не крашит."""
+    import httpx
+    attempts = {"n": 0}
+
     def fake_download(href, part, *, resume_from, total):
-        part.write_bytes(b"xx")            # всегда неполный (2 < 5)
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            part.write_bytes(b"xx")                       # частично…
+            raise httpx.RemoteProtocolError("Connection reset by peer")  # …и обрыв
+        part.write_bytes(b"xxxxx")                        # докачали
+
+    out = cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
+                                    get_json=_yandex_meta_video(size=5), download=fake_download,
+                                    retry_pause_sec=0)
+    assert out.exists()
+    assert attempts["n"] == 2
+
+
+def test_yandex_download_gives_up_after_stalls_without_progress(tmp_path):
+    """Нет прогресса N попыток подряд → RunError (не бесконечный цикл)."""
+    def fake_download(href, part, *, resume_from, total):
+        part.write_bytes(b"xx")            # всегда 2 из 5 — прогресса нет после первой
 
     with pytest.raises(cli.RunError) as exc:
         cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
                                   get_json=_yandex_meta_video(size=5), download=fake_download,
-                                  max_attempts=3)
-    assert "попыт" in str(exc.value).lower()
+                                  max_stalls=3, retry_pause_sec=0)
+    assert "прогресс" in str(exc.value).lower() or "не удалось" in str(exc.value).lower()
 
 
 def test_yandex_idempotent_when_dest_exists(tmp_path):

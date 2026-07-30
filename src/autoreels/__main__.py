@@ -381,22 +381,29 @@ def _download_yandex_disk(
     get_json=None,
     download=None,
     token: str | None = None,
-    max_attempts: int = 3,
+    max_stalls: int = 8,
+    retry_pause_sec: float = 3.0,
 ) -> Path:
     """Скачать файл с публичной ссылки Я.Диска в `inputs/` (httpx-стрим) → путь для конвейера.
 
-    Поток: метаданные (тип/видео/размер, дёшево до гигабайтов) → цикл попыток, где на
+    Поток: метаданные (тип/видео/размер, дёшево до гигабайтов) → цикл докачки, где на
     КАЖДОЙ попытке берётся СВЕЖИЙ временный download URL (старый протухает на 31 ГБ) и
     поток докачивает `.part` с текущего смещения (`Range`). Целостность — по размеру из
-    метаданных. Прогресс — читаемая строка (%/ГБ/скорость/ETA), не сырой curl.
+    метаданных. Прогресс — читаемая строка (%/ГБ/скорость/ETA).
+
+    Устойчивость к обрывам (Яндекс троттлит большие файлы и рвёт соединение — «Connection
+    reset by peer»): обрыв соединения (`httpx.HTTPError`) ловится, качаем дальше со свежей
+    ссылки с места обрыва. Сдаёмся только после `max_stalls` попыток ПОДРЯД без прогресса
+    (а не после N всего) — пока байты идут, докачка продолжается сколько нужно.
 
     Только файлы (/i/). Папка (/d/, type=='dir') — предупредить и выйти (batch — будущее).
-    Публичные ссылки Я.Диск троттлит → предупреждаем о возможном долгом скачивании.
     """
     import os
     import time
 
-    from autoreels.core.progress import print_download_done
+    import httpx
+
+    from autoreels.core.progress import _gb, print_download_done
 
     get_json = get_json or _yandex_api_get
     download = download or _httpx_stream_download
@@ -429,33 +436,47 @@ def _download_yandex_disk(
     if size and size > (1 << 30):     # >1 ГБ — честно предупредить про троттлинг
         print(
             f"файл {name}: {size / (1 << 30):.1f} ГБ. Публичные ссылки Я.Диск троттлит — "
-            f"большой файл может качаться долго.",
+            f"большой файл может качаться долго (докачка при обрывах включена).",
             flush=True,
         )
 
     started = time.monotonic()
-    for attempt in range(1, max_attempts + 1):
+    stalls = 0
+    while True:
         href = _yandex_download_href(url, get_json=get_json, token=token)   # свежий каждый раз
         resume_from = part.stat().st_size if part.exists() else 0
-        if attempt > 1:
-            print(f"докачка (попытка {attempt}/{max_attempts}) со свежей ссылкой…", flush=True)
+        if resume_from:
+            pct = f" ({100 * resume_from // size}%)" if size else ""
+            print(f"докачиваю с {_gb(resume_from)} ГБ{pct} со свежей ссылки…", flush=True)
+
+        interrupted = False
         try:
             download(href, part, resume_from=resume_from, total=size)
-        except (RunError, OSError) as e:
-            print(f"обрыв: {e}", flush=True)
-            continue
+        except (RunError, OSError, httpx.HTTPError) as e:
+            interrupted = True
+            print(f"\nобрыв связи: {e} — переподключаюсь…", flush=True)
 
         got = part.stat().st_size if part.exists() else 0
-        if part.exists() and (size is None or got == size):
+        complete = part.exists() and (got == size if size is not None else not interrupted)
+        if complete:
             part.replace(dest)
             print_download_done(got, time.monotonic() - started)
             print(f"скачано → inputs/{dest.name}", flush=True)
             return dest
 
-    raise RunError(
-        f"не удалось скачать с Я.Диска за {max_attempts} попытки: {url} "
-        f"(ссылка недоступна / обрывы сети / троттлинг)"
-    )
+        # Прогресс есть → сбрасываем счётчик застоя; иначе приближаемся к сдаче.
+        if got > resume_from:
+            stalls = 0
+        else:
+            stalls += 1
+            if stalls >= max_stalls:
+                raise RunError(
+                    f"не удалось скачать с Я.Диска: {url} — "
+                    f"{max_stalls} попыток подряд без прогресса "
+                    f"(ссылка недоступна / жёсткий троттлинг / нет сети)"
+                )
+        if retry_pause_sec:
+            time.sleep(retry_pause_sec)
 
 
 # ----------------------------------------------------- архив (общий хелпер)
