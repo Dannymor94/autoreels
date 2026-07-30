@@ -51,6 +51,14 @@ from autoreels.local.calibrate import CalibrateError, cmd_calibrate
 from autoreels.local.render import RenderError, SourceNotFoundError, load_manifest, render_crop
 from autoreels.local.subtitles import words_in_window
 
+class RunError(Exception):
+    """Приём исходника не удался: не видео (по расширению) или коллизия имени в inputs/.
+
+    Отдельный тип (не FileNotFoundError — файл-то есть): CLI ловит его в _KNOWN_ERRORS
+    и печатает внятное сообщение вместо голого traceback.
+    """
+
+
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
 _KNOWN_ERRORS = (
     ExtractAudioError,
@@ -61,8 +69,16 @@ _KNOWN_ERRORS = (
     ConfigError,
     CalibrationError,
     CalibrateError,
+    RunError,
     FileNotFoundError,
 )
+
+# Расширения, которые считаем видео при приёме исходника по явному пути. Список — лишь
+# ранний дружелюбный отсев (ffmpeg остаётся глубоким валидатором на этапе extract_audio).
+_VIDEO_EXTS = {
+    ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
+    ".flv", ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts",
+}
 
 
 # --------------------------------------------------------------------------- .env
@@ -77,6 +93,57 @@ def _load_env(dotenv_path: str | Path | None = None) -> None:
 def _run_key(source_sha256: str, duration_preset: str) -> str:
     """Детерминированный ключ прогона от source+preset (полноценная версия рубрики — M1)."""
     return hashlib.sha256(f"{source_sha256}:{duration_preset}".encode()).hexdigest()[:16]
+
+
+# ----------------------------------------------------- приём исходника (путь → inputs/)
+
+def _ingest_source(video: Path, inputs_dir: Path) -> Path:
+    """Втянуть исходник в inputs/ так, чтобы `render` нашёл его по sha256.
+
+    `run` может получить путь куда угодно (`ar run ~/Downloads/лекция.mp4`), но `render`
+    ищет исходник только в `inputs/`. Поэтому внешний путь копируется в `inputs/<имя>`
+    (оригинал не трогаем — не move и не symlink: symlink на Windows требует прав, а move
+    унёс бы чужой файл). Путь уже внутри `inputs/` — используется как есть.
+
+    Возвращает путь внутри `inputs/`, который дальше идёт в `cmd_run`. Ошибки:
+    - несуществующий путь / это каталог → FileNotFoundError;
+    - расширение не видео → RunError (ранний отсев до ffmpeg);
+    - в `inputs/` уже другой файл с тем же именем → RunError (без тихой перезаписи).
+    """
+    video = Path(video).expanduser()
+    if not video.exists():
+        raise FileNotFoundError(f"файл не найден: {video}")
+    if not video.is_file():
+        raise FileNotFoundError(f"не файл (это каталог?): {video}")
+    if video.suffix.lower() not in _VIDEO_EXTS:
+        raise RunError(
+            f"не похоже на видео: {video.name} "
+            f"(ожидалось расширение из {', '.join(sorted(_VIDEO_EXTS))})"
+        )
+
+    video = video.resolve()
+    inputs_dir = Path(inputs_dir).resolve()
+
+    # Уже внутри inputs/ → ничего не копируем.
+    try:
+        video.relative_to(inputs_dir)
+        return video
+    except ValueError:
+        pass
+
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    dest = inputs_dir / video.name
+    if dest.exists():
+        if state.file_sha256_partial(video) == state.file_sha256_partial(dest):
+            return dest                                   # тот же файл — идемпотентно
+        raise RunError(
+            f"в inputs/ уже есть другой файл с именем {video.name!r} — "
+            f"переименуйте исходник или уберите старый ({dest})"
+        )
+
+    print(f"копирую в inputs/: {video.name}…", flush=True)
+    shutil.copy2(video, dest)
+    return dest
 
 
 # ----------------------------------------------------- архив (общий хелпер)
@@ -697,6 +764,8 @@ autoreels — длинное talking-head видео → вертикальны�
   run [видео] [--ffmpeg путь]
     Облачный тир (Mac, нужен Groq): аудио → Groq Whisper → транскрипт →
     Groq LLM → manifests/<имя>.json. GROQ_API_KEY задаётся в .env.
+    Аргумент-видео — путь куда угодно (напр. ~/Downloads/лекция.mp4):
+    файл копируется в inputs/ (оригинал остаётся), дальше обычный конвейер.
     Без аргумента: batch по всем inputs/*.mp4.
     После успеха видео перемещается в inputs-archive/.
 
@@ -827,15 +896,19 @@ def _build_parser():
         description=(
             "Облачный тир: видео → аудио → Groq Whisper → транскрипт → Groq LLM → манифест.\n"
             "Нужен GROQ_API_KEY в .env. Видео за пределы машины не уходит.\n"
+            "<видео> — путь куда угодно: файл вне inputs/ копируется в inputs/ (оригинал\n"
+            "остаётся на месте), дальше обычный конвейер.\n"
             "Без <видео>: batch-обработка всех inputs/*.mp4.\n"
             "После успеха видео перемещается в inputs-archive/.\n\n"
             "Пример: autoreels run inputs/лекция.mp4\n"
+            "Извне:  autoreels run ~/Downloads/лекция.mp4\n"
             "Batch:   autoreels run"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     pr.add_argument("video", nargs="?", default=None,
-                    help="путь к видео; без аргумента — batch: все *.mp4 из inputs/")
+                    help="путь к видео (в т.ч. вне inputs/ — скопируется); "
+                         "без аргумента — batch: все *.mp4 из inputs/")
     pr.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
 
@@ -916,7 +989,8 @@ def main(argv=None) -> int:
                 return 1
         elif args.cmd == "run":
             if args.video:
-                cmd_run(Path(args.video), ffmpeg=args.ffmpeg)
+                video = _ingest_source(Path(args.video), Path("inputs"))
+                cmd_run(video, ffmpeg=args.ffmpeg)
             else:
                 _, failed = cmd_run_batch(ffmpeg=args.ffmpeg)
                 if failed:

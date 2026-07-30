@@ -1569,3 +1569,121 @@ def test_no_args_shows_hint_with_manifests(capsys, tmp_path, monkeypatch):
     cli.main([])
     out = capsys.readouterr().out
     assert "ar r" in out or " r" in out.lower()
+
+
+# -------------------------------------------------- приём исходника: путь вне inputs/
+
+def test_ingest_copies_external_path_into_inputs(tmp_path):
+    """Путь вне inputs/ копируется в inputs/<имя>, оригинал не трогается."""
+    ext = tmp_path / "Downloads"
+    ext.mkdir()
+    src = ext / "lecture.mp4"
+    src.write_bytes(b"video-bytes")
+    inputs = tmp_path / "inputs"
+
+    result = cli._ingest_source(src, inputs)
+
+    assert result == inputs / "lecture.mp4"
+    assert result.read_bytes() == b"video-bytes"     # скопировано
+    assert src.exists()                               # оригинал на месте
+
+
+def test_ingest_path_already_inside_inputs_is_noop(tmp_path):
+    """Файл уже в inputs/ — возвращается как есть, без копии-дубля."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    src = inputs / "v.mp4"
+    src.write_bytes(b"x")
+
+    result = cli._ingest_source(src, inputs)
+
+    assert result.resolve() == src.resolve()
+    assert sorted(p.name for p in inputs.iterdir()) == ["v.mp4"]   # нет дубля
+
+
+def test_ingest_nonexistent_path_raises_clear_error(tmp_path):
+    """Несуществующий путь → внятная ошибка (не краш)."""
+    with pytest.raises(FileNotFoundError) as exc:
+        cli._ingest_source(tmp_path / "ghost.mp4", tmp_path / "inputs")
+    assert "ghost.mp4" in str(exc.value)
+
+
+def test_ingest_non_video_extension_raises(tmp_path):
+    """Не видео (по расширению) → внятная ошибка."""
+    doc = tmp_path / "notes.txt"
+    doc.write_text("hello", encoding="utf-8")
+    with pytest.raises(cli.RunError) as exc:
+        cli._ingest_source(doc, tmp_path / "inputs")
+    assert "notes.txt" in str(exc.value)
+
+
+def test_ingest_name_collision_different_content_raises(tmp_path):
+    """В inputs/ уже другой файл с тем же именем → ошибка коллизии, не тихая перезапись."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "v.mp4").write_bytes(b"OTHER-content")
+    ext = tmp_path / "elsewhere"
+    ext.mkdir()
+    src = ext / "v.mp4"
+    src.write_bytes(b"NEW-content")
+
+    with pytest.raises(cli.RunError) as exc:
+        cli._ingest_source(src, inputs)
+    assert "v.mp4" in str(exc.value)
+    assert (inputs / "v.mp4").read_bytes() == b"OTHER-content"   # не перезаписан
+
+
+def test_ingest_same_content_already_in_inputs_reuses(tmp_path):
+    """В inputs/ уже тот же файл (то же содержимое) → переиспользуем, без ошибки."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "v.mp4").write_bytes(b"same-content")
+    ext = tmp_path / "elsewhere"
+    ext.mkdir()
+    src = ext / "v.mp4"
+    src.write_bytes(b"same-content")
+
+    result = cli._ingest_source(src, inputs)
+
+    assert result == inputs / "v.mp4"
+    assert result.read_bytes() == b"same-content"
+
+
+def test_ingest_expands_user_and_resolves(tmp_path):
+    """Путь-директория → внятная ошибка (не видео-файл)."""
+    d = tmp_path / "adir"
+    d.mkdir()
+    with pytest.raises((cli.RunError, FileNotFoundError)):
+        cli._ingest_source(d, tmp_path / "inputs")
+
+
+def test_run_dispatch_ingests_external_path(monkeypatch, tmp_path):
+    """main('run <внешний путь>') прогоняет приём: копирует в inputs/ и зовёт cmd_run с ним."""
+    monkeypatch.chdir(tmp_path)
+    ext = tmp_path / "Downloads"
+    ext.mkdir()
+    src = ext / "clip.mp4"
+    src.write_bytes(b"vid")
+
+    seen = {}
+
+    def _fake_cmd_run(video, **kwargs):
+        seen["video"] = Path(video)
+        return tmp_path / "manifests" / "clip.json"
+
+    monkeypatch.setattr(cli, "cmd_run", _fake_cmd_run)
+
+    rc = cli.main(["run", str(src)])
+
+    assert rc == 0
+    assert seen["video"] == (tmp_path / "inputs" / "clip.mp4")
+    assert (tmp_path / "inputs" / "clip.mp4").exists()
+
+
+def test_run_dispatch_bad_path_returns_error(monkeypatch, tmp_path, capsys):
+    """main('run <несуществующий>') → код 1 + внятное сообщение, не traceback."""
+    monkeypatch.chdir(tmp_path)
+    rc = cli.main(["run", str(tmp_path / "nope.mp4")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "nope.mp4" in err
