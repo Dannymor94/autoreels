@@ -2553,3 +2553,36 @@ def test_stage_select_uses_config_model(monkeypatch):
     monkeypatch.setattr(cli, "select", lambda *a, **k: [])
     cli._stage_select("COMPRESSED", r0_cfg=r0, root=REPO_ROOT)
     assert captured.get("model") == r0.model
+
+
+# -------------------------------------------------- calibrate --all: изоляция ошибок
+
+def test_calibrate_all_skips_broken_video_and_continues(tmp_path, monkeypatch, capsys):
+    """Битое видео (ffprobe/CalibrateError) не роняет весь batch — пропуск и продолжение."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "bad.mp4").write_bytes(b"x")
+    (inputs / "good.mp4").write_bytes(b"y")
+
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast",
+                        lambda v, c: "sha_" + Path(v).name)
+    monkeypatch.setattr(cli, "_calibration_kind", lambda d, s: "none")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "к")
+
+    attempted = []
+
+    def fake_calibrate(video, **k):
+        attempted.append(Path(video).name)
+        if Path(video).name == "bad.mp4":
+            from autoreels.local.calibrate import CalibrateError
+            raise CalibrateError("ffprobe не смог прочитать bad.mp4: moov atom not found")
+
+    monkeypatch.setattr(cli, "cmd_calibrate", fake_calibrate)
+
+    # НЕ должно бросать — обе видео обработаны, битое пропущено
+    cli.cmd_calibrate_batch(root=tmp_path, inputs_dir=inputs,
+                            calibrations_dir=tmp_path / "calib", cache_dir=tmp_path / "c")
+
+    assert attempted == ["bad.mp4", "good.mp4"]      # дошли до второго после падения первого
+    err = capsys.readouterr().err
+    assert "bad.mp4" in err

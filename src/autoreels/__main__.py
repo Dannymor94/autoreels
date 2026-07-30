@@ -955,36 +955,50 @@ def cmd_calibrate_batch(
         print("inputs/ пуст — нечего калибровать")
         return
 
+    failed: list[str] = []
     for video in videos:
-        sha = state.file_sha256_cached_fast(video, cache_dir)
-        kind = _calibration_kind(calibrations_dir, sha)
-        if kind == "manual":
-            continue  # уже откалиброван вручную — пропуск молча
-        if kind == "corrupt":
-            print(f"  ⚠ {video.name}: повреждённый файл калибровки — пропуск "
-                  f"(удалите {calibration_path(calibrations_dir, sha)} и повторите)")
+        # Изоляция per-video: битое/нечитаемое видео (напр. «moov atom not found» —
+        # недокачанный/повреждённый mp4) не должно ронять весь обход. Ctrl-C (BaseException,
+        # отмена калибровки) НЕ ловим — он должен прерывать, как и раньше.
+        try:
+            sha = state.file_sha256_cached_fast(video, cache_dir)
+            kind = _calibration_kind(calibrations_dir, sha)
+            if kind == "manual":
+                continue  # уже откалиброван вручную — пропуск молча
+            if kind == "corrupt":
+                print(f"  ⚠ {video.name}: повреждённый файл калибровки — пропуск "
+                      f"(удалите {calibration_path(calibrations_dir, sha)} и повторите)")
+                continue
+
+            action = _ask_batch_action(video.name, kind)
+
+            if action == "п":
+                continue
+
+            if action == "а":
+                frame_size = _probe_frame_size_for_auto(video, ffprobe=ffprobe)
+                crop = auto_crop(frame_size)
+                save_calibration(
+                    calibrations_dir,
+                    source_name=video.name,
+                    source_sha256=sha,
+                    crop=crop,
+                    frame=frame_size,
+                    setup_label="auto",
+                )
+                print(f"  ⚙ автокроп зафиксирован: {video.name}")
+
+            elif action == "к":
+                cmd_calibrate(video, setup_label=None, ffmpeg=ffmpeg, ffprobe=ffprobe)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠ {video.name}: пропущен (не удалось обработать) — {e}",
+                  file=sys.stderr, flush=True)
+            failed.append(video.name)
             continue
 
-        action = _ask_batch_action(video.name, kind)
-
-        if action == "п":
-            continue
-
-        if action == "а":
-            frame_size = _probe_frame_size_for_auto(video, ffprobe=ffprobe)
-            crop = auto_crop(frame_size)
-            save_calibration(
-                calibrations_dir,
-                source_name=video.name,
-                source_sha256=sha,
-                crop=crop,
-                frame=frame_size,
-                setup_label="auto",
-            )
-            print(f"  ⚙ автокроп зафиксирован: {video.name}")
-
-        elif action == "к":
-            cmd_calibrate(video, setup_label=None, ffmpeg=ffmpeg, ffprobe=ffprobe)
+    if failed:
+        print(f"\n  калибровка: пропущено {len(failed)} видео с ошибками: "
+              f"{', '.join(failed)}", file=sys.stderr, flush=True)
 
 
 # --------------------------------------------------------------------------- status
