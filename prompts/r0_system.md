@@ -47,9 +47,19 @@ weak segments to fill space. "Nothing good here" is a correct answer.
 
 # SELECTION RUBRIC — score each candidate
 
+## HARD GATE — check FIRST, before scoring
+COMPLETE THOUGHT (hard gate): the clip stands as a finished idea — the viewer
+gets a whole point, not a fragment. Either a setup that lands its payoff inside
+the window, OR a self-contained insight/statement that needs no lead-up.
+A point raised but not resolved -> reject. A statement cut before it completes -> reject.
+"Understandable" is not enough; it must feel WHOLE and finished.
+
+A candidate that fails this gate is NOT a low-score segment — it is not a segment
+at all. Do not score it, do not include it. Only candidates that pass the gate
+proceed to scoring below.
+
 Strong signals (raise score):
 - HOOK in the first ~3 seconds: opens on a grab, not a wind-up. No hook = dead clip.
-- SELF-CONTAINED: understandable without the rest of the video.
 - EMOTIONAL PEAK: surprise, conflict, insight, reversal of expectation.
 - QUOTABLE: contains a line a viewer would want to repeat.
 - QUESTION -> ANSWER: a closed micro-arc inside the clip.
@@ -60,9 +70,16 @@ Anti-signals (lower score or reject):
 - Organizational talk ("let's take a break", "turn up the volume").
 - Long wind-up with no payoff.
 
+Disqualifiers (return NOTHING for these — never a low score, just exclude):
+- Service / organizational / transitional talk, greetings, housekeeping.
+- Intro or setup whose payoff falls outside the window.
+- Filler — "sounds fine but says nothing transferable".
+- A thought that begins but does not conclude within the segment.
+
 Score calibration:
 - 80-100: publish with confidence.
-- 60-79: usable.
+- 65-79: usable — but ONLY if the COMPLETE THOUGHT gate holds. A merely "okay"
+  fragment does not belong here; if the gate is shaky, exclude it entirely.
 - below {{min_score}}: too weak, do NOT include.
 
 # LENGTH & SELF-CONTAINMENT (hard constraint)
@@ -86,20 +103,24 @@ Reference style: ЗА ТРАВМОЙ скрыт ДАР: почему «бегл�
 1-2 Russian sentences restating the hook WITHOUT revealing the payoff,
 + 1 emoji + 3-5 relevant hashtags.
 
-# COVERAGE — return ALL qualifying moments, not just the best
+# COVERAGE — return ALL qualifying moments, but a chunk is not a quota
 Scan the transcript from start to finish. Evaluate every distinct moment on its
-own merits. This is NOT a "pick the single best clip" task — a 10+ minute talk
-typically contains several independent clip-worthy moments.
+own merits. Where several moments each independently clear the gate and the bar,
+return them all — selecting one strong moment does NOT reduce the need to include
+another. Segments do not compete; each stands alone.
 
-- Include EVERY segment that independently clears the bar ({{min_score}}+).
-- Selecting one strong moment does NOT reduce the need to include others.
-  Segments do not compete — each stands alone.
-- Do NOT stop after one or two. Continue evaluating to the end of the transcript.
-- Do NOT cap the count. If six moments qualify, return six.
+But there is NO "best moment of this chunk". A chunk is not a quota. Ordinary talk
+yields ZERO clip-worthy moments most of the time; `{ "segments": [] }` is the
+COMMON answer, not the exception. Do not reach for the least-bad fragment to avoid
+returning empty.
 
-This does NOT lower the bar. Exhaustiveness means "miss nothing that qualifies",
-NOT "pad with weak material to reach a number". A weak segment is still rejected;
-an empty result is still valid when nothing clears the bar.
+- Include EVERY segment that passes the COMPLETE THOUGHT gate AND clears {{min_score}}.
+- Do NOT stop after one just because you found it; keep scanning to the end.
+- Do NOT cap the count — but do NOT invent a count either.
+
+Exhaustiveness = "miss nothing that TRULY qualifies", NEVER "find something in
+every chunk". A fragment is still rejected; an empty result is the right answer
+whenever nothing passes the gate.
 
 # DEDUP
 Within this chunk, do not return two segments covering the same moment.

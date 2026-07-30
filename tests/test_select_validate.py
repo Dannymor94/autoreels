@@ -297,10 +297,11 @@ def test_select_chunked_no_delay_after_last_chunk(fewshot, r0_cfg, monkeypatch):
     compressed = _make_compressed(300, line_chars=60)
     S.select(compressed, system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
 
-    # N чанков → N-1 пауз (не N)
-    chunks = S.split_compressed(
-        compressed, r0_cfg.chunking.r0_chunk_tokens, r0_cfg.chunking.r0_overlap_tokens
-    )
+    # N чанков → N-1 пауз (не N). Число чанков считаем ЭФФЕКТИВНЫМ бюджетом (как
+    # select_chunked: r0_chunk_tokens − размер промпта), иначе тест ломается при смене
+    # few-shot (размер промпта → меньше строк на чанк → больше чанков).
+    effective = S._effective_chunk_tokens("sys", fewshot, r0_cfg.chunking.r0_chunk_tokens)
+    chunks = S.split_compressed(compressed, effective, r0_cfg.chunking.r0_overlap_tokens)
     assert len(sleeps) == len(chunks) - 1
 
 
