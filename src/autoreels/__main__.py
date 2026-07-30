@@ -1043,14 +1043,35 @@ _MENU_ITEMS: list[tuple[str, str, str, str]] = [
     ("2", "render",     "Отрендерить манифесты",       "git pull + render"),
     ("3", "status",     "Статус",                       ""),
     ("4", "calibrate",  "Калибровка кропа (все)",       ""),
-    ("5", "path",       "Обработать по пути/URL",        ""),
-    ("6", "transcribe", "Транскрибировать (для контента)", "чистый текст из речи"),
+    ("5", "path",       "Обработать по ссылке или пути к файлу",
+                        "URL, Яндекс.Диск, YouTube или файл на диске"),
+    ("6", "transcribe", "Транскрибировать (для контента)",
+                        "источник: ссылка или файл → текст"),
     ("7", "help",       "Справка",                       ""),
     ("0", "quit",       "Выход",                         ""),
 ]
 
 # Текстовые псевдонимы выхода (кроме цифры 0) — удобство: q/exit/quit/выход.
 _MENU_QUIT_ALIASES = {"q", "quit", "exit", "выход"}
+
+
+_CLASSIFY_LABELS = {
+    "yandex": "→ Яндекс.Диск",
+    "url": "→ URL (yt-dlp: YouTube и пр.)",
+    "path": "→ локальный файл",
+}
+
+
+def _classify_source(arg: str) -> str:
+    """Распознать источник: 'yandex' / 'url' / 'path' (единый источник истины для меню)."""
+    if _is_url(arg):
+        return "yandex" if _is_yandex_disk(arg) else "url"
+    return "path"
+
+
+def _classify_label(arg: str) -> str:
+    """Человеко-читаемая метка распознанного источника («→ Яндекс.Диск» и т.п.)."""
+    return _CLASSIFY_LABELS[_classify_source(arg)]
 
 
 def _menu_action(choice: str) -> str | None:
@@ -1224,7 +1245,9 @@ autoreels — длинное talking-head видео → вертикальны�
   ar <...>        передаёт команду в autoreels напрямую
 
   Меню адаптивно: в шапке — состояние (inputs/манифесты/готово), ▶ помечает
-  рекомендуемый шаг. Пункт 5 спрашивает путь/URL. «0» или q — выход.
+  рекомендуемый шаг. Пункты 5 (обработать) и 6 (транскрибировать) после выбора
+  спрашивают источник — ссылку (URL/Яндекс.Диск/YouTube) или путь к файлу, и
+  показывают, что распознано. Пустой ввод — отмена. «0» или q — выход.
 
   Энкодер и путь к ffmpeg — в config/render.yaml (не нужны флаги):
     ffmpeg: ffmpeg              # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe
@@ -1353,6 +1376,8 @@ def _build_parser():
     )
     pm.add_argument("--resolve", default=None,
                     help="разобрать выбор пользователя в action-токен и выйти")
+    pm.add_argument("--classify", default=None,
+                    help="распознать источник (url/яндекс/путь) и напечатать метку")
     pm.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
     ps = sub.add_parser(
@@ -1516,7 +1541,9 @@ def main(argv=None) -> int:
         return 0
 
     if args.cmd == "menu":
-        if args.resolve is not None:
+        if args.classify is not None:
+            print(_classify_label(args.classify))
+        elif args.resolve is not None:
             print(_menu_action(args.resolve) or "invalid")
         else:
             print(_menu_render(root=args.root))

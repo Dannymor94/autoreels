@@ -1782,6 +1782,50 @@ def test_menu_render_has_transcribe_item(tmp_path):
     assert "ранскриб" in out
 
 
+def test_menu_item5_text_is_clearer(tmp_path):
+    """Пункт 5 понятно объясняет, что принимает (ссылка/URL/Я.Диск/YouTube/файл)."""
+    out = cli._menu_render(root=tmp_path)
+    line = next(l for l in out.splitlines() if l.strip().startswith("5)") or ") 5)" in l or "5)" in l)
+    assert "ссылк" in line.lower() or "пут" in line.lower()
+    assert "Яндекс" in line or "YouTube" in line or "URL" in line
+
+
+# -------------------------------------------------- меню: классификация источника
+
+def test_classify_source_detects_yandex():
+    assert cli._classify_source("https://disk.yandex.ru/i/x") == "yandex"
+    assert cli._classify_source("https://yadi.sk/i/x") == "yandex"
+
+
+def test_classify_source_detects_url():
+    assert cli._classify_source("https://youtu.be/x") == "url"
+    assert cli._classify_source("https://example.com/v.mp4") == "url"
+
+
+def test_classify_source_detects_path():
+    for p in ("/Users/danny/v.mp4", "inputs/v.mp4", "~/Downloads/v.mp4", "v.mp4"):
+        assert cli._classify_source(p) == "path", p
+
+
+def test_classify_label_yandex():
+    assert "Яндекс" in cli._classify_label("https://disk.yandex.ru/i/x")
+
+
+def test_classify_label_url_mentions_ytdlp():
+    lbl = cli._classify_label("https://youtu.be/x")
+    assert "URL" in lbl or "yt-dlp" in lbl
+
+
+def test_classify_label_path():
+    assert "файл" in cli._classify_label("inputs/v.mp4").lower()
+
+
+def test_menu_classify_cli_prints_label(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cli.main(["menu", "--classify", "https://disk.yandex.ru/i/abc"])
+    assert "Яндекс" in capsys.readouterr().out
+
+
 def test_menu_render_highlights_recommended_with_videos(tmp_path):
     """Есть видео → пункт «Обработать видео» подсвечен маркером ▶."""
     (tmp_path / "inputs").mkdir()

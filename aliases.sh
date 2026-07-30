@@ -21,14 +21,18 @@ _ar_menu() {
             status)    ar s ;;
             calibrate) ar c ;;
             path)
-                printf "Путь к файлу или URL: "
+                printf "Вставь ссылку (URL / Яндекс.Диск / YouTube) или путь к файлу: "
                 read -r _src
-                [ -n "$_src" ] && ar run "$_src"
+                if [ -z "$_src" ]; then echo "отменено — назад в меню"; continue; fi
+                autoreels menu --classify "$_src"     # покажет, что распознано
+                ar run "$_src"
                 ;;
             transcribe)
-                printf "Путь к видео/аудио или URL: "
+                printf "Что транскрибировать — ссылка (URL / Яндекс.Диск) или путь к файлу: "
                 read -r _src
-                [ -n "$_src" ] && ar t "$_src"
+                if [ -z "$_src" ]; then echo "отменено — назад в меню"; continue; fi
+                autoreels menu --classify "$_src"     # покажет, что распознано
+                ar t "$_src"
                 ;;
             help)      ar h ;;
             quit)      echo "пока!"; return 0 ;;
