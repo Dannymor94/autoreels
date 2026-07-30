@@ -171,6 +171,16 @@ def filter_by_score(reels: list[Reel], *, min_score: int) -> list[Reel]:
     return [r for r in reels if r.score >= min_score]
 
 
+def filter_by_duration(reels: list[Reel], *, min_meaningful_sec: float) -> list[Reel]:
+    """Отбраковать сегменты короче min_meaningful_sec (планка «законченной мысли»).
+
+    Детерминированный отсев «пустых» коротышей: LLM склонна переоценивать «лучший кусок
+    в чанке» даже когда мысль не завершена. Планка выше технического min_duration пресета —
+    короткий сегмент снимается независимо от score. Лечит «пустые 15-сек клипы».
+    """
+    return [r for r in reels if (r.end - r.start) >= min_meaningful_sec]
+
+
 def _overlap_ratio(a: Reel, b: Reel) -> float:
     inter = max(0.0, min(a.end, b.end) - max(a.start, b.start))
     shorter = min(a.end - a.start, b.end - b.start)
@@ -213,6 +223,7 @@ def _select_one(compressed: str, *, system_text: str, fewshot: dict,
     reels = segments_to_reels(segments)
     flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
     reels = filter_by_score(reels, min_score=r0_cfg.min_score)
+    reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
     reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold)
     reels.sort(key=lambda r: -r.score)
     if r0_cfg.max_reels is not None:
@@ -267,7 +278,9 @@ def select_chunked(
             continue
         reels = segments_to_reels(segs)
         flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
-        all_reels.extend(filter_by_score(reels, min_score=r0_cfg.min_score))
+        reels = filter_by_score(reels, min_score=r0_cfg.min_score)
+        reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
+        all_reels.extend(reels)
 
     chunk_progress("R0", len(chunks), len(chunks),
                    extra=f"найдено {len(all_reels)} моментов", done=True)

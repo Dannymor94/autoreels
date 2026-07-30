@@ -72,6 +72,9 @@ class R0Config(BaseModel):
     duration_preset: str
     model: str = "qwen/qwen3.6-27b"   # LLM R0 на Groq; менять здесь без правки кода
     min_score: int
+    min_meaningful_sec: float = 18    # планка «законченной мысли»: сегменты короче снимает
+                                      # детерминированный пост-фильтр (выше техн. min_duration).
+                                      # Лечит «пустые 15-сек клипы» на длинных видео.
     max_reels: int | None
     chunk_tokens: int
     chunk_overlap_sec: int

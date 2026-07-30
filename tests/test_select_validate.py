@@ -131,6 +131,23 @@ def test_reject_below_min_score(r0_cfg):
     assert out == [keep]
 
 
+def test_reject_below_min_meaningful_duration(r0_cfg):
+    """Пост-фильтр длины: сегмент короче min_meaningful_sec отбраковывается (законченной
+    мысли не бывает в слишком коротком куске). Планка ВЫШЕ технического min_duration."""
+    floor = r0_cfg.min_meaningful_sec
+    keep = _reel(90, 0.0, floor)               # ровно порог → остаётся
+    keep_long = _reel(70, 0.0, floor + 10)     # длиннее порога → остаётся
+    drop = _reel(95, 0.0, floor - 0.1)         # короче порога → отбраковка, даже с высоким score
+    out = S.filter_by_duration([keep, keep_long, drop], min_meaningful_sec=floor)
+    assert keep in out and keep_long in out
+    assert drop not in out
+
+
+def test_min_meaningful_sec_is_above_preset_min(r0_cfg):
+    """Планка смысла строго выше технического минимума пресета — иначе фильтр no-op."""
+    assert r0_cfg.min_meaningful_sec > r0_cfg.min_duration
+
+
 def test_dedup_keeps_higher_score(r0_cfg):
     a = _reel(80, 100.0, 130.0)       # overlap с b > 50%
     b = _reel(60, 110.0, 140.0)
@@ -146,6 +163,25 @@ def test_empty_segments_is_valid_result(fewshot, r0_cfg):
     reels = S.select("[0400.0-0410.0] давайте сделаем перерыв",
                      system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
     assert reels == []                 # «хороших моментов нет» — НЕ ошибка
+
+
+def test_select_drops_short_segment_despite_high_score(fewshot, r0_cfg):
+    """Даже с высоким score короткий сегмент (< min_meaningful_sec) не попадает в выборку.
+
+    Регресс на «пустые 15-сек клипы»: LLM переоценил короткий кусок → детерминированный
+    пост-фильтр длины его снимает. Длинный самодостаточный момент — остаётся."""
+    short_end = r0_cfg.min_meaningful_sec - 1     # заведомо короче планки смысла
+    resp = json.dumps({"segments": [
+        {"start": 0.0, "end": short_end, "score": 95,
+         "hook": "h", "title": "t", "description": "d"},
+        {"start": 100.0, "end": 130.0, "score": 70,
+         "hook": "h", "title": "t", "description": "d"},
+    ]})
+    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                     provider=_MockLLM([resp]), r0_cfg=r0_cfg)
+    starts = {r.start for r in reels}
+    assert 0.0 not in starts        # короткий снят пост-фильтром длины
+    assert 100.0 in starts          # длинный самодостаточный — остался
 
 
 # ----------------------------------------------------------- R0 chunking

@@ -3,6 +3,9 @@ duration_preset: shorts        # shorts | reels | tiktok
 model: qwen/qwen3.6-27b        # LLM R0 на Groq. Сверить список: curl .../v1/models
                                # (прежняя qwen/qwen3-32b снята → давала 404)
 min_score: 65
+min_meaningful_sec: 18         # пост-фильтр длины: сегменты короче — снять (законченной
+                               # мысли не бывает в <18с). ВЫШЕ min пресета (15) — иначе no-op.
+                               # Крутить здесь: строже → 20-22; мягче → 16.
 max_reels: null                # null = все прошедшие порог
 chunk_tokens: 3500
 chunk_overlap_sec: 60
