@@ -128,3 +128,31 @@ def test_success_after_one_429(monkeypatch):
 
     result = GroqLLM().complete([{"role": "user", "content": "hi"}])
     assert result == '{"segments": []}'
+
+
+# ----------------------------------------------------------------- 404: модель устарела
+
+def test_404_model_not_found_clear_error(monkeypatch):
+    """404 от Groq (модель убрана/переименована) → внятная ошибка с именем и подсказкой,
+    а не голый HTTP 404."""
+    import autoreels.cloud.providers as P
+
+    def fake_post(url, *, headers, json, timeout):
+        return _FakeResp(404, body={"error": {"message": "model not found"}})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = GroqLLM(model="qwen/does-not-exist")
+    with pytest.raises(ProviderError) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    msg = str(exc.value)
+    assert "qwen/does-not-exist" in msg      # какая модель не найдена
+    assert "config/r0.yaml" in msg           # где чинить
+    assert "404" in msg
+
+
+def test_default_model_is_current_groq_qwen():
+    """Дефолтная модель провайдера — актуальная на Groq (не удалённая qwen3-32b)."""
+    from autoreels.cloud.providers import DEFAULT_LLM_MODEL
+    assert DEFAULT_LLM_MODEL == "qwen/qwen3.6-27b"

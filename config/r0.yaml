@@ -1,5 +1,7 @@
 # R0 — конфиг выбора моментов. Всё, что вынесено из кода (R0_SPEC §10).
 duration_preset: shorts        # shorts | reels | tiktok
+model: qwen/qwen3.6-27b        # LLM R0 на Groq. Сверить список: curl .../v1/models
+                               # (прежняя qwen/qwen3-32b снята → давала 404)
 min_score: 65
 max_reels: null                # null = все прошедшие порог
 chunk_tokens: 3500

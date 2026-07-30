@@ -2540,3 +2540,16 @@ def test_transcribe_dispatch_url_downloads(monkeypatch, tmp_path):
     rc = cli.main(["transcribe", "https://youtu.be/d"])
     assert rc == 0
     assert seen["url"] == "https://youtu.be/d"
+
+
+# -------------------------------------------------- R0: модель из конфига
+
+def test_stage_select_uses_config_model(monkeypatch):
+    """_stage_select создаёт GroqLLM с моделью из r0.yaml (не хардкод)."""
+    from autoreels.core.config import load_r0_config
+    r0 = load_r0_config(REPO_ROOT / "config" / "r0.yaml")
+    captured = {}
+    monkeypatch.setattr(cli, "GroqLLM", lambda **k: captured.update(k) or object())
+    monkeypatch.setattr(cli, "select", lambda *a, **k: [])
+    cli._stage_select("COMPRESSED", r0_cfg=r0, root=REPO_ROOT)
+    assert captured.get("model") == r0.model

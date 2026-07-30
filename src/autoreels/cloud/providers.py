@@ -17,7 +17,10 @@ from typing import Callable, Protocol
 import httpx
 
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_LLM_MODEL = "qwen/qwen3-32b"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+# Актуальная Qwen на Groq (свериться: curl .../v1/models). Прежняя qwen/qwen3-32b снята
+# → давала 404. Модель конфигурируема через config/r0.yaml (model:), это лишь дефолт.
+DEFAULT_LLM_MODEL = "qwen/qwen3.6-27b"
 # qwen3 — reasoning-модель. Для структурной выборки по чёткой рубрике глубокий reasoning
 # не нужен и раздувает выходные токены → упор в 6K TPM Groq (413). "none" глушит его
 # (Groq принимает только none|default). Заметно снижает выхлоп, убирает перемежающийся 413.
@@ -92,6 +95,15 @@ class GroqLLM:
                 _throttle_wait(wait)
                 time.sleep(wait)
                 continue
+            # 404 = модель убрана/переименована на Groq. Внятно, а не голый HTTP-статус.
+            if resp.status_code == 404:
+                raise ProviderError(
+                    f"модель '{self._model}' не найдена на Groq (404) — вероятно снята "
+                    f"или переименована. Укажи актуальную в config/r0.yaml (model:). "
+                    f"Список моделей: curl -s {GROQ_MODELS_URL} "
+                    f"-H \"Authorization: Bearer $GROQ_API_KEY\"  "
+                    f"(или https://console.groq.com/docs/models)"
+                )
             try:
                 resp.raise_for_status()
             except httpx.HTTPError as e:

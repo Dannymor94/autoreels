@@ -132,3 +132,10 @@ def test_profile_wrong_scale_raises(tmp_path):
     p = _write(tmp_path, "bad.json", json.dumps(data))
     with pytest.raises(ConfigError):
         load_profile(p)
+
+
+def test_r0_config_has_model_field_default(tmp_path):
+    """R0Config несёт поле model с актуальным дефолтом (модель R0 конфигурируема)."""
+    from autoreels.core.config import load_r0_config
+    cfg = load_r0_config("config/r0.yaml")
+    assert cfg.model == "qwen/qwen3.6-27b"

@@ -528,7 +528,7 @@ def _stage_select(compressed, *, r0_cfg, root):
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     return select(
         compressed, system_text=system_text, fewshot=fewshot,
-        provider=GroqLLM(), r0_cfg=r0_cfg,
+        provider=GroqLLM(model=r0_cfg.model), r0_cfg=r0_cfg,
     )
 
 

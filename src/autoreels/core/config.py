@@ -70,6 +70,7 @@ class R0Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_preset: str
+    model: str = "qwen/qwen3.6-27b"   # LLM R0 на Groq; менять здесь без правки кода
     min_score: int
     max_reels: int | None
     chunk_tokens: int
