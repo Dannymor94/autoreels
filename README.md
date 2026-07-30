@@ -145,6 +145,11 @@ ar t https://youtu.be/XXXX --format json
 
 Длинное видео чанкится автоматически. Результат — в `transcripts/`.
 
+**`run` тоже сохраняет транскрипт** попутно: после Whisper (до R0) кладёт
+`transcripts/<имя>.txt` — отдельный `transcribe` на то же видео не нужен.
+Транскрипт кэшируется по хэшу аудио (`data/cache/`), кэш общий для `run` и
+`transcribe`: повторный прогон не гоняет Whisper заново.
+
 **Энкодер и путь к ffmpeg** — в [`config/render.yaml`](config/render.yaml), не флаги:
 ```yaml
 ffmpeg: ffmpeg                   # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe

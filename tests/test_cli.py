@@ -67,10 +67,12 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_subtitles", rec("subtitles", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
     monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "v.json"))
+    # Попутное сохранение транскрипта не входит в цепочку этапов — мокаем (транскрипт-стаб=str).
+    monkeypatch.setattr(cli, "_write_transcript_file", lambda *a, **k: tmp_path / "v.txt")
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
-    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path, transcripts_dir=tmp_path)
 
     assert order == ["extract", "transcribe", "compress", "select", "snap", "trim",
                      "subtitles", "assemble", "write"]
@@ -89,7 +91,8 @@ def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
     calib = tmp_path / "calibrations"
     manifests = tmp_path / "manifests"
 
-    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
+    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests,
+                transcripts_dir=tmp_path / "transcripts")
 
     # Манифест теперь <stem>.json
     m = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
@@ -111,7 +114,8 @@ def test_run_writes_manifest_named_by_stem(monkeypatch, tmp_path):
     video.write_bytes(b"x")
     manifests = tmp_path / "manifests"
 
-    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=manifests)
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=manifests,
+                transcripts_dir=tmp_path / "transcripts")
 
     assert (manifests / "PXL_20260621.json").is_file()
     assert not (manifests / "manifest.json").exists()
@@ -134,7 +138,8 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
     )
     manifests = tmp_path / "manifests"
 
-    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
+    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests,
+                transcripts_dir=tmp_path / "transcripts")
 
     # Манифест → lecture.json (stem от lecture.mp4)
     m = Manifest.model_validate_json((manifests / "lecture.json").read_text(encoding="utf-8"))
@@ -162,7 +167,8 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
                      crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], setup_label="t")
     manifests = tmp_path / "manifests"
 
-    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests)
+    cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib, manifests_dir=manifests,
+                transcripts_dir=tmp_path / "transcripts")
 
     m = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
     assert abs(m.reels[0].end - 31.9) < 1e-6
@@ -182,7 +188,7 @@ def test_run_archives_video_after_success(monkeypatch, tmp_path):
     archive = tmp_path / "inputs-archive"
 
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "manifests",
-                archive_dir=archive)
+                archive_dir=archive, transcripts_dir=tmp_path / "transcripts")
 
     assert not video.exists()                    # перемещён из inputs/
     assert (archive / "v.mp4").exists()          # находится в архиве
@@ -258,7 +264,7 @@ def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
 
     ok, failed = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=manifests,
-        archive_dir=tmp_path / "inputs-archive",
+        archive_dir=tmp_path / "inputs-archive", transcripts_dir=tmp_path / "transcripts",
     )
 
     assert sorted(ok) == ["a.mp4", "b.mp4"]
@@ -287,7 +293,7 @@ def test_run_batch_continues_after_failure(monkeypatch, tmp_path):
 
     ok, failed = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "manifests",
-        archive_dir=tmp_path / "inputs-archive",
+        archive_dir=tmp_path / "inputs-archive", transcripts_dir=tmp_path / "transcripts",
     )
 
     assert ok == ["good.mp4"]
@@ -1341,7 +1347,7 @@ def test_run_does_not_call_ask_batch_action(monkeypatch, tmp_path):
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
     # Не должно кинуть AssertionError — run не интерактивен
-    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path)
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path, transcripts_dir=tmp_path)
 
 
 # -------------------------------------------------- install-aliases
@@ -2586,3 +2592,73 @@ def test_calibrate_all_skips_broken_video_and_continues(tmp_path, monkeypatch, c
     assert attempted == ["bad.mp4", "good.mp4"]      # дошли до второго после падения первого
     err = capsys.readouterr().err
     assert "bad.mp4" in err
+
+
+# -------------------------------------------------- run: попутно сохраняет транскрипт
+
+def test_run_saves_transcript_text(monkeypatch, tmp_path):
+    """run после Whisper сохраняет чистый текст в transcripts/<stem>.txt (тот же формат)."""
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [])
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c")
+
+    txt = (tmp_path / "t" / "lecture.txt").read_text(encoding="utf-8")
+    assert "Первая мысль." in txt        # связный текст
+    assert "\n\n" in txt                 # абзацы по паузе
+    assert "[" not in txt                # без таймкодов
+
+
+# -------------------------------------------------- транскрипт-кэш общий (Whisper 1 раз)
+
+def test_transcript_cache_shared_whisper_called_once(monkeypatch, tmp_path):
+    """Повторный _stage_transcribe (run ИЛИ transcribe) на том же аудио → кэш, не Whisper."""
+    from autoreels.core.config import load_transcribe_config
+    from autoreels.core.models import Transcript, Word
+
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"AUDIODATA" * 200)
+    cache = tmp_path / "cache"
+    calls = {"n": 0}
+
+    class _Counter:
+        def transcribe(self, path, *, language=None):
+            calls["n"] += 1
+            return Transcript(language="ru", words=[Word(word="привет", t0=0.0, t1=0.5)])
+
+    monkeypatch.setattr(cli, "get_backend", lambda cfg: _Counter())
+    tcfg = load_transcribe_config(REPO_ROOT / "config" / "transcribe.yaml")
+
+    # 1-й вызов — Whisper; кэш по хэшу содержимого аудио
+    cli._stage_transcribe(audio, transcribe_cfg=tcfg, cache_dir=cache, r0_cfg=None)
+    # 2-й (эмулирует повторный run / команду transcribe на том же видео) — из кэша
+    cli._stage_transcribe(audio, transcribe_cfg=tcfg, cache_dir=cache, r0_cfg=None)
+
+    assert calls["n"] == 1               # Whisper вызван ровно один раз
+
+
+def test_transcribe_passes_source_sha_for_shared_audio_cache(monkeypatch, tmp_path):
+    """transcribe передаёт source_sha в extract_audio → общий с run аудио-кэш (то же имя)."""
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+    seen = {}
+
+    def fake_extract(source, *, render_cfg, cache_dir, ffmpeg, source_sha=None):
+        seen["source_sha"] = source_sha
+        return tmp_path / "a.mp3"
+
+    monkeypatch.setattr(cli, "_stage_extract_audio", fake_extract)
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"video-bytes-123")
+
+    cli.cmd_transcribe(src, fmt="text", root=REPO_ROOT,
+                       out_dir=tmp_path / "t", cache_dir=tmp_path / "c")
+
+    assert seen["source_sha"] is not None
+    # совпадает с ключом, который использует run (partial-хэш содержимого)
+    assert seen["source_sha"] == cli.state.file_sha256_cached_fast(src, tmp_path / "c")

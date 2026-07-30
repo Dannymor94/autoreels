@@ -605,6 +605,7 @@ def cmd_run(
     manifests_dir=None,
     cache_dir=None,
     archive_dir=None,
+    transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
 ) -> Path:
     """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
@@ -612,6 +613,8 @@ def cmd_run(
     Кроп per-file: берётся из `calibrations/<sha256>.json` (пишет `autoreels calibrate`).
     Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением.
     После записи манифеста видео перемещается в inputs-archive/.
+    Попутно (без доп. работы) сохраняет текст транскрипта в transcripts/<stem>.txt —
+    он уже посчитан для R0, отдельный `transcribe` на то же видео не нужен.
     """
     root = Path(root)
     cfg = root / "config"
@@ -622,6 +625,7 @@ def cmd_run(
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
+    transcripts_dir = Path(transcripts_dir) if transcripts_dir else root / "transcripts"
 
     size_gb = Path(video).stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
@@ -639,6 +643,11 @@ def cmd_run(
         audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir,
         r0_cfg=r0_cfg, audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg,
     )
+    # Попутно: сохранить читаемый текст для контента (транскрипт уже есть — R0 его считал).
+    tx_path = _write_transcript_file(
+        transcript, stem=Path(video).stem, fmt="text", out_dir=transcripts_dir, r0_cfg=r0_cfg
+    )
+    print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
@@ -674,6 +683,16 @@ def _render_transcript(transcript, *, fmt: str, r0_cfg) -> str:
     raise RunError(f"неизвестный формат транскрипта: {fmt}")
 
 
+def _write_transcript_file(transcript, *, stem: str, fmt: str, out_dir, r0_cfg) -> Path:
+    """Записать транскрипт в out_dir/<stem>.<ext> в выбранном формате. Общий для run и transcribe."""
+    rendered = _render_transcript(transcript, fmt=fmt, r0_cfg=r0_cfg)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{stem}.{_TRANSCRIBE_EXT[fmt]}"
+    out.write_text(rendered, encoding="utf-8")
+    return out
+
+
 def cmd_transcribe(
     source,
     *,
@@ -699,16 +718,17 @@ def cmd_transcribe(
     source = Path(source)
 
     print(f"=== transcribe: {source.name} (format={fmt}) ===", flush=True)
-    audio = _stage_extract_audio(source, render_cfg=render_cfg, cache_dir=cache_dir, ffmpeg=ffmpeg)
+    # source_sha (partial-хэш содержимого) — тот же ключ аудио-кэша, что и в run → общий кэш
+    # извлечённого аудио: transcribe после run не пере-извлекает mp3, и наоборот.
+    sha = state.file_sha256_cached_fast(source, cache_dir)
+    audio = _stage_extract_audio(source, render_cfg=render_cfg, cache_dir=cache_dir,
+                                 ffmpeg=ffmpeg, source_sha=sha)
     transcript = _stage_transcribe(
         audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir,
         r0_cfg=r0_cfg, audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg,
     )
-    rendered = _render_transcript(transcript, fmt=fmt, r0_cfg=r0_cfg)
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{source.stem}.{_TRANSCRIBE_EXT[fmt]}"
-    out.write_text(rendered, encoding="utf-8")
+    out = _write_transcript_file(transcript, stem=source.stem, fmt=fmt,
+                                 out_dir=out_dir, r0_cfg=r0_cfg)
     print(f"транскрипт готов ({len(transcript.words)} слов) → {out}", flush=True)
     return out
 
@@ -721,6 +741,7 @@ def cmd_run_batch(
     manifests_dir=None,
     cache_dir=None,
     archive_dir=None,
+    transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
 ) -> tuple[list[str], list[tuple[str, Exception]]]:
     """Batch: обработать все *.mp4 в inputs/ по очереди. Один упал → остальные продолжают.
@@ -740,7 +761,8 @@ def cmd_run_batch(
         try:
             cmd_run(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
-                cache_dir=cache_dir, archive_dir=archive_dir, ffmpeg=ffmpeg,
+                cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
+                ffmpeg=ffmpeg,
             )
             ok.append(v.name)
         except Exception as e:  # noqa: BLE001
