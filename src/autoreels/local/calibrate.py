@@ -284,7 +284,10 @@ def cmd_calibrate(
     _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     size_gb = video.stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ, может занять ~{max(1, int(size_gb * 2))} с)…", flush=True)
-    sha = state.file_sha256_cached(video, _cache_dir)
+    # ВАЖНО: тот же хэш, что использует run/status/автокроп (partial-p1, file_sha256_cached_fast).
+    # Раньше был полный file_sha256_cached → ключ калибровки не совпадал с ключом поиска в run,
+    # и ручной кроп молча игнорировался (run падал в автокроп). См. регресс-тест.
+    sha = state.file_sha256_cached_fast(video, _cache_dir)
     print("хэш готов.", flush=True)
     calib_dir = root / "calibrations"
     work = calib_dir / "_work"

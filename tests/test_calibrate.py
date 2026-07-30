@@ -163,10 +163,38 @@ def test_cmd_calibrate_saves_finalized_calibration(tmp_path, monkeypatch):
 
     from autoreels.core import state
     from autoreels.core.calibration import load_calibration
-    setup = load_calibration(tmp_path / "calibrations", state.file_sha256(video))
+    # Ключ = partial-p1 (тот же, что использует run/load_or_auto_calibrate), НЕ полный sha256.
+    key = state.file_sha256_cached_fast(video, tmp_path / "data" / "cache")
+    setup = load_calibration(tmp_path / "calibrations", key)
     assert setup.setup_id == "tearoom_main"
     assert setup.crop.model_dump() == {"x": 1370, "y": 280, "w": 956, "h": 1700}
     assert path.exists()
+
+
+def test_calibrate_key_matches_run_lookup_not_autocrop(tmp_path, monkeypatch):
+    """Регресс: ручная калибровка находится по ключу run (partial-p1) — не падает в автокроп.
+
+    Раньше cmd_calibrate сохранял под полным sha256, а run искал по partial-p1 → кроп
+    не находился и молча применялся автокроп, несмотря на ручную настройку."""
+    from autoreels.core import state
+    from autoreels.core.calibration import load_or_auto_calibrate
+
+    video = tmp_path / "PXL_test.mp4"
+    video.write_bytes(b"video-content-bytes" * 500)
+    monkeypatch.setattr(cal, "probe_frame", lambda v, *, ffprobe="ffprobe": (3840, 2160, 480.0))
+    monkeypatch.setattr(cal, "extract_reference_frame",
+                        lambda v, out, *, at_seconds, ffmpeg="ffmpeg": out)
+    sel = RawSelection(x=685, y=140, w=478, h=850, display_size=(1920, 1080), frame_size=(3840, 2160))
+    cmd_calibrate(video, setup_label="main", root=tmp_path, calibrator=_FakeCalibrator(sel))
+
+    run_sha = state.file_sha256_cached_fast(video, tmp_path / "data" / "cache")
+    auto = {"n": 0}
+    setup = load_or_auto_calibrate(
+        tmp_path / "calibrations", run_sha, video.name,
+        get_frame_size=lambda: (auto.__setitem__("n", auto["n"] + 1) or (3840, 2160)),
+    )
+    assert auto["n"] == 0                     # автокроп НЕ вызывался — нашлась ручная
+    assert setup.setup_id == "main"
 
 
 # --------------------------------------------------------------------------- helpers
