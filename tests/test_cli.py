@@ -2009,3 +2009,208 @@ def test_run_dispatch_url_download_error_returns_1(monkeypatch, tmp_path, capsys
     rc = cli.main(["run", "https://youtu.be/bad"])
     assert rc == 1
     assert "bad" in capsys.readouterr().err
+
+
+# -------------------------------------------------- Я.Диск: определение ссылки
+
+def test_is_yandex_disk_detects():
+    for u in ("https://disk.yandex.ru/i/abc", "https://disk.yandex.ru/d/x",
+              "https://yadi.sk/i/x", "https://disk.yandex.com/i/x",
+              "https://www.disk.yandex.ru/i/x"):
+        assert cli._is_yandex_disk(u) is True, u
+
+
+def test_is_yandex_disk_rejects_others():
+    for u in ("https://youtu.be/x", "https://example.com/v.mp4",
+              "/local/path", "yadi.sk", "inputs/v.mp4"):
+        assert cli._is_yandex_disk(u) is False, u
+
+
+# -------------------------------------------------- Я.Диск: имя файла
+
+def test_yandex_filename_sanitizes_and_adds_hash():
+    import hashlib
+    url = "https://disk.yandex.ru/i/abc"
+    h = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    out = cli._yandex_filename("Лекция 5 🎬.mp4", url)
+    assert out == f"Лекция_5_{h}.mp4"
+
+
+def test_yandex_filename_empty_title_fallback():
+    import hashlib
+    url = "https://disk.yandex.ru/i/x"
+    h = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    assert cli._yandex_filename("😀.mp4", url) == f"yadisk_{h}.mp4"
+
+
+# -------------------------------------------------- Я.Диск: download URL из API
+
+def test_yandex_download_href_parses_href():
+    def fake_get_json(suffix, public_key, *, token=None):
+        assert suffix == "/download"
+        return {"href": "https://downloader.disk.yandex.ru/x"}
+    href = cli._yandex_download_href("https://disk.yandex.ru/i/a", get_json=fake_get_json)
+    assert href == "https://downloader.disk.yandex.ru/x"
+
+
+def test_yandex_api_get_404_raises(monkeypatch):
+    import httpx
+
+    class Resp:
+        status_code = 404
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: Resp())
+    with pytest.raises(cli.RunError) as exc:
+        cli._yandex_api_get("", "https://disk.yandex.ru/i/gone")
+    assert "gone" in str(exc.value) or "404" in str(exc.value)
+
+
+# -------------------------------------------------- Я.Диск: тип файл / папка
+
+def test_yandex_folder_link_raises(tmp_path):
+    """type=='dir' (ссылка /d/ на папку) → внятная ошибка, batch пока не поддержан."""
+    def fake_get_json(suffix, public_key, *, token=None):
+        return {"type": "dir", "name": "folder"}
+    with pytest.raises(cli.RunError) as exc:
+        cli._download_yandex_disk("https://disk.yandex.ru/d/abc", tmp_path / "inputs",
+                                  get_json=fake_get_json, run=lambda *a, **k: None,
+                                  which=lambda _n: "/usr/bin/curl")
+    assert "папк" in str(exc.value).lower()
+
+
+def test_yandex_non_video_raises(tmp_path):
+    """Файл не видео (mime + расширение) → ошибка до скачивания."""
+    def fake_get_json(suffix, public_key, *, token=None):
+        return {"type": "file", "name": "archive.zip", "mime_type": "application/zip"}
+    with pytest.raises(cli.RunError) as exc:
+        cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
+                                  get_json=fake_get_json, run=lambda *a, **k: None,
+                                  which=lambda _n: "/usr/bin/curl")
+    assert "видео" in str(exc.value).lower()
+
+
+# -------------------------------------------------- Я.Диск: скачивание (curl мокается)
+
+def _yandex_meta_video(size=4):
+    def fake_get_json(suffix, public_key, *, token=None):
+        if suffix == "":
+            return {"type": "file", "name": "Лекция.mp4",
+                    "mime_type": "video/mp4", "size": size}
+        return {"href": "https://downloader.disk.yandex.ru/x"}
+    return fake_get_json
+
+
+def test_yandex_download_happy_path(tmp_path):
+    def fake_run(cmd, **k):
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"data")   # 4 байта == size
+        class R:
+            returncode = 0
+        return R()
+
+    out = cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
+                                    get_json=_yandex_meta_video(size=4), run=fake_run,
+                                    which=lambda _n: "/usr/bin/curl")
+    assert out.exists()
+    assert out.parent == (tmp_path / "inputs")
+    assert out.suffix == ".mp4" and "Лекция" in out.name
+
+
+def test_yandex_curl_command_has_resume_and_output(tmp_path):
+    captured = {}
+
+    def fake_run(cmd, **k):
+        captured["cmd"] = cmd
+        Path(cmd[cmd.index("-o") + 1]).write_bytes(b"data")
+        class R:
+            returncode = 0
+        return R()
+
+    cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
+                              get_json=_yandex_meta_video(size=4), run=fake_run,
+                              which=lambda _n: "/usr/bin/curl")
+    cmd = captured["cmd"]
+    assert "-C" in cmd and "-" in cmd            # докачка curl -C -
+    assert "-o" in cmd
+    assert cmd[-1] == "https://downloader.disk.yandex.ru/x"   # download URL из API
+
+
+def test_yandex_retry_fetches_fresh_url_on_break(tmp_path):
+    """Обрыв (неполный размер) → повтор со СВЕЖИМ download URL, не старым."""
+    href_calls = {"n": 0}
+
+    def fake_get_json(suffix, public_key, *, token=None):
+        if suffix == "":
+            return {"type": "file", "name": "v.mp4", "mime_type": "video/mp4", "size": 5}
+        href_calls["n"] += 1
+        return {"href": f"https://downloader/{href_calls['n']}"}
+
+    attempts = {"n": 0}
+
+    def fake_run(cmd, **k):
+        attempts["n"] += 1
+        part = Path(cmd[cmd.index("-o") + 1])
+        if attempts["n"] == 1:
+            part.write_bytes(b"xx")        # неполный (2 < 5) → обрыв
+        else:
+            part.write_bytes(b"xxxxx")     # полный
+        class R:
+            returncode = 0
+        return R()
+
+    out = cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
+                                    get_json=fake_get_json, run=fake_run,
+                                    which=lambda _n: "/usr/bin/curl")
+    assert out.exists()
+    assert href_calls["n"] == 2            # свежий URL на каждую попытку
+
+
+def test_yandex_missing_curl_raises(tmp_path):
+    with pytest.raises(cli.RunError) as exc:
+        cli._download_yandex_disk("https://disk.yandex.ru/i/abc", tmp_path / "inputs",
+                                  get_json=_yandex_meta_video(), run=lambda *a, **k: None,
+                                  which=lambda _n: None)
+    assert "curl" in str(exc.value)
+
+
+def test_yandex_idempotent_when_dest_exists(tmp_path):
+    """Файл уже скачан (dest есть) → curl не зовём, возвращаем существующий."""
+    url = "https://disk.yandex.ru/i/abc"
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    dest = inputs / cli._yandex_filename("Лекция.mp4", url)
+    dest.write_bytes(b"already")
+
+    out = cli._download_yandex_disk(
+        url, inputs, get_json=_yandex_meta_video(),
+        run=lambda *a, **k: pytest.fail("curl не должен зваться — файл уже есть"),
+        which=lambda _n: "/usr/bin/curl",
+    )
+    assert out == dest
+
+
+# -------------------------------------------------- Я.Диск: диспетч main()
+
+def test_run_dispatch_yandex_calls_yandex_downloader(monkeypatch, tmp_path):
+    """main('run <я.диск-url>') → _download_yandex_disk, не yt-dlp и не _ingest_source."""
+    monkeypatch.chdir(tmp_path)
+    calls = {}
+
+    def fake_yd(url, inputs_dir, **k):
+        calls["url"] = url
+        p = tmp_path / "inputs" / "y.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"v")
+        return p
+
+    monkeypatch.setattr(cli, "_download_yandex_disk", fake_yd)
+    monkeypatch.setattr(cli, "cmd_run",
+                        lambda video, **k: calls.setdefault("video", Path(video)))
+    monkeypatch.setattr(cli, "_download_url",
+                        lambda *a, **k: pytest.fail("yt-dlp не для Я.Диска"))
+
+    rc = cli.main(["run", "https://disk.yandex.ru/i/abc"])
+    assert rc == 0
+    assert calls["url"] == "https://disk.yandex.ru/i/abc"
+    assert calls["video"] == (tmp_path / "inputs" / "y.mp4")

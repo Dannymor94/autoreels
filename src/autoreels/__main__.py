@@ -252,6 +252,167 @@ def _download_url(
     return final
 
 
+# ----------------------------------------------------- приём с Яндекс.Диска (public API)
+
+_YANDEX_HOSTS = {"disk.yandex.ru", "disk.yandex.com", "yadi.sk"}
+_YANDEX_PUBLIC_API = "https://cloud-api.yandex.net/v1/disk/public/resources"
+
+
+def _is_yandex_disk(url: str) -> bool:
+    """Публичная ссылка Я.Диска (disk.yandex.ru / disk.yandex.com / yadi.sk)?"""
+    from urllib.parse import urlparse
+
+    try:
+        host = urlparse(url).netloc.lower()
+    except (ValueError, AttributeError):
+        return False
+    host = host.removeprefix("www.")
+    return host in _YANDEX_HOSTS
+
+
+def _yandex_filename(name: str, url: str) -> str:
+    """Имя ролика Я.Диска → безопасное имя в inputs/: `<sanitized>_<hash8>.<ext>`.
+
+    Хэш от public_key ([:8]) страхует от коллизий (две разные ссылки с одинаковым
+    именем файла) и даёт идемпотентность (та же ссылка → то же имя). Заголовок пуст
+    после санитизации (весь из эмодзи) → фолбэк `yadisk_<hash8>`.
+    """
+    import hashlib
+
+    ext = Path(name).suffix or ".mp4"
+    safe = _sanitize_filename(Path(name).stem)
+    h = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    base = f"{safe}_{h}" if safe else f"yadisk_{h}"
+    return f"{base}{ext}"
+
+
+def _yandex_api_get(suffix: str, public_key: str, *, token: str | None = None) -> dict:
+    """GET JSON с public API Я.Диска. suffix='' — метаданные, '/download' — ссылка.
+
+    Публичным ресурсам токен не нужен; token (OAuth) — только для приватных (не MVP).
+    Модульный уровень → monkeypatch httpx.get в тестах. Ошибки API/сети → RunError.
+    """
+    import httpx
+
+    headers = {"Authorization": f"OAuth {token}"} if token else {}
+    try:
+        resp = httpx.get(
+            _YANDEX_PUBLIC_API + suffix,
+            params={"public_key": public_key},
+            headers=headers, timeout=30, follow_redirects=True,
+        )
+    except httpx.HTTPError as e:
+        raise RunError(f"сеть недоступна при запросе к Я.Диску: {e}") from e
+    if resp.status_code == 404:
+        raise RunError(f"ссылка Я.Диска не найдена (удалена/приватная): {public_key}")
+    if resp.status_code >= 400:
+        raise RunError(f"Я.Диск API вернул {resp.status_code} для {public_key}")
+    return resp.json()
+
+
+def _yandex_public_meta(url: str, *, get_json=None, token: str | None = None) -> dict:
+    """Метаданные публичного ресурса: name / type (file|dir) / mime_type / size."""
+    get_json = get_json or _yandex_api_get
+    return get_json("", url, token=token)
+
+
+def _yandex_download_href(url: str, *, get_json=None, token: str | None = None) -> str:
+    """Свежая ВРЕМЕННАЯ ссылка на скачивание (истекает за минуты — не кэшировать)."""
+    get_json = get_json or _yandex_api_get
+    href = get_json("/download", url, token=token).get("href")
+    if not href:
+        raise RunError(f"Я.Диск не вернул ссылку на скачивание для {url}")
+    return href
+
+
+def _download_yandex_disk(
+    url: str,
+    inputs_dir: Path,
+    *,
+    get_json=None,
+    run=None,
+    which=None,
+    token: str | None = None,
+    max_attempts: int = 3,
+) -> Path:
+    """Скачать файл с публичной ссылки Я.Диска в `inputs/` (curl) → путь для конвейера.
+
+    Поток: метаданные (тип/видео/размер, дёшево до гигабайтов) → цикл попыток, где на
+    КАЖДОЙ попытке берётся СВЕЖИЙ временный download URL (старый протухает на 31 ГБ) и
+    `curl -L -C -` дописывает `.part` с этого нового URL. Целостность — по размеру из
+    метаданных. Скачивание идёт curl-подпроцессом: его нативный прогресс не глушим.
+
+    Только файлы (/i/). Папка (/d/, type=='dir') — предупредить и выйти (batch — будущее).
+    Публичные ссылки Я.Диск троттлит → предупреждаем о возможном долгом скачивании.
+    """
+    import os
+    import subprocess
+
+    get_json = get_json or _yandex_api_get
+    run = run or subprocess.run
+    which = which or shutil.which
+    token = token or os.environ.get("YANDEX_DISK_TOKEN")
+
+    meta = _yandex_public_meta(url, get_json=get_json, token=token)
+    rtype = meta.get("type")
+    if rtype == "dir":
+        raise RunError(
+            "ссылка Я.Диска ведёт на папку (/d/…), а нужен один файл (/i/…). "
+            "Batch с папки Я.Диска — будущее расширение, пока не поддерживается."
+        )
+    if rtype != "file":
+        raise RunError(f"неизвестный тип ресурса Я.Диска: {rtype!r}")
+
+    name = meta.get("name") or "video.mp4"
+    mime = meta.get("mime_type", "") or ""
+    if not (mime.startswith("video/") or Path(name).suffix.lower() in _VIDEO_EXTS):
+        raise RunError(f"файл по ссылке Я.Диска не видео: {name} (mime {mime!r})")
+
+    curl = which("curl")
+    if curl is None:
+        raise RunError(
+            "скачивание с Я.Диска требует curl (обычно есть в macOS и Windows 10+)"
+        )
+
+    inputs_dir = Path(inputs_dir)
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    dest = inputs_dir / _yandex_filename(name, url)
+    if dest.exists():
+        print(f"уже скачано → inputs/{dest.name}", flush=True)
+        return dest
+    part = dest.with_name(dest.name + ".part")
+
+    size = meta.get("size")
+    if isinstance(size, int) and size > (1 << 30):     # >1 ГБ — честно предупредить
+        print(
+            f"файл {name}: {size / (1 << 30):.1f} ГБ. Публичные ссылки Я.Диск троттлит — "
+            f"большой файл может качаться долго.",
+            flush=True,
+        )
+
+    for attempt in range(1, max_attempts + 1):
+        href = _yandex_download_href(url, get_json=get_json, token=token)   # свежий каждый раз
+        if attempt > 1:
+            print(f"докачка (попытка {attempt}/{max_attempts}) со свежей ссылкой…", flush=True)
+        # -L следуем редиректам; -C - докачка с уже скачанного смещения; --fail: HTTP≥400 → код≠0.
+        # stderr наследуется → нативный прогресс curl виден вживую.
+        cmd = [curl, "-L", "--fail", "-C", "-", "-o", str(part), href]
+        result = run(cmd)
+        rc = getattr(result, "returncode", result)
+        complete = part.exists() and (
+            size == part.stat().st_size if isinstance(size, int) else rc == 0
+        )
+        if rc == 0 and complete:
+            part.replace(dest)
+            print(f"скачано → inputs/{dest.name}", flush=True)
+            return dest
+
+    raise RunError(
+        f"не удалось скачать с Я.Диска за {max_attempts} попытки: {url} "
+        f"(ссылка недоступна / обрывы сети / троттлинг)"
+    )
+
+
 # ----------------------------------------------------- архив (общий хелпер)
 
 def _archive_video(video: Path, archive_dir: Path) -> None:
@@ -962,8 +1123,10 @@ autoreels — длинное talking-head видео → вертикальны�
     Groq LLM → manifests/<имя>.json. GROQ_API_KEY задаётся в .env.
     Аргумент — путь куда угодно (напр. ~/Downloads/лекция.mp4): файл копируется
     в inputs/ (оригинал остаётся), дальше обычный конвейер.
-    Аргумент — http/https-ссылка: скачивается yt-dlp в inputs/ (1080p max,
-    --no-playlist), затем обычный конвейер. Нужен pip install 'autoreels[url]'.
+    Аргумент — http/https-ссылка: скачивается в inputs/, затем обычный конвейер.
+      • YouTube и пр. — yt-dlp (1080p max, --no-playlist); pip install 'autoreels[url]'.
+      • Яндекс.Диск (disk.yandex.ru/i/…, yadi.sk) — public API + curl (без доп. пакетов;
+        только файлы /i/, не папки /d/; большие файлы Я.Диск троттлит — качается долго).
     Без аргумента: batch по всем inputs/*.mp4.
     После успеха видео перемещается в inputs-archive/.
 
@@ -1112,13 +1275,15 @@ def _build_parser():
             "Нужен GROQ_API_KEY в .env. Видео за пределы машины не уходит.\n"
             "<видео> — путь куда угодно: файл вне inputs/ копируется в inputs/ (оригинал\n"
             "остаётся на месте), дальше обычный конвейер.\n"
-            "<url> — http/https-ссылка: скачивается yt-dlp в inputs/ (1080p max,\n"
-            "--no-playlist), затем конвейер. Нужен pip install 'autoreels[url]'.\n"
+            "<url> — ссылка: скачивается в inputs/, затем конвейер.\n"
+            "  YouTube/пр. → yt-dlp (1080p, --no-playlist; pip install 'autoreels[url]');\n"
+            "  Яндекс.Диск (disk.yandex.ru/i/…, yadi.sk) → public API + curl (файлы, не папки).\n"
             "Без аргумента: batch-обработка всех inputs/*.mp4.\n"
             "После успеха видео перемещается в inputs-archive/.\n\n"
             "Пример: autoreels run inputs/лекция.mp4\n"
             "Извне:  autoreels run ~/Downloads/лекция.mp4\n"
-            "Ссылка: autoreels run https://youtu.be/XXXX\n"
+            "YouTube: autoreels run https://youtu.be/XXXX\n"
+            "Я.Диск: autoreels run https://disk.yandex.ru/i/XXXX\n"
             "Batch:   autoreels run"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1214,7 +1379,10 @@ def main(argv=None) -> int:
         elif args.cmd == "run":
             if args.video:
                 if _is_url(args.video):
-                    video = _download_url(args.video, Path("inputs"))
+                    if _is_yandex_disk(args.video):
+                        video = _download_yandex_disk(args.video, Path("inputs"))
+                    else:
+                        video = _download_url(args.video, Path("inputs"))
                 else:
                     video = _ingest_source(Path(args.video), Path("inputs"))
                 cmd_run(video, ffmpeg=args.ffmpeg)
