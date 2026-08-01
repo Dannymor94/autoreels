@@ -5,7 +5,7 @@ LLM предлагает start/end приблизительно (часто в �
 хвост (фраза договаривается); start → к началу слова/после паузы. Рубрика/LLM не трогаются.
 Нет подходящей границы рядом → сегмент не меняется. Хвост не выводит за max_duration пресета.
 """
-from autoreels.cloud.snap import snap_segments
+from autoreels.cloud.snap import apply_padding, snap_segments
 from autoreels.core.models import Reel, Word
 
 
@@ -94,3 +94,70 @@ def test_multiple_reels_each_snapped():
     snap_segments([r1, r2], WORDS, **CFG)
     assert abs(r1.end - 31.9) < 1e-6
     assert abs(r2.end - 34.3) < 1e-6   # 34.0 (пауза) + 0.3
+
+
+# ================================================================== apply_padding
+
+# Транскрипт для тестов паддинга: фраза 10.0–12.5, пауза, фраза 20.0–22.0
+PAD_WORDS = [
+    _w(10.0, 10.6, "первое"),
+    _w(10.7, 11.2, "второе"),
+    _w(11.3, 12.5, "последнее"),   # последнее слово фразы
+    _w(20.0, 20.8, "новая"),
+    _w(21.0, 22.0, "фраза"),
+]
+PAD_CFG = dict(tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59)
+
+
+def test_tail_pad_extends_end_after_last_word():
+    """end = last_word.t1 + tail_pad_sec (0.7с воздуха после последнего слова)."""
+    r = _reel(10.0, 12.5)
+    apply_padding([r], PAD_WORDS, **PAD_CFG)
+    assert abs(r.end - (12.5 + 0.7)) < 1e-6   # 12.5 + 0.7 = 13.2
+
+
+def test_lead_pad_extends_start_before_first_word():
+    """start = first_word.t0 - lead_pad_sec (0.3с захода до первого слова)."""
+    r = _reel(10.0, 12.5)
+    apply_padding([r], PAD_WORDS, **PAD_CFG)
+    assert abs(r.start - (10.0 - 0.3)) < 1e-6   # 10.0 - 0.3 = 9.7
+
+
+def test_tail_pad_capped_at_max_duration():
+    """tail_pad не выводит клип за max_duration."""
+    r = _reel(10.0, 12.5)
+    apply_padding([r], PAD_WORDS, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=2.5)
+    # new_start = 9.7, max_end = 9.7 + 2.5 = 12.2; last_word.t1 + 0.7 = 13.2 > 12.2 → cap
+    assert r.end - r.start <= 2.5 + 1e-9
+    assert abs(r.end - (r.start + 2.5)) < 1e-6
+
+
+def test_lead_pad_capped_at_zero():
+    """lead_pad не уходит раньше начала видео (не отрицательный start)."""
+    r = _reel(0.1, 12.5)          # первое слово в 10.0, но клип начинается в 0.1
+    apply_padding([r], PAD_WORDS, **PAD_CFG)
+    assert r.start >= 0.0
+
+
+def test_tail_pad_capped_at_video_duration():
+    """tail_pad не выводит за конец исходного видео."""
+    r = _reel(10.0, 12.5)
+    apply_padding([r], PAD_WORDS, tail_pad_sec=0.7, lead_pad_sec=0.3,
+                  max_duration=59, video_duration=12.8)
+    assert r.end <= 12.8 + 1e-9
+
+
+def test_no_words_in_clip_leaves_unchanged():
+    """Нет слов в диапазоне клипа — границы не меняются."""
+    r = _reel(50.0, 55.0)   # вне PAD_WORDS (10-22с)
+    apply_padding([r], PAD_WORDS, **PAD_CFG)
+    assert (r.start, r.end) == (50.0, 55.0)
+
+
+def test_subtitles_not_affected_by_padding():
+    """Субтитры на reel не меняются при паддинге — pad-зона это тишина."""
+    r = _reel(10.0, 12.5)
+    r.subtitles = [{"word": "последнее", "t0": 11.3, "t1": 12.5}]
+    apply_padding([r], PAD_WORDS, **PAD_CFG)
+    # границы клипа расширились, субтитры остались теми же объектами
+    assert r.subtitles == [{"word": "последнее", "t0": 11.3, "t1": 12.5}]

@@ -82,7 +82,9 @@ class R0Config(BaseModel):
     dedup_overlap_threshold: float
     sentence_pause_sec: float
     max_sentence_buffer_sec: float
-    tail_sec: float            # хвост после последнего слова при snap границ (R4)
+    tail_sec: float            # хвост при snap к границе слова (технический)
+    tail_pad_sec: float = 0.7  # «воздух» после последнего слова клипа (apply_padding)
+    lead_pad_sec: float = 0.3  # заход перед первым словом клипа (apply_padding)
     snap_window_sec: float     # окно поиска границы слова/паузы при snap (±сек)
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str

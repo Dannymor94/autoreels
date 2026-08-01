@@ -26,7 +26,7 @@ from autoreels.cloud.compress import compress_transcript
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import GroqLLM, ProviderError
 from autoreels.cloud.select import SelectError, select
-from autoreels.cloud.snap import snap_segments
+from autoreels.cloud.snap import apply_padding, snap_segments
 from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
@@ -543,6 +543,20 @@ def _stage_snap(reels, transcript, *, r0_cfg):
     return reels
 
 
+def _stage_padding(reels, transcript, *, r0_cfg):
+    """Добавить «воздух» до/после слов клипа (lead_pad_sec / tail_pad_sec)."""
+    print("паддинг границ…", flush=True)
+    video_duration = transcript.words[-1].t1 if transcript.words else None
+    apply_padding(
+        reels, transcript.words,
+        tail_pad_sec=r0_cfg.tail_pad_sec,
+        lead_pad_sec=r0_cfg.lead_pad_sec,
+        max_duration=r0_cfg.max_duration,
+        video_duration=video_duration,
+    )
+    return reels
+
+
 def _stage_trim(reels, transcript, *, r0_cfg):
     """Политика too_long: trim/drop/keep сегменты длиннее max_duration (код, не LLM)."""
     policy = getattr(r0_cfg, "too_long_policy", "keep")
@@ -651,6 +665,7 @@ def cmd_run(
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
+    reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_subtitles(reels, transcript)
     manifest = _assemble_manifest(

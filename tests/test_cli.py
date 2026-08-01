@@ -63,6 +63,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
     monkeypatch.setattr(cli, "_stage_select", rec("select", [_reel()]))
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
+    monkeypatch.setattr(cli, "_stage_padding", rec("padding", [_reel()]))
     monkeypatch.setattr(cli, "_stage_trim", rec("trim", [_reel()]))
     monkeypatch.setattr(cli, "_stage_subtitles", rec("subtitles", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
@@ -74,7 +75,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     video.write_bytes(b"x")
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path, transcripts_dir=tmp_path)
 
-    assert order == ["extract", "transcribe", "compress", "select", "snap", "trim",
+    assert order == ["extract", "transcribe", "compress", "select", "snap", "padding", "trim",
                      "subtitles", "assemble", "write"]
 
 
@@ -171,7 +172,11 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
                 transcripts_dir=tmp_path / "transcripts")
 
     m = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
-    assert abs(m.reels[0].end - 31.9) < 1e-6
+    # После snap: end = 31.6 (граница слова «стоп») + tail_sec 0.3 = 31.9
+    # После apply_padding: last_word.t1 + tail_pad_sec = 31.6 + 0.7 = 32.3
+    #                       first_word.t0 - lead_pad_sec = 30.0 - 0.3 = 29.7
+    assert abs(m.reels[0].end - 32.3) < 1e-6
+    assert abs(m.reels[0].start - 29.7) < 1e-6
 
 
 # ------------------------------------------------------------------ run: архив

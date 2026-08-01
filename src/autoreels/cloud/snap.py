@@ -89,3 +89,39 @@ def snap_segments(reels: list[Reel], words: list[Word], *,
                             pause_sec=pause_sec, max_duration=max_duration)
         if new_end is not None:
             r.end = new_end
+
+
+def apply_padding(
+    reels: list[Reel],
+    words: list[Word],
+    *,
+    tail_pad_sec: float,
+    lead_pad_sec: float,
+    max_duration: float,
+    video_duration: float | None = None,
+) -> None:
+    """Добавить «воздух» до первого и после последнего слова клипа (мутирует на месте).
+
+    Запускается ПОСЛЕ snap_segments. Находит первое/последнее слово в диапазоне [start, end],
+    раздвигает границы: start -= lead_pad_sec, end += tail_pad_sec.
+    Субтитры не затрагиваются — область паддинга это тишина/пауза без слов.
+
+    Ограничения:
+    - start >= 0
+    - end - start <= max_duration
+    - end <= video_duration (если задана)
+    """
+    for r in reels:
+        clip_words = [w for w in words if w.t0 >= r.start and w.t0 < r.end]
+        if not clip_words:
+            continue
+
+        new_start = max(0.0, clip_words[0].t0 - lead_pad_sec)
+        new_end = clip_words[-1].t1 + tail_pad_sec
+
+        new_end = min(new_end, new_start + max_duration)
+        if video_duration is not None:
+            new_end = min(new_end, video_duration)
+
+        r.start = new_start
+        r.end = new_end
