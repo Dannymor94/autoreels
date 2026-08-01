@@ -70,7 +70,8 @@ class R0Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_preset: str
-    model: str = "qwen/qwen3.6-27b"   # LLM R0 на Groq; менять здесь без правки кода
+    model: str = "qwen/qwen3.6-27b"          # LLM R0 на Groq
+    openrouter_model: str = "qwen/qwen3-8b:free"  # failover-модель OpenRouter
     min_score: int
     min_meaningful_sec: float = 18    # планка «законченной мысли»: сегменты короче снимает
                                       # детерминированный пост-фильтр (выше техн. min_duration).

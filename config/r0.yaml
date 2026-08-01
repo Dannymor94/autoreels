@@ -2,6 +2,9 @@
 duration_preset: shorts        # shorts | reels | tiktok
 model: qwen/qwen3.6-27b        # LLM R0 на Groq. Сверить список: curl .../v1/models
                                # (прежняя qwen/qwen3-32b снята → давала 404)
+openrouter_model: qwen/qwen3-8b:free  # бесплатная модель OpenRouter для failover при
+                                      # исчерпании Groq суточного лимита. Добавить
+                                      # OPENROUTER_API_KEY= в .env (регистрация бесплатна)
 min_score: 65
 min_meaningful_sec: 18         # пост-фильтр длины: сегменты короче — снять (законченной
                                # мысли не бывает в <18с). ВЫШЕ min пресета (15) — иначе no-op.
@@ -43,7 +46,10 @@ chunking:
   whisper_threshold_bytes: 20971520    # 20 МБ — второй гард по размеру аудио
   silence_window_sec: 30               # окно VAD поиска тишины вокруг target-границы (±сек)
   silence_threshold_db: -40            # порог silencedetect
-  r0_chunk_tokens: 2000                # токены на R0-чанк транскрипта (уменьшено с 3000 из-за 413)
+  r0_chunk_tokens: 4000                # токены на R0-чанк транскрипта. Эффективный бюджет =
+                                       # r0_chunk_tokens − оценка system+few-shot (~1750 токенов).
+                                       # При 4000: эфф. ~2250 → ~11 чанков вместо 51 на часовом видео.
+                                       # Не превышай 5500: total-запрос (+ overhead) упрётся в 6K TPM.
   r0_overlap_tokens: 300               # перекрытие R0-чанков (≈60с речи)
   r0_chunk_delay_sec: 2.0              # пауза между R0-чанками (избежать 429 TPM Groq)
   dedup_overlap_ratio: 0.5             # порог дедупа рилов из разных R0-чанков
