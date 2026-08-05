@@ -47,7 +47,7 @@ from autoreels.core.config import (
     load_subtitles_config,
     load_transcribe_config,
 )
-from autoreels.core.models import Manifest
+from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import CalibrateError, cmd_calibrate
 from autoreels.local.render import RenderError, SourceNotFoundError, load_manifest, render_crop
 from autoreels.local.subtitles import words_in_window
@@ -709,27 +709,46 @@ def _write_transcript_file(transcript, *, stem: str, fmt: str, out_dir, r0_cfg) 
 
 
 def cmd_transcribe(
-    source,
+    source=None,
     *,
     fmt: str = "text",
     root=".",
     out_dir=None,
     cache_dir=None,
     ffmpeg: str = "ffmpeg",
+    from_cache: str | None = None,
 ) -> Path:
     """Отдельная транскрибация: видео/аудио → чистый текст (или srt/vtt/json) для контента.
 
     Переиспользует облачный конвейер извлечения аудио + Whisper (чанкинг длинных видео —
     внутри `transcribe`). Рендер не задействован: источник читается на месте, результат —
     в `transcripts/<stem>.<ext>`. Дефолт `text` — связный текст с абзацами, без таймкодов.
+
+    from_cache: sha256-хэш аудиофайла (64 hex-символа). Если задан — транскрипт читается
+    из data/cache/<hash>.transcript.json напрямую, без извлечения аудио и вызова Whisper.
+    Нужен когда видео на другой машине, но транскрипт уже закэширован локально.
+    source в этом режиме необязателен — используется только для именования выходного файла.
     """
     root = Path(root)
     cfg = root / "config"
-    render_cfg = load_render_config(cfg / "render.yaml")
     r0_cfg = load_r0_config(cfg / "r0.yaml")
-    transcribe_cfg = load_transcribe_config(cfg / "transcribe.yaml")
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     out_dir = Path(out_dir) if out_dir else root / "transcripts"
+
+    if from_cache is not None:
+        cache_path = cache_dir / f"{from_cache}.transcript.json"
+        if not cache_path.exists():
+            raise RunError(f"транскрипт не найден в кэше: {cache_path}")
+        transcript = Transcript.model_validate_json(cache_path.read_text(encoding="utf-8"))
+        stem = Path(source).stem if source else from_cache[:16]
+        print(f"=== transcribe: из кэша {from_cache[:16]}… (format={fmt}) ===", flush=True)
+        out = _write_transcript_file(transcript, stem=stem, fmt=fmt,
+                                     out_dir=out_dir, r0_cfg=r0_cfg)
+        print(f"транскрипт готов ({len(transcript.words)} слов) → {out}", flush=True)
+        return out
+
+    render_cfg = load_render_config(cfg / "render.yaml")
+    transcribe_cfg = load_transcribe_config(cfg / "transcribe.yaml")
     source = Path(source)
 
     print(f"=== transcribe: {source.name} (format={fmt}) ===", flush=True)
@@ -1640,8 +1659,13 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ptx.add_argument("source", metavar="видео|аудио|url",
-                     help="путь к видео/аудио, http/https или ссылка Яндекс.Диска")
+    ptx.add_argument("source", nargs="?", default=None, metavar="видео|аудио|url",
+                     help="путь к видео/аудио, http/https или ссылка Яндекс.Диска; "
+                          "при --from-cache — необязателен (используется только для именования)")
+    ptx.add_argument("--from-cache", default=None, metavar="HASH",
+                     help="sha256-хэш аудио (64 hex-символа): читать транскрипт из кэша "
+                          "без извлечения аудио и вызова Whisper. "
+                          "Полезно когда видео на другой машине, а транскрипт уже закэширован.")
     ptx.add_argument("--format", choices=["text", "srt", "vtt", "json"], default="text",
                      help="формат вывода (по умолчанию: text — под контент)")
     ptx.add_argument("--ffmpeg", default="ffmpeg",
@@ -1772,16 +1796,24 @@ def main(argv=None) -> int:
                 if failed:
                     return 1
         elif args.cmd == "transcribe":
-            # Источник — как у run, но локальный файл читается НА МЕСТЕ (рендера нет →
-            # копировать в inputs/ незачем); url/Яндекс.Диск скачиваются в inputs/.
-            if _is_url(args.source):
-                if _is_yandex_disk(args.source):
-                    src = _download_yandex_disk(args.source, Path("inputs"))
-                else:
-                    src = _download_url(args.source, Path("inputs"))
+            # Режим --from-cache: транскрипт из кэша без видео и Whisper.
+            # source опционален (только для именования файла).
+            if args.from_cache:
+                cmd_transcribe(
+                    args.source, fmt=args.format, ffmpeg=args.ffmpeg,
+                    from_cache=args.from_cache,
+                )
             else:
-                src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
-            cmd_transcribe(src, fmt=args.format, ffmpeg=args.ffmpeg)
+                # Источник — как у run, но локальный файл читается НА МЕСТЕ (рендера нет →
+                # копировать в inputs/ незачем); url/Яндекс.Диск скачиваются в inputs/.
+                if _is_url(args.source):
+                    if _is_yandex_disk(args.source):
+                        src = _download_yandex_disk(args.source, Path("inputs"))
+                    else:
+                        src = _download_url(args.source, Path("inputs"))
+                else:
+                    src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
+                cmd_transcribe(src, fmt=args.format, ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
         elif args.cmd == "resume":

@@ -2604,6 +2604,115 @@ def test_transcribe_dispatch_url_downloads(monkeypatch, tmp_path):
     assert seen["url"] == "https://youtu.be/d"
 
 
+# -------------------------------------------------- transcribe --from-cache
+
+_FAKE_HASH = "a" * 64  # 64-char hex hash, имитирует реальный sha256 аудио
+
+
+def _write_fake_transcript_cache(cache_dir: Path, audio_hash: str, transcript: Transcript) -> Path:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    p = cache_dir / f"{audio_hash}.transcript.json"
+    p.write_text(transcript.model_dump_json(), encoding="utf-8")
+    return p
+
+
+def test_from_cache_loads_transcript_without_whisper(monkeypatch, tmp_path):
+    """--from-cache <hash> читает транскрипт из файла кэша, минуя Whisper и ffmpeg."""
+    cache_dir = tmp_path / "cache"
+    tx = _transcript_two_paragraphs()
+    _write_fake_transcript_cache(cache_dir, _FAKE_HASH, tx)
+
+    extract_called = []
+    monkeypatch.setattr(cli, "_stage_extract_audio",
+                        lambda *a, **k: extract_called.append(1) or (tmp_path / "a.mp3"))
+    monkeypatch.setattr(cli, "_stage_transcribe",
+                        lambda *a, **k: pytest.fail("_stage_transcribe не должна вызываться"))
+
+    out = cli.cmd_transcribe(
+        fmt="text", root=REPO_ROOT,
+        out_dir=tmp_path / "transcripts", cache_dir=cache_dir,
+        from_cache=_FAKE_HASH,
+    )
+
+    assert not extract_called, "_stage_extract_audio вызвана, хотя есть кэш"
+    assert out.exists()
+    assert "Первая" in out.read_text(encoding="utf-8")
+
+
+def test_from_cache_uses_hash_stem_when_no_source(monkeypatch, tmp_path):
+    """Без source выходной файл называется по первым 16 символам хэша."""
+    cache_dir = tmp_path / "cache"
+    _write_fake_transcript_cache(cache_dir, _FAKE_HASH, _transcript_two_paragraphs())
+
+    out = cli.cmd_transcribe(
+        fmt="text", root=REPO_ROOT,
+        out_dir=tmp_path / "transcripts", cache_dir=cache_dir,
+        from_cache=_FAKE_HASH,
+    )
+
+    assert out.stem == _FAKE_HASH[:16]
+
+
+def test_from_cache_uses_source_stem_when_given(monkeypatch, tmp_path):
+    """Если source задан — stem берётся из source, не из хэша."""
+    cache_dir = tmp_path / "cache"
+    _write_fake_transcript_cache(cache_dir, _FAKE_HASH, _transcript_two_paragraphs())
+
+    out = cli.cmd_transcribe(
+        source="PXL_20260729_085910095.mp4",
+        fmt="text", root=REPO_ROOT,
+        out_dir=tmp_path / "transcripts", cache_dir=cache_dir,
+        from_cache=_FAKE_HASH,
+    )
+
+    assert out.stem == "PXL_20260729_085910095"
+
+
+def test_from_cache_raises_if_not_in_cache(tmp_path):
+    """Если файла кэша нет — RunError с понятным сообщением."""
+    with pytest.raises(cli.RunError, match="не найден в кэше"):
+        cli.cmd_transcribe(
+            fmt="text", root=REPO_ROOT,
+            out_dir=tmp_path / "transcripts", cache_dir=tmp_path / "empty_cache",
+            from_cache=_FAKE_HASH,
+        )
+
+
+def test_transcribe_parser_accepts_from_cache_without_source():
+    """argparse принимает --from-cache без обязательного source."""
+    parser = cli._build_parser()
+    args = parser.parse_args(["transcribe", "--from-cache", _FAKE_HASH])
+    assert args.from_cache == _FAKE_HASH
+    assert args.source is None
+
+
+def test_transcribe_parser_from_cache_with_source():
+    """argparse принимает --from-cache вместе с source (для именования)."""
+    parser = cli._build_parser()
+    args = parser.parse_args(["transcribe", "видео.mp4", "--from-cache", _FAKE_HASH])
+    assert args.from_cache == _FAKE_HASH
+    assert args.source == "видео.mp4"
+
+
+def test_transcribe_dispatch_from_cache_skips_validate_media(monkeypatch, tmp_path):
+    """CLI-dispatch при --from-cache НЕ вызывает _validate_media (файл не нужен)."""
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    def fake_cmd(source=None, **kwargs):
+        seen["source"] = source
+        seen["from_cache"] = kwargs.get("from_cache")
+        return tmp_path / "transcripts" / "t.txt"
+
+    monkeypatch.setattr(cli, "cmd_transcribe", fake_cmd)
+    monkeypatch.setattr(cli, "_validate_media",
+                        lambda *a, **k: pytest.fail("_validate_media вызвана при --from-cache"))
+
+    rc = cli.main(["transcribe", "--from-cache", _FAKE_HASH])
+    assert rc == 0
+    assert seen["from_cache"] == _FAKE_HASH
+
+
 # -------------------------------------------------- R0: модель из конфига
 
 def test_stage_select_uses_config_model(monkeypatch):
