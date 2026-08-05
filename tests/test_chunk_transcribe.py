@@ -102,11 +102,12 @@ def test_overlap_zone_consistency(tmp_path, monkeypatch):
     Сценарий: аудио 1200с, target-граница 600с, тишина на [597.5, 598.5] → реальный срез 598с.
     Чанк 0 возвращает слово «тест» у самого конца (relative t0=598.5).
     Чанк 1 возвращает слово «тест» у самого начала (relative t0=0.5).
-    Обе копии слова должны получить одинаковое абсолютное время 598+0.5=598.5.
+    Обе копии слова получают одинаковое абсолютное время 598+0.5=598.5 → это overlap-зона,
+    и дедуп склейки схлопывает её в ОДНО слово (merge_transcripts убирает дубль по таймкодам).
 
-    Если оркестратор передаст target (600) вместо VAD-среза (598) как offset:
-      chunk1_word.t0 = 600 + 0.5 = 600.5 ≠ 598.5 → тест ПАДАЕТ.
-    Только верный offset=598 даёт chunk1_word.t0=598.5 == chunk0_word.t0=598.5.
+    Это одновременно проверяет offset: только при верном offset=598 копии совпадают по времени
+    (598.5) и дедупятся → 1 слово. При ошибочном offset=600 копия чанка 1 встала бы на 600.5,
+    не попала бы в overlap-зону и осталась бы вторым словом → len==2 (тест ПАДАЕТ).
     """
     from autoreels.core.config import AudioExtract
 
@@ -142,15 +143,14 @@ def test_overlap_zone_consistency(tmp_path, monkeypatch):
         audio, cfg, audio_cfg, tmp_path, _BoundaryBackend()
     )
 
-    # chunk 0, слово у конца: offset=0, absolute = 0 + 598.5 = 598.5
-    chunk0_word_t0 = transcript.words[0].t0
-    # chunk 1, слово у начала: offset должен быть 598 (VAD), absolute = 598 + 0.5 = 598.5
-    chunk1_word_t0 = transcript.words[1].t0
-
-    assert chunk0_word_t0 == pytest.approx(598.5)
-    assert chunk1_word_t0 == pytest.approx(598.5), (
-        f"offset был target=600 вместо VAD=598: слово получило t0={chunk1_word_t0:.1f} вместо 598.5"
+    # Overlap-зона (обе копии «тест» на абс. 598.5) схлопнута дедупом склейки → 1 слово.
+    # len==1 доказывает и дедуп, и верный offset=598 (при offset=600 копия встала бы на
+    # 600.5, не совпала бы с 598.5 → не дедупнулась → len==2).
+    assert len(transcript.words) == 1, (
+        f"ожидалось 1 слово после дедупа overlap, получено {len(transcript.words)} — "
+        f"либо offset != 598 (копии разъехались), либо дедуп не сработал"
     )
+    assert transcript.words[0].t0 == pytest.approx(598.5)
 
 
 # ====================================================== TEST 3: merge continuity
@@ -191,6 +191,54 @@ def test_merge_none_chunk_skipped():
     assert result.words[0].word == "a"
     assert result.words[1].word == "c"
     assert result.words[1].t0 == pytest.approx(1200.0)
+
+
+def test_merge_dedups_overlap_zone():
+    """Соседние чанки перекрываются: хвост chunk0 и начало chunk1 — одни и те же слова
+    с совпадающими АБСОЛЮТНЫМИ таймкодами (offset выравнивает их). В склейке overlap-зона
+    остаётся ОДИН раз (дедуп по word-таймкодам), а не дублируется в тексте.
+    """
+    # chunk0: обычное слово + хвостовая фраза «страх порождает страх» в абс. [10.0, 12.0]
+    chunk0 = _tr(("мысль", 8.0, 8.5),
+                 ("страх", 10.0, 10.5), ("порождает", 10.6, 11.2), ("страх", 11.3, 12.0))
+    # chunk1: та же фраза в overlap-зоне (relative 0.0–2.0), затем новое слово.
+    # offset=10.0 → абс. времена overlap-слов совпадают с хвостом chunk0.
+    chunk1 = _tr(("страх", 0.0, 0.5), ("порождает", 0.6, 1.2), ("страх", 1.3, 2.0),
+                 ("дальше", 2.5, 3.0))
+
+    result = CT.merge_transcripts([chunk0, chunk1], [0.0, 10.0])
+    text = " ".join(w.word for w in result.words)
+
+    assert text == "мысль страх порождает страх дальше"
+    assert text.count("порождает") == 1          # overlap-фраза не задвоилась
+    assert result.words[-1].t0 == pytest.approx(12.5)  # «дальше» = 10.0 + 2.5
+
+
+def test_merge_keeps_intrachunk_jitter():
+    """Пословный джиттер Whisper ВНУТРИ чанка (t0 слова < t1 предыдущего) — НЕ дедуп.
+
+    Дедуп режет только стык чанков; внутри чанка все слова сохраняются, даже если их
+    таймкоды слегка налезают друг на друга (нормально для Whisper на русской речи).
+    Иначе глобальный frontier выкидывал бы легитимные слова и рвал текст.
+    """
+    # «свою» стартует (59.72) РАНЬШЕ, чем кончилось «через» (t1=60.20) — джиттер, не overlap
+    chunk0 = _tr(("через", 59.80, 60.20), ("свою", 59.72, 60.40), ("призму", 60.40, 60.90))
+    result = CT.merge_transcripts([chunk0], [0.0])
+
+    assert [w.word for w in result.words] == ["через", "свою", "призму"]  # ничего не выкинуто
+
+
+def test_merge_no_overlap_gap_keeps_first_word():
+    """Неперекрывающиеся чанки (силенс-срез с зазором): первое слово след. чанка сохраняется.
+
+    prev_t1 < t0 первого слова следующего чанка → дедуп ничего не режет (k=0).
+    """
+    chunk0 = _tr(("один", 0.0, 0.5), ("два", 1.0, 1.5))
+    chunk1 = _tr(("три", 0.0, 0.5))          # offset 600 → абс. 600.0, зазор ~598.5с
+    result = CT.merge_transcripts([chunk0, chunk1], [0.0, 600.0])
+
+    assert [w.word for w in result.words] == ["один", "два", "три"]
+    assert result.words[-1].t0 == pytest.approx(600.0)
 
 
 # ====================================================== TEST 4: chunking threshold

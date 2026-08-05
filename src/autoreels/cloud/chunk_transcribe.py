@@ -92,6 +92,18 @@ def merge_transcripts(
     с временным интервалом пропущенного чанка (для диагностики потерь).
 
     Порядок слов: чанки конкатенируются в порядке start_secs.
+
+    Дедуп overlap-зоны: соседние чанки перекрываются (общий кусок аудио у границы),
+    поэтому хвост чанка i и начало чанка i+1 транскрибируют ОДНИ И ТЕ ЖЕ слова. После
+    выравнивания offset'ом их абсолютные таймкоды совпадают → это дубли. Отбрасываем
+    ТОЛЬКО ведущие слова каждого чанка (кроме первого), чьё начало (t0) попадает во время,
+    уже покрытое хвостом предыдущего чанка (t0 < prev_t1). Как только встретили первое слово
+    ЗА пределом overlap-зоны — дедуп для этого чанка прекращаем.
+
+    Важно: дедуп применяется ТОЛЬКО к началу чанка, не внутри. Пословные таймкоды Whisper
+    внутри речи регулярно чуть налезают друг на друга (t0 следующего < t1 предыдущего —
+    нормальный джиттер, не overlap). Глобальный «frontier» дропал бы эти легитимные слова;
+    здесь мы их не трогаем — режем только стык чанков.
     """
     if len(chunks) != len(start_secs):
         raise ValueError(f"chunks ({len(chunks)}) и start_secs ({len(start_secs)}) должны совпадать")
@@ -110,8 +122,17 @@ def merge_transcripts(
                 )
             continue
         language = chunk.language or language
-        shifted = apply_offset(chunk, start)
-        all_words.extend(shifted.words)
+        words = apply_offset(chunk, start).words
+
+        # Дедуп стыка: срезать ведущие слова, попавшие во время, уже покрытое пред. чанком.
+        if all_words and words:
+            prev_t1 = all_words[-1].t1        # правый край хвоста предыдущего чанка
+            k = 0
+            while k < len(words) and words[k].t0 < prev_t1:
+                k += 1                        # слово в overlap-зоне — дубль, срезаем
+            words = words[k:]
+
+        all_words.extend(words)
 
     return Transcript(language=language, words=all_words)
 
