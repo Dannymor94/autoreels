@@ -193,16 +193,50 @@ def resolve_source(manifest: Manifest, inputs_dir: str | Path) -> Path:
     )
 
 
-def _video_quality_args(codec: str, preset: str, cq: int) -> list[str]:
-    """Аргументы качества/скорости видеоэнкодера.
+def _bitrate_to_bps(bitrate: str) -> int:
+    """'7M'→7_000_000, '128k'→128_000, '900'→900. Для оценки размера и VBV-буфера."""
+    s = bitrate.strip()
+    mult = 1
+    if s and s[-1] in "kK":
+        mult, s = 1_000, s[:-1]
+    elif s and s[-1] in "mM":
+        mult, s = 1_000_000, s[:-1]
+    return int(float(s) * mult)
 
-    Покрыт дефолтный libx264(+x265) путь (-preset/-crf). Для аппаратных энкодеров
-    rate-control задаётся на шаге 6 — здесь им отдаём только кодек (дефолтное качество),
-    чтобы не подсовывать невалидные для AMF/VAAPI флаги.
+
+def _bufsize(video_bitrate: str) -> str:
+    """VBV-буфер = 2× целевого битрейта ('7M'→'14M'): потолок пиков без раздувания размера."""
+    return f"{_bitrate_to_bps(video_bitrate) * 2 // 1_000_000}M"
+
+
+def estimate_size_mb(*, video_bitrate: str, audio_bitrate: str, duration_sec: float) -> float:
+    """Оценка размера выходного mp4 (МБ) = (видео+аудио битрейт) × длительность / 8.
+
+    Быстрая прикидка для отчётов/логов «клип 30с ≈ 26 МБ». Реальный размер ±10-15%
+    (контейнер, VBV-колебания), но порядок величины точный — этого хватает.
     """
+    total_bps = _bitrate_to_bps(video_bitrate) + _bitrate_to_bps(audio_bitrate)
+    return total_bps * duration_sec / 8 / (1024 * 1024)
+
+
+def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: str) -> list[str]:
+    """Аргументы rate-control/пиксформата видеоэнкодера.
+
+    Целевой битрейт (`-b:v`) + VBV-потолок (`-maxrate`/`-bufsize`) → предсказуемый размер
+    файла одним проходом. Работает и на софтверном libx264, и на аппаратном AMF/VAAPI —
+    именно отсутствие rate-control на AMF раздувало файлы (нужда в HandBrake). `-preset`
+    остаётся только у софтверных x26x (у AMF свой пресет — задаётся отдельно, шаг 6).
+    """
+    args: list[str] = []
     if codec in _SOFTWARE_X26X:
-        return ["-preset", preset, "-crf", str(cq)]
-    return []
+        args += ["-preset", preset]
+    args += [
+        "-b:v", video_bitrate,
+        "-maxrate", video_bitrate,
+        "-bufsize", _bufsize(video_bitrate),
+        "-pix_fmt", pix_fmt,
+    ]
+    return args
 
 
 def build_cut_cmd(
@@ -214,7 +248,10 @@ def build_cut_cmd(
     *,
     codec: str,
     preset: str,
-    cq: int,
+    cq: int = 23,
+    video_bitrate: str = "7M",
+    pix_fmt: str = "yuv420p",
+    faststart: bool = True,
     audio_codec: str,
     audio_bitrate: str,
     vf: str | None = None,
@@ -225,6 +262,10 @@ def build_cut_cmd(
     видеофильтр (R1b: `crop=…,scale=…` → вертикальный <id>.mp4). Чистая функция (без ФС) —
     единица, которую проверяют тесты сборки команды. Seek по входу (`-ss` до `-i`) +
     `-t` (длительность) — быстрый рез с перекодированием.
+
+    Rate-control — целевой битрейт (`video_bitrate`) под соцсети: компактный файл сразу,
+    без второго прохода. `faststart` кладёт moov-atom в начало (совместимость соцсетей).
+    `cq` больше не влияет на команду (битрейт-режим), оставлен для совместимости вызовов.
     """
     duration = round(end - start, 3)
     return [
@@ -234,9 +275,10 @@ def build_cut_cmd(
         "-t", _ts(duration),
         *(["-vf", vf] if vf else []),
         "-c:v", codec,
-        *_video_quality_args(codec, preset, cq),
+        *_video_quality_args(codec, preset, video_bitrate, pix_fmt),
         "-c:a", audio_codec,
         "-b:a", audio_bitrate,
+        *(["-movflags", "+faststart"] if faststart else []),
         str(out),
     ]
 
@@ -317,7 +359,8 @@ def _render_segments(
                 ass_cwd = str(tmp_ass_dir)
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
-                codec=codec, preset=enc.preset, cq=enc.cq,
+                codec=codec, preset=enc.preset,
+                video_bitrate=enc.video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                 audio_codec=aud.codec, audio_bitrate=aud.bitrate,
                 vf=reel_vf,
             )

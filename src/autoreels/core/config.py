@@ -117,12 +117,31 @@ class R0Config(BaseModel):
 # ------------------------------------------------------------------------ Render
 
 class Encoder(BaseModel):
+    """Видеоэнкодер + rate-control под соцсети.
+
+    Размер файла контролируется ЦЕЛЕВЫМ БИТРЕЙТОМ (`bitrate_profiles[bitrate_profile]`),
+    а не CRF: битрейт предсказуемо задаёт размер (30с ≈ битрейт×30/8) одним проходом и,
+    главное, работает на аппаратном AMF (который без rate-control раздувает файл в разы —
+    отсюда прежняя нужда дожимать HandBrake). `cq` оставлен для совместимости конфига.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     codec: str
     fallback_codec: str
     preset: str
     cq: int
+    bitrate_profile: str = "reels"          # активный профиль соцсети → битрейт ниже
+    bitrate_profiles: dict[str, str] = Field(
+        default_factory=lambda: {"reels": "7M", "shorts": "8M", "tiktok": "6M"}
+    )
+    pix_fmt: str = "yuv420p"                 # универсальная совместимость соцсетей/плееров
+    faststart: bool = True                   # moov-atom в начало (соцсети требуют для стрима)
+
+    @property
+    def video_bitrate(self) -> str:
+        """Целевой битрейт активного профиля соцсети (напр. '7M')."""
+        return self.bitrate_profiles[self.bitrate_profile]
 
 
 class Audio(BaseModel):
@@ -303,9 +322,17 @@ def load_render_config(path: str | Path, *, local_path: str | Path | None = None
     if local_path.is_file():
         data = _deep_merge(data, _read_yaml(local_path))
     try:
-        return RenderConfig.model_validate(data)
+        cfg = RenderConfig.model_validate(data)
     except ValidationError as e:
         raise ConfigError(f"невалидный render-конфиг {path}:\n{e}") from e
+    enc = cfg.encoder
+    if enc.bitrate_profile not in enc.bitrate_profiles:
+        known = ", ".join(sorted(enc.bitrate_profiles))
+        raise ConfigError(
+            f"неизвестный bitrate_profile '{enc.bitrate_profile}' в {path}; "
+            f"известные профили: {known}"
+        )
+    return cfg
 
 
 def load_subtitles_config(path: str | Path) -> SubtitlesConfig:

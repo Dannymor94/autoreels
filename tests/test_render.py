@@ -163,6 +163,118 @@ def test_cut_cmd_no_crop_filter():
     assert "-vf" not in cmd
 
 
+# ------------------------------------ соцсеть-оптимальный размер (bitrate/faststart/format)
+
+def test_cut_cmd_has_target_bitrate_and_vbv_cap():
+    """Целевой битрейт (-b:v) + VBV-потолок (-maxrate/-bufsize) → предсказуемый размер файла,
+    один проход, без HandBrake. bufsize = 2× битрейта."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="libx264", preset="medium", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert _val_after(cmd, "-b:v") == "7M"
+    assert _val_after(cmd, "-maxrate") == "7M"
+    assert _val_after(cmd, "-bufsize") == "14M"      # 2× для VBV
+
+
+def test_cut_cmd_has_pix_fmt_yuv420p():
+    """yuv420p — универсальная цветовая субдискретизация: соцсети/плееры не примут yuv444."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="libx264", preset="medium", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert _val_after(cmd, "-pix_fmt") == "yuv420p"
+
+
+def test_cut_cmd_has_faststart_before_output():
+    """-movflags +faststart (moov atom в начало): часть соцсетей не примет файл без него.
+    Флаг — опция мукса, идёт ДО имени выходного файла."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="libx264", preset="medium", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert _val_after(cmd, "-movflags") == "+faststart"
+    assert cmd.index("-movflags") < cmd.index(str(Path("/out/r01.mp4")))
+    assert cmd[-1] == str(Path("/out/r01.mp4"))
+
+
+def test_cut_cmd_faststart_off_omits_flag():
+    """faststart=False → флага нет (управляемо из конфига)."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="libx264", preset="medium", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=False, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert "-movflags" not in cmd
+
+
+def test_cut_cmd_amf_gets_bitrate_not_crf():
+    """Аппаратный AMF: целевой битрейт применяется (это и есть фикс огромных файлов —
+    AMF по умолчанию без rate-control раздувает размер), а libx264-specific -crf/-preset — нет."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="h264_amf", preset="balanced", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert _val_after(cmd, "-b:v") == "7M"           # rate-control есть и на AMF
+    assert _val_after(cmd, "-maxrate") == "7M"
+    assert "-crf" not in cmd                          # софтверный флаг не лезет в AMF
+    assert "-preset" not in cmd
+
+
+# ------------------------------------ профили битрейта (config Encoder)
+
+def test_encoder_video_bitrate_resolves_from_active_profile():
+    from autoreels.core.config import Encoder
+    enc = Encoder(codec="libx264", fallback_codec="libx264", preset="medium", cq=23,
+                  bitrate_profile="reels",
+                  bitrate_profiles={"reels": "7M", "shorts": "8M", "tiktok": "6M"})
+    assert enc.video_bitrate == "7M"
+
+
+def test_encoder_bitrate_profile_switch_changes_bitrate():
+    from autoreels.core.config import Encoder
+    enc = Encoder(codec="libx264", fallback_codec="libx264", preset="medium", cq=23,
+                  bitrate_profile="shorts",
+                  bitrate_profiles={"reels": "7M", "shorts": "8M", "tiktok": "6M"})
+    assert enc.video_bitrate == "8M"
+
+
+def test_load_render_config_unknown_bitrate_profile_raises(tmp_path):
+    """Опечатка в bitrate_profile → ConfigError на загрузке (fail-fast), не молча."""
+    from autoreels.core.config import ConfigError, load_render_config
+    import yaml
+    base = yaml.safe_load(RENDER_YAML.read_text(encoding="utf-8"))
+    base["encoder"]["bitrate_profile"] = "no_such_profile"
+    p = tmp_path / "render.yaml"
+    p.write_text(yaml.safe_dump(base), encoding="utf-8")
+    with pytest.raises(ConfigError, match="bitrate_profile"):
+        load_render_config(p)
+
+
+def test_real_render_config_defaults_are_social_optimal():
+    """Дефолтный config/render.yaml даёт соцсеть-оптимальные значения из коробки."""
+    cfg = load_render_config(RENDER_YAML)
+    assert cfg.encoder.pix_fmt == "yuv420p"
+    assert cfg.encoder.faststart is True
+    assert cfg.audio.bitrate == "128k"               # aac 128k — достаточно для соцсетей
+    # активный профиль резолвится в разумный битрейт 6–8 Мбит/с
+    bv = cfg.encoder.video_bitrate
+    assert bv.endswith("M") and 6 <= int(bv[:-1]) <= 8
+
+
+# ------------------------------------ оценка размера выходного файла
+
+def test_estimate_size_mb_30s_clip_in_social_range():
+    """30-сек клип на 7 Мбит/с видео + 128k аудио ≈ 26–28 МБ — компактно, не сотни МБ."""
+    from autoreels.local.render import estimate_size_mb
+    mb = estimate_size_mb(video_bitrate="7M", audio_bitrate="128k", duration_sec=30.0)
+    assert 20 <= mb <= 35, f"ожидалось 20–35 МБ, получено {mb:.1f}"
+
+
 # ----------------------------------------------------- поиск исходника по хэшу
 
 def test_resolve_source_found_by_hash(tmp_path):
@@ -722,3 +834,59 @@ def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, mon
     # cwd должен быть временной директорией, содержащей .ass файл
     cwd_path = Path(cwd)
     assert cwd_path.is_dir() or not cwd_path.exists(), f"cwd не является директорией: {cwd}"
+
+
+# ------------------------------------ integration: реальный рендер (размер+формат)
+
+@pytest.mark.integration
+def test_real_render_social_size_and_format(tmp_path):
+    """СКВОЗНОЙ: реальный ffmpeg-рендер 30-сек клипа целевым битрейтом →
+    файл в соцсеть-диапазоне размера, h264/yuv420p/aac, moov в начале (faststart).
+
+    Гоняется только там, где есть ffmpeg (pytest -m integration). Прямо проверяет цель
+    задачи: клип из рендера сразу готов к загрузке, второй проход HandBrake не нужен.
+    """
+    import shutil, json as _json
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe не установлены")
+
+    # Источник: 30с 1080×1920, намеренно тяжёлый (шум) — без rate-control раздулся бы.
+    src = tmp_path / "src.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "nullsrc=s=1080x1920:d=30",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=30",
+        "-vf", "geq=random(1)*255:128:128",     # шум: несжимаемый → проверка потолка битрейта
+        "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+        "-shortest", str(src),
+    ], check=True, capture_output=True)
+
+    out = tmp_path / "clip.mp4"
+    cmd = build_cut_cmd(
+        ffmpeg, src, 0.0, 30.0, out,
+        codec="libx264", preset="medium", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert r.returncode == 0, f"ffmpeg упал: {r.stderr}"
+
+    # Размер в соцсеть-диапазоне (30с @7Мбит/с ≈ 26 МБ; допускаем 18–40 с запасом на VBV)
+    size_mb = out.stat().st_size / (1024 * 1024)
+    assert 15 <= size_mb <= 45, f"размер {size_mb:.1f} МБ вне соцсеть-диапазона"
+
+    # Формат через ffprobe: h264 + yuv420p + aac
+    probe = subprocess.run([
+        ffprobe, "-v", "error", "-show_streams", "-of", "json", str(out),
+    ], capture_output=True, text=True)
+    streams = _json.loads(probe.stdout)["streams"]
+    v = next(s for s in streams if s["codec_type"] == "video")
+    a = next(s for s in streams if s["codec_type"] == "audio")
+    assert v["codec_name"] == "h264"
+    assert v["pix_fmt"] == "yuv420p"
+    assert a["codec_name"] == "aac"
+
+    # faststart: moov-atom раньше mdat в файле (соцсети требуют для стрим-старта)
+    head = out.read_bytes()
+    assert head.index(b"moov") < head.index(b"mdat"), "moov после mdat — faststart не сработал"

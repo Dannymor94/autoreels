@@ -12,11 +12,21 @@ encoder:
   codec: libx264
   fallback_codec: libx264
   preset: medium              # пресет libx264; для VAAPI/AMF переопределяется на шаге 6
-  cq: 23
+  cq: 23                      # legacy CRF; в битрейт-режиме на команду НЕ влияет
+  # Rate-control под соцсети: ЦЕЛЕВОЙ БИТРЕЙТ → предсказуемый компактный размер файла
+  # одним проходом (клип 30с ≈ 26 МБ, не сотни). Главное — работает на AMF, который без
+  # rate-control раздувал файлы в разы (отсюда была нужда дожимать HandBrake).
+  bitrate_profile: reels      # активный профиль (reels | shorts | tiktok)
+  bitrate_profiles:           # 1080×1920 h264, 6–8 Мбит/с: отличное качество, компактно
+    reels: 7M
+    shorts: 8M
+    tiktok: 6M
+  pix_fmt: yuv420p            # универсальная совместимость соцсетей/плееров (не yuv444)
+  faststart: true            # moov-atom в начало файла — соцсети требуют для стрим-старта
 
 audio:
   codec: aac
-  bitrate: 160k
+  bitrate: 128k               # aac 128k — достаточно для соцсетей (было 160k)
 
 # Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
 # mp3 64k mono 16kHz: 8 000 байт/с → 46 мин = ~22 МБ (под лимит Groq 25 МБ).
