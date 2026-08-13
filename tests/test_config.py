@@ -75,12 +75,14 @@ def test_render_local_yaml_overrides_ffmpeg(tmp_path):
 
 
 def test_render_local_yaml_deep_merges_encoder(tmp_path):
-    """Локальный override меняет только encoder.codec — остальные поля encoder из базы."""
+    """Локальный override меняет только кодек профиля — битрейт и прочие поля из базы (Mac-дев)."""
     base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
-    base_cfg = load_render_config(base)                      # cq/preset из базы
-    _write(tmp_path, "render.local.yaml", "encoder:\n  codec: h264_amf\n")
+    base_cfg = load_render_config(base)                      # cq/preset/битрейт из базы
+    _write(tmp_path, "render.local.yaml",
+           "encoder:\n  profiles:\n    hevc:\n      codec: libx265\n")
     cfg = load_render_config(base)
-    assert cfg.encoder.codec == "h264_amf"                  # переопределено
+    assert cfg.encoder.profiles["hevc"].codec == "libx265"  # кодек переопределён
+    assert cfg.encoder.profiles["hevc"].bitrate == base_cfg.encoder.profiles["hevc"].bitrate
     assert cfg.encoder.cq == base_cfg.encoder.cq            # не тронуто
     assert cfg.encoder.preset == base_cfg.encoder.preset
 

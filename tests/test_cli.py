@@ -1485,7 +1485,7 @@ def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -1509,7 +1509,7 @@ def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 

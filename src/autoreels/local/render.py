@@ -28,19 +28,26 @@ from typing import Callable
 from pydantic import ValidationError
 
 from autoreels.core import state
-from autoreels.core.config import RenderConfig, SubtitlesConfig
+from autoreels.core.config import RenderConfig, SubtitlesConfig, validate_profile
 from autoreels.core.models import Manifest, SetupProfile
 from autoreels.local.subtitles import build_ass
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
 _MANIFEST_NAME = "manifest.json"
 
-# Кодеки, для которых -preset/-crf — родной rate-control. Для аппаратных энкодеров
-# (h264_amf/h264_vaapi/nvenc) эти флаги невалидны; их настройка — шаг 6.
+# Кодеки, для которых -preset — родной параметр (софтверные x26x). Для аппаратных
+# энкодеров (h264_amf/hevc_amf/av1_amf/nvenc) -preset невалиден (у AMF свой пресет).
 _SOFTWARE_X26X = {"libx264", "libx265"}
 
-# env-переопределение энкодера (рантайм-конфиг машины рендера поверх render.yaml).
+# env-переопределение энкодера/профиля (рантайм-конфиг машины рендера поверх render.yaml).
 _ENCODER_ENV = "RENDER_ENCODER"
+_PROFILE_ENV = "RENDER_PROFILE"
+
+
+def _is_hevc(codec: str) -> bool:
+    """HEVC-семейство (по любому бэкенду): нужен тег hvc1 для совместимости соцсетей/Apple."""
+    c = codec.lower()
+    return "hevc" in c or "265" in c
 
 
 def _fmt_time(sec: float) -> str:
@@ -236,6 +243,9 @@ def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: st
         "-bufsize", _bufsize(video_bitrate),
         "-pix_fmt", pix_fmt,
     ]
+    # HEVC в mp4 без тега hvc1 муксится как hev1 — Apple/Safari/часть соцсетей не проигрывают.
+    if _is_hevc(codec):
+        args += ["-tag:v", "hvc1"]
     return args
 
 
@@ -305,12 +315,14 @@ def _render_segments(
     encoder: str | None,
     vf: str | None,
     suffix: str,
+    profile: str | None = None,
     progress: Callable[[str], None] | None = None,
     emit_text: bool = False,
     subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
+    `profile` — кодек-профиль (h264|hevc|av1), переопределяет активный из конфига.
     `progress` — колбэк, вызывается с id reel перед его рендером (видимый прогресс CLI).
     `emit_text` — класть рядом с клипом <id>.txt (title/description для публикации)."""
     # Абсолютные пути обязательны: при cwd=tmp_ass_dir (ass-фильтр) ffmpeg резолвит
@@ -327,9 +339,16 @@ def _render_segments(
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    codec = encoder or os.environ.get(_ENCODER_ENV) or render_cfg.encoder.codec
     enc = render_cfg.encoder
     aud = render_cfg.audio
+    # Профиль: явный аргумент > env RENDER_PROFILE > активный из конфига. Кодек+битрейт —
+    # из профиля; но явный encoder (флаг/env) может переопределить только кодек (Mac-дев:
+    # AMF-кодека нет → подменяем на libx26x, битрейт профиля сохраняется).
+    profile_name = profile or os.environ.get(_PROFILE_ENV) or enc.profile
+    validate_profile(profile_name, enc.profiles, where=f"{_PROFILE_ENV}/--profile")
+    active = enc.profiles[profile_name]
+    codec = encoder or os.environ.get(_ENCODER_ENV) or active.codec
+    video_bitrate = active.bitrate
 
     # .ass живут в tempdir: после ffmpeg убираются автоматически, в out_dir не остаются.
     with tempfile.TemporaryDirectory(prefix="autoreels_ass_") as _tmp_ass:
@@ -360,7 +379,7 @@ def _render_segments(
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
                 codec=codec, preset=enc.preset,
-                video_bitrate=enc.video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
+                video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                 audio_codec=aud.codec, audio_bitrate=aud.bitrate,
                 vf=reel_vf,
             )
@@ -402,16 +421,18 @@ def render_cut(
     render_cfg: RenderConfig,
     ffmpeg: str = "ffmpeg",
     encoder: str | None = None,
+    profile: str | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """R1a: для каждого reel вырезать окно из исходника КАК ЕСТЬ → `out_dir`/<id>_raw.mp4.
 
-    Энкодер: явный `encoder` > env `RENDER_ENCODER` > `render_cfg.encoder.codec`. Возвращает
-    пути готовых сырых клипов (горизонтальный исходник, без кропа и субтитров).
+    Кодек+битрейт — из активного `profile` (h264|hevc|av1); явный `encoder` (флаг/env)
+    переопределяет только кодек. Возвращает пути сырых клипов (горизонтальный, без кропа/субтитров).
     """
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, vf=None, suffix="_raw", progress=progress,
+        ffmpeg=ffmpeg, encoder=encoder, vf=None, suffix="_raw", profile=profile,
+        progress=progress,
     )
 
 
@@ -423,6 +444,7 @@ def render_crop(
     render_cfg: RenderConfig,
     ffmpeg: str = "ffmpeg",
     encoder: str | None = None,
+    profile: str | None = None,
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
@@ -430,10 +452,10 @@ def render_crop(
 
     Кроп+скейл (`setup.crop` + `setup.scale`) — данные манифеста, один на все клипы. Если
     передан `subtitles_cfg` и у reel есть слова — на клип накладывается ASS (после crop/scale).
-    Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a). Энкодер — тот же параметр.
+    Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a). Кодек-профиль — тот же параметр.
     """
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
-        progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
+        profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
     )

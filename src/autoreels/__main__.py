@@ -46,6 +46,7 @@ from autoreels.core.config import (
     load_render_config,
     load_subtitles_config,
     load_transcribe_config,
+    validate_profile,
 )
 from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import CalibrateError, cmd_calibrate
@@ -826,6 +827,7 @@ def cmd_render(
     root=".",
     ffmpeg: str | None = None,
     encoder=None,
+    profile=None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -850,7 +852,11 @@ def cmd_render(
         print("manifests/ пуст — нечего рендерить", flush=True)
         return []
 
-    enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.codec
+    # Профиль кодека: флаг > env RENDER_PROFILE > активный из конфига. Опечатка → fail-fast.
+    prof_name = profile or os.environ.get("RENDER_PROFILE") or render_cfg.encoder.profile
+    validate_profile(prof_name, render_cfg.encoder.profiles, where="--profile/RENDER_PROFILE")
+    # Отображаемый кодек: явный encoder переопределяет кодек профиля (Mac-дев без AMF).
+    enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.profiles[prof_name].codec
     # ffmpeg: флаг > env RENDER_FFMPEG > render.yaml (+ render.local.yaml override).
     effective_ffmpeg = ffmpeg or os.environ.get("RENDER_FFMPEG") or render_cfg.ffmpeg
     all_outputs: list[Path] = []
@@ -879,11 +885,12 @@ def cmd_render(
             n_missing = len(missing)
             n_total = len(manifest.reels)
             label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
-            print(f"=== render: {mf.name} ({label}, {enc}) → {out_dir_final} ===", flush=True)
+            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}) → {out_dir_final} ===",
+                  flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg, encoder=encoder,
-                subtitles_cfg=subtitles_cfg,
+                profile=profile, subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
@@ -914,7 +921,7 @@ def cmd_render(
     return all_outputs
 
 
-def cmd_resume(*, root=".", ffmpeg=None, encoder=None) -> int:
+def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
     """Продолжить прерванное: доделать рендер недостающих клипов + сообщить о недокачках.
 
     Тяжёлые шаги проекта идемпотентны и «продолжаемы» by design: render дорисовывает
@@ -947,7 +954,7 @@ def cmd_resume(*, root=".", ffmpeg=None, encoder=None) -> int:
     if pending:
         did_something = True
         print(f"дорендериваю {len(pending)} манифест(ов) с недостающими клипами…", flush=True)
-        cmd_render(root=root, ffmpeg=ffmpeg, encoder=encoder)
+        cmd_render(root=root, ffmpeg=ffmpeg, encoder=encoder, profile=profile)
 
     if not did_something:
         print("нечего продолжать — всё готово (нет .part и недорендеренных манифестов).",
@@ -1404,7 +1411,7 @@ autoreels — длинное видео → вертикальные Reels 9:16
   1. autoreels status                         # что где, нужен ли кроп
   2. autoreels calibrate --all                # настроить кадры (или пропустить → автокроп)
   3. autoreels run inputs/видео.mp4           # → manifests/<имя>.json
-  4. autoreels render --encoder h264_amf      # → reels-out/<имя>/
+  4. autoreels render                         # → reels-out/<имя>/ (профиль hevc)
 
 Папки: inputs/ · manifests/ · reels-out/ · inputs-archive/
 autoreels <команда> --help — детали и флаги.\
@@ -1533,7 +1540,7 @@ autoreels — длинное talking-head видео → вертикальны�
     source /путь/к/autoreels/aliases.sh
 
   Дальше алиасы обновляются через git pull (правишь aliases.sh, коммитишь).
-  Затем: ar status · ar calibrate --all · ar run · ar render --encoder h264_amf
+  Затем: ar status · ar calibrate --all · ar run · ar render
 \
 """
 
@@ -1677,14 +1684,17 @@ def _build_parser():
         description=(
             "Локальный тир: все манифесты в manifests/ → вертикальные mp4 в reels-out/.\n"
             "Идемпотентен: уже готовые клипы пропускаются; нет видео — предупреждение ⊘.\n"
-            "На системнике Windows: --encoder h264_amf (AMD) или h264_nvenc (NVIDIA).\n\n"
-            "Пример: autoreels render --encoder h264_amf\n"
-            "Windows: autoreels render --encoder h264_amf --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe"
+            "Кодек — профилем: hevc (дефолт, компактный) | h264 (совместимый) | av1 (эксп.).\n"
+            "Профили нацелены на AMF (системник Windows AMD) — достаточно --ffmpeg.\n\n"
+            "Пример: autoreels render --profile hevc\n"
+            "Windows: autoreels render --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    pd.add_argument("--profile", default=None,
+                    help="кодек-профиль: h264 (совместимый) | hevc (компактный, дефолт) | av1 (эксп.)")
     pd.add_argument("--encoder", default=None,
-                    help="видеокодек ffmpeg (h264_amf — AMD Windows, h264_nvenc — NVIDIA, libx264 — CPU)")
+                    help="видеокодек ffmpeg (переопределяет кодек профиля; h264_amf — AMD, libx264 — CPU)")
     pd.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin\\ffmpeg.exe)")
 
@@ -1699,6 +1709,7 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    prs.add_argument("--profile", default=None, help="кодек-профиль (как у render): h264|hevc|av1")
     prs.add_argument("--encoder", default=None, help="видеокодек ffmpeg (как у render)")
     prs.add_argument("--ffmpeg", default=None, help="путь к ffmpeg (иначе из render.yaml)")
 
@@ -1815,9 +1826,9 @@ def main(argv=None) -> int:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
                 cmd_transcribe(src, fmt=args.format, ffmpeg=args.ffmpeg)
         elif args.cmd == "render":
-            cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg)
+            cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "resume":
-            return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg)
+            return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

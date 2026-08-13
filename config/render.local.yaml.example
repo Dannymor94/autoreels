@@ -10,11 +10,19 @@
 # Тогда `python -m autoreels render` (без флагов --ffmpeg/--encoder) работает как есть.
 
 # --- Системник Windows (AMD, ffmpeg вне PATH) ---
+# Профили кодеков в render.yaml уже нацелены на AMF (h264_amf/hevc_amf/av1_amf) — на
+# системнике достаточно указать путь к ffmpeg. Профиль по умолчанию — hevc (компактный).
 # ffmpeg: D:\ffmpeg\bin\ffmpeg.exe    # путь к бинарю; на Windows часто вне PATH
 # encoder:
-#   codec: h264_amf                   # AMD-энкодер (NVIDIA → h264_nvenc; CPU → libx264)
+#   profile: h264                     # сменить активный профиль (h264 | hevc | av1)
+
+# --- Mac-дев (без AMF): подменить кодек на софтверный, битрейт профиля сохраняется ---
+# encoder:
+#   profiles:
+#     hevc: {codec: libx265}          # deep-merge: меняем только кодек, bitrate из render.yaml
 
 # Альтернатива без файла — переменные окружения (симметрично):
 #   RENDER_FFMPEG=D:\ffmpeg\bin\ffmpeg.exe
-#   RENDER_ENCODER=h264_amf
+#   RENDER_PROFILE=h264               # активный кодек-профиль
+#   RENDER_ENCODER=libx265            # переопределить кодек (Mac без AMF)
 # Приоритет: флаг CLI > env > render.local.yaml > render.yaml.

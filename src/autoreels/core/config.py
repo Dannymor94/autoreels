@@ -116,32 +116,63 @@ class R0Config(BaseModel):
 
 # ------------------------------------------------------------------------ Render
 
-class Encoder(BaseModel):
-    """Видеоэнкодер + rate-control под соцсети.
+class CodecProfile(BaseModel):
+    """Один кодек-профиль: связка ffmpeg-кодек + целевой битрейт.
 
-    Размер файла контролируется ЦЕЛЕВЫМ БИТРЕЙТОМ (`bitrate_profiles[bitrate_profile]`),
-    а не CRF: битрейт предсказуемо задаёт размер (30с ≈ битрейт×30/8) одним проходом и,
-    главное, работает на аппаратном AMF (который без rate-control раздувает файл в разы —
-    отсюда прежняя нужда дожимать HandBrake). `cq` оставлен для совместимости конфига.
+    Кодек и битрейт связаны неразрывно (h264 нужен выше битрейт, hevc/av1 — ниже при том
+    же качестве), поэтому живут в одной записи, а не в двух независимых таблицах.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    codec: str
-    fallback_codec: str
+    codec: str        # ffmpeg-энкодер (h264_amf | hevc_amf | av1_amf | libx264 | …)
+    bitrate: str      # целевой битрейт (напр. '5M')
+
+
+# Дефолтные профили: prod — системник Windows AMD (AMF-энкодеры).
+_DEFAULT_PROFILES: dict[str, dict[str, str]] = {
+    "h264": {"codec": "h264_amf", "bitrate": "7M"},   # универсальная совместимость соцсетей
+    "hevc": {"codec": "hevc_amf", "bitrate": "5M"},   # вдвое меньше файл, дефолт
+    "av1": {"codec": "av1_amf", "bitrate": "4M"},     # максимально компактно, экспериментально
+}
+
+
+class Encoder(BaseModel):
+    """Видеоэнкодер + rate-control под соцсети.
+
+    Кодек выбирается ПРОФИЛЕМ (`profiles[profile]`): каждый профиль — связка кодек+битрейт.
+    h264 (безопасный, универсальный) / hevc (компактный, дефолт) / av1 (экспериментальный).
+    Размер файла контролируется ЦЕЛЕВЫМ БИТРЕЙТОМ, а не CRF: битрейт предсказуемо задаёт
+    размер (30с ≈ битрейт×30/8) одним проходом и, главное, работает на аппаратном AMF
+    (который без rate-control раздувает файл в разы — отсюда прежняя нужда дожимать HandBrake).
+    `cq` оставлен для совместимости конфига.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = "hevc"                    # активный кодек-профиль (h264 | hevc | av1)
+    profiles: dict[str, CodecProfile] = Field(
+        default_factory=lambda: {k: CodecProfile(**v) for k, v in _DEFAULT_PROFILES.items()}
+    )
     preset: str
     cq: int
-    bitrate_profile: str = "reels"          # активный профиль соцсети → битрейт ниже
-    bitrate_profiles: dict[str, str] = Field(
-        default_factory=lambda: {"reels": "7M", "shorts": "8M", "tiktok": "6M"}
-    )
     pix_fmt: str = "yuv420p"                 # универсальная совместимость соцсетей/плееров
     faststart: bool = True                   # moov-atom в начало (соцсети требуют для стрима)
 
     @property
+    def active(self) -> CodecProfile:
+        """Активный кодек-профиль (по имени `profile`)."""
+        return self.profiles[self.profile]
+
+    @property
+    def codec(self) -> str:
+        """ffmpeg-кодек активного профиля (напр. 'hevc_amf')."""
+        return self.active.codec
+
+    @property
     def video_bitrate(self) -> str:
-        """Целевой битрейт активного профиля соцсети (напр. '7M')."""
-        return self.bitrate_profiles[self.bitrate_profile]
+        """Целевой битрейт активного профиля (напр. '5M')."""
+        return self.active.bitrate
 
 
 class Audio(BaseModel):
@@ -325,14 +356,20 @@ def load_render_config(path: str | Path, *, local_path: str | Path | None = None
         cfg = RenderConfig.model_validate(data)
     except ValidationError as e:
         raise ConfigError(f"невалидный render-конфиг {path}:\n{e}") from e
-    enc = cfg.encoder
-    if enc.bitrate_profile not in enc.bitrate_profiles:
-        known = ", ".join(sorted(enc.bitrate_profiles))
-        raise ConfigError(
-            f"неизвестный bitrate_profile '{enc.bitrate_profile}' в {path}; "
-            f"известные профили: {known}"
-        )
+    validate_profile(cfg.encoder.profile, cfg.encoder.profiles, where=str(path))
     return cfg
+
+
+def validate_profile(profile: str, profiles: dict, *, where: str) -> None:
+    """Профиль существует в таблице профилей → иначе ConfigError (fail-fast).
+
+    Переиспользуется валидацией конфига И CLI-флагом `--profile` (опечатка ловится сразу,
+    а не падает KeyError глубоко в рендере)."""
+    if profile not in profiles:
+        known = ", ".join(sorted(profiles))
+        raise ConfigError(
+            f"неизвестный профиль кодека '{profile}' в {where}; известные: {known}"
+        )
 
 
 def load_subtitles_config(path: str | Path) -> SubtitlesConfig:

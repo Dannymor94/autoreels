@@ -211,6 +211,36 @@ def test_cut_cmd_faststart_off_omits_flag():
     assert "-movflags" not in cmd
 
 
+def test_cut_cmd_hevc_gets_hvc1_tag():
+    """HEVC в mp4 → тег hvc1 (иначе Apple/Safari/часть соцсетей не проигрывают)."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="hevc_amf", preset="balanced", video_bitrate="5M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert _val_after(cmd, "-tag:v") == "hvc1"
+
+
+def test_cut_cmd_libx265_also_gets_hvc1_tag():
+    """Тег hvc1 навешивается на HEVC любого бэкенда (софтверный libx265 тоже)."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="libx265", preset="medium", video_bitrate="5M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert _val_after(cmd, "-tag:v") == "hvc1"
+
+
+def test_cut_cmd_h264_has_no_hvc1_tag():
+    """H.264 не нуждается в hvc1 — тег только у HEVC."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/inputs/v.mp4"), 0.0, 30.0, Path("/out/r01.mp4"),
+        codec="h264_amf", preset="balanced", video_bitrate="7M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    assert "-tag:v" not in cmd
+
+
 def test_cut_cmd_amf_gets_bitrate_not_crf():
     """Аппаратный AMF: целевой битрейт применяется (это и есть фикс огромных файлов —
     AMF по умолчанию без rate-control раздувает размер), а libx264-specific -crf/-preset — нет."""
@@ -227,31 +257,40 @@ def test_cut_cmd_amf_gets_bitrate_not_crf():
 
 # ------------------------------------ профили битрейта (config Encoder)
 
-def test_encoder_video_bitrate_resolves_from_active_profile():
+def _enc(**kw):
+    """Encoder с профилями по умолчанию (h264/hevc/av1), переопределяемыми через kw."""
     from autoreels.core.config import Encoder
-    enc = Encoder(codec="libx264", fallback_codec="libx264", preset="medium", cq=23,
-                  bitrate_profile="reels",
-                  bitrate_profiles={"reels": "7M", "shorts": "8M", "tiktok": "6M"})
+    return Encoder(preset="medium", cq=23, **kw)
+
+
+def test_encoder_active_profile_resolves_codec_and_bitrate():
+    enc = _enc(profile="h264")
+    assert enc.codec == "h264_amf"
     assert enc.video_bitrate == "7M"
 
 
-def test_encoder_bitrate_profile_switch_changes_bitrate():
-    from autoreels.core.config import Encoder
-    enc = Encoder(codec="libx264", fallback_codec="libx264", preset="medium", cq=23,
-                  bitrate_profile="shorts",
-                  bitrate_profiles={"reels": "7M", "shorts": "8M", "tiktok": "6M"})
-    assert enc.video_bitrate == "8M"
+def test_encoder_profile_switch_changes_codec_and_bitrate():
+    # hevc-профиль → другой кодек И другой (меньший) битрейт: компактнее при том же качестве.
+    enc = _enc(profile="hevc")
+    assert enc.codec == "hevc_amf"
+    assert enc.video_bitrate == "5M"
 
 
-def test_load_render_config_unknown_bitrate_profile_raises(tmp_path):
-    """Опечатка в bitrate_profile → ConfigError на загрузке (fail-fast), не молча."""
+def test_encoder_av1_profile():
+    enc = _enc(profile="av1")
+    assert enc.codec == "av1_amf"
+    assert enc.video_bitrate == "4M"
+
+
+def test_load_render_config_unknown_profile_raises(tmp_path):
+    """Опечатка в profile → ConfigError на загрузке (fail-fast), не молча."""
     from autoreels.core.config import ConfigError, load_render_config
     import yaml
     base = yaml.safe_load(RENDER_YAML.read_text(encoding="utf-8"))
-    base["encoder"]["bitrate_profile"] = "no_such_profile"
+    base["encoder"]["profile"] = "no_such_profile"
     p = tmp_path / "render.yaml"
     p.write_text(yaml.safe_dump(base), encoding="utf-8")
-    with pytest.raises(ConfigError, match="bitrate_profile"):
+    with pytest.raises(ConfigError, match="профиль"):
         load_render_config(p)
 
 
@@ -261,9 +300,12 @@ def test_real_render_config_defaults_are_social_optimal():
     assert cfg.encoder.pix_fmt == "yuv420p"
     assert cfg.encoder.faststart is True
     assert cfg.audio.bitrate == "128k"               # aac 128k — достаточно для соцсетей
-    # активный профиль резолвится в разумный битрейт 6–8 Мбит/с
+    assert cfg.encoder.profile == "hevc"             # дефолт — компактный hevc
+    # активный профиль резолвится в разумный битрейт 4–8 Мбит/с
     bv = cfg.encoder.video_bitrate
-    assert bv.endswith("M") and 6 <= int(bv[:-1]) <= 8
+    assert bv.endswith("M") and 4 <= int(bv[:-1]) <= 8
+    # все три профиля присутствуют
+    assert set(cfg.encoder.profiles) == {"h264", "hevc", "av1"}
 
 
 # ------------------------------------ оценка размера выходного файла
@@ -451,6 +493,73 @@ def test_render_cut_output_paths_are_pathlib_under_out_dir(tmp_path, render_cfg,
     assert out.parent == out_dir
     assert out.name == "r01_raw.mp4"
     assert out_dir.is_dir()                            # папка выдачи создана
+
+
+def test_render_cut_default_profile_applies_hevc_codec_and_bitrate(tmp_path, render_cfg, fake_ffmpeg):
+    # Дефолтный профиль конфига (hevc) → hevc_amf + 5M битрейт + hvc1 в команде.
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"default-hevc-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
+
+    render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    cmd = fake_ffmpeg[0]
+    assert _val_after(cmd, "-c:v") == "hevc_amf"
+    assert _val_after(cmd, "-b:v") == "5M"
+    assert _val_after(cmd, "-tag:v") == "hvc1"
+
+
+def test_render_cut_profile_arg_switches_codec_and_bitrate(tmp_path, render_cfg, fake_ffmpeg):
+    # --profile h264 → h264_amf + 7M, без hvc1.
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"profile-switch-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
+
+    render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg, profile="h264")
+
+    cmd = fake_ffmpeg[0]
+    assert _val_after(cmd, "-c:v") == "h264_amf"
+    assert _val_after(cmd, "-b:v") == "7M"
+    assert "-tag:v" not in cmd
+
+
+def test_render_cut_profile_from_env(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
+    # RENDER_PROFILE=av1 → av1_amf + 4M.
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"env-profile-video")
+    monkeypatch.setenv("RENDER_PROFILE", "av1")
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
+
+    render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    cmd = fake_ffmpeg[0]
+    assert _val_after(cmd, "-c:v") == "av1_amf"
+    assert _val_after(cmd, "-b:v") == "4M"
+
+
+def test_render_cut_encoder_overrides_codec_keeps_profile_bitrate(tmp_path, render_cfg, fake_ffmpeg):
+    # Mac-дев: --encoder libx265 подменяет кодек, но битрейт активного профиля (hevc→5M) остаётся.
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"encoder-override-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
+
+    render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+               render_cfg=render_cfg, encoder="libx265")
+
+    cmd = fake_ffmpeg[0]
+    assert _val_after(cmd, "-c:v") == "libx265"
+    assert _val_after(cmd, "-b:v") == "5M"       # битрейт из профиля hevc, не сброшен
+    assert _val_after(cmd, "-tag:v") == "hvc1"   # libx265 — HEVC → тег есть
+
+
+def test_render_cut_unknown_profile_raises(tmp_path, render_cfg, fake_ffmpeg):
+    from autoreels.core.config import ConfigError
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"bad-profile-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
+    with pytest.raises(ConfigError, match="профиль"):
+        render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                   render_cfg=render_cfg, profile="nope")
 
 
 def test_render_cut_encoder_from_env_overrides_config(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
@@ -888,5 +997,57 @@ def test_real_render_social_size_and_format(tmp_path):
     assert a["codec_name"] == "aac"
 
     # faststart: moov-atom раньше mdat в файле (соцсети требуют для стрим-старта)
+    head = out.read_bytes()
+    assert head.index(b"moov") < head.index(b"mdat"), "moov после mdat — faststart не сработал"
+
+
+@pytest.mark.integration
+def test_real_render_hevc_is_compact_and_tagged_hvc1(tmp_path):
+    """HEVC-профиль (дефолт): реальный рендер того же клипа компактнее h264 и с тегом hvc1.
+
+    Проверяет цель дефолтного профиля hevc — вдвое меньший файл при совместимом контейнере
+    (hvc1, не hev1). libx265 как софтверный стенд-ин для hevc_amf (AMF только на Windows AMD).
+    """
+    import shutil, json as _json
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe не установлены")
+    if "libx265" not in subprocess.run([ffmpeg, "-hide_banner", "-encoders"],
+                                        capture_output=True, text=True).stdout:
+        pytest.skip("libx265 недоступен в этой сборке ffmpeg")
+
+    src = tmp_path / "src.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc2=s=1080x1920:d=30",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=30",
+        "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+        "-shortest", str(src),
+    ], check=True, capture_output=True)
+
+    out = tmp_path / "clip_hevc.mp4"
+    cmd = build_cut_cmd(
+        ffmpeg, src, 0.0, 30.0, out,
+        codec="libx265", preset="medium", video_bitrate="5M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert r.returncode == 0, f"ffmpeg упал: {r.stderr}"
+
+    # 30с @5Мбит/с ≈ 18–19 МБ — компактнее h264-диапазона (25+)
+    size_mb = out.stat().st_size / (1024 * 1024)
+    assert 10 <= size_mb <= 30, f"размер {size_mb:.1f} МБ вне hevc-диапазона"
+
+    probe = subprocess.run([
+        ffprobe, "-v", "error", "-show_streams", "-of", "json", str(out),
+    ], capture_output=True, text=True)
+    streams = _json.loads(probe.stdout)["streams"]
+    v = next(s for s in streams if s["codec_type"] == "video")
+    assert v["codec_name"] == "hevc"
+    assert v["pix_fmt"] == "yuv420p"
+    # тег hvc1 (не hev1) — иначе Apple/соцсети не проигрывают
+    assert v.get("codec_tag_string") == "hvc1", f"тег {v.get('codec_tag_string')} — не hvc1"
+
     head = out.read_bytes()
     assert head.index(b"moov") < head.index(b"mdat"), "moov после mdat — faststart не сработал"
