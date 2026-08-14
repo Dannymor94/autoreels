@@ -90,6 +90,42 @@ def test_invalid_json_retries_then_errors(fewshot, r0_cfg):
     assert provider.calls == 2                              # один ретрай и стоп
 
 
+def test_parse_segments_none_raises_selecterror_not_typeerror():
+    """None-ответ (провайдер отдал пустое тело) → SelectError, а не TypeError из json.loads(None)."""
+    with pytest.raises(S.SelectError):
+        S.parse_segments(None)
+
+
+def test_parse_segments_blank_raises_selecterror():
+    """Пустая/пробельная строка → SelectError (не падаем на json.loads)."""
+    for raw in ("", "   ", "\n"):
+        with pytest.raises(S.SelectError):
+            S.parse_segments(raw)
+
+
+def test_empty_provider_response_is_chunk_failure_not_crash(fewshot, r0_cfg):
+    """Провайдер вернул пустую строку → SelectError (провал чанка), не краш видео."""
+    provider = _MockLLM(["", ""])
+    with pytest.raises(S.SelectError):
+        S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                 provider=provider, r0_cfg=r0_cfg)
+
+
+def test_provider_empty_response_exception_becomes_selecterror(fewshot, r0_cfg):
+    """ProviderEmptyResponse от провайдера (пул исчерпал сиблингов) → SelectError, не пробрасывается."""
+    from autoreels.cloud.providers import ProviderEmptyResponse
+
+    class _EmptyProvider:
+        calls = 0
+        def complete(self, messages, *, temperature=0.0):
+            type(self).calls += 1
+            raise ProviderEmptyResponse("все провайдеры пусты", provider="pool")
+
+    with pytest.raises(S.SelectError):
+        S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                 provider=_EmptyProvider(), r0_cfg=r0_cfg)
+
+
 def test_invalid_then_valid_recovers(fewshot, r0_cfg):
     good = QWEN_FIXTURE.read_text(encoding="utf-8")
     provider = _MockLLM(["мусор", good])
@@ -254,6 +290,34 @@ def test_select_chunked_multiple_llm_calls_when_long(fewshot, r0_cfg):
     provider = _MockLLM(['{"segments": []}'])
     S.select(compressed, system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
     assert provider.calls >= 2
+
+
+def test_select_chunked_survives_one_empty_chunk(fewshot, r0_cfg, monkeypatch, capsys):
+    """Один чанк вернул пустой ответ → провал ЭТОГО чанка (warning), остальные дают рилы.
+
+    Регресс на баг: пустой ответ провайдера ронял всё видео (json.loads(None) → TypeError).
+    Теперь — как с транскрипцией: чанк failed, манифест собирается из выживших чанков."""
+    import autoreels.cloud.select as sel_mod
+    monkeypatch.setattr(sel_mod.time, "sleep", lambda s: None)
+    valid = json.dumps({"segments": [
+        {"start": 100.0, "end": 130.0, "score": 85, "hook": "h", "title": "t", "description": "d"},
+    ]})
+
+    class _ChunkMock:
+        def __init__(self):
+            self.seen = []
+        def complete(self, messages, *, temperature=0.0):
+            chunk = messages[-1]["content"]
+            if chunk not in self.seen:
+                self.seen.append(chunk)
+            return "" if self.seen.index(chunk) == 1 else valid   # 2-й чанк — пустой
+
+    compressed = _make_compressed(300, line_chars=60)             # ≥2 чанка
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
+                     provider=_ChunkMock(), r0_cfg=r0_cfg)
+
+    assert len(reels) >= 1                                        # выжившие чанки дали рилы
+    assert "провалился" in capsys.readouterr().out                # предупреждение о провале чанка
 
 
 def test_select_chunked_dedup_overlap_reels(fewshot, r0_cfg):

@@ -6,7 +6,8 @@
 import pytest
 
 from autoreels.cloud.providers import (
-    FallbackLLM, GroqLLM, OpenRouterLLM, ProviderError, ProviderExhausted,
+    FallbackLLM, GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
+    ProviderExhausted,
 )
 
 
@@ -465,6 +466,47 @@ def test_pool_hard_error_propagates():
     pool, _ = _pool(groq)
     with pytest.raises(ProviderError, match="GROQ_API_KEY"):
         pool.complete([])
+
+
+# ------------------------------------------------ пустой ответ провайдера (не краш видео)
+
+def test_provider_empty_content_raises_empty_response():
+    """content=None (HTTP 200, JSON-mode под нагрузкой) → ProviderEmptyResponse с диагностикой,
+    а не тихий None (который дальше ронял json.loads)."""
+    env = {"choices": [{"message": {"content": None}}]}
+    llm = GroqLLM(request_fn=lambda m, t: env)
+    with pytest.raises(ProviderEmptyResponse) as e:
+        llm.complete([])
+    assert e.value.provider == "Groq"
+    assert "content=None" in str(e.value)          # диагностика: что именно пришло
+
+
+def test_provider_blank_string_raises_empty_response():
+    """Пустая строка content → тоже ProviderEmptyResponse (оборванный ответ)."""
+    env = {"choices": [{"message": {"content": "   "}}]}
+    llm = OpenRouterLLM(request_fn=lambda m, t: env)
+    with pytest.raises(ProviderEmptyResponse):
+        llm.complete([])
+
+
+def test_pool_empty_response_tries_sibling():
+    """Пустой ответ Groq → пул пробует OpenRouter (сиблинга), а не роняет запрос."""
+    groq = _ScriptedProvider("Groq", [ProviderEmptyResponse("Groq пустой", provider="Groq")])
+    openr = _ScriptedProvider("OpenRouter", ["ok-from-openrouter"])
+    pool, _ = _pool(groq, openr)
+    assert pool.complete([]) == "ok-from-openrouter"
+    assert pool.last_provider == "OpenRouter"
+
+
+def test_pool_all_empty_raises_after_bound():
+    """Оба провайдера пусты → пул исчерпывает попытки и пробрасывает ProviderEmptyResponse."""
+    from autoreels.cloud.providers import _MAX_EMPTY_RESPONSES
+    groq = _ScriptedProvider("Groq", [ProviderEmptyResponse("пусто", provider="Groq")] * 5)
+    openr = _ScriptedProvider("OpenRouter", [ProviderEmptyResponse("пусто", provider="OpenRouter")] * 5)
+    pool, _ = _pool(groq, openr)
+    with pytest.raises(ProviderEmptyResponse):
+        pool.complete([])
+    assert groq.calls + openr.calls == _MAX_EMPTY_RESPONSES   # ограничено, не бесконечно
 
 
 # ------------------------------------------------ живая пауза «все провайдеры в лимите»

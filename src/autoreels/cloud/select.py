@@ -130,8 +130,14 @@ def build_prompt(
 
 # -------------------------------------------------------------------------- парсинг
 
-def parse_segments(raw: str) -> list[dict]:
-    """Строгий парсинг JSON-контракта R0 → список сегментов. Кидает SelectError на брак."""
+def parse_segments(raw) -> list[dict]:
+    """Строгий парсинг JSON-контракта R0 → список сегментов. Кидает SelectError на брак.
+
+    None/пустой ответ проверяется ДО json.loads: провайдер под нагрузкой отдаёт HTTP 200 с
+    пустым телом, а json.loads(None) кидает TypeError (не JSONDecodeError) — раньше это роняло
+    всё видео. Теперь → SelectError, т.е. обычный провал чанка (retry/failed, видео живёт)."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raise SelectError("пустой ответ от LLM (провайдер вернул None/пустое тело)")
     try:
         obj = json.loads(raw)
     except json.JSONDecodeError as e:
@@ -199,15 +205,22 @@ def dedup(reels: list[Reel], *, overlap_threshold: float) -> list[Reel]:
 # ------------------------------------------------------------------- верхний уровень
 
 def _complete_and_parse(provider: LLMProvider, messages: list[dict]) -> list[dict]:
-    """Вызвать LLM и распарсить; один ретрай на невалидном JSON, потом SelectError."""
+    """Вызвать LLM и распарсить; один ретрай на невалидном/пустом ответе, потом SelectError.
+
+    Пустой ответ провайдера (ProviderEmptyResponse — пул уже пробовал сиблинга) сразу становится
+    провалом чанка: не роняем видео, select_chunked ловит SelectError и продолжает."""
+    from autoreels.cloud.providers import ProviderEmptyResponse
     last_err: SelectError | None = None
     for _ in range(2):  # первичный вызов + один ретрай
-        raw = provider.complete(messages)
+        try:
+            raw = provider.complete(messages)
+        except ProviderEmptyResponse as e:
+            raise SelectError(f"провайдер вернул пустой ответ: {e}") from e
         try:
             return parse_segments(raw)
         except SelectError as e:
             last_err = e
-    raise SelectError(f"LLM вернул невалидный JSON после ретрая: {last_err}")
+    raise SelectError(f"LLM вернул невалидный/пустой ответ после ретрая: {last_err}")
 
 
 def _select_one(compressed: str, *, system_text: str, fewshot: dict,

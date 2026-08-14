@@ -56,6 +56,8 @@ DEFAULT_REASONING_EFFORT = "none"
 _MAX_THROTTLE_RETRIES = 4
 _THROTTLE_PAUSE_SEC = 8.0       # страховка, если retry-after не пришёл (413/429)
 _EXHAUSTED_THRESHOLD_SEC = 120.0  # retry-after выше порога → дневной лимит, не минутный
+_EMPTY_COOLDOWN_SEC = 1.0      # короткий кулдаун провайдера после пустого ответа (сиблинг подхватит)
+_MAX_EMPTY_RESPONSES = 3       # сколько пустых ответов терпит пул за один запрос до чанк-фейла
 
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
@@ -73,6 +75,17 @@ def _httpx_get(url, *, headers, timeout):
 
 class ProviderError(Exception):
     """Проблема LLM-провайдера (нет ключа, троттлинг, неожиданный формат ответа)."""
+
+
+class ProviderEmptyResponse(ProviderError):
+    """Провайдер вернул HTTP 200, но пустое/None тело вместо JSON (перегрузка/исчерпанная квота).
+
+    Мягкий транзиентный сбой (НЕ конфиг-ошибка): пул пробует сиблинга, а select трактует как
+    провал ЧАНКА (retry → sibling → failed-чанк), не роняя всё видео. Несёт имя провайдера."""
+
+    def __init__(self, message: str, *, provider: str = ""):
+        super().__init__(message)
+        self.provider = provider
 
 
 class ProviderModelNotFound(ProviderError):
@@ -172,6 +185,25 @@ def _chat_request(
     )
 
 
+def _extract_content(data, provider_name: str) -> str:
+    """Достать content первого choice; пустой/None → ProviderEmptyResponse (диагностика).
+
+    Провайдеры на free-tier под нагрузкой иногда отдают HTTP 200 с content=None или пустой
+    строкой (оборванный/пустой ответ). Раньше это молча возвращалось наверх → json.loads(None)
+    → TypeError, роняя всё видео. Теперь — явный мягкий сбой с указанием, ЧТО пришло."""
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise ProviderError(f"неожиданный формат ответа {provider_name}: {e}") from e
+    if content is None or (isinstance(content, str) and not content.strip()):
+        raise ProviderEmptyResponse(
+            f"{provider_name} вернул пустой ответ (HTTP 200, content={content!r}) — "
+            f"вероятно перегрузка/исчерпанная квота",
+            provider=provider_name,
+        )
+    return content
+
+
 def _list_models(url: str, *, headers: dict) -> set[str] | None:
     """Список id доступных моделей провайдера (GET /models). None — если проверить нельзя
     (нет ключа/сети/битый ответ): тогда не блокируем — доверяем рантайму (404 отсеет на месте)."""
@@ -208,13 +240,10 @@ class GroqLLM:
         self._defer_throttle = defer_throttle
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
-        """Вернуть текст ответа модели (content первого choice)."""
+        """Вернуть текст ответа модели (content первого choice). Пустой → ProviderEmptyResponse."""
         request = self._request_fn or self._default_request
         data = request(messages, temperature)
-        try:
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as e:
-            raise ProviderError(f"неожиданный формат ответа LLM: {e}") from e
+        return _extract_content(data, self.name)
 
     def _model_404_hint(self) -> str:
         return (
@@ -278,10 +307,7 @@ class OpenRouterLLM:
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         request = self._request_fn or self._default_request
         data = request(messages, temperature)
-        try:
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as e:
-            raise ProviderError(f"неожиданный формат ответа OpenRouter: {e}") from e
+        return _extract_content(data, self.name)
 
     def _model_404_hint(self) -> str:
         return (
@@ -399,7 +425,10 @@ class ProviderPool:
         """Выполнить запрос на лучшем свободном провайдере; ждать только если все в лимите.
 
         Провайдер, ответивший 404 (конфиг-ошибка модели), исключается из ротации навсегда
-        и прогон продолжается на остальных. Если исключены ВСЕ — внятная ошибка."""
+        и прогон продолжается на остальных. Если исключены ВСЕ — внятная ошибка. Пустой ответ
+        (ProviderEmptyResponse) — мягкий сбой: пробуем сиблинга; после _MAX_EMPTY_RESPONSES
+        пустых подряд — пробрасываем наверх (select пометит чанк failed, видео не падает)."""
+        empty_count = 0
         while True:
             active = [m for m in self._members if not m.disabled]
             if not active:
@@ -417,6 +446,13 @@ class ProviderPool:
                 m = self._members[idx]
                 try:
                     result = m.provider.complete(messages, temperature=temperature)
+                except ProviderEmptyResponse as e:
+                    empty_count += 1
+                    if empty_count >= _MAX_EMPTY_RESPONSES:
+                        raise   # пул исчерпал попытки → чанк-фейл наверх (видео продолжается)
+                    print(f"\n  ⚠ {e} — пробую другого провайдера", flush=True)
+                    self._cooldown(m, now, e, min_sec=_EMPTY_COOLDOWN_SEC)
+                    continue
                 except ProviderModelNotFound as e:
                     m.disabled = True
                     print(f"\n  ⚠ {e} — исключаю {m.name} из пула, продолжаю на остальных",
