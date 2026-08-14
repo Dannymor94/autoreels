@@ -25,6 +25,13 @@ from autoreels.local.render import RenderError, SourceNotFoundError
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def _encoder_available(monkeypatch):
+    """По умолчанию энкодер «доступен» — тесты не гоняют реальный ffmpeg-пробник (нет AMF
+    на Mac). Тесты префлайта/меню переопределяют cli.probe_encoder явно."""
+    monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: True)
+
+
 def _setup() -> SetupProfile:
     return SetupProfile(
         setup_id="tearoom_main",
@@ -862,6 +869,75 @@ def test_render_passes_encoder_through(monkeypatch, tmp_path):
                         lambda manifest, **k: seen.update(k) or [])
     cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, encoder="h264_amf")
     assert seen["encoder"] == "h264_amf"
+
+
+# ---------------------------------------------- префлайт энкодера: доступность + фоллбэк
+
+def _tmp_manifests_with_one(tmp_path):
+    m = tmp_path / "manifests"
+    m.mkdir()
+    (m / "v.json").write_text(_manifest().model_dump_json(), encoding="utf-8")
+    return m
+
+
+def test_render_unavailable_encoder_no_fallback_errors_before_render(monkeypatch, tmp_path):
+    """Недоступный энкодер + --no-fallback → внятная ошибка ДО рендера (render_crop не зовётся)."""
+    manifests = _tmp_manifests_with_one(tmp_path)
+    monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: False)   # ничего не доступно
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda manifest, **k: called.append(1) or [])
+
+    with pytest.raises(cli.RenderError) as e:
+        cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, profile="av1", fallback=False)
+
+    assert "av1" in str(e.value).lower() and "не поддерживается" in str(e.value)
+    assert called == []                                    # рендер не начался
+
+
+def test_render_fallback_switches_to_available_profile(monkeypatch, tmp_path, capsys):
+    """av1 недоступен, hevc доступен → фоллбэк на hevc с уведомлением, рендер идёт на hevc."""
+    manifests = _tmp_manifests_with_one(tmp_path)
+    # av1_amf недоступен, остальное доступно
+    monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: "av1" not in codec)
+    seen = {}
+    monkeypatch.setattr(cli, "render_crop", lambda manifest, **k: seen.update(k) or [])
+
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, profile="av1", fallback=True)
+
+    assert seen["profile"] == "hevc"                       # переключились на доступный
+    out = capsys.readouterr().out
+    assert "фоллбэк" in out and "hevc" in out
+
+
+def test_render_fallback_none_available_errors(monkeypatch, tmp_path):
+    """Ни один энкодер не доступен → ошибка (пробовал всю цепочку)."""
+    manifests = _tmp_manifests_with_one(tmp_path)
+    monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: False)
+
+    with pytest.raises(cli.RenderError):
+        cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, profile="av1", fallback=True)
+
+
+def test_render_no_fallback_flag_parsed():
+    p = cli._build_parser()
+    assert p.parse_args(["render", "--no-fallback"]).no_fallback is True
+    assert p.parse_args(["render"]).no_fallback is False
+
+
+def test_menu_profiles_marks_unavailable(monkeypatch, capsys):
+    """menu --profiles помечает недоступные на этой машине энкодеры."""
+    # av1 недоступен на этом GPU, hevc/h264 доступны
+    monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: "av1" not in codec)
+    monkeypatch.setattr(cli, "_cli_resolve_ffmpeg", lambda flag, **k: "ffmpeg")
+
+    cli.main(["menu", "--profiles", "--root", str(REPO_ROOT)])
+
+    out = capsys.readouterr().out
+    # строка av1 помечена недоступной, hevc/h264 — нет
+    av1_line = next(ln for ln in out.splitlines() if ln.startswith("av1"))
+    hevc_line = next(ln for ln in out.splitlines() if ln.startswith("hevc"))
+    assert "НЕДОСТУПНО" in av1_line
+    assert "НЕДОСТУПНО" not in hevc_line
 
 
 def test_render_ffmpeg_from_env(monkeypatch, tmp_path):

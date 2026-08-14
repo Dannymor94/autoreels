@@ -39,6 +39,28 @@ _MANIFEST_NAME = "manifest.json"
 # энкодеров (h264_amf/hevc_amf/av1_amf/nvenc) -preset невалиден (у AMF свой пресет).
 _SOFTWARE_X26X = {"libx264", "libx265"}
 
+
+def probe_encoder(codec: str, *, ffmpeg: str = "ffmpeg", run=None) -> bool:
+    """True, если энкодер РЕАЛЬНО работает на этой машине (пробный encode 1 кадра).
+
+    `ffmpeg -encoders` показывает СКОМПИЛИРОВАННЫЕ энкодеры, но не факт поддержки GPU:
+    av1_amf есть в сборке, а на AMD RX 6000 инициализация AMF падает («CreateComponent
+    (AMFVideoEncoderHW_AV1) failed error 11»). Поэтому — настоящий тестовый encode: 1 кадр
+    lavfi → энкодер → null. rc 0 → доступен; ошибка/таймаут/нет ffmpeg → недоступен.
+    `run` — точка подмены в тестах (не гоняем реальный ffmpeg)."""
+    ffmpeg_bin = shutil.which(ffmpeg) or ffmpeg
+    cmd = [
+        ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=black:s=320x240:d=0.1",
+        "-frames:v", "1", "-c:v", codec, "-pix_fmt", "yuv420p",
+        "-f", "null", "-",
+    ]
+    runner = run or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=30))
+    try:
+        return runner(cmd).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
 # env-переопределение энкодера/профиля (рантайм-конфиг машины рендера поверх render.yaml).
 _ENCODER_ENV = "RENDER_ENCODER"
 _PROFILE_ENV = "RENDER_PROFILE"

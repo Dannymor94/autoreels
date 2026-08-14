@@ -26,12 +26,42 @@ from autoreels.local.render import (
     RenderError,
     build_cut_cmd,
     load_manifest,
+    probe_encoder,
     resolve_source,
     render_crop,
     render_cut,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+# ------------------------------------------------ probe_encoder: доступность энкодера на GPU
+
+class _RC:
+    def __init__(self, code):
+        self.returncode = code
+
+
+def test_probe_encoder_true_on_success():
+    """rc 0 пробного encode → энкодер доступен."""
+    seen = {}
+    ok = probe_encoder("av1_amf", ffmpeg="ffmpeg",
+                       run=lambda cmd: seen.update(cmd=cmd) or _RC(0))
+    assert ok is True
+    assert "av1_amf" in seen["cmd"] and "-frames:v" in seen["cmd"]   # тестовый encode 1 кадра
+    assert "null" in seen["cmd"]                                      # вывод в никуда
+
+
+def test_probe_encoder_false_on_nonzero():
+    """rc != 0 (AMF CreateComponent failed) → недоступен."""
+    assert probe_encoder("av1_amf", run=lambda cmd: _RC(1)) is False
+
+
+def test_probe_encoder_false_on_exception():
+    """ffmpeg не найден / таймаут → недоступен (не падаем)."""
+    def boom(cmd):
+        raise OSError("no ffmpeg")
+    assert probe_encoder("av1_amf", run=boom) is False
 RENDER_YAML = ROOT / "config" / "render.yaml"
 
 

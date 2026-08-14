@@ -50,7 +50,9 @@ from autoreels.core.config import (
 )
 from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import CalibrateError, cmd_calibrate
-from autoreels.local.render import RenderError, SourceNotFoundError, load_manifest, render_crop
+from autoreels.local.render import (
+    RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
+)
 from autoreels.local.subtitles import words_in_window
 
 class RunError(Exception):
@@ -1039,6 +1041,40 @@ def _missing_reels(manifest: Manifest, out_dir: Path) -> list:
     return [r for r in manifest.reels if not (out_dir / f"{r.id}.mp4").exists()]
 
 
+# Фоллбэк энкодеров: менее→более совместимый с GPU. av1 (нужен RX 7000+) → hevc → h264.
+_ENCODER_FALLBACK_CHAIN = ["av1", "hevc", "h264"]
+
+
+def _encoder_unavailable_msg(codec: str, prof_name: str) -> str:
+    hint = " (аппаратный AV1 нужен AMD RX 7000+ / свежий GPU)" if "av1" in codec else ""
+    return (
+        f"энкодер {codec} (профиль {prof_name}) не поддерживается этой машиной{hint}. "
+        f"Выбери другой профиль: ar → 9 или --profile hevc|h264 "
+        f"(или убери --no-fallback для автоподбора)."
+    )
+
+
+def _preflight_encoder(prof_name, enc, render_cfg, *, ffmpeg, fallback, explicit_encoder):
+    """Проверить энкодер ДО рендера пачки (пробный encode). Недоступен → фоллбэк по цепочке
+    (av1→hevc→h264) с уведомлением, либо внятная ошибка. Возвращает (prof_name, codec)."""
+    if probe_encoder(enc, ffmpeg=ffmpeg):
+        return prof_name, enc
+    # Выбранный недоступен. Явный --encoder или нестандартный профиль → без профиль-фоллбэка.
+    if not fallback or explicit_encoder or prof_name not in _ENCODER_FALLBACK_CHAIN:
+        raise RenderError(_encoder_unavailable_msg(enc, prof_name))
+    # Фоллбэк к более совместимому профилю.
+    for p in _ENCODER_FALLBACK_CHAIN[_ENCODER_FALLBACK_CHAIN.index(prof_name) + 1:]:
+        codec = render_cfg.encoder.profiles[p].codec
+        if probe_encoder(codec, ffmpeg=ffmpeg):
+            print(f"\n  ⚠ {enc} не поддерживается этим GPU — фоллбэк на профиль {p} ({codec})",
+                  flush=True)
+            return p, codec
+    raise RenderError(
+        f"ни один энкодер не доступен (пробовал {prof_name} → … → h264) — "
+        f"проверь ffmpeg/GPU или задай софтверный --encoder libx264"
+    )
+
+
 def cmd_render(
     *,
     manifests_dir=None,
@@ -1049,6 +1085,7 @@ def cmd_render(
     ffmpeg: str | None = None,
     encoder=None,
     profile=None,
+    fallback: bool = True,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -1080,6 +1117,13 @@ def cmd_render(
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.profiles[prof_name].codec
     # ffmpeg: флаг > env RENDER_FFMPEG > render.local.yaml > render.yaml → автопоиск.
     effective_ffmpeg = resolve_ffmpeg(ffmpeg, render_cfg=render_cfg)
+    # Префлайт энкодера: проверяем ДО рендера пачки (иначе av1_amf на неподдерживающем GPU
+    # роняет все манифесты на первом клипе). Недоступен → фоллбэк av1→hevc→h264 или ошибка.
+    explicit_encoder = bool(encoder or os.environ.get("RENDER_ENCODER"))
+    prof_name, enc = _preflight_encoder(
+        prof_name, enc, render_cfg, ffmpeg=effective_ffmpeg,
+        fallback=fallback, explicit_encoder=explicit_encoder,
+    )
     all_outputs: list[Path] = []
     skipped_no_video: list[str] = []
     skipped_done: list[str] = []
@@ -1110,8 +1154,9 @@ def cmd_render(
                   flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
-                render_cfg=render_cfg, ffmpeg=effective_ffmpeg, encoder=encoder,
-                profile=profile, subtitles_cfg=subtitles_cfg,
+                render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
+                encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
+                profile=prof_name, subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
@@ -1607,6 +1652,22 @@ def _current_ffmpeg_display(root=".") -> str:
         return "не найден (задай в render.local.yaml)"
 
 
+def _profile_availability(root=".") -> dict:
+    """{профиль: доступен ли его энкодер на этой машине} (пробный encode). Пусто — проверить
+    нельзя (нет ffmpeg/конфига): тогда меню не помечает — не пугать ложным «недоступно»."""
+    try:
+        render_cfg = load_render_config(Path(root) / "config" / "render.yaml")
+        ffmpeg = _cli_resolve_ffmpeg(None, root=root)
+    except (ConfigError, OSError, FFmpegNotFoundError):
+        return {}
+    avail = {}
+    for name in _RENDER_PROFILE_DESC:
+        prof = render_cfg.encoder.profiles.get(name)
+        if prof is not None:
+            avail[name] = probe_encoder(prof.codec, ffmpeg=ffmpeg)
+    return avail
+
+
 def _machine_settings_line(root=".") -> str:
     """Строка машинных настроек для шапки: «профиль: hevc | ffmpeg: D:\\…» — видно, чем рендерит."""
     return f"настройки: профиль {_current_render_profile(root)}  |  ffmpeg {_current_ffmpeg_display(root)}"
@@ -2060,6 +2121,9 @@ def _build_parser():
                     help="видеокодек ffmpeg (переопределяет кодек профиля; h264_amf — AMD, libx264 — CPU)")
     pd.add_argument("--ffmpeg", default=None,
                     help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
+    pd.add_argument("--no-fallback", action="store_true", dest="no_fallback",
+                    help="не подбирать доступный энкодер автоматически (av1→hevc→h264); "
+                         "недоступный выбранный → ошибка")
 
     prs = sub.add_parser(
         "resume",
@@ -2140,9 +2204,12 @@ def main(argv=None) -> int:
             print(_menu_action(args.resolve) or "invalid")
         elif args.profiles:
             cur = _current_render_profile(root=args.root)
+            avail = _profile_availability(root=args.root)
             for name, desc in _RENDER_PROFILE_DESC.items():
                 mark = " (текущий)" if name == cur else ""
-                print(f"{name}{mark} — {desc}")
+                # None/True → не помечаем; только явно False → «недоступно на этом GPU».
+                unavail = " — НЕДОСТУПНО на этом GPU" if avail.get(name) is False else ""
+                print(f"{name}{mark} — {desc}{unavail}")
         elif args.set_profile is not None:
             try:
                 path = set_render_profile(args.set_profile, root=args.root)
@@ -2211,7 +2278,8 @@ def main(argv=None) -> int:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
-            cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
+            cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
+                       fallback=not args.no_fallback)
         elif args.cmd == "resume":
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "migrate-calibrations":
