@@ -5,6 +5,8 @@ LLM предлагает start/end приблизительно (часто в �
 хвост (фраза договаривается); start → к началу слова/после паузы. Рубрика/LLM не трогаются.
 Нет подходящей границы рядом → сегмент не меняется. Хвост не выводит за max_duration пресета.
 """
+import pytest
+
 from autoreels.cloud.snap import apply_padding, snap_segments
 from autoreels.core.models import Reel, Word
 
@@ -212,6 +214,75 @@ def test_snap_keeps_end_within_max_so_trim_is_noop():
     assert "too_long" not in r.flags
 
 
+# ============================== реальные примеры из диагностики (порог 1.5с + запятая)
+
+# Продакшн-порог 1.5с (из config/r0.yaml после фикса).
+RCFG = dict(tail_sec=0.3, window_sec=1.5, max_duration=59,
+            min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+
+
+def _snap_end_time(words, end, start=0.0, **over):
+    from autoreels.cloud.snap import _snap_end
+    cfg = {**RCFG, **over}
+    return _snap_end(end, start, words, tail_sec=cfg["tail_sec"], window_sec=cfg["window_sec"],
+                     max_duration=cfg["max_duration"], min_pause=cfg["min_pause_for_phrase_end"],
+                     max_micro_pause=cfg["max_micro_pause"], hanging_words=cfg["hanging_words"])
+
+
+@pytest.mark.parametrize("gap", [0.7, 1.0, 1.12])
+def test_short_thinking_pause_is_not_thought_end(gap):
+    """Диагностика: паузы 0.7/1.0/1.12с — thinking-паузы, НЕ конец мысли (тянем дальше)."""
+    from autoreels.cloud.snap import _phrase_end_times
+    words = [
+        _w(0.0, 1.0, "делаем"),                     # gap параметризован
+        _w(1.0 + gap, 2.0 + gap, "самая"),          # продолжение (строчное)
+        _w(2.1 + gap, 3.5 + gap, "мысль."),         # реальный конец (пунктуация)
+    ]
+    ends = _phrase_end_times(words, min_pause=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+    assert 1.0 not in ends                           # «делаем» (пауза < 1.5) — не конец
+    assert (2.0 + gap) not in ends                   # «самая» — не конец
+    assert (3.5 + gap) in ends                       # «мысль.» — конец (пунктуация)
+
+
+@pytest.mark.parametrize("gap", [2.06, 3.48, 7.6])
+def test_long_pause_is_thought_end(gap):
+    """Диагностика: паузы 2.06/3.48/7.6с — реальные разрывы, конец мысли (режем)."""
+    from autoreels.cloud.snap import _phrase_end_times
+    words = [
+        _w(0.0, 1.0, "собой"),
+        _w(1.0 + gap, 2.0 + gap, "а"),               # после длинной паузы
+    ]
+    ends = _phrase_end_times(words, min_pause=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+    assert 1.0 in ends                               # «собой» (пауза > 1.5) — конец
+
+
+@pytest.mark.parametrize("gap", [0.74, 1.12, 3.0])
+def test_comma_word_never_thought_end(gap):
+    """Слово с запятой → НЕ конец мысли при ЛЮБОЙ паузе (запятая = середина фразы)."""
+    from autoreels.cloud.snap import _phrase_end_times
+    words = [
+        _w(0.0, 1.0, "осознавать,"),                 # запятая на конце
+        _w(1.0 + gap, 2.0 + gap, "понимать."),
+    ]
+    ends = _phrase_end_times(words, min_pause=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+    assert 1.0 not in ends                           # «осознавать,» — не конец даже при 3с паузе
+    assert (2.0 + gap) in ends                       # «понимать.» — конец
+
+
+def test_start_not_after_comma():
+    """Начало клипа не встаёт на продолжение после запятой (пауза после запятой ≠ начало фразы)."""
+    from autoreels.cloud.snap import _phrase_start_indices
+    words = [
+        _w(0.0, 0.5, "сказал,"),                     # запятая
+        _w(3.0, 3.5, "что"),                         # пауза 2.5с, но это продолжение
+        _w(3.6, 4.5, "важно."),
+        _w(6.0, 6.5, "Новая"),                       # после «важно.» — реальное начало
+    ]
+    starts = _phrase_start_indices(words, min_pause=1.5)
+    assert 1 not in starts                           # «что» — не начало (после запятой)
+    assert 3 in starts                               # «Новая» — начало (после «важно.»)
+
+
 # ================================================================== apply_padding
 
 # Транскрипт для тестов паддинга: фраза 10.0–12.5, пауза, фраза 20.0–22.0
@@ -277,3 +348,37 @@ def test_subtitles_not_affected_by_padding():
     apply_padding([r], PAD_WORDS, **PAD_CFG)
     # границы клипа расширились, субтитры остались теми же объектами
     assert r.subtitles == [{"word": "последнее", "t0": 11.3, "t1": 12.5}]
+
+
+def test_padding_drops_glued_next_sentence_start():
+    """Реальный баг «…конструкция. И»: слово впритык после конца предложения — спилловер,
+    padding его отбрасывает (end по «конструкция.», не по «И»)."""
+    words = [
+        _w(0.0, 1.0, "статичная"),
+        _w(1.0, 2.0, "конструкция."),                # конец предложения, t1=2.0
+        _w(2.0, 2.1, "И"),                           # приклеено (gap 0.0), союз → начало след. фразы
+        _w(2.1, 2.3, "вот"),                         # тоже приклеено, висячее
+    ]
+    r = _reel(0.0, 2.4)                              # клип включает «И», «вот» (t0 < 2.4)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - (2.0 + 0.7)) < 1e-6           # end по «конструкция.» (2.0) + tail_pad, не по «И»
+
+
+def test_padding_keeps_word_with_real_pause_gap():
+    """Слово с НАСТОЯЩИМ зазором (не впритык) — не спилловер, не отбрасываем."""
+    words = [
+        _w(0.0, 1.0, "конструкция."),
+        _w(1.5, 2.0, "И"),                           # gap 0.5 > _PAD_SPILL_GAP → не приклеено
+    ]
+    r = _reel(0.0, 2.1)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - (2.0 + 0.7)) < 1e-6           # «И» оставлено (реальная пауза, не спилловер)
+
+
+def test_padding_no_hanging_words_backward_compatible():
+    """Без hanging_words (старые вызовы) — спилловер-обрезка не срабатывает по союзам."""
+    r = _reel(10.0, 12.5)
+    apply_padding([r], PAD_WORDS, **PAD_CFG)          # без hanging_words
+    assert abs(r.end - (12.5 + 0.7)) < 1e-6

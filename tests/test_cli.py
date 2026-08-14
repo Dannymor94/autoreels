@@ -168,8 +168,9 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
 
 
 def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
+    # Пауза после «стоп» 1.9с (> min_pause 1.5) → «стоп» = реальная граница мысли.
     words = [Word(word="a", t0=30.0, t1=30.4), Word(word="b", t0=30.5, t1=31.0),
-             Word(word="стоп", t0=31.1, t1=31.6), Word(word="далее", t0=33.0, t1=33.5)]
+             Word(word="стоп", t0=31.1, t1=31.6), Word(word="далее", t0=33.5, t1=34.0)]
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=words))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")

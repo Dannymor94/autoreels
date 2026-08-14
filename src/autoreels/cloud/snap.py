@@ -24,17 +24,29 @@ from autoreels.core.models import Reel, Word
 # Символы конца предложения (Whisper на русском роняет часть пунктуации, но не всю — где
 # есть, доверяем ей как самому сильному сигналу завершения мысли).
 _SENTENCE_END = ".!?…"
+# Пунктуация СЕРЕДИНЫ фразы: запятая/двоеточие/точка с запятой/тире. Слово с ней на конце —
+# мысль ещё не закончена (надёжнее порога паузы: «осознавать, [1.1с] понимать»).
+_MIDPHRASE_PUNCT = ",;:—–-"
+# Padding: слово, приклеенное впритык (gap ≤ порога) к границе предложения, — спилловер
+# следующей фразы («…конструкция. И»); не втягиваем его, лучше отдать тишину.
+_PAD_SPILL_GAP = 0.15
 
 
 def _clean(word: str) -> str:
     """Слово без обрамляющей пунктуации, в нижнем регистре — для сверки с hanging_words."""
-    return word.strip().strip(_SENTENCE_END + ",;:\"'»«()").lower()
+    return word.strip().strip(_SENTENCE_END + ",;:\"'»«()—–-").lower()
 
 
 def _is_sentence_end(word: str) -> bool:
     """Слово завершает предложение (пунктуация Whisper: .!?… или многоточие)."""
     s = word.strip()
     return bool(s) and (s[-1] in _SENTENCE_END or s.endswith("..."))
+
+
+def _ends_midphrase(word: str) -> bool:
+    """Слово оканчивается пунктуацией СЕРЕДИНЫ фразы (запятая/двоеточие/тире/;) — не конец мысли."""
+    s = word.strip()
+    return bool(s) and s[-1] in _MIDPHRASE_PUNCT
 
 
 def _is_hanging(word: str, hanging_words) -> bool:
@@ -74,6 +86,9 @@ def _phrase_end_times(words: list[Word], *, min_pause: float, max_micro_pause: f
         if _is_sentence_end(w.word):
             ends.append(w.t1)
             continue
+        # Запятая/двоеточие/тире на конце → мысль продолжается, паузу игнорируем (любой длины).
+        if _ends_midphrase(w.word):
+            continue
         is_last = i == n - 1
         gap = None if is_last else (words[i + 1].t0 - w.t1)
         if gap is not None and gap <= max_micro_pause:
@@ -85,10 +100,18 @@ def _phrase_end_times(words: list[Word], *, min_pause: float, max_micro_pause: f
 
 
 def _phrase_start_indices(words: list[Word], *, min_pause: float) -> list[int]:
-    """Индексы слов — начал фраз: первое слово или слово после длинной паузы (> min_pause)."""
+    """Индексы слов — начал фраз. Начало = первое слово; ИЛИ предыдущее слово закончило
+    предложение (.!?); ИЛИ длинная пауза (> min_pause), но НЕ после запятой (после запятой —
+    продолжение фразы, не начало: «он сказал, [пауза] что…» — не начинать с «что»)."""
     starts: list[int] = []
     for i, w in enumerate(words):
-        if i == 0 or (w.t0 - words[i - 1].t1) > min_pause:
+        if i == 0:
+            starts.append(i)
+            continue
+        prev = words[i - 1]
+        if _is_sentence_end(prev.word):
+            starts.append(i)
+        elif (w.t0 - prev.t1) > min_pause and not _ends_midphrase(prev.word):
             starts.append(i)
     return starts
 
@@ -172,6 +195,7 @@ def apply_padding(
     lead_pad_sec: float,
     max_duration: float,
     video_duration: float | None = None,
+    hanging_words=None,
 ) -> None:
     """Добавить «воздух» до первого и после последнего слова клипа (мутирует на месте).
 
@@ -179,15 +203,30 @@ def apply_padding(
     раздвигает границы: start -= lead_pad_sec, end += tail_pad_sec.
     Субтитры не затрагиваются — область паддинга это тишина/пауза без слов.
 
+    Спилловер: если хвостовые слова клипа приклеены впритык (gap ≤ _PAD_SPILL_GAP) к концу
+    предложения ИЛИ являются союзом — это начало следующей фразы («…конструкция. И»),
+    втянутое через хвост. Отбрасываем их (лучше 0.7с тишины, чем чужое слово).
+
     Ограничения:
     - start >= 0
     - end - start <= max_duration
     - end <= video_duration (если задана)
     """
+    hanging_words = hanging_words or []
     for r in reels:
         clip_words = [w for w in words if w.t0 >= r.start and w.t0 < r.end]
         if not clip_words:
             continue
+
+        # Срезаем спилловер начала следующей фразы с хвоста клипа.
+        while len(clip_words) >= 2:
+            last, prev = clip_words[-1], clip_words[-2]
+            glued = (last.t0 - prev.t1) <= _PAD_SPILL_GAP
+            starts_next = _is_sentence_end(prev.word) or _is_hanging(last.word, hanging_words)
+            if glued and starts_next:
+                clip_words = clip_words[:-1]
+            else:
+                break
 
         new_start = max(0.0, clip_words[0].t0 - lead_pad_sec)
         new_end = clip_words[-1].t1 + tail_pad_sec

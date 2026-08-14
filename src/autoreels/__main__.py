@@ -571,6 +571,7 @@ def _stage_padding(reels, transcript, *, r0_cfg):
         lead_pad_sec=r0_cfg.lead_pad_sec,
         max_duration=r0_cfg.max_duration,
         video_duration=video_duration,
+        hanging_words=r0_cfg.hanging_words,
     )
     return reels
 
