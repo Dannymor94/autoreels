@@ -150,6 +150,57 @@ def test_handle_save_bad_payload_raises(tmp_path):
         cal_obj._handle_save(b"{not json")
 
 
+def test_handle_save_uses_browser_frame_size_natural(tmp_path):
+    """frame сохраняется в РАЗМЕРЕ ИЗ БРАУЗЕРА (натуральный кадр), не в ffprobe-кодированном —
+    иначе при SAR/повороте кроп в других пикселях, чем рендер."""
+    calib = tmp_path / "calibrations"
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=calib)
+    cal_obj.frame_size = (2688, 1512)                       # ffprobe (кодированный)
+    body = json.dumps({
+        "display": {"x": 100, "y": 0, "w": 300, "h": 533},
+        "display_size": [1000, 562], "frame_size": [1512, 2688],   # браузер: натуральный (повёрнут)
+    }).encode("utf-8")
+    resp = cal_obj._handle_save(body)
+    rec = json.loads((calib / ("a" * 64 + ".json")).read_text(encoding="utf-8"))
+    assert rec["frame"] == [1512, 2688]                    # натуральный из браузера, не 2688×1512
+
+
+def test_narrow_crop_warning_triggers_below_30pct():
+    """Санити: ширина < 30% кадра → предупреждение (реальный кейс 718/2688 = 27%)."""
+    from autoreels.local.calibrate import narrow_crop_warning
+    from autoreels.core.models import Crop
+    w = narrow_crop_warning(Crop(x=278, y=224, w=718, h=1276), [2688, 1512])
+    assert w is not None and "27%" in w and "узкий" in w
+
+
+def test_narrow_crop_warning_ok_for_full_height_9_16():
+    """Полновысотный 9:16 из 16:9 (~31.6% ширины) — норма, без предупреждения."""
+    from autoreels.local.calibrate import narrow_crop_warning
+    from autoreels.core.models import Crop
+    assert narrow_crop_warning(Crop(x=919, y=0, w=850, h=1512), [2688, 1512]) is None
+
+
+def test_handle_save_warns_on_narrow_crop(tmp_path, capsys):
+    """Узкий кроп при сохранении → предупреждение в stdout и в ответе."""
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=tmp_path / "c")
+    cal_obj.frame_size = (2688, 1512)
+    body = json.dumps({
+        "display": {"x": 100, "y": 80, "w": 258, "h": 459},   # ~26% ширины при display==frame
+        "display_size": [2688, 1512], "frame_size": [2688, 1512],
+    }).encode("utf-8")
+    resp = cal_obj._handle_save(body)
+    assert "warning" in resp and "узкий" in resp["warning"]
+    assert "узкий" in capsys.readouterr().out
+
+
+def test_html_scales_by_natural_size_not_ffprobe():
+    """JS считает масштаб по img.naturalWidth (истинный размер PNG), не по ffprobe-FW,
+    и шлёт натуральный размер как frame_size — фикс SAR/поворота."""
+    html = build_calibration_html("B64", (2688, 1512), sha="a" * 64, source_name="v.mp4")
+    assert "img.naturalWidth" in html and "s=DW/NW" in html
+    assert "frame_size:[NW,NH]" in html
+
+
 # ----------------------------------------------- реальный сервер: GET html + POST /save
 
 def test_server_serves_html_and_post_save_saves_then_stops(tmp_path):

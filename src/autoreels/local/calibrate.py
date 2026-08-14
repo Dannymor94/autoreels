@@ -150,6 +150,22 @@ def extract_preview_frames(video, work_dir, sha: str, duration: float, *, main_a
 
 # ----------------------------------------------------- payload браузера → RawSelection
 
+_NARROW_CROP_FRACTION = 0.30   # ширина < 30% кадра — подозрительно узко (возможно масштаб не тот)
+
+
+def narrow_crop_warning(crop, frame) -> str | None:
+    """Санити-проверка: кроп подозрительно узкий (ширина < 30% кадра) → текст предупреждения.
+
+    Полновысотный 9:16 из 16:9-кадра ≈ 31.6% ширины — норма. Уже → вероятно координаты не в
+    масштабе оригинала (превью-пиксели без пересчёта). None если кроп нормальный."""
+    fw = frame[0] if frame else 0
+    w = getattr(crop, "w", None)
+    if fw and w is not None and w < _NARROW_CROP_FRACTION * fw:
+        return (f"очень узкий кроп: ширина {w}px = {w / fw * 100:.0f}% кадра ({fw}px) — "
+                f"проверь рамку (возможно координаты не в масштабе оригинала)")
+    return None
+
+
 def raw_selection_from_drop(drop: dict, frame_size: tuple[int, int]) -> RawSelection:
     """POST-тело из браузера → RawSelection (display-рамка + размеры показа/кадра)."""
     d = drop["display"]
@@ -275,12 +291,20 @@ class ManualCalibrator:
         payload = json.loads(body)
         sel = raw_selection_from_drop(payload, self.frame_size)
         crop = finalize_selection(sel)              # реальные px + точный 9:16 + границы (ядро)
+        # frame = размер, в котором браузер считал координаты (натуральный размер кадра из PNG),
+        # чтобы кроп и кадр были в ОДНОМ пространстве (важно при SAR/повороте телефона).
+        frame = list(sel.frame_size) if sel.frame_size and sel.frame_size[0] else list(self.frame_size)
         self.saved_path = save_calibration(
             self.calib_dir, source_name=self.source_name, source_sha256=self.sha,
-            crop=crop, frame=list(self.frame_size), setup_label=self.setup_label,
+            crop=crop, frame=frame, setup_label=self.setup_label,
         )
         self._sel = sel
-        return {"ok": True, "crop": crop.model_dump(), "saved": str(self.saved_path)}
+        resp = {"ok": True, "crop": crop.model_dump(), "saved": str(self.saved_path)}
+        warn = narrow_crop_warning(crop, frame)
+        if warn:
+            print(f"  ⚠ {warn}", flush=True)
+            resp["warning"] = warn
+        return resp
 
     def propose(self, frame_png, frame_size: tuple[int, int]) -> RawSelection:
         self.frame_size = tuple(frame_size)
@@ -452,6 +476,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
     font:600 11px/1 var(--mono);letter-spacing:.08em;color:#0c0d10;
     background:var(--accent);padding:4px 8px;border-radius:2px;white-space:nowrap;
     pointer-events:none}
+  .badge.warn{background:var(--bad);color:#fff}   /* очень узкий кроп (<30% ширины) */
   /* угловые ручки-метки */
   .handle{position:absolute;width:16px;height:16px;border:2px solid var(--accent);
     background:rgba(12,13,16,.5);touch-action:none}
@@ -581,9 +606,14 @@ const fld={x:document.getElementById('fx'),y:document.getElementById('fy'),
            w:document.getElementById('fw'),h:document.getElementById('fh')};
 
 let DW=0, DH=0, s=1;                  // размер показа + масштаб (показ на реальный)
+let NW=FW, NH=FH;                     // НАТУРАЛЬНЫЙ размер извлечённого кадра. Берём его из
+                                     // самого PNG, а не из ffprobe: при SAR/повороте телефона
+                                     // ffprobe width/height (кодированный) ≠ реальному кадру,
+                                     // и масштаб врал → кроп сохранялся не в тех пикселях.
 let box={x:0,y:0,w:0,h:0};            // рамка в ПИКСЕЛЯХ ПОКАЗА
 
-function measure(){ DW=img.clientWidth; DH=img.clientHeight; s=DW/FW;
+function measure(){ NW=img.naturalWidth||FW; NH=img.naturalHeight||FH;
+  DW=img.clientWidth; DH=img.clientHeight; s=DW/NW;   // показ→реальный по НАТУРАЛЬНОМУ размеру
   frame.style.width=DW+'px'; frame.style.height=DH+'px'; }
 
 function clamp(){                     // 9:16 + в границах кадра (показ-px)
@@ -593,9 +623,15 @@ function clamp(){                     // 9:16 + в границах кадра (
   box.x=Math.max(0, Math.min(box.x, DW-box.w));
   box.y=Math.max(0, Math.min(box.y, DH-box.h));
 }
-function syncFields(){                // показ → РЕАЛЬНЫЕ px исходника
-  fld.x.value=Math.round(box.x/s); fld.y.value=Math.round(box.y/s);
-  fld.w.value=Math.round(box.w/s); fld.h.value=Math.round(box.h/s);
+const badgeEl=document.getElementById('badge');
+function syncFields(){                // показ → РЕАЛЬНЫЕ px исходника (в натуральном размере кадра)
+  const rx=Math.round(box.x/s), ry=Math.round(box.y/s),
+        rw=Math.round(box.w/s), rh=Math.round(box.h/s);
+  fld.x.value=rx; fld.y.value=ry; fld.w.value=rw; fld.h.value=rh;
+  // Живой показ реальных пикселей ОРИГИНАЛА рядом с рамкой + доля ширины кадра.
+  if(badgeEl){ const pct=NW?Math.round(rw/NW*100):0;
+    badgeEl.textContent=rw+'×'+rh+' @ '+rx+','+ry+'  ('+pct+'% ширины '+NW+'px)';
+    badgeEl.classList.toggle('warn', pct>0 && pct<30); }   // <30% — подозрительно узко
 }
 function render(){
   crop.style.left=box.x+'px'; crop.style.top=box.y+'px';
@@ -673,15 +709,16 @@ saveBtn.addEventListener('click',()=>{
     body:JSON.stringify({
       display:{x:Math.round(box.x),y:Math.round(box.y),w:Math.round(box.w),h:Math.round(box.h)},
       display_size:[Math.round(DW),Math.round(DH)],
-      frame_size:[FW,FH]
+      frame_size:[NW,NH]                              // НАТУРАЛЬНЫЙ размер кадра, не ffprobe
     })})
    .then(r=>r.json())
    .then(d=>{ if(d.ok){ const c=d.crop;
        saved=true;
        saveBtn.classList.add('saved');               // зелёная, под цвет статуса
        saveBtn.textContent='✓ Сохранено — закройте вкладку';
-       statusEl.className='status ok';
-       statusEl.textContent='Кроп '+c.x+','+c.y+' '+c.w+'×'+c.h+' сохранён. Сервер калибровки остановлен.';
+       statusEl.className=d.warning?'status bad':'status ok';
+       statusEl.textContent='Кроп '+c.x+','+c.y+' '+c.w+'×'+c.h+' сохранён.'
+         +(d.warning?('  ⚠ '+d.warning):'  Сервер остановлен.');
        document.body.classList.add('done');
        // Без авто-закрытия вкладки, reload и повторных запросов: сервер погас, страница
        // застывает в финальном состоянии. Вкладку пользователь закрывает сам.
@@ -696,7 +733,16 @@ function init(){ measure(); box.h=DH; box.w=box.h*RATIO; box.x=(DW-box.w)/2; box
   clamp(); render(); }
 window.addEventListener('resize',()=>{ const r={x:box.x/s,y:box.y/s,w:box.w/s,h:box.h/s};
   measure(); box={x:r.x*s,y:r.y*s,w:r.w*s,h:r.h*s}; clamp(); render(); });
-if(img.complete && img.naturalWidth) init(); else img.addEventListener('load',init);
+// Первый кадр → init (рамка по центру). Смена кадра превью-сеткой → пересчёт по реальным
+// координатам (сохраняем рамку, не сбрасываем — иначе клик по превью терял настройку).
+let _inited=false;
+function onFrameLoad(){
+  if(!_inited){ _inited=true; init(); }
+  else { const r={x:box.x/s,y:box.y/s,w:box.w/s,h:box.h/s};
+         measure(); box={x:r.x*s,y:r.y*s,w:r.w*s,h:r.h*s}; clamp(); render(); }
+}
+img.addEventListener('load',onFrameLoad);
+if(img.complete && img.naturalWidth) onFrameLoad();
 </script>
 </body>
 </html>
