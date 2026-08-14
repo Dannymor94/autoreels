@@ -66,6 +66,18 @@ _ar_menu() {
                 ar t "$_src"
                 ;;
             resume)    _ar_cli resume ;;
+            profile)
+                _ar_cli menu --profiles
+                printf "Профиль рендера [1] hevc  [2] h264  [3] av1, Enter — отмена: "
+                read -r _p
+                case "$_p" in
+                    1) _ar_cli menu --set-profile hevc ;;
+                    2) _ar_cli menu --set-profile h264 ;;
+                    3) _ar_cli menu --set-profile av1 ;;
+                    "") echo "отменено — назад в меню"; continue ;;
+                    *) echo "  неизвестный выбор: $_p"; continue ;;
+                esac
+                ;;
             help)      ar h ;;
             quit)      echo "пока!"; return 0 ;;
             *)

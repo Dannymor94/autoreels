@@ -103,6 +103,15 @@ def test_menu_transcribe_item_prompts_for_source():
     assert "транскрибировать" in (r.stdout + r.stderr).lower()
 
 
+def test_menu_profile_item_prompts_and_cancels():
+    """Пункт 9 показывает профили рендера и спрашивает выбор; пустой ввод → отмена (без записи)."""
+    r = _run_menu("9\n\n0\n")              # выбрать 9, пустой ввод (отмена), выход
+    out = r.stdout + r.stderr
+    assert "Профиль рендера" in out        # промпт выбора профиля
+    assert "hevc" in out and "h264" in out and "av1" in out   # опции
+    assert "отменено" in out               # пустой ввод отменил, профиль не менялся
+
+
 def test_menu_transcribe_empty_input_cancels():
     r = _run_menu("6\n\n0\n")
     assert "отменено" in (r.stdout + r.stderr)

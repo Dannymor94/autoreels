@@ -1361,6 +1361,7 @@ def cmd_status(*, root=".") -> int:
     archived  = sorted(archive_dir.glob("*.mp4"))     if archive_dir.is_dir()   else []
 
     print("─── autoreels status ───────────────────────────────")
+    print(f"  {_machine_settings_line(root)}")
     print(f"  inputs/          {len(inputs):>3} видео  (ждут run)")
     print(f"  manifests/       {len(manifests):>3} манифеста  (готовы к рендеру)")
     print(f"  reels-out/       {len(rendered):>3} папок  (отрендеренные видео)")
@@ -1450,8 +1451,16 @@ _MENU_ITEMS: list[tuple[str, str, str, str]] = [
     ("7", "resume",     "Продолжить прерванное",
                         "доделать рендер, докачки"),
     ("8", "help",       "Справка",                       ""),
+    ("9", "profile",    "Профиль рендера",               "hevc | h264 | av1"),
     ("0", "quit",       "Выход",                         ""),
 ]
+
+# Профили рендера для меню: имя → человекочитаемое описание (кодек+битрейт — в render.yaml).
+_RENDER_PROFILE_DESC = {
+    "hevc": "компактный, ~18 МБ/клип (дефолт)",
+    "h264": "максимальная совместимость, ~25 МБ",
+    "av1":  "максимально компактный, ~14 МБ (эксп.)",
+}
 
 # Текстовые псевдонимы выхода (кроме цифры 0) — удобство: q/exit/quit/выход.
 _MENU_QUIT_ALIASES = {"q", "quit", "exit", "выход"}
@@ -1510,6 +1519,55 @@ def _recommended_action(state: dict[str, int]) -> str | None:
     return None
 
 
+def _current_render_profile(root=".") -> str:
+    """Активный профиль рендера: env RENDER_PROFILE > render.local.yaml > render.yaml.
+
+    Устойчиво к отсутствию/битому конфигу (шапка меню/статуса не должна падать) → 'hevc'."""
+    env = os.environ.get("RENDER_PROFILE")
+    if env:
+        return env
+    try:
+        return load_render_config(Path(root) / "config" / "render.yaml").encoder.profile
+    except (ConfigError, OSError):
+        return "hevc"
+
+
+def _current_ffmpeg_display(root=".") -> str:
+    """Строка ffmpeg для шапки: резолвнутый путь/команда или пометка «не найден»."""
+    try:
+        return _cli_resolve_ffmpeg(None, root=root)
+    except FFmpegNotFoundError:
+        return "не найден (задай в render.local.yaml)"
+
+
+def _machine_settings_line(root=".") -> str:
+    """Строка машинных настроек для шапки: «профиль: hevc | ffmpeg: D:\\…» — видно, чем рендерит."""
+    return f"настройки: профиль {_current_render_profile(root)}  |  ffmpeg {_current_ffmpeg_display(root)}"
+
+
+def set_render_profile(name: str, *, root=".") -> Path:
+    """Сохранить профиль рендера в config/render.local.yaml (машинная настройка, не в git).
+
+    Deep-merge в encoder.profile — прочие ключи (ffmpeg и т.п.) сохраняются. Применяется ко
+    всем последующим рендерам на этой машине. Неизвестный профиль → ConfigError (fail-fast)."""
+    import yaml
+    if name not in _RENDER_PROFILE_DESC:
+        known = ", ".join(_RENDER_PROFILE_DESC)
+        raise ConfigError(f"неизвестный профиль '{name}'; допустимо: {known}")
+    local = Path(root) / "config" / "render.local.yaml"
+    data = {}
+    if local.is_file():
+        data = yaml.safe_load(local.read_text(encoding="utf-8")) or {}
+    encoder = data.get("encoder")
+    if not isinstance(encoder, dict):
+        encoder = {}
+        data["encoder"] = encoder
+    encoder["profile"] = name
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return local
+
+
 def _menu_render(root=".", *, platform: str | None = None) -> str:
     """Собрать текст адаптивного меню: шапка-состояние + пункты с подсветкой ▶.
 
@@ -1538,9 +1596,14 @@ def _menu_render(root=".", *, platform: str | None = None) -> str:
         f"  inputs: {st['inputs']} ждут  |  манифесты: {st['manifests']}  |  "
         f"готово: {st['rendered']}"
     )
+    lines.append(f"  {_machine_settings_line(root)}")
     lines.append("")
+    current_profile = _current_render_profile(root)
     for num, action, label, hint in _MENU_ITEMS:
         marker = marker_char if action == rec else " "
+        # Пункт профиля показывает ТЕКУЩИЙ профиль прямо в подписи.
+        if action == "profile":
+            label = f"{label}: {current_profile}"
         note = f"  ({hint})" if hint else ""
         # Пометка неактуальных машине пунктов (не блокируем — только подсказка).
         if action == "go" and not is_mac:
@@ -1796,6 +1859,10 @@ def _build_parser():
                     help="разобрать выбор пользователя в action-токен и выйти")
     pm.add_argument("--classify", default=None,
                     help="распознать источник (url/яндекс/путь) и напечатать метку")
+    pm.add_argument("--set-profile", default=None, dest="set_profile",
+                    help="сохранить профиль рендера (hevc|h264|av1) в render.local.yaml")
+    pm.add_argument("--profiles", action="store_true",
+                    help="напечатать доступные профили рендера с описанием")
     pm.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
     ps = sub.add_parser(
@@ -2001,6 +2068,19 @@ def main(argv=None) -> int:
             print(_classify_label(args.classify))
         elif args.resolve is not None:
             print(_menu_action(args.resolve) or "invalid")
+        elif args.profiles:
+            cur = _current_render_profile(root=args.root)
+            for name, desc in _RENDER_PROFILE_DESC.items():
+                mark = " (текущий)" if name == cur else ""
+                print(f"{name}{mark} — {desc}")
+        elif args.set_profile is not None:
+            try:
+                path = set_render_profile(args.set_profile, root=args.root)
+            except ConfigError as e:
+                print(f"ошибка: {e}", file=sys.stderr)
+                return 1
+            print(f"✓ профиль рендера: {args.set_profile} → {path} "
+                  f"(применится ко всем последующим рендерам)")
         else:
             print(_menu_render(root=args.root))
         return 0

@@ -2147,7 +2147,7 @@ def test_menu_action_strips_whitespace():
 
 def test_menu_action_invalid_returns_none():
     """Пустой ввод / вне диапазона / мусор → None (меню повторит запрос)."""
-    for c in ("", "9", "abc", "  ", "12"):
+    for c in ("", "99", "abc", "  ", "12"):
         assert cli._menu_action(c) is None
 
 
@@ -2211,6 +2211,94 @@ def test_menu_render_has_resume_item(tmp_path):
     """В меню есть пункт «Продолжить прерванное»."""
     out = cli._menu_render(root=tmp_path)
     assert "родолж" in out
+
+
+# ------------------------------------------------- профиль рендера (машинная настройка)
+
+def _tmp_project_with_render_yaml(tmp_path):
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "render.yaml").write_text(
+        (REPO_ROOT / "config" / "render.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    return tmp_path
+
+
+def test_set_render_profile_writes_local_yaml(tmp_path):
+    """set_render_profile пишет encoder.profile в render.local.yaml (машинная настройка)."""
+    import yaml
+    root = _tmp_project_with_render_yaml(tmp_path)
+    path = cli.set_render_profile("av1", root=root)
+    assert path == root / "config" / "render.local.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert data["encoder"]["profile"] == "av1"
+
+
+def test_set_render_profile_preserves_existing_keys(tmp_path):
+    """Смена профиля не затирает уже заданный ffmpeg (deep-merge в encoder.profile)."""
+    import yaml
+    root = _tmp_project_with_render_yaml(tmp_path)
+    local = root / "config" / "render.local.yaml"
+    local.write_text("ffmpeg: D:/ffmpeg/bin/ffmpeg.exe\n", encoding="utf-8")
+    cli.set_render_profile("h264", root=root)
+    data = yaml.safe_load(local.read_text(encoding="utf-8"))
+    assert data["ffmpeg"] == "D:/ffmpeg/bin/ffmpeg.exe"    # сохранён
+    assert data["encoder"]["profile"] == "h264"
+
+
+def test_set_render_profile_invalid_raises(tmp_path):
+    from autoreels.core.config import ConfigError
+    root = _tmp_project_with_render_yaml(tmp_path)
+    with pytest.raises(ConfigError, match="профиль"):
+        cli.set_render_profile("mpeg2", root=root)
+
+
+def test_render_uses_saved_profile(tmp_path):
+    """Сохранённый профиль подхватывается конфигом рендера (render.local.yaml deep-merge)."""
+    from autoreels.core.config import load_render_config
+    root = _tmp_project_with_render_yaml(tmp_path)
+    cli.set_render_profile("av1", root=root)
+    cfg = load_render_config(root / "config" / "render.yaml")
+    assert cfg.encoder.profile == "av1"                   # рендер возьмёт этот профиль
+    assert cli._current_render_profile(root=root) == "av1"
+
+
+def test_menu_set_profile_cli_writes_and_confirms(tmp_path, capsys):
+    """`autoreels menu --set-profile hevc` пишет профиль и подтверждает."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    rc = cli.main(["menu", "--set-profile", "h264", "--root", str(root)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "h264" in out and "профиль" in out.lower()
+    assert cli._current_render_profile(root=root) == "h264"
+
+
+def test_menu_header_shows_profile_and_ffmpeg(tmp_path, monkeypatch):
+    """Шапка меню показывает текущий профиль и ffmpeg (видно, чем рендерит)."""
+    monkeypatch.setenv("RENDER_PROFILE", "av1")
+    out = cli._menu_render(root=tmp_path)
+    assert "профиль av1" in out
+    assert "ffmpeg" in out.lower()
+
+
+def test_menu_item_profile_shows_current(tmp_path, monkeypatch):
+    """Пункт профиля в меню показывает текущий профиль в подписи."""
+    monkeypatch.setenv("RENDER_PROFILE", "h264")
+    out = cli._menu_render(root=tmp_path)
+    assert "Профиль рендера: h264" in out
+
+
+def test_menu_action_9_is_profile():
+    """Цифра 9 → action-токен profile (стабильная карта)."""
+    assert cli._menu_action("9") == "profile"
+
+
+def test_status_header_shows_machine_settings(tmp_path, monkeypatch, capsys):
+    """Шапка status показывает машинные настройки: профиль | ffmpeg."""
+    monkeypatch.setenv("RENDER_PROFILE", "hevc")
+    cli.cmd_status(root=tmp_path)
+    out = capsys.readouterr().out
+    assert "профиль hevc" in out
+    assert "ffmpeg" in out.lower()
 
 
 # -------------------------------------------------- resume: продолжить прерванное
@@ -2373,7 +2461,7 @@ def test_menu_resolve_prints_action_token(capsys, tmp_path, monkeypatch):
 def test_menu_resolve_invalid_prints_invalid(capsys, tmp_path, monkeypatch):
     """autoreels menu --resolve <мусор> → печатает 'invalid' (bash попадёт в *)."""
     monkeypatch.chdir(tmp_path)
-    cli.main(["menu", "--resolve", "9"])
+    cli.main(["menu", "--resolve", "99"])
     out = capsys.readouterr().out.strip()
     assert out == "invalid"
 
