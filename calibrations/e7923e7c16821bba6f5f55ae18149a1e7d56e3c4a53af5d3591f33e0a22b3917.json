@@ -1,0 +1,20 @@
+{
+  "source_name": "PXL_20260621_122006193.mp4",
+  "source_sha256": "e7923e7c16821bba6f5f55ae18149a1e7d56e3c4a53af5d3591f33e0a22b3917",
+  "setup_label": "auto",
+  "crop": {
+    "x": 1312,
+    "y": 0,
+    "w": 1215,
+    "h": 2160
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    3840,
+    2160
+  ],
+  "auto": true
+}

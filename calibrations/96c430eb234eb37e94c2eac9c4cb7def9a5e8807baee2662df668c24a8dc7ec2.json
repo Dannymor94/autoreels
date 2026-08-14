@@ -1,0 +1,19 @@
+{
+  "source_name": "2026-08-08 09h 33m 14s.mp4",
+  "source_sha256": "96c430eb234eb37e94c2eac9c4cb7def9a5e8807baee2662df668c24a8dc7ec2",
+  "setup_label": "2026-08-08 09h 33m 14s",
+  "crop": {
+    "x": 648,
+    "y": 452,
+    "w": 505,
+    "h": 897
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    2688,
+    1512
+  ]
+}

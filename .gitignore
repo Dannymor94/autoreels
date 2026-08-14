@@ -10,9 +10,10 @@ inputs-archive/
 reels-out/
 transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
 
-# per-file кроп-калибровки (calibrations/<sha>.json) — машинно-локальные, привязаны к
-# конкретным файлам; кроп уезжает на системник внутри манифеста, не отдельным файлом
-calibrations/
+# per-file кроп-калибровки (calibrations/<sha>.json) ВЕРСИОНИРУЮТСЯ: лёгкий JSON, чтобы
+# калибровка с Mac уезжала на системник (git pull) — иначе status там показывает «кропа нет».
+# Игнорируем только рабочие кадры-PNG (_work/) — бинарь, регенерируется.
+calibrations/_work/
 
 # python
 __pycache__/

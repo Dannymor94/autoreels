@@ -1,0 +1,20 @@
+{
+  "source_name": "PXL_test6min.mp4",
+  "source_sha256": "ce23b7d21a493d196242336e3c003b65d1d2d47dd756185005e0422a543ca20d",
+  "setup_label": "auto",
+  "crop": {
+    "x": 1312,
+    "y": 0,
+    "w": 1215,
+    "h": 2160
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    3840,
+    2160
+  ],
+  "auto": true
+}

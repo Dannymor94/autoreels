@@ -371,6 +371,74 @@ def test_commit_push_manifest_runs_add_commit_push(monkeypatch, tmp_path, capsys
     assert "запушен" in capsys.readouterr().out
 
 
+def test_commit_push_manifest_includes_calibration(monkeypatch, tmp_path):
+    """Калибровка кропа коммитится ВМЕСТЕ с манифестом (уезжает на системник)."""
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    mf = tmp_path / "manifests" / "lecture.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+    cal = tmp_path / "calibrations" / ("a" * 64 + ".json")
+    cal.parent.mkdir(parents=True)
+    cal.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_manifest(mf, 3, root=tmp_path, calibration_path=cal)
+
+    add_args = next(c for c in git.calls if c[0] == "add")
+    assert str(mf) in add_args and str(cal) in add_args      # оба файла в коммите
+
+
+def test_commit_push_calibrations_syncs_dir(monkeypatch, tmp_path, capsys):
+    """_commit_push_calibrations: add calibrations/ → commit → push (для системника)."""
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    (tmp_path / "calibrations").mkdir()
+
+    cli._commit_push_calibrations(root=tmp_path)
+
+    assert git.subcommands() == ["add", "commit", "push"]
+    add_args = next(c for c in git.calls if c[0] == "add")
+    assert "calibrations" in add_args
+    assert "калибровки запушены" in capsys.readouterr().out
+
+
+def test_commit_push_calibrations_noop_when_dir_absent(monkeypatch, tmp_path):
+    """Нет calibrations/ → git не дёргаем."""
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    cli._commit_push_calibrations(root=tmp_path)
+    assert git.calls == []
+
+
+def test_commit_push_calibrations_git_error_does_not_raise(monkeypatch, tmp_path, capsys):
+    """Ошибка git (нет сети) → предупреждение, не исключение (калибровки уже на диске)."""
+    monkeypatch.setattr(cli, "_run_git", _FakeGit(fail_on="push"))
+    (tmp_path / "calibrations").mkdir()
+    cli._commit_push_calibrations(root=tmp_path)          # не должно бросить
+    assert "локально" in capsys.readouterr().err
+
+
+def test_run_commits_calibration_with_manifest(monkeypatch, tmp_path):
+    """cmd_run(push=True) передаёт путь калибровки в коммит (кроп уезжает на системник)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    captured = {}
+    monkeypatch.setattr(cli, "_commit_push_manifest",
+                        lambda path, n, *, root, calibration_path=None:
+                        captured.update(calib=calibration_path))
+
+    video = tmp_path / "inputs" / "lecture.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c",
+                calibrations_dir=tmp_path / "calibrations", archive_dir=tmp_path / "arch",
+                push=True)
+
+    assert captured["calib"] is not None
+    assert "calibrations" in str(captured["calib"])       # путь к calibrations/<sha>.json
+    assert str(captured["calib"]).endswith(".json")
+
+
 def test_commit_push_manifest_git_failure_warns_not_raises(monkeypatch, tmp_path, capsys):
     """Сбой push (нет сети/конфликт) → предупреждение, НЕ исключение (прогон продолжается)."""
     monkeypatch.setattr(cli, "_run_git", _FakeGit(fail_on="push"))
@@ -421,7 +489,7 @@ def test_run_commits_manifest_when_push_true(monkeypatch, tmp_path):
     _mock_pipeline(monkeypatch, tmp_path)
     calls = []
     monkeypatch.setattr(cli, "_commit_push_manifest",
-                        lambda path, n, *, root: calls.append((Path(path).stem, n)))
+                        lambda path, n, *, root, **k: calls.append((Path(path).stem, n)))
 
     video = tmp_path / "inputs" / "lecture.mp4"
     video.parent.mkdir(parents=True)
@@ -455,7 +523,7 @@ def test_batch_commits_each_video(monkeypatch, tmp_path):
     _mock_pipeline(monkeypatch, tmp_path)
     pushed = []
     monkeypatch.setattr(cli, "_commit_push_manifest",
-                        lambda path, n, *, root: pushed.append(Path(path).stem))
+                        lambda path, n, *, root, **k: pushed.append(Path(path).stem))
 
     inputs = tmp_path / "inputs"
     inputs.mkdir()
@@ -479,7 +547,7 @@ def test_batch_failed_video_keeps_previous_pushes(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", selective_extract)
     pushed = []
     monkeypatch.setattr(cli, "_commit_push_manifest",
-                        lambda path, n, *, root: pushed.append(Path(path).stem))
+                        lambda path, n, *, root, **k: pushed.append(Path(path).stem))
 
     inputs = tmp_path / "inputs"
     inputs.mkdir()

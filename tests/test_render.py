@@ -35,9 +35,14 @@ ROOT = Path(__file__).resolve().parents[1]
 RENDER_YAML = ROOT / "config" / "render.yaml"
 
 
+# Изолируем тесты от машинного config/render.local.yaml (напр. profile: av1, выставленный
+# через меню) — тестируем ВЕРСИОНИРУЕМЫЙ render.yaml, а не локальные переопределения машины.
+_NO_LOCAL = Path("/nonexistent/render.local.yaml")
+
+
 @pytest.fixture
 def render_cfg():
-    return load_render_config(RENDER_YAML)
+    return load_render_config(RENDER_YAML, local_path=_NO_LOCAL)
 
 
 def _setup() -> SetupProfile:
@@ -296,7 +301,7 @@ def test_load_render_config_unknown_profile_raises(tmp_path):
 
 def test_real_render_config_defaults_are_social_optimal():
     """Дефолтный config/render.yaml даёт соцсеть-оптимальные значения из коробки."""
-    cfg = load_render_config(RENDER_YAML)
+    cfg = load_render_config(RENDER_YAML, local_path=_NO_LOCAL)   # без машинного override
     assert cfg.encoder.pix_fmt == "yuv420p"
     assert cfg.encoder.faststart is True
     assert cfg.audio.bitrate == "128k"               # aac 128k — достаточно для соцсетей

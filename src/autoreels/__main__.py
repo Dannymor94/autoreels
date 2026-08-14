@@ -644,17 +644,21 @@ def _run_git(args, *, root, timeout=None):
     )
 
 
-def _commit_push_manifest(manifest_path, n_reels: int, *, root) -> None:
-    """Закоммитить и запушить ОДИН манифест сразу после успешной обработки видео.
+def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path=None) -> None:
+    """Закоммитить и запушить манифест (+ калибровку кропа этого видео) сразу после видео.
 
     Per-video (не в конце пачки): упади прогон на следующем видео — уже готовые манифесты
-    УЖЕ на системнике. Ошибка git (нет сети, конфликт, passphrase) НЕ роняет прогон:
-    предупреждаем, что манифест сохранён локально, и продолжаем. Push с таймаутом — не висеть.
+    УЖЕ на системнике. Калибровка кропа коммитится вместе с манифестом, чтобы уехать на
+    системник (status там видит кроп; calibrations/ теперь версионируются). Ошибка git
+    (нет сети, конфликт, passphrase) НЕ роняет прогон: предупреждаем и продолжаем.
     """
     import subprocess
     root = Path(root)
     manifest_path = Path(manifest_path)
     stem = manifest_path.stem
+    paths = [str(manifest_path)]
+    if calibration_path is not None and Path(calibration_path).is_file():
+        paths.append(str(calibration_path))
 
     def _warn(reason: str) -> None:
         detail = " ".join(reason.split())[:200] or "(без деталей)"
@@ -665,12 +669,12 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root) -> None:
         )
 
     try:
-        add = _run_git(["add", "--", str(manifest_path)], root=root)
+        add = _run_git(["add", "--", *paths], root=root)
         if add.returncode != 0:
             _warn(add.stderr)
             return
         commit = _run_git(
-            ["commit", "-m", f"manifest: {stem} ({n_reels} reels)", "--", str(manifest_path)],
+            ["commit", "-m", f"manifest: {stem} ({n_reels} reels)", "--", *paths],
             root=root,
         )
         nothing_new = "nothing to commit" in f"{commit.stdout}{commit.stderr}".lower()
@@ -685,6 +689,49 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root) -> None:
         if not nothing_new:
             print(f"  ✓ манифест {stem} запушен ({n_reels} reels) → на системнике: ar r",
                   flush=True)
+    except subprocess.TimeoutExpired:
+        _warn("git завис (таймаут) — проверь сеть/доступ к remote или SSH-passphrase")
+    except OSError as e:
+        _warn(f"git недоступен: {e}")
+
+
+def _commit_push_calibrations(*, root) -> None:
+    """Синхронизировать калибровки кропа в git: add calibrations/ → commit → push.
+
+    Калибруешь на Mac (ar c / меню) → калибровки уезжают на системник (там ar r = git pull),
+    и status видит ручной кроп. _work/ (кадры-PNG) в .gitignore и не попадают. Ошибка git не
+    роняет команду — калибровки уже на диске, предупреждаем и продолжаем."""
+    import subprocess
+    root = Path(root)
+    if not (root / "calibrations").is_dir():
+        return
+
+    def _warn(reason: str) -> None:
+        detail = " ".join(reason.split())[:200] or "(без деталей)"
+        print(
+            f"  ⚠ калибровки сохранены локально, git-push не прошёл: {detail} — "
+            f"запушь вручную (git push)",
+            file=sys.stderr, flush=True,
+        )
+
+    try:
+        add = _run_git(["add", "--", "calibrations"], root=root)
+        if add.returncode != 0:
+            _warn(add.stderr)
+            return
+        commit = _run_git(
+            ["commit", "-m", "calibrations: sync crop settings", "--", "calibrations"], root=root
+        )
+        nothing_new = "nothing to commit" in f"{commit.stdout}{commit.stderr}".lower()
+        if commit.returncode != 0 and not nothing_new:
+            _warn(f"{commit.stdout} {commit.stderr}")
+            return
+        push = _run_git(["push"], root=root, timeout=180)
+        if push.returncode != 0:
+            _warn(push.stderr)
+            return
+        if not nothing_new:
+            print("  ✓ калибровки запушены → на системнике: ar r (git pull)", flush=True)
     except subprocess.TimeoutExpired:
         _warn("git завис (таймаут) — проверь сеть/доступ к remote или SSH-passphrase")
     except OSError as e:
@@ -842,7 +889,9 @@ def cmd_run(
     path = _write_manifest(manifest, manifests_dir)
     print(f"манифест собран: {len(manifest.reels)} reels → {path}", flush=True)
     if push:
-        _commit_push_manifest(path, len(manifest.reels), root=root)
+        # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
+        _commit_push_manifest(path, len(manifest.reels), root=root,
+                              calibration_path=calibration_path(calibrations_dir, sha))
     _archive_video(Path(video), archive_dir)
     return path
 
@@ -2112,11 +2161,13 @@ def main(argv=None) -> int:
                 _ff = _cli_resolve_ffmpeg(args.ffmpeg, root=args.root)
                 cmd_calibrate_batch(root=args.root, ffmpeg=_ff,
                                     ffprobe=resolve_ffprobe(args.ffprobe, ffmpeg=_ff))
+                _commit_push_calibrations(root=args.root)     # калибровки → git (для системника)
             elif args.video:
                 _ff = _cli_resolve_ffmpeg(args.ffmpeg, root=args.root)
                 cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=_ff,
                               ffprobe=resolve_ffprobe(args.ffprobe, ffmpeg=_ff), port=args.port)
                 _warn_if_manifest_stale(Path(args.video), root=args.root)
+                _commit_push_calibrations(root=args.root)     # калибровки → git (для системника)
             else:
                 print("ошибка: укажите видео или используйте --all", file=sys.stderr)
                 return 1

@@ -1,0 +1,19 @@
+{
+  "source_name": "PXL_test8min.mp4",
+  "source_sha256": "95dc4a809c82327c266b29bab8ef269359e0012e470aafc57d461fc061417c57",
+  "setup_label": "tearoom_main",
+  "crop": {
+    "x": 1311,
+    "y": 0,
+    "w": 1215,
+    "h": 2160
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    3840,
+    2160
+  ]
+}

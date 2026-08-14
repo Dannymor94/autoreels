@@ -1,0 +1,20 @@
+{
+  "source_name": "1.mp4",
+  "source_sha256": "72224ab2cb6edaf640f8b289cae2b7708bf7f4d56b0a55c79ee73a35292aaa31",
+  "setup_label": "auto",
+  "crop": {
+    "x": 656,
+    "y": 0,
+    "w": 608,
+    "h": 1080
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    1920,
+    1080
+  ],
+  "auto": true
+}
