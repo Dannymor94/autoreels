@@ -615,6 +615,72 @@ def _write_manifest(manifest, manifests_dir) -> Path:
     return path
 
 
+# ----------------------------------------------------------- авто-коммит манифеста (per-video)
+
+def _run_git(args, *, root, timeout=None):
+    """Запустить git в репозитории `root` НЕинтерактивно (не зависать на вводе).
+
+    GIT_TERMINAL_PROMPT=0 — не спрашивать логин/пароль (сразу ошибка вместо ожидания ввода).
+    GIT_SSH_COMMAND=…BatchMode=yes — ssh падает, а не ждёт ввода passphrase (иначе push висит).
+    ConnectTimeout — не висеть на недоступном хосте; `timeout` — жёсткий потолок на весь вызов.
+    """
+    import subprocess
+    env = dict(os.environ)
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=10")
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        capture_output=True, text=True, env=env, timeout=timeout,
+    )
+
+
+def _commit_push_manifest(manifest_path, n_reels: int, *, root) -> None:
+    """Закоммитить и запушить ОДИН манифест сразу после успешной обработки видео.
+
+    Per-video (не в конце пачки): упади прогон на следующем видео — уже готовые манифесты
+    УЖЕ на системнике. Ошибка git (нет сети, конфликт, passphrase) НЕ роняет прогон:
+    предупреждаем, что манифест сохранён локально, и продолжаем. Push с таймаутом — не висеть.
+    """
+    import subprocess
+    root = Path(root)
+    manifest_path = Path(manifest_path)
+    stem = manifest_path.stem
+
+    def _warn(reason: str) -> None:
+        detail = " ".join(reason.split())[:200] or "(без деталей)"
+        print(
+            f"  ⚠ манифест {stem} сохранён локально, git-push не прошёл: {detail} — "
+            f"запушь вручную (git push)",
+            file=sys.stderr, flush=True,
+        )
+
+    try:
+        add = _run_git(["add", "--", str(manifest_path)], root=root)
+        if add.returncode != 0:
+            _warn(add.stderr)
+            return
+        commit = _run_git(
+            ["commit", "-m", f"manifest: {stem} ({n_reels} reels)", "--", str(manifest_path)],
+            root=root,
+        )
+        nothing_new = "nothing to commit" in f"{commit.stdout}{commit.stderr}".lower()
+        if commit.returncode != 0 and not nothing_new:
+            _warn(f"{commit.stdout} {commit.stderr}")
+            return
+        # Пушим даже при nothing-to-commit: вдруг прошлый push не прошёл, локаль впереди remote.
+        push = _run_git(["push"], root=root, timeout=180)
+        if push.returncode != 0:
+            _warn(push.stderr)
+            return
+        if not nothing_new:
+            print(f"  ✓ манифест {stem} запушен ({n_reels} reels) → на системнике: ar r",
+                  flush=True)
+    except subprocess.TimeoutExpired:
+        _warn("git завис (таймаут) — проверь сеть/доступ к remote или SSH-passphrase")
+    except OSError as e:
+        _warn(f"git недоступен: {e}")
+
+
 # ------------------------------------------------------------------------- команды
 
 def cmd_run(
@@ -627,8 +693,12 @@ def cmd_run(
     archive_dir=None,
     transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
+    push: bool = False,
 ) -> Path:
     """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
+
+    `push=True` → сразу закоммитить+запушить манифест (per-video sync на системник);
+    ошибка git не роняет прогон. По умолчанию False (git не трогается).
 
     Кроп per-file: берётся из `calibrations/<sha256>.json` (пишет `autoreels calibrate`).
     Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением.
@@ -683,6 +753,8 @@ def cmd_run(
     )
     path = _write_manifest(manifest, manifests_dir)
     print(f"манифест собран: {len(manifest.reels)} reels → {path}", flush=True)
+    if push:
+        _commit_push_manifest(path, len(manifest.reels), root=root)
     _archive_video(Path(video), archive_dir)
     return path
 
@@ -787,9 +859,12 @@ def cmd_run_batch(
     archive_dir=None,
     transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
+    push: bool = False,
 ) -> tuple[list[str], list[tuple[str, Exception]]]:
     """Batch: обработать все *.mp4 в inputs/ по очереди. Один упал → остальные продолжают.
 
+    `push=True` → каждый успешный манифест сразу коммитится+пушится (per-video, не в конце):
+    упади прогон на середине — уже готовые манифесты УЖЕ на системнике.
     Возвращает (ok_names, failed_list) где failed_list = [(name, exc), ...].
     """
     root = Path(root)
@@ -806,7 +881,7 @@ def cmd_run_batch(
             cmd_run(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
-                ffmpeg=ffmpeg,
+                ffmpeg=ffmpeg, push=push,
             )
             ok.append(v.name)
         except Exception as e:  # noqa: BLE001
@@ -1657,6 +1732,9 @@ def _build_parser():
                          "ссылка (yt-dlp); без аргумента — batch: все *.mp4 из inputs/")
     pr.add_argument("--ffmpeg", default="ffmpeg",
                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
+    pr.add_argument("--no-push", action="store_true",
+                    help="не коммитить/пушить манифесты в git (по умолчанию каждый успешный "
+                         "манифест сразу пушится на системник)")
 
     ptx = sub.add_parser(
         "transcribe",
@@ -1810,9 +1888,9 @@ def main(argv=None) -> int:
                         video = _download_url(args.video, Path("inputs"))
                 else:
                     video = _ingest_source(Path(args.video), Path("inputs"))
-                cmd_run(video, ffmpeg=args.ffmpeg)
+                cmd_run(video, ffmpeg=args.ffmpeg, push=not args.no_push)
             else:
-                _, failed = cmd_run_batch(ffmpeg=args.ffmpeg)
+                _, failed = cmd_run_batch(ffmpeg=args.ffmpeg, push=not args.no_push)
                 if failed:
                     return 1
         elif args.cmd == "transcribe":

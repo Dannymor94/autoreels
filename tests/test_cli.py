@@ -318,6 +318,193 @@ def test_run_batch_empty_inputs_returns_empty(monkeypatch, tmp_path):
     assert ok == [] and failed == []
 
 
+# ------------------------------------------------- авто-коммит манифеста per-video (git push)
+
+class _FakeGit:
+    """Записывает git-вызовы; можно назначить сбой/таймаут конкретной подкоманде."""
+    def __init__(self, fail_on=None, timeout_on=None):
+        self.calls = []           # список списков-аргументов git
+        self._fail_on = fail_on
+        self._timeout_on = timeout_on
+
+    def __call__(self, args, *, root, timeout=None):
+        import subprocess
+        self.calls.append(list(args))
+        sub = args[0]
+        if self._timeout_on and sub == self._timeout_on:
+            raise subprocess.TimeoutExpired(cmd="git", timeout=timeout or 1)
+        rc = 1 if (self._fail_on and sub == self._fail_on) else 0
+        stderr = "fatal: could not read Username (no network)" if rc else ""
+        class _R:
+            returncode = rc
+            stdout = ""
+            stderr = ""
+        _R.stderr = stderr
+        return _R()
+
+    def subcommands(self):
+        return [c[0] for c in self.calls]
+
+
+def test_commit_push_manifest_runs_add_commit_push(monkeypatch, tmp_path, capsys):
+    """_commit_push_manifest: add → commit (с сообщением) → push, всё успешно."""
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    mf = tmp_path / "manifests" / "lecture.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_manifest(mf, 7, root=tmp_path)
+
+    assert git.subcommands() == ["add", "commit", "push"]
+    commit_args = next(c for c in git.calls if c[0] == "commit")
+    assert "manifest: lecture (7 reels)" in commit_args      # формат сообщения
+    assert "запушен" in capsys.readouterr().out
+
+
+def test_commit_push_manifest_git_failure_warns_not_raises(monkeypatch, tmp_path, capsys):
+    """Сбой push (нет сети/конфликт) → предупреждение, НЕ исключение (прогон продолжается)."""
+    monkeypatch.setattr(cli, "_run_git", _FakeGit(fail_on="push"))
+    mf = tmp_path / "m" / "v.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_manifest(mf, 3, root=tmp_path)   # не должно бросить
+
+    err = capsys.readouterr().err
+    assert "сохранён локально" in err and "вручную" in err
+
+
+def test_commit_push_manifest_timeout_warns_not_hangs(monkeypatch, tmp_path, capsys):
+    """Push завис (passphrase/сеть) → TimeoutExpired ловится, предупреждение, без зависания."""
+    monkeypatch.setattr(cli, "_run_git", _FakeGit(timeout_on="push"))
+    mf = tmp_path / "m" / "v.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_manifest(mf, 1, root=tmp_path)
+
+    assert "локально" in capsys.readouterr().err
+
+
+def test_run_git_uses_noninteractive_env(monkeypatch, tmp_path):
+    """_run_git выставляет неинтерактивный режим: не зависать на пароле/SSH-passphrase."""
+    seen = {}
+    def fake_subprocess_run(cmd, **kw):
+        seen["cmd"] = cmd
+        seen["env"] = kw.get("env", {})
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    cli._run_git(["push"], root=tmp_path)
+
+    assert seen["env"].get("GIT_TERMINAL_PROMPT") == "0"
+    assert "BatchMode=yes" in seen["env"].get("GIT_SSH_COMMAND", "")
+
+
+def test_run_commits_manifest_when_push_true(monkeypatch, tmp_path):
+    """cmd_run(push=True) → _commit_push_manifest вызван после записи манифеста."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(cli, "_commit_push_manifest",
+                        lambda path, n, *, root: calls.append((Path(path).stem, n)))
+
+    video = tmp_path / "inputs" / "lecture.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c",
+                archive_dir=tmp_path / "arch", push=True)
+
+    assert calls == [("lecture", 1)]     # 1 reel из _mock_pipeline
+
+
+def test_run_no_commit_when_push_false(monkeypatch, tmp_path):
+    """По умолчанию (push=False) git не трогается — текущее поведение single-run."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(cli, "_commit_push_manifest",
+                        lambda *a, **k: calls.append(1))
+
+    video = tmp_path / "inputs" / "v.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c",
+                archive_dir=tmp_path / "arch")   # push по умолчанию False
+
+    assert calls == []
+
+
+def test_batch_commits_each_video(monkeypatch, tmp_path):
+    """batch push=True → коммит+пуш ПОСЛЕ КАЖДОГО видео (не в конце пачки)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    pushed = []
+    monkeypatch.setattr(cli, "_commit_push_manifest",
+                        lambda path, n, *, root: pushed.append(Path(path).stem))
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+                      archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                      cache_dir=tmp_path / "c", push=True)
+
+    assert sorted(pushed) == ["a", "b"]
+
+
+def test_batch_failed_video_keeps_previous_pushes(monkeypatch, tmp_path):
+    """Упавшее видео НЕ откатывает уже запушенные — b падает, a и c запушены."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    def selective_extract(video, **k):
+        if Path(video).name == "b.mp4":
+            raise Exception("forced failure on b")
+        return tmp_path / "a.wav"
+    monkeypatch.setattr(cli, "_stage_extract_audio", selective_extract)
+    pushed = []
+    monkeypatch.setattr(cli, "_commit_push_manifest",
+                        lambda path, n, *, root: pushed.append(Path(path).stem))
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        (inputs / name).write_bytes(b"x")
+
+    ok, failed = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+        cache_dir=tmp_path / "c", push=True,
+    )
+
+    assert pushed == ["a", "c"]           # b пропущено (упало ДО записи манифеста)
+    assert [n for n, _ in failed] == ["b.mp4"]
+
+
+def test_batch_no_push_when_disabled(monkeypatch, tmp_path):
+    """push=False (флаг --no-push) → ни одного git-вызова."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    pushed = []
+    monkeypatch.setattr(cli, "_commit_push_manifest",
+                        lambda *a, **k: pushed.append(1))
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+                      archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                      cache_dir=tmp_path / "c", push=False)
+
+    assert pushed == []
+
+
 # --------------------------------------------------------------- render: глобит manifests/
 
 def test_render_reads_manifest_and_calls_render_crop(monkeypatch, tmp_path):

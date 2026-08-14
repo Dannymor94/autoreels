@@ -112,20 +112,12 @@ ar() {
             _ar_menu
             ;;
         go)
-            # ar go [--no-push]: run всех видео → git push манифестов
+            # ar go [--no-push]: run всех видео. Каждый успешный манифест коммитится+пушится
+            # СРАЗУ (per-video, внутри Python) — упади прогон на середине, уже готовые
+            # манифесты уже на системнике. --no-push отключает. Push-логика — в cmd_run,
+            # не здесь: раньше shell-push в конце терялся при любом упавшем видео (|| return).
             shift
-            local _no_push=0
-            for _arg in "$@"; do
-                [ "$_arg" = "--no-push" ] && _no_push=1
-            done
-            _ar_cli run || return 1
-            if [ "$_no_push" -eq 0 ]; then
-                git -C "$_AR_ROOT" add manifests/ && \
-                git -C "$_AR_ROOT" commit -m "manifests: run $(date '+%Y-%m-%d %H:%M')" && \
-                git -C "$_AR_ROOT" push && \
-                echo "" && \
-                echo "✓ манифесты отправлены → на системнике: ar r"
-            fi
+            _ar_cli run "$@"
             ;;
         r)
             # ar r: git pull → render (энкодер из config/render.yaml)
