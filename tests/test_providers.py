@@ -329,7 +329,7 @@ def test_openrouter_envelope_parses_to_same_segments():
 import types
 
 from autoreels.cloud.providers import (  # noqa: E402
-    ProviderPool, ProviderThrottled, build_pool,
+    ProviderModelNotFound, ProviderPool, ProviderThrottled, build_pool,
 )
 
 
@@ -356,9 +356,13 @@ class _ScriptedProvider:
     """Провайдер по сценарию: каждый вызов complete() отдаёт следующий элемент.
 
     Элемент — либо строка (успех), либо Exception (поднять). Считает вызовы.
+    `model`/`models` — для тестов префлайта: _model (какая модель в конфиге) и available_models()
+    (None = проверить нельзя; set = список доступных).
     """
-    def __init__(self, name, script):
+    def __init__(self, name, script, *, model="m", models=None):
         self.name = name
+        self._model = model
+        self._models = models
         self._script = list(script)
         self.calls = 0
 
@@ -368,6 +372,9 @@ class _ScriptedProvider:
         if isinstance(action, Exception):
             raise action
         return action
+
+    def available_models(self):
+        return self._models
 
 
 def _pool(*providers, strategy="adaptive"):
@@ -536,3 +543,143 @@ def test_build_pool_providers_defer_throttle(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "or")
     pool = build_pool(_fake_r0())
     assert all(m.provider._defer_throttle for m in pool._members)
+
+
+# ============================================ 404: конфиг-ошибка модели → исключение из пула
+
+def test_openrouter_404_raises_model_not_found(monkeypatch):
+    """OpenRouter 404 → ProviderModelNotFound с именем модели и подсказкой про openrouter_model."""
+    import autoreels.cloud.providers as P
+
+    def fake_post(url, *, headers, json, timeout):
+        return _FakeResp(404, body={"error": {"message": "No endpoints found"}})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+
+    llm = OpenRouterLLM(model="vendor/gone:free")
+    with pytest.raises(ProviderModelNotFound) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    msg = str(exc.value)
+    assert "vendor/gone:free" in msg          # какая модель
+    assert "openrouter_model" in msg          # где чинить
+    assert exc.value.model == "vendor/gone:free"
+    assert exc.value.provider == "OpenRouter"
+
+
+def test_pool_404_excludes_provider_and_continues():
+    """404 одного провайдера (конфиг-ошибка модели) → исключён из пула, прогон на втором."""
+    groq = _ScriptedProvider(
+        "Groq", [ProviderModelNotFound("Groq: модель X 404", model="X", provider="Groq")]
+    )
+    openr = _ScriptedProvider("OpenRouter", ["ok-from-openrouter"])
+    pool, _ = _pool(groq, openr)
+    assert pool.complete([]) == "ok-from-openrouter"
+    assert pool.last_provider == "OpenRouter"
+
+
+def test_pool_404_provider_never_retried():
+    """Исключённый по 404 провайдер не опрашивается повторно (это не кулдаун, а конфиг-ошибка)."""
+    groq = _ScriptedProvider(
+        "Groq", [ProviderModelNotFound("404", model="X", provider="Groq")]
+    )
+    openr = _ScriptedProvider("OpenRouter", ["a", "b", "c"])
+    pool, _ = _pool(groq, openr)
+    assert [pool.complete([]) for _ in range(3)] == ["a", "b", "c"]
+    assert groq.calls == 1, "Groq вызван один раз (404), больше не трогаем"
+
+
+def test_pool_all_404_raises_clear_error(capsys):
+    """Все провайдеры вернули 404 → внятная ошибка про model/openrouter_model, не молчком."""
+    groq = _ScriptedProvider("Groq", [ProviderModelNotFound("404", model="X", provider="Groq")])
+    openr = _ScriptedProvider("OpenRouter", [ProviderModelNotFound("404", model="Y", provider="OpenRouter")])
+    pool, _ = _pool(groq, openr)
+    with pytest.raises(ProviderError, match="config/r0.yaml"):
+        pool.complete([])
+    out = capsys.readouterr().out
+    assert "Groq" in out and "OpenRouter" in out    # оба исключены с сообщением
+
+
+def test_pool_404_message_is_clear(capsys):
+    """При исключении по 404 печатается внятное сообщение (какой провайдер, что делать)."""
+    groq = _ScriptedProvider(
+        "Groq", [ProviderModelNotFound("модель 'X' не найдена у Groq", model="X", provider="Groq")]
+    )
+    openr = _ScriptedProvider("OpenRouter", ["ok"])
+    pool, _ = _pool(groq, openr)
+    pool.complete([])
+    out = capsys.readouterr().out
+    assert "не найдена" in out and "Groq" in out
+
+
+# ============================================ префлайт: валидация моделей на старте
+
+def test_preflight_disables_provider_with_missing_model(capsys):
+    """Модель конфига отсутствует в /models провайдера → он исключён ДО прогона."""
+    groq = _ScriptedProvider("Groq", ["ok"], model="qwen/good", models={"qwen/good"})
+    openr = _ScriptedProvider("OpenRouter", ["x"], model="vendor/missing:free",
+                              models={"openai/gpt-oss-20b:free"})
+    pool, _ = _pool(groq, openr)
+    pool.preflight()
+    # OpenRouter отключён (его модели нет в списке), Groq — активен
+    assert pool.complete([]) == "ok"
+    assert pool.last_provider == "Groq"
+    out = capsys.readouterr().out
+    assert "OpenRouter" in out and "openrouter_model" in out
+
+
+def test_preflight_keeps_provider_with_valid_model():
+    """Модель конфига есть в /models → провайдер НЕ исключается."""
+    groq = _ScriptedProvider("Groq", ["ok"], model="qwen/good", models={"qwen/good", "other"})
+    pool, _ = _pool(groq)
+    pool.preflight()
+    assert pool.complete([]) == "ok"
+
+
+def test_preflight_skips_when_cannot_verify():
+    """available_models() == None (нет ключа/сети) → не блокируем, доверяем рантайму."""
+    groq = _ScriptedProvider("Groq", ["ok"], model="qwen/whatever", models=None)
+    pool, _ = _pool(groq)
+    pool.preflight()                       # не должно исключать/падать
+    assert pool.complete([]) == "ok"
+
+
+def test_preflight_all_missing_raises():
+    """Все модели недоступны → ошибка ДО транскрипции (не тратим Whisper зря)."""
+    groq = _ScriptedProvider("Groq", ["ok"], model="a", models={"b"})
+    openr = _ScriptedProvider("OpenRouter", ["ok"], model="c", models={"d"})
+    pool, _ = _pool(groq, openr)
+    with pytest.raises(ProviderError, match="config/r0.yaml"):
+        pool.preflight()
+
+
+def test_openrouter_available_models_parses_list(monkeypatch):
+    """available_models() парсит /models в множество id (для префлайта)."""
+    import autoreels.cloud.providers as P
+
+    def fake_get(url, *, headers, timeout):
+        assert url == P.OPENROUTER_MODELS_URL
+        return _FakeResp(200, body={"data": [
+            {"id": "openai/gpt-oss-20b:free"}, {"id": "google/gemma-4-31b-it:free"},
+        ]})
+
+    monkeypatch.setattr(P, "_httpx_get", fake_get)
+    ids = OpenRouterLLM().available_models()
+    assert ids == {"openai/gpt-oss-20b:free", "google/gemma-4-31b-it:free"}
+
+
+def test_available_models_none_on_network_error(monkeypatch):
+    """Сбой /models (сеть/битый ответ) → None, а не исключение (префлайт не роняет прогон)."""
+    import autoreels.cloud.providers as P
+
+    def boom(url, *, headers, timeout):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(P, "_httpx_get", boom)
+    assert OpenRouterLLM().available_models() is None
+
+
+def test_default_openrouter_model_is_available_free_model():
+    """Дефолтная OpenRouter-модель — из актуального списка бесплатных (та же есть на Groq)."""
+    from autoreels.cloud.providers import DEFAULT_OPENROUTER_MODEL
+    assert DEFAULT_OPENROUTER_MODEL == "openai/gpt-oss-20b:free"

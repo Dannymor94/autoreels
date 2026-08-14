@@ -2733,6 +2733,73 @@ def test_stage_select_builds_provider_pool_from_config(monkeypatch):
     assert captured["cfg"].provider_strategy in ("adaptive", "round_robin")
 
 
+def test_run_preflights_models_before_transcription(monkeypatch, tmp_path):
+    """cmd_run валидирует модели (preflight) ДО транскрипции; тот же пул уходит в R0-select."""
+    order = []
+
+    class _FakePool:
+        def preflight(self):
+            order.append("preflight")
+
+    fake_pool = _FakePool()
+    captured = {}
+    monkeypatch.setattr(cli, "build_pool", lambda cfg, **k: fake_pool)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio",
+                        lambda *a, **k: order.append("extract") or (tmp_path / "a.mp3"))
+    monkeypatch.setattr(cli, "_stage_transcribe",
+                        lambda *a, **k: order.append("transcribe") or Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select",
+                        lambda *a, **k: captured.update(provider=k.get("provider")) or [])
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c",
+                archive_dir=tmp_path / "arch")
+
+    # префлайт строго до извлечения аудио и транскрипции
+    assert order.index("preflight") < order.index("extract") < order.index("transcribe")
+    assert captured["provider"] is fake_pool           # тот же провалидированный пул → select
+
+
+def test_run_survives_provider_404_via_pool(monkeypatch, tmp_path):
+    """Сквозной: 404 одного провайдера в R0 не роняет run — пул уводит на второй, манифест собран."""
+    from autoreels.cloud.providers import ProviderPool, ProviderModelNotFound
+
+    class _Prov:
+        def __init__(self, name, script, model="m"):
+            self.name = name
+            self._model = model
+            self._script = list(script)
+        def complete(self, messages, *, temperature=0.0):
+            a = self._script.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+        def available_models(self):
+            return None                                 # префлайт не проверяет (нет сети)
+
+    bad = _Prov("OpenRouter", [ProviderModelNotFound("модель X 404", model="X", provider="OpenRouter")])
+    good = _Prov("Groq", ['{"segments": []}'])
+    # OpenRouter первым, чтобы 404 сработал до Groq и был реально исключён
+    pool = ProviderPool([bad, good], strategy="round_robin")
+    monkeypatch.setattr(cli, "build_pool", lambda cfg, **k: pool)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "[0-5] короткий текст")
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    # не должно бросить — 404 OpenRouter исключается, R0 идёт на Groq
+    path = cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                       transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c",
+                       archive_dir=tmp_path / "arch")
+    assert path.is_file()                               # манифест собран, прогон завершился
+
+
 # -------------------------------------------------- calibrate --all: изоляция ошибок
 
 def test_calibrate_all_skips_broken_video_and_continues(tmp_path, monkeypatch, capsys):

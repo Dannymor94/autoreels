@@ -39,12 +39,15 @@ import httpx
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 # Актуальная Qwen на Groq. Модель конфигурируема через config/r0.yaml (model:).
 DEFAULT_LLM_MODEL = "qwen/qwen3.6-27b"
-# Бесплатная модель OpenRouter для распределения/failover. Qwen — то же семейство,
-# хорошая поддержка русского, JSON-mode. СЛАБЕЕ Groq-модели → в adaptive она вторична.
-DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-8b:free"
+# Бесплатная модель OpenRouter для распределения. Та же модель доступна и на Groq
+# (openai/gpt-oss-20b) → выборка НЕ плавает между провайдерами, рубрика срабатывает
+# одинаково на всех чанках. Надёжный JSON-mode (OpenAI-родословная). Свериться со списком:
+# curl -s {OPENROUTER_MODELS_URL} | jq '.data[].id | select(endswith(":free"))'.
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 
 # qwen3 — reasoning-модель; reasoning раздувает выходные токены → упор в 6K TPM.
 # "none" глушит reasoning (Groq принимает только none|default).
@@ -63,8 +66,27 @@ def _httpx_post(url, *, headers, json, timeout):
     return httpx.post(url, headers=headers, json=json, timeout=timeout)
 
 
+def _httpx_get(url, *, headers, timeout):
+    """Тонкая обёртка над httpx.get — модульный уровень для monkeypatch (префлайт /models)."""
+    return httpx.get(url, headers=headers, timeout=timeout)
+
+
 class ProviderError(Exception):
     """Проблема LLM-провайдера (нет ключа, троттлинг, неожиданный формат ответа)."""
+
+
+class ProviderModelNotFound(ProviderError):
+    """Провайдер вернул 404 на chat/completions — модель в конфиге не существует/недоступна.
+
+    Это КОНФИГ-ошибка (неверное `model`/`openrouter_model`), а не транзиентный сбой: пул
+    ловит её, ИСКЛЮЧАЕТ провайдера из ротации навсегда и продолжает на остальных — один
+    неверный openrouter_model не должен ронять весь прогон после успешной транскрипции.
+    """
+
+    def __init__(self, message: str, *, model: str = "", provider: str = ""):
+        super().__init__(message)
+        self.model = model
+        self.provider = provider
 
 
 class ProviderThrottled(ProviderError):
@@ -129,8 +151,12 @@ def _chat_request(
             _throttle_wait(wait, provider_name)
             time.sleep(wait)
             continue
-        if resp.status_code == 404 and not_found_hint:
-            raise ProviderError(not_found_hint)
+        if resp.status_code == 404:
+            model = payload.get("model", "?")
+            raise ProviderModelNotFound(
+                not_found_hint or f"{provider_name}: модель '{model}' не найдена (404)",
+                model=model, provider=provider_name,
+            )
         try:
             resp.raise_for_status()
         except httpx.HTTPError as e:
@@ -144,6 +170,21 @@ def _chat_request(
     raise ProviderError(
         f"{provider_name} троттлит (HTTP {last_status}) после {_MAX_THROTTLE_RETRIES} ретраев — {detail}"
     )
+
+
+def _list_models(url: str, *, headers: dict) -> set[str] | None:
+    """Список id доступных моделей провайдера (GET /models). None — если проверить нельзя
+    (нет ключа/сети/битый ответ): тогда не блокируем — доверяем рантайму (404 отсеет на месте)."""
+    try:
+        resp = _httpx_get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:  # noqa: BLE001 — префлайт не должен ронять прогон из-за сети/формата
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        return None
+    ids = {m.get("id") for m in data["data"] if isinstance(m, dict)}
+    return {i for i in ids if i}
 
 
 class GroqLLM:
@@ -183,6 +224,13 @@ class GroqLLM:
             f"-H \"Authorization: Bearer $GROQ_API_KEY\"  "
             f"(или https://console.groq.com/docs/models)"
         )
+
+    def available_models(self) -> set[str] | None:
+        """id моделей, доступных на Groq (для префлайта). None — нет ключа/сети → не проверяем."""
+        api_key = self._api_key or os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            return None
+        return _list_models(GROQ_MODELS_URL, headers={"Authorization": f"Bearer {api_key}"})
 
     def _default_request(self, messages: list[dict], temperature: float) -> dict:
         api_key = self._api_key or os.environ.get("GROQ_API_KEY")
@@ -235,6 +283,20 @@ class OpenRouterLLM:
         except (KeyError, IndexError, TypeError) as e:
             raise ProviderError(f"неожиданный формат ответа OpenRouter: {e}") from e
 
+    def _model_404_hint(self) -> str:
+        return (
+            f"модель '{self._model}' не найдена у OpenRouter (404) — проверь "
+            f"openrouter_model в config/r0.yaml (формат 'vendor/model:free'). "
+            f"Актуальный список бесплатных: curl -s {OPENROUTER_MODELS_URL} | "
+            f"jq -r '.data[].id | select(endswith(\":free\"))'"
+        )
+
+    def available_models(self) -> set[str] | None:
+        """id моделей OpenRouter (для префлайта). None — нет сети/битый ответ → не проверяем."""
+        api_key = self._api_key or os.environ.get("OPENROUTER_API_KEY")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        return _list_models(OPENROUTER_MODELS_URL, headers=headers)
+
     def _default_request(self, messages: list[dict], temperature: float) -> dict:
         api_key = self._api_key or os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
@@ -255,24 +317,32 @@ class OpenRouterLLM:
         return _chat_request(
             OPENROUTER_CHAT_URL, headers=headers, payload=payload,
             provider_name=self.name, defer_throttle=self._defer_throttle,
+            not_found_hint=self._model_404_hint(),
         )
 
 
 class _PoolMember:
-    """Провайдер + его состояние кулдауна внутри пула.
+    """Провайдер + его состояние внутри пула.
 
     `available_at` — момент (по часам пула), когда провайдер снова свободен. 0 = свободен.
     `reason` — почему в кулдауне (для сообщений): '' | 'throttled' | 'exhausted'.
+    `disabled` — навсегда исключён из ротации (конфиг-ошибка модели: 404). В отличие от
+    кулдауна (временный), disabled не возвращается — модель в конфиге надо чинить.
     """
 
     def __init__(self, provider: LLMProvider):
         self.provider = provider
         self.available_at = 0.0
         self.reason = ""
+        self.disabled = False
 
     @property
     def name(self) -> str:
         return getattr(self.provider, "name", "?")
+
+    @property
+    def model(self) -> str:
+        return getattr(self.provider, "_model", "?")
 
 
 class ProviderPool:
@@ -326,10 +396,19 @@ class ProviderPool:
         return list(range(n))
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
-        """Выполнить запрос на лучшем свободном провайдере; ждать только если все в лимите."""
+        """Выполнить запрос на лучшем свободном провайдере; ждать только если все в лимите.
+
+        Провайдер, ответивший 404 (конфиг-ошибка модели), исключается из ротации навсегда
+        и прогон продолжается на остальных. Если исключены ВСЕ — внятная ошибка."""
         while True:
+            active = [m for m in self._members if not m.disabled]
+            if not active:
+                raise ProviderError(
+                    "все провайдеры исключены из-за неверных моделей — "
+                    "проверь model/openrouter_model в config/r0.yaml"
+                )
             now = self._clock()
-            order = self._candidate_order()
+            order = [i for i in self._candidate_order() if not self._members[i].disabled]
             available = [i for i in order if self._members[i].available_at <= now]
             if not available:
                 self._wait_for_earliest(now)
@@ -338,6 +417,11 @@ class ProviderPool:
                 m = self._members[idx]
                 try:
                     result = m.provider.complete(messages, temperature=temperature)
+                except ProviderModelNotFound as e:
+                    m.disabled = True
+                    print(f"\n  ⚠ {e} — исключаю {m.name} из пула, продолжаю на остальных",
+                          flush=True)
+                    continue
                 except ProviderExhausted as e:
                     self._cooldown(m, now, e, min_sec=_EXHAUSTED_THRESHOLD_SEC)
                     continue
@@ -349,7 +433,7 @@ class ProviderPool:
                 m.reason = ""
                 self.last_provider = m.name
                 return result
-            # все свободные только что ушли в кулдаун → на следующем витке пул поспит
+            # все свободные ушли в кулдаун/исключены → на следующем витке пул поспит или упадёт
 
     def _cooldown(self, member: _PoolMember, now: float, exc: ProviderError, *, min_sec: float) -> None:
         retry_after = getattr(exc, "retry_after", 0.0) or 0.0
@@ -357,17 +441,47 @@ class ProviderPool:
         member.reason = "exhausted" if isinstance(exc, ProviderExhausted) else "throttled"
 
     def _wait_for_earliest(self, now: float) -> None:
-        """Все провайдеры в лимите → пауза до ближайшего освобождения, с оценкой по каждому."""
-        earliest = min(m.available_at for m in self._members)
+        """Все АКТИВНЫЕ провайдеры в лимите → пауза до ближайшего освобождения, с оценкой."""
+        active = [m for m in self._members if not m.disabled]
+        earliest = min(m.available_at for m in active)
         wait = max(0.0, earliest - now)
         details = ", ".join(
-            f"{m.name} через ~{max(0.0, m.available_at - now):.0f}с" for m in self._members
+            f"{m.name} через ~{max(0.0, m.available_at - now):.0f}с" for m in active
         )
         print(
             f"\n  ⏸ все провайдеры в лимите — пауза ~{wait:.0f}с ({details})",
             flush=True,
         )
         self._sleep(wait)
+
+    def preflight(self) -> None:
+        """Проверить доступность моделей ДО прогона (лёгкий GET /models на провайдера).
+
+        Модель из конфига отсутствует в списке провайдера → исключить его сразу с внятным
+        сообщением, а не падать 404-ом на 2-м R0-чанке после дорогой транскрипции. Если
+        проверить нельзя (нет ключа/сети → available_models вернул None) — не блокируем:
+        доверяем рантайму (404 отсеет провайдера на месте). Все модели неверны → ошибка."""
+        for m in self._members:
+            available = None
+            try:
+                available = m.provider.available_models()
+            except Exception:  # noqa: BLE001 — префлайт не роняет прогон из-за сети
+                available = None
+            if not available:
+                continue  # не смогли проверить → доверяем рантайму
+            if m.model not in available:
+                m.disabled = True
+                key = "openrouter_model" if m.name == "OpenRouter" else "model"
+                print(
+                    f"\n  ⚠ {m.name}: модель '{m.model}' недоступна — исключаю провайдера "
+                    f"(проверь {key} в config/r0.yaml)",
+                    flush=True,
+                )
+        if all(m.disabled for m in self._members):
+            raise ProviderError(
+                "ни одна модель провайдеров не доступна — проверь model/openrouter_model "
+                "в config/r0.yaml"
+            )
 
 
 class FallbackLLM:

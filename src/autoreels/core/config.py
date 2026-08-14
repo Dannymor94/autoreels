@@ -71,7 +71,7 @@ class R0Config(BaseModel):
 
     duration_preset: str
     model: str = "qwen/qwen3.6-27b"          # LLM R0 на Groq (основная, сильнее по качеству)
-    openrouter_model: str = "qwen/qwen3-8b:free"  # второй провайдер OpenRouter (слабее)
+    openrouter_model: str = "openai/gpt-oss-20b:free"  # та же модель есть на Groq → не плавает
     provider_strategy: str = "adaptive"      # распределение R0-нагрузки: adaptive | round_robin
                                              # adaptive: Groq основной, слив на OpenRouter под
                                              # троттлом (качество не плавает). round_robin:

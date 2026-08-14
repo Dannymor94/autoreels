@@ -522,14 +522,18 @@ def _stage_compress(transcript, *, r0_cfg):
     )
 
 
-def _stage_select(compressed, *, r0_cfg, root):
+def _stage_select(compressed, *, r0_cfg, root, provider=None):
+    """R0-выбор. `provider` — заранее собранный пул (cmd_run строит его и валидирует ДО
+    транскрипции); если None — собираем здесь (standalone-путь)."""
     print("выбор моментов…", flush=True)
     root = Path(root)
     system_text = (root / r0_cfg.prompts.system).read_text(encoding="utf-8")
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
+    if provider is None:
+        provider = build_pool(r0_cfg)
     return select(
         compressed, system_text=system_text, fewshot=fewshot,
-        provider=build_pool(r0_cfg), r0_cfg=r0_cfg,
+        provider=provider, r0_cfg=r0_cfg,
     )
 
 
@@ -652,6 +656,10 @@ def cmd_run(
     )
 
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
+    # Пул провайдеров + префлайт моделей ДО дорогой транскрипции: неверная model/
+    # openrouter_model отсеивается сразу, а не 404-ом на 2-м R0-чанке после Whisper.
+    provider = build_pool(r0_cfg)
+    provider.preflight()
     audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir,
                                  ffmpeg=ffmpeg, source_sha=sha)
     transcript = _stage_transcribe(
@@ -664,7 +672,7 @@ def cmd_run(
     )
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
-    reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root)
+    reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
