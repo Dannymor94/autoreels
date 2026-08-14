@@ -8,6 +8,9 @@ LLM предлагает start/end приблизительно (часто в �
 from autoreels.cloud.snap import apply_padding, snap_segments
 from autoreels.core.models import Reel, Word
 
+HANGING = ["и", "а", "но", "что", "это", "как", "в", "на",
+           "потому", "чтобы", "если", "когда", "то", "есть", "вот"]
+
 
 def _w(t0: float, t1: float, word: str = "x") -> Word:
     return Word(word=word, t0=t0, t1=t1)
@@ -18,82 +21,195 @@ def _reel(start: float, end: float) -> Reel:
                 hook="h", title="t", description="d", reason="r", topic="x")
 
 
-# Транскрипт: две фразы с паузой между ними (паузы — gap между словами > pause_sec).
+# Транскрипт: две фразы с паузой между ними (паузы — gap между словами > min_pause 0.6).
 #  с1: 30.0–31.6 ("слово1 слово2 стоп"), пауза 31.6→33.0 (1.4с),
 #  с2: 33.0–34.0 ("далее ещё"), пауза 34.0→36.0 (2.0с), "конец" 36.0–36.6 (конец речи).
 WORDS = [
     _w(0.0, 0.5, "intro"),       # далеко до клипа
     _w(30.0, 30.4, "слово1"),
     _w(30.5, 31.0, "слово2"),
-    _w(31.1, 31.6, "стоп"),      # пауза после → граница 31.6
+    _w(31.1, 31.6, "стоп"),      # пауза 1.4с после → завершение мысли 31.6
     _w(33.0, 33.5, "далее"),
-    _w(33.6, 34.0, "ещё"),       # пауза после → граница 34.0
-    _w(36.0, 36.6, "конец"),     # последнее слово → граница 36.6
+    _w(33.6, 34.0, "ещё"),       # пауза 2.0с после → завершение 34.0
+    _w(36.0, 36.6, "конец"),     # последнее слово → завершение 36.6
 ]
-CFG = dict(tail_sec=0.3, window_sec=1.5, pause_sec=0.35, max_duration=59)
+CFG = dict(tail_sec=0.3, window_sec=1.5, max_duration=59,
+           min_pause_for_phrase_end=0.6, max_micro_pause=0.4, hanging_words=HANGING)
 
 
-def test_end_midword_snaps_to_pause_plus_tail():
-    # end=31.3 в середине слова «стоп» (31.1–31.6) → к паузе 31.6 + хвост 0.3 = 31.9
+def test_end_midword_snaps_to_phrase_end_plus_tail():
+    # end=31.3 в середине «стоп» → завершение мысли (пауза) 31.6 + хвост 0.3 = 31.9
     r = _reel(30.0, 31.3)
     snap_segments([r], WORDS, **CFG)
-    assert abs(r.end - 31.9) < 1e-6              # пауза 31.6 + хвост 0.3
-    assert r.start == 30.0                       # начало уже на границе слова — не двинулось
+    assert abs(r.end - 31.9) < 1e-6
+    assert r.start == 30.0                       # начало уже на границе фразы — не двинулось
 
 
 def test_start_midword_snaps_to_word_boundary():
-    # start=30.6 в середине «слово2» → к началу фразы 30.0 (граница слова после паузы)
+    # start=30.6 в середине «слово2» → к началу фразы 30.0 (после паузы)
     r = _reel(30.6, 33.4)
     snap_segments([r], WORDS, **CFG)
     assert r.start == 30.0
-    assert r.start != 30.6                        # не начинается с обрубка слова
+    assert r.start != 30.6
 
 
 def test_start_pulled_to_phrase_beginning_within_window():
-    # start=33.7 в середине «ещё» (фраза «далее ещё» началась в 33.0 после паузы) →
-    # лёгкое вытягивание к началу мысли 33.0, в пределах окна ±1.5с (не к 36.0 за окном)
+    # start=33.7 в середине «ещё» → к началу мысли 33.0 в пределах окна ±1.5с
     r = _reel(33.7, 36.4)
     snap_segments([r], WORDS, **CFG)
-    assert r.start == 33.0                        # начало смысловой фразы, не середина
+    assert r.start == 33.0
 
 
-def test_end_fallback_to_word_end_when_no_pause_nearby():
-    # плотная речь без пауз: нет паузы рядом → к ближайшему КОНЦУ слова (не середине)
-    dense = [_w(40.0 + 0.4 * i, 40.0 + 0.4 * i + 0.3, "wд") for i in range(12)]  # без зазоров > pause
-    r = _reel(40.0, 40.55)                        # 40.55 в середине 2-го слова (40.4–40.7)
+def test_end_extends_to_end_of_continuous_utterance():
+    # Плотная речь без пауз/пунктуации: мысль завершается лишь в конце блока (последнее слово).
+    dense = [_w(40.0 + 0.4 * i, 40.0 + 0.4 * i + 0.3, "wд") for i in range(12)]
+    r = _reel(40.0, 40.55)                        # предложен конец в середине блока
     snap_segments([r], dense, **CFG)
-    # ближайший конец слова к 40.55 — 40.7, + хвост 0.3 = 41.0; не середина слова
-    assert abs(r.end - 41.0) < 1e-6
+    # тянем до конца непрерывной мысли: последнее слово t1=44.7 + хвост 0.3 = 45.0
+    assert abs(r.end - 45.0) < 1e-6
 
 
 def test_tail_trimmed_to_not_exceed_max_duration():
-    # max_duration мал: граница 31.6 в пределах, но 31.6+0.3 вышло бы за лимит → хвост подрезан
+    # max_duration мал: завершение 31.6 в пределах, но 31.6+0.3 вышло бы за лимит → хвост подрезан
     r = _reel(30.0, 31.3)
-    snap_segments([r], WORDS, tail_sec=0.3, window_sec=1.5, pause_sec=0.35, max_duration=1.7)
+    snap_segments([r], WORDS, tail_sec=0.3, window_sec=1.5, max_duration=1.7,
+                  min_pause_for_phrase_end=0.6, max_micro_pause=0.4, hanging_words=HANGING)
     assert r.end == 31.7                          # ровно start+max_duration (хвост 0.3→0.1)
     assert r.end - r.start <= 1.7 + 1e-9
 
 
 def test_no_boundary_in_range_leaves_segment_untouched():
-    # предложенные границы далеко от любых слов (в «тишине» вне ±search) → не трогаем
+    # предложенные границы далеко от любых слов (в «тишине» вне окна) → не трогаем
     r = _reel(50.0, 52.0)
     snap_segments([r], WORDS, **CFG)
     assert (r.start, r.end) == (50.0, 52.0)
 
 
 def test_empty_transcript_leaves_segment_untouched():
-    # нет word-level (тишина/пустой транскрипт) → нечего подтягивать, сегмент как есть
     r = _reel(30.0, 31.3)
     snap_segments([r], [], **CFG)
     assert (r.start, r.end) == (30.0, 31.3)
 
 
 def test_multiple_reels_each_snapped():
-    r1 = _reel(30.0, 31.3)       # end → 31.9
-    r2 = _reel(33.0, 35.0)       # end=35.0 в тишине после «ещё» (34.0); пауза 34.0 в ±1.5 → 34.3
+    r1 = _reel(30.0, 31.3)       # end → 31.9 (завершение 31.6 + хвост)
+    r2 = _reel(33.0, 35.0)       # end=35.0; завершение 34.0 (пауза 2.0с) в окне → 34.3
     snap_segments([r1, r2], WORDS, **CFG)
     assert abs(r1.end - 31.9) < 1e-6
-    assert abs(r2.end - 34.3) < 1e-6   # 34.0 (пауза) + 0.3
+    assert abs(r2.end - 34.3) < 1e-6
+
+
+# ================================================== завершение мысли: пунктуация / союзы / откат
+
+# Транскрипт с пунктуацией и висячими словами: мысль тянется до конца предложения.
+#  «клип начинается тут потому что» (висячий конец на "что") → продолжить до «мысль.»
+THOUGHT_WORDS = [
+    _w(10.0, 10.4, "клип"),
+    _w(10.5, 10.9, "начинается"),
+    _w(11.0, 11.3, "тут"),
+    _w(11.4, 11.8, "потому"),     # висячее
+    _w(11.9, 12.3, "что"),        # висячее — пауза 0.9с после, но конец на союзе → НЕ конец
+    _w(13.2, 13.6, "главная"),
+    _w(13.7, 14.4, "мысль."),     # пунктуация → конец предложения = завершение 14.4
+    _w(16.0, 16.5, "дальше"),     # новая фраза
+]
+TCFG = CFG
+
+
+def test_end_extends_past_hanging_conjunction_to_sentence_end():
+    # Предложенный конец 12.3 приходится на «что» (висячее) с паузой после → НЕ обрывать там,
+    # тянуть до конца предложения «мысль.» (14.4) + хвост 0.3 = 14.7.
+    r = _reel(10.0, 12.3)
+    snap_segments([r], THOUGHT_WORDS, **TCFG)
+    assert abs(r.end - 14.7) < 1e-6
+
+
+def test_end_uses_sentence_punctuation_as_completion():
+    # Даже с запасом времени тянем ровно до конца предложения (пунктуация), не дальше.
+    r = _reel(10.0, 13.5)
+    snap_segments([r], THOUGHT_WORDS, **TCFG)
+    assert abs(r.end - 14.7) < 1e-6              # «мысль.» 14.4 + 0.3, не до «дальше»
+
+
+def test_micro_pause_not_treated_as_thought_end():
+    # Микропаузы (0.1с между словами) внутри фразы — не конец; тянем до реального завершения.
+    micro = [
+        _w(20.0, 20.4, "раз"),
+        _w(20.5, 20.9, "два"),       # пауза 0.1 (микро) — не конец
+        _w(21.0, 21.4, "три"),       # пауза 0.1 — не конец
+        _w(21.5, 22.2, "финиш."),    # пунктуация → конец 22.2
+    ]
+    r = _reel(20.0, 20.6)            # предложен конец на «два» (микропауза рядом)
+    snap_segments([r], micro, **CFG)
+    assert abs(r.end - 22.5) < 1e-6  # не 20.9, а «финиш.» 22.2 + 0.3
+
+
+def test_thought_too_long_rolls_back_to_last_complete_phrase():
+    # Мысль не завершается до max_duration → откат к последней целой фразе в пределах лимита.
+    words = [
+        _w(0.0, 0.5, "первая"),
+        _w(0.6, 1.2, "фраза."),      # завершение 1.2 (в пределах лимита)
+        _w(1.5, 2.0, "потом"),
+        _w(2.1, 2.6, "длинная"),
+        _w(2.7, 3.2, "мысль"),       # без пунктуации/пауз до конца — не влезает
+        _w(3.3, 3.8, "которая"),
+        _w(3.9, 4.4, "тянется"),
+    ]
+    r = _reel(0.0, 2.4)              # предложен конец на «длинная»; лимит start+max=0+2.0=2.0
+    snap_segments([r], words, tail_sec=0.0, window_sec=1.5, max_duration=2.0,
+                  min_pause_for_phrase_end=0.6, max_micro_pause=0.4, hanging_words=HANGING)
+    # вперёд завершения в [end-окно, лимит]: единственное завершение <=2.0 — «фраза.» 1.2 → откат
+    assert abs(r.end - 1.2) < 1e-6
+    assert r.end - r.start <= 2.0 + 1e-9         # целая фраза, влезает в лимит
+
+
+def test_start_not_on_hanging_word():
+    # Начало фразы — висячее слово «и» → сдвинуть вперёд к первому не-висячему слову.
+    words = [
+        _w(5.0, 5.3, "и"),           # начало фразы, но висячее
+        _w(5.4, 5.7, "потом"),       # тоже висячее? нет — "потом" не в списке ("потому" — да)
+        _w(5.8, 6.4, "главное"),
+        _w(6.5, 7.2, "мысль."),
+    ]
+    r = _reel(5.0, 7.0)
+    snap_segments([r], words, **CFG)
+    assert r.start == 5.4            # не с «и» (5.0), а со следующего слова
+
+
+# ============================================== взаимодействие snap → padding → trim
+
+def test_snap_then_padding_ends_on_completed_thought():
+    """snap тянет до конца предложения, padding добавляет воздух — конец на завершённой мысли."""
+    r = _reel(10.0, 12.3)                          # обрыв на «что» (висячее)
+    snap_segments([r], THOUGHT_WORDS, **TCFG)      # → end 14.7 (мысль. 14.4 + хвост)
+    apply_padding([r], THOUGHT_WORDS, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59)
+    # padding: последнее слово клипа — «мысль.» (t1=14.4) → end = 14.4 + 0.7 = 15.1
+    assert abs(r.end - 15.1) < 1e-6
+    assert abs(r.start - 9.7) < 1e-6               # первое слово 10.0 - 0.3
+
+
+def test_snap_padding_trim_keeps_whole_thought_within_max():
+    """Полный конвейер snap→padding→trim: клип завершён по мысли и влезает в max → не режется."""
+    from autoreels.cloud.select import flag_durations
+    from autoreels.cloud.trim import trim_too_long
+    r = _reel(10.0, 12.3)
+    snap_segments([r], THOUGHT_WORDS, **TCFG)
+    apply_padding([r], THOUGHT_WORDS, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59)
+    flag_durations([r], min_duration=15, max_duration=59)
+    trim_too_long([r], THOUGHT_WORDS, max_duration=59, pause_sec=0.35, policy="trim")
+    assert "too_long" not in r.flags               # в пределах пресета — не режется
+    assert abs(r.end - 15.1) < 1e-6                # конец мысли сохранён
+
+
+def test_snap_keeps_end_within_max_so_trim_is_noop():
+    """snap никогда не выводит end за max_duration → trim (too_long) не срабатывает."""
+    from autoreels.cloud.select import flag_durations
+    r = _reel(10.0, 12.3)
+    snap_segments([r], THOUGHT_WORDS, tail_sec=0.3, window_sec=1.5, max_duration=6.0,
+                  min_pause_for_phrase_end=0.6, max_micro_pause=0.4, hanging_words=HANGING)
+    assert r.end - r.start <= 6.0 + 1e-9
+    flag_durations([r], min_duration=15, max_duration=6)
+    assert "too_long" not in r.flags
 
 
 # ================================================================== apply_padding

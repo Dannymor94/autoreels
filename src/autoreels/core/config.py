@@ -91,6 +91,14 @@ class R0Config(BaseModel):
     tail_pad_sec: float = 0.7  # «воздух» после последнего слова клипа (apply_padding)
     lead_pad_sec: float = 0.3  # заход перед первым словом клипа (apply_padding)
     snap_window_sec: float     # окно поиска границы слова/паузы при snap (±сек)
+    # Snap «до завершения мысли»: конец клипа тянется до конца предложения (пунктуация) или
+    # длинной паузы, пока есть запас до max_duration. Не обрывать на висячих словах/микропаузах.
+    min_pause_for_phrase_end: float = 0.6   # пауза > порога = конец фразы (не микропауза)
+    max_micro_pause: float = 0.4            # пауза < порога = микропауза внутри фразы (не конец)
+    hanging_words: list[str] = Field(default_factory=lambda: [
+        "и", "а", "но", "что", "это", "как", "в", "на",
+        "потому", "чтобы", "если", "когда", "то", "есть", "вот",
+    ])
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str

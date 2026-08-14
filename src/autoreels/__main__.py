@@ -551,7 +551,10 @@ def _stage_snap(reels, transcript, *, r0_cfg):
     snap_segments(
         reels, transcript.words,
         tail_sec=r0_cfg.tail_sec, window_sec=r0_cfg.snap_window_sec,
-        pause_sec=r0_cfg.sentence_pause_sec, max_duration=r0_cfg.max_duration,
+        max_duration=r0_cfg.max_duration,
+        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+        max_micro_pause=r0_cfg.max_micro_pause,
+        hanging_words=r0_cfg.hanging_words,
     )
     return reels
 
