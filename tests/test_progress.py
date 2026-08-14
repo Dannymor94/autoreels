@@ -72,6 +72,77 @@ def test_chunk_progress_tty_in_progress_no_trailing_newline(monkeypatch, capsys)
     assert not out.endswith("\n")
 
 
+# ------------------------------------------------------------------ unit: render_bar
+
+def test_render_bar_empty_at_zero():
+    bar = P.render_bar(0, width=10)
+    assert bar == "[" + "░" * 10 + "]"
+
+
+def test_render_bar_full_at_hundred():
+    bar = P.render_bar(100, width=10)
+    assert bar == "[" + "█" * 10 + "]"
+
+
+def test_render_bar_half():
+    bar = P.render_bar(50, width=10)
+    assert bar == "[" + "█" * 5 + "░" * 5 + "]"
+
+
+def test_render_bar_clamps_out_of_range():
+    assert P.render_bar(-20, width=8) == "[" + "░" * 8 + "]"
+    assert P.render_bar(150, width=8) == "[" + "█" * 8 + "]"
+
+
+def test_render_bar_length_is_width_plus_brackets():
+    assert len(P.render_bar(37, width=20)) == 22   # 20 ячеек + [ ]
+
+
+def test_chunk_progress_contains_bar(monkeypatch, capsys):
+    """chunk_progress рисует визуальный бар (█/░), а не только процент."""
+    monkeypatch.setattr(P, "is_tty", lambda: False)
+    P.chunk_progress("R0", 4, 5)
+    out = capsys.readouterr().out
+    assert "█" in out and "░" in out     # частично заполненный бар при 80%
+
+
+# ------------------------------------------------------------------ unit: print_bar_line
+
+def test_print_bar_line_has_bar_and_percent(monkeypatch, capsys):
+    monkeypatch.setattr(P, "is_tty", lambda: False)
+    P.print_bar_line("извлекаю аудио", 40)
+    out = capsys.readouterr().out
+    assert "█" in out and "░" in out
+    assert "40%" in out
+    assert "извлекаю аудио" in out
+
+
+def test_print_bar_line_tty_overwrites_no_newline(monkeypatch, capsys):
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.print_bar_line("извлекаю аудио", 40)
+    out = capsys.readouterr().out
+    assert out.startswith("\r")
+    assert "\033[K" in out
+    assert not out.endswith("\n")
+
+
+def test_print_bar_line_done_tty_ends_with_newline(monkeypatch, capsys):
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.print_bar_line("извлекаю аудио", 100, done=True)
+    out = capsys.readouterr().out
+    assert out.endswith("\n")
+    assert "✓" in out
+
+
+def test_print_spin_line_non_tty_silent_until_done(monkeypatch, capsys):
+    """Спиннер на non-TTY не спамит: печатает только финал (done)."""
+    monkeypatch.setattr(P, "is_tty", lambda: False)
+    P.print_spin_line("извлекаю аудио", tick=3)
+    assert capsys.readouterr().out == ""      # тикающие кадры не печатаются в лог
+    P.print_spin_line("извлекаю аудио", done=True)
+    assert "✓" in capsys.readouterr().out
+
+
 # ------------------------------------------------------------------ unit: throttle_wait
 
 def test_throttle_wait_non_tty_contains_seconds(monkeypatch, capsys):

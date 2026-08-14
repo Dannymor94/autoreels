@@ -99,3 +99,77 @@ def test_ffmpeg_not_found_raises(audio_cfg, tmp_path):
     with pytest.raises(ExtractAudioError) as e:
         extract_audio(dummy, audio_cfg, cache_dir=tmp_path, ffmpeg="ffmpeg-does-not-exist-xyz")
     assert "ffmpeg" in str(e.value).lower()   # внятная ошибка, не голый traceback
+
+
+# ------------------------------------------------------ прогресс-бар (мок ffmpeg)
+
+def _fake_ffmpeg_progress_proc(out_time_us_steps, returncode=0, stderr=""):
+    """Фабрика фейкового Popen: stdout отдаёт -progress строки out_time_ms=…, stderr — текст."""
+    class _FakeProc:
+        def __init__(self, cmd, **kwargs):
+            self.stdout = iter([f"out_time_ms={us}\n" for us in out_time_us_steps])
+            self.stderr = iter([stderr] if stderr else [])
+            self.returncode = returncode
+        def wait(self):
+            return self.returncode
+    return _FakeProc
+
+
+def test_extract_prints_live_bar(monkeypatch, tmp_path, audio_cfg, capsys):
+    """extract_audio рисует живой прогресс-бар по времени ffmpeg (мок Popen + ffprobe)."""
+    import autoreels.cloud.extract_audio as EA
+    import autoreels.core.progress as prog
+
+    monkeypatch.setattr(prog, "is_tty", lambda: False)
+    monkeypatch.setattr(EA.shutil, "which", lambda b: f"/fake/{b}")
+    monkeypatch.setattr(EA, "_probe_duration_sec", lambda ffmpeg_bin, source: 100.0)
+    # 30с и 100с из 100с → бар растёт до 30%, затем финальный 100%
+    monkeypatch.setattr(EA.subprocess, "Popen",
+                        _fake_ffmpeg_progress_proc([30_000_000, 100_000_000]))
+
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"x")
+    out = extract_audio(src, audio_cfg, cache_dir=tmp_path / "c", source_sha="a" * 64)
+
+    assert out == tmp_path / "c" / f"{'a'*64}.{audio_cfg.format}"
+    printed = capsys.readouterr().out
+    assert "█" in printed and "░" in printed          # визуальный бар
+    assert "30%" in printed                            # промежуточный прогресс
+    assert "100%" in printed and "✓" in printed        # финал
+
+
+def test_extract_spinner_when_duration_unknown(monkeypatch, tmp_path, audio_cfg, capsys):
+    """Длительность не определить (ffprobe нет) → живой спиннер вместо бара, финал печатается."""
+    import autoreels.cloud.extract_audio as EA
+    import autoreels.core.progress as prog
+
+    monkeypatch.setattr(prog, "is_tty", lambda: False)
+    monkeypatch.setattr(EA.shutil, "which", lambda b: f"/fake/{b}")
+    monkeypatch.setattr(EA, "_probe_duration_sec", lambda ffmpeg_bin, source: None)
+    monkeypatch.setattr(EA.subprocess, "Popen",
+                        _fake_ffmpeg_progress_proc([10_000_000, 20_000_000]))
+
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"x")
+    extract_audio(src, audio_cfg, cache_dir=tmp_path / "c", source_sha="b" * 64)
+
+    printed = capsys.readouterr().out
+    assert "извлекаю аудио" in printed and "✓" in printed   # финальная строка спиннера
+
+
+def test_extract_ffmpeg_failure_raises_with_stderr(monkeypatch, tmp_path, audio_cfg):
+    """ffmpeg вернул код != 0 → ExtractAudioError со stderr (поведение сохранено на Popen)."""
+    import autoreels.cloud.extract_audio as EA
+    import autoreels.core.progress as prog
+
+    monkeypatch.setattr(prog, "is_tty", lambda: False)
+    monkeypatch.setattr(EA.shutil, "which", lambda b: f"/fake/{b}")
+    monkeypatch.setattr(EA, "_probe_duration_sec", lambda ffmpeg_bin, source: 100.0)
+    monkeypatch.setattr(EA.subprocess, "Popen",
+                        _fake_ffmpeg_progress_proc([], returncode=1, stderr="boom decode error\n"))
+
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"x")
+    with pytest.raises(ExtractAudioError) as e:
+        extract_audio(src, audio_cfg, cache_dir=tmp_path / "c", source_sha="c" * 64)
+    assert "boom decode error" in str(e.value)

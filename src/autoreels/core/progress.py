@@ -19,6 +19,22 @@ _DONE = "✓"
 _LINE_WIDTH = 72   # минимальная ширина строки (заполняется пробелами на TTY)
 _CLEAR_EOL = "\033[K"   # ANSI «стереть до конца строки» — вместо добивки пробелами
 
+_BAR_WIDTH = 20         # ячеек в прогресс-баре по умолчанию
+_BAR_FILL = "█"
+_BAR_EMPTY = "░"
+
+
+def render_bar(pct: float, width: int = _BAR_WIDTH) -> str:
+    """Текстовый прогресс-бар `[█████░░░░░]` по проценту (0..100), клип за границы.
+
+    Визуальная «загрузка» — видно и что идёт, и сколько осталось, одним взглядом.
+    Ширина в СИМВОЛАХ (█/░ — по одному символу Python), скобки не считаются в width.
+    """
+    p = max(0.0, min(100.0, float(pct)))
+    filled = int(round(width * p / 100.0))
+    filled = max(0, min(width, filled))
+    return "[" + _BAR_FILL * filled + _BAR_EMPTY * (width - filled) + "]"
+
 
 def is_tty() -> bool:
     """True если вывод — интерактивный терминал (обновляем строку через \\r).
@@ -55,7 +71,8 @@ def chunk_progress(
     pct = int(100 * i / total) if total > 0 else 100
     mark = _DONE if done else spinner(i - 1)
     extra_str = f"  {extra}" if extra else ""
-    msg = f"  {label}: чанк {i}/{total} ({pct}%) {mark}{extra_str}"
+    bar = render_bar(pct)
+    msg = f"  {label}: {bar} {pct}% · {i}/{total} {mark}{extra_str}"
 
     if is_tty():
         # Дополняем пробелами, чтобы стереть хвост предыдущей строки
@@ -65,6 +82,50 @@ def chunk_progress(
         else:
             print(padded, end="", flush=True)    # без newline
     else:
+        print(msg, flush=True)
+
+
+def print_bar_line(
+    label: str,
+    pct: float,
+    *,
+    tick: int = 0,
+    done: bool = False,
+    extra: str = "",
+) -> None:
+    """Одна перезаписываемая строка-бар для этапа с известным % (не по чанкам: напр. ffmpeg).
+
+    TTY: `\\r` + очистка до конца строки + бар, БЕЗ `\\n` — живая перезапись на месте.
+    Non-TTY: обычная строка (вызывающий сам дросселирует частоту, чтобы не спамить лог).
+    `tick` крутит спиннер — видно «жизнь» даже когда % растёт медленно.
+    """
+    p = max(0.0, min(100.0, float(pct)))
+    mark = _DONE if done else spinner(tick)
+    bar = render_bar(p)
+    extra_str = f"  {extra}" if extra else ""
+    msg = f"  {label}: {bar} {int(p)}% {mark}{extra_str}"
+    if is_tty():
+        end = "\n" if done else ""
+        sys.stdout.write(f"\r{_CLEAR_EOL}{msg}{end}")
+        sys.stdout.flush()
+    else:
+        print(msg, flush=True)
+
+
+def print_spin_line(label: str, *, tick: int = 0, done: bool = False, extra: str = "") -> None:
+    """Живой спиннер без процента — для этапа без измеримого прогресса (видно, что идёт работа).
+
+    TTY: перезапись строки со сменой кадра спиннера. Non-TTY: печатаем только финал (done),
+    чтобы не спамить лог тикающими строками.
+    """
+    mark = _DONE if done else spinner(tick)
+    extra_str = f"  {extra}" if extra else ""
+    msg = f"  {label}… {mark}{extra_str}"
+    if is_tty():
+        end = "\n" if done else ""
+        sys.stdout.write(f"\r{_CLEAR_EOL}{msg}{end}")
+        sys.stdout.flush()
+    elif done:
         print(msg, flush=True)
 
 

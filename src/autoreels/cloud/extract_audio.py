@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 from autoreels.core import state
@@ -23,6 +24,81 @@ from autoreels.core.config import AudioExtract
 
 class ExtractAudioError(Exception):
     """Извлечение аудио не удалось (нет файла, нет ffmpeg, ffmpeg вернул ошибку)."""
+
+
+def _probe_duration_sec(ffmpeg_bin: str, source: Path) -> float | None:
+    """Длительность источника через ffprobe (для процента бара). None — если не удалось
+    (нет ffprobe/битый вывод): тогда показываем живой спиннер без %, а не падаем."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        # ffprobe часто лежит рядом с ffmpeg — пробуем соседний бинарь.
+        cand = Path(ffmpeg_bin).with_name("ffprobe" + Path(ffmpeg_bin).suffix)
+        ffprobe = str(cand) if cand.is_file() else None
+    if ffprobe is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(source)],
+            capture_output=True, text=True,
+        )
+        return float(proc.stdout.strip()) or None
+    except (ValueError, OSError):
+        return None
+
+
+def _run_extract_with_progress(cmd: list[str], *, duration_sec: float | None) -> tuple[int, str]:
+    """Запустить ffmpeg с `-progress pipe:1`, рисуя живой прогресс-бар по времени.
+
+    Живой бар (при известной длительности) или спиннер (если длительность неизвестна) —
+    видно, что этап идёт, а не завис. stderr сливается в поток (иначе Popen на большом
+    stderr зависает). Возвращает (returncode, stderr_text) — как subprocess.run.
+    """
+    from autoreels.core.progress import is_tty, print_bar_line, print_spin_line
+
+    prog_cmd = [cmd[0], "-progress", "pipe:1", "-nostats"] + cmd[1:]
+    proc = subprocess.Popen(
+        prog_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8",
+    )
+    stderr_chunks: list[str] = []
+
+    def _drain_stderr() -> None:
+        for line in proc.stderr:
+            stderr_chunks.append(line)
+
+    t = threading.Thread(target=_drain_stderr, daemon=True)
+    t.start()
+
+    tick = 0
+    last_bucket = -1
+    for line in proc.stdout:
+        key, _, val = line.strip().partition("=")
+        if key != "out_time_ms":
+            continue
+        tick += 1
+        try:
+            elapsed = max(0.0, int(val) / 1_000_000)
+        except ValueError:
+            continue
+        if duration_sec:
+            pct = min(100.0, elapsed / duration_sec * 100)
+            # На non-TTY (пайп/лог) печатаем не чаще, чем раз в 5% — иначе спам строк.
+            bucket = int(pct) // 5
+            if is_tty() or bucket != last_bucket:
+                print_bar_line("извлекаю аудио", pct, tick=tick)
+                last_bucket = bucket
+        elif is_tty():
+            print_spin_line("извлекаю аудио", tick=tick)
+
+    proc.wait()
+    t.join(timeout=2)
+    if proc.returncode == 0:
+        if duration_sec:
+            print_bar_line("извлекаю аудио", 100, done=True)
+        else:
+            print_spin_line("извлекаю аудио", done=True)
+    return proc.returncode, "".join(stderr_chunks)
 
 
 def build_extract_cmd(
@@ -75,11 +151,12 @@ def extract_audio(
     out = cache_dir / f"{sha}.{audio_cfg.format}"
 
     cmd = build_extract_cmd(ffmpeg_bin, source, out, audio_cfg)
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
-    if proc.returncode != 0:
+    duration = _probe_duration_sec(ffmpeg_bin, source)
+    returncode, stderr_text = _run_extract_with_progress(cmd, duration_sec=duration)
+    if returncode != 0:
         out.unlink(missing_ok=True)
-        stderr = proc.stderr.strip() or "(пустой stderr)"
+        stderr = stderr_text.strip() or "(пустой stderr)"
         raise ExtractAudioError(
-            f"ffmpeg не смог извлечь аудио из {source} (код {proc.returncode}): {stderr}"
+            f"ffmpeg не смог извлечь аудио из {source} (код {returncode}): {stderr}"
         )
     return out

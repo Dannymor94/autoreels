@@ -496,7 +496,8 @@ def _archive_video(video: Path, archive_dir: Path) -> None:
 # ----------------------------------------------------- этапы конвейера `run` (блоки)
 
 def _stage_extract_audio(video, *, render_cfg, cache_dir, ffmpeg, source_sha=None):
-    print("извлекаю аудио…", flush=True)
+    # Прогресс печатает сам extract_audio (живой бар по времени ffmpeg) — здесь без
+    # статичной строки, иначе она осталась бы висеть над баром.
     return extract_audio(video, render_cfg.audio_extract, cache_dir,
                          ffmpeg=ffmpeg, source_sha=source_sha)
 
