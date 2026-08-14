@@ -632,6 +632,84 @@ def test_calibrate_batch_warns_when_manifest_already_exists(tmp_path, monkeypatc
     assert "повторный run" in capsys.readouterr().err
 
 
+# ------------------------------------------------- разрешение пути к ffmpeg (машинные дефолты)
+
+def _rcfg(ffmpeg="ffmpeg"):
+    from types import SimpleNamespace
+    return SimpleNamespace(ffmpeg=ffmpeg)
+
+
+def test_resolve_ffmpeg_flag_beats_env_beats_config(monkeypatch):
+    """Приоритет: флаг > env RENDER_FFMPEG > render.local.yaml/render.yaml (config)."""
+    monkeypatch.setenv("RENDER_FFMPEG", "/env/ffmpeg")
+    # флаг выигрывает
+    assert cli.resolve_ffmpeg("/flag/ffmpeg", render_cfg=_rcfg("/cfg/ffmpeg")) == "/flag/ffmpeg"
+    # без флага — env
+    assert cli.resolve_ffmpeg(None, render_cfg=_rcfg("/cfg/ffmpeg")) == "/env/ffmpeg"
+
+
+def test_resolve_ffmpeg_config_used_when_no_flag_no_env(monkeypatch):
+    """render.local.yaml (config.ffmpeg ≠ дефолт) применяется без флага/env — машинный дефолт."""
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    assert cli.resolve_ffmpeg(None, render_cfg=_rcfg(r"D:\ffmpeg\bin\ffmpeg.exe")) == \
+        r"D:\ffmpeg\bin\ffmpeg.exe"
+
+
+def test_resolve_ffmpeg_uses_path_when_nothing_set(monkeypatch):
+    """Ничего не задано, ffmpeg в PATH → возвращаем «ffmpeg» (команда), не абсолютный путь."""
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    got = cli.resolve_ffmpeg(None, render_cfg=_rcfg("ffmpeg"),
+                             which=lambda b: "/usr/bin/ffmpeg" if b == "ffmpeg" else None)
+    assert got == "ffmpeg"
+
+
+def test_resolve_ffmpeg_autodiscovers_typical_path(monkeypatch):
+    """Нет флага/env/config и НЕ в PATH → автопоиск типичных мест (работает без настройки)."""
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    cands = [r"D:\ffmpeg\bin\ffmpeg.exe", "/usr/local/bin/ffmpeg"]
+    got = cli.resolve_ffmpeg(
+        None, render_cfg=_rcfg("ffmpeg"),
+        which=lambda b: None,                              # не в PATH
+        candidates=cands,
+        is_file=lambda p: str(p) == r"D:\ffmpeg\bin\ffmpeg.exe",
+    )
+    assert got == r"D:\ffmpeg\bin\ffmpeg.exe"
+
+
+def test_resolve_ffmpeg_not_found_clear_error(monkeypatch):
+    """Не найден нигде → FFmpegNotFoundError: где искал + как задать (флаг/env/render.local.yaml)."""
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    with pytest.raises(cli.FFmpegNotFoundError) as e:
+        cli.resolve_ffmpeg(None, render_cfg=_rcfg("ffmpeg"),
+                           which=lambda b: None,
+                           candidates=[r"D:\ffmpeg\bin\ffmpeg.exe"],
+                           is_file=lambda p: False)
+    msg = str(e.value)
+    assert "Искал" in msg and r"D:\ffmpeg\bin\ffmpeg.exe" in msg    # где искал
+    assert "RENDER_FFMPEG" in msg and "render.local.yaml" in msg    # как задать
+    assert "--ffmpeg" in msg
+
+
+def test_resolve_ffprobe_flag_and_env(monkeypatch):
+    monkeypatch.delenv("RENDER_FFPROBE", raising=False)
+    assert cli.resolve_ffprobe("/flag/ffprobe", which=lambda b: None) == "/flag/ffprobe"
+    monkeypatch.setenv("RENDER_FFPROBE", "/env/ffprobe")
+    assert cli.resolve_ffprobe(None, which=lambda b: None) == "/env/ffprobe"
+
+
+def test_resolve_ffprobe_derives_sibling_of_ffmpeg(monkeypatch):
+    """ffprobe не в PATH → берём соседний бинарь по каталогу резолвнутого ffmpeg.
+
+    Путь нативный для ОС теста (на Windows Path сам разберёт D:\\...\\ffmpeg.exe)."""
+    monkeypatch.delenv("RENDER_FFPROBE", raising=False)
+    got = cli.resolve_ffprobe(
+        None, ffmpeg="/opt/ffmpeg/bin/ffmpeg",
+        which=lambda b: None,
+        is_file=lambda p: str(p) == "/opt/ffmpeg/bin/ffprobe",
+    )
+    assert got == "/opt/ffmpeg/bin/ffprobe"               # рядом с ffmpeg
+
+
 # --------------------------------------------------------------- render: глобит manifests/
 
 def test_render_reads_manifest_and_calls_render_crop(monkeypatch, tmp_path):

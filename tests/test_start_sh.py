@@ -62,3 +62,41 @@ def test_lib_mode_does_not_launch_menu(tmp_path):
     """Sourcing в lib-режиме не запускает меню (только определения функций)."""
     r = _bash(f'AUTOREELS_START_LIB=1 source "{START}"', cwd=tmp_path)
     assert "═══ autoreels" not in r.stdout
+
+
+# ------------------------------------------------- ffmpeg: разовая настройка render.local.yaml
+
+def test_ffmpeg_in_local_true_when_set(tmp_path):
+    """_start_ffmpeg_in_local: True если render.local.yaml задаёт ffmpeg:."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "render.local.yaml").write_text("ffmpeg: D:/ffmpeg/bin/ffmpeg.exe\n")
+    r = _lib(f'_start_ffmpeg_in_local "{tmp_path}" && echo YES || echo NO')
+    assert r.stdout.strip() == "YES"
+
+
+def test_ffmpeg_in_local_false_when_absent(tmp_path):
+    """Нет файла / нет ключа ffmpeg: → False."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "render.local.yaml").write_text("encoder:\n  profile: hevc\n")
+    r = _lib(f'_start_ffmpeg_in_local "{tmp_path}" && echo YES || echo NO')
+    assert r.stdout.strip() == "NO"
+
+
+def test_write_ffmpeg_local_creates_entry(tmp_path):
+    """_start_write_ffmpeg_local пишет ffmpeg: <путь> в render.local.yaml."""
+    (tmp_path / "config").mkdir()
+    r = _lib(f'_start_write_ffmpeg_local "{tmp_path}" "D:/ffmpeg/bin/ffmpeg.exe"')
+    assert r.returncode == 0, r.stderr
+    content = (tmp_path / "config" / "render.local.yaml").read_text()
+    assert "ffmpeg: D:/ffmpeg/bin/ffmpeg.exe" in content
+
+
+def test_write_ffmpeg_local_does_not_clobber_existing(tmp_path):
+    """Если ffmpeg: уже задан — не перезаписываем (разовая настройка не портит ручную)."""
+    (tmp_path / "config").mkdir()
+    f = tmp_path / "config" / "render.local.yaml"
+    f.write_text("ffmpeg: /my/custom/ffmpeg\n")
+    _lib(f'_start_write_ffmpeg_local "{tmp_path}" "D:/other/ffmpeg.exe"')
+    content = f.read_text()
+    assert "/my/custom/ffmpeg" in content
+    assert "D:/other/ffmpeg.exe" not in content

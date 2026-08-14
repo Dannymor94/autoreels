@@ -12,6 +12,8 @@
 # --- Системник Windows (AMD, ffmpeg вне PATH) ---
 # Профили кодеков в render.yaml уже нацелены на AMF (h264_amf/hevc_amf/av1_amf) — на
 # системнике достаточно указать путь к ffmpeg. Профиль по умолчанию — hevc (компактный).
+# Автопоиск: если ffmpeg не задан, ищется в PATH и типичных местах (D:\ffmpeg\bin\ffmpeg.exe,
+# C:\ffmpeg\bin\, /usr/local/bin). Не найден → внятная ошибка (где искал + как задать).
 # ffmpeg: D:\ffmpeg\bin\ffmpeg.exe    # путь к бинарю; на Windows часто вне PATH
 # encoder:
 #   profile: h264                     # сменить активный профиль (h264 | hevc | av1)

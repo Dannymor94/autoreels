@@ -62,6 +62,12 @@ class RunError(Exception):
 
 
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
+class FFmpegNotFoundError(Exception):
+    """ffmpeg не найден (ни флаг/env/render.local.yaml, ни PATH, ни типичные пути).
+
+    Сообщение перечисляет, где искали, и как задать путь (флаг / env / render.local.yaml)."""
+
+
 _KNOWN_ERRORS = (
     ExtractAudioError,
     TranscriptionError,
@@ -72,6 +78,7 @@ _KNOWN_ERRORS = (
     CalibrationError,
     CalibrateError,
     RunError,
+    FFmpegNotFoundError,
     FileNotFoundError,
 )
 
@@ -681,6 +688,84 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root) -> None:
         _warn(f"git недоступен: {e}")
 
 
+# ------------------------------------------------------------- разрешение пути к ffmpeg
+
+def _ffmpeg_candidates() -> list[str]:
+    """Типичные места ffmpeg вне PATH. Windows-пути безвредны на Unix (is_file→False) и
+    наоборот — порядок зависит от ОС (сначала «родные» пути машины)."""
+    win = [r"D:\ffmpeg\bin\ffmpeg.exe", r"C:\ffmpeg\bin\ffmpeg.exe",
+           r"C:\Program Files\ffmpeg\bin\ffmpeg.exe"]
+    unix = ["/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/bin/ffmpeg"]
+    return (win + unix) if os.name == "nt" else (unix + win)
+
+
+def resolve_ffmpeg(cli_flag=None, *, render_cfg, which=None, candidates=None, is_file=None) -> str:
+    """Разрешить путь к ffmpeg. Приоритет: флаг > env RENDER_FFMPEG > render.local.yaml >
+    render.yaml (последние два — уже слиты в `render_cfg.ffmpeg` через deep-merge).
+
+    Явно заданный источник возвращается как есть (существование проверит downstream —
+    так пути с другой машины не роняют резолв). Если НИЧЕГО не задано (или дефолт «ffmpeg»):
+    сначала PATH, затем автопоиск типичных мест (работает без настройки), затем —
+    FFmpegNotFoundError с перечнем, где искали, и как задать путь."""
+    which = which if which is not None else shutil.which
+    is_file = is_file if is_file is not None else (lambda p: Path(str(p)).is_file())
+    candidates = candidates if candidates is not None else _ffmpeg_candidates()
+
+    config_value = getattr(render_cfg, "ffmpeg", "ffmpeg")
+    explicit = cli_flag or os.environ.get("RENDER_FFMPEG") or (
+        config_value if config_value and config_value != "ffmpeg" else None
+    )
+    if explicit:
+        return explicit
+    if which("ffmpeg"):
+        return "ffmpeg"
+    for cand in candidates:
+        if is_file(cand):
+            return cand
+    searched = ["ffmpeg (в PATH)"] + list(candidates)
+    raise FFmpegNotFoundError(
+        "ffmpeg не найден. Искал: " + ", ".join(searched) + ".\n"
+        "Задай путь одним из способов (приоритет сверху вниз):\n"
+        "  • флаг:  --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        "  • env:   RENDER_FFMPEG=D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        "  • файл:  config/render.local.yaml → ffmpeg: D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        "или установи ffmpeg в PATH."
+    )
+
+
+def resolve_ffprobe(cli_flag=None, *, ffmpeg=None, which=None, is_file=None) -> str:
+    """Разрешить ffprobe: флаг > env RENDER_FFPROBE > PATH > сосед резолвнутого ffmpeg.
+
+    ffprobe почти всегда лежит рядом с ffmpeg — если его нет в PATH, берём соседний бинарь
+    по каталогу ffmpeg. Иначе — «ffprobe» (downstream даст ошибку, если и его нет)."""
+    which = which if which is not None else shutil.which
+    is_file = is_file if is_file is not None else (lambda p: Path(str(p)).is_file())
+    explicit = cli_flag or os.environ.get("RENDER_FFPROBE")
+    if explicit:
+        return explicit
+    if which("ffprobe"):
+        return "ffprobe"
+    if ffmpeg and (("/" in ffmpeg) or ("\\" in ffmpeg)):
+        sibling = Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)
+        if is_file(sibling):
+            return str(sibling)
+    return "ffprobe"
+
+
+def _cli_resolve_ffmpeg(flag, *, root=".") -> str:
+    """Разрешить ffmpeg для CLI-команд (run/transcribe/calibrate), которые сами render_cfg
+    не грузят. Внятная FFmpegNotFoundError, если не найден (ловится в main → чистое сообщение).
+
+    Если render.yaml не загрузился (запуск не из корня проекта) — деградируем к дефолту
+    (ffmpeg='ffmpeg'): резолв всё равно учтёт флаг/env/PATH/автопоиск."""
+    from types import SimpleNamespace
+    try:
+        render_cfg = load_render_config(Path(root) / "config" / "render.yaml")
+    except (ConfigError, OSError):
+        render_cfg = SimpleNamespace(ffmpeg="ffmpeg")
+    return resolve_ffmpeg(flag, render_cfg=render_cfg)
+
+
 # ------------------------------------------------------------------------- команды
 
 def cmd_run(
@@ -941,8 +1026,8 @@ def cmd_render(
     validate_profile(prof_name, render_cfg.encoder.profiles, where="--profile/RENDER_PROFILE")
     # Отображаемый кодек: явный encoder переопределяет кодек профиля (Mac-дев без AMF).
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.profiles[prof_name].codec
-    # ffmpeg: флаг > env RENDER_FFMPEG > render.yaml (+ render.local.yaml override).
-    effective_ffmpeg = ffmpeg or os.environ.get("RENDER_FFMPEG") or render_cfg.ffmpeg
+    # ffmpeg: флаг > env RENDER_FFMPEG > render.local.yaml > render.yaml → автопоиск.
+    effective_ffmpeg = resolve_ffmpeg(ffmpeg, render_cfg=render_cfg)
     all_outputs: list[Path] = []
     skipped_no_video: list[str] = []
     skipped_done: list[str] = []
@@ -1748,10 +1833,10 @@ def _build_parser():
                     help="псевдоним --all")
     pc.add_argument("--setup", default=None,
                     help="метка сетапа — имя позиции съёмки (→ setup_id в манифесте)")
-    pc.add_argument("--ffmpeg", default="ffmpeg",
-                    help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
-    pc.add_argument("--ffprobe", default="ffprobe",
-                    help="путь к ffprobe (по умолчанию: ffprobe из PATH)")
+    pc.add_argument("--ffmpeg", default=None,
+                    help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
+    pc.add_argument("--ffprobe", default=None,
+                    help="путь к ffprobe (иначе env RENDER_FFPROBE / PATH / рядом с ffmpeg)")
     pc.add_argument("--root", default=".",
                     help="корень проекта (по умолчанию: .)")
     pc.add_argument("--port", type=int, default=8765,
@@ -1781,8 +1866,8 @@ def _build_parser():
     pr.add_argument("video", nargs="?", default=None, metavar="видео|url",
                     help="путь к видео (в т.ч. вне inputs/ — скопируется) или http/https-"
                          "ссылка (yt-dlp); без аргумента — batch: все *.mp4 из inputs/")
-    pr.add_argument("--ffmpeg", default="ffmpeg",
-                    help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
+    pr.add_argument("--ffmpeg", default=None,
+                    help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
     pr.add_argument("--no-push", action="store_true",
                     help="не коммитить/пушить манифесты в git (по умолчанию каждый успешный "
                          "манифест сразу пушится на системник)")
@@ -1813,8 +1898,8 @@ def _build_parser():
                           "Полезно когда видео на другой машине, а транскрипт уже закэширован.")
     ptx.add_argument("--format", choices=["text", "srt", "vtt", "json"], default="text",
                      help="формат вывода (по умолчанию: text — под контент)")
-    ptx.add_argument("--ffmpeg", default="ffmpeg",
-                     help="путь к ffmpeg (по умолчанию: ffmpeg из PATH)")
+    ptx.add_argument("--ffmpeg", default=None,
+                     help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
 
     pd = sub.add_parser(
         "render",
@@ -1833,8 +1918,8 @@ def _build_parser():
                     help="кодек-профиль: h264 (совместимый) | hevc (компактный, дефолт) | av1 (эксп.)")
     pd.add_argument("--encoder", default=None,
                     help="видеокодек ffmpeg (переопределяет кодек профиля; h264_amf — AMD, libx264 — CPU)")
-    pd.add_argument("--ffmpeg", default="ffmpeg",
-                    help="путь к ffmpeg-бинарю (Windows: D:\\ffmpeg\\bin\\ffmpeg.exe)")
+    pd.add_argument("--ffmpeg", default=None,
+                    help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
 
     prs = sub.add_parser(
         "resume",
@@ -1923,15 +2008,19 @@ def main(argv=None) -> int:
     try:
         if args.cmd == "calibrate":
             if args.all:
-                cmd_calibrate_batch(root=args.root, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe)
+                _ff = _cli_resolve_ffmpeg(args.ffmpeg, root=args.root)
+                cmd_calibrate_batch(root=args.root, ffmpeg=_ff,
+                                    ffprobe=resolve_ffprobe(args.ffprobe, ffmpeg=_ff))
             elif args.video:
-                cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
-                              ffprobe=args.ffprobe, port=args.port)
+                _ff = _cli_resolve_ffmpeg(args.ffmpeg, root=args.root)
+                cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=_ff,
+                              ffprobe=resolve_ffprobe(args.ffprobe, ffmpeg=_ff), port=args.port)
                 _warn_if_manifest_stale(Path(args.video), root=args.root)
             else:
                 print("ошибка: укажите видео или используйте --all", file=sys.stderr)
                 return 1
         elif args.cmd == "run":
+            ffmpeg = _cli_resolve_ffmpeg(args.ffmpeg)   # флаг>env>local.yaml>render.yaml>автопоиск
             if args.video:
                 if _is_url(args.video):
                     if _is_yandex_disk(args.video):
@@ -1940,13 +2029,13 @@ def main(argv=None) -> int:
                         video = _download_url(args.video, Path("inputs"))
                 else:
                     video = _ingest_source(Path(args.video), Path("inputs"))
-                cmd_run(video, ffmpeg=args.ffmpeg, push=not args.no_push)
+                cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push)
             else:
-                _, failed = cmd_run_batch(ffmpeg=args.ffmpeg, push=not args.no_push)
+                _, failed = cmd_run_batch(ffmpeg=ffmpeg, push=not args.no_push)
                 if failed:
                     return 1
         elif args.cmd == "transcribe":
-            # Режим --from-cache: транскрипт из кэша без видео и Whisper.
+            # Режим --from-cache: транскрипт из кэша без видео и Whisper → ffmpeg не нужен.
             # source опционален (только для именования файла).
             if args.from_cache:
                 cmd_transcribe(
@@ -1954,6 +2043,7 @@ def main(argv=None) -> int:
                     from_cache=args.from_cache,
                 )
             else:
+                ffmpeg = _cli_resolve_ffmpeg(args.ffmpeg)
                 # Источник — как у run, но локальный файл читается НА МЕСТЕ (рендера нет →
                 # копировать в inputs/ незачем); url/Яндекс.Диск скачиваются в inputs/.
                 if _is_url(args.source):
@@ -1963,7 +2053,7 @@ def main(argv=None) -> int:
                         src = _download_url(args.source, Path("inputs"))
                 else:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
-                cmd_transcribe(src, fmt=args.format, ffmpeg=args.ffmpeg)
+                cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "resume":
