@@ -411,7 +411,7 @@ class ProviderPool:
             order = [i for i in self._candidate_order() if not self._members[i].disabled]
             available = [i for i in order if self._members[i].available_at <= now]
             if not available:
-                self._wait_for_earliest(now)
+                self._wait_for_earliest()
                 continue
             for idx in available:
                 m = self._members[idx]
@@ -440,19 +440,34 @@ class ProviderPool:
         member.available_at = now + max(retry_after, min_sec)
         member.reason = "exhausted" if isinstance(exc, ProviderExhausted) else "throttled"
 
-    def _wait_for_earliest(self, now: float) -> None:
-        """Все АКТИВНЫЕ провайдеры в лимите → пауза до ближайшего освобождения, с оценкой."""
+    def _wait_for_earliest(self) -> None:
+        """Все АКТИВНЫЕ провайдеры в лимите → ЖИВАЯ пауза до ближайшего освобождения.
+
+        Обновляемая строка (\\r) с обратным отсчётом и спиннером, тик ≈1с. Как только
+        провайдер освобождается — сразу сообщаем «▶ … доступен» и выходим (не досыпаем).
+        Оценка пересчитывается на КАЖДОМ тике: если пауза затянулась (кулдаун продлили) —
+        показываем новую оценку, не молчим. Non-TTY печатает реже (print_provider_wait).
+        """
+        from autoreels.core.progress import print_provider_ready, print_provider_wait
         active = [m for m in self._members if not m.disabled]
-        earliest = min(m.available_at for m in active)
-        wait = max(0.0, earliest - now)
-        details = ", ".join(
-            f"{m.name} через ~{max(0.0, m.available_at - now):.0f}с" for m in active
-        )
-        print(
-            f"\n  ⏸ все провайдеры в лимите — пауза ~{wait:.0f}с ({details})",
-            flush=True,
-        )
-        self._sleep(wait)
+        if not active:
+            return
+        print(flush=True)   # своя строка под \r-отсчёт (не затирать прогресс R0 сверху)
+        tick = 0
+        while True:
+            now = self._clock()
+            ready = [m for m in active if m.available_at <= now]
+            if ready:
+                print_provider_ready(ready[0].name)
+                return
+            earliest = min(m.available_at for m in active)
+            remaining = max(0.0, earliest - now)
+            details = " · ".join(
+                f"{m.name} через ~{max(0.0, m.available_at - now):.0f}с" for m in active
+            )
+            print_provider_wait(remaining, details, tick)
+            tick += 1
+            self._sleep(min(1.0, remaining) if remaining > 0 else 1.0)
 
     def preflight(self) -> None:
         """Проверить доступность моделей ДО прогона (лёгкий GET /models на провайдера).

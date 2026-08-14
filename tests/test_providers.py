@@ -444,7 +444,7 @@ def test_pool_both_limited_sleeps_until_earliest(capsys):
     assert result == "groq-ok"
     assert clock.t == 30.0, "пул должен проспать до ближайшего (Groq, 30с)"
     out = capsys.readouterr().out
-    assert "лимит" in out.lower() or "пауза" in out.lower()
+    assert "ждём провайдеров" in out and "осталось" in out   # живой отсчёт паузы
 
 
 def test_pool_both_daily_exhausted_waits_and_recovers(capsys):
@@ -465,6 +465,89 @@ def test_pool_hard_error_propagates():
     pool, _ = _pool(groq)
     with pytest.raises(ProviderError, match="GROQ_API_KEY"):
         pool.complete([])
+
+
+# ------------------------------------------------ живая пауза «все провайдеры в лимите»
+
+def test_pool_wait_shows_live_countdown(monkeypatch, capsys):
+    """Пауза живая: обратный отсчёт обновляется каждую секунду (~3с → ~2с → ~1с), спиннер."""
+    import autoreels.core.progress as prog
+    monkeypatch.setattr(prog, "is_tty", lambda: True)      # TTY: строка на каждый тик
+    groq = _ScriptedProvider("Groq", [])
+    openr = _ScriptedProvider("OpenRouter", [])
+    pool, clock = _pool(groq, openr)
+    pool._members[0].available_at = 3.0
+    pool._members[1].available_at = 5.0
+
+    pool._wait_for_earliest()
+
+    out = capsys.readouterr().out
+    assert "ждём провайдеров" in out
+    assert "осталось ~3с" in out and "осталось ~2с" in out and "осталось ~1с" in out
+    assert "Groq через" in out and "OpenRouter через" in out   # ETA по каждому
+    assert clock.t == 3.0                                       # проспали ровно до ближайшего
+
+
+def test_pool_wait_stops_when_provider_frees(monkeypatch, capsys):
+    """Провайдер освободился → сразу «▶ … доступен, продолжаю», не досыпаем до второго."""
+    import autoreels.core.progress as prog
+    monkeypatch.setattr(prog, "is_tty", lambda: True)
+    groq = _ScriptedProvider("Groq", [])
+    openr = _ScriptedProvider("OpenRouter", [])
+    pool, clock = _pool(groq, openr)
+    pool._members[0].available_at = 10.0    # Groq ещё долго
+    pool._members[1].available_at = 2.0     # OpenRouter освободится первым
+
+    pool._wait_for_earliest()
+
+    out = capsys.readouterr().out
+    assert "OpenRouter доступен" in out and "продолжаю" in out
+    assert clock.t == 2.0                    # вышли на OpenRouter, а не ждали Groq (10с)
+
+
+def test_pool_wait_recomputes_when_pause_extends(monkeypatch, capsys):
+    """Пауза затянулась (кулдаун продлили в процессе) → пересчёт оценки, не молчим."""
+    import autoreels.core.progress as prog
+    monkeypatch.setattr(prog, "is_tty", lambda: True)
+    groq = _ScriptedProvider("Groq", [])
+    openr = _ScriptedProvider("OpenRouter", [])
+
+    clock = _Clock()
+    bumped = [False]
+
+    def sleeper(sec):
+        clock.advance(sec)
+        # на 2-й секунде «провайдер не отпустил» — продлил кулдаун Groq с 2с до 5с
+        if not bumped[0] and clock.t >= 2.0:
+            pool._members[0].available_at = 5.0
+            bumped[0] = True
+
+    pool = ProviderPool([groq, openr], strategy="adaptive", clock=clock, sleep=sleeper)
+    pool._members[0].available_at = 2.0
+    pool._members[1].available_at = 5.0
+
+    pool._wait_for_earliest()
+
+    out = capsys.readouterr().out
+    assert "осталось ~2с" in out       # начальная оценка
+    assert "осталось ~3с" in out       # пересчёт вверх после продления (5.0 - clock 2.0)
+    assert clock.t == 5.0              # дождались реального освобождения
+
+
+def test_pool_wait_non_tty_does_not_spam(monkeypatch, capsys):
+    """Non-TTY: печатать не каждую секунду (раз в N тиков) — не спамить лог."""
+    import autoreels.core.progress as prog
+    monkeypatch.setattr(prog, "is_tty", lambda: False)
+    groq = _ScriptedProvider("Groq", [])
+    pool, clock = _pool(groq)
+    pool._members[0].available_at = 12.0    # 12 тиков
+
+    pool._wait_for_earliest()
+
+    out = capsys.readouterr().out
+    wait_lines = [ln for ln in out.splitlines() if "ждём провайдеров" in ln]
+    assert 0 < len(wait_lines) <= 4          # не 12 строк (throttle раз в 5 тиков → ~3)
+    assert "доступен" in out
 
 
 def test_pool_exposes_last_provider_for_progress():

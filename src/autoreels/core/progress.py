@@ -142,6 +142,36 @@ def throttle_wait(sec: float, source: str = "Groq") -> None:
         print(msg, flush=True)
 
 
+def format_provider_wait(remaining_sec: float, details: str, tick: int) -> str:
+    """Строка живой паузы «все провайдеры в лимите»: обратный отсчёт + ETA по каждому + спиннер."""
+    tail = f" · {details}" if details else ""
+    return f"⏸ ждём провайдеров: осталось ~{max(0.0, remaining_sec):.0f}с{tail} {spinner(tick)}"
+
+
+def print_provider_wait(remaining_sec: float, details: str, tick: int, *, every: int = 5) -> None:
+    """Обновить ОДНУ строку паузы ожидания провайдеров (тот же \\r-механизм, что у скачивания).
+
+    TTY: `\\r` + очистка до конца строки, БЕЗ `\\n` — живой отсчёт перезаписывается на месте.
+    Non-TTY (пайп/лог): строка раз в `every` тиков (≈раз в N секунд) — не спамить.
+    """
+    line = format_provider_wait(remaining_sec, details, tick)
+    if is_tty():
+        sys.stdout.write(f"\r{_CLEAR_EOL}{line}")
+        sys.stdout.flush()
+    elif tick % every == 0:
+        print(line, flush=True)
+
+
+def print_provider_ready(name: str) -> None:
+    """Закрыть строку паузы: провайдер освободился, продолжаем (закрывает \\r-строку через \\n)."""
+    line = f"▶ {name} доступен, продолжаю"
+    if is_tty():
+        sys.stdout.write(f"\r{_CLEAR_EOL}{line}\n")
+        sys.stdout.flush()
+    else:
+        print(line, flush=True)
+
+
 def chunk_start(label: str, total: int, est_sec: float | None = None) -> None:
     """Напечатать банер перед стартом чанкинга.
 
