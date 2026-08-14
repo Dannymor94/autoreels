@@ -447,6 +447,53 @@ def test_run_commits_calibration_with_manifest(monkeypatch, tmp_path):
     assert str(captured["calib"]).endswith(".json")
 
 
+def test_git_sync_disabled_on_windows(monkeypatch):
+    """Системник Windows — потребитель: авто-git-синхронизация выключена по умолчанию."""
+    monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    assert cli._should_git_sync() is False
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    assert cli._should_git_sync() is True
+
+
+def test_git_sync_env_override(monkeypatch):
+    """AUTOREELS_GIT_SYNC=1/0 переопределяет платформенный дефолт."""
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setenv("AUTOREELS_GIT_SYNC", "1")
+    assert cli._should_git_sync() is True                 # вкл на Windows явно
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setenv("AUTOREELS_GIT_SYNC", "0")
+    assert cli._should_git_sync() is False                # выкл на Mac явно
+
+
+def test_commit_push_manifest_skipped_on_windows(monkeypatch, tmp_path):
+    """На Windows _commit_push_manifest не трогает git (не пишет кроп/манифест в гит)."""
+    monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    mf = tmp_path / "m" / "v.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_manifest(mf, 3, root=tmp_path)
+
+    assert git.calls == []                                 # git не дёргался
+
+
+def test_commit_push_calibrations_skipped_on_windows(monkeypatch, tmp_path):
+    """На Windows _commit_push_calibrations не пушит калибровки (системник — потребитель)."""
+    monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    (tmp_path / "calibrations").mkdir()
+
+    cli._commit_push_calibrations(root=tmp_path)
+
+    assert git.calls == []
+
+
 def test_commit_push_manifest_git_failure_warns_not_raises(monkeypatch, tmp_path, capsys):
     """Сбой push (нет сети/конфликт) → предупреждение, НЕ исключение (прогон продолжается)."""
     monkeypatch.setattr(cli, "_run_git", _FakeGit(fail_on="push"))

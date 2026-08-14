@@ -630,6 +630,20 @@ def _write_manifest(manifest, manifests_dir) -> Path:
 
 # ----------------------------------------------------------- авто-коммит манифеста (per-video)
 
+def _should_git_sync() -> bool:
+    """Авто-коммит/пуш в git (транспорт Mac → системник) — только на машине-ИСТОЧНИКЕ.
+
+    Системник Windows — ПОТРЕБИТЕЛЬ: git pull + рендер из локальных файлов, пушить ему
+    незачем (нет удалёнки/креды, а calibrate/run зря дёргали git). По умолчанию: Mac/Linux —
+    да, Windows — нет. Явное переопределение: AUTOREELS_GIT_SYNC=1 (вкл) / =0 (выкл)."""
+    v = os.environ.get("AUTOREELS_GIT_SYNC")
+    if v == "1":
+        return True
+    if v == "0":
+        return False
+    return not sys.platform.startswith("win")
+
+
 def _run_git(args, *, root, timeout=None):
     """Запустить git в репозитории `root` НЕинтерактивно (не зависать на вводе).
 
@@ -655,6 +669,8 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path
     системник (status там видит кроп; calibrations/ теперь версионируются). Ошибка git
     (нет сети, конфликт, passphrase) НЕ роняет прогон: предупреждаем и продолжаем.
     """
+    if not _should_git_sync():
+        return   # системник (Windows) — потребитель: не коммитим, только рендер из локальных
     import subprocess
     root = Path(root)
     manifest_path = Path(manifest_path)
@@ -704,6 +720,8 @@ def _commit_push_calibrations(*, root) -> None:
     Калибруешь на Mac (ar c / меню) → калибровки уезжают на системник (там ar r = git pull),
     и status видит ручной кроп. _work/ (кадры-PNG) в .gitignore и не попадают. Ошибка git не
     роняет команду — калибровки уже на диске, предупреждаем и продолжаем."""
+    if not _should_git_sync():
+        return   # системник (Windows) — потребитель калибровок (git pull), не пушим
     import subprocess
     root = Path(root)
     if not (root / "calibrations").is_dir():
