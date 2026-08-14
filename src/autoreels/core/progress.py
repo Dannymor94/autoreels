@@ -16,8 +16,7 @@ import sys
 
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _DONE = "✓"
-_LINE_WIDTH = 72   # минимальная ширина строки (заполняется пробелами на TTY)
-_CLEAR_EOL = "\033[K"   # ANSI «стереть до конца строки» — вместо добивки пробелами
+_CLEAR_EOL = "\033[K"   # ANSI «стереть до конца строки» — все \r-строки чистят хвост им
 
 _BAR_WIDTH = 20         # ячеек в прогресс-баре по умолчанию
 _BAR_FILL = "█"
@@ -75,12 +74,11 @@ def chunk_progress(
     msg = f"  {label}: {bar} {pct}% · {i}/{total} {mark}{extra_str}"
 
     if is_tty():
-        # Дополняем пробелами, чтобы стереть хвост предыдущей строки
-        padded = f"\r{msg:<{_LINE_WIDTH}}"
-        if done:
-            print(padded.rstrip(), flush=True)   # с newline
-        else:
-            print(padded, end="", flush=True)    # без newline
+        # \r + очистка до конца строки (\033[K) — стирает хвост длинной предыдущей строки
+        # (иначе «найдено 16 моментов» + остаток → «…моментовентов»). done закрывает строку \n.
+        end = "\n" if done else ""
+        sys.stdout.write(f"\r{_CLEAR_EOL}{msg}{end}")
+        sys.stdout.flush()
     else:
         print(msg, flush=True)
 
@@ -137,7 +135,8 @@ def throttle_wait(sec: float, source: str = "Groq") -> None:
     """
     msg = f"  ждём {source} (rate limit, ~{sec:.0f}с)…"
     if is_tty():
-        print(f"\r{msg:<{_LINE_WIDTH}}", end="", flush=True)
+        sys.stdout.write(f"\r{_CLEAR_EOL}{msg}")   # очистка до конца строки — без хвоста
+        sys.stdout.flush()
     else:
         print(msg, flush=True)
 

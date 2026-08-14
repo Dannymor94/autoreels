@@ -72,6 +72,28 @@ def test_chunk_progress_tty_in_progress_no_trailing_newline(monkeypatch, capsys)
     assert not out.endswith("\n")
 
 
+def test_chunk_progress_tty_clears_to_eol(monkeypatch, capsys):
+    """Каждая \\r-строка несёт очистку до конца строки (\\033[K) — хвост длинной строки стирается."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.chunk_progress("R0", 4, 5, extra="via OpenRouter · найдено 16 моментов")   # длинная
+    P.chunk_progress("R0", 5, 5, extra="найдено 16 моментов", done=True)          # короче
+    out = capsys.readouterr().out
+    assert "\033[K" in out                       # очистка присутствует
+    # финальная строка не добивается пробелами (не остаётся хвостом «…моментовентов»)
+    last = out.rsplit("\r", 1)[-1]
+    assert "   " not in last                      # нет длинного хвоста пробелов
+
+
+def test_chunk_progress_short_after_long_no_leftover(monkeypatch, capsys):
+    """Короткая строка после длинной: каждая \\r-запись начинается с очистки (\\033[K) до текста."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    P.chunk_progress("транскрипция", 9, 10, extra="очень длинный хвост строки прогресса тут")
+    P.chunk_progress("транскрипция", 10, 10, done=True)
+    out = capsys.readouterr().out
+    # обе записи вида \r\033[K<текст> — очистка ДО текста в каждой
+    assert out.count("\r\033[K") == 2
+
+
 # ------------------------------------------------------------------ unit: render_bar
 
 def test_render_bar_empty_at_zero():
