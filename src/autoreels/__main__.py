@@ -1118,6 +1118,53 @@ def _calibration_kind(calibrations_dir: Path, sha: str) -> str:
         return "corrupt"
 
 
+def _manifest_calibration_desync(manifest, calibrations_dir) -> str | None:
+    """Кроп в манифесте разошёлся с текущей калибровкой видео → манифест устарел.
+
+    Кроп едет на системник ВНУТРИ манифеста (calibrations/ локальны, в .gitignore — системнику
+    не нужны). Если видео откалибровали уже ПОСЛЕ run — калибровка обновилась, а манифест нет:
+    рендер возьмёт старый кроп из манифеста. Возвращает текст «нужен повторный run» или None
+    (синхронно, либо файла калибровки нет — сравнивать не с чем)."""
+    path = calibration_path(Path(calibrations_dir), manifest.source_sha256)
+    if not path.is_file():
+        return None
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        calib_crop = rec["crop"]
+    except (OSError, json.JSONDecodeError, KeyError):
+        return None
+    if manifest.setup.crop.model_dump() == calib_crop:
+        return None
+    stem = Path(manifest.source).stem
+    calib_is_manual = not (rec.get("auto") or rec.get("setup_label") == "auto")
+    if manifest.setup.setup_id == "auto" and calib_is_manual:
+        return (f"манифест {stem} создан с автокропом, но появилась ручная калибровка "
+                f"→ нужен повторный run (ar go)")
+    return (f"манифест {stem}: кроп устарел (калибровка изменилась) "
+            f"→ нужен повторный run (ar go)")
+
+
+def _warn_if_manifest_stale(video, *, root, calibrations_dir=None) -> str | None:
+    """После calibrate: если для видео УЖЕ есть манифест с устаревшим кропом → предупредить.
+
+    Ручная калибровка после run не применяется сама — манифест несёт старый (авто)кроп.
+    Печатает предупреждение в stderr, возвращает его текст (или None, если манифеста нет/синхрон)."""
+    root = Path(root)
+    stem = Path(video).stem
+    mf = root / "manifests" / f"{stem}.json"
+    if not mf.is_file():
+        return None
+    try:
+        manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    cal_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
+    msg = _manifest_calibration_desync(manifest, cal_dir)
+    if msg:
+        print(f"\n  ⚠ {msg}", file=sys.stderr, flush=True)
+    return msg
+
+
 def _ask_batch_action(name: str, kind: str) -> str:
     """Интерактивный промпт для одного видео в calibrate --all. Точка подмены в тестах."""
     if kind == "auto":
@@ -1196,6 +1243,7 @@ def cmd_calibrate_batch(
 
             elif action == "к":
                 cmd_calibrate(video, setup_label=None, ffmpeg=ffmpeg, ffprobe=ffprobe)
+                _warn_if_manifest_stale(video, root=root, calibrations_dir=calibrations_dir)
         except Exception as e:  # noqa: BLE001
             print(f"  ⚠ {video.name}: пропущен (не удалось обработать) — {e}",
                   file=sys.stderr, flush=True)
@@ -1262,6 +1310,9 @@ def cmd_status(*, root=".") -> int:
             stem = Path(m.source).stem
             if stem not in input_stems:
                 warnings.append(f"  ⚠ манифест без видео: {mf.name} (нет inputs/{m.source})")
+            desync = _manifest_calibration_desync(m, calibrations_dir)
+            if desync:
+                warnings.append(f"  ⚠ {desync}")
         except Exception:  # noqa: BLE001
             warnings.append(f"  ⚠ битый манифест: {mf.name}")
 
@@ -1876,6 +1927,7 @@ def main(argv=None) -> int:
             elif args.video:
                 cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=args.ffmpeg,
                               ffprobe=args.ffprobe, port=args.port)
+                _warn_if_manifest_stale(Path(args.video), root=args.root)
             else:
                 print("ошибка: укажите видео или используйте --all", file=sys.stderr)
                 return 1

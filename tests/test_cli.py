@@ -46,6 +46,15 @@ def _manifest(reels=None, source="v.mp4") -> Manifest:
     )
 
 
+def _manifest_with_crop(stem, sha, crop: Crop, setup_id) -> Manifest:
+    return Manifest(
+        source=f"{stem}.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
+        duration_preset="shorts",
+        setup=SetupProfile(setup_id=setup_id, crop=crop, scale=[1080, 1920], frame=[3840, 2160]),
+        run_key="rk", reels=[],
+    )
+
+
 # ------------------------------------------------------------------ run: порядок этапов
 
 def test_run_calls_stages_in_order(monkeypatch, tmp_path):
@@ -503,6 +512,124 @@ def test_batch_no_push_when_disabled(monkeypatch, tmp_path):
                       cache_dir=tmp_path / "c", push=False)
 
     assert pushed == []
+
+
+# ------------------------------------- рассинхронизация калибровка ↔ манифест (кроп устарел)
+
+def test_desync_detects_auto_manifest_with_manual_calibration(tmp_path):
+    """Манифест с автокропом + появилась ручная калибровка (другой кроп) → рассинхрон."""
+    sha = "a" * 64
+    m = _manifest_with_crop("lecture", sha, Crop(x=100, y=0, w=900, h=1600), "auto")
+    cal = tmp_path / "calibrations"
+    save_calibration(cal, source_name="lecture.mp4", source_sha256=sha,
+                     crop=Crop(x=300, y=50, w=800, h=1400), frame=[3840, 2160],
+                     setup_label="lecture")
+
+    msg = cli._manifest_calibration_desync(m, cal)
+    assert msg is not None
+    assert "lecture" in msg
+    assert "run" in msg.lower()          # советует повторный run
+    assert "автокроп" in msg
+
+
+def test_no_desync_when_manifest_crop_matches_calibration(tmp_path):
+    """Кроп манифеста == калибровка → синхронно, предупреждения нет."""
+    sha = "b" * 64
+    crop = Crop(x=300, y=50, w=800, h=1400)
+    m = _manifest_with_crop("v", sha, crop, "v")
+    cal = tmp_path / "calibrations"
+    save_calibration(cal, source_name="v.mp4", source_sha256=sha, crop=crop,
+                     frame=[3840, 2160], setup_label="v")
+
+    assert cli._manifest_calibration_desync(m, cal) is None
+
+
+def test_no_desync_when_no_calibration_file(tmp_path):
+    """Нет файла калибровки (локален/удалён) → сравнить не с чем, предупреждения нет."""
+    m = _manifest_with_crop("v", "c" * 64, Crop(x=0, y=0, w=900, h=1600), "auto")
+    assert cli._manifest_calibration_desync(m, tmp_path / "calibrations") is None
+
+
+def test_status_reports_calibration_desync(tmp_path, capsys):
+    """status показывает рассинхронизацию: манифест с автокропом при ручной калибровке."""
+    root = tmp_path
+    (root / "inputs").mkdir()
+    manifests = root / "manifests"
+    manifests.mkdir()
+    cal = root / "calibrations"
+    sha = "a" * 64
+    m = _manifest_with_crop("lecture", sha, Crop(x=100, y=0, w=900, h=1600), "auto")
+    (manifests / "lecture.json").write_text(m.model_dump_json(), encoding="utf-8")
+    save_calibration(cal, source_name="lecture.mp4", source_sha256=sha,
+                     crop=Crop(x=300, y=50, w=800, h=1400), frame=[3840, 2160],
+                     setup_label="lecture")
+
+    cli.cmd_status(root=root)
+
+    out = capsys.readouterr().out
+    assert "повторный run" in out
+    assert "lecture" in out
+
+
+def test_warn_if_manifest_stale_returns_and_prints(tmp_path, capsys):
+    """_warn_if_manifest_stale (вызывается после calibrate): устаревший манифест → предупреждение."""
+    root = tmp_path
+    (root / "manifests").mkdir()
+    cal = root / "calibrations"
+    sha = "a" * 64
+    m = _manifest_with_crop("lecture", sha, Crop(x=100, y=0, w=900, h=1600), "auto")
+    (root / "manifests" / "lecture.json").write_text(m.model_dump_json(), encoding="utf-8")
+    save_calibration(cal, source_name="lecture.mp4", source_sha256=sha,
+                     crop=Crop(x=300, y=50, w=800, h=1400), frame=[3840, 2160],
+                     setup_label="lecture")
+
+    msg = cli._warn_if_manifest_stale(root / "inputs" / "lecture.mp4", root=root)
+
+    assert msg is not None
+    assert "повторный run" in capsys.readouterr().err
+
+
+def test_warn_if_manifest_stale_silent_when_no_manifest(tmp_path, capsys):
+    """Манифеста ещё нет (калибровка ДО первого run — норма) → тихо, без предупреждения."""
+    root = tmp_path
+    (root / "calibrations").mkdir()
+    save_calibration(root / "calibrations", source_name="v.mp4", source_sha256="a" * 64,
+                     crop=Crop(x=1, y=2, w=3, h=4), frame=[3840, 2160], setup_label="v")
+
+    msg = cli._warn_if_manifest_stale(root / "inputs" / "v.mp4", root=root)
+
+    assert msg is None
+    assert capsys.readouterr().err == ""
+
+
+def test_calibrate_batch_warns_when_manifest_already_exists(tmp_path, monkeypatch, capsys):
+    """calibrate --all: ручная калибровка видео с уже созданным (авто)манифестом → предупреждение."""
+    root = tmp_path
+    inputs = root / "inputs"
+    inputs.mkdir()
+    (inputs / "lecture.mp4").write_bytes(b"x")
+    (root / "manifests").mkdir()
+    cal = root / "calibrations"
+    cal.mkdir()
+    sha = "d" * 64
+
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast", lambda v, c: sha)
+    monkeypatch.setattr(cli, "_calibration_kind", lambda d, s: "none")
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "к")
+
+    m = _manifest_with_crop("lecture", sha, Crop(x=100, y=0, w=900, h=1600), "auto")
+    (root / "manifests" / "lecture.json").write_text(m.model_dump_json(), encoding="utf-8")
+
+    def fake_calibrate(video, **k):
+        save_calibration(cal, source_name=Path(video).name, source_sha256=sha,
+                         crop=Crop(x=300, y=50, w=800, h=1400), frame=[3840, 2160],
+                         setup_label="lecture")
+    monkeypatch.setattr(cli, "cmd_calibrate", fake_calibrate)
+
+    cli.cmd_calibrate_batch(root=root, inputs_dir=inputs, calibrations_dir=cal,
+                            cache_dir=root / "c")
+
+    assert "повторный run" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------- render: глобит manifests/
