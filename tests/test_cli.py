@@ -1517,8 +1517,11 @@ def _write_auto_cal(tmp_path, video):
     return sha
 
 
-def test_calibrate_all_skips_manually_calibrated(tmp_path, monkeypatch, capsys):
-    """Видео с ручной калибровкой пропускается молча — _ask_batch_action не вызывается."""
+def test_calibrate_all_offers_recalibration_for_manual(tmp_path, monkeypatch, capsys):
+    """Видео с ручной калибровкой ТОЖЕ предлагается (браузер доступен из меню); Enter — оставить.
+
+    Раньше manual пропускался молча → «Калибровать всё» при всех откалиброванных видео
+    не делало ничего видимого. Теперь спрашивает (kind='manual'), по умолчанию оставляет."""
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     video = inputs / "manual.mp4"
@@ -1526,12 +1529,34 @@ def test_calibrate_all_skips_manually_calibrated(tmp_path, monkeypatch, capsys):
     _save_manual_cal(tmp_path, video)
 
     asked = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "п")
-    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+    recalibrated = []
+    monkeypatch.setattr(cli, "_ask_batch_action",
+                        lambda name, kind: asked.append((name, kind)) or "п")   # оставить
+    monkeypatch.setattr(cli, "cmd_calibrate", lambda v, **k: recalibrated.append(v))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
 
-    assert asked == [], "ручная калибровка не должна переспрашиваться"
+    assert asked == [("manual.mp4", "manual")]     # предложено (не пропущено молча)
+    assert recalibrated == []                       # но по умолчанию (Enter/п) не перекалибровали
+    out = capsys.readouterr().out
+    assert "оставлено" in out                        # видна сводка-реакция
+
+
+def test_calibrate_all_recalibrates_manual_when_chosen(tmp_path, monkeypatch):
+    """Ручную калибровку можно ПЕРЕзапустить из --all (к → браузер) — фикс «ничего не происходит»."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    video = inputs / "manual.mp4"
+    video.write_bytes(b"x")
+    _save_manual_cal(tmp_path, video)
+
+    recalibrated = []
+    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: "к")
+    monkeypatch.setattr(cli, "cmd_calibrate", lambda v, **k: recalibrated.append(Path(v).name))
+
+    cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
+
+    assert recalibrated == ["manual.mp4"]           # браузер-калибратор запущен
 
 
 def test_calibrate_all_prompts_for_uncalibrated(tmp_path, monkeypatch):
@@ -1624,7 +1649,7 @@ def test_calibrate_all_action_k_calls_cmd_calibrate(tmp_path, monkeypatch):
 
 
 def test_calibrate_all_mixed_batch(tmp_path, monkeypatch):
-    """Пачка: ручная (пропуск) + некалиброванная (спросить) + автокроп (спросить)."""
+    """Пачка: спрашивает про КАЖДОЕ видео (ручное/некалиброванное/автокроп) — с нужным kind."""
     inputs = tmp_path / "inputs"
     inputs.mkdir()
 
@@ -1639,15 +1664,14 @@ def test_calibrate_all_mixed_batch(tmp_path, monkeypatch):
     auto_v.write_bytes(b"auto-content")
     _write_auto_cal(tmp_path, auto_v)
 
-    asked = []
-    monkeypatch.setattr(cli, "_ask_batch_action", lambda name, kind: asked.append(name) or "п")
+    asked = {}
+    monkeypatch.setattr(cli, "_ask_batch_action",
+                        lambda name, kind: asked.update({name: kind}) or "п")
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
 
     cli.cmd_calibrate_batch(root=tmp_path, ffmpeg="ffmpeg", ffprobe="ffprobe")
 
-    assert "manual.mp4" not in asked
-    assert "raw.mp4" in asked
-    assert "autocrop.mp4" in asked
+    assert asked == {"manual.mp4": "manual", "raw.mp4": "none", "autocrop.mp4": "auto"}
 
 
 # ------------------------------------------ новые тесты: исправления багов
@@ -1724,6 +1748,15 @@ def test_ask_batch_action_none_prompt_says_no_crop(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda prompt: inputs_given.append(prompt) or "п")
     cli._ask_batch_action("video.mp4", "none")
     assert "кропа нет" in inputs_given[0]
+
+
+def test_ask_batch_action_manual_offers_recalibrate_enter_keeps(monkeypatch):
+    """Для kind='manual' промпт предлагает калибровать заново; Enter (пусто) → оставить (п)."""
+    inputs_given = []
+    monkeypatch.setattr("builtins.input", lambda prompt: inputs_given.append(prompt) or "")
+    result = cli._ask_batch_action("video.mp4", "manual")
+    assert "уже есть" in inputs_given[0] and "заново" in inputs_given[0]
+    assert result == "п"                             # пустой ввод (Enter) = оставить
 
 
 def test_calibrate_batch_action_a_uses_save_calibration(tmp_path, monkeypatch):

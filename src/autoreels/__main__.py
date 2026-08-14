@@ -1254,8 +1254,17 @@ def _warn_if_manifest_stale(video, *, root, calibrations_dir=None) -> str | None
 
 
 def _ask_batch_action(name: str, kind: str) -> str:
-    """Интерактивный промпт для одного видео в calibrate --all. Точка подмены в тестах."""
-    if kind == "auto":
+    """Интерактивный промпт для одного видео в calibrate --all. Точка подмены в тестах.
+
+    manual — уже откалиброван вручную: предложить перекалибровать, Enter = оставить (быстрый
+    проход по уже-готовым). auto/none — как раньше.
+    """
+    if kind == "manual":
+        prompt = f"  {name}: кроп уже есть (ручной). [к]алибровать заново / Enter — оставить: "
+        valid = ("к", "п", "k", "p", "")
+        norm = {"k": "к", "p": "п", "": "п"}
+        hint = "введите к или Enter"
+    elif kind == "auto":
         prompt = f"  {name}: автокроп уже зафиксирован. [к]алибровать вручную / [п]ропустить? "
         valid = ("к", "п", "k", "p")
         norm = {"k": "к", "p": "п"}
@@ -1281,10 +1290,12 @@ def cmd_calibrate_batch(
     ffmpeg: str = "ffmpeg",
     ffprobe: str = "ffprobe",
 ) -> None:
-    """Интерактивная калибровка пачки: проходит по inputs/*.mp4, пропускает ручные.
+    """Интерактивная калибровка пачки: проходит по inputs/*.mp4.
 
-    Для каждого видео без ручной калибровки спрашивает: к/а/п.
-    к → браузер-калибратор; а → сохранить автокроп; п → пропустить.
+    Для КАЖДОГО видео (в т.ч. уже откалиброванного вручную) спрашивает, что делать —
+    так браузер-калибратор доступен из меню даже когда все видео уже с кропом (иначе
+    «Калибровать всё» молча ничего не делало). к → браузер; а → автокроп; п/Enter → оставить.
+    В конце — сводка, чтобы всегда была видна реакция на выбор пункта меню.
     """
     root = Path(root)
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
@@ -1296,7 +1307,12 @@ def cmd_calibrate_batch(
         print("inputs/ пуст — нечего калибровать")
         return
 
+    print(f"калибровка кропа: {len(videos)} видео в inputs/ "
+          f"(к — браузер, а — автокроп, Enter — оставить как есть)", flush=True)
+
     failed: list[str] = []
+    calibrated = 0   # открыли браузер / сохранили автокроп
+    kept = 0         # оставили как есть (пропуск)
     for video in videos:
         # Изоляция per-video: битое/нечитаемое видео (напр. «moov atom not found» —
         # недокачанный/повреждённый mp4) не должно ронять весь обход. Ctrl-C (BaseException,
@@ -1304,16 +1320,16 @@ def cmd_calibrate_batch(
         try:
             sha = state.file_sha256_cached_fast(video, cache_dir)
             kind = _calibration_kind(calibrations_dir, sha)
-            if kind == "manual":
-                continue  # уже откалиброван вручную — пропуск молча
             if kind == "corrupt":
                 print(f"  ⚠ {video.name}: повреждённый файл калибровки — пропуск "
                       f"(удалите {calibration_path(calibrations_dir, sha)} и повторите)")
+                kept += 1
                 continue
 
             action = _ask_batch_action(video.name, kind)
 
             if action == "п":
+                kept += 1
                 continue
 
             if action == "а":
@@ -1328,19 +1344,21 @@ def cmd_calibrate_batch(
                     setup_label="auto",
                 )
                 print(f"  ⚙ автокроп зафиксирован: {video.name}")
+                calibrated += 1
 
             elif action == "к":
                 cmd_calibrate(video, setup_label=None, ffmpeg=ffmpeg, ffprobe=ffprobe)
                 _warn_if_manifest_stale(video, root=root, calibrations_dir=calibrations_dir)
+                calibrated += 1
         except Exception as e:  # noqa: BLE001
             print(f"  ⚠ {video.name}: пропущен (не удалось обработать) — {e}",
                   file=sys.stderr, flush=True)
             failed.append(video.name)
             continue
 
-    if failed:
-        print(f"\n  калибровка: пропущено {len(failed)} видео с ошибками: "
-              f"{', '.join(failed)}", file=sys.stderr, flush=True)
+    print(f"\nкалибровка завершена: {calibrated} обработано, {kept} оставлено без изменений"
+          + (f", {len(failed)} с ошибками ({', '.join(failed)})" if failed else ""),
+          flush=True)
 
 
 # --------------------------------------------------------------------------- status
