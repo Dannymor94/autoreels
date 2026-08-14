@@ -24,7 +24,7 @@ from pathlib import Path
 
 from autoreels.cloud.compress import compress_transcript
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
-from autoreels.cloud.providers import GroqLLM, ProviderError
+from autoreels.cloud.providers import ProviderError, build_pool
 from autoreels.cloud.select import SelectError, select
 from autoreels.cloud.snap import apply_padding, snap_segments
 from autoreels.cloud.trim import trim_too_long
@@ -529,7 +529,7 @@ def _stage_select(compressed, *, r0_cfg, root):
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     return select(
         compressed, system_text=system_text, fewshot=fewshot,
-        provider=GroqLLM(model=r0_cfg.model), r0_cfg=r0_cfg,
+        provider=build_pool(r0_cfg), r0_cfg=r0_cfg,
     )
 
 

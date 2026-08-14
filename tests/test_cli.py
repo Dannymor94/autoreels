@@ -2715,15 +2715,22 @@ def test_transcribe_dispatch_from_cache_skips_validate_media(monkeypatch, tmp_pa
 
 # -------------------------------------------------- R0: модель из конфига
 
-def test_stage_select_uses_config_model(monkeypatch):
-    """_stage_select создаёт GroqLLM с моделью из r0.yaml (не хардкод)."""
+def test_stage_select_builds_provider_pool_from_config(monkeypatch):
+    """_stage_select собирает провайдер-пул из r0_cfg (модели/стратегия — не хардкод)."""
     from autoreels.core.config import load_r0_config
     r0 = load_r0_config(REPO_ROOT / "config" / "r0.yaml")
     captured = {}
-    monkeypatch.setattr(cli, "GroqLLM", lambda **k: captured.update(k) or object())
+
+    def fake_build_pool(cfg, **k):
+        captured["cfg"] = cfg
+        return object()
+
+    monkeypatch.setattr(cli, "build_pool", fake_build_pool)
     monkeypatch.setattr(cli, "select", lambda *a, **k: [])
     cli._stage_select("COMPRESSED", r0_cfg=r0, root=REPO_ROOT)
-    assert captured.get("model") == r0.model
+    assert captured["cfg"] is r0                       # пул строится из того же r0_cfg
+    assert captured["cfg"].model == r0.model
+    assert captured["cfg"].provider_strategy in ("adaptive", "round_robin")
 
 
 # -------------------------------------------------- calibrate --all: изоляция ошибок

@@ -281,6 +281,12 @@ def select_chunked(
         reels = filter_by_score(reels, min_score=r0_cfg.min_score)
         reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
         all_reels.extend(reels)
+        # Прозрачность распределения: показать, какой провайдер обработал этот чанк
+        # (пул выставляет last_provider; одиночный провайдер — нет, тогда без «via»).
+        provider_name = getattr(provider, "last_provider", None)
+        via = f"via {provider_name} · " if provider_name else ""
+        chunk_progress("R0", i + 1, len(chunks),
+                       extra=f"{via}найдено {len(all_reels)} моментов")
 
     chunk_progress("R0", len(chunks), len(chunks),
                    extra=f"найдено {len(all_reels)} моментов", done=True)

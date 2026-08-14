@@ -75,6 +75,7 @@ def test_429_retries_and_raises_with_status_code(monkeypatch):
 def test_413_retries_and_raises_with_status_code(monkeypatch):
     """413 от Groq: ретраи, итог — ProviderError с '413' в сообщении."""
     import autoreels.cloud.providers as P
+    monkeypatch.setattr(P.time, "sleep", lambda s: None)   # не спать реально в юнит-тесте
     calls = []
 
     def fake_post(url, *, headers, json, timeout):
@@ -263,3 +264,275 @@ def test_fallback_llm_prints_switch_message(capsys):
     FallbackLLM([primary, secondary]).complete([])
     out = capsys.readouterr().out
     assert "OpenRouter" in out or "провайдер" in out.lower()
+
+
+# ========================================================= ProviderThrottled (defer)
+
+def test_groq_defer_throttle_raises_throttled_not_sleeps(monkeypatch):
+    """defer_throttle=True: короткий 429 → ProviderThrottled немедленно (пул сам разрулит),
+    без внутреннего sleep. Так пул может увести чанк на другой провайдер, а не ждать."""
+    import autoreels.cloud.providers as P
+    from autoreels.cloud.providers import ProviderThrottled
+    sleeps = []
+    monkeypatch.setattr(P.time, "sleep", lambda s: sleeps.append(s))
+
+    def fake_post(url, *, headers, json, timeout):
+        return _FakeResp(429, headers={"retry-after": "5"})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = GroqLLM(defer_throttle=True)
+    with pytest.raises(ProviderThrottled) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    assert exc.value.retry_after == 5.0
+    assert sleeps == [], "в defer-режиме провайдер не должен спать — это задача пула"
+
+
+def test_groq_defer_throttle_still_exhausts_on_long_retry_after(monkeypatch):
+    """Длинный retry-after → ProviderExhausted (суточный лимит) даже в defer-режиме."""
+    import autoreels.cloud.providers as P
+    from autoreels.cloud.providers import ProviderExhausted
+
+    def fake_post(url, *, headers, json, timeout):
+        return _FakeResp(429, headers={"retry-after": str(P._EXHAUSTED_THRESHOLD_SEC)})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = GroqLLM(defer_throttle=True)
+    with pytest.raises(ProviderExhausted) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    assert exc.value.retry_after == P._EXHAUSTED_THRESHOLD_SEC
+
+
+def test_providers_have_names():
+    """Провайдеры несут человекочитаемое имя для строки прогресса «via …»."""
+    assert GroqLLM().name == "Groq"
+    assert OpenRouterLLM().name == "OpenRouter"
+
+
+def test_openrouter_envelope_parses_to_same_segments():
+    """Ответ OpenRouter (OpenAI-совместимый конверт) парсится в те же сегменты, что Groq."""
+    from autoreels.cloud.select import parse_segments
+    content = ('{"segments": [{"start": 1, "end": 30, "score": 80, '
+               '"hook": "h", "title": "t", "description": "d"}]}')
+    env = {"choices": [{"message": {"content": content}}]}
+    llm = OpenRouterLLM(request_fn=lambda m, t: env)
+    segs = parse_segments(llm.complete([]))
+    assert len(segs) == 1
+    assert segs[0]["start"] == 1 and segs[0]["score"] == 80
+
+
+# ========================================================= ProviderPool (распределение)
+
+import types
+
+from autoreels.cloud.providers import (  # noqa: E402
+    ProviderPool, ProviderThrottled, build_pool,
+)
+
+
+class _Clock:
+    """Инъектируемые монотонные часы: тест двигает время явно (без реального сна)."""
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, dt):
+        self.t += dt
+
+
+def _sleeper(clock):
+    """Фейковый sleep: двигает инъектируемые часы вместо реальной паузы."""
+    def _s(sec):
+        clock.advance(sec)
+    return _s
+
+
+class _ScriptedProvider:
+    """Провайдер по сценарию: каждый вызов complete() отдаёт следующий элемент.
+
+    Элемент — либо строка (успех), либо Exception (поднять). Считает вызовы.
+    """
+    def __init__(self, name, script):
+        self.name = name
+        self._script = list(script)
+        self.calls = 0
+
+    def complete(self, messages, *, temperature=0.0):
+        self.calls += 1
+        action = self._script.pop(0)
+        if isinstance(action, Exception):
+            raise action
+        return action
+
+
+def _pool(*providers, strategy="adaptive"):
+    clock = _Clock()
+    pool = ProviderPool(list(providers), strategy=strategy,
+                        clock=clock, sleep=_sleeper(clock))
+    return pool, clock
+
+
+def test_pool_adaptive_prefers_first_provider():
+    """adaptive: пока Groq (первый) отвечает — второй провайдер не трогается (качество)."""
+    groq = _ScriptedProvider("Groq", ["a", "b"])
+    openr = _ScriptedProvider("OpenRouter", ["x", "y"])
+    pool, _ = _pool(groq, openr)
+    assert pool.complete([]) == "a"
+    assert pool.complete([]) == "b"
+    assert groq.calls == 2
+    assert openr.calls == 0, "OpenRouter не должен вызываться пока Groq свободен"
+
+
+def test_pool_routes_to_sibling_when_first_throttled():
+    """Groq троттлит короткий → чанк уходит на OpenRouter немедленно (распределение)."""
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=30)])
+    openr = _ScriptedProvider("OpenRouter", ["from-openrouter"])
+    pool, _ = _pool(groq, openr)
+    assert pool.complete([]) == "from-openrouter"
+    assert pool.last_provider == "OpenRouter"
+
+
+def test_pool_skips_provider_in_cooldown():
+    """Провайдер в кулдауне не долбится повторно, пока не остынет."""
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=100)])
+    openr = _ScriptedProvider("OpenRouter", ["one", "two"])
+    pool, clock = _pool(groq, openr)
+    assert pool.complete([]) == "one"     # Groq троттлит → OpenRouter
+    assert pool.complete([]) == "two"     # Groq ещё в кулдауне (100с) → снова OpenRouter
+    assert groq.calls == 1, "Groq не должен вызываться повторно в кулдауне"
+
+
+def test_pool_adaptive_returns_to_groq_after_cooldown():
+    """adaptive: когда Groq остыл — пул возвращается к нему (предпочтение по качеству)."""
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=30), "groq-back"])
+    openr = _ScriptedProvider("OpenRouter", ["openr"])
+    pool, clock = _pool(groq, openr)
+    assert pool.complete([]) == "openr"        # Groq троттлит → OpenRouter
+    clock.advance(31)                          # Groq остыл
+    assert pool.complete([]) == "groq-back"    # вернулись на Groq
+    assert pool.last_provider == "Groq"
+
+
+def test_pool_round_robin_alternates():
+    """round_robin: чанки поочерёдно на оба провайдера — равномерная нагрузка."""
+    groq = _ScriptedProvider("Groq", ["g1", "g2"])
+    openr = _ScriptedProvider("OpenRouter", ["o1", "o2"])
+    pool, _ = _pool(groq, openr, strategy="round_robin")
+    used = [pool.complete([]) for _ in range(4)]
+    assert used == ["g1", "o1", "g2", "o2"]
+    assert groq.calls == 2 and openr.calls == 2
+
+
+def test_pool_both_limited_sleeps_until_earliest(capsys):
+    """Оба в лимите → пул паузит до ближайшего освобождения, затем продолжает."""
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=30), "groq-ok"])
+    openr = _ScriptedProvider("OpenRouter", [ProviderThrottled("tpm", retry_after=50)])
+    pool, clock = _pool(groq, openr)
+    result = pool.complete([])
+    assert result == "groq-ok"
+    assert clock.t == 30.0, "пул должен проспать до ближайшего (Groq, 30с)"
+    out = capsys.readouterr().out
+    assert "лимит" in out.lower() or "пауза" in out.lower()
+
+
+def test_pool_both_daily_exhausted_waits_and_recovers(capsys):
+    """Оба упёрлись в суточный лимит → внятная пауза с ETA, затем восстановление."""
+    from autoreels.cloud.providers import ProviderExhausted
+    groq = _ScriptedProvider("Groq", [ProviderExhausted("daily", retry_after=200), "recovered"])
+    openr = _ScriptedProvider("OpenRouter", [ProviderExhausted("daily", retry_after=300)])
+    pool, clock = _pool(groq, openr)
+    assert pool.complete([]) == "recovered"
+    assert clock.t == 200.0
+    out = capsys.readouterr().out
+    assert "Groq" in out and "OpenRouter" in out   # какой когда освободится
+
+
+def test_pool_hard_error_propagates():
+    """Не-лимитная ошибка провайдера (напр. нет ключа) не глотается как кулдаун."""
+    groq = _ScriptedProvider("Groq", [ProviderError("нет GROQ_API_KEY")])
+    pool, _ = _pool(groq)
+    with pytest.raises(ProviderError, match="GROQ_API_KEY"):
+        pool.complete([])
+
+
+def test_pool_exposes_last_provider_for_progress():
+    """last_provider отражает провайдера последнего успешного вызова (для «via …»)."""
+    groq = _ScriptedProvider("Groq", ["ok"])
+    pool, _ = _pool(groq)
+    pool.complete([])
+    assert pool.last_provider == "Groq"
+
+
+def test_pool_requires_at_least_one_provider():
+    with pytest.raises(ValueError):
+        ProviderPool([])
+
+
+def test_pool_unknown_strategy_raises():
+    with pytest.raises(ValueError, match="strategy"):
+        ProviderPool([_ScriptedProvider("Groq", [])], strategy="magic")
+
+
+def test_pool_single_provider_throttle_waits_then_succeeds():
+    """Один провайдер (нет OpenRouter-ключа) троттлит → пул ждёт кулдаун и повторяет."""
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=8), "ok"])
+    pool, clock = _pool(groq)
+    assert pool.complete([]) == "ok"
+    assert clock.t == 8.0
+
+
+# ------------------------------------------------------- build_pool (сборка из конфига)
+
+def _fake_r0(strategy="adaptive"):
+    return types.SimpleNamespace(
+        model="qwen/groq-model",
+        openrouter_model="qwen/or-model:free",
+        provider_strategy=strategy,
+    )
+
+
+def test_build_pool_groq_only_without_openrouter_key(monkeypatch):
+    """Нет OPENROUTER_API_KEY → пул из одного Groq (не падать, работать на Groq)."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    pool = build_pool(_fake_r0())
+    assert isinstance(pool, ProviderPool)
+    names = [m.provider.name for m in pool._members]
+    assert names == ["Groq"]
+
+
+def test_build_pool_adds_openrouter_when_key_present(monkeypatch):
+    """OPENROUTER_API_KEY задан → в пуле два провайдера (Groq первый, для качества)."""
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    pool = build_pool(_fake_r0())
+    names = [m.provider.name for m in pool._members]
+    assert names == ["Groq", "OpenRouter"]
+
+
+def test_build_pool_uses_models_from_config(monkeypatch):
+    """Модели берутся из r0_cfg (model / openrouter_model), не хардкод."""
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    pool = build_pool(_fake_r0())
+    assert pool._members[0].provider._model == "qwen/groq-model"
+    assert pool._members[1].provider._model == "qwen/or-model:free"
+
+
+def test_build_pool_respects_strategy_from_config(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    pool = build_pool(_fake_r0(strategy="round_robin"))
+    assert pool._strategy == "round_robin"
+
+
+def test_build_pool_providers_defer_throttle(monkeypatch):
+    """Провайдеры в пуле — в defer-режиме: троттл отдаётся пулу, а не спится внутри."""
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    pool = build_pool(_fake_r0())
+    assert all(m.provider._defer_throttle for m in pool._members)

@@ -70,8 +70,13 @@ class R0Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_preset: str
-    model: str = "qwen/qwen3.6-27b"          # LLM R0 на Groq
-    openrouter_model: str = "qwen/qwen3-8b:free"  # failover-модель OpenRouter
+    model: str = "qwen/qwen3.6-27b"          # LLM R0 на Groq (основная, сильнее по качеству)
+    openrouter_model: str = "qwen/qwen3-8b:free"  # второй провайдер OpenRouter (слабее)
+    provider_strategy: str = "adaptive"      # распределение R0-нагрузки: adaptive | round_robin
+                                             # adaptive: Groq основной, слив на OpenRouter под
+                                             # троттлом (качество не плавает). round_robin:
+                                             # чередовать поровну (макс. пропускная, но половина
+                                             # чанков на слабую модель — компромисс качества).
     min_score: int
     min_meaningful_sec: float = 18    # планка «законченной мысли»: сегменты короче снимает
                                       # детерминированный пост-фильтр (выше техн. min_duration).
@@ -320,6 +325,12 @@ def load_r0_config(path: str | Path) -> R0Config:
         raise ConfigError(
             f"неизвестный duration_preset '{cfg.duration_preset}' в {path}; "
             f"известные пресеты: {known}"
+        )
+    from autoreels.cloud.providers import POOL_STRATEGIES
+    if cfg.provider_strategy not in POOL_STRATEGIES:
+        raise ConfigError(
+            f"неизвестный provider_strategy '{cfg.provider_strategy}' в {path}; "
+            f"допустимо: {', '.join(POOL_STRATEGIES)}"
         )
     return cfg
 
