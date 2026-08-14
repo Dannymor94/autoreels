@@ -22,6 +22,8 @@ from autoreels.local.calibrate import (
     build_calibration_html,
     build_frame_cmd,
     cmd_calibrate,
+    extract_preview_frames,
+    parse_frame_at,
     parse_probe,
     raw_selection_from_drop,
 )
@@ -39,6 +41,73 @@ def test_build_frame_cmd_seeks_and_takes_one_frame():
 
 def test_parse_probe_reads_width_height_duration():
     assert parse_probe("3840\n2160\n480.0\n") == (3840, 2160, 480.0)
+
+
+# ------------------------------------------------------------ выбор кадра для калибровки
+
+def test_parse_frame_at_percent():
+    assert parse_frame_at("50%", 480.0) == 240.0
+    assert parse_frame_at("25%", 480.0) == 120.0
+
+
+def test_parse_frame_at_seconds():
+    assert parse_frame_at("120", 480.0) == 120.0
+    assert parse_frame_at("120s", 480.0) == 120.0        # суффикс 's' допустим
+
+
+def test_parse_frame_at_default_is_not_first_frame():
+    """Дефолт (None) — из середины (~40%), НЕ первый кадр (0с)."""
+    at = parse_frame_at(None, 480.0)
+    assert at > 0                                         # не первый кадр
+    assert 0.3 * 480 <= at <= 0.5 * 480                  # в диапазоне 30-50%
+
+
+def test_parse_frame_at_clamps_to_end():
+    """Позиция за концом видео зажимается внутрь (seek не в пустоту)."""
+    assert parse_frame_at("100%", 480.0) < 480.0
+    assert parse_frame_at("999", 480.0) < 480.0
+
+
+def test_parse_frame_at_invalid_raises():
+    for bad in ("abc", "50x", "%"):
+        with pytest.raises(CalibrateError):
+            parse_frame_at(bad, 480.0)
+
+
+def test_parse_frame_at_negative_raises():
+    with pytest.raises(CalibrateError):
+        parse_frame_at("-10", 480.0)
+
+
+def test_extract_preview_frames_positions(tmp_path, monkeypatch):
+    """Сетка извлекает кадры из опорных точек (10/25/50/75%) + главный; помечает главный."""
+    seen = []
+    monkeypatch.setattr(cal, "extract_reference_frame",
+                        lambda v, out, *, at_seconds, ffmpeg="ffmpeg": seen.append(at_seconds) or out)
+    frames = extract_preview_frames("v.mp4", tmp_path, "a" * 64, 480.0, main_at=192.0)
+    ats = sorted(f["at"] for f in frames)
+    assert 48.0 in ats and 120.0 in ats and 240.0 in ats and 360.0 in ats   # 10/25/50/75%
+    assert 192.0 in ats                                                       # главный (40%)
+    assert sum(1 for f in frames if f["is_main"]) == 1                        # ровно один главный
+    assert next(f for f in frames if f["is_main"])["at"] == 192.0
+
+
+def test_build_calibration_html_has_preview_grid():
+    """С ≥2 превью-кадрами HTML несёт сетку (JS + base64 каждого)."""
+    frames = [{"label": "10%", "b64": "AAA", "main": False},
+              {"label": "40%", "b64": "BBB", "main": True}]
+    html = build_calibration_html("MAIN", (3840, 2160), sha="a" * 64,
+                                  source_name="v.mp4", preview_frames=frames)
+    assert "renderThumbs" in html and "thumbs" in html
+    assert '"10%"' in html and '"40%"' in html and "BBB" in html
+
+
+def test_build_calibration_html_single_frame_empty_grid():
+    """Без превью — сетка пуста (одиночный кадр как раньше)."""
+    html = build_calibration_html("MAIN", (3840, 2160), sha="a" * 64, source_name="v.mp4")
+    assert "const FRAMES = [];" in html
+    import re
+    assert re.findall(r"__[A-Z_]+__", html) == []        # все плейсхолдеры подставлены
 
 
 def test_raw_selection_from_drop_builds_selection():

@@ -1978,6 +1978,9 @@ def _build_parser():
                     help="корень проекта (по умолчанию: .)")
     pc.add_argument("--port", type=int, default=8765,
                     help="порт localhost-сервера калибровки (по умолчанию: 8765)")
+    pc.add_argument("--frame-at", default=None, dest="frame_at",
+                    help="кадр для калибровки: '50%%' (доля длительности) или секунда ('120'). "
+                         "По умолчанию ~40%% (не первый кадр); в браузере есть превью-сетка")
 
     pr = sub.add_parser(
         "run",
@@ -2165,7 +2168,8 @@ def main(argv=None) -> int:
             elif args.video:
                 _ff = _cli_resolve_ffmpeg(args.ffmpeg, root=args.root)
                 cmd_calibrate(Path(args.video), setup_label=args.setup, ffmpeg=_ff,
-                              ffprobe=resolve_ffprobe(args.ffprobe, ffmpeg=_ff), port=args.port)
+                              ffprobe=resolve_ffprobe(args.ffprobe, ffmpeg=_ff), port=args.port,
+                              frame_at=args.frame_at)
                 _warn_if_manifest_stale(Path(args.video), root=args.root)
                 _commit_push_calibrations(root=args.root)     # калибровки → git (для системника)
             else:

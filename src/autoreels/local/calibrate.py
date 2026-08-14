@@ -68,6 +68,37 @@ def build_frame_cmd(ffmpeg: str, video, out_png, at_seconds: float) -> list[str]
     ]
 
 
+# Дефолт: НЕ первый кадр (штатив ещё правят, человек садится) — из 40% длительности,
+# где кадр уже установился. Хороший дефолт без действий пользователя.
+_DEFAULT_FRAME_FRACTION = 0.4
+# Позиции превью-сетки (доли длительности) — пользователь видит варианты и кликает.
+_PREVIEW_FRACTIONS = (0.1, 0.25, 0.5, 0.75)
+
+
+def parse_frame_at(spec, duration: float) -> float:
+    """Разобрать `--frame-at` в секунды: '50%'→50% длительности; '120'/'120s'→секунда.
+
+    None → дефолт (_DEFAULT_FRAME_FRACTION середины, не первый кадр). Результат зажимается
+    в [0, duration). Мусор/отрицательное → CalibrateError."""
+    if spec is None:
+        return duration * _DEFAULT_FRAME_FRACTION
+    s = str(spec).strip().lower()
+    try:
+        if s.endswith("%"):
+            frac = float(s[:-1]) / 100.0
+            at = duration * frac
+        else:
+            at = float(s[:-1] if s.endswith("s") else s)
+    except ValueError as e:
+        raise CalibrateError(
+            f"неверный --frame-at {spec!r}: ожидается '50%' или секунда ('120' / '120s')"
+        ) from e
+    if at < 0:
+        raise CalibrateError(f"--frame-at не может быть отрицательным: {spec!r}")
+    # Не выходить за конец видео (seek за пределы даёт пустой/последний кадр).
+    return min(at, max(0.0, duration - 0.05))
+
+
 def probe_frame(video, *, ffprobe: str = "ffprobe") -> tuple[int, int, float]:
     binary = shutil.which(ffprobe)
     if binary is None:
@@ -92,6 +123,31 @@ def extract_reference_frame(video, out_png, *, at_seconds: float, ffmpeg: str = 
     return out_png
 
 
+def extract_preview_frames(video, work_dir, sha: str, duration: float, *, main_at: float,
+                           ffmpeg: str = "ffmpeg") -> list[dict]:
+    """Извлечь кадры для превью-сетки: главный (main_at) + опорные точки (10/25/50/75%).
+
+    Возвращает список {label, path, at, is_main}, отсортированный по времени. Best-effort:
+    неудавшийся кадр пропускается (сетка не роняет калибровку). Первый успешный — фолбэк-главный,
+    если main_at не извлёкся. ffmpeg -ss — быстрый seek без полного декодирования."""
+    work_dir = Path(work_dir)
+    positions = {round(duration * f, 3) for f in _PREVIEW_FRACTIONS if 0 <= duration * f < duration}
+    positions.add(round(main_at, 3))
+    frames: list[dict] = []
+    for at in sorted(positions):
+        pct = int(round(at / duration * 100)) if duration > 0 else 0
+        png = work_dir / f"{sha}_{pct:02d}.png"
+        try:
+            extract_reference_frame(video, png, at_seconds=at, ffmpeg=ffmpeg)
+        except CalibrateError:
+            continue
+        frames.append({"label": f"{pct}%", "path": png, "at": at,
+                       "is_main": abs(at - main_at) < 1e-3})
+    if frames and not any(f["is_main"] for f in frames):
+        frames[0]["is_main"] = True   # главный не извлёкся → показываем первый успешный
+    return frames
+
+
 # ----------------------------------------------------- payload браузера → RawSelection
 
 def raw_selection_from_drop(drop: dict, frame_size: tuple[int, int]) -> RawSelection:
@@ -112,19 +168,24 @@ def _html_escape(text: str) -> str:
 
 
 def build_calibration_html(frame_b64: str, frame_size: tuple[int, int], *, sha: str,
-                           source_name: str) -> str:
+                           source_name: str, preview_frames: list | None = None) -> str:
     """Страница-видоискатель: кадр-фон + 9:16-рамка (constrained при drag/resize), поля
     x/y/w/h в РЕАЛЬНЫХ px исходника (двусторонние), Save → fetch POST /save.
 
     Кадр показывается уменьшенным; пересчёт показ↔реальные консистентен с to_real_pixels
     (s = display_w / frame_w; real = display / s). На сервер уходит display-рамка +
     display_size + frame_size — финал (9:16, реальные px, границы) считает ядро.
+
+    `preview_frames` (≥2) → превью-сетка: клик по кадру меняет фон (кроп-координаты
+    frame-независимы). Пусто/один → одиночный кадр как раньше.
     """
     fw, fh = frame_size
     config = json.dumps({"fw": fw, "fh": fh, "sha": sha, "source": source_name})
+    frames_json = json.dumps(preview_frames if preview_frames and len(preview_frames) >= 2 else [])
     return (
         _HTML_TEMPLATE
         .replace("__CONFIG__", config)
+        .replace("__FRAMES_JSON__", frames_json)
         .replace("__FRAME_B64__", frame_b64)
         .replace("__SOURCE__", _html_escape(source_name))
         .replace("__FW__", str(fw))
@@ -205,6 +266,7 @@ class ManualCalibrator:
     timeout_sec: float = 600.0
     open_browser: bool = True
     frame_size: tuple[int, int] = (0, 0)
+    preview_frames: list | None = None   # [{label, path, is_main}] для превью-сетки в браузере
     saved_path: Path | None = field(default=None)
     _sel: RawSelection | None = field(default=None)
 
@@ -223,8 +285,20 @@ class ManualCalibrator:
     def propose(self, frame_png, frame_size: tuple[int, int]) -> RawSelection:
         self.frame_size = tuple(frame_size)
         b64 = base64.b64encode(Path(frame_png).read_bytes()).decode("ascii")
+        # Превью-сетка: base64 каждого кадра для клика-выбора (крон-координаты не зависят
+        # от того, какой кадр показан — все одного разрешения; сетка лишь помогает увидеть,
+        # где кадр установился). Только с ≥2 кадрами — иначе одиночный кадр как раньше.
+        preview = []
+        for fr in (self.preview_frames or []):
+            try:
+                fb64 = base64.b64encode(Path(fr["path"]).read_bytes()).decode("ascii")
+            except OSError:
+                continue
+            preview.append({"label": fr.get("label", ""), "b64": fb64,
+                            "main": bool(fr.get("is_main"))})
         html = build_calibration_html(
-            b64, self.frame_size, sha=self.sha, source_name=self.source_name
+            b64, self.frame_size, sha=self.sha, source_name=self.source_name,
+            preview_frames=preview,
         ).encode("utf-8")
 
         done = threading.Event()
@@ -272,14 +346,20 @@ def cmd_calibrate(
     calibrator=None,
     timeout_sec: float = 600.0,
     cache_dir=None,
+    frame_at=None,
 ) -> Path:
-    """Откалибровать кроп для `video` → calibrations/<sha>.json. Отдельно ПЕРЕД run."""
+    """Откалибровать кроп для `video` → calibrations/<sha>.json. Отдельно ПЕРЕД run.
+
+    Кадр для калибровки: по умолчанию из середины (~40%), НЕ первый (первый часто нерелевантен —
+    штатив правят, человек садится). `frame_at` ('50%' / '120' сек) задаёт конкретную позицию.
+    В браузере — превью-сетка кадров (10/25/50/75%), можно кликнуть репрезентативный."""
     root = Path(root)
     video = Path(video)
     if not video.is_file():
         raise CalibrateError(f"видео не найдено: {video}")
 
     w, h, duration = probe_frame(video, ffprobe=ffprobe)
+    main_at = parse_frame_at(frame_at, duration)
 
     _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     size_gb = video.stat().st_size / (1 << 30)
@@ -292,18 +372,24 @@ def cmd_calibrate(
     calib_dir = root / "calibrations"
     work = calib_dir / "_work"
     work.mkdir(parents=True, exist_ok=True)
-    frame_png = work / f"{sha}.png"
 
-    print("извлекаю опорный кадр (середина видео)…", flush=True)
-    extract_reference_frame(video, frame_png, at_seconds=duration / 2, ffmpeg=ffmpeg)
+    print(f"извлекаю кадры для калибровки (главный ~{main_at:.0f}с + превью-сетка)…", flush=True)
+    frames = extract_preview_frames(video, work, sha, duration, main_at=main_at, ffmpeg=ffmpeg)
+    if not frames:
+        # Ни один кадр не извлёкся → фолбэк к одиночному извлечению (внятная ошибка при провале).
+        frame_png = work / f"{sha}.png"
+        extract_reference_frame(video, frame_png, at_seconds=main_at, ffmpeg=ffmpeg)
+        frames = [{"label": f"{int(round(main_at/duration*100)) if duration else 0}%",
+                   "path": frame_png, "at": main_at, "is_main": True}]
+    main_frame = next(f for f in frames if f["is_main"])
 
     if calibrator is None:
         calibrator = ManualCalibrator(
             sha=sha, source_name=video.name, calib_dir=calib_dir, setup_label=setup_label,
-            host=host, port=port, timeout_sec=timeout_sec,
+            host=host, port=port, timeout_sec=timeout_sec, preview_frames=frames,
         )
 
-    sel = calibrator.propose(frame_png, (w, h))
+    sel = calibrator.propose(main_frame["path"], (w, h))
     # POST-хендлер ManualCalibrator уже сохранил (saved_path); иначе (напр. авто-детект,
     # возвращающий только рамку) — сохраняем здесь. Единый финал через ядро.
     path = getattr(calibrator, "saved_path", None)
@@ -409,6 +495,13 @@ _HTML_TEMPLATE = r"""<!doctype html>
     display:grid;grid-template-columns:auto 1fr;gap:6px 12px;
     font:500 11.5px/1.4 var(--mono);color:var(--mut)}
   .meta dt{color:#5f656e} .meta dd{margin:0;text-align:right;word-break:break-all}
+  .thumbs{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:center}
+  .thumb{border:2px solid var(--line);border-radius:7px;overflow:hidden;cursor:pointer;
+    width:104px;background:var(--stage);opacity:.65;transition:opacity .15s,border-color .15s}
+  .thumb:hover{opacity:.9}
+  .thumb.active{border-color:#6ea8fe;opacity:1}
+  .thumb img{width:100%;display:block;height:58px;object-fit:cover}
+  .thumb span{display:block;font:600 10px/1.6 var(--mono);text-align:center;color:var(--mut)}
   @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -426,6 +519,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
         <div class="handle se" data-corner="se"></div>
       </div>
     </div>
+    <div class="thumbs" id="thumbs" aria-label="выбор кадра для калибровки"></div>
   </section>
 
   <aside class="panel">
@@ -456,7 +550,27 @@ _HTML_TEMPLATE = r"""<!doctype html>
 
 <script>
 const CFG = __CONFIG__;
+const FRAMES = __FRAMES_JSON__;
 const FW = CFG.fw, FH = CFG.fh;
+
+// Превью-сетка: клик по кадру меняет фон-кадр (кроп frame-независим — все одного разрешения).
+(function renderThumbs(){
+  const box = document.getElementById('thumbs');
+  const img = document.getElementById('img');
+  if (!box || !img || !Array.isArray(FRAMES) || FRAMES.length < 2) return;
+  FRAMES.forEach(f => {
+    const uri = 'data:image/png;base64,' + f.b64;
+    const t = document.createElement('div');
+    t.className = 'thumb' + (f.main ? ' active' : '');
+    t.innerHTML = '<img src="' + uri + '" alt="кадр ' + f.label + '"><span>' + f.label + '</span>';
+    t.addEventListener('click', function(){
+      img.src = uri;
+      box.querySelectorAll('.thumb').forEach(e => e.classList.remove('active'));
+      t.classList.add('active');
+    });
+    box.appendChild(t);
+  });
+})();
 const RATIO = 1080/1920;              // ширина/высота = 0.5625 (жёстко держим)
 const MIN_REAL_H = 160;              // не дать рамке схлопнуться
 

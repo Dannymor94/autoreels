@@ -1559,6 +1559,31 @@ def test_calibrate_all_without_video_arg_is_valid():
     assert args.video is None
 
 
+def test_calibrate_frame_at_flag_parsed():
+    """--frame-at регистрируется и парсится ('50%' / секунда)."""
+    p = cli._build_parser()
+    assert p.parse_args(["calibrate", "v.mp4", "--frame-at", "50%"]).frame_at == "50%"
+    assert p.parse_args(["calibrate", "v.mp4", "--frame-at", "120"]).frame_at == "120"
+    assert p.parse_args(["calibrate", "v.mp4"]).frame_at is None      # дефолт
+
+
+def test_calibrate_dispatch_passes_frame_at(monkeypatch, tmp_path):
+    """Диспетчер прокидывает --frame-at в cmd_calibrate."""
+    seen = {}
+    monkeypatch.setattr(cli, "_cli_resolve_ffmpeg", lambda flag, **k: "ffmpeg")
+    monkeypatch.setattr(cli, "resolve_ffprobe", lambda flag, **k: "ffprobe")
+    monkeypatch.setattr(cli, "cmd_calibrate",
+                        lambda video, **k: seen.update(k) or (tmp_path / "c.json"))
+    monkeypatch.setattr(cli, "_warn_if_manifest_stale", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_commit_push_calibrations", lambda *, root: None)
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    cli.main(["calibrate", str(video), "--frame-at", "50%"])
+
+    assert seen.get("frame_at") == "50%"
+
+
 # ------------------------------------------ calibrate --all: логика пачки
 
 def _write_auto_cal(tmp_path, video):
