@@ -2787,6 +2787,53 @@ def test_run_saves_transcript_text(monkeypatch, tmp_path):
     assert "[" not in txt                # без таймкодов
 
 
+def test_run_batch_saves_transcript_for_each_video(monkeypatch, tmp_path):
+    """batch: три видео → три transcripts/<stem>.txt (попутно, у каждого свой файл)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    # реальный транскрипт (не пустой) → _write_transcript_file пишет содержательный текст
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    for name in ("a.mp4", "b.mp4", "c.mp4"):
+        (inputs / name).write_bytes(b"x")
+    transcripts = tmp_path / "transcripts"
+
+    ok, failed = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=transcripts, cache_dir=tmp_path / "c",
+    )
+
+    assert failed == []
+    for stem in ("a", "b", "c"):
+        txt = (transcripts / f"{stem}.txt").read_text(encoding="utf-8")
+        assert "Первая мысль." in txt    # содержательный текст у каждого
+        assert "[" not in txt            # без таймкодов
+
+
+def test_run_transcript_byte_identical_to_transcribe(monkeypatch, tmp_path):
+    """Попутный транскрипт run и вывод команды transcribe — байт-в-байт (общий рендер-путь)."""
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [])
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+
+    # эталон — отдельная команда transcribe (fmt=text по умолчанию)
+    transcribe_out = cli.cmd_transcribe(video, fmt="text", root=REPO_ROOT,
+                                        out_dir=tmp_path / "tr", cache_dir=tmp_path / "c")
+    # run пишет попутный транскрипт в свою папку (тот же исходный транскрипт)
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "run", cache_dir=tmp_path / "c",
+                archive_dir=tmp_path / "arch")
+
+    run_txt = (tmp_path / "run" / "lecture.txt").read_text(encoding="utf-8")
+    assert run_txt == transcribe_out.read_text(encoding="utf-8")
+
+
 # -------------------------------------------------- транскрипт-кэш общий (Whisper 1 раз)
 
 def test_transcript_cache_shared_whisper_called_once(monkeypatch, tmp_path):
