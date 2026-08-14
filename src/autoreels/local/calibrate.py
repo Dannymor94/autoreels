@@ -32,7 +32,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from autoreels.core import state
-from autoreels.core.calibration import RawSelection, finalize_selection, save_calibration
+from autoreels.core.calibration import (
+    CalibrationError,
+    RawSelection,
+    finalize_selection,
+    save_calibration,
+    validate_crop_in_frame,
+)
+from autoreels.core.models import Crop
 
 
 class CalibrateError(Exception):
@@ -59,8 +66,12 @@ def parse_probe(output: str) -> tuple[int, int, float]:
 
 
 def build_frame_cmd(ffmpeg: str, video, out_png, at_seconds: float) -> list[str]:
+    # -noautorotate: НЕ применять поворот по rotation-метаданным (телефоны PXL). Кадр —
+    # в КОДИРОВАННОМ пространстве (как ffprobe width×height и как рендер, у которого тоже
+    # -noautorotate). Иначе PNG выходил повёрнутым (ш/в перепутаны) → кроп в другом
+    # пространстве, чем рендер → «зум с обрезанным верхом».
     return [
-        ffmpeg, "-y", "-loglevel", "error",
+        ffmpeg, "-y", "-loglevel", "error", "-noautorotate",
         "-ss", f"{at_seconds:.3f}",
         "-i", str(video),
         "-frames:v", "1",
@@ -423,7 +434,21 @@ def cmd_calibrate(
             calib_dir, source_name=video.name, source_sha256=sha,
             crop=crop, frame=[w, h], setup_label=setup_label,
         )
-    print(f"калибровка сохранена: {path}", flush=True)
+    # Жёсткая кросс-проверка сохранённого кропа против РЕАЛЬНЫХ (ffprobe, кодированных) w×h.
+    # Ловит рассинхрон пространств (браузер прислал повёрнутый кадр) ДО того как рендер
+    # молча склампит и выдаст 30 битых клипов. Битую калибровку удаляем.
+    saved = json.loads(Path(path).read_text(encoding="utf-8"))
+    sc = saved["crop"]
+    try:
+        validate_crop_in_frame(Crop.model_validate(sc), w, h)
+    except CalibrationError as e:
+        Path(path).unlink(missing_ok=True)
+        raise CalibrateError(
+            f"калибровка отклонена: {e} (реальный кадр {w}×{h}). Перекалибруй — "
+            f"координаты не в масштабе оригинала."
+        ) from e
+    print(f"калибровка сохранена: {path}  "
+          f"(кроп {sc['w']}×{sc['h']} @ {sc['x']},{sc['y']} в кадре {w}×{h})", flush=True)
     return path
 
 

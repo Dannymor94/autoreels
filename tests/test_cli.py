@@ -32,6 +32,14 @@ def _encoder_available(monkeypatch):
     monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: True)
 
 
+@pytest.fixture(autouse=True)
+def _frame_size_probe(monkeypatch):
+    """По умолчанию реальный размер кадра = 3840×2160 (совпадает с frame в _setup()) — cmd_run
+    кросс-проверяет кроп против ffprobe при сборке манифеста, а тестовые mp4 фейковые. Тесты,
+    которым нужен другой размер (авто-кроп, out-of-bounds), переопределяют явно."""
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+
+
 def _setup() -> SetupProfile:
     return SetupProfile(
         setup_id="tearoom_main",
@@ -165,6 +173,32 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
     assert m.source == "lecture.mp4"
     assert len(m.source_sha256) == 64
     assert len(m.reels) == 1
+
+
+def test_run_rejects_crop_out_of_real_frame(monkeypatch, tmp_path):
+    """Калибровка записана в перепутанном пространстве (кроп h=2347 в кадре 2688×1512): при
+    сборке манифеста кроп кросс-проверяется против РЕАЛЬНЫХ ffprobe-размеров → падаем с числами,
+    а не рендерим 30 битых клипов."""
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
+    # Реальный кадр — горизонтальный 2688×1512, а кроп из калибровки — в повёрнутом (h=2347).
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (2688, 1512))
+
+    video = tmp_path / "PXL.mp4"
+    video.write_bytes(b"hello-bytes")
+    calib = tmp_path / "calibrations"
+    save_calibration(
+        calib, source_name="PXL.mp4", source_sha256=state.file_sha256_partial(video),
+        crop=Crop(x=278, y=224, w=718, h=2347), frame=[1512, 2688], setup_label="pxl",
+    )
+
+    with pytest.raises(cli.CalibrationError) as e:
+        cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib,
+                    manifests_dir=tmp_path / "manifests", transcripts_dir=tmp_path / "transcripts")
+    assert "2688×1512" in str(e.value)                 # реальные размеры в сообщении
+    assert not (tmp_path / "manifests" / "PXL.json").exists()   # битый манифест не записан
 
 
 def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):

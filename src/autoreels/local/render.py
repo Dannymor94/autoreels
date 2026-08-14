@@ -302,6 +302,10 @@ def build_cut_cmd(
     duration = round(end - start, 3)
     return [
         str(ffmpeg), "-y", "-loglevel", "error",
+        # -noautorotate: рез/кроп в КОДИРОВАННОМ пространстве (ш×в как ffprobe), СОГЛАСОВАННО
+        # с калибратором (тоже -noautorotate). Иначе на видео с rotation-метаданными (PXL)
+        # кроп калибровки и crop-фильтр рендера оказывались в разных пространствах.
+        "-noautorotate",
         "-ss", _ts(start),
         "-i", str(source),
         "-t", _ts(duration),

@@ -39,6 +39,7 @@ from autoreels.core.calibration import (
     load_calibration,
     load_or_auto_calibrate,
     save_calibration,
+    validate_crop_in_frame,
 )
 from autoreels.core.config import (
     ConfigError,
@@ -881,6 +882,12 @@ def cmd_run(
         calibrations_dir, sha, Path(video).name,
         get_frame_size=lambda: _probe_frame_size_for_auto(video),
     )
+
+    # Жёсткая валидация при сборке манифеста: кроп проверяется против РЕАЛЬНЫХ размеров кадра
+    # (ffprobe), а не записанных в калибровку (те могли быть в перепутанном пространстве —
+    # тогда кроп молча вылезал за кадр и рендерились битые клипы). Падаем с числами здесь.
+    real_w, real_h = _probe_frame_size_for_auto(video)
+    validate_crop_in_frame(setup.crop, real_w, real_h)
 
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
     # Пул провайдеров + префлайт моделей ДО дорогой транскрипции: неверная model/

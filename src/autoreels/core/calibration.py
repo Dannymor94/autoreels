@@ -82,9 +82,31 @@ def snap_9_16(x: float, y: float, w: float, h: float, *, frame_size: tuple[int, 
     return Crop(x=x, y=y, w=w, h=h)
 
 
+def validate_crop_in_frame(crop: Crop, frame_w: int, frame_h: int) -> None:
+    """Жёсткая проверка: кроп ВПИСАН в кадр (x+w ≤ ширина, y+h ≤ высота). Иначе — ошибка с
+    числами (НЕ молча клампить). Ловит рассинхрон пространств (ш/в перепутаны при повороте)."""
+    if crop.x + crop.w > frame_w or crop.y + crop.h > frame_h:
+        raise CalibrationError(
+            f"кроп выходит за границы кадра: right={crop.x + crop.w}/bottom={crop.y + crop.h} "
+            f"при кадре {frame_w}×{frame_h}. Похоже координаты в другом пространстве "
+            f"(поворот/SAR) — перекалибруй."
+        )
+
+
 def finalize_selection(sel: RawSelection) -> Crop:
-    """Сырая рамка из UI → финальный кроп: пересчёт в реальные px + 9:16 + в границах."""
+    """Сырая рамка из UI → финальный кроп: пересчёт в реальные px + 9:16 + в границах.
+
+    Жёсткая валидация ДО клампа: если сырая рамка заметно вылезает за кадр (>2px допуска) —
+    ошибка, а не молчаливый кламп (иначе рамка в чужом пространстве проходит и ломает рендер).
+    """
     x, y, w, h = to_real_pixels(sel)
+    fw, fh = sel.frame_size
+    tol = 2
+    if x + w > fw + tol or y + h > fh + tol or x < -tol or y < -tol:
+        raise CalibrationError(
+            f"рамка вне кадра: право={round(x + w)}/низ={round(y + h)} при кадре {fw}×{fh} — "
+            f"вероятно координаты в другом пространстве (поворот/SAR)"
+        )
     return snap_9_16(x, y, w, h, frame_size=sel.frame_size)
 
 
@@ -114,6 +136,9 @@ def save_calibration(
         "crop": crop.model_dump(),
         "scale": TARGET_SCALE,
         "frame": list(frame),
+        # В каком пространстве координаты: rotation НЕ применён (кадр извлечён с -noautorotate,
+        # кодированное ш×в), рендер тоже -noautorotate → одно пространство.
+        "rotation_applied": False,
     }
     path = calibration_path(calibrations_dir, source_sha256)
     path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
