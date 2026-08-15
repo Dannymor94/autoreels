@@ -978,6 +978,71 @@ def test_recrop_auto_pushes_updated_manifest(tmp_path):
     assert pushed == ["v.json"]                        # обновлённый манифест запушен
 
 
+# ------------------------------------------------------------ diagnose-cuts (обрывы фраз)
+
+def _setup_diag(tmp_path, *, reels, sha="d" * 64):
+    """Манифест + кэш-транскрипт по реальной цепочке source_sha → mp3 → audio_hash → transcript."""
+    manifests = tmp_path / "manifests"; manifests.mkdir()
+    cache = tmp_path / "cache"; cache.mkdir()
+    words = [{"word": "всё", "t0": 0.0, "t1": 0.5}, {"word": "понятно.", "t0": 0.5, "t1": 1.0},
+             {"word": "это", "t0": 1.2, "t1": 1.6}, {"word": "дальше", "t0": 3.5, "t1": 4.0}]
+    audio = cache / f"{sha}.mp3"; audio.write_bytes(b"FAKE-MP3-BYTES")
+    ah = state.audio_hash(audio)
+    (cache / f"{ah}.transcript.json").write_text(
+        json.dumps({"language": "ru", "words": words}), encoding="utf-8")
+    m = Manifest(source="v.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
+                 duration_preset="shorts", setup=_setup(), run_key="rk", reels=reels)
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    return manifests, cache
+
+
+def _reel_win(rid, start, end):
+    return Reel(id=rid, start=start, end=end, score=80, hook="h", title="t",
+                description="d", reason="r", topic="x")
+
+
+def test_diagnose_cuts_classifies_manifest_ends(tmp_path, capsys):
+    """Дефолт (без LLM): r01 кончается на «понятно.» → CLEAN, r02 на «это» → HARD висячее."""
+    manifests, cache = _setup_diag(tmp_path, reels=[
+        _reel_win("r01", 0.0, 1.0),     # «понятно.» — CLEAN
+        _reel_win("r02", 0.0, 1.6),     # «это» — HARD висячее
+    ])
+    rc = cli.cmd_diagnose_cuts(root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "CLEAN" in out and "HARD" in out and "висячее" in out
+    assert "1 clean" in out and "1 HARD" in out          # сводка
+
+
+def test_diagnose_cuts_warns_when_transcript_missing(tmp_path, capsys):
+    """Нет кэш-транскрипта (видео не прогонялось здесь) → предупреждение, не падение."""
+    manifests = tmp_path / "manifests"; manifests.mkdir()
+    m = Manifest(source="v.mp4", source_sha256="e" * 64, source_hash_scheme="partial-p1",
+                 duration_preset="shorts", setup=_setup(), run_key="rk", reels=[_reel_win("r01", 0, 1)])
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    rc = cli.cmd_diagnose_cuts(root=REPO_ROOT, manifests_dir=manifests, cache_dir=tmp_path / "cache")
+    assert rc == 0
+    assert "транскрипт не найден" in capsys.readouterr().err
+
+
+def test_diagnose_cuts_rerun_uses_cached_transcript_and_warns(tmp_path, monkeypatch, capsys):
+    """--rerun: пере-прогон от КЭШ-транскрипта (mock select — без реального LLM) + предупреждение."""
+    manifests, cache = _setup_diag(tmp_path, reels=[_reel_win("r01", 0.0, 1.0)])
+    seen = {}
+    monkeypatch.setattr(cli, "build_pool", lambda cfg: type("P", (), {"preflight": lambda s: None})())
+    def fake_select(compressed, **k):
+        seen["compressed"] = compressed
+        return [_reel_win("r01", 0.0, 1.0)]
+    monkeypatch.setattr(cli, "select", fake_select)
+
+    rc = cli.cmd_diagnose_cuts(root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache, rerun=True)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "--rerun" in out and "сравнивать" in out.lower()   # предупреждение о different space
+    assert "compressed" in seen                               # select вызван на кэш-транскрипте
+    assert "понятно" in seen["compressed"]                    # именно текст кэш-транскрипта
+
+
 def test_calibrate_batch_warns_when_manifest_already_exists(tmp_path, monkeypatch, capsys):
     """calibrate --all: ручная калибровка видео с уже созданным (авто)манифестом → предупреждение."""
     root = tmp_path

@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 
 from autoreels.cloud.compress import compress_transcript
+from autoreels.cloud.diagnose import classify_end, summarize
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import ProviderError, build_pool
 from autoreels.cloud.select import SelectError, select
@@ -1706,6 +1707,135 @@ def cmd_calibrate_batch(
           flush=True)
 
 
+# ------------------------------------------------------------------ diagnose-cuts (обрывы фраз)
+
+def _transcript_for_manifest(manifest, cache_dir, *, audio_format="mp3"):
+    """Кэш-транскрипт видео по цепочке source_sha → cache/<sha>.<fmt> → audio_hash → transcript.json.
+    Возвращает Transcript или None (нет аудио/транскрипта в кэше — видео не прогонялось здесь)."""
+    audio = Path(cache_dir) / f"{manifest.source_sha256}.{audio_format}"
+    if not audio.is_file():
+        return None
+    tp = state.transcript_cache_path(cache_dir, audio)
+    if not tp.is_file():
+        return None
+    try:
+        return Transcript.model_validate_json(tp.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _rerun_reels(transcript, r0_cfg, root):
+    """Честный пере-прогон детерминированного слоя от кэш-транскрипта: compress → select(LLM)
+    → snap → pad → trim. Возвращает reels как в реальном run (для before/after по СВОДКЕ)."""
+    compressed = compress_transcript(
+        transcript, pause_sec=r0_cfg.sentence_pause_sec,
+        max_sentence_sec=getattr(r0_cfg, "max_sentence_sec", None))
+    system_text = (Path(root) / r0_cfg.prompts.system).read_text(encoding="utf-8")
+    fewshot = json.loads((Path(root) / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
+    provider = build_pool(r0_cfg)
+    provider.preflight()
+    reels = select(compressed, system_text=system_text, fewshot=fewshot,
+                   provider=provider, r0_cfg=r0_cfg)
+    snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
+                  window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
+                  min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+                  max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_words)
+    apply_padding(reels, transcript.words, tail_pad_sec=r0_cfg.tail_pad_sec,
+                  lead_pad_sec=r0_cfg.lead_pad_sec, max_duration=r0_cfg.max_duration,
+                  video_duration=transcript.words[-1].t1 if transcript.words else None,
+                  hanging_words=r0_cfg.hanging_words)
+    trim_too_long(reels, transcript.words, max_duration=r0_cfg.max_duration,
+                  pause_sec=r0_cfg.sentence_pause_sec, policy=r0_cfg.too_long_policy)
+    return reels
+
+
+def _print_diag_table(stem, diags) -> None:
+    print(f"\n### {stem}")
+    print(f"  {'id':<4}{'dur':>6}  {'последние слова':<34}{'тип конца':<13}{'пауза':>6}  "
+          f"{'вердикт':<8} причина")
+    for d in diags:
+        pa = f"{d.pause_after:.2f}" if d.pause_after is not None else "—"
+        mark = {"CLEAN": "✓ ", "SOFT": "· ", "HARD": "⛔ "}.get(d.verdict, "")
+        print(f"  {d.reel_id:<4}{d.duration:>5.1f}с {d.last_words[-33:]:<34}{d.end_type:<13}"
+              f"{pa:>6}  {mark}{d.verdict:<5}{d.cause}")
+
+
+def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
+                      manifests_dir=None) -> int:
+    """Классифицировать концы клипов: CLEAN / SOFT / HARD (обрыв) с причиной — быстрая проверка
+    после правок snap/padding/рубрики.
+
+    По умолчанию — анализ существующих манифестов (без LLM). `--rerun` — честный пере-прогон R0
+    от кэш-транскрипта (для before/after: границы готового манифеста уже пост-snap+padding,
+    сравнивать по ним НЕЛЬЗЯ — предупреждаем)."""
+    root = Path(root)
+    r0_cfg = load_r0_config(root / "config" / "r0.yaml")
+    render_cfg = load_render_config(root / "config" / "render.yaml")
+    audio_format = render_cfg.audio_extract.format
+    manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+
+    if target:
+        mf = manifests_dir / f"{Path(target).stem}.json"
+        if not mf.is_file():
+            print(f"нет манифеста для «{Path(target).stem}» в {manifests_dir}", file=sys.stderr, flush=True)
+            return 1
+        manifest_files = [mf]
+    else:
+        manifest_files = sorted(manifests_dir.glob("*.json"))
+        if not manifest_files:
+            print("manifests/ пуст — нечего диагностировать", flush=True)
+            return 0
+
+    if rerun:
+        print("⚠ --rerun: честный пере-прогон R0 от кэш-транскрипта (реальный LLM). Это "
+              "before/after по СВОДКЕ, НЕ по клипам: R0 недетерминирован и выбирает другие "
+              "моменты. Сравнивать концы одних и тех же reel с манифестом нельзя — границы "
+              "манифеста уже пост-snap+padding (дают ложные срабатывания).", flush=True)
+
+    cfg = dict(min_pause=r0_cfg.min_pause_for_phrase_end, max_micro_pause=r0_cfg.max_micro_pause,
+               tail_pad_sec=r0_cfg.tail_pad_sec, hanging_words=r0_cfg.hanging_words)
+    total = {"clean": 0, "soft": 0, "hard": 0, "causes": {}}
+    analyzed = 0
+    for mf in manifest_files:
+        try:
+            manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠ битый манифест {mf.name}: {e}", file=sys.stderr, flush=True)
+            continue
+        transcript = _transcript_for_manifest(manifest, cache_dir, audio_format=audio_format)
+        if transcript is None:
+            print(f"  ⚠ {mf.stem}: кэш-транскрипт не найден (видео не прогонялось здесь) — пропуск",
+                  file=sys.stderr, flush=True)
+            continue
+        if rerun:
+            print(f"  … пере-прогон R0: {mf.stem}", flush=True)
+            reels = _rerun_reels(transcript, r0_cfg, root)
+        else:
+            reels = manifest.reels
+        diags = [classify_end(r.id, r.start, r.end, transcript.words, **cfg) for r in reels]
+        _print_diag_table(mf.stem, diags)
+        s = summarize(diags)
+        for k in ("clean", "soft", "hard"):
+            total[k] += s[k]
+        for c, n in s["causes"].items():
+            total["causes"][c] = total["causes"].get(c, 0) + n
+        analyzed += 1
+
+    if analyzed:
+        n = total["clean"] + total["soft"] + total["hard"]
+        print(f"\n=== ИТОГО ({'пере-прогон R0' if rerun else 'манифесты'}): "
+              f"{total['clean']} clean · {total['soft']} soft · {total['hard']} HARD  из {n} клипов ===",
+              flush=True)
+        if total["causes"]:
+            parts = ", ".join(f"{c}={n}" for c, n in sorted(total["causes"].items()))
+            print(f"    причины HARD: {parts}", flush=True)
+        if total["soft"]:
+            print("    (soft = пауза 0.4–1.5с на нормальном слове — естественный вдох, приемлемо)",
+                  flush=True)
+    return 0
+
+
 # --------------------------------------------------------------------------- status
 
 def cmd_status(*, root=".") -> int:
@@ -1815,6 +1945,7 @@ _MENU_ITEMS: list[tuple[str, str, str, str]] = [
                         "доделать рендер, докачки"),
     ("8", "help",       "Справка",                       ""),
     ("9", "profile",    "Профиль рендера",               "hevc | h264 | av1"),
+    ("10", "diagnose",  "Диагностика обрывов фраз",      "CLEAN/SOFT/HARD по клипам + причина"),
     ("0", "quit",       "Выход",                         ""),
 ]
 
@@ -2150,6 +2281,7 @@ autoreels — длинное talking-head видео → вертикальны�
   arl go --no-push run без push
   arl r            render (git pull внутри; блокирует устаревший кроп)  (системник)
   arl rc [видео]   recrop: обновить кроп в манифесте по свежей калибровке (без R0)
+  arl dc [--rerun] diagnose-cuts: проверить обрывы фраз (CLEAN/SOFT/HARD + причина)
   arl s            status
   arl c            calibrate --all
   arl t <ист>      транскрибация (видео/аудио/url → текст для контента)
@@ -2472,6 +2604,26 @@ def _build_parser():
     prc.add_argument("--no-push", action="store_true", dest="no_push",
                      help="не пушить обновлённый манифест в git")
 
+    pdc = sub.add_parser(
+        "diagnose-cuts",
+        help="классифицировать концы клипов: CLEAN/SOFT/HARD (обрыв фразы) с причиной",
+        description=(
+            "Проверка обрывов фраз после правок snap/padding/рубрики. По каждому клипу — тип\n"
+            "конца (фраза/пауза/висячее/запятая/мид-слово), вердикт CLEAN/SOFT/HARD и причина\n"
+            "HARD (PAD-хвост / snap-fallback). Быстро, без LLM — по существующим манифестам.\n\n"
+            "--rerun — честный пере-прогон R0 от кэш-транскрипта (before/after по СВОДКЕ после\n"
+            "правок; границы готового манифеста уже пост-snap+padding, по ним сравнивать нельзя).\n\n"
+            "Пример: autoreels diagnose-cuts            # все манифесты\n"
+            "        autoreels diagnose-cuts video.mp4  # одно\n"
+            "        autoreels diagnose-cuts --rerun    # честный пере-прогон R0"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pdc.add_argument("target", nargs="?", default=None, metavar="видео|манифест",
+                     help="конкретное видео/манифест (иначе — все манифесты)")
+    pdc.add_argument("--rerun", action="store_true",
+                     help="честный пере-прогон R0 от кэш-транскрипта (для before/after по сводке)")
+
     sub.add_parser(
         "migrate-calibrations",
         help="перенести ручные калибровки со старого ключа (полный sha) на актуальный",
@@ -2616,6 +2768,8 @@ def main(argv=None) -> int:
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "recrop":
             return cmd_recrop(args.video, push=not args.no_push)
+        elif args.cmd == "diagnose-cuts":
+            return cmd_diagnose_cuts(args.target, rerun=args.rerun)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":
