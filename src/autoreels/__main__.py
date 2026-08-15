@@ -632,17 +632,49 @@ def _write_manifest(manifest, manifests_dir) -> Path:
 # ----------------------------------------------------------- авто-коммит манифеста (per-video)
 
 def _should_git_sync() -> bool:
-    """Авто-коммит/пуш в git (транспорт Mac → системник) — только на машине-ИСТОЧНИКЕ.
+    """Авто-git-синхронизация: push калибровок/манифестов и pull перед работой.
 
-    Системник Windows — ПОТРЕБИТЕЛЬ: git pull + рендер из локальных файлов, пушить ему
-    незачем (нет удалёнки/креды, а calibrate/run зря дёргали git). По умолчанию: Mac/Linux —
-    да, Windows — нет. Явное переопределение: AUTOREELS_GIT_SYNC=1 (вкл) / =0 (выкл)."""
+    ОБА тира теперь участники git-транспорта: системник (Windows) КАЛИБРУЕТ и пушит калибровки,
+    Mac делает run и пушит манифесты, рендер тянет свежее. Поэтому включено ВЕЗДЕ по умолчанию
+    (раньше выключалось на Windows, когда системник был лишь потребителем — workflow изменился).
+    Явное переопределение: AUTOREELS_GIT_SYNC=0 (выкл — одиночная машина без remote) / =1 (вкл)."""
     v = os.environ.get("AUTOREELS_GIT_SYNC")
     if v == "1":
         return True
     if v == "0":
         return False
-    return not sys.platform.startswith("win")
+    return True
+
+
+def _git_pull(root, *, what: str = "свежие данные") -> None:
+    """git pull --ff-only ПЕРЕД работой (подтянуть калибровки/манифесты с другой машины).
+
+    Не роняет команду при ошибке (нет сети/конфликт/нет remote) — предупреждаем и работаем с
+    локальными файлами. Точка синхронизации: run на Mac тянет калибровки, render — манифесты."""
+    if not _should_git_sync():
+        return
+    import subprocess
+    root = Path(root)
+    try:
+        pull = _run_git(["pull", "--ff-only"], root=root, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("  ⚠ git pull завис (таймаут) — работаю с локальными файлами",
+              file=sys.stderr, flush=True)
+        return
+    except OSError as e:
+        print(f"  ⚠ git недоступен: {e} — работаю с локальными файлами",
+              file=sys.stderr, flush=True)
+        return
+    if pull.returncode != 0:
+        detail = " ".join((pull.stderr or "").split())[:160] or "(без деталей)"
+        print(f"  ⚠ git pull не прошёл ({what}): {detail} — работаю с локальными файлами",
+              file=sys.stderr, flush=True)
+        return
+    combined = f"{pull.stdout}{pull.stderr}".lower()
+    if "up to date" in combined or "актуальн" in combined:
+        print(f"  ✓ git pull: уже актуально ({what})", flush=True)
+    else:
+        print(f"  ✓ git pull: подтянул {what}", flush=True)
 
 
 def _run_git(args, *, root, timeout=None):
@@ -753,7 +785,8 @@ def _commit_push_calibrations(*, root) -> None:
             _warn(push.stderr)
             return
         if not nothing_new:
-            print("  ✓ калибровки запушены → на системнике: ar r (git pull)", flush=True)
+            print("  ✓ калибровка сохранена и отправлена → на Mac: ar run "
+                  "(подтянет калибровки и построит манифесты)", flush=True)
     except subprocess.TimeoutExpired:
         _warn("git завис (таймаут) — проверь сеть/доступ к remote или SSH-passphrase")
     except OSError as e:
@@ -851,11 +884,14 @@ def cmd_run(
     transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
     push: bool = False,
+    pull_first: bool = True,
 ) -> Path:
     """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
 
     `push=True` → сразу закоммитить+запушить манифест (per-video sync на системник);
     ошибка git не роняет прогон. По умолчанию False (git не трогается).
+    `pull_first=True` → git pull ПЕРЕД стартом (подтянуть свежие калибровки с системника,
+    чтобы не строить манифест на старом кропе). Batch тянет один раз и зовёт с pull_first=False.
 
     Кроп per-file: берётся из `calibrations/<sha256>.json` (пишет `autoreels calibrate`).
     Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением.
@@ -864,6 +900,8 @@ def cmd_run(
     он уже посчитан для R0, отдельный `transcribe` на то же видео не нужен.
     """
     root = Path(root)
+    if pull_first:
+        _git_pull(root, what="калибровки")     # свежие ручные калибровки с системника
     cfg = root / "config"
     render_cfg = load_render_config(cfg / "render.yaml")
     r0_cfg = load_r0_config(cfg / "r0.yaml")
@@ -1054,6 +1092,7 @@ def cmd_run_batch(
     Возвращает (ok_names, failed_list) где failed_list = [(name, exc), ...].
     """
     root = Path(root)
+    _git_pull(root, what="калибровки")          # один pull на всю пачку (не на каждое видео)
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     videos = sorted(inputs_dir.glob("*.mp4"))
     if not videos:
@@ -1067,7 +1106,7 @@ def cmd_run_batch(
             cmd_run(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
-                ffmpeg=ffmpeg, push=push,
+                ffmpeg=ffmpeg, push=push, pull_first=False,
             )
             ok.append(v.name)
         except Exception as e:  # noqa: BLE001
@@ -1128,11 +1167,14 @@ def cmd_render(
     inputs_dir=None,
     out_dir=None,
     archive_dir=None,
+    calibrations_dir=None,
     root=".",
     ffmpeg: str | None = None,
     encoder=None,
     profile=None,
     fallback: bool = True,
+    allow_stale: bool = False,
+    pull_first: bool = True,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -1145,12 +1187,15 @@ def cmd_render(
     Идемпотентность обеспечивается проверкой выходных файлов, а не перемещением манифеста.
     """
     root = Path(root)
+    if pull_first:
+        _git_pull(root, what="манифесты")       # свежие манифесты с Mac (после run)
     render_cfg = load_render_config(root / "config" / "render.yaml")
     subtitles_cfg = load_subtitles_config(root / "config" / "subtitles.yaml")
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
+    calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
 
     manifest_files = sorted(manifests_dir.glob("*.json"))
     if not manifest_files:
@@ -1174,6 +1219,7 @@ def cmd_render(
     all_outputs: list[Path] = []
     skipped_no_video: list[str] = []
     skipped_done: list[str] = []
+    skipped_stale: list[str] = []
     failed: list[tuple[str, Exception]] = []
 
     for mf in manifest_files:
@@ -1181,6 +1227,17 @@ def cmd_render(
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
             stem = Path(manifest.source).stem
             out_dir_final = out_dir / stem
+
+            # Рассинхрон: калибровка новее манифеста (кроп в манифесте устарел). Рендерить —
+            # значит выжечь СТАРЫЙ кроп в клипы. По умолчанию НЕ рендерим (--allow-stale снимает).
+            desync = _manifest_calibration_desync(manifest, calibrations_dir)
+            if desync and not allow_stale:
+                print(f"\n  ⛔ ПРОПУСК {stem}: {desync}", file=sys.stderr, flush=True)
+                print(f"     кроп в манифесте {manifest.setup.crop.model_dump()} — старый. "
+                      f"Обнови: ar recrop (быстро, без пересчёта R0), затем ar r. "
+                      f"Форс старым кропом: ar r --allow-stale", file=sys.stderr, flush=True)
+                skipped_stale.append(mf.name)
+                continue
 
             # Идемпотентность: пропускаем манифесты, для которых все клипы уже есть
             missing = _missing_reels(manifest, out_dir_final)
@@ -1216,13 +1273,16 @@ def cmd_render(
             failed.append((mf.name, e))
 
     total = len(manifest_files)
-    skipped = skipped_no_video + skipped_done
+    skipped = skipped_no_video + skipped_done + skipped_stale
     if total > 1 or failed or skipped:
         ok = total - len(failed) - len(skipped)
         parts = [f"{ok} отрендерено"]
         if skipped_done:
             names = ", ".join(s.removesuffix(".json") for s in skipped_done)
             parts.append(f"{len(skipped_done)} уже готово ({names})")
+        if skipped_stale:
+            names = ", ".join(s.removesuffix(".json") for s in skipped_stale)
+            parts.append(f"{len(skipped_stale)} устарел кроп → нужен run ({names})")
         if skipped_no_video:
             names = ", ".join(s.removesuffix(".json") for s in skipped_no_video)
             parts.append(f"{len(skipped_no_video)} нет видео ({names})")
@@ -1232,6 +1292,118 @@ def cmd_render(
         for name, err in failed:
             print(f"  ✗ {name}: {err}", file=sys.stderr)
     return all_outputs
+
+
+def _find_source_video(source_name, *, inputs_dir, archive_dir):
+    """Найти видеофайл по имени в inputs/ или архиве (для probe размера при автокропе)."""
+    for d in (inputs_dir, archive_dir):
+        p = Path(d) / source_name
+        if p.is_file():
+            return p
+    return None
+
+
+def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir):
+    """Свежий setup для манифеста: калибровка по sha (или автокроп по отображаемому кадру).
+
+    Кроп валидируется В ОТОБРАЖАЕМОМ кадре (границы + 9:16). Автокроп требует видео на диске —
+    иначе CalibrationError (нечем определить размер кадра). Reels/тексты не участвуют."""
+    def _frame_size():
+        video = _find_source_video(manifest.source, inputs_dir=inputs_dir, archive_dir=archive_dir)
+        if video is None:
+            raise CalibrationError(
+                f"нет калибровки и видео «{manifest.source}» недоступно (ни inputs/, ни архив) — "
+                f"нечем считать автокроп"
+            )
+        return _probe_frame_size_for_auto(video)
+
+    setup = load_or_auto_calibrate(
+        calibrations_dir, manifest.source_sha256, manifest.source, get_frame_size=_frame_size
+    )
+    validate_crop_in_frame(setup.crop, setup.frame[0], setup.frame[1])
+    return setup
+
+
+def cmd_recrop(
+    video=None,
+    *,
+    root=".",
+    manifests_dir=None,
+    calibrations_dir=None,
+    inputs_dir=None,
+    archive_dir=None,
+    push: bool = True,
+    pull_first: bool = True,
+) -> int:
+    """Обновить ТОЛЬКО кроп в существующем манифесте по свежей калибровке — БЕЗ пересчёта R0.
+
+    Смена калибровки не должна гнать LLM заново (границы клипов, тексты, субтитры не меняются —
+    меняется лишь crop). Эта команда читает калибровку по sha видео (или автокроп), обновляет
+    setup (crop/scale/frame) в манифесте и всё; reels байт-в-байт те же. Без <video> — batch по
+    всем манифестам с устаревшим кропом. Валидация: кроп в отображаемом кадре, 9:16. Авто-push."""
+    root = Path(root)
+    if pull_first:
+        _git_pull(root, what="калибровки")
+    manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
+    calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
+    inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+    archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
+
+    if video is not None:
+        mf = manifests_dir / f"{Path(video).stem}.json"
+        if not mf.is_file():
+            print(f"нет манифеста для {Path(video).stem} — сначала ar run", file=sys.stderr, flush=True)
+            return 1
+        targets = [mf]
+    else:
+        targets = sorted(manifests_dir.glob("*.json"))
+        if not targets:
+            print("manifests/ пуст — нечего рекропить", flush=True)
+            return 0
+
+    updated: list[str] = []
+    skipped: list[str] = []
+    for mf in targets:
+        try:
+            manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠ битый манифест {mf.name}: {e}", file=sys.stderr, flush=True)
+            skipped.append(mf.name)
+            continue
+        stem = Path(manifest.source).stem
+        try:
+            new_setup = _recrop_setup(manifest, calibrations_dir=calibrations_dir,
+                                      inputs_dir=inputs_dir, archive_dir=archive_dir)
+        except CalibrationError as e:
+            print(f"  ⚠ пропуск {stem}: {e}", file=sys.stderr, flush=True)
+            skipped.append(mf.name)
+            continue
+
+        old = manifest.setup.crop
+        same_crop = old.model_dump() == new_setup.crop.model_dump()
+        same_frame = list(manifest.setup.frame) == list(new_setup.frame)
+        if same_crop and same_frame:
+            if video is not None:                       # явный recrop одного видео — сообщим
+                print(f"  {stem}: кроп уже актуален — без изменений", flush=True)
+            continue
+
+        # Обновляем ТОЛЬКО setup; reels/тексты/субтитры остаются те же объекты → байт-в-байт.
+        _write_manifest(manifest.model_copy(update={"setup": new_setup}), manifests_dir)
+        c = new_setup.crop
+        print(f"  ✓ {stem}: кроп {old.w}×{old.h}@{old.x},{old.y} → {c.w}×{c.h}@{c.x},{c.y} "
+              f"в кадре {new_setup.frame} (R0 не пересчитывался)", flush=True)
+        updated.append(mf.name)
+        if push:
+            _commit_push_manifest(manifests_dir / f"{stem}.json", len(manifest.reels), root=root)
+
+    if video is None or len(targets) > 1:
+        parts = [f"{len(updated)} обновлено"]
+        if skipped:
+            parts.append(f"{len(skipped)} пропущено")
+        print(f"\n=== recrop: {' / '.join(parts)} ===", flush=True)
+    if updated:
+        print("  → теперь ar r (render) на системнике", flush=True)
+    return 0
 
 
 def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
@@ -1368,9 +1540,27 @@ def _manifest_calibration_desync(manifest, calibrations_dir) -> str | None:
     calib_is_manual = not (rec.get("auto") or rec.get("setup_label") == "auto")
     if manifest.setup.setup_id == "auto" and calib_is_manual:
         return (f"манифест {stem} создан с автокропом, но появилась ручная калибровка "
-                f"→ нужен повторный run (ar go)")
+                f"→ ar recrop (обновить кроп без пересчёта R0)")
     return (f"манифест {stem}: кроп устарел (калибровка изменилась) "
-            f"→ нужен повторный run (ar go)")
+            f"→ ar recrop (обновить кроп без пересчёта R0)")
+
+
+def _manifest_sync_mark(video, manifests_dir, calibrations_dir) -> str:
+    """Короткая метка состояния синхронизации для status: есть ли манифест и не устарел ли кроп.
+
+    «манифест ✓» — синхронно; «манифест устарел → run» — калибровка новее (нужен run на Mac);
+    «нет манифеста → run» — видео ещё не прогнано; «манифест повреждён» — не читается."""
+    stem = Path(video).stem
+    mf = Path(manifests_dir) / f"{stem}.json"
+    if not mf.is_file():
+        return "нет манифеста → run"
+    try:
+        manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return "манифест повреждён"
+    if _manifest_calibration_desync(manifest, Path(calibrations_dir)):
+        return "кроп устарел → recrop"
+    return "манифест ✓"
 
 
 def _warn_if_manifest_stale(video, *, root, calibrations_dir=None) -> str | None:
@@ -1528,7 +1718,7 @@ def cmd_status(*, root=".") -> int:
 
     cache_dir = root / "data" / "cache"
 
-    # Per-file таблица кропа
+    # Per-file таблица: кроп + состояние синхронизации манифеста (нужен ли повторный run).
     if inputs:
         print()
         print("  ┌─ inputs/ ────────────────────────────────────────")
@@ -1539,14 +1729,14 @@ def cmd_status(*, root=".") -> int:
             except Exception:  # noqa: BLE001
                 kind = "none"
             if kind == "manual":
-                mark = "✓ кроп откалиброван (ручной)"
+                mark = "✓ кроп (ручной)"
             elif kind == "auto":
-                mark = "⚙ автокроп (зафиксирован)"
+                mark = "⚙ автокроп"
             elif kind == "corrupt":
                 mark = "⚠ калибровка повреждена"
             else:
-                mark = "⚙ автокроп (калибровки нет)"
-            print(f"  │ {v.name:<30}  {mark}")
+                mark = "⚙ автокроп (нет калибровки)"
+            print(f"  │ {v.name:<30}  {mark} · {_manifest_sync_mark(v, manifests_dir, calibrations_dir)}")
         print("  └──────────────────────────────────────────────────")
 
     # Предупреждения: манифесты без видео
@@ -2171,6 +2361,9 @@ def _build_parser():
     pd.add_argument("--no-fallback", action="store_true", dest="no_fallback",
                     help="не подбирать доступный энкодер автоматически (av1→hevc→h264); "
                          "недоступный выбранный → ошибка")
+    pd.add_argument("--allow-stale", action="store_true", dest="allow_stale",
+                    help="рендерить даже если кроп в манифесте устарел (калибровка новее); "
+                         "по умолчанию такие видео пропускаются с требованием повторного run")
 
     prs = sub.add_parser(
         "resume",
@@ -2186,6 +2379,24 @@ def _build_parser():
     prs.add_argument("--profile", default=None, help="кодек-профиль (как у render): h264|hevc|av1")
     prs.add_argument("--encoder", default=None, help="видеокодек ffmpeg (как у render)")
     prs.add_argument("--ffmpeg", default=None, help="путь к ffmpeg (иначе из render.yaml)")
+
+    prc = sub.add_parser(
+        "recrop",
+        help="обновить только кроп в существующем манифесте по свежей калибровке (без R0)",
+        description=(
+            "Обновляет ТОЛЬКО crop в манифесте по актуальной калибровке — без пересчёта R0\n"
+            "(LLM, чанки, квоты). Границы клипов, тексты, субтитры не меняются. Нужно после\n"
+            "перекалибровки, когда манифест уже построен: не гнать run заново.\n"
+            "Без <видео> — batch по всем манифестам с устаревшим кропом. Авто-push.\n\n"
+            "Пример: autoreels recrop            # все устаревшие\n"
+            "        autoreels recrop video.mp4  # одно видео"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    prc.add_argument("video", nargs="?", default=None, metavar="видео",
+                     help="конкретное видео (иначе — все манифесты с устаревшим кропом)")
+    prc.add_argument("--no-push", action="store_true", dest="no_push",
+                     help="не пушить обновлённый манифест в git")
 
     sub.add_parser(
         "migrate-calibrations",
@@ -2326,9 +2537,11 @@ def main(argv=None) -> int:
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
-                       fallback=not args.no_fallback)
+                       fallback=not args.no_fallback, allow_stale=args.allow_stale)
         elif args.cmd == "resume":
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
+        elif args.cmd == "recrop":
+            return cmd_recrop(args.video, push=not args.no_push)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

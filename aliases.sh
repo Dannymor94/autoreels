@@ -97,11 +97,12 @@ _ar_menu() {
 # КОРОТКИЕ КОМАНДЫ:
 #   ar           → интерактивное меню (цифрами)
 #   ar menu      → то же меню
-#   ar go        → run всех видео + git push манифестов (Mac, нужен Groq)
+#   ar go        → run всех видео + git push манифестов (Mac, нужен Groq; git pull перед стартом)
 #   ar go --no-push → run без git push
-#   ar r         → git pull + render (системник)
+#   ar r         → render (git pull внутри; блокирует рендер устаревшего кропа) (системник)
+#   ar rc [вид]  → recrop: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
 #   ar s         → status
-#   ar c         → calibrate --all
+#   ar c         → calibrate --all (пушит калибровки → на Mac ar run)
 #   ar t <ист>   → transcribe (видео/аудио/url → текст для контента)
 #   ar h         → help
 #   ar <...>     → передать в autoreels напрямую
@@ -132,14 +133,21 @@ ar() {
             _ar_cli run "$@"
             ;;
         r)
-            # ar r: git pull → render (энкодер из config/render.yaml)
-            git -C "$_AR_ROOT" pull && _ar_cli render
+            # ar r: render (git pull делается ВНУТРИ render — подтягивает свежие манифесты
+            # и блокирует рендер устаревшего кропа). Энкодер из config/render.yaml.
+            shift
+            _ar_cli render "$@"
             ;;
         s)
             _ar_cli status
             ;;
         c)
             _ar_cli calibrate --all
+            ;;
+        rc)
+            # ar rc [видео]: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
+            shift
+            _ar_cli recrop "$@"
             ;;
         t)
             # ar t <видео|аудио|url>: транскрибация для контента

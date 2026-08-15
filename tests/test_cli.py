@@ -24,12 +24,32 @@ from autoreels.local.render import RenderError, SourceNotFoundError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# Реальный _run_git, захваченный ДО autouse-мока (_no_real_git) — для теста самого _run_git.
+_REAL_RUN_GIT = cli._run_git
+
 
 @pytest.fixture(autouse=True)
 def _encoder_available(monkeypatch):
     """По умолчанию энкодер «доступен» — тесты не гоняют реальный ffmpeg-пробник (нет AMF
     на Mac). Тесты префлайта/меню переопределяют cli.probe_encoder явно."""
     monkeypatch.setattr(cli, "probe_encoder", lambda codec, **k: True)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_git(monkeypatch):
+    """КРИТИЧНО: тесты используют root=REPO_ROOT (реальный репозиторий). cmd_run/cmd_render
+    теперь дёргают git pull, а calibrate — commit/push. Без этого мока реальный git выполнялся
+    бы в рабочем репо во время тестов (наблюдалось: тест закоммитил и запушил калибровки).
+    По умолчанию git — no-op; тесты git (_FakeGit) переопределяют _run_git явно."""
+    monkeypatch.setattr(cli, "_git_pull", lambda *a, **k: None)
+
+    def _fake_git(args, *, root, timeout=None):
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+    monkeypatch.setattr(cli, "_run_git", _fake_git)
 
 
 @pytest.fixture(autouse=True)
@@ -444,7 +464,8 @@ def test_commit_push_calibrations_syncs_dir(monkeypatch, tmp_path, capsys):
     assert git.subcommands() == ["add", "commit", "push"]
     add_args = next(c for c in git.calls if c[0] == "add")
     assert "calibrations" in add_args
-    assert "калибровки запушены" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "отправлена" in out and "ar run" in out         # следующий шаг — run на Mac
 
 
 def test_commit_push_calibrations_noop_when_dir_absent(monkeypatch, tmp_path):
@@ -484,42 +505,28 @@ def test_run_commits_calibration_with_manifest(monkeypatch, tmp_path):
     assert str(captured["calib"]).endswith(".json")
 
 
-def test_git_sync_disabled_on_windows(monkeypatch):
-    """Системник Windows — потребитель: авто-git-синхронизация выключена по умолчанию."""
+def test_git_sync_enabled_on_all_platforms_by_default(monkeypatch):
+    """Оба тира — участники git (системник калибрует и пушит калибровки, Mac пушит манифесты).
+    По умолчанию синхронизация включена ВЕЗДЕ (workflow изменился — Windows больше не только потребитель)."""
     monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
     monkeypatch.setattr(cli.sys, "platform", "win32")
-    assert cli._should_git_sync() is False
+    assert cli._should_git_sync() is True                 # системник тоже пушит калибровки
     monkeypatch.setattr(cli.sys, "platform", "darwin")
     assert cli._should_git_sync() is True
 
 
 def test_git_sync_env_override(monkeypatch):
-    """AUTOREELS_GIT_SYNC=1/0 переопределяет платформенный дефолт."""
+    """AUTOREELS_GIT_SYNC=0 выключает (одиночная машина без remote), =1 форсит."""
     monkeypatch.setattr(cli.sys, "platform", "win32")
-    monkeypatch.setenv("AUTOREELS_GIT_SYNC", "1")
-    assert cli._should_git_sync() is True                 # вкл на Windows явно
-    monkeypatch.setattr(cli.sys, "platform", "darwin")
     monkeypatch.setenv("AUTOREELS_GIT_SYNC", "0")
-    assert cli._should_git_sync() is False                # выкл на Mac явно
+    assert cli._should_git_sync() is False                # выкл явно
+    monkeypatch.setattr(cli.sys, "platform", "darwin")
+    monkeypatch.setenv("AUTOREELS_GIT_SYNC", "1")
+    assert cli._should_git_sync() is True                 # вкл явно
 
 
-def test_commit_push_manifest_skipped_on_windows(monkeypatch, tmp_path):
-    """На Windows _commit_push_manifest не трогает git (не пишет кроп/манифест в гит)."""
-    monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
-    monkeypatch.setattr(cli.sys, "platform", "win32")
-    git = _FakeGit()
-    monkeypatch.setattr(cli, "_run_git", git)
-    mf = tmp_path / "m" / "v.json"
-    mf.parent.mkdir(parents=True)
-    mf.write_text("{}", encoding="utf-8")
-
-    cli._commit_push_manifest(mf, 3, root=tmp_path)
-
-    assert git.calls == []                                 # git не дёргался
-
-
-def test_commit_push_calibrations_skipped_on_windows(monkeypatch, tmp_path):
-    """На Windows _commit_push_calibrations не пушит калибровки (системник — потребитель)."""
+def test_commit_push_calibrations_works_on_windows(monkeypatch, tmp_path):
+    """На системнике (Windows) калибровки ПУШАТСЯ — он теперь источник калибровок (item 1)."""
     monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
     monkeypatch.setattr(cli.sys, "platform", "win32")
     git = _FakeGit()
@@ -528,7 +535,23 @@ def test_commit_push_calibrations_skipped_on_windows(monkeypatch, tmp_path):
 
     cli._commit_push_calibrations(root=tmp_path)
 
-    assert git.calls == []
+    assert git.subcommands() == ["add", "commit", "push"]  # пушит, а не молчит
+
+
+def test_git_sync_disabled_by_env_skips_push(monkeypatch, tmp_path):
+    """AUTOREELS_GIT_SYNC=0 → _commit_push_* не трогает git (одиночная машина без remote)."""
+    monkeypatch.setenv("AUTOREELS_GIT_SYNC", "0")
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    (tmp_path / "calibrations").mkdir()
+    mf = tmp_path / "m" / "v.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_calibrations(root=tmp_path)
+    cli._commit_push_manifest(mf, 3, root=tmp_path)
+
+    assert git.calls == []                                 # git не дёргался (выкл env)
 
 
 def test_commit_push_manifest_git_failure_warns_not_raises(monkeypatch, tmp_path, capsys):
@@ -569,6 +592,7 @@ def test_run_git_uses_noninteractive_env(monkeypatch, tmp_path):
         return _R()
     import subprocess
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(cli, "_run_git", _REAL_RUN_GIT)   # снять autouse-мок: тестируем сам _run_git
 
     cli._run_git(["push"], root=tmp_path)
 
@@ -688,7 +712,7 @@ def test_desync_detects_auto_manifest_with_manual_calibration(tmp_path):
     msg = cli._manifest_calibration_desync(m, cal)
     assert msg is not None
     assert "lecture" in msg
-    assert "run" in msg.lower()          # советует повторный run
+    assert "recrop" in msg.lower()       # советует быстрый recrop (без пересчёта R0)
     assert "автокроп" in msg
 
 
@@ -727,7 +751,7 @@ def test_status_reports_calibration_desync(tmp_path, capsys):
     cli.cmd_status(root=root)
 
     out = capsys.readouterr().out
-    assert "повторный run" in out
+    assert "recrop" in out
     assert "lecture" in out
 
 
@@ -746,7 +770,7 @@ def test_warn_if_manifest_stale_returns_and_prints(tmp_path, capsys):
     msg = cli._warn_if_manifest_stale(root / "inputs" / "lecture.mp4", root=root)
 
     assert msg is not None
-    assert "повторный run" in capsys.readouterr().err
+    assert "recrop" in capsys.readouterr().err
 
 
 def test_warn_if_manifest_stale_silent_when_no_manifest(tmp_path, capsys):
@@ -760,6 +784,198 @@ def test_warn_if_manifest_stale_silent_when_no_manifest(tmp_path, capsys):
 
     assert msg is None
     assert capsys.readouterr().err == ""
+
+
+# --------------------------------- авто-синхронизация: run тянет pull, render блокирует устаревшее
+
+def test_run_pulls_before_start(monkeypatch, tmp_path):
+    """cmd_run делает git pull ПЕРЕД стартом (подтянуть свежие калибровки с системника)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    pulls = []
+    monkeypatch.setattr(cli, "_git_pull", lambda root, **k: pulls.append(k.get("what")))
+    video = tmp_path / "inputs" / "v.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                transcripts_dir=tmp_path / "t", cache_dir=tmp_path / "c",
+                calibrations_dir=tmp_path / "calibrations", archive_dir=tmp_path / "arch")
+
+    assert pulls == ["калибровки"]                     # pull вызван ровно раз перед работой
+
+
+def test_run_batch_pulls_once_not_per_video(monkeypatch, tmp_path):
+    """Batch тянет pull ОДИН раз, а не на каждое видео (cmd_run зовётся с pull_first=False)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    pulls = []
+    monkeypatch.setattr(cli, "_git_pull", lambda root, **k: pulls.append(1))
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+                      archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                      cache_dir=tmp_path / "c", calibrations_dir=tmp_path / "calibrations")
+
+    assert pulls == [1]                                # один pull на всю пачку
+
+
+def _stale_render_setup(tmp_path):
+    """Манифест + калибровка с ДРУГИМ (свежим) кропом → рассинхрон. Возвращает (manifests, cal)."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    m = _manifest()                                    # sha 'a'*64, crop 1370,280,956,1700
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    cal = tmp_path / "calibrations"
+    save_calibration(cal, source_name="v.mp4", source_sha256=m.source_sha256,
+                     crop=Crop(x=96, y=170, w=1320, h=2347), frame=[1512, 2688], setup_label="v")
+    return manifests, cal
+
+
+def test_render_blocks_stale_crop(monkeypatch, tmp_path, capsys):
+    """Калибровка новее манифеста → рендер ПРОПУСКАЕТ видео (не жжёт старый кроп), советует recrop."""
+    manifests, cal = _stale_render_setup(tmp_path)
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [])
+
+    out = cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT)
+
+    assert called == []                                # render_crop НЕ вызван (пропущено)
+    assert out == []
+    err = capsys.readouterr().err
+    assert "ПРОПУСК" in err and "recrop" in err
+
+
+def test_render_allow_stale_renders_anyway(monkeypatch, tmp_path):
+    """--allow-stale: рендерим устаревший кроп сознательно (форс)."""
+    manifests, cal = _stale_render_setup(tmp_path)
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [Path("r.mp4")])
+
+    cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT, allow_stale=True)
+
+    assert len(called) == 1                            # отрендерён несмотря на рассинхрон
+
+
+def test_status_shows_manifest_sync_marks(monkeypatch, tmp_path, capsys):
+    """status по каждому видео показывает состояние манифеста: ✓ / кроп устарел → recrop / нет."""
+    root = tmp_path
+    inputs = root / "inputs"; inputs.mkdir()
+    manifests = root / "manifests"; manifests.mkdir()
+    cal = root / "calibrations"
+    sha = "d" * 64
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast", lambda v, c: sha)
+    monkeypatch.setattr(cli, "_calibration_kind", lambda d, s: "manual")
+    (inputs / "v.mp4").write_bytes(b"x")
+    # манифест с УСТАРЕВШИМ кропом + свежая калибровка (другой кроп) → «кроп устарел → recrop»
+    (manifests / "v.json").write_text(
+        _manifest_with_crop("v", sha, Crop(x=0, y=0, w=900, h=1600), "auto").model_dump_json(),
+        encoding="utf-8")
+    save_calibration(cal, source_name="v.mp4", source_sha256=sha,
+                     crop=Crop(x=96, y=170, w=1320, h=2347), frame=[1512, 2688], setup_label="v")
+
+    cli.cmd_status(root=root)
+
+    out = capsys.readouterr().out
+    assert "кроп устарел → recrop" in out              # per-video метка синхронизации
+
+
+# ------------------------------------------------------------ recrop: обновить кроп без R0
+
+def _recrop_manifest_and_cal(tmp_path, *, manifest_crop, cal_crop, cal_frame=(1512, 2688)):
+    sha = "d" * 64
+    manifests = tmp_path / "manifests"; manifests.mkdir()
+    reels = [Reel(id="r01", start=10.0, end=40.0, score=80, hook="h", title="Т", description="о",
+                  reason="r", topic="x", subtitles=[Word(word="слово", t0=11.0, t1=11.5)])]
+    m = Manifest(source="v.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
+                 duration_preset="shorts",
+                 setup=SetupProfile(setup_id="old", crop=manifest_crop, scale=[1080, 1920],
+                                    frame=[2688, 1512]),
+                 run_key="rk", reels=reels)
+    (manifests / "v.json").write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    cal = tmp_path / "calibrations"
+    save_calibration(cal, source_name="v.mp4", source_sha256=sha, crop=cal_crop,
+                     frame=list(cal_frame), setup_label="room")
+    return manifests, cal
+
+
+def test_recrop_updates_only_crop_rest_byte_identical(tmp_path):
+    """recrop меняет ТОЛЬКО setup; reels/тексты/субтитры/прочее — байт-в-байт те же."""
+    manifests, cal = _recrop_manifest_and_cal(
+        tmp_path, manifest_crop=Crop(x=133, y=75, w=808, h=1437),
+        cal_crop=Crop(x=96, y=170, w=1320, h=2347))
+    before = json.loads((manifests / "v.json").read_text(encoding="utf-8"))
+
+    rc = cli.cmd_recrop("v.mp4", root=REPO_ROOT, manifests_dir=manifests,
+                        calibrations_dir=cal, push=False)
+
+    assert rc == 0
+    after = json.loads((manifests / "v.json").read_text(encoding="utf-8"))
+    assert after["setup"]["crop"] == {"x": 96, "y": 170, "w": 1320, "h": 2347}   # кроп обновлён
+    assert after["setup"]["frame"] == [1512, 2688]
+    # всё, кроме setup — идентично (границы клипов, тексты, субтитры не тронуты)
+    before.pop("setup"); after.pop("setup")
+    assert before == after
+
+
+def test_recrop_validates_crop_bounds(tmp_path, capsys):
+    """Кроп калибровки вне отображаемого кадра → recrop ПРОПУСКАЕТ (манифест не портится)."""
+    manifests, cal = _recrop_manifest_and_cal(
+        tmp_path, manifest_crop=Crop(x=133, y=75, w=808, h=1437),
+        cal_crop=Crop(x=0, y=0, w=1512, h=2800), cal_frame=(1512, 2688))   # h=2800 > 2688
+    before = (manifests / "v.json").read_text(encoding="utf-8")
+
+    cli.cmd_recrop("v.mp4", root=REPO_ROOT, manifests_dir=manifests,
+                   calibrations_dir=cal, push=False)
+
+    assert (manifests / "v.json").read_text(encoding="utf-8") == before   # не изменён
+    assert "пропуск" in capsys.readouterr().err.lower()
+
+
+def test_recrop_batch_updates_only_stale(tmp_path):
+    """Batch recrop: обновляет манифест с устаревшим кропом, синхронный не трогает."""
+    sha_stale, sha_ok = "d" * 64, "e" * 64
+    manifests = tmp_path / "manifests"; manifests.mkdir()
+    cal = tmp_path / "calibrations"
+    good_crop = Crop(x=96, y=170, w=1320, h=2347)
+    # устаревший: манифест-кроп ≠ калибровка
+    m1 = _manifest_with_crop("stale", sha_stale, Crop(x=1, y=2, w=900, h=1600), "auto")
+    (manifests / "stale.json").write_text(m1.model_dump_json(indent=2), encoding="utf-8")
+    save_calibration(cal, source_name="stale.mp4", source_sha256=sha_stale,
+                     crop=good_crop, frame=[1512, 2688], setup_label="s")
+    # синхронный: манифест-кроп == калибровка
+    m2 = _manifest_with_crop("ok", sha_ok, good_crop, "ok")
+    m2_frame = m2.model_copy(update={"setup": SetupProfile(setup_id="ok", crop=good_crop,
+                                     scale=[1080, 1920], frame=[1512, 2688])})
+    (manifests / "ok.json").write_text(m2_frame.model_dump_json(indent=2), encoding="utf-8")
+    save_calibration(cal, source_name="ok.mp4", source_sha256=sha_ok,
+                     crop=good_crop, frame=[1512, 2688], setup_label="ok")
+    ok_before = (manifests / "ok.json").read_text(encoding="utf-8")
+
+    cli.cmd_recrop(None, root=REPO_ROOT, manifests_dir=manifests, calibrations_dir=cal, push=False)
+
+    stale_after = json.loads((manifests / "stale.json").read_text(encoding="utf-8"))
+    assert stale_after["setup"]["crop"] == good_crop.model_dump()          # обновлён
+    assert (manifests / "ok.json").read_text(encoding="utf-8") == ok_before  # синхронный не тронут
+
+
+def test_recrop_auto_pushes_updated_manifest(tmp_path):
+    """recrop с push=True коммитит+пушит обновлённый манифест (уезжает на системник)."""
+    manifests, cal = _recrop_manifest_and_cal(
+        tmp_path, manifest_crop=Crop(x=133, y=75, w=808, h=1437),
+        cal_crop=Crop(x=96, y=170, w=1320, h=2347))
+    pushed = []
+    import autoreels.__main__ as _cli
+    orig = _cli._commit_push_manifest
+    _cli._commit_push_manifest = lambda path, n, *, root, calibration_path=None: pushed.append(Path(path).name)
+    try:
+        cli.cmd_recrop("v.mp4", root=REPO_ROOT, manifests_dir=manifests,
+                       calibrations_dir=cal, push=True)
+    finally:
+        _cli._commit_push_manifest = orig
+
+    assert pushed == ["v.json"]                        # обновлённый манифест запушен
 
 
 def test_calibrate_batch_warns_when_manifest_already_exists(tmp_path, monkeypatch, capsys):
@@ -789,7 +1005,7 @@ def test_calibrate_batch_warns_when_manifest_already_exists(tmp_path, monkeypatc
     cli.cmd_calibrate_batch(root=root, inputs_dir=inputs, calibrations_dir=cal,
                             cache_dir=root / "c")
 
-    assert "повторный run" in capsys.readouterr().err
+    assert "recrop" in capsys.readouterr().err
 
 
 # ------------------------------------------------- разрешение пути к ffmpeg (машинные дефолты)
