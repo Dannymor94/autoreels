@@ -1378,6 +1378,7 @@ def cmd_recrop(
 
     updated: list[str] = []
     skipped: list[str] = []
+    synced: list[str] = []
     for mf in targets:
         try:
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
@@ -1395,29 +1396,42 @@ def cmd_recrop(
             continue
 
         old = manifest.setup.crop
+        old_frame = list(manifest.setup.frame)
+        new_frame = list(new_setup.frame)
         same_crop = old.model_dump() == new_setup.crop.model_dump()
-        same_frame = list(manifest.setup.frame) == list(new_setup.frame)
+        same_frame = old_frame == new_frame
         if same_crop and same_frame:
-            if video is not None:                       # явный recrop одного видео — сообщим
-                print(f"  {stem}: кроп уже актуален — без изменений", flush=True)
+            # Явно сообщаем «уже синхронно» (и в batch) — иначе «0 обновлено» выглядит как баг.
+            print(f"  = {stem}: кроп уже совпадает с калибровкой ({old.w}×{old.h}@{old.x},{old.y}, "
+                  f"кадр {old_frame}) — без изменений", flush=True)
+            synced.append(mf.name)
             continue
+
+        # Смена пространства (кадр перевёрнут: кодированное ↔ отображаемое) — однозначно устарел.
+        space = ""
+        if old_frame != new_frame:
+            space = (f"  [пространство изменилось: кадр {old_frame} → {new_frame}"
+                     + ("; кодированное→отображаемое" if old_frame == new_frame[::-1] else "") + "]")
 
         # Обновляем ТОЛЬКО setup; reels/тексты/субтитры остаются те же объекты → байт-в-байт.
         _write_manifest(manifest.model_copy(update={"setup": new_setup}), manifests_dir)
         c = new_setup.crop
         print(f"  ✓ {stem}: кроп {old.w}×{old.h}@{old.x},{old.y} → {c.w}×{c.h}@{c.x},{c.y} "
-              f"в кадре {new_setup.frame} (R0 не пересчитывался)", flush=True)
+              f"в кадре {new_frame} (R0 не пересчитывался){space}", flush=True)
         updated.append(mf.name)
         if push:
             _commit_push_manifest(manifests_dir / f"{stem}.json", len(manifest.reels), root=root)
 
     if video is None or len(targets) > 1:
         parts = [f"{len(updated)} обновлено"]
+        if synced:
+            parts.append(f"{len(synced)} уже синхронно")
         if skipped:
             parts.append(f"{len(skipped)} пропущено")
         print(f"\n=== recrop: {' / '.join(parts)} ===", flush=True)
     if updated:
-        print("  → теперь arl r (render) на системнике", flush=True)
+        print("  → кроп обновлён; границы клипов НЕ изменились (recrop трогает только кроп). "
+              "Дальше: arl r (render).", flush=True)
     return 0
 
 

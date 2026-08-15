@@ -960,6 +960,41 @@ def test_recrop_batch_updates_only_stale(tmp_path):
     assert (manifests / "ok.json").read_text(encoding="utf-8") == ok_before  # синхронный не тронут
 
 
+def test_recrop_batch_updates_on_frame_space_change_and_reports_synced(tmp_path, capsys):
+    """Кадр в манифесте перевёрнут vs калибровки (кодированное [2688,1512] ↔ отображаемое
+    [1512,2688]) → однозначно устарел, обновляется; синхронный явно помечается «уже синхронно»
+    (иначе «0 обновлено» в batch выглядит как баг)."""
+    manifests = tmp_path / "manifests"; manifests.mkdir()
+    cal = tmp_path / "calibrations"
+    disp = Crop(x=170, y=457, w=1255, h=2231)
+    # coded манифест (frame [2688,1512]) + display калибровка (frame [1512,2688]) → устарел
+    m1 = Manifest(source="coded.mp4", source_sha256="a" * 64, source_hash_scheme="partial-p1",
+                  duration_preset="shorts",
+                  setup=SetupProfile(setup_id="auto", crop=Crop(x=133, y=75, w=808, h=1437),
+                                     scale=[1080, 1920], frame=[2688, 1512]),
+                  run_key="rk", reels=[_reel_win("r01", 10, 40)])
+    (manifests / "coded.json").write_text(m1.model_dump_json(indent=2), encoding="utf-8")
+    save_calibration(cal, source_name="coded.mp4", source_sha256="a" * 64,
+                     crop=disp, frame=[1512, 2688], setup_label="c")
+    # синхронный
+    m2 = Manifest(source="ok.mp4", source_sha256="b" * 64, source_hash_scheme="partial-p1",
+                  duration_preset="shorts",
+                  setup=SetupProfile(setup_id="c", crop=disp, scale=[1080, 1920], frame=[1512, 2688]),
+                  run_key="rk", reels=[_reel_win("r01", 10, 40)])
+    (manifests / "ok.json").write_text(m2.model_dump_json(indent=2), encoding="utf-8")
+    save_calibration(cal, source_name="ok.mp4", source_sha256="b" * 64,
+                     crop=disp, frame=[1512, 2688], setup_label="c")
+
+    cli.cmd_recrop(None, root=REPO_ROOT, manifests_dir=manifests, calibrations_dir=cal, push=False)
+
+    out = capsys.readouterr().out
+    coded_after = json.loads((manifests / "coded.json").read_text(encoding="utf-8"))
+    assert coded_after["setup"]["frame"] == [1512, 2688]        # пространство обновлено
+    assert "кодированное→отображаемое" in out                   # явная пометка смены пространства
+    assert "уже синхронно" in out                              # синхронный виден в batch
+    assert "1 обновлено" in out and "1 уже синхронно" in out
+
+
 def test_recrop_auto_pushes_updated_manifest(tmp_path):
     """recrop с push=True коммитит+пушит обновлённый манифест (уезжает на системник)."""
     manifests, cal = _recrop_manifest_and_cal(
