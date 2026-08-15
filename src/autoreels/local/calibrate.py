@@ -35,7 +35,10 @@ from autoreels.core import state
 from autoreels.core.calibration import (
     CalibrationError,
     RawSelection,
+    _probe_frame_size_for_auto,
+    crop_orientation_warnings,
     finalize_selection,
+    frame_orientation,
     save_calibration,
     validate_crop_in_frame,
 )
@@ -66,12 +69,11 @@ def parse_probe(output: str) -> tuple[int, int, float]:
 
 
 def build_frame_cmd(ffmpeg: str, video, out_png, at_seconds: float) -> list[str]:
-    # -noautorotate: НЕ применять поворот по rotation-метаданным (телефоны PXL). Кадр —
-    # в КОДИРОВАННОМ пространстве (как ffprobe width×height и как рендер, у которого тоже
-    # -noautorotate). Иначе PNG выходил повёрнутым (ш/в перепутаны) → кроп в другом
-    # пространстве, чем рендер → «зум с обрезанным верхом».
+    # autorotate (ПО УМОЛЧАНИЮ, без -noautorotate): PNG выходит в ОТОБРАЖАЕМОЙ ориентации —
+    # ровно как человек видит видео и как рендерит crop-фильтр (тоже autorotate). Единое
+    # пространство координат калибратора и рендера. Кадр НЕ поворачиваем сами.
     return [
-        ffmpeg, "-y", "-loglevel", "error", "-noautorotate",
+        ffmpeg, "-y", "-loglevel", "error",
         "-ss", f"{at_seconds:.3f}",
         "-i", str(video),
         "-frames:v", "1",
@@ -207,6 +209,12 @@ def build_calibration_html(frame_b64: str, frame_size: tuple[int, int], *, sha: 
     frame-независимы). Пусто/один → одиночный кадр как раньше.
     """
     fw, fh = frame_size
+    orient = frame_orientation(fw, fh)
+    orient_hint = {
+        "vertical": f"Видео вертикальное {fw}×{fh} — кроп приближает кадр (рамка внутри вертикали).",
+        "horizontal": f"Видео горизонтальное {fw}×{fh} — кроп вырезает вертикальную полосу 9:16.",
+        "square": f"Видео квадратное {fw}×{fh} — кроп вырезает вертикальную полосу 9:16.",
+    }[orient]
     config = json.dumps({"fw": fw, "fh": fh, "sha": sha, "source": source_name})
     frames_json = json.dumps(preview_frames if preview_frames and len(preview_frames) >= 2 else [])
     return (
@@ -215,6 +223,7 @@ def build_calibration_html(frame_b64: str, frame_size: tuple[int, int], *, sha: 
         .replace("__FRAMES_JSON__", frames_json)
         .replace("__FRAME_B64__", frame_b64)
         .replace("__SOURCE__", _html_escape(source_name))
+        .replace("__ORIENT_HINT__", _html_escape(orient_hint))
         .replace("__FW__", str(fw))
         .replace("__FH__", str(fh))
         .replace("__SHA12__", _html_escape(sha[:12]))
@@ -394,6 +403,14 @@ def cmd_calibrate(
         raise CalibrateError(f"видео не найдено: {video}")
 
     w, h, duration = probe_frame(video, ffprobe=ffprobe)
+    # Отображаемые (после rotation-метаданных) размеры — единое пространство калибратора и
+    # рендера. Кадр извлекается с autorotate, поэтому калибруем и валидируем именно в них.
+    dw, dh = _probe_frame_size_for_auto(video, ffprobe=ffprobe)
+    orient = frame_orientation(dw, dh)
+    _hint = {"vertical": f"видео вертикальное {dw}×{dh} — кроп приближает кадр",
+             "horizontal": f"видео горизонтальное {dw}×{dh} — кроп вырезает вертикальную полосу",
+             "square": f"видео квадратное {dw}×{dh} — кроп вырезает вертикальную полосу"}[orient]
+    print(_hint, flush=True)
     main_at = parse_frame_at(frame_at, duration)
 
     _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
@@ -424,7 +441,7 @@ def cmd_calibrate(
             host=host, port=port, timeout_sec=timeout_sec, preview_frames=frames,
         )
 
-    sel = calibrator.propose(main_frame["path"], (w, h))
+    sel = calibrator.propose(main_frame["path"], (dw, dh))
     # POST-хендлер ManualCalibrator уже сохранил (saved_path); иначе (напр. авто-детект,
     # возвращающий только рамку) — сохраняем здесь. Единый финал через ядро.
     path = getattr(calibrator, "saved_path", None)
@@ -432,23 +449,26 @@ def cmd_calibrate(
         crop = finalize_selection(sel)
         path = save_calibration(
             calib_dir, source_name=video.name, source_sha256=sha,
-            crop=crop, frame=[w, h], setup_label=setup_label,
+            crop=crop, frame=[dw, dh], setup_label=setup_label,
         )
-    # Жёсткая кросс-проверка сохранённого кропа против РЕАЛЬНЫХ (ffprobe, кодированных) w×h.
-    # Ловит рассинхрон пространств (браузер прислал повёрнутый кадр) ДО того как рендер
-    # молча склампит и выдаст 30 битых клипов. Битую калибровку удаляем.
+    # Жёсткая кросс-проверка сохранённого кропа против ОТОБРАЖАЕМЫХ (display, rotation-aware)
+    # размеров — ровно то пространство, в котором рендер применит crop-фильтр. Ловит рассинхрон
+    # ДО того как рендер молча склампит и выдаст 30 битых клипов. Битую калибровку удаляем.
     saved = json.loads(Path(path).read_text(encoding="utf-8"))
     sc = saved["crop"]
+    crop_obj = Crop.model_validate(sc)
     try:
-        validate_crop_in_frame(Crop.model_validate(sc), w, h)
+        validate_crop_in_frame(crop_obj, dw, dh)
     except CalibrationError as e:
         Path(path).unlink(missing_ok=True)
         raise CalibrateError(
-            f"калибровка отклонена: {e} (реальный кадр {w}×{h}). Перекалибруй — "
+            f"калибровка отклонена: {e} (отображаемый кадр {dw}×{dh}). Перекалибруй — "
             f"координаты не в масштабе оригинала."
         ) from e
+    for warn in crop_orientation_warnings(crop_obj, dw, dh):
+        print(f"  ⚠ {warn}", flush=True)
     print(f"калибровка сохранена: {path}  "
-          f"(кроп {sc['w']}×{sc['h']} @ {sc['x']},{sc['y']} в кадре {w}×{h})", flush=True)
+          f"(кроп {sc['w']}×{sc['h']} @ {sc['x']},{sc['y']} в кадре {dw}×{dh})", flush=True)
     return path
 
 
@@ -519,6 +539,8 @@ _HTML_TEMPLATE = r"""<!doctype html>
   h1 .src{display:block;font:500 12px/1.4 var(--mono);color:var(--mut);margin-top:6px;
     word-break:break-all}
   .hint{margin:0;font-size:12.5px;line-height:1.5;color:var(--mut)}
+  .orient{margin:0;font:600 12px/1.45 var(--sans);color:var(--accent);
+    background:var(--accent-dim);opacity:.95;padding:9px 11px;border-radius:6px}
 
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .field{display:flex;flex-direction:column;gap:5px}
@@ -577,6 +599,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
       <div class="eyebrow">Кадр середины · 9:16</div>
       <h1>Калибровка кропа<span class="src">__SOURCE__</span></h1>
     </div>
+    <p class="orient" id="orient">__ORIENT_HINT__</p>
     <p class="hint">Тяни рамку — двигает. Тяни углы — меняет размер, держа 9:16.
       Координаты — в реальных пикселях исходника. Стрелки двигают на 1 px (Shift — 10).</p>
 

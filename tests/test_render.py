@@ -478,7 +478,8 @@ def fake_ffmpeg(monkeypatch):
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
-            calls.append(cmd)
+            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+                calls.append(cmd)
             self.returncode = 0
             self.stdout = iter([])   # нет progress-строк
             self.stderr = iter([])
@@ -872,7 +873,8 @@ def test_ass_filter_contains_only_filename_no_path(tmp_path, render_cfg, monkeyp
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
-            vf_seen.append(cmd)
+            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+                vf_seen.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
@@ -916,7 +918,8 @@ def test_source_path_is_absolute_when_cwd_is_set(tmp_path, render_cfg, monkeypat
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
-            cmds_seen.append(cmd)
+            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+                cmds_seen.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
@@ -958,7 +961,8 @@ def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, mon
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
-            popen_kwargs.append(kwargs)
+            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+                popen_kwargs.append(kwargs)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
@@ -1086,3 +1090,65 @@ def test_real_render_hevc_is_compact_and_tagged_hvc1(tmp_path):
 
     head = out.read_bytes()
     assert head.index(b"moov") < head.index(b"mdat"), "moov после mdat — faststart не сработал"
+
+
+@pytest.mark.integration
+def test_real_rotated_video_calibration_and_render_same_space(tmp_path):
+    """СКВОЗНОЙ (повёрнутое видео = телефон PXL): кадр калибровки и crop-фильтр рендера в ОДНОМ
+    отображаемом пространстве. Синтезируем coded 2688×1512 + display-matrix rotation 90 (→ показ
+    1512×2688), затем проверяем:
+
+    1. _probe_frame_size_for_auto (rotation-aware) → отображаемые 1512×2688;
+    2. кадр калибровки (build_frame_cmd, autorotate по умолчанию) → PNG 1512×2688 = как видит человек;
+    3. crop-фильтр рендера в этих же координатах (1320×2347@96,170) РЕНДЕРИТСЯ без клампа —
+       значит autorotate применяется ДО crop (иначе кроп в 2688×1512 и h=2347>1512 → ошибка).
+    """
+    import shutil, struct, json as _json
+    from autoreels.core.calibration import _probe_frame_size_for_auto
+    from autoreels.local.calibrate import build_frame_cmd
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe не установлены")
+
+    horiz = tmp_path / "h.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc=size=2688x1512:rate=5:duration=2",
+        "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", str(horiz),
+    ], check=True, capture_output=True)
+    # Запекаем display-matrix rotation 90 (как у телефонного вертикального видео): coded остаётся
+    # 2688×1512, но метаданные говорят показывать вертикально 1512×2688.
+    rot = tmp_path / "rot.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-display_rotation:v:0", "90", "-i", str(horiz), "-c", "copy", str(rot),
+    ], check=True, capture_output=True)
+
+    # 1. отображаемые размеры (rotation-aware) = вертикальные
+    assert _probe_frame_size_for_auto(rot, ffprobe=ffprobe) == (1512, 2688)
+
+    # 2. кадр калибровки (autorotate по умолчанию) — вертикальный PNG
+    frame_png = tmp_path / "frame.png"
+    r = subprocess.run(build_frame_cmd(ffmpeg, rot, frame_png, at_seconds=1.0),
+                       capture_output=True, text=True)
+    assert r.returncode == 0, f"извлечение кадра упало: {r.stderr}"
+    png = frame_png.read_bytes()
+    assert struct.unpack(">II", png[16:24]) == (1512, 2688), "PNG калибровки не в отображаемом пространстве"
+
+    # 3. рендер: crop в отображаемых координатах 1512×2688 → без клампа (autorotate до crop)
+    out = tmp_path / "clip.mp4"
+    cmd = build_cut_cmd(
+        ffmpeg, rot, 0.0, 2.0, out,
+        codec="libx264", preset="ultrafast", video_bitrate="4M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+        vf="crop=1320:2347:96:170,scale=1080:1920",
+    )
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert r.returncode == 0, f"рендер crop в отображаемом пространстве упал: {r.stderr}"
+    probe = subprocess.run([
+        ffprobe, "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height", "-of", "json", str(out),
+    ], capture_output=True, text=True)
+    v = _json.loads(probe.stdout)["streams"][0]
+    assert (v["width"], v["height"]) == (1080, 1920), "выход не 1080×1920"

@@ -43,54 +43,96 @@ def test_parse_probe_reads_width_height_duration():
     assert parse_probe("3840\n2160\n480.0\n") == (3840, 2160, 480.0)
 
 
-# ------------------------------------------------ поворот: калибровка и рендер в ОДНОМ пространстве
+# -------------------------- поворот: калибратор и рендер в ЕДИНОМ (ОТОБРАЖАЕМОМ) пространстве
 
-def test_calibration_frame_extract_uses_noautorotate():
-    """Кадр калибровки извлекается БЕЗ автоповорота → кодированное пространство (как рендер)."""
+def test_calibration_frame_extract_autorotates_by_default():
+    """Кадр калибровки извлекается С autorotate (нет -noautorotate) → ОТОБРАЖАЕМОЕ пространство,
+    как человек видит видео и как рендерит crop-фильтр. Кадр сами не поворачиваем."""
     cmd = build_frame_cmd("ffmpeg", "/in/v.mp4", "/out/f.png", at_seconds=100.0)
-    assert "-noautorotate" in cmd
-    assert cmd.index("-noautorotate") < cmd.index("-i")    # опция входа (до -i)
+    assert "-noautorotate" not in cmd
 
 
-def test_render_and_calibration_same_rotation_space():
-    """Рендер (crop-фильтр) и калибратор оба -noautorotate → одно пространство координат."""
+def test_render_and_calibration_same_displayed_space():
+    """Рендер (crop-фильтр) и калибратор оба autorotate (без -noautorotate) → одно
+    отображаемое пространство координат. rotation применяется ДО -vf (crop видит его)."""
     from autoreels.local.render import build_cut_cmd
     frame_cmd = build_frame_cmd("ffmpeg", "/v.mp4", "/f.png", at_seconds=10.0)
     cut_cmd = build_cut_cmd("ffmpeg", "/v.mp4", 0.0, 5.0, "/o.mp4", codec="libx264",
-                            preset="medium", audio_codec="aac", audio_bitrate="128k")
-    assert "-noautorotate" in frame_cmd and "-noautorotate" in cut_cmd
+                            preset="medium", audio_codec="aac", audio_bitrate="128k", vf="crop=1:1:0:0")
+    assert "-noautorotate" not in frame_cmd and "-noautorotate" not in cut_cmd
+    # crop-фильтр идёт ПОСЛЕ -i → autorotate (вставляется ffmpeg до -vf) применяется раньше
+    assert cut_cmd.index("-vf") > cut_cmd.index("-i")
 
 
-# ------------------------------------------------ жёсткая валидация: кроп вне границ → ошибка
+def test_display_size_from_stream_swaps_on_rotation():
+    """Отображаемые размеры: coded ш×в + rotation-метаданные → при ±90° меняем ш/в местами."""
+    from autoreels.core.calibration import display_size_from_stream
+    # телефон снял вертикально: coded 2688×1512 + display-matrix rotation -90 → показ 1512×2688
+    st_rot = {"width": 2688, "height": 1512,
+              "side_data_list": [{"side_data_type": "Display Matrix", "rotation": -90}]}
+    assert display_size_from_stream(st_rot) == (1512, 2688)
+    # горизонтальное без поворота — как есть
+    assert display_size_from_stream({"width": 3840, "height": 2160}) == (3840, 2160)
+    # старый файл с tag rotate=90
+    assert display_size_from_stream({"width": 1920, "height": 1080,
+                                     "tags": {"rotate": "90"}}) == (1080, 1920)
 
-def test_validate_crop_in_frame_raises_on_swap():
-    """Реальный баг: кроп h=2347 (повёрнутое пространство) в кадре 2688×1512 → ошибка с числами."""
+
+# ------------------------------------------------ жёсткая валидация: границы + соотношение 9:16
+
+def test_validate_crop_in_frame_bounds_and_aspect():
     from autoreels.core.calibration import validate_crop_in_frame, CalibrationError
     from autoreels.core.models import Crop
+    # выход за границы отображаемого кадра → ошибка с числами
     with pytest.raises(CalibrationError) as e:
-        validate_crop_in_frame(Crop(x=278, y=224, w=718, h=2347), 2688, 1512)
-    assert "2347" in str(e.value) or "2571" in str(e.value)   # число низа/высоты в сообщении
-    # нормальный полновысотный 9:16 — не бросает
-    validate_crop_in_frame(Crop(x=919, y=0, w=850, h=1512), 2688, 1512)
+        validate_crop_in_frame(Crop(x=0, y=0, w=1512, h=2800), 1512, 2688)
+    assert "2800" in str(e.value) and "1512×2688" in str(e.value)
+    # не 9:16 (пользователь/пространство перепутаны) → ошибка
+    with pytest.raises(CalibrationError):
+        validate_crop_in_frame(Crop(x=0, y=0, w=1400, h=700), 1512, 2688)
+    # нормальный вертикальный 9:16 внутри кадра — не бросает
+    validate_crop_in_frame(Crop(x=96, y=170, w=1320, h=2347), 1512, 2688)
+
+
+def test_frame_orientation():
+    from autoreels.core.calibration import frame_orientation
+    assert frame_orientation(1512, 2688) == "vertical"
+    assert frame_orientation(3840, 2160) == "horizontal"
+    assert frame_orientation(1080, 1080) == "square"
+
+
+def test_crop_orientation_warnings():
+    from autoreels.core.calibration import crop_orientation_warnings
+    from autoreels.core.models import Crop
+    # вертикальный кадр, кроп почти во весь кадр — нечего приближать
+    warns = crop_orientation_warnings(Crop(x=0, y=0, w=1512, h=2688), 1512, 2688)
+    assert any("приближать" in w for w in warns)
+    # горизонтальный кадр, кроп занимает почти всю ширину — вероятно нарисовали горизонтальную рамку
+    warns = crop_orientation_warnings(Crop(x=0, y=0, w=3800, h=2160), 3840, 2160)
+    assert any("вертикальн" in w for w in warns)
+    # разумное приближение спикера в вертикали — без предупреждений
+    assert crop_orientation_warnings(Crop(x=96, y=170, w=1320, h=2347), 1512, 2688) == []
 
 
 def test_finalize_selection_rejects_out_of_bounds():
     """Сырая рамка вылезает за кадр (координаты в другом пространстве) → ошибка, не молчаливый кламп."""
     from autoreels.core.calibration import finalize_selection, CalibrationError, RawSelection
-    sel = RawSelection(x=100, y=100, w=300, h=1500,     # y+h=1600 > 1512 (real=display)
-                       display_size=(2688, 1512), frame_size=(2688, 1512))
+    sel = RawSelection(x=100, y=100, w=300, h=2800,     # y+h=2900 > 2688 (real=display)
+                       display_size=(1512, 2688), frame_size=(1512, 2688))
     with pytest.raises(CalibrationError):
         finalize_selection(sel)
 
 
-def test_cmd_calibrate_rejects_crop_out_of_real_frame(tmp_path, monkeypatch):
-    """cmd_calibrate кросс-проверяет сохранённый кроп против РЕАЛЬНЫХ ffprobe w×h → отклоняет
-    рассинхрон пространств (браузер прислал повёрнутый кадр) и удаляет битую калибровку."""
+def test_cmd_calibrate_rejects_crop_out_of_displayed_frame(tmp_path, monkeypatch):
+    """cmd_calibrate кросс-проверяет сохранённый кроп против ОТОБРАЖАЕМЫХ размеров (display,
+    rotation-aware) → отклоняет рассинхрон пространств и удаляет битую калибровку."""
     from autoreels.core.calibration import save_calibration
     from autoreels.core.models import Crop
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
     monkeypatch.setattr(cal, "probe_frame", lambda v, *, ffprobe="ffprobe": (2688, 1512, 480.0))
+    # отображаемое (после rotation) — вертикальное 1512×2688
+    monkeypatch.setattr(cal, "_probe_frame_size_for_auto", lambda v, **k: (1512, 2688))
     monkeypatch.setattr(cal, "extract_reference_frame",
                         lambda v, out, *, at_seconds, ffmpeg="ffmpeg": out)
 
@@ -98,17 +140,17 @@ def test_cmd_calibrate_rejects_crop_out_of_real_frame(tmp_path, monkeypatch):
 
     class _BadCropCalibrator:
         def __init__(self):
-            # «сохранил» кроп в ПОВЁРНУТОМ пространстве: y+h=224+1400=1624 > реальной высоты 1512
+            # кроп вылезает по высоте за отображаемый кадр: y+h=224+2600=2824 > 2688
             self.saved_path = save_calibration(
                 calib_dir, source_name="v.mp4", source_sha256="d" * 64,
-                crop=Crop(x=278, y=224, w=718, h=1400), frame=[1512, 2688], setup_label="v")
+                crop=Crop(x=96, y=224, w=1462, h=2600), frame=[1512, 2688], setup_label="v")
         def propose(self, frame_png, frame_size):
             return None
 
     bad = _BadCropCalibrator()
     with pytest.raises(CalibrateError) as e:
         cmd_calibrate(video, root=tmp_path, calibrator=bad)
-    assert "2688×1512" in str(e.value) or "границы" in str(e.value)
+    assert "1512×2688" in str(e.value) or "границы" in str(e.value)
     assert not bad.saved_path.exists()                  # битая калибровка удалена
 
 
@@ -343,6 +385,7 @@ def test_cmd_calibrate_saves_finalized_calibration(tmp_path, monkeypatch):
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"some-video-bytes")
     monkeypatch.setattr(cal, "probe_frame", lambda v, *, ffprobe="ffprobe": (3840, 2160, 480.0))
+    monkeypatch.setattr(cal, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
     monkeypatch.setattr(cal, "extract_reference_frame",
                         lambda v, out, *, at_seconds, ffmpeg="ffmpeg": out)
     sel = RawSelection(x=685, y=140, w=478, h=850, display_size=(1920, 1080), frame_size=(3840, 2160))
@@ -371,6 +414,7 @@ def test_calibrate_key_matches_run_lookup_not_autocrop(tmp_path, monkeypatch):
     video = tmp_path / "PXL_test.mp4"
     video.write_bytes(b"video-content-bytes" * 500)
     monkeypatch.setattr(cal, "probe_frame", lambda v, *, ffprobe="ffprobe": (3840, 2160, 480.0))
+    monkeypatch.setattr(cal, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
     monkeypatch.setattr(cal, "extract_reference_frame",
                         lambda v, out, *, at_seconds, ffmpeg="ffmpeg": out)
     sel = RawSelection(x=685, y=140, w=478, h=850, display_size=(1920, 1080), frame_size=(3840, 2160))

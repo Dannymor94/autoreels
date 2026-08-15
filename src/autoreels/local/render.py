@@ -185,6 +185,31 @@ def _basename_hint(source: str) -> str:
     return win if len(win) <= len(posix) else posix
 
 
+def _sibling_ffprobe(ffmpeg_bin: str) -> str:
+    """ffprobe рядом с резолвнутым ffmpeg (если есть), иначе 'ffprobe' из PATH."""
+    sibling = Path(ffmpeg_bin).with_name("ffprobe" + Path(ffmpeg_bin).suffix)
+    return str(sibling) if sibling.exists() else "ffprobe"
+
+
+def _diagnose_crop_space(source: Path, manifest: Manifest, ffmpeg_bin: str) -> None:
+    """Диагностика перед рендером: в каком пространстве применяется crop и его размеры ДО
+    фильтра. crop-фильтр работает в ОТОБРАЖАЕМОМ кадре (autorotate до -vf). Если реальные
+    отображаемые размеры разошлись с записанными в калибровке — предупреждаем (виден разъезд)."""
+    from autoreels.core.calibration import _probe_frame_size_for_auto, frame_orientation
+    c = manifest.setup.crop
+    mf = tuple(manifest.setup.frame)
+    head = f"рендер: crop {c.w}×{c.h}@{c.x},{c.y} в отображаемом кадре"
+    try:
+        disp = _probe_frame_size_for_auto(source, ffprobe=_sibling_ffprobe(ffmpeg_bin))
+    except Exception:
+        print(f"{head} {mf[0]}×{mf[1]} (по калибровке; ffprobe недоступен)", flush=True)
+        return
+    print(f"{head} {disp[0]}×{disp[1]} ({frame_orientation(*disp)}, autorotate→crop)", flush=True)
+    if disp != mf:
+        print(f"  ⚠ отображаемый кадр рендера {disp[0]}×{disp[1]} ≠ калибровки {mf[0]}×{mf[1]} — "
+              f"кроп может разъехаться (перекалибруй это видео)", flush=True)
+
+
 def resolve_source(manifest: Manifest, inputs_dir: str | Path) -> Path:
     """Найти исходник в `inputs_dir` по `manifest.source_sha256`.
 
@@ -302,10 +327,10 @@ def build_cut_cmd(
     duration = round(end - start, 3)
     return [
         str(ffmpeg), "-y", "-loglevel", "error",
-        # -noautorotate: рез/кроп в КОДИРОВАННОМ пространстве (ш×в как ffprobe), СОГЛАСОВАННО
-        # с калибратором (тоже -noautorotate). Иначе на видео с rotation-метаданными (PXL)
-        # кроп калибровки и crop-фильтр рендера оказывались в разных пространствах.
-        "-noautorotate",
+        # autorotate (ПО УМОЛЧАНИЮ, без -noautorotate): rotation-метаданные применяются ДО
+        # -vf, поэтому crop-фильтр видит кадр в ОТОБРАЖАЕМОМ пространстве — том же, что и
+        # калибратор (тоже autorotate). Кадр НЕ поворачиваем сами (никакого transpose):
+        # вертикальность рилса даёт кроп внутри отображаемого кадра.
         "-ss", _ts(start),
         "-i", str(source),
         "-t", _ts(duration),
@@ -375,6 +400,9 @@ def _render_segments(
     active = enc.profiles[profile_name]
     codec = encoder or os.environ.get(_ENCODER_ENV) or active.codec
     video_bitrate = active.bitrate
+
+    if vf:                                   # только при кропе (R1b); сырой рез (R1a) без crop
+        _diagnose_crop_space(source, manifest, ffmpeg_bin)
 
     # .ass живут в tempdir: после ffmpeg убираются автоматически, в out_dir не остаются.
     with tempfile.TemporaryDirectory(prefix="autoreels_ass_") as _tmp_ass:
