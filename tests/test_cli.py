@@ -1066,6 +1066,40 @@ def test_resolve_ffmpeg_not_found_clear_error(monkeypatch):
     assert "--ffmpeg" in msg
 
 
+def test_cli_resolve_ffmpeg_reads_local_yaml_from_project_root_not_cwd(tmp_path, monkeypatch):
+    """_cli_resolve_ffmpeg берёт render.local.yaml из КОРНЯ ПРОЕКТА, а не из cwd — иначе после
+    autoload (`arl` из любой папки) машинный путь ffmpeg не находился → падало в 'ffmpeg'."""
+    proj = tmp_path / "proj"
+    (proj / "config").mkdir(parents=True)
+    (proj / "config" / "render.yaml").write_text(
+        (REPO_ROOT / "config" / "render.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (proj / "config" / "render.local.yaml").write_text(
+        "ffmpeg: D:/ffmpeg/bin/ffmpeg.exe\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "_project_root", lambda: proj)
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    monkeypatch.chdir(tmp_path)                          # cwd НЕ корень проекта
+
+    got = cli._cli_resolve_ffmpeg(None)                  # без root → корень проекта
+
+    assert got == "D:/ffmpeg/bin/ffmpeg.exe"            # взят из render.local.yaml проекта
+
+
+def test_cli_resolve_ffmpeg_falls_back_to_project_root_when_cwd_config_missing(tmp_path, monkeypatch):
+    """Даже если явный root без config — деградируем к корню проекта (там render.local.yaml)."""
+    proj = tmp_path / "proj"
+    (proj / "config").mkdir(parents=True)
+    (proj / "config" / "render.yaml").write_text(
+        (REPO_ROOT / "config" / "render.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (proj / "config" / "render.local.yaml").write_text(
+        "ffmpeg: /opt/ff/ffmpeg\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "_project_root", lambda: proj)
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+
+    got = cli._cli_resolve_ffmpeg(None, root=tmp_path / "empty")   # root без config/
+
+    assert got == "/opt/ff/ffmpeg"
+
+
 def test_resolve_ffprobe_flag_and_env(monkeypatch):
     monkeypatch.delenv("RENDER_FFPROBE", raising=False)
     assert cli.resolve_ffprobe("/flag/ffprobe", which=lambda b: None) == "/flag/ffprobe"

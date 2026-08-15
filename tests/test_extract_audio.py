@@ -98,7 +98,28 @@ def test_ffmpeg_not_found_raises(audio_cfg, tmp_path):
     dummy.write_bytes(b"x")
     with pytest.raises(ExtractAudioError) as e:
         extract_audio(dummy, audio_cfg, cache_dir=tmp_path, ffmpeg="ffmpeg-does-not-exist-xyz")
-    assert "ffmpeg" in str(e.value).lower()   # внятная ошибка, не голый traceback
+    msg = str(e.value)
+    assert "ffmpeg" in msg.lower()            # внятная ошибка, не голый traceback
+    assert "render.local.yaml" in msg and "--ffmpeg" in msg   # КАК задать путь
+
+
+def test_popen_filenotfound_becomes_clean_error(monkeypatch, tmp_path, audio_cfg):
+    """Бинарь резолвнулся (which вернул путь), но Popen падает FileNotFoundError ([WinError 2]).
+    Должны получить внятную ExtractAudioError с подсказкой, а НЕ голый WinError 2."""
+    import autoreels.cloud.extract_audio as EA
+    src = tmp_path / "v.mp4"; src.write_bytes(b"x")
+    monkeypatch.setattr(EA.shutil, "which", lambda b: f"/fake/{b}")   # which «нашёл» путь
+    monkeypatch.setattr(EA, "_probe_duration_sec", lambda ffmpeg_bin, source: None)
+
+    def _popen_boom(*a, **k):
+        raise FileNotFoundError(2, "Не удаётся найти указанный файл")
+    monkeypatch.setattr(EA.subprocess, "Popen", _popen_boom)
+
+    with pytest.raises(ExtractAudioError) as e:
+        extract_audio(src, audio_cfg, cache_dir=tmp_path / "c",
+                      ffmpeg=r"D:\ffmpeg\bin\ffmpeg.exe", source_sha="e" * 64)
+    msg = str(e.value)
+    assert "ffmpeg" in msg.lower() and "render.local.yaml" in msg   # внятно + как чинить
 
 
 # ------------------------------------------------------ прогресс-бар (мок ffmpeg)

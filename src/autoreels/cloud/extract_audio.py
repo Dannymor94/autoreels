@@ -26,6 +26,18 @@ class ExtractAudioError(Exception):
     """Извлечение аудио не удалось (нет файла, нет ffmpeg, ffmpeg вернул ошибку)."""
 
 
+def _ffmpeg_not_found_msg(ffmpeg: str) -> str:
+    """Внятное сообщение о ненайденном ffmpeg — ЧТО искали и КАК задать путь (вместо
+    голого [WinError 2] «Не удаётся найти указанный файл», который ничего не объясняет)."""
+    return (
+        f"ffmpeg не найден (искали '{ffmpeg}' в PATH). Задай путь одним из способов:\n"
+        f"  • файл:  config/render.local.yaml → ffmpeg: D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        f"  • флаг:  --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        f"  • env:   RENDER_FFMPEG=D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        f"или установи ffmpeg в PATH."
+    )
+
+
 def _probe_duration_sec(ffmpeg_bin: str, source: Path) -> float | None:
     """Длительность источника через ffprobe (для процента бара). None — если не удалось
     (нет ffprobe/битый вывод): тогда показываем живой спиннер без %, а не падаем."""
@@ -57,10 +69,14 @@ def _run_extract_with_progress(cmd: list[str], *, duration_sec: float | None) ->
     from autoreels.core.progress import is_tty, print_bar_line, print_spin_line
 
     prog_cmd = [cmd[0], "-progress", "pipe:1", "-nostats"] + cmd[1:]
-    proc = subprocess.Popen(
-        prog_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8",
-    )
+    try:
+        proc = subprocess.Popen(
+            prog_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8",
+        )
+    except FileNotFoundError as e:
+        # Бинарь не запустился (напр. путь мимо файла) — сырой [WinError 2] превращаем в внятное.
+        raise ExtractAudioError(_ffmpeg_not_found_msg(cmd[0])) from e
     stderr_chunks: list[str] = []
 
     def _drain_stderr() -> None:
@@ -141,9 +157,7 @@ def extract_audio(
 
     ffmpeg_bin = shutil.which(ffmpeg)
     if ffmpeg_bin is None:
-        raise ExtractAudioError(
-            f"ffmpeg не найден в PATH (искали '{ffmpeg}'); установите ffmpeg для извлечения аудио"
-        )
+        raise ExtractAudioError(_ffmpeg_not_found_msg(ffmpeg))
 
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)

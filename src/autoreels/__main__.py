@@ -857,18 +857,32 @@ def resolve_ffprobe(cli_flag=None, *, ffmpeg=None, which=None, is_file=None) -> 
     return "ffprobe"
 
 
-def _cli_resolve_ffmpeg(flag, *, root=".") -> str:
+def _project_root() -> Path:
+    """Корень репозитория (где config/render.local.yaml, aliases.sh) — по расположению пакета.
+    Команды находят машинный конфиг ffmpeg независимо от cwd: после autoload `arl` (и любой
+    CLI-вызов) стартует из ПРОИЗВОЛЬНОЙ директории, а render.local.yaml лежит в проекте."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _cli_resolve_ffmpeg(flag, *, root=None) -> str:
     """Разрешить ffmpeg для CLI-команд (run/transcribe/calibrate), которые сами render_cfg
     не грузят. Внятная FFmpegNotFoundError, если не найден (ловится в main → чистое сообщение).
 
-    Если render.yaml не загрузился (запуск не из корня проекта) — деградируем к дефолту
-    (ffmpeg='ffmpeg'): резолв всё равно учтёт флаг/env/PATH/автопоиск."""
+    Конфиг (render.yaml + машинный render.local.yaml) читается из КОРНЯ ПРОЕКТА, а не из cwd —
+    иначе после autoload (`arl` из любой папки) render.local.yaml с путём ffmpeg не находился,
+    и резолв падал в 'ffmpeg' → [WinError 2] на извлечении аудио. Пробуем root (если задан явно),
+    затем корень проекта; если ни там ни там — дефолт (резолв учтёт флаг/env/PATH/автопоиск)."""
     from types import SimpleNamespace
-    try:
-        render_cfg = load_render_config(Path(root) / "config" / "render.yaml")
-    except (ConfigError, OSError):
-        render_cfg = SimpleNamespace(ffmpeg="ffmpeg")
-    return resolve_ffmpeg(flag, render_cfg=render_cfg)
+    tried = []
+    if root is not None and str(root) != ".":
+        tried.append(Path(root))
+    tried.append(_project_root())
+    for base in tried:
+        try:
+            return resolve_ffmpeg(flag, render_cfg=load_render_config(base / "config" / "render.yaml"))
+        except (ConfigError, OSError):
+            continue
+    return resolve_ffmpeg(flag, render_cfg=SimpleNamespace(ffmpeg="ffmpeg"))
 
 
 # ------------------------------------------------------------------------- команды
