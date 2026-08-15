@@ -261,11 +261,14 @@ def apply_padding(
         if not idxs:
             continue
 
-        # Срезаем хвостовые слова, втянутые из следующей фразы: висячее слово ИЛИ слово,
-        # идущее сразу за концом предложения («…конструкция. И вот») — это начало новой мысли.
+        # Срезаем хвостовые слова, на которых клип не должен заканчиваться: висячее слово,
+        # слово-с-запятой (мысль продолжается), ИЛИ слово сразу за концом предложения
+        # («…конструкция. И вот» — начало новой фразы). Пока не упрёмся в содержательный конец.
         while len(idxs) >= 2:
             li, pi = idxs[-1], idxs[-2]
-            if _is_sentence_end(words[pi].word) or _is_hanging(words[li].word, hanging_words):
+            if (_is_sentence_end(words[pi].word)
+                    or _is_hanging(words[li].word, hanging_words)
+                    or _ends_midphrase(words[li].word)):
                 idxs.pop()
             else:
                 break
