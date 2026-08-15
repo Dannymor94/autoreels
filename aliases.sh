@@ -51,6 +51,7 @@ _ar_menu() {
             render)    arl r ;;
             status)    arl s ;;
             calibrate) arl c ;;
+            resnap)    arl rs ;;
             diagnose)  arl dc ;;
             path)
                 printf "Вставь ссылку (URL / Яндекс.Диск / YouTube) или путь к файлу: "
@@ -104,6 +105,7 @@ _ar_menu() {
 #   arl rc [вид]  → recrop: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
 #   arl s         → status
 #   arl c         → calibrate --all (пушит калибровки → на Mac arl run)
+#   arl rs [видео]   → resnap: пересчитать границы клипов из R0-границ (snap/padding, без LLM)
 #   arl dc [--rerun] → diagnose-cuts: проверка обрывов фраз (CLEAN/SOFT/HARD + причина)
 #   arl t <ист>   → transcribe (видео/аудио/url → текст для контента)
 #   arl h         → help
@@ -150,6 +152,11 @@ arl() {
             # arl rc [видео]: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
             shift
             _ar_cli recrop "$@"
+            ;;
+        rs)
+            # arl rs [видео]: пересчитать границы клипов из R0-границ (snap/padding, без LLM)
+            shift
+            _ar_cli resnap "$@"
             ;;
         dc)
             # arl dc [видео] [--rerun]: диагностика обрывов фраз по клипам

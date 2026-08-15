@@ -1078,6 +1078,85 @@ def test_diagnose_cuts_rerun_uses_cached_transcript_and_warns(tmp_path, monkeypa
     assert "понятно" in seen["compressed"]                    # именно текст кэш-транскрипта
 
 
+# ------------------------------------------------------------ resnap (пересчёт границ из R0)
+
+def test_reel_loads_without_r0_fields_backward_compatible():
+    """Старый манифест без r0_start/r0_end грузится (поля None) — обратная совместимость."""
+    r = Reel.model_validate({"id": "r01", "start": 10.0, "end": 40.0, "score": 80,
+                             "hook": "h", "title": "t", "description": "d"})
+    assert r.r0_start is None and r.r0_end is None
+
+
+def test_run_populates_r0_bounds_before_snap(monkeypatch, tmp_path):
+    """cmd_run сохраняет R0-границы (start/end от select) в r0_start/r0_end ДО snap."""
+    captured = {}
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda d, s, n, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])   # start=10, end=40
+    def snap_capture(reels, *a, **k):
+        captured["r0"] = [(r.r0_start, r.r0_end) for r in reels]
+        return reels
+    monkeypatch.setattr(cli, "_stage_snap", snap_capture)
+    monkeypatch.setattr(cli, "_stage_padding", lambda reels, *a, **k: reels)
+    monkeypatch.setattr(cli, "_stage_trim", lambda reels, *a, **k: reels)
+    monkeypatch.setattr(cli, "_stage_subtitles", lambda reels, *a, **k: reels)
+    monkeypatch.setattr(cli, "_assemble_manifest", lambda *a, **k: _manifest())
+    monkeypatch.setattr(cli, "_write_manifest", lambda *a, **k: tmp_path / "v.json")
+    monkeypatch.setattr(cli, "_write_transcript_file", lambda *a, **k: tmp_path / "v.txt")
+
+    video = tmp_path / "v.mp4"; video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path, transcripts_dir=tmp_path)
+
+    assert captured["r0"] == [(10.0, 40.0)]              # r0 = границы select ДО snap
+
+
+def _setup_resnap(tmp_path, reels, sha="d" * 64):
+    """Манифест (с указанными reels) + кэш-транскрипт по цепочке source_sha → mp3 → audio_hash."""
+    manifests = tmp_path / "manifests"; manifests.mkdir()
+    cache = tmp_path / "cache"; cache.mkdir()
+    words = [{"word": "всё", "t0": 0.0, "t1": 0.5}, {"word": "понятно.", "t0": 0.5, "t1": 1.0},
+             {"word": "это", "t0": 1.2, "t1": 1.6}, {"word": "дальше", "t0": 3.5, "t1": 4.0}]
+    audio = cache / f"{sha}.mp3"; audio.write_bytes(b"MP3-BYTES")
+    ah = state.audio_hash(audio)
+    (cache / f"{ah}.transcript.json").write_text(
+        json.dumps({"language": "ru", "words": words}), encoding="utf-8")
+    m = Manifest(source="v.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
+                 duration_preset="shorts", setup=_setup(), run_key="rk", reels=reels)
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    return manifests, cache
+
+
+def test_resnap_recomputes_bounds_from_r0_keeps_text_and_subs(tmp_path):
+    """resnap сбрасывает границы к r0 и пересчитывает snap/padding; тексты/субтитры/r0 не трогает."""
+    reel = Reel(id="r01", start=99.0, end=99.0, r0_start=0.0, r0_end=1.3, score=80,
+                hook="h", title="Заголовок", description="о", reason="r", topic="x",
+                subtitles=[Word(word="всё", t0=0.0, t1=0.5)])
+    manifests, cache = _setup_resnap(tmp_path, [reel])
+
+    rc = cli.cmd_resnap("v.mp4", root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache, push=False)
+
+    assert rc == 0
+    r = json.loads((manifests / "v.json").read_text(encoding="utf-8"))["reels"][0]
+    assert r["start"] < 5 and r["end"] < 5              # пересчитано из r0 (не «сломанные» 99)
+    assert r["r0_start"] == 0.0 and r["r0_end"] == 1.3  # R0-границы сохранены
+    assert r["title"] == "Заголовок"                    # текст не тронут
+    assert len(r["subtitles"]) == 1                     # субтитры не тронуты
+
+
+def test_resnap_refuses_manifest_without_r0(tmp_path, capsys):
+    """Манифест без r0_start (снят до фичи) → внятный отказ, манифест не изменён."""
+    manifests, cache = _setup_resnap(tmp_path, [_reel_win("r01", 10.0, 40.0)])   # без r0
+    before = (manifests / "v.json").read_text(encoding="utf-8")
+
+    cli.cmd_resnap("v.mp4", root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache, push=False)
+
+    assert (manifests / "v.json").read_text(encoding="utf-8") == before          # не тронут
+    err = capsys.readouterr().err
+    assert "нет сохранённых R0-границ" in err and "run" in err
+
+
 def test_calibrate_batch_warns_when_manifest_already_exists(tmp_path, monkeypatch, capsys):
     """calibrate --all: ручная калибровка видео с уже созданным (авто)манифестом → предупреждение."""
     root = tmp_path

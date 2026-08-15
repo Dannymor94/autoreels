@@ -99,6 +99,11 @@ class Reel(BaseModel):
     description: str
     reason: str = ""
     topic: str = ""
+    # Границы от LLM ДО snap/padding — сохраняются в run сразу после выбора. Позволяют
+    # `resnap` пересчитать границы (snap→padding→trim) без повторного R0. None — старые
+    # манифесты без этих полей (снятые до фичи): resnap просит один полный run.
+    r0_start: float | None = None
+    r0_end: float | None = None
     # Чек-флаги (too_long/too_short/no_hook/cut_midword) ставит детерминированный код.
     flags: list[str] = Field(default_factory=list)
     # Сырой word-level. Группировку в строки делает R3 (local/subtitles.py), не схема.

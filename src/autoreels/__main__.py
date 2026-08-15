@@ -981,6 +981,8 @@ def cmd_run(
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+    for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
+        r.r0_start, r.r0_end = r.start, r.end
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
@@ -1432,6 +1434,105 @@ def cmd_recrop(
     if updated:
         print("  → кроп обновлён; границы клипов НЕ изменились (recrop трогает только кроп). "
               "Дальше: arl r (render).", flush=True)
+    return 0
+
+
+def _resnap_reels(reels, transcript, r0_cfg) -> None:
+    """Пересчитать границы клипов из сохранённых R0-границ: сброс start/end к r0_start/r0_end,
+    затем snap → padding → trim текущим кодом. Мутирует reels; тексты/субтитры не трогает."""
+    for r in reels:
+        r.start, r.end = r.r0_start, r.r0_end
+    snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
+                  window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
+                  min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+                  max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_words)
+    apply_padding(reels, transcript.words, tail_pad_sec=r0_cfg.tail_pad_sec,
+                  lead_pad_sec=r0_cfg.lead_pad_sec, max_duration=r0_cfg.max_duration,
+                  video_duration=transcript.words[-1].t1 if transcript.words else None,
+                  hanging_words=r0_cfg.hanging_words)
+    trim_too_long(reels, transcript.words, max_duration=r0_cfg.max_duration,
+                  pause_sec=r0_cfg.sentence_pause_sec, policy=r0_cfg.too_long_policy)
+
+
+def cmd_resnap(
+    video=None,
+    *,
+    root=".",
+    manifests_dir=None,
+    cache_dir=None,
+    push: bool = True,
+    pull_first: bool = True,
+) -> int:
+    """Пересчитать ГРАНИЦЫ клипов из сохранённых R0-границ (snap→padding→trim текущим кодом),
+    БЕЗ повторного R0/LLM. Для проверки правок snap/padding без пересборки манифеста.
+
+    Выбор моментов (R0), тексты, субтитры — НЕ трогаются: те же r0_start/r0_end прогоняются
+    заново детерминированным слоем. Транскрипт берётся из кэша (как diagnose-cuts). Без <video>
+    — batch по всем манифестам. Манифест без r0_start (снят до фичи) → нужен один полный run."""
+    root = Path(root)
+    if pull_first:
+        _git_pull(root, what="манифесты")
+    r0_cfg = load_r0_config(root / "config" / "r0.yaml")
+    render_cfg = load_render_config(root / "config" / "render.yaml")
+    audio_format = render_cfg.audio_extract.format
+    manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+
+    if video is not None:
+        mf = manifests_dir / f"{Path(video).stem}.json"
+        if not mf.is_file():
+            print(f"нет манифеста для «{Path(video).stem}» — сначала arl run", file=sys.stderr, flush=True)
+            return 1
+        targets = [mf]
+    else:
+        targets = sorted(manifests_dir.glob("*.json"))
+        if not targets:
+            print("manifests/ пуст — нечего пересчитывать", flush=True)
+            return 0
+
+    updated: list[str] = []
+    skipped: list[str] = []
+    no_r0: list[str] = []
+    for mf in targets:
+        try:
+            manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print(f"  ⚠ битый манифест {mf.name}: {e}", file=sys.stderr, flush=True)
+            skipped.append(mf.name)
+            continue
+        stem = Path(manifest.source).stem
+        if not manifest.reels or any(r.r0_start is None or r.r0_end is None for r in manifest.reels):
+            print(f"  ⚠ {stem}: нет сохранённых R0-границ (манифест снят до фичи resnap) — нужен "
+                  f"ОДИН полный run (arl run), дальше resnap бесплатен", file=sys.stderr, flush=True)
+            no_r0.append(mf.name)
+            continue
+        transcript = _transcript_for_manifest(manifest, cache_dir, audio_format=audio_format)
+        if transcript is None:
+            print(f"  ⚠ {stem}: кэш-транскрипт не найден (видео не прогонялось здесь) — пропуск",
+                  file=sys.stderr, flush=True)
+            skipped.append(mf.name)
+            continue
+
+        reels = [r.model_copy(deep=True) for r in manifest.reels]
+        _resnap_reels(reels, transcript, r0_cfg)
+        n_changed = sum(1 for a, b in zip(manifest.reels, reels)
+                        if (round(a.start, 3), round(a.end, 3)) != (round(b.start, 3), round(b.end, 3)))
+        _write_manifest(manifest.model_copy(update={"reels": reels}), manifests_dir)
+        print(f"  ✓ {stem}: границы пересчитаны из R0 без LLM "
+              f"({n_changed}/{len(reels)} клипов сдвинулись; тексты/субтитры/выбор те же)", flush=True)
+        updated.append(mf.name)
+        if push:
+            _commit_push_manifest(manifests_dir / f"{stem}.json", len(reels), root=root)
+
+    if video is None or len(targets) > 1:
+        parts = [f"{len(updated)} пересчитано"]
+        if no_r0:
+            parts.append(f"{len(no_r0)} без R0-границ (нужен run)")
+        if skipped:
+            parts.append(f"{len(skipped)} пропущено")
+        print(f"\n=== resnap: {' / '.join(parts)} ===", flush=True)
+    if updated:
+        print("  → границы обновлены (R0 не пересчитывался). Дальше: arl r (render).", flush=True)
     return 0
 
 
@@ -1960,6 +2061,7 @@ _MENU_ITEMS: list[tuple[str, str, str, str]] = [
     ("8", "help",       "Справка",                       ""),
     ("9", "profile",    "Профиль рендера",               "hevc | h264 | av1"),
     ("10", "diagnose",  "Диагностика обрывов фраз",      "CLEAN/SOFT/HARD по клипам + причина"),
+    ("11", "resnap",    "Пересчитать границы (resnap)",  "snap/padding из R0-границ, без LLM"),
     ("0", "quit",       "Выход",                         ""),
 ]
 
@@ -2295,6 +2397,7 @@ autoreels — длинное talking-head видео → вертикальны�
   arl go --no-push run без push
   arl r            render (git pull внутри; блокирует устаревший кроп)  (системник)
   arl rc [видео]   recrop: обновить кроп в манифесте по свежей калибровке (без R0)
+  arl rs [видео]   resnap: пересчитать границы клипов из R0-границ (snap/padding, без LLM)
   arl dc [--rerun] diagnose-cuts: проверить обрывы фраз (CLEAN/SOFT/HARD + причина)
   arl s            status
   arl c            calibrate --all
@@ -2638,6 +2741,25 @@ def _build_parser():
     pdc.add_argument("--rerun", action="store_true",
                      help="честный пере-прогон R0 от кэш-транскрипта (для before/after по сводке)")
 
+    prn = sub.add_parser(
+        "resnap",
+        help="пересчитать границы клипов из сохранённых R0-границ (snap→padding→trim, без LLM)",
+        description=(
+            "Пересчитывает ГРАНИЦЫ клипов из сохранённых R0-границ (r0_start/r0_end) текущим\n"
+            "кодом snap→padding→trim — БЕЗ повторного R0/LLM/квот. Для проверки правок\n"
+            "snap/padding без пересборки: те же моменты, тексты, субтитры — меняются лишь границы.\n"
+            "Транскрипт берётся из кэша. Без <видео> — batch по всем манифестам.\n"
+            "Манифест без r0_start (снят до фичи) → нужен ОДИН полный run, дальше resnap бесплатен.\n\n"
+            "Пример: autoreels resnap            # все манифесты\n"
+            "        autoreels resnap video.mp4  # одно"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    prn.add_argument("video", nargs="?", default=None, metavar="видео",
+                     help="конкретное видео (иначе — все манифесты)")
+    prn.add_argument("--no-push", action="store_true", dest="no_push",
+                     help="не пушить обновлённый манифест в git")
+
     sub.add_parser(
         "migrate-calibrations",
         help="перенести ручные калибровки со старого ключа (полный sha) на актуальный",
@@ -2782,6 +2904,8 @@ def main(argv=None) -> int:
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "recrop":
             return cmd_recrop(args.video, push=not args.no_push)
+        elif args.cmd == "resnap":
+            return cmd_resnap(args.video, push=not args.no_push)
         elif args.cmd == "diagnose-cuts":
             return cmd_diagnose_cuts(args.target, rerun=args.rerun)
         elif args.cmd == "migrate-calibrations":
