@@ -197,7 +197,10 @@ def test_run_rejects_crop_out_of_real_frame(monkeypatch, tmp_path):
     with pytest.raises(cli.CalibrationError) as e:
         cli.cmd_run(video, root=REPO_ROOT, calibrations_dir=calib,
                     manifests_dir=tmp_path / "manifests", transcripts_dir=tmp_path / "transcripts")
-    assert "2688×1512" in str(e.value)                 # реальные размеры в сообщении
+    msg = str(e.value)
+    assert "2688×1512" in msg                          # отображаемые размеры в сообщении
+    assert "перекалибруй" in msg.lower()               # явная инструкция, не молчаливый откат
+    assert "Автокроп НЕ подставляю" in msg             # инвариант: не подменяем автокропом
     assert not (tmp_path / "manifests" / "PXL.json").exists()   # битый манифест не записан
 
 

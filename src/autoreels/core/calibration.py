@@ -221,9 +221,16 @@ def load_calibration(calibrations_dir: str | Path, source_sha256: str) -> SetupP
 # ----------------------------------------------------------------- авто-кроп (центр)
 
 def auto_crop(frame_size: tuple[int, int]) -> Crop:
-    """Центральный кроп 9:16 из кадра: полная высота, ширина под аспект, x по центру."""
+    """Центральный кроп 9:16 из ОТОБРАЖАЕМОГО кадра: полная высота, ширина под аспект, x по центру.
+
+    frame_size — отображаемые (после rotation) размеры, то же пространство, где рендерит crop-фильтр.
+    Вертикальный кадр (h≥w*9/16): ширина = h*9/16 ≤ w → берём полную высоту, полосу по центру.
+    Горизонтальный: та же формула даёт узкую вертикальную полосу. В обоих случаях кроп ВПИСАН
+    в кадр (никогда не шире), потому что 9:16 всегда уже квадрата."""
     W, H = frame_size
     w = round(H * _ASPECT)
+    if w > W:                       # экстремально узкий кадр (H*9/16 > W) — упираем в ширину
+        w = W
     x = (W - w) // 2
     return Crop(x=x, y=0, w=w, h=H)
 
@@ -274,6 +281,14 @@ def _probe_frame_size_for_auto(video: str | Path, *, ffprobe: str = "ffprobe") -
         raise CalibrationError(f"не удалось определить размер кадра {video}: {proc.stderr.strip()}") from e
 
 
+def _read_calibration_meta(path: Path) -> dict:
+    """Сырой JSON калибровки (для диагностики: kind/rotation_applied/frame/source_name)."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def load_or_auto_calibrate(
     calibrations_dir: str | Path,
     source_sha256: str,
@@ -281,22 +296,49 @@ def load_or_auto_calibrate(
     *,
     get_frame_size: Callable[[], tuple[int, int]],
 ) -> SetupProfile:
-    """Вернуть SetupProfile: ручная калибровка (если есть) или авто-кроп по центру.
+    """Вернуть SetupProfile: ручная калибровка (если есть по ключу) или авто-кроп по центру.
 
-    Авто-кроп сохраняется с `"auto": true` — ручной `calibrate` его перезапишет.
-    Сообщение пользователю: чтобы не молчать про центр-кроп.
+    ЯВНО логирует исход (найдена/не найдена/какая) — откат на автокроп НЕ должен быть молчаливым.
+    Защита: если по ключу калибровки нет, но в каталоге есть РУЧНАЯ калибровка для видео с тем же
+    именем файла — это почти наверняка «тот самый» файл под другим хэшем (файл изменился/пересжат).
+    В этом случае ПАДАЕМ, а не подменяем ручную настройку автокропом (инвариант «не молча»).
     """
     calibrations_dir = Path(calibrations_dir)
     path = calibration_path(calibrations_dir, source_sha256)
+    print(f"ищу калибровку по ключу sha={source_sha256[:12]}… в {calibrations_dir}", flush=True)
     if path.is_file():
-        return load_calibration(calibrations_dir, source_sha256)
+        rec = _read_calibration_meta(path)
+        setup = load_calibration(calibrations_dir, source_sha256)
+        kind = "авто" if rec.get("auto") else "РУЧНАЯ"
+        rot = rec.get("rotation_applied")
+        c = setup.crop
+        print(f"калибровка найдена ({kind}): {path.name}  "
+              f"кроп {c.w}×{c.h}@{c.x},{c.y}, кадр {setup.frame}, rotation_applied={rot}", flush=True)
+        return setup
 
+    # По ключу не найдена — показать, что искали и что вообще есть в каталоге.
+    existing = sorted(calibrations_dir.glob("*.json")) if calibrations_dir.is_dir() else []
+    print(f"калибровка НЕ найдена по ключу sha={source_sha256[:12]}…", flush=True)
+    if existing:
+        print(f"  калибровки в каталоге: {', '.join(p.name for p in existing)}", flush=True)
+    # Есть ли РУЧНАЯ калибровка для файла с этим же именем? Тогда это «тот самый» видос под
+    # другим хэшем — не подменяем автокропом молча, а требуем перекалибровать именно его.
+    for p in existing:
+        meta = _read_calibration_meta(p)
+        if not meta.get("auto") and meta.get("source_name") == source_name:
+            raise CalibrationError(
+                f"есть ручная калибровка для «{source_name}» ({p.name}), но под ДРУГИМ хэшем "
+                f"(искали {source_sha256[:12]}…). Видеофайл изменился/пересжат после калибровки "
+                f"или это другая копия. Перекалибруй именно это видео: autoreels calibrate "
+                f"«{source_name}». Автокроп НЕ подставляю (ручная настройка важнее)."
+            )
+
+    frame_size = get_frame_size()
     print(
-        "кроп не откалиброван → авто-кроп по центру "
-        "(autoreels calibrate <video> для ручной настройки)",
+        f"кроп не откалиброван → авто-кроп 9:16 по центру в ОТОБРАЖАЕМОМ кадре "
+        f"{frame_size[0]}×{frame_size[1]} (autoreels calibrate <video> для ручной настройки)",
         flush=True,
     )
-    frame_size = get_frame_size()
     crop = auto_crop(frame_size)
     calibrations_dir.mkdir(parents=True, exist_ok=True)
     rec = {

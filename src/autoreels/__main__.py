@@ -885,11 +885,30 @@ def cmd_run(
 
     # Жёсткая валидация при сборке манифеста: кроп проверяется против ОТОБРАЖАЕМЫХ (display,
     # после rotation-метаданных) размеров кадра — ровно то пространство, в котором рендер
-    # применит crop-фильтр (autorotate по умолчанию). Записанный в калибровку frame мог быть
-    # в перепутанном пространстве → кроп молча вылезал за кадр и рендерились битые клипы.
-    # Падаем с числами здесь (границы + соотношение 9:16).
+    # применит crop-фильтр (autorotate по умолчанию). Приводим к ОДНОМУ пространству перед
+    # сравнением: и калибровка (rotation_applied=true), и probe — отображаемые размеры.
     disp_w, disp_h = _probe_frame_size_for_auto(video)
-    validate_crop_in_frame(setup.crop, disp_w, disp_h)
+    c = setup.crop
+    print(f"отображаемый кадр видео (после rotation): {disp_w}×{disp_h}; "
+          f"кроп калибровки: {c.w}×{c.h}@{c.x},{c.y} в кадре {setup.frame}", flush=True)
+    try:
+        validate_crop_in_frame(setup.crop, disp_w, disp_h)
+    except CalibrationError as e:
+        # Рассинхрон пространств. Если записанный в калибровке кадр совпадает с ПЕРЕВЁРНУТЫМ
+        # отображаемым — калибровка и rotation детектились по-разному (калибратор/рендер vs run).
+        cal_frame = tuple(setup.frame) if setup.frame else None
+        swapped = cal_frame == (disp_h, disp_w)
+        hint = ("  калибровка в ПЕРЕВЁРНУТОМ пространстве относительно рендера "
+                f"(кадр калибровки {cal_frame} = swap отображаемого {disp_w}×{disp_h}).\n"
+                if swapped else "")
+        raise CalibrationError(
+            f"калибровка не годится для этого видео: {e}\n"
+            f"{hint}"
+            f"  калибровка: кроп {c.w}×{c.h}@{c.x},{c.y}, кадр {setup.frame}\n"
+            f"  видео сейчас: отображаемый кадр {disp_w}×{disp_h}\n"
+            f"  → перекалибруй это видео (autoreels calibrate). Автокроп НЕ подставляю."
+        ) from e
+    print(f"калибровка валидна в отображаемом пространстве ✓ (setup={setup.setup_id})", flush=True)
 
     print(f"=== run: {Path(video).name} (setup={setup.setup_id}) ===", flush=True)
     # Пул провайдеров + префлайт моделей ДО дорогой транскрипции: неверная model/

@@ -164,3 +164,45 @@ def test_manual_calibrate_overwrites_auto(tmp_path):
     setup = load_calibration(tmp_path, SHA_A)
     assert setup.crop.model_dump() == {"x": 100, "y": 50, "w": 900, "h": 1600}
     assert setup.setup_id == "manual"
+
+
+# ---------------------------- диагностика: не молчаливый откат на автокроп + логирование
+
+def test_load_logs_when_manual_calibration_found(tmp_path, capsys):
+    """Найденная РУЧНАЯ калибровка логируется явно (не молча)."""
+    save_calibration(tmp_path, source_name="v.mp4", source_sha256=SHA_A,
+                     crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], setup_label="room")
+    load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4", get_frame_size=lambda: (3840, 2160))
+    out = capsys.readouterr().out
+    assert "калибровка найдена" in out and "РУЧНАЯ" in out
+
+
+def test_load_raises_when_manual_calibration_exists_under_other_hash(tmp_path):
+    """Ручная калибровка есть для этого имени файла, но под ДРУГИМ хэшем → падаем, НЕ автокроп."""
+    save_calibration(tmp_path, source_name="PXL.mp4", source_sha256=SHA_B,
+                     crop=Crop(x=225, y=545, w=1205, h=2143), frame=[1512, 2688], setup_label="pxl")
+    called = []
+    with pytest.raises(CalibrationError) as e:
+        load_or_auto_calibrate(tmp_path, SHA_A, "PXL.mp4",   # тот же файл-имя, другой sha
+                               get_frame_size=lambda: called.append(1) or (1512, 2688))
+    assert "PXL.mp4" in str(e.value) and "перекалибруй" in str(e.value).lower()
+    assert called == []               # автокроп НЕ считался (get_frame_size не вызван)
+
+
+def test_load_autocrops_for_new_video_despite_other_calibrations(tmp_path, capsys):
+    """Новое видео (другое имя) → автокроп в отображаемом кадре, даже если есть калибровки других."""
+    save_calibration(tmp_path, source_name="other.mp4", source_sha256=SHA_B,
+                     crop=Crop(x=225, y=545, w=1205, h=2143), frame=[1512, 2688], setup_label="o")
+    setup = load_or_auto_calibrate(tmp_path, SHA_A, "new.mp4", get_frame_size=lambda: (1512, 2688))
+    assert setup.setup_id == "auto"
+    out = capsys.readouterr().out
+    assert "НЕ найдена" in out and "ОТОБРАЖАЕМОМ кадре 1512×2688" in out
+
+
+def test_auto_crop_fits_vertical_and_horizontal_frames():
+    """Автокроп вписан (9:16, в границах) и для вертикального, и для горизонтального кадра."""
+    from autoreels.core.calibration import validate_crop_in_frame
+    for W, H in [(1512, 2688), (2688, 1512), (3840, 2160), (1080, 1920)]:
+        c = auto_crop((W, H))
+        validate_crop_in_frame(c, W, H)          # не бросает: границы + 9:16
+        assert c.x >= 0 and c.y == 0 and c.x + c.w <= W and c.h <= H
