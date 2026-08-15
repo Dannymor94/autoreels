@@ -27,9 +27,8 @@ _SENTENCE_END = ".!?…"
 # Пунктуация СЕРЕДИНЫ фразы: запятая/двоеточие/точка с запятой/тире. Слово с ней на конце —
 # мысль ещё не закончена (надёжнее порога паузы: «осознавать, [1.1с] понимать»).
 _MIDPHRASE_PUNCT = ",;:—–-"
-# Padding: слово, приклеенное впритык (gap ≤ порога) к границе предложения, — спилловер
-# следующей фразы («…конструкция. И»); не втягиваем его, лучше отдать тишину.
-_PAD_SPILL_GAP = 0.15
+# Padding: минимальный зазор до соседнего слова — хвост/заход не касаются чужой речи вплотную.
+_PAD_EPS = 0.05
 
 
 def _clean(word: str) -> str:
@@ -116,11 +115,53 @@ def _phrase_start_indices(words: list[Word], *, min_pause: float) -> list[int]:
     return starts
 
 
+def _relaxed_end(words: list[Word], *, start: float, end: float, limit: float, window_sec: float,
+                 max_micro_pause: float, hanging_words) -> float | None:
+    """Фолбэк, когда в сегменте НЕТ строгого завершения мысли (паузы ≥ min_pause / пунктуации).
+
+    Иерархия (мягче, но НИКОГДА не на висячем слове / после запятой, если есть альтернатива):
+      b) последняя пауза ≥ max_micro_pause (0.4с, не 1.5) на не-висячем/не-после-запятой слове;
+      c) иначе — не-висячее слово перед МАКСИМАЛЬНОЙ паузой в сегменте;
+      d) иначе — последнее не-висячее слово; совсем нет — ближайший конец слова (не полуслово).
+    """
+    seg = [(i, w) for i, w in enumerate(words) if start < w.t1 <= limit]
+    if not seg:
+        return None
+
+    # (b) те же правила завершённости, но порог паузы = max_micro_pause вместо min_pause.
+    soft = _phrase_end_times(words, min_pause=max_micro_pause, max_micro_pause=max_micro_pause,
+                             hanging_words=hanging_words)
+    forward = [t for t in soft if t >= end - window_sec and start < t <= limit]
+    if forward:
+        return min(forward)
+    within = [t for t in soft if start < t <= limit]
+    if within:
+        return max(within)
+
+    # (c) не-висячее слово перед максимальной паузой в сегменте.
+    best_t, best_gap = None, -1.0
+    for i, w in seg:
+        gap = (words[i + 1].t0 - w.t1) if i + 1 < len(words) else None
+        if gap is None or _ends_midphrase(w.word) or _is_hanging(w.word, hanging_words):
+            continue
+        if gap > best_gap:
+            best_gap, best_t = gap, w.t1
+    if best_t is not None:
+        return best_t
+
+    # (d) последнее не-висячее/не-после-запятой слово; иначе ближайший конец слова.
+    clean = [w.t1 for _, w in seg if not _is_hanging(w.word, hanging_words) and not _ends_midphrase(w.word)]
+    if clean:
+        return _nearest_in_window(end, clean, window_sec) or max(clean)
+    return _nearest_in_window(end, [w.t1 for _, w in seg], window_sec)
+
+
 def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, window_sec: float,
               max_duration: float, min_pause: float, max_micro_pause: float,
               hanging_words) -> float | None:
     """Новый end: тянуть вперёд до завершения мысли в пределах max_duration; не влезло —
-    откат к последней целой фразе; совсем нет завершений рядом → к концу слова (не полуслово)."""
+    откат к последней целой фразе; совсем нет завершений рядом → мягкая иерархия фолбэка
+    (_relaxed_end) — конец предложения / пауза ≥0.4с / не-висячее слово, НЕ полуслово."""
     limit = start + max_duration
     ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
                              hanging_words=hanging_words)
@@ -137,9 +178,9 @@ def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, w
         if within:
             chosen = max(within)
         else:
-            # Нет завершений мысли рядом — хотя бы к ближайшему концу слова (не полуслово).
-            chosen = _nearest_in_window(end, [w.t1 for w in words if start < w.t1 <= limit],
-                                        window_sec)
+            # Нет строгих завершений — мягкая иерархия (не садиться на висячее/после запятой).
+            chosen = _relaxed_end(words, start=start, end=end, limit=limit, window_sec=window_sec,
+                                  max_micro_pause=max_micro_pause, hanging_words=hanging_words)
             if chosen is None:
                 return None
     new_end = min(chosen + tail_sec, limit)
@@ -203,9 +244,11 @@ def apply_padding(
     раздвигает границы: start -= lead_pad_sec, end += tail_pad_sec.
     Субтитры не затрагиваются — область паддинга это тишина/пауза без слов.
 
-    Спилловер: если хвостовые слова клипа приклеены впритык (gap ≤ _PAD_SPILL_GAP) к концу
-    предложения ИЛИ являются союзом — это начало следующей фразы («…конструкция. И»),
-    втянутое через хвост. Отбрасываем их (лучше 0.7с тишины, чем чужое слово).
+    CLAMP по соседним словам: хвост НЕ заезжает в начало следующего слова
+    (`new_end ≤ next_word.t0 − _PAD_EPS`), заход НЕ заезжает в конец предыдущего
+    (`new_start ≥ prev_word.t1 + _PAD_EPS`). Так фиксированные 0.7с «воздуха» никогда не
+    втягивают речь соседней фразы (межфразовая пауза Whisper часто < tail_pad → был обрыв).
+    Нет соседнего слова (край речи) — паддинг как есть. Заменяет узкий spillover-триммер.
 
     Ограничения:
     - start >= 0
@@ -214,22 +257,34 @@ def apply_padding(
     """
     hanging_words = hanging_words or []
     for r in reels:
-        clip_words = [w for w in words if w.t0 >= r.start and w.t0 < r.end]
-        if not clip_words:
+        idxs = [i for i, w in enumerate(words) if w.t0 >= r.start and w.t0 < r.end]
+        if not idxs:
             continue
 
-        # Срезаем спилловер начала следующей фразы с хвоста клипа.
-        while len(clip_words) >= 2:
-            last, prev = clip_words[-1], clip_words[-2]
-            glued = (last.t0 - prev.t1) <= _PAD_SPILL_GAP
-            starts_next = _is_sentence_end(prev.word) or _is_hanging(last.word, hanging_words)
-            if glued and starts_next:
-                clip_words = clip_words[:-1]
+        # Срезаем хвостовые слова, втянутые из следующей фразы: висячее слово ИЛИ слово,
+        # идущее сразу за концом предложения («…конструкция. И вот») — это начало новой мысли.
+        while len(idxs) >= 2:
+            li, pi = idxs[-1], idxs[-2]
+            if _is_sentence_end(words[pi].word) or _is_hanging(words[li].word, hanging_words):
+                idxs.pop()
             else:
                 break
 
-        new_start = max(0.0, clip_words[0].t0 - lead_pad_sec)
-        new_end = clip_words[-1].t1 + tail_pad_sec
+        fi, la = idxs[0], idxs[-1]
+        first_word, last_word = words[fi], words[la]
+
+        # Заход: воздух до первого слова, но не в конец предыдущего слова (по индексу).
+        new_start = max(0.0, first_word.t0 - lead_pad_sec)
+        if fi > 0:
+            new_start = max(new_start, words[fi - 1].t1 + _PAD_EPS)
+        new_start = min(new_start, first_word.t0)          # не резать само первое слово
+
+        # Хвост: воздух после последнего слова, но не в начало следующего (по индексу — ловит
+        # и приклеенное впритык слово, у которого gap ≈ 0).
+        new_end = last_word.t1 + tail_pad_sec
+        if la + 1 < len(words):
+            new_end = min(new_end, words[la + 1].t0 - _PAD_EPS)
+        new_end = max(new_end, last_word.t1)               # не резать само последнее слово
 
         new_end = min(new_end, new_start + max_duration)
         if video_duration is not None:

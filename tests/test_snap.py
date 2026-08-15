@@ -351,8 +351,8 @@ def test_subtitles_not_affected_by_padding():
 
 
 def test_padding_drops_glued_next_sentence_start():
-    """Реальный баг «…конструкция. И»: слово впритык после конца предложения — спилловер,
-    padding его отбрасывает (end по «конструкция.», не по «И»)."""
+    """«…конструкция. И вот»: слова после конца предложения — начало следующей фразы; хвост
+    их не втягивает и НЕ добавляет tail в их речь (clamp по соседнему слову)."""
     words = [
         _w(0.0, 1.0, "статичная"),
         _w(1.0, 2.0, "конструкция."),                # конец предложения, t1=2.0
@@ -362,19 +362,38 @@ def test_padding_drops_glued_next_sentence_start():
     r = _reel(0.0, 2.4)                              # клип включает «И», «вот» (t0 < 2.4)
     apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
                   hanging_words=HANGING)
-    assert abs(r.end - (2.0 + 0.7)) < 1e-6           # end по «конструкция.» (2.0) + tail_pad, не по «И»
+    assert abs(r.end - 2.0) < 1e-6                   # end ровно по «конструкция.» — «И» впритык, tail=0
 
 
-def test_padding_keeps_word_with_real_pause_gap():
-    """Слово с НАСТОЯЩИМ зазором (не впритык) — не спилловер, не отбрасываем."""
+def test_padding_tail_clamped_before_next_word():
+    """Хвост (0.7с) НЕ заезжает в начало следующего слова — обрезается до next.t0 − _PAD_EPS."""
     words = [
-        _w(0.0, 1.0, "конструкция."),
-        _w(1.5, 2.0, "И"),                           # gap 0.5 > _PAD_SPILL_GAP → не приклеено
+        _w(0.0, 1.0, "первое"),
+        _w(1.5, 2.0, "второе"),                      # последнее слово клипа
+        _w(2.2, 2.6, "третье"),                      # следующее слово: gap 0.2 < tail_pad 0.7
     ]
+    r = _reel(0.0, 2.1)                              # клип = первое, второе (t0 < 2.1)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - (2.2 - 0.05)) < 1e-6          # клампнут перед «третье», не 2.0+0.7=2.7
+
+
+def test_padding_tail_full_at_end_of_speech():
+    """Нет следующего слова (конец речи) — tail_pad как есть (0.7с воздуха)."""
+    words = [_w(0.0, 1.0, "первое"), _w(1.5, 2.0, "конец.")]
     r = _reel(0.0, 2.1)
     apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
                   hanging_words=HANGING)
-    assert abs(r.end - (2.0 + 0.7)) < 1e-6           # «И» оставлено (реальная пауза, не спилловер)
+    assert abs(r.end - (2.0 + 0.7)) < 1e-6           # полный хвост — некуда заезжать
+
+
+def test_padding_lead_clamped_after_prev_word():
+    """Заход (0.3с) НЕ заезжает в конец предыдущего слова — ограничен prev.t1 + _PAD_EPS."""
+    words = [_w(0.0, 1.0, "раньше"), _w(1.2, 2.0, "клип."), ]  # gap 0.2 < lead_pad 0.3
+    r = _reel(1.2, 2.0)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.start - (1.0 + 0.05)) < 1e-6        # клампнут после «раньше», не 1.2−0.3=0.9
 
 
 def test_padding_no_hanging_words_backward_compatible():
@@ -382,3 +401,50 @@ def test_padding_no_hanging_words_backward_compatible():
     r = _reel(10.0, 12.5)
     apply_padding([r], PAD_WORDS, **PAD_CFG)          # без hanging_words
     assert abs(r.end - (12.5 + 0.7)) < 1e-6
+
+
+# --------- РЕАЛЬНЫЕ примеры из диагностики длинных роликов (обрывы фраз вернулись) ---------
+
+def test_padding_real_neрealizovanny_eto():
+    """«…нереализованный. Это всего…» (реальные тайминги): хвост 0.7с НЕ въезжает в «Это»
+    (начало след. фразы, gap 0.52) — был обрыв +0.70, стал чистый конец на «нереализованный.»."""
+    words = [_w(178.09, 178.57, "какой-то"), _w(178.57, 179.69, "нереализованный."),
+             _w(180.21, 180.35, "Это"), _w(180.35, 180.69, "всего")]
+    r = _reel(170.0, 179.99)                          # snap-конец = нереализованный.t1 + tail 0.3
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - (180.21 - 0.05)) < 1e-6        # клампнут перед «Это», не 179.69+0.7=180.39
+    assert r.end > 179.69                             # «нереализованный.» включён + воздух
+
+
+def test_padding_real_prochuvstvovat_pogovori():
+    """«…прочувствовать. Поговори…» (реальные тайминги, gap 0.16): хвост 0.7с НЕ въезжает в
+    «Поговори» — был обрыв (речь след. фразы), стал чистый конец на «прочувствовать.»."""
+    words = [_w(85.28, 85.44, "были"), _w(85.44, 86.68, "прочувствовать."),
+             _w(86.84, 87.18, "Поговори"), _w(87.18, 87.34, "с")]
+    r = _reel(80.0, 86.98)                            # snap-конец = прочувствовать.t1 + tail 0.3
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - (86.84 - 0.05)) < 1e-6         # клампнут перед «Поговори», не 86.68+0.7
+    assert r.end >= 86.68
+
+
+def test_snap_fallback_lands_on_non_hanging_not_hanging():
+    """Нет пунктуации и пауз ≥1.5с (сплошная речь): фолбэк садится на не-висячее слово,
+    НЕ на «это»/«есть». (реальная картина «…нереализованный. Это» без пунктуации Whisper)."""
+    words = [_w(0.0, 0.4, "поэтому"), _w(0.4, 0.9, "важно"),
+             _w(1.5, 2.0, "это")]                     # is_last, висячее, gap 0.6 после «важно»
+    r = _reel(0.0, 1.8)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+    assert abs(r.end - (0.9 + 0.3)) < 1e-6            # конец на «важно»(0.9)+tail, не на «это»
+
+
+def test_snap_fallback_lands_on_non_comma_not_after_comma():
+    """Фолбэк не садится ПОСЛЕ запятой, если есть не-запятая альтернатива."""
+    words = [_w(0.0, 0.4, "поэтому"), _w(0.4, 0.9, "важно"),
+             _w(1.5, 2.0, "смотри,")]                 # is_last, запятая, gap 0.6 после «важно»
+    r = _reel(0.0, 1.8)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+    assert abs(r.end - (0.9 + 0.3)) < 1e-6            # конец на «важно», не на «смотри,»
