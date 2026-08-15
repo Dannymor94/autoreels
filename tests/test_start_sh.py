@@ -100,3 +100,25 @@ def test_write_ffmpeg_local_does_not_clobber_existing(tmp_path):
     content = f.read_text()
     assert "/my/custom/ffmpeg" in content
     assert "D:/other/ffmpeg.exe" not in content
+
+
+# ------------------------------------------------- автозагрузка: предложение установить
+
+def test_offer_autoload_silent_when_already_installed(tmp_path):
+    """Если source-строка уже в профиле — не спрашиваем (идемпотентно, без нагона)."""
+    home = tmp_path / "home"; home.mkdir()
+    (home / ".zshrc").write_text(f"source {tmp_path}/aliases.sh\n", encoding="utf-8")
+    r = _bash(
+        f'AUTOREELS_START_LIB=1 source "{START}"; HOME="{home}" _start_offer_autoload "{tmp_path}" </dev/null'
+    )
+    assert "Прописать автозагрузку" not in r.stdout      # промпт не показан
+
+
+def test_offer_autoload_prompts_when_not_installed(tmp_path):
+    """Строки нет ни в одном профиле → спрашиваем; пустой ввод (н) → «пропущено», без установки."""
+    home = tmp_path / "home"; home.mkdir()
+    r = _bash(
+        f'AUTOREELS_START_LIB=1 source "{START}"; HOME="{home}" _start_offer_autoload "{tmp_path}" <<< "н"'
+    )
+    assert "Прописать автозагрузку" in r.stdout
+    assert "пропущено" in r.stdout

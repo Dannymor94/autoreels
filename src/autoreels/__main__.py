@@ -135,7 +135,7 @@ def _run_key(source_sha256: str, duration_preset: str) -> str:
 def _ingest_source(video: Path, inputs_dir: Path) -> Path:
     """Втянуть исходник в inputs/ так, чтобы `render` нашёл его по sha256.
 
-    `run` может получить путь куда угодно (`ar run ~/Downloads/лекция.mp4`), но `render`
+    `run` может получить путь куда угодно (`arl run ~/Downloads/лекция.mp4`), но `render`
     ищет исходник только в `inputs/`. Поэтому внешний путь копируется в `inputs/<имя>`
     (оригинал не трогаем — не move и не symlink: symlink на Windows требует прав, а move
     унёс бы чужой файл). Путь уже внутри `inputs/` — используется как есть.
@@ -739,7 +739,7 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path
             _warn(push.stderr)
             return
         if not nothing_new:
-            print(f"  ✓ манифест {stem} запушен ({n_reels} reels) → на системнике: ar r",
+            print(f"  ✓ манифест {stem} запушен ({n_reels} reels) → на системнике: arl r",
                   flush=True)
     except subprocess.TimeoutExpired:
         _warn("git завис (таймаут) — проверь сеть/доступ к remote или SSH-passphrase")
@@ -750,7 +750,7 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path
 def _commit_push_calibrations(*, root) -> None:
     """Синхронизировать калибровки кропа в git: add calibrations/ → commit → push.
 
-    Калибруешь на Mac (ar c / меню) → калибровки уезжают на системник (там ar r = git pull),
+    Калибруешь на Mac (arl c / меню) → калибровки уезжают на системник (там arl r = git pull),
     и status видит ручной кроп. _work/ (кадры-PNG) в .gitignore и не попадают. Ошибка git не
     роняет команду — калибровки уже на диске, предупреждаем и продолжаем."""
     if not _should_git_sync():
@@ -785,7 +785,7 @@ def _commit_push_calibrations(*, root) -> None:
             _warn(push.stderr)
             return
         if not nothing_new:
-            print("  ✓ калибровка сохранена и отправлена → на Mac: ar run "
+            print("  ✓ калибровка сохранена и отправлена → на Mac: arl run "
                   "(подтянет калибровки и построит манифесты)", flush=True)
     except subprocess.TimeoutExpired:
         _warn("git завис (таймаут) — проверь сеть/доступ к remote или SSH-passphrase")
@@ -1135,7 +1135,7 @@ def _encoder_unavailable_msg(codec: str, prof_name: str) -> str:
     hint = " (аппаратный AV1 нужен AMD RX 7000+ / свежий GPU)" if "av1" in codec else ""
     return (
         f"энкодер {codec} (профиль {prof_name}) не поддерживается этой машиной{hint}. "
-        f"Выбери другой профиль: ar → 9 или --profile hevc|h264 "
+        f"Выбери другой профиль: arl → 9 или --profile hevc|h264 "
         f"(или убери --no-fallback для автоподбора)."
     )
 
@@ -1234,8 +1234,8 @@ def cmd_render(
             if desync and not allow_stale:
                 print(f"\n  ⛔ ПРОПУСК {stem}: {desync}", file=sys.stderr, flush=True)
                 print(f"     кроп в манифесте {manifest.setup.crop.model_dump()} — старый. "
-                      f"Обнови: ar recrop (быстро, без пересчёта R0), затем ar r. "
-                      f"Форс старым кропом: ar r --allow-stale", file=sys.stderr, flush=True)
+                      f"Обнови: arl recrop (быстро, без пересчёта R0), затем arl r. "
+                      f"Форс старым кропом: arl r --allow-stale", file=sys.stderr, flush=True)
                 skipped_stale.append(mf.name)
                 continue
 
@@ -1352,7 +1352,7 @@ def cmd_recrop(
     if video is not None:
         mf = manifests_dir / f"{Path(video).stem}.json"
         if not mf.is_file():
-            print(f"нет манифеста для {Path(video).stem} — сначала ar run", file=sys.stderr, flush=True)
+            print(f"нет манифеста для {Path(video).stem} — сначала arl run", file=sys.stderr, flush=True)
             return 1
         targets = [mf]
     else:
@@ -1402,7 +1402,7 @@ def cmd_recrop(
             parts.append(f"{len(skipped)} пропущено")
         print(f"\n=== recrop: {' / '.join(parts)} ===", flush=True)
     if updated:
-        print("  → теперь ar r (render) на системнике", flush=True)
+        print("  → теперь arl r (render) на системнике", flush=True)
     return 0
 
 
@@ -1423,7 +1423,7 @@ def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
     if parts:
         did_something = True
         print(f"⚠ прерванные загрузки: {len(parts)} .part-файл(ов) в inputs/ —", flush=True)
-        print("  повтори ту же ссылку (меню п.5 или ar run <url>): "
+        print("  повтори ту же ссылку (меню п.5 или arl run <url>): "
               "докачается с места обрыва.", flush=True)
         for p in parts:
             print(f"   • {p.name}", flush=True)
@@ -1540,9 +1540,9 @@ def _manifest_calibration_desync(manifest, calibrations_dir) -> str | None:
     calib_is_manual = not (rec.get("auto") or rec.get("setup_label") == "auto")
     if manifest.setup.setup_id == "auto" and calib_is_manual:
         return (f"манифест {stem} создан с автокропом, но появилась ручная калибровка "
-                f"→ ar recrop (обновить кроп без пересчёта R0)")
+                f"→ arl recrop (обновить кроп без пересчёта R0)")
     return (f"манифест {stem}: кроп устарел (калибровка изменилась) "
-            f"→ ar recrop (обновить кроп без пересчёта R0)")
+            f"→ arl recrop (обновить кроп без пересчёта R0)")
 
 
 def _manifest_sync_mark(video, manifests_dir, calibrations_dir) -> str:
@@ -1768,7 +1768,7 @@ def cmd_status(*, root=".") -> int:
 def _next_hint(root=".") -> str | None:
     """Подсказка следующего шага по состоянию проекта.
 
-    Возвращает одну строку вида «→ ar go» или None если не очевидно что делать.
+    Возвращает одну строку вида «→ arl go» или None если не очевидно что делать.
     Видео в inputs/ приоритетнее манифестов: сначала run, потом render.
     """
     root = Path(root)
@@ -1777,10 +1777,10 @@ def _next_hint(root=".") -> str | None:
 
     if inputs:
         n = len(inputs)
-        return f"→ {n} видео ждут обработки:  ar go"
+        return f"→ {n} видео ждут обработки:  arl go"
     if manifests:
         n = len(manifests)
-        return f"→ {n} манифест(а) готовы к рендеру:  ar r  (на системнике)"
+        return f"→ {n} манифест(а) готовы к рендеру:  arl r  (на системнике)"
     return None
 
 
@@ -2071,18 +2071,21 @@ autoreels <команда> --help — детали и флаги.\
 _HELP_EXTENDED = """\
 autoreels — длинное talking-head видео → вертикальные Reels 9:16
 
-━━━ КОРОТКИЕ КОМАНДЫ (после source aliases.sh) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ КОРОТКИЕ КОМАНДЫ (autoreels install-aliases → работают в любом терминале) ━━
 
-  ar              интерактивное меню (выбор цифрой, без ввода команд)
-  ar menu         то же меню
-  ar go           run всех видео + git push манифестов  (Mac, нужен Groq)
-  ar go --no-push run без push
-  ar r            git pull + render                      (системник)
-  ar s            status
-  ar c            calibrate --all
-  ar t <ист>      транскрибация (видео/аудио/url → текст для контента)
-  ar h            эта справка
-  ar <...>        передаёт команду в autoreels напрямую
+  arl              интерактивное меню (выбор цифрой, без ввода команд)
+  arl menu         то же меню
+  arl go           run всех видео + git push манифестов  (Mac, нужен Groq)
+  arl go --no-push run без push
+  arl r            render (git pull внутри; блокирует устаревший кроп)  (системник)
+  arl rc [видео]   recrop: обновить кроп в манифесте по свежей калибровке (без R0)
+  arl s            status
+  arl c            calibrate --all
+  arl t <ист>      транскрибация (видео/аудио/url → текст для контента)
+  arl h            эта справка
+  arl <...>        передаёт команду в autoreels напрямую
+
+  Команда называется arl (не ar — ar занят системным Unix-архиватором).
 
   Меню адаптивно: в шапке — состояние (inputs/манифесты/готово), ▶ помечает
   рекомендуемый шаг. Пункты 5 (обработать) и 6 (транскрибировать) после выбора
@@ -2148,17 +2151,17 @@ autoreels — длинное talking-head видео → вертикальны�
   ЭТАП 1 — подготовка (обычно Mac):
 
     1. Положить видео в inputs/
-    2. ar s                 # (= autoreels status) — что видит: исходники, кропы
-    3. ar c                 # (= calibrate --all)  — настроить кадры
+    2. arl s                 # (= autoreels status) — что видит: исходники, кропы
+    3. arl c                 # (= calibrate --all)  — настроить кадры
 
   ЭТАП 2 — анализ (Mac, нужен Groq):
 
-    4. ar go                # run всех видео → manifests/ + git push
+    4. arl go                # run всех видео → manifests/ + git push
        # (длинное >15 мин → чанкинг Whisper автоматически)
 
   ЭТАП 3 — рендер (системник Windows):
 
-    5. ar r                 # git pull + render → reels-out/<имя>/
+    5. arl r                 # git pull + render → reels-out/<имя>/
        # каждый клип: <id>.mp4 + <id>.txt с текстом поста
 
 ━━━ ВАЖНЫЕ ЗАМЕТКИ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2191,7 +2194,7 @@ autoreels — длинное talking-head видео → вертикальны�
     source /путь/к/autoreels/aliases.sh
 
   Дальше алиасы обновляются через git pull (правишь aliases.sh, коммитишь).
-  Затем: ar status · ar calibrate --all · ar run · ar render
+  Затем: arl status · arl calibrate --all · arl run · arl render
 \
 """
 
@@ -2210,10 +2213,10 @@ def _build_parser():
 
     pm = sub.add_parser(
         "menu",
-        help="печать интерактивного меню (цикл рисует bash-обёртка ar menu)",
+        help="печать интерактивного меню (цикл рисует bash-обёртка arl menu)",
         description=(
             "Печатает адаптивное меню (шапка-состояние + пункты с подсветкой ▶).\n"
-            "Сам цикл (чтение цифры, запуск операций, возврат) — в bash-функции ar menu;\n"
+            "Сам цикл (чтение цифры, запуск операций, возврат) — в bash-функции arl menu;\n"
             "эта подкоманда — «мозги»: рендер меню и разбор выбора.\n\n"
             "  autoreels menu                 — напечатать меню\n"
             "  autoreels menu --resolve 1     — цифра → action-токен (go/render/…/quit)"
@@ -2417,7 +2420,7 @@ def _build_parser():
             "Один раз на каждой машине: дописывает строку\n"
             "  source /путь/к/autoreels/aliases.sh\n"
             "в профиль shell (~/.zshrc на Mac, ~/.bashrc на Windows Git Bash).\n"
-            "После этого алиасы (alias ar='autoreels') обновляются через git pull.\n\n"
+            "После этого короткие команды (arl …) обновляются через git pull.\n\n"
             "Пример: autoreels install-aliases\n"
             "Без изменений: autoreels install-aliases --dry-run"
         ),

@@ -1,6 +1,6 @@
 # autoreels — bootstrap одной командой: venv + короткие команды + меню.
 #
-# ЗАПУСКАТЬ ЧЕРЕЗ SOURCE, чтобы venv и команды ar остались в текущем shell:
+# ЗАПУСКАТЬ ЧЕРЕЗ SOURCE, чтобы venv и команды arl остались в текущем shell:
 #     source start.sh          (или коротко:  . start.sh)
 # Через ./start.sh тоже работает (меню откроется), но после выхода окружение
 # не сохранится — активация venv живёт только в sourced-шелле.
@@ -80,6 +80,23 @@ _start_ensure_ffmpeg() {
     fi
 }
 
+# Предложить автозагрузку: дописать `source aliases.sh` в профиль shell, чтобы команды arl
+# работали в ЛЮБОМ новом терминале без ручного `source start.sh`. Идемпотентно: если строка
+# уже в одном из профилей — молчим. Иначе спрашиваем и зовём `autoreels install-aliases`.
+_start_offer_autoload() {
+    local root="$1" line prof _ans
+    line="source $root/aliases.sh"
+    for prof in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+        [ -f "$prof" ] && grep -qF "$line" "$prof" 2>/dev/null && return 0   # уже настроено
+    done
+    printf "Прописать автозагрузку команд arl в профиль shell (работали бы в любом терминале)? [д/н]: "
+    read -r _ans
+    case "$_ans" in
+        д|Д|y|Y|yes) autoreels install-aliases --yes ;;
+        *) echo "  пропущено. Позже разово: autoreels install-aliases" ;;
+    esac
+}
+
 # Скрипт запущен через source (окружение сохранится) или как ./start.sh (нет)?
 _start_is_sourced() {
     if [ -n "${BASH_SOURCE:-}" ]; then
@@ -98,7 +115,7 @@ _start_main() {
 
     if ! _start_is_sourced; then
         echo "⚠ запущено без source — окружение не сохранится после выхода из меню."
-        echo "  для постоянных команд ar:  source start.sh"
+        echo "  для постоянных команд arl:  source start.sh"
         echo
     fi
 
@@ -119,9 +136,13 @@ _start_main() {
         . "$act"
     fi
 
-    # Короткие команды ar + функция меню.
+    # Короткие команды arl + функция меню.
     # shellcheck source=/dev/null
     . "$root/aliases.sh"
+
+    # Разово предложить автозагрузку (source aliases.sh в профиль) — чтобы arl работал сразу
+    # в любом новом терминале, без ритуала `source start.sh`. Только если ещё не прописано.
+    _start_offer_autoload "$root"
 
     # GROQ_API_KEY нужен для run/transcribe (Groq). Для render — нет. Только предупреждаем.
     if [ ! -f "$root/.env" ] || ! grep -q '^GROQ_API_KEY=..*' "$root/.env" 2>/dev/null; then

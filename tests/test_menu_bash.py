@@ -63,6 +63,45 @@ def test_ar_cli_uses_direct_when_available():
     assert "mode=direct" in r.stdout, (r.stdout, r.stderr)
 
 
+def _bash(script: str, *, cwd=REPO_ROOT) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env["PATH"] = f"{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                          cwd=cwd, env=env, timeout=60)
+
+
+def test_arl_defined_but_ar_is_not_a_project_function():
+    """Проект определяет функцию `arl`, но НЕ `ar` (иначе перекрыл бы системный архиватор)."""
+    r = _bash(f'source "{ALIASES}"; declare -F arl >/dev/null; echo "arl=$?"; '
+              f'declare -F ar >/dev/null; echo "ar=$?"')
+    assert "arl=0" in r.stdout          # arl определена
+    assert "ar=1" in r.stdout           # ar как функция НЕ определена (остаётся системный ar)
+
+
+def test_arl_dispatches_all_subcommands():
+    """arl <sub> → правильная подкоманда autoreels (диспетчер). _ar_cli замокан эхо-стабом."""
+    subs = [
+        ("s", "CLI:status"),
+        ("go x", "CLI:run x"),
+        ("r", "CLI:render"),
+        ("rc v.mp4", "CLI:recrop v.mp4"),
+        ("c", "CLI:calibrate --all"),
+        ("t f.mp3", "CLI:transcribe f.mp3"),
+        ("h", "CLI:help"),
+    ]
+    script = f'source "{ALIASES}"; _ar_cli(){{ echo "CLI:$*"; }};\n' + \
+             "\n".join(f'arl {args}' for args, _ in subs)
+    r = _bash(script)
+    for _, expect in subs:
+        assert expect in r.stdout, (expect, r.stdout, r.stderr)
+
+
+def test_arl_works_from_any_directory(tmp_path):
+    """arl активирует venv и диспетчеризует из ЛЮБОЙ директории (корень — по расположению aliases.sh)."""
+    r = _bash(f'source "{ALIASES}"; _ar_cli(){{ echo "CLI:$*"; }}; arl s', cwd=tmp_path)
+    assert "CLI:status" in r.stdout, (r.stdout, r.stderr)
+
+
 def test_ar_menu_works_via_module_fallback(tmp_path):
     """Меню целиком работает через python -m, когда прямой autoreels сломан."""
     fake = tmp_path / "autoreels"

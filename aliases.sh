@@ -47,23 +47,23 @@ _ar_menu() {
         read -r _choice
         _action="$(_ar_cli menu --resolve "$_choice")"
         case "$_action" in
-            go)        ar go ;;
-            render)    ar r ;;
-            status)    ar s ;;
-            calibrate) ar c ;;
+            go)        arl go ;;
+            render)    arl r ;;
+            status)    arl s ;;
+            calibrate) arl c ;;
             path)
                 printf "Вставь ссылку (URL / Яндекс.Диск / YouTube) или путь к файлу: "
                 read -r _src
                 if [ -z "$_src" ]; then echo "отменено — назад в меню"; continue; fi
                 _ar_cli menu --classify "$_src"     # покажет, что распознано
-                ar run "$_src"
+                arl run "$_src"
                 ;;
             transcribe)
                 printf "Что транскрибировать — ссылка (URL / Яндекс.Диск) или путь к файлу: "
                 read -r _src
                 if [ -z "$_src" ]; then echo "отменено — назад в меню"; continue; fi
                 _ar_cli menu --classify "$_src"     # покажет, что распознано
-                ar t "$_src"
+                arl t "$_src"
                 ;;
             resume)    _ar_cli resume ;;
             profile)
@@ -78,7 +78,7 @@ _ar_menu() {
                     *) echo "  неизвестный выбор: $_p"; continue ;;
                 esac
                 ;;
-            help)      ar h ;;
+            help)      arl h ;;
             quit)      echo "пока!"; return 0 ;;
             *)
                 # Пустой ввод или мусор → просто перерисовать меню, без паузы.
@@ -91,22 +91,22 @@ _ar_menu() {
     done
 }
 
-# ar: активировать venv проекта (если ещё не активен), затем диспетчер команд.
+# arl: активировать venv проекта (если ещё не активен), затем диспетчер команд.
 # Mac/Linux: .venv/bin/activate   Windows Git Bash: .venv/Scripts/activate
 #
 # КОРОТКИЕ КОМАНДЫ:
-#   ar           → интерактивное меню (цифрами)
-#   ar menu      → то же меню
-#   ar go        → run всех видео + git push манифестов (Mac, нужен Groq; git pull перед стартом)
-#   ar go --no-push → run без git push
-#   ar r         → render (git pull внутри; блокирует рендер устаревшего кропа) (системник)
-#   ar rc [вид]  → recrop: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
-#   ar s         → status
-#   ar c         → calibrate --all (пушит калибровки → на Mac ar run)
-#   ar t <ист>   → transcribe (видео/аудио/url → текст для контента)
-#   ar h         → help
-#   ar <...>     → передать в autoreels напрямую
-ar() {
+#   arl           → интерактивное меню (цифрами)
+#   arl menu      → то же меню
+#   arl go        → run всех видео + git push манифестов (Mac, нужен Groq; git pull перед стартом)
+#   arl go --no-push → run без git push
+#   arl r         → render (git pull внутри; блокирует рендер устаревшего кропа) (системник)
+#   arl rc [вид]  → recrop: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
+#   arl s         → status
+#   arl c         → calibrate --all (пушит калибровки → на Mac arl run)
+#   arl t <ист>   → transcribe (видео/аудио/url → текст для контента)
+#   arl h         → help
+#   arl <...>     → передать в autoreels напрямую
+arl() {
     # Активация venv
     if [ -z "$VIRTUAL_ENV" ] || [ "$VIRTUAL_ENV" != "$_AR_ROOT/.venv" ]; then
         if [ -f "$_AR_ROOT/.venv/bin/activate" ]; then
@@ -121,11 +121,11 @@ ar() {
     # Диспетчер
     case "$1" in
         ""|menu)
-            # ar / ar menu → интерактивное меню
+            # arl / arl menu → интерактивное меню
             _ar_menu
             ;;
         go)
-            # ar go [--no-push]: run всех видео. Каждый успешный манифест коммитится+пушится
+            # arl go [--no-push]: run всех видео. Каждый успешный манифест коммитится+пушится
             # СРАЗУ (per-video, внутри Python) — упади прогон на середине, уже готовые
             # манифесты уже на системнике. --no-push отключает. Push-логика — в cmd_run,
             # не здесь: раньше shell-push в конце терялся при любом упавшем видео (|| return).
@@ -133,7 +133,7 @@ ar() {
             _ar_cli run "$@"
             ;;
         r)
-            # ar r: render (git pull делается ВНУТРИ render — подтягивает свежие манифесты
+            # arl r: render (git pull делается ВНУТРИ render — подтягивает свежие манифесты
             # и блокирует рендер устаревшего кропа). Энкодер из config/render.yaml.
             shift
             _ar_cli render "$@"
@@ -145,12 +145,12 @@ ar() {
             _ar_cli calibrate --all
             ;;
         rc)
-            # ar rc [видео]: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
+            # arl rc [видео]: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
             shift
             _ar_cli recrop "$@"
             ;;
         t)
-            # ar t <видео|аудио|url>: транскрибация для контента
+            # arl t <видео|аудио|url>: транскрибация для контента
             shift
             _ar_cli transcribe "$@"
             ;;

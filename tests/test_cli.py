@@ -465,7 +465,7 @@ def test_commit_push_calibrations_syncs_dir(monkeypatch, tmp_path, capsys):
     add_args = next(c for c in git.calls if c[0] == "add")
     assert "calibrations" in add_args
     out = capsys.readouterr().out
-    assert "отправлена" in out and "ar run" in out         # следующий шаг — run на Mac
+    assert "отправлена" in out and "arl run" in out         # следующий шаг — run на Mac
 
 
 def test_commit_push_calibrations_noop_when_dir_absent(monkeypatch, tmp_path):
@@ -1521,8 +1521,8 @@ def test_no_args_shows_next_step_hint(capsys):
     rc = cli.main([])
     assert rc == 0
     out = capsys.readouterr().out
-    # Либо hint (ar go / ar r) либо ссылка на help
-    assert "ar" in out.lower() or "help" in out.lower() or "autoreels" in out
+    # Либо hint (arl go / arl r) либо ссылка на help
+    assert "arl" in out.lower() or "help" in out.lower() or "autoreels" in out
 
 
 # ------------------------------------------------------------------ autoreels help
@@ -1670,7 +1670,7 @@ def test_help_has_4_workflow_stages(capsys):
 
 def test_help_workflow_has_run_and_render_commands(capsys):
     out = _help_out(capsys)
-    # help упоминает run и render (напрямую или через ar go / ar r)
+    # help упоминает run и render (напрямую или через arl go / arl r)
     assert "run" in out
     assert "render" in out
 
@@ -2289,7 +2289,7 @@ def test_install_aliases_dry_run_prints_source_line(tmp_path, capsys):
     profile = tmp_path / ".zshrc"
     profile.write_text("", encoding="utf-8")
     aliases = tmp_path / "aliases.sh"
-    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+    aliases.write_text("# autoreels aliases\n", encoding="utf-8")
 
     rc = cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, dry_run=True)
 
@@ -2303,7 +2303,7 @@ def test_install_aliases_appends_source_line(tmp_path):
     profile = tmp_path / ".zshrc"
     profile.write_text("export PATH=$PATH\n", encoding="utf-8")
     aliases = tmp_path / "aliases.sh"
-    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+    aliases.write_text("# autoreels aliases\n", encoding="utf-8")
 
     cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, dry_run=False, confirm=False)
 
@@ -2314,7 +2314,7 @@ def test_install_aliases_appends_source_line(tmp_path):
 def test_install_aliases_idempotent(tmp_path):
     profile = tmp_path / ".zshrc"
     aliases = tmp_path / "aliases.sh"
-    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+    aliases.write_text("# autoreels aliases\n", encoding="utf-8")
     source_line = f"source {aliases}"
     profile.write_text(f"export PATH=$PATH\n{source_line}\n", encoding="utf-8")
 
@@ -2340,7 +2340,7 @@ def test_install_aliases_main_dispatch_dry_run(tmp_path, capsys, monkeypatch):
     profile = tmp_path / ".zshrc"
     profile.write_text("", encoding="utf-8")
     aliases = tmp_path / "aliases.sh"
-    aliases.write_text("alias ar='autoreels'\n", encoding="utf-8")
+    aliases.write_text("# autoreels aliases\n", encoding="utf-8")
 
     monkeypatch.setattr(cli, "_detect_shell_profile", lambda: profile)
     monkeypatch.setattr(cli, "_find_aliases_sh", lambda: aliases)
@@ -2439,24 +2439,24 @@ def test_no_args_includes_status_info(capsys):
 
 
 def test_next_hint_with_videos(tmp_path):
-    """_next_hint возвращает 'ar go' когда есть видео в inputs/."""
+    """_next_hint возвращает 'arl go' когда есть видео в inputs/."""
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
 
     hint = cli._next_hint(root=tmp_path)
     assert hint is not None
-    assert "ar go" in hint or "go" in hint
+    assert "arl go" in hint
 
 
 def test_next_hint_with_manifests(tmp_path):
-    """_next_hint возвращает 'ar r' когда есть манифесты в manifests/."""
+    """_next_hint возвращает 'arl r' когда есть манифесты в manifests/."""
     (tmp_path / "manifests").mkdir()
     (tmp_path / "manifests" / "a.json").write_bytes(b"{}")
 
     hint = cli._next_hint(root=tmp_path)
     assert hint is not None
-    assert "ar r" in hint or " r" in hint
+    assert "arl r" in hint
 
 
 def test_next_hint_empty_project(tmp_path):
@@ -2467,7 +2467,7 @@ def test_next_hint_empty_project(tmp_path):
 
 
 def test_next_hint_videos_take_priority_over_manifests(tmp_path):
-    """Если есть и видео и манифесты — подсказка про ar go (run первым)."""
+    """Если есть и видео и манифесты — подсказка про arl go (run первым)."""
     (tmp_path / "inputs").mkdir()
     (tmp_path / "inputs" / "a.mp4").write_bytes(b"x")
     (tmp_path / "manifests").mkdir()
@@ -2479,7 +2479,7 @@ def test_next_hint_videos_take_priority_over_manifests(tmp_path):
 
 
 def test_no_args_shows_hint_with_videos(capsys, tmp_path, monkeypatch):
-    """autoreels без аргументов показывает 'ar go' когда есть видео."""
+    """autoreels без аргументов показывает 'arl go' когда есть видео."""
     monkeypatch.chdir(tmp_path)
     inputs = tmp_path / "inputs"
     inputs.mkdir()
@@ -2488,11 +2488,11 @@ def test_no_args_shows_hint_with_videos(capsys, tmp_path, monkeypatch):
     # Нужен config dir чтобы cmd_status не упал на манифестах
     cli.main([])
     out = capsys.readouterr().out
-    assert "ar go" in out or "go" in out.lower()
+    assert "arl go" in out
 
 
 def test_no_args_shows_hint_with_manifests(capsys, tmp_path, monkeypatch):
-    """autoreels без аргументов показывает 'ar r' когда есть манифесты без видео."""
+    """autoreels без аргументов показывает 'arl r' когда есть манифесты без видео."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "manifests").mkdir()
     (tmp_path / "manifests" / "a.json").write_bytes(
@@ -2501,7 +2501,7 @@ def test_no_args_shows_hint_with_manifests(capsys, tmp_path, monkeypatch):
 
     cli.main([])
     out = capsys.readouterr().out
-    assert "ar r" in out or " r" in out.lower()
+    assert "arl r" in out
 
 
 # -------------------------------------------------- приём исходника: путь вне inputs/
