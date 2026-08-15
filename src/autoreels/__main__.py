@@ -1997,6 +1997,35 @@ def _detect_shell_profile() -> Path:
     return Path.home() / ".bashrc"
 
 
+def _posix_path_for_shell(path) -> str:
+    """Путь для `source` в bash-профиле. На Windows (Git Bash/MSYS) — в POSIX-форме:
+    `D:\\autoreels\\aliases.sh` → `/d/autoreels/aliases.sh`. Иначе backslashes Windows-пути
+    съедаются как escape-последовательности в bash-строке ~/.bashrc и путь ломается
+    (`source D:autoreelsaliases.sh` → файл не найден). Mac/Linux — путь как есть."""
+    s = str(path)
+    is_windows_path = "\\" in s or (len(s) >= 2 and s[1] == ":" and s[0].isalpha())
+    if not is_windows_path:
+        return s                                   # уже POSIX (Mac/Linux)
+    import shutil as _sh
+    import subprocess as _sp
+    cyg = _sh.which("cygpath")                      # штатный конвертер Git Bash/MSYS
+    if cyg:
+        try:
+            out = _sp.run([cyg, "-u", s], capture_output=True, text=True, timeout=10)
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+        except (OSError, _sp.SubprocessError):
+            pass
+    # Вручную: буква диска → /<буква>, backslash → slash.
+    s = s.replace("\\", "/")
+    if len(s) >= 2 and s[1] == ":" and s[0].isalpha():
+        rest = s[2:]
+        if not rest.startswith("/"):
+            rest = "/" + rest
+        return f"/{s[0].lower()}{rest}"
+    return s
+
+
 def cmd_install_aliases(
     *,
     profile_path: Path | None = None,
@@ -2018,7 +2047,8 @@ def cmd_install_aliases(
         print(f"ошибка: aliases.sh не найден: {aliases_path}", file=sys.stderr)
         return 1
 
-    source_line = f"source {aliases_path.resolve()}"
+    # POSIX-путь: на Git Bash/MSYS Windows-путь с backslashes ломается в ~/.bashrc.
+    source_line = f"source {_posix_path_for_shell(aliases_path.resolve())}"
 
     if dry_run:
         print(f"Добавит в {profile_path}:")
@@ -2026,21 +2056,48 @@ def cmd_install_aliases(
         return 0
 
     existing = profile_path.read_text(encoding="utf-8") if profile_path.exists() else ""
-    if source_line in existing:
+    lines = existing.splitlines()
+
+    def _refs_aliases(line: str) -> bool:
+        """Строка автозагрузки aliases.sh (в т.ч. БИТАЯ: `source D:autoreelsaliases.sh`)."""
+        st = line.strip()
+        return "aliases.sh" in st and (st.startswith("source ") or st.startswith(". "))
+
+    alias_lines = [l for l in lines if _refs_aliases(l)]
+    correct_present = any(l.strip() == source_line for l in alias_lines)
+    broken = [l for l in alias_lines if l.strip() != source_line]   # старые/битые записи
+
+    if correct_present and not broken:
         print(f"✓ уже установлено в {profile_path}")
         return 0
 
     if confirm:
-        print(f"Добавить в {profile_path}:")
+        if broken:
+            print(f"В {profile_path} найдена битая/старая запись автозагрузки:")
+            for b in broken:
+                print(f"  ✗ {b.strip()}")
+            print("Заменить на корректную:")
+        else:
+            print(f"Добавить в {profile_path}:")
         print(f"  {source_line}")
         ans = input("Продолжить? [д/н]: ").strip().lower()
-        if ans not in ("д", "y", "yes", "д"):
+        if ans not in ("д", "y", "yes"):
             print("отменено")
             return 0
 
-    with profile_path.open("a", encoding="utf-8") as f:
-        f.write(f"\n{source_line}\n")
-    print(f"✓ добавлено в {profile_path}")
+    # Переписываем профиль: убираем ВСЕ строки автозагрузки aliases.sh (битые/дубли),
+    # дописываем одну корректную POSIX-строку. Идемпотентно и чинит битую запись.
+    kept = [l for l in lines if not _refs_aliases(l)]
+    new_text = "\n".join(kept).rstrip("\n")
+    new_text = (new_text + "\n") if new_text else ""
+    new_text += f"{source_line}\n"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(new_text, encoding="utf-8")
+
+    if broken:
+        print(f"✓ исправлена запись автозагрузки в {profile_path}")
+    else:
+        print(f"✓ добавлено в {profile_path}")
     print(f"  Перезапусти shell или выполни: source {profile_path}")
     return 0
 

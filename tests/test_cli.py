@@ -2351,6 +2351,69 @@ def test_install_aliases_main_dispatch_dry_run(tmp_path, capsys, monkeypatch):
     assert "source" in out
 
 
+# ---------------------- install-aliases: POSIX-путь на Windows + починка битой записи
+
+def test_posix_path_converts_windows_path():
+    """Windows-путь → POSIX (Git Bash/MSYS): D:\\autoreels\\aliases.sh → /d/autoreels/aliases.sh."""
+    assert cli._posix_path_for_shell("D:\\autoreels\\aliases.sh") == "/d/autoreels/aliases.sh"
+    assert cli._posix_path_for_shell("C:/proj/aliases.sh") == "/c/proj/aliases.sh"
+
+
+def test_posix_path_leaves_unix_path_untouched():
+    """Mac/Linux путь (POSIX) не трогаем."""
+    assert cli._posix_path_for_shell("/Users/d/autoreels/aliases.sh") == "/Users/d/autoreels/aliases.sh"
+
+
+def test_install_aliases_source_line_is_posix_for_windows_path(tmp_path, capsys):
+    """Записываемая source-строка — POSIX, даже если resolve() вернул Windows-путь."""
+    profile = tmp_path / ".bashrc"; profile.write_text("", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"; aliases.write_text("#\n", encoding="utf-8")
+
+    class _WinPath:
+        def resolve(self): return "D:\\autoreels\\aliases.sh"
+        def is_file(self): return True
+
+    cli.cmd_install_aliases(profile_path=profile, aliases_path=_WinPath(), confirm=False)
+
+    content = profile.read_text(encoding="utf-8")
+    assert "source /d/autoreels/aliases.sh" in content    # POSIX, без backslashes
+    assert "\\" not in content
+
+
+def test_install_aliases_fixes_broken_windows_entry(tmp_path, capsys):
+    """Битая запись (Windows-путь с backslashes) обнаруживается и ЗАМЕНЯЕТСЯ корректной."""
+    profile = tmp_path / ".bashrc"
+    profile.write_text("export PATH=$PATH\nsource D:\\autoreels\\aliases.sh\n", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"; aliases.write_text("#\n", encoding="utf-8")
+    source_line = f"source {aliases}"
+
+    rc = cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, confirm=False)
+
+    assert rc == 0
+    content = profile.read_text(encoding="utf-8")
+    assert source_line in content                          # корректная строка есть
+    assert "D:\\autoreels" not in content                  # битая убрана
+    assert content.count("aliases.sh") == 1                # ровно одна запись
+    assert "исправлена" in capsys.readouterr().out
+
+
+def test_install_aliases_detects_backslash_eaten_entry_not_already_installed(tmp_path, capsys):
+    """Реальный случай пользователя: backslashes уже съедены (source D:autoreelsaliases.sh).
+    Это НЕ «уже установлено» — обнаружить как битую и починить."""
+    profile = tmp_path / ".bashrc"
+    profile.write_text("source D:autoreelsaliases.sh\n", encoding="utf-8")
+    aliases = tmp_path / "aliases.sh"; aliases.write_text("#\n", encoding="utf-8")
+
+    cli.cmd_install_aliases(profile_path=profile, aliases_path=aliases, confirm=False)
+
+    out = capsys.readouterr().out
+    assert "уже установлено" not in out
+    assert "исправлена" in out
+    content = profile.read_text(encoding="utf-8")
+    assert f"source {aliases}" in content
+    assert "D:autoreelsaliases.sh" not in content          # битая строка убрана
+
+
 # -------------------------------------------------- render: ffmpeg из конфига
 
 def test_render_config_accepts_ffmpeg_field():
