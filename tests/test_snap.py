@@ -453,6 +453,28 @@ def test_padding_drops_trailing_comma_word():
     assert r.end >= 1.0                               # осталось на «интересно» (t1=1.0)
 
 
+def test_padding_trims_next_sentence_spillover_to_period():
+    """«…психосоматика. И вот мы» — snap-хвост втянул начало след. фразы; padding обрезает до «.»
+    (триммер последнего слова стопался на «мы» — обычное слово; нужен трим короткого спилловера)."""
+    words = [_w(0.0, 1.0, "нашем"), _w(1.0, 2.0, "психосоматика."),
+             _w(1.98, 2.06, "И"), _w(2.06, 2.34, "вот"), _w(2.34, 2.5, "мы"), _w(2.5, 3.0, "уже")]
+    r = _reel(0.0, 2.3)                              # клип захватил «И вот» (t0 < 2.3)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - 2.0) < 1e-6                   # конец на «психосоматика.» (2.0), не на «мы»
+
+
+def test_padding_keeps_sentence_end_after_prior_sentence_end():
+    """«…что? Умрёте. И мы» — «Умрёте.» само завершает предложение; НЕ срезаем его как спилловер
+    после «что?» (guard в триммере: слово-конец-предложения — чистый конец)."""
+    words = [_w(0.0, 1.0, "что?"), _w(1.0, 2.0, "умрёте."),
+             _w(2.05, 2.13, "И"), _w(2.13, 2.3, "мы")]
+    r = _reel(0.0, 2.3)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  hanging_words=HANGING)
+    assert abs(r.end - 2.0) < 1e-6                   # конец на «умрёте.», не откат к «что?»
+
+
 def test_snap_fallback_lands_on_non_comma_not_after_comma():
     """Фолбэк не садится ПОСЛЕ запятой, если есть не-запятая альтернатива."""
     words = [_w(0.0, 0.4, "поэтому"), _w(0.4, 0.9, "важно"),

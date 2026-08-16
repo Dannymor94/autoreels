@@ -70,6 +70,15 @@ def test_cause_snap_fallback_no_clean_boundary():
     assert "snap-fallback" in d.cause
 
 
+def test_classify_overlapping_next_word_after_sentence_is_clean():
+    """Whisper-перекрытие таймкодов: след. слово начинается ВНУТРИ конца предложения
+    («психосоматика.» 0.0–1.0, «И» 0.96–1.04) — клип кончается на «.», «И» лишь захватило край.
+    Конец = фраза, CLEAN (не HARD висячее из-за артефакта)."""
+    words = [_w(0.0, 1.0, "психосоматика."), _w(0.96, 1.04, "И"), _w(1.04, 1.3, "вот")]
+    d = classify_end("r", 0.0, 1.0, words, **CFG)
+    assert d.verdict == "CLEAN" and d.end_type == "фраза(.!?)"
+
+
 def test_summarize_counts_and_causes():
     diags = [
         classify_end("r1", 0, 1.0, [_w(0, 1.0, "понятно.")], **CFG),                      # CLEAN

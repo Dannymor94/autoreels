@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autoreels.cloud.snap import _clean, _ends_midphrase, _phrase_end_times
+from autoreels.cloud.snap import _clean, _ends_midphrase, _is_sentence_end, _phrase_end_times
 from autoreels.core.models import Word
 
 _SENT_PUNCT = ".!?…"
@@ -54,6 +54,12 @@ def classify_end(reel_id: str, start: float, end: float, words: list[Word], *,
     if not prev:
         return EndDiag(reel_id, dur, "", "нет слов", None, "HARD", "нет слов в клипе")
     lw = prev[-1]
+    # Перекрытие таймкодов Whisper: следующее слово начинается ВНУТРИ конца предложения
+    # («психосоматика.» 1090.5–1092.1, «И» 1092.04–1092.12) — клип кончается на «.», а «И» лишь
+    # захватило край. Считаем концом само предложение, а не перекрывший его артефакт.
+    while len(prev) >= 2 and prev[-1].t0 < prev[-2].t1 and _is_sentence_end(prev[-2].word):
+        prev = prev[:-1]
+        lw = prev[-1]
     nxt = [w for w in words if w.t0 > lw.t1 + 0.001]
     gap = round(nxt[0].t0 - lw.t1, 2) if nxt else None
     raw = lw.word.strip()
