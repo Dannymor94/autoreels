@@ -59,6 +59,15 @@ _EXHAUSTED_THRESHOLD_SEC = 120.0  # retry-after выше порога → дне
 _EMPTY_COOLDOWN_SEC = 1.0      # короткий кулдаун провайдера после пустого ответа (сиблинг подхватит)
 _MAX_EMPTY_RESPONSES = 3       # сколько пустых ответов терпит пул за один запрос до чанк-фейла
 
+# Сетевые таймауты R0. read большой: LLM (reasoning) думает долго на больших чанках; connect
+# короткий — недоступный хост не должен висеть. Таймаут = транзиентный сбой (как пустой ответ).
+_R0_READ_TIMEOUT_SEC = 300.0   # было 120 total → мало для длинных чанков, ловили read timeout
+_R0_CONNECT_TIMEOUT_SEC = 10.0
+_TIMEOUT_RETRIES_SAME = 2      # ретраи на ТОМ ЖЕ провайдере при таймауте (транзиентный блип)
+_TIMEOUT_BACKOFF_SEC = 2.0     # короткий бэкофф между ретраями на том же провайдере
+_MAX_TIMEOUTS = 3             # сколько таймаутов терпит пул (по сиблингам) до чанк-фейла
+_TIMEOUT_COOLDOWN_SEC = 2.0
+
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
 
@@ -66,6 +75,28 @@ POOL_STRATEGIES = ("adaptive", "round_robin")
 def _httpx_post(url, *, headers, json, timeout):
     """Тонкая обёртка над httpx.post — вынесена на модульный уровень для monkeypatch в тестах."""
     return httpx.post(url, headers=headers, json=json, timeout=timeout)
+
+
+def _post_r0(url, *, headers, payload, provider_name):
+    """POST к chat API с увеличенным read-timeout и ретраями на ТОМ ЖЕ провайдере при сетевом
+    таймауте (read/connect) или обрыве соединения. Исчерпав ретраи — ProviderTimeout
+    (транзиентный: пул уведёт на сиблинга, затем чанк-фейл, а не падение всего видео)."""
+    timeout = httpx.Timeout(_R0_READ_TIMEOUT_SEC, connect=_R0_CONNECT_TIMEOUT_SEC,
+                            write=30.0, pool=10.0)
+    last: Exception | None = None
+    for attempt in range(_TIMEOUT_RETRIES_SAME + 1):
+        try:
+            return _httpx_post(url, headers=headers, json=payload, timeout=timeout)
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            last = e
+            if attempt < _TIMEOUT_RETRIES_SAME:
+                time.sleep(_TIMEOUT_BACKOFF_SEC)
+                continue
+    raise ProviderTimeout(
+        f"{provider_name}: сетевой таймаут R0-запроса (read>{_R0_READ_TIMEOUT_SEC:.0f}с) "
+        f"после {_TIMEOUT_RETRIES_SAME + 1} попыток: {type(last).__name__}: {last}",
+        provider=provider_name,
+    )
 
 
 def _httpx_get(url, *, headers, timeout):
@@ -82,6 +113,17 @@ class ProviderEmptyResponse(ProviderError):
 
     Мягкий транзиентный сбой (НЕ конфиг-ошибка): пул пробует сиблинга, а select трактует как
     провал ЧАНКА (retry → sibling → failed-чанк), не роняя всё видео. Несёт имя провайдера."""
+
+    def __init__(self, message: str, *, provider: str = ""):
+        super().__init__(message)
+        self.provider = provider
+
+
+class ProviderTimeout(ProviderError):
+    """Сетевой таймаут чтения ответа (read/connect timeout) или обрыв соединения.
+
+    Транзиентный сбой (как ProviderEmptyResponse): _post_r0 ретраит на ТОМ ЖЕ провайдере,
+    пул уводит на сиблинга, select трактует как провал ЧАНКА — всё видео НЕ падает."""
 
     def __init__(self, message: str, *, provider: str = ""):
         super().__init__(message)
@@ -147,7 +189,8 @@ def _chat_request(
     """
     last_status: int | None = None
     for _ in range(_MAX_THROTTLE_RETRIES):
-        resp = _httpx_post(url, headers=headers, json=payload, timeout=120)
+        # Сетевой таймаут/обрыв → ProviderTimeout (ретраи на том же провайдере внутри _post_r0).
+        resp = _post_r0(url, headers=headers, payload=payload, provider_name=provider_name)
         if resp.status_code in (429, 413):
             last_status = resp.status_code
             wait = float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC))
@@ -429,6 +472,7 @@ class ProviderPool:
         (ProviderEmptyResponse) — мягкий сбой: пробуем сиблинга; после _MAX_EMPTY_RESPONSES
         пустых подряд — пробрасываем наверх (select пометит чанк failed, видео не падает)."""
         empty_count = 0
+        timeout_count = 0
         while True:
             active = [m for m in self._members if not m.disabled]
             if not active:
@@ -452,6 +496,13 @@ class ProviderPool:
                         raise   # пул исчерпал попытки → чанк-фейл наверх (видео продолжается)
                     print(f"\n  ⚠ {e} — пробую другого провайдера", flush=True)
                     self._cooldown(m, now, e, min_sec=_EMPTY_COOLDOWN_SEC)
+                    continue
+                except ProviderTimeout as e:
+                    timeout_count += 1
+                    if timeout_count >= _MAX_TIMEOUTS:
+                        raise   # сиблинги тоже таймаутят → чанк-фейл наверх (видео продолжается)
+                    print(f"\n  ⚠ {e} — пробую другого провайдера", flush=True)
+                    self._cooldown(m, now, e, min_sec=_TIMEOUT_COOLDOWN_SEC)
                     continue
                 except ProviderModelNotFound as e:
                     m.disabled = True

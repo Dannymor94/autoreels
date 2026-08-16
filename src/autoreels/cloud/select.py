@@ -209,13 +209,15 @@ def _complete_and_parse(provider: LLMProvider, messages: list[dict]) -> list[dic
 
     Пустой ответ провайдера (ProviderEmptyResponse — пул уже пробовал сиблинга) сразу становится
     провалом чанка: не роняем видео, select_chunked ловит SelectError и продолжает."""
-    from autoreels.cloud.providers import ProviderEmptyResponse
+    from autoreels.cloud.providers import ProviderEmptyResponse, ProviderTimeout
     last_err: SelectError | None = None
     for _ in range(2):  # первичный вызов + один ретрай
         try:
             raw = provider.complete(messages)
-        except ProviderEmptyResponse as e:
-            raise SelectError(f"провайдер вернул пустой ответ: {e}") from e
+        except (ProviderEmptyResponse, ProviderTimeout) as e:
+            # Пул уже пробовал сиблингов → провал ЧАНКА (select_chunked ловит SelectError,
+            # продолжает; всё видео не падает). Сообщение несёт провайдера/причину.
+            raise SelectError(f"{e}") from e
         try:
             return parse_segments(raw)
         except SelectError as e:

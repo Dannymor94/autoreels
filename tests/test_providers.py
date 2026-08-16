@@ -509,6 +509,54 @@ def test_pool_all_empty_raises_after_bound():
     assert groq.calls + openr.calls == _MAX_EMPTY_RESPONSES   # ограничено, не бесконечно
 
 
+# ------------------------------------------------ сетевой таймаут чтения (транзиентный)
+
+def test_read_timeout_retries_same_provider_then_raises_provider_timeout(monkeypatch):
+    """Read timeout: _post_r0 ретраит на ТОМ ЖЕ провайдере, затем ProviderTimeout (транзиентный),
+    а не сырой httpx.ReadTimeout, который ронял всё видео."""
+    import autoreels.cloud.providers as P
+    import httpx
+    monkeypatch.setattr(P.time, "sleep", lambda s: None)      # не спать в юните
+    seen = []
+
+    def fake_post(url, *, headers, json, timeout):
+        seen.append(timeout)
+        raise httpx.ReadTimeout("The read operation timed out")
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = GroqLLM()
+    with pytest.raises(P.ProviderTimeout) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    assert "Groq" in str(exc.value) and "таймаут" in str(exc.value).lower()
+    assert exc.value.provider == "Groq"
+    assert len(seen) == P._TIMEOUT_RETRIES_SAME + 1          # первичный + ретраи на том же
+    assert seen[0].read == P._R0_READ_TIMEOUT_SEC           # увеличенный read-timeout
+
+
+def test_pool_routes_to_sibling_on_timeout():
+    """Таймаут Groq → чанк уходит на OpenRouter (сиблинга) немедленно, не падает."""
+    from autoreels.cloud.providers import ProviderTimeout
+    groq = _ScriptedProvider("Groq", [ProviderTimeout("net timeout", provider="Groq")])
+    openr = _ScriptedProvider("OpenRouter", ["from-openrouter"])
+    pool, _ = _pool(groq, openr)
+    assert pool.complete([]) == "from-openrouter"
+    assert pool.last_provider == "OpenRouter"
+
+
+def test_pool_all_timeout_fails_chunk_after_max():
+    """Все сиблинги таймаутят → пул исчерпывает попытки и поднимает ProviderTimeout (чанк-фейл,
+    видео продолжается), а не висит бесконечно."""
+    from autoreels.cloud.providers import ProviderTimeout, _MAX_TIMEOUTS
+    groq = _ScriptedProvider("Groq", [ProviderTimeout("t", provider="Groq")] * 5)
+    openr = _ScriptedProvider("OpenRouter", [ProviderTimeout("t", provider="OpenRouter")] * 5)
+    pool, _ = _pool(groq, openr)
+    with pytest.raises(ProviderTimeout):
+        pool.complete([])
+    assert groq.calls + openr.calls == _MAX_TIMEOUTS         # ограничено, не бесконечно
+
+
 # ------------------------------------------------ живая пауза «все провайдеры в лимите»
 
 def test_pool_wait_shows_live_countdown(monkeypatch, capsys):

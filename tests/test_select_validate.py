@@ -320,6 +320,36 @@ def test_select_chunked_survives_one_empty_chunk(fewshot, r0_cfg, monkeypatch, c
     assert "провалился" in capsys.readouterr().out                # предупреждение о провале чанка
 
 
+def test_select_chunked_survives_one_timeout_chunk(fewshot, r0_cfg, monkeypatch, capsys):
+    """Сетевой таймаут на ОДНОМ чанке (пул исчерпал сиблингов → ProviderTimeout) → провал ЭТОГО
+    чанка, остальные дают рилы. Всё видео НЕ теряется (баг: read timeout ронял видео целиком)."""
+    import autoreels.cloud.select as sel_mod
+    from autoreels.cloud.providers import ProviderTimeout
+    monkeypatch.setattr(sel_mod.time, "sleep", lambda s: None)
+    valid = json.dumps({"segments": [
+        {"start": 100.0, "end": 130.0, "score": 85, "hook": "h", "title": "t", "description": "d"},
+    ]})
+
+    class _ChunkMock:
+        def __init__(self):
+            self.seen = []
+        def complete(self, messages, *, temperature=0.0):
+            chunk = messages[-1]["content"]
+            if chunk not in self.seen:
+                self.seen.append(chunk)
+            if self.seen.index(chunk) == 1:                      # 2-й чанк — сетевой таймаут
+                raise ProviderTimeout("Groq: сетевой таймаут R0-запроса", provider="Groq")
+            return valid
+
+    compressed = _make_compressed(300, line_chars=60)            # ≥2 чанка
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
+                     provider=_ChunkMock(), r0_cfg=r0_cfg)
+
+    assert len(reels) >= 1                                        # выжившие чанки дали рилы
+    out = capsys.readouterr().out
+    assert "провалился" in out and "таймаут" in out.lower()      # провал чанка с указанием причины
+
+
 def test_select_chunked_dedup_overlap_reels(fewshot, r0_cfg):
     """Один и тот же момент найден в 2 чанках → после дедупа остаётся 1 рил."""
     reel_json = json.dumps({"segments": [
