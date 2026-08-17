@@ -273,23 +273,38 @@ def estimate_size_mb(*, video_bitrate: str, audio_bitrate: str, duration_sec: fl
     return total_bps * duration_sec / 8 / (1024 * 1024)
 
 
-def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: str) -> list[str]:
-    """Аргументы rate-control/пиксформата видеоэнкодера.
+def _is_amf(codec: str) -> bool:
+    return codec.endswith("_amf")
 
-    Целевой битрейт (`-b:v`) + VBV-потолок (`-maxrate`/`-bufsize`) → предсказуемый размер
-    файла одним проходом. Работает и на софтверном libx264, и на аппаратном AMF/VAAPI —
-    именно отсутствие rate-control на AMF раздувало файлы (нужда в HandBrake). `-preset`
-    остаётся только у софтверных x26x (у AMF свой пресет — задаётся отдельно, шаг 6).
+
+def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: str, *,
+                        quality: str | None = None, rate_control: str | None = None,
+                        qp: int | None = None) -> list[str]:
+    """Аргументы rate-control/качества/пиксформата видеоэнкодера.
+
+    По умолчанию — целевой битрейт (`-b:v` + VBV `-maxrate`/`-bufsize`): предсказуемый размер
+    одним проходом (важно для соцсетей и для AMF, который без rate-control раздувал файл).
+    `-preset` — только у софтверных x26x (у AMF свой).
+
+    Качество AMF (только *_amf): `-quality quality` — режим кодера (часто важнее битрейта);
+    `rate_control='cqp'` → `-rc cqp -qp_i qp -qp_p qp+2` ВМЕСТО битрейта (лучше качество,
+    размер непредсказуем). Диагностика: softness — от AMF, а не от 5 Мбит/с.
     """
     args: list[str] = []
     if codec in _SOFTWARE_X26X:
         args += ["-preset", preset]
-    args += [
-        "-b:v", video_bitrate,
-        "-maxrate", video_bitrate,
-        "-bufsize", _bufsize(video_bitrate),
-        "-pix_fmt", pix_fmt,
-    ]
+    if _is_amf(codec) and quality:
+        args += ["-quality", quality]
+    if _is_amf(codec) and rate_control == "cqp" and qp is not None:
+        # Постоянный QP: качество приоритетно, размер плавает (для hevc_hq).
+        args += ["-rc", "cqp", "-qp_i", str(qp), "-qp_p", str(qp + 2), "-pix_fmt", pix_fmt]
+    else:
+        args += [
+            "-b:v", video_bitrate,
+            "-maxrate", video_bitrate,
+            "-bufsize", _bufsize(video_bitrate),
+            "-pix_fmt", pix_fmt,
+        ]
     # HEVC в mp4 без тега hvc1 муксится как hev1 — Apple/Safari/часть соцсетей не проигрывают.
     if _is_hevc(codec):
         args += ["-tag:v", "hvc1"]
@@ -312,6 +327,9 @@ def build_cut_cmd(
     audio_codec: str,
     audio_bitrate: str,
     vf: str | None = None,
+    quality: str | None = None,
+    rate_control: str | None = None,
+    qp: int | None = None,
 ) -> list[str]:
     """Собрать команду ffmpeg: вырезать окно start→end из `source`.
 
@@ -336,7 +354,8 @@ def build_cut_cmd(
         "-t", _ts(duration),
         *(["-vf", vf] if vf else []),
         "-c:v", codec,
-        *_video_quality_args(codec, preset, video_bitrate, pix_fmt),
+        *_video_quality_args(codec, preset, video_bitrate, pix_fmt,
+                             quality=quality, rate_control=rate_control, qp=qp),
         "-c:a", audio_codec,
         "-b:a", audio_bitrate,
         *(["-movflags", "+faststart"] if faststart else []),
@@ -436,6 +455,7 @@ def _render_segments(
                 video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                 audio_codec=aud.codec, audio_bitrate=aud.bitrate,
                 vf=reel_vf,
+                quality=active.quality, rate_control=active.rate_control, qp=active.qp,
             )
             returncode, stderr_text = _run_ffmpeg_with_progress(
                 cmd, reel_id=reel.id, idx=idx, total=total,

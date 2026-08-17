@@ -213,6 +213,43 @@ def test_cut_cmd_has_target_bitrate_and_vbv_cap():
     assert _val_after(cmd, "-bufsize") == "14M"      # 2× для VBV
 
 
+def test_cut_cmd_amf_quality_flag():
+    """AMF-кодек + quality='quality' → -quality quality в команде (режим кодера против мыла)."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/v.mp4"), 0.0, 30.0, Path("/r.mp4"),
+        codec="hevc_amf", preset="medium", video_bitrate="5M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k", quality="quality",
+    )
+    assert _val_after(cmd, "-quality") == "quality"
+    assert _val_after(cmd, "-b:v") == "5M"               # без cqp — целевой битрейт остаётся
+
+
+def test_cut_cmd_amf_cqp_replaces_bitrate():
+    """AMF + rate_control='cqp' + qp=18 → -rc cqp -qp_i 18 -qp_p 20 ВМЕСТО -b:v (качество)."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/v.mp4"), 0.0, 30.0, Path("/r.mp4"),
+        codec="hevc_amf", preset="medium", video_bitrate="12M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+        quality="quality", rate_control="cqp", qp=18,
+    )
+    assert _val_after(cmd, "-rc") == "cqp"
+    assert _val_after(cmd, "-qp_i") == "18" and _val_after(cmd, "-qp_p") == "20"
+    assert "-b:v" not in cmd                              # cqp вместо целевого битрейта
+
+
+def test_cut_cmd_software_codec_ignores_amf_quality():
+    """Софтверный libx265 игнорирует AMF-флаги quality/cqp — остаётся целевой битрейт."""
+    cmd = build_cut_cmd(
+        "ffmpeg", Path("/v.mp4"), 0.0, 30.0, Path("/r.mp4"),
+        codec="libx265", preset="medium", video_bitrate="5M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+        quality="quality", rate_control="cqp", qp=18,
+    )
+    assert "-quality" not in cmd and "-rc" not in cmd     # AMF-флаги не для софта
+    assert _val_after(cmd, "-b:v") == "5M"                # битрейт-режим
+    assert _val_after(cmd, "-preset") == "medium"         # у софта свой preset
+
+
 def test_cut_cmd_has_pix_fmt_yuv420p():
     """yuv420p — универсальная цветовая субдискретизация: соцсети/плееры не примут yuv444."""
     cmd = build_cut_cmd(
@@ -339,8 +376,10 @@ def test_real_render_config_defaults_are_social_optimal():
     # активный профиль резолвится в разумный битрейт 4–8 Мбит/с
     bv = cfg.encoder.video_bitrate
     assert bv.endswith("M") and 4 <= int(bv[:-1]) <= 8
-    # все три профиля присутствуют
-    assert set(cfg.encoder.profiles) == {"h264", "hevc", "av1"}
+    # базовые + hq + софтверный профили присутствуют
+    assert {"h264", "hevc", "av1", "hevc_hq", "h264_hq", "hevc_sw"} <= set(cfg.encoder.profiles)
+    # дефолтный hevc несёт AMF quality-режим (против мыла на равном битрейте)
+    assert cfg.encoder.profiles["hevc"].quality == "quality"
 
 
 # ------------------------------------ оценка размера выходного файла

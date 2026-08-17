@@ -147,14 +147,29 @@ class CodecProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     codec: str        # ffmpeg-энкодер (h264_amf | hevc_amf | av1_amf | libx264 | …)
-    bitrate: str      # целевой битрейт (напр. '5M')
+    bitrate: str      # целевой битрейт (напр. '5M'); при rate_control='cqp' игнорируется
+    # Качество AMF (аппаратный кодер): часто важнее битрейта. Диагностика показала, что softness
+    # на равном битрейте — от AMF, а не от 5 Мбит/с. Применяются ТОЛЬКО к *_amf кодекам.
+    quality: str | None = None        # -quality: quality | balanced | speed (дефолт AMF — balanced)
+    rate_control: str | None = None   # 'cqp' → -rc cqp + qp (лучше качество, размер непредсказуем);
+                                      # иначе (None/'vbr') — целевой битрейт (предсказуемый размер)
+    qp: int | None = None             # базовый QP для cqp (qp_i=qp, qp_p=qp+2); ниже = качественнее
+    label: str = ""                   # заметка для меню: скорость/качество
 
 
 # Дефолтные профили: prod — системник Windows AMD (AMF-энкодеры).
-_DEFAULT_PROFILES: dict[str, dict[str, str]] = {
-    "h264": {"codec": "h264_amf", "bitrate": "7M"},   # универсальная совместимость соцсетей
-    "hevc": {"codec": "hevc_amf", "bitrate": "5M"},   # вдвое меньше файл, дефолт
-    "av1": {"codec": "av1_amf", "bitrate": "4M"},     # максимально компактно, экспериментально
+_DEFAULT_PROFILES: dict[str, dict] = {
+    "h264":    {"codec": "h264_amf", "bitrate": "7M", "quality": "quality",
+                "label": "быстро, совместимый"},
+    "hevc":    {"codec": "hevc_amf", "bitrate": "5M", "quality": "quality",
+                "label": "быстро, компактный (дефолт)"},
+    "hevc_hq": {"codec": "hevc_amf", "bitrate": "12M", "quality": "quality",
+                "rate_control": "cqp", "qp": 18, "label": "быстро, лучше качество (крупнее файл)"},
+    "h264_hq": {"codec": "h264_amf", "bitrate": "16M", "quality": "quality",
+                "label": "быстро, лучше, совместимый (крупный файл)"},
+    "hevc_sw": {"codec": "libx265", "bitrate": "5M",
+                "label": "МЕДЛЕННО, максимум качества (для избранных клипов)"},
+    "av1":     {"codec": "av1_amf", "bitrate": "4M", "label": "экспериментально, компактно"},
 }
 
 
