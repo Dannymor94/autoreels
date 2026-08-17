@@ -634,19 +634,31 @@ def _write_manifest(manifest, manifests_dir) -> Path:
 
 # ----------------------------------------------------------- авто-коммит манифеста (per-video)
 
-def _should_git_sync() -> bool:
-    """Авто-git-синхронизация: push калибровок/манифестов и pull перед работой.
-
-    ОБА тира теперь участники git-транспорта: системник (Windows) КАЛИБРУЕТ и пушит калибровки,
-    Mac делает run и пушит манифесты, рендер тянет свежее. Поэтому включено ВЕЗДЕ по умолчанию
-    (раньше выключалось на Windows, когда системник был лишь потребителем — workflow изменился).
-    Явное переопределение: AUTOREELS_GIT_SYNC=0 (выкл — одиночная машина без remote) / =1 (вкл)."""
-    v = os.environ.get("AUTOREELS_GIT_SYNC")
+def _git_flag(specific_env: str) -> bool:
+    """Флаг git-действия: AUTOREELS_GIT_<PULL|PUSH> (специфичный) > AUTOREELS_GIT_SYNC (общий) >
+    дефолт (вкл). Позволяет разделить чтение и запись: на системнике (только рендер) удобно
+    PUSH=0 (push упирается в аутентификацию и мешает), PULL=1 (тянуть свежие манифесты)."""
+    v = os.environ.get(specific_env)
     if v == "1":
         return True
     if v == "0":
         return False
+    s = os.environ.get("AUTOREELS_GIT_SYNC")   # общий рубильник (обратная совместимость)
+    if s == "1":
+        return True
+    if s == "0":
+        return False
     return True
+
+
+def _should_git_pull() -> bool:
+    """Тянуть ли свежие манифесты/калибровки перед работой (AUTOREELS_GIT_PULL, дефолт вкл)."""
+    return _git_flag("AUTOREELS_GIT_PULL")
+
+
+def _should_git_push() -> bool:
+    """Пушить ли свои изменения (AUTOREELS_GIT_PUSH, дефолт вкл). На системнике удобно =0."""
+    return _git_flag("AUTOREELS_GIT_PUSH")
 
 
 def _git_pull(root, *, what: str = "свежие данные") -> None:
@@ -654,7 +666,7 @@ def _git_pull(root, *, what: str = "свежие данные") -> None:
 
     Не роняет команду при ошибке (нет сети/конфликт/нет remote) — предупреждаем и работаем с
     локальными файлами. Точка синхронизации: run на Mac тянет калибровки, render — манифесты."""
-    if not _should_git_sync():
+    if not _should_git_pull():
         return
     import subprocess
     root = Path(root)
@@ -705,8 +717,8 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path
     системник (status там видит кроп; calibrations/ теперь версионируются). Ошибка git
     (нет сети, конфликт, passphrase) НЕ роняет прогон: предупреждаем и продолжаем.
     """
-    if not _should_git_sync():
-        return   # системник (Windows) — потребитель: не коммитим, только рендер из локальных
+    if not _should_git_push():
+        return   # push выключен (напр. системник: только рендер, PUSH=0) — манифест уже локально
     import subprocess
     root = Path(root)
     manifest_path = Path(manifest_path)
@@ -756,8 +768,8 @@ def _commit_push_calibrations(*, root) -> None:
     Калибруешь на Mac (arl c / меню) → калибровки уезжают на системник (там arl r = git pull),
     и status видит ручной кроп. _work/ (кадры-PNG) в .gitignore и не попадают. Ошибка git не
     роняет команду — калибровки уже на диске, предупреждаем и продолжаем."""
-    if not _should_git_sync():
-        return   # системник (Windows) — потребитель калибровок (git pull), не пушим
+    if not _should_git_push():
+        return   # push выключен (PUSH=0/SYNC=0) — калибровки уже на диске, не пушим
     import subprocess
     root = Path(root)
     if not (root / "calibrations").is_dir():
@@ -1271,7 +1283,7 @@ def cmd_render(
                     print(f"  ↻ {stem}: кроп обновлён по калибровке (был устаревший) → "
                           f"{c.w}×{c.h}@{c.x},{c.y} в кадре {new_setup.frame} — продолжаю рендер",
                           flush=True)
-                    # push по общим правилам git-синхронизации (AUTOREELS_GIT_SYNC=0 → только локально)
+                    # push по общим правилам (AUTOREELS_GIT_PUSH=0/SYNC=0 → только локально, без ошибок)
                     _commit_push_manifest(manifests_dir / f"{stem}.json", len(manifest.reels), root=root)
                     # дальше рендерим обновлённым manifest (не continue)
                 else:
@@ -2446,6 +2458,10 @@ autoreels — длинное talking-head видео → вертикальны�
   Энкодер и путь к ffmpeg — в config/render.yaml (не нужны флаги):
     ffmpeg: ffmpeg              # Mac; Windows: D:\ffmpeg\bin\ffmpeg.exe
     encoder → codec: h264_amf  # Windows AMD; h264_nvenc NVIDIA; libx264 CPU
+
+  Git-синхронизация (env, дефолт вкл): AUTOREELS_GIT_PULL=1 тянуть свежее,
+    AUTOREELS_GIT_PUSH=1 пушить своё, AUTOREELS_GIT_SYNC=0 выключить оба.
+    Системник (только рендер): AUTOREELS_GIT_PUSH=0 — тянет манифесты, не пушит.
 
 ━━━ ВСЕ КОМАНДЫ autoreels ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

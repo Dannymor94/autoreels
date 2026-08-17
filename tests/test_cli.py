@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Реальный _run_git, захваченный ДО autouse-мока (_no_real_git) — для теста самого _run_git.
 _REAL_RUN_GIT = cli._run_git
+_REAL_GIT_PULL = cli._git_pull            # реальный _git_pull ДО autouse-мока (_no_real_git)
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +42,9 @@ def _no_real_git(monkeypatch):
     теперь дёргают git pull, а calibrate — commit/push. Без этого мока реальный git выполнялся
     бы в рабочем репо во время тестов (наблюдалось: тест закоммитил и запушил калибровки).
     По умолчанию git — no-op; тесты git (_FakeGit) переопределяют _run_git явно."""
+    # Изоляция от git-флагов реального окружения (AUTOREELS_GIT_PULL/PUSH/SYNC могут быть заданы).
+    for e in ("AUTOREELS_GIT_SYNC", "AUTOREELS_GIT_PULL", "AUTOREELS_GIT_PUSH"):
+        monkeypatch.delenv(e, raising=False)
     monkeypatch.setattr(cli, "_git_pull", lambda *a, **k: None)
 
     def _fake_git(args, *, root, timeout=None):
@@ -505,30 +509,63 @@ def test_run_commits_calibration_with_manifest(monkeypatch, tmp_path):
     assert str(captured["calib"]).endswith(".json")
 
 
-def test_git_sync_enabled_on_all_platforms_by_default(monkeypatch):
-    """Оба тира — участники git (системник калибрует и пушит калибровки, Mac пушит манифесты).
-    По умолчанию синхронизация включена ВЕЗДЕ (workflow изменился — Windows больше не только потребитель)."""
-    monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
-    monkeypatch.setattr(cli.sys, "platform", "win32")
-    assert cli._should_git_sync() is True                 # системник тоже пушит калибровки
-    monkeypatch.setattr(cli.sys, "platform", "darwin")
-    assert cli._should_git_sync() is True
+def _clear_git_env(monkeypatch):
+    for e in ("AUTOREELS_GIT_SYNC", "AUTOREELS_GIT_PULL", "AUTOREELS_GIT_PUSH"):
+        monkeypatch.delenv(e, raising=False)
 
 
-def test_git_sync_env_override(monkeypatch):
-    """AUTOREELS_GIT_SYNC=0 выключает (одиночная машина без remote), =1 форсит."""
-    monkeypatch.setattr(cli.sys, "platform", "win32")
+def test_git_flags_enabled_by_default(monkeypatch):
+    """Без env — и pull, и push включены (оба тира участвуют)."""
+    _clear_git_env(monkeypatch)
+    assert cli._should_git_pull() is True
+    assert cli._should_git_push() is True
+
+
+def test_git_flags_split_pull_and_push(monkeypatch):
+    """Системник: PUSH=0 (не пушит, аутентификация мешает) + PULL=1 (тянет манифесты)."""
+    _clear_git_env(monkeypatch)
+    monkeypatch.setenv("AUTOREELS_GIT_PUSH", "0")
+    assert cli._should_git_pull() is True                 # тянет
+    assert cli._should_git_push() is False                # НЕ пушит
+
+
+def test_git_flag_sync_disables_both_and_specific_overrides(monkeypatch):
+    """AUTOREELS_GIT_SYNC=0 выключает ОБА (обратная совместимость); специфичный флаг перебивает."""
+    _clear_git_env(monkeypatch)
     monkeypatch.setenv("AUTOREELS_GIT_SYNC", "0")
-    assert cli._should_git_sync() is False                # выкл явно
-    monkeypatch.setattr(cli.sys, "platform", "darwin")
-    monkeypatch.setenv("AUTOREELS_GIT_SYNC", "1")
-    assert cli._should_git_sync() is True                 # вкл явно
+    assert cli._should_git_pull() is False and cli._should_git_push() is False
+    monkeypatch.setenv("AUTOREELS_GIT_PULL", "1")         # специфичный > общий
+    assert cli._should_git_pull() is True                 # pull включён точечно
+    assert cli._should_git_push() is False                # push всё ещё off (через SYNC=0)
 
 
-def test_commit_push_calibrations_works_on_windows(monkeypatch, tmp_path):
-    """На системнике (Windows) калибровки ПУШАТСЯ — он теперь источник калибровок (item 1)."""
-    monkeypatch.delenv("AUTOREELS_GIT_SYNC", raising=False)
-    monkeypatch.setattr(cli.sys, "platform", "win32")
+def test_git_pull_runs_even_when_push_disabled(monkeypatch, tmp_path):
+    """PUSH=0 не мешает pull: _git_pull всё равно тянет (системник тянет манифесты)."""
+    _clear_git_env(monkeypatch)
+    monkeypatch.setenv("AUTOREELS_GIT_PUSH", "0")
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    monkeypatch.setattr(cli, "_git_pull", _REAL_GIT_PULL)   # снять autouse-мок
+    cli._git_pull(tmp_path)
+    assert "pull" in git.subcommands()                    # тянет несмотря на PUSH=0
+
+
+def test_commit_push_skipped_when_git_push_zero(monkeypatch, tmp_path):
+    """AUTOREELS_GIT_PUSH=0 → _commit_push_* не пушит (системник: только рендер)."""
+    _clear_git_env(monkeypatch)
+    monkeypatch.setenv("AUTOREELS_GIT_PUSH", "0")
+    git = _FakeGit()
+    monkeypatch.setattr(cli, "_run_git", git)
+    (tmp_path / "calibrations").mkdir()
+    mf = tmp_path / "m" / "v.json"; mf.parent.mkdir(parents=True); mf.write_text("{}", encoding="utf-8")
+    cli._commit_push_calibrations(root=tmp_path)
+    cli._commit_push_manifest(mf, 3, root=tmp_path)
+    assert git.calls == []                                # push не дёргался
+
+
+def test_commit_push_calibrations_works_by_default(monkeypatch, tmp_path):
+    """По умолчанию (push включён) калибровки ПУШАТСЯ."""
+    _clear_git_env(monkeypatch)
     git = _FakeGit()
     monkeypatch.setattr(cli, "_run_git", git)
     (tmp_path / "calibrations").mkdir()
@@ -540,6 +577,7 @@ def test_commit_push_calibrations_works_on_windows(monkeypatch, tmp_path):
 
 def test_git_sync_disabled_by_env_skips_push(monkeypatch, tmp_path):
     """AUTOREELS_GIT_SYNC=0 → _commit_push_* не трогает git (одиночная машина без remote)."""
+    _clear_git_env(monkeypatch)
     monkeypatch.setenv("AUTOREELS_GIT_SYNC", "0")
     git = _FakeGit()
     monkeypatch.setattr(cli, "_run_git", git)
