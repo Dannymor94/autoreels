@@ -453,6 +453,37 @@ def test_padding_drops_trailing_comma_word():
     assert r.end >= 1.0                               # осталось на «интересно» (t1=1.0)
 
 
+def test_snap_prefer_longer_extends_short_clip_to_later_sentence():
+    """Короткий грамматически-завершённый клип с запасом → продлить до след. чистой границы
+    (максимум +max_extra предложений). «раз.» → «три.» (+2), не первая попавшаяся."""
+    words = [_w(0, 2, "раз."), _w(4, 6, "два."), _w(8, 10, "три."), _w(30, 32, "далеко.")]
+    r = _reel(0.0, 2.5)                              # LLM-конец у «раз.»
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=20,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+                  prefer_longer_below_ratio=0.7, max_extra_sentences=2)
+    assert abs(r.end - 10.3) < 1e-6                 # продлён до «три.» (+2), не «раз.»(2.3)
+
+
+def test_snap_prefer_longer_stops_at_ratio():
+    """Как только клип дотянул до ratio·max_duration — стоп (не тянем до упора)."""
+    words = [_w(0, 2, "раз."), _w(15, 17, "два."), _w(19, 21, "три.")]
+    r = _reel(0.0, 15.5)                            # LLM-конец у «два.»(17) — клип уже 17с > 14
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=20,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+                  prefer_longer_below_ratio=0.7, max_extra_sentences=2)
+    assert abs(r.end - 17.3) < 1e-6                 # не прыгнул на «три.»(21) — уже ≥70% лимита
+
+
+def test_snap_prefer_longer_disabled_when_ratio_zero():
+    """ratio=0 отключает продление (обратная совместимость: первая чистая граница)."""
+    words = [_w(0, 2, "раз."), _w(4, 6, "два."), _w(8, 10, "три.")]
+    r = _reel(0.0, 2.5)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=20,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+                  prefer_longer_below_ratio=0.0, max_extra_sentences=2)
+    assert abs(r.end - 2.3) < 1e-6                  # без продления — «раз.»
+
+
 def test_padding_trims_next_sentence_spillover_to_period():
     """«…психосоматика. И вот мы» — snap-хвост втянул начало след. фразы; padding обрезает до «.»
     (триммер последнего слова стопался на «мы» — обычное слово; нужен трим короткого спилловера)."""

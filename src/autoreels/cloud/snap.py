@@ -159,12 +159,39 @@ def _relaxed_end(words: list[Word], *, start: float, end: float, limit: float, w
     return _nearest_in_window(end, [w.t1 for _, w in seg], window_sec)
 
 
+def _sentence_end_times(words: list[Word]) -> list[float]:
+    """Времена концов слов с пунктуацией конца предложения (.!?…) — «чистые границы»."""
+    return [w.t1 for w in words if _is_sentence_end(w.word)]
+
+
+def _prefer_longer_end(chosen: float, *, start: float, limit: float, tail_sec: float,
+                       words: list[Word], ratio: float, max_extra: int) -> float:
+    """Пока клип (chosen+хвост) заметно короче лимита (< ratio·max_duration) — продлевать до
+    СЛЕДУЮЩЕЙ чистой границы предложения (по одной), максимум на `max_extra` предложений.
+    Пошагово с пере-проверкой ratio: как только клип дотянул до ratio·max_duration — стоп
+    (не тянем до упора). Грамматически конец бывает раньше, чем спикер закончил мысль."""
+    if ratio <= 0 or max_extra <= 0:
+        return chosen
+    sent_ends = sorted(_sentence_end_times(words))
+    extra = 0
+    while extra < max_extra and (chosen + tail_sec - start) < ratio * (limit - start):
+        later = [t for t in sent_ends if t > chosen + 1e-6 and t <= limit]
+        if not later:
+            break
+        chosen = later[0]        # следующая чистая граница
+        extra += 1
+    return chosen
+
+
 def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, window_sec: float,
               max_duration: float, min_pause: float, max_micro_pause: float,
-              hanging_words) -> float | None:
+              hanging_words, prefer_longer_below_ratio: float = 0.0,
+              max_extra_sentences: int = 0) -> float | None:
     """Новый end: тянуть вперёд до завершения мысли в пределах max_duration; не влезло —
     откат к последней целой фразе; совсем нет завершений рядом → мягкая иерархия фолбэка
-    (_relaxed_end) — конец предложения / пауза ≥0.4с / не-висячее слово, НЕ полуслово."""
+    (_relaxed_end) — конец предложения / пауза ≥0.4с / не-висячее слово, НЕ полуслово.
+
+    prefer_longer: короткий клип с запасом времени продлевается до следующей чистой границы."""
     limit = start + max_duration
     ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
                              hanging_words=hanging_words)
@@ -175,6 +202,10 @@ def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, w
     forward = [t for t in ends if t >= end - window_sec and start < t <= limit]
     if forward:
         chosen = min(forward)
+        # Клип грамматически завершён, но короткий и есть запас → тянуть до след. чистой границы.
+        chosen = _prefer_longer_end(chosen, start=start, limit=limit, tail_sec=tail_sec,
+                                    words=words, ratio=prefer_longer_below_ratio,
+                                    max_extra=max_extra_sentences)
     else:
         # Мысль не завершается до max_duration → откат к последней целой фразе в лимите.
         within = [t for t in ends if start < t <= limit]
@@ -212,10 +243,12 @@ def _snap_start(start: float, end: float, words: list[Word], *, window_sec: floa
 
 def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, window_sec: float,
                   max_duration: float, min_pause_for_phrase_end: float, max_micro_pause: float,
-                  hanging_words) -> None:
+                  hanging_words, prefer_longer_below_ratio: float = 0.0,
+                  max_extra_sentences: int = 0) -> None:
     """Подтянуть start/end каждого reel к завершению мысли (мутирует на месте).
 
     Пустой `words` → границы не трогаем. Порядок в пайплайне: snap → padding → trim.
+    prefer_longer_*: короткий грамматически-завершённый клип продлевается до след. чистой границы.
     """
     if not words:
         return
@@ -226,7 +259,9 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
             r.start = new_start
         new_end = _snap_end(r.end, r.start, words, tail_sec=tail_sec, window_sec=window_sec,
                             max_duration=max_duration, min_pause=min_pause_for_phrase_end,
-                            max_micro_pause=max_micro_pause, hanging_words=hanging_words)
+                            max_micro_pause=max_micro_pause, hanging_words=hanging_words,
+                            prefer_longer_below_ratio=prefer_longer_below_ratio,
+                            max_extra_sentences=max_extra_sentences)
         if new_end is not None:
             r.end = new_end
 
