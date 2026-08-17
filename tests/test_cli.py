@@ -833,29 +833,61 @@ def _stale_render_setup(tmp_path):
     return manifests, cal
 
 
-def test_render_blocks_stale_crop(monkeypatch, tmp_path, capsys):
-    """Калибровка новее манифеста → рендер ПРОПУСКАЕТ видео (не жжёт старый кроп), советует recrop."""
+def test_render_auto_recrops_stale_crop_and_renders(monkeypatch, tmp_path, capsys):
+    """Устаревший кроп + есть калибровка → авто-применение (как recrop) и рендер обновлённым кропом."""
     manifests, cal = _stale_render_setup(tmp_path)
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [Path("r.mp4")])
+
+    cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT)
+
+    assert len(called) == 1                            # отрендерён (не пропущен)
+    assert called[0].setup.crop.model_dump() == {"x": 96, "y": 170, "w": 1320, "h": 2347}  # свежий кроп
+    m = json.loads((manifests / "v.json").read_text(encoding="utf-8"))
+    assert m["setup"]["crop"]["w"] == 1320             # манифест сохранён с новым кропом
+    out = capsys.readouterr().out
+    assert "↻" in out and "кроп обновлён" in out
+
+
+def test_render_no_auto_recrop_blocks_stale(monkeypatch, tmp_path, capsys):
+    """--no-auto-recrop: строгая блокировка — манифест не трогаем, не рендерим."""
+    manifests, cal = _stale_render_setup(tmp_path)
+    before = (manifests / "v.json").read_text(encoding="utf-8")
     called = []
     monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [])
 
-    out = cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT)
+    cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT, auto_recrop=False)
 
-    assert called == []                                # render_crop НЕ вызван (пропущено)
-    assert out == []
+    assert called == []                                # не рендерим
+    assert (manifests / "v.json").read_text(encoding="utf-8") == before   # манифест не тронут
+    assert "ПРОПУСК" in capsys.readouterr().err
+
+
+def test_render_blocks_when_recrop_cannot_apply(monkeypatch, tmp_path, capsys):
+    """Нечего применить (калибровка невалидна/отсутствует, _recrop_setup падает) → блокировка."""
+    manifests, cal = _stale_render_setup(tmp_path)
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [])
+    monkeypatch.setattr(cli, "_recrop_setup",
+                        lambda *a, **k: (_ for _ in ()).throw(cli.CalibrationError("нет калибровки")))
+
+    cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT)
+
+    assert called == []                                # заблокировано
     err = capsys.readouterr().err
-    assert "ПРОПУСК" in err and "recrop" in err
+    assert "ПРОПУСК" in err and "не удалось авто-применить" in err
 
 
-def test_render_allow_stale_renders_anyway(monkeypatch, tmp_path):
-    """--allow-stale: рендерим устаревший кроп сознательно (форс)."""
+def test_render_allow_stale_renders_old_crop(monkeypatch, tmp_path):
+    """--allow-stale: рендерим устаревший кроп КАК ЕСТЬ (без авто-recrop)."""
     manifests, cal = _stale_render_setup(tmp_path)
     called = []
     monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [Path("r.mp4")])
 
     cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT, allow_stale=True)
 
-    assert len(called) == 1                            # отрендерён несмотря на рассинхрон
+    assert len(called) == 1                            # отрендерён
+    assert called[0].setup.crop.model_dump()["w"] == 956   # СТАРЫЙ кроп (не тронут)
 
 
 def test_status_shows_manifest_sync_marks(monkeypatch, tmp_path, capsys):

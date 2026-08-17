@@ -1193,6 +1193,7 @@ def cmd_render(
     profile=None,
     fallback: bool = True,
     allow_stale: bool = False,
+    auto_recrop: bool = True,
     pull_first: bool = True,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
@@ -1248,15 +1249,39 @@ def cmd_render(
             out_dir_final = out_dir / stem
 
             # Рассинхрон: калибровка новее манифеста (кроп в манифесте устарел). Рендерить —
-            # значит выжечь СТАРЫЙ кроп в клипы. По умолчанию НЕ рендерим (--allow-stale снимает).
+            # значит выжечь СТАРЫЙ кроп. desync ≠ None ⇒ калибровка ЕСТЬ (иначе сравнивать не с чем).
             desync = _manifest_calibration_desync(manifest, calibrations_dir)
             if desync and not allow_stale:
-                print(f"\n  ⛔ ПРОПУСК {stem}: {desync}", file=sys.stderr, flush=True)
-                print(f"     кроп в манифесте {manifest.setup.crop.model_dump()} — старый. "
-                      f"Обнови: arl recrop (быстро, без пересчёта R0), затем arl r. "
-                      f"Форс старым кропом: arl r --allow-stale", file=sys.stderr, flush=True)
-                skipped_stale.append(mf.name)
-                continue
+                if auto_recrop:
+                    # Калибровка есть и детерминирована (без LLM, секунды) → применяем сразу,
+                    # тем же кодом, что recrop, и продолжаем рендер обновлённым кропом.
+                    try:
+                        new_setup = _recrop_setup(manifest, calibrations_dir=calibrations_dir,
+                                                  inputs_dir=inputs_dir, archive_dir=archive_dir)
+                    except CalibrationError as e:
+                        # Нечего применить (нет валидной калибровки) → блокируем как раньше.
+                        print(f"\n  ⛔ ПРОПУСК {stem}: {desync}\n     не удалось авто-применить "
+                              f"калибровку: {e}. arl recrop / arl r --allow-stale",
+                              file=sys.stderr, flush=True)
+                        skipped_stale.append(mf.name)
+                        continue
+                    manifest = manifest.model_copy(update={"setup": new_setup})
+                    _write_manifest(manifest, manifests_dir)          # локально
+                    c = new_setup.crop
+                    print(f"  ↻ {stem}: кроп обновлён по калибровке (был устаревший) → "
+                          f"{c.w}×{c.h}@{c.x},{c.y} в кадре {new_setup.frame} — продолжаю рендер",
+                          flush=True)
+                    # push по общим правилам git-синхронизации (AUTOREELS_GIT_SYNC=0 → только локально)
+                    _commit_push_manifest(manifests_dir / f"{stem}.json", len(manifest.reels), root=root)
+                    # дальше рендерим обновлённым manifest (не continue)
+                else:
+                    # --no-auto-recrop: строгая блокировка (не трогаем манифест).
+                    print(f"\n  ⛔ ПРОПУСК {stem}: {desync}\n     кроп в манифесте "
+                          f"{manifest.setup.crop.model_dump()} — старый. Обнови: arl recrop, "
+                          f"затем arl r. Форс старым кропом: arl r --allow-stale",
+                          file=sys.stderr, flush=True)
+                    skipped_stale.append(mf.name)
+                    continue
 
             # Идемпотентность: пропускаем манифесты, для которых все клипы уже есть
             missing = _missing_reels(manifest, out_dir_final)
@@ -1301,7 +1326,7 @@ def cmd_render(
             parts.append(f"{len(skipped_done)} уже готово ({names})")
         if skipped_stale:
             names = ", ".join(s.removesuffix(".json") for s in skipped_stale)
-            parts.append(f"{len(skipped_stale)} устарел кроп → нужен run ({names})")
+            parts.append(f"{len(skipped_stale)} устарел кроп, нечем обновить ({names})")
         if skipped_no_video:
             names = ", ".join(s.removesuffix(".json") for s in skipped_no_video)
             parts.append(f"{len(skipped_no_video)} нет видео ({names})")
@@ -2674,6 +2699,8 @@ def _build_parser():
         description=(
             "Локальный тир: все манифесты в manifests/ → вертикальные mp4 в reels-out/.\n"
             "Идемпотентен: уже готовые клипы пропускаются; нет видео — предупреждение ⊘.\n"
+            "Устаревший кроп (калибровка новее) авто-обновляется по калибровке (↻, без LLM);\n"
+            "--no-auto-recrop — строго блокировать; --allow-stale — рендерить старый кроп.\n"
             "Кодек — профилем: hevc (дефолт, компактный) | h264 (совместимый) | av1 (эксп.).\n"
             "Профили нацелены на AMF (системник Windows AMD) — достаточно --ffmpeg.\n\n"
             "Пример: autoreels render --profile hevc\n"
@@ -2692,7 +2719,10 @@ def _build_parser():
                          "недоступный выбранный → ошибка")
     pd.add_argument("--allow-stale", action="store_true", dest="allow_stale",
                     help="рендерить даже если кроп в манифесте устарел (калибровка новее); "
-                         "по умолчанию такие видео пропускаются с требованием повторного run")
+                         "по умолчанию устаревший кроп авто-обновляется по калибровке")
+    pd.add_argument("--no-auto-recrop", action="store_true", dest="no_auto_recrop",
+                    help="не авто-применять калибровку при устаревшем кропе (строго блокировать, "
+                         "как раньше — обновлять вручную через arl recrop)")
 
     prs = sub.add_parser(
         "resume",
@@ -2905,7 +2935,8 @@ def main(argv=None) -> int:
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
-                       fallback=not args.no_fallback, allow_stale=args.allow_stale)
+                       fallback=not args.no_fallback, allow_stale=args.allow_stale,
+                       auto_recrop=not args.no_auto_recrop)
         elif args.cmd == "resume":
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "recrop":
