@@ -2762,7 +2762,7 @@ def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2786,7 +2786,7 @@ def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2809,7 +2809,7 @@ def test_cmd_preview_passes_parsed_palettes(monkeypatch, tmp_path):
     seen = {}
 
     def _fake_preview(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, palettes,
-                      seconds, reel_id, profile, encoder, progress):
+                      seconds, reel_id, profile, encoder, zoom, ztag, progress):
         seen.update(palettes=palettes, seconds=seconds, out_dir=out_dir)
         return [Path(out_dir) / f"r01__{p}.mp4" for p in palettes]
 
@@ -2854,6 +2854,46 @@ def test_cmd_preview_unknown_palette_errors(tmp_path):
     (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
     rc = cli.cmd_preview("v", palettes=["neutral", "bogus"], root=root)
     assert rc == 1
+
+
+def test_cmd_preview_zoom_compare_renders_both_variants(monkeypatch, tmp_path):
+    """--zoom compare → render_preview зовётся дважды: zoom=True(zoom) и zoom=False(flat)."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    manifests = root / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (root / "inputs").mkdir()
+    (root / "inputs" / "v.mp4").write_bytes(b"x")
+
+    calls = []
+
+    def _fake_preview(manifest, *, zoom, ztag, palettes, **kw):
+        calls.append((zoom, ztag))
+        return []
+
+    monkeypatch.setattr(cli, "render_preview", _fake_preview)
+    rc = cli.cmd_preview("v", palettes=["neutral"], zoom="compare", root=root)
+    assert rc == 0
+    assert (True, "zoom") in calls and (False, "flat") in calls
+
+
+def test_cmd_render_zoom_flag_passes_bool_to_render(monkeypatch, tmp_path):
+    """cmd_render(zoom=True) прокидывает zoom в render_crop."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "v.mp4").write_bytes(b"x")
+
+    seen = {}
+
+    def _fake_render(manifest, *, zoom, **kw):
+        seen["zoom"] = zoom
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", _fake_render)
+    cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, zoom=True)
+    assert seen["zoom"] is True
 
 
 # -------------------------------------------------- ar без аргументов: status + hint

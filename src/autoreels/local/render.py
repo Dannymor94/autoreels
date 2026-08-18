@@ -30,7 +30,7 @@ from pydantic import ValidationError
 
 from autoreels.core import state
 from autoreels.core.config import (
-    AudioProcessing, Palette, RenderConfig, SubtitlesConfig, validate_profile,
+    AudioProcessing, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.models import Manifest, SetupProfile
 from autoreels.local.subtitles import build_ass
@@ -411,16 +411,39 @@ def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
     return f"fade=t=in:st=0:d={_num(d)},fade=t=out:st={_num(out_st)}:d={_num(d)}"
 
 
-def _crop_vf(setup: SetupProfile) -> str:
+def _zoom_vf(scale, zoom: Zoom) -> str:
+    """zoompan hook-зума ВМЕСТО статичного scale. Качество: сэмплит уже вырезанный ПОЛНОРАЗМЕРНЫЙ
+    регион (вход фильтра) и выводит SW×SH — динамический кроп меньшей области, НЕ апскейл готового
+    кадра. z(t) — трапеция по времени `ot`: наезд за duration → удержание → плавный возврат к 1 в
+    пределах hook_seconds, дальше базовый кадр. Пусто, если зум выключен/scheme=none → обычный scale.
+
+    Запятые внутри выражения экранированы (`\\,`), чтобы filtergraph не разбил zoompan на фильтры.
+    """
+    if not zoom.enabled or zoom.scheme == "none" or zoom.percent <= 0:
+        return ""
+    sw, sh = scale
+    p = zoom.percent / 100.0
+    d = zoom.duration
+    h = zoom.hook_seconds
+    # трапеция 0→1→0: rise за d, плато, fall за d в конце hook-окна, дальше 0 (clip max→0)
+    z = f"1+{_num(p)}*max(0\\,min(ot/{_num(d)}\\,min(({_num(h)}-ot)/{_num(d)}\\,1)))"
+    return (f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d=1:s={sw}x{sh}:fps={zoom.fps}")
+
+
+def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None) -> str:
     """Видеофильтр выравнивания+кропа+скейла из профиля сетапа: `[rotate=…,]crop=w:h:x:y,scale=SW:SH`.
 
     Числа — данные манифеста (`setup.crop` + `setup.scale` + `setup.rotation_deg`), НЕ хардкод.
-    Порядок: rotate → crop → scale. Кроп один на все клипы (уровень манифеста, не reel).
+    Порядок: rotate → crop → scale. При включённом `zoom` статичный scale заменяется на zoompan
+    (зум ИЗ полноразмерного региона, без апскейла готового кадра). Кроп один на все клипы.
     """
     c = setup.crop
     sw, sh = setup.scale
     rot = _rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)
-    crop_scale = f"crop={c.w}:{c.h}:{c.x}:{c.y},scale={sw}:{sh}"
+    zoom_vf = _zoom_vf(setup.scale, zoom) if zoom is not None else ""
+    tail = zoom_vf if zoom_vf else f"scale={sw}:{sh}"
+    crop_scale = f"crop={c.w}:{c.h}:{c.x}:{c.y},{tail}"
     return f"{rot},{crop_scale}" if rot else crop_scale
 
 
@@ -619,6 +642,7 @@ def render_crop(
     encoder: str | None = None,
     profile: str | None = None,
     palette: str | None = None,
+    zoom: bool | None = None,
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
@@ -627,13 +651,17 @@ def render_crop(
     Кроп+скейл (`setup.crop` + `setup.scale`) — данные манифеста, один на все клипы. Если
     передан `subtitles_cfg` и у reel есть слова — на клип накладывается ASS (после crop/scale).
     `palette` — имя пресета палитры (переопределяет `render_cfg.palette`); цветокор встаёт
-    между scale и субтитрами. Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a).
+    между scale и субтитрами. `zoom` — bool-переопределение `render_cfg.zoom.enabled` (None =
+    из конфига). Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a).
     """
     pal_name = palette if palette is not None else render_cfg.palette
     palette_vf = palette_filter(render_cfg.palettes[pal_name])
+    zoom_cfg = render_cfg.zoom
+    if zoom is not None and zoom != zoom_cfg.enabled:
+        zoom_cfg = zoom_cfg.model_copy(update={"enabled": zoom})
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
+        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup, zoom_cfg), suffix="",
         palette_vf=palette_vf,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
     )
@@ -651,14 +679,17 @@ def render_preview(
     reel_id: str | None = None,
     profile: str | None = None,
     encoder: str | None = None,
+    zoom: bool | None = None,
+    ztag: str = "",
     progress: Callable[[str], None] | None = None,
 ) -> list[Path]:
     """Короткий фрагмент (`seconds` с начала клипа) в НЕСКОЛЬКИХ палитрах — подбор цветокора
-    без полного рендера всех клипов. Один файл на палитру: `<id>__<palette>.mp4`.
+    без полного рендера всех клипов. Один файл на палитру: `<id>__<palette>[__<ztag>].mp4`.
 
     Берётся первый reel (или `reel_id`), окно укорачивается до `seconds`. Кроп+скейл — как в
-    боевом рендере; цветокор — из каждого пресета. Субтитры НЕ выжигаются (чистое сравнение
-    цвета). Порядок фильтров тот же: crop→scale→eq/unsharp. Возвращает пути в порядке `palettes`.
+    боевом рендере; цветокор — из каждого пресета. `zoom` (bool|None) переопределяет
+    `render_cfg.zoom.enabled` — для сравнения «с зумом / без»; `ztag` добавляется в имя файла.
+    Субтитры НЕ выжигаются (чистое сравнение). Возвращает пути в порядке `palettes`.
     """
     if not manifest.reels:
         raise RenderError("в манифесте нет клипов — нечего превьюить")
@@ -668,18 +699,22 @@ def render_preview(
         if reel is None:
             raise RenderError(f"клип '{reel_id}' не найден в манифесте")
     short_end = min(reel.end, reel.start + seconds)
+    zoom_cfg = render_cfg.zoom
+    if zoom is not None and zoom != zoom_cfg.enabled:
+        zoom_cfg = zoom_cfg.model_copy(update={"enabled": zoom})
     outputs: list[Path] = []
     for pal in palettes:
         if pal not in render_cfg.palettes:
             known = ", ".join(render_cfg.palettes)
             raise RenderError(f"неизвестная палитра '{pal}'; допустимо: {known}")
         palette_vf = palette_filter(render_cfg.palettes[pal])
-        preview_reel = reel.model_copy(update={"id": f"{reel.id}__{pal}", "end": short_end,
+        clip_id = f"{reel.id}__{pal}" + (f"__{ztag}" if ztag else "")
+        preview_reel = reel.model_copy(update={"id": clip_id, "end": short_end,
                                                "subtitles": None})
         mini = manifest.model_copy(update={"reels": [preview_reel]})
         outputs.extend(_render_segments(
             mini, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-            ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(mini.setup), suffix="",
+            ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(mini.setup, zoom_cfg), suffix="",
             palette_vf=palette_vf, profile=profile, progress=progress,
         ))
     return outputs

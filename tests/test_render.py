@@ -384,6 +384,8 @@ def test_real_render_config_defaults_are_social_optimal():
     ap = cfg.audio_processing
     assert ap.loudnorm_enabled is True and ap.target_lufs == -14.0
     assert ap.denoise_enabled is False and ap.fade_enabled is False
+    # зум выключен по умолчанию; схема hook, наезд 8%
+    assert cfg.zoom.enabled is False and cfg.zoom.scheme == "hook" and cfg.zoom.percent == 8.0
 
 
 # ------------------------------------ оценка размера выходного файла
@@ -836,6 +838,77 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     content = txt.read_text(encoding="utf-8")
     assert "ЗА ТРАВМОЙ скрыт ДАР 🫀…" in content
     assert "#травма #психология" in content
+
+
+# ------------------------------------------------------------ эффект зума (hook, качество из источника)
+
+from autoreels.core.config import Zoom
+from autoreels.local.render import _crop_vf, _zoom_vf
+
+
+def test_zoom_disabled_gives_plain_scale():
+    # выкл (дефолт) → обычный scale, без zoompan
+    assert _zoom_vf([1080, 1920], Zoom()) == ""
+    vf = _crop_vf(_crop_setup(), Zoom())
+    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+    assert "zoompan" not in vf
+
+
+def test_zoom_scheme_none_gives_plain_scale():
+    assert _zoom_vf([1080, 1920], Zoom(enabled=True, scheme="none")) == ""
+
+
+def test_zoom_enabled_replaces_scale_with_zoompan():
+    # зум ВМЕСТО scale (не поверх): выход 1080×1920, вход zoompan — полноразмерный регион
+    vf = _crop_vf(_crop_setup(), Zoom(enabled=True))
+    assert "zoompan=" in vf and "scale=1080:1920" not in vf
+    assert "s=1080x1920" in vf                                # zoompan сам даёт целевой размер
+    assert vf.startswith("crop=1215:2160:1240:0,zoompan=")    # crop полноразмерного региона ДО zoompan
+
+
+def test_zoom_is_dynamic_crop_not_upscale_of_finished_frame():
+    # качество: zoompan идёт СРАЗУ после crop полноразмерного региона (нет промежуточного
+    # scale в 1080, который бы потом апскейлился) — зум сэмплит исходное разрешение
+    vf = _crop_vf(_crop_setup(), Zoom(enabled=True, percent=8))
+    assert vf.index("crop=") < vf.index("zoompan=")
+    assert "scale=" not in vf                                 # единственный ресемплинг — внутри zoompan
+
+
+def test_zoom_params_from_config_in_expression():
+    # параметры (percent/duration/hook/fps) попадают в выражение zoompan
+    vf = _zoom_vf([1080, 1920], Zoom(enabled=True, percent=12, duration=0.5,
+                                     hook_seconds=3.0, fps=25))
+    assert "1+0.12*" in vf                                    # percent 12 → 0.12
+    assert "ot/0.5" in vf                                     # duration 0.5
+    assert "(3-ot)/0.5" in vf                                 # hook_seconds 3.0
+    assert "fps=25" in vf
+
+
+def test_zoom_zooms_into_center():
+    vf = _zoom_vf([1080, 1920], Zoom(enabled=True))
+    assert "x='iw/2-(iw/zoom/2)'" in vf and "y='ih/2-(ih/zoom/2)'" in vf
+
+
+def test_render_zoom_flag_adds_zoompan_to_command(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"zoom-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg, zoom=True)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert "zoompan=" in vf
+
+
+def test_render_zoom_off_by_default(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"no-zoom-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert "zoompan" not in vf and "scale=1080:1920" in vf
 
 
 # ------------------------------------------------------------ обработка звука (loudnorm/denoise/fade)

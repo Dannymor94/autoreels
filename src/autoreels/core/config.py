@@ -251,6 +251,21 @@ class AudioExtract(BaseModel):
     bitrate: str | None = None   # напр. "64k" для mp3; None для PCM (bitrate неприменим)
 
 
+class Zoom(BaseModel):
+    """Эффект зума (акцент на моменте). Качество: зум берётся ИЗ ИСХОДНОГО разрешения —
+    zoompan сэмплит уже вырезанный полноразмерный регион и выводит 1080×1920 (динамический
+    кроп меньшей области), НЕ апскейлит готовый кадр. ВЫКЛ по умолчанию."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    percent: float = 8.0        # величина наезда, % (8% = z до 1.08)
+    duration: float = 0.4       # секунды на наезд и на возврат
+    scheme: str = "hook"        # hook (лёгкий зум в начале + возврат) | none
+    hook_seconds: float = 2.5   # длина hook-жеста от начала клипа (наезд+удержание+возврат)
+    fps: int = 30               # выходной fps зум-клипа (zoompan форсит постоянный fps)
+
+
 class SubtitleStyle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -312,6 +327,7 @@ class RenderConfig(BaseModel):
     subtitles: SubtitleStyle
     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
     audio_processing: AudioProcessing = Field(default_factory=AudioProcessing)
+    zoom: Zoom = Field(default_factory=Zoom)
     palette: str = "neutral"                 # активная палитра (--palette / render.local.yaml)
     palettes: dict[str, Palette] = Field(
         default_factory=lambda: {k: Palette(**v) for k, v in _DEFAULT_PALETTES.items()}

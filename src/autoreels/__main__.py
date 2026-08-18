@@ -1205,6 +1205,7 @@ def cmd_render(
     encoder=None,
     profile=None,
     palette=None,
+    zoom: bool | None = None,
     fallback: bool = True,
     allow_stale: bool = False,
     auto_recrop: bool = True,
@@ -1318,13 +1319,15 @@ def cmd_render(
             n_total = len(manifest.reels)
             label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
             pal_tag = "" if pal_name == "neutral" else f", палитра {pal_name}"
-            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}) → {out_dir_final} ===",
+            zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
+            zoom_tag = ", зум" if zoom_on else ""
+            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}) → {out_dir_final} ===",
                   flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
-                profile=prof_name, palette=pal_name, subtitles_cfg=subtitles_cfg,
+                profile=prof_name, palette=pal_name, zoom=zoom, subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
@@ -1364,6 +1367,7 @@ def cmd_preview(
     palettes=None,
     seconds: float = 6.0,
     reel_id=None,
+    zoom=None,
     root=".",
     manifests_dir=None,
     inputs_dir=None,
@@ -1372,9 +1376,10 @@ def cmd_preview(
     encoder=None,
     profile=None,
 ) -> int:
-    """Короткий фрагмент одного клипа в НЕСКОЛЬКИХ палитрах — подобрать цветокор быстро, без
+    """Короткий фрагмент одного клипа в НЕСКОЛЬКИХ палитрах — подобрать цветокор/зум быстро, без
     полного рендера всех клипов. `arl preview <манифест> --palettes neutral,vivid,sharp` →
-    reels-out/_preview/<id>__<palette>.mp4 рядом для сравнения. Без --palettes — все пресеты."""
+    reels-out/_preview/<id>__<palette>.mp4 рядом для сравнения. Без --palettes — все пресеты.
+    `zoom`: None (из конфига) | "on" | "off" | "compare" (рендерит оба варианта — с зумом и без)."""
     root = Path(root)
     render_cfg = load_render_config(root / "config" / "render.yaml")
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
@@ -1411,16 +1416,28 @@ def cmd_preview(
            or render_cfg.encoder.profiles[prof_name].codec)
     effective_ffmpeg = resolve_ffmpeg(ffmpeg, render_cfg=render_cfg)
 
+    # Варианты зума: compare → оба (с зумом/без) с тегом в имени; on/off → один; None → из конфига.
+    if zoom == "compare":
+        zoom_variants = [(True, "zoom"), (False, "flat")]
+    elif zoom in ("on", "off"):
+        zoom_variants = [(zoom == "on", "")]
+    else:
+        zoom_variants = [(None, "")]
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"=== preview: {mf.stem} · палитры {', '.join(pal_list)} · {seconds:g}с → {out_dir} ===",
-          flush=True)
+    zoom_note = {"compare": " · зум: с/без", "on": " · зум", "off": " · без зума"}.get(zoom, "")
+    print(f"=== preview: {mf.stem} · палитры {', '.join(pal_list)} · {seconds:g}с{zoom_note} "
+          f"→ {out_dir} ===", flush=True)
     try:
-        outputs = render_preview(
-            manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-            ffmpeg=effective_ffmpeg, palettes=pal_list, seconds=seconds, reel_id=reel_id,
-            profile=prof_name, encoder=(enc if explicit_encoder else None),
-            progress=lambda rid: print(f"  · {rid}", flush=True),
-        )
+        outputs = []
+        for z_enabled, ztag in zoom_variants:
+            outputs += render_preview(
+                manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+                ffmpeg=effective_ffmpeg, palettes=pal_list, seconds=seconds, reel_id=reel_id,
+                profile=prof_name, encoder=(enc if explicit_encoder else None),
+                zoom=z_enabled, ztag=ztag,
+                progress=lambda rid: print(f"  · {rid}", flush=True),
+            )
     except (RenderError, SourceNotFoundError) as e:
         print(f"[ОШИБКА] {e}", file=sys.stderr, flush=True)
         return 1
@@ -2869,6 +2886,8 @@ def _build_parser():
                     help="кодек-профиль: h264 (совместимый) | hevc (компактный, дефолт) | av1 (эксп.)")
     pd.add_argument("--palette", default=None,
                     help="палитра цветокора: neutral (дефолт) | vivid | soft | sharp")
+    pd.add_argument("--zoom", choices=["on", "off"], default=None,
+                    help="эффект зума (hook): on|off переопределяет config zoom.enabled")
     pd.add_argument("--encoder", default=None,
                     help="видеокодек ffmpeg (переопределяет кодек профиля; h264_amf — AMD, libx264 — CPU)")
     pd.add_argument("--ffmpeg", default=None,
@@ -2903,6 +2922,8 @@ def _build_parser():
                      help="длина фрагмента в секундах (5–8 удобно; по умолчанию 6)")
     ppv.add_argument("--reel", default=None, dest="reel",
                      help="id клипа для превью (по умолчанию — первый в манифесте)")
+    ppv.add_argument("--zoom", choices=["on", "off", "compare"], default=None,
+                     help="эффект зума: on|off|compare (compare рендерит оба — с зумом и без)")
     ppv.add_argument("--profile", default=None, help="кодек-профиль (как у render)")
     ppv.add_argument("--encoder", default=None, help="видеокодек ffmpeg (как у render)")
     ppv.add_argument("--ffmpeg", default=None,
@@ -3131,15 +3152,16 @@ def main(argv=None) -> int:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
+            zoom_flag = {"on": True, "off": False}.get(args.zoom)   # None = из конфига
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
-                       palette=args.palette,
+                       palette=args.palette, zoom=zoom_flag,
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
                        auto_recrop=not args.no_auto_recrop)
         elif args.cmd == "preview":
             pals = [p.strip() for p in args.palettes.split(",") if p.strip()] if args.palettes else None
             return cmd_preview(args.manifest, palettes=pals, seconds=args.seconds,
-                               reel_id=args.reel, encoder=args.encoder, ffmpeg=args.ffmpeg,
-                               profile=args.profile)
+                               reel_id=args.reel, zoom=args.zoom, encoder=args.encoder,
+                               ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "resume":
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "recrop":
