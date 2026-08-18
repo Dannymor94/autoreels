@@ -380,6 +380,10 @@ def test_real_render_config_defaults_are_social_optimal():
     assert {"h264", "hevc", "av1", "hevc_hq", "h264_hq", "hevc_sw"} <= set(cfg.encoder.profiles)
     # дефолтный hevc несёт AMF quality-режим (против мыла на равном битрейте)
     assert cfg.encoder.profiles["hevc"].quality == "quality"
+    # обработка звука: нормализация -14 LUFS включена, шумоподавление и фейд — выключены
+    ap = cfg.audio_processing
+    assert ap.loudnorm_enabled is True and ap.target_lufs == -14.0
+    assert ap.denoise_enabled is False and ap.fade_enabled is False
 
 
 # ------------------------------------ оценка размера выходного файла
@@ -832,6 +836,101 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     content = txt.read_text(encoding="utf-8")
     assert "ЗА ТРАВМОЙ скрыт ДАР 🫀…" in content
     assert "#травма #психология" in content
+
+
+# ------------------------------------------------------------ обработка звука (loudnorm/denoise/fade)
+
+from autoreels.core.config import AudioProcessing
+from autoreels.local.render import _audio_filter_chain, _video_fade_filter
+
+
+def test_audio_chain_default_is_loudnorm_only():
+    # дефолт: только нормализация громкости к -14 LUFS
+    af = _audio_filter_chain(AudioProcessing(), 30.0)
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11"
+
+
+def test_audio_chain_empty_when_all_disabled():
+    ap = AudioProcessing(loudnorm_enabled=False, denoise_enabled=False, fade_enabled=False)
+    assert _audio_filter_chain(ap, 30.0) == ""
+
+
+def test_audio_chain_denoise_before_loudnorm():
+    ap = AudioProcessing(denoise_enabled=True, denoise_strength=10)
+    af = _audio_filter_chain(ap, 30.0)
+    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11"
+    assert af.index("afftdn") < af.index("loudnorm")
+
+
+def test_audio_chain_fade_last_and_out_start_from_duration():
+    ap = AudioProcessing(fade_enabled=True, fade_duration=0.25)
+    af = _audio_filter_chain(ap, 30.0)
+    # порядок: loudnorm → afade in → afade out; out стартует в конце минус длительность фейда
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.25,afade=t=out:st=29.75:d=0.25"
+
+
+def test_video_fade_off_by_default():
+    assert _video_fade_filter(AudioProcessing(), 30.0) == ""
+
+
+def test_video_fade_matches_audio_fade_timing():
+    ap = AudioProcessing(fade_enabled=True, fade_duration=0.3)
+    assert _video_fade_filter(ap, 20.0) == "fade=t=in:st=0:d=0.3,fade=t=out:st=19.7:d=0.3"
+
+
+def test_render_default_adds_loudnorm_to_command(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"loudnorm-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    af = _val_after(fake_ffmpeg[0], "-af")
+    assert "loudnorm=I=-14" in af
+
+
+def test_render_loudnorm_disabled_by_config_omits_af(tmp_path, render_cfg, fake_ffmpeg):
+    render_cfg.audio_processing.loudnorm_enabled = False
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"no-loudnorm-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    assert "-af" not in fake_ffmpeg[0]
+
+
+def test_render_denoise_flag_adds_afftdn(tmp_path, render_cfg, fake_ffmpeg):
+    render_cfg.audio_processing.denoise_enabled = True
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"denoise-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    af = _val_after(fake_ffmpeg[0], "-af")
+    assert "afftdn" in af and af.index("afftdn") < af.index("loudnorm")
+
+
+def test_render_fade_video_appended_after_subtitles(tmp_path, render_cfg, fake_ffmpeg):
+    # фейд-видео последним в vf (после ass) — фейдит готовый кадр; таймкод из длительности клипа
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    render_cfg.audio_processing.fade_enabled = True
+    render_cfg.audio_processing.fade_duration = 0.25
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"fade-video")
+    reel = _reel("r01", 10.0, 40.0)         # длительность 30с
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                subtitles_cfg=subs_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    af = _val_after(fake_ffmpeg[0], "-af")
+    assert vf.index("ass=") < vf.index("fade=t=in")           # фейд после субтитров
+    assert "fade=t=out:st=29.75" in vf                        # 30 - 0.25 (не конфликтует с padding)
+    assert "afade=t=out:st=29.75" in af                       # аудиофейд синхронен видео
 
 
 # ------------------------------------------------------------ выравнивание горизонта (rotate)

@@ -218,6 +218,27 @@ class Audio(BaseModel):
     bitrate: str
 
 
+class AudioProcessing(BaseModel):
+    """Обработка звука клипа. Порядок фильтров: шумоподавление → нормализация → фейд."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Нормализация громкости (loudnorm) — ГЛАВНОЕ: единый уровень для всех клипов (стандарт
+    # соцсетей -14 LUFS). Однопроходный: для клипов 30-60с точности достаточно, двухпроходный
+    # (медленнее, +проход анализа) не нужен. Включено по умолчанию.
+    loudnorm_enabled: bool = True
+    target_lufs: float = -14.0     # I=  (целевая интегральная громкость, LUFS)
+    true_peak: float = -1.5        # TP= (потолок истинного пика, дБ)
+    loudness_range: float = 11.0   # LRA=
+    # Шумоподавление (afftdn) — ВЫКЛ по умолчанию: агрессивно может съедать голос.
+    denoise_enabled: bool = False
+    denoise_strength: float = 12.0   # afftdn nr= (сила подавления, дБ)
+    # Фейд видео+звука в начале/конце (убирает резкий старт/обрыв). ВЫКЛ по умолчанию.
+    # Хвост фейд-аута ложится на padding-«воздух» в конце клипа — не режет речь.
+    fade_enabled: bool = False
+    fade_duration: float = 0.25      # секунды (0.2-0.3 обычно)
+
+
 class AudioExtract(BaseModel):
     """Параметры извлечения аудиодорожки под Whisper (cloud/extract_audio.py)."""
 
@@ -290,6 +311,7 @@ class RenderConfig(BaseModel):
     audio_extract: AudioExtract
     subtitles: SubtitleStyle
     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
+    audio_processing: AudioProcessing = Field(default_factory=AudioProcessing)
     palette: str = "neutral"                 # активная палитра (--palette / render.local.yaml)
     palettes: dict[str, Palette] = Field(
         default_factory=lambda: {k: Palette(**v) for k, v in _DEFAULT_PALETTES.items()}

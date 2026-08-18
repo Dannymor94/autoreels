@@ -29,7 +29,9 @@ from typing import Callable
 from pydantic import ValidationError
 
 from autoreels.core import state
-from autoreels.core.config import Palette, RenderConfig, SubtitlesConfig, validate_profile
+from autoreels.core.config import (
+    AudioProcessing, Palette, RenderConfig, SubtitlesConfig, validate_profile,
+)
 from autoreels.core.models import Manifest, SetupProfile
 from autoreels.local.subtitles import build_ass
 
@@ -328,6 +330,7 @@ def build_cut_cmd(
     audio_codec: str,
     audio_bitrate: str,
     vf: str | None = None,
+    af: str | None = None,
     quality: str | None = None,
     rate_control: str | None = None,
     qp: int | None = None,
@@ -354,6 +357,7 @@ def build_cut_cmd(
         "-i", str(source),
         "-t", _ts(duration),
         *(["-vf", vf] if vf else []),
+        *(["-af", af] if af else []),
         "-c:v", codec,
         *_video_quality_args(codec, preset, video_bitrate, pix_fmt,
                              quality=quality, rate_control=rate_control, qp=qp),
@@ -373,6 +377,38 @@ def _rotate_vf(rotation_deg: float) -> str:
         return ""
     rad = math.radians(rotation_deg)
     return f"rotate={rad:.6f}"
+
+
+def _audio_filter_chain(ap: AudioProcessing, clip_duration: float) -> str:
+    """Аудиофильтры клипа. Порядок: шумоподавление → нормализация громкости → фейд.
+
+    - afftdn (шумоподавление) — только если включено (по умолчанию выкл: может съесть голос);
+    - loudnorm (нормализация к target_lufs) — главное, единый уровень всех клипов;
+    - afade in/out — плавный старт/затухание; хвост fade-out ложится на padding-«воздух» конца.
+    Пусто — всё выключено (команда без -af). Порядок именно такой: чистим → ровняем → фейдим."""
+    parts: list[str] = []
+    if ap.denoise_enabled:
+        parts.append(f"afftdn=nr={_num(ap.denoise_strength)}")
+    if ap.loudnorm_enabled:
+        parts.append(
+            f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)}"
+        )
+    if ap.fade_enabled and ap.fade_duration > 0:
+        d = ap.fade_duration
+        out_st = max(0.0, round(clip_duration - d, 3))
+        parts.append(f"afade=t=in:st=0:d={_num(d)}")
+        parts.append(f"afade=t=out:st={_num(out_st)}:d={_num(d)}")
+    return ",".join(parts)
+
+
+def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
+    """Видео-фейд из/в чёрное (in+out) той же длины, что аудиофейд. Пусто, если фейд выключен.
+    Ставится ПОСЛЕДНИМ в видеоцепочке (после субтитров) — фейдит уже готовый кадр целиком."""
+    if not (ap.fade_enabled and ap.fade_duration > 0):
+        return ""
+    d = ap.fade_duration
+    out_st = max(0.0, round(clip_duration - d, 3))
+    return f"fade=t=in:st=0:d={_num(d)},fade=t=out:st={_num(out_st)}:d={_num(d)}"
 
 
 def _crop_vf(setup: SetupProfile) -> str:
@@ -463,6 +499,7 @@ def _render_segments(
 
     enc = render_cfg.encoder
     aud = render_cfg.audio
+    ap = render_cfg.audio_processing
     # Профиль: явный аргумент > env RENDER_PROFILE > активный из конфига. Кодек+битрейт —
     # из профиля; но явный encoder (флаг/env) может переопределить только кодек (Mac-дев:
     # AMF-кодека нет → подменяем на libx26x, битрейт профиля сохраняется).
@@ -505,12 +542,18 @@ def _render_segments(
                 ass_filter = f"ass={ass_filename}"
                 reel_vf = f"{base_vf},{ass_filter}" if base_vf else ass_filter
                 ass_cwd = str(tmp_ass_dir)
+            # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
+            clip_duration = reel.end - reel.start
+            reel_af = _audio_filter_chain(ap, clip_duration) or None
+            vfade = _video_fade_filter(ap, clip_duration)
+            if vfade:
+                reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
                 codec=codec, preset=enc.preset,
                 video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                 audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-                vf=reel_vf,
+                vf=reel_vf, af=reel_af,
                 quality=active.quality, rate_control=active.rate_control, qp=active.qp,
             )
             returncode, stderr_text = _run_ffmpeg_with_progress(
