@@ -2726,7 +2726,7 @@ def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2750,7 +2750,7 @@ def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2759,6 +2759,65 @@ def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
     cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, ffmpeg="/custom/ffmpeg")
 
     assert ffmpeg_used[0] == "/custom/ffmpeg"
+
+
+def test_cmd_preview_passes_parsed_palettes(monkeypatch, tmp_path):
+    """arl preview --palettes neutral,vivid → render_preview зовётся с этим списком и seconds."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    manifests = root / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (root / "inputs").mkdir()
+    (root / "inputs" / "v.mp4").write_bytes(b"x")
+
+    seen = {}
+
+    def _fake_preview(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, palettes,
+                      seconds, reel_id, profile, encoder, progress):
+        seen.update(palettes=palettes, seconds=seconds, out_dir=out_dir)
+        return [Path(out_dir) / f"r01__{p}.mp4" for p in palettes]
+
+    monkeypatch.setattr(cli, "render_preview", _fake_preview)
+
+    rc = cli.cmd_preview("v", palettes=["neutral", "vivid"], seconds=5.0, root=root)
+
+    assert rc == 0
+    assert seen["palettes"] == ["neutral", "vivid"]
+    assert seen["seconds"] == 5.0
+    # превью складываются в reels-out/_preview
+    assert seen["out_dir"] == root / "reels-out" / "_preview"
+
+
+def test_cmd_preview_default_palettes_are_all_presets(monkeypatch, tmp_path):
+    """Без --palettes превью гонит ВСЕ пресеты из конфига."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    manifests = root / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (root / "inputs").mkdir()
+    (root / "inputs" / "v.mp4").write_bytes(b"x")
+
+    seen = {}
+
+    def _fake_preview(manifest, *, palettes, **kw):
+        seen["palettes"] = palettes
+        return []
+
+    monkeypatch.setattr(cli, "render_preview", _fake_preview)
+
+    rc = cli.cmd_preview("v", palettes=None, root=root)
+    assert rc == 0
+    assert set(seen["palettes"]) >= {"neutral", "vivid", "soft", "sharp"}
+
+
+def test_cmd_preview_unknown_palette_errors(tmp_path):
+    """Неизвестная палитра → сообщение и код 1, без рендера."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    manifests = root / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    rc = cli.cmd_preview("v", palettes=["neutral", "bogus"], root=root)
+    assert rc == 1
 
 
 # -------------------------------------------------- ar без аргументов: status + hint
@@ -2996,7 +3055,7 @@ def test_menu_action_strips_whitespace():
 
 def test_menu_action_invalid_returns_none():
     """Пустой ввод / вне диапазона / мусор → None (меню повторит запрос)."""
-    for c in ("", "99", "abc", "  ", "12"):
+    for c in ("", "99", "abc", "  ", "13"):
         assert cli._menu_action(c) is None
 
 
@@ -3139,6 +3198,87 @@ def test_menu_item_profile_shows_current(tmp_path, monkeypatch):
 def test_menu_action_9_is_profile():
     """Цифра 9 → action-токен profile (стабильная карта)."""
     assert cli._menu_action("9") == "profile"
+
+
+# --------------------------------------------------------------- палитра (цветокор) в CLI/меню
+
+def test_set_render_palette_writes_local_yaml(tmp_path):
+    """set_render_palette пишет palette в render.local.yaml (машинная настройка)."""
+    import yaml
+    root = _tmp_project_with_render_yaml(tmp_path)
+    path = cli.set_render_palette("vivid", root=root)
+    assert path == root / "config" / "render.local.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert data["palette"] == "vivid"
+
+
+def test_set_render_palette_preserves_existing_keys(tmp_path):
+    """Смена палитры не затирает уже заданный ffmpeg/профиль."""
+    import yaml
+    root = _tmp_project_with_render_yaml(tmp_path)
+    local = root / "config" / "render.local.yaml"
+    local.write_text("ffmpeg: D:/ffmpeg/bin/ffmpeg.exe\nencoder:\n  profile: h264\n", encoding="utf-8")
+    cli.set_render_palette("soft", root=root)
+    data = yaml.safe_load(local.read_text(encoding="utf-8"))
+    assert data["ffmpeg"] == "D:/ffmpeg/bin/ffmpeg.exe"
+    assert data["encoder"]["profile"] == "h264"
+    assert data["palette"] == "soft"
+
+
+def test_set_render_palette_invalid_raises(tmp_path):
+    from autoreels.core.config import ConfigError
+    root = _tmp_project_with_render_yaml(tmp_path)
+    with pytest.raises(ConfigError, match="палитр"):
+        cli.set_render_palette("cyberpunk", root=root)
+
+
+def test_render_uses_saved_palette(tmp_path):
+    """Сохранённая палитра подхватывается конфигом рендера (render.local.yaml deep-merge)."""
+    from autoreels.core.config import load_render_config
+    root = _tmp_project_with_render_yaml(tmp_path)
+    cli.set_render_palette("vivid", root=root)
+    cfg = load_render_config(root / "config" / "render.yaml")
+    assert cfg.palette == "vivid"
+    assert cli._current_render_palette(root=root) == "vivid"
+
+
+def test_menu_set_palette_cli_writes_and_confirms(tmp_path, capsys):
+    """`autoreels menu --set-palette vivid` пишет палитру и подтверждает."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    rc = cli.main(["menu", "--set-palette", "vivid", "--root", str(root)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "vivid" in out and "палитр" in out.lower()
+    assert cli._current_render_palette(root=root) == "vivid"
+
+
+def test_menu_palettes_cli_lists_presets(tmp_path, capsys):
+    """`autoreels menu --palettes` перечисляет пресеты с описанием и помечает текущий."""
+    root = _tmp_project_with_render_yaml(tmp_path)
+    rc = cli.main(["menu", "--palettes", "--root", str(root)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "neutral" in out and "vivid" in out and "soft" in out and "sharp" in out
+    assert "(текущая)" in out              # neutral — дефолт
+
+
+def test_menu_header_shows_palette(tmp_path, monkeypatch):
+    """Шапка меню показывает текущую палитру."""
+    monkeypatch.setenv("RENDER_PALETTE", "vivid")
+    out = cli._menu_render(root=tmp_path)
+    assert "палитра vivid" in out
+
+
+def test_menu_item_palette_shows_current(tmp_path, monkeypatch):
+    """Пункт палитры в меню показывает текущую палитру в подписи."""
+    monkeypatch.setenv("RENDER_PALETTE", "soft")
+    out = cli._menu_render(root=tmp_path)
+    assert "Палитра рендера: soft" in out
+
+
+def test_menu_action_12_is_palette():
+    """Цифра 12 → action-токен palette (стабильная карта)."""
+    assert cli._menu_action("12") == "palette"
 
 
 def test_status_header_shows_machine_settings(tmp_path, monkeypatch, capsys):

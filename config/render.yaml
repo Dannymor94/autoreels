@@ -68,6 +68,28 @@ audio_extract:
   format: mp3
   bitrate: 64k
 
+# Цветокоррекция — готовые пресеты палитры. Активный выбирается флагом --palette или
+# полем palette: в render.local.yaml (машинная настройка). Фильтры встают в цепочку ПОСЛЕ
+# crop/scale и ДО субтитров: crop→scale→eq/unsharp→ass→энкодер (субтитры остаются чистыми).
+# eq: brightness -1..1 (0), contrast 0..2 (1), saturation 0..3 (1), gamma 0.1..10 (1).
+# unsharp ВЫКЛ по умолчанию — перебор даёт звон по контурам (соцсети усиливают при рекомпрессии).
+# colortemperature: Кельвины, <6500 теплее / >6500 холоднее; null = выкл.
+palette: neutral               # активная палитра (neutral | vivid | soft | sharp)
+palettes:
+  neutral:                     # ДЕФОЛТ: всё по нулям — картинка не меняется
+    label: "без изменений (дефолт)"
+  vivid:                       # живее для соцсетей
+    eq: {saturation: 1.15, contrast: 1.10}
+    label: "живее: насыщенность +15%, контраст +10% (соцсети)"
+  soft:                        # мягче + теплее, под talking-head
+    eq: {contrast: 0.95, saturation: 1.05}
+    colortemperature: 5400
+    label: "мягче + теплее (talking-head)"
+  sharp:                       # умеренная резкость + лёгкий контраст
+    eq: {contrast: 1.05}
+    unsharp: {enabled: true, luma_amount: 0.6}
+    label: "умеренный unsharp + лёгкий контраст"
+
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
   font: Montserrat

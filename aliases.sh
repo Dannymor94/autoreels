@@ -83,6 +83,26 @@ _ar_menu() {
                     *) echo "  неизвестный выбор: $_p"; continue ;;
                 esac
                 ;;
+            palette)
+                _ar_cli menu --palettes
+                printf "Палитра (имя или цифра): [1] neutral [2] vivid [3] soft [4] sharp, [p] превью-сравнение, Enter — отмена: "
+                read -r _pal
+                case "$_pal" in
+                    1|neutral) _ar_cli menu --set-palette neutral ;;
+                    2|vivid)   _ar_cli menu --set-palette vivid ;;
+                    3|soft)    _ar_cli menu --set-palette soft ;;
+                    4|sharp)   _ar_cli menu --set-palette sharp ;;
+                    p|preview)
+                        printf "Манифест (имя/стем, Enter — первый): "
+                        read -r _mf
+                        printf "Палитры через запятую (Enter — все пресеты): "
+                        read -r _pals
+                        if [ -n "$_pals" ]; then arl preview "$_mf" --palettes "$_pals"; else arl preview "$_mf"; fi
+                        ;;
+                    "") echo "отменено — назад в меню"; continue ;;
+                    *) echo "  неизвестный выбор: $_pal"; continue ;;
+                esac
+                ;;
             help)      arl h ;;
             quit)      echo "пока!"; return 0 ;;
             *)
@@ -105,6 +125,7 @@ _ar_menu() {
 #   arl go        → run всех видео + git push манифестов (Mac, нужен Groq; git pull перед стартом)
 #   arl go --no-push → run без git push
 #   arl r         → render (git pull внутри; блокирует рендер устаревшего кропа) (системник)
+#   arl pv [ман] [--palettes n,v,s] → preview: короткий фрагмент в нескольких палитрах (подбор цветокора)
 #   arl rc [вид]  → recrop: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
 #   arl s         → status
 #   arl c         → calibrate --all (пушит калибровки → на Mac arl run)
@@ -144,6 +165,12 @@ arl() {
             # и блокирует рендер устаревшего кропа). Энкодер из config/render.yaml.
             shift
             _ar_cli render "$@"
+            ;;
+        pv)
+            # arl pv [манифест] [--palettes n,v,s]: короткий фрагмент в нескольких палитрах
+            # (подбор цветокора без полного рендера всех клипов) → reels-out/_preview/
+            shift
+            _ar_cli preview "$@"
             ;;
         s)
             _ar_cli status

@@ -28,7 +28,7 @@ from typing import Callable
 from pydantic import ValidationError
 
 from autoreels.core import state
-from autoreels.core.config import RenderConfig, SubtitlesConfig, validate_profile
+from autoreels.core.config import Palette, RenderConfig, SubtitlesConfig, validate_profile
 from autoreels.core.models import Manifest, SetupProfile
 from autoreels.local.subtitles import build_ass
 
@@ -375,6 +375,43 @@ def _crop_vf(setup: SetupProfile) -> str:
 
 
 
+def _num(x: float) -> str:
+    """Короткая запись числа для ffmpeg: 1.0→'1', 1.15→'1.15' (без хвостовых нулей)."""
+    return f"{x:g}"
+
+
+def palette_filter(palette: Palette) -> str:
+    """Строка ffmpeg-фильтров цветокоррекции пресета: `eq=…[,unsharp=…][,colortemperature=…]`.
+
+    Порядок частей фиксирован: eq → unsharp → colortemperature. Нейтральные значения
+    (дефолты) опускаются; neutral-пресет даёт пустую строку — команда рендера не меняется.
+    Фильтры встают в цепочку ПОСЛЕ crop/scale и ДО ass-субтитров (grounding: субтитры
+    накладываются поверх цветокора и остаются чистыми).
+    """
+    parts: list[str] = []
+    eq = palette.eq
+    eq_terms: list[str] = []
+    if eq.contrast != 1.0:
+        eq_terms.append(f"contrast={_num(eq.contrast)}")
+    if eq.brightness != 0.0:
+        eq_terms.append(f"brightness={_num(eq.brightness)}")
+    if eq.saturation != 1.0:
+        eq_terms.append(f"saturation={_num(eq.saturation)}")
+    if eq.gamma != 1.0:
+        eq_terms.append(f"gamma={_num(eq.gamma)}")
+    if eq_terms:
+        parts.append("eq=" + ":".join(eq_terms))
+    u = palette.unsharp
+    if u.enabled:
+        parts.append(
+            f"unsharp=luma_msize_x={u.luma_msize_x}:luma_msize_y={u.luma_msize_y}"
+            f":luma_amount={_num(u.luma_amount)}"
+        )
+    if palette.colortemperature is not None:
+        parts.append(f"colortemperature=temperature={palette.colortemperature}")
+    return ",".join(parts)
+
+
 def _render_segments(
     manifest: Manifest,
     *,
@@ -385,6 +422,7 @@ def _render_segments(
     encoder: str | None,
     vf: str | None,
     suffix: str,
+    palette_vf: str = "",
     profile: str | None = None,
     progress: Callable[[str], None] | None = None,
     emit_text: bool = False,
@@ -434,7 +472,11 @@ def _render_segments(
             out = out_dir / f"{reel.id}{suffix}.mp4"
             # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale
             # (в координатах финального кадра 1080×1920). Слова берутся из reel.subtitles.
-            reel_vf = vf
+            # Цветокор (палитра) — ПОСЛЕ crop/scale, ДО ass. Порядок: crop→scale→eq/unsharp→ass.
+            base_vf = vf
+            if vf and palette_vf:
+                base_vf = f"{vf},{palette_vf}"
+            reel_vf = base_vf
             ass_cwd: str | None = None
             if subtitles_cfg is not None and reel.subtitles:
                 ass_filename = f"{reel.id}.ass"
@@ -447,7 +489,7 @@ def _render_segments(
                 # Абсолютный путь в ass= фильтре ломается на Windows: двоеточие (C:)
                 # и бэкслэши — синтаксис filtergraph; относительный путь безопасен.
                 ass_filter = f"ass={ass_filename}"
-                reel_vf = f"{vf},{ass_filter}" if vf else ass_filter
+                reel_vf = f"{base_vf},{ass_filter}" if base_vf else ass_filter
                 ass_cwd = str(tmp_ass_dir)
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
@@ -519,17 +561,68 @@ def render_crop(
     ffmpeg: str = "ffmpeg",
     encoder: str | None = None,
     profile: str | None = None,
+    palette: str | None = None,
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
-    """R1b+R3: вырезать окно, применить кроп-профиль и (опц.) выжечь субтитры → <id>.mp4.
+    """R1b+R3: вырезать окно, применить кроп-профиль, цветокор и (опц.) выжечь субтитры → <id>.mp4.
 
     Кроп+скейл (`setup.crop` + `setup.scale`) — данные манифеста, один на все клипы. Если
     передан `subtitles_cfg` и у reel есть слова — на клип накладывается ASS (после crop/scale).
-    Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a). Кодек-профиль — тот же параметр.
+    `palette` — имя пресета палитры (переопределяет `render_cfg.palette`); цветокор встаёт
+    между scale и субтитрами. Выход — вертикальный 1080×1920, отдельно от <id>_raw.mp4 (R1a).
     """
+    pal_name = palette if palette is not None else render_cfg.palette
+    palette_vf = palette_filter(render_cfg.palettes[pal_name])
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
+        palette_vf=palette_vf,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
     )
+
+
+def render_preview(
+    manifest: Manifest,
+    *,
+    inputs_dir: str | Path,
+    out_dir: str | Path,
+    render_cfg: RenderConfig,
+    ffmpeg: str = "ffmpeg",
+    palettes: list[str],
+    seconds: float = 6.0,
+    reel_id: str | None = None,
+    profile: str | None = None,
+    encoder: str | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> list[Path]:
+    """Короткий фрагмент (`seconds` с начала клипа) в НЕСКОЛЬКИХ палитрах — подбор цветокора
+    без полного рендера всех клипов. Один файл на палитру: `<id>__<palette>.mp4`.
+
+    Берётся первый reel (или `reel_id`), окно укорачивается до `seconds`. Кроп+скейл — как в
+    боевом рендере; цветокор — из каждого пресета. Субтитры НЕ выжигаются (чистое сравнение
+    цвета). Порядок фильтров тот же: crop→scale→eq/unsharp. Возвращает пути в порядке `palettes`.
+    """
+    if not manifest.reels:
+        raise RenderError("в манифесте нет клипов — нечего превьюить")
+    reel = manifest.reels[0]
+    if reel_id is not None:
+        reel = next((r for r in manifest.reels if r.id == reel_id), None)
+        if reel is None:
+            raise RenderError(f"клип '{reel_id}' не найден в манифесте")
+    short_end = min(reel.end, reel.start + seconds)
+    outputs: list[Path] = []
+    for pal in palettes:
+        if pal not in render_cfg.palettes:
+            known = ", ".join(render_cfg.palettes)
+            raise RenderError(f"неизвестная палитра '{pal}'; допустимо: {known}")
+        palette_vf = palette_filter(render_cfg.palettes[pal])
+        preview_reel = reel.model_copy(update={"id": f"{reel.id}__{pal}", "end": short_end,
+                                               "subtitles": None})
+        mini = manifest.model_copy(update={"reels": [preview_reel]})
+        outputs.extend(_render_segments(
+            mini, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+            ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(mini.setup), suffix="",
+            palette_vf=palette_vf, profile=profile, progress=progress,
+        ))
+    return outputs

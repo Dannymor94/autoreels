@@ -54,6 +54,7 @@ from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import CalibrateError, cmd_calibrate
 from autoreels.local.render import (
     RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
+    render_preview,
 )
 from autoreels.local.subtitles import words_in_window
 
@@ -1203,6 +1204,7 @@ def cmd_render(
     ffmpeg: str | None = None,
     encoder=None,
     profile=None,
+    palette=None,
     fallback: bool = True,
     allow_stale: bool = False,
     auto_recrop: bool = True,
@@ -1237,6 +1239,11 @@ def cmd_render(
     # Профиль кодека: флаг > env RENDER_PROFILE > активный из конфига. Опечатка → fail-fast.
     prof_name = profile or os.environ.get("RENDER_PROFILE") or render_cfg.encoder.profile
     validate_profile(prof_name, render_cfg.encoder.profiles, where="--profile/RENDER_PROFILE")
+    # Палитра (цветокор): флаг > env RENDER_PALETTE > активная из конфига (render.local.yaml).
+    pal_name = palette or os.environ.get("RENDER_PALETTE") or render_cfg.palette
+    if pal_name not in render_cfg.palettes:
+        known = ", ".join(render_cfg.palettes)
+        raise SystemExit(f"неизвестная палитра '{pal_name}'. Доступны: {known}")
     # Отображаемый кодек: явный encoder переопределяет кодек профиля (Mac-дев без AMF).
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.profiles[prof_name].codec
     # ffmpeg: флаг > env RENDER_FFMPEG > render.local.yaml > render.yaml → автопоиск.
@@ -1310,13 +1317,14 @@ def cmd_render(
             n_missing = len(missing)
             n_total = len(manifest.reels)
             label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
-            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}) → {out_dir_final} ===",
+            pal_tag = "" if pal_name == "neutral" else f", палитра {pal_name}"
+            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}) → {out_dir_final} ===",
                   flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
-                profile=prof_name, subtitles_cfg=subtitles_cfg,
+                profile=prof_name, palette=pal_name, subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
@@ -1348,6 +1356,78 @@ def cmd_render(
         for name, err in failed:
             print(f"  ✗ {name}: {err}", file=sys.stderr)
     return all_outputs
+
+
+def cmd_preview(
+    manifest_arg=None,
+    *,
+    palettes=None,
+    seconds: float = 6.0,
+    reel_id=None,
+    root=".",
+    manifests_dir=None,
+    inputs_dir=None,
+    out_dir=None,
+    ffmpeg: str | None = None,
+    encoder=None,
+    profile=None,
+) -> int:
+    """Короткий фрагмент одного клипа в НЕСКОЛЬКИХ палитрах — подобрать цветокор быстро, без
+    полного рендера всех клипов. `arl preview <манифест> --palettes neutral,vivid,sharp` →
+    reels-out/_preview/<id>__<palette>.mp4 рядом для сравнения. Без --palettes — все пресеты."""
+    root = Path(root)
+    render_cfg = load_render_config(root / "config" / "render.yaml")
+    manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
+    inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+    out_dir = Path(out_dir) if out_dir else root / "reels-out" / "_preview"
+
+    if manifest_arg:
+        mf = Path(manifest_arg)
+        if not mf.is_file():
+            mf = manifests_dir / f"{Path(manifest_arg).stem}.json"
+    else:
+        candidates = sorted(manifests_dir.glob("*.json"))
+        if not candidates:
+            print("manifests/ пуст — нечего превьюить", file=sys.stderr, flush=True)
+            return 1
+        mf = candidates[0]
+    if not mf.is_file():
+        print(f"нет манифеста «{manifest_arg}» — сначала arl run", file=sys.stderr, flush=True)
+        return 1
+
+    manifest = load_manifest(mf.parent, name=mf.name)
+    pal_list = palettes if palettes else list(render_cfg.palettes)
+    unknown = [p for p in pal_list if p not in render_cfg.palettes]
+    if unknown:
+        known = ", ".join(render_cfg.palettes)
+        print(f"неизвестные палитры: {', '.join(unknown)}. Доступны: {known}",
+              file=sys.stderr, flush=True)
+        return 1
+
+    prof_name = profile or os.environ.get("RENDER_PROFILE") or render_cfg.encoder.profile
+    validate_profile(prof_name, render_cfg.encoder.profiles, where="--profile/RENDER_PROFILE")
+    explicit_encoder = bool(encoder or os.environ.get("RENDER_ENCODER"))
+    enc = (encoder or os.environ.get("RENDER_ENCODER")
+           or render_cfg.encoder.profiles[prof_name].codec)
+    effective_ffmpeg = resolve_ffmpeg(ffmpeg, render_cfg=render_cfg)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"=== preview: {mf.stem} · палитры {', '.join(pal_list)} · {seconds:g}с → {out_dir} ===",
+          flush=True)
+    try:
+        outputs = render_preview(
+            manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+            ffmpeg=effective_ffmpeg, palettes=pal_list, seconds=seconds, reel_id=reel_id,
+            profile=prof_name, encoder=(enc if explicit_encoder else None),
+            progress=lambda rid: print(f"  · {rid}", flush=True),
+        )
+    except (RenderError, SourceNotFoundError) as e:
+        print(f"[ОШИБКА] {e}", file=sys.stderr, flush=True)
+        return 1
+    print(f"готово: {len(outputs)} превью → {out_dir}", flush=True)
+    for p in outputs:
+        print(f"  {p.name}", flush=True)
+    return 0
 
 
 def _find_source_video(source_name, *, inputs_dir, archive_dir):
@@ -2105,6 +2185,7 @@ _MENU_ITEMS: list[tuple[str, str, str, str]] = [
     ("9", "profile",    "Профиль рендера",               "hevc | h264 | av1"),
     ("10", "diagnose",  "Диагностика обрывов фраз",      "CLEAN/SOFT/HARD по клипам + причина"),
     ("11", "resnap",    "Пересчитать границы (resnap)",  "snap/padding из R0-границ, без LLM"),
+    ("12", "palette",   "Палитра рендера",               "neutral | vivid | soft | sharp"),
     ("0", "quit",       "Выход",                         ""),
 ]
 
@@ -2214,7 +2295,8 @@ def _profile_availability(root=".") -> dict:
 
 def _machine_settings_line(root=".") -> str:
     """Строка машинных настроек для шапки: «профиль: hevc | ffmpeg: D:\\…» — видно, чем рендерит."""
-    return f"настройки: профиль {_current_render_profile(root)}  |  ffmpeg {_current_ffmpeg_display(root)}"
+    return (f"настройки: профиль {_current_render_profile(root)}  |  "
+            f"палитра {_current_render_palette(root)}  |  ffmpeg {_current_ffmpeg_display(root)}")
 
 
 def set_render_profile(name: str, *, root=".") -> Path:
@@ -2235,6 +2317,44 @@ def set_render_profile(name: str, *, root=".") -> Path:
         encoder = {}
         data["encoder"] = encoder
     encoder["profile"] = name
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return local
+
+
+def _render_palettes(root=".") -> dict:
+    """{имя палитры: label} из render.yaml (+ render.local). Пусто при битом/отсутствующем конфиге."""
+    try:
+        cfg = load_render_config(Path(root) / "config" / "render.yaml")
+    except (ConfigError, OSError):
+        return {}
+    return {name: pal.label for name, pal in cfg.palettes.items()}
+
+
+def _current_render_palette(root=".") -> str:
+    """Активная палитра: env RENDER_PALETTE > render.local.yaml > render.yaml. Фолбэк 'neutral'."""
+    env = os.environ.get("RENDER_PALETTE")
+    if env:
+        return env
+    try:
+        return load_render_config(Path(root) / "config" / "render.yaml").palette
+    except (ConfigError, OSError):
+        return "neutral"
+
+
+def set_render_palette(name: str, *, root=".") -> Path:
+    """Сохранить палитру цветокора в config/render.local.yaml (машинная настройка, не в git).
+
+    Deep-merge в поле palette — прочие ключи сохраняются. Неизвестная палитра → ConfigError."""
+    import yaml
+    known = _render_palettes(root)
+    if known and name not in known:
+        raise ConfigError(f"неизвестная палитра '{name}'; допустимо: {', '.join(known)}")
+    local = Path(root) / "config" / "render.local.yaml"
+    data = {}
+    if local.is_file():
+        data = yaml.safe_load(local.read_text(encoding="utf-8")) or {}
+    data["palette"] = name
     local.parent.mkdir(parents=True, exist_ok=True)
     local.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return local
@@ -2271,11 +2391,14 @@ def _menu_render(root=".", *, platform: str | None = None) -> str:
     lines.append(f"  {_machine_settings_line(root)}")
     lines.append("")
     current_profile = _current_render_profile(root)
+    current_palette = _current_render_palette(root)
     for num, action, label, hint in _MENU_ITEMS:
         marker = marker_char if action == rec else " "
-        # Пункт профиля показывает ТЕКУЩИЙ профиль прямо в подписи.
+        # Пункт профиля/палитры показывает ТЕКУЩЕЕ значение прямо в подписи.
         if action == "profile":
             label = f"{label}: {current_profile}"
+        elif action == "palette":
+            label = f"{label}: {current_palette}"
         note = f"  ({hint})" if hint else ""
         # Пометка неактуальных машине пунктов (не блокируем — только подсказка).
         if action == "go" and not is_mac:
@@ -2601,6 +2724,10 @@ def _build_parser():
                     help="сохранить профиль рендера (hevc|h264|av1) в render.local.yaml")
     pm.add_argument("--profiles", action="store_true",
                     help="напечатать доступные профили рендера с описанием")
+    pm.add_argument("--set-palette", default=None, dest="set_palette",
+                    help="сохранить палитру цветокора (neutral|vivid|soft|sharp) в render.local.yaml")
+    pm.add_argument("--palettes", action="store_true",
+                    help="напечатать доступные палитры цветокора с описанием")
     pm.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
     ps = sub.add_parser(
@@ -2729,6 +2856,8 @@ def _build_parser():
     )
     pd.add_argument("--profile", default=None,
                     help="кодек-профиль: h264 (совместимый) | hevc (компактный, дефолт) | av1 (эксп.)")
+    pd.add_argument("--palette", default=None,
+                    help="палитра цветокора: neutral (дефолт) | vivid | soft | sharp")
     pd.add_argument("--encoder", default=None,
                     help="видеокодек ffmpeg (переопределяет кодек профиля; h264_amf — AMD, libx264 — CPU)")
     pd.add_argument("--ffmpeg", default=None,
@@ -2742,6 +2871,31 @@ def _build_parser():
     pd.add_argument("--no-auto-recrop", action="store_true", dest="no_auto_recrop",
                     help="не авто-применять калибровку при устаревшем кропе (строго блокировать, "
                          "как раньше — обновлять вручную через arl recrop)")
+
+    ppv = sub.add_parser(
+        "preview",
+        help="короткий фрагмент клипа в нескольких палитрах — подобрать цветокор без полного рендера",
+        description=(
+            "Рендерит ОДИН короткий фрагмент (по умолч. 6с) первого клипа манифеста в НЕСКОЛЬКИХ\n"
+            "палитрах — быстрое сравнение цветокора, вместо рендера всех 13 клипов.\n"
+            "Выход: reels-out/_preview/<id>__<палитра>.mp4 (субтитры не выжигаются — чистый цвет).\n\n"
+            "Пример: autoreels preview лекция --palettes neutral,vivid,sharp\n"
+            "Все пресеты: autoreels preview лекция"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ppv.add_argument("manifest", nargs="?", default=None, metavar="манифест",
+                     help="имя/стем/путь манифеста (без аргумента — первый в manifests/)")
+    ppv.add_argument("--palettes", default=None,
+                     help="список палитр через запятую (по умолчанию — все пресеты)")
+    ppv.add_argument("--seconds", type=float, default=6.0,
+                     help="длина фрагмента в секундах (5–8 удобно; по умолчанию 6)")
+    ppv.add_argument("--reel", default=None, dest="reel",
+                     help="id клипа для превью (по умолчанию — первый в манифесте)")
+    ppv.add_argument("--profile", default=None, help="кодек-профиль (как у render)")
+    ppv.add_argument("--encoder", default=None, help="видеокодек ffmpeg (как у render)")
+    ppv.add_argument("--ffmpeg", default=None,
+                     help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
 
     prs = sub.add_parser(
         "resume",
@@ -2893,6 +3047,19 @@ def main(argv=None) -> int:
                 return 1
             print(f"✓ профиль рендера: {args.set_profile} → {path} "
                   f"(применится ко всем последующим рендерам)")
+        elif args.palettes:
+            cur = _current_render_palette(root=args.root)
+            for name, desc in _render_palettes(root=args.root).items():
+                mark = " (текущая)" if name == cur else ""
+                print(f"{name}{mark} — {desc}")
+        elif args.set_palette is not None:
+            try:
+                path = set_render_palette(args.set_palette, root=args.root)
+            except ConfigError as e:
+                print(f"ошибка: {e}", file=sys.stderr)
+                return 1
+            print(f"✓ палитра рендера: {args.set_palette} → {path} "
+                  f"(применится ко всем последующим рендерам)")
         else:
             print(_menu_render(root=args.root))
         return 0
@@ -2954,8 +3121,14 @@ def main(argv=None) -> int:
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
+                       palette=args.palette,
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
                        auto_recrop=not args.no_auto_recrop)
+        elif args.cmd == "preview":
+            pals = [p.strip() for p in args.palettes.split(",") if p.strip()] if args.palettes else None
+            return cmd_preview(args.manifest, palettes=pals, seconds=args.seconds,
+                               reel_id=args.reel, encoder=args.encoder, ffmpeg=args.ffmpeg,
+                               profile=args.profile)
         elif args.cmd == "resume":
             return cmd_resume(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile)
         elif args.cmd == "recrop":

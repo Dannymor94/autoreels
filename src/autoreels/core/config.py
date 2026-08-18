@@ -240,6 +240,45 @@ class SubtitleStyle(BaseModel):
     font_dir: str | None
 
 
+class PaletteEq(BaseModel):
+    """eq-фильтр цветокоррекции. Дефолты = нейтрально (картинка не меняется)."""
+    model_config = ConfigDict(extra="forbid")
+    brightness: float = 0.0   # -1..1
+    contrast: float = 1.0     # 0..2
+    saturation: float = 1.0   # 0..3
+    gamma: float = 1.0        # 0.1..10
+
+
+class PaletteUnsharp(BaseModel):
+    """unsharp (резкость). ВЫКЛ по умолчанию — перебор даёт звон по контурам, соцсети усилят."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    luma_msize_x: int = 5
+    luma_msize_y: int = 5
+    luma_amount: float = 0.8
+
+
+class Palette(BaseModel):
+    """Пресет палитры: eq + unsharp + опц. цветовая температура. neutral = всё по дефолтам."""
+    model_config = ConfigDict(extra="forbid")
+    eq: PaletteEq = Field(default_factory=PaletteEq)
+    unsharp: PaletteUnsharp = Field(default_factory=PaletteUnsharp)
+    colortemperature: int | None = None   # Кельвины; <6500 теплее, >6500 холоднее; None = выкл
+    label: str = ""                       # заметка для меню
+
+
+# Готовые пресеты палитры (значения — не хардкод в коде рендера).
+_DEFAULT_PALETTES: dict[str, dict] = {
+    "neutral": {"label": "без изменений (дефолт)"},
+    "vivid":   {"eq": {"saturation": 1.15, "contrast": 1.10},
+                "label": "живее: насыщенность +15%, контраст +10% (соцсети)"},
+    "soft":    {"eq": {"contrast": 0.95, "saturation": 1.05}, "colortemperature": 5400,
+                "label": "мягче + теплее (talking-head)"},
+    "sharp":   {"eq": {"contrast": 1.05}, "unsharp": {"enabled": True, "luma_amount": 0.6},
+                "label": "умеренный unsharp + лёгкий контраст"},
+}
+
+
 class RenderConfig(BaseModel):
     """Типизированный config/render.yaml."""
 
@@ -251,6 +290,15 @@ class RenderConfig(BaseModel):
     audio_extract: AudioExtract
     subtitles: SubtitleStyle
     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
+    palette: str = "neutral"                 # активная палитра (--palette / render.local.yaml)
+    palettes: dict[str, Palette] = Field(
+        default_factory=lambda: {k: Palette(**v) for k, v in _DEFAULT_PALETTES.items()}
+    )
+
+    @property
+    def active_palette(self) -> Palette:
+        """Активный пресет палитры (по имени `palette`)."""
+        return self.palettes[self.palette]
 
 
 # ----------------------------------------------------------------------- Subtitles

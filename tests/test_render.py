@@ -834,6 +834,114 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     assert "#травма #психология" in content
 
 
+# ------------------------------------------------------------ палитра / цветокоррекция
+
+from autoreels.core.config import Palette, PaletteEq, PaletteUnsharp
+from autoreels.local.render import palette_filter
+
+
+def test_palette_neutral_produces_empty_filter():
+    # neutral = все дефолты → пустая строка (команда рендера не меняется)
+    assert palette_filter(Palette()) == ""
+
+
+def test_palette_eq_only_non_neutral_terms():
+    # eq выдаёт только НЕ-нейтральные термы, порядок фиксирован contrast→brightness→sat→gamma
+    pal = Palette(eq=PaletteEq(saturation=1.15, contrast=1.10))
+    assert palette_filter(pal) == "eq=contrast=1.1:saturation=1.15"
+
+
+def test_palette_unsharp_off_by_default_on_when_enabled():
+    off = Palette(unsharp=PaletteUnsharp(enabled=False, luma_amount=0.6))
+    assert "unsharp" not in palette_filter(off)
+    on = Palette(unsharp=PaletteUnsharp(enabled=True, luma_amount=0.6))
+    assert palette_filter(on) == "unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount=0.6"
+
+
+def test_palette_colortemperature_appended_last():
+    pal = Palette(eq=PaletteEq(contrast=0.95), colortemperature=5400)
+    assert palette_filter(pal) == "eq=contrast=0.95,colortemperature=temperature=5400"
+
+
+def test_palette_filter_part_order_eq_unsharp_temp():
+    # порядок частей: eq → unsharp → colortemperature
+    pal = Palette(
+        eq=PaletteEq(contrast=1.05),
+        unsharp=PaletteUnsharp(enabled=True, luma_amount=0.6),
+        colortemperature=5400,
+    )
+    f = palette_filter(pal)
+    assert f.index("eq=") < f.index("unsharp=") < f.index("colortemperature=")
+
+
+def test_render_config_default_palette_is_neutral():
+    cfg = load_render_config(RENDER_YAML, local_path=_NO_LOCAL)
+    assert cfg.palette == "neutral"
+    assert set(cfg.palettes) >= {"neutral", "vivid", "soft", "sharp"}
+    assert palette_filter(cfg.palettes["neutral"]) == ""
+    assert cfg.active_palette is cfg.palettes["neutral"]
+
+
+def test_render_config_vivid_preset_values():
+    cfg = load_render_config(RENDER_YAML, local_path=_NO_LOCAL)
+    assert palette_filter(cfg.palettes["vivid"]) == "eq=contrast=1.1:saturation=1.15"
+
+
+def test_crop_default_neutral_palette_leaves_vf_unchanged(tmp_path, render_cfg, fake_ffmpeg):
+    # дефолт neutral → vf ровно crop,scale, без eq/unsharp/colortemperature
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"neutral-palette-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+    assert "eq=" not in vf and "unsharp=" not in vf
+
+
+def test_crop_palette_arg_inserts_eq_between_scale_and_end(tmp_path, render_cfg, fake_ffmpeg):
+    # --palette vivid → eq после scale; порядок crop→scale→eq
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"vivid-palette-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                palette="vivid")
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert vf == "crop=1215:2160:1240:0,scale=1080:1920,eq=contrast=1.1:saturation=1.15"
+    assert vf.index("eq=") > vf.index("scale=")
+
+
+def test_crop_palette_from_config_when_no_arg(tmp_path, render_cfg, fake_ffmpeg):
+    # палитра из конфига (render_cfg.palette), без явного arg
+    render_cfg.palette = "vivid"
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"config-palette-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    assert "eq=contrast=1.1:saturation=1.15" in _val_after(fake_ffmpeg[0], "-vf")
+
+
+def test_crop_palette_before_subtitles_ass(tmp_path, render_cfg, fake_ffmpeg):
+    # порядок цепочки: crop → scale → eq (палитра) → ass (субтитры чистые, поверх цветокора)
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"palette-then-subs-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                palette="vivid", subtitles_cfg=subs_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert vf.index("scale=") < vf.index("eq=") < vf.index("ass=")
+
+
 def test_crop_sidecar_txt_format_is_title_blankline_description_utf8(tmp_path, render_cfg, fake_ffmpeg):
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "v.mp4", b"sidecar-format-video")
