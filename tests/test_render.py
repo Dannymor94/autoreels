@@ -834,6 +834,60 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     assert "#травма #психология" in content
 
 
+# ------------------------------------------------------------ выравнивание горизонта (rotate)
+
+def _crop_setup_rot(deg: float) -> SetupProfile:
+    return SetupProfile(
+        setup_id="tilt", crop=Crop(x=1240, y=0, w=1215, h=2160),
+        scale=[1080, 1920], frame=[3840, 2160], rotation_deg=deg,
+    )
+
+
+def test_crop_rotation_zero_adds_no_rotate_filter(tmp_path, render_cfg, fake_ffmpeg):
+    # дефолт 0° → фильтр rotate НЕ добавляется (команда прежняя)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"rot-zero-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup_rot(0.0))
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert "rotate=" not in vf
+    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+
+
+def test_crop_rotation_prepends_rotate_before_crop(tmp_path, render_cfg, fake_ffmpeg):
+    # угол → rotate ПЕРЕД crop (иначе кроп берёт пустые углы); значение в радианах
+    import math
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"rot-set-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup_rot(3.0))
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    rad = math.radians(3.0)
+    assert vf == f"rotate={rad:.6f},crop=1215:2160:1240:0,scale=1080:1920"
+    assert vf.index("rotate=") < vf.index("crop=") < vf.index("scale=")
+
+
+def test_crop_rotation_then_palette_then_subtitles_order(tmp_path, render_cfg, fake_ffmpeg):
+    # полная цепочка: rotate → crop → scale → eq (палитра) → ass (субтитры)
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"rot-palette-subs-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup_rot(2.5))
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                palette="vivid", subtitles_cfg=subs_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert vf.index("rotate=") < vf.index("crop=") < vf.index("scale=") \
+        < vf.index("eq=") < vf.index("ass=")
+
+
 # ------------------------------------------------------------ палитра / цветокоррекция
 
 from autoreels.core.config import Palette, PaletteEq, PaletteUnsharp

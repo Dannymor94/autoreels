@@ -17,6 +17,7 @@ r"""R1a — нарезка без кропа: manifest → reels-out/<id>_raw.mp
 """
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import subprocess
@@ -363,15 +364,28 @@ def build_cut_cmd(
     ]
 
 
-def _crop_vf(setup: SetupProfile) -> str:
-    """Видеофильтр кропа+скейла из профиля сетапа: `crop=w:h:x:y,scale=SW:SH`.
+def _rotate_vf(rotation_deg: float) -> str:
+    """Фильтр выравнивания горизонта: `rotate=<рад>` (+ = по часовой, как CSS-превью калибратора),
+    билинейная интерполяция (дефолт ffmpeg), чёрная заливка углов. Угол 0 → пустая строка (фильтр
+    НЕ добавляем — не тратим обработку). Поворот ставится ПЕРЕД кропом: кроп берёт заполненную
+    область повёрнутого кадра, а не пустые треугольники по углам."""
+    if not rotation_deg:
+        return ""
+    rad = math.radians(rotation_deg)
+    return f"rotate={rad:.6f}"
 
-    Числа — данные манифеста (`setup.crop` + `setup.scale`), НЕ хардкод в коде. Кроп один
-    на все клипы (уровень манифеста, не reel — как в схеме models.py).
+
+def _crop_vf(setup: SetupProfile) -> str:
+    """Видеофильтр выравнивания+кропа+скейла из профиля сетапа: `[rotate=…,]crop=w:h:x:y,scale=SW:SH`.
+
+    Числа — данные манифеста (`setup.crop` + `setup.scale` + `setup.rotation_deg`), НЕ хардкод.
+    Порядок: rotate → crop → scale. Кроп один на все клипы (уровень манифеста, не reel).
     """
     c = setup.crop
     sw, sh = setup.scale
-    return f"crop={c.w}:{c.h}:{c.x}:{c.y},scale={sw}:{sh}"
+    rot = _rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)
+    crop_scale = f"crop={c.w}:{c.h}:{c.x}:{c.y},scale={sw}:{sh}"
+    return f"{rot},{crop_scale}" if rot else crop_scale
 
 
 

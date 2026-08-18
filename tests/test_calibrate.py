@@ -304,6 +304,52 @@ def test_handle_save_warns_on_narrow_crop(tmp_path, capsys):
     assert "узкий" in capsys.readouterr().out
 
 
+def test_handle_save_persists_rotation_deg(tmp_path):
+    """rotation_deg из payload попадает в calibrations/<sha>.json и в ответ."""
+    calib = tmp_path / "calibrations"
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=calib)
+    cal_obj.frame_size = (3840, 2160)
+    body = json.dumps({
+        "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+        "display_size": [1920, 1080], "frame_size": [3840, 2160],
+        "rotation_deg": 2.5,
+    }).encode("utf-8")
+
+    resp = cal_obj._handle_save(body)
+
+    assert resp["rotation_deg"] == 2.5
+    rec = json.loads((calib / ("a" * 64 + ".json")).read_text(encoding="utf-8"))
+    assert rec["rotation_deg"] == 2.5
+
+
+def test_handle_save_no_rotation_defaults_zero(tmp_path):
+    """Payload без rotation_deg → сохраняется 0 (обратная совместимость)."""
+    calib = tmp_path / "calibrations"
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=calib)
+    cal_obj.frame_size = (3840, 2160)
+    body = json.dumps({
+        "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+        "display_size": [1920, 1080], "frame_size": [3840, 2160],
+    }).encode("utf-8")
+    cal_obj._handle_save(body)
+    rec = json.loads((calib / ("a" * 64 + ".json")).read_text(encoding="utf-8"))
+    assert rec["rotation_deg"] == 0.0
+
+
+def test_handle_save_warns_when_rotation_pushes_crop_out(tmp_path):
+    """Полновысотный кроп + большой угол → предупреждение о пустых углах в ответе."""
+    calib = tmp_path / "calibrations"
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=calib)
+    cal_obj.frame_size = (3840, 2160)
+    body = json.dumps({
+        "display": {"x": 1312, "y": 0, "w": 1215, "h": 2160},   # во всю высоту
+        "display_size": [3840, 2160], "frame_size": [3840, 2160],
+        "rotation_deg": 8.0,
+    }).encode("utf-8")
+    resp = cal_obj._handle_save(body)
+    assert "warning" in resp and "угол" in resp["warning"].lower()
+
+
 def test_html_scales_by_natural_size_not_ffprobe():
     """JS считает масштаб по img.naturalWidth (истинный размер PNG), не по ffprobe-FW,
     и шлёт натуральный размер как frame_size — фикс SAR/поворота."""

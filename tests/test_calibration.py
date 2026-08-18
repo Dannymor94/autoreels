@@ -9,8 +9,11 @@ import pytest
 from autoreels.core.calibration import (
     CalibrationError,
     RawSelection,
+    crop_fits_after_rotation,
     finalize_selection,
     load_calibration,
+    max_safe_rotation_deg,
+    rotation_safety_warning,
     save_calibration,
     snap_9_16,
     to_real_pixels,
@@ -95,6 +98,64 @@ def test_calibration_keyed_by_sha_not_name(tmp_path):
     assert load_calibration(tmp_path, SHA_A) is not None
     with pytest.raises(CalibrationError):
         load_calibration(tmp_path, SHA_B)
+
+
+# ------------------------------------------------------- выравнивание горизонта (rotation_deg)
+
+def test_save_load_rotation_deg_roundtrip(tmp_path):
+    save_calibration(
+        tmp_path, source_name="tilt.mp4", source_sha256=SHA_A,
+        crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], rotation_deg=3.5,
+    )
+    setup = load_calibration(tmp_path, SHA_A)
+    assert setup.rotation_deg == 3.5
+
+
+def test_rotation_defaults_to_zero_when_absent(tmp_path):
+    # калибровка без поля (снята до фичи) → rotation_deg = 0 (обратная совместимость)
+    save_calibration(
+        tmp_path, source_name="old.mp4", source_sha256=SHA_A,
+        crop=Crop(x=0, y=0, w=956, h=1700), frame=[3840, 2160],
+    )
+    import json
+    p = tmp_path / f"{SHA_A}.json"
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    del rec["rotation_deg"]
+    p.write_text(json.dumps(rec), encoding="utf-8")
+    assert load_calibration(tmp_path, SHA_A).rotation_deg == 0.0
+
+
+def test_crop_fits_after_rotation_angle_zero_always_true():
+    # угол 0 → всегда помещается (кроп уже валиден)
+    crop = Crop(x=0, y=0, w=956, h=1700)
+    assert crop_fits_after_rotation(crop, 3840, 2160, 0.0) is True
+
+
+def test_crop_fits_after_rotation_centered_small_angle():
+    # центральный кроп с полями по всем краям, маленький угол → всё ещё в заполненной зоне
+    crop = Crop(x=1642, y=300, w=556, h=988)     # центр 3840×2160, есть запас к краям
+    assert crop_fits_after_rotation(crop, 3840, 2160, 2.0) is True
+
+
+def test_crop_fails_when_full_height_crop_rotated():
+    # кроп во всю высоту кадра: любой поворот утыкает верх/низ в пустые углы → не помещается
+    crop = Crop(x=1442, y=0, w=1215, h=2160)
+    assert crop_fits_after_rotation(crop, 3840, 2160, 5.0) is False
+
+
+def test_rotation_safety_warning_only_when_unsafe():
+    safe = Crop(x=1442, y=200, w=956, h=1700)
+    assert rotation_safety_warning(safe, 3840, 2160, 1.0) is None
+    unsafe = Crop(x=1442, y=0, w=1215, h=2160)
+    warn = rotation_safety_warning(unsafe, 3840, 2160, 8.0)
+    assert warn is not None and "уменьш" in warn.lower()
+
+
+def test_max_safe_rotation_shrinks_as_crop_grows():
+    # запас к центру: кроп с полями допускает больший угол, чем кроп впритык к краям
+    roomy = Crop(x=1642, y=300, w=556, h=988)
+    tight = Crop(x=1442, y=0, w=1215, h=2160)
+    assert max_safe_rotation_deg(roomy, 3840, 2160) > max_safe_rotation_deg(tight, 3840, 2160)
 
 
 # --------------------------------------------------------------- авто-кроп (centre)

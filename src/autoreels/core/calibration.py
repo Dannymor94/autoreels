@@ -19,6 +19,7 @@ Downloads/). Это компромисс из-за serverless HTML без бэк
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -114,6 +115,59 @@ def validate_crop_in_frame(crop: Crop, frame_w: int, frame_h: int) -> None:
         )
 
 
+def crop_fits_after_rotation(crop: Crop, frame_w: int, frame_h: int, rotation_deg: float,
+                             *, tol: float = 1.0) -> bool:
+    """Помещается ли кроп-прямоугольник в ЗАПОЛНЕННУЮ область повёрнутого кадра.
+
+    Рендер поворачивает кадр на `rotation_deg` вокруг центра (тот же WxH-холст), из-за чего по
+    углам появляются пустые треугольники, а кроп берётся уже из повёрнутого холста. Кроп безопасен,
+    только если целиком лежит в пересечении исходного кадра и повёрнутого — центрированном
+    восьмиугольнике. Проверяем консервативно для ОБОИХ направлений поворота (не зависит от знака
+    угла в ffmpeg): каждый угол кропа, повёрнутый на ±θ вокруг центра, обязан попасть в [0,W]×[0,H].
+    Угол 0 → всегда True (кроп уже проверен `validate_crop_in_frame`)."""
+    if not rotation_deg:
+        return True
+    theta = math.radians(abs(rotation_deg))
+    cx, cy = frame_w / 2.0, frame_h / 2.0
+    corners = [(crop.x, crop.y), (crop.x + crop.w, crop.y),
+               (crop.x, crop.y + crop.h), (crop.x + crop.w, crop.y + crop.h)]
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    for px, py in corners:
+        dx, dy = px - cx, py - cy
+        for sign in (1.0, -1.0):
+            rx = cx + dx * cos_t - sign * dy * sin_t
+            ry = cy + sign * dx * sin_t + dy * cos_t
+            if rx < -tol or ry < -tol or rx > frame_w + tol or ry > frame_h + tol:
+                return False
+    return True
+
+
+def max_safe_rotation_deg(crop: Crop, frame_w: int, frame_h: int, *, limit: float = 10.0) -> float:
+    """Наибольший |угол| (в пределах `limit`), при котором кроп ещё лежит в заполненной области.
+
+    Для подсказки калибратору «уменьшите угол до …». Грубый скан с шагом 0.1° — достаточно для UI."""
+    step = 0.1
+    ok = 0.0
+    a = step
+    while a <= limit + 1e-9:
+        if crop_fits_after_rotation(crop, frame_w, frame_h, a):
+            ok = a
+            a += step
+        else:
+            break
+    return round(ok, 1)
+
+
+def rotation_safety_warning(crop: Crop, frame_w: int, frame_h: int,
+                            rotation_deg: float) -> str | None:
+    """Текст предупреждения, если кроп при данном угле вылезает в пустую зону (иначе None)."""
+    if crop_fits_after_rotation(crop, frame_w, frame_h, rotation_deg):
+        return None
+    safe = max_safe_rotation_deg(crop, frame_w, frame_h)
+    return (f"при повороте на {rotation_deg:g}° кроп задевает пустые углы повёрнутого кадра — "
+            f"уменьшите угол до ≈{safe:g}° или сдвиньте/уменьшите рамку")
+
+
 def crop_orientation_warnings(crop: Crop, frame_w: int, frame_h: int) -> list[str]:
     """Мягкие предупреждения по ориентации (не падать, но подсветить вероятную ошибку рамки).
 
@@ -170,8 +224,10 @@ def save_calibration(
     crop: Crop,
     frame,
     setup_label: str | None = None,
+    rotation_deg: float = 0.0,
 ) -> Path:
-    """Записать калибровку для файла (ключ — sha256). `setup_label` → setup_id манифеста."""
+    """Записать калибровку для файла (ключ — sha256). `setup_label` → setup_id манифеста.
+    `rotation_deg` — угол выравнивания горизонта (0 = без поворота)."""
     calibrations_dir = Path(calibrations_dir)
     calibrations_dir.mkdir(parents=True, exist_ok=True)
     rec = {
@@ -181,6 +237,7 @@ def save_calibration(
         "crop": crop.model_dump(),
         "scale": TARGET_SCALE,
         "frame": list(frame),
+        "rotation_deg": float(rotation_deg),
         # Пространство координат — ОТОБРАЖАЕМОЕ: кадр калибровки извлечён с autorotate (как
         # видит человек), рендер тоже autorotate → crop-фильтр в том же повёрнутом кадре.
         # frame здесь = display-размеры (после rotation-метаданных). Поворот кадра не делаем —
@@ -213,6 +270,7 @@ def load_calibration(calibrations_dir: str | Path, source_sha256: str) -> SetupP
             crop=Crop.model_validate(rec["crop"]),
             scale=rec.get("scale", TARGET_SCALE),
             frame=rec["frame"],
+            rotation_deg=rec.get("rotation_deg", 0.0),
         )
     except (KeyError, ValidationError) as e:
         raise CalibrationError(f"невалидная калибровка {path}: {e}") from e

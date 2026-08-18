@@ -39,6 +39,7 @@ from autoreels.core.calibration import (
     crop_orientation_warnings,
     finalize_selection,
     frame_orientation,
+    rotation_safety_warning,
     save_calibration,
     validate_crop_in_frame,
 )
@@ -311,19 +312,27 @@ class ManualCalibrator:
         payload = json.loads(body)
         sel = raw_selection_from_drop(payload, self.frame_size)
         crop = finalize_selection(sel)              # реальные px + точный 9:16 + границы (ядро)
+        rotation_deg = float(payload.get("rotation_deg", 0.0) or 0.0)
         # frame = размер, в котором браузер считал координаты (натуральный размер кадра из PNG),
         # чтобы кроп и кадр были в ОДНОМ пространстве (важно при SAR/повороте телефона).
         frame = list(sel.frame_size) if sel.frame_size and sel.frame_size[0] else list(self.frame_size)
         self.saved_path = save_calibration(
             self.calib_dir, source_name=self.source_name, source_sha256=self.sha,
-            crop=crop, frame=frame, setup_label=self.setup_label,
+            crop=crop, frame=frame, setup_label=self.setup_label, rotation_deg=rotation_deg,
         )
         self._sel = sel
-        resp = {"ok": True, "crop": crop.model_dump(), "saved": str(self.saved_path)}
+        resp = {"ok": True, "crop": crop.model_dump(), "saved": str(self.saved_path),
+                "rotation_deg": rotation_deg}
         warn = narrow_crop_warning(crop, frame)
+        # Валидация выравнивания: кроп при этом угле должен помещаться в заполненную область.
+        rot_warn = rotation_safety_warning(crop, frame[0], frame[1], rotation_deg) if frame and frame[0] else None
+        combined = "; ".join(w for w in (warn, rot_warn) if w)
         if warn:
             print(f"  ⚠ {warn}", flush=True)
-            resp["warning"] = warn
+        if rot_warn:
+            print(f"  ⚠ {rot_warn}", flush=True)
+        if combined:
+            resp["warning"] = combined
         return resp
 
     def propose(self, frame_png, frame_size: tuple[int, int]) -> RawSelection:
@@ -500,7 +509,18 @@ _HTML_TEMPLATE = r"""<!doctype html>
   /* сцена с кадром */
   .stage{background:var(--stage);display:grid;place-items:center;padding:28px;overflow:auto}
   .frame{position:relative;line-height:0;box-shadow:0 24px 80px rgba(0,0,0,.6)}
-  .frame img{display:block;max-width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+  .frame img{display:block;max-width:100%;height:auto;user-select:none;-webkit-user-drag:none;
+    transform-origin:center center}   /* поворот выравнивания горизонта — вокруг центра */
+
+  /* сетка-помощник выравнивания: горизонтали/вертикали поверх кадра (НЕ поворачивается —
+     эталон, к которому пользователь подгоняет наклонённый горизонт). Плотнее правила третей. */
+  .level-grid{position:absolute;inset:0;pointer-events:none;z-index:1;display:none;
+    background:
+      repeating-linear-gradient(0deg,transparent 0,transparent calc(10% - 1px),rgba(110,168,254,.5) calc(10% - 1px),rgba(110,168,254,.5) 10%),
+      repeating-linear-gradient(90deg,transparent 0,transparent calc(10% - 1px),rgba(110,168,254,.5) calc(10% - 1px),rgba(110,168,254,.5) 10%)}
+  .level-grid.on{display:block}
+  .level-grid::after{content:"";position:absolute;left:0;right:0;top:50%;height:2px;
+    margin-top:-1px;background:rgba(123,216,143,.9)}   /* центральная горизонталь — «уровень» */
 
   /* 9:16 рамка-видоискатель: вырез в затемнении через большой box-shadow */
   .crop{position:absolute;left:0;top:0;cursor:grab;
@@ -551,6 +571,23 @@ _HTML_TEMPLATE = r"""<!doctype html>
     font:500 16px/1 var(--mono);padding:9px 10px;border-radius:5px;width:100%}
   .field input:focus{outline:none;border-color:var(--accent)}
 
+  /* блок выравнивания горизонта */
+  .rotbox{border:1px solid var(--line);border-radius:8px;padding:12px 13px;
+    display:flex;flex-direction:column;gap:9px}
+  .rothead{display:flex;justify-content:space-between;align-items:baseline}
+  .rothead label{font:600 10px/1 var(--mono);letter-spacing:.14em;color:var(--mut);
+    text-transform:uppercase}
+  .rothead output{font:650 15px/1 var(--mono);color:var(--accent)}
+  .rotbox input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
+  .rotrow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .rotbox .mini{appearance:none;border:1px solid var(--line);background:#0c0d10;color:var(--ink);
+    font:600 11px/1 var(--mono);padding:6px 9px;border-radius:5px;cursor:pointer}
+  .rotbox .mini:hover{border-color:var(--accent)}
+  .chk{display:flex;align-items:center;gap:6px;font:500 11.5px/1 var(--sans);color:var(--mut);
+    cursor:pointer}
+  .rothint{margin:0;font:500 11px/1.4 var(--sans);color:var(--mut)}
+  .rothint.bad{color:var(--bad)}
+
   button#save{appearance:none;border:0;border-radius:6px;cursor:pointer;
     background:var(--accent);color:#0c0d10;font:650 14px/1 var(--sans);
     padding:13px 14px;letter-spacing:.01em}
@@ -582,6 +619,7 @@ _HTML_TEMPLATE = r"""<!doctype html>
   <section class="stage">
     <div class="frame" id="frame">
       <img id="img" src="data:image/png;base64,__FRAME_B64__" alt="опорный кадр середины видео">
+      <div class="level-grid" id="levelGrid"></div>
       <div class="crop" id="crop" tabindex="0" aria-label="рамка кропа 9:16, стрелки двигают">
         <div class="thirds"></div>
         <div class="badge" id="badge">9:16 · 1080×1920</div>
@@ -608,6 +646,20 @@ _HTML_TEMPLATE = r"""<!doctype html>
       <div class="field"><label>Y <span class="u">px</span></label><input id="fy" type="number" inputmode="numeric"></div>
       <div class="field"><label>Ширина <span class="u">px</span></label><input id="fw" type="number" inputmode="numeric"></div>
       <div class="field"><label>Высота <span class="u">px</span></label><input id="fh" type="number" inputmode="numeric"></div>
+    </div>
+
+    <div class="rotbox">
+      <div class="rothead">
+        <label for="rot">Выравнивание горизонта</label>
+        <output id="rotval">0.0°</output>
+      </div>
+      <input id="rot" type="range" min="-10" max="10" step="0.1" value="0"
+             aria-label="угол поворота, градусы">
+      <div class="rotrow">
+        <button type="button" id="rotreset" class="mini">Сброс 0°</button>
+        <label class="chk"><input type="checkbox" id="gridtog"> сетка-уровень</label>
+      </div>
+      <p class="rothint" id="rothint">Наклонён горизонт? Крути ползунок и ровняй по сетке.</p>
     </div>
 
     <button id="save">Сохранить кроп</button>
@@ -685,7 +737,43 @@ function render(){
   crop.style.left=box.x+'px'; crop.style.top=box.y+'px';
   crop.style.width=box.w+'px'; crop.style.height=box.h+'px';
   syncFields();
+  updateRotHint();                    // при сдвиге рамки — пересчёт безопасности угла
 }
+
+/* ---- выравнивание горизонта: поворот кадра (CSS-превью), сетка-уровень, live-проверка ---- */
+let ROT=0;
+const rotEl=document.getElementById('rot'), rotVal=document.getElementById('rotval'),
+      rotHint=document.getElementById('rothint'), levelGrid=document.getElementById('levelGrid');
+// Помещается ли кроп в заполненную область при повороте на deg (та же октагон-проверка, что в
+// ядре: оба знака поворота, углы кропа в реальных px должны попасть в [0,NW]×[0,NH]).
+function cropFitsRot(deg){
+  if(!deg) return true;
+  const th=Math.abs(deg)*Math.PI/180, cx=NW/2, cy=NH/2, ct=Math.cos(th), st=Math.sin(th), tol=1;
+  const rx=box.x/s, ry=box.y/s, rw=box.w/s, rh=box.h/s;
+  const corners=[[rx,ry],[rx+rw,ry],[rx,ry+rh],[rx+rw,ry+rh]];
+  for(const c of corners){ const dx=c[0]-cx, dy=c[1]-cy;
+    for(const sg of [1,-1]){ const qx=cx+dx*ct-sg*dy*st, qy=cy+sg*dx*st+dy*ct;
+      if(qx<-tol||qy<-tol||qx>NW+tol||qy>NH+tol) return false; } }
+  return true;
+}
+function updateRotHint(){
+  if(!rotHint) return;
+  const ok=cropFitsRot(ROT);
+  rotHint.classList.toggle('bad', !ok);
+  rotHint.textContent = ok
+    ? 'Наклонён горизонт? Крути ползунок и ровняй по сетке.'
+    : '⚠ кроп задевает пустые углы повёрнутого кадра — уменьши угол или сдвинь/сузь рамку';
+}
+function applyRot(){
+  ROT=parseFloat(rotEl.value)||0;
+  rotVal.textContent=ROT.toFixed(1)+'°';
+  img.style.transform = ROT ? 'rotate('+ROT+'deg)' : '';
+  updateRotHint();
+}
+rotEl.addEventListener('input',applyRot);
+document.getElementById('rotreset').addEventListener('click',()=>{ rotEl.value=0; applyRot(); });
+document.getElementById('gridtog').addEventListener('change',e=>{
+  levelGrid.classList.toggle('on', e.target.checked); });
 
 /* ---- перетаскивание тела рамки ---- */
 crop.addEventListener('pointerdown',e=>{
@@ -757,7 +845,8 @@ saveBtn.addEventListener('click',()=>{
     body:JSON.stringify({
       display:{x:Math.round(box.x),y:Math.round(box.y),w:Math.round(box.w),h:Math.round(box.h)},
       display_size:[Math.round(DW),Math.round(DH)],
-      frame_size:[NW,NH]                              // НАТУРАЛЬНЫЙ размер кадра, не ffprobe
+      frame_size:[NW,NH],                             // НАТУРАЛЬНЫЙ размер кадра, не ffprobe
+      rotation_deg:ROT                                // угол выравнивания горизонта (0 = без поворота)
     })})
    .then(r=>r.json())
    .then(d=>{ if(d.ok){ const c=d.crop;

@@ -1519,12 +1519,16 @@ def cmd_recrop(
         old = manifest.setup.crop
         old_frame = list(manifest.setup.frame)
         new_frame = list(new_setup.frame)
+        old_rot = float(getattr(manifest.setup, "rotation_deg", 0.0) or 0.0)
+        new_rot = float(getattr(new_setup, "rotation_deg", 0.0) or 0.0)
         same_crop = old.model_dump() == new_setup.crop.model_dump()
         same_frame = old_frame == new_frame
-        if same_crop and same_frame:
+        same_rot = old_rot == new_rot
+        if same_crop and same_frame and same_rot:
             # Явно сообщаем «уже синхронно» (и в batch) — иначе «0 обновлено» выглядит как баг.
+            rot_note = f", поворот {old_rot:g}°" if old_rot else ""
             print(f"  = {stem}: кроп уже совпадает с калибровкой ({old.w}×{old.h}@{old.x},{old.y}, "
-                  f"кадр {old_frame}) — без изменений", flush=True)
+                  f"кадр {old_frame}{rot_note}) — без изменений", flush=True)
             synced.append(mf.name)
             continue
 
@@ -1537,8 +1541,13 @@ def cmd_recrop(
         # Обновляем ТОЛЬКО setup; reels/тексты/субтитры остаются те же объекты → байт-в-байт.
         _write_manifest(manifest.model_copy(update={"setup": new_setup}), manifests_dir)
         c = new_setup.crop
+        rot_note = ""
+        if old_rot != new_rot:
+            rot_note = f", поворот {old_rot:g}°→{new_rot:g}°"
+        elif new_rot:
+            rot_note = f", поворот {new_rot:g}°"
         print(f"  ✓ {stem}: кроп {old.w}×{old.h}@{old.x},{old.y} → {c.w}×{c.h}@{c.x},{c.y} "
-              f"в кадре {new_frame} (R0 не пересчитывался){space}", flush=True)
+              f"в кадре {new_frame}{rot_note} (R0 не пересчитывался){space}", flush=True)
         updated.append(mf.name)
         if push:
             _commit_push_manifest(manifests_dir / f"{stem}.json", len(manifest.reels), root=root)
@@ -1785,7 +1794,9 @@ def _manifest_calibration_desync(manifest, calibrations_dir) -> str | None:
         calib_crop = rec["crop"]
     except (OSError, json.JSONDecodeError, KeyError):
         return None
-    if manifest.setup.crop.model_dump() == calib_crop:
+    calib_rot = float(rec.get("rotation_deg", 0.0) or 0.0)
+    manifest_rot = float(getattr(manifest.setup, "rotation_deg", 0.0) or 0.0)
+    if manifest.setup.crop.model_dump() == calib_crop and manifest_rot == calib_rot:
         return None
     stem = Path(manifest.source).stem
     calib_is_manual = not (rec.get("auto") or rec.get("setup_label") == "auto")

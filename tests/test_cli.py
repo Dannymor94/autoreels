@@ -772,6 +772,42 @@ def test_no_desync_when_no_calibration_file(tmp_path):
     assert cli._manifest_calibration_desync(m, tmp_path / "calibrations") is None
 
 
+def test_desync_detects_rotation_change(tmp_path):
+    """Кроп тот же, но калибровку перевыровняли (угол изменился) → манифест устарел."""
+    sha = "d" * 64
+    crop = Crop(x=300, y=50, w=800, h=1400)
+    m = _manifest_with_crop("v", sha, crop, "v")           # rotation_deg=0 в манифесте
+    cal = tmp_path / "calibrations"
+    save_calibration(cal, source_name="v.mp4", source_sha256=sha, crop=crop,
+                     frame=[3840, 2160], setup_label="v", rotation_deg=2.5)
+
+    msg = cli._manifest_calibration_desync(m, cal)
+    assert msg is not None and "recrop" in msg.lower()
+
+
+def test_recrop_carries_rotation_into_manifest(tmp_path):
+    """recrop переносит rotation_deg из калибровки в манифест (без пересчёта R0)."""
+    root = tmp_path
+    (root / "inputs").mkdir()
+    manifests = root / "manifests"
+    manifests.mkdir()
+    cal = root / "calibrations"
+    sha = "e" * 64
+    crop = Crop(x=300, y=50, w=800, h=1400)
+    m = _manifest_with_crop("v", sha, crop, "v")
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    save_calibration(cal, source_name="v.mp4", source_sha256=sha, crop=crop,
+                     frame=[3840, 2160], setup_label="v", rotation_deg=3.0)
+
+    rc = cli.cmd_recrop("v", root=root, manifests_dir=manifests, calibrations_dir=cal,
+                        inputs_dir=root / "inputs", push=False, pull_first=False)
+    assert rc == 0
+    from autoreels.core.models import Manifest as _M
+    updated = _M.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
+    assert updated.setup.rotation_deg == 3.0
+    assert updated.setup.crop.model_dump() == crop.model_dump()   # кроп тот же
+
+
 def test_status_reports_calibration_desync(tmp_path, capsys):
     """status показывает рассинхронизацию: манифест с автокропом при ручной калибровке."""
     root = tmp_path
