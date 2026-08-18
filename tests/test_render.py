@@ -386,6 +386,8 @@ def test_real_render_config_defaults_are_social_optimal():
     assert ap.denoise_enabled is False and ap.fade_enabled is False
     # зум выключен по умолчанию; схема hook, наезд 8%
     assert cfg.zoom.enabled is False and cfg.zoom.scheme == "hook" and cfg.zoom.percent == 8.0
+    # музыка выключена по умолчанию; громкость тише голоса, финальная нормализация включена
+    assert cfg.music.enabled is False and cfg.music.volume < 0.3 and cfg.music.final_normalize is True
 
 
 # ------------------------------------ оценка размера выходного файла
@@ -838,6 +840,94 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     content = txt.read_text(encoding="utf-8")
     assert "ЗА ТРАВМОЙ скрыт ДАР 🫀…" in content
     assert "#травма #психология" in content
+
+
+# ------------------------------------------------------------ фоновая музыка (микс/loop/ducking)
+
+from autoreels.core.config import Music
+from autoreels.local.render import _music_filter_complex
+
+
+def test_music_filter_complex_has_amix_and_volume():
+    fc = _music_filter_complex("crop=1:1:0:0,scale=1080:1920", AudioProcessing(),
+                               Music(enabled=True, volume=0.13), 30.0)
+    assert "amix=inputs=2" in fc
+    assert "volume=0.13" in fc                    # громкость музыки из конфига
+    assert "[v]" in fc and "[a]" in fc            # выходы графа: видео и звук
+
+
+def test_music_volume_from_config():
+    fc = _music_filter_complex("scale=1080:1920", AudioProcessing(),
+                               Music(enabled=True, volume=0.2), 30.0)
+    assert "volume=0.2" in fc
+
+
+def test_music_no_ducking_by_default():
+    fc = _music_filter_complex("scale=1080:1920", AudioProcessing(),
+                               Music(enabled=True), 30.0)
+    assert "sidechaincompress" not in fc
+    assert "amix=inputs=2" in fc
+
+
+def test_music_ducking_flag_adds_sidechaincompress():
+    fc = _music_filter_complex("scale=1080:1920", AudioProcessing(),
+                               Music(enabled=True, ducking=True), 30.0)
+    assert "sidechaincompress" in fc
+    assert "asplit=2" in fc                        # речь раздвоена: в микс + сайдчейн-триггер
+
+
+def test_music_final_normalize_after_mix():
+    fc = _music_filter_complex("scale=1080:1920", AudioProcessing(),
+                               Music(enabled=True, final_normalize=True), 30.0)
+    # финальная нормализация ПОСЛЕ amix (анти-клиппинг суммы)
+    assert fc.index("amix=") < fc.rindex("loudnorm=")
+
+
+def test_music_fade_out_start_from_duration():
+    fc = _music_filter_complex("scale=1080:1920", AudioProcessing(),
+                               Music(enabled=True, fade_seconds=2.0), 30.0)
+    assert "afade=t=in:st=0:d=2" in fc and "afade=t=out:st=28:d=2" in fc
+
+
+def test_cut_cmd_music_loops_track_and_uses_filter_complex():
+    # -stream_loop -1 зацикливает короткий трек; filter_complex + -map вместо -vf/-af
+    cmd = build_cut_cmd(
+        "ffmpeg", "/src.mp4", 10.0, 40.0, "/out.mp4",
+        codec="libx264", preset="medium", video_bitrate="5M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+        music_path="/music/track.mp3", filter_complex="[0:v]scale=1080:1920[v];...[a]",
+    )
+    assert "-stream_loop" in cmd and _val_after(cmd, "-stream_loop") == "-1"
+    assert cmd.count("-i") == 2                    # источник + музыка
+    assert "-filter_complex" in cmd
+    assert _val_after(cmd, "-map") == "[v]"
+    assert "-vf" not in cmd and "-af" not in cmd   # микс идёт через filter_complex
+
+
+def test_render_music_off_by_default_no_second_input(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"no-music-video")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    cmd = fake_ffmpeg[0]
+    assert "-filter_complex" not in cmd and "-stream_loop" not in cmd
+    assert cmd.count("-i") == 1
+
+
+def test_render_music_path_adds_mix(tmp_path, render_cfg, fake_ffmpeg):
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"music-video")
+    (tmp_path / "track.mp3").write_bytes(b"fake-music")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                music_path=str(tmp_path / "track.mp3"))
+
+    cmd = fake_ffmpeg[0]
+    assert "-filter_complex" in cmd and "-stream_loop" in cmd
+    assert "amix=inputs=2" in _val_after(cmd, "-filter_complex")
 
 
 # ------------------------------------------------------------ эффект зума (hook, качество из источника)

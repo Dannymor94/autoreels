@@ -30,7 +30,7 @@ from pydantic import ValidationError
 
 from autoreels.core import state
 from autoreels.core.config import (
-    AudioProcessing, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
+    AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.models import Manifest, SetupProfile
 from autoreels.local.subtitles import build_ass
@@ -331,6 +331,8 @@ def build_cut_cmd(
     audio_bitrate: str,
     vf: str | None = None,
     af: str | None = None,
+    music_path: str | Path | None = None,
+    filter_complex: str | None = None,
     quality: str | None = None,
     rate_control: str | None = None,
     qp: int | None = None,
@@ -347,6 +349,24 @@ def build_cut_cmd(
     `cq` больше не влияет на команду (битрейт-режим), оставлен для совместимости вызовов.
     """
     duration = round(end - start, 3)
+    quality_args = _video_quality_args(codec, preset, video_bitrate, pix_fmt,
+                                       quality=quality, rate_control=rate_control, qp=qp)
+    if filter_complex and music_path:
+        # Микс с музыкой: второй вход (`-stream_loop -1` — зациклить трек), filter_complex вместо
+        # -vf/-af, явные -map выходов графа ([v]/[a]). Длину задаёт `-t` + amix duration=first.
+        return [
+            str(ffmpeg), "-y", "-loglevel", "error",
+            "-ss", _ts(start),
+            "-i", str(source),
+            "-stream_loop", "-1", "-i", str(music_path),
+            "-t", _ts(duration),
+            "-filter_complex", filter_complex,
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", codec, *quality_args,
+            "-c:a", audio_codec, "-b:a", audio_bitrate,
+            *(["-movflags", "+faststart"] if faststart else []),
+            str(out),
+        ]
     return [
         str(ffmpeg), "-y", "-loglevel", "error",
         # autorotate (ПО УМОЛЧАНИЮ, без -noautorotate): rotation-метаданные применяются ДО
@@ -359,8 +379,7 @@ def build_cut_cmd(
         *(["-vf", vf] if vf else []),
         *(["-af", af] if af else []),
         "-c:v", codec,
-        *_video_quality_args(codec, preset, video_bitrate, pix_fmt,
-                             quality=quality, rate_control=rate_control, qp=qp),
+        *quality_args,
         "-c:a", audio_codec,
         "-b:a", audio_bitrate,
         *(["-movflags", "+faststart"] if faststart else []),
@@ -379,26 +398,80 @@ def _rotate_vf(rotation_deg: float) -> str:
     return f"rotate={rad:.6f}"
 
 
-def _audio_filter_chain(ap: AudioProcessing, clip_duration: float) -> str:
-    """Аудиофильтры клипа. Порядок: шумоподавление → нормализация громкости → фейд.
+def _loudnorm_str(ap: AudioProcessing) -> str:
+    """Строка loudnorm по конфигу (нормализация к target_lufs)."""
+    return f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)}"
 
-    - afftdn (шумоподавление) — только если включено (по умолчанию выкл: может съесть голос);
-    - loudnorm (нормализация к target_lufs) — главное, единый уровень всех клипов;
-    - afade in/out — плавный старт/затухание; хвост fade-out ложится на padding-«воздух» конца.
-    Пусто — всё выключено (команда без -af). Порядок именно такой: чистим → ровняем → фейдим."""
+
+def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:
+    """Речевая часть: шумоподавление (если вкл) → нормализация громкости (если вкл). Без фейда."""
     parts: list[str] = []
     if ap.denoise_enabled:
         parts.append(f"afftdn=nr={_num(ap.denoise_strength)}")
     if ap.loudnorm_enabled:
-        parts.append(
-            f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)}"
-        )
-    if ap.fade_enabled and ap.fade_duration > 0:
-        d = ap.fade_duration
-        out_st = max(0.0, round(clip_duration - d, 3))
-        parts.append(f"afade=t=in:st=0:d={_num(d)}")
-        parts.append(f"afade=t=out:st={_num(out_st)}:d={_num(d)}")
-    return ",".join(parts)
+        parts.append(_loudnorm_str(ap))
+    return parts
+
+
+def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
+    """afade in/out (если фейд вкл). Хвост fade-out ложится на padding-«воздух» конца клипа."""
+    if not (ap.fade_enabled and ap.fade_duration > 0):
+        return []
+    d = ap.fade_duration
+    out_st = max(0.0, round(clip_duration - d, 3))
+    return [f"afade=t=in:st=0:d={_num(d)}", f"afade=t=out:st={_num(out_st)}:d={_num(d)}"]
+
+
+def _audio_filter_chain(ap: AudioProcessing, clip_duration: float) -> str:
+    """Аудиофильтры клипа (БЕЗ музыки). Порядок: шумоподавление → нормализация → фейд.
+    Пусто — всё выключено (команда без -af)."""
+    return ",".join(_audio_denoise_norm(ap) + _audio_fade_parts(ap, clip_duration))
+
+
+def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
+                          clip_duration: float) -> str:
+    """filter_complex для микса речи с фоновой музыкой. Второй вход (`-i` музыки) зациклен на
+    уровне демуксера (`-stream_loop -1`); длина берётся по речи (`amix duration=first`) — короткий
+    трек играет по кругу, длинный обрезается. Порядок аудио: речь(шумоподавление→нормализация) →
+    микс с музыкой(громкость+фейд[+ducking]) → финальная нормализация(анти-клиппинг) → фейд клипа.
+
+    Выходы графа: `[v]` (видео = `video_vf`) и `[a]` (готовый звук). Музыка заметно тише голоса
+    (`volume`); ducking (sidechaincompress) приглушает музыку, когда звучит речь."""
+    parts: list[str] = []
+    parts.append(f"[0:v]{video_vf}[v]" if video_vf else "[0:v]null[v]")
+
+    speech = _audio_denoise_norm(ap)              # шумоподавление → нормализация речи
+    speech_prefix = (",".join(speech) + ",") if speech else ""
+
+    # Музыка: громкость + фейд в начале/конце (fade-out ложится в конец по длине клипа).
+    mfade = ""
+    if music.fade_seconds > 0:
+        f = music.fade_seconds
+        out_st = max(0.0, round(clip_duration - f, 3))
+        mfade = f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
+    music_chain = f"volume={_num(music.volume)}{mfade}"
+
+    if music.ducking:
+        # Речь используется дважды (в микс и как сайдчейн-триггер) → split.
+        parts.append(f"[0:a]{speech_prefix}asplit=2[spmix][spsc]")
+        parts.append(f"[1:a]{music_chain}[mu0]")
+        parts.append("[mu0][spsc]sidechaincompress=threshold=0.03:ratio=8"
+                     ":attack=20:release=250[mu]")
+        mix_in = "[spmix][mu]"
+    else:
+        parts.append(f"[0:a]{speech_prefix}anull[sp]" if speech_prefix else "[0:a]anull[sp]")
+        parts.append(f"[1:a]{music_chain}[mu]")
+        mix_in = "[sp][mu]"
+
+    # Микс: normalize=0 — речь остаётся на полном уровне, музыка на своей громкости.
+    tail = [f"{mix_in}amix=inputs=2:duration=first:dropout_transition=0:normalize=0"]
+    post: list[str] = []
+    if music.final_normalize:
+        post.append(_loudnorm_str(ap))     # финальная нормализация микса (анти-клиппинг)
+    post += _audio_fade_parts(ap, clip_duration)
+    mix_str = tail[0] + ("".join("," + p for p in post))
+    parts.append(f"{mix_str}[a]")
+    return ";".join(parts)
 
 
 def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
@@ -496,6 +569,7 @@ def _render_segments(
     vf: str | None,
     suffix: str,
     palette_vf: str = "",
+    music_path: str | Path | None = None,
     profile: str | None = None,
     progress: Callable[[str], None] | None = None,
     emit_text: bool = False,
@@ -523,6 +597,7 @@ def _render_segments(
     enc = render_cfg.encoder
     aud = render_cfg.audio
     ap = render_cfg.audio_processing
+    music = render_cfg.music
     # Профиль: явный аргумент > env RENDER_PROFILE > активный из конфига. Кодек+битрейт —
     # из профиля; но явный encoder (флаг/env) может переопределить только кодек (Mac-дев:
     # AMF-кодека нет → подменяем на libx26x, битрейт профиля сохраняется).
@@ -567,16 +642,23 @@ def _render_segments(
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             clip_duration = reel.end - reel.start
-            reel_af = _audio_filter_chain(ap, clip_duration) or None
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
+            # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
+            reel_fc = None
+            reel_af = None
+            if music_path:
+                reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration)
+            else:
+                reel_af = _audio_filter_chain(ap, clip_duration) or None
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
                 codec=codec, preset=enc.preset,
                 video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                 audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-                vf=reel_vf, af=reel_af,
+                vf=(None if reel_fc else reel_vf), af=reel_af,
+                music_path=music_path, filter_complex=reel_fc,
                 quality=active.quality, rate_control=active.rate_control, qp=active.qp,
             )
             returncode, stderr_text = _run_ffmpeg_with_progress(
@@ -643,6 +725,7 @@ def render_crop(
     profile: str | None = None,
     palette: str | None = None,
     zoom: bool | None = None,
+    music_path: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
 ) -> list[Path]:
@@ -662,7 +745,7 @@ def render_crop(
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup, zoom_cfg), suffix="",
-        palette_vf=palette_vf,
+        palette_vf=palette_vf, music_path=music_path,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
     )
 

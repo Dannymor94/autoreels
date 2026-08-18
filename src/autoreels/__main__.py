@@ -1193,6 +1193,54 @@ def _preflight_encoder(prof_name, enc, render_cfg, *, ffmpeg, fallback, explicit
     )
 
 
+_MUSIC_EXTS = (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".flac", ".opus")
+
+
+def _resolve_music_track(music_cfg, root, *, flag=None) -> str | None:
+    """Абсолютный путь к фоновому треку или None (музыка выключена/трек не найден).
+
+    Приоритет: флаг --music > конфиг. Имя трека ищется как есть (абсолютный путь) или в music/.
+    `random` в конфиге → случайный файл из music/. Отсутствие файла — предупреждение, не ошибка
+    (рендер продолжается без музыки). Детерминизм: случайный трек — единственная не-детерминантная
+    точка, осознанно (разнообразие фона); границы/тексты/кроп от этого не зависят."""
+    music_dir = Path(root) / "music"
+
+    def _find(name: str) -> Path | None:
+        p = Path(name)
+        if p.is_file():
+            return p
+        cand = music_dir / name
+        return cand if cand.is_file() else None
+
+    if flag:
+        track = _find(flag)
+        if track is None:
+            print(f"  ⚠ музыка: трек «{flag}» не найден (ни как путь, ни в music/) — без музыки",
+                  file=sys.stderr, flush=True)
+        return str(track.resolve()) if track else None
+
+    if not music_cfg.enabled:
+        return None
+    if music_cfg.random:
+        tracks = sorted(p for p in music_dir.glob("*") if p.suffix.lower() in _MUSIC_EXTS) \
+            if music_dir.is_dir() else []
+        if not tracks:
+            print(f"  ⚠ музыка: music.random, но в {music_dir}/ нет треков — без музыки",
+                  file=sys.stderr, flush=True)
+            return None
+        import random
+        return str(random.choice(tracks).resolve())
+    if music_cfg.file:
+        track = _find(music_cfg.file)
+        if track is None:
+            print(f"  ⚠ музыка: трек «{music_cfg.file}» из конфига не найден — без музыки",
+                  file=sys.stderr, flush=True)
+        return str(track.resolve()) if track else None
+    print("  ⚠ музыка включена, но не задан файл (music.file / music.random / --music) — без музыки",
+          file=sys.stderr, flush=True)
+    return None
+
+
 def cmd_render(
     *,
     manifests_dir=None,
@@ -1206,6 +1254,7 @@ def cmd_render(
     profile=None,
     palette=None,
     zoom: bool | None = None,
+    music=None,
     fallback: bool = True,
     allow_stale: bool = False,
     auto_recrop: bool = True,
@@ -1245,6 +1294,8 @@ def cmd_render(
     if pal_name not in render_cfg.palettes:
         known = ", ".join(render_cfg.palettes)
         raise SystemExit(f"неизвестная палитра '{pal_name}'. Доступны: {known}")
+    # Фоновая музыка: --music <файл> > конфиг (music.file/random). None → без музыки.
+    music_path = _resolve_music_track(render_cfg.music, root, flag=music)
     # Отображаемый кодек: явный encoder переопределяет кодек профиля (Mac-дев без AMF).
     enc = encoder or os.environ.get("RENDER_ENCODER") or render_cfg.encoder.profiles[prof_name].codec
     # ffmpeg: флаг > env RENDER_FFMPEG > render.local.yaml > render.yaml → автопоиск.
@@ -1321,13 +1372,15 @@ def cmd_render(
             pal_tag = "" if pal_name == "neutral" else f", палитра {pal_name}"
             zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
             zoom_tag = ", зум" if zoom_on else ""
-            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}) → {out_dir_final} ===",
-                  flush=True)
+            music_tag = f", музыка {Path(music_path).name}" if music_path else ""
+            print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}{music_tag}) "
+                  f"→ {out_dir_final} ===", flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
-                profile=prof_name, palette=pal_name, zoom=zoom, subtitles_cfg=subtitles_cfg,
+                profile=prof_name, palette=pal_name, zoom=zoom, music_path=music_path,
+                subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
@@ -2888,6 +2941,8 @@ def _build_parser():
                     help="палитра цветокора: neutral (дефолт) | vivid | soft | sharp")
     pd.add_argument("--zoom", choices=["on", "off"], default=None,
                     help="эффект зума (hook): on|off переопределяет config zoom.enabled")
+    pd.add_argument("--music", default=None,
+                    help="фоновая музыка: путь к треку или имя файла в music/ (переопределяет config)")
     pd.add_argument("--encoder", default=None,
                     help="видеокодек ffmpeg (переопределяет кодек профиля; h264_amf — AMD, libx264 — CPU)")
     pd.add_argument("--ffmpeg", default=None,
@@ -3154,7 +3209,7 @@ def main(argv=None) -> int:
         elif args.cmd == "render":
             zoom_flag = {"on": True, "off": False}.get(args.zoom)   # None = из конфига
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
-                       palette=args.palette, zoom=zoom_flag,
+                       palette=args.palette, zoom=zoom_flag, music=args.music,
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
                        auto_recrop=not args.no_auto_recrop)
         elif args.cmd == "preview":

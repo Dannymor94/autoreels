@@ -251,6 +251,21 @@ class AudioExtract(BaseModel):
     bitrate: str | None = None   # напр. "64k" для mp3; None для PCM (bitrate неприменим)
 
 
+class Music(BaseModel):
+    """Фоновая музыка под речь. Микс: речь → шумоподавление → нормализация → микс с музыкой →
+    финальная нормализация (анти-клиппинг). Музыка заметно тише голоса. ВЫКЛ по умолчанию."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    file: str | None = None        # трек: путь (абсолютный или относительно music/)
+    random: bool = False           # случайный трек из music/ (разнообразие)
+    volume: float = 0.13           # громкость музыки (0..1) — тише голоса
+    fade_seconds: float = 2.0      # фейд музыки в начале/конце
+    ducking: bool = False          # приглушать музыку под речь (sidechaincompress)
+    final_normalize: bool = True   # финальная нормализация микса (сумма не клиппит)
+
+
 class Zoom(BaseModel):
     """Эффект зума (акцент на моменте). Качество: зум берётся ИЗ ИСХОДНОГО разрешения —
     zoompan сэмплит уже вырезанный полноразмерный регион и выводит 1080×1920 (динамический
@@ -327,6 +342,7 @@ class RenderConfig(BaseModel):
     subtitles: SubtitleStyle
     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
     audio_processing: AudioProcessing = Field(default_factory=AudioProcessing)
+    music: Music = Field(default_factory=Music)
     zoom: Zoom = Field(default_factory=Zoom)
     palette: str = "neutral"                 # активная палитра (--palette / render.local.yaml)
     palettes: dict[str, Palette] = Field(

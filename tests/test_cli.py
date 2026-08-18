@@ -2762,7 +2762,7 @@ def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, music_path, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2786,7 +2786,7 @@ def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, music_path, subtitles_cfg):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2894,6 +2894,81 @@ def test_cmd_render_zoom_flag_passes_bool_to_render(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "render_crop", _fake_render)
     cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, zoom=True)
     assert seen["zoom"] is True
+
+
+# ------------------------------------------------------------------ фоновая музыка
+
+def test_resolve_music_flag_finds_in_music_dir(tmp_path):
+    """--music <имя> ищется в music/ (или как путь). Найден → абсолютный путь."""
+    from autoreels.core.config import Music
+    (tmp_path / "music").mkdir()
+    track = tmp_path / "music" / "bg.mp3"
+    track.write_bytes(b"m")
+    got = cli._resolve_music_track(Music(), tmp_path, flag="bg.mp3")
+    assert got == str(track.resolve())
+
+
+def test_resolve_music_flag_missing_warns_and_none(tmp_path, capsys):
+    from autoreels.core.config import Music
+    got = cli._resolve_music_track(Music(), tmp_path, flag="nope.mp3")
+    assert got is None
+    assert "не найден" in capsys.readouterr().err
+
+
+def test_resolve_music_disabled_config_is_none(tmp_path):
+    from autoreels.core.config import Music
+    assert cli._resolve_music_track(Music(enabled=False), tmp_path) is None
+
+
+def test_resolve_music_config_file(tmp_path):
+    from autoreels.core.config import Music
+    (tmp_path / "music").mkdir()
+    (tmp_path / "music" / "song.mp3").write_bytes(b"m")
+    got = cli._resolve_music_track(Music(enabled=True, file="song.mp3"), tmp_path)
+    assert got.endswith("song.mp3")
+
+
+def test_resolve_music_random_picks_from_dir(tmp_path):
+    from autoreels.core.config import Music
+    (tmp_path / "music").mkdir()
+    for n in ("a.mp3", "b.wav"):
+        (tmp_path / "music" / n).write_bytes(b"m")
+    got = cli._resolve_music_track(Music(enabled=True, random=True), tmp_path)
+    assert Path(got).name in {"a.mp3", "b.wav"}
+
+
+def test_resolve_music_random_empty_dir_warns_none(tmp_path, capsys):
+    from autoreels.core.config import Music
+    (tmp_path / "music").mkdir()
+    assert cli._resolve_music_track(Music(enabled=True, random=True), tmp_path) is None
+    assert "нет треков" in capsys.readouterr().err
+
+
+def test_cmd_render_music_flag_threads_path(monkeypatch, tmp_path):
+    """cmd_render(music=<файл>) резолвит трек и прокидывает music_path в render_crop."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (manifests / "v.json").write_text(_manifest(source="v.mp4").model_dump_json(), encoding="utf-8")
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "v.mp4").write_bytes(b"x")
+    (tmp_path / "music").mkdir()
+    (tmp_path / "music" / "bg.mp3").write_bytes(b"m")
+
+    seen = {}
+
+    def _fake_render(manifest, *, music_path, **kw):
+        seen["music_path"] = music_path
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", _fake_render)
+    # root=tmp_path так, чтобы music/ и render.yaml нашлись
+    import shutil
+    (tmp_path / "config").mkdir()
+    shutil.copy(REPO_ROOT / "config" / "render.yaml", tmp_path / "config" / "render.yaml")
+    shutil.copy(REPO_ROOT / "config" / "subtitles.yaml", tmp_path / "config" / "subtitles.yaml")
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=tmp_path / "inputs", root=tmp_path,
+                   music="bg.mp3", pull_first=False)
+    assert seen["music_path"].endswith("bg.mp3")
 
 
 # -------------------------------------------------- ar без аргументов: status + hint
