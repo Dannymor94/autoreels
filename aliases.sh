@@ -45,7 +45,11 @@ _ar_menu() {
         _ar_cli menu
         printf "Выбор [цифра, Enter — обновить]: "
         read -r _choice
-        _action="$(_ar_cli menu --resolve "$_choice")"
+        # Windows Git Bash: Python-stdout приходит с CRLF; $() срезает только \n, оставляя \r —
+        # тогда $_action = "palette\r" и НИ ОДНА ветка case не матчится (меню «ничего не делает»).
+        # tr -d '\r' убирает CR → токен чистый на всех платформах. Так же чистим введённую цифру.
+        _choice="$(printf '%s' "$_choice" | tr -d '\r')"
+        _action="$(_ar_cli menu --resolve "$_choice" | tr -d '\r\n')"
         case "$_action" in
             go)        arl go ;;
             render)    arl r ;;
