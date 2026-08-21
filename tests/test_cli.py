@@ -2971,6 +2971,135 @@ def test_cmd_render_music_flag_threads_path(monkeypatch, tmp_path):
     assert seen["music_path"].endswith("bg.mp3")
 
 
+# ------------------------------------------------------------------ палитра из манифеста (setup)
+
+def _project_with_manifest(tmp_path, *, palette=None):
+    """Проект (render.yaml/subtitles.yaml) + manifests/v.json с одним reel и setup.palette."""
+    import shutil
+    (tmp_path / "config").mkdir()
+    shutil.copy(REPO_ROOT / "config" / "render.yaml", tmp_path / "config" / "render.yaml")
+    shutil.copy(REPO_ROOT / "config" / "subtitles.yaml", tmp_path / "config" / "subtitles.yaml")
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "v.mp4").write_bytes(b"x")
+    setup = SetupProfile(setup_id="s", crop=Crop(x=0, y=0, w=1080, h=1920),
+                         scale=[1080, 1920], frame=[1080, 1920], palette=palette)
+    m = Manifest(source="v.mp4", source_sha256="a" * 64, source_hash_scheme="partial-p1",
+                 duration_preset="shorts", setup=setup, run_key="rk", reels=[_reel("r01")])
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    return manifests
+
+
+def test_cmd_render_uses_manifest_setup_palette(monkeypatch, tmp_path):
+    """Палитра из setup.palette манифеста (выбрана в калибраторе) едет в render_crop."""
+    manifests = _project_with_manifest(tmp_path, palette="vivid")
+    seen = {}
+    monkeypatch.setattr(cli, "render_crop", lambda m, *, palette, **kw: seen.update(palette=palette) or [])
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=tmp_path / "inputs", root=tmp_path,
+                   pull_first=False)
+    assert seen["palette"] == "vivid"
+
+
+def test_cmd_render_flag_overrides_setup_palette(monkeypatch, tmp_path):
+    """Явный --palette переопределяет setup.palette манифеста."""
+    manifests = _project_with_manifest(tmp_path, palette="vivid")
+    seen = {}
+    monkeypatch.setattr(cli, "render_crop", lambda m, *, palette, **kw: seen.update(palette=palette) or [])
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=tmp_path / "inputs", root=tmp_path,
+                   palette="soft", pull_first=False)
+    assert seen["palette"] == "soft"
+
+
+def test_recrop_carries_palette_into_manifest(tmp_path):
+    """recrop переносит palette из калибровки в setup манифеста (как кроп)."""
+    from autoreels.core.calibration import save_calibration
+    root = tmp_path
+    (root / "inputs").mkdir()
+    manifests = root / "manifests"
+    manifests.mkdir()
+    cal = root / "calibrations"
+    sha = "e" * 64
+    crop = Crop(x=300, y=50, w=800, h=1400)
+    m = _manifest_with_crop("v", sha, crop, "v")
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    save_calibration(cal, source_name="v.mp4", source_sha256=sha, crop=crop,
+                     frame=[3840, 2160], setup_label="v", palette="soft")
+
+    rc = cli.cmd_recrop("v", root=root, manifests_dir=manifests, calibrations_dir=cal,
+                        inputs_dir=root / "inputs", push=False, pull_first=False)
+    assert rc == 0
+    updated = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
+    assert updated.setup.palette == "soft"
+
+
+# ------------------------------------------------------------------ настройки: музыка / звук
+
+def test_set_render_music_writes_enabled_and_file(tmp_path):
+    import yaml
+    root = _tmp_project_with_render_yaml(tmp_path)
+    cli.set_render_music("bg.mp3", root=root)
+    data = yaml.safe_load((root / "config" / "render.local.yaml").read_text(encoding="utf-8"))
+    assert data["music"]["enabled"] is True and data["music"]["file"] == "bg.mp3"
+
+
+def test_set_render_music_off_disables(tmp_path):
+    import yaml
+    root = _tmp_project_with_render_yaml(tmp_path)
+    cli.set_render_music("off", root=root)
+    data = yaml.safe_load((root / "config" / "render.local.yaml").read_text(encoding="utf-8"))
+    assert data["music"]["enabled"] is False
+
+
+def test_set_audio_normalization_off(tmp_path):
+    import yaml
+    from autoreels.core.config import load_render_config
+    root = _tmp_project_with_render_yaml(tmp_path)
+    cli.set_audio_normalization(False, root=root)
+    data = yaml.safe_load((root / "config" / "render.local.yaml").read_text(encoding="utf-8"))
+    assert data["audio_processing"]["loudnorm_enabled"] is False
+    assert load_render_config(root / "config" / "render.yaml").audio_processing.loudnorm_enabled is False
+
+
+def test_list_music_tracks(tmp_path):
+    (tmp_path / "music").mkdir()
+    for n in ("b.wav", "a.mp3", "notmusic.txt"):
+        (tmp_path / "music" / n).write_bytes(b"x")
+    assert cli.list_music_tracks(root=tmp_path) == ["a.mp3", "b.wav"]
+
+
+def test_menu_settings_renders_current_values(tmp_path, capsys):
+    root = _tmp_project_with_render_yaml(tmp_path)
+    rc = cli.main(["menu", "--settings", "--root", str(root)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Профиль кодека" in out and "Палитра" in out and "музык" in out.lower()
+
+
+def test_menu_resolve_setting_maps_digits(tmp_path, capsys):
+    for num, token in (("1", "profile"), ("2", "palette"), ("3", "music"), ("4", "audio"), ("0", "back")):
+        rc = cli.main(["menu", "--resolve-setting", num, "--root", str(tmp_path)])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == token
+
+
+def test_menu_set_music_cli(tmp_path, capsys):
+    root = _tmp_project_with_render_yaml(tmp_path)
+    rc = cli.main(["menu", "--set-music", "bg.mp3", "--root", str(root)])
+    assert rc == 0
+    assert "bg.mp3" in capsys.readouterr().out
+    from autoreels.core.config import load_render_config
+    assert load_render_config(root / "config" / "render.yaml").music.file == "bg.mp3"
+
+
+def test_menu_set_audio_cli(tmp_path, capsys):
+    root = _tmp_project_with_render_yaml(tmp_path)
+    rc = cli.main(["menu", "--set-audio", "off", "--root", str(root)])
+    assert rc == 0
+    from autoreels.core.config import load_render_config
+    assert load_render_config(root / "config" / "render.yaml").audio_processing.loudnorm_enabled is False
+
+
 # -------------------------------------------------- ar без аргументов: status + hint
 
 def test_no_args_shows_status_output(capsys):
@@ -3181,15 +3310,18 @@ def test_run_dispatch_bad_path_returns_error(monkeypatch, tmp_path, capsys):
 # -------------------------------------------------- меню: парсинг выбора
 
 def test_menu_action_maps_digits_to_actions():
-    """Каждая цифра меню → свой action-токен (стабильная нумерация)."""
+    """Каждая цифра меню → свой action-токен (сгруппированная нумерация)."""
     assert cli._menu_action("1") == "go"
-    assert cli._menu_action("2") == "render"
-    assert cli._menu_action("3") == "status"
+    assert cli._menu_action("2") == "path"
+    assert cli._menu_action("3") == "render"
     assert cli._menu_action("4") == "calibrate"
-    assert cli._menu_action("5") == "path"
-    assert cli._menu_action("6") == "transcribe"
-    assert cli._menu_action("7") == "resume"
-    assert cli._menu_action("8") == "help"
+    assert cli._menu_action("5") == "transcribe"
+    assert cli._menu_action("6") == "diagnose"
+    assert cli._menu_action("7") == "resnap"
+    assert cli._menu_action("8") == "settings"
+    assert cli._menu_action("9") == "status"
+    assert cli._menu_action("10") == "resume"
+    assert cli._menu_action("11") == "help"
     assert cli._menu_action("0") == "quit"
 
 
@@ -3339,16 +3471,22 @@ def test_menu_header_shows_profile_and_ffmpeg(tmp_path, monkeypatch):
     assert "ffmpeg" in out.lower()
 
 
-def test_menu_item_profile_shows_current(tmp_path, monkeypatch):
-    """Пункт профиля в меню показывает текущий профиль в подписи."""
+def test_menu_settings_item_shows_current_profile(tmp_path, monkeypatch):
+    """Пункт «Настройки рендера» показывает текущий профиль в подсказке."""
     monkeypatch.setenv("RENDER_PROFILE", "h264")
     out = cli._menu_render(root=tmp_path)
-    assert "Профиль рендера: h264" in out
+    line = next(l for l in out.splitlines() if "Настройки рендера" in l)
+    assert "профиль h264" in line
 
 
-def test_menu_action_9_is_profile():
-    """Цифра 9 → action-токен profile (стабильная карта)."""
-    assert cli._menu_action("9") == "profile"
+def test_menu_action_8_is_settings():
+    """Цифра 8 → action-токен settings (сгруппированное меню)."""
+    assert cli._menu_action("8") == "settings"
+
+
+def test_settings_action_1_is_profile():
+    """Подменю настроек: цифра 1 → profile."""
+    assert cli._settings_action("1") == "profile"
 
 
 # --------------------------------------------------------------- палитра (цветокор) в CLI/меню
@@ -3420,16 +3558,17 @@ def test_menu_header_shows_palette(tmp_path, monkeypatch):
     assert "палитра vivid" in out
 
 
-def test_menu_item_palette_shows_current(tmp_path, monkeypatch):
-    """Пункт палитры в меню показывает текущую палитру в подписи."""
+def test_menu_settings_item_shows_current_palette(tmp_path, monkeypatch):
+    """Пункт «Настройки рендера» показывает текущую палитру в подсказке."""
     monkeypatch.setenv("RENDER_PALETTE", "soft")
     out = cli._menu_render(root=tmp_path)
-    assert "Палитра рендера: soft" in out
+    line = next(l for l in out.splitlines() if "Настройки рендера" in l)
+    assert "палитра soft" in line
 
 
-def test_menu_action_12_is_palette():
-    """Цифра 12 → action-токен palette (стабильная карта)."""
-    assert cli._menu_action("12") == "palette"
+def test_settings_action_2_is_palette():
+    """Подменю настроек: цифра 2 → palette."""
+    assert cli._settings_action("2") == "palette"
 
 
 def test_status_header_shows_machine_settings(tmp_path, monkeypatch, capsys):
@@ -3475,17 +3614,24 @@ def test_resume_subcommand_registered():
 
 
 def test_menu_render_has_transcribe_item(tmp_path):
-    """В меню есть пункт транскрибации для контента."""
+    """В меню есть пункт «только транскрипт» для контента."""
     out = cli._menu_render(root=tmp_path)
-    assert "ранскриб" in out
+    assert "ранскрип" in out
 
 
-def test_menu_item5_text_is_clearer(tmp_path):
-    """Пункт 5 понятно объясняет, что принимает (ссылка/URL/Я.Диск/YouTube/файл)."""
+def test_menu_path_item_text_is_clearer(tmp_path):
+    """Пункт «по ссылке или пути» понятно объясняет источник (ссылка/URL/Я.Диск/файл)."""
     out = cli._menu_render(root=tmp_path)
-    line = next(l for l in out.splitlines() if l.strip().startswith("5)") or ") 5)" in l or "5)" in l)
+    line = next(l for l in out.splitlines() if "по ссылке или пути" in l)
     assert "ссылк" in line.lower() or "пут" in line.lower()
-    assert "Яндекс" in line or "YouTube" in line or "URL" in line
+    assert "Яндекс" in line or "URL" in line or "файл" in line.lower()
+
+
+def test_menu_item1_hints_transcripts_saved(tmp_path):
+    """Пункт 1 подсказывает, что транскрипты сохраняются автоматически (убрать путаницу с п.5)."""
+    out = cli._menu_render(root=tmp_path)
+    line = next(l for l in out.splitlines() if l.strip().startswith("1)") or " 1) " in l)
+    assert "транскрип" in line.lower()
 
 
 # -------------------------------------------------- меню: классификация источника

@@ -313,16 +313,20 @@ class ManualCalibrator:
         sel = raw_selection_from_drop(payload, self.frame_size)
         crop = finalize_selection(sel)              # реальные px + точный 9:16 + границы (ядро)
         rotation_deg = float(payload.get("rotation_deg", 0.0) or 0.0)
+        palette = payload.get("palette") or None    # выбранная в калибраторе палитра (или дефолт)
+        if palette == "neutral":
+            palette = None                          # neutral = «палитра по умолчанию», не пишем
         # frame = размер, в котором браузер считал координаты (натуральный размер кадра из PNG),
         # чтобы кроп и кадр были в ОДНОМ пространстве (важно при SAR/повороте телефона).
         frame = list(sel.frame_size) if sel.frame_size and sel.frame_size[0] else list(self.frame_size)
         self.saved_path = save_calibration(
             self.calib_dir, source_name=self.source_name, source_sha256=self.sha,
             crop=crop, frame=frame, setup_label=self.setup_label, rotation_deg=rotation_deg,
+            palette=palette,
         )
         self._sel = sel
         resp = {"ok": True, "crop": crop.model_dump(), "saved": str(self.saved_path),
-                "rotation_deg": rotation_deg}
+                "rotation_deg": rotation_deg, "palette": palette}
         warn = narrow_crop_warning(crop, frame)
         # Валидация выравнивания: кроп при этом угле должен помещаться в заполненную область.
         rot_warn = rotation_safety_warning(crop, frame[0], frame[1], rotation_deg) if frame and frame[0] else None
@@ -571,6 +575,17 @@ _HTML_TEMPLATE = r"""<!doctype html>
     font:500 16px/1 var(--mono);padding:9px 10px;border-radius:5px;width:100%}
   .field input:focus{outline:none;border-color:var(--accent)}
 
+  /* блок палитры цвета */
+  .palbox{border:1px solid var(--line);border-radius:8px;padding:12px 13px;
+    display:flex;flex-direction:column;gap:9px}
+  .palhead{font:600 10px/1 var(--mono);letter-spacing:.14em;color:var(--mut);text-transform:uppercase}
+  .palrow{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+  .palbtn{appearance:none;border:1px solid var(--line);background:#0c0d10;color:var(--ink);
+    font:600 12px/1 var(--sans);padding:9px 4px;border-radius:5px;cursor:pointer;text-align:center}
+  .palbtn:hover{border-color:var(--accent)}
+  .palbtn.active{border-color:var(--accent);background:var(--accent-dim);color:var(--accent)}
+  .palhint{margin:0;font:500 11px/1.4 var(--sans);color:var(--mut)}
+
   /* блок выравнивания горизонта */
   .rotbox{border:1px solid var(--line);border-radius:8px;padding:12px 13px;
     display:flex;flex-direction:column;gap:9px}
@@ -646,6 +661,17 @@ _HTML_TEMPLATE = r"""<!doctype html>
       <div class="field"><label>Y <span class="u">px</span></label><input id="fy" type="number" inputmode="numeric"></div>
       <div class="field"><label>Ширина <span class="u">px</span></label><input id="fw" type="number" inputmode="numeric"></div>
       <div class="field"><label>Высота <span class="u">px</span></label><input id="fh" type="number" inputmode="numeric"></div>
+    </div>
+
+    <div class="palbox">
+      <div class="palhead">Палитра цвета</div>
+      <div class="palrow" id="palrow">
+        <button type="button" class="palbtn active" data-pal="neutral">без изм.</button>
+        <button type="button" class="palbtn" data-pal="vivid">vivid</button>
+        <button type="button" class="palbtn" data-pal="soft">soft</button>
+        <button type="button" class="palbtn" data-pal="sharp">sharp</button>
+      </div>
+      <p class="palhint">Мгновенный предпросмотр на кадре. Палитра сохранится в манифест этого видео.</p>
     </div>
 
     <div class="rotbox">
@@ -775,6 +801,20 @@ document.getElementById('rotreset').addEventListener('click',()=>{ rotEl.value=0
 document.getElementById('gridtog').addEventListener('change',e=>{
   levelGrid.classList.toggle('on', e.target.checked); });
 
+/* ---- палитра цвета: мгновенный предпросмотр CSS-фильтром на кадре ---- */
+let PAL='neutral';
+// CSS-приближение пресетов рендера (eq/unsharp). Предпросмотр ориентировочный: точный цветокор
+// делает ffmpeg при рендере, здесь — чтобы прикинуть, какая палитра идёт видео.
+const PAL_FILTER={neutral:'',vivid:'saturate(1.15) contrast(1.1)',
+  soft:'contrast(0.95) saturate(1.05) sepia(0.12)',sharp:'contrast(1.08) saturate(1.02)'};
+function applyPal(){ img.style.filter = PAL_FILTER[PAL] || 'none'; }
+document.querySelectorAll('.palbtn').forEach(b=>b.addEventListener('click',()=>{
+  PAL=b.dataset.pal;
+  document.querySelectorAll('.palbtn').forEach(e=>e.classList.remove('active'));
+  b.classList.add('active');
+  applyPal();
+}));
+
 /* ---- перетаскивание тела рамки ---- */
 crop.addEventListener('pointerdown',e=>{
   if(e.target.classList.contains('handle')) return;
@@ -846,7 +886,8 @@ saveBtn.addEventListener('click',()=>{
       display:{x:Math.round(box.x),y:Math.round(box.y),w:Math.round(box.w),h:Math.round(box.h)},
       display_size:[Math.round(DW),Math.round(DH)],
       frame_size:[NW,NH],                             // НАТУРАЛЬНЫЙ размер кадра, не ffprobe
-      rotation_deg:ROT                                // угол выравнивания горизонта (0 = без поворота)
+      rotation_deg:ROT,                               // угол выравнивания горизонта (0 = без поворота)
+      palette:PAL                                     // палитра цвета (neutral = дефолт рендера)
     })})
    .then(r=>r.json())
    .then(d=>{ if(d.ok){ const c=d.crop;

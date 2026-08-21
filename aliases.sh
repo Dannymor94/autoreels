@@ -40,11 +40,71 @@ _ar_cli() {
 
 # Интерактивное меню (цикл в bash, «мозги» — autoreels menu на Python).
 # Рисует адаптивное меню, читает цифру, запускает пункт, возвращается — до «Выход».
+# Подменю «Настройки рендера» (пункт 8): профиль / палитра / музыка / звук. Цикл до «Назад».
+# Один и тот же CRLF-фикс, что и в _ar_menu: чистим захват --resolve-setting и введённые цифры.
+_ar_settings() {
+    while true; do
+        _ar_cli menu --settings
+        printf "Настройка [цифра, Enter — назад]: "
+        read -r _s || return 0          # EOF (пайп исчерпан) → назад, не крутить пустой цикл
+        _s="$(printf '%s' "$_s" | tr -d '\r')"
+        _sact="$(_ar_cli menu --resolve-setting "$_s" | tr -d '\r\n')"
+        case "$_sact" in
+            profile)
+                _ar_cli menu --profiles
+                printf "Профиль (цифра): [1] hevc [2] hevc_hq [3] h264 [4] h264_hq [5] hevc_sw [6] av1, Enter — отмена: "
+                read -r _p; _p="$(printf '%s' "$_p" | tr -d '\r')"
+                case "$_p" in
+                    1|hevc)     _ar_cli menu --set-profile hevc ;;
+                    2|hevc_hq)  _ar_cli menu --set-profile hevc_hq ;;
+                    3|h264)     _ar_cli menu --set-profile h264 ;;
+                    4|h264_hq)  _ar_cli menu --set-profile h264_hq ;;
+                    5|hevc_sw)  _ar_cli menu --set-profile hevc_sw ;;
+                    6|av1)      _ar_cli menu --set-profile av1 ;;
+                    "")         echo "отменено" ;;
+                    *)          echo "  неизвестный выбор: $_p" ;;
+                esac
+                ;;
+            palette)
+                _ar_cli menu --palettes
+                printf "Палитра (цифра): [1] neutral [2] vivid [3] soft [4] sharp, Enter — отмена: "
+                read -r _pal; _pal="$(printf '%s' "$_pal" | tr -d '\r')"
+                case "$_pal" in
+                    1|neutral)  _ar_cli menu --set-palette neutral ;;
+                    2|vivid)    _ar_cli menu --set-palette vivid ;;
+                    3|soft)     _ar_cli menu --set-palette soft ;;
+                    4|sharp)    _ar_cli menu --set-palette sharp ;;
+                    "")         echo "отменено" ;;
+                    *)          echo "  неизвестный выбор: $_pal" ;;
+                esac
+                ;;
+            music)
+                _ar_cli menu --music-tracks
+                printf "Музыка: имя трека из списка, [off] выключить, Enter — отмена: "
+                read -r _mus; _mus="$(printf '%s' "$_mus" | tr -d '\r')"
+                [ -n "$_mus" ] && _ar_cli menu --set-music "$_mus"
+                ;;
+            audio)
+                printf "Нормализация громкости [on/off], Enter — отмена: "
+                read -r _au; _au="$(printf '%s' "$_au" | tr -d '\r')"
+                case "$_au" in
+                    on|off)     _ar_cli menu --set-audio "$_au" ;;
+                    "")         echo "отменено" ;;
+                    *)          echo "  введите on или off" ;;
+                esac
+                ;;
+            back|"") return 0 ;;
+            *) [ -n "$_s" ] && echo "  неизвестный пункт: $_s" ;;
+        esac
+        printf "\n[Enter] — к настройкам… "; read -r _
+    done
+}
+
 _ar_menu() {
     while true; do
         _ar_cli menu
         printf "Выбор [цифра, Enter — обновить]: "
-        read -r _choice
+        read -r _choice || break        # EOF (пайп исчерпан) → выйти, не крутить пустой цикл
         # Windows Git Bash: Python-stdout приходит с CRLF; $() срезает только \n, оставляя \r —
         # тогда $_action = "palette\r" и НИ ОДНА ветка case не матчится (меню «ничего не делает»).
         # tr -d '\r' убирает CR → токен чистый на всех платформах. Так же чистим введённую цифру.
@@ -72,41 +132,7 @@ _ar_menu() {
                 arl t "$_src"
                 ;;
             resume)    _ar_cli resume ;;
-            profile)
-                _ar_cli menu --profiles
-                printf "Профиль (имя или цифра): [1] hevc [2] hevc_hq [3] h264 [4] h264_hq [5] hevc_sw [6] av1, Enter — отмена: "
-                read -r _p
-                case "$_p" in
-                    1|hevc)     _ar_cli menu --set-profile hevc ;;
-                    2|hevc_hq)  _ar_cli menu --set-profile hevc_hq ;;
-                    3|h264)     _ar_cli menu --set-profile h264 ;;
-                    4|h264_hq)  _ar_cli menu --set-profile h264_hq ;;
-                    5|hevc_sw)  _ar_cli menu --set-profile hevc_sw ;;
-                    6|av1)      _ar_cli menu --set-profile av1 ;;
-                    "") echo "отменено — назад в меню"; continue ;;
-                    *) echo "  неизвестный выбор: $_p"; continue ;;
-                esac
-                ;;
-            palette)
-                _ar_cli menu --palettes
-                printf "Палитра (имя или цифра): [1] neutral [2] vivid [3] soft [4] sharp, [p] превью-сравнение, Enter — отмена: "
-                read -r _pal
-                case "$_pal" in
-                    1|neutral) _ar_cli menu --set-palette neutral ;;
-                    2|vivid)   _ar_cli menu --set-palette vivid ;;
-                    3|soft)    _ar_cli menu --set-palette soft ;;
-                    4|sharp)   _ar_cli menu --set-palette sharp ;;
-                    p|preview)
-                        printf "Манифест (имя/стем, Enter — первый): "
-                        read -r _mf
-                        printf "Палитры через запятую (Enter — все пресеты): "
-                        read -r _pals
-                        if [ -n "$_pals" ]; then arl preview "$_mf" --palettes "$_pals"; else arl preview "$_mf"; fi
-                        ;;
-                    "") echo "отменено — назад в меню"; continue ;;
-                    *) echo "  неизвестный выбор: $_pal"; continue ;;
-                esac
-                ;;
+            settings)  _ar_settings ;;
             help)      arl h ;;
             quit)      echo "пока!"; return 0 ;;
             *)

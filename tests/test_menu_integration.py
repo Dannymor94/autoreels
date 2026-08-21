@@ -83,12 +83,24 @@ def _argparse_subcommands() -> set[str]:
 
 _ARL_SHORT = _arl_short_map()
 _SUBCOMMANDS = _argparse_subcommands()
-_PY_TOKENS = [action for (_num, action, _lbl, _hint) in cli._MENU_ITEMS]
+_PY_TOKENS = [action for (_num, action, *_rest) in cli._MENU_ITEMS]
 
 
 def _cli_command(name: str) -> str:
     """Резолв команды из bash-обработчика в CLI-подкоманду: короткая arl → полная, иначе как есть."""
     return _ARL_SHORT.get(name, name)
+
+
+def _handler_with_helpers(token: str) -> str:
+    """Текст обработчика пункта + тела bash-функций-помощников `_ar_*`, которые он зовёт (один
+    уровень). Пункт «settings» диспетчерит в `_ar_settings`, где и живут реальные вызовы."""
+    text = _menu_handlers()[token]
+    for helper in set(re.findall(r"\b(_ar_[a-z]+)\b", text)):
+        try:
+            text += "\n" + _func_body(ALIASES, helper)
+        except AssertionError:
+            pass
+    return text
 
 
 # --------------------------------------------------------------- тесты
@@ -104,7 +116,7 @@ def test_python_and_bash_menu_tokens_match_exactly():
     assert not orphan_in_bash, f"ветки в _ar_menu без пункта меню: {orphan_in_bash}"
 
 
-@pytest.mark.parametrize("num,action", [(n, a) for (n, a, _l, _h) in cli._MENU_ITEMS])
+@pytest.mark.parametrize("num,action", [(n, a) for (n, a, *_r) in cli._MENU_ITEMS])
 def test_menu_digit_resolves_to_its_token(num, action):
     """Цифра пункта → --resolve отдаёт ровно его action-токен (отрисовка ↔ разбор согласованы)."""
     assert cli._menu_action(num) == action
@@ -121,7 +133,7 @@ def test_token_handler_invokes_real_cli_command(token):
     """Ветка обработчика вызывает хотя бы одну РЕАЛЬНУЮ CLI-подкоманду (существует в argparse).
 
     Ловит опечатку/переименование: пункт диспетчеризован, но зовёт несуществующую команду."""
-    handler = _menu_handlers()[token]
+    handler = _handler_with_helpers(token)
     invoked = re.findall(r"\barl ([a-z][a-z-]*)", handler) + \
         re.findall(r"_ar_cli ([a-z][a-z-]+)", handler)
     resolved = {_cli_command(c) for c in invoked}
@@ -152,10 +164,38 @@ def test_resolve_capture_strips_cr_for_windows():
         f"захват --resolve не срезает CR (Windows CRLF сломает case): {m.group(0).strip()}"
 
 
-def test_new_setting_items_present_both_sides():
-    """Явная фиксация НОВЫХ пунктов-настроек (профиль/палитра): и в отрисовке, и в диспетчере."""
+def test_grouped_menu_items_present_both_sides():
+    """Реструктурированные пункты (settings/diagnose/resnap): и в отрисовке, и в диспетчере."""
     py = set(_PY_TOKENS)
     bash = _menu_case_tokens()
-    for token in ("profile", "palette", "diagnose", "resnap"):
+    for token in ("settings", "diagnose", "resnap", "calibrate", "transcribe"):
         assert token in py, f"пункт «{token}» пропал из отрисовки _MENU_ITEMS"
         assert token in bash, f"пункт «{token}» пропал из диспетчера _ar_menu"
+
+
+# --------------------------------------------------------------- подменю настроек
+
+def _settings_case_tokens() -> set[str]:
+    """Токены веток `case \"$_sact\"` в _ar_settings (отступ 12). Разбивает `back|\"\"` на части."""
+    body = _func_body(ALIASES, "_ar_settings")
+    toks: set[str] = set()
+    for m in _outer_case_arms(body, 12):
+        for part in m.group(1).split("|"):
+            part = part.strip('"')
+            if part and part != "*":
+                toks.add(part)
+    return toks
+
+
+def test_settings_python_and_bash_tokens_match():
+    """Пункты подменю настроек (Python _SETTINGS_ITEMS) == ветки _ar_settings (bash)."""
+    py = {a for (_n, a, _l, _h) in cli._SETTINGS_ITEMS}
+    bash = _settings_case_tokens()
+    assert py - bash == set(), f"пункты настроек без ветки в _ar_settings: {py - bash}"
+    assert bash - py == set(), f"ветки _ar_settings без пункта настроек: {bash - py}"
+
+
+@pytest.mark.parametrize("num,action", [(n, a) for (n, a, _l, _h) in cli._SETTINGS_ITEMS])
+def test_settings_digit_resolves(num, action):
+    """Цифра подменю настроек → --resolve-setting отдаёт её токен."""
+    assert cli._settings_action(num) == action

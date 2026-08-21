@@ -65,6 +65,9 @@ class SetupProfile(BaseModel):
     # НЕ путать с rotation_applied (метаданные ориентации телефона — их autorotate уже применил).
     # Порядок в рендере: rotate → crop → scale (поворот ДО кропа: кроп берёт заполненную область).
     rotation_deg: float = Field(default=0.0, ge=-45.0, le=45.0)
+    # Палитра цветокора для ЭТОГО видео (выбрана в калибраторе). None → палитра по умолчанию из
+    # render.yaml. Едет в манифесте вместе с кропом (per-video override), как crop/rotation_deg.
+    palette: str | None = None
 
 
 class Word(BaseModel):

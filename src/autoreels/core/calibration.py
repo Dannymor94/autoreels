@@ -225,9 +225,11 @@ def save_calibration(
     frame,
     setup_label: str | None = None,
     rotation_deg: float = 0.0,
+    palette: str | None = None,
 ) -> Path:
     """Записать калибровку для файла (ключ — sha256). `setup_label` → setup_id манифеста.
-    `rotation_deg` — угол выравнивания горизонта (0 = без поворота)."""
+    `rotation_deg` — угол выравнивания горизонта (0 = без поворота). `palette` — палитра
+    цветокора для этого видео (None → палитра по умолчанию из render.yaml)."""
     calibrations_dir = Path(calibrations_dir)
     calibrations_dir.mkdir(parents=True, exist_ok=True)
     rec = {
@@ -238,6 +240,7 @@ def save_calibration(
         "scale": TARGET_SCALE,
         "frame": list(frame),
         "rotation_deg": float(rotation_deg),
+        "palette": palette,
         # Пространство координат — ОТОБРАЖАЕМОЕ: кадр калибровки извлечён с autorotate (как
         # видит человек), рендер тоже autorotate → crop-фильтр в том же повёрнутом кадре.
         # frame здесь = display-размеры (после rotation-метаданных). Поворот кадра не делаем —
@@ -271,6 +274,7 @@ def load_calibration(calibrations_dir: str | Path, source_sha256: str) -> SetupP
             scale=rec.get("scale", TARGET_SCALE),
             frame=rec["frame"],
             rotation_deg=rec.get("rotation_deg", 0.0),
+            palette=rec.get("palette"),
         )
     except (KeyError, ValidationError) as e:
         raise CalibrationError(f"невалидная калибровка {path}: {e}") from e

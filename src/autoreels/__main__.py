@@ -1289,11 +1289,13 @@ def cmd_render(
     # Профиль кодека: флаг > env RENDER_PROFILE > активный из конфига. Опечатка → fail-fast.
     prof_name = profile or os.environ.get("RENDER_PROFILE") or render_cfg.encoder.profile
     validate_profile(prof_name, render_cfg.encoder.profiles, where="--profile/RENDER_PROFILE")
-    # Палитра (цветокор): флаг > env RENDER_PALETTE > активная из конфига (render.local.yaml).
-    pal_name = palette or os.environ.get("RENDER_PALETTE") or render_cfg.palette
-    if pal_name not in render_cfg.palettes:
+    # Палитра (цветокор): флаг > env RENDER_PALETTE переопределяют ВСЁ; иначе per-video из
+    # манифеста (setup.palette, выбрана в калибраторе) > активная из конфига. Разрешается
+    # per-manifest внутри цикла (у каждого видео может быть своя палитра).
+    pal_override = palette or os.environ.get("RENDER_PALETTE")
+    if pal_override and pal_override not in render_cfg.palettes:
         known = ", ".join(render_cfg.palettes)
-        raise SystemExit(f"неизвестная палитра '{pal_name}'. Доступны: {known}")
+        raise SystemExit(f"неизвестная палитра '{pal_override}'. Доступны: {known}")
     # Фоновая музыка: --music <файл> > конфиг (music.file/random). None → без музыки.
     music_path = _resolve_music_track(render_cfg.music, root, flag=music)
     # Отображаемый кодек: явный encoder переопределяет кодек профиля (Mac-дев без AMF).
@@ -1369,7 +1371,14 @@ def cmd_render(
             n_missing = len(missing)
             n_total = len(manifest.reels)
             label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
-            pal_tag = "" if pal_name == "neutral" else f", палитра {pal_name}"
+            # Палитра этого видео: флаг/env > setup.palette (калибратор) > конфиг. Неизвестную —
+            # игнорируем с предупреждением (не роняем весь рендер из-за опечатки в манифесте).
+            eff_pal = pal_override or manifest.setup.palette or render_cfg.palette
+            if eff_pal not in render_cfg.palettes:
+                print(f"  ⚠ палитра «{eff_pal}» неизвестна — беру {render_cfg.palette}",
+                      file=sys.stderr, flush=True)
+                eff_pal = render_cfg.palette
+            pal_tag = "" if eff_pal == "neutral" else f", палитра {eff_pal}"
             zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
             zoom_tag = ", зум" if zoom_on else ""
             music_tag = f", музыка {Path(music_path).name}" if music_path else ""
@@ -1379,7 +1388,7 @@ def cmd_render(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
-                profile=prof_name, palette=pal_name, zoom=zoom, music_path=music_path,
+                profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
                 subtitles_cfg=subtitles_cfg,
             )
             all_outputs.extend(outputs)
@@ -1591,10 +1600,13 @@ def cmd_recrop(
         new_frame = list(new_setup.frame)
         old_rot = float(getattr(manifest.setup, "rotation_deg", 0.0) or 0.0)
         new_rot = float(getattr(new_setup, "rotation_deg", 0.0) or 0.0)
+        old_pal = getattr(manifest.setup, "palette", None)
+        new_pal = getattr(new_setup, "palette", None)
         same_crop = old.model_dump() == new_setup.crop.model_dump()
         same_frame = old_frame == new_frame
         same_rot = old_rot == new_rot
-        if same_crop and same_frame and same_rot:
+        same_pal = old_pal == new_pal
+        if same_crop and same_frame and same_rot and same_pal:
             # Явно сообщаем «уже синхронно» (и в batch) — иначе «0 обновлено» выглядит как баг.
             rot_note = f", поворот {old_rot:g}°" if old_rot else ""
             print(f"  = {stem}: кроп уже совпадает с калибровкой ({old.w}×{old.h}@{old.x},{old.y}, "
@@ -1866,7 +1878,10 @@ def _manifest_calibration_desync(manifest, calibrations_dir) -> str | None:
         return None
     calib_rot = float(rec.get("rotation_deg", 0.0) or 0.0)
     manifest_rot = float(getattr(manifest.setup, "rotation_deg", 0.0) or 0.0)
-    if manifest.setup.crop.model_dump() == calib_crop and manifest_rot == calib_rot:
+    calib_pal = rec.get("palette")
+    manifest_pal = getattr(manifest.setup, "palette", None)
+    if (manifest.setup.crop.model_dump() == calib_crop and manifest_rot == calib_rot
+            and manifest_pal == calib_pal):
         return None
     stem = Path(manifest.source).stem
     calib_is_manual = not (rec.get("auto") or rec.get("setup_label") == "auto")
@@ -2249,25 +2264,39 @@ def _next_hint(root=".") -> str | None:
 
 # ----------------------------------------------------------------------------- меню
 
-# Пункты меню: (цифра, action-токен, подпись, короткая подсказка). Нумерация СТАБИЛЬНА —
-# адаптивность (подсветка/пометки) влияет только на оформление, не на digit→action.
-_MENU_ITEMS: list[tuple[str, str, str, str]] = [
-    ("1", "go",         "Обработать видео из inputs/", "run всех + git push"),
-    ("2", "render",     "Отрендерить манифесты",       "git pull + render"),
-    ("3", "status",     "Статус",                       ""),
-    ("4", "calibrate",  "Калибровка кропа (все)",       ""),
-    ("5", "path",       "Обработать по ссылке или пути к файлу",
-                        "URL, Яндекс.Диск, YouTube или файл на диске"),
-    ("6", "transcribe", "Транскрибировать (для контента)",
-                        "источник: ссылка или файл → текст"),
-    ("7", "resume",     "Продолжить прерванное",
-                        "доделать рендер, докачки"),
-    ("8", "help",       "Справка",                       ""),
-    ("9", "profile",    "Профиль рендера",               "hevc | h264 | av1"),
-    ("10", "diagnose",  "Диагностика обрывов фраз",      "CLEAN/SOFT/HARD по клипам + причина"),
-    ("11", "resnap",    "Пересчитать границы (resnap)",  "snap/padding из R0-границ, без LLM"),
-    ("12", "palette",   "Палитра рендера",               "neutral | vivid | soft | sharp"),
-    ("0", "quit",       "Выход",                         ""),
+# Пункты меню: (цифра, action-токен, подпись, подсказка, ГРУППА). Сгруппировано по смыслу
+# (действия / подготовка / качество / настройки / прочее), чтобы 13 пунктов вперемешку не
+# путали. digit→action СТАБИЛЬНА; адаптивность (подсветка/пометки) — только оформление.
+_MENU_ITEMS: list[tuple[str, str, str, str, str]] = [
+    ("1", "go",         "Обработать видео из inputs/",
+                        "анализ → манифест + транскрипт (сохраняется в transcripts/)", "ОСНОВНОЕ"),
+    ("2", "path",       "Обработать по ссылке или пути",
+                        "URL / Яндекс.Диск / файл на диске", "ОСНОВНОЕ"),
+    ("3", "render",     "Отрендерить манифесты",       "→ готовые рилсы", "ОСНОВНОЕ"),
+    ("4", "calibrate",  "Калибровка кадра",
+                        "кроп + палитра + горизонт в одном окне", "ПОДГОТОВКА"),
+    ("5", "transcribe", "Только транскрипт",
+                        "без рилсов — текст для контента (рилсы уже кладут транскрипт сами)",
+                        "ПОДГОТОВКА"),
+    ("6", "diagnose",   "Диагностика границ фраз",      "CLEAN/SOFT/HARD по клипам + причина",
+                        "КАЧЕСТВО"),
+    ("7", "resnap",     "Пересчитать границы",          "snap/padding из R0-границ, без LLM",
+                        "КАЧЕСТВО"),
+    ("8", "settings",   "Настройки рендера",            "профиль, палитра, музыка, звук",
+                        "НАСТРОЙКИ"),
+    ("9", "status",     "Статус",                        "", "ПРОЧЕЕ"),
+    ("10", "resume",    "Продолжить прерванное",         "доделать рендер, докачки", "ПРОЧЕЕ"),
+    ("11", "help",      "Справка",                        "", "ПРОЧЕЕ"),
+    ("0", "quit",       "Выход",                          "", "ПРОЧЕЕ"),
+]
+
+# Подменю «Настройки рендера» (пункт 8): (цифра, токен, подпись, подсказка). back/пусто — назад.
+_SETTINGS_ITEMS: list[tuple[str, str, str, str]] = [
+    ("1", "profile", "Профиль кодека",       "скорость / качество / совместимость"),
+    ("2", "palette", "Палитра по умолчанию", "neutral | vivid | soft | sharp"),
+    ("3", "music",   "Фоновая музыка",        "вкл/выкл + трек из music/"),
+    ("4", "audio",   "Нормализация звука",    "loudnorm -14 LUFS вкл/выкл"),
+    ("0", "back",    "← Назад в меню",        ""),
 ]
 
 # Профили рендера для меню: имя → человекочитаемое описание (кодек+битрейт — в render.yaml).
@@ -2312,7 +2341,19 @@ def _menu_action(choice: str) -> str | None:
     c = (choice or "").strip().lower()
     if c in _MENU_QUIT_ALIASES:
         return "quit"
-    for num, action, _label, _hint in _MENU_ITEMS:
+    for num, action, _label, _hint, _group in _MENU_ITEMS:
+        if c == num:
+            return action
+    return None
+
+
+def _settings_action(choice: str) -> str | None:
+    """Выбор в подменю настроек → токен (profile/palette/music/audio/back) или None.
+    Пустой ввод (Enter) и q/exit/выход → back (промпт обещает «Enter — назад»)."""
+    c = (choice or "").strip().lower()
+    if c == "" or c in _MENU_QUIT_ALIASES:
+        return "back"
+    for num, action, _label, _hint in _SETTINGS_ITEMS:
         if c == num:
             return action
     return None
@@ -2441,6 +2482,95 @@ def set_render_palette(name: str, *, root=".") -> Path:
     return local
 
 
+# ------------------------------------------------------- настройки: музыка / звук (render.local)
+
+def _load_local_yaml(root):
+    import yaml
+    local = Path(root) / "config" / "render.local.yaml"
+    data = {}
+    if local.is_file():
+        data = yaml.safe_load(local.read_text(encoding="utf-8")) or {}
+    return local, data
+
+
+def _save_local_yaml(local, data):
+    import yaml
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def list_music_tracks(root=".") -> list[str]:
+    """Имена файлов-треков в music/ (по расширениям). Пусто, если папки/треков нет."""
+    d = Path(root) / "music"
+    if not d.is_dir():
+        return []
+    return sorted(p.name for p in d.glob("*") if p.suffix.lower() in _MUSIC_EXTS)
+
+
+def _current_music(root=".") -> tuple[bool, str | None]:
+    """(включена ли музыка, имя трека) — env не участвует, только конфиг."""
+    try:
+        m = load_render_config(Path(root) / "config" / "render.yaml").music
+        return bool(m.enabled), m.file
+    except (ConfigError, OSError):
+        return False, None
+
+
+def set_render_music(value: str, *, root=".") -> Path:
+    """Настроить фоновую музыку в render.local.yaml. value: 'off' → выкл; иначе имя трека → вкл
+    с этим файлом. Deep-merge в секцию music (прочие ключи сохраняются)."""
+    local, data = _load_local_yaml(root)
+    music = data.get("music")
+    if not isinstance(music, dict):
+        music = {}
+        data["music"] = music
+    if value == "off":
+        music["enabled"] = False
+    else:
+        music["enabled"] = True
+        music["file"] = value
+    _save_local_yaml(local, data)
+    return local
+
+
+def _current_audio_norm(root=".") -> bool:
+    """Включена ли нормализация громкости (loudnorm) — из конфига."""
+    try:
+        return bool(load_render_config(Path(root) / "config" / "render.yaml")
+                    .audio_processing.loudnorm_enabled)
+    except (ConfigError, OSError):
+        return True
+
+
+def set_audio_normalization(on: bool, *, root=".") -> Path:
+    """Вкл/выкл нормализацию громкости (loudnorm) в render.local.yaml (audio_processing)."""
+    local, data = _load_local_yaml(root)
+    ap = data.get("audio_processing")
+    if not isinstance(ap, dict):
+        ap = {}
+        data["audio_processing"] = ap
+    ap["loudnorm_enabled"] = bool(on)
+    _save_local_yaml(local, data)
+    return local
+
+
+def _settings_render(root=".") -> str:
+    """Текст подменю «Настройки рендера»: пункты с ТЕКУЩИМИ значениями."""
+    prof = _current_render_profile(root)
+    pal = _current_render_palette(root)
+    mus_on, mus_file = _current_music(root)
+    mus = f"вкл · {mus_file}" if (mus_on and mus_file) else ("вкл" if mus_on else "выкл")
+    norm = "вкл" if _current_audio_norm(root) else "выкл"
+    cur = {"profile": prof, "palette": pal, "music": mus, "audio": norm}
+    lines = ["── Настройки рендера ─────────────────────────────────"]
+    for num, action, label, hint in _SETTINGS_ITEMS:
+        val = f": {cur[action]}" if action in cur else ""
+        note = f"  ({hint})" if hint else ""
+        lines.append(f"  {num}) {label}{val}{note}")
+    lines.append("──────────────────────────────────────────────────────")
+    return "\n".join(lines)
+
+
 def _menu_render(root=".", *, platform: str | None = None) -> str:
     """Собрать текст адаптивного меню: шапка-состояние + пункты с подсветкой ▶.
 
@@ -2473,14 +2603,19 @@ def _menu_render(root=".", *, platform: str | None = None) -> str:
     lines.append("")
     current_profile = _current_render_profile(root)
     current_palette = _current_render_palette(root)
-    for num, action, label, hint in _MENU_ITEMS:
+    current_group = None
+    for num, action, label, hint, group in _MENU_ITEMS:
+        if group != current_group:                 # заголовок группы (действия/настройки/…)
+            if current_group is not None:
+                lines.append("")
+            lines.append(f"  {group}")
+            current_group = group
         marker = marker_char if action == rec else " "
-        # Пункт профиля/палитры показывает ТЕКУЩЕЕ значение прямо в подписи.
-        if action == "profile":
-            label = f"{label}: {current_profile}"
-        elif action == "palette":
-            label = f"{label}: {current_palette}"
-        note = f"  ({hint})" if hint else ""
+        # Пункт настроек показывает текущий профиль/палитру прямо в подсказке.
+        if action == "settings":
+            note = f"  (профиль {current_profile} · палитра {current_palette})"
+        else:
+            note = f"  ({hint})" if hint else ""
         # Пометка неактуальных машине пунктов (не блокируем — только подсказка).
         if action == "go" and not is_mac:
             note += "  · нужен Groq (обычно Mac)"
@@ -2809,6 +2944,16 @@ def _build_parser():
                     help="сохранить палитру цветокора (neutral|vivid|soft|sharp) в render.local.yaml")
     pm.add_argument("--palettes", action="store_true",
                     help="напечатать доступные палитры цветокора с описанием")
+    pm.add_argument("--settings", action="store_true",
+                    help="напечатать подменю настроек рендера (профиль/палитра/музыка/звук)")
+    pm.add_argument("--resolve-setting", default=None, dest="resolve_setting",
+                    help="разобрать выбор в подменю настроек → токен (profile/palette/music/audio/back)")
+    pm.add_argument("--music-tracks", action="store_true", dest="music_tracks",
+                    help="напечатать список треков в music/")
+    pm.add_argument("--set-music", default=None, dest="set_music",
+                    help="настроить фоновую музыку: 'off' или имя трека из music/")
+    pm.add_argument("--set-audio", default=None, dest="set_audio", choices=["on", "off"],
+                    help="вкл/выкл нормализацию громкости (loudnorm)")
     pm.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
     ps = sub.add_parser(
@@ -3147,6 +3292,24 @@ def main(argv=None) -> int:
                 return 1
             print(f"✓ палитра рендера: {args.set_palette} → {path} "
                   f"(применится ко всем последующим рендерам)")
+        elif args.settings:
+            print(_settings_render(root=args.root))
+        elif args.resolve_setting is not None:
+            print(_settings_action(args.resolve_setting) or "invalid")
+        elif args.music_tracks:
+            tracks = list_music_tracks(root=args.root)
+            if tracks:
+                for t in tracks:
+                    print(t)
+            else:
+                print("(в music/ нет треков — положи .mp3/.m4a/.wav и т.п.)")
+        elif args.set_music is not None:
+            path = set_render_music(args.set_music, root=args.root)
+            state = "выключена" if args.set_music == "off" else f"включена · {args.set_music}"
+            print(f"✓ музыка {state} → {path}")
+        elif args.set_audio is not None:
+            path = set_audio_normalization(args.set_audio == "on", root=args.root)
+            print(f"✓ нормализация громкости {'вкл' if args.set_audio == 'on' else 'выкл'} → {path}")
         else:
             print(_menu_render(root=args.root))
         return 0

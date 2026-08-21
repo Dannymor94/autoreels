@@ -45,10 +45,10 @@ def test_ar_cli_falls_back_to_module_when_direct_broken(tmp_path):
     env = dict(os.environ)
     env["PATH"] = f"{tmp_path}{os.pathsep}{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
     r = subprocess.run(
-        ["bash", "-c", f'source "{ALIASES}"; _ar_cli menu --resolve 3'],
+        ["bash", "-c", f'source "{ALIASES}"; _ar_cli menu --resolve 1'],
         capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
     )
-    assert r.stdout.strip() == "status", (r.stdout, r.stderr)
+    assert r.stdout.strip() == "go", (r.stdout, r.stderr)
 
 
 def test_ar_cli_uses_direct_when_available():
@@ -56,10 +56,10 @@ def test_ar_cli_uses_direct_when_available():
     env = dict(os.environ)
     env["PATH"] = f"{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
     r = subprocess.run(
-        ["bash", "-c", f'source "{ALIASES}"; _ar_cli menu --resolve 3; echo "mode=$_AR_CLI_MODE"'],
+        ["bash", "-c", f'source "{ALIASES}"; _ar_cli menu --resolve 1; echo "mode=$_AR_CLI_MODE"'],
         capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
     )
-    assert "status" in r.stdout
+    assert "go" in r.stdout
     assert "mode=direct" in r.stdout, (r.stdout, r.stderr)
 
 
@@ -111,46 +111,55 @@ def test_ar_menu_works_via_module_fallback(tmp_path):
     env["PATH"] = f"{tmp_path}{os.pathsep}{VENV_BIN}{os.pathsep}{env.get('PATH', '')}"
     r = subprocess.run(
         ["bash", "-c", f'source "{ALIASES}"; _ar_menu'],
-        input="3\n\n0\n", capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
+        input="0\n", capture_output=True, text=True, cwd=REPO_ROOT, env=env, timeout=60,
     )
-    # шапка меню отрисовалась (python -m autoreels menu отработал)
+    # шапка меню отрисовалась (python -m autoreels menu отработал), затем выход
     assert "autoreels" in (r.stdout + r.stderr).lower()
     assert "inputs:" in (r.stdout + r.stderr)
 
 
 def test_menu_path_item_prompts_for_source():
-    """Пункт 5 после выбора спрашивает ссылку/путь."""
-    r = _run_menu("5\n\n0\n")            # выбрать 5, пустой ввод, затем выход
+    """Пункт 2 (по ссылке или пути) после выбора спрашивает ссылку/путь."""
+    r = _run_menu("2\n\n0\n")            # выбрать 2, пустой ввод, затем выход
     assert "Вставь ссылку" in (r.stdout + r.stderr)
 
 
 def test_menu_path_empty_input_cancels():
-    """Пустой ввод в пункте 5 → отмена, возврат в меню (run не запускается).
+    """Пустой ввод в пункте 2 → отмена, возврат в меню (run не запускается).
 
     Маркер «отменено» печатается в ветке пустого ввода ДО classify/run — его наличие и
     доказывает, что обработка не стартовала (иначе пошли бы этапы run: «считаю хэш…»).
     """
-    r = _run_menu("5\n\n0\n")
+    r = _run_menu("2\n\n0\n")
     out = r.stdout + r.stderr
     assert "отменено" in out
     assert "считаю хэш" not in out        # конвейер run не запускался
 
 
 def test_menu_transcribe_item_prompts_for_source():
-    """Пункт 6 (транскрибация) тоже спрашивает источник после выбора."""
-    r = _run_menu("6\n\n0\n")
+    """Пункт 5 (только транскрипт) тоже спрашивает источник после выбора."""
+    r = _run_menu("5\n\n0\n")
     assert "транскрибировать" in (r.stdout + r.stderr).lower()
 
 
-def test_menu_profile_item_prompts_and_cancels():
-    """Пункт 9 показывает профили рендера и спрашивает выбор; пустой ввод → отмена (без записи)."""
-    r = _run_menu("9\n\n0\n")              # выбрать 9, пустой ввод (отмена), выход
+def test_menu_settings_profile_picker_and_cancel():
+    """Пункт 8 → подменю настроек → 1 (профиль): показывает профили; пустой ввод → отмена."""
+    # 8 (настройки) → 1 (профиль) → пусто (отмена) → пусто (Enter к настройкам) → 0 (назад) → 0 (выход)
+    r = _run_menu("8\n1\n\n\n0\n0\n")
     out = r.stdout + r.stderr
-    assert "Профиль рендера" in out        # промпт выбора профиля
-    assert "hevc" in out and "h264" in out and "av1" in out   # опции
-    assert "отменено" in out               # пустой ввод отменил, профиль не менялся
+    assert "Настройки рендера" in out          # подменю настроек отрисовалось
+    assert "hevc" in out and "h264" in out and "av1" in out   # опции профиля
+    assert "отменено" in out                    # пустой ввод отменил, профиль не менялся
+
+
+def test_menu_settings_back_returns_to_main():
+    """Подменю настроек: 0 (назад) возвращает в главное меню (видно шапку autoreels)."""
+    r = _run_menu("8\n0\n0\n")
+    out = r.stdout + r.stderr
+    assert "Настройки рендера" in out           # зашли в настройки
+    assert "inputs:" in out                     # вернулись в главное меню (его шапка)
 
 
 def test_menu_transcribe_empty_input_cancels():
-    r = _run_menu("6\n\n0\n")
+    r = _run_menu("5\n\n0\n")
     assert "отменено" in (r.stdout + r.stderr)

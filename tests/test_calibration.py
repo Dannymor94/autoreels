@@ -111,6 +111,28 @@ def test_save_load_rotation_deg_roundtrip(tmp_path):
     assert setup.rotation_deg == 3.5
 
 
+def test_save_load_palette_roundtrip(tmp_path):
+    save_calibration(
+        tmp_path, source_name="v.mp4", source_sha256=SHA_A,
+        crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], palette="vivid",
+    )
+    assert load_calibration(tmp_path, SHA_A).palette == "vivid"
+
+
+def test_palette_defaults_none_when_absent(tmp_path):
+    # калибровка без поля palette (снята до фичи) → None (палитра по умолчанию из render.yaml)
+    save_calibration(
+        tmp_path, source_name="v.mp4", source_sha256=SHA_A,
+        crop=Crop(x=0, y=0, w=956, h=1700), frame=[3840, 2160],
+    )
+    import json
+    p = tmp_path / f"{SHA_A}.json"
+    rec = json.loads(p.read_text(encoding="utf-8"))
+    del rec["palette"]
+    p.write_text(json.dumps(rec), encoding="utf-8")
+    assert load_calibration(tmp_path, SHA_A).palette is None
+
+
 def test_rotation_defaults_to_zero_when_absent(tmp_path):
     # калибровка без поля (снята до фичи) → rotation_deg = 0 (обратная совместимость)
     save_calibration(

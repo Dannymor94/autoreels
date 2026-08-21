@@ -336,6 +336,39 @@ def test_handle_save_no_rotation_defaults_zero(tmp_path):
     assert rec["rotation_deg"] == 0.0
 
 
+def test_handle_save_persists_palette(tmp_path):
+    """palette из payload попадает в calibrations/<sha>.json и в ответ."""
+    calib = tmp_path / "calibrations"
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=calib)
+    cal_obj.frame_size = (3840, 2160)
+    body = json.dumps({
+        "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+        "display_size": [1920, 1080], "frame_size": [3840, 2160],
+        "palette": "vivid",
+    }).encode("utf-8")
+
+    resp = cal_obj._handle_save(body)
+
+    assert resp["palette"] == "vivid"
+    rec = json.loads((calib / ("a" * 64 + ".json")).read_text(encoding="utf-8"))
+    assert rec["palette"] == "vivid"
+
+
+def test_handle_save_neutral_palette_stored_as_none(tmp_path):
+    """neutral = «палитра по умолчанию» → в калибровке None (не переопределяет конфиг)."""
+    calib = tmp_path / "calibrations"
+    cal_obj = ManualCalibrator(sha="a" * 64, source_name="v.mp4", calib_dir=calib)
+    cal_obj.frame_size = (3840, 2160)
+    body = json.dumps({
+        "display": {"x": 685, "y": 140, "w": 478, "h": 850},
+        "display_size": [1920, 1080], "frame_size": [3840, 2160],
+        "palette": "neutral",
+    }).encode("utf-8")
+    cal_obj._handle_save(body)
+    rec = json.loads((calib / ("a" * 64 + ".json")).read_text(encoding="utf-8"))
+    assert rec["palette"] is None
+
+
 def test_handle_save_warns_when_rotation_pushes_crop_out(tmp_path):
     """Полновысотный кроп + большой угол → предупреждение о пустых углах в ответе."""
     calib = tmp_path / "calibrations"
