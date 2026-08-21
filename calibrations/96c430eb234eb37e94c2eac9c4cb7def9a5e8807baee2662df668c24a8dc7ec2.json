@@ -3,10 +3,10 @@
   "source_sha256": "96c430eb234eb37e94c2eac9c4cb7def9a5e8807baee2662df668c24a8dc7ec2",
   "setup_label": "2026-08-08 09h 33m 14s",
   "crop": {
-    "x": 487,
-    "y": 1032,
-    "w": 670,
-    "h": 1192
+    "x": 419,
+    "y": 804,
+    "w": 805,
+    "h": 1431
   },
   "scale": [
     1080,
@@ -16,5 +16,7 @@
     1512,
     2688
   ],
+  "rotation_deg": 0.0,
+  "palette": "sharp",
   "rotation_applied": true
 }
