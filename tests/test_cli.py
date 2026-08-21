@@ -60,8 +60,12 @@ def _no_real_git(monkeypatch):
 def _frame_size_probe(monkeypatch):
     """По умолчанию реальный размер кадра = 3840×2160 (совпадает с frame в _setup()) — cmd_run
     кросс-проверяет кроп против ffprobe при сборке манифеста, а тестовые mp4 фейковые. Тесты,
-    которым нужен другой размер (авто-кроп, out-of-bounds), переопределяют явно."""
+    которым нужен другой размер (авто-кроп, out-of-bounds), переопределяют явно.
+
+    Также обходим validate_input: тестовые mp4 — крошечные заглушки (b\"x\"), реальная валидация
+    отвергла бы их как «слишком мал». Тесты про саму валидацию снимают этот мок явно."""
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
+    monkeypatch.setattr(cli, "validate_input", lambda v, **k: (3840, 2160, 60.0))
 
 
 def _setup() -> SetupProfile:
@@ -345,7 +349,7 @@ def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
     (inputs / "b.mp4").write_bytes(b"x")
     manifests = tmp_path / "manifests"
 
-    ok, failed = cli.cmd_run_batch(
+    ok, failed, skipped = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=manifests,
         archive_dir=tmp_path / "inputs-archive", transcripts_dir=tmp_path / "transcripts",
     )
@@ -374,7 +378,7 @@ def test_run_batch_continues_after_failure(monkeypatch, tmp_path):
     (inputs / "bad.mp4").write_bytes(b"x")
     (inputs / "good.mp4").write_bytes(b"x")
 
-    ok, failed = cli.cmd_run_batch(
+    ok, failed, skipped = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "manifests",
         archive_dir=tmp_path / "inputs-archive", transcripts_dir=tmp_path / "transcripts",
     )
@@ -390,10 +394,73 @@ def test_run_batch_empty_inputs_returns_empty(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
 
-    ok, failed = cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs,
+    ok, failed, skipped = cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs,
                                    manifests_dir=tmp_path / "m", archive_dir=tmp_path / "a")
 
-    assert ok == [] and failed == []
+    assert ok == [] and failed == [] and skipped == []
+
+
+def _validate_by_size(v, **k):
+    """Стаб validate_input: битый = «слишком мал», иначе валиден (для batch-тестов)."""
+    from autoreels.local.calibrate import InputInvalid
+    if Path(v).stat().st_size < 1024:
+        raise InputInvalid("файл пустой (0 байт) — вероятно недокачан или обрезан")
+    return (3840, 2160, 60.0)
+
+
+def test_batch_skips_invalid_file_without_hashing(monkeypatch, tmp_path, capsys):
+    """Битый файл → SKIPPED (не FAILED); хэш для него НЕ считается; он остаётся в inputs/."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "validate_input", _validate_by_size)   # реальная валидация по размеру
+    hashed = []
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast",
+                        lambda v, c: hashed.append(Path(v).name) or "a" * 64)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "empty.mp4").write_bytes(b"")             # битый (0 байт)
+    (inputs / "good.mp4").write_bytes(b"\0" * 2048)     # валидный
+    archive = tmp_path / "inputs-archive"
+
+    ok, failed, skipped = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=archive, transcripts_dir=tmp_path / "t")
+
+    assert ok == ["good.mp4"]
+    assert failed == []
+    assert [n for n, _ in skipped] == ["empty.mp4"]
+    assert "недокач" in skipped[0][1].lower() or "пуст" in skipped[0][1].lower()
+    assert "empty.mp4" not in hashed                    # хэш не тратился на битый
+    assert (inputs / "empty.mp4").exists()              # НЕ заархивирован — остался в inputs/
+    assert not (archive / "empty.mp4").exists()
+
+
+def test_batch_summary_separates_skipped_and_failed(monkeypatch, tmp_path, capsys):
+    """Сводка batch различает три категории: ok / пропущено (битые) / ошибки."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "validate_input", _validate_by_size)
+
+    def selective_extract(video, **k):
+        if Path(video).name == "boom.mp4":
+            raise Exception("forced failure")
+        return tmp_path / "a.wav"
+    monkeypatch.setattr(cli, "_stage_extract_audio", selective_extract)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "boom.mp4").write_bytes(b"\0" * 2048)     # валиден, но упадёт на extract → FAILED
+    (inputs / "empty.mp4").write_bytes(b"")             # битый → SKIPPED
+    (inputs / "good.mp4").write_bytes(b"\0" * 2048)     # ok
+
+    ok, failed, skipped = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t")
+
+    assert ok == ["good.mp4"]
+    assert [n for n, _ in failed] == ["boom.mp4"]       # реальная ошибка — в failed
+    assert [n for n, _ in skipped] == ["empty.mp4"]     # битый — в skipped, НЕ в failed
+    out = capsys.readouterr().out
+    assert "пропущено" in out and "проверь inputs/" in out
 
 
 # ------------------------------------------------- авто-коммит манифеста per-video (git push)
@@ -708,7 +775,7 @@ def test_batch_failed_video_keeps_previous_pushes(monkeypatch, tmp_path):
     for name in ("a.mp4", "b.mp4", "c.mp4"):
         (inputs / name).write_bytes(b"x")
 
-    ok, failed = cli.cmd_run_batch(
+    ok, failed, skipped = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
         cache_dir=tmp_path / "c", push=True,
@@ -4632,7 +4699,7 @@ def test_run_batch_saves_transcript_for_each_video(monkeypatch, tmp_path):
         (inputs / name).write_bytes(b"x")
     transcripts = tmp_path / "transcripts"
 
-    ok, failed = cli.cmd_run_batch(
+    ok, failed, skipped = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=tmp_path / "arch", transcripts_dir=transcripts, cache_dir=tmp_path / "c",
     )

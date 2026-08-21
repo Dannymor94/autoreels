@@ -51,7 +51,9 @@ from autoreels.core.config import (
     validate_profile,
 )
 from autoreels.core.models import Manifest, Transcript
-from autoreels.local.calibrate import CalibrateError, cmd_calibrate
+from autoreels.local.calibrate import (
+    CalibrateError, InputInvalid, cmd_calibrate, validate_input,
+)
 from autoreels.local.render import (
     RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
     render_preview,
@@ -942,6 +944,11 @@ def cmd_run(
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
     transcripts_dir = Path(transcripts_dir) if transcripts_dir else root / "transcripts"
 
+    # ВАЛИДАЦИЯ ПЕРВЫМ ШАГОМ — до хэша/калибровки/аудио. Битый/пустой/недокачанный файл ловим
+    # сразу (InputInvalid), не тратя sha по гигабайтам и ffprobe-калибровку. Наверх летит
+    # InputInvalid — batch отнесёт его к «пропущено» (SKIPPED), а не «ошибка».
+    validate_input(Path(video), ffprobe=resolve_ffprobe(None, ffmpeg=ffmpeg))
+
     size_gb = Path(video).stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
     sha = state.file_sha256_cached_fast(video, cache_dir)
@@ -1116,12 +1123,13 @@ def cmd_run_batch(
     transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
     push: bool = False,
-) -> tuple[list[str], list[tuple[str, Exception]]]:
+) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]]]:
     """Batch: обработать все *.mp4 в inputs/ по очереди. Один упал → остальные продолжают.
 
     `push=True` → каждый успешный манифест сразу коммитится+пушится (per-video, не в конце):
     упади прогон на середине — уже готовые манифесты УЖЕ на системнике.
-    Возвращает (ok_names, failed_list) где failed_list = [(name, exc), ...].
+    Возвращает (ok_names, failed_list, skipped_list): failed = [(name, exc), …] (реальные ошибки);
+    skipped = [(name, причина), …] (битые/пустые файлы — их НЕ архивируем, остаются в inputs/).
     """
     root = Path(root)
     _git_pull(root, what="калибровки")          # один pull на всю пачку (не на каждое видео)
@@ -1129,10 +1137,11 @@ def cmd_run_batch(
     videos = sorted(inputs_dir.glob("*.mp4"))
     if not videos:
         print("inputs/ пуст — нечего обрабатывать", flush=True)
-        return [], []
+        return [], [], []
 
     ok: list[str] = []
     failed: list[tuple[str, Exception]] = []
+    skipped: list[tuple[str, str]] = []
     for v in videos:
         try:
             cmd_run(
@@ -1141,14 +1150,26 @@ def cmd_run_batch(
                 ffmpeg=ffmpeg, push=push, pull_first=False,
             )
             ok.append(v.name)
+        except InputInvalid as e:               # битый/пустой файл — пропуск, НЕ ошибка
+            print(f"\n⊘ пропущен {v.name}: {e}", file=sys.stderr, flush=True)
+            skipped.append((v.name, str(e)))
         except Exception as e:  # noqa: BLE001
             print(f"\n[ОШИБКА] {v.name}: {e}", file=sys.stderr, flush=True)
             failed.append((v.name, e))
 
-    print(f"\n=== batch run: {len(ok)} ok / {len(failed)} failed ===", flush=True)
+    parts = [f"{len(ok)} ok"]
+    if skipped:
+        parts.append(f"{len(skipped)} пропущено (битые)")
+    parts.append(f"{len(failed)} ошибок")
+    print(f"\n=== batch run: {' / '.join(parts)} ===", flush=True)
     for name, err in failed:
         print(f"  ✗ {name}: {err}", file=sys.stderr)
-    return ok, failed
+    for name, reason in skipped:
+        print(f"  ⊘ {name}: {reason}", file=sys.stderr)
+    if skipped:
+        print(f"\n⚠ пропущено {len(skipped)} файла(ов) — проверь inputs/, они битые "
+              f"(остались на месте, не заархивированы; удали или перекачай)", flush=True)
+    return ok, failed, skipped
 
 
 def _missing_reels(manifest: Manifest, out_dir: Path) -> list:
@@ -3344,9 +3365,14 @@ def main(argv=None) -> int:
                         video = _download_url(args.video, Path("inputs"))
                 else:
                     video = _ingest_source(Path(args.video), Path("inputs"))
-                cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push)
+                try:
+                    cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push)
+                except InputInvalid as e:
+                    print(f"⊘ пропущен {Path(video).name}: {e}\n"
+                          f"  файл битый/пустой — перекачай/пересними и повтори", file=sys.stderr)
+                    return 1
             else:
-                _, failed = cmd_run_batch(ffmpeg=ffmpeg, push=not args.no_push)
+                _, failed, _skipped = cmd_run_batch(ffmpeg=ffmpeg, push=not args.no_push)
                 if failed:
                     return 1
         elif args.cmd == "transcribe":

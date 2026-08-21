@@ -123,6 +123,64 @@ def probe_frame(video, *, ffprobe: str = "ffprobe") -> tuple[int, int, float]:
     return parse_probe(proc.stdout)
 
 
+# --------------------------------------------------------------- валидация входного файла
+
+class InputInvalid(Exception):
+    """Входной файл битый/пустой/не видео — обрабатывать нельзя. Это SKIPPED, не FAILED:
+    пользователь чинит файл, конвейер не тратит на него хэш/калибровку/аудио."""
+
+
+# Порог «пустой/недокачан»: реальное talking-head видео на минуты — это десятки-сотни МБ.
+# Меньше 1 МБ — почти наверняка обрезок/пустышка/недокачка (0 байт — тем более).
+_MIN_INPUT_BYTES = 1 << 20
+
+
+def _humanize_ffprobe_error(stderr: str) -> str:
+    """Типичные ошибки ffprobe → человеческое объяснение (что случилось и что делать)."""
+    s = (stderr or "").lower()
+    if "moov atom not found" in s:
+        return ("файл недокачан или обрезан при копировании — перекачай/пересними "
+                "(moov atom not found)")
+    if "invalid data found" in s:
+        return "не видеофайл или повреждён (Invalid data found)"
+    if "end of file" in s or "truncat" in s:
+        return "файл обрезан/недокачан (unexpected end of file)"
+    tail = stderr.strip() or "(без вывода)"
+    return f"ffprobe не смог прочитать файл: {tail}"
+
+
+def validate_input(video, *, ffprobe: str = "ffprobe",
+                   min_bytes: int = _MIN_INPUT_BYTES) -> tuple[int, int, float]:
+    """Быстрая проверка входного файла ПЕРВЫМ шагом — ДО хэша/калибровки/аудио.
+
+    Ловит битые/пустые/недокачанные файлы сразу: размер ≥ `min_bytes`; ffprobe читает файл; есть
+    видеопоток с ненулевыми размером кадра и длительностью. Ничего тяжёлого не считает (никакого
+    sha по гигабайтам). Возвращает (w, h, duration) при успехе; иначе `InputInvalid` с понятной
+    причиной (типичные ошибки ffprobe распознаются и объясняются)."""
+    video = Path(video)
+    if not video.is_file():
+        raise InputInvalid(f"файл не найден: {video}")
+    size = video.stat().st_size
+    if size < min_bytes:
+        what = "файл пустой (0 байт)" if size == 0 else f"файл слишком мал ({size} Б < {min_bytes} Б)"
+        raise InputInvalid(f"{what} — вероятно недокачан или обрезан при копировании")
+    binary = shutil.which(ffprobe)
+    if binary is None:
+        raise InputInvalid(f"ffprobe не найден (искали '{ffprobe}') — не могу проверить файл")
+    proc = subprocess.run(build_probe_cmd(binary, video), capture_output=True, text=True,
+                          encoding="utf-8")
+    if proc.returncode != 0:
+        raise InputInvalid(_humanize_ffprobe_error(proc.stderr))
+    try:
+        w, h, duration = parse_probe(proc.stdout)
+    except CalibrateError as e:
+        raise InputInvalid("нет видеопотока или файл повреждён — не определяются "
+                           "размер кадра и длительность") from e
+    if w <= 0 or h <= 0 or duration <= 0:
+        raise InputInvalid(f"невалидные параметры видео: кадр {w}×{h}, длительность {duration}с")
+    return w, h, duration
+
+
 def extract_reference_frame(video, out_png, *, at_seconds: float, ffmpeg: str = "ffmpeg") -> Path:
     binary = shutil.which(ffmpeg)
     if binary is None:
