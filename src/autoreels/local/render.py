@@ -526,15 +526,51 @@ def _num(x: float) -> str:
     return f"{x:g}"
 
 
-def palette_filter(palette: Palette) -> str:
-    """Строка ffmpeg-фильтров цветокоррекции пресета: `eq=…[,unsharp=…][,colortemperature=…]`.
+# Точки кривой для теней/светов. Концы (0/0, 1/1) НЕ трогаем — крайние значения не выбивают
+# детали в чёрном/белом. Двигаем узлы четвертьтона (0.25) и three-quarter (0.75).
+_CURVE_LOW_X = 0.25
+_CURVE_HIGH_X = 0.75
+_CURVE_MAX_SHIFT = 0.15    # макс. сдвиг узла при |значении|=100 — мягко, без клиппинга
 
-    Порядок частей фиксирован: eq → unsharp → colortemperature. Нейтральные значения
+
+def _curve_point(x: float, value: int) -> str:
+    """Узел кривой `x/y`: y = x + (value/100)·MAX_SHIFT, зажат в [0,1] (страховка от клиппинга)."""
+    y = x + (value / 100.0) * _CURVE_MAX_SHIFT
+    y = max(0.0, min(1.0, y))
+    return f"{_num(round(x, 4))}/{_num(round(y, 4))}"
+
+
+def curves_filter(curves) -> str:
+    """`curves` (тени/света) → ffmpeg curves. Шкала снаружи -100..+100, внутри — точки кривой.
+
+    shadows +N поднимает узел четвертьтона (x=0.25) — вытягивает тени; highlights -N прибирает
+    узел three-quarter (x=0.75) — приглушает света. Концы 0/0 и 1/1 ФИКСИРОВАНЫ (без клиппинга
+    в чёрном/белом). 0/0 по обоим → пустая строка (curves не добавляется, нейтрально)."""
+    s = int(getattr(curves, "shadows", 0) or 0)
+    h = int(getattr(curves, "highlights", 0) or 0)
+    if s == 0 and h == 0:
+        return ""
+    pts = ["0/0"]
+    if s != 0:
+        pts.append(_curve_point(_CURVE_LOW_X, s))
+    if h != 0:
+        pts.append(_curve_point(_CURVE_HIGH_X, h))
+    pts.append("1/1")
+    return "curves=all='" + " ".join(pts) + "'"
+
+
+def palette_filter(palette: Palette) -> str:
+    """Строка ffmpeg-фильтров цветокоррекции пресета: `curves→eq→colortemperature→unsharp`.
+
+    Порядок ФИКСИРОВАН: сначала тональный диапазон (curves), потом общая коррекция (eq) и
+    температура, резкость (unsharp) — ПОСЛЕДНЕЙ (по финальной картинке). Нейтральные значения
     (дефолты) опускаются; neutral-пресет даёт пустую строку — команда рендера не меняется.
-    Фильтры встают в цепочку ПОСЛЕ crop/scale и ДО ass-субтитров (grounding: субтитры
-    накладываются поверх цветокора и остаются чистыми).
+    Вся цепочка встаёт ПОСЛЕ crop/scale и ДО ass-субтитров (субтитры цветокором не затрагиваются).
     """
     parts: list[str] = []
+    curves = curves_filter(palette.curves)
+    if curves:
+        parts.append(curves)
     eq = palette.eq
     eq_terms: list[str] = []
     if eq.contrast != 1.0:
@@ -547,14 +583,14 @@ def palette_filter(palette: Palette) -> str:
         eq_terms.append(f"gamma={_num(eq.gamma)}")
     if eq_terms:
         parts.append("eq=" + ":".join(eq_terms))
+    if palette.colortemperature is not None:
+        parts.append(f"colortemperature=temperature={palette.colortemperature}")
     u = palette.unsharp
-    if u.enabled:
+    if u.enabled:                      # unsharp ПОСЛЕДНИМ — резкость по финальной картинке
         parts.append(
             f"unsharp=luma_msize_x={u.luma_msize_x}:luma_msize_y={u.luma_msize_y}"
             f":luma_amount={_num(u.luma_amount)}"
         )
-    if palette.colortemperature is not None:
-        parts.append(f"colortemperature=temperature={palette.colortemperature}")
     return ",".join(parts)
 
 

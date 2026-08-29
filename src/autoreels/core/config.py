@@ -309,9 +309,21 @@ class PaletteUnsharp(BaseModel):
     luma_amount: float = 0.8
 
 
-class Palette(BaseModel):
-    """Пресет палитры: eq + unsharp + опц. цветовая температура. neutral = всё по дефолтам."""
+class PaletteCurves(BaseModel):
+    """Тени/света через curves. Шкала ПОНЯТНАЯ снаружи (-100..+100), пересчёт в точки кривой —
+    в рендере. 0 = нейтрально (curves вообще не добавляется). shadows +N поднимает нижнюю часть
+    кривой (вытягивает тени), highlights -N прибирает верхнюю (приглушает света). Концы кривой
+    зафиксированы — крайние значения не выбивают детали в чёрном/белом (без клиппинга).
+    Осторожно: подъём теней вытаскивает шум из тёмных участков (телефон в помещении — заметно)."""
     model_config = ConfigDict(extra="forbid")
+    shadows: int = Field(default=0, ge=-100, le=100)
+    highlights: int = Field(default=0, ge=-100, le=100)
+
+
+class Palette(BaseModel):
+    """Пресет палитры: curves + eq + unsharp + опц. цветовая температура. neutral = всё по дефолтам."""
+    model_config = ConfigDict(extra="forbid")
+    curves: PaletteCurves = Field(default_factory=PaletteCurves)
     eq: PaletteEq = Field(default_factory=PaletteEq)
     unsharp: PaletteUnsharp = Field(default_factory=PaletteUnsharp)
     colortemperature: int | None = None   # Кельвины; <6500 теплее, >6500 холоднее; None = выкл
@@ -324,7 +336,8 @@ _DEFAULT_PALETTES: dict[str, dict] = {
     "vivid":   {"eq": {"saturation": 1.15, "contrast": 1.10},
                 "label": "живее: насыщенность +15%, контраст +10% (соцсети)"},
     "soft":    {"eq": {"contrast": 0.95, "saturation": 1.05}, "colortemperature": 5400,
-                "label": "мягче + теплее (talking-head)"},
+                "curves": {"shadows": 10},
+                "label": "мягче + теплее, тени +10 (talking-head)"},
     "sharp":   {"eq": {"contrast": 1.05}, "unsharp": {"enabled": True, "luma_amount": 0.6},
                 "label": "умеренный unsharp + лёгкий контраст"},
 }

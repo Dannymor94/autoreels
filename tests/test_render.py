@@ -1152,8 +1152,8 @@ def test_crop_rotation_then_palette_then_subtitles_order(tmp_path, render_cfg, f
 
 # ------------------------------------------------------------ палитра / цветокоррекция
 
-from autoreels.core.config import Palette, PaletteEq, PaletteUnsharp
-from autoreels.local.render import palette_filter
+from autoreels.core.config import Palette, PaletteCurves, PaletteEq, PaletteUnsharp
+from autoreels.local.render import curves_filter, palette_filter
 
 
 def test_palette_neutral_produces_empty_filter():
@@ -1179,15 +1179,81 @@ def test_palette_colortemperature_appended_last():
     assert palette_filter(pal) == "eq=contrast=0.95,colortemperature=temperature=5400"
 
 
-def test_palette_filter_part_order_eq_unsharp_temp():
-    # порядок частей: eq → unsharp → colortemperature
+def test_palette_filter_part_order_curves_eq_temp_unsharp():
+    # порядок частей ФИКСИРОВАН: curves → eq → colortemperature → unsharp (unsharp последним)
     pal = Palette(
+        curves=PaletteCurves(shadows=10),
         eq=PaletteEq(contrast=1.05),
         unsharp=PaletteUnsharp(enabled=True, luma_amount=0.6),
         colortemperature=5400,
     )
     f = palette_filter(pal)
-    assert f.index("eq=") < f.index("unsharp=") < f.index("colortemperature=")
+    assert (f.index("curves=") < f.index("eq=")
+            < f.index("colortemperature=") < f.index("unsharp="))
+
+
+# ------------------------------------------------------- curves: тени/света (-100..+100)
+
+def test_curves_neutral_produces_empty_string():
+    # 0/0 → curves не добавляется вообще (нейтрально, команда не меняется)
+    assert curves_filter(PaletteCurves()) == ""
+    assert "curves" not in palette_filter(Palette(curves=PaletteCurves(shadows=0, highlights=0)))
+
+
+def test_curves_shadows_raises_low_node_endpoints_fixed():
+    # shadows +100 → узел четвертьтона поднят (0.25/0.4), концы 0/0 и 1/1 зафиксированы
+    assert curves_filter(PaletteCurves(shadows=100)) == "curves=all='0/0 0.25/0.4 1/1'"
+
+
+def test_curves_highlights_lowers_high_node():
+    # highlights -100 → узел three-quarter приглушён (0.75/0.6)
+    assert curves_filter(PaletteCurves(highlights=-100)) == "curves=all='0/0 0.75/0.6 1/1'"
+
+
+def test_curves_both_nodes_present():
+    f = curves_filter(PaletteCurves(shadows=10, highlights=-10))
+    assert f == "curves=all='0/0 0.25/0.265 0.75/0.735 1/1'"
+
+
+def test_curves_before_eq_in_chain():
+    pal = Palette(curves=PaletteCurves(shadows=20), eq=PaletteEq(contrast=1.1))
+    f = palette_filter(pal)
+    assert f.index("curves=") < f.index("eq=")           # тональный диапазон ДО общей коррекции
+
+
+def test_curves_extremes_stay_within_bounds_no_clipping():
+    # крайние значения не выбивают детали: концы 0/0, 1/1; узлы остаются в (0,1)
+    for c in (PaletteCurves(shadows=100, highlights=-100),
+              PaletteCurves(shadows=-100, highlights=100)):
+        f = curves_filter(c)
+        assert f.startswith("curves=all='0/0 ") and f.endswith(" 1/1'")
+        import re as _re
+        ys = [float(p.split("/")[1]) for p in _re.findall(r"[\d.]+/[\d.]+", f)]
+        assert all(0.0 <= y <= 1.0 for y in ys)          # ни один узел не за пределами [0,1]
+
+
+def test_soft_preset_includes_shadows_curve():
+    cfg = load_render_config(RENDER_YAML, local_path=_NO_LOCAL)
+    assert "curves=" in palette_filter(cfg.palettes["soft"])   # soft: тени +10
+
+
+def test_render_soft_palette_curves_order_and_subtitles_untouched(tmp_path, render_cfg, fake_ffmpeg):
+    # soft (тени +10) end-to-end: crop→scale→curves→eq→colortemperature→ass; субтитры ПОСЛЕ цветокора
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"soft-curves-subs-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                palette="soft", subtitles_cfg=subs_cfg)
+
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert (vf.index("scale=") < vf.index("curves=") < vf.index("eq=")
+            < vf.index("colortemperature=") < vf.index("ass="))   # порядок цепочки
+    # субтитры (ass) — последними: цветокор их не трогает (grounding)
+    assert vf.rindex("curves=") < vf.index("ass=")
 
 
 def test_render_config_default_palette_is_neutral():
