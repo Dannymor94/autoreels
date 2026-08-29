@@ -2367,6 +2367,37 @@ _SETTINGS_ITEMS: list[tuple[str, str, str, str]] = [
     ("0", "back",    "← Назад в меню",        ""),
 ]
 
+# ЕДИНЫЙ ИСТОЧНИК диспетчеризации: action-токен пункта → его цель. Меню живёт в двух местах
+# (Python рисует пункты и резолвит цифру→токен; bash-обёртка arl исполняет токен). Чтобы они
+# не разъезжались, цель каждого токена описана здесь ОДИН раз, а тест сверяет, что каждый
+# нарисованный пункт есть и здесь, и в bash-диспетчере (aliases.sh). Значение — либо имя
+# РЕАЛЬНОЙ CLI-подкоманды (проверяется по argparse), либо «вид» для пунктов без прямой команды:
+#   "interactive" — bash сам спрашивает ввод (ссылка/путь) и дальше зовёт CLI;
+#   "config"      — сохранение настройки через `menu --set-*` (не отдельная подкоманда);
+#   "meta"        — управление самим меню (выход/назад), CLI-команды нет.
+# Добавил пункт в отрисовку, но забыл сюда или в bash-диспетчер → параметрический тест падает.
+_MENU_CLI_TARGET: dict[str, str] = {
+    "go": "run",
+    "path": "interactive",
+    "render": "render",
+    "calibrate": "calibrate",
+    "transcribe": "transcribe",
+    "diagnose": "diagnose-cuts",
+    "resnap": "resnap",
+    "settings": "interactive",
+    "status": "status",
+    "resume": "resume",
+    "help": "help",
+    "quit": "meta",
+}
+_SETTINGS_CLI_TARGET: dict[str, str] = {
+    "profile": "config",
+    "palette": "config",
+    "music": "config",
+    "audio": "config",
+    "back": "meta",
+}
+
 # Профили рендера для меню: имя → человекочитаемое описание (кодек+битрейт — в render.yaml).
 _RENDER_PROFILE_DESC = {
     "hevc":    "быстро · компактный ~18 МБ/клип (дефолт)",

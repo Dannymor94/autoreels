@@ -3454,6 +3454,83 @@ def test_menu_action_invalid_returns_none():
         assert cli._menu_action(c) is None
 
 
+# ------------------------- меню ↔ диспетчер: единый источник, защита от разъезда (Python/bash)
+
+ALIASES_SH = REPO_ROOT / "aliases.sh"
+
+
+def _bash_case_tokens(func_name: str) -> set[str]:
+    """Токены веток `case` из bash-функции в aliases.sh (для сверки с Python-меню).
+
+    Тело функции — от `func_name()` до следующего определения функции. Из меток веток
+    (`token)` и `a|b|"")`) достаём альтернативы: делим по `|`, снимаем кавычки/пустые.
+    Вложенные case (внутри веток настроек) тоже попадают — не мешает: проверяем вхождение."""
+    import re
+    text = ALIASES_SH.read_text(encoding="utf-8")
+    body = text.split(f"{func_name}()", 1)[1]
+    body = re.split(r"\n[A-Za-z_]+\(\)\s*\{", body, maxsplit=1)[0]   # до следующей функции
+    tokens: set[str] = set()
+    for labels in re.findall(r"^\s*([A-Za-z_\"|]+)\)", body, re.M):
+        for part in labels.split("|"):
+            part = part.strip().strip('"')
+            if part:
+                tokens.add(part)
+    return tokens
+
+
+def _cli_subcommands() -> set[str]:
+    """Множество реальных CLI-подкоманд из argparse (для проверки целей меню)."""
+    subs: set[str] = set()
+    for a in cli._build_parser()._subparsers._group_actions:
+        if getattr(a, "choices", None):
+            subs |= set(a.choices)
+    return subs
+
+
+_KNOWN_TARGET_KINDS = ("interactive", "config", "meta")
+
+
+@pytest.mark.parametrize("num,action", [(n, a) for n, a, *_ in cli._MENU_ITEMS])
+def test_menu_item_resolves_to_dispatch_target(num, action):
+    """Каждый пункт главного меню: цифра резолвится в свой токен, токен описан в единой карте
+    диспетчеризации, а его цель — РЕАЛЬНАЯ CLI-подкоманда или известный вид."""
+    assert cli._menu_action(num) == action                 # цифра → токен
+    assert action in cli._MENU_CLI_TARGET                  # токен есть в единой карте
+    target = cli._MENU_CLI_TARGET[action]
+    assert target in _cli_subcommands() or target in _KNOWN_TARGET_KINDS
+
+
+@pytest.mark.parametrize("num,action", [(n, a) for n, a, *_ in cli._SETTINGS_ITEMS])
+def test_settings_item_resolves_to_dispatch_target(num, action):
+    """То же для подменю настроек: пункт резолвится и имеет цель (config/meta)."""
+    assert cli._settings_action(num) == action
+    assert action in cli._SETTINGS_CLI_TARGET
+    target = cli._SETTINGS_CLI_TARGET[action]
+    assert target in _cli_subcommands() or target in _KNOWN_TARGET_KINDS
+
+
+def test_menu_dispatch_map_matches_items_exactly():
+    """Карта диспетчеризации и список пунктов не разъезжаются (нет лишних/забытых токенов).
+    Единый источник: добавил пункт — обязан описать его цель, и наоборот."""
+    assert {a for _, a, *_ in cli._MENU_ITEMS} == set(cli._MENU_CLI_TARGET)
+    assert {a for _, a, *_ in cli._SETTINGS_ITEMS} == set(cli._SETTINGS_CLI_TARGET)
+
+
+@pytest.mark.parametrize("action", [a for _, a, *_ in cli._MENU_ITEMS])
+def test_every_menu_action_dispatched_in_bash(action):
+    """ГЛАВНОЕ: каждый нарисованный пункт меню обрабатывается bash-диспетчером (_ar_menu).
+    Падает, если пункт добавили в отрисовку (Python), но забыли ветку в bash (aliases.sh)."""
+    assert action in _bash_case_tokens("_ar_menu"), \
+        f"пункт меню '{action}' не обрабатывается в _ar_menu (aliases.sh) — разъезд Python/bash"
+
+
+@pytest.mark.parametrize("action", [a for _, a, *_ in cli._SETTINGS_ITEMS])
+def test_every_settings_action_dispatched_in_bash(action):
+    """Каждый пункт подменю настроек обрабатывается bash-диспетчером _ar_settings."""
+    assert action in _bash_case_tokens("_ar_settings"), \
+        f"пункт настроек '{action}' не обрабатывается в _ar_settings (aliases.sh)"
+
+
 # -------------------------------------------------- меню: состояние и рекомендация
 
 def test_menu_state_counts_filesystem(tmp_path):
