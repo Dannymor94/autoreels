@@ -466,11 +466,15 @@ def test_batch_summary_separates_skipped_and_failed(monkeypatch, tmp_path, capsy
 # ------------------------------------------------- авто-коммит манифеста per-video (git push)
 
 class _FakeGit:
-    """Записывает git-вызовы; можно назначить сбой/таймаут конкретной подкоманде."""
-    def __init__(self, fail_on=None, timeout_on=None):
+    """Записывает git-вызовы; можно назначить сбой/таймаут/явный вывод конкретной подкоманде.
+
+    outputs={subcmd: (rc, stdout, stderr)} переопределяет ответ подкоманды (напр. конфликт
+    rebase: {"pull": (1, "", "CONFLICT (content): Merge conflict in manifests/v.json")})."""
+    def __init__(self, fail_on=None, timeout_on=None, outputs=None):
         self.calls = []           # список списков-аргументов git
         self._fail_on = fail_on
         self._timeout_on = timeout_on
+        self._outputs = outputs or {}
 
     def __call__(self, args, *, root, timeout=None):
         import subprocess
@@ -478,13 +482,16 @@ class _FakeGit:
         sub = args[0]
         if self._timeout_on and sub == self._timeout_on:
             raise subprocess.TimeoutExpired(cmd="git", timeout=timeout or 1)
-        rc = 1 if (self._fail_on and sub == self._fail_on) else 0
-        stderr = "fatal: could not read Username (no network)" if rc else ""
+        if sub in self._outputs:
+            rc, out, err = self._outputs[sub]
+        else:
+            rc = 1 if (self._fail_on and sub == self._fail_on) else 0
+            out = ""
+            err = "fatal: could not read Username (no network)" if rc else ""
         class _R:
             returncode = rc
-            stdout = ""
-            stderr = ""
-        _R.stderr = stderr
+            stdout = out
+            stderr = err
         return _R()
 
     def subcommands(self):
@@ -501,10 +508,32 @@ def test_commit_push_manifest_runs_add_commit_push(monkeypatch, tmp_path, capsys
 
     cli._commit_push_manifest(mf, 7, root=tmp_path)
 
-    assert git.subcommands() == ["add", "commit", "push"]
+    # pull --rebase вставлен между commit и push (влить удалённые изменения без merge-коммита)
+    assert git.subcommands() == ["add", "commit", "pull", "push"]
     commit_args = next(c for c in git.calls if c[0] == "commit")
     assert "manifest: lecture (7 reels)" in commit_args      # формат сообщения
+    pull_args = next(c for c in git.calls if c[0] == "pull")
+    assert "--rebase" in pull_args and "--autostash" in pull_args
     assert "запушен" in capsys.readouterr().out
+
+
+def test_commit_push_manifest_rebase_conflict_aborts_and_warns(monkeypatch, tmp_path, capsys):
+    """Конфликт rebase в общих файлах → rebase --abort, push НЕ делается, внятная инструкция."""
+    git = _FakeGit(outputs={"pull": (1, "", "CONFLICT (content): Merge conflict in manifests/v.json")})
+    monkeypatch.setattr(cli, "_run_git", git)
+    mf = tmp_path / "manifests" / "v.json"
+    mf.parent.mkdir(parents=True)
+    mf.write_text("{}", encoding="utf-8")
+
+    cli._commit_push_manifest(mf, 3, root=tmp_path)
+
+    subs = git.subcommands()
+    assert "rebase" in subs                                  # откат rebase вызван
+    rebase_args = next(c for c in git.calls if c[0] == "rebase")
+    assert "--abort" in rebase_args
+    assert "push" not in subs                                # push НЕ сделан (дерево осталось чистым)
+    err = capsys.readouterr().err
+    assert "конфликт" in err.lower() and "git pull --rebase" in err   # что делать человеку
 
 
 def test_commit_push_manifest_includes_calibration(monkeypatch, tmp_path):
@@ -532,7 +561,7 @@ def test_commit_push_calibrations_syncs_dir(monkeypatch, tmp_path, capsys):
 
     cli._commit_push_calibrations(root=tmp_path)
 
-    assert git.subcommands() == ["add", "commit", "push"]
+    assert git.subcommands() == ["add", "commit", "pull", "push"]   # rebase перед push
     add_args = next(c for c in git.calls if c[0] == "add")
     assert "calibrations" in add_args
     out = capsys.readouterr().out
@@ -639,7 +668,7 @@ def test_commit_push_calibrations_works_by_default(monkeypatch, tmp_path):
 
     cli._commit_push_calibrations(root=tmp_path)
 
-    assert git.subcommands() == ["add", "commit", "push"]  # пушит, а не молчит
+    assert git.subcommands() == ["add", "commit", "pull", "push"]  # пушит (rebase перед push)
 
 
 def test_git_sync_disabled_by_env_skips_push(monkeypatch, tmp_path):
@@ -975,8 +1004,10 @@ def _stale_render_setup(tmp_path):
 
 
 def test_render_auto_recrops_stale_crop_and_renders(monkeypatch, tmp_path, capsys):
-    """Устаревший кроп + есть калибровка → авто-применение (как recrop) и рендер обновлённым кропом."""
+    """Устаревший кроп + есть калибровка → свежий кроп применяется В ПАМЯТИ для этого рендера,
+    но манифест НЕ переписывается (иммутабелен после сборки; обновляет его только arl recrop)."""
     manifests, cal = _stale_render_setup(tmp_path)
+    before = (manifests / "v.json").read_text(encoding="utf-8")
     called = []
     monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [Path("r.mp4")])
 
@@ -984,10 +1015,24 @@ def test_render_auto_recrops_stale_crop_and_renders(monkeypatch, tmp_path, capsy
 
     assert len(called) == 1                            # отрендерён (не пропущен)
     assert called[0].setup.crop.model_dump() == {"x": 96, "y": 170, "w": 1320, "h": 2347}  # свежий кроп
-    m = json.loads((manifests / "v.json").read_text(encoding="utf-8"))
-    assert m["setup"]["crop"]["w"] == 1320             # манифест сохранён с новым кропом
+    assert (manifests / "v.json").read_text(encoding="utf-8") == before   # манифест НЕ тронут
     out = capsys.readouterr().out
-    assert "↻" in out and "кроп обновлён" in out
+    assert "↻" in out and "манифест не меняю" in out
+
+
+def test_render_does_not_write_or_push_manifest_on_stale(monkeypatch, tmp_path):
+    """Рендер устаревшего кропа НЕ вызывает ни _write_manifest, ни _commit_push_manifest —
+    рендер-машина не должна коммитить манифесты (источник git-конфликтов на двух машинах)."""
+    manifests, cal = _stale_render_setup(tmp_path)
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: [Path("r.mp4")])
+    wrote, pushed = [], []
+    monkeypatch.setattr(cli, "_write_manifest", lambda *a, **k: wrote.append(a) or Path("x"))
+    monkeypatch.setattr(cli, "_commit_push_manifest", lambda *a, **k: pushed.append(a))
+
+    cli.cmd_render(manifests_dir=manifests, calibrations_dir=cal, root=REPO_ROOT)
+
+    assert wrote == []                                 # манифест не переписан
+    assert pushed == []                                # и не закоммичен/запушен рендером
 
 
 def test_render_no_auto_recrop_blocks_stale(monkeypatch, tmp_path, capsys):

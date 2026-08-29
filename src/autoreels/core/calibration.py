@@ -248,7 +248,9 @@ def save_calibration(
         "rotation_applied": True,
     }
     path = calibration_path(calibrations_dir, source_sha256)
-    path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    # newline="\n": на Windows write_text в text-режиме иначе пишет CRLF, и калибровка,
+    # сохранённая на системнике, конфликтует по git с LF-версией с Mac (весь файл «изменён»).
+    path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     return path
 
 
@@ -360,6 +362,8 @@ def load_or_auto_calibrate(
 ) -> SetupProfile:
     """Вернуть SetupProfile: ручная калибровка (если есть по ключу) или авто-кроп по центру.
 
+    НИКОГДА не пишет на диск: существующую калибровку только читает, автокроп считает в памяти.
+    Запись файла — отдельная явная команда (calibrate), не побочка чтения (иначе git-churn).
     ЯВНО логирует исход (найдена/не найдена/какая) — откат на автокроп НЕ должен быть молчаливым.
     Защита: если по ключу калибровки нет, но в каталоге есть РУЧНАЯ калибровка для видео с тем же
     именем файла — это почти наверняка «тот самый» файл под другим хэшем (файл изменился/пересжат).
@@ -398,24 +402,18 @@ def load_or_auto_calibrate(
     frame_size = get_frame_size()
     print(
         f"кроп не откалиброван → авто-кроп 9:16 по центру в ОТОБРАЖАЕМОМ кадре "
-        f"{frame_size[0]}×{frame_size[1]} (autoreels calibrate <video> для ручной настройки)",
+        f"{frame_size[0]}×{frame_size[1]} (в памяти, файл не пишется; "
+        f"autoreels calibrate <video> — для ручной настройки)",
         flush=True,
     )
-    crop = auto_crop(frame_size)
-    calibrations_dir.mkdir(parents=True, exist_ok=True)
-    rec = {
-        "source_name": source_name,
-        "source_sha256": source_sha256,
-        "setup_label": "auto",
-        "crop": crop.model_dump(),
-        "scale": TARGET_SCALE,
-        "frame": list(frame_size),
-        "auto": True,
-    }
-    path.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Автокроп — ДЕТЕРМИНИРОВАННАЯ функция размера кадра: НЕ персистим его на диск. Запись
+    # автокропа как побочный эффект «чтения» плодила git-конфликты (обе машины независимо
+    # писали один и тот же файл при каждом run). Кроп всё равно уезжает на рендер ВНУТРИ
+    # манифеста; calibrations/ хранит только НАМЕРЕННЫЕ ручные калибровки. Нужна запись —
+    # это явная команда (calibrate), а не побочка чтения.
     return SetupProfile(
         setup_id="auto",
-        crop=crop,
+        crop=auto_crop(frame_size),
         scale=TARGET_SCALE,
         frame=list(frame_size),
     )

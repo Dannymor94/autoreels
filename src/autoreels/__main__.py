@@ -712,6 +712,41 @@ def _run_git(args, *, root, timeout=None):
     )
 
 
+def _pull_rebase_before_push(root, *, what: str) -> str | None:
+    """Перед push влить удалённые изменения через `pull --rebase --autostash` — не плодя merge.
+
+    Обе машины пишут в manifests/calibrations, поэтому «слепой» push после чужого коммита
+    отвергается (non-fast-forward). Rebase перекладывает локальные коммиты поверх удалённых.
+    Возврат:
+    - None → можно пушить: rebase прошёл, ЛИБО транзиентная ошибка (нет сети/upstream) — тогда
+      push сам сообщит свою ошибку, не блокируем здесь;
+    - СТРОКА → конфликт в общих файлах (изменены и тут, и на другой машине): rebase ОТМЕНЁН
+      (`--abort`, рабочее дерево чистое, локальные коммиты целы), push НЕ делается, строка —
+      внятная инструкция человеку (а не сырой вывод git)."""
+    import subprocess
+    try:
+        rb = _run_git(["pull", "--rebase", "--autostash"], root=root, timeout=180)
+    except (subprocess.TimeoutExpired, OSError):
+        return None   # транзиентно — пусть push попробует и сам разберётся
+    if rb.returncode == 0:
+        return None
+    combined = f"{rb.stdout}\n{rb.stderr}".lower()
+    if "conflict" not in combined:
+        return None   # не конфликт (нет upstream/сети/rebase невозможен) — push сам сообщит
+    # Конфликт: откатываем rebase, чтобы дерево осталось чистым (локальные коммиты на месте).
+    try:
+        _run_git(["rebase", "--abort"], root=root, timeout=60)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return (
+        f"git-конфликт при синхронизации ({what}): файл изменён и здесь, и на другой машине. "
+        f"Rebase отменён — рабочее дерево чистое, локальные изменения целы. Разреши вручную: "
+        f"git pull --rebase → устрани конфликт → git push. Подсказка: манифест после сборки "
+        f"иммутабелен, автокроп в calibrations/ не хранится — при сомнении бери версию машины "
+        f"анализа (где шёл arl run/calibrate)."
+    )
+
+
 def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path=None) -> None:
     """Закоммитить и запушить манифест (+ калибровку кропа этого видео) сразу после видео.
 
@@ -750,6 +785,12 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path
         nothing_new = "nothing to commit" in f"{commit.stdout}{commit.stderr}".lower()
         if commit.returncode != 0 and not nothing_new:
             _warn(f"{commit.stdout} {commit.stderr}")
+            return
+        # Перед push влить удалённое через rebase (обе машины пишут в manifests → чужой коммит
+        # отверг бы наш push). Конфликт → внятная инструкция, дерево остаётся чистым.
+        conflict = _pull_rebase_before_push(root, what=f"манифест {stem}")
+        if conflict:
+            print(f"  ⚠ {conflict}", file=sys.stderr, flush=True)
             return
         # Пушим даже при nothing-to-commit: вдруг прошлый push не прошёл, локаль впереди remote.
         push = _run_git(["push"], root=root, timeout=180)
@@ -797,6 +838,10 @@ def _commit_push_calibrations(*, root) -> None:
         nothing_new = "nothing to commit" in f"{commit.stdout}{commit.stderr}".lower()
         if commit.returncode != 0 and not nothing_new:
             _warn(f"{commit.stdout} {commit.stderr}")
+            return
+        conflict = _pull_rebase_before_push(root, what="калибровки")
+        if conflict:
+            print(f"  ⚠ {conflict}", file=sys.stderr, flush=True)
             return
         push = _run_git(["push"], root=root, timeout=180)
         if push.returncode != 0:
@@ -1359,15 +1404,17 @@ def cmd_render(
                               file=sys.stderr, flush=True)
                         skipped_stale.append(mf.name)
                         continue
+                    # Применяем свежий кроп ТОЛЬКО В ПАМЯТИ для этого рендера. Манифест на диске
+                    # не трогаем: после сборки он иммутабелен (пишет только анализ, рендер читает).
+                    # Иначе рендер-машина коммитит манифесты и на двух машинах начинаются git-
+                    # конфликты. Обновить сам манифест — отдельным arl recrop на машине анализа.
                     manifest = manifest.model_copy(update={"setup": new_setup})
-                    _write_manifest(manifest, manifests_dir)          # локально
                     c = new_setup.crop
-                    print(f"  ↻ {stem}: кроп обновлён по калибровке (был устаревший) → "
-                          f"{c.w}×{c.h}@{c.x},{c.y} в кадре {new_setup.frame} — продолжаю рендер",
+                    print(f"  ↻ {stem}: кроп устарел — применяю свежую калибровку "
+                          f"{c.w}×{c.h}@{c.x},{c.y} в кадре {new_setup.frame} ТОЛЬКО для этого "
+                          f"рендера (манифест не меняю; обновить его — arl recrop на машине анализа)",
                           flush=True)
-                    # push по общим правилам (AUTOREELS_GIT_PUSH=0/SYNC=0 → только локально, без ошибок)
-                    _commit_push_manifest(manifests_dir / f"{stem}.json", len(manifest.reels), root=root)
-                    # дальше рендерим обновлённым manifest (не continue)
+                    # дальше рендерим обновлённым (в памяти) manifest (не continue)
                 else:
                     # --no-auto-recrop: строгая блокировка (не трогаем манифест).
                     print(f"\n  ⛔ ПРОПУСК {stem}: {desync}\n     кроп в манифесте "

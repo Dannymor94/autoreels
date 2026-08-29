@@ -83,6 +83,23 @@ def test_save_then_load_calibration_roundtrip(tmp_path):
     assert setup.setup_id == "tearoom_main"     # метка из --setup → setup_id манифеста
 
 
+def test_load_calibration_does_not_modify_file(tmp_path):
+    """Чтение калибровки не меняет файл (байты + mtime). Иначе git видит фантомные изменения
+    и на двух машинах начинаются конфликты при pull даже без реальной перекалибровки."""
+    path = save_calibration(
+        tmp_path, source_name="v.mp4", source_sha256=SHA_A,
+        crop=Crop(x=1370, y=280, w=956, h=1700), frame=[3840, 2160], setup_label="v",
+    )
+    before_bytes = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
+
+    for _ in range(3):
+        load_calibration(tmp_path, SHA_A)
+
+    assert path.read_bytes() == before_bytes          # содержимое не тронуто
+    assert path.stat().st_mtime_ns == before_mtime    # и файл не перезаписан (та же mtime)
+
+
 def test_load_calibration_missing_raises_with_calibrate_hint(tmp_path):
     with pytest.raises(CalibrationError) as e:
         load_calibration(tmp_path, SHA_A)
@@ -216,31 +233,30 @@ def test_load_or_auto_calibrate_uses_manual_if_exists(tmp_path):
     assert setup.setup_id == "my_room"
 
 
-def test_load_or_auto_calibrate_creates_center_crop_when_no_calibration(tmp_path):
+def test_load_or_auto_calibrate_returns_center_crop_when_no_calibration(tmp_path):
     setup = load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
                                    get_frame_size=lambda: (3840, 2160))
     expected = auto_crop((3840, 2160))
     assert setup.crop.model_dump() == expected.model_dump()
     assert setup.frame == [3840, 2160]
-    # и файл сохранён — повторный load_calibration работает
-    from autoreels.core.calibration import load_calibration as _lc
-    assert _lc(tmp_path, SHA_A).crop.model_dump() == expected.model_dump()
+    assert setup.setup_id == "auto"
 
 
-def test_auto_calibration_saved_with_auto_flag(tmp_path):
-    import json
+def test_auto_calibration_is_not_persisted(tmp_path):
+    """Автокроп НЕ пишется на диск: чтение не должно создавать файл (иначе git-churn на 2 машинах).
+    Автокроп детерминирован от размера кадра и уезжает на рендер внутри манифеста."""
     from autoreels.core.calibration import calibration_path
     load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
                            get_frame_size=lambda: (3840, 2160))
-    rec = json.loads(calibration_path(tmp_path, SHA_A).read_text(encoding="utf-8"))
-    assert rec.get("auto") is True
+    assert not calibration_path(tmp_path, SHA_A).is_file()   # файл не создан
+    assert list(tmp_path.glob("*.json")) == []               # каталог чист
 
 
-def test_manual_calibrate_overwrites_auto(tmp_path):
-    # сначала авто-кроп
+def test_manual_calibrate_after_auto(tmp_path):
+    # сначала авто-кроп (в памяти, файл не пишется)
     load_or_auto_calibrate(tmp_path, SHA_A, "v.mp4",
                            get_frame_size=lambda: (3840, 2160))
-    # потом ручная перезаписывает
+    # ручная калибровка создаёт файл
     manual_crop = Crop(x=100, y=50, w=900, h=1600)
     save_calibration(tmp_path, source_name="v.mp4", source_sha256=SHA_A,
                      crop=manual_crop, frame=[3840, 2160], setup_label="manual")
