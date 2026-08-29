@@ -856,3 +856,41 @@ def test_default_openrouter_model_is_available_free_model():
     """Дефолтная OpenRouter-модель — из актуального списка бесплатных (та же есть на Groq)."""
     from autoreels.cloud.providers import DEFAULT_OPENROUTER_MODEL
     assert DEFAULT_OPENROUTER_MODEL == "openai/gpt-oss-20b:free"
+
+
+# ------------------------------------------- live-проверка провайдера для doctor (без сети)
+
+def test_interpret_provider_status_decodes_codes():
+    from autoreels.cloud.providers import interpret_provider_status as I
+    assert I(200)[1] == "доступен"
+    assert "неверный или протух" in I(401)[1]
+    assert "регион заблокирован" in I(403)[1]
+    assert "нет сети" in I(None)[1]                 # таймаут/сеть
+    assert I(429)[0] == "429" and "лимит" in I(429)[1].lower()
+
+
+def test_probe_provider_returns_status_code(monkeypatch):
+    from autoreels.cloud.providers import probe_provider
+    class _R:
+        status_code = 200
+    got = probe_provider("http://x/models", api_key="k",
+                         get_fn=lambda url, *, headers, timeout: _R())
+    assert got == 200
+
+
+def test_probe_provider_none_on_network_error():
+    from autoreels.cloud.providers import probe_provider
+    def boom(url, *, headers, timeout):
+        raise RuntimeError("no network")
+    assert probe_provider("http://x/models", api_key="k", get_fn=boom) is None
+
+
+def test_probe_provider_sends_bearer_when_key():
+    from autoreels.cloud.providers import probe_provider
+    seen = {}
+    def cap(url, *, headers, timeout):
+        seen.update(headers)
+        class _R: status_code = 401
+        return _R()
+    probe_provider("http://x/models", api_key="secret", get_fn=cap)
+    assert seen.get("Authorization") == "Bearer secret"

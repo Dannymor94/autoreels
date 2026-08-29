@@ -1886,12 +1886,14 @@ def test_render_uses_default_paths_without_args(monkeypatch, tmp_path):
 # ------------------------------------------------------------------ .env автоподхват
 
 def test_cli_autoloads_dotenv(tmp_path, monkeypatch):
-    env = tmp_path / ".env"
-    env.write_text("AUTOREELS_DOTENV_PROBE=loaded123\n", encoding="utf-8")
+    """CLI автоподхватывает .env от КОРНЯ проекта в окружение и запоминает отчёт (для doctor)."""
+    (tmp_path / ".env").write_text("AUTOREELS_DOTENV_PROBE=loaded123\n", encoding="utf-8")
     monkeypatch.delenv("AUTOREELS_DOTENV_PROBE", raising=False)
+    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
     try:
-        cli._load_env(env)
+        cli._load_env()
         assert os.environ["AUTOREELS_DOTENV_PROBE"] == "loaded123"
+        assert cli._ENV_REPORT.path == (tmp_path / ".env").resolve()
     finally:
         os.environ.pop("AUTOREELS_DOTENV_PROBE", None)
 
@@ -5003,3 +5005,59 @@ def test_migrate_calibrations_idempotent(tmp_path, capsys):
 def test_migrate_calibrations_subcommand_registered():
     args = cli._build_parser().parse_args(["migrate-calibrations"])
     assert args.cmd == "migrate-calibrations"
+
+
+# ------------------------------------------------------------------- doctor (преflight)
+
+def test_doctor_masks_secret_and_decodes_status(tmp_path, capsys):
+    """Ключ показан только префиксом; 401→протух, 200→доступен. Секрет целиком не печатается."""
+    def probe(url, api_key):
+        return 401 if "groq" in url else 200
+    cli.cmd_doctor(root=tmp_path, probe=probe,
+                   environ={"GROQ_API_KEY": "gsk_realsecret123", "OPENROUTER_API_KEY": "or_key123"})
+    out = capsys.readouterr().out
+    assert "gsk_real…" in out
+    assert "gsk_realsecret123" not in out            # секрет целиком НЕ печатается
+    assert "протух" in out                            # 401 → Groq
+    assert "OpenRouter: ✓ доступен" in out            # 200 → OpenRouter
+
+
+def test_doctor_decodes_timeout_and_region_block(tmp_path, capsys):
+    """Таймаут (None)→нет сети; 403→регион заблокирован."""
+    def probe(url, api_key):
+        return None if "groq" in url else 403
+    cli.cmd_doctor(root=tmp_path, probe=probe,
+                   environ={"GROQ_API_KEY": "gsk_x", "OPENROUTER_API_KEY": "or_x"})
+    out = capsys.readouterr().out
+    assert "нет сети" in out
+    assert "регион заблокирован" in out
+
+
+def test_doctor_reports_missing_groq_key(tmp_path, capsys):
+    """Нет ключа Groq → явное «НЕ ЗАДАН» (не тихий пропуск)."""
+    cli.cmd_doctor(root=tmp_path, probe=lambda url, api_key: 200, environ={})
+    out = capsys.readouterr().out
+    assert "GROQ_API_KEY" in out and "НЕ ЗАДАН" in out
+
+
+def test_doctor_warns_dotenv_txt(tmp_path, capsys):
+    """Есть .env.txt (нет .env) → doctor советует переименовать."""
+    (tmp_path / ".env.txt").write_text("GROQ_API_KEY=gsk_x\n", encoding="utf-8")
+    cli.cmd_doctor(root=tmp_path, probe=lambda url, api_key: 200, environ={})
+    out = capsys.readouterr().out
+    assert ".env.txt" in out and "переименуй" in out.lower()
+
+
+def test_run_without_groq_key_fails_clearly(monkeypatch, tmp_path, capsys):
+    """run без GROQ_API_KEY → внятное сообщение с путём .env и подсказкой doctor, не traceback/401."""
+    from autoreels.core.env import EnvReport
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "_load_env",
+                        lambda: setattr(cli, "_ENV_REPORT", EnvReport(path=tmp_path / ".env")))
+    video = tmp_path / "inputs" / "v.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    rc = cli.main(["run", str(video)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "GROQ_API_KEY" in err and "doctor" in err

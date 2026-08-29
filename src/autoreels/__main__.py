@@ -32,6 +32,7 @@ from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
 from autoreels.core import state
+from autoreels.core.env import MissingKeyError, require_key
 from autoreels.core.calibration import (
     CalibrationError,
     _probe_frame_size_for_auto,
@@ -86,6 +87,7 @@ _KNOWN_ERRORS = (
     CalibrateError,
     RunError,
     FFmpegNotFoundError,
+    MissingKeyError,
     FileNotFoundError,
 )
 
@@ -122,11 +124,18 @@ def _validate_media(path: Path, *, exts: set[str]) -> Path:
 
 # --------------------------------------------------------------------------- .env
 
-def _load_env(dotenv_path: str | Path | None = None) -> None:
-    """Подхватить .env в окружение (закрывает ручной `source .env`, долг 5a)."""
-    from dotenv import load_dotenv
+# Отчёт о загрузке .env (путь, найденные ключи, .env.txt) — заполняется _load_env(), читается
+# командой `doctor` и preflight'ом run для внятных сообщений вместо 401 из глубины.
+_ENV_REPORT = None
 
-    load_dotenv(str(dotenv_path) if dotenv_path is not None else None)
+
+def _load_env() -> None:
+    """Подхватить .env в окружение УСТОЙЧИВО: чистка CRLF/кавычек/пробелов, поиск от корня
+    проекта, детект .env.txt (закрывает ручной `source .env` и Windows-грабли с 401)."""
+    global _ENV_REPORT
+    from autoreels.core import env as _envmod
+
+    _ENV_REPORT = _envmod.load_env(root=_project_root())
 
 
 def _run_key(source_sha256: str, duration_preset: str) -> str:
@@ -2309,6 +2318,107 @@ def cmd_status(*, root=".") -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- doctor
+
+def _doctor_tool_line(tool: str, root) -> str:
+    """Строка doctor для ffmpeg/ffprobe: резолв пути + первая строка `-version`, или «не найден».
+
+    После обновлений Windows ffmpeg регулярно теряется из PATH — doctor показывает это явно,
+    ДО того как run упадёт [WinError 2] на извлечении аудио."""
+    import subprocess
+    try:
+        ff = _cli_resolve_ffmpeg(None, root=root)
+        path = ff if tool == "ffmpeg" else resolve_ffprobe(None, ffmpeg=ff)
+    except FFmpegNotFoundError:
+        return (f"  {tool:<16} ⚠ не найден (ни PATH, ни render.local.yaml, ни автопоиск) — "
+                f"после обновлений Windows ffmpeg часто выпадает из PATH")
+    try:
+        out = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=10)
+        blob = out.stdout or out.stderr or ""
+        first = blob.splitlines()[0] if blob.strip() else "(без вывода -version)"
+        return f"  {tool:<16} ✓ {path}  ·  {first}"
+    except (OSError, subprocess.SubprocessError):
+        return f"  {tool:<16} ⚠ путь {path} есть, но бинарь не запускается"
+
+
+def cmd_doctor(*, root=".", probe=None, environ=None) -> int:
+    """Преflight окружения: по пунктам печатает, что найдено и что сломано — ДО тяжёлой работы.
+
+    Проверяет: .env (абсолютный путь / .env.txt), ключи провайдеров (ТОЛЬКО префикс, не секрет),
+    live-доступность Groq/OpenRouter (короткий GET /models → 200/401/403/таймаут), ffmpeg/ffprobe
+    (версия), python + entry-point, git-синк (флаги), каталоги проекта. Ничего не меняет, rc=0
+    (диагностика, не гейт) — но чётко подсвечивает поломки, чтобы run/render не падали молча."""
+    import sys as _sys
+    from autoreels.cloud.providers import (
+        GROQ_MODELS_URL, OPENROUTER_MODELS_URL, interpret_provider_status, probe_provider,
+    )
+    from autoreels.core.env import clean_key, key_prefix, scan_env
+
+    environ = environ if environ is not None else os.environ
+    probe = probe or (lambda url, api_key: probe_provider(url, api_key=api_key))
+    root = Path(root)
+
+    print("─── autoreels doctor ───────────────────────────────")
+
+    # 1) .env: откуда прочитан (абсолютный путь) + предупреждение про .env.txt
+    rep = scan_env(root)
+    if rep.path:
+        print(f"  .env             {rep.path}")
+    else:
+        searched = ", ".join(str(p) for p in rep.searched) or str(root / ".env")
+        print(f"  .env             ⚠ не найден (искал: {searched})")
+    if rep.dotenv_txt:
+        print(f"  ⚠ найден {rep.dotenv_txt.name} — Windows прячет расширения; переименуй в .env")
+
+    # 2) ключи (только ПРЕФИКС) + live-проверка провайдера
+    providers = [
+        ("GROQ_API_KEY", "Groq", GROQ_MODELS_URL, True),
+        ("OPENROUTER_API_KEY", "OpenRouter", OPENROUTER_MODELS_URL, False),
+    ]
+    for key_name, label, url, required in providers:
+        val = clean_key(key_name, environ=environ)
+        if not val:
+            if required:
+                print(f"  {key_name:<18} ⚠ НЕ ЗАДАН — R0/Whisper работать не будут (нужен для run)")
+            else:
+                print(f"  {key_name:<18} · не задан — распределение на OpenRouter выключено (опц.)")
+            continue
+        status = probe(url, val)
+        _short, human = interpret_provider_status(status)
+        icon = "✓" if status == 200 else "⚠"
+        empty = "  ⚠ в .env пустой после очистки" if key_name in rep.empty_keys else ""
+        print(f"  {key_name:<18} {key_prefix(val)}  → {label}: {icon} {human}{empty}")
+
+    # 3) ffmpeg / ffprobe
+    print(_doctor_tool_line("ffmpeg", root))
+    print(_doctor_tool_line("ffprobe", root))
+
+    # 4) python + entry-point (на Windows Py3.14 console-script иногда не кладётся в PATH)
+    py = f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}"
+    ep = shutil.which("autoreels")
+    ep_note = (f"✓ entry-point autoreels в PATH ({ep})" if ep
+               else "⚠ entry-point не в PATH — используй `python -m autoreels`")
+    print(f"  python           {py}  ·  {ep_note}")
+
+    # 5) git-синк (флаги двухмашинной синхронизации)
+    sync = environ.get("AUTOREELS_GIT_SYNC")
+    extra = f"  (AUTOREELS_GIT_SYNC={sync})" if sync is not None else ""
+    print(f"  git-синк         pull {'вкл' if _should_git_pull() else 'ВЫКЛ'} · "
+          f"push {'вкл' if _should_git_push() else 'ВЫКЛ'}{extra}")
+
+    # 6) каталоги проекта
+    for name in ("inputs", "manifests", "calibrations"):
+        d = root / name
+        if d.is_dir():
+            n = sum(1 for _ in d.glob("*") if _.is_file())
+            print(f"  {name:<15}  ✓ есть · {n} файлов")
+        else:
+            print(f"  {name:<15}  · нет (создастся при работе)")
+
+    print("────────────────────────────────────────────────────")
+    return 0
+
+
 # ----------------------------------------------------------------------- smart hint
 
 def _next_hint(root=".") -> str | None:
@@ -3071,6 +3181,25 @@ def _build_parser():
     )
     ps.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
+    pdoc = sub.add_parser(
+        "doctor",
+        help="преflight окружения: .env, ключи, провайдеры (200/401/403), ffmpeg, git, каталоги",
+        description=(
+            "Проверяет окружение ДО тяжёлой работы и печатает по пунктам, что найдено/сломано:\n"
+            "  • .env — откуда прочитан (абсолютный путь) или не найден; предупреждение про .env.txt\n"
+            "  • ключи GROQ_API_KEY / OPENROUTER_API_KEY — только ПРЕФИКС (gsk_abcd…), не секрет\n"
+            "  • live-проверка провайдеров: короткий запрос → 200 доступен / 401 ключ протух /\n"
+            "    403 регион заблокирован / таймаут нет сети\n"
+            "  • ffmpeg и ffprobe: найдены в PATH? версия?\n"
+            "  • python: версия, работает ли entry-point autoreels или нужен python -m\n"
+            "  • git-синк: pull/push вкл/выкл (AUTOREELS_GIT_SYNC/PULL/PUSH)\n"
+            "  • каталоги inputs/manifests/calibrations: есть, сколько файлов\n\n"
+            "Ничего не меняет. Пример: autoreels doctor"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pdoc.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+
     pc = sub.add_parser(
         "calibrate",
         help="визуальная калибровка кропа (per-file или --all для пачки)",
@@ -3416,6 +3545,9 @@ def main(argv=None) -> int:
     if args.cmd == "status":
         return cmd_status(root=args.root)
 
+    if args.cmd == "doctor":
+        return cmd_doctor(root=args.root)
+
     try:
         if args.cmd == "calibrate":
             if args.all:
@@ -3434,6 +3566,9 @@ def main(argv=None) -> int:
                 print("ошибка: укажите видео или используйте --all", file=sys.stderr)
                 return 1
         elif args.cmd == "run":
+            # Ключ проверяем ПЕРВЫМ делом: без GROQ_API_KEY весь конвейер бессмыслен (Whisper+R0).
+            # Внятная ошибка с путём .env и подсказкой doctor — вместо 401 из глубины после аудио.
+            require_key("GROQ_API_KEY", _ENV_REPORT)
             ffmpeg = _cli_resolve_ffmpeg(args.ffmpeg)   # флаг>env>local.yaml>render.yaml>автопоиск
             if args.video:
                 if _is_url(args.video):

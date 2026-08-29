@@ -247,6 +247,36 @@ def _extract_content(data, provider_name: str) -> str:
     return content
 
 
+def interpret_provider_status(status: int | None) -> tuple[str, str]:
+    """HTTP-код префлайта провайдера → (короткий вердикт, человеческая расшифровка) для doctor.
+
+    None = сеть недоступна/таймаут (не дождались ответа). Расшифровки покрывают ровно то, что
+    важно на месте: рабочий ключ, протухший ключ, гео-блок региона, отвал сети/VPN."""
+    if status is None:
+        return ("нет сети", "нет сети / VPN отвалился (таймаут при обращении к API)")
+    if status == 200:
+        return ("доступен", "доступен")
+    if status == 401:
+        return ("401", "ключ неверный или протух")
+    if status == 403:
+        return ("403", "регион заблокирован — анализ на этой машине невозможен (нужен VPN)")
+    if status == 429:
+        return ("429", "лимит запросов исчерпан (ключ рабочий) — подожди сброса квоты")
+    return (str(status), f"неожиданный ответ HTTP {status}")
+
+
+def probe_provider(url: str, *, api_key: str | None, get_fn=None, timeout: float = 15.0) -> int | None:
+    """Лёгкая live-проверка провайдера: GET /models. Вернуть HTTP-код или None при таймауте/
+    сетевой ошибке. Тело ответа не важно — интересует лишь статус (200/401/403/…)."""
+    get_fn = get_fn or _httpx_get
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        resp = get_fn(url, headers=headers, timeout=timeout)
+    except Exception:  # noqa: BLE001 — любая сетевая ошибка/таймаут → «нет сети»
+        return None
+    return getattr(resp, "status_code", None)
+
+
 def _list_models(url: str, *, headers: dict) -> set[str] | None:
     """Список id доступных моделей провайдера (GET /models). None — если проверить нельзя
     (нет ключа/сети/битый ответ): тогда не блокируем — доверяем рантайму (404 отсеет на месте)."""

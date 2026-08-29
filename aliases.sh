@@ -158,6 +158,7 @@ _ar_menu() {
 #   arl pv [ман] [--palettes n,v,s] → preview: короткий фрагмент в нескольких палитрах (подбор цветокора)
 #   arl rc [вид]  → recrop: обновить кроп в манифесте по свежей калибровке (без пересчёта R0)
 #   arl s         → status
+#   arl doctor    → преflight окружения: .env, ключи, провайдеры, ffmpeg, git, каталоги
 #   arl c         → calibrate --all (пушит калибровки → на Mac arl run)
 #   arl rs [видео]   → resnap: пересчитать границы клипов из R0-границ (snap/padding, без LLM)
 #   arl dc [--rerun] → diagnose-cuts: проверка обрывов фраз (CLEAN/SOFT/HARD + причина)
