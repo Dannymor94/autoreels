@@ -2,15 +2,16 @@
 duration_preset: shorts        # shorts | reels | tiktok
 model: qwen/qwen3.6-27b        # LLM R0 на Groq (основная, сильнее по качеству). Сверить
                                # список: curl .../v1/models (прежняя qwen3-32b снята → 404)
-openrouter_model: openai/gpt-oss-20b:free  # второй провайдер OpenRouter для РАСПРЕДЕЛЕНИЯ
-                                      # R0-нагрузки (обход дневной квоты Groq). Та же модель
-                                      # доступна на Groq (openai/gpt-oss-20b) → выборка НЕ
-                                      # плавает между провайдерами, рубрика одинакова на всех
-                                      # чанках. Формат OpenRouter: 'vendor/model:free' — сверить
-                                      # список: curl -s https://openrouter.ai/api/v1/models .
-                                      # Мощнее (если нужно): nvidia/nemotron-3-super-120b-a12b:free,
-                                      # google/gemma-4-31b-it:free. Добавить OPENROUTER_API_KEY=
-                                      # в .env (бесплатно); без ключа — только Groq.
+openrouter_model: mistralai/mistral-small-3.1-24b-instruct:free  # OpenRouter: второй провайдер
+                                      # для распределения R0-нагрузки (обход дневной квоты Groq).
+                                      # Формат: 'vendor/model:free'. Сверить актуальный список:
+                                      # curl -s https://openrouter.ai/api/v1/models | jq -r
+                                      # '.data[].id | select(endswith(":free"))'.
+                                      # Добавить OPENROUTER_API_KEY= в .env (бесплатно);
+                                      # без ключа — только Groq.
+openrouter_fallback_models:           # запасные модели: при 404 основной пробуем по порядку
+  - meta-llama/llama-3.1-8b-instruct:free
+  - google/gemma-2-9b-it:free
 provider_strategy: adaptive    # распределение R0-чанков между Groq и OpenRouter:
                                #   adaptive     — Groq основной; слив на OpenRouter только под
                                #                  троттлом, возврат когда Groq остыл. Качество

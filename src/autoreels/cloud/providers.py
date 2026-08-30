@@ -43,11 +43,13 @@ OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 # Актуальная Qwen на Groq. Модель конфигурируема через config/r0.yaml (model:).
 DEFAULT_LLM_MODEL = "qwen/qwen3.6-27b"
-# Бесплатная модель OpenRouter для распределения. Та же модель доступна и на Groq
-# (openai/gpt-oss-20b) → выборка НЕ плавает между провайдерами, рубрика срабатывает
-# одинаково на всех чанках. Надёжный JSON-mode (OpenAI-родословная). Свериться со списком:
-# curl -s {OPENROUTER_MODELS_URL} | jq '.data[].id | select(endswith(":free"))'.
-DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+# Бесплатная модель OpenRouter для распределения нагрузки. Свериться со списком:
+# curl -s https://openrouter.ai/api/v1/models | jq -r '.data[].id | select(endswith(":free"))'
+DEFAULT_OPENROUTER_MODEL = "mistralai/mistral-small-3.1-24b-instruct:free"
+DEFAULT_OPENROUTER_FALLBACKS = [
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "google/gemma-2-9b-it:free",
+]
 
 # qwen3 — reasoning-модель; reasoning раздувает выходные токены → упор в 6K TPM.
 # "none" глушит reasoning (Groq принимает только none|default).
@@ -368,24 +370,31 @@ class OpenRouterLLM:
         self,
         *,
         model: str = DEFAULT_OPENROUTER_MODEL,
+        model_fallbacks: list[str] | None = None,
         api_key: str | None = None,
         request_fn: Callable[[list[dict], float], dict] | None = None,
         defer_throttle: bool = False,
     ):
         self._model = model
+        self._model_fallbacks: list[str] = model_fallbacks if model_fallbacks is not None else list(DEFAULT_OPENROUTER_FALLBACKS)
         self._api_key = api_key
         self._request_fn = request_fn
         self._defer_throttle = defer_throttle
+
+    @property
+    def _model_queue(self) -> list[str]:
+        """Все модели для попытки: основная + запасные."""
+        return [self._model] + self._model_fallbacks
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         request = self._request_fn or self._default_request
         data = request(messages, temperature)
         return _extract_content(data, self.name)
 
-    def _model_404_hint(self) -> str:
+    def _model_404_hint(self, model: str) -> str:
         return (
-            f"модель '{self._model}' не найдена у OpenRouter (404) — проверь "
-            f"openrouter_model в config/r0.yaml (формат 'vendor/model:free'). "
+            f"модель '{model}' не найдена у OpenRouter (404) — снята или переименована. "
+            f"Обнови openrouter_model в config/r0.yaml (формат 'vendor/model:free'). "
             f"Актуальный список бесплатных: curl -s {OPENROUTER_MODELS_URL} | "
             f"jq -r '.data[].id | select(endswith(\":free\"))'"
         )
@@ -402,22 +411,48 @@ class OpenRouterLLM:
             raise ProviderError(
                 "нет OPENROUTER_API_KEY — добавьте в .env для распределения нагрузки на OpenRouter"
             )
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": temperature,
-            "response_format": {"type": "json_object"},
-        }
         headers = {
             "Authorization": f"Bearer {api_key}",
             "HTTP-Referer": "https://github.com/Dannymor94/autoreels",
             "X-Title": "autoreels",
         }
-        return _chat_request(
-            OPENROUTER_CHAT_URL, headers=headers, payload=payload,
-            provider_name=self.name, defer_throttle=self._defer_throttle,
-            not_found_hint=self._model_404_hint(),
-        )
+        last_exc: ProviderModelNotFound | None = None
+        for model in self._model_queue:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "response_format": {"type": "json_object"},
+            }
+            try:
+                result = _chat_request(
+                    OPENROUTER_CHAT_URL, headers=headers, payload=payload,
+                    provider_name=self.name, defer_throttle=self._defer_throttle,
+                    not_found_hint=self._model_404_hint(model),
+                )
+                if model != self._model:
+                    # Зафиксировать переключение на запасную модель для следующих запросов
+                    print(f"  ℹ OpenRouter: перешёл на модель '{model}'", flush=True)
+                    self._model = model
+                return result
+            except ProviderModelNotFound as e:
+                last_exc = e
+                if model != self._model_queue[-1]:
+                    print(
+                        f"\n  ⚠ OpenRouter: модель '{model}' недоступна, "
+                        f"пробую следующую из запасных…",
+                        flush=True,
+                    )
+        primary = self._model_queue[0]
+        tried = ", ".join(f"'{m}'" for m in self._model_queue)
+        raise ProviderModelNotFound(
+            f"OpenRouter: все модели недоступны ({tried}). "
+            f"Обнови openrouter_model/openrouter_fallback_models в config/r0.yaml. "
+            f"Актуальный список бесплатных: curl -s {OPENROUTER_MODELS_URL} | "
+            f"jq -r '.data[].id | select(endswith(\":free\"))'",
+            model=primary,
+            provider="OpenRouter",
+        ) from last_exc
 
 
 class _PoolMember:
@@ -589,10 +624,9 @@ class ProviderPool:
     def preflight(self) -> None:
         """Проверить доступность моделей ДО прогона (лёгкий GET /models на провайдера).
 
-        Модель из конфига отсутствует в списке провайдера → исключить его сразу с внятным
-        сообщением, а не падать 404-ом на 2-м R0-чанке после дорогой транскрипции. Если
-        проверить нельзя (нет ключа/сети → available_models вернул None) — не блокируем:
-        доверяем рантайму (404 отсеет провайдера на месте). Все модели неверны → ошибка."""
+        Если проверить нельзя (нет ключа/сети → available_models вернул None) — не блокируем:
+        доверяем рантайму (404 отсеет провайдера на месте). Для OpenRouter: проверяет и запасные
+        модели (_model_queue) — провайдер остаётся в пуле, пока хотя бы одна модель доступна."""
         for m in self._members:
             available = None
             try:
@@ -601,14 +635,31 @@ class ProviderPool:
                 available = None
             if not available:
                 continue  # не смогли проверить → доверяем рантайму
-            if m.model not in available:
+
+            # Список всех моделей провайдера (основная + запасные, если есть)
+            all_models: list[str] = getattr(m.provider, "_model_queue", [m.model])
+            reachable = [mod for mod in all_models if mod in available]
+
+            if not reachable:
                 m.disabled = True
+                tried = ", ".join(f"'{x}'" for x in all_models)
                 key = "openrouter_model" if m.name == "OpenRouter" else "model"
                 print(
-                    f"\n  ⚠ {m.name}: модель '{m.model}' недоступна — исключаю провайдера "
-                    f"(проверь {key} в config/r0.yaml)",
+                    f"\n  ⚠ {m.name}: ни одна модель не доступна ({tried}) — "
+                    f"исключаю провайдера. Обнови {key} в config/r0.yaml. "
+                    f"Актуальный список бесплатных OpenRouter: "
+                    f"curl -s {OPENROUTER_MODELS_URL} | jq -r '.data[].id | select(endswith(\":free\"))'",
                     flush=True,
                 )
+            elif m.model not in available:
+                # Основная модель недоступна, но есть рабочая запасная — провайдер остаётся.
+                working = reachable[0]
+                print(
+                    f"\n  ℹ {m.name}: основная модель '{m.model}' недоступна, "
+                    f"буду использовать '{working}' (запасная из config/r0.yaml)",
+                    flush=True,
+                )
+
         if all(m.disabled for m in self._members):
             raise ProviderError(
                 "ни одна модель провайдеров не доступна — проверь model/openrouter_model "
@@ -658,7 +709,12 @@ def build_pool(r0_cfg, *, strategy: str | None = None) -> ProviderPool:
         GroqLLM(model=r0_cfg.model, defer_throttle=True)
     ]
     if os.environ.get("OPENROUTER_API_KEY"):
+        fallbacks = getattr(r0_cfg, "openrouter_fallback_models", None)
         providers.append(
-            OpenRouterLLM(model=r0_cfg.openrouter_model, defer_throttle=True)
+            OpenRouterLLM(
+                model=r0_cfg.openrouter_model,
+                model_fallbacks=fallbacks,
+                defer_throttle=True,
+            )
         )
     return ProviderPool(providers, strategy=strat)

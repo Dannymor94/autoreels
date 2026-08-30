@@ -411,3 +411,97 @@ def test_r0_numbering_does_not_mutate_original():
     result = CT.renumber_reels(reels)
     assert reels[0].id == "r05"   # оригинал не тронут
     assert result[0].id == "r01"
+
+
+# ====================================================== TEST 11: _derive_ffprobe
+
+def test_derive_ffprobe_from_path(monkeypatch, tmp_path):
+    """Если ffprobe НЕТ в PATH, но лежит рядом с ffmpeg — берётся сосед."""
+    fake_ffmpeg = tmp_path / "ffmpeg"
+    fake_ffprobe = tmp_path / "ffprobe"
+    fake_ffprobe.touch()
+
+    monkeypatch.setattr(CT.shutil, "which", lambda name: None)  # не в PATH
+
+    result = CT._derive_ffprobe(str(fake_ffmpeg))
+    assert result == str(fake_ffprobe)
+
+
+def test_derive_ffprobe_prefers_path(monkeypatch, tmp_path):
+    """Если ffprobe есть в PATH — берётся из PATH, а не из каталога ffmpeg."""
+    fake_ffprobe_path = str(tmp_path / "system_ffprobe")
+    monkeypatch.setattr(CT.shutil, "which", lambda name: fake_ffprobe_path if name == "ffprobe" else None)
+
+    result = CT._derive_ffprobe("/some/other/dir/ffmpeg")
+    assert result == fake_ffprobe_path
+
+
+def test_derive_ffprobe_fallback_bare(monkeypatch):
+    """Ни PATH, ни соседний файл — возвращает голое 'ffprobe' (последний шанс)."""
+    monkeypatch.setattr(CT.shutil, "which", lambda name: None)
+
+    result = CT._derive_ffprobe("ffmpeg")  # нет пути → нет соседа
+    assert result == "ffprobe"
+
+
+def test_detect_silences_file_not_found_gives_clear_error(monkeypatch, tmp_path):
+    """FileNotFoundError при запуске ffmpeg → ChunkTranscribeError с именем утилиты и шагом."""
+    import subprocess
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"\x00")
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(CT.subprocess, "run", fake_run)
+
+    with pytest.raises(CT.ChunkTranscribeError) as exc:
+        CT.detect_silences(audio, threshold_db=-40, ffmpeg="/nonexistent/ffmpeg")
+    msg = str(exc.value)
+    assert "ffmpeg" in msg
+    assert "VAD" in msg or "тишин" in msg
+
+
+def test_probe_duration_file_not_found_gives_clear_error(monkeypatch, tmp_path):
+    """FileNotFoundError от ffprobe → ChunkTranscribeError с именем утилиты и шагом."""
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"\x00")
+
+    monkeypatch.setattr(CT.shutil, "which", lambda name: None)
+
+    def fake_run(cmd, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(CT.subprocess, "run", fake_run)
+
+    with pytest.raises(CT.ChunkTranscribeError) as exc:
+        CT._probe_duration(audio, ffmpeg="ffmpeg")
+    msg = str(exc.value)
+    assert "ffprobe" in msg
+    assert "длительност" in msg
+
+
+# ====================================================== GUARD: нет голых 'ffmpeg'/'ffprobe' в subprocess
+
+def test_no_bare_ffmpeg_in_subprocess_calls():
+    """Guard: ни один .py-файл кроме __main__.py не содержит литерального ['ffmpeg' или ['ffprobe'
+    как первый аргумент подпроцесса. Все вызовы внешних бинарей должны идти через параметр."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).parent.parent / "src" / "autoreels"
+    pattern = re.compile(r"\[\s*[\"']ff(?:mpeg|probe)[\"']")
+
+    violations = []
+    for f in sorted(src.rglob("*.py")):
+        if f.name == "__main__.py":
+            continue  # резолверы определяют bare-имена здесь, это допустимо
+        text = f.read_text(encoding="utf-8")
+        for m in pattern.finditer(text):
+            lineno = text[: m.start()].count("\n") + 1
+            violations.append(f"{f.relative_to(src.parent.parent)}:{lineno}")
+
+    assert not violations, (
+        "Голые 'ffmpeg'/'ffprobe' в начале subprocess-списка — "
+        "использовать параметр ffmpeg=... везде:\n" + "\n".join(violations)
+    )

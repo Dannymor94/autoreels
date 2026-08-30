@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -189,7 +190,13 @@ def detect_silences(
         "-af", f"silencedetect=noise={threshold_db}dB:d=0.3",
         "-f", "null", "-",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    except FileNotFoundError as e:
+        raise ChunkTranscribeError(
+            f"ffmpeg не найден (искали '{ffmpeg}') на шаге VAD-определения тишины. "
+            f"Задайте путь через --ffmpeg или добавьте ffmpeg в PATH."
+        ) from e
     # silencedetect пишет в stderr
     return _parse_silencedetect(proc.stderr)
 
@@ -230,7 +237,13 @@ def split_audio_chunk(
         cmd += ["-b:a", audio_cfg.bitrate]
     cmd += ["-f", audio_cfg.format, str(out_path)]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    except FileNotFoundError as e:
+        raise ChunkTranscribeError(
+            f"ffmpeg не найден (искали '{ffmpeg}') на шаге нарезки аудио-чанка. "
+            f"Задайте путь через --ffmpeg или добавьте ffmpeg в PATH."
+        ) from e
     if proc.returncode != 0:
         raise ChunkTranscribeError(
             f"ffmpeg не смог нарезать чанк [{start_sec}-{end_sec}]: "
@@ -244,14 +257,36 @@ def _chunk_cache_path(cache_dir: Path, chunk_path: Path) -> Path:
     return cache_dir / f"{sha}.chunk.json"
 
 
+def _derive_ffprobe(ffmpeg: str) -> str:
+    """Определить путь к ffprobe из пути к ffmpeg.
+
+    Приоритет: PATH → сосед ffmpeg-бинаря (Path.with_name) → голое 'ffprobe'.
+    Не использует str.replace — тот заменяет и имя каталога ('ffmpeg' в D:\\ffmpeg\\bin\\).
+    """
+    in_path = shutil.which("ffprobe")
+    if in_path:
+        return in_path
+    if "/" in ffmpeg or "\\" in ffmpeg:
+        sibling = Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)
+        if sibling.is_file():
+            return str(sibling)
+    return "ffprobe"
+
+
 def _probe_duration(audio_path: Path, ffmpeg: str = "ffmpeg") -> float:
     """Длительность аудиофайла через ffprobe (секунды)."""
-    ffprobe = "ffprobe" if ffmpeg == "ffmpeg" else ffmpeg.replace("ffmpeg", "ffprobe")
+    ffprobe = _derive_ffprobe(ffmpeg)
     cmd = [ffprobe, "-v", "error",
            "-show_entries", "format=duration",
            "-of", "default=noprint_wrappers=1:nokey=1",
            str(audio_path)]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    except FileNotFoundError as e:
+        raise ChunkTranscribeError(
+            f"ffprobe не найден (искали '{ffprobe}') на шаге определения длительности аудио. "
+            f"Задайте путь через --ffmpeg /path/to/ffmpeg или добавьте ffprobe в PATH."
+        ) from e
     try:
         return float(result.stdout.strip())
     except ValueError:

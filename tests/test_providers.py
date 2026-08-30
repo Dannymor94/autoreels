@@ -852,10 +852,13 @@ def test_available_models_none_on_network_error(monkeypatch):
     assert OpenRouterLLM().available_models() is None
 
 
-def test_default_openrouter_model_is_available_free_model():
-    """Дефолтная OpenRouter-модель — из актуального списка бесплатных (та же есть на Groq)."""
-    from autoreels.cloud.providers import DEFAULT_OPENROUTER_MODEL
-    assert DEFAULT_OPENROUTER_MODEL == "openai/gpt-oss-20b:free"
+def test_default_openrouter_model_is_free():
+    """Дефолтная OpenRouter-модель должна быть бесплатной (":free" суффикс)."""
+    from autoreels.cloud.providers import DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_FALLBACKS
+    assert DEFAULT_OPENROUTER_MODEL.endswith(":free"), \
+        f"PRIMARY модель должна быть :free, получили: {DEFAULT_OPENROUTER_MODEL!r}"
+    for m in DEFAULT_OPENROUTER_FALLBACKS:
+        assert m.endswith(":free"), f"Запасная модель должна быть :free: {m!r}"
 
 
 # ------------------------------------------- live-проверка провайдера для doctor (без сети)
@@ -894,3 +897,83 @@ def test_probe_provider_sends_bearer_when_key():
         return _R()
     probe_provider("http://x/models", api_key="secret", get_fn=cap)
     assert seen.get("Authorization") == "Bearer secret"
+
+
+# ====================================================== OpenRouter fallback-модели
+
+def test_openrouter_falls_back_to_next_model_on_404(monkeypatch):
+    """404 на основной модели → пробуем запасную, провайдер НЕ выключается."""
+    import autoreels.cloud.providers as P
+
+    calls = []
+
+    def fake_post(url, *, headers, json, timeout):
+        model = json["model"]
+        calls.append(model)
+        if model == "bad/model:free":
+            return _FakeResp(404, body={"error": {"message": "model not found"}})
+        return _FakeResp(200, _good_envelope())
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "testkey")
+
+    llm = OpenRouterLLM(model="bad/model:free", model_fallbacks=["good/model:free"])
+    result = llm.complete([{"role": "user", "content": "hi"}])
+
+    assert result == '{"segments": []}'
+    assert calls == ["bad/model:free", "good/model:free"]
+    assert llm._model == "good/model:free"   # переключился насовсем
+
+
+def test_openrouter_all_models_404_raises(monkeypatch):
+    """404 на основной И всех запасных → ProviderModelNotFound с перечислением попыток."""
+    import autoreels.cloud.providers as P
+
+    def fake_post(url, *, headers, json, timeout):
+        return _FakeResp(404, body={"error": {"message": "not found"}})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "testkey")
+
+    from autoreels.cloud.providers import ProviderModelNotFound
+    llm = OpenRouterLLM(model="a:free", model_fallbacks=["b:free", "c:free"])
+    with pytest.raises(ProviderModelNotFound) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    msg = str(exc.value)
+    assert "a:free" in msg and "b:free" in msg and "c:free" in msg
+
+
+def test_preflight_keeps_provider_when_fallback_available(monkeypatch):
+    """Основная модель отсутствует в /models, но есть запасная → провайдер НЕ выключается."""
+    import autoreels.cloud.providers as P
+    from autoreels.cloud.providers import ProviderPool, OpenRouterLLM
+
+    # available_models вернёт только запасную модель
+    llm = OpenRouterLLM(model="dead/model:free", model_fallbacks=["alive/model:free"])
+    monkeypatch.setattr(llm, "available_models", lambda: {"alive/model:free"})
+
+    pool = ProviderPool([llm])
+    pool.preflight()  # не должен выбрасывать
+
+    # провайдер не выключен
+    assert not pool._members[0].disabled
+
+
+def test_preflight_disables_when_all_models_unavailable(monkeypatch):
+    """Ни основная, ни запасные не доступны → провайдер выключается, ProviderError."""
+    import autoreels.cloud.providers as P
+    from autoreels.cloud.providers import ProviderPool, OpenRouterLLM, ProviderError
+
+    llm_or = OpenRouterLLM(model="dead:free", model_fallbacks=["also_dead:free"])
+    monkeypatch.setattr(llm_or, "available_models", lambda: {"some_other_model"})
+
+    # Groq тоже «не проверяем» (available_models → None), иначе тест упадёт на all-disabled
+    from autoreels.cloud.providers import GroqLLM
+    llm_groq = GroqLLM()
+    monkeypatch.setattr(llm_groq, "available_models", lambda: None)
+
+    pool = ProviderPool([llm_groq, llm_or])
+    pool.preflight()   # не должен падать — Groq не проверен (None), остаётся активным
+
+    assert pool._members[1].disabled    # OpenRouter выключен
+    assert not pool._members[0].disabled  # Groq остаётся

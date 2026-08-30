@@ -71,7 +71,13 @@ class R0Config(BaseModel):
 
     duration_preset: str
     model: str = "qwen/qwen3.6-27b"          # LLM R0 на Groq (основная, сильнее по качеству)
-    openrouter_model: str = "openai/gpt-oss-20b:free"  # та же модель есть на Groq → не плавает
+    openrouter_model: str = "mistralai/mistral-small-3.1-24b-instruct:free"
+    openrouter_fallback_models: list[str] = Field(
+        default_factory=lambda: [
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "google/gemma-2-9b-it:free",
+        ]
+    )
     provider_strategy: str = "adaptive"      # распределение R0-нагрузки: adaptive | round_robin
                                              # adaptive: Groq основной, слив на OpenRouter под
                                              # троттлом (качество не плавает). round_robin:
