@@ -43,8 +43,9 @@ def _no_real_git(monkeypatch):
     теперь дёргают git pull, а calibrate — commit/push. Без этого мока реальный git выполнялся
     бы в рабочем репо во время тестов (наблюдалось: тест закоммитил и запушил калибровки).
     По умолчанию git — no-op; тесты git (_FakeGit) переопределяют _run_git явно."""
-    # Изоляция от git-флагов реального окружения (AUTOREELS_GIT_PULL/PUSH/SYNC могут быть заданы).
-    for e in ("AUTOREELS_GIT_SYNC", "AUTOREELS_GIT_PULL", "AUTOREELS_GIT_PUSH"):
+    # Изоляция от env реального окружения (git-флаги + явные бинари ffmpeg/ffprobe могут быть заданы).
+    for e in ("AUTOREELS_GIT_SYNC", "AUTOREELS_GIT_PULL", "AUTOREELS_GIT_PUSH",
+              "FFMPEG_BINARY", "FFPROBE_BINARY"):
         monkeypatch.delenv(e, raising=False)
     monkeypatch.setattr(cli, "_git_pull", lambda *a, **k: None)
 
@@ -1464,7 +1465,7 @@ def test_resolve_ffmpeg_not_found_clear_error(monkeypatch):
                            is_file=lambda p: False)
     msg = str(e.value)
     assert "Искал" in msg and r"D:\ffmpeg\bin\ffmpeg.exe" in msg    # где искал
-    assert "RENDER_FFMPEG" in msg and "render.local.yaml" in msg    # как задать
+    assert "FFMPEG_BINARY" in msg and "render.local.yaml" in msg    # как задать (env устойчив к PATH)
     assert "--ffmpeg" in msg
 
 
@@ -5130,3 +5131,104 @@ def test_run_batch_preflight_before_any_hashing(monkeypatch, tmp_path):
                           cache_dir=tmp_path / "c", transcripts_dir=tmp_path / "t",
                           calibrations_dir=tmp_path / "cal", archive_dir=tmp_path / "ar")
     assert hashed == []                      # ни один файл не хэширован
+
+
+# ------------------------- honest doctor: единый резолвер, FFMPEG_BINARY, PATH-честность
+
+def test_resolve_ffmpeg_ex_candidate_not_in_path(monkeypatch):
+    """Найден автопоиском, но НЕ в PATH → source=candidate, in_path=False (doctor это предупредит)."""
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    res = cli.resolve_ffmpeg_ex(
+        None, render_cfg=_rcfg("ffmpeg"),
+        which=lambda b: None,                                   # не в PATH
+        candidates=[r"D:\ffmpeg\bin\ffmpeg.exe"],
+        is_file=lambda p: str(p) == r"D:\ffmpeg\bin\ffmpeg.exe",
+    )
+    assert res.path == r"D:\ffmpeg\bin\ffmpeg.exe"
+    assert res.source == "candidate" and res.in_path is False
+
+
+def test_resolve_ffmpeg_ex_in_path(monkeypatch):
+    monkeypatch.delenv("RENDER_FFMPEG", raising=False)
+    res = cli.resolve_ffmpeg_ex(None, render_cfg=_rcfg("ffmpeg"),
+                                which=lambda b: "/usr/bin/ffmpeg" if b == "ffmpeg" else None)
+    assert res.path == "ffmpeg" and res.source == "path" and res.in_path is True
+
+
+def test_ffmpeg_binary_env_overrides_path(monkeypatch):
+    """FFMPEG_BINARY переопределяет поиск (даже если ffmpeg в PATH) — устойчиво к потере PATH."""
+    monkeypatch.setenv("FFMPEG_BINARY", r"D:\tools\ffmpeg.exe")
+    res = cli.resolve_ffmpeg_ex(None, render_cfg=_rcfg("ffmpeg"),
+                                which=lambda b: "/usr/bin/ffmpeg")   # даже если в PATH
+    assert res.path == r"D:\tools\ffmpeg.exe" and res.source == "binary_env"
+    # обёртка resolve_ffmpeg (рантайм) даёт тот же путь
+    assert cli.resolve_ffmpeg(None, render_cfg=_rcfg("ffmpeg"), which=lambda b: "/usr/bin/ffmpeg") \
+        == r"D:\tools\ffmpeg.exe"
+
+
+def test_ffprobe_binary_env_overrides(monkeypatch):
+    monkeypatch.setenv("FFPROBE_BINARY", r"D:\tools\ffprobe.exe")
+    res = cli.resolve_ffprobe_ex(None, ffmpeg="ffmpeg", which=lambda b: "/usr/bin/ffprobe")
+    assert res.path == r"D:\tools\ffprobe.exe" and res.source == "binary_env"
+
+
+def test_doctor_and_runtime_use_same_resolver(monkeypatch):
+    """FFMPEG_BINARY виден И рантайм-резолверу (resolve_ffmpeg), И doctor-резолверу (resolve_ffmpeg_ex)
+    — общая функция, разойтись не могут."""
+    monkeypatch.setenv("FFMPEG_BINARY", "/opt/ff/ffmpeg")
+    runtime_path = cli.resolve_ffmpeg(None, render_cfg=_rcfg("ffmpeg"), which=lambda b: None)
+    doctor_res = cli.resolve_ffmpeg_ex(None, render_cfg=_rcfg("ffmpeg"), which=lambda b: None)
+    assert runtime_path == doctor_res.path == "/opt/ff/ffmpeg"
+
+
+def test_tool_status_line_warns_found_but_not_in_path():
+    """Найден автопоиском, не в PATH → ⚠ (не ✓), с именем каталога и подсказкой FFMPEG_BINARY."""
+    res = cli.ToolResolution("ffmpeg", r"D:\ffmpeg\bin\ffmpeg.exe", "candidate", False)
+    line = cli._tool_status_line(res, version_line="ffmpeg version 8", runnable=True)
+    assert "⚠" in line and "не" in line and "PATH" in line
+    assert "FFMPEG_BINARY" in line
+    assert "✓" not in line                                   # ИМЕННО предупреждение, не успех
+
+
+def test_tool_status_line_ok_when_in_path():
+    res = cli.ToolResolution("ffmpeg", "ffmpeg", "path", True)
+    line = cli._tool_status_line(res, version_line="ffmpeg version 8", runnable=True)
+    assert "✓" in line and "PATH" in line and "⚠" not in line
+
+
+def test_tool_status_line_ok_when_explicit_binary():
+    res = cli.ToolResolution("ffprobe", "/opt/ff/ffprobe", "binary_env", False)
+    line = cli._tool_status_line(res, version_line="ffprobe version 8", runnable=True)
+    assert "✓" in line and "явно" in line and "⚠" not in line
+
+
+def test_doctor_tool_line_warns_not_in_path(monkeypatch, tmp_path):
+    """cmd_doctor через _doctor_tool_line: найден автопоиском, не в PATH → ⚠, даже если -version ок."""
+    res = cli.ToolResolution("ffmpeg", r"D:\ffmpeg\bin\ffmpeg.exe", "candidate", False)
+    monkeypatch.setattr(cli, "_cli_resolve_ffmpeg_ex", lambda flag, *, root=None: res)
+    line = cli._doctor_tool_line(
+        "ffmpeg", tmp_path,
+        runner=lambda p: type("R", (), {"stdout": "ffmpeg version 8", "stderr": ""})(),
+    )
+    assert "⚠" in line and "PATH" in line and "✓" not in line
+
+
+def test_run_passes_resolved_ffprobe_to_frame_probe(monkeypatch, tmp_path):
+    """Рантайм зовёт ffprobe РЕЗОЛВНУТЫМ путём, не голым именем (иначе WinError 2 вне PATH)."""
+    monkeypatch.setenv("RENDER_FFPROBE", "/custom/ffprobe")
+    seen = {}
+
+    def _spy(v, *, ffprobe="ffprobe"):
+        seen["ffprobe"] = ffprobe
+        return (3840, 2160)
+
+    monkeypatch.setattr(cli, "_probe_frame_size_for_auto", _spy)
+    _mock_pipeline(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast", lambda v, c: "a" * 64)
+    video = tmp_path / "inputs" / "v.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m", cache_dir=tmp_path / "c",
+                transcripts_dir=tmp_path / "t", calibrations_dir=tmp_path / "cal",
+                archive_dir=tmp_path / "ar")
+    assert seen["ffprobe"] == "/custom/ffprobe"              # резолвнутый, не "ffprobe"

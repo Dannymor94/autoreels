@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from autoreels.cloud.compress import compress_transcript
@@ -876,57 +877,90 @@ def _ffmpeg_candidates() -> list[str]:
     return (win + unix) if os.name == "nt" else (unix + win)
 
 
-def resolve_ffmpeg(cli_flag=None, *, render_cfg, which=None, candidates=None, is_file=None) -> str:
-    """Разрешить путь к ffmpeg. Приоритет: флаг > env RENDER_FFMPEG > render.local.yaml >
-    render.yaml (последние два — уже слиты в `render_cfg.ffmpeg` через deep-merge).
+@dataclass
+class ToolResolution:
+    """Как разрешён внешний бинарь (ffmpeg/ffprobe) — ЕДИНЫЙ результат для рантайма и doctor.
 
-    Явно заданный источник возвращается как есть (существование проверит downstream —
-    так пути с другой машины не роняют резолв). Если НИЧЕГО не задано (или дефолт «ffmpeg»):
-    сначала PATH, затем автопоиск типичных мест (работает без настройки), затем —
-    FFmpegNotFoundError с перечнем, где искали, и как задать путь."""
+    `path` — что реально запускать (абсолютный путь или голое имя). `source` — откуда взят:
+    flag | binary_env (FFMPEG_BINARY/FFPROBE_BINARY) | render_env (RENDER_*) | config | path |
+    candidate (автопоиск типичных мест) | sibling (сосед ffmpeg) | default. `in_path` — резолвится
+    ли ГОЛОЕ имя через PATH. Ключ к честности doctor: если path задан явно ИЛИ in_path — запуск
+    надёжен; если найден автопоиском (candidate/sibling) при in_path=False — хрупко (не «✓»)."""
+    name: str          # "ffmpeg" | "ffprobe"
+    path: str          # что запускать
+    source: str        # flag | binary_env | render_env | config | path | candidate | sibling | default
+    in_path: bool      # разрешается ли голое имя через PATH
+
+
+def resolve_ffmpeg_ex(cli_flag=None, *, render_cfg, which=None, candidates=None, is_file=None) -> ToolResolution:
+    """ЕДИНЫЙ резолвер ffmpeg (рантайм и doctor зовут его — не могут разойтись). Приоритет:
+    флаг > FFMPEG_BINARY > RENDER_FFMPEG > render.local.yaml/render.yaml (config) > PATH > автопоиск.
+
+    FFMPEG_BINARY — абсолютный путь к бинарю: устойчивее к обновлениям Windows, после которых
+    PATH теряется. Возвращает ToolResolution (path + откуда + есть ли в PATH) — doctor по нему
+    решает «✓» (явно/в PATH) или «⚠» (нашли автопоиском, но в PATH нет → хрупко)."""
     which = which if which is not None else shutil.which
     is_file = is_file if is_file is not None else (lambda p: Path(str(p)).is_file())
     candidates = candidates if candidates is not None else _ffmpeg_candidates()
+    in_path = which("ffmpeg") is not None
 
+    if cli_flag:
+        return ToolResolution("ffmpeg", cli_flag, "flag", in_path)
+    if os.environ.get("FFMPEG_BINARY"):
+        return ToolResolution("ffmpeg", os.environ["FFMPEG_BINARY"], "binary_env", in_path)
+    if os.environ.get("RENDER_FFMPEG"):
+        return ToolResolution("ffmpeg", os.environ["RENDER_FFMPEG"], "render_env", in_path)
     config_value = getattr(render_cfg, "ffmpeg", "ffmpeg")
-    explicit = cli_flag or os.environ.get("RENDER_FFMPEG") or (
-        config_value if config_value and config_value != "ffmpeg" else None
-    )
-    if explicit:
-        return explicit
-    if which("ffmpeg"):
-        return "ffmpeg"
+    if config_value and config_value != "ffmpeg":
+        return ToolResolution("ffmpeg", config_value, "config", in_path)
+    if in_path:
+        return ToolResolution("ffmpeg", "ffmpeg", "path", True)
     for cand in candidates:
         if is_file(cand):
-            return cand
+            return ToolResolution("ffmpeg", cand, "candidate", False)
     searched = ["ffmpeg (в PATH)"] + list(candidates)
     raise FFmpegNotFoundError(
         "ffmpeg не найден. Искал: " + ", ".join(searched) + ".\n"
         "Задай путь одним из способов (приоритет сверху вниз):\n"
         "  • флаг:  --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe\n"
-        "  • env:   RENDER_FFMPEG=D:\\ffmpeg\\bin\\ffmpeg.exe\n"
+        "  • env:   FFMPEG_BINARY=D:\\ffmpeg\\bin\\ffmpeg.exe  (устойчиво к потере PATH)\n"
         "  • файл:  config/render.local.yaml → ffmpeg: D:\\ffmpeg\\bin\\ffmpeg.exe\n"
         "или установи ffmpeg в PATH."
     )
 
 
-def resolve_ffprobe(cli_flag=None, *, ffmpeg=None, which=None, is_file=None) -> str:
-    """Разрешить ffprobe: флаг > env RENDER_FFPROBE > PATH > сосед резолвнутого ffmpeg.
+def resolve_ffmpeg(cli_flag=None, *, render_cfg, which=None, candidates=None, is_file=None) -> str:
+    """Путь к ffmpeg (тонкая обёртка над resolve_ffmpeg_ex — для вызывающих, которым нужен только путь)."""
+    return resolve_ffmpeg_ex(
+        cli_flag, render_cfg=render_cfg, which=which, candidates=candidates, is_file=is_file
+    ).path
 
-    ffprobe почти всегда лежит рядом с ffmpeg — если его нет в PATH, берём соседний бинарь
-    по каталогу ffmpeg. Иначе — «ffprobe» (downstream даст ошибку, если и его нет)."""
+
+def resolve_ffprobe_ex(cli_flag=None, *, ffmpeg=None, which=None, is_file=None) -> ToolResolution:
+    """ЕДИНЫЙ резолвер ffprobe. Приоритет: флаг > FFPROBE_BINARY > RENDER_FFPROBE > PATH >
+    сосед резолвнутого ffmpeg > голое «ffprobe». Возвращает ToolResolution (для honest-doctor)."""
     which = which if which is not None else shutil.which
     is_file = is_file if is_file is not None else (lambda p: Path(str(p)).is_file())
-    explicit = cli_flag or os.environ.get("RENDER_FFPROBE")
-    if explicit:
-        return explicit
-    if which("ffprobe"):
-        return "ffprobe"
+    in_path = which("ffprobe") is not None
+
+    if cli_flag:
+        return ToolResolution("ffprobe", cli_flag, "flag", in_path)
+    if os.environ.get("FFPROBE_BINARY"):
+        return ToolResolution("ffprobe", os.environ["FFPROBE_BINARY"], "binary_env", in_path)
+    if os.environ.get("RENDER_FFPROBE"):
+        return ToolResolution("ffprobe", os.environ["RENDER_FFPROBE"], "render_env", in_path)
+    if in_path:
+        return ToolResolution("ffprobe", "ffprobe", "path", True)
     if ffmpeg and (("/" in ffmpeg) or ("\\" in ffmpeg)):
         sibling = Path(ffmpeg).with_name("ffprobe" + Path(ffmpeg).suffix)
         if is_file(sibling):
-            return str(sibling)
-    return "ffprobe"
+            return ToolResolution("ffprobe", str(sibling), "sibling", False)
+    return ToolResolution("ffprobe", "ffprobe", "default", False)
+
+
+def resolve_ffprobe(cli_flag=None, *, ffmpeg=None, which=None, is_file=None) -> str:
+    """Путь к ffprobe (тонкая обёртка над resolve_ffprobe_ex)."""
+    return resolve_ffprobe_ex(cli_flag, ffmpeg=ffmpeg, which=which, is_file=is_file).path
 
 
 def _preflight_tools(ffmpeg: str, ffprobe: str, *, which=None) -> None:
@@ -953,9 +987,9 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _cli_resolve_ffmpeg(flag, *, root=None) -> str:
-    """Разрешить ffmpeg для CLI-команд (run/transcribe/calibrate), которые сами render_cfg
-    не грузят. Внятная FFmpegNotFoundError, если не найден (ловится в main → чистое сообщение).
+def _cli_resolve_ffmpeg_ex(flag, *, root=None) -> ToolResolution:
+    """ToolResolution для ffmpeg в CLI-командах (run/transcribe/calibrate/doctor), которые сами
+    render_cfg не грузят. ЕДИНАЯ точка резолва: и рантайм, и doctor зовут её → не разъезжаются.
 
     Конфиг (render.yaml + машинный render.local.yaml) читается из КОРНЯ ПРОЕКТА, а не из cwd —
     иначе после autoload (`arl` из любой папки) render.local.yaml с путём ffmpeg не находился,
@@ -968,10 +1002,15 @@ def _cli_resolve_ffmpeg(flag, *, root=None) -> str:
     tried.append(_project_root())
     for base in tried:
         try:
-            return resolve_ffmpeg(flag, render_cfg=load_render_config(base / "config" / "render.yaml"))
+            return resolve_ffmpeg_ex(flag, render_cfg=load_render_config(base / "config" / "render.yaml"))
         except (ConfigError, OSError):
             continue
-    return resolve_ffmpeg(flag, render_cfg=SimpleNamespace(ffmpeg="ffmpeg"))
+    return resolve_ffmpeg_ex(flag, render_cfg=SimpleNamespace(ffmpeg="ffmpeg"))
+
+
+def _cli_resolve_ffmpeg(flag, *, root=None) -> str:
+    """Путь к ffmpeg для CLI-команд (обёртка над _cli_resolve_ffmpeg_ex — где нужен только путь)."""
+    return _cli_resolve_ffmpeg_ex(flag, root=root).path
 
 
 # ------------------------------------------------------------------------- команды
@@ -1032,14 +1071,14 @@ def cmd_run(
     print("хэш готов.", flush=True)
     setup = load_or_auto_calibrate(
         calibrations_dir, sha, Path(video).name,
-        get_frame_size=lambda: _probe_frame_size_for_auto(video),
+        get_frame_size=lambda: _probe_frame_size_for_auto(video, ffprobe=ffprobe),
     )
 
     # Жёсткая валидация при сборке манифеста: кроп проверяется против ОТОБРАЖАЕМЫХ (display,
     # после rotation-метаданных) размеров кадра — ровно то пространство, в котором рендер
     # применит crop-фильтр (autorotate по умолчанию). Приводим к ОДНОМУ пространству перед
     # сравнением: и калибровка (rotation_applied=true), и probe — отображаемые размеры.
-    disp_w, disp_h = _probe_frame_size_for_auto(video)
+    disp_w, disp_h = _probe_frame_size_for_auto(video, ffprobe=ffprobe)
     c = setup.crop
     print(f"отображаемый кадр видео (после rotation): {disp_w}×{disp_h}; "
           f"кроп калибровки: {c.w}×{c.h}@{c.x},{c.y} в кадре {setup.frame}", flush=True)
@@ -1431,8 +1470,11 @@ def cmd_render(
                     # Калибровка есть и детерминирована (без LLM, секунды) → применяем сразу,
                     # тем же кодом, что recrop, и продолжаем рендер обновлённым кропом.
                     try:
-                        new_setup = _recrop_setup(manifest, calibrations_dir=calibrations_dir,
-                                                  inputs_dir=inputs_dir, archive_dir=archive_dir)
+                        new_setup = _recrop_setup(
+                            manifest, calibrations_dir=calibrations_dir, inputs_dir=inputs_dir,
+                            archive_dir=archive_dir,
+                            ffprobe=resolve_ffprobe(None, ffmpeg=effective_ffmpeg),
+                        )
                     except CalibrationError as e:
                         # Нечего применить (нет валидной калибровки) → блокируем как раньше.
                         print(f"\n  ⛔ ПРОПУСК {stem}: {desync}\n     не удалось авто-применить "
@@ -1622,11 +1664,12 @@ def _find_source_video(source_name, *, inputs_dir, archive_dir):
     return None
 
 
-def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir):
+def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir, ffprobe="ffprobe"):
     """Свежий setup для манифеста: калибровка по sha (или автокроп по отображаемому кадру).
 
     Кроп валидируется В ОТОБРАЖАЕМОМ кадре (границы + 9:16). Автокроп требует видео на диске —
-    иначе CalibrationError (нечем определить размер кадра). Reels/тексты не участвуют."""
+    иначе CalibrationError (нечем определить размер кадра). `ffprobe` — резолвнутый путь (не
+    голое имя): иначе автокроп-ветка падает WinError 2, если ffprobe не в PATH. Reels не участвуют."""
     def _frame_size():
         video = _find_source_video(manifest.source, inputs_dir=inputs_dir, archive_dir=archive_dir)
         if video is None:
@@ -1634,7 +1677,7 @@ def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir):
                 f"нет калибровки и видео «{manifest.source}» недоступно (ни inputs/, ни архив) — "
                 f"нечем считать автокроп"
             )
-        return _probe_frame_size_for_auto(video)
+        return _probe_frame_size_for_auto(video, ffprobe=ffprobe)
 
     setup = load_or_auto_calibrate(
         calibrations_dir, manifest.source_sha256, manifest.source, get_frame_size=_frame_size
@@ -1668,6 +1711,15 @@ def cmd_recrop(
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
 
+    # Резолвнутый ffprobe (не голое имя) для автокроп-ветки _recrop_setup — иначе WinError 2,
+    # если ffprobe не в PATH. Ручная калибровка ffprobe не зовёт; резолв best-effort (не роняем
+    # recrop, если ffmpeg не найден — там, где кроп ручной, ffprobe и не понадобится).
+    try:
+        _ff = _cli_resolve_ffmpeg(None, root=root)
+    except FFmpegNotFoundError:
+        _ff = None
+    recrop_ffprobe = resolve_ffprobe(None, ffmpeg=_ff)
+
     if video is not None:
         mf = manifests_dir / f"{Path(video).stem}.json"
         if not mf.is_file():
@@ -1693,7 +1745,8 @@ def cmd_recrop(
         stem = Path(manifest.source).stem
         try:
             new_setup = _recrop_setup(manifest, calibrations_dir=calibrations_dir,
-                                      inputs_dir=inputs_dir, archive_dir=archive_dir)
+                                      inputs_dir=inputs_dir, archive_dir=archive_dir,
+                                      ffprobe=recrop_ffprobe)
         except CalibrationError as e:
             print(f"  ⚠ пропуск {stem}: {e}", file=sys.stderr, flush=True)
             skipped.append(mf.name)
@@ -2347,25 +2400,60 @@ def cmd_status(*, root=".") -> int:
 
 # --------------------------------------------------------------------------- doctor
 
-def _doctor_tool_line(tool: str, root) -> str:
-    """Строка doctor для ffmpeg/ffprobe: резолв пути + первая строка `-version`, или «не найден».
+# Имя env-переменной явного бинаря для подсказок doctor.
+_TOOL_BINARY_ENV = {"ffmpeg": "FFMPEG_BINARY", "ffprobe": "FFPROBE_BINARY"}
+# Источники, при которых путь задан ЯВНО (запуск надёжен независимо от PATH).
+_EXPLICIT_TOOL_SOURCES = ("flag", "binary_env", "render_env", "config")
 
-    После обновлений Windows ffmpeg регулярно теряется из PATH — doctor показывает это явно,
-    ДО того как run упадёт [WinError 2] на извлечении аудио."""
+
+def _tool_status_line(res: ToolResolution, *, version_line: str | None, runnable: bool) -> str:
+    """ЧЕСТНАЯ строка doctor по ToolResolution. «✓» — только если путь задан явно ИЛИ имя есть
+    в PATH (ровно то, что делает рантайм: он зовёт этот же резолвнутый путь). Если бинарь найден
+    лишь автопоиском (candidate/sibling), а в PATH его нет — это «⚠», а не «✓»: голое имя не
+    разрешится, и держится всё на угаданном пути (хрупко, PATH после обновления Windows теряется)."""
+    tool = res.name
+    env = _TOOL_BINARY_ENV[tool]
+    if not runnable:
+        return f"  {tool:<16} ⚠ путь '{res.path}' задан, но бинарь не запускается — проверь путь"
+    if res.source in _EXPLICIT_TOOL_SOURCES:
+        where = {"flag": f"--{tool}", "binary_env": env,
+                 "render_env": f"RENDER_{tool.upper()}", "config": "render.local.yaml"}[res.source]
+        return f"  {tool:<16} ✓ {res.path}  (задан явно: {where})  ·  {version_line}"
+    if res.in_path:
+        return f"  {tool:<16} ✓ {res.path} (в PATH)  ·  {version_line}"
+    if res.source in ("candidate", "sibling"):
+        folder = str(Path(res.path).parent)
+        return (f"  {tool:<16} ⚠ найден в {folder}, но каталога нет в PATH — по имени не "
+                f"запустится, держится на автопоиске (хрупко). Добавь в PATH или задай {env}={res.path}")
+    return (f"  {tool:<16} ⚠ не в PATH и путь не задан — запуск упадёт. "
+            f"Добавь в PATH или задай {env}=<путь к бинарю>")
+
+
+def _doctor_tool_line(tool: str, root, *, runner=None) -> str:
+    """Строка doctor для ffmpeg/ffprobe через ЕДИНЫЙ резолвер (тот же, что и рантайм) + `-version`.
+
+    Резолв идёт через _cli_resolve_ffmpeg_ex/resolve_ffprobe_ex — рантайм зовёт их же, поэтому
+    doctor не может показать «найдено», когда рантайм упадёт. `runner` — точка подмены (тесты)."""
     import subprocess
+    runner = runner or (lambda p: subprocess.run([p, "-version"], capture_output=True, text=True, timeout=10))
     try:
-        ff = _cli_resolve_ffmpeg(None, root=root)
-        path = ff if tool == "ffmpeg" else resolve_ffprobe(None, ffmpeg=ff)
+        if tool == "ffmpeg":
+            res = _cli_resolve_ffmpeg_ex(None, root=root)
+        else:
+            res = resolve_ffprobe_ex(None, ffmpeg=_cli_resolve_ffmpeg(None, root=root))
     except FFmpegNotFoundError:
-        return (f"  {tool:<16} ⚠ не найден (ни PATH, ни render.local.yaml, ни автопоиск) — "
+        env = _TOOL_BINARY_ENV[tool]
+        return (f"  {tool:<16} ⚠ не найден (ни PATH, ни {env}, ни render.local.yaml, ни автопоиск) — "
                 f"после обновлений Windows ffmpeg часто выпадает из PATH")
+    version_line, runnable = None, False
     try:
-        out = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=10)
-        blob = out.stdout or out.stderr or ""
-        first = blob.splitlines()[0] if blob.strip() else "(без вывода -version)"
-        return f"  {tool:<16} ✓ {path}  ·  {first}"
+        out = runner(res.path)
+        blob = (getattr(out, "stdout", "") or getattr(out, "stderr", "") or "")
+        version_line = blob.splitlines()[0] if blob.strip() else "(без вывода -version)"
+        runnable = True
     except (OSError, subprocess.SubprocessError):
-        return f"  {tool:<16} ⚠ путь {path} есть, но бинарь не запускается"
+        runnable = False
+    return _tool_status_line(res, version_line=version_line, runnable=runnable)
 
 
 def cmd_doctor(*, root=".", probe=None, environ=None) -> int:
