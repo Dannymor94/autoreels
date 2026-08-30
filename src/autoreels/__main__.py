@@ -929,6 +929,23 @@ def resolve_ffprobe(cli_flag=None, *, ffmpeg=None, which=None, is_file=None) -> 
     return "ffprobe"
 
 
+def _preflight_tools(ffmpeg: str, ffprobe: str, *, which=None) -> None:
+    """Проверить, что ffmpeg И ffprobe СУЩЕСТВУЮТ (в PATH или по заданному пути) — ДО тяжёлой
+    работы (хэш гигабайтных файлов). Иначе пайплайн падает сырым «[WinError 2] Не удаётся найти
+    указанный файл» глубоко внутри (после того как впустую прочитаны десятки ГБ), и непонятно,
+    что не найдено — пользователь думает на видеофайл, а на деле нет утилиты в PATH.
+
+    Не найдено → FFmpegNotFoundError с ИМЕНЕМ утилиты и подсказкой `arl doctor` (main ловит её
+    в _KNOWN_ERRORS и печатает чистое сообщение). Точка подмены `which` — для тестов."""
+    which = which if which is not None else shutil.which
+    for name, path in (("ffmpeg", ffmpeg), ("ffprobe", ffprobe)):
+        if which(path) is None:
+            raise FFmpegNotFoundError(
+                f"{name} не найден (искал '{path}' в PATH) — установи {name} или добавь в PATH. "
+                f"Проверь окружение: arl doctor"
+            )
+
+
 def _project_root() -> Path:
     """Корень репозитория (где config/render.local.yaml, aliases.sh) — по расположению пакета.
     Команды находят машинный конфиг ffmpeg независимо от cwd: после autoload `arl` (и любой
@@ -998,10 +1015,16 @@ def cmd_run(
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
     transcripts_dir = Path(transcripts_dir) if transcripts_dir else root / "transcripts"
 
-    # ВАЛИДАЦИЯ ПЕРВЫМ ШАГОМ — до хэша/калибровки/аудио. Битый/пустой/недокачанный файл ловим
-    # сразу (InputInvalid), не тратя sha по гигабайтам и ffprobe-калибровку. Наверх летит
-    # InputInvalid — batch отнесёт его к «пропущено» (SKIPPED), а не «ошибка».
-    validate_input(Path(video), ffprobe=resolve_ffprobe(None, ffmpeg=ffmpeg))
+    # ПОРЯДОК ПРОВЕРОК: окружение → файл → тяжёлая работа. Сначала преflight утилит: ffmpeg и
+    # ffprobe должны СУЩЕСТВОВАТЬ ДО того, как посчитан хэш 14-гигабайтного файла (иначе на пачке
+    # впустую читаются десятки ГБ, прежде чем всплывёт «нет ffmpeg»). Внятная FFmpegNotFoundError
+    # с именем утилиты — вместо сырого WinError 2 из глубины extract_audio.
+    ffprobe = resolve_ffprobe(None, ffmpeg=ffmpeg)
+    _preflight_tools(ffmpeg, ffprobe)
+    # Затем валидация ФАЙЛА — до хэша/калибровки/аудио. Битый/пустой/недокачанный ловим сразу
+    # (InputInvalid), не тратя sha по гигабайтам. Наверх летит InputInvalid — batch отнесёт его к
+    # «пропущено» (SKIPPED), а не «ошибка».
+    validate_input(Path(video), ffprobe=ffprobe)
 
     size_gb = Path(video).stat().st_size / (1 << 30)
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
@@ -1186,6 +1209,10 @@ def cmd_run_batch(
     skipped = [(name, причина), …] (битые/пустые файлы — их НЕ архивируем, остаются в inputs/).
     """
     root = Path(root)
+    # Преflight утилит ОДИН раз до всей пачки: нет ffmpeg/ffprobe → падаем сразу с внятным
+    # сообщением, не прочитав ни одного гигабайта (на 6 файлах впустую читалось ~40 ГБ хэшей,
+    # прежде чем всплывало «нет ffmpeg»). Летит наверх (не в per-file try) → одно сообщение.
+    _preflight_tools(ffmpeg, resolve_ffprobe(None, ffmpeg=ffmpeg))
     _git_pull(root, what="калибровки")          # один pull на всю пачку (не на каждое видео)
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     videos = sorted(inputs_dir.glob("*.mp4"))

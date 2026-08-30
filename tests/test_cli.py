@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Реальный _run_git, захваченный ДО autouse-мока (_no_real_git) — для теста самого _run_git.
 _REAL_RUN_GIT = cli._run_git
 _REAL_GIT_PULL = cli._git_pull            # реальный _git_pull ДО autouse-мока (_no_real_git)
+_REAL_PREFLIGHT = cli._preflight_tools    # реальный _preflight_tools ДО autouse-мока (тесты преflight)
 
 
 @pytest.fixture(autouse=True)
@@ -63,9 +64,13 @@ def _frame_size_probe(monkeypatch):
     которым нужен другой размер (авто-кроп, out-of-bounds), переопределяют явно.
 
     Также обходим validate_input: тестовые mp4 — крошечные заглушки (b\"x\"), реальная валидация
-    отвергла бы их как «слишком мал». Тесты про саму валидацию снимают этот мок явно."""
+    отвергла бы их как «слишком мал». Тесты про саму валидацию снимают этот мок явно.
+
+    И глушим преflight утилит (_preflight_tools дёргает shutil.which(ffmpeg/ffprobe)) — иначе
+    мок-тесты требовали бы ffmpeg в PATH. Тесты самого преflight'а зовут _REAL_PREFLIGHT."""
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (3840, 2160))
     monkeypatch.setattr(cli, "validate_input", lambda v, **k: (3840, 2160, 60.0))
+    monkeypatch.setattr(cli, "_preflight_tools", lambda *a, **k: None)
 
 
 def _setup() -> SetupProfile:
@@ -5061,3 +5066,67 @@ def test_run_without_groq_key_fails_clearly(monkeypatch, tmp_path, capsys):
     assert rc == 1
     err = capsys.readouterr().err
     assert "GROQ_API_KEY" in err and "doctor" in err
+
+
+# ------------------------------------------------- преflight утилит (ffmpeg/ffprobe) до хэша
+
+def test_preflight_tools_names_missing_ffmpeg():
+    """Нет ffmpeg → FFmpegNotFoundError с ИМЕНЕМ утилиты + arl doctor, не сырой WinError."""
+    with pytest.raises(cli.FFmpegNotFoundError) as e:
+        _REAL_PREFLIGHT("ffmpeg", "ffprobe", which=lambda p: None)
+    msg = str(e.value)
+    assert "ffmpeg" in msg and "doctor" in msg
+    assert "WinError" not in msg
+
+
+def test_preflight_tools_names_missing_ffprobe():
+    """ffmpeg есть, ffprobe нет → сообщение называет именно ffprobe."""
+    def which(p):
+        return "/usr/bin/ffmpeg" if p == "ffmpeg" else None
+    with pytest.raises(cli.FFmpegNotFoundError) as e:
+        _REAL_PREFLIGHT("ffmpeg", "ffprobe", which=which)
+    assert "ffprobe" in str(e.value)
+
+
+def test_preflight_tools_passes_when_both_present():
+    """Обе утилиты найдены → не бросает."""
+    _REAL_PREFLIGHT("ffmpeg", "ffprobe", which=lambda p: f"/usr/bin/{Path(p).name}")
+
+
+def test_run_preflight_runs_before_hashing(monkeypatch, tmp_path):
+    """Преflight срабатывает ДО хэширования: нет утилиты → падаем, не прочитав гигабайты."""
+    order = []
+    monkeypatch.setattr(
+        cli, "_preflight_tools",
+        lambda ff, fp: (_ for _ in ()).throw(cli.FFmpegNotFoundError("ffmpeg не найден — arl doctor")),
+    )
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast",
+                        lambda *a, **k: order.append("hash") or "a" * 64)
+    video = tmp_path / "inputs" / "v.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+    with pytest.raises(cli.FFmpegNotFoundError):
+        cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m", cache_dir=tmp_path / "c",
+                    transcripts_dir=tmp_path / "t", calibrations_dir=tmp_path / "cal",
+                    archive_dir=tmp_path / "ar")
+    assert order == []                       # хэш НЕ считался — преflight раньше
+
+
+def test_run_batch_preflight_before_any_hashing(monkeypatch, tmp_path):
+    """Batch: нет утилиты → одно падение ДО чтения любого файла (не 40 ГБ впустую на 6 файлах)."""
+    hashed = []
+    monkeypatch.setattr(
+        cli, "_preflight_tools",
+        lambda ff, fp: (_ for _ in ()).throw(cli.FFmpegNotFoundError("ffmpeg не найден — arl doctor")),
+    )
+    monkeypatch.setattr(cli.state, "file_sha256_cached_fast",
+                        lambda *a, **k: hashed.append("h") or "a" * 64)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir(parents=True)
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+    with pytest.raises(cli.FFmpegNotFoundError):
+        cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+                          cache_dir=tmp_path / "c", transcripts_dir=tmp_path / "t",
+                          calibrations_dir=tmp_path / "cal", archive_dir=tmp_path / "ar")
+    assert hashed == []                      # ни один файл не хэширован
