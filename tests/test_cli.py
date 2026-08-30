@@ -123,6 +123,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
     monkeypatch.setattr(cli, "_stage_padding", rec("padding", [_reel()]))
     monkeypatch.setattr(cli, "_stage_trim", rec("trim", [_reel()]))
+    monkeypatch.setattr(cli, "_stage_min_clip_filter", rec("min_clip", ([_reel()], 0)))
     monkeypatch.setattr(cli, "_stage_subtitles", rec("subtitles", [_reel()]))
     monkeypatch.setattr(cli, "_assemble_manifest", rec("assemble", _manifest()))
     monkeypatch.setattr(cli, "_write_manifest", rec("write", tmp_path / "v.json"))
@@ -134,7 +135,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path, transcripts_dir=tmp_path)
 
     assert order == ["extract", "transcribe", "compress", "select", "snap", "padding", "trim",
-                     "subtitles", "assemble", "write"]
+                     "min_clip", "subtitles", "assemble", "write"]
 
 
 def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
@@ -248,6 +249,8 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
     midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
                    description="d", reason="r", topic="x")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [midword])
+    # Этот тест проверяет snap/padding, а не min_clip_filter → минуем фильтр.
+    monkeypatch.setattr(cli, "_stage_min_clip_filter", lambda reels, transcript, *, r0_cfg: (reels, 0))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"vid")

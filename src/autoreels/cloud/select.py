@@ -187,6 +187,33 @@ def filter_by_duration(reels: list[Reel], *, min_meaningful_sec: float) -> list[
     return [r for r in reels if (r.end - r.start) >= min_meaningful_sec]
 
 
+def diagnose_collapse(r: Reel) -> str:
+    """Объяснить, почему клип оказался слишком коротким после snap+padding.
+
+    Сравнивает r0_start/r0_end (границы до snap) с финальными start/end.
+    Если r0_* не сохранены (старый манифест) — сообщает об этом.
+    """
+    final_dur = r.end - r.start
+    if r.r0_start is None or r.r0_end is None:
+        return f"длина {final_dur:.1f}с (r0_start/r0_end не сохранены — старый манифест)"
+    r0_dur = r.r0_end - r.r0_start
+    # Если R0-длина лишь чуть больше финала (в пределах 1с) — snap тут ни при чём,
+    # момент был коротким уже на этапе LLM-выборки.
+    if r0_dur < final_dur + 1.0:
+        return f"R0 вернул {r0_dur:.1f}с — момент был коротким при выборке"
+    return f"R0 {r0_dur:.1f}с → snap/padding схлопнули до {final_dur:.1f}с"
+
+
+def filter_min_clip_duration(reels: list[Reel], *, min_clip_duration: float) -> list[Reel]:
+    """Пост-snap фильтр: убрать клипы короче min_clip_duration.
+
+    Вызывается ПОСЛЕ snap+padding+trim (пост-snap). Отличается от filter_by_duration
+    (пре-snap): snap может схлопнуть хороший 18с момент до 1с — этот фильтр ловит такие случаи.
+    Перед применением этого фильтра вызовите try_rescue_clip (snap.py) для попытки расширения.
+    """
+    return [r for r in reels if r.end - r.start >= min_clip_duration]
+
+
 def _overlap_ratio(a: Reel, b: Reel) -> float:
     inter = max(0.0, min(a.end, b.end) - max(a.start, b.start))
     shorter = min(a.end - a.start, b.end - b.start)

@@ -87,6 +87,8 @@ class R0Config(BaseModel):
     min_meaningful_sec: float = 18    # планка «законченной мысли»: сегменты короче снимает
                                       # детерминированный пост-фильтр (выше техн. min_duration).
                                       # Лечит «пустые 15-сек клипы» на длинных видео.
+    min_clip_duration: float = 8.0    # пост-snap минимум (snap+padding могут схлопнуть 18с → 1с);
+                                      # перед отбросом код пробует расширить до границы фразы.
     max_reels: int | None
     chunk_tokens: int
     chunk_overlap_sec: int

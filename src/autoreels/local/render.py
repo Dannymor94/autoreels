@@ -38,6 +38,10 @@ from autoreels.local.subtitles import build_ass
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
 _MANIFEST_NAME = "manifest.json"
 
+# Минимальная длительность клипа, ниже которой рендер пропускает с предупреждением.
+# Защита от схлопнутых границ, прошедших в манифест (основная фильтрация — пост-snap в run).
+_MIN_CLIP_RENDER_SEC = 2.0
+
 # Кодеки, для которых -preset — родной параметр (софтверные x26x). Для аппаратных
 # энкодеров (h264_amf/hevc_amf/av1_amf/nvenc) -preset невалиден (у AMF свой пресет).
 _SOFTWARE_X26X = {"libx264", "libx265"}
@@ -652,6 +656,14 @@ def _render_segments(
         outputs: list[Path] = []
         total = len(manifest.reels)
         for idx, reel in enumerate(manifest.reels, 1):
+            clip_dur = reel.end - reel.start
+            if clip_dur < _MIN_CLIP_RENDER_SEC:
+                print(
+                    f"  ⚠ {reel.id}: {clip_dur:.1f}с < {_MIN_CLIP_RENDER_SEC}с — "
+                    f"пропущен (схлопывание границ; манифест стоит пересобрать)",
+                    flush=True,
+                )
+                continue
             if progress is not None:
                 progress(reel.id)
             out = out_dir / f"{reel.id}{suffix}.mp4"

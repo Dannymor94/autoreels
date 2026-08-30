@@ -241,6 +241,47 @@ def _snap_start(start: float, end: float, words: list[Word], *, window_sec: floa
     return target if target < end else None
 
 
+def try_rescue_clip(
+    r: Reel,
+    words: list[Word],
+    *,
+    min_duration: float,
+    max_duration: float,
+    min_pause: float,
+    max_micro_pause: float,
+    hanging_words,
+) -> bool:
+    """Расширить схлопнутый клип до ближайшей границы мысли. Мутирует r.end.
+
+    True → r.end перенесён к ближайшему концу фразы, (r.end - r.start) >= min_duration.
+    False → подходящего конца в пределах max_duration не нашлось, r не изменён.
+
+    Порядок поиска:
+      1. Строгие концы мысли (пунктуация / пауза > min_pause) — не на висячем слове;
+      2. Мягкие концы (пауза > max_micro_pause) — если строгих нет.
+    start не двигается: началo уже snap'нуто, отодвигать его назад рискованно.
+    """
+    limit = r.start + max_duration
+
+    # Строгие концы мысли (тот же критерий, что snap_end)
+    strict = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
+                               hanging_words=hanging_words)
+    for t in sorted(t for t in strict if t > r.end and t <= limit):
+        if t - r.start >= min_duration:
+            r.end = t
+            return True
+
+    # Мягкие концы (пауза > max_micro_pause — ниже порога «конца мысли», но выше микропаузы)
+    relaxed = _phrase_end_times(words, min_pause=max_micro_pause, max_micro_pause=max_micro_pause,
+                                hanging_words=hanging_words)
+    for t in sorted(t for t in relaxed if t > r.end and t <= limit):
+        if t - r.start >= min_duration:
+            r.end = t
+            return True
+
+    return False
+
+
 def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, window_sec: float,
                   max_duration: float, min_pause_for_phrase_end: float, max_micro_pause: float,
                   hanging_words, prefer_longer_below_ratio: float = 0.0,

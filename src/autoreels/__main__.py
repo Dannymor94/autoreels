@@ -27,8 +27,8 @@ from autoreels.cloud.compress import compress_transcript
 from autoreels.cloud.diagnose import classify_end, summarize
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import ProviderError, build_pool
-from autoreels.cloud.select import SelectError, select
-from autoreels.cloud.snap import apply_padding, snap_segments
+from autoreels.cloud.select import SelectError, diagnose_collapse, filter_min_clip_duration, select
+from autoreels.cloud.snap import apply_padding, snap_segments, try_rescue_clip
 from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
@@ -614,6 +614,55 @@ def _stage_trim(reels, transcript, *, r0_cfg):
     return reels
 
 
+def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, int]:
+    """Пост-snap: убрать клипы короче min_clip_duration, попытавшись расширить до фразы.
+
+    Для каждого короткого клипа:
+      1. Диагностирует причину (R0 вернул коротко / snap схлопнул).
+      2. Пробует расширить конец до ближайшей границы мысли (try_rescue_clip).
+      3. Если расширение даёт >= min_clip_duration → клип спасён (остаётся).
+      4. Иначе → отброшен, причина залогирована.
+
+    Returns (kept_reels, n_dropped).
+    """
+    min_dur = r0_cfg.min_clip_duration
+    words = transcript.words
+    kept: list = []
+    n_dropped = 0
+
+    for r in reels:
+        if r.end - r.start >= min_dur:
+            kept.append(r)
+            continue
+
+        before_rescue_end = r.end
+        reason = diagnose_collapse(r)
+
+        rescued = try_rescue_clip(
+            r, words,
+            min_duration=min_dur,
+            max_duration=r0_cfg.max_duration,
+            min_pause=r0_cfg.min_pause_for_phrase_end,
+            max_micro_pause=r0_cfg.max_micro_pause,
+            hanging_words=r0_cfg.hanging_words,
+        )
+        if rescued:
+            print(
+                f"  ↑ {r.id}: расширен {before_rescue_end - r.start:.1f}с → "
+                f"{r.end - r.start:.1f}с ({reason})",
+                flush=True,
+            )
+            kept.append(r)
+        else:
+            print(f"  ✗ {r.id}: отброшен — {reason}", flush=True)
+            n_dropped += 1
+
+    if n_dropped:
+        print(f"min_clip_filter: отброшено {n_dropped} коротких клипов", flush=True)
+
+    return kept, n_dropped
+
+
 def _stage_subtitles(reels, transcript):
     """R3: привязать word-level транскрипта к каждому reel."""
     print("субтитры: привязка слов к сегментам…", flush=True)
@@ -1124,12 +1173,14 @@ def cmd_run(
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
+    reels, n_short_dropped = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_subtitles(reels, transcript)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )
     path = _write_manifest(manifest, manifests_dir)
-    print(f"манифест собран: {len(manifest.reels)} reels → {path}", flush=True)
+    drop_info = f" (отброшено коротких: {n_short_dropped})" if n_short_dropped else ""
+    print(f"манифест собран: {len(manifest.reels)} reels{drop_info} → {path}", flush=True)
     if push:
         # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
         _commit_push_manifest(path, len(manifest.reels), root=root,
