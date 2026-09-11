@@ -117,6 +117,9 @@ class Reel(BaseModel):
     flags: list[str] = Field(default_factory=list)
     # Сырой word-level. Группировку в строки делает R3 (local/subtitles.py), не схема.
     subtitles: list[Word] = Field(default_factory=list)
+    # Метрики snap: насколько end сдвинулся от r0_end и по какой причине.
+    end_drift_sec: float | None = None
+    end_snap_reason: str | None = None  # "sentence" | "pause" | "cap" | None
 
 
 class Manifest(BaseModel):

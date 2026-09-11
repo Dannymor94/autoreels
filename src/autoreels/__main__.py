@@ -618,8 +618,8 @@ def _stage_snap(reels, transcript, *, r0_cfg):
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
         max_micro_pause=r0_cfg.max_micro_pause,
         hanging_words=r0_cfg.hanging_words,
-        prefer_longer_below_ratio=r0_cfg.prefer_longer_below_ratio,
-        max_extra_sentences=r0_cfg.max_extra_sentences,
+        max_end_search_sec=r0_cfg.max_end_search_sec,
+        min_clip_duration=r0_cfg.min_clip_duration,
     )
     return reels
 
@@ -1912,8 +1912,8 @@ def _resnap_reels(reels, transcript, r0_cfg) -> None:
                   window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
                   min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
                   max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_words,
-                  prefer_longer_below_ratio=r0_cfg.prefer_longer_below_ratio,
-                  max_extra_sentences=r0_cfg.max_extra_sentences)
+                  max_end_search_sec=r0_cfg.max_end_search_sec,
+                  min_clip_duration=r0_cfg.min_clip_duration)
     apply_padding(reels, transcript.words, tail_pad_sec=r0_cfg.tail_pad_sec,
                   lead_pad_sec=r0_cfg.lead_pad_sec, max_duration=r0_cfg.max_duration,
                   video_duration=transcript.words[-1].t1 if transcript.words else None,
@@ -2392,8 +2392,8 @@ def _rerun_reels(transcript, r0_cfg, root):
                   window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
                   min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
                   max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_words,
-                  prefer_longer_below_ratio=r0_cfg.prefer_longer_below_ratio,
-                  max_extra_sentences=r0_cfg.max_extra_sentences)
+                  max_end_search_sec=r0_cfg.max_end_search_sec,
+                  min_clip_duration=r0_cfg.min_clip_duration)
     apply_padding(reels, transcript.words, tail_pad_sec=r0_cfg.tail_pad_sec,
                   lead_pad_sec=r0_cfg.lead_pad_sec, max_duration=r0_cfg.max_duration,
                   video_duration=transcript.words[-1].t1 if transcript.words else None,

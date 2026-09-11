@@ -453,16 +453,6 @@ def test_padding_drops_trailing_comma_word():
     assert r.end >= 1.0                               # осталось на «интересно» (t1=1.0)
 
 
-def test_snap_prefer_longer_extends_short_clip_to_later_sentence():
-    """Короткий грамматически-завершённый клип с запасом → продлить до след. чистой границы
-    (максимум +max_extra предложений). «раз.» → «три.» (+2), не первая попавшаяся."""
-    words = [_w(0, 2, "раз."), _w(4, 6, "два."), _w(8, 10, "три."), _w(30, 32, "далеко.")]
-    r = _reel(0.0, 2.5)                              # LLM-конец у «раз.»
-    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=20,
-                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
-                  prefer_longer_below_ratio=0.7, max_extra_sentences=2)
-    assert abs(r.end - 10.3) < 1e-6                 # продлён до «три.» (+2), не «раз.»(2.3)
-
 
 def test_snap_prefer_longer_stops_at_ratio():
     """Как только клип дотянул до ratio·max_duration — стоп (не тянем до упора)."""
@@ -514,3 +504,117 @@ def test_snap_fallback_lands_on_non_comma_not_after_comma():
     snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
                   min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING)
     assert abs(r.end - (0.9 + 0.3)) < 1e-6            # конец на «важно», не на «смотри,»
+
+
+# ===== Task 5: punctuation-first end snap anchored on r0_end (TDD — RED before implementation) =====
+# All tests pass max_end_search_sec to snap_segments → TypeError until implemented.
+# r.end_snap_reason / r.end_drift_sec → AttributeError until added to Reel.
+
+_R0CFG = dict(tail_sec=0.3, window_sec=1.5, max_duration=59,
+              min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+              max_end_search_sec=12.0)
+
+
+def test_sentence_within_cap_chosen_as_end():
+    """Test 1: sentence-terminal word 0.9s after r0_end is chosen as end."""
+    words = [
+        _w(100.0, 100.4, "слово"),
+        # r0_end = 101.0; "первое." starts 0.9s later
+        _w(101.9, 102.4, "первое."),   # sentence-terminal, 1.4s after r0_end → within 12s cap
+        _w(120.0, 120.5, "дальше."),   # beyond cap
+    ]
+    r = _reel(100.0, 105.0)
+    r.r0_end = 101.0
+    snap_segments([r], words, **_R0CFG)
+    assert abs(r.end - (102.4 + 0.3)) < 1e-6, f"expected 102.7, got {r.end}"
+    assert r.end_snap_reason == "sentence"
+
+
+def test_sentence_beyond_cap_uses_pause_fallback():
+    """Test 2: sentence-terminal word 14s after r0_end is beyond 12s cap → pause fallback."""
+    words = [
+        _w(100.0, 100.5, "начало"),
+        # r0_end = 101.0; cap = 113.0
+        _w(107.0, 107.5, "пауза"),    # gap > 1.5s before next word → pause-end within cap
+        _w(116.0, 116.5, "конец."),   # sentence-terminal at 15s after r0_end → BEYOND cap
+    ]
+    r = _reel(100.0, 102.0)
+    r.r0_end = 101.0
+    snap_segments([r], words, **_R0CFG)
+    assert r.end <= 101.0 + 12.0 + 0.3 + 1e-6, f"end {r.end} exceeds cap+tail"
+    assert r.end_snap_reason in ("pause", "cap")
+
+
+def test_end_stops_at_first_sentence_not_extended():
+    """Test 3: end never placed past FIRST sentence-terminal found (regression for +27s case).
+
+    Old _prefer_longer_end would extend short clips to later sentences.
+    New code stops at the first sentence-terminal word at/after r0_end.
+    """
+    words = [
+        _w(0.0, 0.5, "начало"),
+        # r0_end = 1.8
+        _w(2.5, 3.0, "первое."),   # first sentence-terminal after r0_end → stop here
+        _w(10.0, 10.5, "второе."), # second — old code would jump here (prefer_longer)
+        _w(20.0, 20.5, "третье."), # third — old code could reach here (+27s)
+    ]
+    r = _reel(0.0, 2.0)
+    r.r0_end = 1.8
+    snap_segments([r], words, **_R0CFG)
+    # Must stop at "первое." (3.0 + 0.3 = 3.3), NOT extend to "второе." or "третье."
+    assert abs(r.end - 3.3) < 1e-6, f"expected 3.3 (first sentence end), got {r.end}"
+
+
+def test_short_clip_after_snap_flagged_too_short():
+    """Test 4: clip shorter than min_clip_duration after snap gets too_short flag (rejected)."""
+    words = [
+        _w(100.0, 100.4, "раз"),
+        # r0_end ≈ 100.5; sentence end at 100.8 → clip duration = 1.1s < 8s
+        _w(100.5, 100.8, "всё."),
+    ]
+    r = _reel(100.0, 101.0)
+    r.r0_end = 100.5
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+                  max_end_search_sec=12.0, min_clip_duration=8.0)
+    assert "too_short" in r.flags, f"expected too_short flag, got flags={r.flags}"
+
+
+def test_end_drift_and_reason_written_for_every_reel():
+    """Test 5: end_drift_sec and end_snap_reason written for every reel after snap."""
+    words = [
+        _w(50.0, 50.4, "слово"),
+        _w(51.2, 51.8, "конец."),   # sentence-terminal
+    ]
+    r = _reel(50.0, 52.0)
+    r.r0_end = 50.9
+    snap_segments([r], words, **_R0CFG)
+    assert r.end_snap_reason is not None, "end_snap_reason must be set"
+    assert r.end_drift_sec is not None, "end_drift_sec must be set"
+    assert abs(r.end_drift_sec - (r.end - r.r0_end)) < 1e-6
+
+
+def test_corpus_max_drift_within_cap():
+    """Test 6: on the 3 lecture manifests, end never drifts > max_end_search_sec + tail past r0_end."""
+    import json as _json
+    from pathlib import Path as _Path
+    from autoreels.core.models import Manifest
+    manifest_dir = _Path(__file__).resolve().parents[1] / "manifests"
+    manifests = list(manifest_dir.glob("*.json"))
+    if not manifests:
+        pytest.skip("no manifests/ to run corpus check against")
+
+    max_allowed = 12.0 + 0.3  # max_end_search_sec + tail_sec
+    violations = []
+    for mf in manifests:
+        m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        words = [w for r in m.reels for w in r.subtitles]
+        for r in m.reels:
+            if r.r0_end is None:
+                continue
+            snap_segments([r], words, **_R0CFG)
+            drift = r.end - r.r0_end
+            if drift > max_allowed + 1e-6:
+                violations.append(f"{mf.name} reel {r.id}: drift={drift:.1f}s")
+
+    assert not violations, "end drift > cap:\n" + "\n".join(violations)

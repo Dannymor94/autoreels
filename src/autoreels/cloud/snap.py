@@ -189,9 +189,7 @@ def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, w
               max_extra_sentences: int = 0) -> float | None:
     """Новый end: тянуть вперёд до завершения мысли в пределах max_duration; не влезло —
     откат к последней целой фразе; совсем нет завершений рядом → мягкая иерархия фолбэка
-    (_relaxed_end) — конец предложения / пауза ≥0.4с / не-висячее слово, НЕ полуслово.
-
-    prefer_longer: короткий клип с запасом времени продлевается до следующей чистой границы."""
+    (_relaxed_end) — конец предложения / пауза ≥0.4с / не-висячее слово, НЕ полуслово."""
     limit = start + max_duration
     ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
                              hanging_words=hanging_words)
@@ -202,10 +200,6 @@ def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, w
     forward = [t for t in ends if t >= end - window_sec and start < t <= limit]
     if forward:
         chosen = min(forward)
-        # Клип грамматически завершён, но короткий и есть запас → тянуть до след. чистой границы.
-        chosen = _prefer_longer_end(chosen, start=start, limit=limit, tail_sec=tail_sec,
-                                    words=words, ratio=prefer_longer_below_ratio,
-                                    max_extra=max_extra_sentences)
     else:
         # Мысль не завершается до max_duration → откат к последней целой фразе в лимите.
         within = [t for t in ends if start < t <= limit]
@@ -219,6 +213,45 @@ def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, w
                 return None
     new_end = min(chosen + tail_sec, limit)
     return new_end if new_end > start else None
+
+
+def _snap_end_punctuation_first(
+    r0_end: float,
+    start: float,
+    words: list[Word],
+    *,
+    max_end_search_sec: float,
+    tail_sec: float,
+    min_pause: float,
+    max_micro_pause: float,
+    hanging_words,
+) -> tuple[float, str]:
+    """Punctuation-first end snap anchored on r0_end.
+
+    1. Find first sentence-terminal word at or after r0_end, within r0_end + max_end_search_sec.
+    2. Fallback: first phrase-end (pause-based) within the same cap.
+    3. Final fallback: r0_end itself + tail_sec ("cap").
+
+    Returns (new_end, reason) where reason is "sentence" | "pause" | "cap".
+    """
+    cap = r0_end + max_end_search_sec
+
+    # 1. Punctuation-first: first sentence-terminal word at or after r0_end, within cap.
+    sentence_ends = [w.t1 for w in words if w.t1 >= r0_end and w.t1 <= cap and _is_sentence_end(w.word)]
+    if sentence_ends:
+        return min(sentence_ends) + tail_sec, "sentence"
+
+    # 2. Pause-based fallback within cap.
+    phrase_ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
+                                    hanging_words=hanging_words)
+    within_cap = [t for t in phrase_ends if t >= r0_end and t <= cap]
+    if within_cap:
+        return min(within_cap) + tail_sec, "pause"
+
+    # 3. Cap fallback: snap to r0_end + tail, or nearest phrase end before r0_end.
+    before = [t for t in phrase_ends if start < t < r0_end]
+    chosen = max(before) if before else r0_end
+    return chosen + tail_sec, "cap"
 
 
 def _snap_start(start: float, end: float, words: list[Word], *, window_sec: float,
@@ -285,11 +318,17 @@ def try_rescue_clip(
 def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, window_sec: float,
                   max_duration: float, min_pause_for_phrase_end: float, max_micro_pause: float,
                   hanging_words, prefer_longer_below_ratio: float = 0.0,
-                  max_extra_sentences: int = 0) -> None:
+                  max_extra_sentences: int = 0, max_end_search_sec: float | None = None,
+                  min_clip_duration: float | None = None) -> None:
     """Подтянуть start/end каждого reel к завершению мысли (мутирует на месте).
 
     Пустой `words` → границы не трогаем. Порядок в пайплайне: snap → padding → trim.
-    prefer_longer_*: короткий грамматически-завершённый клип продлевается до след. чистой границы.
+
+    Если max_end_search_sec задан и r.r0_end не None — использует punctuation-first snap
+    (конец предложения в окне r0_end + max_end_search_sec, без prefer_longer).
+    Пишет r.end_drift_sec и r.end_snap_reason для каждого reel.
+
+    min_clip_duration: клипы короче порога получают флаг "too_short".
     """
     if not words:
         return
@@ -298,13 +337,33 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
                                 min_pause=min_pause_for_phrase_end, hanging_words=hanging_words)
         if new_start is not None:
             r.start = new_start
-        new_end = _snap_end(r.end, r.start, words, tail_sec=tail_sec, window_sec=window_sec,
-                            max_duration=max_duration, min_pause=min_pause_for_phrase_end,
-                            max_micro_pause=max_micro_pause, hanging_words=hanging_words,
-                            prefer_longer_below_ratio=prefer_longer_below_ratio,
-                            max_extra_sentences=max_extra_sentences)
-        if new_end is not None:
-            r.end = new_end
+
+        if max_end_search_sec is not None and r.r0_end is not None:
+            new_end, reason = _snap_end_punctuation_first(
+                r.r0_end, r.start, words,
+                max_end_search_sec=max_end_search_sec,
+                tail_sec=tail_sec,
+                min_pause=min_pause_for_phrase_end,
+                max_micro_pause=max_micro_pause,
+                hanging_words=hanging_words,
+            )
+            r.end = min(new_end, r.start + max_duration)
+            r.end_snap_reason = reason
+            r.end_drift_sec = r.end - r.r0_end
+        else:
+            new_end = _snap_end(r.end, r.start, words, tail_sec=tail_sec, window_sec=window_sec,
+                                max_duration=max_duration, min_pause=min_pause_for_phrase_end,
+                                max_micro_pause=max_micro_pause, hanging_words=hanging_words,
+                                prefer_longer_below_ratio=prefer_longer_below_ratio,
+                                max_extra_sentences=max_extra_sentences)
+            if new_end is not None:
+                r.end = new_end
+            if r.r0_end is not None:
+                r.end_drift_sec = r.end - r.r0_end
+
+        if min_clip_duration is not None and (r.end - r.start) < min_clip_duration:
+            if "too_short" not in r.flags:
+                r.flags.append("too_short")
 
 
 def apply_padding(
