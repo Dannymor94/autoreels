@@ -103,6 +103,52 @@ _VIDEO_EXTS = {
 _AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wma"}
 _MEDIA_EXTS = _VIDEO_EXTS | _AUDIO_EXTS
 
+# Расширения, которые batch-сканер принимает из inputs/ (case-insensitive).
+# Подмножество _VIDEO_EXTS — форматы, реально встречающиеся у пользователей.
+_BATCH_SCAN_EXTS = {".mp4", ".mov", ".mkv"}
+
+
+def _scan_inputs(inputs_dir: Path) -> list[Path]:
+    """Вернуть отсортированный список видеофайлов в inputs_dir.
+
+    Правила:
+    - Расширения .mp4/.mov/.mkv принимаются без учёта регистра (.MP4, .MOV, .MKV — ОК).
+    - Скрытые файлы (имя начинается с '.') всегда пропускаются (.DS_Store, .hidden.mp4).
+    - Фильтр по размеру/длительности не применяется (те не нужны на этапе перечисления).
+    """
+    if not inputs_dir.is_dir():
+        return []
+    return sorted(
+        p for p in inputs_dir.iterdir()
+        if p.is_file()
+        and not p.name.startswith(".")
+        and p.suffix.lower() in _BATCH_SCAN_EXTS
+    )
+
+
+def _report_empty_inputs(inputs_dir: Path) -> None:
+    """Диагностическое сообщение, когда inputs_dir не содержит видеофайлов.
+
+    Печатает абсолютный путь сканированного каталога, текущую рабочую директорию и
+    список файлов, которые есть, но не прошли фильтр — с причиной (до 10 штук).
+    """
+    inputs_abs = inputs_dir.resolve()
+    print(f"inputs/ пуст — нечего обрабатывать", flush=True)
+    print(f"  сканировался: {inputs_abs}", flush=True)
+    print(f"  cwd:          {Path.cwd()}", flush=True)
+    if not inputs_dir.is_dir():
+        print(f"  каталог не существует", flush=True)
+        return
+    entries = [p for p in inputs_dir.iterdir() if p.is_file()]
+    print(f"  файлов в каталоге: {len(entries)}", flush=True)
+    missed = [p for p in entries if p.suffix.lower() not in _BATCH_SCAN_EXTS or p.name.startswith(".")]
+    for p in missed[:10]:
+        if p.name.startswith("."):
+            reason = "скрытый файл"
+        else:
+            reason = f"расширение {p.suffix!r} не в {sorted(_BATCH_SCAN_EXTS)}"
+        print(f"    {p.name} — {reason}", flush=True)
+
 
 def _validate_media(path: Path, *, exts: set[str]) -> Path:
     """Проверить, что путь — существующий файл с медиа-расширением; вернуть resolve().
@@ -1281,7 +1327,7 @@ def cmd_transcribe(
 
 def cmd_run_batch(
     *,
-    root=".",
+    root=None,
     inputs_dir=None,
     calibrations_dir=None,
     manifests_dir=None,
@@ -1291,23 +1337,25 @@ def cmd_run_batch(
     ffmpeg: str = "ffmpeg",
     push: bool = False,
 ) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]]]:
-    """Batch: обработать все *.mp4 в inputs/ по очереди. Один упал → остальные продолжают.
+    """Batch: обработать все видео в inputs/ по очереди. Один упал → остальные продолжают.
 
+    `root=None` → корень проекта из `_project_root()` (по расположению пакета, НЕ по cwd).
+    Явный `root=<путь>` переопределяет дефолт — для тестов и нестандартных раскладок.
     `push=True` → каждый успешный манифест сразу коммитится+пушится (per-video, не в конце):
     упади прогон на середине — уже готовые манифесты УЖЕ на системнике.
     Возвращает (ok_names, failed_list, skipped_list): failed = [(name, exc), …] (реальные ошибки);
     skipped = [(name, причина), …] (битые/пустые файлы — их НЕ архивируем, остаются в inputs/).
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     # Преflight утилит ОДИН раз до всей пачки: нет ffmpeg/ffprobe → падаем сразу с внятным
     # сообщением, не прочитав ни одного гигабайта (на 6 файлах впустую читалось ~40 ГБ хэшей,
     # прежде чем всплывало «нет ffmpeg»). Летит наверх (не в per-file try) → одно сообщение.
     _preflight_tools(ffmpeg, resolve_ffprobe(None, ffmpeg=ffmpeg))
     _git_pull(root, what="калибровки")          # один pull на всю пачку (не на каждое видео)
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
-    videos = sorted(inputs_dir.glob("*.mp4"))
+    videos = _scan_inputs(inputs_dir)
     if not videos:
-        print("inputs/ пуст — нечего обрабатывать", flush=True)
+        _report_empty_inputs(inputs_dir)
         return [], [], []
 
     ok: list[str] = []

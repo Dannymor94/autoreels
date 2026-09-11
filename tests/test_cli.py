@@ -5356,3 +5356,117 @@ def test_dump_clips_registered_in_dispatch_map():
     """(6) dump-clips есть в едином источнике диспетчеризации и как argparse-подкоманда."""
     assert cli._MENU_CLI_TARGET["dumpclips"] == "dump-clips"
     assert "dump-clips" in _cli_subcommands()
+
+
+
+# --------------------------------------- inputs/ scanner: path-safety and diagnostics
+
+def _stub_run(monkeypatch):
+    """Stub cmd_run so cmd_run_batch only tests enumeration (not the full pipeline)."""
+    found = []
+    def _noop(video, **kwargs):
+        found.append(Path(video).name)
+    monkeypatch.setattr(cli, "cmd_run", _noop)
+    monkeypatch.setattr(cli, "_preflight_tools", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_git_pull", lambda *a, **k: None)
+    return found
+
+
+def test_scanner_finds_video_when_cwd_is_different(monkeypatch, tmp_path):
+    """(1) Regression: scanner finds inputs/ by package-anchored root, not cwd.
+
+    Before the fix, cmd_run_batch() with no root defaulted to '.' (cwd) and missed the
+    file when cwd != project root. After the fix, _project_root() anchors the default.
+    """
+    found = _stub_run(monkeypatch)
+    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "lecture1.mp4").write_bytes(b"x")
+
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    import os
+    orig = os.getcwd()
+    try:
+        os.chdir(other_dir)       # cwd is now DIFFERENT from the project root
+        cli.cmd_run_batch()       # no root kwarg — must use _project_root()
+    finally:
+        os.chdir(orig)
+
+    assert found == ["lecture1.mp4"], f"file not found from different cwd; found={found}"
+
+
+def test_scanner_finds_file_with_spaces_in_name(monkeypatch, tmp_path):
+    """(2) Filenames with spaces and dashes pass enumeration end-to-end."""
+    found = _stub_run(monkeypatch)
+    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    fname = "2026-08-08 10h 59m 38s.mp4"
+    (inputs / fname).write_bytes(b"x")
+
+    cli.cmd_run_batch()
+
+    assert fname in found, f"expected {fname!r} in found={found}"
+
+
+def test_scanner_accepts_uppercase_extensions_and_excludes_dotfiles(monkeypatch, tmp_path):
+    """(3) .MP4 and .MOV are accepted case-insensitively; dotfiles are excluded."""
+    found = _stub_run(monkeypatch)
+    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "big.MP4").write_bytes(b"x")
+    (inputs / "clip.MOV").write_bytes(b"x")
+    (inputs / ".DS_Store").write_bytes(b"x")
+    (inputs / ".hidden.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch()
+
+    names = set(found)
+    assert "big.MP4" in names,      "uppercase .MP4 not found"
+    assert "clip.MOV" in names,     "uppercase .MOV not found"
+    assert ".DS_Store" not in names, ".DS_Store must be excluded"
+    assert ".hidden.mp4" not in names, "hidden dotfile must be excluded"
+
+
+def test_scanner_empty_message_includes_absolute_path_and_cwd(monkeypatch, tmp_path, capsys):
+    """(4) Empty-inputs message reports absolute scanned path and current working directory."""
+    _stub_run(monkeypatch)
+    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "notes.txt").write_bytes(b"x")   # non-video — triggers missed-entries branch
+
+    ok, failed, skipped = cli.cmd_run_batch()
+
+    out = capsys.readouterr().out + capsys.readouterr().err
+    assert str(inputs.resolve()) in out, f"absolute scanned path missing from: {out!r}"
+    assert str(Path.cwd()) in out,       f"cwd missing from: {out!r}"
+    assert ok == [] and failed == [] and skipped == []
+
+
+def test_scanner_explicit_root_overrides_project_root(monkeypatch, tmp_path):
+    """(5) An explicit root= kwarg still overrides the _project_root() default."""
+    found = _stub_run(monkeypatch)
+    monkeypatch.setattr(cli, "_project_root", lambda: Path("/nonexistent"))
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "v.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch(root=tmp_path)
+
+    assert found == ["v.mp4"]
+
+
+def test_scanner_drift_menu_items():
+    """(6) All menu items still resolve to registered dispatch targets (no drift)."""
+    for num, action, *_ in cli._MENU_ITEMS:
+        assert cli._menu_action(num) == action
+        assert action in cli._MENU_CLI_TARGET
