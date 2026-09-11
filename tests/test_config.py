@@ -39,12 +39,12 @@ def test_load_r0_config_returns_typed_object():
     assert "shorts" in cfg.presets
 
 
-def test_preset_resolves_shorts_to_15_59():
+def test_preset_resolves_shorts_to_15_90():
     # Единственное место, где пресет превращается в числа. Сверка с config/r0.yaml.
     cfg = load_r0_config(R0_YAML)
     assert cfg.duration_preset == "shorts"
     assert cfg.min_duration == 15
-    assert cfg.max_duration == 59
+    assert cfg.max_duration == 90
 
 
 def test_r0_config_segmentation_params_tied_to_preset():
@@ -54,7 +54,7 @@ def test_r0_config_segmentation_params_tied_to_preset():
     # max_sentence_sec привязан к пресету: >= max_duration, чтобы не рубить легальные
     # моменты 30–59с; дробятся только гиганты (> max_duration + запас).
     assert cfg.max_sentence_sec >= cfg.max_duration
-    assert cfg.max_sentence_sec == cfg.max_duration + 30   # запас ~30с → shorts ≈ 89с
+    assert cfg.max_sentence_sec == cfg.max_duration + 30   # запас ~30с → shorts ≈ 120с
 
 
 def test_load_render_config_returns_typed_object():

@@ -54,7 +54,7 @@ max_end_search_sec: 12.0        # окно поиска конца предло�
 # Предпочтение длинного клипа: грамматически конец бывает раньше, чем спикер закончил мысль,
 # а запас времени есть. Если клип < ratio·max_duration — тянуть до следующей чистой границы
 # предложения, максимум +max_extra_sentences. ratio=0 отключает. Проверяется resnap'ом мгновенно.
-prefer_longer_below_ratio: 0.7  # <70% лимита (<41с при 59с) → продлить до следующего конца фразы
+prefer_longer_below_ratio: 0.7  # <70% лимита (<63с при 90с) → продлить до следующего конца фразы
 max_extra_sentences: 2          # но не более +2 предложений (чтобы не уйти в другую тему)
 hanging_words:                 # висячие слова: клип не заканчивать/начинать на них
   - и
@@ -73,9 +73,9 @@ hanging_words:                 # висячие слова: клип не зак
   - есть
   - вот
 max_sentence_buffer_sec: 30     # запас сверх max_duration пресета: эффективный порог
-                                # дробления = max_duration + запас (shorts ≈ 89с). Гиганты
+                                # дробления = max_duration + запас (shorts ≈ 120с). Гиганты
                                 # режутся по самым длинным внутренним паузам; легальные
-                                # моменты 30–59с остаются целыми (см. R0Config.max_sentence_sec)
+                                # моменты 30–90с остаются целыми (см. R0Config.max_sentence_sec)
 too_long_policy: trim              # trim | drop | keep (что делать с сегментами >max_duration)
 title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
 language: ru                   # язык вывода LLM
@@ -83,7 +83,7 @@ prompt_language: en            # system-промпт на английском (
 
 # Пресеты длины (сек) — PROJECT_GUIDE / R0_SPEC §3. Код-валидатор ставит too_long/too_short.
 presets:
-  shorts: { min: 15, max: 59 }
+  shorts: { min: 15, max: 90 }
   reels:  { min: 15, max: 90 }
   tiktok: { min: 15, max: 180 }
 

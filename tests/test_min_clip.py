@@ -17,7 +17,7 @@ from autoreels.core.models import Reel, Word
 ROOT = Path(__file__).resolve().parents[1]
 
 MIN_DUR = 8.0
-MAX_DUR = 59.0
+MAX_DUR = 90.0
 MIN_PAUSE = 1.5
 MAX_MICRO = 0.4
 HANGING = ["и", "а", "но", "что", "это"]
@@ -110,8 +110,8 @@ def test_rescue_fails_no_phrase_end_in_range():
 def test_rescue_does_not_exceed_max_duration():
     """Конец фразы за пределами start+max_duration → не используется."""
     r = _reel(10.0, 11.0)
-    # Конец предложения на 70с, но 10+59=69 < 70 → за пределами
-    words = _words(("конец.", 69.5, 70.0))
+    # Конец предложения на 105с, но 10+90=100 < 105 → за пределами
+    words = _words(("конец.", 100.5, 101.0))
     ok = try_rescue_clip(r, words, min_duration=MIN_DUR, max_duration=MAX_DUR,
                          min_pause=MIN_PAUSE, max_micro_pause=MAX_MICRO, hanging_words=HANGING)
     assert ok is False

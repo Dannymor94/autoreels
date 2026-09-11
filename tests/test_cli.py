@@ -2134,7 +2134,7 @@ def test_help_mentions_autocrop(capsys):
 
 def test_help_mentions_too_long(capsys):
     out = _help_out(capsys)
-    assert "59" in out or "too_long" in out or "обрезаются" in out.lower()
+    assert "90" in out or "too_long" in out or "обрезаются" in out.lower()
 
 
 def test_help_lists_all_folders(capsys):
@@ -5240,7 +5240,7 @@ def test_run_passes_resolved_ffprobe_to_frame_probe(monkeypatch, tmp_path):
 # ------------------------------------------------------ dump-clips: экспорт текстов в фикстуры
 
 def _dump_manifest(reels, source="lecture.mp4"):
-    """Манифест для dump-clips тестов (preset shorts → max 59с)."""
+    """Манифест для dump-clips тестов (preset shorts → max 90с)."""
     return Manifest(
         source=source, source_sha256="a" * 64, source_hash_scheme="partial-p1",
         duration_preset="shorts", setup=_setup(), run_key="rk", reels=reels,
@@ -5322,9 +5322,9 @@ def test_dump_clips_does_not_modify_manifest(tmp_path):
 
 
 def test_dump_clips_hit_duration_cap(tmp_path):
-    """(5) hit_duration_cap: true для клипа на пределе пресета (59с), false для короткого."""
+    """(5) hit_duration_cap: true для клипа на пределе пресета (90с), false для короткого."""
     m = _dump_manifest([
-        _dump_reel("r01", 0.0, 59.0, ["на", "пределе"]),   # ровно max shorts
+        _dump_reel("r01", 0.0, 90.0, ["на", "пределе"]),   # ровно max shorts
         _dump_reel("r02", 0.0, 30.0, ["короткий"]),         # вдвое короче
     ])
     mf = tmp_path / "lecture.json"

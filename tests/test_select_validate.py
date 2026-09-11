@@ -136,23 +136,23 @@ def test_invalid_then_valid_recovers(fewshot, r0_cfg):
 
 
 def test_real_fixture_flags_too_long(fewshot, r0_cfg):
-    # Инвариант 6 на РЕАЛЬНЫХ данных: 590.0–651.8 (61.8с > 59 shorts) код метит too_long;
-    # сегмент в пределах пресета — без флага. Ставит код, не модель.
+    # Инвариант 6 на РЕАЛЬНЫХ данных: 590.0–651.8 (61.8с < 90 shorts) — в пределах нового потолка,
+    # флага too_long быть не должно. Ставит код, не модель.
     content = QWEN_FIXTURE.read_text(encoding="utf-8")
     reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                      provider=_MockLLM([content]), r0_cfg=r0_cfg)
     by_start = {r.start: r for r in reels}
-    assert "too_long" in by_start[590.0].flags     # 61.8с — за пресетом
-    assert by_start[432.1].flags == []             # 52.5с — в пределах
+    assert by_start[590.0].flags == []              # 61.8с — в пределах нового потолка 90с
+    assert by_start[432.1].flags == []              # 52.5с — в пределах
 
 
 # ----------------------------------------------------------- валидаторы (код, не модель)
 
 def test_flags_too_long_and_too_short(r0_cfg):
-    # Пресет shorts: 15..59с. Код ставит флаги на граничных длинах.
+    # Пресет shorts: 15..90с. Код ставит флаги на граничных длинах.
     short = _reel(80, 0.0, 10.0)     # 10с < 15 → too_short
     ok = _reel(80, 0.0, 30.0)        # 30с в пределах → без флага
-    long = _reel(80, 0.0, 70.0)      # 70с > 59 → too_long
+    long = _reel(80, 0.0, 95.0)      # 95с > 90 → too_long
     S.flag_durations([short, ok, long],
                      min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
     assert short.flags == ["too_short"]
