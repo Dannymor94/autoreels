@@ -5470,3 +5470,15 @@ def test_scanner_drift_menu_items():
     for num, action, *_ in cli._MENU_ITEMS:
         assert cli._menu_action(num) == action
         assert action in cli._MENU_CLI_TARGET
+
+
+def test_dump_clips_finds_manifests_from_different_cwd(monkeypatch, tmp_path):
+    """(7) dump-clips auto-discovers manifests/ via _project_root(), not cwd."""
+    # Change cwd to tmp_path (a directory with no manifests/).
+    monkeypatch.chdir(tmp_path)
+    # Patch _project_root to point to REPO_ROOT so manifests/ is found.
+    monkeypatch.setattr(cli, "_project_root", lambda: REPO_ROOT)
+    # Run with no explicit manifests list → auto-discovery.
+    out = tmp_path / "clips"
+    found = cli._auto_discover_manifests(root=None)
+    assert len(found) > 0, "no manifests found — cwd-dependency not fixed"

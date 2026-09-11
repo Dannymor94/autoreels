@@ -2004,7 +2004,13 @@ def cmd_resnap(
     return 0
 
 
-def cmd_dump_clips(manifests, *, out, root=".") -> int:
+def _auto_discover_manifests(root=None) -> list[Path]:
+    """Glob manifests/*.json relative to project root (cwd-independent)."""
+    manifests_dir = (Path(root) if root else _project_root()) / "manifests"
+    return sorted(manifests_dir.glob("*.json"))
+
+
+def cmd_dump_clips(manifests, *, out, root=None) -> int:
     """Выгрузить тексты клипов в JSON-фикстуры для разметки — БЕЗ ретранскрипции/LLM/ffmpeg/сети.
 
     Один клип → один файл <source_stem>__<index>.json. Текст восстанавливается ТОЛЬКО из
@@ -2013,7 +2019,7 @@ def cmd_dump_clips(manifests, *, out, root=".") -> int:
     """
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    r0_cfg = load_r0_config(Path(root) / "config" / "r0.yaml")
+    r0_cfg = load_r0_config((Path(root) if root else _project_root()) / "config" / "r0.yaml")
 
     written = skipped = 0
     n_cap = 0
@@ -3928,11 +3934,11 @@ def main(argv=None) -> int:
             return cmd_diagnose_cuts(args.target, rerun=args.rerun)
         elif args.cmd == "dump-clips":
             manifests = [Path(m) for m in args.manifests] if args.manifests \
-                else sorted((Path(args.root) / "manifests").glob("*.json"))
+                else _auto_discover_manifests(root=args.root if args.root != "." else None)
             if not manifests:
                 print("manifests/ пуст — нечего выгружать", flush=True)
                 return 0
-            return cmd_dump_clips(manifests, out=args.out, root=args.root)
+            return cmd_dump_clips(manifests, out=args.out, root=args.root if args.root != "." else None)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

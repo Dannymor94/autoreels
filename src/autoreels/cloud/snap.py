@@ -225,33 +225,54 @@ def _snap_end_punctuation_first(
     min_pause: float,
     max_micro_pause: float,
     hanging_words,
-) -> tuple[float, str]:
+    max_duration: float,
+) -> tuple[float | None, str]:
     """Punctuation-first end snap anchored on r0_end.
 
-    1. Find first sentence-terminal word at or after r0_end, within r0_end + max_end_search_sec.
-    2. Fallback: first phrase-end (pause-based) within the same cap.
-    3. Final fallback: r0_end itself + tail_sec ("cap").
+    End is NEVER placed before r0_end unless max_duration forces it (reason "max_duration").
 
-    Returns (new_end, reason) where reason is "sentence" | "pause" | "cap".
+    Returns (new_end, reason):
+      "sentence"      — first sentence-terminal word at/after r0_end in window
+      "no_punctuation"— no sentence-terminal in window; pause-based fallback used
+      "max_duration"  — end capped at start + max_duration (only case where end < r0_end)
+      "no_end"        — no acceptable end at/after r0_end; caller should reject the clip
+                        (new_end is None)
     """
-    cap = r0_end + max_end_search_sec
+    hard_limit = start + max_duration
 
-    # 1. Punctuation-first: first sentence-terminal word at or after r0_end, within cap.
-    sentence_ends = [w.t1 for w in words if w.t1 >= r0_end and w.t1 <= cap and _is_sentence_end(w.word)]
+    # Max-duration already exhausted before r0_end: hard cap is the only option.
+    if hard_limit <= r0_end:
+        phrase_ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
+                                        hanging_words=hanging_words)
+        before = [t for t in phrase_ends if start < t <= hard_limit]
+        chosen = max(before) if before else hard_limit - tail_sec
+        return min(chosen + tail_sec, hard_limit), "max_duration"
+
+    search_cap = min(r0_end + max_end_search_sec, hard_limit)
+
+    # 1. Punctuation-first: first sentence-terminal word at/after r0_end, within search window.
+    sentence_ends = sorted(
+        w.t1 for w in words
+        if w.t1 >= r0_end and w.t1 <= search_cap and _is_sentence_end(w.word)
+    )
     if sentence_ends:
-        return min(sentence_ends) + tail_sec, "sentence"
+        new_end = sentence_ends[0] + tail_sec
+        if new_end <= hard_limit:
+            return new_end, "sentence"
+        return hard_limit, "max_duration"
 
-    # 2. Pause-based fallback within cap.
+    # 2. Pause-based fallback within search window (no punctuation found).
     phrase_ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
                                     hanging_words=hanging_words)
-    within_cap = [t for t in phrase_ends if t >= r0_end and t <= cap]
+    within_cap = sorted(t for t in phrase_ends if t >= r0_end and t <= search_cap)
     if within_cap:
-        return min(within_cap) + tail_sec, "pause"
+        new_end = within_cap[0] + tail_sec
+        if new_end <= hard_limit:
+            return new_end, "no_punctuation"
+        return hard_limit, "max_duration"
 
-    # 3. Cap fallback: snap to r0_end + tail, or nearest phrase end before r0_end.
-    before = [t for t in phrase_ends if start < t < r0_end]
-    chosen = max(before) if before else r0_end
-    return chosen + tail_sec, "cap"
+    # 3. No good end at/after r0_end in window → signal rejection.
+    return None, "no_end"
 
 
 def _snap_start(start: float, end: float, words: list[Word], *, window_sec: float,
@@ -346,9 +367,20 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
                 min_pause=min_pause_for_phrase_end,
                 max_micro_pause=max_micro_pause,
                 hanging_words=hanging_words,
+                max_duration=max_duration,
             )
-            r.end = min(new_end, r.start + max_duration)
             r.end_snap_reason = reason
+            if new_end is None:
+                # No acceptable end at/after r0_end; reject the clip.
+                if "too_short" not in r.flags:
+                    r.flags.append("too_short")
+            else:
+                r.end = new_end
+                assert reason != "sentence" or r.end >= r.r0_end - 1e-6, (
+                    f"invariant violated: reason='sentence' but end={r.end} < r0_end={r.r0_end}"
+                )
+                if reason == "no_punctuation" and "unpunctuated" not in r.flags:
+                    r.flags.append("unpunctuated")
             r.end_drift_sec = r.end - r.r0_end
         else:
             new_end = _snap_end(r.end, r.start, words, tail_sec=tail_sec, window_sec=window_sec,

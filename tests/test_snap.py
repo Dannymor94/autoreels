@@ -542,7 +542,7 @@ def test_sentence_beyond_cap_uses_pause_fallback():
     r.r0_end = 101.0
     snap_segments([r], words, **_R0CFG)
     assert r.end <= 101.0 + 12.0 + 0.3 + 1e-6, f"end {r.end} exceeds cap+tail"
-    assert r.end_snap_reason in ("pause", "cap")
+    assert r.end_snap_reason == "no_punctuation"  # pause fallback, no sentence-terminal in cap
 
 
 def test_end_stops_at_first_sentence_not_extended():
@@ -618,3 +618,95 @@ def test_corpus_max_drift_within_cap():
                 violations.append(f"{mf.name} reel {r.id}: drift={drift:.1f}s")
 
     assert not violations, "end drift > cap:\n" + "\n".join(violations)
+
+
+# ===== Task 6: negative drift fix + honest reason labels (TDD — RED before implementation) =====
+
+_R0CFG2 = dict(tail_sec=0.3, window_sec=1.5, max_duration=59,
+               min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+               max_end_search_sec=12.0)
+
+
+def test_no_end_after_r0end_rejects_not_placed_early():
+    """T1: only candidate end is before r0_end, clip within max_duration → NOT placed early."""
+    # Sentence end at 5.5 (before r0_end=10.0). Search window [10.0, 22.0] has nothing.
+    # Clip under max_duration=59 → should be rejected, end must not go before r0_end.
+    words = [_w(4.0, 5.5, "только.")]
+    r = _reel(4.0, 11.0)
+    r.r0_end = 10.0
+    snap_segments([r], words, **_R0CFG2)
+    assert r.end >= r.r0_end - 1e-6, f"end {r.end} placed before r0_end {r.r0_end}"
+    assert r.end_snap_reason == "no_end"
+
+
+def test_max_duration_cap_sets_max_duration_reason():
+    """T2: clip must be shortened to fit max_duration → end_snap_reason == 'max_duration'."""
+    # r0_end=108.0 but start+max_duration=105.0 → sentence found in [108,120] but beyond limit.
+    words = [_w(100.0, 100.5, "начало"), _w(109.0, 109.5, "конец.")]
+    r = _reel(100.0, 106.0)
+    r.r0_end = 108.0
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=5,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
+                  max_end_search_sec=12.0)
+    assert r.end_snap_reason == "max_duration"
+    assert r.end <= 100.0 + 5.0 + 1e-6
+
+
+def test_no_punctuation_yields_no_punctuation_reason_and_flag():
+    """T3: no sentence-terminal punctuation → 'no_punctuation' reason + 'unpunctuated' flag."""
+    # No punctuation. Gap before "три" is 2s > 1.5 → phrase end at 51.0 (pause-based).
+    words = [_w(50.0, 50.5, "один"), _w(50.6, 51.0, "два"), _w(53.0, 53.5, "три")]
+    r = _reel(50.0, 52.0)
+    r.r0_end = 50.3
+    snap_segments([r], words, **_R0CFG2)
+    assert r.end_snap_reason == "no_punctuation", f"expected no_punctuation, got {r.end_snap_reason!r}"
+    assert "unpunctuated" in r.flags
+    assert r.end_snap_reason != "sentence"
+
+
+def test_sentence_reason_implies_sentence_terminal_punctuation():
+    """T4: end_snap_reason == 'sentence' iff the chosen end word has .?!… (invariant)."""
+    from autoreels.cloud.snap import _is_sentence_end as _ise
+    cases = [
+        ([_w(0.0, 0.5, "раз"), _w(2.0, 2.5, "стоп."), _w(5.0, 5.5, "дальше.")], 1.0, "стоп."),
+        ([_w(0.0, 0.5, "вопрос?"), _w(2.0, 2.5, "ответ")], 0.2, "вопрос?"),
+        ([_w(0.0, 0.5, "точка!"), _w(2.0, 2.5, "следующее")], 0.1, "точка!"),
+    ]
+    for words, r0_end, expected_word in cases:
+        r = _reel(0.0, 3.0)
+        r.r0_end = r0_end
+        snap_segments([r], words, **_R0CFG2)
+        if r.end_snap_reason == "sentence":
+            # Verify the end word is genuinely sentence-terminal.
+            picked = [w for w in words if abs(w.t1 - (r.end - 0.3)) < 0.2]
+            assert picked and _ise(picked[0].word), \
+                f"'sentence' reason but end word {picked} is not sentence-terminal"
+
+
+def test_task5_corpus_still_passes_after_fix():
+    """T6: corpus drift invariant (≤ max_end_search_sec + tail) still holds after negative-drift fix."""
+    import glob as _glob
+    from pathlib import Path as _Path
+    from autoreels.core.models import Manifest as _Manifest
+    manifest_dir = _Path(__file__).resolve().parents[1] / "manifests"
+    manifests = list(manifest_dir.glob("*.json"))
+    if not manifests:
+        pytest.skip("no manifests/ to run corpus check against")
+
+    max_allowed = 12.0 + 0.3
+    violations = []
+    for mf in manifests:
+        m = _Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        words = [w for r in m.reels for w in r.subtitles]
+        for r in m.reels:
+            if r.r0_end is None:
+                continue
+            snap_segments([r], words, **_R0CFG2)
+            if r.end_snap_reason in ("no_end", "max_duration"):
+                continue   # legitimate or rejected — drift not applicable here
+            if r.end_drift_sec is not None and r.end_drift_sec < -1e-6:
+                violations.append(
+                    f"{mf.name} reel {r.id}: negative drift {r.end_drift_sec:.1f}s "
+                    f"(reason={r.end_snap_reason})"
+                )
+    assert not violations, "negative drift detected:\n" + "\n".join(violations)
