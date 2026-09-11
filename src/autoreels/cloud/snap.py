@@ -215,6 +215,40 @@ def _snap_end(end: float, start: float, words: list[Word], *, tail_sec: float, w
     return new_end if new_end > start else None
 
 
+def _trim_start(
+    start: float,
+    end: float,
+    max_duration: float,
+    words: list[Word],
+    pause_sec: float,
+) -> tuple[float, str]:
+    """Move start forward so (end - new_start) ≤ max_duration.
+
+    Hierarchy:
+    1. First word whose preceding word ends with sentence-terminal (. ? !) at t0 ≥ end-max_duration.
+    2. First word after a pause > pause_sec at t0 ≥ end-max_duration.
+    3. Hard cut at (end - max_duration).
+
+    Returns (new_start, reason): reason in ("sentence", "pause", "hard_cut").
+    """
+    floor = end - max_duration
+    in_window = [w for w in words if w.t0 >= start and w.t0 <= end]
+
+    for i, w in enumerate(in_window):
+        if w.t0 < floor or i == 0:
+            continue
+        if _is_sentence_end(in_window[i - 1].word):
+            return w.t0, "sentence"
+
+    for i, w in enumerate(in_window):
+        if w.t0 < floor or i == 0:
+            continue
+        if (w.t0 - in_window[i - 1].t1) > pause_sec:
+            return w.t0, "pause"
+
+    return floor, "hard_cut"
+
+
 def _snap_end_punctuation_first(
     r0_end: float,
     start: float,
@@ -229,49 +263,37 @@ def _snap_end_punctuation_first(
 ) -> tuple[float | None, str]:
     """Punctuation-first end snap anchored on r0_end.
 
-    End is NEVER placed before r0_end unless max_duration forces it (reason "max_duration").
+    Precondition: caller has already applied start-trim so that start + max_duration >= r0_end.
+    End is NEVER moved backwards (no "max_duration" reason). Candidates that would exceed
+    hard_limit are skipped; if none fit, returns (None, "no_end").
 
     Returns (new_end, reason):
-      "sentence"      — first sentence-terminal word at/after r0_end in window
+      "sentence"      — first sentence-terminal word at/after r0_end within hard_limit
       "no_punctuation"— no sentence-terminal in window; pause-based fallback used
-      "max_duration"  — end capped at start + max_duration (only case where end < r0_end)
-      "no_end"        — no acceptable end at/after r0_end; end stays at r0_end, clip is valid
-                        if duration bounds are satisfied; caller adds "unpunctuated" flag
+      "no_end"        — no acceptable end at/after r0_end; end stays at r0_end, caller adds
+                        "unpunctuated" flag
     """
     hard_limit = start + max_duration
-
-    # Max-duration already exhausted before r0_end: hard cap is the only option.
-    if hard_limit <= r0_end:
-        phrase_ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
-                                        hanging_words=hanging_words)
-        before = [t for t in phrase_ends if start < t <= hard_limit]
-        chosen = max(before) if before else hard_limit - tail_sec
-        return min(chosen + tail_sec, hard_limit), "max_duration"
-
     search_cap = min(r0_end + max_end_search_sec, hard_limit)
 
-    # 1. Punctuation-first: first sentence-terminal word at/after r0_end, within search window.
+    # 1. Punctuation-first: first sentence-terminal word at/after r0_end, within hard_limit.
     sentence_ends = sorted(
         w.t1 for w in words
         if w.t1 >= r0_end and w.t1 <= search_cap and _is_sentence_end(w.word)
     )
-    if sentence_ends:
-        new_end = sentence_ends[0] + tail_sec
-        if new_end <= hard_limit:
-            return new_end, "sentence"
-        return hard_limit, "max_duration"
+    for t in sentence_ends:
+        if t + tail_sec <= hard_limit:
+            return t + tail_sec, "sentence"
 
-    # 2. Pause-based fallback within search window (no punctuation found).
+    # 2. Pause-based fallback within search window (no reachable punctuation found).
     phrase_ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
                                     hanging_words=hanging_words)
     within_cap = sorted(t for t in phrase_ends if t >= r0_end and t <= search_cap)
-    if within_cap:
-        new_end = within_cap[0] + tail_sec
-        if new_end <= hard_limit:
-            return new_end, "no_punctuation"
-        return hard_limit, "max_duration"
+    for t in within_cap:
+        if t + tail_sec <= hard_limit:
+            return t + tail_sec, "no_punctuation"
 
-    # 3. No good end at/after r0_end in window → signal rejection.
+    # 3. No good end at/after r0_end in window.
     return None, "no_end"
 
 
@@ -360,6 +382,19 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
             r.start = new_start
 
         if max_end_search_sec is not None and r.r0_end is not None:
+            # If clip already exceeds max_duration before snap, trim START first so that
+            # end snap sees hard_limit >= r0_end and never needs to move end backwards.
+            orig_start = r.start
+            if r.r0_end > r.start + max_duration:
+                window_words = [w for w in words
+                                if w.t0 >= r.start - 0.1 and w.t1 <= r.r0_end + 0.1]
+                new_start, snap_reason = _trim_start(
+                    r.start, r.r0_end, max_duration, window_words, min_pause_for_phrase_end
+                )
+                r.start = new_start
+                r.start_drift_sec = round(new_start - orig_start, 3)
+                r.start_snap_reason = snap_reason
+
             new_end, reason = _snap_end_punctuation_first(
                 r.r0_end, r.start, words,
                 max_end_search_sec=max_end_search_sec,

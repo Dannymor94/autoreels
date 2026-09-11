@@ -4,61 +4,21 @@
 - trim  (дефолт): обрезать НАЧАЛО клипа, сохраняя конец, поставленный punctuation-first snap.
   Иерархия: первое слово после sentence-terminal mark (. ? !) в диапазоне [end-max, end];
   фолбэк — первое слово после паузы > pause_sec; жёсткий рез (end - max_duration) если нет.
-  Конец двигается назад ТОЛЬКО когда финальное предложение само > max_duration (нет ни одного
-  sentence-terminal mark перед порогом).
+  Конец двигается назад ТОЛЬКО когда нет ни одной естественной границы (sentence/pause) в
+  диапазоне [end-max, end] — выбор end-trim гарантирует законченную мысль.
   Флаг too_long снимается. start_drift_sec / start_snap_reason фиксируют сдвиг.
 - drop: убрать сегмент из списка.
 - keep: оставить как есть. Флаг too_long остаётся.
+
+_trim_start живёт в snap.py: snap.py импортировать из trim нельзя (цикл),
+а trim.py уже импортирует из snap.py.
 """
 from __future__ import annotations
 
-from autoreels.cloud.snap import _is_sentence_end
+from autoreels.cloud.snap import _is_sentence_end, _trim_start
 from autoreels.core.models import Reel, Word
 
 _FLAG = "too_long"
-
-
-def _trim_start(
-    start: float,
-    end: float,
-    max_duration: float,
-    words: list[Word],
-    pause_sec: float,
-) -> tuple[float, str]:
-    """Новый start: сдвинуть вперёд так, чтобы (end - new_start) ≤ max_duration.
-
-    Иерархия (применяется к словам в [start, end]):
-    1. Первое слово w ≥ floor=(end-max_duration), предыдущее слово — sentence-terminal (. ? !).
-    2. Первое слово w ≥ floor, перед которым пауза > pause_sec.
-    3. Жёсткий рез: floor.
-
-    Returns (new_start, reason): reason in ("sentence", "pause", "hard_cut").
-    """
-    floor = end - max_duration
-    in_window = [w for w in words if w.t0 >= start and w.t0 <= end]
-
-    # 1. sentence boundary at or after floor
-    for i, w in enumerate(in_window):
-        if w.t0 < floor:
-            continue
-        if i == 0:
-            continue
-        prev = in_window[i - 1]
-        if _is_sentence_end(prev.word):
-            return w.t0, "sentence"
-
-    # 2. pause boundary at or after floor
-    for i, w in enumerate(in_window):
-        if w.t0 < floor:
-            continue
-        if i == 0:
-            continue
-        prev = in_window[i - 1]
-        if (w.t0 - prev.t1) > pause_sec:
-            return w.t0, "pause"
-
-    # 3. hard cut
-    return floor, "hard_cut"
 
 
 def _last_sentence_end(words: list[Word], limit: float) -> float | None:

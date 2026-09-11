@@ -674,17 +674,25 @@ def test_no_end_below_min_clip_duration_gets_too_short():
     assert "unpunctuated" in r.flags
 
 
-def test_max_duration_cap_sets_max_duration_reason():
-    """T2: clip must be shortened to fit max_duration → end_snap_reason == 'max_duration'."""
-    # r0_end=108.0 but start+max_duration=105.0 → sentence found in [108,120] but beyond limit.
+def test_max_duration_trims_start_not_end():
+    """T2: clip exceeds max_duration → START trimmed, end stays at r0_end; no 'max_duration' reason.
+
+    Old behaviour: end was capped at start+max_duration with reason 'max_duration'.
+    New behaviour: start is moved forward; end stays; reason reflects end search outcome.
+    """
+    # r0_end=108.0, start=100.0, max_duration=5 → r0_end 3s beyond hard_limit(105).
+    # Start-trim: floor=103, words at 100 and 109; no sentence/pause in [103,108] → hard_cut at 103.
+    # End snap from r0_end=108: sentence "конец." at 109 > hard_limit(103+5=108) by tail=0.3 → skip.
+    # No valid end → "no_end", end stays at r0_end=108.
     words = [_w(100.0, 100.5, "начало"), _w(109.0, 109.5, "конец.")]
     r = _reel(100.0, 106.0)
     r.r0_end = 108.0
     snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=5,
                   min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING,
                   max_end_search_sec=12.0)
-    assert r.end_snap_reason == "max_duration"
-    assert r.end <= 100.0 + 5.0 + 1e-6
+    assert r.end_snap_reason != "max_duration", "reason 'max_duration' must never appear"
+    assert r.end - r.start <= 5.0 + 1e-6, "clip must fit within max_duration"
+    assert r.start_snap_reason is not None, "start_snap_reason must be set"
 
 
 def test_no_punctuation_yields_no_punctuation_reason_and_flag():
@@ -737,8 +745,8 @@ def test_task5_corpus_still_passes_after_fix():
             if r.r0_end is None:
                 continue
             snap_segments([r], words, **_R0CFG2)
-            if r.end_snap_reason in ("no_end", "max_duration"):
-                continue   # legitimate or rejected — drift not applicable here
+            if r.end_snap_reason == "no_end":
+                continue   # end stays at r0_end, drift = 0, not a negative-drift case
             if r.end_drift_sec is not None and r.end_drift_sec < -1e-6:
                 violations.append(
                     f"{mf.name} reel {r.id}: negative drift {r.end_drift_sec:.1f}s "
@@ -777,3 +785,81 @@ def test_too_short_set_iff_duration_below_minimum():
     _ss([r4], [_w(0.0, 1.0, "слово")], **cfg)
     assert "too_short" in r4.flags, f"short+no_end: {r4.flags}"
     assert "unpunctuated" in r4.flags
+
+
+# ===== Task: max_duration path start-first trim =====
+
+def test_r11_new_118s_moment_start_trimmed_end_preserved():
+    """Регресс нового r11 (PXL_20260729): 118.4с без пунктуации, потолок 90с.
+
+    Старое поведение: end обрезался до start+90, end_drift_sec=-28.1.
+    Новое поведение: start двигается вперёд, end сохраняется на r0_end.
+    """
+    start, r0_end = 1681.3, 1799.7   # 118.4s > 90
+    # Слова без sentence-terminal marks, с паузами между ними
+    words = [
+        _w(1681.3, 1681.8, "раз"),
+        _w(1685.0, 1685.5, "два"),     # пауза 3.2с > min_pause
+        _w(1710.0, 1710.5, "три"),     # пауза 24.5с > min_pause; t0=1710 > floor=1709.7
+        _w(1750.0, 1750.5, "четыре"),
+        _w(1799.0, 1799.5, "пять"),
+    ]
+    r = _reel(start, r0_end)
+    r.r0_end = r0_end
+    snap_segments([r], words, **{**_R0CFG2, "max_duration": 90})
+
+    assert r.end >= r0_end - 1e-6, f"end {r.end} must not go below r0_end {r0_end}"
+    assert r.end - r.start <= 90.0 + 1e-6, f"clip {r.end - r.start}s exceeds max_duration"
+    assert r.start_snap_reason in ("sentence", "pause", "hard_cut"), (
+        f"start_snap_reason must be set, got {r.start_snap_reason!r}")
+    assert r.start_drift_sec is not None and r.start_drift_sec > 0, (
+        f"start_drift_sec must be positive, got {r.start_drift_sec}")
+    assert r.end_snap_reason != "max_duration", "reason 'max_duration' must not appear"
+
+
+def test_r11_new_with_punctuation_start_trimmed_at_sentence():
+    """118.4с момент с пунктуацией: start обрезается до границы предложения."""
+    start, r0_end = 1681.3, 1799.7
+    words = [
+        _w(1681.3, 1681.8, "старт."),   # sentence-terminal
+        _w(1710.0, 1710.5, "новое"),     # следует за "."; t0=1710 > floor=1709.7
+        _w(1750.0, 1750.5, "продолжение"),
+        _w(1799.0, 1799.5, "конец"),
+    ]
+    r = _reel(start, r0_end)
+    r.r0_end = r0_end
+    snap_segments([r], words, **{**_R0CFG2, "max_duration": 90})
+
+    assert r.start_snap_reason == "sentence"
+    assert r.start == pytest.approx(1710.0, abs=0.1)
+    assert r.end - r.start <= 90.0 + 1e-6
+
+
+def test_max_duration_reason_never_appears_in_snap():
+    """Reason 'max_duration' не должен появляться ни при каком сценарии."""
+    from autoreels.cloud.snap import snap_segments as _ss
+
+    cfg = dict(tail_sec=0.3, window_sec=1.5, max_duration=10,
+               min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=[],
+               max_end_search_sec=12.0)
+
+    # Случай 1: r0_end > hard_limit (старый баг)
+    r1 = _reel(0.0, 20.0); r1.r0_end = 18.0   # 18 > 0+10=10
+    _ss([r1], [_w(0.0, 1.0, "слово"), _w(5.0, 5.5, "ещё"), _w(17.0, 17.5, "конец.")], **cfg)
+    assert r1.end_snap_reason != "max_duration", f"r1 reason: {r1.end_snap_reason}"
+
+    # Случай 2: sentence найдена, но с tail выходит за hard_limit
+    r2 = _reel(0.0, 15.0); r2.r0_end = 9.5
+    _ss([r2], [_w(0.0, 1.0, "начало"), _w(9.5, 9.8, "конец.")], **cfg)
+    assert r2.end_snap_reason != "max_duration", f"r2 reason: {r2.end_snap_reason}"
+
+
+def test_start_drift_populated_after_max_duration_trim():
+    """start_drift_sec и start_snap_reason заполнены после start-trim из-за max_duration."""
+    r = _reel(0.0, 110.0)
+    r.r0_end = 100.0   # 100 > 0+90=90 → start-trim нужен
+    words = [_w(i * 5.0, i * 5.0 + 4.0, f"w{i}") for i in range(22)]
+    snap_segments([r], words, **{**_R0CFG2, "max_duration": 90})
+    assert r.start_drift_sec is not None, "start_drift_sec not set"
+    assert r.start_snap_reason is not None, "start_snap_reason not set"
+    assert r.start_drift_sec > 0, f"start moved forward: drift={r.start_drift_sec}"
