@@ -235,8 +235,8 @@ def _snap_end_punctuation_first(
       "sentence"      — first sentence-terminal word at/after r0_end in window
       "no_punctuation"— no sentence-terminal in window; pause-based fallback used
       "max_duration"  — end capped at start + max_duration (only case where end < r0_end)
-      "no_end"        — no acceptable end at/after r0_end; caller should reject the clip
-                        (new_end is None)
+      "no_end"        — no acceptable end at/after r0_end; end stays at r0_end, clip is valid
+                        if duration bounds are satisfied; caller adds "unpunctuated" flag
     """
     hard_limit = start + max_duration
 
@@ -371,9 +371,10 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
             )
             r.end_snap_reason = reason
             if new_end is None:
-                # No acceptable end at/after r0_end; reject the clip.
-                if "too_short" not in r.flags:
-                    r.flags.append("too_short")
+                # No acceptable end at/after r0_end; keep end at r0_end, mark unpunctuated.
+                # Duration check below sets "too_short" if needed.
+                if "unpunctuated" not in r.flags:
+                    r.flags.append("unpunctuated")
             else:
                 r.end = new_end
                 assert reason != "sentence" or r.end >= r.r0_end - 1e-6, (

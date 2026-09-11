@@ -77,7 +77,7 @@ Word-level нужен **коду** (для snap границ при нарезк
 - Код-валидатор после LLM: `duration > max` → флаг `too_long` → либо обрезка по правилу, либо отбраковка.
 - `duration < min` (дефолт 15 сек) → флаг `too_short` → отбраковка (слишком коротко для смысла).
 
-Пресеты — из PROJECT_GUIDE (`shorts` 15–59 дефолт / `reels` / `tiktok`).
+Пресеты — из PROJECT_GUIDE (`shorts` 15–90 дефолт / `reels` / `tiktok`).
 
 ---
 

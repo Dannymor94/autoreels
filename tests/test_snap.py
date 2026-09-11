@@ -627,16 +627,51 @@ _R0CFG2 = dict(tail_sec=0.3, window_sec=1.5, max_duration=59,
                max_end_search_sec=12.0)
 
 
-def test_no_end_after_r0end_rejects_not_placed_early():
-    """T1: only candidate end is before r0_end, clip within max_duration → NOT placed early."""
+def test_no_end_after_r0end_stays_at_r0end_not_rejected():
+    """T1: no acceptable end at/after r0_end; end stays at r0_end, clip is kept (valid duration).
+
+    Regression for r11: 61.6s clip with no punctuation after r0_end was mislabelled "too_short".
+    Fix: "no_end" → flag "unpunctuated", never "too_short" from this path.
+    """
     # Sentence end at 5.5 (before r0_end=10.0). Search window [10.0, 22.0] has nothing.
-    # Clip under max_duration=59 → should be rejected, end must not go before r0_end.
     words = [_w(4.0, 5.5, "только.")]
     r = _reel(4.0, 11.0)
     r.r0_end = 10.0
     snap_segments([r], words, **_R0CFG2)
     assert r.end >= r.r0_end - 1e-6, f"end {r.end} placed before r0_end {r.r0_end}"
     assert r.end_snap_reason == "no_end"
+    assert "unpunctuated" in r.flags, "no_end should set 'unpunctuated', not 'too_short'"
+    assert "too_short" not in r.flags, "'too_short' must not be set by snap path, only by duration check"
+
+
+def test_r11_regression_no_end_valid_duration_kept():
+    """Регресс r11: 61.6с клип без пунктуации после r0_end — kept, 'unpunctuated', никогда 'too_short'."""
+    # r11: start≈1231.7, r0_end≈1292.7, end≈1293.3 (duration 61.6s). No terminal marks in window.
+    start, r0_end = 1231.7, 1292.7
+    words = [
+        _w(start, start + 0.5, "первое"),
+        _w(start + 2.0, start + 2.5, "второе"),
+        # no sentence-terminal marks anywhere in the window
+    ]
+    r = _reel(start, r0_end)
+    r.r0_end = r0_end
+    # max_duration=90 (current shorts ceiling): clip 61s fits within limit, so no_end path taken
+    snap_segments([r], words, **{**_R0CFG2, "max_duration": 90}, min_clip_duration=8.0)
+    assert r.end_snap_reason == "no_end"
+    assert "unpunctuated" in r.flags
+    assert "too_short" not in r.flags
+    assert r.end - r.start >= 8.0, "valid-duration clip should not be dropped by snap"
+
+
+def test_no_end_below_min_clip_duration_gets_too_short():
+    """no_end + длина < min_clip_duration → 'too_short' ставит duration-check, не snap-path."""
+    words = [_w(0.0, 0.5, "одно")]
+    r = _reel(0.0, 3.0)  # duration 3s < min 8s
+    r.r0_end = 2.0
+    snap_segments([r], words, **_R0CFG2, min_clip_duration=8.0)
+    assert r.end_snap_reason == "no_end"
+    assert "too_short" in r.flags  # set by duration check, not snap path
+    assert "unpunctuated" in r.flags
 
 
 def test_max_duration_cap_sets_max_duration_reason():
@@ -710,3 +745,35 @@ def test_task5_corpus_still_passes_after_fix():
                     f"(reason={r.end_snap_reason})"
                 )
     assert not violations, "negative drift detected:\n" + "\n".join(violations)
+
+
+def test_too_short_set_iff_duration_below_minimum():
+    """Инвариант: 'too_short' выставляется ТОЛЬКО duration-check'ом, никогда как побочный эффект
+    snap-пути. Генерируем 4 варианта: (duration ok/short) × (snap reason sentence/no_end)."""
+    from autoreels.cloud.snap import snap_segments as _ss
+
+    cfg = dict(tail_sec=0.3, window_sec=1.5, max_duration=90,
+               min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=[],
+               max_end_search_sec=12.0, min_clip_duration=15.0)
+
+    # duration ok + sentence end found → no too_short
+    r1 = _reel(0.0, 50.0); r1.r0_end = 49.0
+    _ss([r1], [_w(49.5, 50.2, "стоп.")], **cfg)
+    assert "too_short" not in r1.flags, f"ok+sentence: {r1.flags}"
+
+    # duration ok + no_end → no too_short, but unpunctuated
+    r2 = _reel(0.0, 50.0); r2.r0_end = 49.0
+    _ss([r2], [_w(0.0, 1.0, "слово")], **cfg)
+    assert "too_short" not in r2.flags, f"ok+no_end: {r2.flags}"
+    assert "unpunctuated" in r2.flags
+
+    # duration short + sentence end → too_short (from duration, not from snap)
+    r3 = _reel(0.0, 5.0); r3.r0_end = 4.0
+    _ss([r3], [_w(4.5, 5.2, "стоп.")], **cfg)
+    assert "too_short" in r3.flags, f"short+sentence: {r3.flags}"
+
+    # duration short + no_end → too_short (from duration) + unpunctuated
+    r4 = _reel(0.0, 5.0); r4.r0_end = 4.0
+    _ss([r4], [_w(0.0, 1.0, "слово")], **cfg)
+    assert "too_short" in r4.flags, f"short+no_end: {r4.flags}"
+    assert "unpunctuated" in r4.flags

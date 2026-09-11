@@ -82,7 +82,7 @@ MAC — только разработка кода (Claude Code, git, тесты
 
 | Пресет | min | max | Платформа |
 |---|---|---|---|
-| `shorts` (дефолт) | 15 | 59 | YouTube Shorts, универсал |
+| `shorts` (дефолт) | 15 | 90 | YouTube Shorts, универсал (платформы допускают до 3 мин, но engagement падает и Instagram не рекомендует Reels > 3 мин новой аудитории — 90с рабочий потолок) |
 | `reels` | 15 | 90 | Instagram Reels |
 | `tiktok` | 15 | 180 | TikTok |
 
