@@ -1956,6 +1956,70 @@ def cmd_resnap(
     return 0
 
 
+def cmd_dump_clips(manifests, *, out, root=".") -> int:
+    """Выгрузить тексты клипов в JSON-фикстуры для разметки — БЕЗ ретранскрипции/LLM/ffmpeg/сети.
+
+    Один клип → один файл <source_stem>__<index>.json. Текст восстанавливается ТОЛЬКО из
+    word-level субтитров манифеста. Манифест не изменяется (инвариант неизменности).
+    Фикстуру с проставленным label повторный прогон не трогает (ручная разметка переживает).
+    """
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    r0_cfg = load_r0_config(Path(root) / "config" / "r0.yaml")
+
+    written = skipped = 0
+    n_cap = 0
+    trunc_counts: dict = {}
+    manifest_records_truncation = False   # манифест не хранит способ обрезки момента
+
+    for mf in manifests:
+        mf = Path(mf)
+        manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        stem = Path(manifest.source).stem
+        preset_max = r0_cfg.presets[manifest.duration_preset].max
+        for i, r in enumerate(manifest.reels, 1):
+            clip_id = f"{stem}__{i}"
+            dest = out / f"{clip_id}.json"
+            if dest.is_file():
+                try:
+                    prev = json.loads(dest.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    prev = {}
+                if prev.get("label") is not None:
+                    skipped += 1
+                    continue
+            duration = r.end - r.start
+            hit_cap = abs(duration - preset_max) <= 1.0
+            was_truncated = None   # манифест не фиксирует «pause» / «hard_time»
+            if hit_cap:
+                n_cap += 1
+            trunc_counts[was_truncated] = trunc_counts.get(was_truncated, 0) + 1
+            dest.write_text(json.dumps({
+                "id": clip_id,
+                "source": manifest.source,
+                "start": r.start,
+                "end": r.end,
+                "duration": duration,
+                "text": " ".join(w.word for w in r.subtitles),
+                "hit_duration_cap": hit_cap,
+                "was_truncated": was_truncated,
+                "label": None,
+                "label_note": None,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            written += 1
+
+    total = written + skipped
+    print(f"\n=== dump-clips: {written} записано / {skipped} пропущено (label) / {total} всего ===",
+          flush=True)
+    print(f"  hit_duration_cap: {n_cap}", flush=True)
+    trunc_line = ", ".join(f"{k}: {v}" for k, v in trunc_counts.items())
+    print(f"  was_truncated: {trunc_line or '(нет клипов)'}", flush=True)
+    if not manifest_records_truncation:
+        print("  примечание: манифест НЕ хранит способ обрезки момента → was_truncated всегда null",
+              flush=True)
+    return 0
+
+
 def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
     """Продолжить прерванное: доделать рендер недостающих клипов + сообщить о недокачках.
 
@@ -2626,6 +2690,8 @@ _MENU_ITEMS: list[tuple[str, str, str, str, str]] = [
                         "КАЧЕСТВО"),
     ("7", "resnap",     "Пересчитать границы",          "snap/padding из R0-границ, без LLM",
                         "КАЧЕСТВО"),
+    ("12", "dumpclips", "Выгрузить тексты клипов",       "→ фикстуры для разметки (tests/fixtures/clips/)",
+                        "КАЧЕСТВО"),
     ("8", "settings",   "Настройки рендера",            "профиль, палитра, музыка, звук",
                         "НАСТРОЙКИ"),
     ("9", "status",     "Статус",                        "", "ПРОЧЕЕ"),
@@ -2660,6 +2726,7 @@ _MENU_CLI_TARGET: dict[str, str] = {
     "transcribe": "transcribe",
     "diagnose": "diagnose-cuts",
     "resnap": "resnap",
+    "dumpclips": "dump-clips",
     "settings": "interactive",
     "status": "status",
     "resume": "resume",
@@ -3625,6 +3692,24 @@ def _build_parser():
     pi.add_argument("--yes", action="store_true", default=False,
                     help="не спрашивать подтверждения")
 
+    pdcl = sub.add_parser(
+        "dump-clips",
+        help="выгрузить тексты клипов в JSON-фикстуры (для разметки; без ретранскрипции)",
+        description=(
+            "Экспорт текстов клипов из манифестов в JSON-фикстуры (tests/fixtures/clips/).\n"
+            "Текст берётся ТОЛЬКО из word-level субтитров манифеста — без LLM/Whisper/ffmpeg/сети.\n"
+            "Манифест не изменяется. Фикстуру с проставленным label повторный прогон не трогает.\n"
+            "Без путей — все манифесты из manifests/.\n\n"
+            "Пример: autoreels dump-clips manifests/lecture.json --out tests/fixtures/clips/"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pdcl.add_argument("manifests", nargs="*", default=None, metavar="манифест",
+                      help="манифест(ы) (иначе — все из manifests/)")
+    pdcl.add_argument("--out", default="tests/fixtures/clips", metavar="каталог",
+                      help="каталог для фикстур (по умолчанию tests/fixtures/clips)")
+    pdcl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+
     return p
 
 
@@ -3793,6 +3878,13 @@ def main(argv=None) -> int:
             return cmd_resnap(args.video, push=not args.no_push)
         elif args.cmd == "diagnose-cuts":
             return cmd_diagnose_cuts(args.target, rerun=args.rerun)
+        elif args.cmd == "dump-clips":
+            manifests = [Path(m) for m in args.manifests] if args.manifests \
+                else sorted((Path(args.root) / "manifests").glob("*.json"))
+            if not manifests:
+                print("manifests/ пуст — нечего выгружать", flush=True)
+                return 0
+            return cmd_dump_clips(manifests, out=args.out, root=args.root)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

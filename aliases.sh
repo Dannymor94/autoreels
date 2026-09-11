@@ -117,6 +117,7 @@ _ar_menu() {
             calibrate) arl c ;;
             resnap)    arl rs ;;
             diagnose)  arl dc ;;
+            dumpclips) arl dump-clips ;;
             path)
                 printf "Вставь ссылку (URL / Яндекс.Диск / YouTube) или путь к файлу: "
                 read -r _src

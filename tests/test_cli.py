@@ -5235,3 +5235,124 @@ def test_run_passes_resolved_ffprobe_to_frame_probe(monkeypatch, tmp_path):
                 transcripts_dir=tmp_path / "t", calibrations_dir=tmp_path / "cal",
                 archive_dir=tmp_path / "ar")
     assert seen["ffprobe"] == "/custom/ffprobe"              # резолвнутый, не "ffprobe"
+
+
+# ------------------------------------------------------ dump-clips: экспорт текстов в фикстуры
+
+def _dump_manifest(reels, source="lecture.mp4"):
+    """Манифест для dump-clips тестов (preset shorts → max 59с)."""
+    return Manifest(
+        source=source, source_sha256="a" * 64, source_hash_scheme="partial-p1",
+        duration_preset="shorts", setup=_setup(), run_key="rk", reels=reels,
+    )
+
+
+def _dump_reel(rid, start, end, words):
+    subs = [Word(word=w, t0=start + i * 0.5, t1=start + i * 0.5 + 0.4)
+            for i, w in enumerate(words)]
+    return Reel(id=rid, start=start, end=end, score=80, hook="h", title="T",
+                description="d", reason="r", topic="x", subtitles=subs)
+
+
+def test_dump_clips_reconstructs_text_from_subtitles(tmp_path):
+    """(1) Текст клипа собирается из word-level субтитров манифеста."""
+    m = _dump_manifest([_dump_reel("r01", 10.0, 40.0, ["привет", "как", "дела"])])
+    mf = tmp_path / "lecture.json"
+    mf.write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    out = tmp_path / "clips"
+
+    cli.cmd_dump_clips([mf], out=out, root=REPO_ROOT)
+
+    data = json.loads((out / "lecture__1.json").read_text(encoding="utf-8"))
+    assert data["text"] == "привет как дела"
+    assert data["id"] == "lecture__1"
+    assert data["source"] == "lecture.mp4"
+    assert data["start"] == 10.0 and data["end"] == 40.0
+    assert data["duration"] == 30.0
+    assert data["label"] is None and data["label_note"] is None
+
+
+def test_dump_clips_keeps_labelled_fixture(tmp_path):
+    """(2) Повторный прогон НЕ перезаписывает фикстуру с проставленным label."""
+    m = _dump_manifest([_dump_reel("r01", 10.0, 40.0, ["новый", "текст"])])
+    mf = tmp_path / "lecture.json"
+    mf.write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    out = tmp_path / "clips"
+    out.mkdir()
+    existing = out / "lecture__1.json"
+    existing.write_text(json.dumps(
+        {"id": "lecture__1", "text": "РУЧНАЯ РАЗМЕТКА", "label": "good", "label_note": "ok"},
+        ensure_ascii=False), encoding="utf-8")
+
+    cli.cmd_dump_clips([mf], out=out, root=REPO_ROOT)
+
+    data = json.loads(existing.read_text(encoding="utf-8"))
+    assert data["label"] == "good"
+    assert data["text"] == "РУЧНАЯ РАЗМЕТКА"      # не затёрто новым текстом из манифеста
+
+
+def test_dump_clips_overwrites_unlabelled_fixture(tmp_path):
+    """(3) Повторный прогон перезаписывает фикстуру с label=null."""
+    m = _dump_manifest([_dump_reel("r01", 10.0, 40.0, ["актуальный", "текст"])])
+    mf = tmp_path / "lecture.json"
+    mf.write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    out = tmp_path / "clips"
+    out.mkdir()
+    stale = out / "lecture__1.json"
+    stale.write_text(json.dumps(
+        {"id": "lecture__1", "text": "устаревший", "label": None, "label_note": None},
+        ensure_ascii=False), encoding="utf-8")
+
+    cli.cmd_dump_clips([mf], out=out, root=REPO_ROOT)
+
+    data = json.loads(stale.read_text(encoding="utf-8"))
+    assert data["text"] == "актуальный текст"       # обновлено
+
+
+def test_dump_clips_does_not_modify_manifest(tmp_path):
+    """(4) Файл манифеста байт-в-байт не меняется (инвариант неизменности манифеста)."""
+    m = _dump_manifest([_dump_reel("r01", 10.0, 40.0, ["слово"])])
+    mf = tmp_path / "lecture.json"
+    mf.write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    before = mf.read_bytes()
+
+    cli.cmd_dump_clips([mf], out=tmp_path / "clips", root=REPO_ROOT)
+
+    assert mf.read_bytes() == before
+
+
+def test_dump_clips_hit_duration_cap(tmp_path):
+    """(5) hit_duration_cap: true для клипа на пределе пресета (59с), false для короткого."""
+    m = _dump_manifest([
+        _dump_reel("r01", 0.0, 59.0, ["на", "пределе"]),   # ровно max shorts
+        _dump_reel("r02", 0.0, 30.0, ["короткий"]),         # вдвое короче
+    ])
+    mf = tmp_path / "lecture.json"
+    mf.write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    out = tmp_path / "clips"
+
+    cli.cmd_dump_clips([mf], out=out, root=REPO_ROOT)
+
+    at_cap = json.loads((out / "lecture__1.json").read_text(encoding="utf-8"))
+    short = json.loads((out / "lecture__2.json").read_text(encoding="utf-8"))
+    assert at_cap["hit_duration_cap"] is True
+    assert short["hit_duration_cap"] is False
+
+
+def test_dump_clips_was_truncated_null_when_manifest_lacks_it(tmp_path):
+    """was_truncated=null: манифест не хранит способ обрезки момента."""
+    m = _dump_manifest([_dump_reel("r01", 10.0, 40.0, ["текст"])])
+    mf = tmp_path / "lecture.json"
+    mf.write_text(m.model_dump_json(indent=2), encoding="utf-8")
+    out = tmp_path / "clips"
+
+    cli.cmd_dump_clips([mf], out=out, root=REPO_ROOT)
+
+    data = json.loads((out / "lecture__1.json").read_text(encoding="utf-8"))
+    assert data["was_truncated"] is None
+
+
+def test_dump_clips_registered_in_dispatch_map():
+    """(6) dump-clips есть в едином источнике диспетчеризации и как argparse-подкоманда."""
+    assert cli._MENU_CLI_TARGET["dumpclips"] == "dump-clips"
+    assert "dump-clips" in _cli_subcommands()
