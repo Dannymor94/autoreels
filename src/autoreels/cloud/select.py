@@ -110,6 +110,7 @@ def build_prompt(
     min_score: int,
     min_duration: int,
     max_duration: int,
+    target_candidates: int | None = None,
 ) -> list[dict]:
     """Собрать chat-сообщения: system (рубрика с подставленными переменными) +
     few-shot (input→output пары) + сжатый транскрипт последним user-сообщением.
@@ -119,6 +120,7 @@ def build_prompt(
         .replace("{{min_score}}", str(min_score))
         .replace("{{min_duration}}", str(min_duration))
         .replace("{{max_duration}}", str(max_duration))
+        .replace("{{target_candidates}}", str(target_candidates) if target_candidates else "all qualifying")
     )
     messages: list[dict] = [{"role": "system", "content": system}]
     for ex in fewshot.get("examples", []):
@@ -156,6 +158,8 @@ def segments_to_reels(segments: list[dict]) -> list[Reel]:
             start=seg["start"], end=seg["end"], score=seg["score"],
             hook=seg["hook"], title=seg["title"], description=seg["description"],
             reason=seg.get("reason", ""), topic=seg.get("topic", ""),
+            self_contained_start=seg.get("self_contained_start"),
+            start_justification=seg.get("start_justification", ""),
         ))
     return reels
 
@@ -202,6 +206,18 @@ def diagnose_collapse(r: Reel) -> str:
     if r0_dur < final_dur + 1.0:
         return f"R0 вернул {r0_dur:.1f}с — момент был коротким при выборке"
     return f"R0 {r0_dur:.1f}с → snap/padding схлопнули до {final_dur:.1f}с"
+
+
+def filter_self_contained_start(reels: list[Reel]) -> tuple[list[Reel], list[Reel]]:
+    """Drop segments where model flagged self_contained_start=False. Returns (kept, dropped)."""
+    kept, dropped = [], []
+    for r in reels:
+        if r.self_contained_start is False:
+            print(f"  ✗ {r.id} dropped (start not self-contained): {r.start_justification}", flush=True)
+            dropped.append(r)
+        else:
+            kept.append(r)
+    return kept, dropped
 
 
 def filter_min_clip_duration(reels: list[Reel], *, min_clip_duration: float) -> list[Reel]:
@@ -253,26 +269,37 @@ def _complete_and_parse(provider: LLMProvider, messages: list[dict]) -> list[dic
 
 
 def _select_one(compressed: str, *, system_text: str, fewshot: dict,
-                provider: LLMProvider, r0_cfg) -> list[Reel]:
-    """Одиночный R0-запрос (без чанкинга): промпт → LLM → валидация → дедуп."""
+                provider: LLMProvider, r0_cfg) -> tuple[list[Reel], list[dict]]:
+    """Одиночный R0-запрос (без чанкинга): промпт → LLM → валидация → дедуп → top-N."""
+    target = getattr(r0_cfg, "target_candidates", None)
     messages = build_prompt(
         system_text, fewshot, compressed,
         min_score=r0_cfg.min_score,
         min_duration=r0_cfg.min_duration,
         max_duration=r0_cfg.max_duration,
+        target_candidates=target,
     )
     segments = _complete_and_parse(provider, messages)
     reels = segments_to_reels(segments)
     flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
     reels = filter_by_score(reels, min_score=r0_cfg.min_score)
     reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
+    reels, start_dropped = filter_self_contained_start(reels)
+    discarded: list[dict] = [
+        {"id": r.id, "score": r.score, "reason": f"start not self-contained: {r.start_justification}"}
+        for r in start_dropped
+    ]
     reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold)
     reels.sort(key=lambda r: -r.score)
-    if r0_cfg.max_reels is not None:
+    if r0_cfg.max_reels is not None and len(reels) > r0_cfg.max_reels:
+        cut = reels[r0_cfg.max_reels:]
+        discarded += [{"id": r.id, "score": r.score, "reason": f"below top-N cut (rank: {r0_cfg.max_reels + i + 1})"}
+                      for i, r in enumerate(cut)]
         reels = reels[:r0_cfg.max_reels]
     for i, r in enumerate(reels, 1):
         r.id = f"r{i:02d}"
-    return reels
+        r.rank = i
+    return reels, discarded
 
 
 def select_chunked(
@@ -282,7 +309,7 @@ def select_chunked(
     fewshot: dict,
     provider: LLMProvider,
     r0_cfg,
-) -> list[Reel]:
+) -> tuple[list[Reel], list[dict]]:
     """R0 с чанкингом: транскрипт → чанки → LLM на каждый → смерж + дедуп по t0.
 
     Чанки перекрываются (overlap_tokens) → один и тот же момент может попасть в два
@@ -300,7 +327,9 @@ def select_chunked(
     est_sec = len(chunks) * (chunking.r0_chunk_delay_sec + 15)
     chunk_start("R0", len(chunks), est_sec=est_sec)
 
+    target = getattr(r0_cfg, "target_candidates", None)
     all_reels: list[Reel] = []
+    all_discarded: list[dict] = []
     for i, chunk in enumerate(chunks):
         if i > 0:
             throttle_wait(chunking.r0_chunk_delay_sec)
@@ -312,6 +341,7 @@ def select_chunked(
             min_score=r0_cfg.min_score,
             min_duration=r0_cfg.min_duration,
             max_duration=r0_cfg.max_duration,
+            target_candidates=target,
         )
         try:
             segs = _complete_and_parse(provider, messages)
@@ -322,6 +352,11 @@ def select_chunked(
         flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
         reels = filter_by_score(reels, min_score=r0_cfg.min_score)
         reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
+        reels, start_dropped = filter_self_contained_start(reels)
+        all_discarded += [
+            {"id": r.id, "score": r.score, "reason": f"start not self-contained: {r.start_justification}"}
+            for r in start_dropped
+        ]
         all_reels.extend(reels)
         # Прозрачность распределения: показать, какой провайдер обработал этот чанк
         # (пул выставляет last_provider; одиночный провайдер — нет, тогда без «via»).
@@ -333,12 +368,18 @@ def select_chunked(
     chunk_progress("R0", len(chunks), len(chunks),
                    extra=f"найдено {len(all_reels)} моментов", done=True)
 
-    # Дедуп по t0 (первый по хронологии при пересечении > порога)
+    # Дедуп по t0 (первый по хронологии при пересечении > порога), затем top-N
     all_reels = dedup_reels(all_reels, chunking.dedup_overlap_ratio)
     all_reels.sort(key=lambda r: -r.score)
-    if r0_cfg.max_reels is not None:
+    if r0_cfg.max_reels is not None and len(all_reels) > r0_cfg.max_reels:
+        cut = all_reels[r0_cfg.max_reels:]
+        all_discarded += [{"id": r.id, "score": r.score, "reason": f"below top-N cut (rank: {r0_cfg.max_reels + i + 1})"}
+                          for i, r in enumerate(cut)]
         all_reels = all_reels[:r0_cfg.max_reels]
-    return renumber_reels(all_reels)
+    all_reels = renumber_reels(all_reels)
+    for i, r in enumerate(all_reels, 1):
+        r.rank = i
+    return all_reels, all_discarded
 
 
 def select(
@@ -348,12 +389,12 @@ def select(
     fewshot: dict,
     provider: LLMProvider,
     r0_cfg,
-) -> list[Reel]:
+) -> tuple[list[Reel], list[dict]]:
     """R0 end-to-end: диспетчер одиночного запроса или чанкинга.
 
     Если chunking включён и транскрипт превышает r0_chunk_tokens → select_chunked.
     Иначе (или если chunking не сконфигурирован) → одиночный запрос.
-    Возвращает отранжированные по score Reel-объекты ([] — валидный результат).
+    Возвращает (reels, discarded): reels — отранжированные, discarded — сброшенные кандидаты.
     """
     chunking = getattr(r0_cfg, "chunking", None)
     if chunking and chunking.enabled and _count_tokens(compressed) > chunking.r0_chunk_tokens:

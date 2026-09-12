@@ -120,6 +120,13 @@ class Reel(BaseModel):
     r0_end: float | None = None
     # Чек-флаги (too_long/too_short/no_hook/cut_midword) ставит детерминированный код.
     flags: list[str] = Field(default_factory=list)
+    # Самодостаточное начало: модель судит, понятна ли первая фраза без предыдущего контекста
+    # (нет висячего "поэтому"/"он"/"это" без антецедента внутри клипа). False → клип снимается
+    # в select (не чиним в коде). None — старые манифесты без поля (обратная совместимость).
+    self_contained_start: bool | None = None
+    start_justification: str = ""
+    # Ранг по score среди отобранных (1 = сильнейший). None — до ранжирования / старые манифесты.
+    rank: int | None = None
     # Сырой word-level. Группировку в строки делает R3 (local/subtitles.py), не схема.
     subtitles: list[Word] = Field(default_factory=list)
     # Метрики snap: насколько end сдвинулся от r0_end и по какой причине.

@@ -29,7 +29,9 @@ No preamble, no markdown, no code fences. A single JSON object:
       "title": "<clickbait title in Russian, see TITLE RULES>",
       "description": "<1-2 sentence Russian caption + 3-5 hashtags, see DESC RULES>",
       "reason": "<short Russian justification: why this works as a clip>",
-      "topic": "<2-4 word Russian topic label>"
+      "topic": "<2-4 word Russian topic label>",
+      "self_contained_start": <bool — true if first sentence is understandable without prior context>,
+      "start_justification": "<one-line: why true or why not>"
     }
   ]
 }
@@ -57,6 +59,24 @@ A point raised but not resolved -> reject. A statement cut before it completes -
 A candidate that fails this gate is NOT a low-score segment — it is not a segment
 at all. Do not score it, do not include it. Only candidates that pass the gate
 proceed to scoring below.
+
+## HARD GATE — SELF-CONTAINED OPENING (check second, after COMPLETE THOUGHT)
+The clip's first sentence must be understandable to a viewer who has NOT watched
+the preceding material. No dangling pronoun, no dangling connective with no referent
+inside the clip.
+
+Disqualifying openers (set self_contained_start: false — do not include the segment):
+- "Поэтому это и работает" — "поэтому" refers to an external cause not in the clip
+- "Он сказал, что это невозможно" — "он" has no referent inside the clip
+- "И вот когда мы берём это..." — "это" and "мы берём" continue a thought started earlier
+- "Как я уже говорил..." — explicit reference to prior context
+
+Acceptable openers (self_contained_start: true):
+- "За травмой почти всегда прячется ровно тот ресурс, который нужен" — complete standalone claim
+- "Есть такой феномен: люди убегают не потому что слабые..." — self-contained setup
+
+Always set self_contained_start and start_justification on every segment.
+Set self_contained_start: false when the opener fails. Do NOT repair — the segment is dropped by the pipeline.
 
 Strong signals (raise score):
 - HOOK in the first ~3 seconds: opens on a grab, not a wind-up. No hook = dead clip.
@@ -114,6 +134,7 @@ yields ZERO clip-worthy moments most of the time; `{ "segments": [] }` is the
 COMMON answer, not the exception. Do not reach for the least-bad fragment to avoid
 returning empty.
 
+Aim to return approximately {{target_candidates}} qualifying moments — prefer inclusive over exclusive; we rank and apply top-N downstream. When target_candidates is "all qualifying", return all qualifying moments.
 - Include EVERY segment that passes the COMPLETE THOUGHT gate AND clears {{min_score}}.
 - Do NOT stop after one just because you found it; keep scanning to the end.
 - Do NOT cap the count — but do NOT invent a count either.

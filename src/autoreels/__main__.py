@@ -604,10 +604,18 @@ def _stage_select(compressed, *, r0_cfg, root, provider=None):
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     if provider is None:
         provider = build_pool(r0_cfg)
-    return select(
+    reels, discarded = select(
         compressed, system_text=system_text, fewshot=fewshot,
         provider=provider, r0_cfg=r0_cfg,
     )
+    return reels, discarded
+
+
+def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
+    if not discarded:
+        return
+    sidecar = manifest_path.with_suffix("").with_suffix(".discarded.json")
+    sidecar.write_text(json.dumps(discarded, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _stage_snap(reels, transcript, *, r0_cfg):
@@ -1217,7 +1225,7 @@ def cmd_run(
     )
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
-    reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+    reels, discarded = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
     for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
         r.r0_start, r.r0_end = r.start, r.end
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
@@ -1229,8 +1237,10 @@ def cmd_run(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )
     path = _write_manifest(manifest, manifests_dir)
+    _write_discarded(discarded, path)
     drop_info = f" (отброшено коротких: {n_short_dropped})" if n_short_dropped else ""
-    print(f"манифест собран: {len(manifest.reels)} reels{drop_info} → {path}", flush=True)
+    discard_info = f", сброшено кандидатов: {len(discarded)}" if discarded else ""
+    print(f"манифест собран: {len(manifest.reels)} reels{drop_info}{discard_info} → {path}", flush=True)
     if push:
         # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
         _commit_push_manifest(path, len(manifest.reels), root=root,
@@ -2405,8 +2415,8 @@ def _rerun_reels(transcript, r0_cfg, root):
     fewshot = json.loads((Path(root) / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     provider = build_pool(r0_cfg)
     provider.preflight()
-    reels = select(compressed, system_text=system_text, fewshot=fewshot,
-                   provider=provider, r0_cfg=r0_cfg)
+    reels, _ = select(compressed, system_text=system_text, fewshot=fewshot,
+                      provider=provider, r0_cfg=r0_cfg)
     snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
                   window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
                   min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,

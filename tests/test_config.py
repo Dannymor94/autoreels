@@ -35,7 +35,7 @@ def test_load_r0_config_returns_typed_object():
     cfg = load_r0_config(R0_YAML)
     assert isinstance(cfg, R0Config)
     assert cfg.min_score == 65
-    assert cfg.max_reels is None
+    assert cfg.max_reels == 20
     assert "shorts" in cfg.presets
 
 

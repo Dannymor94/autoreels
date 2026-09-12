@@ -129,8 +129,8 @@ def test_provider_empty_response_exception_becomes_selecterror(fewshot, r0_cfg):
 def test_invalid_then_valid_recovers(fewshot, r0_cfg):
     good = QWEN_FIXTURE.read_text(encoding="utf-8")
     provider = _MockLLM(["мусор", good])
-    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                     provider=provider, r0_cfg=r0_cfg)
+    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                        provider=provider, r0_cfg=r0_cfg)
     assert provider.calls == 2
     assert len(reels) == 5
 
@@ -139,8 +139,8 @@ def test_real_fixture_flags_too_long(fewshot, r0_cfg):
     # Инвариант 6 на РЕАЛЬНЫХ данных: 590.0–651.8 (61.8с < 90 shorts) — в пределах нового потолка,
     # флага too_long быть не должно. Ставит код, не модель.
     content = QWEN_FIXTURE.read_text(encoding="utf-8")
-    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                     provider=_MockLLM([content]), r0_cfg=r0_cfg)
+    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                        provider=_MockLLM([content]), r0_cfg=r0_cfg)
     by_start = {r.start: r for r in reels}
     assert by_start[590.0].flags == []              # 61.8с — в пределах нового потолка 90с
     assert by_start[432.1].flags == []              # 52.5с — в пределах
@@ -196,8 +196,8 @@ def test_dedup_keeps_higher_score(r0_cfg):
 
 def test_empty_segments_is_valid_result(fewshot, r0_cfg):
     provider = _MockLLM(['{"segments": []}'])
-    reels = S.select("[0400.0-0410.0] давайте сделаем перерыв",
-                     system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
+    reels, _ = S.select("[0400.0-0410.0] давайте сделаем перерыв",
+                        system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
     assert reels == []                 # «хороших моментов нет» — НЕ ошибка
 
 
@@ -213,8 +213,8 @@ def test_select_drops_short_segment_despite_high_score(fewshot, r0_cfg):
         {"start": 100.0, "end": 130.0, "score": 70,
          "hook": "h", "title": "t", "description": "d"},
     ]})
-    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                     provider=_MockLLM([resp]), r0_cfg=r0_cfg)
+    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                        provider=_MockLLM([resp]), r0_cfg=r0_cfg)
     starts = {r.start for r in reels}
     assert 0.0 not in starts        # короткий снят пост-фильтром длины
     assert 100.0 in starts          # длинный самодостаточный — остался
@@ -313,8 +313,8 @@ def test_select_chunked_survives_one_empty_chunk(fewshot, r0_cfg, monkeypatch, c
             return "" if self.seen.index(chunk) == 1 else valid   # 2-й чанк — пустой
 
     compressed = _make_compressed(300, line_chars=60)             # ≥2 чанка
-    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
-                     provider=_ChunkMock(), r0_cfg=r0_cfg)
+    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+                        provider=_ChunkMock(), r0_cfg=r0_cfg)
 
     assert len(reels) >= 1                                        # выжившие чанки дали рилы
     assert "провалился" in capsys.readouterr().out                # предупреждение о провале чанка
@@ -342,8 +342,8 @@ def test_select_chunked_survives_one_timeout_chunk(fewshot, r0_cfg, monkeypatch,
             return valid
 
     compressed = _make_compressed(300, line_chars=60)            # ≥2 чанка
-    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
-                     provider=_ChunkMock(), r0_cfg=r0_cfg)
+    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+                        provider=_ChunkMock(), r0_cfg=r0_cfg)
 
     assert len(reels) >= 1                                        # выжившие чанки дали рилы
     out = capsys.readouterr().out
@@ -358,8 +358,8 @@ def test_select_chunked_dedup_overlap_reels(fewshot, r0_cfg):
     # Оба чанка возвращают одинаковый рил (overlap zone)
     provider = _MockLLM([reel_json, reel_json])
     compressed = _make_compressed(300, line_chars=60)
-    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
-                     provider=provider, r0_cfg=r0_cfg)
+    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+                        provider=provider, r0_cfg=r0_cfg)
     # Дедуп должен оставить ровно 1 рил, не 2
     matching = [r for r in reels if abs(r.start - 100.0) < 1.0]
     assert len(matching) == 1
@@ -428,8 +428,8 @@ def test_select_chunked_renumbers_sequentially(fewshot, r0_cfg):
     r2 = json.dumps({"segments": [_seg(600, 640, 80)]})
     provider = _MockLLM([r1, r2])
     compressed = _make_compressed(300, line_chars=60)
-    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
-                     provider=provider, r0_cfg=r0_cfg)
+    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+                        provider=provider, r0_cfg=r0_cfg)
     assert [r.id for r in reels] == [f"r{i:02d}" for i in range(1, len(reels) + 1)]
 
 
@@ -441,7 +441,84 @@ def test_select_ranks_by_score_and_assigns_ids(fewshot, r0_cfg):
         {"start": 200.0, "end": 230.0, "score": 90, "hook": "h", "title": "t2", "description": "d"},
     ]})
     provider = _MockLLM([raw])
-    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                     provider=provider, r0_cfg=r0_cfg)
+    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                        provider=provider, r0_cfg=r0_cfg)
     assert [r.score for r in reels] == [90, 72]   # ранжировано по score (убыв.)
     assert [r.id for r in reels] == ["r01", "r02"]
+
+
+# ----------------------------------------------------------- Part A: self-contained start gate
+
+def test_self_contained_start_false_dropped():
+    """self_contained_start=False → segment dropped, justification preserved."""
+    segs = [{"start": 0.0, "end": 30.0, "score": 80, "hook": "h", "title": "t",
+             "description": "d", "reason": "r", "topic": "top",
+             "self_contained_start": False, "start_justification": "dangling pronoun"}]
+    reels = S.segments_to_reels(segs)
+    kept, dropped = S.filter_self_contained_start(reels)
+    assert len(kept) == 0
+    assert len(dropped) == 1
+    assert dropped[0].start_justification == "dangling pronoun"
+
+
+def test_self_contained_start_none_kept():
+    """self_contained_start=None (old manifests) → segment kept (backward compat)."""
+    segs = [{"start": 0.0, "end": 30.0, "score": 80, "hook": "h", "title": "t",
+             "description": "d"}]
+    reels = S.segments_to_reels(segs)
+    kept, dropped = S.filter_self_contained_start(reels)
+    assert len(kept) == 1 and len(dropped) == 0
+
+
+# ----------------------------------------------------------- Part B: over-generation top-N
+
+def _make_segs(n: int, *, base_score: int = 66) -> list[dict]:
+    """n non-overlapping segments, scores base_score..base_score+n-1."""
+    return [{"start": i * 40.0, "end": i * 40.0 + 30.0, "score": base_score + i,
+             "hook": "h", "title": "t", "description": "d"} for i in range(n)]
+
+
+def test_max_reels_top_n(fewshot, r0_cfg):
+    """max_reels=20 + 35 candidates → exactly 20 kept, 15 discarded."""
+    cfg = r0_cfg.model_copy(update={"max_reels": 20})
+    provider = _MockLLM([json.dumps({"segments": _make_segs(35)})])
+    reels, discarded = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                                provider=provider, r0_cfg=cfg)
+    assert len(reels) == 20
+    assert len(discarded) == 15
+
+
+def test_max_reels_null_keep_all(fewshot, r0_cfg):
+    """max_reels=None → all qualifying segments kept, discarded empty."""
+    cfg = r0_cfg.model_copy(update={"max_reels": None})
+    provider = _MockLLM([json.dumps({"segments": _make_segs(30)})])
+    reels, discarded = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                                provider=provider, r0_cfg=cfg)
+    assert len(reels) == 30
+    assert discarded == []
+
+
+def test_dedup_before_topn(fewshot, r0_cfg):
+    """Dedup happens before top-N: 21 segs with 1 overlapping pair → 20 unique → all 20 kept."""
+    # 20 non-overlapping segments
+    segs = _make_segs(20, base_score=70)
+    # +1 segment overlapping heavily with seg 0
+    segs.append({"start": 0.0, "end": 30.0, "score": 69, "hook": "h", "title": "t", "description": "d"})
+    cfg = r0_cfg.model_copy(update={"max_reels": 20})
+    provider = _MockLLM([json.dumps({"segments": segs})])
+    reels, discarded = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                                provider=provider, r0_cfg=cfg)
+    # After dedup: 20 unique; top-20 keeps all → no top-N discards
+    assert len(reels) == 20
+    # The overlapping lower-score seg was deduped away (not a top-N discard)
+    top_n_discards = [d for d in discarded if "top-N" in d["reason"]]
+    assert len(top_n_discards) == 0
+
+
+def test_kept_reels_have_rank(fewshot, r0_cfg):
+    """Kept reels have rank set (1-based)."""
+    cfg = r0_cfg.model_copy(update={"max_reels": 3})
+    provider = _MockLLM([json.dumps({"segments": _make_segs(3)})])
+    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                        provider=provider, r0_cfg=cfg)
+    assert [r.rank for r in reels] == [1, 2, 3]

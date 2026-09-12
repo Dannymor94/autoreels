@@ -90,6 +90,8 @@ class R0Config(BaseModel):
     min_clip_duration: float = 8.0    # пост-snap минимум (snap+padding могут схлопнуть 18с → 1с);
                                       # перед отбросом код пробует расширить до границы фразы.
     max_reels: int | None
+    candidate_multiplier: float = 1.75   # over-generation: цель кандидатов = max_reels * это.
+                                         # Копим больше, ранжируем по score, режем top-N.
     chunk_tokens: int
     chunk_overlap_sec: int
     dedup_overlap_threshold: float
@@ -133,6 +135,15 @@ class R0Config(BaseModel):
     def max_duration(self) -> int:
         """Верхняя граница длины клипа (сек) активного пресета."""
         return self.presets[self.duration_preset].max
+
+    @property
+    def target_candidates(self) -> int | None:
+        """Целевое число кандидатов для over-generation (max_reels * candidate_multiplier).
+
+        None когда max_reels=null (over-generation выключено → «вернуть все качественные»)."""
+        if self.max_reels is None:
+            return None
+        return max(self.max_reels, round(self.max_reels * self.candidate_multiplier))
 
     @property
     def max_sentence_sec(self) -> float:

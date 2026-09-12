@@ -119,7 +119,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", rec("extract", tmp_path / "a.wav"))
     monkeypatch.setattr(cli, "_stage_transcribe", rec("transcribe", "TRANSCRIPT"))
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
-    monkeypatch.setattr(cli, "_stage_select", rec("select", [_reel()]))
+    monkeypatch.setattr(cli, "_stage_select", rec("select", ([_reel()], [])))
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
     monkeypatch.setattr(cli, "_stage_padding", rec("padding", [_reel()]))
     monkeypatch.setattr(cli, "_stage_trim", rec("trim", [_reel()]))
@@ -142,7 +142,7 @@ def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], []))
 
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **kw: (3840, 2160))
 
@@ -168,7 +168,7 @@ def test_run_writes_manifest_named_by_stem(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
 
     video = tmp_path / "PXL_20260621.mp4"
     video.write_bytes(b"x")
@@ -187,7 +187,7 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], []))
 
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"hello-bytes")
@@ -217,7 +217,7 @@ def test_run_rejects_crop_out_of_real_frame(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel("r01")])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], []))
     # Реальный кадр — горизонтальный 2688×1512, а кроп из калибровки — в повёрнутом (h=2347).
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (2688, 1512))
 
@@ -248,7 +248,7 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
                    description="d", reason="r", topic="x")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [midword])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([midword], []))
     # Этот тест проверяет snap/padding, а не min_clip_filter → минуем фильтр.
     monkeypatch.setattr(cli, "_stage_min_clip_filter", lambda reels, transcript, *, r0_cfg: (reels, 0))
 
@@ -277,7 +277,7 @@ def test_run_archives_video_after_success(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
@@ -346,7 +346,7 @@ def _mock_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
 
 
 def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
@@ -1294,7 +1294,7 @@ def test_diagnose_cuts_rerun_uses_cached_transcript_and_warns(tmp_path, monkeypa
     monkeypatch.setattr(cli, "build_pool", lambda cfg: type("P", (), {"preflight": lambda s: None})())
     def fake_select(compressed, **k):
         seen["compressed"] = compressed
-        return [_reel_win("r01", 0.0, 1.0)]
+        return [_reel_win("r01", 0.0, 1.0)], []
     monkeypatch.setattr(cli, "select", fake_select)
 
     rc = cli.cmd_diagnose_cuts(root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache, rerun=True)
@@ -1321,7 +1321,7 @@ def test_run_populates_r0_bounds_before_snap(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])   # start=10, end=40
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))   # start=10, end=40
     def snap_capture(reels, *a, **k):
         captured["r0"] = [(r.r0_start, r.r0_end) for r in reels]
         return reels
@@ -2705,7 +2705,7 @@ def test_run_does_not_call_ask_batch_action(monkeypatch, tmp_path):
                         lambda *a, **k: __import__("autoreels.core.models", fromlist=["Transcript"])
                         .Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [_reel()])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
 
     if hasattr(cli, "_ask_batch_action"):
         called = []
@@ -4692,7 +4692,7 @@ def test_stage_select_builds_provider_pool_from_config(monkeypatch):
         return object()
 
     monkeypatch.setattr(cli, "build_pool", fake_build_pool)
-    monkeypatch.setattr(cli, "select", lambda *a, **k: [])
+    monkeypatch.setattr(cli, "select", lambda *a, **k: ([], []))
     cli._stage_select("COMPRESSED", r0_cfg=r0, root=REPO_ROOT)
     assert captured["cfg"] is r0                       # пул строится из того же r0_cfg
     assert captured["cfg"].model == r0.model
@@ -4717,7 +4717,7 @@ def test_run_preflights_models_before_transcription(monkeypatch, tmp_path):
                         lambda *a, **k: order.append("transcribe") or Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     monkeypatch.setattr(cli, "_stage_select",
-                        lambda *a, **k: captured.update(provider=k.get("provider")) or [])
+                        lambda *a, **k: captured.update(provider=k.get("provider")) or ([], []))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
@@ -4807,7 +4807,7 @@ def test_run_saves_transcript_text(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], []))
 
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"x")
@@ -4850,7 +4850,7 @@ def test_run_transcript_byte_identical_to_transcribe(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: [])
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], []))
 
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"x")
