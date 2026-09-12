@@ -102,6 +102,15 @@ def file_sha256_cached_fast(path: str | Path, cache_dir: str | Path) -> str:
     return result
 
 
-def transcript_cache_path(cache_dir: str | Path, audio_path: str | Path) -> Path:
-    """Путь к кэшу транскрипта: <cache_dir>/<audio_hash>.transcript.json."""
-    return Path(cache_dir) / f"{audio_hash(audio_path)}.transcript.json"
+def transcript_cache_path(
+    cache_dir: str | Path, audio_path: str | Path, params_key: str = ""
+) -> Path:
+    """Путь к кэшу транскрипта: <cache_dir>/<audio_hash>[.<params_key>].transcript.json.
+
+    params_key — отпечаток параметров транскрипции (model+initial_prompt). Пустой →
+    старое имя (обратная совместимость). Непустой добавляется в имя, поэтому смена
+    промпта/модели даёт другой файл → кэш промахивается → свежая транскрипция.
+    """
+    h = audio_hash(audio_path)
+    name = f"{h}.{params_key}.transcript.json" if params_key else f"{h}.transcript.json"
+    return Path(cache_dir) / name

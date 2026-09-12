@@ -92,6 +92,11 @@ class Transcript(BaseModel):
 
     language: str
     words: list[Word] = Field(default_factory=list)
+    # Параметры, которыми получен транскрипт (для воспроизводимости и инвалидации кэша).
+    # Пустые в старых кэшах, снятых до фичи — читаются без ошибки (дефолты).
+    model: str = ""
+    provider: str = ""
+    prompt_hash: str = ""
 
 
 class Reel(BaseModel):

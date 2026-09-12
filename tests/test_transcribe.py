@@ -162,6 +162,73 @@ def test_empty_initial_prompt_not_sent(tmp_path, monkeypatch):
     assert "prompt" not in captured[0]
 
 
+# ------------------------------------------------------ params_key / инвалидация кэша
+
+class _MetaSpy:
+    """Спай с describe() — задаёт meta и считает вызовы transcribe."""
+
+    def __init__(self, *, model="whisper-large-v3", prompt_hash="", provider="groq"):
+        self.calls = 0
+        self._meta = {"provider": provider, "model": model, "prompt_hash": prompt_hash}
+
+    def describe(self):
+        return dict(self._meta)
+
+    def transcribe(self, audio_path, *, language=None):
+        self.calls += 1
+        return Transcript(language="ru", words=[Word(word="ок", t0=0.0, t1=0.1)])
+
+
+def test_params_key_changes_with_prompt():
+    base = {"provider": "groq", "model": "whisper-large-v3", "prompt_hash": ""}
+    primed = {**base, "prompt_hash": "abc123"}
+    assert T.params_key(base) != T.params_key(primed)
+    assert T.params_key({}) == ""            # нет meta → старое имя
+
+
+def test_prompt_change_forces_fresh_transcription(tmp_path):
+    """Смена initial_prompt (→ prompt_hash) даёт другой ключ → кэш промахивается → новый вызов."""
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"fake audio bytes")
+    cache_dir = tmp_path / "cache"
+
+    unprimed = _MetaSpy(prompt_hash="")
+    T.transcribe(audio, cache_dir, backend=unprimed)
+    T.transcribe(audio, cache_dir, backend=unprimed)
+    assert unprimed.calls == 1               # второй раз — кэш-хит
+
+    primed = _MetaSpy(prompt_hash="deadbeef")
+    T.transcribe(audio, cache_dir, backend=primed)
+    assert primed.calls == 1                 # другой ключ → своя транскрипция, не хит старого
+    # оба файла на диске, имена различаются
+    files = sorted(p.name for p in cache_dir.glob("*.transcript.json"))
+    assert len(files) == 2
+
+
+def test_transcript_records_params(tmp_path):
+    """Артефакт на диске несёт model/provider/prompt_hash (воспроизводимость)."""
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"fake audio bytes")
+    cache_dir = tmp_path / "cache"
+
+    T.transcribe(audio, cache_dir, backend=_MetaSpy(model="whisper-large-v3", prompt_hash="ph9"))
+    path = next(cache_dir.glob("*.transcript.json"))
+    tr = Transcript.model_validate_json(path.read_text(encoding="utf-8"))
+    assert (tr.provider, tr.model, tr.prompt_hash) == ("groq", "whisper-large-v3", "ph9")
+
+
+def test_force_retranscribes_despite_matching_params(tmp_path):
+    """force=True перетранскрибирует даже при совпадающем ключе (--force-transcribe)."""
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"fake audio bytes")
+    cache_dir = tmp_path / "cache"
+    spy = _MetaSpy(prompt_hash="x")
+
+    T.transcribe(audio, cache_dir, backend=spy)
+    T.transcribe(audio, cache_dir, backend=spy, force=True)
+    assert spy.calls == 2
+
+
 # ------------------------------------------------------ кэш / идемпотентность
 
 class _SpyBackend:

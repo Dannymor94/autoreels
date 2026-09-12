@@ -251,10 +251,14 @@ def split_audio_chunk(
         )
 
 
-def _chunk_cache_path(cache_dir: Path, chunk_path: Path) -> Path:
-    """Путь кэша транскрипта чанка: <cache_dir>/<sha256(chunk_bytes)>.chunk.json."""
+def _chunk_cache_path(cache_dir: Path, chunk_path: Path, params_key: str = "") -> Path:
+    """Путь кэша транскрипта чанка: <cache_dir>/<sha256(chunk_bytes)>[.<params_key>].chunk.json.
+
+    params_key — тот же отпечаток параметров транскрипции, что и у merged-кэша. Без него
+    смена initial_prompt не инвалидировала бы чанк-кэш (главный источник бага)."""
     sha = hashlib.sha256(chunk_path.read_bytes()).hexdigest()
-    return cache_dir / f"{sha}.chunk.json"
+    name = f"{sha}.{params_key}.chunk.json" if params_key else f"{sha}.chunk.json"
+    return cache_dir / name
 
 
 def _derive_ffprobe(ffmpeg: str) -> str:
@@ -302,10 +306,14 @@ def transcribe_chunks(
     *,
     fail_fast: bool = False,
     language: str = "ru",
+    params_key: str = "",
+    force: bool = False,
 ) -> tuple[list[Transcript | None], list[str]]:
     """Транскрибировать список чанков с кэшем и обработкой провалов.
 
     chunks_info: [(chunk_path, start_sec, end_sec), ...]
+    params_key — отпечаток параметров транскрипции в имени чанк-кэша.
+    force — безусловно игнорировать существующий чанк-кэш (--force-transcribe).
     Возвращает (results, warnings):
       results — list[Transcript|None] в том же порядке (None = провал)
       warnings — список строк для пользователя о пропущенных диапазонах
@@ -321,10 +329,10 @@ def transcribe_chunks(
 
     for i, (chunk_path, start_sec, end_sec) in enumerate(chunks_info):
         chunk_progress("транскрипция", i + 1, total)
-        cache_path = _chunk_cache_path(cache_dir, chunk_path)
+        cache_path = _chunk_cache_path(cache_dir, chunk_path, params_key)
 
-        # Кэш-хит
-        if cache_path.exists():
+        # Кэш-хит (force → игнорируем и перетранскрибируем)
+        if cache_path.exists() and not force:
             tr = Transcript.model_validate_json(cache_path.read_text(encoding="utf-8"))
             results.append(tr)
             continue
@@ -358,6 +366,8 @@ def transcribe_chunked(
     *,
     ffmpeg: str = "ffmpeg",
     language: str = "ru",
+    params_key: str = "",
+    force: bool = False,
 ) -> tuple[Transcript, list[str]]:
     """Оркестратор Whisper-чанкинга end-to-end.
 
@@ -412,6 +422,7 @@ def transcribe_chunked(
     results, warnings = transcribe_chunks(
         chunks_info, backend, cache_dir,
         fail_fast=cfg.fail_fast, language=language,
+        params_key=params_key, force=force,
     )
 
     # Склейка: offset = real start_sec из chunks_info (не i*duration!)

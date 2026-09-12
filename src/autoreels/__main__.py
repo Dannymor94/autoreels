@@ -572,8 +572,9 @@ def _stage_extract_audio(video, *, render_cfg, cache_dir, ffmpeg, source_sha=Non
                          ffmpeg=ffmpeg, source_sha=source_sha)
 
 
-def _stage_transcribe(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cfg=None, ffmpeg="ffmpeg"):
-    print("транскрипция…", flush=True)
+def _stage_transcribe(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cfg=None,
+                      ffmpeg="ffmpeg", force=False):
+    print("транскрипция…" + (" (--force-transcribe)" if force else ""), flush=True)
     backend = get_backend(transcribe_cfg)
     chunking_cfg = r0_cfg.chunking if r0_cfg is not None else None
     return transcribe(
@@ -583,6 +584,7 @@ def _stage_transcribe(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cf
         chunking_cfg=chunking_cfg,
         audio_cfg=audio_cfg,
         ffmpeg=ffmpeg,
+        force=force,
     )
 
 
@@ -1122,6 +1124,7 @@ def cmd_run(
     ffmpeg: str = "ffmpeg",
     push: bool = False,
     pull_first: bool = True,
+    force_transcribe: bool = False,
 ) -> Path:
     """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
 
@@ -1206,6 +1209,7 @@ def cmd_run(
     transcript = _stage_transcribe(
         audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir,
         r0_cfg=r0_cfg, audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg,
+        force=force_transcribe,
     )
     # Попутно: сохранить читаемый текст для контента (транскрипт уже есть — R0 его считал).
     tx_path = _write_transcript_file(
@@ -1294,9 +1298,17 @@ def cmd_transcribe(
     out_dir = Path(out_dir) if out_dir else root / "transcripts"
 
     if from_cache is not None:
-        cache_path = cache_dir / f"{from_cache}.transcript.json"
-        if not cache_path.exists():
-            raise RunError(f"транскрипт не найден в кэше: {cache_path}")
+        # Имя кэша теперь <hash>[.<params_key>].transcript.json — берём точное совпадение,
+        # иначе самый свежий вариант с этим хэшем (напр. праймленый перекрывает старый).
+        exact = cache_dir / f"{from_cache}.transcript.json"
+        if exact.exists():
+            cache_path = exact
+        else:
+            cands = sorted(cache_dir.glob(f"{from_cache}.*.transcript.json"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)
+            if not cands:
+                raise RunError(f"транскрипт не найден в кэше: {exact}")
+            cache_path = cands[0]
         transcript = Transcript.model_validate_json(cache_path.read_text(encoding="utf-8"))
         stem = Path(source).stem if source else from_cache[:16]
         print(f"=== transcribe: из кэша {from_cache[:16]}… (format={fmt}) ===", flush=True)
@@ -1336,6 +1348,7 @@ def cmd_run_batch(
     transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
     push: bool = False,
+    force_transcribe: bool = False,
 ) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]]]:
     """Batch: обработать все видео в inputs/ по очереди. Один упал → остальные продолжают.
 
@@ -1366,7 +1379,7 @@ def cmd_run_batch(
             cmd_run(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
-                ffmpeg=ffmpeg, push=push, pull_first=False,
+                ffmpeg=ffmpeg, push=push, pull_first=False, force_transcribe=force_transcribe,
             )
             ok.append(v.name)
         except InputInvalid as e:               # битый/пустой файл — пропуск, НЕ ошибка
@@ -3550,6 +3563,9 @@ def _build_parser():
     pr.add_argument("--no-push", action="store_true",
                     help="не коммитить/пушить манифесты в git (по умолчанию каждый успешный "
                          "манифест сразу пушится на системник)")
+    pr.add_argument("--force-transcribe", action="store_true",
+                    help="перетранскрибировать безусловно, игнорируя кэш транскрипта и чанков "
+                         "(нужно после смены initial_prompt/модели, если кэш уже прогрет)")
 
     ptx = sub.add_parser(
         "transcribe",
@@ -3884,13 +3900,15 @@ def main(argv=None) -> int:
                 else:
                     video = _ingest_source(Path(args.video), Path("inputs"))
                 try:
-                    cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push)
+                    cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push,
+                            force_transcribe=args.force_transcribe)
                 except InputInvalid as e:
                     print(f"⊘ пропущен {Path(video).name}: {e}\n"
                           f"  файл битый/пустой — перекачай/пересними и повтори", file=sys.stderr)
                     return 1
             else:
-                _, failed, _skipped = cmd_run_batch(ffmpeg=ffmpeg, push=not args.no_push)
+                _, failed, _skipped = cmd_run_batch(ffmpeg=ffmpeg, push=not args.no_push,
+                                                    force_transcribe=args.force_transcribe)
                 if failed:
                     return 1
         elif args.cmd == "transcribe":

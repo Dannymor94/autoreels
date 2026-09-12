@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from pathlib import Path
@@ -60,6 +61,27 @@ def parse_faster_whisper(segments, language: str) -> Transcript:
 
 class TranscriptionBackend(Protocol):
     def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript: ...
+    def describe(self) -> dict: ...
+
+
+def params_key(meta: dict) -> str:
+    """Короткий отпечаток параметров транскрипции для ключа кэша (12 hex).
+
+    Пустой meta → "" (старое имя кэша, обратная совместимость с backend'ами без describe).
+    Иначе — sha256 по стабильной сериализации provider/model/prompt_hash: смена любого из
+    них даёт другое имя файла → кэш промахивается → свежая транскрипция (закрывает баг,
+    когда смена initial_prompt не инвалидировала кэш).
+    """
+    if not meta:
+        return ""
+    raw = "|".join(f"{k}={meta[k]}" for k in sorted(meta))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _backend_meta(backend) -> dict:
+    """Метаданные бэкенда для ключа/артефакта. Backend без describe() → {} (тестовые спаи)."""
+    describe = getattr(backend, "describe", None)
+    return describe() if callable(describe) else {}
 
 
 class GroqBackend:
@@ -85,6 +107,14 @@ class GroqBackend:
     def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript:
         request = self._request_fn or self._default_request
         return parse_groq_response(request(Path(audio_path), language))
+
+    def describe(self) -> dict:
+        """Параметры, влияющие на текст: provider, model, хэш initial_prompt (или "")."""
+        prompt_hash = (
+            hashlib.sha256(self._initial_prompt.encode("utf-8")).hexdigest()[:12]
+            if self._initial_prompt else ""
+        )
+        return {"provider": "groq", "model": self._model, "prompt_hash": prompt_hash}
 
     def _default_request(self, audio_path: Path, language: str | None) -> dict:
         import httpx  # ленивый импорт: модуль грузится без сетевого стека
@@ -180,6 +210,9 @@ class FasterWhisperBackend:
         segments, info = model.transcribe(str(audio_path), language=language, word_timestamps=True)
         return parse_faster_whisper(segments, info.language)
 
+    def describe(self) -> dict:
+        return {"provider": "faster_whisper", "model": self._model_size, "prompt_hash": ""}
+
 
 def get_backend(config=None) -> TranscriptionBackend:
     """Бэкенд транскрипции. Источник выбора: config (transcribe.yaml), env перебивает.
@@ -240,11 +273,22 @@ def transcribe(
     if audio_path.stat().st_size == 0:
         raise TranscriptionError(f"пустой аудиофайл: {audio_path}")
 
-    cache_path = state.transcript_cache_path(cache_dir, audio_path)
+    backend = backend or get_backend()
+    meta = _backend_meta(backend)
+    pkey = params_key(meta)
+
+    # Ключ кэша включает params_key: смена model/initial_prompt → другое имя → промах.
+    cache_path = state.transcript_cache_path(cache_dir, audio_path, pkey)
     if cache_path.exists() and not force:
         return Transcript.model_validate_json(cache_path.read_text(encoding="utf-8"))
 
-    backend = backend or get_backend()
+    def _stamp(tr: Transcript) -> Transcript:
+        """Записать в артефакт параметры, которыми он получен (воспроизводимость)."""
+        return tr.model_copy(update={
+            "model": meta.get("model", ""),
+            "provider": meta.get("provider", ""),
+            "prompt_hash": meta.get("prompt_hash", ""),
+        })
 
     # Чанкинг: если конфиг передан и аудио превышает порог
     if chunking_cfg is not None and chunking_cfg.enabled:
@@ -254,13 +298,15 @@ def transcribe(
             tr, _warns = transcribe_chunked(
                 audio_path, chunking_cfg, audio_cfg, Path(cache_dir),
                 backend, ffmpeg=ffmpeg, language=language or "ru",
+                params_key=pkey, force=force,
             )
+            tr = _stamp(tr)
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(tr.model_dump_json(), encoding="utf-8")
             return tr
 
     # Одиночный запрос (короткое аудио или chunking_cfg не передан)
-    tr = backend.transcribe(audio_path, language=language)
+    tr = _stamp(backend.transcribe(audio_path, language=language))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(tr.model_dump_json(), encoding="utf-8")
     return tr

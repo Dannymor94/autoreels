@@ -310,6 +310,38 @@ def test_dedup_sorted_by_t0_not_score():
     assert [r.id for r in result] == ["r02", "r01"]
 
 
+# ====================================================== chunk cache: params_key + force
+
+def test_chunk_cache_key_includes_params(tmp_path):
+    """Другой params_key → другой файл чанк-кэша → повторный вызов бэкенда (смена промпта)."""
+    chunk = tmp_path / "chunk_00.mp3"
+    chunk.write_bytes(b"abc" * 10)
+    chunks_info = [(chunk, 0.0, 600.0)]
+
+    log_a: list = []
+    CT.transcribe_chunks(chunks_info, _SuccessBackend(call_log=log_a), tmp_path, params_key="aaa")
+    CT.transcribe_chunks(chunks_info, _SuccessBackend(call_log=log_a), tmp_path, params_key="aaa")
+    assert len(log_a) == 1                    # тот же ключ → кэш-хит
+
+    log_b: list = []
+    CT.transcribe_chunks(chunks_info, _SuccessBackend(call_log=log_b), tmp_path, params_key="bbb")
+    assert len(log_b) == 1                    # другой ключ → своя транскрипция
+    assert len(list(tmp_path.glob("*.chunk.json"))) == 2
+
+
+def test_chunk_force_bypasses_cache(tmp_path):
+    """force=True → игнорировать существующий чанк-кэш при совпадающем ключе."""
+    chunk = tmp_path / "chunk_00.mp3"
+    chunk.write_bytes(b"abc" * 10)
+    chunks_info = [(chunk, 0.0, 600.0)]
+
+    log: list = []
+    be = _SuccessBackend(call_log=log)
+    CT.transcribe_chunks(chunks_info, be, tmp_path, params_key="k")
+    CT.transcribe_chunks(chunks_info, be, tmp_path, params_key="k", force=True)
+    assert len(log) == 2
+
+
 # ====================================================== TEST 7: partial failure, continue
 
 def test_partial_failure_continue(tmp_path):
