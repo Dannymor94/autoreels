@@ -102,6 +102,66 @@ def test_groq_backend_uses_injected_request():
     assert tr.words[0].word == "я"
 
 
+# ------------------------------------------------------ initial_prompt (priming)
+
+def _capture_posts(monkeypatch):
+    """Мокнуть httpx.post, вернуть список захваченных `data`-дичей запросов."""
+    import httpx
+
+    captured: list[dict] = []
+
+    class _FakeResp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"language": "ru", "words": []}
+
+    def _fake_post(url, *, data, **k):
+        captured.append(dict(data))
+        return _FakeResp()
+
+    monkeypatch.setattr("httpx.post", _fake_post)
+    return captured
+
+
+def test_initial_prompt_sent_to_every_chunk(tmp_path, monkeypatch):
+    """Priming уходит в КАЖДЫЙ вызов бэкенда, не только в chunk 0 (backend переиспользуется)."""
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    captured = _capture_posts(monkeypatch)
+
+    backend = T.GroqBackend(initial_prompt="Точка. Вопрос? Восклицание!")
+    for i in range(3):                       # имитируем 3 чанка одним backend'ом
+        audio = tmp_path / f"chunk_{i}.mp3"
+        audio.write_bytes(b"\x00" * 1024)
+        backend._default_request(audio, "ru")
+
+    assert len(captured) == 3
+    for data in captured:                    # prompt в каждом, не только в первом
+        assert data.get("prompt") == "Точка. Вопрос? Восклицание!"
+
+
+def test_initial_prompt_from_config(monkeypatch):
+    """Prompt берётся из config; переопределение в конфиге меняет отправляемое."""
+    from autoreels.core.config import GroqWhisper, TranscribeConfig
+
+    monkeypatch.delenv("TRANSCRIBE_BACKEND", raising=False)
+    cfg = TranscribeConfig(groq=GroqWhisper(initial_prompt="Особый прайм."))
+    backend = T.get_backend(cfg)
+    assert isinstance(backend, T.GroqBackend)
+    assert backend._initial_prompt == "Особый прайм."
+
+
+def test_empty_initial_prompt_not_sent(tmp_path, monkeypatch):
+    """Пустой prompt = не слать ключ (старое поведение, обратная совместимость)."""
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    captured = _capture_posts(monkeypatch)
+
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"\x00" * 1024)
+    T.GroqBackend(initial_prompt="")._default_request(audio, "ru")
+
+    assert "prompt" not in captured[0]
+
+
 # ------------------------------------------------------ кэш / идемпотентность
 
 class _SpyBackend:

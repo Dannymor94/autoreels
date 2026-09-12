@@ -74,10 +74,12 @@ class GroqBackend:
         *,
         api_key: str | None = None,
         model: str = GROQ_WHISPER_MODEL,
+        initial_prompt: str = "",
         request_fn: Callable[[Path, str | None], dict] | None = None,
     ):
         self._api_key = api_key
         self._model = model
+        self._initial_prompt = initial_prompt
         self._request_fn = request_fn
 
     def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript:
@@ -108,6 +110,10 @@ class GroqBackend:
         }
         if language:
             data["language"] = language
+        # Priming-текст: применяется к КАЖДОМУ чанку (backend переиспользуется в
+        # transcribe_chunks), иначе прайм ловил бы только начало записи.
+        if self._initial_prompt:
+            data["prompt"] = self._initial_prompt
 
         last_exc: Exception | None = None
         for attempt in range(_RETRY_ATTEMPTS):
@@ -186,7 +192,8 @@ def get_backend(config=None) -> TranscriptionBackend:
     )
     if name == "groq":
         model = config.groq.model if config is not None else GROQ_WHISPER_MODEL
-        return GroqBackend(model=model)
+        initial_prompt = config.groq.initial_prompt if config is not None else ""
+        return GroqBackend(model=model, initial_prompt=initial_prompt)
     if name == "faster_whisper":
         if config is not None:
             fw = config.faster_whisper

@@ -415,6 +415,14 @@ class GroqWhisper(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = "whisper-large-v3"
+    # Priming-текст: Whisper копирует пунктуационный стиль initial_prompt. Русская
+    # разговорная речь (лекция/интервью) без него теряет точки/вопросы → пропадает
+    # sentence-путь snap'а. Прайм короткой хорошо пунктуированной прозой в том же
+    # регистре. Пустая строка = не слать prompt (старое поведение).
+    initial_prompt: str = (
+        "Ну что, давайте разберёмся. Как мы приходим к балансу с собой, "
+        "и почему это важно? Я расскажу, как это работает на практике."
+    )
 
 
 class FasterWhisperParams(BaseModel):
