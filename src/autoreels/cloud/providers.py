@@ -31,6 +31,7 @@ API-ключи (GROQ_API_KEY, OPENROUTER_API_KEY) — только из окру
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Callable, Protocol
 
@@ -76,8 +77,28 @@ _POOL_MAX_CONSEC_FAILURES = 5    # после N подряд throttled/exhausted
 _POOL_BUDGET_SEC = 600.0         # суммарный бюджет ожидания на один complete() — 10 мин
 _POOL_BACKOFF_BASE_SEC = 60.0    # база экспоненциального бэкоффа (×2^n, cap 3600с)
 
+# Groq free-tier: conservative fallback when x-ratelimit-* headers absent.
+# ponytail: flat constant; expose via build_pool/config if per-key tuning needed
+_GROQ_FREE_FALLBACK_DELAY_SEC = 60.0
+
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
+
+
+def _count_tokens_approx(text: str) -> int:
+    """4 chars ≈ 1 token — rough but consistent with select.py's _count_tokens."""
+    return max(1, len(text) // 4)
+
+
+def _parse_groq_reset(s: str) -> float | None:
+    """Parse Groq x-ratelimit-reset-* value ('29.5s', '1m29.5s') → seconds float."""
+    m = re.match(r'^(?:(\d+)m)?(\d+(?:\.\d+)?)s$', str(s).strip())
+    if m:
+        return int(m.group(1) or 0) * 60 + float(m.group(2))
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
 
 
 def _httpx_post(url, *, headers, json, timeout):
@@ -186,6 +207,7 @@ def _chat_request(
     provider_name: str,
     defer_throttle: bool,
     not_found_hint: str | None = None,
+    out_headers: dict | None = None,
 ) -> dict:
     """Единый HTTP-цикл к OpenAI-совместимому chat API (Groq и OpenRouter идентичны).
 
@@ -199,6 +221,9 @@ def _chat_request(
     for _ in range(_MAX_THROTTLE_RETRIES):
         # Сетевой таймаут/обрыв → ProviderTimeout (ретраи на том же провайдере внутри _post_r0).
         resp = _post_r0(url, headers=headers, payload=payload, provider_name=provider_name)
+        # Capture response headers before any raise so callers can read rate-limit state.
+        if out_headers is not None:
+            out_headers.update({k.lower(): v for k, v in resp.headers.items()})
         if resp.status_code in (429, 413):
             last_status = resp.status_code
             # diagnostic: dump all ratelimit headers once so we can see which limit is hit
@@ -318,18 +343,70 @@ class GroqLLM:
         reasoning_effort: str | None = DEFAULT_REASONING_EFFORT,
         request_fn: Callable[[list[dict], float], dict] | None = None,
         defer_throttle: bool = False,
+        fallback_delay_sec: float = _GROQ_FREE_FALLBACK_DELAY_SEC,
+        _sleep_fn: Callable[[float], None] | None = None,
+        _monotonic_fn: Callable[[], float] | None = None,
     ):
         self._reasoning_effort = reasoning_effort
         self._model = model
         self._api_key = api_key
         self._request_fn = request_fn
         self._defer_throttle = defer_throttle
+        self._fallback_delay_sec = fallback_delay_sec
+        self._sleep_fn = _sleep_fn or time.sleep
+        self._monotonic_fn = _monotonic_fn or time.monotonic
+        # token-budget state (updated from x-ratelimit-* headers after each response)
+        self._budget_remaining: int = 999_999
+        self._budget_reset_at: float = 0.0
+        self._got_budget_headers: bool = False
+        self._request_count: int = 0
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         """Вернуть текст ответа модели (content первого choice). Пустой → ProviderEmptyResponse."""
         request = self._request_fn or self._default_request
         data = request(messages, temperature)
         return _extract_content(data, self.name)
+
+    def _pace_if_needed(self, estimated_tokens: int) -> None:
+        """Wait before sending if the remaining TPM budget would be exceeded.
+
+        Two modes:
+        - Headers seen: compare remaining against estimated; sleep until reset + 0.5s buffer.
+        - No headers yet (Groq didn't send them): apply fallback_delay_sec on 2nd+ request.
+        One log line per wait event.
+        """
+        now = self._monotonic_fn()
+        if self._got_budget_headers:
+            if self._budget_remaining < estimated_tokens and self._budget_reset_at > now:
+                wait = self._budget_reset_at - now + 0.5
+                print(
+                    f"\n  ⏳ Groq TPM: remaining={self._budget_remaining} < ~{estimated_tokens}"
+                    f" — ждём {wait:.0f}с до сброса квоты",
+                    flush=True,
+                )
+                self._sleep_fn(wait)
+        elif self._request_count > 0 and self._fallback_delay_sec > 0:
+            print(
+                f"\n  ⏳ Groq: нет x-ratelimit-* заголовков"
+                f" — fallback {self._fallback_delay_sec:.0f}с",
+                flush=True,
+            )
+            self._sleep_fn(self._fallback_delay_sec)
+
+    def _update_budget(self, resp_headers: dict) -> None:
+        """Read x-ratelimit-remaining-tokens and x-ratelimit-reset-tokens from a response."""
+        remaining = resp_headers.get("x-ratelimit-remaining-tokens")
+        reset = resp_headers.get("x-ratelimit-reset-tokens")
+        if remaining is not None:
+            try:
+                self._budget_remaining = int(remaining)
+                self._got_budget_headers = True
+            except (ValueError, TypeError):
+                pass
+        if reset is not None:
+            parsed = _parse_groq_reset(str(reset))
+            if parsed is not None:
+                self._budget_reset_at = self._monotonic_fn() + parsed
 
     def _model_404_hint(self) -> str:
         return (
@@ -352,6 +429,10 @@ class GroqLLM:
         if not api_key:
             raise ProviderError("нет GROQ_API_KEY — задайте ключ Groq в окружении для R0")
 
+        estimated = sum(_count_tokens_approx(m.get("content") or "") for m in messages)
+        self._pace_if_needed(estimated)
+        self._request_count += 1
+
         payload = {
             "model": self._model,
             "messages": messages,
@@ -362,11 +443,17 @@ class GroqLLM:
             payload["reasoning_effort"] = self._reasoning_effort
 
         headers = {"Authorization": f"Bearer {api_key}"}
-        return _chat_request(
-            GROQ_CHAT_URL, headers=headers, payload=payload,
-            provider_name=self.name, defer_throttle=self._defer_throttle,
-            not_found_hint=self._model_404_hint(),
-        )
+        out_headers: dict = {}
+        try:
+            return _chat_request(
+                GROQ_CHAT_URL, headers=headers, payload=payload,
+                provider_name=self.name, defer_throttle=self._defer_throttle,
+                not_found_hint=self._model_404_hint(),
+                out_headers=out_headers,
+            )
+        finally:
+            # Always update budget from response headers, even on ProviderThrottled/Exhausted.
+            self._update_budget(out_headers)
 
 
 class OpenRouterLLM:

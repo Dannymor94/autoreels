@@ -1109,6 +1109,112 @@ def test_pool_budget_no_memory_growth():
     assert total_delta < 64 * 1024, f"неожиданный рост памяти: {total_delta} байт"
 
 
+# ============================================ header-based TPM pacing (GroqLLM)
+
+from autoreels.cloud.providers import _GROQ_FREE_FALLBACK_DELAY_SEC  # noqa: E402
+
+
+def test_groq_pacing_waits_when_remaining_below_request(monkeypatch):
+    """remaining-tokens < estimated request size → sleep until reset before sending."""
+    import autoreels.cloud.providers as P
+
+    sleeps = []
+    clock = [100.0]
+
+    monkeypatch.setattr(P, "_httpx_post", lambda *a, **kw: _FakeResp(200, _good_envelope()))
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = P.GroqLLM(
+        fallback_delay_sec=0,
+        _sleep_fn=sleeps.append,
+        _monotonic_fn=lambda: clock[0],
+    )
+    # Inject low budget: 500 remaining, reset in 30s from now
+    llm._budget_remaining = 500
+    llm._budget_reset_at = 130.0   # clock[0] + 30
+    llm._got_budget_headers = True
+
+    # ~600-token message (2400 chars / 4 = 600) → should pace
+    msg = [{"role": "user", "content": "x" * 2400}]
+    llm.complete(msg)
+
+    assert len(sleeps) == 1
+    assert abs(sleeps[0] - 30.5) < 1.0, f"ожидали ~30.5с, получили {sleeps[0]}"
+
+
+def test_groq_pacing_fallback_delay_when_no_headers(monkeypatch):
+    """No x-ratelimit-* headers in responses → fallback_delay_sec applied on 2nd+ request."""
+    import autoreels.cloud.providers as P
+
+    sleeps = []
+    monkeypatch.setattr(P, "_httpx_post",
+                        lambda *a, **kw: _FakeResp(200, _good_envelope()))  # no rl headers
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = P.GroqLLM(fallback_delay_sec=60.0, _sleep_fn=sleeps.append)
+
+    msg = [{"role": "user", "content": "hi"}]
+    llm.complete(msg)   # first request — no sleep
+    llm.complete(msg)   # second request — fallback sleep (no headers seen)
+
+    assert sleeps == [60.0], f"ожидали один fallback sleep 60с, получили {sleeps}"
+
+
+def test_groq_pacing_6_chunks_zero_429s(monkeypatch):
+    """6 chunks against a 6000-TPM mock: pacing prevents any 429.
+
+    Setup: first response leaves remaining=1800 (< 4000 next chunk).
+    Pacing sleeps until reset; subsequent requests see a full 6000 budget.
+    All 6 complete() calls succeed — no ProviderThrottled raised.
+    """
+    import autoreels.cloud.providers as P
+
+    sleeps = []
+    clock = [0.0]
+
+    def fake_sleep(s):
+        sleeps.append(s)
+        clock[0] += s
+
+    call_num = [0]
+
+    def fake_post(url, *, headers, json, timeout):
+        call_num[0] += 1
+        if call_num[0] == 1:
+            # Budget nearly exhausted after first chunk (4000 tokens consumed from 6000)
+            rl_hdrs = {
+                "x-ratelimit-remaining-tokens": "2000",
+                "x-ratelimit-reset-tokens": "50s",
+            }
+        else:
+            # Fresh window after pacing wait
+            rl_hdrs = {
+                "x-ratelimit-remaining-tokens": "6000",
+                "x-ratelimit-reset-tokens": "60s",
+            }
+        return _FakeResp(200, _good_envelope(), headers=rl_hdrs)
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = P.GroqLLM(
+        fallback_delay_sec=0,   # disable fallback so only header pacing acts
+        _sleep_fn=fake_sleep,
+        _monotonic_fn=lambda: clock[0],
+    )
+
+    # ~4000-token chunk (16000 chars)
+    big_msg = [{"role": "user", "content": "x" * 16000}]
+
+    for _ in range(6):
+        llm.complete(big_msg)   # must not raise
+
+    assert call_num[0] == 6, "все 6 чанков должны были дойти до API"
+    assert len(sleeps) >= 1, "пейсинг должен был вызвать sleep хотя бы раз"
+    # First sleep was ~50.5s (reset_at=50, now=0 → wait=50+0.5)
+    assert abs(sleeps[0] - 50.5) < 1.0, f"первый sleep должен быть ~50.5с, получили {sleeps[0]}"
+
+
 def test_pool_single_log_line_per_throttle_event(capsys):
     """Один лог при первом throttle, один при достижении бэкоффа — не на каждую итерацию."""
     n = _POOL_MAX_CONSEC_FAILURES
