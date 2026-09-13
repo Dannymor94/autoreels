@@ -138,21 +138,24 @@ def merge_transcripts(
     return Transcript(language=language, words=all_words)
 
 
-def dedup_reels(reels: list[Reel], threshold: float) -> list[Reel]:
+def dedup_reels(reels: list[Reel], threshold: float, *, dropped: list[dict] | None = None) -> list[Reel]:
     """Дедуп рилов из разных R0-чанков по пересечению (intersection / min_duration).
 
-    Сортирует по t0 ПЕРЕД дедупом: «первый по t0» — хронологически ранний.
-    При пересечении > threshold оставляет тот, кто раньше в хронологии (меньший start).
+    Сортирует по score desc ПЕРЕД дедупом: при пересечении > threshold оставляет
+    сегмент с БОЛЬШИМ score (ранее — первый по t0; теперь унифицировано с dedup()).
+    If `dropped` is given, appends sidecar-ready dicts for eliminated reels.
     """
     kept: list[Reel] = []
-    for r in sorted(reels, key=lambda x: x.start):
-        duplicate = False
-        for k in kept:
-            if _overlap_ratio(r, k) > threshold:
-                duplicate = True
-                break
-        if not duplicate:
+    for r in sorted(reels, key=lambda x: -x.score):
+        winner = next((k for k in kept if _overlap_ratio(r, k) > threshold), None)
+        if winner is None:
             kept.append(r)
+        elif dropped is not None:
+            dropped.append({
+                "id": r.id, "score": r.score,
+                "reason": f"overlap_dedup: overlaps {winner.id}",
+                "first_words": r.hook[:80],
+            })
     return kept
 
 

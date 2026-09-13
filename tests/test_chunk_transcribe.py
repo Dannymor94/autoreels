@@ -270,14 +270,14 @@ def test_chunking_threshold_exactly_on_limit():
 # ====================================================== TEST 5: dedup heavy overlap
 
 def test_dedup_heavy_overlap():
-    """2 рила с 80% пересечением → остаётся ранний по t0, независимо от порядка во входном списке."""
-    # r1: [0, 60], r2: [5, 65] → intersection=55, min_dur=60 → ratio=55/60≈0.92 > 0.5
-    r1 = _reel("r01", 0.0,  60.0)
-    r2 = _reel("r02", 5.0,  65.0)
-    # Подаём в обратном порядке: r2 первый. После сортировки по t0 → r1 первый → r1 остаётся
+    """2 рила с 80% пересечением → остаётся с более высоким score, независимо от порядка во входном списке."""
+    # r1: [0, 60] score=90, r2: [5, 65] score=80 → intersection=55, min_dur=60 → ratio≈0.92 > 0.5
+    r1 = _reel("r01", 0.0,  60.0, score=90)
+    r2 = _reel("r02", 5.0,  65.0, score=80)
+    # Подаём в обратном порядке: r2 первый. После сортировки по -score → r1 первый → r1 остаётся
     result = CT.dedup_reels([r2, r1], threshold=0.5)
     assert len(result) == 1
-    assert result[0].id == "r01"   # ранний по t0, НЕ первый в списке входа
+    assert result[0].id == "r01"   # высший score, НЕ первый в списке входа
 
 
 def test_dedup_exact_threshold_kept():

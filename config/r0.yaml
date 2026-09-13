@@ -35,7 +35,7 @@ candidate_multiplier: 1.75     # over-generation: цель кандидатов 
                                # <манифест>.discarded.json рядом с манифестом.
 chunk_tokens: 3500
 chunk_overlap_sec: 60
-dedup_overlap_threshold: 0.5
+dedup_overlap_threshold: 0.6
 dangling_words:          # first-word blocklist for dangling-start check (post-snap, uppercase variants)
   - поэтому
   - потому
@@ -52,7 +52,7 @@ tail_sec: 0.3                   # хвост при snap к границе сл�
 tail_pad_sec: 0.7               # «воздух» после последнего слова клипа (apply_padding, post-snap)
 lead_pad_sec: 0.3               # заход перед первым словом клипа (apply_padding, post-snap)
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
-max_start_repair_sec: 6.0       # seconds to scan forward for a sentence-initial word when repairing dangling start
+max_start_repair_sec: 10.0      # seconds to scan forward for a sentence-initial word when repairing dangling start
 # Snap «до завершения мысли»: конец клипа тянется до конца предложения (пунктуация Whisper) или
 # длинной паузы, пока (end-start) < max_duration; не обрывать на союзе/предлоге и микропаузе;
 # не влезло в лимит → откат к последней целой фразе.
@@ -119,5 +119,5 @@ chunking:
                                        # Не превышай 5500: total-запрос (+ overhead) упрётся в 6K TPM.
   r0_overlap_tokens: 300               # перекрытие R0-чанков (≈60с речи)
   r0_chunk_delay_sec: 2.0              # пауза между R0-чанками (избежать 429 TPM Groq)
-  dedup_overlap_ratio: 0.5             # порог дедупа рилов из разных R0-чанков
+  dedup_overlap_ratio: 0.6             # порог дедупа рилов из разных R0-чанков
   fail_fast: false                     # false → продолжать при провале одного чанка

@@ -636,3 +636,57 @@ def test_corpus_sidecar_valid():
             for e in entries:
                 assert "id" in e, f"{sidecar.name}: entry missing 'id'"
                 assert "reason" in e, f"{sidecar.name}: entry missing 'reason'"
+
+
+# ----------------------------------------------------------- terminal-mark repair (c019/c020 regression)
+
+def test_repair_terminal_mark_before_lowercase_and():
+    """c019/c020 regression: first sentence ends within 3 s → start moves to next word even if it's 'И'."""
+    # Simulates: "страх порождает страх, ещё больше, ещё больше. И все ваши травмы..."
+    # Terminal mark at t1=2.9, next word 'И' (lowercase/connective) → repair via terminal-mark path.
+    words = _words([
+        ("страх", 0.5, 0.9),
+        ("порождает", 1.0, 1.5),
+        ("страх,", 1.6, 1.9),
+        ("ещё", 2.0, 2.3),
+        ("больше.", 2.4, 2.9),   # terminal mark here
+        ("И", 3.0, 3.3),
+        ("все", 3.4, 3.7),
+        ("ваши", 3.8, 4.1),
+        ("травмы", 4.2, 40.0),
+    ])
+    r = _creel(start=0.5, end=40.0, score=88)
+    kept, disc = S.filter_dangling_start([r], words, min_duration=15.0, max_start_repair_sec=10.0)
+    assert len(kept) == 1 and len(disc) == 0, f"should repair, not drop; disc={disc}"
+    assert kept[0].start == pytest.approx(3.0)
+    assert kept[0].start_snap_reason == "repaired_to_sentence"
+    assert "start_repaired" in kept[0].flags
+
+
+def test_repair_no_terminal_no_capital_drops():
+    """Clip with neither terminal mark nor capitalised word within 10 s → dropped."""
+    words = _words([
+        ("и", 0.0, 0.3),
+        ("всё", 0.4, 0.8),
+        ("продолжается", 0.9, 1.5),
+        ("ещё", 2.0, 11.0),  # no terminal, no uppercase in window
+        ("Важно", 12.0, 40.0),  # uppercase but past 10-s deadline
+    ])
+    r = _creel(start=0.0, end=40.0)
+    kept, disc = S.filter_dangling_start([r], words, min_duration=15.0, max_start_repair_sec=10.0)
+    assert len(kept) == 0 and len(disc) == 1
+
+
+def test_sidecar_invariant_candidates_eq_reels_plus_sidecar():
+    """candidates_after_dedup == manifest_reels + sidecar overlap_dedup entries (dedup invariant)."""
+    # Build 5 reels, 2 pairs overlap >60%, 1 standalone
+    reels = [
+        Reel(id="c001", start=0.0,  end=30.0, score=90, hook="h", title="t", description="d"),
+        Reel(id="c002", start=2.0,  end=32.0, score=85, hook="h", title="t", description="d"),  # overlaps c001
+        Reel(id="c003", start=60.0, end=90.0, score=80, hook="h", title="t", description="d"),
+        Reel(id="c004", start=62.0, end=92.0, score=75, hook="h", title="t", description="d"),  # overlaps c003
+        Reel(id="c005", start=120.0, end=150.0, score=70, hook="h", title="t", description="d"),
+    ]
+    dropped: list[dict] = []
+    kept = S.dedup(reels, overlap_threshold=0.6, dropped=dropped)
+    assert len(kept) + len(dropped) == len(reels)

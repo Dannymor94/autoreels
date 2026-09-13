@@ -600,7 +600,7 @@ def _stage_compress(transcript, *, r0_cfg):
 
 
 def _stage_select(compressed, *, r0_cfg, root, provider=None):
-    """R0-выбор. Returns all post-dedup candidates (no top-N/rank yet — that happens after snap).
+    """R0-выбор. Returns (reels, dedup_disc) where dedup_disc is a list of overlap_dedup sidecar entries.
     `provider` — заранее собранный пул (cmd_run строит его и валидирует ДО транскрипции);
     если None — собираем здесь (standalone-путь)."""
     print("выбор моментов…", flush=True)
@@ -609,10 +609,12 @@ def _stage_select(compressed, *, r0_cfg, root, provider=None):
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     if provider is None:
         provider = build_pool(r0_cfg)
-    return select(
+    dedup_disc: list[dict] = []
+    reels = select(
         compressed, system_text=system_text, fewshot=fewshot,
-        provider=provider, r0_cfg=r0_cfg,
+        provider=provider, r0_cfg=r0_cfg, _dropped=dedup_disc,
     )
+    return reels, dedup_disc
 
 
 def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
@@ -1232,7 +1234,7 @@ def cmd_run(
     )
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
-    reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+    reels, dedup_disc = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
     for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
         r.r0_start, r.r0_end = r.start, r.end
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
@@ -1255,7 +1257,7 @@ def cmd_run(
     reels, topn_disc = apply_top_n(
         reels, max_reels=r0_cfg.max_reels, transcript_words=tx_words,
     )
-    discarded = dangling_disc + topn_disc
+    discarded = dedup_disc + dangling_disc + topn_disc
     reels = renumber_reels(reels)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
@@ -2113,8 +2115,32 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
             }, ensure_ascii=False, indent=2), encoding="utf-8")
             written += 1
 
+    # Orphan cleanup: delete unlabelled fixtures for processed stems whose index > reel count.
+    stem_reel_counts: dict[str, int] = {}
+    for mf in manifests:
+        mf = Path(mf)
+        manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        stem_reel_counts[Path(manifest.source).stem] = len(manifest.reels)
+    deleted_orphans = 0
+    for stem, reel_count in stem_reel_counts.items():
+        idx = reel_count + 1
+        while True:
+            candidate = out / f"{stem}__{idx}.json"
+            if not candidate.is_file():
+                break
+            try:
+                prev = json.loads(candidate.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                prev = {}
+            if prev.get("label") is None:
+                candidate.unlink()
+                print(f"  удалён orphan: {candidate.name}", flush=True)
+                deleted_orphans += 1
+            idx += 1
+
     total = written + skipped
-    print(f"\n=== dump-clips: {written} записано / {skipped} пропущено (label) / {total} всего ===",
+    print(f"\n=== dump-clips: {written} записано / {skipped} пропущено (label) / {total} всего"
+          f"{f' / {deleted_orphans} orphan удалено' if deleted_orphans else ''} ===",
           flush=True)
     print(f"  hit_duration_cap: {n_cap}", flush=True)
     trunc_line = ", ".join(f"{k}: {v}" for k, v in trunc_counts.items())

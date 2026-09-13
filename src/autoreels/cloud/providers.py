@@ -80,6 +80,9 @@ _POOL_BACKOFF_BASE_SEC = 60.0    # база экспоненциального �
 # Groq free-tier: conservative fallback when x-ratelimit-* headers absent.
 # ponytail: flat constant; expose via build_pool/config if per-key tuning needed
 _GROQ_FREE_FALLBACK_DELAY_SEC = 60.0
+# Groq chat-template adds ~200 special tokens (BOS, role markers, etc.) on top of text content.
+# Used in pacing and max_tokens computation so both mirror the actual admission check.
+_GROQ_CHAT_TEMPLATE_OVERHEAD = 400  # conservative: 200 template + 200 buffer
 
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
@@ -467,8 +470,9 @@ class GroqLLM:
         # Must fit within the per-window admission limit: prompt + max_tokens ≤ budget_limit.
         # Groq chat-template overhead adds ~200 tokens on top of our text estimate, so use
         # budget_limit − estimated − 400 as the hard ceiling (400 = 200 template + 200 buffer).
-        max_tokens = max(1024, min(2048, self._budget_limit - estimated - 400))
-        self._pace_if_needed(estimated + max_tokens)
+        max_tokens = max(1024, min(2048, self._budget_limit - estimated - _GROQ_CHAT_TEMPLATE_OVERHEAD))
+        # Pace on the full admission cost: text estimate + chat-template overhead + max_tokens.
+        self._pace_if_needed(estimated + _GROQ_CHAT_TEMPLATE_OVERHEAD + max_tokens)
         self._request_count += 1
 
         payload = {

@@ -227,22 +227,32 @@ _DEFAULT_DANGLING = frozenset({
 })
 
 
+_TERMINAL_MARKS = frozenset(".?!")
+
+
+def _word_ends_sentence(w) -> bool:
+    """True if word ends with a sentence-terminal punctuation mark."""
+    return bool(w.word) and w.word.rstrip("»\"')").endswith(tuple(_TERMINAL_MARKS))
+
+
 def filter_dangling_start(
     reels: list[Reel],
     transcript_words: list,
     *,
     dangling_words: list[str] | None = None,
     min_duration: float = 15.0,
-    max_start_repair_sec: float = 6.0,
+    max_start_repair_sec: float = 10.0,
 ) -> tuple[list[Reel], list[dict]]:
     """Drop (or repair) clips whose snapped first word begins lowercase or is a dangling connective.
 
-    Before dropping, scans forward up to max_start_repair_sec for the first sentence-initial word
-    (uppercase, not in dangling set). If found and clip still meets min_duration → keep with
-    start_snap_reason='repaired_to_sentence' and start_repair_sec set.
+    Repair priority (in order):
+    (a) If a sentence-terminal mark (.?!) exists within max_start_repair_sec, move start to the
+        word immediately after it — regardless of case or connective status.
+    (b) Otherwise, scan for first uppercase non-dangling word within the window.
+    (c) Only if neither works: drop.
 
-    Must be called AFTER snap so boundaries reflect the actual clip start.
-    Returns (kept, discarded_entries). Each entry: {id, score, reason, first_words}.
+    The connective list applies only to path (b), not to words following a terminal mark.
+    Must be called AFTER snap. Returns (kept, discarded_entries).
     """
     from autoreels.local.subtitles import words_in_window
     dw = _DEFAULT_DANGLING | set(dangling_words or [])
@@ -259,22 +269,36 @@ def filter_dangling_start(
         is_dangling = fw_clean in dw
         orig_start = r.start
         if is_lowercase or is_dangling:
-            # Try repair: scan forward for first uppercase non-dangling word within window
             repair_deadline = orig_start + max_start_repair_sec
             repaired = False
-            for w in clip_words[1:]:
+            # (a) terminal-mark scan: first word after a sentence-ending word
+            for i, w in enumerate(clip_words[:-1]):
                 if w.t0 > repair_deadline:
                     break
-                wc = w.word.strip(".,!?;:—–-«»\"'()").lower()
-                if w.word and w.word[0].isupper() and wc not in dw:
-                    new_start = w.t0
-                    if r.end - new_start >= min_duration:
-                        r.start = new_start
-                        r.start_repair_sec = new_start - orig_start
+                if _word_ends_sentence(w):
+                    nw = clip_words[i + 1]
+                    if nw.t0 <= repair_deadline and r.end - nw.t0 >= min_duration:
+                        r.start = nw.t0
+                        r.start_repair_sec = nw.t0 - orig_start
                         r.start_snap_reason = "repaired_to_sentence"
                         r.flags.append("start_repaired")
                         repaired = True
                     break
+            # (b) uppercase non-dangling scan (only if (a) didn't fire)
+            if not repaired:
+                for w in clip_words[1:]:
+                    if w.t0 > repair_deadline:
+                        break
+                    wc = w.word.strip(".,!?;:—–-«»\"'()").lower()
+                    if w.word and w.word[0].isupper() and wc not in dw:
+                        new_start = w.t0
+                        if r.end - new_start >= min_duration:
+                            r.start = new_start
+                            r.start_repair_sec = new_start - orig_start
+                            r.start_snap_reason = "repaired_to_sentence"
+                            r.flags.append("start_repaired")
+                            repaired = True
+                        break
             if not repaired:
                 reason = "dangling_start: " + (
                     "первое слово со строчной буквы" if is_lowercase
@@ -322,12 +346,22 @@ def _overlap_ratio(a: Reel, b: Reel) -> float:
     return inter / shorter if shorter > 0 else 0.0
 
 
-def dedup(reels: list[Reel], *, overlap_threshold: float) -> list[Reel]:
-    """Пересечение > порога → оставить сегмент с большим score (жадно, по убыванию score)."""
+def dedup(reels: list[Reel], *, overlap_threshold: float, dropped: list[dict] | None = None) -> list[Reel]:
+    """Пересечение > порога → оставить сегмент с большим score (жадно, по убыванию score).
+
+    If `dropped` is given, appends sidecar-ready dicts for each eliminated reel.
+    """
     kept: list[Reel] = []
     for r in sorted(reels, key=lambda x: -x.score):
-        if all(_overlap_ratio(r, k) <= overlap_threshold for k in kept):
+        winner = next((k for k in kept if _overlap_ratio(r, k) > overlap_threshold), None)
+        if winner is None:
             kept.append(r)
+        elif dropped is not None:
+            dropped.append({
+                "id": r.id, "score": r.score,
+                "reason": f"overlap_dedup: overlaps {winner.id}",
+                "first_words": r.hook[:80],
+            })
     return kept
 
 
@@ -355,7 +389,7 @@ def _complete_and_parse(provider: LLMProvider, messages: list[dict]) -> list[dic
 
 
 def _select_one(compressed: str, *, system_text: str, fewshot: dict,
-                provider: LLMProvider, r0_cfg) -> list[Reel]:
+                provider: LLMProvider, r0_cfg, _dropped: list[dict] | None = None) -> list[Reel]:
     """Одиночный R0-запрос (без чанкинга): промпт → LLM → валидация → дедуп.
 
     Top-N cut, rank, and dangling_start filter happen later (after snap) in __main__.
@@ -373,7 +407,7 @@ def _select_one(compressed: str, *, system_text: str, fewshot: dict,
     flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
     reels = filter_by_score(reels, min_score=r0_cfg.min_score)
     reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
-    reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold)
+    reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold, dropped=_dropped)
     for i, r in enumerate(reels, 1):
         r.id = f"c{i:03d}"
     return reels
@@ -386,6 +420,7 @@ def select_chunked(
     fewshot: dict,
     provider: LLMProvider,
     r0_cfg,
+    _dropped: list[dict] | None = None,
 ) -> list[Reel]:
     """R0 с чанкингом: транскрипт → чанки → LLM на каждый → смерж + дедуп по t0.
 
@@ -434,7 +469,7 @@ def select_chunked(
     chunk_progress("R0", len(chunks), len(chunks),
                    extra=f"найдено {len(all_reels)} моментов", done=True)
 
-    all_reels = dedup_reels(all_reels, chunking.dedup_overlap_ratio)
+    all_reels = dedup_reels(all_reels, chunking.dedup_overlap_ratio, dropped=_dropped)
     for i, r in enumerate(all_reels, 1):
         r.id = f"c{i:03d}"
     return all_reels
@@ -447,18 +482,20 @@ def select(
     fewshot: dict,
     provider: LLMProvider,
     r0_cfg,
+    _dropped: list[dict] | None = None,
 ) -> list[Reel]:
     """R0 end-to-end: диспетчер одиночного запроса или чанкинга.
 
     Returns all post-dedup candidates with c{NNN} ids. Top-N cut, rank assignment,
     and dangling_start filter happen after snap in __main__ (they need snapped boundaries).
+    If `_dropped` list is given, it is populated with overlap_dedup sidecar entries.
     """
     chunking = getattr(r0_cfg, "chunking", None)
     if chunking and chunking.enabled and _count_tokens(compressed) > chunking.r0_chunk_tokens:
         return select_chunked(compressed, system_text=system_text, fewshot=fewshot,
-                              provider=provider, r0_cfg=r0_cfg)
+                              provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
     return _select_one(compressed, system_text=system_text, fewshot=fewshot,
-                       provider=provider, r0_cfg=r0_cfg)
+                       provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
 
 
 # ---- interview host-turn detection ----

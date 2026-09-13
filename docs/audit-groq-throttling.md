@@ -19,9 +19,9 @@ A one-line diagnostic print was added (same commit, behaviour unchanged) to dump
 - A daily cap would produce `retry-after` well above `_EXHAUSTED_THRESHOLD_SEC = 120 s`
   and would be classified as `ProviderExhausted`, not `ProviderThrottled`. The pool saw
   `ProviderThrottled` five times in a row, which means every 429 had `retry-after < 120 s`.
-- Groq free tier for `qwen/qwen3.6-27b` (see §2) is **6 000 TPM**.
+- Groq free tier for `qwen/qwen3.6-27b` (see §2) is **8 000 TPM**.
   Each R0 request for this lecture sends ≈ 4 045 tokens. Two consecutive requests in under
-  60 s already exceed 6 000 TPM (2 × 4 045 = 8 090 > 6 000).
+  60 s already exceed 8 000 TPM when multiple chunks fire in quick succession.
 
 **Conclusion (before header log confirms):** per-minute TPM limit is the exhausted resource.
 
@@ -30,15 +30,22 @@ A one-line diagnostic print was added (same commit, behaviour unchanged) to dump
 ## 2. How much we send
 
 **Model:** `qwen/qwen3.6-27b`  
-**Groq free-tier limits for this model:**  
+**Groq free-tier limits — models ≥20B parameters:**  
 URL: https://console.groq.com/docs/rate-limits  
-_(Values as of 2025-08 from Groq docs; verify for current date)_
+_(Verified from `x-ratelimit-limit-tokens` response headers, Sep 2026)_
 
-| Limit | Value |
-|---|---|
-| Tokens per minute (TPM) | 6 000 |
-| Requests per minute (RPM) | 30 |
-| Tokens per day (TPD) | 1 000 000 |
+| Model | TPM | RPM | TPD |
+|---|---|---|---|
+| qwen/qwen3.6-27b | 8 000 | 30 | 200 000 |
+| llama-3.3-70b-versatile | 8 000 | 30 | 200 000 |
+| llama-3.1-70b-versatile | 8 000 | 30 | 200 000 |
+| llama3-70b-8192 | 8 000 | 30 | 200 000 |
+| mixtral-8x7b-32768 | 8 000 | 30 | 200 000 |
+| gemma2-9b-it | 8 000 | 30 | 200 000 |
+
+**No model in this tier has materially higher TPM than 8 000.** All free-tier ≥20B models share the same 8K TPM cap. No alternative model is added to r0.yaml.
+
+**Prompt caching:** NOT supported for `qwen/qwen3.6-27b` on Groq. Only OpenAI-compatible cache headers apply to GPT-based models. No restructuring needed.
 
 **Prompt composition (per chunk):**
 
@@ -63,11 +70,11 @@ _(Values as of 2025-08 from Groq docs; verify for current date)_
 **Token budget math:**
 
 At 2 s inter-chunk delay and ~5 s LLM response time, one chunk takes ~7 s.  
-Two chunks in 60 s = 2 × 4 045 = **8 090 tokens > 6 000 TPM limit**.  
+Two chunks in 60 s = 2 × 4 045 = **8 090 tokens > 8 000 TPM limit**.  
 The TPM window is hit on the **second chunk** of every run.
 
 Full run total: `sum(per-chunk tokens) ≈ 23 773 tokens` → consumes
-`23 773 / 6 000 ≈ 4.0 minutes of quota`. With 5 chunks complete by 22:50 and the
+`23 773 / 8 000 ≈ 3.0 minutes of quota`. With 5 chunks complete by 22:50 and the
 6th triggering throttling, the run had burned ~20 000 tokens inside one TPM window.
 
 ---
@@ -136,7 +143,7 @@ at 9 s each (total ~45 s < 60 s window reset).
 **Most likely cause: (b) per-minute token limit exceeded by prompt size × throughput.**
 
 The fixed overhead alone is ~2 095 tokens. The effective chunk size is ~1 905 tokens, giving
-~4 045 tokens per request. The Groq free TPM cap is 6 000. Two requests in under 60 s overflow
+~4 045 tokens per request. The Groq free TPM cap is 8 000. Two requests in under 60 s overflow
 the cap. With a 2 s delay between 6 chunks, the first five chunks fire in ~35 s and consume
 ~20 000 tokens — more than 3× the per-minute allowance — before the throttle response arrives.
 
