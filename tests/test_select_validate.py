@@ -558,3 +558,81 @@ def test_sidecar_ids_unique():
     kept, disc = S.apply_top_n(reels, max_reels=20)
     all_ids = [r.id for r in kept] + [d["id"] for d in disc]
     assert len(all_ids) == len(set(all_ids))
+
+
+# ----------------------------------------------------------- dangling-start repair
+
+def _repair_words():
+    """Words: dangling 'и'+'вот', then uppercase 'Знаете' at t0=11.0, long clip to t1=40."""
+    return _words([
+        ("и", 10.0, 10.2),
+        ("вот", 10.3, 10.6),
+        ("Знаете", 11.0, 11.5),
+        ("что", 11.6, 12.0),
+        ("важно", 12.1, 40.0),
+    ])
+
+
+def test_repair_success():
+    """Dangling opener repaired to first uppercase word within window."""
+    words = _repair_words()
+    r = _creel(start=10.0, end=40.0)
+    kept, disc = S.filter_dangling_start([r], words, min_duration=15.0, max_start_repair_sec=6.0)
+    assert len(kept) == 1 and len(disc) == 0
+    assert kept[0].start == pytest.approx(11.0)
+    assert kept[0].start_repair_sec == pytest.approx(1.0)
+    assert kept[0].start_snap_reason == "repaired_to_sentence"
+    assert "start_repaired" in kept[0].flags
+
+
+def test_repair_no_capital_in_window():
+    """No uppercase word within repair window → clip dropped."""
+    words = _words([
+        ("и", 10.0, 10.2),
+        ("вот", 10.3, 11.0),
+        ("это", 11.1, 15.9),   # lowercase, within 6s window but lowercase
+        ("Важно", 20.0, 40.0),  # uppercase but past deadline (10+6=16)
+    ])
+    r = _creel(start=10.0, end=40.0)
+    kept, disc = S.filter_dangling_start([r], words, min_duration=15.0, max_start_repair_sec=6.0)
+    assert len(kept) == 0 and len(disc) == 1
+    assert disc[0]["id"] == "c001"
+
+
+def test_repair_too_short_after_repair():
+    """Uppercase word found but remaining clip too short → dropped."""
+    words = _words([
+        ("и", 10.0, 10.2),
+        ("Знаете", 14.0, 14.5),  # 25.0 - 14.0 = 11.0 < min_duration=15
+        ("всё", 15.0, 25.0),
+    ])
+    r = _creel(start=10.0, end=25.0)
+    kept, disc = S.filter_dangling_start([r], words, min_duration=15.0, max_start_repair_sec=6.0)
+    assert len(kept) == 0 and len(disc) == 1
+
+
+def test_clean_opener_unchanged():
+    """Clean uppercase opener passes unchanged, no repair fields set."""
+    words = _words([("Самое", 5.0, 5.5), ("главное", 5.6, 40.0)])
+    r = _creel(start=5.0, end=40.0)
+    kept, disc = S.filter_dangling_start([r], words, min_duration=15.0)
+    assert len(kept) == 1 and len(disc) == 0
+    assert kept[0].start == pytest.approx(5.0)
+    assert kept[0].start_repair_sec is None
+
+
+def test_corpus_sidecar_valid():
+    """Every existing manifest's sidecar (if present) is a valid list with id+reason."""
+    import json
+    manifest_dir = ROOT / "manifests"
+    manifests = [p for p in manifest_dir.glob("*.json") if ".discarded" not in p.name]
+    if not manifests:
+        pytest.skip("no manifests")
+    for mp in manifests:
+        sidecar = mp.with_suffix("").with_suffix(".discarded.json")
+        if sidecar.exists():
+            entries = json.loads(sidecar.read_text())
+            assert isinstance(entries, list), f"{sidecar.name}: expected list"
+            for e in entries:
+                assert "id" in e, f"{sidecar.name}: entry missing 'id'"
+                assert "reason" in e, f"{sidecar.name}: entry missing 'reason'"

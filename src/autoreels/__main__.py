@@ -674,21 +674,22 @@ def _stage_trim(reels, transcript, *, r0_cfg):
     return reels
 
 
-def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, int]:
+def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, list[dict]]:
     """Пост-snap: убрать клипы короче min_clip_duration, попытавшись расширить до фразы.
 
     Для каждого короткого клипа:
       1. Диагностирует причину (R0 вернул коротко / snap схлопнул).
       2. Пробует расширить конец до ближайшей границы мысли (try_rescue_clip).
       3. Если расширение даёт >= min_clip_duration → клип спасён (остаётся).
-      4. Иначе → отброшен, причина залогирована.
+      4. Иначе → отброшен, причина логируется в sidecar.
 
-    Returns (kept_reels, n_dropped).
+    Returns (kept_reels, discarded_entries).
     """
+    from autoreels.local.subtitles import words_in_window
     min_dur = r0_cfg.min_clip_duration
     words = transcript.words
     kept: list = []
-    n_dropped = 0
+    disc: list[dict] = []
 
     for r in reels:
         if r.end - r.start >= min_dur:
@@ -715,12 +716,14 @@ def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, int]:
             kept.append(r)
         else:
             print(f"  ✗ {r.id}: отброшен — {reason}", flush=True)
-            n_dropped += 1
+            cw = words_in_window(words, r.start, r.end)
+            first_8 = " ".join(w.word for w in cw[:8])
+            disc.append({"id": r.id, "score": r.score, "reason": f"too_short: {reason}", "first_words": first_8})
 
-    if n_dropped:
-        print(f"min_clip_filter: отброшено {n_dropped} коротких клипов", flush=True)
+    if disc:
+        print(f"min_clip_filter: отброшено {len(disc)} коротких клипов", flush=True)
 
-    return kept, n_dropped
+    return kept, disc
 
 
 def _stage_subtitles(reels, transcript):
@@ -1239,9 +1242,16 @@ def cmd_run(
     reels, dangling_disc = filter_dangling_start(
         reels, tx_words,
         dangling_words=getattr(r0_cfg, "dangling_words", None),
+        min_duration=r0_cfg.min_clip_duration,
+        max_start_repair_sec=getattr(r0_cfg, "max_start_repair_sec", 6.0),
     )
-    if dangling_disc:
-        print(f"  ✗ dangling_start: {len(dangling_disc)} клип(ов) снято", flush=True)
+    repaired = sum(1 for r in reels if "start_repaired" in r.flags)
+    dropped_dangling = len(dangling_disc)
+    if dropped_dangling or repaired:
+        print(
+            f"  dangling_start: снято {dropped_dangling}, отремонтировано {repaired}",
+            flush=True,
+        )
     reels, topn_disc = apply_top_n(
         reels, max_reels=r0_cfg.max_reels, transcript_words=tx_words,
     )
@@ -1249,16 +1259,16 @@ def cmd_run(
     reels = renumber_reels(reels)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
-    reels, n_short_dropped = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
+    reels, short_disc = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
+    discarded += short_disc
     reels = _stage_subtitles(reels, transcript)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
     )
     path = _write_manifest(manifest, manifests_dir)
     _write_discarded(discarded, path)
-    drop_info = f" (отброшено коротких: {n_short_dropped})" if n_short_dropped else ""
     discard_info = f", сброшено кандидатов: {len(discarded)}" if discarded else ""
-    print(f"манифест собран: {len(manifest.reels)} reels{drop_info}{discard_info} → {path}", flush=True)
+    print(f"манифест собран: {len(manifest.reels)} reels{discard_info} → {path}", flush=True)
     if push:
         # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
         _commit_push_manifest(path, len(manifest.reels), root=root,

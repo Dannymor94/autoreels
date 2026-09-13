@@ -119,6 +119,7 @@ class R0Config(BaseModel):
         "потому", "чтобы", "если", "когда", "то", "есть", "вот",
     ])
     dangling_words: list[str] = Field(default_factory=list)  # extra blocklist for dangling_start gate
+    max_start_repair_sec: float = 6.0  # scan window to find a sentence-initial word when repairing a dangling start
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str

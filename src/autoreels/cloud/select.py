@@ -232,8 +232,14 @@ def filter_dangling_start(
     transcript_words: list,
     *,
     dangling_words: list[str] | None = None,
+    min_duration: float = 15.0,
+    max_start_repair_sec: float = 6.0,
 ) -> tuple[list[Reel], list[dict]]:
-    """Drop clips whose snapped first word begins lowercase or is a dangling connective/pronoun.
+    """Drop (or repair) clips whose snapped first word begins lowercase or is a dangling connective.
+
+    Before dropping, scans forward up to max_start_repair_sec for the first sentence-initial word
+    (uppercase, not in dangling set). If found and clip still meets min_duration → keep with
+    start_snap_reason='repaired_to_sentence' and start_repair_sec set.
 
     Must be called AFTER snap so boundaries reflect the actual clip start.
     Returns (kept, discarded_entries). Each entry: {id, score, reason, first_words}.
@@ -251,13 +257,33 @@ def filter_dangling_start(
         fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
         is_lowercase = bool(fw) and fw[0].islower()
         is_dangling = fw_clean in dw
+        orig_start = r.start
         if is_lowercase or is_dangling:
-            reason = "dangling_start: " + (
-                "первое слово со строчной буквы" if is_lowercase
-                else f"висячее слово «{fw_clean}»"
-            )
-            r.flags.append("dangling_start")
-            disc.append({"id": r.id, "score": r.score, "reason": reason, "first_words": first_8})
+            # Try repair: scan forward for first uppercase non-dangling word within window
+            repair_deadline = orig_start + max_start_repair_sec
+            repaired = False
+            for w in clip_words[1:]:
+                if w.t0 > repair_deadline:
+                    break
+                wc = w.word.strip(".,!?;:—–-«»\"'()").lower()
+                if w.word and w.word[0].isupper() and wc not in dw:
+                    new_start = w.t0
+                    if r.end - new_start >= min_duration:
+                        r.start = new_start
+                        r.start_repair_sec = new_start - orig_start
+                        r.start_snap_reason = "repaired_to_sentence"
+                        r.flags.append("start_repaired")
+                        repaired = True
+                    break
+            if not repaired:
+                reason = "dangling_start: " + (
+                    "первое слово со строчной буквы" if is_lowercase
+                    else f"висячее слово «{fw_clean}»"
+                )
+                r.flags.append("dangling_start")
+                disc.append({"id": r.id, "score": r.score, "reason": reason, "first_words": first_8})
+            else:
+                kept.append(r)
         else:
             kept.append(r)
     return kept, disc

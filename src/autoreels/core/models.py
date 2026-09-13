@@ -134,7 +134,8 @@ class Reel(BaseModel):
     end_snap_reason: str | None = None  # "sentence" | "pause" | "cap" | None
     # Метрики start-trim: насколько start сдвинулся вперёд при too_long trim.
     start_drift_sec: float | None = None
-    start_snap_reason: str | None = None  # "sentence" | "pause" | "hard_cut" | None
+    start_snap_reason: str | None = None  # "sentence" | "pause" | "hard_cut" | "repaired_to_sentence" | None
+    start_repair_sec: float | None = None  # seconds trimmed from front during dangling-start repair
 
 
 class Manifest(BaseModel):
