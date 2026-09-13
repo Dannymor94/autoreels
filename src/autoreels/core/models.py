@@ -136,6 +136,7 @@ class Reel(BaseModel):
     start_drift_sec: float | None = None
     start_snap_reason: str | None = None  # "sentence" | "pause" | "hard_cut" | "repaired_to_sentence" | None
     start_repair_sec: float | None = None  # seconds trimmed from front during dangling-start repair
+    ends_on_host_turn: bool = False  # diagnostic: would have ended inside a host question without interview snap
 
 
 class Manifest(BaseModel):

@@ -459,3 +459,97 @@ def select(
                               provider=provider, r0_cfg=r0_cfg)
     return _select_one(compressed, system_text=system_text, fewshot=fewshot,
                        provider=provider, r0_cfg=r0_cfg)
+
+
+# ---- interview host-turn detection ----
+
+_SECOND_PERSON = {"вы", "вас", "вам", "вашу", "ваш", "ваши"}
+_HOST_OPENERS = ("расскажите", "скажите", "как вы", "что вы", "почему вы", "когда вы")
+
+
+def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
+    """Return (start, end) spans of host interrogative turns.
+
+    A turn qualifies when its sentence ends with '?' AND contains a second-person
+    marker or starts with a host-opener phrase.
+    ponytail: O(n) scan over word list; no sentence segmentation — splits on terminal punct.
+    """
+    if not transcript_words:
+        return []
+
+    turns = []
+    sent_words = []
+
+    def _flush(buf):
+        if not buf:
+            return
+        text = " ".join(w.word for w in buf).lower()
+        last = buf[-1].word.rstrip()
+        if not last.endswith("?"):
+            return
+        has_2p = any(w.word.lower() in _SECOND_PERSON for w in buf)
+        has_opener = any(text.startswith(op) for op in _HOST_OPENERS)
+        if has_2p or has_opener:
+            turns.append((buf[0].t0, buf[-1].t1))
+
+    for w in transcript_words:
+        sent_words.append(w)
+        if w.word.rstrip().endswith((".", "?", "!", "…")):
+            _flush(sent_words)
+            sent_words = []
+    _flush(sent_words)  # trailing incomplete sentence
+    return turns
+
+
+# ---- interview snap stage ----
+
+def _stage_interview_snap(
+    reels: list,
+    host_turns: list[tuple[float, float]],
+    *,
+    r0_cfg,
+) -> tuple[list, list[dict]]:
+    """Enforce interview clip boundaries: end before host turn, optionally include host question."""
+    from autoreels.local.subtitles import words_in_window
+
+    kept = []
+    disc = []
+    min_dur = getattr(r0_cfg, "min_clip_duration", 15.0)
+    tx_words = getattr(r0_cfg, "_tx_words", [])
+
+    for r in reels:
+        # --- end rule: move back before earliest host turn that starts after r0_start ---
+        r0_start = r.r0_start if r.r0_start is not None else r.start
+        intruding = [
+            (ts, te) for ts, te in host_turns
+            if ts > r0_start and ts < r.end + 10.0 and te <= r.end + 10.0
+        ]
+        if intruding:
+            earliest_ts = min(ts for ts, _ in intruding)
+            r.end = earliest_ts - 0.15
+            r.end_snap_reason = "before_host_turn"
+
+        # drop if too short after end adjustment
+        if r.end - r.start < min_dur:
+            first_words = " ".join(w.word for w in words_in_window(tx_words, r.start, r.end)[:8])
+            disc.append({
+                "id": r.id,
+                "score": r.score,
+                "reason": "interview_snap_too_short",
+                "first_words": first_words,
+            })
+            continue
+
+        # --- start rule: include preceding host question if close and short enough ---
+        preceding = [
+            (ts, te) for ts, te in host_turns
+            if te <= r0_start and (r0_start - te) <= 8.0 and (te - ts) <= 12.0
+        ]
+        if preceding:
+            closest = max(preceding, key=lambda x: x[1])  # closest end to r0_start
+            r.start = closest[0]
+            r.start_snap_reason = "host_question_included"
+
+        kept.append(r)
+
+    return kept, disc
