@@ -28,8 +28,8 @@ from autoreels.cloud.diagnose import classify_end, summarize
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import ProviderError, build_pool
 from autoreels.cloud.select import (
-    SelectError, apply_top_n, diagnose_collapse, filter_dangling_start,
-    filter_min_clip_duration, select,
+    SelectError, apply_top_n, detect_host_turns, diagnose_collapse,
+    filter_dangling_start, filter_min_clip_duration, select, _stage_interview_snap,
 )
 from autoreels.cloud.chunk_transcribe import renumber_reels
 from autoreels.cloud.snap import apply_padding, snap_segments, try_rescue_clip
@@ -1254,6 +1254,28 @@ def cmd_run(
             f"  dangling_start: снято {dropped_dangling}, отремонтировано {repaired}",
             flush=True,
         )
+    # Interview: enforce host-turn clip boundaries.
+    host_turns = (
+        detect_host_turns(tx_words)
+        if getattr(r0_cfg, "source_kind", "lecture") == "interview"
+        else []
+    )
+    if host_turns:
+        reels, interview_disc = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg)
+        n_host_cut = sum(1 for r in reels if r.end_snap_reason == "before_host_turn")
+        n_host_start = sum(1 for r in reels if r.start_snap_reason == "host_question_included")
+        if n_host_cut or n_host_start or interview_disc:
+            print(
+                f"  interview snap: before_host_turn={n_host_cut}"
+                f", host_question_included={n_host_start}"
+                f", too_short_dropped={len(interview_disc)}",
+                flush=True,
+            )
+        dangling_disc += interview_disc
+    # Compute ends_on_host_turn diagnostic on all kept reels (False for lecture; measurable for interview).
+    for r in reels:
+        r0_s = r.r0_start if r.r0_start is not None else r.start
+        r.ends_on_host_turn = any(ts > r0_s and ts <= r.end for ts, te in host_turns)
     reels, topn_disc = apply_top_n(
         reels, max_reels=r0_cfg.max_reels, transcript_words=tx_words,
     )

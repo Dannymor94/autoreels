@@ -500,8 +500,18 @@ def select(
 
 # ---- interview host-turn detection ----
 
-_SECOND_PERSON = {"вы", "вас", "вам", "вашу", "ваш", "ваши"}
-_HOST_OPENERS = ("расскажите", "скажите", "как вы", "что вы", "почему вы", "когда вы")
+_SECOND_PERSON = frozenset({
+    # informal (ты)
+    "ты", "тебе", "тебя", "твой", "твоя", "твоё", "твоего", "твоему", "твою", "твоих",
+    # formal (вы)
+    "вы", "вас", "вам", "вашу", "ваш", "ваши", "вашего", "вашему",
+})
+_HOST_OPENERS = (
+    # informal
+    "расскажи", "а как ты", "а что ты", "бывало ли", "как ты",
+    # formal
+    "расскажите", "скажите", "как вы", "что вы", "почему вы", "когда вы",
+)
 
 
 def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
@@ -544,6 +554,7 @@ def _stage_interview_snap(
     reels: list,
     host_turns: list[tuple[float, float]],
     *,
+    tx_words: list,
     r0_cfg,
 ) -> tuple[list, list[dict]]:
     """Enforce interview clip boundaries: end before host turn, optionally include host question."""
@@ -552,7 +563,6 @@ def _stage_interview_snap(
     kept = []
     disc = []
     min_dur = getattr(r0_cfg, "min_clip_duration", 15.0)
-    tx_words = getattr(r0_cfg, "_tx_words", [])
 
     for r in reels:
         # --- end rule: move back before earliest host turn that starts after r0_start ---

@@ -1,4 +1,5 @@
 # R0 — конфиг выбора моментов. Всё, что вынесено из кода (R0_SPEC §10).
+source_kind: interview         # "lecture" | "interview"
 duration_preset: shorts        # shorts | reels | tiktok
 model: qwen/qwen3.6-27b        # LLM R0 на Groq (основная, сильнее по качеству). Сверить
                                # список: curl .../v1/models (прежняя qwen3-32b снята → 404)
