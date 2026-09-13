@@ -70,6 +70,12 @@ _TIMEOUT_BACKOFF_SEC = 2.0     # короткий бэкофф между рет
 _MAX_TIMEOUTS = 3             # сколько таймаутов терпит пул (по сиблингам) до чанк-фейла
 _TIMEOUT_COOLDOWN_SEC = 2.0
 
+# Защита пула от бесконечного спина на одном провайдере.
+# ponytail: flat constants, move to config if per-preset tuning needed
+_POOL_MAX_CONSEC_FAILURES = 5    # после N подряд throttled/exhausted — экспоненциальный бэкофф
+_POOL_BUDGET_SEC = 600.0         # суммарный бюджет ожидания на один complete() — 10 мин
+_POOL_BACKOFF_BASE_SEC = 60.0    # база экспоненциального бэкоффа (×2^n, cap 3600с)
+
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
 
@@ -469,6 +475,7 @@ class _PoolMember:
         self.available_at = 0.0
         self.reason = ""
         self.disabled = False
+        self.consec_failures = 0  # consecutive throttled/exhausted failures this complete() call
 
     @property
     def name(self) -> str:
@@ -538,7 +545,19 @@ class ProviderPool:
         пустых подряд — пробрасываем наверх (select пометит чанк failed, видео не падает)."""
         empty_count = 0
         timeout_count = 0
+        _budget_start = self._clock()
+        _fail_counts: dict[str, int] = {}
+        # reset per-call consecutive failure counters
+        for _m in self._members:
+            _m.consec_failures = 0
         while True:
+            elapsed = self._clock() - _budget_start
+            if elapsed > _POOL_BUDGET_SEC:
+                counts = ", ".join(f"{n}: {c}" for n, c in sorted(_fail_counts.items()))
+                raise ProviderError(
+                    f"бюджет ожидания {_POOL_BUDGET_SEC:.0f}с исчерпан без ответа "
+                    f"(отказы: {counts or '—'})"
+                )
             active = [m for m in self._members if not m.disabled]
             if not active:
                 raise ProviderError(
@@ -575,21 +594,39 @@ class ProviderPool:
                           flush=True)
                     continue
                 except ProviderExhausted as e:
+                    _fail_counts[m.name] = _fail_counts.get(m.name, 0) + 1
                     self._cooldown(m, now, e, min_sec=_EXHAUSTED_THRESHOLD_SEC)
+                    if m.consec_failures == 1:
+                        print(f"\n  ⏳ {m.name} исчерпан (retry-after={e.retry_after:.0f}с)", flush=True)
                     continue
                 except ProviderThrottled as e:
+                    _fail_counts[m.name] = _fail_counts.get(m.name, 0) + 1
                     self._cooldown(m, now, e, min_sec=1.0)
+                    if m.consec_failures == 1:
+                        print(f"\n  ⏳ {m.name} троттлит (retry-after={e.retry_after:.0f}с)", flush=True)
+                    elif m.consec_failures == _POOL_MAX_CONSEC_FAILURES:
+                        wait = m.available_at - now
+                        print(f"\n  ⚠ {m.name} {m.consec_failures}× подряд — бэкофф {wait:.0f}с",
+                              flush=True)
                     continue
-                # успех: сбрасываем кулдаун, запоминаем провайдера для прогресса
+                # успех: сбрасываем кулдаун и счётчик, запоминаем провайдера для прогресса
                 m.available_at = 0.0
                 m.reason = ""
+                m.consec_failures = 0
                 self.last_provider = m.name
                 return result
             # все свободные ушли в кулдаун/исключены → на следующем витке пул поспит или упадёт
 
     def _cooldown(self, member: _PoolMember, now: float, exc: ProviderError, *, min_sec: float) -> None:
         retry_after = getattr(exc, "retry_after", 0.0) or 0.0
-        member.available_at = now + max(retry_after, min_sec)
+        member.consec_failures += 1
+        if member.consec_failures >= _POOL_MAX_CONSEC_FAILURES:
+            # exponential backoff: 60, 120, 240, … cap 3600s — forces fallthrough to sibling
+            extra = _POOL_BACKOFF_BASE_SEC * (2 ** (member.consec_failures - _POOL_MAX_CONSEC_FAILURES))
+            cooldown = min(max(retry_after, extra), 3600.0)
+        else:
+            cooldown = max(retry_after, min_sec)
+        member.available_at = now + cooldown
         member.reason = "exhausted" if isinstance(exc, ProviderExhausted) else "throttled"
 
     def _wait_for_earliest(self) -> None:

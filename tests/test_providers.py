@@ -977,3 +977,147 @@ def test_preflight_disables_when_all_models_unavailable(monkeypatch):
 
     assert pool._members[1].disabled    # OpenRouter выключен
     assert not pool._members[0].disabled  # Groq остаётся
+
+
+# ============================================ защита от бесконечного спина (budget + backoff)
+
+from autoreels.cloud.providers import _POOL_MAX_CONSEC_FAILURES, _POOL_BUDGET_SEC  # noqa: E402
+
+
+def test_pool_retry_after_honored_not_retried_before_expiry():
+    """Провайдер с retry-after=30 не вызывается до истечения 30с."""
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=30), "ok"])
+    pool, clock = _pool(groq)
+    # после первого троттла available_at = 30
+    pool.complete([])
+    assert groq.calls == 2                          # вызван до троттла + после ожидания
+    assert clock.t >= 30.0                          # пул ждал не меньше 30с
+
+
+def test_pool_consecutive_failures_trigger_backoff(capsys):
+    """N подряд throttled-ответов → экспоненциальный бэкофф (кулдаун > retry-after)."""
+    n = _POOL_MAX_CONSEC_FAILURES
+    # N троттлов подряд с retry-after=8, затем успех
+    script = [ProviderThrottled("tpm", retry_after=8)] * n + ["ok"]
+    groq = _ScriptedProvider("Groq", script)
+    pool, clock = _pool(groq)
+    result = pool.complete([])
+    assert result == "ok"
+    # после N-го отказа кулдаун > 8с (экспоненциальный бэкофф начался)
+    # суммарное время > N * 8с (иначе бэкофф не сработал)
+    # первые N-1 по 8с, N-й — 60с (BACKOFF_BASE)
+    assert clock.t >= 8.0 * (n - 1) + 60.0 - 1e-6
+    out = capsys.readouterr().out
+    assert "бэкофф" in out or "подряд" in out      # сообщение о бэкоффе напечатано
+
+
+def test_pool_fallthrough_to_sibling_after_max_consecutive():
+    """После N подряд throttled Groq уходит в длинный кулдаун → следующий вызов идёт на OpenRouter."""
+    n = _POOL_MAX_CONSEC_FAILURES
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=8)] * n + ["groq-ok"])
+    openr = _ScriptedProvider("OpenRouter", ["openr-ok"])
+    pool, clock = _pool(groq, openr)
+    # первый complete: Groq троттлит N раз, на N-й получает длинный бэкофф → OpenRouter подхватывает
+    result = pool.complete([])
+    assert result == "openr-ok"
+    assert pool.last_provider == "OpenRouter"
+
+
+def test_pool_budget_exhausted_raises_with_failure_counts(capsys):
+    """Бюджет {_POOL_BUDGET_SEC}с исчерпан → ProviderError с именами и счётчиками отказов."""
+    # Одиночный провайдер, вечно троттлит с retry-after=1с (вписывается в бюджет по времени)
+    # Быстро исчерпываем бюджет инъекцией часов
+    class _FastClock:
+        """Часы, которые перепрыгивают через бюджет на первой же проверке после первого троттла."""
+        def __init__(self):
+            self.t = 0.0
+            self._jumped = False
+        def __call__(self):
+            return self.t
+
+    fc = _FastClock()
+    calls = [0]
+
+    def _throttle_once(messages, *, temperature=0.0):
+        calls[0] += 1
+        fc.t += 1.0   # имитируем тик часов
+        if calls[0] == 1:
+            fc.t = _POOL_BUDGET_SEC + 1.0   # перепрыгиваем бюджет после первого троттла
+        raise ProviderThrottled("tpm", retry_after=1)
+
+    class _InfiniteThrottle:
+        name = "Groq"
+        _model = "m"
+        def complete(self, messages, *, temperature=0.0):
+            return _throttle_once(messages, temperature=temperature)
+        def available_models(self):
+            return None
+
+    pool = ProviderPool([_InfiniteThrottle()], clock=fc, sleep=lambda s: None)
+    with pytest.raises(ProviderError) as exc:
+        pool.complete([])
+    msg = str(exc.value)
+    assert "бюджет" in msg.lower() or "исчерпан" in msg.lower()
+    assert "Groq" in msg                    # имя провайдера в сообщении об ошибке
+    assert "1" in msg                       # счётчик отказов (>= 1 отказ)
+
+
+def test_pool_budget_no_memory_growth():
+    """Внутренние структуры пула не растут с числом итераций (нет утечки через список/dict)."""
+    import tracemalloc
+
+    class _AlwaysThrottle:
+        name = "Groq"
+        _model = "m"
+        _call = 0
+
+        def complete(self, messages, *, temperature=0.0):
+            self._call += 1
+            raise ProviderThrottled("tpm", retry_after=0)
+
+        def available_models(self):
+            return None
+
+    provider = _AlwaysThrottle()
+
+    class _StepClock:
+        """Прыгает сразу за бюджет на 3-м вызове (одна пара throttle → wait → throttle)."""
+        def __init__(self):
+            self.t = 0.0
+            self._calls = 0
+        def __call__(self):
+            self._calls += 1
+            if self._calls > 3:
+                self.t = _POOL_BUDGET_SEC + 1.0
+            return self.t
+
+    sc = _StepClock()
+    pool = ProviderPool([provider], clock=sc, sleep=lambda s: None)
+
+    tracemalloc.start()
+    snap1 = tracemalloc.take_snapshot()
+    try:
+        pool.complete([])
+    except ProviderError:
+        pass
+    snap2 = tracemalloc.take_snapshot()
+    tracemalloc.stop()
+
+    # дельта памяти должна быть крошечной (< 64 KiB — только несколько dict/list)
+    diff = snap2.compare_to(snap1, "lineno")
+    total_delta = sum(s.size_diff for s in diff if s.size_diff > 0)
+    assert total_delta < 64 * 1024, f"неожиданный рост памяти: {total_delta} байт"
+
+
+def test_pool_single_log_line_per_throttle_event(capsys):
+    """Один лог при первом throttle, один при достижении бэкоффа — не на каждую итерацию."""
+    n = _POOL_MAX_CONSEC_FAILURES
+    # N+2 троттлов, затем успех
+    script = [ProviderThrottled("tpm", retry_after=1)] * (n + 2) + ["ok"]
+    groq = _ScriptedProvider("Groq", script)
+    pool, clock = _pool(groq)
+    pool.complete([])
+    out = capsys.readouterr().out
+    throttle_lines = [ln for ln in out.splitlines() if "троттлит" in ln or "бэкофф" in ln]
+    # Ожидаем ровно 2 строки: первый троттл + сообщение о бэкоффе
+    assert len(throttle_lines) == 2, f"ожидали 2 строки, получили {len(throttle_lines)}: {throttle_lines}"
