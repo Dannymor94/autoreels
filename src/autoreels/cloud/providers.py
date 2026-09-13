@@ -201,6 +201,11 @@ def _chat_request(
         resp = _post_r0(url, headers=headers, payload=payload, provider_name=provider_name)
         if resp.status_code in (429, 413):
             last_status = resp.status_code
+            # diagnostic: dump all ratelimit headers once so we can see which limit is hit
+            _rl_keys = [k for k in resp.headers if "ratelimit" in k.lower() or k.lower() == "retry-after"]
+            if _rl_keys:
+                print(f"  [diag] {provider_name} {resp.status_code} headers: " +
+                      ", ".join(f"{k}={resp.headers[k]}" for k in sorted(_rl_keys)), flush=True)
             wait = float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC))
             if wait >= _EXHAUSTED_THRESHOLD_SEC:
                 raise ProviderExhausted(
