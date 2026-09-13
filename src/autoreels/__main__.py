@@ -1235,14 +1235,15 @@ def cmd_run(
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
     # Dangling-start gate: post-snap, deterministic — checks actual first snapped word.
     # Whisper capitalises sentence-initial words, so first-word-lowercase = mid-sentence start.
+    tx_words = getattr(transcript, "words", [])
     reels, dangling_disc = filter_dangling_start(
-        reels, transcript.words,
+        reels, tx_words,
         dangling_words=getattr(r0_cfg, "dangling_words", None),
     )
     if dangling_disc:
         print(f"  ✗ dangling_start: {len(dangling_disc)} клип(ов) снято", flush=True)
     reels, topn_disc = apply_top_n(
-        reels, max_reels=r0_cfg.max_reels, transcript_words=transcript.words,
+        reels, max_reels=r0_cfg.max_reels, transcript_words=tx_words,
     )
     discarded = dangling_disc + topn_disc
     reels = renumber_reels(reels)
