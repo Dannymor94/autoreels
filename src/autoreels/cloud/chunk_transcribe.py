@@ -311,16 +311,17 @@ def transcribe_chunks(
     language: str = "ru",
     params_key: str = "",
     force: bool = False,
-) -> tuple[list[Transcript | None], list[str]]:
+    initial_prompt: str = "",
+) -> tuple[list[Transcript | None], list[str], int]:
     """Транскрибировать список чанков с кэшем и обработкой провалов.
 
     chunks_info: [(chunk_path, start_sec, end_sec), ...]
     params_key — отпечаток параметров транскрипции в имени чанк-кэша.
     force — безусловно игнорировать существующий чанк-кэш (--force-transcribe).
-    Возвращает (results, warnings):
-      results — list[Transcript|None] в том же порядке (None = провал)
-      warnings — список строк для пользователя о пропущенных диапазонах
+    initial_prompt — если задан, применяет фильтр утечки промпта к каждому чанку.
+    Возвращает (results, warnings, total_leak_words_removed).
     """
+    from autoreels.cloud.transcribe import filter_prompt_leak
     from autoreels.core.progress import chunk_progress
 
     cache_dir = Path(cache_dir)
@@ -329,6 +330,7 @@ def transcribe_chunks(
     total = len(chunks_info)
     results: list[Transcript | None] = []
     warnings: list[str] = []
+    total_leak_removed = 0
 
     for i, (chunk_path, start_sec, end_sec) in enumerate(chunks_info):
         chunk_progress("транскрипция", i + 1, total)
@@ -343,6 +345,9 @@ def transcribe_chunks(
         # Транскрипция
         try:
             tr = backend.transcribe(chunk_path, language=language)
+            if initial_prompt:
+                tr, n_removed = filter_prompt_leak(tr, initial_prompt)
+                total_leak_removed += n_removed
             cache_path.write_text(tr.model_dump_json(), encoding="utf-8")
             results.append(tr)
         except Exception as exc:
@@ -357,7 +362,7 @@ def transcribe_chunks(
             results.append(None)
 
     chunk_progress("транскрипция", total, total, done=True)
-    return results, warnings
+    return results, warnings, total_leak_removed
 
 
 def transcribe_chunked(
@@ -371,6 +376,7 @@ def transcribe_chunked(
     language: str = "ru",
     params_key: str = "",
     force: bool = False,
+    initial_prompt: str = "",
 ) -> tuple[Transcript, list[str]]:
     """Оркестратор Whisper-чанкинга end-to-end.
 
@@ -422,13 +428,16 @@ def transcribe_chunked(
         chunks_info.append((chunk_path, start, end_for_meta))
 
     # Транскрипция + кэш
-    results, warnings = transcribe_chunks(
+    results, warnings, leak_removed = transcribe_chunks(
         chunks_info, backend, cache_dir,
         fail_fast=cfg.fail_fast, language=language,
         params_key=params_key, force=force,
+        initial_prompt=initial_prompt,
     )
 
     # Склейка: offset = real start_sec из chunks_info (не i*duration!)
     real_start_secs = [info[1] for info in chunks_info]
     transcript = merge_transcripts(results, real_start_secs, warns=warnings)
+    if leak_removed:
+        transcript = transcript.model_copy(update={"prompt_leak_removed": leak_removed})
     return transcript, warnings

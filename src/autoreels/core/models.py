@@ -97,6 +97,8 @@ class Transcript(BaseModel):
     model: str = ""
     provider: str = ""
     prompt_hash: str = ""
+    # Count of words removed by the prompt-leak filter across all chunks.
+    prompt_leak_removed: int = 0
 
 
 class Reel(BaseModel):

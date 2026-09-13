@@ -524,6 +524,74 @@ def test_transcribe_no_chunking_cfg_uses_single_request(tmp_path):
     assert result.words[0].word == "тест"
 
 
+# ------------------------------------------------------ filter_prompt_leak
+
+def _words(*texts_and_times):
+    """Helper: [(word, t0, t1), ...] → list[Word]"""
+    return [Word(word=w, t0=t0, t1=t1) for w, t0, t1 in texts_and_times]
+
+
+def _tr(*texts_and_times):
+    return Transcript(language="ru", words=_words(*texts_and_times))
+
+
+PROMPT = "Тема сегодняшней беседы. Специалисты выделяют несколько факторов."
+
+
+def test_leak_filter_removes_verbatim_prefix():
+    """Verbatim prompt sentence at start is removed; remaining words and timings intact."""
+    prompt = "Тема сегодняшней беседы."
+    tr = _tr(("Тема", 0.0, 0.3), ("сегодняшней", 0.3, 0.7), ("беседы.", 0.7, 1.0),
+             ("Это", 1.2, 1.4), ("важно.", 1.4, 1.7))
+    filtered, n = T.filter_prompt_leak(tr, prompt)
+    assert n == 3
+    assert [w.word for w in filtered.words] == ["Это", "важно."]
+    assert filtered.words[0].t0 == pytest.approx(1.2)
+
+
+def test_leak_filter_normalized_match():
+    """Case and punctuation differences still match (normalized comparison)."""
+    prompt = "Тема сегодняшней беседы."
+    # Whisper output: lowercase, no period
+    tr = _tr(("тема", 0.0, 0.3), ("сегодняшней", 0.3, 0.7), ("беседы", 0.7, 1.0),
+             ("дальше", 1.0, 1.3))
+    filtered, n = T.filter_prompt_leak(tr, prompt)
+    assert n == 3
+    assert [w.word for w in filtered.words] == ["дальше"]
+
+
+def test_leak_filter_no_false_positive():
+    """A sentence sharing a few words with the prompt is NOT removed."""
+    prompt = "Тема сегодняшней беседы."
+    tr = _tr(("Тема", 0.0, 0.3), ("другая.", 0.3, 0.6))
+    filtered, n = T.filter_prompt_leak(tr, prompt)
+    assert n == 0
+    assert len(filtered.words) == 2
+
+
+def test_leak_filter_counter_written_to_transcript(tmp_path):
+    """prompt_leak_removed is persisted on the Transcript artefact."""
+    prompt = "Тема беседы."
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"\x00" * 64)
+
+    raw_words = [{"word": "Тема", "start": 0.0, "end": 0.3},
+                 {"word": "беседы.", "start": 0.3, "end": 0.6},
+                 {"word": "Хорошо.", "start": 0.7, "end": 1.0}]
+
+    backend = T.GroqBackend(
+        initial_prompt=prompt,
+        request_fn=lambda *_: {"language": "ru", "words": raw_words},
+    )
+    tr = T.transcribe(audio, tmp_path, backend=backend)
+    assert tr.prompt_leak_removed == 2
+    # cache round-trip
+    cached = Transcript.model_validate_json(
+        list((tmp_path).glob("*.json"))[0].read_text(encoding="utf-8")
+    )
+    assert cached.prompt_leak_removed == 2
+
+
 # ------------------------------------------------------ integration (только системник)
 
 @pytest.mark.integration

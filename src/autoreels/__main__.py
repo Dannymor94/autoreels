@@ -2082,7 +2082,7 @@ def cmd_resnap(
 def _auto_discover_manifests(root=None) -> list[Path]:
     """Glob manifests/*.json relative to project root (cwd-independent)."""
     manifests_dir = (Path(root) if root else _project_root()) / "manifests"
-    return sorted(manifests_dir.glob("*.json"))
+    return sorted(p for p in manifests_dir.glob("*.json") if not p.name.endswith(".discarded.json"))
 
 
 def cmd_dump_clips(manifests, *, out, root=None) -> int:
@@ -2103,7 +2103,11 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
 
     for mf in manifests:
         mf = Path(mf)
-        manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        try:
+            manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"  skip {mf.name}: {exc}", file=sys.stderr, flush=True)
+            continue
         stem = Path(manifest.source).stem
         preset_max = r0_cfg.presets[manifest.duration_preset].max
         for i, r in enumerate(manifest.reels, 1):
@@ -2141,7 +2145,10 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     stem_reel_counts: dict[str, int] = {}
     for mf in manifests:
         mf = Path(mf)
-        manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        try:
+            manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
         stem_reel_counts[Path(manifest.source).stem] = len(manifest.reels)
     deleted_orphans = 0
     for stem, reel_count in stem_reel_counts.items():

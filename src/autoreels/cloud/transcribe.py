@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
+import sys
 import time
 from pathlib import Path
 from typing import Callable, Protocol
@@ -55,6 +57,62 @@ def parse_faster_whisper(segments, language: str) -> Transcript:
         for w in (getattr(seg, "words", None) or []):
             words.append(Word(word=w.word, t0=float(w.start), t1=float(w.end)))
     return Transcript(language=language, words=words)
+
+
+# ------------------------------------------------------ prompt-leak filter
+
+def _normalize(text: str) -> str:
+    """Fold case, strip punctuation, collapse whitespace for fuzzy sentence match."""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", "", text, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _prompt_sentences(prompt: str) -> list[str]:
+    """Split prompt on sentence-ending punctuation; return non-empty normalized sentences."""
+    parts = re.split(r"(?<=[.!?])\s+", prompt.strip())
+    return [n for p in parts if (n := _normalize(p))]
+
+
+def filter_prompt_leak(transcript: Transcript, prompt: str) -> tuple[Transcript, int]:
+    """Remove prompt sentences that leaked into the start of the transcript.
+
+    Whisper sometimes continues the initial_prompt as if it were speech. This shows
+    up as the first N words of the transcript matching a prompt sentence verbatim (or
+    with case/punctuation folded). Only the leading prefix of the transcript is scanned;
+    a match that starts mid-transcript is NOT removed (the speaker may have said it).
+
+    Returns (filtered_transcript, n_words_removed).
+    """
+    if not prompt or not transcript.words:
+        return transcript, 0
+
+    sentences = _prompt_sentences(prompt)
+    if not sentences:
+        return transcript, 0
+
+    words = list(transcript.words)
+    total_removed = 0
+
+    for sent_norm in sentences:
+        sent_tokens = sent_norm.split()
+        n = len(sent_tokens)
+        if len(words) < n:
+            continue
+        candidate = " ".join(_normalize(w.word) for w in words[:n])
+        if candidate == sent_norm:
+            t0 = words[0].t0
+            t1 = words[n - 1].t1
+            print(
+                f"[leak-filter] removed {n} words at {t0:.2f}s–{t1:.2f}s: "
+                f"{' '.join(w.word for w in words[:n])!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+            words = words[n:]
+            total_removed += n
+
+    return transcript.model_copy(update={"words": words}), total_removed
 
 
 # ------------------------------------------------------------------------- бэкенды
@@ -282,6 +340,9 @@ def transcribe(
     if cache_path.exists() and not force:
         return Transcript.model_validate_json(cache_path.read_text(encoding="utf-8"))
 
+    # initial_prompt from backend (for leak filter); empty string if backend doesn't expose it
+    prompt = getattr(backend, "_initial_prompt", "")
+
     def _stamp(tr: Transcript) -> Transcript:
         """Записать в артефакт параметры, которыми он получен (воспроизводимость)."""
         return tr.model_copy(update={
@@ -298,7 +359,7 @@ def transcribe(
             tr, _warns = transcribe_chunked(
                 audio_path, chunking_cfg, audio_cfg, Path(cache_dir),
                 backend, ffmpeg=ffmpeg, language=language or "ru",
-                params_key=pkey, force=force,
+                params_key=pkey, force=force, initial_prompt=prompt,
             )
             tr = _stamp(tr)
             cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -306,7 +367,12 @@ def transcribe(
             return tr
 
     # Одиночный запрос (короткое аудио или chunking_cfg не передан)
-    tr = _stamp(backend.transcribe(audio_path, language=language))
+    tr = backend.transcribe(audio_path, language=language)
+    if prompt:
+        tr, n_removed = filter_prompt_leak(tr, prompt)
+        if n_removed:
+            tr = tr.model_copy(update={"prompt_leak_removed": n_removed})
+    tr = _stamp(tr)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(tr.model_dump_json(), encoding="utf-8")
     return tr

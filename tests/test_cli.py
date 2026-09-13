@@ -5484,6 +5484,36 @@ def test_dump_clips_finds_manifests_from_different_cwd(monkeypatch, tmp_path):
     assert len(found) > 0, "no manifests found — cwd-dependency not fixed"
 
 
+def test_auto_discover_excludes_discarded_sidecar(tmp_path):
+    """_auto_discover_manifests skips *.discarded.json sidecars."""
+    manifests_dir = tmp_path / "manifests"
+    manifests_dir.mkdir()
+    real = manifests_dir / "lecture.json"
+    real.write_text("{}")
+    sidecar = manifests_dir / "lecture.discarded.json"
+    sidecar.write_text("[]")
+
+    found = cli._auto_discover_manifests(root=tmp_path)
+    assert found == [real]
+
+
+def test_dump_clips_skips_malformed_json(tmp_path, capsys):
+    """cmd_dump_clips reports a bad file by name and continues with valid manifests."""
+    good_mf = tmp_path / "good.json"
+    good_mf.write_text(_dump_manifest([_dump_reel("r01", 0.0, 30.0, ["hello"])]).model_dump_json())
+    bad_mf = tmp_path / "bad.json"
+    bad_mf.write_text("not json at all")
+
+    out = tmp_path / "clips"
+    cli.cmd_dump_clips([good_mf, bad_mf], out=out, root=REPO_ROOT)
+
+    captured = capsys.readouterr()
+    assert "bad.json" in captured.err
+    # good manifest still produced output
+    clips = list(out.iterdir())
+    assert len(clips) == 1
+
+
 def test_dump_clips_removes_unlabelled_orphan_keeps_labelled(tmp_path):
     """dump-clips deletes unlabelled fixture with index > reel count; keeps labelled one."""
     # Manifest has 2 reels → indices 1 and 2 are current. Indices 3 (unlabelled) and 4 (labelled) are orphans.

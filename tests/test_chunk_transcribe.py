@@ -357,7 +357,7 @@ def test_partial_failure_continue(tmp_path):
     chunks_info = list(zip(chunk_files, start_secs, end_secs))
 
     backend = _FailingBackend(fail_on={2})
-    results, warns = CT.transcribe_chunks(chunks_info, backend, tmp_path, fail_fast=False)
+    results, warns, _ = CT.transcribe_chunks(chunks_info, backend, tmp_path, fail_fast=False)
 
     assert len(results) == 6
     assert results[2] is None
