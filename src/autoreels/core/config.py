@@ -118,6 +118,7 @@ class R0Config(BaseModel):
         "и", "а", "но", "что", "это", "как", "в", "на",
         "потому", "чтобы", "если", "когда", "то", "есть", "вот",
     ])
+    dangling_words: list[str] = Field(default_factory=list)  # extra blocklist for dangling_start gate
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str

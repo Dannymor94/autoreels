@@ -158,8 +158,6 @@ def segments_to_reels(segments: list[dict]) -> list[Reel]:
             start=seg["start"], end=seg["end"], score=seg["score"],
             hook=seg["hook"], title=seg["title"], description=seg["description"],
             reason=seg.get("reason", ""), topic=seg.get("topic", ""),
-            self_contained_start=seg.get("self_contained_start"),
-            start_justification=seg.get("start_justification", ""),
         ))
     return reels
 
@@ -208,17 +206,6 @@ def diagnose_collapse(r: Reel) -> str:
     return f"R0 {r0_dur:.1f}с → snap/padding схлопнули до {final_dur:.1f}с"
 
 
-def filter_self_contained_start(reels: list[Reel]) -> tuple[list[Reel], list[Reel]]:
-    """Drop segments where model flagged self_contained_start=False. Returns (kept, dropped)."""
-    kept, dropped = [], []
-    for r in reels:
-        if r.self_contained_start is False:
-            print(f"  ✗ {r.id} dropped (start not self-contained): {r.start_justification}", flush=True)
-            dropped.append(r)
-        else:
-            kept.append(r)
-    return kept, dropped
-
 
 def filter_min_clip_duration(reels: list[Reel], *, min_clip_duration: float) -> list[Reel]:
     """Пост-snap фильтр: убрать клипы короче min_clip_duration.
@@ -228,6 +215,79 @@ def filter_min_clip_duration(reels: list[Reel], *, min_clip_duration: float) -> 
     Перед применением этого фильтра вызовите try_rescue_clip (snap.py) для попытки расширения.
     """
     return [r for r in reels if r.end - r.start >= min_clip_duration]
+
+
+_DEFAULT_DANGLING = frozenset({
+    "поэтому", "потому", "и", "вот", "то", "так", "любом", "же",
+    "он", "она", "они", "его", "её", "их", "им", "ним",
+    "это", "этот", "эта", "эти", "того", "этого",
+    "который", "которая", "которые",
+    "ведь", "значит", "тоже", "также",
+    "а", "но", "или", "либо", "однако",
+})
+
+
+def filter_dangling_start(
+    reels: list[Reel],
+    transcript_words: list,
+    *,
+    dangling_words: list[str] | None = None,
+) -> tuple[list[Reel], list[dict]]:
+    """Drop clips whose snapped first word begins lowercase or is a dangling connective/pronoun.
+
+    Must be called AFTER snap so boundaries reflect the actual clip start.
+    Returns (kept, discarded_entries). Each entry: {id, score, reason, first_words}.
+    """
+    from autoreels.local.subtitles import words_in_window
+    dw = _DEFAULT_DANGLING | set(dangling_words or [])
+    kept, disc = [], []
+    for r in reels:
+        clip_words = words_in_window(transcript_words, r.start, r.end)
+        first_8 = " ".join(w.word for w in clip_words[:8])
+        if not clip_words:
+            kept.append(r)
+            continue
+        fw = clip_words[0].word.strip()
+        fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
+        is_lowercase = bool(fw) and fw[0].islower()
+        is_dangling = fw_clean in dw
+        if is_lowercase or is_dangling:
+            reason = "dangling_start: " + (
+                "первое слово со строчной буквы" if is_lowercase
+                else f"висячее слово «{fw_clean}»"
+            )
+            r.flags.append("dangling_start")
+            disc.append({"id": r.id, "score": r.score, "reason": reason, "first_words": first_8})
+        else:
+            kept.append(r)
+    return kept, disc
+
+
+def apply_top_n(
+    reels: list[Reel],
+    *,
+    max_reels: int | None,
+    transcript_words: list | None = None,
+) -> tuple[list[Reel], list[dict]]:
+    """Sort by score desc, apply top-N cut, assign rank 1-N. Returns (kept, discarded_entries)."""
+    from autoreels.local.subtitles import words_in_window
+    reels_sorted = sorted(reels, key=lambda r: -r.score)
+    if max_reels is None:
+        kept, cut = reels_sorted, []
+    else:
+        kept, cut = reels_sorted[:max_reels], reels_sorted[max_reels:]
+    disc = []
+    for pos, r in enumerate(cut, (max_reels or 0) + 1):
+        first_8 = ""
+        if transcript_words:
+            clip_words = words_in_window(transcript_words, r.start, r.end)
+            first_8 = " ".join(w.word for w in clip_words[:8])
+        disc.append({"id": r.id, "score": r.score,
+                     "reason": f"below top-{max_reels} cut (rank: {pos})",
+                     "first_words": first_8})
+    for i, r in enumerate(kept, 1):
+        r.rank = i
+    return kept, disc
 
 
 def _overlap_ratio(a: Reel, b: Reel) -> float:
@@ -269,8 +329,11 @@ def _complete_and_parse(provider: LLMProvider, messages: list[dict]) -> list[dic
 
 
 def _select_one(compressed: str, *, system_text: str, fewshot: dict,
-                provider: LLMProvider, r0_cfg) -> tuple[list[Reel], list[dict]]:
-    """Одиночный R0-запрос (без чанкинга): промпт → LLM → валидация → дедуп → top-N."""
+                provider: LLMProvider, r0_cfg) -> list[Reel]:
+    """Одиночный R0-запрос (без чанкинга): промпт → LLM → валидация → дедуп.
+
+    Top-N cut, rank, and dangling_start filter happen later (after snap) in __main__.
+    """
     target = getattr(r0_cfg, "target_candidates", None)
     messages = build_prompt(
         system_text, fewshot, compressed,
@@ -284,22 +347,10 @@ def _select_one(compressed: str, *, system_text: str, fewshot: dict,
     flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
     reels = filter_by_score(reels, min_score=r0_cfg.min_score)
     reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
-    reels, start_dropped = filter_self_contained_start(reels)
-    discarded: list[dict] = [
-        {"id": r.id, "score": r.score, "reason": f"start not self-contained: {r.start_justification}"}
-        for r in start_dropped
-    ]
     reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold)
-    reels.sort(key=lambda r: -r.score)
-    if r0_cfg.max_reels is not None and len(reels) > r0_cfg.max_reels:
-        cut = reels[r0_cfg.max_reels:]
-        discarded += [{"id": r.id, "score": r.score, "reason": f"below top-N cut (rank: {r0_cfg.max_reels + i + 1})"}
-                      for i, r in enumerate(cut)]
-        reels = reels[:r0_cfg.max_reels]
     for i, r in enumerate(reels, 1):
-        r.id = f"r{i:02d}"
-        r.rank = i
-    return reels, discarded
+        r.id = f"c{i:03d}"
+    return reels
 
 
 def select_chunked(
@@ -309,27 +360,23 @@ def select_chunked(
     fewshot: dict,
     provider: LLMProvider,
     r0_cfg,
-) -> tuple[list[Reel], list[dict]]:
+) -> list[Reel]:
     """R0 с чанкингом: транскрипт → чанки → LLM на каждый → смерж + дедуп по t0.
 
-    Чанки перекрываются (overlap_tokens) → один и тот же момент может попасть в два
-    соседних чанка. После смержа: cross-chunk dedup_reels (первый по t0), затем
-    ранжирование по score и сквозная нумерация.
+    Top-N cut, rank, and dangling_start filter happen later (after snap) in __main__.
     """
-    from autoreels.cloud.chunk_transcribe import dedup_reels, renumber_reels
+    from autoreels.cloud.chunk_transcribe import dedup_reels
     from autoreels.core.progress import chunk_progress, chunk_start, throttle_wait
 
     chunking = r0_cfg.chunking
     effective_tokens = _effective_chunk_tokens(system_text, fewshot, chunking.r0_chunk_tokens)
     chunks = split_compressed(compressed, effective_tokens, chunking.r0_overlap_tokens)
 
-    # ~15с на LLM + задержка между чанками
     est_sec = len(chunks) * (chunking.r0_chunk_delay_sec + 15)
     chunk_start("R0", len(chunks), est_sec=est_sec)
 
     target = getattr(r0_cfg, "target_candidates", None)
     all_reels: list[Reel] = []
-    all_discarded: list[dict] = []
     for i, chunk in enumerate(chunks):
         if i > 0:
             throttle_wait(chunking.r0_chunk_delay_sec)
@@ -352,14 +399,7 @@ def select_chunked(
         flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
         reels = filter_by_score(reels, min_score=r0_cfg.min_score)
         reels = filter_by_duration(reels, min_meaningful_sec=r0_cfg.min_meaningful_sec)
-        reels, start_dropped = filter_self_contained_start(reels)
-        all_discarded += [
-            {"id": r.id, "score": r.score, "reason": f"start not self-contained: {r.start_justification}"}
-            for r in start_dropped
-        ]
         all_reels.extend(reels)
-        # Прозрачность распределения: показать, какой провайдер обработал этот чанк
-        # (пул выставляет last_provider; одиночный провайдер — нет, тогда без «via»).
         provider_name = getattr(provider, "last_provider", None)
         via = f"via {provider_name} · " if provider_name else ""
         chunk_progress("R0", i + 1, len(chunks),
@@ -368,18 +408,10 @@ def select_chunked(
     chunk_progress("R0", len(chunks), len(chunks),
                    extra=f"найдено {len(all_reels)} моментов", done=True)
 
-    # Дедуп по t0 (первый по хронологии при пересечении > порога), затем top-N
     all_reels = dedup_reels(all_reels, chunking.dedup_overlap_ratio)
-    all_reels.sort(key=lambda r: -r.score)
-    if r0_cfg.max_reels is not None and len(all_reels) > r0_cfg.max_reels:
-        cut = all_reels[r0_cfg.max_reels:]
-        all_discarded += [{"id": r.id, "score": r.score, "reason": f"below top-N cut (rank: {r0_cfg.max_reels + i + 1})"}
-                          for i, r in enumerate(cut)]
-        all_reels = all_reels[:r0_cfg.max_reels]
-    all_reels = renumber_reels(all_reels)
     for i, r in enumerate(all_reels, 1):
-        r.rank = i
-    return all_reels, all_discarded
+        r.id = f"c{i:03d}"
+    return all_reels
 
 
 def select(
@@ -389,12 +421,11 @@ def select(
     fewshot: dict,
     provider: LLMProvider,
     r0_cfg,
-) -> tuple[list[Reel], list[dict]]:
+) -> list[Reel]:
     """R0 end-to-end: диспетчер одиночного запроса или чанкинга.
 
-    Если chunking включён и транскрипт превышает r0_chunk_tokens → select_chunked.
-    Иначе (или если chunking не сконфигурирован) → одиночный запрос.
-    Возвращает (reels, discarded): reels — отранжированные, discarded — сброшенные кандидаты.
+    Returns all post-dedup candidates with c{NNN} ids. Top-N cut, rank assignment,
+    and dangling_start filter happen after snap in __main__ (they need snapped boundaries).
     """
     chunking = getattr(r0_cfg, "chunking", None)
     if chunking and chunking.enabled and _count_tokens(compressed) > chunking.r0_chunk_tokens:

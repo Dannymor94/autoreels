@@ -27,7 +27,11 @@ from autoreels.cloud.compress import compress_transcript
 from autoreels.cloud.diagnose import classify_end, summarize
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import ProviderError, build_pool
-from autoreels.cloud.select import SelectError, diagnose_collapse, filter_min_clip_duration, select
+from autoreels.cloud.select import (
+    SelectError, apply_top_n, diagnose_collapse, filter_dangling_start,
+    filter_min_clip_duration, select,
+)
+from autoreels.cloud.chunk_transcribe import renumber_reels
 from autoreels.cloud.snap import apply_padding, snap_segments, try_rescue_clip
 from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
@@ -596,19 +600,19 @@ def _stage_compress(transcript, *, r0_cfg):
 
 
 def _stage_select(compressed, *, r0_cfg, root, provider=None):
-    """R0-выбор. `provider` — заранее собранный пул (cmd_run строит его и валидирует ДО
-    транскрипции); если None — собираем здесь (standalone-путь)."""
+    """R0-выбор. Returns all post-dedup candidates (no top-N/rank yet — that happens after snap).
+    `provider` — заранее собранный пул (cmd_run строит его и валидирует ДО транскрипции);
+    если None — собираем здесь (standalone-путь)."""
     print("выбор моментов…", flush=True)
     root = Path(root)
     system_text = (root / r0_cfg.prompts.system).read_text(encoding="utf-8")
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     if provider is None:
         provider = build_pool(r0_cfg)
-    reels, discarded = select(
+    return select(
         compressed, system_text=system_text, fewshot=fewshot,
         provider=provider, r0_cfg=r0_cfg,
     )
-    return reels, discarded
 
 
 def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
@@ -1225,10 +1229,23 @@ def cmd_run(
     )
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
-    reels, discarded = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+    reels = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
     for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
         r.r0_start, r.r0_end = r.start, r.end
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
+    # Dangling-start gate: post-snap, deterministic — checks actual first snapped word.
+    # Whisper capitalises sentence-initial words, so first-word-lowercase = mid-sentence start.
+    reels, dangling_disc = filter_dangling_start(
+        reels, transcript.words,
+        dangling_words=getattr(r0_cfg, "dangling_words", None),
+    )
+    if dangling_disc:
+        print(f"  ✗ dangling_start: {len(dangling_disc)} клип(ов) снято", flush=True)
+    reels, topn_disc = apply_top_n(
+        reels, max_reels=r0_cfg.max_reels, transcript_words=transcript.words,
+    )
+    discarded = dangling_disc + topn_disc
+    reels = renumber_reels(reels)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels, n_short_dropped = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
@@ -2415,8 +2432,9 @@ def _rerun_reels(transcript, r0_cfg, root):
     fewshot = json.loads((Path(root) / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     provider = build_pool(r0_cfg)
     provider.preflight()
-    reels, _ = select(compressed, system_text=system_text, fewshot=fewshot,
-                      provider=provider, r0_cfg=r0_cfg)
+    reels = select(compressed, system_text=system_text, fewshot=fewshot,
+                   provider=provider, r0_cfg=r0_cfg)
+    reels, _ = apply_top_n(reels, max_reels=r0_cfg.max_reels)
     snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
                   window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
                   min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,

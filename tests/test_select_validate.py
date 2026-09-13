@@ -129,7 +129,7 @@ def test_provider_empty_response_exception_becomes_selecterror(fewshot, r0_cfg):
 def test_invalid_then_valid_recovers(fewshot, r0_cfg):
     good = QWEN_FIXTURE.read_text(encoding="utf-8")
     provider = _MockLLM(["мусор", good])
-    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                         provider=provider, r0_cfg=r0_cfg)
     assert provider.calls == 2
     assert len(reels) == 5
@@ -139,7 +139,7 @@ def test_real_fixture_flags_too_long(fewshot, r0_cfg):
     # Инвариант 6 на РЕАЛЬНЫХ данных: 590.0–651.8 (61.8с < 90 shorts) — в пределах нового потолка,
     # флага too_long быть не должно. Ставит код, не модель.
     content = QWEN_FIXTURE.read_text(encoding="utf-8")
-    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                         provider=_MockLLM([content]), r0_cfg=r0_cfg)
     by_start = {r.start: r for r in reels}
     assert by_start[590.0].flags == []              # 61.8с — в пределах нового потолка 90с
@@ -196,7 +196,7 @@ def test_dedup_keeps_higher_score(r0_cfg):
 
 def test_empty_segments_is_valid_result(fewshot, r0_cfg):
     provider = _MockLLM(['{"segments": []}'])
-    reels, _ = S.select("[0400.0-0410.0] давайте сделаем перерыв",
+    reels = S.select("[0400.0-0410.0] давайте сделаем перерыв",
                         system_text="sys", fewshot=fewshot, provider=provider, r0_cfg=r0_cfg)
     assert reels == []                 # «хороших моментов нет» — НЕ ошибка
 
@@ -213,7 +213,7 @@ def test_select_drops_short_segment_despite_high_score(fewshot, r0_cfg):
         {"start": 100.0, "end": 130.0, "score": 70,
          "hook": "h", "title": "t", "description": "d"},
     ]})
-    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                         provider=_MockLLM([resp]), r0_cfg=r0_cfg)
     starts = {r.start for r in reels}
     assert 0.0 not in starts        # короткий снят пост-фильтром длины
@@ -313,7 +313,7 @@ def test_select_chunked_survives_one_empty_chunk(fewshot, r0_cfg, monkeypatch, c
             return "" if self.seen.index(chunk) == 1 else valid   # 2-й чанк — пустой
 
     compressed = _make_compressed(300, line_chars=60)             # ≥2 чанка
-    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
                         provider=_ChunkMock(), r0_cfg=r0_cfg)
 
     assert len(reels) >= 1                                        # выжившие чанки дали рилы
@@ -342,7 +342,7 @@ def test_select_chunked_survives_one_timeout_chunk(fewshot, r0_cfg, monkeypatch,
             return valid
 
     compressed = _make_compressed(300, line_chars=60)            # ≥2 чанка
-    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
                         provider=_ChunkMock(), r0_cfg=r0_cfg)
 
     assert len(reels) >= 1                                        # выжившие чанки дали рилы
@@ -358,7 +358,7 @@ def test_select_chunked_dedup_overlap_reels(fewshot, r0_cfg):
     # Оба чанка возвращают одинаковый рил (overlap zone)
     provider = _MockLLM([reel_json, reel_json])
     compressed = _make_compressed(300, line_chars=60)
-    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
                         provider=provider, r0_cfg=r0_cfg)
     # Дедуп должен оставить ровно 1 рил, не 2
     matching = [r for r in reels if abs(r.start - 100.0) < 1.0]
@@ -420,7 +420,7 @@ def test_split_compressed_uses_prompt_aware_budget(fewshot, r0_cfg):
 
 
 def test_select_chunked_renumbers_sequentially(fewshot, r0_cfg):
-    """После смержа чанков id рилов сквозные: r01, r02, …"""
+    """После смержа чанков id рилов сквозные: c001, c002, …"""
     def _seg(start, end, score):
         return {"start": start, "end": end, "score": score,
                 "hook": "h", "title": "t", "description": "d"}
@@ -428,9 +428,9 @@ def test_select_chunked_renumbers_sequentially(fewshot, r0_cfg):
     r2 = json.dumps({"segments": [_seg(600, 640, 80)]})
     provider = _MockLLM([r1, r2])
     compressed = _make_compressed(300, line_chars=60)
-    reels, _ = S.select(compressed, system_text="sys", fewshot=fewshot,
+    reels = S.select(compressed, system_text="sys", fewshot=fewshot,
                         provider=provider, r0_cfg=r0_cfg)
-    assert [r.id for r in reels] == [f"r{i:02d}" for i in range(1, len(reels) + 1)]
+    assert [r.id for r in reels] == [f"c{i:03d}" for i in range(1, len(reels) + 1)]
 
 
 def test_select_ranks_by_score_and_assigns_ids(fewshot, r0_cfg):
@@ -441,36 +441,68 @@ def test_select_ranks_by_score_and_assigns_ids(fewshot, r0_cfg):
         {"start": 200.0, "end": 230.0, "score": 90, "hook": "h", "title": "t2", "description": "d"},
     ]})
     provider = _MockLLM([raw])
-    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+    reels = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
                         provider=provider, r0_cfg=r0_cfg)
-    assert [r.score for r in reels] == [90, 72]   # ранжировано по score (убыв.)
-    assert [r.id for r in reels] == ["r01", "r02"]
+    assert {r.score for r in reels} == {72, 90}
+    assert all(r.id.startswith("c") for r in reels)  # candidate IDs до renumber
 
 
-# ----------------------------------------------------------- Part A: self-contained start gate
+# ----------------------------------------------------------- dangling_start gate (post-snap)
 
-def test_self_contained_start_false_dropped():
-    """self_contained_start=False → segment dropped, justification preserved."""
-    segs = [{"start": 0.0, "end": 30.0, "score": 80, "hook": "h", "title": "t",
-             "description": "d", "reason": "r", "topic": "top",
-             "self_contained_start": False, "start_justification": "dangling pronoun"}]
-    reels = S.segments_to_reels(segs)
-    kept, dropped = S.filter_self_contained_start(reels)
+from autoreels.core.models import Word as _Word
+
+
+def _words(pairs):
+    return [_Word(word=w, t0=t0, t1=t1) for w, t0, t1 in pairs]
+
+
+def _creel(start=0.0, end=30.0, score=80, rid="c001"):
+    return Reel(id=rid, start=start, end=end, score=score,
+                hook="h", title="t", description="d")
+
+
+def test_dangling_start_r04_lowercase():
+    """r04-style: 'все' (lowercase) → flagged dangling_start."""
+    words = _words([("все", 10.0, 10.5), ("ваши", 10.5, 11.0), ("травмы", 11.0, 11.5)])
+    r = _creel()
+    kept, disc = S.filter_dangling_start([r], words)
+    assert len(kept) == 0 and len(disc) == 1
+    assert "dangling_start" in disc[0]["reason"]
+
+
+def test_dangling_start_r14_lubom():
+    """r14-style: 'любом' (lowercase + in dangling list) → flagged."""
+    words = _words([("любом", 10.0, 10.4), ("случае,", 10.4, 10.8)])
+    r = _creel()
+    kept, disc = S.filter_dangling_start([r], words)
     assert len(kept) == 0
-    assert len(dropped) == 1
-    assert dropped[0].start_justification == "dangling pronoun"
 
 
-def test_self_contained_start_none_kept():
-    """self_contained_start=None (old manifests) → segment kept (backward compat)."""
-    segs = [{"start": 0.0, "end": 30.0, "score": 80, "hook": "h", "title": "t",
-             "description": "d"}]
-    reels = S.segments_to_reels(segs)
-    kept, dropped = S.filter_self_contained_start(reels)
-    assert len(kept) == 1 and len(dropped) == 0
+def test_dangling_start_r05_lowercase():
+    """r05-style: 'моя' (lowercase) → flagged."""
+    words = _words([("моя", 5.0, 5.3), ("психика", 5.3, 5.8)])
+    r = _creel()
+    kept, disc = S.filter_dangling_start([r], words)
+    assert len(kept) == 0
 
 
-# ----------------------------------------------------------- Part B: over-generation top-N
+def test_dangling_start_r13_lowercase():
+    """r13-style: 'так' (lowercase) → flagged."""
+    words = _words([("так", 20.0, 20.3), ("брать,", 20.3, 20.7)])
+    r = _creel()
+    kept, disc = S.filter_dangling_start([r], words)
+    assert len(kept) == 0
+
+
+def test_dangling_start_clean_opener():
+    """Uppercase sentence-initial word passes."""
+    words = _words([("За", 0.0, 0.3), ("травмой", 0.3, 0.7)])
+    r = _creel()
+    kept, disc = S.filter_dangling_start([r], words)
+    assert len(kept) == 1 and len(disc) == 0
+
+
+# ----------------------------------------------------------- top-N via apply_top_n
 
 def _make_segs(n: int, *, base_score: int = 66) -> list[dict]:
     """n non-overlapping segments, scores base_score..base_score+n-1."""
@@ -478,47 +510,51 @@ def _make_segs(n: int, *, base_score: int = 66) -> list[dict]:
              "hook": "h", "title": "t", "description": "d"} for i in range(n)]
 
 
-def test_max_reels_top_n(fewshot, r0_cfg):
-    """max_reels=20 + 35 candidates → exactly 20 kept, 15 discarded."""
-    cfg = r0_cfg.model_copy(update={"max_reels": 20})
-    provider = _MockLLM([json.dumps({"segments": _make_segs(35)})])
-    reels, discarded = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                                provider=provider, r0_cfg=cfg)
-    assert len(reels) == 20
-    assert len(discarded) == 15
+def _make_reels(n: int, *, base_score: int = 66) -> list[Reel]:
+    return [Reel(id=f"c{i:03d}", start=i * 40.0, end=i * 40.0 + 30.0,
+                 score=base_score + i, hook="h", title="t", description="d")
+            for i in range(n)]
 
 
-def test_max_reels_null_keep_all(fewshot, r0_cfg):
-    """max_reels=None → all qualifying segments kept, discarded empty."""
-    cfg = r0_cfg.model_copy(update={"max_reels": None})
-    provider = _MockLLM([json.dumps({"segments": _make_segs(30)})])
-    reels, discarded = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                                provider=provider, r0_cfg=cfg)
-    assert len(reels) == 30
-    assert discarded == []
+def test_max_reels_top_n():
+    """apply_top_n: 35 candidates → exactly 20 kept, 15 discarded."""
+    reels = _make_reels(35)
+    kept, disc = S.apply_top_n(reels, max_reels=20)
+    assert len(kept) == 20
+    assert len(disc) == 15
+
+
+def test_max_reels_null_keep_all():
+    """apply_top_n: max_reels=None → all kept, no discarded."""
+    reels = _make_reels(30)
+    kept, disc = S.apply_top_n(reels, max_reels=None)
+    assert len(kept) == 30
+    assert disc == []
 
 
 def test_dedup_before_topn(fewshot, r0_cfg):
-    """Dedup happens before top-N: 21 segs with 1 overlapping pair → 20 unique → all 20 kept."""
-    # 20 non-overlapping segments
+    """Dedup (inside select) happens before top-N (apply_top_n): overlapping pair → 20 unique."""
     segs = _make_segs(20, base_score=70)
-    # +1 segment overlapping heavily with seg 0
     segs.append({"start": 0.0, "end": 30.0, "score": 69, "hook": "h", "title": "t", "description": "d"})
     cfg = r0_cfg.model_copy(update={"max_reels": 20})
     provider = _MockLLM([json.dumps({"segments": segs})])
-    reels, discarded = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                                provider=provider, r0_cfg=cfg)
-    # After dedup: 20 unique; top-20 keeps all → no top-N discards
-    assert len(reels) == 20
-    # The overlapping lower-score seg was deduped away (not a top-N discard)
-    top_n_discards = [d for d in discarded if "top-N" in d["reason"]]
-    assert len(top_n_discards) == 0
+    candidates = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
+                          provider=provider, r0_cfg=cfg)
+    kept, disc = S.apply_top_n(candidates, max_reels=20)
+    assert len(kept) == 20
+    assert all("top-N" not in d["reason"] for d in disc)
 
 
-def test_kept_reels_have_rank(fewshot, r0_cfg):
-    """Kept reels have rank set (1-based)."""
-    cfg = r0_cfg.model_copy(update={"max_reels": 3})
-    provider = _MockLLM([json.dumps({"segments": _make_segs(3)})])
-    reels, _ = S.select("[0000.0-0005.0] x", system_text="sys", fewshot=fewshot,
-                        provider=provider, r0_cfg=cfg)
-    assert [r.rank for r in reels] == [1, 2, 3]
+def test_kept_reels_have_rank():
+    """apply_top_n assigns rank 1-N on kept reels."""
+    reels = _make_reels(3)
+    kept, _ = S.apply_top_n(reels, max_reels=3)
+    assert [r.rank for r in kept] == [1, 2, 3]
+
+
+def test_sidecar_ids_unique():
+    """Sidecar entries have unique ids (c{NNN} scheme from select ensures this)."""
+    reels = _make_reels(25)
+    kept, disc = S.apply_top_n(reels, max_reels=20)
+    all_ids = [r.id for r in kept] + [d["id"] for d in disc]
+    assert len(all_ids) == len(set(all_ids))

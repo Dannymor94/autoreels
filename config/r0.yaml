@@ -36,6 +36,15 @@ candidate_multiplier: 1.75     # over-generation: цель кандидатов 
 chunk_tokens: 3500
 chunk_overlap_sec: 60
 dedup_overlap_threshold: 0.5
+dangling_words:          # first-word blocklist for dangling-start check (post-snap, uppercase variants)
+  - поэтому
+  - потому
+  - любом
+  - однако
+  - ведь
+  - значит
+  - тоже
+  - также
 sentence_pause_sec: 0.35        # склейка предложений: пауза > порога рвёт предложение
                                 # (Whisper на русском роняет пунктуацию → порог занижен).
                                 # тот же порог = «пауза» при snap границ к словам (R4-min)
