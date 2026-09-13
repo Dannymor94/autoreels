@@ -7,7 +7,7 @@ import pytest
 
 from autoreels.cloud.providers import (
     FallbackLLM, GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
-    ProviderExhausted,
+    ProviderExhausted, ProviderRequestTooLarge,
 )
 
 
@@ -1227,3 +1227,99 @@ def test_pool_single_log_line_per_throttle_event(capsys):
     throttle_lines = [ln for ln in out.splitlines() if "троттлит" in ln or "бэкофф" in ln]
     # Ожидаем ровно 2 строки: первый троттл + сообщение о бэкоффе
     assert len(throttle_lines) == 2, f"ожидали 2 строки, получили {len(throttle_lines)}: {throttle_lines}"
+
+
+# ============================================ HTTP 413 — non-retryable request-size error
+
+def test_413_is_not_retried_on_same_provider(monkeypatch):
+    """413 raises ProviderRequestTooLarge immediately — no retry loop on the same provider."""
+    import autoreels.cloud.providers as P
+
+    calls = []
+
+    def fake_post(url, *, headers, json, timeout):
+        calls.append(1)
+        return _FakeResp(413, body={"error": {"message": "Request too large"}},
+                         headers={"x-ratelimit-limit-tokens": "8000",
+                                  "x-ratelimit-remaining-tokens": "8000",
+                                  "x-ratelimit-reset-tokens": "1ms"})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = P.GroqLLM()
+    with pytest.raises(ProviderRequestTooLarge) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+
+    assert len(calls) == 1, f"413 не должен ретраиться, но было {len(calls)} попыток"
+    assert "8000" in str(exc.value)    # лимит упомянут в сообщении
+
+
+def test_413_request_shrunk_to_fit_header_limit(monkeypatch):
+    """When budget_limit is set from headers, max_tokens is capped so prompt+max_tokens <= limit."""
+    import autoreels.cloud.providers as P
+
+    captured = {}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["max_tokens"] = json.get("max_tokens")
+        captured["messages"] = json.get("messages", [])
+        return _FakeResp(200, _good_envelope())
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    # Limit of 5000 set from a prior response header
+    llm = P.GroqLLM(fallback_delay_sec=0)
+    llm._budget_limit = 5000
+
+    # ~1200-token message (4800 chars / 4 = 1200)
+    msg = [{"role": "user", "content": "x" * 4800}]
+    llm.complete(msg)
+
+    estimated = sum(P._count_tokens_approx(m.get("content") or "") for m in msg)
+    max_tok = captured["max_tokens"]
+    assert max_tok is not None, "max_tokens должен быть в payload"
+    # With budget_limit=5000 and -400 buffer: max_tokens = max(1024, min(2048, 5000−1200−400)) = 2048
+    # → prompt + max_tokens = 1200 + 2048 = 3248 ≤ 5000
+    assert estimated + max_tok <= 5000, (
+        f"prompt({estimated}) + max_tokens({max_tok}) = {estimated + max_tok} > 5000"
+    )
+    assert max_tok >= 1024, f"max_tokens={max_tok} ниже минимума 1024"
+
+
+def test_413_pool_falls_through_to_sibling(capsys):
+    """413 on Groq → pool tries OpenRouter; if no sibling, raises immediately."""
+    from autoreels.cloud.providers import ProviderPool
+
+    groq = _ScriptedProvider(
+        "Groq", [ProviderRequestTooLarge("413", prompt_tokens=3500, max_tokens=4000, limit=8000)]
+    )
+    openr = _ScriptedProvider("OpenRouter", ["ok-from-openrouter"])
+    pool, _ = _pool(groq, openr)
+    result = pool.complete([])
+    assert result == "ok-from-openrouter"
+    assert pool.last_provider == "OpenRouter"
+
+
+def test_r0_output_parsing_survives_lower_max_tokens():
+    """parse_segments works on the largest real R0 response from data/runs/r0_live_response.json.
+
+    Lower max_tokens only affects the generation cap, not the parse path. This regression test
+    verifies that the real cached output (5 segments, 483 tokens) still parses correctly.
+    """
+    import json, os
+    from autoreels.cloud.select import parse_segments
+
+    live_path = os.path.join(
+        os.path.dirname(__file__), "..", "data", "runs", "r0_live_response.json"
+    )
+    with open(live_path) as f:
+        raw_obj = json.load(f)
+
+    # The live response is already parsed (dict with 'segments'). Simulate a raw LLM string response.
+    raw_str = json.dumps(raw_obj, ensure_ascii=False)
+    segs = parse_segments(raw_str)
+    assert len(segs) == 5
+    for s in segs:
+        assert "start" in s and "end" in s and "score" in s

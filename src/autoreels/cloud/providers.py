@@ -195,6 +195,19 @@ class ProviderExhausted(ProviderError):
         self.retry_after = retry_after
 
 
+class ProviderRequestTooLarge(ProviderError):
+    """Запрос отклонён (HTTP 413): prompt_tokens + max_tokens превышает лимит окна.
+
+    Не транзиентный — тот же запрос никогда не пройдёт на том же провайдере. Пул пробует
+    сиблинга; если провайдер один — поднимает сразу с деталями размеров."""
+
+    def __init__(self, message: str, *, prompt_tokens: int = 0, max_tokens: int = 0, limit: int = 0):
+        super().__init__(message)
+        self.prompt_tokens = prompt_tokens
+        self.max_tokens = max_tokens
+        self.limit = limit
+
+
 class LLMProvider(Protocol):
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str: ...
 
@@ -224,12 +237,27 @@ def _chat_request(
         # Capture response headers before any raise so callers can read rate-limit state.
         if out_headers is not None:
             out_headers.update({k.lower(): v for k, v in resp.headers.items()})
-        if resp.status_code in (429, 413):
-            last_status = resp.status_code
-            # diagnostic: dump all ratelimit headers once so we can see which limit is hit
+        if resp.status_code == 413:
+            # Non-retryable: prompt+max_tokens exceeds the provider's per-window admission cap.
+            # Same request can never succeed on this provider — raise immediately, no retry.
             _rl_keys = [k for k in resp.headers if "ratelimit" in k.lower() or k.lower() == "retry-after"]
             if _rl_keys:
-                print(f"  [diag] {provider_name} {resp.status_code} headers: " +
+                print(f"  [diag] {provider_name} 413 headers: " +
+                      ", ".join(f"{k}={resp.headers[k]}" for k in sorted(_rl_keys)), flush=True)
+            limit_hdr = resp.headers.get("x-ratelimit-limit-tokens", "?")
+            prompt_tok = sum(_count_tokens_approx(m.get("content") or "") for m in payload.get("messages", []))
+            max_tok = payload.get("max_tokens", 0)
+            raise ProviderRequestTooLarge(
+                f"{provider_name}: 413 — prompt ~{prompt_tok}tok + max_tokens={max_tok} "
+                f"превышает лимит {limit_hdr}tok. Уменьши r0_chunk_tokens или max_tokens.",
+                prompt_tokens=prompt_tok, max_tokens=max_tok,
+                limit=int(limit_hdr) if str(limit_hdr).isdigit() else 0,
+            )
+        if resp.status_code == 429:
+            last_status = resp.status_code
+            _rl_keys = [k for k in resp.headers if "ratelimit" in k.lower() or k.lower() == "retry-after"]
+            if _rl_keys:
+                print(f"  [diag] {provider_name} 429 headers: " +
                       ", ".join(f"{k}={resp.headers[k]}" for k in sorted(_rl_keys)), flush=True)
             wait = float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC))
             if wait >= _EXHAUSTED_THRESHOLD_SEC:
@@ -256,13 +284,9 @@ def _chat_request(
         except httpx.HTTPError as e:
             raise ProviderError(f"{provider_name} chat API ошибка: {e}") from e
         return resp.json()
-    detail = (
-        "rate limit (429): подождите или уменьшите r0_chunk_tokens"
-        if last_status == 429
-        else "payload/TPM (413): уменьшите r0_chunk_tokens в config/r0.yaml"
-    )
     raise ProviderError(
-        f"{provider_name} троттлит (HTTP {last_status}) после {_MAX_THROTTLE_RETRIES} ретраев — {detail}"
+        f"{provider_name} троттлит (HTTP 429) после {_MAX_THROTTLE_RETRIES} ретраев — "
+        f"подождите или уменьшите r0_chunk_tokens в config/r0.yaml"
     )
 
 
@@ -358,6 +382,7 @@ class GroqLLM:
         # token-budget state (updated from x-ratelimit-* headers after each response)
         self._budget_remaining: int = 999_999
         self._budget_reset_at: float = 0.0
+        self._budget_limit: int = 8000   # conservative default; updated from x-ratelimit-limit-tokens
         self._got_budget_headers: bool = False
         self._request_count: int = 0
 
@@ -367,17 +392,19 @@ class GroqLLM:
         data = request(messages, temperature)
         return _extract_content(data, self.name)
 
-    def _pace_if_needed(self, estimated_tokens: int) -> None:
+    def _pace_if_needed(self, total_tokens: int) -> None:
         """Wait before sending if the remaining TPM budget would be exceeded.
 
+        total_tokens = estimated prompt tokens + max_tokens (the full admission cost).
         Two modes:
-        - Headers seen: compare remaining against estimated; sleep until reset + 0.5s buffer.
-        - No headers yet (Groq didn't send them): apply fallback_delay_sec on 2nd+ request.
+        - Headers seen: compare remaining against total; sleep until reset + 0.5s buffer.
+        - No headers yet: apply fallback_delay_sec on 2nd+ request.
         One log line per wait event.
         """
         now = self._monotonic_fn()
+        estimated_tokens = total_tokens  # alias for log messages
         if self._got_budget_headers:
-            if self._budget_remaining < estimated_tokens and self._budget_reset_at > now:
+            if self._budget_remaining < total_tokens and self._budget_reset_at > now:
                 wait = self._budget_reset_at - now + 0.5
                 print(
                     f"\n  ⏳ Groq TPM: remaining={self._budget_remaining} < ~{estimated_tokens}"
@@ -394,9 +421,15 @@ class GroqLLM:
             self._sleep_fn(self._fallback_delay_sec)
 
     def _update_budget(self, resp_headers: dict) -> None:
-        """Read x-ratelimit-remaining-tokens and x-ratelimit-reset-tokens from a response."""
+        """Read x-ratelimit-{limit,remaining,reset}-tokens from a response."""
+        limit = resp_headers.get("x-ratelimit-limit-tokens")
         remaining = resp_headers.get("x-ratelimit-remaining-tokens")
         reset = resp_headers.get("x-ratelimit-reset-tokens")
+        if limit is not None:
+            try:
+                self._budget_limit = int(limit)
+            except (ValueError, TypeError):
+                pass
         if remaining is not None:
             try:
                 self._budget_remaining = int(remaining)
@@ -430,13 +463,19 @@ class GroqLLM:
             raise ProviderError("нет GROQ_API_KEY — задайте ключ Groq в окружении для R0")
 
         estimated = sum(_count_tokens_approx(m.get("content") or "") for m in messages)
-        self._pace_if_needed(estimated)
+        # max_tokens: cap at 2048 (observed peak ~500 tokens / chunk; 2048 = 4× headroom).
+        # Must fit within the per-window admission limit: prompt + max_tokens ≤ budget_limit.
+        # Groq chat-template overhead adds ~200 tokens on top of our text estimate, so use
+        # budget_limit − estimated − 400 as the hard ceiling (400 = 200 template + 200 buffer).
+        max_tokens = max(1024, min(2048, self._budget_limit - estimated - 400))
+        self._pace_if_needed(estimated + max_tokens)
         self._request_count += 1
 
         payload = {
             "model": self._model,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
         if self._reasoning_effort is not None:
@@ -679,6 +718,18 @@ class ProviderPool:
                         raise   # сиблинги тоже таймаутят → чанк-фейл наверх (видео продолжается)
                     print(f"\n  ⚠ {e} — пробую другого провайдера", flush=True)
                     self._cooldown(m, now, e, min_sec=_TIMEOUT_COOLDOWN_SEC)
+                    continue
+                except ProviderRequestTooLarge as e:
+                    _fail_counts[m.name] = _fail_counts.get(m.name, 0) + 1
+                    print(f"\n  ✗ {m.name} 413: {e}", flush=True)
+                    # Skip this provider for this call — same request won't fit.
+                    # Other providers (OpenRouter) may have a different limit.
+                    m.available_at = _budget_start + _POOL_BUDGET_SEC + 1.0
+                    m.reason = "too_large"
+                    m.consec_failures += 1
+                    others = [x for x in self._members if not x.disabled and x is not m]
+                    if not others:
+                        raise ProviderError(str(e)) from e
                     continue
                 except ProviderModelNotFound as e:
                     m.disabled = True
