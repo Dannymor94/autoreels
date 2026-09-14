@@ -95,6 +95,11 @@ hanging_words:                 # висячие слова: применяетс
   - тогда
   - здесь
   - сейчас
+host_affirmations:             # standalone tail sentences trimmed regardless of speaker
+  - здорово
+  - понятно
+  - отлично
+  - хорошо
 max_sentence_buffer_sec: 30     # запас сверх max_duration пресета: эффективный порог
                                 # дробления = max_duration + запас (shorts ≈ 120с). Гиганты
                                 # режутся по самым длинным внутренним паузам; легальные

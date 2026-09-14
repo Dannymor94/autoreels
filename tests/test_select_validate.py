@@ -690,3 +690,94 @@ def test_sidecar_invariant_candidates_eq_reels_plus_sidecar():
     dropped: list[dict] = []
     kept = S.dedup(reels, overlap_threshold=0.6, dropped=dropped)
     assert len(kept) + len(dropped) == len(reels)
+
+
+# ----------------------------------------------------------------- host-turn detection (Task 3)
+
+def _word(text, t0, t1):
+    from autoreels.core.models import Word
+    return Word(word=text, t0=t0, t1=t1)
+
+
+def _reel2(start, end, rid="rXX"):
+    return Reel(id=rid, start=start, end=end, score=80, hook="h", title="t", description="d")
+
+
+# Test 1: r01 regression — declarative "Ты коснулся книги..." treated as host turn
+def test_detect_host_turns_declarative_ты():
+    """Sentence starting with 'Ты' (no '?') is a host turn."""
+    words = [
+        _word("Ты", 1538.84, 1539.0),
+        _word("коснулся", 1539.0, 1539.5),
+        _word("книги,", 1539.5, 1540.0),
+        _word("ты", 1540.0, 1540.2),
+        _word("стал", 1540.2, 1540.5),
+        _word("автором", 1540.5, 1541.0),
+        _word("книги,", 1541.0, 1541.5),
+        _word("ты", 1541.5, 1541.7),
+        _word("вне", 1541.7, 1542.0),
+        _word("полома.", 1542.0, 1542.5),
+    ]
+    turns = S.detect_host_turns(words)
+    assert len(turns) == 1
+    assert turns[0][0] == pytest.approx(1538.84)
+
+
+# Test 2: dash-marked sentence is host turn even without '?'
+def test_detect_host_turns_dash_marked_no_question():
+    """Em-dash at sentence start → host turn regardless of punctuation."""
+    words = [
+        _word("—", 10.0, 10.05),
+        _word("Сколько", 10.05, 10.3),
+        _word("лет", 10.3, 10.5),
+        _word("вы", 10.5, 10.6),
+        _word("этим", 10.6, 10.8),
+        _word("занимаетесь.", 10.8, 11.0),
+    ]
+    turns = S.detect_host_turns(words)
+    assert len(turns) == 1
+
+
+# Test 3: 'ты' in reported speech (sentence starts with 'Я') → NOT a host turn
+def test_detect_host_turns_ty_in_reported_speech_not_host():
+    """'Ты' inside a sentence starting with 'Я' is reported speech, not a host turn."""
+    words = [
+        _word("Я", 5.0, 5.1),
+        _word("думаю,", 5.1, 5.4),
+        _word("что", 5.4, 5.5),
+        _word("ты", 5.5, 5.7),
+        _word("прав.", 5.7, 6.0),
+    ]
+    turns = S.detect_host_turns(words)
+    assert turns == []
+
+
+# Test 4: one-word affirmation at tail trimmed; same word inside sentence not trimmed
+def test_trim_tail_affirmation_standalone_trimmed_inline_not():
+    from autoreels.cloud.select import _trim_tail_affirmation
+
+    affirmations = frozenset(["здорово"])
+
+    # Case A: "...предложение. Здорово." → trimmed
+    words_a = [
+        _word("Это", 1.0, 1.3),
+        _word("предложение.", 1.3, 2.0),
+        _word("Здорово.", 2.1, 2.5),
+    ]
+    r_a = _reel2(1.0, 3.0, "rA")
+    result_a = _trim_tail_affirmation(r_a, words_a, affirmations)
+    assert result_a is True
+    assert r_a.end < 2.1   # moved before "Здорово."
+
+    # Case B: "Это здорово, что мы..." → not trimmed (not standalone sentence)
+    words_b = [
+        _word("Это", 10.0, 10.2),
+        _word("здорово,", 10.2, 10.5),
+        _word("что", 10.5, 10.6),
+        _word("мы", 10.6, 10.7),
+        _word("здесь.", 10.7, 11.0),
+    ]
+    r_b = _reel2(10.0, 12.0, "rB")
+    result_b = _trim_tail_affirmation(r_b, words_b, affirmations)
+    assert result_b is False
+    assert r_b.end == pytest.approx(12.0)

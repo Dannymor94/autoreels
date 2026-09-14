@@ -514,12 +514,27 @@ _HOST_OPENERS = (
 )
 
 
-def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
-    """Return (start, end) spans of host interrogative turns.
+_DASH_CHARS = ("—", "–")   # em-dash / en-dash: Whisper speaker-change marker
 
-    A turn qualifies when its sentence ends with '?' AND contains a second-person
-    marker or starts with a host-opener phrase.
-    ponytail: O(n) scan over word list; no sentence segmentation — splits on terminal punct.
+
+def _first_word_clean(word: str) -> str:
+    """Strip leading dash/punct and lower-case for first-word comparisons."""
+    return word.lstrip("".join(_DASH_CHARS) + " ").lower()
+
+
+def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
+    """Return (start, end) spans of host turns (interrogative OR declarative).
+
+    A turn qualifies when:
+      (a) sentence ends with '?' AND (has second-person word OR starts with a host-opener), OR
+      (b) sentence first word starts with 'ты'/'вы' (direct address to guest), OR
+      (c) sentence first word starts with an em/en dash (Whisper speaker-change marker).
+
+    Note on dash marking: in the PXL corpus only ~2 % of sentences carry a dash, so
+    (c) is supplementary — it adds a handful of turns the heuristic would otherwise miss.
+    The primary signal is (a)+(b).
+
+    ponytail: O(n) scan over word list; splits on terminal punct.
     """
     if not transcript_words:
         return []
@@ -532,11 +547,23 @@ def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
             return
         text = " ".join(w.word for w in buf).lower()
         last = buf[-1].word.rstrip()
-        if not last.endswith("?"):
+        first_clean = _first_word_clean(buf[0].word)
+
+        # (a) interrogative with second-person or opener
+        if last.endswith("?"):
+            has_2p = any(w.word.lower() in _SECOND_PERSON for w in buf)
+            has_opener = any(text.startswith(op) for op in _HOST_OPENERS)
+            if has_2p or has_opener:
+                turns.append((buf[0].t0, buf[-1].t1))
+                return
+
+        # (b) declarative direct address: sentence starts with ты/вы
+        if first_clean in ("ты", "вы"):
+            turns.append((buf[0].t0, buf[-1].t1))
             return
-        has_2p = any(w.word.lower() in _SECOND_PERSON for w in buf)
-        has_opener = any(text.startswith(op) for op in _HOST_OPENERS)
-        if has_2p or has_opener:
+
+        # (c) dash-marked speaker change
+        if buf[0].word.startswith(_DASH_CHARS):
             turns.append((buf[0].t0, buf[-1].t1))
 
     for w in transcript_words:
@@ -549,6 +576,41 @@ def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
 
 
 # ---- interview snap stage ----
+
+def _trim_tail_affirmation(r, tx_words, affirmations: frozenset) -> bool:
+    """If the last sentence of the clip is a single-word affirmation, trim it.
+
+    Returns True when the clip was shortened. Mutates r.end and r.end_snap_reason.
+    Only trims when the affirmation is a standalone sentence (preceded by terminal
+    punct) and the word is in `affirmations` (lower-cased, punct-stripped).
+    """
+    if not affirmations:
+        return False
+    from autoreels.local.subtitles import words_in_window
+    from autoreels.cloud.snap import _clean, _is_sentence_end
+
+    clip_words = words_in_window(tx_words, r.start, r.end)
+    if not clip_words:
+        return False
+
+    # Walk backwards: find the last sentence boundary, then check if tail is one affirmation word.
+    # A "standalone sentence" = the single tail word that follows a sentence-terminal.
+    tail = clip_words[-1]
+    if not _is_sentence_end(tail.word):
+        return False   # last word must end a sentence (else it's mid-sentence, don't trim)
+    if len(clip_words) < 2:
+        return False
+    prev = clip_words[-2]
+    if not _is_sentence_end(prev.word):
+        return False   # previous word must also be a sentence-terminal (one-word sentence check)
+    # The tail word is a complete one-word sentence; check if it's an affirmation.
+    if _clean(tail.word) not in affirmations:
+        return False
+    # Trim: move end to just before this affirmation word.
+    r.end = tail.t0 - 0.05
+    r.end_snap_reason = "before_host_turn"
+    return True
+
 
 def _stage_interview_snap(
     reels: list,
@@ -563,6 +625,7 @@ def _stage_interview_snap(
     kept = []
     disc = []
     min_dur = getattr(r0_cfg, "min_clip_duration", 15.0)
+    affirmations = frozenset(getattr(r0_cfg, "host_affirmations", []))
 
     for r in reels:
         # --- end rule: move back before earliest host turn that starts after r0_start ---
@@ -575,6 +638,9 @@ def _stage_interview_snap(
             earliest_ts = min(ts for ts, _ in intruding)
             r.end = earliest_ts - 0.15
             r.end_snap_reason = "before_host_turn"
+
+        # --- affirmation tail trim: one-word closing affirmation ("Здорово.", "Понятно.") ---
+        _trim_tail_affirmation(r, tx_words, affirmations)
 
         # drop if too short after end adjustment
         if r.end - r.start < min_dur:
