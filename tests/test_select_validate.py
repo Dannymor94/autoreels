@@ -399,23 +399,46 @@ def test_select_chunked_no_delay_after_last_chunk(fewshot, r0_cfg, monkeypatch):
     assert len(sleeps) == len(chunks) - 1
 
 
-def test_split_compressed_uses_prompt_aware_budget(fewshot, r0_cfg):
-    """Бюджет чанка уменьшается когда суммарный оверхед (system+fewshot+output+template) давит на лимит."""
-    # Large system (~2500 tok) pushes limit_budget below chunk_tokens=4000:
-    # limit_budget = 8000 - 2500 - 900 - 400 - 500 = 3700 < 4000 → effective = 3700
-    system_text = "x" * 10000   # ~2500 токенов
+@pytest.mark.parametrize("chunk_tokens", [1200, 2500, 4000])
+def test_split_compressed_uses_prompt_aware_budget(fewshot, r0_cfg, chunk_tokens):
+    """Invariants of _effective_chunk_tokens hold for any reasonable r0_chunk_tokens value.
+
+    The formula: effective = max(500, min(chunk_tokens, limit_budget))
+    where limit_budget = (groq_limit − max_out − template) / factor − system_tok − fewshot_tok.
+
+    Tested invariants (independent of config value):
+    - Never exceeds chunk_tokens (config is the upper bound).
+    - Always positive (min-guard of 500).
+    - When system overhead is large enough to make limit_budget < chunk_tokens,
+      effective < chunk_tokens (limit, not config, is binding).
+    - Fewer tokens per chunk → at least as many chunks.
+    """
+    # System large enough (~2500 tok) to push limit_budget below 4000 but possibly above 1200.
+    system_text = "x" * 10000   # ~2500 tokens
     fewshot_small = {"examples": []}
 
+    effective = S._effective_chunk_tokens(system_text, fewshot_small, chunk_tokens)
+
+    # invariant 1: config upper bound respected
+    assert effective <= chunk_tokens
+    # invariant 2: always positive
+    assert effective >= 500
+
+    # invariant 3 (limit is binding): when overhead forces limit_budget below chunk_tokens,
+    # effective < chunk_tokens. We verify by computing limit_budget directly.
+    system_tok = len(system_text) // 4
+    limit_budget = int((8000 - 900 - 400) / 1.45) - system_tok   # no fewshot
+    if limit_budget < chunk_tokens:
+        assert effective < chunk_tokens, (
+            f"large system should cap effective ({effective}) below chunk_tokens ({chunk_tokens})"
+        )
+
+    # invariant 4: smaller budget → no fewer chunks
     compressed = _make_compressed(100, line_chars=60)
-    budget_full = r0_cfg.chunking.r0_chunk_tokens  # 4000
-
-    effective = S._effective_chunk_tokens(system_text, fewshot_small, budget_full)
-    chunks_no_overhead = S.split_compressed(compressed, budget_full, r0_cfg.chunking.r0_overlap_tokens)
-    chunks_with_overhead = S.split_compressed(compressed, effective, r0_cfg.chunking.r0_overlap_tokens)
-
-    # large system → limit-based cap → effective < config max
-    assert effective < budget_full
-    assert len(chunks_with_overhead) >= len(chunks_no_overhead)
+    overlap = r0_cfg.chunking.r0_overlap_tokens
+    chunks_config = S.split_compressed(compressed, chunk_tokens, overlap)
+    chunks_effective = S.split_compressed(compressed, effective, overlap)
+    assert len(chunks_effective) >= len(chunks_config)
 
 
 def test_select_chunked_renumbers_sequentially(fewshot, r0_cfg):
@@ -861,13 +884,18 @@ def test_413_message_components_sum_to_total(monkeypatch):
     assert e.limit == 8000
 
 
-def test_factor_budget_larger_than_flat_margin(fewshot, r0_cfg):
-    """factor=1.37 gives a materially larger budget than the old flat safety_margin=2000."""
+def test_factor_budget_larger_than_flat_margin(fewshot):
+    """factor=1.37 gives a materially larger budget than the old flat safety_margin=2000.
+
+    Uses an explicit chunk_tokens=8000 (unconstrained) so the test measures the formula
+    output, not the config cap. r0_chunk_tokens is a tunable value, not part of this invariant.
+    """
     system_text = "x" * (1667 * 4)  # ~1667 tok (matches lecture system prompt size)
-    chunk_tokens = r0_cfg.chunking.r0_chunk_tokens  # 4000
+    # Use a large cap so the formula (not the config limit) determines the output.
+    chunk_tokens_uncapped = 8000
 
     budget_factor = S._effective_chunk_tokens(
-        system_text, fewshot, chunk_tokens,
+        system_text, fewshot, chunk_tokens_uncapped,
         underestimation_factor=1.37,
     )
     # old formula equivalent (for comparison):
