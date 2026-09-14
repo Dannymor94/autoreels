@@ -261,11 +261,19 @@ def _chat_request(
                 print(f"  [diag] {provider_name} 413 headers: " +
                       ", ".join(f"{k}={resp.headers[k]}" for k in sorted(_rl_keys)), flush=True)
             limit_hdr = resp.headers.get("x-ratelimit-limit-tokens", "?")
-            prompt_tok = sum(_count_tokens_approx(m.get("content") or "") for m in payload.get("messages", []))
+            msgs = payload.get("messages", [])
+            _sys_tok = _count_tokens_approx(msgs[0].get("content", "") if msgs else "")
+            _chunk_tok = _count_tokens_approx(msgs[-1].get("content", "") if len(msgs) > 1 else "")
+            _fewshot_tok = sum(_count_tokens_approx(m.get("content") or "") for m in msgs[1:-1])
+            _template_tok = _GROQ_CHAT_TEMPLATE_OVERHEAD
+            prompt_tok = _sys_tok + _fewshot_tok + _chunk_tok + _template_tok
             max_tok = payload.get("max_tokens", 0)
+            total_tok = prompt_tok + max_tok
             raise ProviderRequestTooLarge(
-                f"{provider_name}: 413 — prompt ~{prompt_tok}tok + max_tokens={max_tok} "
-                f"превышает лимит {limit_hdr}tok. Уменьши r0_chunk_tokens или max_tokens.",
+                f"{provider_name}: 413 — total ~{total_tok}tok = "
+                f"system {_sys_tok} + fewshot {_fewshot_tok} + chunk {_chunk_tok} + "
+                f"template {_template_tok} + max_tokens {max_tok} "
+                f"vs лимит {limit_hdr}tok. Уменьши r0_chunk_tokens или max_tokens.",
                 prompt_tokens=prompt_tok, max_tokens=max_tok,
                 limit=int(limit_hdr) if str(limit_hdr).isdigit() else 0,
             )
@@ -495,14 +503,34 @@ class GroqLLM:
         if not api_key:
             raise ProviderError("нет GROQ_API_KEY — задайте ключ Groq в окружении для R0")
 
-        estimated = sum(_count_tokens_approx(m.get("content") or "") for m in messages)
+        # Break messages into components for accurate reporting.
+        _sys_tok = _count_tokens_approx(messages[0].get("content", "") if messages else "")
+        _chunk_tok = _count_tokens_approx(messages[-1].get("content", "") if len(messages) > 1 else "")
+        _fewshot_tok = sum(_count_tokens_approx(m.get("content") or "") for m in messages[1:-1])
+        _template_tok = _GROQ_CHAT_TEMPLATE_OVERHEAD
+        estimated = _sys_tok + _fewshot_tok + _chunk_tok
         # max_output_tokens from config (default 900); must stay below Groq free-tier OTPM cap
         # of 1000 tok/min (not exposed in any x-ratelimit-* header — see docs/audit-groq-413.md).
         # Actual R0 output is typically 200-600 tokens; 900 gives ~10% headroom below 1000.
         max_tokens = self._max_output_tokens
+        total_est = estimated + _template_tok + max_tokens
         # Pace on the full admission cost: text estimate + chat-template overhead + max_tokens.
-        self._pace_if_needed(estimated + _GROQ_CHAT_TEMPLATE_OVERHEAD + max_tokens)
+        self._pace_if_needed(total_est)
         self._request_count += 1
+
+        # Pre-send guard: reject before the network call when estimate already exceeds the limit.
+        # Prevents 413 round-trips; raises ProviderRequestTooLarge so the pool can try a sibling.
+        if total_est > self._budget_limit:
+            raise ProviderRequestTooLarge(
+                f"Groq: pre-send — оценка {total_est}tok = "
+                f"system {_sys_tok} + fewshot {_fewshot_tok} + chunk {_chunk_tok} + "
+                f"template {_template_tok} + max_tokens {max_tokens} "
+                f"превышает лимит {self._budget_limit}tok — "
+                f"уменьши r0_chunk_tokens или safety_margin в config/r0.yaml",
+                prompt_tokens=estimated + _template_tok,
+                max_tokens=max_tokens,
+                limit=self._budget_limit,
+            )
 
         payload = {
             "model": self._model,
@@ -517,7 +545,7 @@ class GroqLLM:
         headers = {"Authorization": f"Bearer {api_key}"}
         out_headers: dict = {}
         try:
-            return _chat_request(
+            data = _chat_request(
                 GROQ_CHAT_URL, headers=headers, payload=payload,
                 provider_name=self.name, defer_throttle=self._defer_throttle,
                 not_found_hint=self._model_404_hint(),
@@ -526,6 +554,19 @@ class GroqLLM:
         finally:
             # Always update budget from response headers, even on ProviderThrottled/Exhausted.
             self._update_budget(out_headers)
+
+        # Compare estimate to actual prompt_tokens from usage (diagnoses systematic underestimation).
+        actual_prompt_tokens = data.get("usage", {}).get("prompt_tokens") if isinstance(data, dict) else None
+        if actual_prompt_tokens is not None:
+            text_est = estimated + _template_tok
+            delta = actual_prompt_tokens - text_est
+            if abs(delta) > 100:
+                print(
+                    f"  ℹ Groq token estimate: est={text_est} actual={actual_prompt_tokens} "
+                    f"delta={delta:+d}",
+                    flush=True,
+                )
+        return data
 
 
 class OpenRouterLLM:

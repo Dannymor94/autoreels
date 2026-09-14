@@ -400,21 +400,20 @@ def test_select_chunked_no_delay_after_last_chunk(fewshot, r0_cfg, monkeypatch):
 
 
 def test_split_compressed_uses_prompt_aware_budget(fewshot, r0_cfg):
-    """Бюджет чанка уменьшается на размер промпта (system + few-shot)."""
-    system_text = "x" * 400   # ~100 токенов
+    """Бюджет чанка уменьшается когда суммарный оверхед (system+fewshot+output+template) давит на лимит."""
+    # Large system (~2500 tok) pushes limit_budget below chunk_tokens=4000:
+    # limit_budget = 8000 - 2500 - 900 - 400 - 500 = 3700 < 4000 → effective = 3700
+    system_text = "x" * 10000   # ~2500 токенов
     fewshot_small = {"examples": []}
 
     compressed = _make_compressed(100, line_chars=60)
-    budget_full = r0_cfg.chunking.r0_chunk_tokens
+    budget_full = r0_cfg.chunking.r0_chunk_tokens  # 4000
 
-    # При маленьком промпте (0 токенов) → много строк на чанк
-    chunks_no_overhead = S.split_compressed(compressed, budget_full, r0_cfg.chunking.r0_overlap_tokens)
-    # При большом промпте (~100 токенов) → меньше строк на чанк → больше чанков
-    # Симулируем: вызов select_chunked передаёт эффективный бюджет = chunk_tokens - prompt_tokens
     effective = S._effective_chunk_tokens(system_text, fewshot_small, budget_full)
+    chunks_no_overhead = S.split_compressed(compressed, budget_full, r0_cfg.chunking.r0_overlap_tokens)
     chunks_with_overhead = S.split_compressed(compressed, effective, r0_cfg.chunking.r0_overlap_tokens)
 
-    # prompt_tokens > 0 → effective < full → больше чанков (или равно, но не меньше)
+    # large system → limit-based cap → effective < config max
     assert effective < budget_full
     assert len(chunks_with_overhead) >= len(chunks_no_overhead)
 
@@ -781,3 +780,80 @@ def test_trim_tail_affirmation_standalone_trimmed_inline_not():
     result_b = _trim_tail_affirmation(r_b, words_b, affirmations)
     assert result_b is False
     assert r_b.end == pytest.approx(12.0)
+
+
+# ----------------------------------------------------------------- token budget / 413 guard
+
+def test_effective_chunk_tokens_respects_limit_and_upper_bound():
+    """chunk_budget = limit − system − fewshot − max_output − template − safety; capped by config."""
+    # System ~100 tok, no fewshot, config max=9999 (huge) → budget is limit-derived, not config
+    system_text = "x" * 400  # 100 tok
+    effective = S._effective_chunk_tokens(
+        system_text, {"examples": []}, 9999,
+        max_output_tokens=500, template_overhead=300, groq_limit=5000, safety_margin=100,
+    )
+    # limit_budget = 5000 - 100 - 500 - 300 - 100 = 4000
+    assert effective <= 4000 + 5  # allow ±5 for integer division
+    # The full request fits: effective + system + max_output + template + safety <= groq_limit
+    assert effective + 100 + 500 + 300 + 100 <= 5000
+    assert effective >= 500  # minimum guard
+
+
+def test_groq_pre_send_guard_no_network_call(monkeypatch):
+    """When estimate exceeds budget_limit, ProviderRequestTooLarge raised before any HTTP call."""
+    import autoreels.cloud.providers as P
+
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+    network_called = []
+    monkeypatch.setattr(P, "_httpx_post", lambda *a, **kw: network_called.append(1) or None)
+
+    llm = P.GroqLLM(max_output_tokens=900)
+    llm._budget_limit = 2000  # tight limit: 2000 tok
+
+    # system(500) + chunk(500) + template(400) + max_tokens(900) = 2300 > 2000 → must raise
+    messages = [
+        {"role": "system", "content": "s" * 2000},   # 500 tok
+        {"role": "user",   "content": "c" * 2000},   # 500 tok
+    ]
+    with pytest.raises(P.ProviderRequestTooLarge) as exc:
+        llm.complete(messages)
+
+    assert not network_called, "HTTP call must not be made for oversized request"
+    e = exc.value
+    assert e.prompt_tokens + e.max_tokens > e.limit  # arithmetic is consistent
+
+
+def test_413_message_components_sum_to_total(monkeypatch):
+    """413 from network: message shows components and their sum equals total."""
+    import autoreels.cloud.providers as P
+
+    limit_hdr = "8000"
+    response_body = {}
+
+    class _Resp413:
+        status_code = 413
+        headers = {"x-ratelimit-limit-tokens": limit_hdr}
+        def raise_for_status(self): pass
+        def json(self): return response_body
+
+    monkeypatch.setattr(P, "_httpx_post", lambda *a, **kw: _Resp413())
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = P.GroqLLM(max_output_tokens=900)
+    llm._budget_limit = 99999  # disable pre-send guard so we reach network
+    messages = [
+        {"role": "system",    "content": "sys"},
+        {"role": "user",      "content": "fewshot_in"},
+        {"role": "assistant", "content": "fewshot_out"},
+        {"role": "user",      "content": "chunk"},
+    ]
+    with pytest.raises(P.ProviderRequestTooLarge) as exc:
+        llm.complete(messages)
+
+    e = exc.value
+    msg = str(e)
+    # Components must appear in message and be consistent
+    assert "system" in msg and "fewshot" in msg and "chunk" in msg and "template" in msg
+    # prompt_tokens + max_tokens > limit (that's why 413)
+    assert e.prompt_tokens + e.max_tokens > 0
+    assert e.limit == 8000

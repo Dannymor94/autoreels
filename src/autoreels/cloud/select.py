@@ -69,17 +69,34 @@ def split_compressed(compressed: str, chunk_tokens: int, overlap_tokens: int) ->
     return chunks if chunks else [compressed]
 
 
-def _effective_chunk_tokens(system_text: str, fewshot: dict, chunk_tokens: int) -> int:
-    """Эффективный бюджет чанка = chunk_tokens − оценка токенов промпта (system + few-shot).
+def _effective_chunk_tokens(
+    system_text: str,
+    fewshot: dict,
+    chunk_tokens: int,
+    *,
+    max_output_tokens: int = 900,
+    template_overhead: int = 400,
+    groq_limit: int = 8000,
+    safety_margin: int = 2000,
+) -> int:
+    """Derive safe chunk budget so the full request stays within groq_limit.
 
-    Предотвращает 413: суммарный запрос (промпт + чанк) не должен превышать лимит Groq.
-    Минимум 500 токенов оставляем, чтобы чанкинг не зациклился.
+    chunk_budget = limit − system − fewshot − max_output_tokens − template − safety_margin.
+    Also capped by the configured r0_chunk_tokens upper bound.
+    Minimum 500 tokens to avoid infinite chunking loops.
+
+    safety_margin of 2000 compensates for Qwen tokenizer underestimation on Russian text
+    (empirically ≈1.6× more tokens than 4-chars/token estimate; 2000 covers the gap for
+    typical chunk sizes up to ~4000 estimated tokens).
+    # ponytail: fixed multiplier; replace with tiktoken/Qwen tokenizer if 413s persist
     """
-    prompt_tokens = _count_tokens(system_text)
+    system_tok = _count_tokens(system_text)
+    fewshot_tok = 0
     for ex in fewshot.get("examples", []):
-        prompt_tokens += _count_tokens(ex.get("input", ""))
-        prompt_tokens += _count_tokens(json.dumps(ex.get("output", ""), ensure_ascii=False))
-    return max(500, chunk_tokens - prompt_tokens)
+        fewshot_tok += _count_tokens(ex.get("input", ""))
+        fewshot_tok += _count_tokens(json.dumps(ex.get("output", ""), ensure_ascii=False))
+    limit_budget = groq_limit - system_tok - fewshot_tok - max_output_tokens - template_overhead - safety_margin
+    return max(500, min(chunk_tokens, limit_budget))
 
 
 # Чек-флаги длины (ставит код, не модель — CLAUDE.md инвариант 6).
@@ -430,7 +447,16 @@ def select_chunked(
     from autoreels.core.progress import chunk_progress, chunk_start, throttle_wait
 
     chunking = r0_cfg.chunking
-    effective_tokens = _effective_chunk_tokens(system_text, fewshot, chunking.r0_chunk_tokens)
+    max_out = getattr(r0_cfg, "max_output_tokens", 900)
+    effective_tokens = _effective_chunk_tokens(
+        system_text, fewshot, chunking.r0_chunk_tokens,
+        max_output_tokens=max_out,
+    )
+    print(
+        f"  ℹ R0 chunk budget: {effective_tokens} tok "
+        f"(limit-derived; config upper bound: {chunking.r0_chunk_tokens})",
+        flush=True,
+    )
     chunks = split_compressed(compressed, effective_tokens, chunking.r0_overlap_tokens)
 
     est_sec = len(chunks) * (chunking.r0_chunk_delay_sec + 15)
@@ -491,9 +517,16 @@ def select(
     If `_dropped` list is given, it is populated with overlap_dedup sidecar entries.
     """
     chunking = getattr(r0_cfg, "chunking", None)
-    if chunking and chunking.enabled and _count_tokens(compressed) > chunking.r0_chunk_tokens:
-        return select_chunked(compressed, system_text=system_text, fewshot=fewshot,
-                              provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
+    if chunking and chunking.enabled:
+        max_out = getattr(r0_cfg, "max_output_tokens", 900)
+        # Use effective budget (not raw config) as chunking threshold so that even
+        # transcripts that fit in r0_chunk_tokens are chunked when the total request
+        # (system+fewshot+chunk+template+max_tokens) would exceed the Groq limit.
+        effective = _effective_chunk_tokens(system_text, fewshot, chunking.r0_chunk_tokens,
+                                            max_output_tokens=max_out)
+        if _count_tokens(compressed) > effective:
+            return select_chunked(compressed, system_text=system_text, fewshot=fewshot,
+                                  provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
     return _select_one(compressed, system_text=system_text, fewshot=fewshot,
                        provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
 
