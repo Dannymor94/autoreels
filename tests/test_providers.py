@@ -636,7 +636,7 @@ def test_pool_wait_non_tty_does_not_spam(monkeypatch, capsys):
 
     out = capsys.readouterr().out
     wait_lines = [ln for ln in out.splitlines() if "ждём провайдеров" in ln]
-    assert 0 < len(wait_lines) <= 4          # не 12 строк (throttle раз в 5 тиков → ~3)
+    assert len(wait_lines) == 1              # только enter-строка; per-tick non-TTY подавлены
     assert "доступен" in out
 
 

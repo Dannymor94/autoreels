@@ -784,11 +784,19 @@ class ProviderPool:
         Оценка пересчитывается на КАЖДОМ тике: если пауза затянулась (кулдаун продлили) —
         показываем новую оценку, не молчим. Non-TTY печатает реже (print_provider_wait).
         """
-        from autoreels.core.progress import print_provider_ready, print_provider_wait
+        from autoreels.core.progress import is_tty, print_provider_ready, print_provider_wait
         active = [m for m in self._members if not m.disabled]
         if not active:
             return
-        print(flush=True)   # своя строка под \r-отсчёт (не затирать прогресс R0 сверху)
+        if is_tty():
+            print(flush=True)   # своя строка под \r-отсчёт (не затирать прогресс R0 сверху)
+        else:
+            now0 = self._clock()
+            earliest0 = min(m.available_at for m in active)
+            details0 = " · ".join(
+                f"{m.name} через ~{max(0.0, m.available_at - now0):.0f}с" for m in active
+            )
+            print(f"⏸ ждём провайдеров: осталось ~{max(0.0, earliest0 - now0):.0f}с · {details0}", flush=True)
         tick = 0
         while True:
             now = self._clock()

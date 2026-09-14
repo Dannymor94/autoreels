@@ -517,3 +517,42 @@ def test_is_tty_env_override(monkeypatch):
     monkeypatch.setenv("AUTOREELS_FORCE_TTY", "0")
     monkeypatch.setenv("AUTOREELS_NO_TTY", "1")
     assert P.is_tty() is False
+
+
+# ------------------------------------------------------------------ provider wait countdown
+
+def test_non_tty_provider_wait_at_most_two_lines(monkeypatch, capsys):
+    """Non-TTY 60-секундное ожидание → не более 2 строк с 'ждём провайдеров'."""
+    monkeypatch.setattr(P, "is_tty", lambda: False)
+    monkeypatch.setattr(P, "_last_provider_wait_line", "")
+    for tick in range(60):
+        P.print_provider_wait(60.0 - tick, "Groq через ~60с", tick)
+    out = capsys.readouterr().out
+    assert out == ""   # non-TTY: print_provider_wait пишет ничего
+
+
+def test_tty_provider_wait_truncated_to_terminal_width(monkeypatch, capsys):
+    """TTY с шириной 40: строка никогда не длиннее 40 символов."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    monkeypatch.setattr(P, "_last_provider_wait_line", "")
+    monkeypatch.setattr(P.shutil, "get_terminal_size", lambda fallback=None: type("T", (), {"columns": 40})())
+    P.print_provider_wait(119.0, "Groq через ~119с · OpenRouter через ~119с", 0)
+    out = capsys.readouterr().out
+    # strip the \r and ANSI clear
+    line = out.replace("\r", "").replace("\033[K", "")
+    assert len(line) <= 40
+
+
+def test_tty_provider_wait_dedup(monkeypatch, capsys):
+    """Два одинаковых рендера → второй не пишет ничего."""
+    monkeypatch.setattr(P, "is_tty", lambda: True)
+    monkeypatch.setattr(P, "_last_provider_wait_line", "")
+    # tick=0 and tick=0 again → same spinner char → same line
+    line1 = P.format_provider_wait(10.0, "Groq через ~10с", 0)
+    line2 = P.format_provider_wait(10.0, "Groq через ~10с", 0)
+    assert line1 == line2   # precondition: truly identical
+    P.print_provider_wait(10.0, "Groq через ~10с", 0)
+    capsys.readouterr()     # clear first write
+    P.print_provider_wait(10.0, "Groq через ~10с", 0)
+    out = capsys.readouterr().out
+    assert out == ""

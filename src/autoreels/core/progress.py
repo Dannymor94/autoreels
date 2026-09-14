@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -141,24 +142,37 @@ def throttle_wait(sec: float, source: str = "Groq") -> None:
         print(msg, flush=True)
 
 
+def _terminal_width() -> int:
+    return shutil.get_terminal_size(fallback=(80, 24)).columns
+
+
 def format_provider_wait(remaining_sec: float, details: str, tick: int) -> str:
     """Строка живой паузы «все провайдеры в лимите»: обратный отсчёт + ETA по каждому + спиннер."""
     tail = f" · {details}" if details else ""
     return f"⏸ ждём провайдеров: осталось ~{max(0.0, remaining_sec):.0f}с{tail} {spinner(tick)}"
 
 
-def print_provider_wait(remaining_sec: float, details: str, tick: int, *, every: int = 5) -> None:
-    """Обновить ОДНУ строку паузы ожидания провайдеров (тот же \\r-механизм, что у скачивания).
+_last_provider_wait_line: str = ""
 
-    TTY: `\\r` + очистка до конца строки, БЕЗ `\\n` — живой отсчёт перезаписывается на месте.
-    Non-TTY (пайп/лог): строка раз в `every` тиков (≈раз в N секунд) — не спамить.
+
+def print_provider_wait(remaining_sec: float, details: str, tick: int) -> None:
+    """Обновить ОДНУ строку паузы ожидания провайдеров.
+
+    TTY: `\\r` + очистка до конца строки, обрезка по ширине терминала, пропуск если текст не изменился.
+    Non-TTY: ничего — caller печатает только enter/exit.
     """
+    global _last_provider_wait_line
+    if not is_tty():
+        return
     line = format_provider_wait(remaining_sec, details, tick)
-    if is_tty():
-        sys.stdout.write(f"\r{_CLEAR_EOL}{line}")
-        sys.stdout.flush()
-    elif tick % every == 0:
-        print(line, flush=True)
+    width = _terminal_width()
+    if len(line) > width:
+        line = line[: width - 1] + "…"
+    if line == _last_provider_wait_line:
+        return
+    _last_provider_wait_line = line
+    sys.stdout.write(f"\r{_CLEAR_EOL}{line}")
+    sys.stdout.flush()
 
 
 def print_provider_ready(name: str) -> None:
