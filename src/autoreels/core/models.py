@@ -158,6 +158,7 @@ class Manifest(BaseModel):
     # Дефолт "full" означает: старые манифесты без поля читаются корректно.
     # _assemble_manifest (run) явно ставит "partial-p1" для новых манифестов.
     source_hash_scheme: str = "full"
+    source_kind: str = ""          # "interview" | "lecture" | "" (absent in old manifests)
     duration_preset: str
     setup: SetupProfile
     # Ключ идемпотентности = хэш(source + preset + версия рубрики). Ставит state.py.

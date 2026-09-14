@@ -32,7 +32,7 @@ from autoreels.cloud.select import (
     filter_dangling_start, filter_min_clip_duration, select, _stage_interview_snap,
 )
 from autoreels.cloud.chunk_transcribe import renumber_reels
-from autoreels.cloud.snap import apply_padding, snap_segments, try_rescue_clip
+from autoreels.cloud.snap import apply_padding, snap_segments, trim_hanging_subtitles, try_rescue_clip
 from autoreels.cloud.trim import trim_too_long
 from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
 from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
@@ -736,7 +736,7 @@ def _stage_subtitles(reels, transcript):
     return reels
 
 
-def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
+def _assemble_manifest(video, reels, *, sha, setup, duration_preset, source_kind=""):
     """Собрать манифест: кроп/setup_id — из калибровки (setup), source_sha256 — от файла."""
     return Manifest(
         source=Path(video).name,
@@ -746,6 +746,7 @@ def _assemble_manifest(video, reels, *, sha, setup, duration_preset):
         setup=setup,
         run_key=_run_key(sha, duration_preset),
         reels=reels,
+        source_kind=source_kind,
     )
 
 
@@ -1286,8 +1287,10 @@ def cmd_run(
     reels, short_disc = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
     discarded += short_disc
     reels = _stage_subtitles(reels, transcript)
+    trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
     manifest = _assemble_manifest(
-        video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset
+        video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
+        source_kind=getattr(r0_cfg, "source_kind", ""),
     )
     path = _write_manifest(manifest, manifests_dir)
     _write_discarded(discarded, path)

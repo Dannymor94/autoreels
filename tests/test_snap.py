@@ -482,7 +482,10 @@ def test_padding_trims_next_sentence_spillover_to_period():
     r = _reel(0.0, 2.3)                              # клип захватил «И вот» (t0 < 2.3)
     apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
                   hanging_words=HANGING)
-    assert abs(r.end - 2.0) < 1e-6                   # конец на «психосоматика.» (2.0), не на «мы»
+    # After overlapping-timestamp guard: new_end < "И".t0=1.98 so "И" is excluded from window.
+    # "психосоматика." (t0=1.0) is still in window since 1.0 < new_end.
+    assert r.end < 1.98, f"'И' (t0=1.98) still in subtitle window: r.end={r.end}"
+    assert r.end > 1.0, f"last word 'психосоматика.' (t0=1.0) cut from window: r.end={r.end}"
 
 
 def test_padding_keeps_sentence_end_after_prior_sentence_end():
@@ -863,3 +866,91 @@ def test_start_drift_populated_after_max_duration_trim():
     assert r.start_drift_sec is not None, "start_drift_sec not set"
     assert r.start_snap_reason is not None, "start_snap_reason not set"
     assert r.start_drift_sec > 0, f"start moved forward: drift={r.start_drift_sec}"
+
+
+# ---------------------------------------------------------------------------
+# Hanging-word end-trim regressions (Task 2)
+# ---------------------------------------------------------------------------
+HANGING_EX = HANGING + ["я", "потом", "тогда", "здесь", "сейчас"]
+
+from autoreels.cloud.snap import trim_hanging_subtitles
+from autoreels.core.models import Word as _Word
+
+
+def _reel_with_subtitles(start: float, end: float, words: list) -> Reel:
+    r = _reel(start, end)
+    r.subtitles = [_w(w.t0, w.t1, w.word) for w in words]
+    return r
+
+
+def test_apply_padding_overlapping_timestamps_excludes_trailing_hanging(tmp_path):
+    """r17-regression: overlapping Whisper timestamps put trailing hanging word into window.
+
+    Pattern: sentence_terminal.t1 > hanging_word.t0 (overlap), hanging_word comes after
+    terminal in transcript list. apply_padding must clamp new_end < hanging_word.t0.
+    """
+    # "запомнило." t0=168.283 t1=168.843; "Потом" t0=168.823 t1=169.183 (overlapping)
+    sent = _w(168.283, 168.843, "запомнило.")
+    hang = _w(168.823, 169.183, "Потом")
+    next_w = _w(169.183, 169.303, "это")
+    words = [sent, hang, next_w]
+
+    r = _reel(133.5, 169.143)  # end set by snap (sent.t1 + tail_sec)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=90.0)
+
+    # After fix: new_end must be below hang.t0=168.823 so "Потом" is not in window
+    assert r.end < hang.t0, (
+        f"'Потом' (t0={hang.t0}) still in window: r.end={r.end}"
+    )
+
+
+def test_trim_hanging_subtitles_removes_trailing_hanging(tmp_path):
+    """r04-regression: hanging word follows sentence-terminal in transcript list but has
+    earlier t0 (overlapping) — can't exclude by adjusting r.end. Subtitle trim removes it.
+    """
+    sent = _w(378.666, 379.526, "методу.")
+    hang = _w(378.546, 379.546, "Я")   # t0 < sent.t0 — can't exclude via r.end
+    r = _reel(334.866, 379.526)
+    r.end_snap_reason = "sentence"
+    r.subtitles = [sent, hang]  # transcript order: sent then hang
+
+    trim_hanging_subtitles([r], hanging_words=HANGING_EX)
+
+    assert all(_w2.word != "Я" for _w2 in r.subtitles), "trailing 'Я' not removed from subtitles"
+    assert r.end_snap_reason == "sentence_trimmed_hanging"
+
+
+def test_trim_hanging_subtitles_leaves_normal_clip_untouched():
+    """Content word at end of subtitles is not removed."""
+    w1 = _w(10.0, 10.5, "принцип.")
+    r = _reel(5.0, 11.0)
+    r.end_snap_reason = "sentence"
+    r.subtitles = [w1]
+
+    trim_hanging_subtitles([r], hanging_words=HANGING_EX)
+
+    assert len(r.subtitles) == 1
+    assert r.end_snap_reason == "sentence"  # reason unchanged
+
+
+def test_source_kind_persisted_in_manifest():
+    """source_kind from r0_cfg is stored in Manifest."""
+    from autoreels.core.models import Manifest, SetupProfile, Crop
+
+    setup = SetupProfile(
+        setup_id="test",
+        crop=Crop(x=420, y=0, w=1080, h=1920),
+        scale=[1080, 1920],
+        frame=[1920, 1080],
+    )
+    m = Manifest(
+        source="video.mp4", source_sha256="abc", duration_preset="shorts",
+        setup=setup, run_key="key", source_kind="interview",
+    )
+    assert m.source_kind == "interview"
+
+    m2 = Manifest(
+        source="video.mp4", source_sha256="abc", duration_preset="shorts",
+        setup=setup, run_key="key",
+    )
+    assert m2.source_kind == ""  # default for old manifests

@@ -511,6 +511,17 @@ def apply_padding(
         if la + 1 < len(words):
             new_end = min(new_end, words[la + 1].t0 - _PAD_EPS)
         new_end = max(new_end, last_word.t1)               # не резать само последнее слово
+        # Overlapping-timestamp guard: words after `la` in list order may have t0 < new_end
+        # (Whisper places them there despite coming later in the utterance). Clamp to exclude
+        # them when their t0 > last_word.t0 (i.e., we can push end below their t0 without
+        # losing last_word from the subtitle window, which uses w.t0 < end).
+        for k in range(la + 1, len(words)):
+            if words[k].t0 >= new_end:
+                break
+            if words[k].t0 > last_word.t0:
+                new_end = min(new_end, words[k].t0 - _PAD_EPS)
+                break
+        new_end = max(new_end, last_word.t0 + _PAD_EPS)   # keep last_word in window
 
         new_end = min(new_end, new_start + max_duration)
         if video_duration is not None:
@@ -518,3 +529,22 @@ def apply_padding(
 
         r.start = new_start
         r.end = new_end
+
+
+def trim_hanging_subtitles(reels: list[Reel], *, hanging_words) -> None:
+    """Remove trailing hanging words from reel.subtitles (mutates in place).
+
+    Handles the case where overlapping Whisper timestamps include a hanging word
+    in the subtitle window even though apply_padding excluded it from idxs.
+    Sets end_snap_reason='sentence_trimmed_hanging' when any trimming occurs.
+    """
+    hw_set = set(hanging_words or [])
+    for r in reels:
+        if not r.subtitles or not hw_set:
+            continue
+        trimmed = False
+        while r.subtitles and _clean(r.subtitles[-1].word) in hw_set:
+            r.subtitles.pop()
+            trimmed = True
+        if trimmed and r.end_snap_reason in ("sentence", "no_punctuation"):
+            r.end_snap_reason = "sentence_trimmed_hanging"
