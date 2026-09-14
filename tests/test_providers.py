@@ -1280,12 +1280,8 @@ def test_413_request_shrunk_to_fit_header_limit(monkeypatch):
     estimated = sum(P._count_tokens_approx(m.get("content") or "") for m in msg)
     max_tok = captured["max_tokens"]
     assert max_tok is not None, "max_tokens должен быть в payload"
-    # With budget_limit=5000 and -400 buffer: max_tokens = max(1024, min(2048, 5000−1200−400)) = 2048
-    # → prompt + max_tokens = 1200 + 2048 = 3248 ≤ 5000
-    assert estimated + max_tok <= 5000, (
-        f"prompt({estimated}) + max_tokens({max_tok}) = {estimated + max_tok} > 5000"
-    )
-    assert max_tok >= 1024, f"max_tokens={max_tok} ниже минимума 1024"
+    # max_tokens = max_output_tokens (default 900) — fixed ceiling from config to stay below OTPM.
+    assert max_tok == 900, f"max_tokens={max_tok}, ожидали default 900"
 
 
 def test_413_pool_falls_through_to_sibling(capsys):
@@ -1323,3 +1319,105 @@ def test_r0_output_parsing_survives_lower_max_tokens():
     assert len(segs) == 5
     for s in segs:
         assert "start" in s and "end" in s and "score" in s
+
+
+# ======================================================= OTPM / Type B 429 (audit-groq-413.md)
+
+def test_type_b_429_raises_otpm_not_throttled(monkeypatch):
+    """Type B 429 (remaining==limit, no retry-after) → ProviderOTPMExceeded, no sleep."""
+    import autoreels.cloud.providers as P
+    from autoreels.cloud.providers import ProviderOTPMExceeded
+    sleeps = []
+    monkeypatch.setattr(P.time, "sleep", lambda s: sleeps.append(s))
+
+    def fake_post(url, *, headers, json, timeout):
+        return _FakeResp(429, headers={
+            "x-ratelimit-remaining-tokens": "8000",
+            "x-ratelimit-limit-tokens": "8000",
+            # no retry-after
+        })
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    llm = P.GroqLLM()
+    with pytest.raises(ProviderOTPMExceeded) as exc:
+        llm.complete([{"role": "user", "content": "hi"}])
+    assert "OTPM" in str(exc.value)
+    assert sleeps == [], "Type B должен не ждать"
+
+
+def test_type_a_429_still_waits(monkeypatch):
+    """Type A 429 (retry-after present) → ждёт и ретраит как прежде."""
+    import autoreels.cloud.providers as P
+    sleeps = []
+    monkeypatch.setattr(P.time, "sleep", lambda s: sleeps.append(s))
+
+    attempt = [0]
+
+    def fake_post(url, *, headers, json, timeout):
+        attempt[0] += 1
+        if attempt[0] == 1:
+            return _FakeResp(429, headers={
+                "retry-after": "3",
+                "x-ratelimit-remaining-tokens": "100",
+                "x-ratelimit-limit-tokens": "8000",
+            })
+        return _FakeResp(200, _good_envelope())
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    result = P.GroqLLM().complete([{"role": "user", "content": "hi"}])
+    assert result == '{"segments": []}'
+    assert any(s == 3.0 for s in sleeps), f"должен был подождать 3с, sleep={sleeps}"
+
+
+def test_max_tokens_sent_below_ceiling(monkeypatch):
+    """max_tokens в payload не превышает max_output_tokens (default 900)."""
+    import autoreels.cloud.providers as P
+    payloads = []
+
+    def fake_post(url, *, headers, json, timeout):
+        payloads.append(json)
+        return _FakeResp(200, _good_envelope())
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("GROQ_API_KEY", "testkey")
+
+    ceiling = 900
+    llm = P.GroqLLM(max_output_tokens=ceiling)
+    llm.complete([{"role": "user", "content": "x" * 2000}])
+    assert payloads, "должен был POST"
+    assert payloads[0]["max_tokens"] <= ceiling, (
+        f"max_tokens={payloads[0]['max_tokens']} > ceiling={ceiling}"
+    )
+
+
+def test_openrouter_shared_pool_excluded_at_construction(monkeypatch):
+    """OpenRouter, вернувший shared-pool 429 (is_byok:false), исключается при build_pool."""
+    import autoreels.cloud.providers as P
+
+    shared_pool_429 = _FakeResp(429, body={
+        "error": {
+            "metadata": {"is_byok": False, "limit_source": "upstream_provider_shared_pool"}
+        }
+    })
+
+    def fake_post(url, *, headers, json, timeout):
+        return shared_pool_429
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-testkey")
+
+    class _FakeCfg:
+        model = "qwen/qwen3.6-27b"
+        openrouter_model = "google/gemma-4-31b-it:free"
+        openrouter_fallback_models = []
+        provider_strategy = "adaptive"
+        max_output_tokens = 900
+
+    pool = P.build_pool(_FakeCfg())
+    # pool should contain only Groq (OpenRouter excluded due to shared pool block)
+    assert len(pool._members) == 1
+    assert pool._members[0].name == "Groq"

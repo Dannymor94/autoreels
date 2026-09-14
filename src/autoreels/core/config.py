@@ -78,6 +78,8 @@ class R0Config(BaseModel):
             "google/gemma-2-9b-it:free",
         ]
     )
+    max_output_tokens: int = 900             # Groq free-tier OTPM cap = 1000 tok/min (no header).
+                                             # Keep below 1000; 900 gives ~10% headroom.
     provider_strategy: str = "adaptive"      # распределение R0-нагрузки: adaptive | round_robin
                                              # adaptive: Groq основной, слив на OpenRouter под
                                              # троттлом (качество не плавает). round_robin:

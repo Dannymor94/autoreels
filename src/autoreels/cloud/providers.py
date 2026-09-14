@@ -211,6 +211,19 @@ class ProviderRequestTooLarge(ProviderError):
         self.limit = limit
 
 
+class ProviderOTPMExceeded(ProviderError):
+    """Groq OTPM (output-tokens-per-minute) cap hit — Type B 429.
+
+    Diagnostic: remaining-tokens == limit-tokens (input never the constraint), no retry-after.
+    Waiting is useless; only lowering max_output_tokens in config/r0.yaml helps.
+    """
+
+    def __init__(self, message: str, *, otpm_limit: int = 0, max_tokens_sent: int = 0):
+        super().__init__(message)
+        self.otpm_limit = otpm_limit
+        self.max_tokens_sent = max_tokens_sent
+
+
 class LLMProvider(Protocol):
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str: ...
 
@@ -262,6 +275,21 @@ def _chat_request(
             if _rl_keys:
                 print(f"  [diag] {provider_name} 429 headers: " +
                       ", ".join(f"{k}={resp.headers[k]}" for k in sorted(_rl_keys)), flush=True)
+            # Type B: OTPM hit — remaining==limit (input full), no retry-after. Waiting is useless.
+            _remaining = resp.headers.get("x-ratelimit-remaining-tokens")
+            _limit = resp.headers.get("x-ratelimit-limit-tokens")
+            _has_retry_after = "retry-after" in resp.headers
+            if (not _has_retry_after and _remaining is not None and _limit is not None
+                    and _remaining == _limit):
+                _max_tok = payload.get("max_tokens", 0)
+                _otpm_limit = int(_limit) if str(_limit).isdigit() else 0
+                raise ProviderOTPMExceeded(
+                    f"{provider_name}: OTPM limit {_otpm_limit}/min — waiting won't help; "
+                    f"lower max_output_tokens in config/r0.yaml below {_otpm_limit} "
+                    f"(sent max_tokens={_max_tok})",
+                    otpm_limit=_otpm_limit,
+                    max_tokens_sent=_max_tok,
+                )
             wait = float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC))
             if wait >= _EXHAUSTED_THRESHOLD_SEC:
                 raise ProviderExhausted(
@@ -368,6 +396,7 @@ class GroqLLM:
         model: str = DEFAULT_LLM_MODEL,
         api_key: str | None = None,
         reasoning_effort: str | None = DEFAULT_REASONING_EFFORT,
+        max_output_tokens: int = 900,
         request_fn: Callable[[list[dict], float], dict] | None = None,
         defer_throttle: bool = False,
         fallback_delay_sec: float = _GROQ_FREE_FALLBACK_DELAY_SEC,
@@ -377,6 +406,7 @@ class GroqLLM:
         self._reasoning_effort = reasoning_effort
         self._model = model
         self._api_key = api_key
+        self._max_output_tokens = max_output_tokens
         self._request_fn = request_fn
         self._defer_throttle = defer_throttle
         self._fallback_delay_sec = fallback_delay_sec
@@ -466,11 +496,10 @@ class GroqLLM:
             raise ProviderError("нет GROQ_API_KEY — задайте ключ Groq в окружении для R0")
 
         estimated = sum(_count_tokens_approx(m.get("content") or "") for m in messages)
-        # max_tokens: cap at 2048 (observed peak ~500 tokens / chunk; 2048 = 4× headroom).
-        # Must fit within the per-window admission limit: prompt + max_tokens ≤ budget_limit.
-        # Groq chat-template overhead adds ~200 tokens on top of our text estimate, so use
-        # budget_limit − estimated − 400 as the hard ceiling (400 = 200 template + 200 buffer).
-        max_tokens = max(1024, min(2048, self._budget_limit - estimated - _GROQ_CHAT_TEMPLATE_OVERHEAD))
+        # max_output_tokens from config (default 900); must stay below Groq free-tier OTPM cap
+        # of 1000 tok/min (not exposed in any x-ratelimit-* header — see docs/audit-groq-413.md).
+        # Actual R0 output is typically 200-600 tokens; 900 gives ~10% headroom below 1000.
+        max_tokens = self._max_output_tokens
         # Pace on the full admission cost: text estimate + chat-template overhead + max_tokens.
         self._pace_if_needed(estimated + _GROQ_CHAT_TEMPLATE_OVERHEAD + max_tokens)
         self._request_count += 1
@@ -723,6 +752,14 @@ class ProviderPool:
                     print(f"\n  ⚠ {e} — пробую другого провайдера", flush=True)
                     self._cooldown(m, now, e, min_sec=_TIMEOUT_COOLDOWN_SEC)
                     continue
+                except ProviderOTPMExceeded as e:
+                    # Type B 429: waiting is useless, only lowering max_tokens helps.
+                    # Don't cooldown, don't increment consec_failures. Log once, fail fast.
+                    print(
+                        f"\n  ✗ {m.name} OTPM: {e}",
+                        flush=True,
+                    )
+                    raise ProviderError(str(e)) from e
                 except ProviderRequestTooLarge as e:
                     _fail_counts[m.name] = _fail_counts.get(m.name, 0) + 1
                     print(f"\n  ✗ {m.name} 413: {e}", flush=True)
@@ -888,6 +925,43 @@ class FallbackLLM:
         raise ProviderError("все провайдеры исчерпаны — добавьте ключи или подождите сброса квоты")
 
 
+def _openrouter_shared_pool_blocked(model: str, api_key: str) -> str | None:
+    """Minimal chat-completion ping to OpenRouter. Returns reason string if the model is
+    blocked by the upstream shared pool (is_byok:false), else None.
+
+    Called at pool construction so we don't burn retries on every chunk for a provider
+    that is permanently unavailable on the free shared pool."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://github.com/Dannymor94/autoreels",
+        "X-Title": "autoreels",
+    }
+    payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+    try:
+        resp = _httpx_post(
+            OPENROUTER_CHAT_URL, headers=headers, json=payload,
+            timeout=httpx.Timeout(15.0),
+        )
+    except Exception:  # noqa: BLE001 — network error at construction: let runtime handle it
+        return None
+    if resp.status_code != 429:
+        return None
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001
+        return None
+    error = body.get("error", {}) if isinstance(body, dict) else {}
+    metadata = error.get("metadata", {}) if isinstance(error, dict) else {}
+    if not isinstance(metadata, dict):
+        return None
+    if metadata.get("is_byok") is False or metadata.get("limit_source") == "upstream_provider_shared_pool":
+        return (
+            f"model '{model}' rejected by upstream shared pool (is_byok:false) — "
+            f"use BYOK key or pick a different free model in config/r0.yaml (openrouter_model:)"
+        )
+    return None
+
+
 def build_pool(r0_cfg, *, strategy: str | None = None) -> ProviderPool:
     """Собрать ProviderPool из конфига и ключей окружения.
 
@@ -897,16 +971,22 @@ def build_pool(r0_cfg, *, strategy: str | None = None) -> ProviderPool:
     а не спится внутри провайдера. Стратегия — из аргумента > r0_cfg.provider_strategy > adaptive.
     """
     strat = strategy or getattr(r0_cfg, "provider_strategy", "adaptive")
+    max_out = getattr(r0_cfg, "max_output_tokens", 900)
     providers: list[LLMProvider] = [
-        GroqLLM(model=r0_cfg.model, defer_throttle=True)
+        GroqLLM(model=r0_cfg.model, defer_throttle=True, max_output_tokens=max_out)
     ]
-    if os.environ.get("OPENROUTER_API_KEY"):
-        fallbacks = getattr(r0_cfg, "openrouter_fallback_models", None)
-        providers.append(
-            OpenRouterLLM(
-                model=r0_cfg.openrouter_model,
-                model_fallbacks=fallbacks,
-                defer_throttle=True,
+    or_key = os.environ.get("OPENROUTER_API_KEY")
+    if or_key:
+        reason = _openrouter_shared_pool_blocked(r0_cfg.openrouter_model, or_key)
+        if reason:
+            print(f"\n  ⚠ OpenRouter: {reason} — исключаю из пула", flush=True)
+        else:
+            fallbacks = getattr(r0_cfg, "openrouter_fallback_models", None)
+            providers.append(
+                OpenRouterLLM(
+                    model=r0_cfg.openrouter_model,
+                    model_fallbacks=fallbacks,
+                    defer_throttle=True,
+                )
             )
-        )
     return ProviderPool(providers, strategy=strat)
