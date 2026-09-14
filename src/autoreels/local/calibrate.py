@@ -133,6 +133,7 @@ class InputInvalid(Exception):
 # Порог «пустой/недокачан»: реальное talking-head видео на минуты — это десятки-сотни МБ.
 # Меньше 1 МБ — почти наверняка обрезок/пустышка/недокачка (0 байт — тем более).
 _MIN_INPUT_BYTES = 1 << 20
+_MIN_INPUT_DURATION = 30.0          # секунды; разговорные рилсы < 30 с — очень редко валидны
 
 
 def _humanize_ffprobe_error(stderr: str) -> str:
@@ -150,7 +151,8 @@ def _humanize_ffprobe_error(stderr: str) -> str:
 
 
 def validate_input(video, *, ffprobe: str = "ffprobe",
-                   min_bytes: int = _MIN_INPUT_BYTES) -> tuple[int, int, float]:
+                   min_bytes: int = _MIN_INPUT_BYTES,
+                   min_duration: float = _MIN_INPUT_DURATION) -> tuple[int, int, float]:
     """Быстрая проверка входного файла ПЕРВЫМ шагом — ДО хэша/калибровки/аудио.
 
     Ловит битые/пустые/недокачанные файлы сразу: размер ≥ `min_bytes`; ffprobe читает файл; есть
@@ -178,6 +180,11 @@ def validate_input(video, *, ffprobe: str = "ffprobe",
                            "размер кадра и длительность") from e
     if w <= 0 or h <= 0 or duration <= 0:
         raise InputInvalid(f"невалидные параметры видео: кадр {w}×{h}, длительность {duration}с")
+    if duration < min_duration:
+        raise InputInvalid(
+            f"видео слишком короткое ({duration:.1f}с < {min_duration:.0f}с) — "
+            f"вероятно клип/превью, а не полноценное видео"
+        )
     return w, h, duration
 
 

@@ -93,6 +93,22 @@ def test_zero_dimensions_invalid(tmp_path, monkeypatch):
         validate_input(_big_file(tmp_path))
 
 
+# ------------------------------------------------------------ длительность: слишком короткое
+
+def test_short_video_is_invalid(tmp_path, monkeypatch):
+    """Файл с валидным потоком, но длительность < min_duration → «слишком короткое»."""
+    _mock_ffprobe(monkeypatch, _Proc(0, stdout="1920\n1080\n10.5\n"))
+    with pytest.raises(InputInvalid) as e:
+        validate_input(_big_file(tmp_path), min_duration=30.0)
+    assert "короткое" in str(e.value).lower() or "коротк" in str(e.value).lower()
+
+
+def test_duration_at_floor_passes(tmp_path, monkeypatch):
+    """Файл ровно на пороге min_duration → валиден."""
+    _mock_ffprobe(monkeypatch, _Proc(0, stdout="1920\n1080\n30.0\n"))
+    assert validate_input(_big_file(tmp_path), min_duration=30.0) == (1920, 1080, 30.0)
+
+
 # ------------------------------------------------------------ валидный файл проходит
 
 def test_valid_file_returns_dimensions(tmp_path, monkeypatch):
