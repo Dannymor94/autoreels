@@ -77,25 +77,25 @@ def _effective_chunk_tokens(
     max_output_tokens: int = 900,
     template_overhead: int = 400,
     groq_limit: int = 8000,
-    safety_margin: int = 2000,
+    underestimation_factor: float = 1.45,
 ) -> int:
-    """Derive safe chunk budget so the full request stays within groq_limit.
+    """Derive safe chunk budget so the scaled request stays within groq_limit.
 
-    chunk_budget = limit − system − fewshot − max_output_tokens − template − safety_margin.
+    Formula (solving for chunk_budget_est):
+      (system_est + fewshot_est + chunk_budget_est) × factor + template + max_out ≤ limit
+      → chunk_budget_est = (limit − max_out − template) / factor − system_est − fewshot_est
+
     Also capped by the configured r0_chunk_tokens upper bound.
     Minimum 500 tokens to avoid infinite chunking loops.
-
-    safety_margin of 2000 compensates for Qwen tokenizer underestimation on Russian text
-    (empirically ≈1.6× more tokens than 4-chars/token estimate; 2000 covers the gap for
-    typical chunk sizes up to ~4000 estimated tokens).
-    # ponytail: fixed multiplier; replace with tiktoken/Qwen tokenizer if 413s persist
+    underestimation_factor should come from the persisted token_scale state (GroqLLM),
+    defaulting to 1.45 on first run (calibrates to observed ~1.37-1.40 after a few runs).
     """
     system_tok = _count_tokens(system_text)
     fewshot_tok = 0
     for ex in fewshot.get("examples", []):
         fewshot_tok += _count_tokens(ex.get("input", ""))
         fewshot_tok += _count_tokens(json.dumps(ex.get("output", ""), ensure_ascii=False))
-    limit_budget = groq_limit - system_tok - fewshot_tok - max_output_tokens - template_overhead - safety_margin
+    limit_budget = int((groq_limit - max_output_tokens - template_overhead) / underestimation_factor) - system_tok - fewshot_tok
     return max(500, min(chunk_tokens, limit_budget))
 
 
@@ -448,13 +448,15 @@ def select_chunked(
 
     chunking = r0_cfg.chunking
     max_out = getattr(r0_cfg, "max_output_tokens", 900)
+    factor = getattr(provider, "token_scale_factor", 1.45)
     effective_tokens = _effective_chunk_tokens(
         system_text, fewshot, chunking.r0_chunk_tokens,
         max_output_tokens=max_out,
+        underestimation_factor=factor,
     )
     print(
         f"  ℹ R0 chunk budget: {effective_tokens} tok "
-        f"(limit-derived; config upper bound: {chunking.r0_chunk_tokens})",
+        f"(factor={factor:.3f}; config upper bound: {chunking.r0_chunk_tokens})",
         flush=True,
     )
     chunks = split_compressed(compressed, effective_tokens, chunking.r0_overlap_tokens)
@@ -519,11 +521,13 @@ def select(
     chunking = getattr(r0_cfg, "chunking", None)
     if chunking and chunking.enabled:
         max_out = getattr(r0_cfg, "max_output_tokens", 900)
+        factor = getattr(provider, "token_scale_factor", 1.45)
         # Use effective budget (not raw config) as chunking threshold so that even
         # transcripts that fit in r0_chunk_tokens are chunked when the total request
         # (system+fewshot+chunk+template+max_tokens) would exceed the Groq limit.
         effective = _effective_chunk_tokens(system_text, fewshot, chunking.r0_chunk_tokens,
-                                            max_output_tokens=max_out)
+                                            max_output_tokens=max_out,
+                                            underestimation_factor=factor)
         if _count_tokens(compressed) > effective:
             return select_chunked(compressed, system_text=system_text, fewshot=fewshot,
                                   provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)

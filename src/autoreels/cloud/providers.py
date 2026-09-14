@@ -30,9 +30,11 @@ API-ключи (GROQ_API_KEY, OPENROUTER_API_KEY) — только из окру
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
+from pathlib import Path
 from typing import Callable, Protocol
 
 import httpx
@@ -84,6 +86,13 @@ _GROQ_FREE_FALLBACK_DELAY_SEC = 60.0
 # Used in pacing and max_tokens computation so both mirror the actual admission check.
 _GROQ_CHAT_TEMPLATE_OVERHEAD = 400  # conservative: 200 template + 200 buffer
 
+# Token underestimation correction: Qwen tokenizer on Russian text uses ~1.4× more tokens
+# than the 4-chars/token approximation. The factor is learned from usage.prompt_tokens after
+# each successful request and persisted to _TOKEN_SCALE_FILE, keyed by model name.
+_TOKEN_SCALE_DEFAULT = 1.45   # start conservative; calibrates down to observed 1.37-1.40
+_TOKEN_SCALE_EMA_ALPHA = 0.3  # EMA weight for new observations (fast-ish convergence)
+_TOKEN_SCALE_FILE = Path("data/token_scale.json")
+
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
 
@@ -91,6 +100,31 @@ POOL_STRATEGIES = ("adaptive", "round_robin")
 def _count_tokens_approx(text: str) -> int:
     """4 chars ≈ 1 token — rough but consistent with select.py's _count_tokens."""
     return max(1, len(text) // 4)
+
+
+def _load_token_scale(model: str) -> float | None:
+    """Return persisted underestimation factor for model, or None if not found/readable."""
+    try:
+        data = json.loads(_TOKEN_SCALE_FILE.read_text())
+        v = data.get(model)
+        return float(v) if v is not None else None
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
+        return None
+
+
+def _save_token_scale(model: str, factor: float) -> None:
+    """Persist updated underestimation factor for model (non-fatal on write errors)."""
+    try:
+        _TOKEN_SCALE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data: dict = {}
+        try:
+            data = json.loads(_TOKEN_SCALE_FILE.read_text())
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+        data[model] = round(factor, 4)
+        _TOKEN_SCALE_FILE.write_text(json.dumps(data, indent=2))
+    except OSError:
+        pass
 
 
 def _parse_groq_reset(s: str) -> float | None:
@@ -426,6 +460,20 @@ class GroqLLM:
         self._budget_limit: int = 8000   # conservative default; updated from x-ratelimit-limit-tokens
         self._got_budget_headers: bool = False
         self._request_count: int = 0
+        # Underestimation correction factor: loaded from state file on first request.
+        self._token_scale: float = _TOKEN_SCALE_DEFAULT
+        self._scale_loaded: bool = False
+        self._scale_logged: bool = False
+
+    @property
+    def token_scale_factor(self) -> float:
+        """Underestimation correction factor (loaded from state file on first access)."""
+        if not self._scale_loaded:
+            persisted = _load_token_scale(self._model)
+            if persisted is not None:
+                self._token_scale = persisted
+            self._scale_loaded = True
+        return self._token_scale
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         """Вернуть текст ответа модели (content первого choice). Пустой → ProviderEmptyResponse."""
@@ -508,26 +556,31 @@ class GroqLLM:
         _chunk_tok = _count_tokens_approx(messages[-1].get("content", "") if len(messages) > 1 else "")
         _fewshot_tok = sum(_count_tokens_approx(m.get("content") or "") for m in messages[1:-1])
         _template_tok = _GROQ_CHAT_TEMPLATE_OVERHEAD
-        estimated = _sys_tok + _fewshot_tok + _chunk_tok
+        estimated = _sys_tok + _fewshot_tok + _chunk_tok  # text tokens only (no template/max)
         # max_output_tokens from config (default 900); must stay below Groq free-tier OTPM cap
         # of 1000 tok/min (not exposed in any x-ratelimit-* header — see docs/audit-groq-413.md).
         # Actual R0 output is typically 200-600 tokens; 900 gives ~10% headroom below 1000.
         max_tokens = self._max_output_tokens
-        total_est = estimated + _template_tok + max_tokens
-        # Pace on the full admission cost: text estimate + chat-template overhead + max_tokens.
+        # Apply underestimation factor (loaded from state file; defaults to _TOKEN_SCALE_DEFAULT).
+        scale = self.token_scale_factor  # also triggers lazy load
+        if not self._scale_logged:
+            print(f"  ℹ Groq token scale factor: {scale:.3f} (model={self._model})", flush=True)
+            self._scale_logged = True
+        scaled_text = int(estimated * scale)
+        total_est = scaled_text + _template_tok + max_tokens
+        # Pace on the scaled admission cost.
         self._pace_if_needed(total_est)
         self._request_count += 1
 
-        # Pre-send guard: reject before the network call when estimate already exceeds the limit.
-        # Prevents 413 round-trips; raises ProviderRequestTooLarge so the pool can try a sibling.
+        # Pre-send guard: reject before the network call when scaled estimate exceeds the limit.
+        # Raises ProviderRequestTooLarge so the pool can try a sibling provider.
         if total_est > self._budget_limit:
             raise ProviderRequestTooLarge(
-                f"Groq: pre-send — оценка {total_est}tok = "
-                f"system {_sys_tok} + fewshot {_fewshot_tok} + chunk {_chunk_tok} + "
+                f"Groq: pre-send — scaled estimate {total_est}tok = "
+                f"text({estimated})×{scale:.2f}={scaled_text} + "
                 f"template {_template_tok} + max_tokens {max_tokens} "
-                f"превышает лимит {self._budget_limit}tok — "
-                f"уменьши r0_chunk_tokens или safety_margin в config/r0.yaml",
-                prompt_tokens=estimated + _template_tok,
+                f"превышает лимит {self._budget_limit}tok",
+                prompt_tokens=scaled_text + _template_tok,
                 max_tokens=max_tokens,
                 limit=self._budget_limit,
             )
@@ -555,17 +608,21 @@ class GroqLLM:
             # Always update budget from response headers, even on ProviderThrottled/Exhausted.
             self._update_budget(out_headers)
 
-        # Compare estimate to actual prompt_tokens from usage (diagnoses systematic underestimation).
+        # Learn underestimation factor from usage.prompt_tokens and persist via EMA.
         actual_prompt_tokens = data.get("usage", {}).get("prompt_tokens") if isinstance(data, dict) else None
-        if actual_prompt_tokens is not None:
-            text_est = estimated + _template_tok
-            delta = actual_prompt_tokens - text_est
-            if abs(delta) > 100:
-                print(
-                    f"  ℹ Groq token estimate: est={text_est} actual={actual_prompt_tokens} "
-                    f"delta={delta:+d}",
-                    flush=True,
-                )
+        if actual_prompt_tokens is not None and estimated > 0:
+            # text_real ≈ actual_prompt_tokens minus fixed template overhead
+            text_real = actual_prompt_tokens - _template_tok
+            observed_factor = text_real / estimated
+            new_scale = (1 - _TOKEN_SCALE_EMA_ALPHA) * self._token_scale + _TOKEN_SCALE_EMA_ALPHA * observed_factor
+            delta = actual_prompt_tokens - (estimated + _template_tok)
+            print(
+                f"  ℹ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
+                f"delta={delta:+d} observed_factor={observed_factor:.3f} → scale={new_scale:.3f}",
+                flush=True,
+            )
+            self._token_scale = new_scale
+            _save_token_scale(self._model, new_scale)
         return data
 
 

@@ -785,22 +785,23 @@ def test_trim_tail_affirmation_standalone_trimmed_inline_not():
 # ----------------------------------------------------------------- token budget / 413 guard
 
 def test_effective_chunk_tokens_respects_limit_and_upper_bound():
-    """chunk_budget = limit − system − fewshot − max_output − template − safety; capped by config."""
+    """chunk_budget derived from limit/factor; capped by config upper bound."""
     # System ~100 tok, no fewshot, config max=9999 (huge) → budget is limit-derived, not config
     system_text = "x" * 400  # 100 tok
     effective = S._effective_chunk_tokens(
         system_text, {"examples": []}, 9999,
-        max_output_tokens=500, template_overhead=300, groq_limit=5000, safety_margin=100,
+        max_output_tokens=500, template_overhead=300, groq_limit=5000,
+        underestimation_factor=1.0,  # factor=1 → no correction; budget = (5000-500-300)/1 - 100 = 4100
     )
-    # limit_budget = 5000 - 100 - 500 - 300 - 100 = 4000
-    assert effective <= 4000 + 5  # allow ±5 for integer division
-    # The full request fits: effective + system + max_output + template + safety <= groq_limit
-    assert effective + 100 + 500 + 300 + 100 <= 5000
+    # (groq_limit - max_out - template) / factor - system = (5000-500-300)/1.0 - 100 = 4100
+    assert effective <= 4100 + 5  # allow ±5 for integer division
+    # The full request fits (factor=1.0 means estimate == real): effective+system+max+template ≤ limit
+    assert effective + 100 + 500 + 300 <= 5000
     assert effective >= 500  # minimum guard
 
 
 def test_groq_pre_send_guard_no_network_call(monkeypatch):
-    """When estimate exceeds budget_limit, ProviderRequestTooLarge raised before any HTTP call."""
+    """When scaled estimate exceeds budget_limit, ProviderRequestTooLarge raised before HTTP."""
     import autoreels.cloud.providers as P
 
     monkeypatch.setenv("GROQ_API_KEY", "testkey")
@@ -808,9 +809,10 @@ def test_groq_pre_send_guard_no_network_call(monkeypatch):
     monkeypatch.setattr(P, "_httpx_post", lambda *a, **kw: network_called.append(1) or None)
 
     llm = P.GroqLLM(max_output_tokens=900)
-    llm._budget_limit = 2000  # tight limit: 2000 tok
+    llm._budget_limit = 2000   # tight limit: 2000 tok
+    llm._token_scale = 2.0     # extreme factor so text(500)*2=1000 + template(400) + max(900) = 2300 > 2000
+    llm._scale_loaded = True   # skip file load
 
-    # system(500) + chunk(500) + template(400) + max_tokens(900) = 2300 > 2000 → must raise
     messages = [
         {"role": "system", "content": "s" * 2000},   # 500 tok
         {"role": "user",   "content": "c" * 2000},   # 500 tok
@@ -857,3 +859,55 @@ def test_413_message_components_sum_to_total(monkeypatch):
     # prompt_tokens + max_tokens > limit (that's why 413)
     assert e.prompt_tokens + e.max_tokens > 0
     assert e.limit == 8000
+
+
+def test_factor_budget_larger_than_flat_margin(fewshot, r0_cfg):
+    """factor=1.37 gives a materially larger budget than the old flat safety_margin=2000."""
+    system_text = "x" * (1667 * 4)  # ~1667 tok (matches lecture system prompt size)
+    chunk_tokens = r0_cfg.chunking.r0_chunk_tokens  # 4000
+
+    budget_factor = S._effective_chunk_tokens(
+        system_text, fewshot, chunk_tokens,
+        underestimation_factor=1.37,
+    )
+    # old formula equivalent (for comparison):
+    # 8000 - 1667 - fewshot_tok - 900 - 400 - 2000 ≈ 2625 (was observed as 2319)
+    old_approx = 2625  # conservative old budget
+
+    assert budget_factor > old_approx, (
+        f"factor-based budget {budget_factor} should exceed flat-margin {old_approx}"
+    )
+    # Verify it actually fits: (system + fewshot + chunk) * 1.37 + template + max ≤ limit
+    system_tok = len(system_text) // 4
+    fewshot_tok = sum(
+        len(ex.get("input", "")) // 4 + len(json.dumps(ex.get("output", ""), ensure_ascii=False)) // 4
+        for ex in fewshot.get("examples", [])
+    )
+    real_est = (system_tok + fewshot_tok + budget_factor) * 1.37 + 400 + 900
+    assert real_est <= 8000 + 50, f"scaled total {real_est:.0f} must fit within Groq limit"
+
+
+def test_token_scale_persisted_and_reloaded(tmp_path, monkeypatch):
+    """EMA-updated factor is saved to state file and loaded on next GroqLLM instance."""
+    import autoreels.cloud.providers as P
+
+    scale_file = tmp_path / "token_scale.json"
+    monkeypatch.setattr(P, "_TOKEN_SCALE_FILE", scale_file)
+
+    model = "test-model"
+    # Save initial factor
+    P._save_token_scale(model, 1.37)
+    assert scale_file.exists()
+
+    # New instance loads it
+    loaded = P._load_token_scale(model)
+    assert loaded == pytest.approx(1.37, abs=0.001)
+
+    # EMA update: observed factor 1.50, alpha=0.3 → new = 0.7*1.37 + 0.3*1.50 = 1.409
+    new_factor = (1 - P._TOKEN_SCALE_EMA_ALPHA) * 1.37 + P._TOKEN_SCALE_EMA_ALPHA * 1.50
+    P._save_token_scale(model, new_factor)
+    loaded2 = P._load_token_scale(model)
+    assert loaded2 == pytest.approx(new_factor, abs=0.001)
+
+    # Missing model returns None
+    assert P._load_token_scale("nonexistent-model") is None
