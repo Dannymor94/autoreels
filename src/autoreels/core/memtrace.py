@@ -11,7 +11,6 @@ probe to locate which stage grows RSS, without touching the pipeline's logic.
 from __future__ import annotations
 
 import os
-import resource
 import sys
 import tracemalloc
 
@@ -23,9 +22,13 @@ _started = False
 
 
 def _peak_rss_bytes() -> int:
-    """Peak resident set size in bytes. ru_maxrss is bytes on macOS, KiB on Linux."""
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return rss if sys.platform == "darwin" else rss * 1024
+    """Peak RSS in bytes, or 0 on platforms without resource (Windows)."""
+    try:
+        import resource  # noqa: PLC0415 — lazy: Unix-only
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return rss if sys.platform == "darwin" else rss * 1024
+    except ImportError:
+        return 0
 
 
 def mark(label: str) -> None:
