@@ -40,10 +40,10 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
 
 ## Технические ограничения
 
-- **Только бесплатные API.** LLM — Groq (Qwen) → OpenRouter failover. Whisper — Groq или локальный faster-whisper. Узкое место — TPM на R0 (6K Groq free): транскрипт сжимать (sentence-level) + чанкить + троттлить по `x-ratelimit` заголовкам + prompt-cache на рубрику.
-- **Reasoning-выхлоп бьёт по TPM.** qwen3 — reasoning-модель; reasoning раздувает выходные токены и упирает в 6K TPM (перемежающийся 413). Для структурной выборки по чёткой рубрике reasoning не нужен → `reasoning_effort=none`. M1-чанкинг: token-бюджет = вход + reasoning-выхлоп, не только вход.
+- **Только бесплатные API.** LLM — Groq (Qwen) → OpenRouter failover. Whisper — Groq или локальный faster-whisper. Узкое место — **OTPM на R0** (output tokens per minute = 1000 на free-tier; не публикуется в документации, отсутствует в заголовках `x-ratelimit-*`): урожай определяется **числом запросов**, не размером каждого → чанки держать мелкими, `max_tokens` < 1000. Стратегия: транскрипт сжимать (sentence-level) + мелкий чанкинг + троттлинг по заголовкам. Prompt-cache **не применим** (Groq — только GPT-OSS модели; снимает вход, а упираемся в выход). Подробно — `docs/audit-groq-413.md`.
+- **Reasoning-выхлоп бьёт по OTPM.** qwen3 — reasoning-модель; reasoning раздувает выходные токены и упирает в OTPM 1000. Для структурной выборки по чёткой рубрике reasoning не нужен → `reasoning_effort=none` (проверено: текущий дефолт в `providers.py` для qwen3.8-27b; gpt-oss модели принимают `low/medium/high`, не `none` — при смене модели проверять).
 - **Рабочий поток — на системнике Windows.** Все команды (`calibrate` → `run` → `render`) гоняются на одной машине: системник (32 ГБ ОЗУ, AMD → `h264_amf`). Там же файлы в `inputs/` и `GROQ_API_KEY` в `.env`. Mac — только разработка кода (Claude Code, git, тесты), видео не трогает. Двухмашинная передача манифеста (git/Syncthing) — опциональна, была для отладки.
-- **Железо:** 8 ГБ GPU / 32 ГБ ОЗУ. Qwen 32B локально НЕ влезает → R0 через API. Рендер — ffmpeg локально (NVENC где можно).
+- **Железо:** 8 ГБ GPU / 32 ГБ ОЗУ. Локальные LLM ≥27B не влезают → R0 через API. Актуальная модель — `config/r0.yaml`, имена у Groq протухают молча (`arl models` — живой список). Рендер — ffmpeg локально (NVENC где можно).
 - **Промпты:** system на английском, вывод на русском (валидированный паттерн: крепче grounding на русской речи).
 
 ## Кодовые конвенции
