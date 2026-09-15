@@ -1222,23 +1222,30 @@ def cmd_run(
     # openrouter_model отсеивается сразу, а не 404-ом на 2-м R0-чанке после Whisper.
     provider = build_pool(r0_cfg)
     provider.preflight()
+    from autoreels.core import memtrace
+    memtrace.mark("run start")
     audio = _stage_extract_audio(video, render_cfg=render_cfg, cache_dir=cache_dir,
                                  ffmpeg=ffmpeg, source_sha=sha)
+    memtrace.mark("after extract_audio")
     transcript = _stage_transcribe(
         audio, transcribe_cfg=transcribe_cfg, cache_dir=cache_dir,
         r0_cfg=r0_cfg, audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg,
         force=force_transcribe,
     )
+    memtrace.mark("after transcribe")
     # Попутно: сохранить читаемый текст для контента (транскрипт уже есть — R0 его считал).
     tx_path = _write_transcript_file(
         transcript, stem=Path(video).stem, fmt="text", out_dir=transcripts_dir, r0_cfg=r0_cfg
     )
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
+    memtrace.mark("after compress")
     reels, dedup_disc = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+    memtrace.mark("after select (R0)")
     for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
         r.r0_start, r.r0_end = r.start, r.end
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
+    memtrace.mark("after snap")
     # Dangling-start gate: post-snap, deterministic — checks actual first snapped word.
     # Whisper capitalises sentence-initial words, so first-word-lowercase = mid-sentence start.
     tx_words = getattr(transcript, "words", [])
@@ -1287,12 +1294,14 @@ def cmd_run(
     reels, short_disc = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
     discarded += short_disc
     reels = _stage_subtitles(reels, transcript)
+    memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
         source_kind=getattr(r0_cfg, "source_kind", ""),
     )
     path = _write_manifest(manifest, manifests_dir)
+    memtrace.mark("after manifest assembly")
     _write_discarded(discarded, path)
     discard_info = f", сброшено кандидатов: {len(discarded)}" if discarded else ""
     print(f"манифест собран: {len(manifest.reels)} reels{discard_info} → {path}", flush=True)
