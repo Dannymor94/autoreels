@@ -159,6 +159,10 @@ arl t https://youtu.be/XXXX --format json
 Транскрипт кэшируется по хэшу аудио (`data/cache/`), кэш общий для `run` и
 `transcribe`: повторный прогон не гоняет Whisper заново.
 
+> **`transcripts/` — локальная папка, не в git.** Транскрипты воспроизводимы из
+> `data/cache/` (ключ = хэш аудио + параметры транскрибации). Машина рендера их
+> не читает — ей нужен только манифест.
+
 **Энкодер и путь к ffmpeg** — не флаги. Общие дефолты в [`config/render.yaml`](config/render.yaml)
 (в git), **машинные** настройки — в `config/render.local.yaml` (в `.gitignore`, накладывается
 поверх через deep-merge), чтобы путь ffmpeg на Windows не уезжал на Mac:
