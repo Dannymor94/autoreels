@@ -1,9 +1,9 @@
 """Tests for `arl models` (cmd_models in __main__.py).
 
-HTTP mocked via monkeypatch on cloud.providers._httpx_get.
+HTTP mocked via monkeypatch on cloud.providers._httpx_get (catalogue) and
+cloud.providers._httpx_post (OpenRouter shared-pool ping).
 No real network, no API keys required.
 """
-import json
 import types
 import pytest
 
@@ -15,7 +15,8 @@ def _fake_response(data: dict, status: int = 200):
     r = types.SimpleNamespace()
     r.status_code = status
     r.json = lambda: data
-    r.raise_for_status = lambda: None
+    r.raise_for_status = lambda: (None if status < 400 else (_ for _ in ()).throw(
+        Exception(f"HTTP {status}")))
     return r
 
 
@@ -29,7 +30,7 @@ OR_LIVE_PAID = ["openai/gpt-4o"]
 
 
 def _make_get(groq_models=None, or_models=None):
-    """Return a fake _httpx_get that serves model lists by URL."""
+    """Fake _httpx_get — serves /models catalogue by URL."""
     def get(url, *, headers, timeout):
         if "groq.com" in url:
             if groq_models is None:
@@ -43,6 +44,22 @@ def _make_get(groq_models=None, or_models=None):
     return get
 
 
+def _make_post_ok():
+    """Fake _httpx_post — OpenRouter ping returns 200 (model accessible)."""
+    def post(url, *, headers, json, timeout):
+        return _fake_response({"choices": [{"message": {"content": "hi"}}]}, 200)
+    return post
+
+
+def _make_post_byok_blocked(model):
+    """Fake _httpx_post — OpenRouter ping returns 429 with is_byok:false."""
+    def post(url, *, headers, json, timeout):
+        body = {"error": {"metadata": {"is_byok": False,
+                                        "limit_source": "upstream_provider_shared_pool"}}}
+        return _fake_response(body, 429)
+    return post
+
+
 def _make_cfg(model, openrouter_model="google/gemma-3-27b-it:free", fallbacks=None):
     """Minimal R0Config-like object."""
     cfg = types.SimpleNamespace()
@@ -52,68 +69,127 @@ def _make_cfg(model, openrouter_model="google/gemma-3-27b-it:free", fallbacks=No
     return cfg
 
 
-# --- Test 1: configured model present → OK, exit 0 ---
+# --- Test 1: all models present and OR ping passes → OK, exit 0 ---
 
 def test_models_all_present_exit_0(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
     monkeypatch.setattr(P, "_httpx_get", _make_get(
         groq_models=GROQ_LIVE,
         or_models=OR_LIVE_FREE + OR_LIVE_PAID,
     ))
+    monkeypatch.setattr(P, "_httpx_post", _make_post_ok())
     monkeypatch.setattr(cli, "load_r0_config",
                         lambda _: _make_cfg("qwen/qwen3.8-27b"))
     code = cli.cmd_models(root=str(tmp_path))
     out = capsys.readouterr().out
     assert code == 0
     assert "✓ OK" in out
-    assert "✗ ОТСУТСТВУЕТ" not in out
+    assert "✗" not in out
 
 
-# --- Test 2: configured model missing → flagged, exit 1 ---
+# --- Test 2: configured Groq model missing from catalogue → exit 1 ---
 
-def test_models_missing_configured_exit_1(monkeypatch, tmp_path, capsys):
+def test_models_groq_missing_exit_1(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
     monkeypatch.setattr(P, "_httpx_get", _make_get(
         groq_models=GROQ_LIVE,
         or_models=OR_LIVE_FREE + OR_LIVE_PAID,
     ))
+    monkeypatch.setattr(P, "_httpx_post", _make_post_ok())
     monkeypatch.setattr(cli, "load_r0_config",
-                        lambda _: _make_cfg("qwen/qwen3.6-27b"))  # old/removed model
+                        lambda _: _make_cfg("qwen/qwen3.6-27b"))  # removed model
     code = cli.cmd_models(root=str(tmp_path))
     out = capsys.readouterr().out
     assert code == 1
     assert "✗ ОТСУТСТВУЕТ" in out
 
 
-# --- Test 3: one provider down → still shows the other ---
+# --- Test 3: OR model in catalogue but rejected by shared pool → НЕДОСТУПНА, exit 1 ---
 
-def test_models_groq_down_still_shows_openrouter(monkeypatch, tmp_path, capsys):
+def test_models_or_in_catalogue_but_byok_blocked_exit_1(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
     monkeypatch.setattr(P, "_httpx_get", _make_get(
-        groq_models=None,          # Groq times out
-        or_models=OR_LIVE_FREE + OR_LIVE_PAID,
+        groq_models=GROQ_LIVE,
+        or_models=OR_LIVE_FREE + OR_LIVE_PAID,  # model IS in catalogue
     ))
+    monkeypatch.setattr(P, "_httpx_post", _make_post_byok_blocked("google/gemma-3-27b-it:free"))
     monkeypatch.setattr(cli, "load_r0_config",
                         lambda _: _make_cfg("qwen/qwen3.8-27b",
                                             openrouter_model="google/gemma-3-27b-it:free"))
     code = cli.cmd_models(root=str(tmp_path))
     out = capsys.readouterr().out
-    # OpenRouter output should appear
-    assert "OpenRouter" in out
-    # Groq model status unknown (provider unavailable), not crash
-    assert "провайдер недоступен" in out
+    assert code == 1
+    assert "НЕДОСТУПНА" in out
+    assert "shared pool" in out.lower() or "byok" in out.lower()
+    # Must NOT report OK
+    assert "✓ OK" not in out.split("OpenRouter model")[1]
 
 
-def test_models_no_groq_key_still_shows_openrouter(monkeypatch, tmp_path, capsys):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+# --- Test 4: OR model in catalogue and ping passes → OK ---
+
+def test_models_or_in_catalogue_and_ping_ok(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
     monkeypatch.setattr(P, "_httpx_get", _make_get(
         groq_models=GROQ_LIVE,
         or_models=OR_LIVE_FREE + OR_LIVE_PAID,
     ))
+    monkeypatch.setattr(P, "_httpx_post", _make_post_ok())
     monkeypatch.setattr(cli, "load_r0_config",
-                        lambda _: _make_cfg("qwen/qwen3.8-27b"))
-    # Should not raise, just note missing key
+                        lambda _: _make_cfg("qwen/qwen3.8-27b",
+                                            openrouter_model="google/gemma-3-27b-it:free"))
     code = cli.cmd_models(root=str(tmp_path))
     out = capsys.readouterr().out
-    assert "GROQ_API_KEY" in out
+    assert code == 0
+    assert "✓ OK" in out
+
+
+# --- Test 5: one provider down → still shows the other ---
+
+def test_models_groq_down_still_shows_openrouter(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
+    monkeypatch.setattr(P, "_httpx_get", _make_get(
+        groq_models=None,          # Groq times out
+        or_models=OR_LIVE_FREE + OR_LIVE_PAID,
+    ))
+    monkeypatch.setattr(P, "_httpx_post", _make_post_ok())
+    monkeypatch.setattr(cli, "load_r0_config",
+                        lambda _: _make_cfg("qwen/qwen3.8-27b",
+                                            openrouter_model="google/gemma-3-27b-it:free"))
+    code = cli.cmd_models(root=str(tmp_path))
+    out = capsys.readouterr().out
     assert "OpenRouter" in out
+    assert "провайдер недоступен" in out  # Groq status
+
+
+# --- Test 6: Groq catalogue check is catalogue-only (no _httpx_post call for Groq) ---
+
+def test_models_groq_uses_catalogue_only(monkeypatch, tmp_path, capsys):
+    """Groq models are checked via catalogue, not via a chat ping."""
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or_test")
+    post_called = []
+
+    def tracking_post(url, *, headers, json, timeout):
+        post_called.append(url)
+        return _fake_response({}, 200)
+
+    monkeypatch.setattr(P, "_httpx_get", _make_get(
+        groq_models=GROQ_LIVE,
+        or_models=OR_LIVE_FREE + OR_LIVE_PAID,
+    ))
+    monkeypatch.setattr(P, "_httpx_post", tracking_post)
+    monkeypatch.setattr(cli, "load_r0_config",
+                        lambda _: _make_cfg("qwen/qwen3.8-27b",
+                                            openrouter_model="google/gemma-3-27b-it:free",
+                                            fallbacks=[]))
+    cli.cmd_models(root=str(tmp_path))
+    # Only one _httpx_post should be made: the OpenRouter ping (not a Groq ping)
+    assert all("openrouter" in u for u in post_called), (
+        f"Expected only OpenRouter pings, got: {post_called}"
+    )
+    assert len(post_called) == 1  # one OR model configured

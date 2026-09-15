@@ -3526,19 +3526,24 @@ autoreels — длинное talking-head видео → вертикальны�
 def cmd_models(*, root=".") -> int:
     """Показать доступные модели на Groq и OpenRouter, проверить сконфигурированные.
 
-    Возвращает 0, если все сконфигурированные модели присутствуют в живых списках.
-    Возвращает 1, если хотя бы одна отсутствует (используется как preflight).
+    Для Groq — проверка по каталогу (/models).
+    Для OpenRouter — каталог + пинг каждой настроенной модели (проверяет shared-pool доступ,
+    как это делает build_pool). Присутствие в каталоге не гарантирует доступ через shared pool.
+
+    Возвращает 0 только если все настроенные модели доступны.
+    Возвращает 1 если хотя бы одна отсутствует в каталоге или заблокирована shared pool.
     """
     from autoreels.cloud.providers import (
         GROQ_MODELS_URL, OPENROUTER_MODELS_URL, _list_models,
+        _openrouter_shared_pool_blocked,
     )
 
     root = Path(root)
     cfg_path = root / "config" / "r0.yaml"
     try:
         r0_cfg = load_r0_config(cfg_path)
-        configured = {
-            "Groq model": r0_cfg.model,
+        groq_configured = {"Groq model": r0_cfg.model}
+        or_configured = {
             "OpenRouter model": r0_cfg.openrouter_model,
             **{f"OpenRouter fallback {i+1}": m
                for i, m in enumerate(r0_cfg.openrouter_fallback_models)},
@@ -3558,7 +3563,7 @@ def cmd_models(*, root=".") -> int:
     or_models_raw = _list_models(
         OPENROUTER_MODELS_URL,
         headers={"Authorization": f"Bearer {or_key}"} if or_key else {},
-    ) if True else None  # always attempt (no key → _list_models handles gracefully)
+    )
     or_models = {m for m in (or_models_raw or set()) if m.endswith(":free")}
 
     # Print Groq live list
@@ -3583,25 +3588,43 @@ def cmd_models(*, root=".") -> int:
 
     print()
 
-    # Check configured models
-    missing: list[str] = []
+    # Check configured models: Groq — catalogue only; OpenRouter — catalogue + shared-pool ping
+    problems: list[str] = []
     print("Сконфигурированные модели:")
-    for label, model in configured.items():
-        is_groq = "Groq" in label
-        live = groq_models if is_groq else or_models_raw
-        if live is None:
+
+    for label, model in groq_configured.items():
+        if groq_models is None:
             status = "? (провайдер недоступен)"
-        elif model in live:
+        elif model in groq_models:
             status = "✓ OK"
         else:
             status = "✗ ОТСУТСТВУЕТ"
-            missing.append(f"{label}: {model}")
+            problems.append(f"{label}: {model}")
         print(f"  {label}: {model}  [{status}]")
 
-    if missing:
-        print("\nОТСУТСТВУЮТ в живом списке:", file=sys.stderr)
-        for m in missing:
-            print(f"  {m}", file=sys.stderr)
+    for label, model in or_configured.items():
+        if or_models_raw is None:
+            status = "? (провайдер недоступен)"
+        elif model not in or_models_raw:
+            status = "✗ ОТСУТСТВУЕТ"
+            problems.append(f"{label}: {model}")
+        else:
+            # Catalogue presence confirmed — now ping to verify shared-pool access
+            if or_key:
+                reason = _openrouter_shared_pool_blocked(model, or_key)
+                if reason:
+                    status = f"✗ НЕДОСТУПНА (shared pool / BYOK): {reason}"
+                    problems.append(f"{label}: {model}")
+                else:
+                    status = "✓ OK"
+            else:
+                status = "? (нет OPENROUTER_API_KEY — пинг невозможен)"
+        print(f"  {label}: {model}  [{status}]")
+
+    if problems:
+        print("\nПроблемные модели:", file=sys.stderr)
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
         print("Обнови config/r0.yaml (model / openrouter_model / openrouter_fallback_models).",
               file=sys.stderr)
         return 1
