@@ -6,8 +6,8 @@
 
 <p>
 <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-blue">
-<img alt="tests" src="https://img.shields.io/badge/tests-65%20passed-brightgreen">
-<img alt="status" src="https://img.shields.io/badge/M0-R0%20готов-yellow">
+<img alt="tests" src="https://img.shields.io/badge/tests-~1190%20passed-brightgreen">
+<img alt="status" src="https://img.shields.io/badge/M1.5-closed-green">
 </p>
 
 ---
@@ -116,6 +116,10 @@ source /путь/к/autoreels/aliases.sh
 | `arl s` | status |
 | `arl c` | calibrate --all |
 | `arl t <ист>` | transcribe — видео/аудио/url → текст для контента |
+| `arl models` | список доступных моделей Groq/OpenRouter + проверка настроенных |
+| `arl dump-clips <манифест>` | дамп таймкодов всех клипов в текст (для ревью) |
+| `arl diagnose-cuts [видео]` | классификация границ фраз (CLEAN/SOFT/HARD) по клипам |
+| `arl resnap [видео]` | пересчитать snap/padding из R0-границ без повторного LLM-вызова |
 | `arl h` | help |
 
 > Команда называется **`arl`**, а не `ar`: `ar` — системный Unix-архиватор,
@@ -176,7 +180,9 @@ env `RENDER_FFMPEG` / `RENDER_ENCODER`. Приоритет: флаг > env > `re
 
 ## Статус
 
-Идёт **M0** — вертикальный слайс «один клип end-to-end», по TDD.
+**M0 ✅ закрыт** — один клип end-to-end работает.  
+**M1 ✅ в основном закрыт** — полный R0 на часовых видео, recall, чанкинг, OpenRouter failover, кликбейт, snap. Остаётся: review-UI (R2).  
+**M1.5 ✅ закрыт** — качество клипов: 85% → **13% брака** (ручная разметка на реальном материале).
 
 | Этап | Состояние |
 |---|---|
@@ -184,12 +190,13 @@ env `RENDER_FFMPEG` / `RENDER_ENCODER`. Приоритет: флаг > env > `re
 | Извлечение аудио (ffmpeg) | ✅ |
 | Транскрипция (Groq Whisper, кэш) | ✅ |
 | Сжатие транскрипта | ✅ |
-| **R0 — выбор моментов (ядро)** | ✅ recall + планка + grounding проверены на реальном видео |
-| R1 — нарезка + статичный кроп | ⏳ следующий (нужна калибровка профиля) |
-| R3 — субтитры (ASS burn-in) | ⏳ |
-| Склейка CLI | ⏳ |
+| **R0 — выбор моментов (ядро)** | ✅ |
+| R1 — нарезка + статичный кроп | ✅ |
+| R3 — субтитры (ASS burn-in) | ✅ |
+| CLI + алиасы | ✅ |
+| **R2 — review-UI** | ⏳ главный незакрытый пункт M1 |
 
-Дальше — M1 (полный R0 на часовых видео + review-UI), M2 (приём по ссылке + SMM). См. [PLAN.md](PLAN.md).
+Дальше — M2 (приём по ссылке + SMM). См. [PLAN.md](PLAN.md).
 
 ## Документация
 
@@ -203,7 +210,9 @@ env `RENDER_FFMPEG` / `RENDER_ENCODER`. Приоритет: флаг > env > `re
 
 ## Технологии
 
-Python 3.11+ · Pydantic · Groq (Whisper large-v3 + Qwen3-32B) · faster-whisper (опц. CPU-fallback) · ffmpeg · pytest
+Python 3.11+ · Pydantic · Groq (Whisper large-v3 + LLM) · faster-whisper (опц. CPU-fallback) · ffmpeg · pytest
+
+Актуальные модели LLM — `arl models` (имена у Groq/OpenRouter протухают молча; `config/r0.yaml` — настройка).
 
 ## Лицензия
 
