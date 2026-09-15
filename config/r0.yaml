@@ -1,20 +1,22 @@
-# R0 — конфиг выбора моментов. Всё, что вынесено из кода (R0_SPEC §10).
-source_kind: interview         # "lecture" | "interview"
+# R0 — конфиг выбора моментов. Всё, что вынесено из кода (R0_SPEC).
+source_kind: lecture           # "lecture" | "interview"
 duration_preset: shorts        # shorts | reels | tiktok
-model: qwen/qwen3.6-27b        # LLM R0 на Groq (основная, сильнее по качеству). Сверить
-                               # список: curl .../v1/models (прежняя qwen3-32b снята → 404)
-openrouter_model: google/gemma-4-31b-it:free  # OpenRouter: второй провайдер
+model: qwen/qwen3.8-27b        # LLM R0 на Groq (основная, сильнее по качеству). Имена моделей
+                               # у Groq протухают молча (qwen3-32b → 404, затем qwen3.6-27b снята).
+                               # Сверять: `arl models` — покажет живые списки обоих провайдеров
+                               # и пометит настроенные.
+openrouter_model: nvidia/nemotron-3-super-120b-a12b:free  # OpenRouter: второй провайдер
                                       # для распределения R0-нагрузки (обход дневной квоты Groq).
-                                      # Формат: 'vendor/model:free'. Список бесплатных моделей
-                                      # МЕНЯЕТСЯ — старые имена исчезают молча, провайдер тогда
-                                      # исключает себя из пула на старте (см. лог). Сверять:
-                                      # curl -s https://openrouter.ai/api/v1/models | jq -r
-                                      # '.data[].id | select(endswith(":free"))'.
+                                      # Формат: 'vendor/model:free'. Наличие модели в каталоге
+                                      # НЕ означает доступность: часть бесплатных отдаётся только
+                                      # по своему ключу провайдера и отвергается пулом с
+                                      # 'is_byok:false' (так отвалились обе Gemma).
+                                      # `arl models` пингует настроенные и показывает это.
                                       # Добавить OPENROUTER_API_KEY= в .env (бесплатно);
                                       # без ключа — только Groq.
-openrouter_fallback_models:           # запасные модели: при 404 основной пробуем по порядку
-  - nvidia/nemotron-3-super-120b-a12b:free
-  - google/gemma-4-26b-a4b-it:free
+openrouter_fallback_models:           # запасные модели: при 404/блокировке пробуем по порядку.
+  - nvidia/nemotron-3-ultra-550b-a55b:free   # пингом не проверены — прогнать `arl models`
+  - thinkingmachines/inkling:free
 provider_strategy: adaptive    # распределение R0-чанков между Groq и OpenRouter:
                                #   adaptive     — Groq основной; слив на OpenRouter только под
                                #                  троттлом, возврат когда Groq остыл. Качество
@@ -25,6 +27,7 @@ provider_strategy: adaptive    # распределение R0-чанков ме
 min_score: 65
 max_output_tokens: 900   # Groq free-tier OTPM = 1000 tok/min (не в заголовках, рулит max_tokens).
                          # Держать < 1000; 900 = запас ~10%. Реальный R0-ответ обычно 200-600 tok.
+                         # Платный Developer-тир снимает OTPM — тогда поднимать до ~4000.
 min_meaningful_sec: 18         # пост-фильтр длины: сегменты короче — снять (законченной
                                # мысли не бывает в <18с). ВЫШЕ min пресета (15) — иначе no-op.
                                # Крутить здесь: строже → 20-22; мягче → 16.
@@ -41,7 +44,9 @@ candidate_multiplier: 1.75     # over-generation: цель кандидатов 
 chunk_tokens: 3500
 chunk_overlap_sec: 60
 dedup_overlap_threshold: 0.6
-dangling_words:          # first-word blocklist for dangling-start check (post-snap, uppercase variants)
+dangling_words:                # блоклист ПЕРВОГО слова клипа (проверка dangling-start, post-snap;
+                               # регистр не важен). К слову, стоящему сразу после терминального
+                               # знака, не применяется — там граница предложения важнее.
   - поэтому
   - потому
   - любом
@@ -57,7 +62,10 @@ tail_sec: 0.3                   # хвост при snap к границе сл�
 tail_pad_sec: 0.7               # «воздух» после последнего слова клипа (apply_padding, post-snap)
 lead_pad_sec: 0.3               # заход перед первым словом клипа (apply_padding, post-snap)
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
-max_start_repair_sec: 10.0      # seconds to scan forward for a sentence-initial word when repairing dangling start
+max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
+                                # слово после терминального знака (.?!), иначе слово с заглавной.
+                                # Ремонт ВМЕСТО отбрасывания — иначе теряются сильные кандидаты
+                                # из-за одной строчной буквы (было 16 отсевов из 33).
 # Snap «до завершения мысли»: конец клипа тянется до конца предложения (пунктуация Whisper) или
 # длинной паузы, пока (end-start) < max_duration; не обрывать на союзе/предлоге и микропаузе;
 # не влезло в лимит → откат к последней целой фразе.
@@ -95,7 +103,8 @@ hanging_words:                 # висячие слова: применяетс
   - тогда
   - здесь
   - сейчас
-host_affirmations:             # standalone tail sentences trimmed regardless of speaker
+host_affirmations:             # самостоятельные реплики-поддакивания: срезать с хвоста клипа
+                               # независимо от того, кто определён как говорящий
   - здорово
   - понятно
   - отлично
@@ -104,12 +113,16 @@ max_sentence_buffer_sec: 30     # запас сверх max_duration пресе�
                                 # дробления = max_duration + запас (shorts ≈ 120с). Гиганты
                                 # режутся по самым длинным внутренним паузам; легальные
                                 # моменты 30–90с остаются целыми (см. R0Config.max_sentence_sec)
-too_long_policy: trim              # trim | drop | keep (что делать с сегментами >max_duration)
+too_long_policy: trim              # trim | drop | keep (что делать с сегментами >max_duration).
+                                   # trim режет НАЧАЛО, не конец: развязка мысли живёт в конце,
+                                   # завязку зритель догоняет по контексту.
 title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
 language: ru                   # язык вывода LLM
 prompt_language: en            # system-промпт на английском (крепче grounding)
 
 # Пресеты длины (сек) — PROJECT_GUIDE / R0_SPEC §3. Код-валидатор ставит too_long/too_short.
+# 90с: площадки допускают до 180с (Shorts и Reels — 3 мин), но вовлечённость падает раньше,
+# а Instagram не рекомендует Reels длиннее 3 мин новой аудитории.
 presets:
   shorts: { min: 15, max: 90 }
   reels:  { min: 15, max: 90 }
@@ -120,7 +133,7 @@ prompts:
   system: prompts/r0_system.md
   fewshot: prompts/r0_fewshot.json
 
-# Чанкинг: Whisper-чанкинг аудио (M1.2) + R0-чанкинг транскрипта (M1.3, не реализован).
+# Чанкинг: Whisper-чанкинг аудио + R0-чанкинг транскрипта. Оба реализованы и работают.
 chunking:
   enabled: true
   whisper_chunk_duration_sec: 600      # 10 мин на чанк
@@ -128,14 +141,18 @@ chunking:
   whisper_threshold_bytes: 20971520    # 20 МБ — второй гард по размеру аудио
   silence_window_sec: 30               # окно VAD поиска тишины вокруг target-границы (±сек)
   silence_threshold_db: -40            # порог silencedetect
-  r0_chunk_tokens: 4000                # токены на R0-чанк транскрипта. Эффективный бюджет =
-                                       # r0_chunk_tokens − оценка system+few-shot (~2000 токенов).
-                                       # Groq free-tier TPM-лимит (8000) — НА ВХОДЕ, не блокер:
-                                       # реальный лимит — OTPM (выходные 1000 tok/min, заголовков
-                                       # нет). Было понижено до 2500 по ошибке — вход никогда не
-                                       # был ограничением (probe: 5000-token prompt + max_tokens=8192
-                                       # проходит). Темп держит пейсер по x-ratelimit-* заголовкам.
+  r0_chunk_tokens: 1200                # токены на R0-чанк транскрипта. НАМЕРЕННО МЕЛКО — это не
+                                       # экономия входа: при OTPM=1000 ответ обрезан примерно на
+                                       # трёх моментах, поэтому урожай определяется ЧИСЛОМ
+                                       # запросов, а не размером чанка. Крупные чанки = те же
+                                       # 3 момента с бо́льшего куска речи = меньше клипов
+                                       # (проверено: 4000 → 4 рилса, 1200 → 7 на той же лекции).
+                                       # Вход (8000 TPM) ограничением НЕ является: пробник прошёл
+                                       # prompt 4700 + max_tokens 8192.
+                                       # После перехода на платный тир поднимать вместе с
+                                       # max_output_tokens.
   r0_overlap_tokens: 300               # перекрытие R0-чанков (≈60с речи)
-  r0_chunk_delay_sec: 2.0              # пауза между R0-чанками (избежать 429 TPM Groq)
+  r0_chunk_delay_sec: 2.0              # пауза между R0-чанками; темп сверх этого держит пейсер
+                                       # по заголовкам x-ratelimit-*
   dedup_overlap_ratio: 0.6             # порог дедупа рилов из разных R0-чанков
   fail_fast: false                     # false → продолжать при провале одного чанка
