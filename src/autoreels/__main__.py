@@ -3523,6 +3523,91 @@ autoreels — длинное talking-head видео → вертикальны�
 """
 
 
+def cmd_models(*, root=".") -> int:
+    """Показать доступные модели на Groq и OpenRouter, проверить сконфигурированные.
+
+    Возвращает 0, если все сконфигурированные модели присутствуют в живых списках.
+    Возвращает 1, если хотя бы одна отсутствует (используется как preflight).
+    """
+    from autoreels.cloud.providers import (
+        GROQ_MODELS_URL, OPENROUTER_MODELS_URL, _list_models,
+    )
+
+    root = Path(root)
+    cfg_path = root / "config" / "r0.yaml"
+    try:
+        r0_cfg = load_r0_config(cfg_path)
+        configured = {
+            "Groq model": r0_cfg.model,
+            "OpenRouter model": r0_cfg.openrouter_model,
+            **{f"OpenRouter fallback {i+1}": m
+               for i, m in enumerate(r0_cfg.openrouter_fallback_models)},
+        }
+    except (ConfigError, OSError) as e:
+        print(f"не удалось прочитать конфиг: {e}", file=sys.stderr)
+        return 1
+
+    groq_key = os.environ.get("GROQ_API_KEY")
+    or_key = os.environ.get("OPENROUTER_API_KEY")
+
+    groq_models = _list_models(
+        GROQ_MODELS_URL,
+        headers={"Authorization": f"Bearer {groq_key}"} if groq_key else {},
+    ) if groq_key else None
+
+    or_models_raw = _list_models(
+        OPENROUTER_MODELS_URL,
+        headers={"Authorization": f"Bearer {or_key}"} if or_key else {},
+    ) if True else None  # always attempt (no key → _list_models handles gracefully)
+    or_models = {m for m in (or_models_raw or set()) if m.endswith(":free")}
+
+    # Print Groq live list
+    if groq_key is None:
+        print("Groq: нет GROQ_API_KEY — пропускаю")
+    elif groq_models is None:
+        print("Groq: недоступен (сеть/ошибка)")
+    else:
+        print(f"Groq ({len(groq_models)} моделей):")
+        for m in sorted(groq_models):
+            print(f"  {m}")
+
+    print()
+
+    # Print OpenRouter :free list
+    if or_models_raw is None:
+        print("OpenRouter: недоступен (сеть/ошибка)")
+    else:
+        print(f"OpenRouter free ({len(or_models)} бесплатных моделей):")
+        for m in sorted(or_models):
+            print(f"  {m}")
+
+    print()
+
+    # Check configured models
+    missing: list[str] = []
+    print("Сконфигурированные модели:")
+    for label, model in configured.items():
+        is_groq = "Groq" in label
+        live = groq_models if is_groq else or_models_raw
+        if live is None:
+            status = "? (провайдер недоступен)"
+        elif model in live:
+            status = "✓ OK"
+        else:
+            status = "✗ ОТСУТСТВУЕТ"
+            missing.append(f"{label}: {model}")
+        print(f"  {label}: {model}  [{status}]")
+
+    if missing:
+        print("\nОТСУТСТВУЮТ в живом списке:", file=sys.stderr)
+        for m in missing:
+            print(f"  {m}", file=sys.stderr)
+        print("Обнови config/r0.yaml (model / openrouter_model / openrouter_fallback_models).",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 def _build_parser():
     import argparse
 
@@ -3886,6 +3971,19 @@ def _build_parser():
                       help="каталог для фикстур (по умолчанию tests/fixtures/clips)")
     pdcl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
+    pmod = sub.add_parser(
+        "models",
+        help="показать доступные модели на Groq/OpenRouter и проверить сконфигурированные",
+        description=(
+            "Запрашивает живые списки моделей у Groq и OpenRouter (:free).\n"
+            "Показывает, какие настроенные модели есть в списке, а каких нет.\n"
+            "Выходит с кодом 1, если хотя бы одна сконфигурированная модель отсутствует.\n\n"
+            "Пример: autoreels models"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pmod.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+
     return p
 
 
@@ -4063,6 +4161,8 @@ def main(argv=None) -> int:
                 print("manifests/ пуст — нечего выгружать", flush=True)
                 return 0
             return cmd_dump_clips(manifests, out=args.out, root=args.root if args.root != "." else None)
+        elif args.cmd == "models":
+            return cmd_models(root=args.root)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

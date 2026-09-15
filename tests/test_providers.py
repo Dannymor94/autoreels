@@ -156,10 +156,10 @@ def test_404_model_not_found_clear_error(monkeypatch):
     assert "404" in msg
 
 
-def test_default_model_is_current_groq_qwen():
-    """Дефолтная модель провайдера — актуальная на Groq (не удалённая qwen3-32b)."""
+def test_default_model_is_configured():
+    """DEFAULT_LLM_MODEL — непустая строка (конкретный id не пинится: меняется с ротацией моделей)."""
     from autoreels.cloud.providers import DEFAULT_LLM_MODEL
-    assert DEFAULT_LLM_MODEL == "qwen/qwen3.6-27b"
+    assert isinstance(DEFAULT_LLM_MODEL, str) and DEFAULT_LLM_MODEL
 
 
 # ========================================================= ProviderExhausted / failover
