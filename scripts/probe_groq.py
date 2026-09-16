@@ -207,16 +207,73 @@ def print_table(label: str, results: list[dict]) -> None:
               f"{str(api_pt):>8} {r['our_est_prompt']:>8} {str(total):>11}", flush=True)
 
 
+# Groq free-tier, JSON-capable, >=20B (from console.groq.com/docs/rate-limits).
+# OTPM is NOT published per model there, so we measure it here.
+OTPM_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
+]
+OTPM_MEASURE_SYSTEM = "Reply with a json object."
+OTPM_MEASURE_USER = "Return a json object {\"ok\": true}."
+
+
+def measure_otpm(url: str, api_key: str, model: str, *, gap_sec: float) -> None:
+    """Binary-search the largest max_tokens a small prompt accepts (proxy for OTPM cap).
+
+    A 429 whose body names OTPM (or a 429 with retry-after absent) = output cap hit
+    -> too high. 200 = fits under cap -> too low. Small fixed prompt so the input TPM
+    axis never confounds. gap_sec between every request so per-minute windows reset.
+    """
+    print(f"\n{'='*70}\n  OTPM measure: {model}\n{'='*70}", flush=True)
+    lo, hi = 1, 8192          # lo always passes, hi assumed to fail; converge on the edge
+    best_pass = None
+    # Seed: confirm hi fails and lo passes would take 2 calls; skip — just bisect [lo,hi].
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        wait(gap_sec)
+        # No reasoning_effort: gpt-oss rejects "none" (400), and the OTPM admission
+        # reserve is driven by max_tokens, not the reasoning setting. Omitting it works
+        # for every candidate and keeps the measured axis clean.
+        rec = send(url, api_key, model, system=OTPM_MEASURE_SYSTEM, user=OTPM_MEASURE_USER,
+                   max_tokens=mid, response_format=True, reasoning_none=False)
+        status = rec["status"]
+        otpm_hit = status == 429 and "output tokens per minute" in (rec["error"] or "").lower()
+        tag = "PASS" if status == 200 else (f"OTPM/429" if otpm_hit else f"FAIL/{status}")
+        print(f"    max_tokens={mid:>5}  -> {tag}  rl={rec['rl']}", flush=True)
+        if status == 200:
+            best_pass = mid
+            lo = mid + 1
+        else:
+            if not otpm_hit and status != 429:
+                print(f"    (non-OTPM error, body: {(rec['error'] or '')[:200]})", flush=True)
+            hi = mid - 1
+    print(f"  => largest max_tokens accepted for {model}: {best_pass}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", choices=["groq", "openrouter", "both"], default="both")
     ap.add_argument("--no-wait", action="store_true",
                     help="2s gaps instead of 70s (quick smoke, may confound per-minute windows)")
+    ap.add_argument("--measure-otpm", action="store_true",
+                    help="binary-search max_tokens per candidate Groq model (measures the "
+                         "unpublished OTPM cap); ignores --provider, uses Groq only")
     args = ap.parse_args()
     gap = 2.0 if args.no_wait else 70.0
 
     load_env()
     groq_model, or_model = load_models()
+
+    if args.measure_otpm:
+        key = os.environ.get("GROQ_API_KEY")
+        if not key:
+            print("нет GROQ_API_KEY — measure-otpm требует ключ", flush=True)
+            return 1
+        for m in OTPM_MODELS:
+            measure_otpm(GROQ_CHAT_URL, key, m, gap_sec=gap)
+        return 0
 
     if args.provider in ("groq", "both"):
         key = os.environ.get("GROQ_API_KEY")
