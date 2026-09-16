@@ -84,10 +84,11 @@ def test_diagnose_cuts_ignores_sidecar(tmp_path, monkeypatch):
 
     captured = []
 
-    def fake_transcript(manifest, cache_dir, *, audio_format):
-        return None  # triggers "not found" warning, not a parse error
+    def fake_resolve(manifest, cache_dir, *, audio_format, config_pkey=""):
+        return None, "k"  # (transcript, expected_pkey) — None triggers skip, not a parse error
 
-    monkeypatch.setattr(cli, "_transcript_for_manifest", fake_transcript)
+    monkeypatch.setattr(cli, "_resolve_transcript", fake_resolve)
+    monkeypatch.setattr(cli, "_config_params_key", lambda root: "")
     monkeypatch.setattr(cli, "load_r0_config", lambda p: _fake_r0_cfg())
     monkeypatch.setattr(cli, "load_render_config", lambda p: _fake_render_cfg())
 
@@ -181,11 +182,12 @@ def test_diagnose_cuts_skips_malformed(tmp_path, monkeypatch, capsys):
 
     good_seen = []
 
-    def fake_transcript(manifest, cache_dir, *, audio_format):
+    def fake_resolve(manifest, cache_dir, *, audio_format, config_pkey=""):
         good_seen.append(manifest.source)
-        return None
+        return None, "k"
 
-    monkeypatch.setattr(cli, "_transcript_for_manifest", fake_transcript)
+    monkeypatch.setattr(cli, "_resolve_transcript", fake_resolve)
+    monkeypatch.setattr(cli, "_config_params_key", lambda root: "")
     monkeypatch.setattr(cli, "load_r0_config", lambda p: _fake_r0_cfg())
     monkeypatch.setattr(cli, "load_render_config", lambda p: _fake_render_cfg())
 

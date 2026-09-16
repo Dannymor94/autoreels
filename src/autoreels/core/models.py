@@ -163,6 +163,12 @@ class Manifest(BaseModel):
     setup: SetupProfile
     # Ключ идемпотентности = хэш(source + preset + версия рубрики). Ставит state.py.
     run_key: str
+    # params_key транскрипта (отпечаток model|provider|prompt_hash), на котором СОБРАН манифест.
+    # Позволяет diagnose-cuts/resnap найти ТОТ ЖЕ транскрипт, а не устаревшего «сироту» без
+    # params_key (другая пунктуация → фантомные мид-слово обрывы при чтении и порча границ при
+    # resnap-записи). "" = легаси-манифест, снятый до этого поля: resnap для него отказан (нельзя
+    # проверить совпадение), нужен один полный run. Ставит cmd_run из stamped-мета транскрипта.
+    transcript_params_key: str = ""
     status: ProjectStatus = ProjectStatus.pending
     # Пустой список валиден: «хороших моментов нет» — ожидаемый исход, не ошибка.
     reels: list[Reel] = Field(default_factory=list)

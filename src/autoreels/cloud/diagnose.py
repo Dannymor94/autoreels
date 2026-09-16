@@ -31,13 +31,31 @@ class EndDiag:
 
 
 def _hard_cause(end: float, words: list[Word], end_type: str, *, min_pause: float,
-                max_micro_pause: float, tail_pad_sec: float, hanging_words) -> str:
-    """Механизм HARD-обрыва: перелёт padding-хвоста за чистую фразу (≈ tail_pad) → PAD-хвост,
-    иначе — snap-fallback (в сегменте нет чистой границы)."""
+                max_micro_pause: float, tail_pad_sec: float, hanging_words,
+                stored_reason: str | None = None) -> str:
+    """Механизм HARD-обрыва.
+
+    Приоритет — РЕАЛЬНАЯ причина из манифеста (`r.end_snap_reason`, её ставит тот этап пайплайна,
+    что подвинул границу): before_host_turn / no_end / sentence(+PAD-хвост) и т.д. Прежний
+    ярлык «snap-fallback (нет чистой границы)» вешался на всё подряд и врал (реальный механизм
+    бывал before_host_turn или перелёт padding); теперь он — лишь фолбэк для легаси-манифестов
+    без поля end_snap_reason."""
     ends = _phrase_end_times(words, min_pause=min_pause, max_micro_pause=max_micro_pause,
                              hanging_words=hanging_words)
     pe = max([t for t in ends if t <= end + 0.05], default=None)
-    if pe is not None and 0.05 < (end - pe) <= tail_pad_sec + 0.35:
+    pad = pe is not None and 0.05 < (end - pe) <= tail_pad_sec + 0.35
+
+    if stored_reason:
+        # padding-хвост уехал за чистую фразу ПОСЛЕ корректного snap → это перелёт padding,
+        # а не сам snap; дописываем деталь к настоящей причине.
+        if pad and stored_reason in ("sentence", "no_punctuation", "sentence_trimmed_hanging"):
+            return f"{stored_reason} → PAD-хвост +{end - pe:.2f}с"
+        if stored_reason == "no_end":
+            return "no_end (в окне нет пунктуации/паузы)"
+        return stored_reason
+
+    # Legacy: манифест без end_snap_reason — прежняя эвристика.
+    if pad:
         return f"PAD-хвост +{end - pe:.2f}с"
     if end_type in ("висячее", "запятая"):
         return f"{end_type} (snap-fallback)"
@@ -46,8 +64,11 @@ def _hard_cause(end: float, words: list[Word], end_type: str, *, min_pause: floa
 
 def classify_end(reel_id: str, start: float, end: float, words: list[Word], *,
                  min_pause: float, max_micro_pause: float, tail_pad_sec: float,
-                 hanging_words) -> EndDiag:
-    """Классифицировать конец клипа [start, end] по словам транскрипта. Чистая функция."""
+                 hanging_words, stored_reason: str | None = None) -> EndDiag:
+    """Классифицировать конец клипа [start, end] по словам транскрипта. Чистая функция.
+
+    stored_reason — `reel.end_snap_reason` из манифеста: настоящий механизм границы; при HARD
+    он идёт в `cause` вместо эвристического ярлыка (см. _hard_cause)."""
     dur = round(end - start, 1)
     prev = [w for w in words if w.t1 <= end + 0.05]
     last_words = " ".join(w.word for w in prev[-5:])
@@ -68,7 +89,7 @@ def classify_end(reel_id: str, start: float, end: float, words: list[Word], *,
         return EndDiag(reel_id, dur, last_words, end_type, gap, "HARD",
                        _hard_cause(end, words, end_type, min_pause=min_pause,
                                    max_micro_pause=max_micro_pause, tail_pad_sec=tail_pad_sec,
-                                   hanging_words=hanging_words))
+                                   hanging_words=hanging_words, stored_reason=stored_reason))
 
     if raw and raw[-1] in _SENT_PUNCT:
         return EndDiag(reel_id, dur, last_words, "фраза(.!?)", gap, "CLEAN", "")

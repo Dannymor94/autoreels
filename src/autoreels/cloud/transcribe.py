@@ -142,6 +142,19 @@ def _backend_meta(backend) -> dict:
     return describe() if callable(describe) else {}
 
 
+def transcript_identity(tr) -> str:
+    """params_key УЖЕ загруженного транскрипта — из его stamped-мета (model/provider/prompt_hash).
+
+    "" для «сироты» без штампа (кэши до фичи штампования). Совпадает с pkey в имени файла,
+    которым транскрипт был сохранён (тот же набор ключей, что _backend_meta → params_key)."""
+    provider = getattr(tr, "provider", "") or ""
+    model = getattr(tr, "model", "") or ""
+    prompt_hash = getattr(tr, "prompt_hash", "") or ""
+    if not (provider or model or prompt_hash):
+        return ""
+    return params_key({"provider": provider, "model": model, "prompt_hash": prompt_hash})
+
+
 class GroqBackend:
     """Groq Whisper API. Ключ из GROQ_API_KEY (нужен только при вызове, не при создании).
 

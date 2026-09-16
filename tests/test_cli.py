@@ -1245,6 +1245,19 @@ def test_recrop_auto_pushes_updated_manifest(tmp_path):
 
 # ------------------------------------------------------------ diagnose-cuts (обрывы фраз)
 
+def _write_keyed_transcript(cache, ah, words):
+    """Записать params-keyed + stamped транскрипт (как реальный run) и вернуть его params_key.
+
+    Резолв diagnose/resnap идёт строго по params_key; «сироту» без ключа они игнорируют."""
+    from autoreels.cloud.transcribe import params_key
+    provider, model, prompt_hash = "groq", "whisper-large-v3", "ph1"
+    key = params_key({"provider": provider, "model": model, "prompt_hash": prompt_hash})
+    (cache / f"{ah}.{key}.transcript.json").write_text(json.dumps({
+        "language": "ru", "words": words,
+        "provider": provider, "model": model, "prompt_hash": prompt_hash}), encoding="utf-8")
+    return key
+
+
 def _setup_diag(tmp_path, *, reels, sha="d" * 64):
     """Манифест + кэш-транскрипт по реальной цепочке source_sha → mp3 → audio_hash → transcript."""
     manifests = tmp_path / "manifests"; manifests.mkdir()
@@ -1253,10 +1266,10 @@ def _setup_diag(tmp_path, *, reels, sha="d" * 64):
              {"word": "это", "t0": 1.2, "t1": 1.6}, {"word": "дальше", "t0": 3.5, "t1": 4.0}]
     audio = cache / f"{sha}.mp3"; audio.write_bytes(b"FAKE-MP3-BYTES")
     ah = state.audio_hash(audio)
-    (cache / f"{ah}.transcript.json").write_text(
-        json.dumps({"language": "ru", "words": words}), encoding="utf-8")
+    key = _write_keyed_transcript(cache, ah, words)
     m = Manifest(source="v.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
-                 duration_preset="shorts", setup=_setup(), run_key="rk", reels=reels)
+                 duration_preset="shorts", setup=_setup(), run_key="rk",
+                 transcript_params_key=key, reels=reels)
     (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
     return manifests, cache
 
@@ -1287,7 +1300,7 @@ def test_diagnose_cuts_warns_when_transcript_missing(tmp_path, capsys):
     (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
     rc = cli.cmd_diagnose_cuts(root=REPO_ROOT, manifests_dir=manifests, cache_dir=tmp_path / "cache")
     assert rc == 0
-    assert "транскрипт не найден" in capsys.readouterr().err
+    assert "нет аудио в кэше" in capsys.readouterr().err     # видео не прогонялось здесь → пропуск
 
 
 def test_diagnose_cuts_rerun_uses_cached_transcript_and_warns(tmp_path, monkeypatch, capsys):
@@ -1350,10 +1363,10 @@ def _setup_resnap(tmp_path, reels, sha="d" * 64):
              {"word": "это", "t0": 1.2, "t1": 1.6}, {"word": "дальше", "t0": 3.5, "t1": 4.0}]
     audio = cache / f"{sha}.mp3"; audio.write_bytes(b"MP3-BYTES")
     ah = state.audio_hash(audio)
-    (cache / f"{ah}.transcript.json").write_text(
-        json.dumps({"language": "ru", "words": words}), encoding="utf-8")
+    key = _write_keyed_transcript(cache, ah, words)
     m = Manifest(source="v.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
-                 duration_preset="shorts", setup=_setup(), run_key="rk", reels=reels)
+                 duration_preset="shorts", setup=_setup(), run_key="rk",
+                 transcript_params_key=key, reels=reels)
     (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
     return manifests, cache
 

@@ -190,3 +190,57 @@ undershoot, not the "punctuation desert / snap-fallback" the label claims.
    pause ≥ 0.4 s to land on, so it keeps `r0_end`, which itself can sit mid-thought (PXL r14). This
    is the known weak spot on interview material and is real under today's code — but it is one clip,
    not nine.
+
+---
+
+## FIX APPLIED (2026-09-16)
+
+The measurement/write bug above is now fixed. Changes:
+
+- **Manifest schema** gains `transcript_params_key` — `cmd_run` records the params_key of the
+  transcript the manifest was built from (from the transcript's stamped `provider|model|prompt_hash`).
+- **`_transcript_for_manifest` → `_resolve_transcript`**: resolves the transcript **strictly by
+  params_key** — the manifest's recorded key (authoritative), or the current config's key as a
+  read-only legacy best-effort. It **never** falls back to the params-key-less orphan
+  (`<hash>.transcript.json`).
+- **`diagnose-cuts`**: when no matching transcript exists it prints `нет транскрипта с
+  params_key=… — пропуск` and skips (a wrong measurement is worse than none). The per-clip HARD
+  `cause` now reports the **real** stored `end_snap_reason` (`before_host_turn` / `no_end` /
+  `sentence`(+`PAD-хвост`)) instead of the catch-all `snap-fallback (нет чистой границы)`, which is
+  kept only as the legacy fallback for manifests without the field.
+- **`resnap`**: requires a recorded `transcript_params_key`; resolves by it only (never the config
+  fallback); a guard verifies the resolved transcript's stamped identity equals the manifest's key
+  and **refuses to write** (naming both keys) on absence or mismatch. Legacy manifests without the
+  key are refused until one full `arl run` — the same migration precedent as the `r0_start/r0_end`
+  fields.
+
+Tests: `tests/test_transcript_resolution.py` (params-keyed wins over orphan; orphan-only → diagnose
+skips + resnap refuses; guard rejects a params_key mismatch) plus the updated `test_cli.py`
+diagnose/resnap fixtures.
+
+### Corrupted-manifest audit (on-disk, this machine)
+
+Detection: classify each manifest's frozen boundaries against the transcript it was actually built
+from (its recorded key, or the current-config `84b62c` variant). An orphan-resnapped manifest's
+ends would land mid-word when viewed in the correct transcript.
+
+| manifest | cache variants | built-on | verdict vs. correct transcript | corrupted? |
+|----------|----------------|----------|--------------------------------|------------|
+| PXL_…_34f06abf         | orphan + `84b62c` | `84b62c`            | 14 clean / 1 HARD (r14, 0.07 s undershoot) | **NO** |
+| 2026-08-08 11h 42m 49s | orphan + `84b62c` | `84b62c`            | 5 clean / 2 HARD (genuine)                 | **NO** |
+| 2026-08-08 10h 59m 38s | orphan only       | empty-prompt build | — (now skipped)                            | **NO** |
+| 2026-08-08 09h 33m 14s | orphan only       | empty-prompt build | — (now skipped)                            | **NO** |
+
+None of the four manifests on this dev Mac are orphan-corrupted. PXL and 11h42 were last written by a
+correct run against `84b62c` (their stored r14 end matches "запомнило." in `84b62c`, not "запомни" in
+the orphan; classifying their frozen boundaries against `84b62c` yields the clean picture above).
+09h33/10h59 were genuinely built with an empty `initial_prompt` (only the orphan exists for their
+audio) — not corrupted, but now skipped by `diagnose-cuts` and refused by `resnap` until one re-run,
+rather than measured/written against a transcript that isn't provably theirs.
+
+**The six manifests resnapped on the Windows machine yesterday are not present on this Mac and cannot
+be inspected here** — they are the suspect set named in the task. Recovery is deterministic and does
+not need this machine: with the fix, `arl resnap` now **refuses** every legacy manifest lacking
+`transcript_params_key` (all pre-fix manifests) instead of rewriting it against an orphan, and
+`arl diagnose-cuts` skips or measures correctly. Re-run each of the six with `arl run` (records the
+key and rebuilds boundaries on the correct transcript); **do not** `resnap` them.

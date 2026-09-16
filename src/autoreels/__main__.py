@@ -34,7 +34,14 @@ from autoreels.cloud.select import (
 from autoreels.cloud.chunk_transcribe import renumber_reels
 from autoreels.cloud.snap import apply_padding, snap_segments, trim_hanging_subtitles, try_rescue_clip
 from autoreels.cloud.trim import trim_too_long
-from autoreels.cloud.transcribe import TranscriptionError, get_backend, transcribe
+from autoreels.cloud.transcribe import (
+    TranscriptionError,
+    _backend_meta,
+    get_backend,
+    params_key,
+    transcribe,
+    transcript_identity,
+)
 from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
 from autoreels.core import state
 from autoreels.core.env import MissingKeyError, require_key
@@ -756,8 +763,12 @@ def _stage_subtitles(reels, transcript):
     return reels
 
 
-def _assemble_manifest(video, reels, *, sha, setup, duration_preset, source_kind=""):
-    """Собрать манифест: кроп/setup_id — из калибровки (setup), source_sha256 — от файла."""
+def _assemble_manifest(video, reels, *, sha, setup, duration_preset, source_kind="",
+                       transcript_params_key=""):
+    """Собрать манифест: кроп/setup_id — из калибровки (setup), source_sha256 — от файла.
+
+    transcript_params_key — отпечаток транскрипта, на котором собран манифест: даёт
+    resnap/diagnose найти ТОТ ЖЕ транскрипт, а не «сироту» без params_key."""
     return Manifest(
         source=Path(video).name,
         source_sha256=sha,
@@ -767,6 +778,7 @@ def _assemble_manifest(video, reels, *, sha, setup, duration_preset, source_kind
         run_key=_run_key(sha, duration_preset),
         reels=reels,
         source_kind=source_kind,
+        transcript_params_key=transcript_params_key,
     )
 
 
@@ -1329,6 +1341,7 @@ def cmd_run(
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
         source_kind=getattr(r0_cfg, "source_kind", ""),
+        transcript_params_key=transcript_identity(transcript),
     )
     path = _write_manifest(manifest, manifests_dir)
     memtrace.mark("after manifest assembly")
@@ -2123,6 +2136,7 @@ def cmd_resnap(
     updated: list[str] = []
     skipped: list[str] = []
     no_r0: list[str] = []
+    refused: list[str] = []
     for mf in targets:
         try:
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
@@ -2136,11 +2150,31 @@ def cmd_resnap(
                   f"ОДИН полный run (arl run), дальше resnap бесплатен", file=sys.stderr, flush=True)
             no_r0.append(mf.name)
             continue
-        transcript = _transcript_for_manifest(manifest, cache_dir, audio_format=audio_format)
+        # Идентичность транскрипта ОБЯЗАТЕЛЬНА для записи: без записанного params_key нельзя
+        # проверить, что резолвим тот же транскрипт → отказ (порча границ хуже отсутствия правки).
+        if not manifest.transcript_params_key:
+            print(f"  ⚠ {stem}: манифест без transcript_params_key (снят до этого фикса) — resnap "
+                  f"ОТКАЗАН: нельзя проверить транскрипт. Нужен ОДИН полный run (arl run), "
+                  f"дальше resnap безопасен", file=sys.stderr, flush=True)
+            refused.append(mf.name)
+            continue
+        # Резолв ТОЛЬКО по записанному ключу (config_pkey="" не подставляем — иначе можно уехать
+        # на транскрипт текущего конфига, если он сменился после сборки манифеста).
+        transcript, expected = _resolve_transcript(manifest, cache_dir, audio_format=audio_format)
         if transcript is None:
-            print(f"  ⚠ {stem}: кэш-транскрипт не найден (видео не прогонялось здесь) — пропуск",
+            why = ("нет аудио в кэше" if expected is None
+                   else f"нет транскрипта с params_key={expected}")
+            print(f"  ⚠ {stem}: {why} (тот, на котором собран манифест) — resnap ОТКАЗАН",
                   file=sys.stderr, flush=True)
-            skipped.append(mf.name)
+            refused.append(mf.name)
+            continue
+        # Guard: имя файла говорит params_key X, но stamped-мета внутри — Y? Не писать.
+        actual = transcript_identity(transcript)
+        if actual != manifest.transcript_params_key:
+            print(f"  ⚠ {stem}: params_key транскрипта расходится (манифест="
+                  f"{manifest.transcript_params_key}, транскрипт={actual or '—'}) — resnap ОТКАЗАН",
+                  file=sys.stderr, flush=True)
+            refused.append(mf.name)
             continue
 
         reels = [r.model_copy(deep=True) for r in manifest.reels]
@@ -2158,6 +2192,8 @@ def cmd_resnap(
         parts = [f"{len(updated)} пересчитано"]
         if no_r0:
             parts.append(f"{len(no_r0)} без R0-границ (нужен run)")
+        if refused:
+            parts.append(f"{len(refused)} отказано (транскрипт не подтверждён)")
         if skipped:
             parts.append(f"{len(skipped)} пропущено")
         print(f"\n=== resnap: {' / '.join(parts)} ===", flush=True)
@@ -2569,19 +2605,35 @@ def cmd_calibrate_batch(
 
 # ------------------------------------------------------------------ diagnose-cuts (обрывы фраз)
 
-def _transcript_for_manifest(manifest, cache_dir, *, audio_format="mp3"):
-    """Кэш-транскрипт видео по цепочке source_sha → cache/<sha>.<fmt> → audio_hash → transcript.json.
-    Возвращает Transcript или None (нет аудио/транскрипта в кэше — видео не прогонялось здесь)."""
+def _config_params_key(root) -> str:
+    """params_key, которым транскрибирует ТЕКУЩИЙ config/transcribe.yaml (для резолва легаси-
+    манифестов без записанного отпечатка). Совпадает с pkey, который ставит cmd_run."""
+    tcfg = load_transcribe_config(Path(root) / "config" / "transcribe.yaml")
+    return params_key(_backend_meta(get_backend(tcfg)))
+
+
+def _resolve_transcript(manifest, cache_dir, *, audio_format="mp3", config_pkey=""):
+    """Загрузить транскрипт, на котором СОБРАН манифест, — строго по params_key.
+
+    Приоритет: manifest.transcript_params_key (авторитетно) → config_pkey (легаси best-effort,
+    только для read-only диагностики). НИКОГДА не откатывается к «сироте» без params_key
+    (<hash>.transcript.json): другая пунктуация → фантомные обрывы при чтении и порча границ
+    при resnap-записи. Возвращает (Transcript|None, expected_pkey).
+
+    Резолв резнапа (запись) должен звать с config_pkey="" → только записанный в манифесте ключ."""
     audio = Path(cache_dir) / f"{manifest.source_sha256}.{audio_format}"
     if not audio.is_file():
-        return None
-    tp = state.transcript_cache_path(cache_dir, audio)
+        return None, None
+    expected = manifest.transcript_params_key or config_pkey
+    if not expected:                       # нет отпечатка — резолвить нечем (сироту не берём)
+        return None, expected
+    tp = state.transcript_cache_path(cache_dir, audio, expected)
     if not tp.is_file():
-        return None
+        return None, expected
     try:
-        return Transcript.model_validate_json(tp.read_text(encoding="utf-8"))
+        return Transcript.model_validate_json(tp.read_text(encoding="utf-8")), expected
     except Exception:  # noqa: BLE001
-        return None
+        return None, expected
 
 
 def _rerun_reels(transcript, r0_cfg, root):
@@ -2658,6 +2710,7 @@ def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
 
     cfg = dict(min_pause=r0_cfg.min_pause_for_phrase_end, max_micro_pause=r0_cfg.max_micro_pause,
                tail_pad_sec=r0_cfg.tail_pad_sec, hanging_words=r0_cfg.hanging_words)
+    config_pkey = _config_params_key(root)
     total = {"clean": 0, "soft": 0, "hard": 0, "causes": {}}
     analyzed = 0
     for mf in manifest_files:
@@ -2666,17 +2719,21 @@ def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
         except Exception as e:  # noqa: BLE001
             print(f"  ⚠ битый манифест {mf.name}: {e}", file=sys.stderr, flush=True)
             continue
-        transcript = _transcript_for_manifest(manifest, cache_dir, audio_format=audio_format)
+        transcript, expected = _resolve_transcript(
+            manifest, cache_dir, audio_format=audio_format, config_pkey=config_pkey)
         if transcript is None:
-            print(f"  ⚠ {mf.stem}: кэш-транскрипт не найден (видео не прогонялось здесь) — пропуск",
-                  file=sys.stderr, flush=True)
+            # НЕ подставляем «сироту»: неверное измерение хуже отсутствия измерения.
+            why = ("нет аудио в кэше" if expected is None
+                   else f"нет транскрипта с params_key={expected} (тот, на котором собран манифест)")
+            print(f"  ⚠ {mf.stem}: {why} — пропуск", file=sys.stderr, flush=True)
             continue
         if rerun:
             print(f"  … пере-прогон R0: {mf.stem}", flush=True)
             reels = _rerun_reels(transcript, r0_cfg, root)
         else:
             reels = manifest.reels
-        diags = [classify_end(r.id, r.start, r.end, transcript.words, **cfg) for r in reels]
+        diags = [classify_end(r.id, r.start, r.end, transcript.words,
+                              stored_reason=r.end_snap_reason, **cfg) for r in reels]
         _print_diag_table(mf.stem, diags)
         s = summarize(diags)
         for k in ("clean", "soft", "hard"):
