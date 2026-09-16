@@ -1683,7 +1683,7 @@ def cmd_render(
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
 
-    manifest_files = sorted(manifests_dir.glob("*.json"))
+    manifest_files = _glob_manifests(manifests_dir)
     if not manifest_files:
         print("manifests/ пуст — нечего рендерить", flush=True)
         return []
@@ -1860,7 +1860,7 @@ def cmd_preview(
         if not mf.is_file():
             mf = manifests_dir / f"{Path(manifest_arg).stem}.json"
     else:
-        candidates = sorted(manifests_dir.glob("*.json"))
+        candidates = _glob_manifests(manifests_dir)
         if not candidates:
             print("manifests/ пуст — нечего превьюить", file=sys.stderr, flush=True)
             return 1
@@ -1988,7 +1988,7 @@ def cmd_recrop(
             return 1
         targets = [mf]
     else:
-        targets = sorted(manifests_dir.glob("*.json"))
+        targets = _glob_manifests(manifests_dir)
         if not targets:
             print("manifests/ пуст — нечего рекропить", flush=True)
             return 0
@@ -2115,7 +2115,7 @@ def cmd_resnap(
             return 1
         targets = [mf]
     else:
-        targets = sorted(manifests_dir.glob("*.json"))
+        targets = _glob_manifests(manifests_dir)
         if not targets:
             print("manifests/ пуст — нечего пересчитывать", flush=True)
             return 0
@@ -2166,10 +2166,19 @@ def cmd_resnap(
     return 0
 
 
+_SIDECAR_SUFFIXES = (".discarded.json",)
+
+
+def _glob_manifests(d: Path) -> list[Path]:
+    """Sorted manifest paths in dir d, excluding sidecar files."""
+    return sorted(p for p in d.glob("*.json")
+                  if not any(p.name.endswith(s) for s in _SIDECAR_SUFFIXES))
+
+
 def _auto_discover_manifests(root=None) -> list[Path]:
     """Glob manifests/*.json relative to project root (cwd-independent)."""
     manifests_dir = (Path(root) if root else _project_root()) / "manifests"
-    return sorted(p for p in manifests_dir.glob("*.json") if not p.name.endswith(".discarded.json"))
+    return _glob_manifests(manifests_dir)
 
 
 def cmd_dump_clips(manifests, *, out, root=None) -> int:
@@ -2290,7 +2299,7 @@ def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
             print(f"   • {p.name}", flush=True)
 
     pending: list[str] = []
-    for mf in (sorted(manifests_dir.glob("*.json")) if manifests_dir.is_dir() else []):
+    for mf in (_glob_manifests(manifests_dir) if manifests_dir.is_dir() else []):
         try:
             m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
             if _missing_reels(m, out_root / Path(m.source).stem):
@@ -2636,7 +2645,7 @@ def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
             return 1
         manifest_files = [mf]
     else:
-        manifest_files = sorted(manifests_dir.glob("*.json"))
+        manifest_files = _glob_manifests(manifests_dir)
         if not manifest_files:
             print("manifests/ пуст — нечего диагностировать", flush=True)
             return 0
@@ -2702,7 +2711,7 @@ def cmd_status(*, root=".") -> int:
     calibrations_dir = root / "calibrations"
 
     inputs    = sorted(inputs_dir.glob("*.mp4"))      if inputs_dir.is_dir()    else []
-    manifests = sorted(manifests_dir.glob("*.json"))  if manifests_dir.is_dir() else []
+    manifests = _glob_manifests(manifests_dir) if manifests_dir.is_dir() else []
     rendered  = [d for d in reels_out_dir.iterdir() if d.is_dir()] \
                 if reels_out_dir.is_dir() else []
     archived  = sorted(archive_dir.glob("*.mp4"))     if archive_dir.is_dir()   else []
@@ -2920,7 +2929,7 @@ def _next_hint(root=".") -> str | None:
     """
     root = Path(root)
     inputs = list((root / "inputs").glob("*.mp4")) if (root / "inputs").is_dir() else []
-    manifests = list((root / "manifests").glob("*.json")) if (root / "manifests").is_dir() else []
+    manifests = _glob_manifests(root / "manifests") if (root / "manifests").is_dir() else []
 
     if inputs:
         n = len(inputs)
@@ -3069,7 +3078,7 @@ def _menu_state(root=".") -> dict[str, int]:
     """Счётчики состояния для шапки меню: inputs / manifests / rendered."""
     root = Path(root)
     inputs = len(list((root / "inputs").glob("*.mp4"))) if (root / "inputs").is_dir() else 0
-    manifests = len(list((root / "manifests").glob("*.json"))) if (root / "manifests").is_dir() else 0
+    manifests = len(_glob_manifests(root / "manifests")) if (root / "manifests").is_dir() else 0
     reels_out = root / "reels-out"
     rendered = len([d for d in reels_out.iterdir() if d.is_dir()]) if reels_out.is_dir() else 0
     return {"inputs": inputs, "manifests": manifests, "rendered": rendered}
