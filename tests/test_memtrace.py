@@ -69,13 +69,17 @@ _UNIX_ONLY = {
 
 def test_no_unix_only_imports_on_main_path():
     """All autoreels modules import without Unix-only stdlib modules available."""
-    # Build a fake-absent mapping for every Unix-only module
     blocked = {name: None for name in _UNIX_ONLY}
 
-    # Remove all autoreels modules from cache so imports run fresh
-    for key in list(sys.modules):
-        if key.startswith("autoreels"):
-            del sys.modules[key]
+    # Snapshot current autoreels modules so we can restore them after the test.
+    # Without this, the modules imported inside the `with patch.dict` block are
+    # evicted from sys.modules on exit, causing identity splits in subsequent tests:
+    # module-level `from autoreels.X import Foo` binds to the pre-test object, but
+    # `import autoreels.X as M; M.Foo` after the test gets a fresh re-import — a
+    # different class object — breaking Pydantic validation and mock patching.
+    autoreels_snapshot = {k: v for k, v in sys.modules.items() if k.startswith("autoreels")}
+    for key in autoreels_snapshot:
+        del sys.modules[key]
 
     failed = []
     with patch.dict(sys.modules, blocked):
@@ -91,6 +95,13 @@ def test_no_unix_only_imports_on_main_path():
             except Exception:
                 # Other errors (missing env vars, etc.) are not our concern here
                 pass
+
+    # Remove modules imported during the test; restore the pre-test objects so
+    # subsequent tests see the same module identity they bound at import time.
+    for key in list(sys.modules):
+        if key.startswith("autoreels"):
+            del sys.modules[key]
+    sys.modules.update(autoreels_snapshot)
 
     assert not failed, "Unix-only imports found:\n" + "\n".join(
         f"  {mod}: {err}" for mod, err in failed

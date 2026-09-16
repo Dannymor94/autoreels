@@ -59,6 +59,21 @@ def _no_real_git(monkeypatch):
     monkeypatch.setattr(cli, "_run_git", _fake_git)
 
 
+@pytest.fixture(autouse=True)
+def _no_local_render_cfg(monkeypatch):
+    """Prevent cmd_render from reading the real config/render.local.yaml (which sets
+    role=analyze on this Mac dev machine and blocks all render logic tests).
+    Only bypasses local_path when the config path is under REPO_ROOT — tests that use
+    tmp_path roots still read their own render.local.yaml normally."""
+    from autoreels.core.config import load_render_config as _lrc
+
+    def _patched(path, **k):
+        if "local_path" not in k and str(Path(path).resolve()).startswith(str(REPO_ROOT)):
+            k["local_path"] = Path("/nonexistent_render_local")
+        return _lrc(path, **k)
+
+    monkeypatch.setattr(cli, "load_render_config", _patched)
+
 
 @pytest.fixture(autouse=True)
 def _frame_size_probe(monkeypatch):
