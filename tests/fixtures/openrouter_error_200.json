@@ -1,0 +1,11 @@
+{
+  "_comment": "OpenRouter error body с HTTP 200 — воспроизводит баг прогона от 2026-08-08. OpenRouter возвращает ошибку в теле ответа вместо choices при перегрузке upstream-провайдера или блокировке shared pool. _extract_content должен детектировать это как ProviderEmptyResponse (мягкий сбой, chunk-fail), а не KeyError('choices') → ProviderError (video-kill).",
+  "error": {
+    "message": "This endpoint's upstream provider temporarily failed: nvidia/nemotron-3-super-120b-a12b failed to respond.",
+    "code": 502,
+    "metadata": {
+      "provider_name": "nvidia",
+      "raw": "upstream error"
+    }
+  }
+}

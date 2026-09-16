@@ -367,8 +367,18 @@ def _extract_content(data, provider_name: str) -> str:
     """Достать content первого choice; пустой/None → ProviderEmptyResponse (диагностика).
 
     Провайдеры на free-tier под нагрузкой иногда отдают HTTP 200 с content=None или пустой
-    строкой (оборванный/пустой ответ). Раньше это молча возвращалось наверх → json.loads(None)
-    → TypeError, роняя всё видео. Теперь — явный мягкий сбой с указанием, ЧТО пришло."""
+    строкой (оборванный/пустой ответ). OpenRouter и другие иногда кладут {"error": {...}} в
+    тело при HTTP 200 вместо choices — детектируем явно. Раньше оба случая тихо роняли видео
+    через TypeError/KeyError; теперь — мягкий сбой (ProviderEmptyResponse), пул пробует
+    сиблинга, чанк фейлится, видео продолжается."""
+    # Error payload disguised as HTTP 200 (e.g. OpenRouter upstream error, rate-limit proxy).
+    if isinstance(data, dict) and "error" in data and "choices" not in data:
+        err = data["error"]
+        msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+        raise ProviderEmptyResponse(
+            f"{provider_name} вернул ошибку в теле HTTP 200: {msg}",
+            provider=provider_name,
+        )
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:

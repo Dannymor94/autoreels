@@ -1421,3 +1421,71 @@ def test_openrouter_shared_pool_excluded_at_construction(monkeypatch):
     # pool should contain only Groq (OpenRouter excluded due to shared pool block)
     assert len(pool._members) == 1
     assert pool._members[0].name == "Groq"
+
+
+# ============================================ контрактные тесты: реальные конверты от провайдеров
+
+import json as _json  # noqa: E402
+import os as _os  # noqa: E402
+
+_FIXTURES = _os.path.join(_os.path.dirname(__file__), "fixtures")
+
+
+def _load_fixture(name: str) -> dict:
+    with open(_os.path.join(_FIXTURES, name)) as f:
+        return _json.load(f)
+
+
+def test_groq_envelope_parses_to_content():
+    """Groq chat HTTP body (реальный конверт) → _extract_content достаёт content-строку без ошибок."""
+    from autoreels.cloud.providers import _extract_content
+    data = _load_fixture("groq_chat_envelope.json")
+    content = _extract_content(data, "Groq")
+    assert isinstance(content, str) and len(content) > 0
+    parsed = _json.loads(content)
+    assert "segments" in parsed and len(parsed["segments"]) >= 1
+    s = parsed["segments"][0]
+    assert "start" in s and "end" in s and "score" in s
+
+
+def test_openrouter_envelope_parses_to_same_structure():
+    """OpenRouter chat HTTP body → _extract_content парсит так же, как Groq (один контракт)."""
+    from autoreels.cloud.providers import _extract_content
+    data = _load_fixture("openrouter_chat_envelope.json")
+    content = _extract_content(data, "OpenRouter")
+    assert isinstance(content, str) and len(content) > 0
+    parsed = _json.loads(content)
+    assert "segments" in parsed
+    s = parsed["segments"][0]
+    # Одинаковый набор полей у обоих провайдеров
+    for field in ("start", "end", "score", "hook", "title"):
+        assert field in s, f"поле {field!r} отсутствует в ответе OpenRouter"
+
+
+def test_openrouter_error_200_raises_empty_response_not_parse_error():
+    """OpenRouter error-body при HTTP 200 → ProviderEmptyResponse (мягкий сбой, chunk-fail),
+    а не KeyError('choices') → ProviderError (video-kill). Воспроизводит баг 2026-08-08."""
+    from autoreels.cloud.providers import ProviderEmptyResponse, _extract_content
+    data = _load_fixture("openrouter_error_200.json")
+    with pytest.raises(ProviderEmptyResponse) as exc:
+        _extract_content(data, "OpenRouter")
+    msg = str(exc.value)
+    assert exc.value.provider == "OpenRouter"
+    # Сообщение об ошибке должно содержать суть из тела, а не голый KeyError
+    assert "ошибку" in msg and "HTTP 200" in msg
+
+
+def test_openrouter_error_200_chunk_fails_gracefully():
+    """Chunk с error-body-в-HTTP-200 → чанк провалился (SelectError), видео продолжается."""
+    from autoreels.cloud.providers import ProviderEmptyResponse
+    from autoreels.cloud.select import SelectError, _complete_and_parse
+
+    data = _load_fixture("openrouter_error_200.json")
+
+    class _ErrorProvider:
+        def complete(self, messages, *, temperature=0.0):
+            from autoreels.cloud.providers import _extract_content
+            return _extract_content(data, "OpenRouter")  # raises ProviderEmptyResponse
+
+    with pytest.raises(SelectError):
+        _complete_and_parse(_ErrorProvider(), [])
