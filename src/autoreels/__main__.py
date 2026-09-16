@@ -2748,13 +2748,17 @@ def cmd_status(*, root=".") -> int:
 
     # Предупреждения: манифесты без видео
     warnings: list[str] = []
-    input_stems = {v.stem for v in inputs} | {v.stem for v in archived}
     for mf in manifests:
         try:
             m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
-            stem = Path(m.source).stem
-            if stem not in input_stems:
-                warnings.append(f"  ⚠ манифест без видео: {mf.name} (нет inputs/{m.source})")
+            src_name = Path(m.source).name
+            in_inputs  = (inputs_dir  / src_name).is_file()
+            in_archive = (archive_dir / src_name).is_file()
+            if not in_inputs and not in_archive:
+                warnings.append(
+                    f"  ⚠ манифест без видео: {mf.name} "
+                    f"(нет ни в inputs/, ни в inputs-archive/)"
+                )
             desync = _manifest_calibration_desync(m, calibrations_dir)
             if desync:
                 warnings.append(f"  ⚠ {desync}")
