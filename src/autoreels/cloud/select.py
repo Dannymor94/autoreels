@@ -440,6 +440,7 @@ def select_chunked(
     provider: LLMProvider,
     r0_cfg,
     _dropped: list[dict] | None = None,
+    _failed_chunks: list[dict] | None = None,
 ) -> list[Reel]:
     """R0 с чанкингом: транскрипт → чанки → LLM на каждый → смерж + дедуп по t0.
 
@@ -481,10 +482,18 @@ def select_chunked(
             max_duration=r0_cfg.max_duration,
             target_candidates=target,
         )
+        _t0 = time.monotonic()
         try:
             segs = _complete_and_parse(provider, messages)
         except SelectError as e:
-            print(f"\n  ⚠ R0 чанк {i + 1} провалился: {e}", flush=True)
+            elapsed = round(time.monotonic() - _t0, 1)
+            print(f"\n  ⚠ R0 чанк {i + 1} провалился ({elapsed:.0f}с потрачено): {e}", flush=True)
+            if _failed_chunks is not None:
+                _failed_chunks.append({
+                    "chunk_idx": i + 1,
+                    "error": str(e),
+                    "time_lost_sec": elapsed,
+                })
             continue
         reels = segments_to_reels(segs)
         flag_durations(reels, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
@@ -513,12 +522,15 @@ def select(
     provider: LLMProvider,
     r0_cfg,
     _dropped: list[dict] | None = None,
+    _failed_chunks: list[dict] | None = None,
 ) -> list[Reel]:
     """R0 end-to-end: диспетчер одиночного запроса или чанкинга.
 
     Returns all post-dedup candidates with c{NNN} ids. Top-N cut, rank assignment,
     and dangling_start filter happen after snap in __main__ (they need snapped boundaries).
     If `_dropped` list is given, it is populated with overlap_dedup sidecar entries.
+    If `_failed_chunks` list is given, failed chunk records ({chunk_idx, error, time_lost_sec})
+    are appended there for the manifest sidecar (visible coverage gaps).
     """
     chunking = getattr(r0_cfg, "chunking", None)
     if chunking and chunking.enabled:
@@ -532,7 +544,8 @@ def select(
                                             underestimation_factor=factor)
         if _count_tokens(compressed) > effective:
             return select_chunked(compressed, system_text=system_text, fewshot=fewshot,
-                                  provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
+                                  provider=provider, r0_cfg=r0_cfg, _dropped=_dropped,
+                                  _failed_chunks=_failed_chunks)
     return _select_one(compressed, system_text=system_text, fewshot=fewshot,
                        provider=provider, r0_cfg=r0_cfg, _dropped=_dropped)
 

@@ -74,6 +74,15 @@ class RunError(Exception):
     """
 
 
+class ZeroHarvestError(Exception):
+    """Транскрипт непустой, но R0 не нашёл ни одного рила.
+
+    Источник остаётся в inputs/ — нужна ручная проверка (плохой материал или
+    слишком строгий порог). Отличается от пустого транскрипта (тишина/пустышка)
+    — тот архивируется автоматически.
+    """
+
+
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
 class FFmpegNotFoundError(Exception):
     """ffmpeg не найден (ни флаг/env/render.local.yaml, ни PATH, ни типичные пути).
@@ -600,9 +609,11 @@ def _stage_compress(transcript, *, r0_cfg):
 
 
 def _stage_select(compressed, *, r0_cfg, root, provider=None):
-    """R0-выбор. Returns (reels, dedup_disc) where dedup_disc is a list of overlap_dedup sidecar entries.
+    """R0-выбор. Returns (reels, dedup_disc, failed_chunks).
+
     `provider` — заранее собранный пул (cmd_run строит его и валидирует ДО транскрипции);
-    если None — собираем здесь (standalone-путь)."""
+    если None — собираем здесь (standalone-путь).
+    """
     print("выбор моментов…", flush=True)
     root = Path(root)
     system_text = (root / r0_cfg.prompts.system).read_text(encoding="utf-8")
@@ -610,11 +621,20 @@ def _stage_select(compressed, *, r0_cfg, root, provider=None):
     if provider is None:
         provider = build_pool(r0_cfg)
     dedup_disc: list[dict] = []
+    failed_chunks: list[dict] = []
     reels = select(
         compressed, system_text=system_text, fewshot=fewshot,
         provider=provider, r0_cfg=r0_cfg, _dropped=dedup_disc,
+        _failed_chunks=failed_chunks,
     )
-    return reels, dedup_disc
+    return reels, dedup_disc, failed_chunks
+
+
+def _write_failed_chunks(failed_chunks: list[dict], manifest_path: Path) -> None:
+    if not failed_chunks:
+        return
+    sidecar = manifest_path.with_suffix("").with_suffix(".failed_chunks.json")
+    sidecar.write_text(json.dumps(failed_chunks, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
@@ -1240,7 +1260,7 @@ def cmd_run(
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     memtrace.mark("after compress")
-    reels, dedup_disc = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+    reels, dedup_disc, failed_chunks = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
     memtrace.mark("after select (R0)")
     for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
         r.r0_start, r.r0_end = r.start, r.end
@@ -1303,13 +1323,29 @@ def cmd_run(
     path = _write_manifest(manifest, manifests_dir)
     memtrace.mark("after manifest assembly")
     _write_discarded(discarded, path)
+    _write_failed_chunks(failed_chunks, path)
     discard_info = f", сброшено кандидатов: {len(discarded)}" if discarded else ""
-    print(f"манифест собран: {len(manifest.reels)} reels{discard_info} → {path}", flush=True)
-    if push:
-        # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
-        _commit_push_manifest(path, len(manifest.reels), root=root,
-                              calibration_path=calibration_path(calibrations_dir, sha))
-    _archive_video(Path(video), archive_dir)
+    chunk_info = f", провалилось чанков: {len(failed_chunks)}" if failed_chunks else ""
+    print(f"манифест собран: {len(manifest.reels)} reels{discard_info}{chunk_info} → {path}", flush=True)
+
+    # Zero-harvest: непустой транскрипт, но рилов нет → источник остаётся в inputs/.
+    # Пустой транскрипт (тишина) → архивируем.
+    is_empty_transcript = not compressed.strip()
+    if not manifest.reels:
+        if is_empty_transcript:
+            print(f"⊘ транскрипт пуст (тишина) — архивируем {Path(video).name}", flush=True)
+            _archive_video(Path(video), archive_dir)
+        else:
+            raise ZeroHarvestError(
+                f"R0 не нашёл ни одного рила (транскрипт непустой) — "
+                f"источник оставлен в inputs/ для ручной проверки: {Path(video).name}"
+            )
+    else:
+        if push:
+            # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
+            _commit_push_manifest(path, len(manifest.reels), root=root,
+                                  calibration_path=calibration_path(calibrations_dir, sha))
+        _archive_video(Path(video), archive_dir)
     return path
 
 
@@ -1423,15 +1459,17 @@ def cmd_run_batch(
     ffmpeg: str = "ffmpeg",
     push: bool = False,
     force_transcribe: bool = False,
-) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]]]:
+) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Batch: обработать все видео в inputs/ по очереди. Один упал → остальные продолжают.
 
     `root=None` → корень проекта из `_project_root()` (по расположению пакета, НЕ по cwd).
     Явный `root=<путь>` переопределяет дефолт — для тестов и нестандартных раскладок.
     `push=True` → каждый успешный манифест сразу коммитится+пушится (per-video, не в конце):
     упади прогон на середине — уже готовые манифесты УЖЕ на системнике.
-    Возвращает (ok_names, failed_list, skipped_list): failed = [(name, exc), …] (реальные ошибки);
-    skipped = [(name, причина), …] (битые/пустые файлы — их НЕ архивируем, остаются в inputs/).
+    Возвращает (ok_names, failed_list, skipped_list, zero_harvest_list):
+    failed = [(name, exc), …] (реальные ошибки);
+    skipped = [(name, причина), …] (битые/пустые файлы — их НЕ архивируем, остаются в inputs/);
+    zero_harvest = [(name, причина), …] (непустой транскрипт, но 0 рилов — источник в inputs/).
     """
     root = Path(root) if root is not None else _project_root()
     # Преflight утилит ОДИН раз до всей пачки: нет ffmpeg/ffprobe → падаем сразу с внятным
@@ -1443,11 +1481,12 @@ def cmd_run_batch(
     videos = _scan_inputs(inputs_dir)
     if not videos:
         _report_empty_inputs(inputs_dir)
-        return [], [], []
+        return [], [], [], []
 
     ok: list[str] = []
     failed: list[tuple[str, Exception]] = []
     skipped: list[tuple[str, str]] = []
+    zero_harvest: list[tuple[str, str]] = []
     for v in videos:
         try:
             cmd_run(
@@ -1459,23 +1498,33 @@ def cmd_run_batch(
         except InputInvalid as e:               # битый/пустой файл — пропуск, НЕ ошибка
             print(f"\n⊘ пропущен {v.name}: {e}", file=sys.stderr, flush=True)
             skipped.append((v.name, str(e)))
+        except ZeroHarvestError as e:           # транскрипт непустой, но рилов нет
+            print(f"\n⚠ нулевой урожай {v.name}: {e}", file=sys.stderr, flush=True)
+            zero_harvest.append((v.name, str(e)))
         except Exception as e:  # noqa: BLE001
             print(f"\n[ОШИБКА] {v.name}: {e}", file=sys.stderr, flush=True)
             failed.append((v.name, e))
 
     parts = [f"{len(ok)} ok"]
+    if zero_harvest:
+        parts.append(f"{len(zero_harvest)} нулевой урожай")
     if skipped:
         parts.append(f"{len(skipped)} пропущено (битые)")
     parts.append(f"{len(failed)} ошибок")
     print(f"\n=== batch run: {' / '.join(parts)} ===", flush=True)
     for name, err in failed:
         print(f"  ✗ {name}: {err}", file=sys.stderr)
+    for name, reason in zero_harvest:
+        print(f"  ⚠ {name}: {reason}", file=sys.stderr)
     for name, reason in skipped:
         print(f"  ⊘ {name}: {reason}", file=sys.stderr)
+    if zero_harvest:
+        print(f"\n⚠ {len(zero_harvest)} видео без рилов — транскрипт непустой, "
+              f"но R0 ничего не нашёл; файлы оставлены в inputs/ для ручной проверки", flush=True)
     if skipped:
         print(f"\n⚠ пропущено {len(skipped)} файла(ов) — проверь inputs/, они битые "
               f"(остались на месте, не заархивированы; удали или перекачай)", flush=True)
-    return ok, failed, skipped
+    return ok, failed, skipped, zero_harvest
 
 
 def _missing_reels(manifest: Manifest, out_dir: Path) -> list:
@@ -4134,9 +4183,11 @@ def main(argv=None) -> int:
                           f"  файл битый/пустой — перекачай/пересними и повтори", file=sys.stderr)
                     return 1
             else:
-                _, failed, _skipped = cmd_run_batch(ffmpeg=ffmpeg, push=not args.no_push,
-                                                    force_transcribe=args.force_transcribe)
-                if failed:
+                _, failed, _skipped, zero_harvest = cmd_run_batch(
+                    ffmpeg=ffmpeg, push=not args.no_push,
+                    force_transcribe=args.force_transcribe,
+                )
+                if failed or zero_harvest:
                     return 1
         elif args.cmd == "transcribe":
             # Режим --from-cache: транскрипт из кэша без видео и Whisper → ffmpeg не нужен.

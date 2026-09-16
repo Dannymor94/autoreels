@@ -119,7 +119,7 @@ def test_run_calls_stages_in_order(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", rec("extract", tmp_path / "a.wav"))
     monkeypatch.setattr(cli, "_stage_transcribe", rec("transcribe", "TRANSCRIPT"))
     monkeypatch.setattr(cli, "_stage_compress", rec("compress", "COMPRESSED"))
-    monkeypatch.setattr(cli, "_stage_select", rec("select", ([_reel()], [])))
+    monkeypatch.setattr(cli, "_stage_select", rec("select", ([_reel()], [], [])))
     monkeypatch.setattr(cli, "_stage_snap", rec("snap", [_reel()]))
     monkeypatch.setattr(cli, "_stage_padding", rec("padding", [_reel()]))
     monkeypatch.setattr(cli, "_stage_trim", rec("trim", [_reel()]))
@@ -142,7 +142,7 @@ def test_run_falls_back_to_auto_crop_when_uncalibrated(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], [], []))
 
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **kw: (3840, 2160))
 
@@ -168,7 +168,7 @@ def test_run_writes_manifest_named_by_stem(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))
 
     video = tmp_path / "PXL_20260621.mp4"
     video.write_bytes(b"x")
@@ -187,7 +187,7 @@ def test_run_assembles_manifest_with_crop_from_calibration(monkeypatch, tmp_path
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], [], []))
 
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"hello-bytes")
@@ -217,7 +217,7 @@ def test_run_rejects_crop_out_of_real_frame(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel("r01")], [], []))
     # Реальный кадр — горизонтальный 2688×1512, а кроп из калибровки — в повёрнутом (h=2347).
     monkeypatch.setattr(cli, "_probe_frame_size_for_auto", lambda v, **k: (2688, 1512))
 
@@ -248,7 +248,7 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
                    description="d", reason="r", topic="x")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([midword], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([midword], [], []))
     # Этот тест проверяет snap/padding, а не min_clip_filter → минуем фильтр.
     monkeypatch.setattr(cli, "_stage_min_clip_filter", lambda reels, transcript, *, r0_cfg: (reels, []))
 
@@ -277,7 +277,7 @@ def test_run_archives_video_after_success(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
@@ -346,7 +346,7 @@ def _mock_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))
 
 
 def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
@@ -358,13 +358,14 @@ def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
     (inputs / "b.mp4").write_bytes(b"x")
     manifests = tmp_path / "manifests"
 
-    ok, failed, skipped = cli.cmd_run_batch(
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=manifests,
         archive_dir=tmp_path / "inputs-archive", transcripts_dir=tmp_path / "transcripts",
     )
 
     assert sorted(ok) == ["a.mp4", "b.mp4"]
     assert failed == []
+    assert zero_harvest == []
     assert (manifests / "a.json").is_file()
     assert (manifests / "b.json").is_file()
 
@@ -387,7 +388,7 @@ def test_run_batch_continues_after_failure(monkeypatch, tmp_path):
     (inputs / "bad.mp4").write_bytes(b"x")
     (inputs / "good.mp4").write_bytes(b"x")
 
-    ok, failed, skipped = cli.cmd_run_batch(
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "manifests",
         archive_dir=tmp_path / "inputs-archive", transcripts_dir=tmp_path / "transcripts",
     )
@@ -403,10 +404,10 @@ def test_run_batch_empty_inputs_returns_empty(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
 
-    ok, failed, skipped = cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs,
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs,
                                    manifests_dir=tmp_path / "m", archive_dir=tmp_path / "a")
 
-    assert ok == [] and failed == [] and skipped == []
+    assert ok == [] and failed == [] and skipped == [] and zero_harvest == []
 
 
 def _validate_by_size(v, **k):
@@ -431,7 +432,7 @@ def test_batch_skips_invalid_file_without_hashing(monkeypatch, tmp_path, capsys)
     (inputs / "good.mp4").write_bytes(b"\0" * 2048)     # валидный
     archive = tmp_path / "inputs-archive"
 
-    ok, failed, skipped = cli.cmd_run_batch(
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=archive, transcripts_dir=tmp_path / "t")
 
@@ -461,7 +462,7 @@ def test_batch_summary_separates_skipped_and_failed(monkeypatch, tmp_path, capsy
     (inputs / "empty.mp4").write_bytes(b"")             # битый → SKIPPED
     (inputs / "good.mp4").write_bytes(b"\0" * 2048)     # ok
 
-    ok, failed, skipped = cli.cmd_run_batch(
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t")
 
@@ -813,7 +814,7 @@ def test_batch_failed_video_keeps_previous_pushes(monkeypatch, tmp_path):
     for name in ("a.mp4", "b.mp4", "c.mp4"):
         (inputs / name).write_bytes(b"x")
 
-    ok, failed, skipped = cli.cmd_run_batch(
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
         cache_dir=tmp_path / "c", push=True,
@@ -1321,7 +1322,7 @@ def test_run_populates_r0_bounds_before_snap(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))   # start=10, end=40
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))   # start=10, end=40
     def snap_capture(reels, *a, **k):
         captured["r0"] = [(r.r0_start, r.r0_end) for r in reels]
         return reels
@@ -2705,7 +2706,7 @@ def test_run_does_not_call_ask_batch_action(monkeypatch, tmp_path):
                         lambda *a, **k: __import__("autoreels.core.models", fromlist=["Transcript"])
                         .Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], []))
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))
 
     if hasattr(cli, "_ask_batch_action"):
         called = []
@@ -4806,8 +4807,8 @@ def test_run_saves_transcript_text(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
-    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], []))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "")  # пустой → архив (не ZeroHarvest)
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], [], []))
 
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"x")
@@ -4832,7 +4833,7 @@ def test_run_batch_saves_transcript_for_each_video(monkeypatch, tmp_path):
         (inputs / name).write_bytes(b"x")
     transcripts = tmp_path / "transcripts"
 
-    ok, failed, skipped = cli.cmd_run_batch(
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=tmp_path / "arch", transcripts_dir=transcripts, cache_dir=tmp_path / "c",
     )
@@ -4849,8 +4850,8 @@ def test_run_transcript_byte_identical_to_transcribe(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
     monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.mp3")
     monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: _transcript_two_paragraphs())
-    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
-    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], []))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "")  # пустой → архив (не ZeroHarvest)
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], [], []))
 
     video = tmp_path / "lecture.mp4"
     video.write_bytes(b"x")
@@ -5443,12 +5444,12 @@ def test_scanner_empty_message_includes_absolute_path_and_cwd(monkeypatch, tmp_p
     inputs.mkdir()
     (inputs / "notes.txt").write_bytes(b"x")   # non-video — triggers missed-entries branch
 
-    ok, failed, skipped = cli.cmd_run_batch()
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch()
 
     out = capsys.readouterr().out + capsys.readouterr().err
     assert str(inputs.resolve()) in out, f"absolute scanned path missing from: {out!r}"
     assert str(Path.cwd()) in out,       f"cwd missing from: {out!r}"
-    assert ok == [] and failed == [] and skipped == []
+    assert ok == [] and failed == [] and skipped == [] and zero_harvest == []
 
 
 def test_scanner_explicit_root_overrides_project_root(monkeypatch, tmp_path):
@@ -5534,3 +5535,109 @@ def test_dump_clips_removes_unlabelled_orphan_keeps_labelled(tmp_path):
 
     assert not orphan_unlabelled.exists(), "unlabelled orphan should have been deleted"
     assert orphan_labelled.exists(), "labelled orphan must be kept"
+
+
+# -------------------------------------------------- Fix 1: zero-harvest / empty-transcript
+
+
+def _mock_pipeline_zero(monkeypatch, tmp_path, *, reels, compressed="non-empty transcript"):
+    """Мок конвейера с заданным результатом R0 и настраиваемым compressed."""
+    from autoreels.core.config import load_render_config
+    _render_cfg = load_render_config(REPO_ROOT / "config" / "render.yaml", local_path="/dev/null")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: _render_cfg)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: compressed)
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: (reels, [], []))
+
+
+def test_run_zero_harvest_raises_and_leaves_source_in_inputs(monkeypatch, tmp_path):
+    """Non-empty transcript + 0 reels → ZeroHarvestError, source stays in inputs/."""
+    _mock_pipeline_zero(monkeypatch, tmp_path, reels=[], compressed="some words")
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+
+    with pytest.raises(cli.ZeroHarvestError):
+        cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                    archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                    cache_dir=tmp_path / "c")
+
+    assert video.exists(), "source must stay in inputs/ on zero harvest"
+
+
+def test_run_empty_transcript_archives(monkeypatch, tmp_path):
+    """Empty transcript (silence) → no ZeroHarvestError, source archived."""
+    _mock_pipeline_zero(monkeypatch, tmp_path, reels=[], compressed="")
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                cache_dir=tmp_path / "c")
+
+    assert not video.exists(), "silent source must be archived"
+    assert (tmp_path / "arch" / "lecture.mp4").exists()
+
+
+def test_run_batch_zero_harvest_in_separate_bucket(monkeypatch, tmp_path):
+    """batch: zero-harvest video goes to zero_harvest list, not failed, source stays."""
+    from autoreels.core.config import load_render_config
+    _render_cfg = load_render_config(REPO_ROOT / "config" / "render.yaml", local_path="/dev/null")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: _render_cfg)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "some words")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], [], []))
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "empty.mp4").write_bytes(b"x")
+
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+    )
+
+    assert ok == []
+    assert failed == []
+    assert len(zero_harvest) == 1
+    assert zero_harvest[0][0] == "empty.mp4"
+    assert (inputs / "empty.mp4").exists(), "zero-harvest source must stay in inputs/"
+
+
+# -------------------------------------------------- Fix 2: failed_chunks sidecar
+
+
+def test_failed_chunks_sidecar_written(monkeypatch, tmp_path):
+    """Failed chunks from select are recorded in <stem>.failed_chunks.json sidecar."""
+    from autoreels.core.config import load_render_config
+    _render_cfg = load_render_config(REPO_ROOT / "config" / "render.yaml", local_path="/dev/null")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: _render_cfg)
+
+    failed_record = {"chunk_idx": 2, "error": "SSL error", "time_lost_sec": 45.0}
+
+    def mock_select(compressed, *, r0_cfg, root, provider=None):
+        return [_reel()], [], [failed_record]
+
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", mock_select)
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    manifests = tmp_path / "m"
+
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=manifests,
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                cache_dir=tmp_path / "c")
+
+    sidecar = manifests / "lecture.failed_chunks.json"
+    assert sidecar.exists(), "failed_chunks sidecar must be written when chunks fail"
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert data == [failed_record]

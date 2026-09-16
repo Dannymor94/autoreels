@@ -64,14 +64,18 @@ _EXHAUSTED_THRESHOLD_SEC = 120.0  # retry-after выше порога → дне
 _EMPTY_COOLDOWN_SEC = 1.0      # короткий кулдаун провайдера после пустого ответа (сиблинг подхватит)
 _MAX_EMPTY_RESPONSES = 3       # сколько пустых ответов терпит пул за один запрос до чанк-фейла
 
-# Сетевые таймауты R0. read большой: LLM (reasoning) думает долго на больших чанках; connect
-# короткий — недоступный хост не должен висеть. Таймаут = транзиентный сбой (как пустой ответ).
-_R0_READ_TIMEOUT_SEC = 300.0   # было 120 total → мало для длинных чанков, ловили read timeout
+# Сетевые таймауты R0. read: LLM думает долго, но 120с достаточно с запасом над самым долгим
+# реально замеренным ответом (~60-70с на Groq free-tier). 300с приводило к 30-минутным потерям
+# при SSL-ошибках (3 попытки × 2 провайдера). connect короткий — недоступный хост не висит.
+_R0_READ_TIMEOUT_SEC = 120.0   # было 300.0; SSL-ошибки не должны жечь полный бюджет попыток
 _R0_CONNECT_TIMEOUT_SEC = 10.0
-_TIMEOUT_RETRIES_SAME = 2      # ретраи на ТОМ ЖЕ провайдере при таймауте (транзиентный блип)
-_TIMEOUT_BACKOFF_SEC = 2.0     # короткий бэкофф между ретраями на том же провайдере
-_MAX_TIMEOUTS = 3             # сколько таймаутов терпит пул (по сиблингам) до чанк-фейла
+_TIMEOUT_RETRIES_SAME = 2      # ретраи на ТОМ ЖЕ провайдере при read-таймауте (блип сети)
+_TIMEOUT_BACKOFF_SEC = 2.0     # бэкофф между ретраями на том же провайдере
+_MAX_TIMEOUTS = 3             # сколько read-таймаутов терпит пул (по сиблингам) до чанк-фейла
 _TIMEOUT_COOLDOWN_SEC = 2.0
+# ConnectError (SSL/сеть) на N провайдерах подряд → проблема не в API, а в сети/VPN → fast-fail.
+# Не тратим бюджет попыток: SSL-ошибки мгновенны, но retried_same×providers = много потерь.
+_MAX_CONNECT_ERRORS = 2        # Groq + OpenRouter оба упали с ConnectError → сеть, не API
 
 # Защита пула от бесконечного спина на одном провайдере.
 # ponytail: flat constants, move to config if per-preset tuning needed
@@ -144,22 +148,34 @@ def _httpx_post(url, *, headers, json, timeout):
 
 
 def _post_r0(url, *, headers, payload, provider_name):
-    """POST к chat API с увеличенным read-timeout и ретраями на ТОМ ЖЕ провайдере при сетевом
-    таймауте (read/connect) или обрыве соединения. Исчерпав ретраи — ProviderTimeout
-    (транзиентный: пул уведёт на сиблинга, затем чанк-фейл, а не падение всего видео)."""
+    """POST к chat API с read-timeout и ретраями на ТОМ ЖЕ провайдере при read-таймауте.
+
+    ConnectError (SSL/сбой соединения): ретраи на том же провайдере НЕ помогут — fast-fail
+    с is_connect_error=True, чтобы пул мог быстро посчитать сетевые сбои через все сиблинги.
+    Read-timeout: ретраи _TIMEOUT_RETRIES_SAME раз с бэкоффом (транзиентный блип), потом
+    ProviderTimeout → пул уведёт чанк на сиблинга, а не роняет всё видео."""
     timeout = httpx.Timeout(_R0_READ_TIMEOUT_SEC, connect=_R0_CONNECT_TIMEOUT_SEC,
                             write=30.0, pool=10.0)
     last: Exception | None = None
     for attempt in range(_TIMEOUT_RETRIES_SAME + 1):
         try:
             return _httpx_post(url, headers=headers, json=payload, timeout=timeout)
+        except httpx.ConnectError as e:
+            # SSL/сетевой сбой на уровне соединения (вкл. UNEXPECTED_EOF_WHILE_READING):
+            # ретраи на этом провайдере бессмысленны — поднимаем сразу, не тратим время.
+            raise ProviderTimeout(
+                f"{provider_name}: сбой соединения R0 (сеть/SSL?): "
+                f"{type(e).__name__}: {e}",
+                provider=provider_name,
+                is_connect_error=True,
+            ) from e
         except (httpx.TimeoutException, httpx.TransportError) as e:
             last = e
             if attempt < _TIMEOUT_RETRIES_SAME:
                 time.sleep(_TIMEOUT_BACKOFF_SEC)
                 continue
     raise ProviderTimeout(
-        f"{provider_name}: сетевой таймаут R0-запроса (read>{_R0_READ_TIMEOUT_SEC:.0f}с) "
+        f"{provider_name}: read-таймаут R0-запроса (read>{_R0_READ_TIMEOUT_SEC:.0f}с) "
         f"после {_TIMEOUT_RETRIES_SAME + 1} попыток: {type(last).__name__}: {last}",
         provider=provider_name,
     )
@@ -189,11 +205,14 @@ class ProviderTimeout(ProviderError):
     """Сетевой таймаут чтения ответа (read/connect timeout) или обрыв соединения.
 
     Транзиентный сбой (как ProviderEmptyResponse): _post_r0 ретраит на ТОМ ЖЕ провайдере,
-    пул уводит на сиблинга, select трактует как провал ЧАНКА — всё видео НЕ падает."""
+    пул уводит на сиблинга, select трактует как провал ЧАНКА — всё видео НЕ падает.
+    `is_connect_error=True` — SSL/ConnectError: не read-таймаут, а сбой соединения. Пул считает
+    их отдельно (_MAX_CONNECT_ERRORS) и fast-fail'ит, если оба провайдера упали так подряд."""
 
-    def __init__(self, message: str, *, provider: str = ""):
+    def __init__(self, message: str, *, provider: str = "", is_connect_error: bool = False):
         super().__init__(message)
         self.provider = provider
+        self.is_connect_error = is_connect_error
 
 
 class ProviderModelNotFound(ProviderError):
@@ -817,6 +836,7 @@ class ProviderPool:
         пустых подряд — пробрасываем наверх (select пометит чанк failed, видео не падает)."""
         empty_count = 0
         timeout_count = 0
+        connect_error_count = 0
         _budget_start = self._clock()
         _fail_counts: dict[str, int] = {}
         # reset per-call consecutive failure counters
@@ -855,8 +875,21 @@ class ProviderPool:
                     continue
                 except ProviderTimeout as e:
                     timeout_count += 1
+                    is_connect = getattr(e, "is_connect_error", False)
+                    if is_connect:
+                        connect_error_count += 1
+                    if connect_error_count >= _MAX_CONNECT_ERRORS:
+                        # Оба провайдера упали с ConnectError подряд → сеть/VPN, не API.
+                        # Fast-fail: дальнейшие попытки только добавят ожидание впустую.
+                        raise ProviderTimeout(
+                            f"сбой соединения на всех {connect_error_count} провайдерах "
+                            f"(SSL/сеть, вероятно VPN или обрыв) — чанк пропущен; "
+                            f"проверь соединение. Последняя ошибка: {e}",
+                            provider="network",
+                            is_connect_error=True,
+                        ) from e
                     if timeout_count >= _MAX_TIMEOUTS:
-                        raise   # сиблинги тоже таймаутят → чанк-фейл наверх (видео продолжается)
+                        raise   # read-таймаут: сиблинги тоже → чанк-фейл (видео продолжается)
                     print(f"\n  ⚠ {e} — пробую другого провайдера", flush=True)
                     self._cooldown(m, now, e, min_sec=_TIMEOUT_COOLDOWN_SEC)
                     continue

@@ -1489,3 +1489,47 @@ def test_openrouter_error_200_chunk_fails_gracefully():
 
     with pytest.raises(SelectError):
         _complete_and_parse(_ErrorProvider(), [])
+
+
+def test_connect_error_fast_fails_without_retry():
+    """httpx.ConnectError → ProviderTimeout с is_connect_error=True, без ретраев на провайдере."""
+    import httpx
+    from autoreels.cloud.providers import ProviderTimeout, _post_r0
+
+    call_count = 0
+
+    def _raise_connect(url, **k):
+        nonlocal call_count
+        call_count += 1
+        raise httpx.ConnectError("SSL EOF")
+
+    import autoreels.cloud.providers as _p
+    original = _p._httpx_post
+    _p._httpx_post = _raise_connect
+    try:
+        with pytest.raises(ProviderTimeout) as exc:
+            _post_r0("https://example.com", headers={}, payload={}, provider_name="TestProvider")
+    finally:
+        _p._httpx_post = original
+
+    assert exc.value.is_connect_error is True
+    assert call_count == 1, "ConnectError must not be retried on same provider"
+
+
+def test_pool_fast_fails_when_all_providers_get_connect_error():
+    """Если оба провайдера получают ConnectError → pool бросает ProviderTimeout с network-hint."""
+    from autoreels.cloud.providers import ProviderPool, ProviderTimeout
+
+    class _ConnectFailProvider:
+        name = "fail"
+        def complete(self, messages, **k):
+            raise ProviderTimeout("SSL EOF", provider="fail", is_connect_error=True)
+
+    pool = ProviderPool([_ConnectFailProvider(), _ConnectFailProvider()])
+
+    with pytest.raises(ProviderTimeout) as exc:
+        pool.complete([{"role": "user", "content": "x"}])
+
+    assert exc.value.is_connect_error is True
+    msg = str(exc.value)
+    assert "network" in exc.value.provider.lower() or "ssl" in msg.lower() or "сеть" in msg.lower() or "соедин" in msg.lower()

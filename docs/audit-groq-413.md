@@ -142,3 +142,50 @@ GROQ_API_KEY=... OPENROUTER_API_KEY=... .venv/bin/python scripts/probe_groq.py
 # быстрый smoke (2 с паузы, смешивает per-minute окна — только проверка механики):
 .venv/bin/python scripts/probe_groq.py --no-wait --provider groq
 ```
+
+---
+
+# Аудит per-model лимитов Groq (free tier) + измерение OTPM
+
+Задача: свести опубликованную таблицу лимитов и измерить неопубликованный OTPM,
+который нас роняет (см. секции выше). READ-ONLY: пайплайн не тронут, меняется
+только `scripts/probe_groq.py` (+ режим `--measure-otpm`) и этот документ.
+
+## 1. Опубликованные лимиты (free tier)
+
+Источник: <https://console.groq.com/docs/rate-limits> (free plan, «Rate Limits by
+Model»). Отфильтровано: модели с JSON-выходом (chat/completions, `response_format`)
+и размером ≥20B. Исключены whisper/orpheus (audio), prompt-guard-2 (22M/86M,
+классификаторы <20B).
+
+| model id | RPM | RPD (TPD-req) | TPM (вход) | TPD | OTPM (выход) | context |
+|---|---:|---:|---:|---:|---:|---:|
+| openai/gpt-oss-120b | 30 | 1K | 8K | 200K | **не публикуется** | 131 072 |
+| openai/gpt-oss-20b | 30 | 1K | 8K | 200K | **не публикуется** | 131 072 |
+| openai/gpt-oss-safeguard-20b | 30 | 1K | 8K | 200K | **не публикуется** | 131 072 |
+| qwen/qwen3.6-27b | 30 | 1K | 8K | 200K | **не публикуется** | 131 072 |
+| qwen/qwen3.8-27b | 30 | 1K | 8K | 200K | **не публикуется** | 131 072 |
+| groq/compound* | 30 | 250 | 70K | — | **не публикуется** | — |
+| groq/compound-mini* | 30 | 250 | 70K | — | **не публикуется** | — |
+
+\* `groq/compound(-mini)` — агентная система, не одиночная модель; JSON-контракт
+`response_format` на ней не гарантирован. В кандидаты на замену не берём.
+
+**Вывод по п.1:** OTPM в документации per-model **не публикуется вообще** —
+ни в таблице, ни в описании тиров. Это подтверждает, почему лимит 1000 был
+невидим до прямого пробника. Groq показывает разбивку «X in / Y out» только на
+странице Limits в консоли аккаунта, не в публичных доках.
+
+## 2. Измеренный OTPM (`--measure-otpm`)
+
+Метод: `scripts/probe_groq.py --measure-otpm` бинарно ищет наибольший
+`max_tokens`, который проходит с маленьким фиксированным промптом (вход не
+конфаундит), 70 с между запросами (per-minute окно OTPM успевает сброситься).
+429 с телом «output tokens per minute» = кап задет → ветка вниз; 200 → вверх.
+
+| model id | наибольший принятый max_tokens | измеренный OTPM-кап |
+|---|---:|---:|
+| openai/gpt-oss-120b | _(pending)_ | _(pending)_ |
+| openai/gpt-oss-20b | _(pending)_ | _(pending)_ |
+| qwen/qwen3.6-27b | _(pending)_ | _(pending)_ |
+| qwen/qwen3.8-27b | _(pending)_ | _(pending)_ |
