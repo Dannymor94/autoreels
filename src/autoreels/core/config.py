@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from autoreels.core.models import SetupProfile
 
@@ -387,6 +387,15 @@ class RenderConfig(BaseModel):
     palettes: dict[str, Palette] = Field(
         default_factory=lambda: {k: Palette(**v) for k, v in _DEFAULT_PALETTES.items()}
     )
+    role: str = "both"        # "analyze" | "render" | "both" (machine-local, render.local.yaml)
+    auto_render: bool = False  # авто-рендер после анализа (machine-local, render.local.yaml)
+
+    @field_validator("role")
+    @classmethod
+    def _validate_role(cls, v: str) -> str:
+        if v not in ("analyze", "render", "both"):
+            raise ValueError(f"role must be 'analyze', 'render', or 'both'; got '{v}'")
+        return v
 
     @property
     def active_palette(self) -> Palette:

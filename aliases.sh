@@ -112,6 +112,7 @@ _ar_menu() {
         _action="$(_ar_cli menu --resolve "$_choice" | tr -d '\r\n')"
         case "$_action" in
             go)        arl go ;;
+            go_render) arl run --render ;;
             render)    arl r ;;
             status)    arl s ;;
             calibrate) arl c ;;

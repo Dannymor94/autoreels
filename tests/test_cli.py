@@ -30,6 +30,7 @@ _REAL_GIT_PULL = cli._git_pull            # реальный _git_pull ДО auto
 _REAL_PREFLIGHT = cli._preflight_tools    # реальный _preflight_tools ДО autouse-мока (тесты преflight)
 
 
+
 @pytest.fixture(autouse=True)
 def _encoder_available(monkeypatch):
     """По умолчанию энкодер «доступен» — тесты не гоняют реальный ffmpeg-пробник (нет AMF
@@ -56,6 +57,7 @@ def _no_real_git(monkeypatch):
             stderr = ""
         return _R()
     monkeypatch.setattr(cli, "_run_git", _fake_git)
+
 
 
 @pytest.fixture(autouse=True)
@@ -1476,6 +1478,7 @@ def test_resolve_ffmpeg_not_found_clear_error(monkeypatch):
 def test_cli_resolve_ffmpeg_reads_local_yaml_from_project_root_not_cwd(tmp_path, monkeypatch):
     """_cli_resolve_ffmpeg берёт render.local.yaml из КОРНЯ ПРОЕКТА, а не из cwd — иначе после
     autoload (`arl` из любой папки) машинный путь ffmpeg не находился → падало в 'ffmpeg'."""
+    from autoreels.core.config import load_render_config as _real_lrc
     proj = tmp_path / "proj"
     (proj / "config").mkdir(parents=True)
     (proj / "config" / "render.yaml").write_text(
@@ -1483,6 +1486,7 @@ def test_cli_resolve_ffmpeg_reads_local_yaml_from_project_root_not_cwd(tmp_path,
     (proj / "config" / "render.local.yaml").write_text(
         "ffmpeg: D:/ffmpeg/bin/ffmpeg.exe\n", encoding="utf-8")
     monkeypatch.setattr(cli, "_project_root", lambda: proj)
+    monkeypatch.setattr(cli, "load_render_config", _real_lrc)   # bypass autouse: need real local
     monkeypatch.delenv("RENDER_FFMPEG", raising=False)
     monkeypatch.chdir(tmp_path)                          # cwd НЕ корень проекта
 
@@ -1493,6 +1497,7 @@ def test_cli_resolve_ffmpeg_reads_local_yaml_from_project_root_not_cwd(tmp_path,
 
 def test_cli_resolve_ffmpeg_falls_back_to_project_root_when_cwd_config_missing(tmp_path, monkeypatch):
     """Даже если явный root без config — деградируем к корню проекта (там render.local.yaml)."""
+    from autoreels.core.config import load_render_config as _real_lrc
     proj = tmp_path / "proj"
     (proj / "config").mkdir(parents=True)
     (proj / "config" / "render.yaml").write_text(
@@ -1500,6 +1505,7 @@ def test_cli_resolve_ffmpeg_falls_back_to_project_root_when_cwd_config_missing(t
     (proj / "config" / "render.local.yaml").write_text(
         "ffmpeg: /opt/ff/ffmpeg\n", encoding="utf-8")
     monkeypatch.setattr(cli, "_project_root", lambda: proj)
+    monkeypatch.setattr(cli, "load_render_config", _real_lrc)   # bypass autouse: need real local
     monkeypatch.delenv("RENDER_FFMPEG", raising=False)
 
     got = cli._cli_resolve_ffmpeg(None, root=tmp_path / "empty")   # root без config/
@@ -2869,7 +2875,7 @@ def test_render_config_accepts_ffmpeg_field():
 def test_render_config_ffmpeg_default_is_ffmpeg():
     """По умолчанию RenderConfig.ffmpeg == 'ffmpeg'."""
     from autoreels.core.config import load_render_config
-    cfg = load_render_config(REPO_ROOT / "config" / "render.yaml")
+    cfg = load_render_config(REPO_ROOT / "config" / "render.yaml", local_path="/dev/null")
     assert cfg.ffmpeg == "ffmpeg"
 
 
@@ -2891,6 +2897,9 @@ def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
         return []
 
     monkeypatch.setattr(cli, "render_crop", _fake_render)
+    from autoreels.core.config import load_render_config as _lrc
+    monkeypatch.setattr(cli, "load_render_config",
+                        lambda *a, **k: _lrc(*a, **{**k, "local_path": "/dev/null"}))
 
     cli.cmd_render(manifests_dir=manifests, root=REPO_ROOT, ffmpeg=None)
 
@@ -3462,7 +3471,7 @@ def test_menu_action_strips_whitespace():
 
 def test_menu_action_invalid_returns_none():
     """Пустой ввод / вне диапазона / мусор → None (меню повторит запрос)."""
-    for c in ("", "99", "abc", "  ", "13"):
+    for c in ("", "99", "abc", "  ", "14"):
         assert cli._menu_action(c) is None
 
 
@@ -3887,7 +3896,7 @@ def test_menu_render_highlights_render_when_manifests(tmp_path):
     (tmp_path / "manifests" / "a.json").write_text("{}", encoding="utf-8")
 
     out = cli._menu_render(root=tmp_path, platform="darwin")
-    render_line = next(l for l in out.splitlines() if "рендер" in l.lower() or "Отрендер" in l)
+    render_line = next(l for l in out.splitlines() if "Отрендерить" in l)
     go_line = next(l for l in out.splitlines() if "Обработать видео" in l)
     assert "▶" in render_line
     assert "▶" not in go_line
@@ -4718,7 +4727,7 @@ def test_run_preflights_models_before_transcription(monkeypatch, tmp_path):
                         lambda *a, **k: order.append("transcribe") or Transcript(language="ru", words=[]))
     monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
     monkeypatch.setattr(cli, "_stage_select",
-                        lambda *a, **k: captured.update(provider=k.get("provider")) or ([], []))
+                        lambda *a, **k: captured.update(provider=k.get("provider")) or ([_reel()], [], []))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
@@ -4749,7 +4758,7 @@ def test_run_survives_provider_404_via_pool(monkeypatch, tmp_path):
             return None                                 # префлайт не проверяет (нет сети)
 
     bad = _Prov("OpenRouter", [ProviderModelNotFound("модель X 404", model="X", provider="OpenRouter")])
-    good = _Prov("Groq", ['{"segments": []}'])
+    good = _Prov("Groq", ['{"segments": [{"id": "r01", "start": 10.0, "end": 40.0, "score": 80, "hook": "h", "title": "t", "description": "d", "reason": "r", "topic": "x"}]}'])
     # OpenRouter первым, чтобы 404 сработал до Groq и был реально исключён
     pool = ProviderPool([bad, good], strategy="round_robin")
     monkeypatch.setattr(cli, "build_pool", lambda cfg, **k: pool)
@@ -5641,3 +5650,154 @@ def test_failed_chunks_sidecar_written(monkeypatch, tmp_path):
     assert sidecar.exists(), "failed_chunks sidecar must be written when chunks fail"
     data = json.loads(sidecar.read_text(encoding="utf-8"))
     assert data == [failed_record]
+
+
+# ---------------------------------------------------------------------------
+# Machine role + auto_render tests
+# ---------------------------------------------------------------------------
+
+def _make_render_cfg(**kwargs):
+    """Return a RenderConfig with local overrides skipped, patched with kwargs."""
+    from autoreels.core.config import load_render_config
+    base = load_render_config(REPO_ROOT / "config" / "render.yaml", local_path="/dev/null")
+    return base.model_copy(update=kwargs)
+
+
+def test_cmd_render_blocked_when_role_analyze(monkeypatch, tmp_path):
+    """cmd_render returns [] immediately when role=analyze."""
+    render_cfg = _make_render_cfg(role="analyze")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    result = cli.cmd_render(root=REPO_ROOT, manifests_dir=tmp_path / "m")
+    assert result == []
+
+
+def test_cmd_render_proceeds_when_role_render(monkeypatch, tmp_path):
+    """cmd_render does NOT short-circuit when role=render (no manifests → returns [])."""
+    render_cfg = _make_render_cfg(role="render")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    # no manifests → renders nothing but also doesn't raise or return early via role check
+    result = cli.cmd_render(root=REPO_ROOT, manifests_dir=tmp_path / "m")
+    # returns [] because there are no manifests to render; not because role blocked it
+    assert result == []
+
+
+def test_cmd_render_proceeds_when_role_both(monkeypatch, tmp_path):
+    """cmd_render does NOT short-circuit when role=both."""
+    render_cfg = _make_render_cfg(role="both")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    result = cli.cmd_render(root=REPO_ROOT, manifests_dir=tmp_path / "m")
+    assert result == []
+
+
+def test_auto_render_fires_after_success(monkeypatch, tmp_path):
+    """auto_render=True triggers cmd_render after a successful non-empty manifest."""
+    render_cfg = _make_render_cfg(role="both")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))
+
+    render_called = []
+    monkeypatch.setattr(cli, "cmd_render",
+                        lambda *a, **k: render_called.append(1) or [])
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                cache_dir=tmp_path / "c", auto_render=True)
+
+    assert render_called, "cmd_render must be called when auto_render=True and role allows"
+
+
+def test_auto_render_skipped_on_empty_manifest(monkeypatch, tmp_path):
+    """auto_render must NOT fire when transcript is empty (silence → archive path)."""
+    render_cfg = _make_render_cfg(role="both")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "")   # empty → silence
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], [], []))
+
+    render_called = []
+    monkeypatch.setattr(cli, "cmd_render",
+                        lambda *a, **k: render_called.append(1) or [])
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                cache_dir=tmp_path / "c", auto_render=True)
+
+    assert not render_called, "cmd_render must NOT be called on empty manifest (silence)"
+
+
+def test_auto_render_skipped_on_failed_chunks(monkeypatch, tmp_path):
+    """auto_render must NOT fire when there are failed chunks."""
+    render_cfg = _make_render_cfg(role="both")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    failed = [{"chunk_idx": 0, "error": "net", "time_lost_sec": 10.0}]
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], failed))
+
+    render_called = []
+    monkeypatch.setattr(cli, "cmd_render",
+                        lambda *a, **k: render_called.append(1) or [])
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                cache_dir=tmp_path / "c", auto_render=True)
+
+    assert not render_called, "cmd_render must NOT be called when chunks failed"
+
+
+def test_auto_render_skipped_when_role_analyze(monkeypatch, tmp_path):
+    """auto_render must NOT fire when role=analyze even if manifest is non-empty."""
+    render_cfg = _make_render_cfg(role="analyze")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    monkeypatch.setattr(cli, "load_or_auto_calibrate", lambda *a, **k: _setup())
+    monkeypatch.setattr(cli, "_stage_extract_audio", lambda *a, **k: tmp_path / "a.wav")
+    monkeypatch.setattr(cli, "_stage_transcribe", lambda *a, **k: Transcript(language="ru", words=[]))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "C")
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([_reel()], [], []))
+
+    render_called = []
+    monkeypatch.setattr(cli, "cmd_render",
+                        lambda *a, **k: render_called.append(1) or [])
+
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"x")
+    cli.cmd_run(video, root=REPO_ROOT, manifests_dir=tmp_path / "m",
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                cache_dir=tmp_path / "c", auto_render=True)
+
+    assert not render_called, "cmd_render must NOT be called when role=analyze"
+
+
+def test_doctor_reports_role(monkeypatch, tmp_path, capsys):
+    """cmd_doctor prints the machine role."""
+    render_cfg = _make_render_cfg(role="analyze")
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    cli.cmd_doctor(root=REPO_ROOT)
+    out = capsys.readouterr().out
+    assert "analyze" in out, "doctor must show the role from config"
+
+
+def test_doctor_warns_cpu_encoder_on_render_role(monkeypatch, tmp_path, capsys):
+    """cmd_doctor warns when role=render and encoder is a CPU profile."""
+    from autoreels.core.config import Encoder
+    cpu_encoder = _make_render_cfg().encoder.model_copy(update={"profile": "libx264"})
+    render_cfg = _make_render_cfg(role="render", encoder=cpu_encoder)
+    monkeypatch.setattr(cli, "load_render_config", lambda *a, **k: render_cfg)
+    cli.cmd_doctor(root=REPO_ROOT)
+    out = capsys.readouterr().out
+    assert "libx264" in out or "CPU" in out.upper() or "⚠" in out, \
+        "doctor must warn when render role uses a CPU encoder"

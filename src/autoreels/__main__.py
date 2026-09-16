@@ -1150,6 +1150,15 @@ def _cli_resolve_ffmpeg(flag, *, root=None) -> str:
 
 # ------------------------------------------------------------------------- команды
 
+def _should_auto_render(render_cfg, *, failed_chunks: list) -> tuple[bool, str]:
+    """Returns (ok, skip_reason). skip_reason empty when ok=True."""
+    if render_cfg.role == "analyze":
+        return False, "role=analyze запрещает рендер на этой машине"
+    if failed_chunks:
+        return False, f"провалилось {len(failed_chunks)} чанков — рендер пропущен"
+    return True, ""
+
+
 def cmd_run(
     video,
     *,
@@ -1163,6 +1172,7 @@ def cmd_run(
     push: bool = False,
     pull_first: bool = True,
     force_transcribe: bool = False,
+    auto_render: bool = False,
 ) -> Path:
     """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
 
@@ -1346,6 +1356,13 @@ def cmd_run(
             _commit_push_manifest(path, len(manifest.reels), root=root,
                                   calibration_path=calibration_path(calibrations_dir, sha))
         _archive_video(Path(video), archive_dir)
+        if auto_render:
+            _ok, _reason = _should_auto_render(render_cfg, failed_chunks=failed_chunks)
+            if _ok:
+                print(f"\n▶ авто-рендер манифеста {path.name}…", flush=True)
+                cmd_render(root=root, manifests_dir=manifests_dir, pull_first=False)
+            else:
+                print(f"  авто-рендер пропущен: {_reason}", flush=True)
     return path
 
 
@@ -1459,6 +1476,7 @@ def cmd_run_batch(
     ffmpeg: str = "ffmpeg",
     push: bool = False,
     force_transcribe: bool = False,
+    auto_render: bool = False,
 ) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Batch: обработать все видео в inputs/ по очереди. Один упал → остальные продолжают.
 
@@ -1493,6 +1511,7 @@ def cmd_run_batch(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
                 ffmpeg=ffmpeg, push=push, pull_first=False, force_transcribe=force_transcribe,
+                auto_render=auto_render,
             )
             ok.append(v.name)
         except InputInvalid as e:               # битый/пустой файл — пропуск, НЕ ошибка
@@ -1650,6 +1669,13 @@ def cmd_render(
     if pull_first:
         _git_pull(root, what="манифесты")       # свежие манифесты с Mac (после run)
     render_cfg = load_render_config(root / "config" / "render.yaml")
+    if render_cfg.role == "analyze":
+        print(
+            '⊘ рендер недоступен на этой машине: role = "analyze" '
+            "(config/render.local.yaml) — смените на \"both\" или \"render\"",
+            file=sys.stderr,
+        )
+        return []
     subtitles_cfg = load_subtitles_config(root / "config" / "subtitles.yaml")
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
@@ -2858,7 +2884,20 @@ def cmd_doctor(*, root=".", probe=None, environ=None) -> int:
     print(f"  git-синк         pull {'вкл' if _should_git_pull() else 'ВЫКЛ'} · "
           f"push {'вкл' if _should_git_push() else 'ВЫКЛ'}{extra}")
 
-    # 6) каталоги проекта
+    # 6) machine role
+    try:
+        _rcfg = load_render_config(root / "config" / "render.yaml")
+        _role = _rcfg.role
+        _encoder_profile = _rcfg.encoder.profile
+    except Exception:
+        _role = "both"
+        _encoder_profile = "?"
+    _CPU_ENCODERS = {"libx264", "libx265", "libsvtav1"}
+    print(f"  role             {_role}")
+    if _role in ("render", "both") and _encoder_profile in _CPU_ENCODERS:
+        print(f"  ⚠ профиль {_encoder_profile!r} — CPU-кодировщик, рендер будет долгим (часы)")
+
+    # 7) каталоги проекта
     for name in ("inputs", "manifests", "calibrations"):
         d = root / name
         if d.is_dir():
@@ -2900,6 +2939,8 @@ def _next_hint(root=".") -> str | None:
 _MENU_ITEMS: list[tuple[str, str, str, str, str]] = [
     ("1", "go",         "Обработать видео из inputs/",
                         "анализ → манифест + транскрипт (сохраняется в transcripts/)", "ОСНОВНОЕ"),
+    ("13", "go_render", "Анализ + рендер",
+                        "анализ и сразу рендер на этой машине", "ОСНОВНОЕ"),
     ("2", "path",       "Обработать по ссылке или пути",
                         "URL / Яндекс.Диск / файл на диске", "ОСНОВНОЕ"),
     ("3", "render",     "Отрендерить манифесты",       "→ готовые рилсы", "ОСНОВНОЕ"),
@@ -2942,6 +2983,7 @@ _SETTINGS_ITEMS: list[tuple[str, str, str, str]] = [
 # Добавил пункт в отрисовку, но забыл сюда или в bash-диспетчер → параметрический тест падает.
 _MENU_CLI_TARGET: dict[str, str] = {
     "go": "run",
+    "go_render": "run",
     "path": "interactive",
     "render": "render",
     "calibrate": "calibrate",
@@ -3080,8 +3122,15 @@ def _profile_availability(root=".") -> dict:
 
 
 def _machine_settings_line(root=".") -> str:
-    """Строка машинных настроек для шапки: «профиль: hevc | ffmpeg: D:\\…» — видно, чем рендерит."""
-    return (f"настройки: профиль {_current_render_profile(root)}  |  "
+    """Строка машинных настроек для шапки: «роль both | профиль: hevc | ffmpeg: D:\\…»."""
+    try:
+        _rcfg = load_render_config(Path(root) / "config" / "render.yaml")
+        _role = _rcfg.role
+        _auto = " · авто-рендер" if _rcfg.auto_render else ""
+    except Exception:
+        _role = "both"
+        _auto = ""
+    return (f"настройки: роль {_role}{_auto}  |  профиль {_current_render_profile(root)}  |  "
             f"палитра {_current_render_palette(root)}  |  ffmpeg {_current_ffmpeg_display(root)}")
 
 
@@ -3267,8 +3316,17 @@ def _menu_render(root=".", *, platform: str | None = None) -> str:
     lines.append("")
     current_profile = _current_render_profile(root)
     current_palette = _current_render_palette(root)
+    try:
+        _menu_role = load_render_config(Path(root) / "config" / "render.yaml").role
+    except Exception:
+        _menu_role = "both"
     current_group = None
     for num, action, label, hint, group in _MENU_ITEMS:
+        # Hide render-related items when role=analyze; hide go_render when role=analyze/render only.
+        if action == "render" and _menu_role == "analyze":
+            continue
+        if action == "go_render" and _menu_role not in ("both", "render"):
+            continue
         if group != current_group:                 # заголовок группы (действия/настройки/…)
             if current_group is not None:
                 lines.append("")
@@ -3829,6 +3887,8 @@ def _build_parser():
     pr.add_argument("--force-transcribe", action="store_true",
                     help="перетранскрибировать безусловно, игнорируя кэш транскрипта и чанков "
                          "(нужно после смены initial_prompt/модели, если кэш уже прогрет)")
+    pr.add_argument("--render", dest="auto_render", action="store_true",
+                    help="после успешного анализа сразу запустить рендер (если role позволяет)")
 
     ptx = sub.add_parser(
         "transcribe",
@@ -4177,7 +4237,8 @@ def main(argv=None) -> int:
                     video = _ingest_source(Path(args.video), Path("inputs"))
                 try:
                     cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push,
-                            force_transcribe=args.force_transcribe)
+                            force_transcribe=args.force_transcribe,
+                            auto_render=getattr(args, "auto_render", False))
                 except InputInvalid as e:
                     print(f"⊘ пропущен {Path(video).name}: {e}\n"
                           f"  файл битый/пустой — перекачай/пересними и повтори", file=sys.stderr)
@@ -4186,6 +4247,7 @@ def main(argv=None) -> int:
                 _, failed, _skipped, zero_harvest = cmd_run_batch(
                     ffmpeg=ffmpeg, push=not args.no_push,
                     force_transcribe=args.force_transcribe,
+                    auto_render=getattr(args, "auto_render", False),
                 )
                 if failed or zero_harvest:
                     return 1

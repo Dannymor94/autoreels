@@ -41,7 +41,7 @@ _ARL_BODY = _func_body(ALIASES, "arl")
 def _outer_case_arms(body: str, indent: int) -> list[re.Match]:
     """Ветки внешнего case на заданном отступе (внутренние case — на большем отступе, не ловятся)."""
     pad = " " * indent
-    return list(re.finditer(rf"^{pad}([a-z\"|]+|\*)\)", body, re.M))
+    return list(re.finditer(rf"^{pad}([a-z_\"|]+|\*)\)", body, re.M))
 
 
 def _menu_case_tokens() -> set[str]:
