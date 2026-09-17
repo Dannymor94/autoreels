@@ -119,7 +119,7 @@ class BlockScoringConfig(BaseModel):
     # Negative weights (subtracted from raw score)
     w_dangling: float = 10.0        # many pronouns/demonstratives in first sentence
     w_speaker_change: float = 20.0  # has_internal_speaker_change from stage 2
-    w_density_penalty: float = 8.0  # speech density outside [0.5, 0.95]
+    w_density_penalty: float = 8.0  # speech density < 0.5 (near-silence); > 0.95 is normal speech
 
     # Duration bell-curve parameters
     min_sec: float = 18.0           # score = 0 at and below this (matches min_meaningful_sec)
@@ -137,11 +137,19 @@ class BlockScoringConfig(BaseModel):
     ])
     # Words that make a bad first word: conjunctions indicating context-dependency,
     # 3rd-person pronouns, and demonstratives with definite back-reference.
+    # "а" intentionally excluded: Russian host-question opener "А когда/А бывало ли" is standalone.
     bad_open_words: list[str] = Field(default_factory=lambda: [
+        "и", "из", "но", "или",
         "поэтому", "потому", "однако", "ведь", "значит", "тоже", "также",
         "зато", "впрочем", "итак", "следовательно", "таким",
         "он", "она", "они", "оно", "его", "её", "их", "им", "ей",
-        "тот", "та", "те", "этот", "эта", "эти", "этим", "таким",
+        "тот", "та", "те", "этот", "эта", "эти", "этим",
+    ])
+    # 3rd-person pronouns and demonstratives used ONLY for dangling_reference density check
+    # (NOT conjunctions — those appear mid-sentence normally and would inflate the ratio).
+    dangling_pronouns: list[str] = Field(default_factory=lambda: [
+        "он", "она", "они", "оно", "его", "её", "их", "им", "ей",
+        "тот", "та", "те", "этот", "эта", "эти", "этим",
     ])
 
 

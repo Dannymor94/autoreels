@@ -174,7 +174,7 @@ block_scoring:
   w_lexical: 8.0          # lexical richness: unique_words / total_words
   w_dangling: 10.0        # penalty: many pronouns/demonstratives in first sentence
   w_speaker_change: 20.0  # penalty: has_internal_speaker_change
-  w_density_penalty: 8.0  # penalty: speech density outside [0.5, 0.95]
+  w_density_penalty: 8.0  # penalty: speech density < 0.5 (near-silence); >0.95 is normal speech
   min_sec: 18.0           # score = 0 at and below this (matches min_meaningful_sec)
   sweet_spot_min: 30.0    # duration ramp reaches 1.0 here
   sweet_spot_max: 60.0    # starts falling off; hits 0 at sweet_max + (sweet_max - sweet_min)
@@ -192,6 +192,11 @@ block_scoring:
     - "парадокс в том"
     - "на самом же деле"
   bad_open_words:         # conjunctions + pronouns + demonstratives that signal dangling context
+    # "а" excluded: Russian host-question opener "А когда/А бывало ли" is a valid standalone start
+    - "и"
+    - "из"
+    - "но"
+    - "или"
     - "поэтому"
     - "потому"
     - "однако"
@@ -204,6 +209,25 @@ block_scoring:
     - "итак"
     - "следовательно"
     - "таким"
+    - "он"
+    - "она"
+    - "они"
+    - "оно"
+    - "его"
+    - "её"
+    - "их"
+    - "им"
+    - "ей"
+    - "тот"
+    - "та"
+    - "те"
+    - "этот"
+    - "эта"
+    - "эти"
+    - "этим"
+  # 3rd-person pronouns and demonstratives for dangling_reference density check only
+  # (conjunctions excluded — they appear normally mid-sentence and inflate the ratio)
+  dangling_pronouns:
     - "он"
     - "она"
     - "они"

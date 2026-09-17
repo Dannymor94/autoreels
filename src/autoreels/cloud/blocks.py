@@ -384,11 +384,14 @@ def score_block(block: "CandidateBlock", cfg: "BlockScoringConfig") -> tuple[flo
     lex_pts = cfg.w_lexical * lexical
 
     # -- negative features --
-    # Dangling reference: pronoun/demonstrative density in first sentence > 25%
+    # Dangling reference: 3rd-person pronoun/demonstrative density in first sentence > 25%.
+    # Uses cfg.dangling_pronouns (pronouns only) — NOT bad_open_words (which includes conjunctions
+    # that appear normally mid-sentence and would inflate the count spuriously).
     first_sent_end = next((i for i, c in enumerate(text) if c in ".?!…"), -1)
     first_sent = text_lower[:first_sent_end] if first_sent_end > 0 else text_lower
     fs_words = _WORD_RE.findall(first_sent)
-    dangling_count = sum(1 for w in fs_words if w in bad_set)
+    dangle_set = {w.lower() for w in cfg.dangling_pronouns}
+    dangling_count = sum(1 for w in fs_words if w in dangle_set)
     dangling = 1.0 if fs_words and dangling_count / len(fs_words) > 0.25 else 0.0
     dangle_pts = cfg.w_dangling * dangling
 
@@ -396,7 +399,8 @@ def score_block(block: "CandidateBlock", cfg: "BlockScoringConfig") -> tuple[flo
 
     speech_time = sum(ln.t1 - ln.t0 for ln in block.lines)
     density = speech_time / block.duration if block.duration > 0 else 0.0
-    dens_pen = 1.0 if (density < 0.5 or density > 0.95) else 0.0
+    # penytail: only near-silence is abnormal; dense speech (>0.95) is the norm for this material
+    dens_pen = 1.0 if density < 0.5 else 0.0
     dens_pts = cfg.w_density_penalty * dens_pen
 
     max_positive = cfg.w_duration + cfg.w_ends_sentence + cfg.w_opens_sentence + cfg.w_question + cfg.w_contrarian + cfg.w_lexical
