@@ -103,6 +103,48 @@ class BlocksFilterConfig(BaseModel):
     ])
 
 
+class BlockScoringConfig(BaseModel):
+    """Stage-3 heuristic scoring config: weights and lists for score_block()."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Positive weights (raw points contributed when feature is present)
+    w_duration: float = 20.0        # bell-curve peak inside sweet_spot_min..sweet_spot_max
+    w_ends_sentence: float = 10.0   # block ends on terminal punctuation
+    w_opens_sentence: float = 10.0  # first word is not a dangling opener (pronoun/conjunction)
+    w_question: float = 8.0         # block contains an interrogative sentence
+    w_contrarian: float = 12.0      # block contains a contrarian / hook marker
+    w_lexical: float = 8.0          # lexical richness: unique_words / total_words
+
+    # Negative weights (subtracted from raw score)
+    w_dangling: float = 10.0        # many pronouns/demonstratives in first sentence
+    w_speaker_change: float = 20.0  # has_internal_speaker_change from stage 2
+    w_density_penalty: float = 8.0  # speech density outside [0.5, 0.95]
+
+    # Duration bell-curve parameters
+    min_sec: float = 18.0           # score = 0 at and below this (matches min_meaningful_sec)
+    sweet_spot_min: float = 30.0    # ramp reaches 1.0 here
+    sweet_spot_max: float = 60.0    # starts falling off here; hits 0 at sweet_max+(sweet_max-sweet_min)
+
+    # Top-K filtering
+    top_k_per_chunk: int = 8        # keep this many blocks per time window
+    chunk_window_sec: float = 300.0 # time window size for per-chunk filtering (≈ R0 chunk in time)
+
+    contrarian_markers: list[str] = Field(default_factory=lambda: [
+        "на самом деле", "наоборот", "а вот и нет", "что интересно",
+        "однако", "но дело в том", "интересно то", "всё дело в",
+        "парадокс в том", "на самом же деле",
+    ])
+    # Words that make a bad first word: conjunctions indicating context-dependency,
+    # 3rd-person pronouns, and demonstratives with definite back-reference.
+    bad_open_words: list[str] = Field(default_factory=lambda: [
+        "поэтому", "потому", "однако", "ведь", "значит", "тоже", "также",
+        "зато", "впрочем", "итак", "следовательно", "таким",
+        "он", "она", "они", "оно", "его", "её", "их", "им", "ей",
+        "тот", "та", "те", "этот", "эта", "эти", "этим", "таким",
+    ])
+
+
 class R0Config(BaseModel):
     """Типизированный config/r0.yaml. Пресет резолвится в числа через свойства ниже."""
 
@@ -171,6 +213,7 @@ class R0Config(BaseModel):
     prompts: PromptPaths
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     blocks_filter: BlocksFilterConfig = Field(default_factory=BlocksFilterConfig)
+    block_scoring: BlockScoringConfig = Field(default_factory=BlockScoringConfig)
 
     @property
     def min_duration(self) -> int:

@@ -1,4 +1,4 @@
-"""Tests for candidate block segmentation (M1.6 stage 1 + 2).
+"""Tests for candidate block segmentation (M1.6 stage 1 + 2 + 3).
 
 All tests are fixture-only — no network, no LLM, no ffmpeg.
 """
@@ -7,7 +7,10 @@ import random
 
 import pytest
 
-from autoreels.cloud.blocks import CandidateBlock, _Line, candidate_blocks, filter_blocks
+from autoreels.cloud.blocks import (
+    CandidateBlock, _Line, candidate_blocks, filter_blocks, score_block, topk_filter,
+)
+from autoreels.core.config import BlockScoringConfig
 
 MIN_SEC = 18.0
 MAX_SEC = 90.0
@@ -473,6 +476,108 @@ def test_signoff_phrase_mid_sentence_not_dropped():
     kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
     assert len(kept) == 1
     assert not any(r == "signoff" for _, r in dropped)
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: heuristic scoring (M1.6 stage 3)
+# ---------------------------------------------------------------------------
+
+_SCORING_CFG = BlockScoringConfig()  # default weights
+
+
+def test_score_ends_sentence_bonus():
+    """Block ending on '.' scores higher than identical block without terminal punctuation."""
+    b_with = _make_block(
+        "Это важная мысль, которая завершается точкой.", start=200.0, end=242.0
+    )
+    b_without = _make_block(
+        "Это важная мысль, которая не завершается точкой", start=200.0, end=242.0
+    )
+    s_with, _ = score_block(b_with, _SCORING_CFG)
+    s_without, _ = score_block(b_without, _SCORING_CFG)
+    assert s_with > s_without, f"expected ends-sentence bonus: {s_with:.1f} vs {s_without:.1f}"
+
+
+def test_score_opener_penalty():
+    """Block opening with 'поэтому' (dangling conjunction) scores lower than a clean opener."""
+    b_clean = _make_block(
+        "Нам важно понять, что происходит здесь и сейчас в нашей жизни.",
+        start=200.0, end=242.0,
+    )
+    b_dangling = _make_block(
+        "Поэтому нам важно понять, что происходит здесь и сейчас.",
+        start=200.0, end=242.0,
+    )
+    s_clean, _ = score_block(b_clean, _SCORING_CFG)
+    s_dangling, _ = score_block(b_dangling, _SCORING_CFG)
+    assert s_clean > s_dangling, f"clean opener should score higher: {s_clean:.1f} vs {s_dangling:.1f}"
+
+
+def test_score_speaker_change_penalty():
+    """Block flagged with has_internal_speaker_change scores materially lower."""
+    lines_no_sc = [_Line(200.0, 220.0, "Первый говорит что-то важное"), _Line(220.5, 242.0, "И продолжает мысль")]
+    lines_sc = [_Line(200.0, 220.0, "Первый говорит что-то важное"), _Line(220.5, 242.0, "— Второй отвечает")]
+    b_no_sc = _make_block("Первый говорит что-то важное И продолжает мысль", lines=lines_no_sc)
+    b_sc = _make_block("Первый говорит что-то важное — Второй отвечает", lines=lines_sc)
+    b_sc.has_internal_speaker_change = True
+    s_no_sc, _ = score_block(b_no_sc, _SCORING_CFG)
+    s_sc, _ = score_block(b_sc, _SCORING_CFG)
+    min_gap = _SCORING_CFG.w_speaker_change / (
+        _SCORING_CFG.w_duration + _SCORING_CFG.w_ends_sentence + _SCORING_CFG.w_opens_sentence
+        + _SCORING_CFG.w_question + _SCORING_CFG.w_contrarian + _SCORING_CFG.w_lexical
+    ) * 100
+    assert s_no_sc - s_sc >= min_gap * 0.9, (
+        f"SC penalty not reflected: {s_no_sc:.1f} vs {s_sc:.1f}, expected gap ≥{min_gap:.1f}"
+    )
+
+
+def test_score_duration_sweet_spot():
+    """Score peaks inside the sweet spot and falls off on both sides."""
+    cfg = BlockScoringConfig(sweet_spot_min=30.0, sweet_spot_max=60.0, min_sec=18.0)
+    text = "Нейтральный текст без особенностей для теста длительности здесь."
+
+    def make_b(dur: float) -> CandidateBlock:
+        return _make_block(text, start=200.0, end=200.0 + dur)
+
+    s_short, _ = score_block(make_b(20.0), cfg)   # below sweet spot
+    s_sweet, _ = score_block(make_b(45.0), cfg)   # in sweet spot (peak)
+    s_long, _ = score_block(make_b(82.0), cfg)    # above sweet spot
+
+    assert s_sweet > s_short, f"sweet spot should beat too-short: {s_sweet:.1f} vs {s_short:.1f}"
+    assert s_sweet > s_long, f"sweet spot should beat too-long: {s_sweet:.1f} vs {s_long:.1f}"
+
+
+def test_topk_per_chunk_applies_per_window():
+    """Top-K is applied per time window, not globally — a lone block in its window always survives."""
+    cfg = BlockScoringConfig(chunk_window_sec=300.0, top_k_per_chunk=8)
+    # 9 blocks in window 0 ([0-300s]), 1 block in window 1 ([300-600s])
+    blocks_w0 = [
+        _make_block(f"Блок {i} первого окна с уникальным текстом номер {i}",
+                    start=20.0 * i, end=20.0 * i + 18.0)
+        for i in range(9)
+    ]
+    block_w1 = _make_block("Блок второго окна с уникальным текстом", start=310.0, end=340.0)
+    all_blocks_s3 = blocks_w0 + [block_w1]
+    for b in all_blocks_s3:
+        b.heuristic_score, b.score_breakdown = score_block(b, cfg)
+
+    kept_s3, cut_s3 = topk_filter(all_blocks_s3, chunk_window_sec=cfg.chunk_window_sec, top_k=cfg.top_k_per_chunk)
+
+    assert len(kept_s3) == 9, f"expected 8 (w0) + 1 (w1) = 9 kept; got {len(kept_s3)}"
+    assert len(cut_s3) == 1, f"expected 1 cut from w0; got {len(cut_s3)}"
+    assert any(b.start == 310.0 for b in kept_s3), "lone block in window 1 must always be kept"
+
+
+def test_score_reproducible():
+    """Same input always produces the same score."""
+    b = _make_block(
+        "Это детерминированный блок текста для проверки стабильности скоринга.",
+        start=200.0, end=235.0,
+    )
+    s1, bd1 = score_block(b, _SCORING_CFG)
+    s2, bd2 = score_block(b, _SCORING_CFG)
+    assert s1 == s2
+    assert bd1 == bd2
 
 
 def test_block_64s_from_end_without_signoff_phrase_is_kept():

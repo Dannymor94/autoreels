@@ -2312,7 +2312,7 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def cmd_blocks(target: str, *, root: str = ".") -> int:
+def cmd_blocks(target: str, *, root: str = ".", scored: bool = False) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
     Loads the transcript, compresses it sentence-by-sentence, segments into candidate blocks
@@ -2323,7 +2323,7 @@ def cmd_blocks(target: str, *, root: str = ".") -> int:
     import json as _json
     import statistics
 
-    from autoreels.cloud.blocks import candidate_blocks, filter_blocks
+    from autoreels.cloud.blocks import candidate_blocks, filter_blocks, score_block, topk_filter
     from autoreels.cloud.compress import compress_transcript
 
     root = Path(root)
@@ -2445,6 +2445,65 @@ def cmd_blocks(target: str, *, root: str = ".") -> int:
             for b, r in dropped
         ]
         sidecar.write_text(_json.dumps(sidecar_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Stage 3: heuristic scoring (only when --scored)
+    topk_cut: list = []
+    if scored and kept:
+        bs_cfg = r0_cfg.block_scoring
+        for b in kept:
+            b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
+        kept_scored, topk_cut = topk_filter(
+            kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk
+        )
+
+        # Print sorted by score descending
+        print("\n--- SCORED (top-K kept, sorted by heuristic_score) ---")
+        topk_cut_ids = {b.id for b in topk_cut}
+        all_scored = sorted(kept, key=lambda b: b.heuristic_score, reverse=True)
+        for rank, b in enumerate(all_scored, 1):
+            verdict = "CUT(topk)" if b.id in topk_cut_ids else "KEPT"
+            bd = b.score_breakdown
+            words = b.text.split()
+            snippet = " ".join(words[:10]) + ("…" if len(words) > 10 else "")
+            print(
+                f"{rank:3d} [{b.heuristic_score:5.1f}] {b.start:6.1f}-{b.end:6.1f}s "
+                f"({b.duration:4.1f}s) [{verdict}]"
+            )
+            print(
+                f"     +dur:{bd['duration']:.1f} +ends:{bd['ends_sentence']:.0f} "
+                f"+open:{bd['opens_sentence']:.0f} +q:{bd['question']:.0f} "
+                f"+contr:{bd['contrarian']:.0f} +lex:{bd['lexical']:.1f} "
+                f"-dang:{-bd['dangling_ref']:.0f} -sc:{-bd['speaker_change']:.0f} "
+                f"-dens:{-bd['density_penalty']:.0f}"
+            )
+            print(f"     {snippet}")
+
+        if manifest_path is not None and topk_cut:
+            sidecar_topk = manifest_path.with_suffix(".blocks.topk_cut.json")
+            sidecar_topk.write_text(
+                _json.dumps(
+                    [
+                        {
+                            "id": b.id,
+                            "start": b.start,
+                            "end": b.end,
+                            "boundary_reason": b.boundary_reason,
+                            "heuristic_score": round(b.heuristic_score, 2),
+                            "score_breakdown": b.score_breakdown,
+                            "first_words": " ".join(b.text.split()[:8]),
+                        }
+                        for b in topk_cut
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+        print(
+            f"\nScoring: {len(kept)} блоков оценено → kept after top-K: {len(kept_scored)}, "
+            f"cut by top-K: {len(topk_cut)}"
+        )
 
     # Summary
     if all_blocks:
@@ -4354,6 +4413,11 @@ def _build_parser():
     )
     pbl.add_argument("target", help="манифест (.json) или транскрипт (.transcript.json)")
     pbl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    pbl.add_argument(
+        "--scored",
+        action="store_true",
+        help="score kept blocks by heuristic and apply top-K per window (M1.6 stage 3)",
+    )
 
     return p
 
@@ -4539,7 +4603,7 @@ def main(argv=None) -> int:
         elif args.cmd == "models":
             return cmd_models(root=args.root)
         elif args.cmd == "blocks":
-            return cmd_blocks(args.target, root=args.root)
+            return cmd_blocks(args.target, root=args.root, scored=args.scored)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

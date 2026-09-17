@@ -163,6 +163,64 @@ blocks_filter:
     - "рад вас видеть"
     - "давайте начнём"
 
+# M1.6 stage 3: heuristic pre-scoring. Weights are tunable; final model verdict still wins.
+# A filter that buries a good block is worse than one that lets junk through — tune conservatively.
+block_scoring:
+  w_duration: 20.0        # bell-curve peak inside sweet_spot_min..sweet_spot_max
+  w_ends_sentence: 10.0   # block ends on terminal punctuation
+  w_opens_sentence: 10.0  # first word is not a dangling opener
+  w_question: 8.0         # block contains an interrogative sentence
+  w_contrarian: 12.0      # block contains a hook/contrarian marker
+  w_lexical: 8.0          # lexical richness: unique_words / total_words
+  w_dangling: 10.0        # penalty: many pronouns/demonstratives in first sentence
+  w_speaker_change: 20.0  # penalty: has_internal_speaker_change
+  w_density_penalty: 8.0  # penalty: speech density outside [0.5, 0.95]
+  min_sec: 18.0           # score = 0 at and below this (matches min_meaningful_sec)
+  sweet_spot_min: 30.0    # duration ramp reaches 1.0 here
+  sweet_spot_max: 60.0    # starts falling off; hits 0 at sweet_max + (sweet_max - sweet_min)
+  top_k_per_chunk: 8      # keep this many blocks per time window
+  chunk_window_sec: 300.0 # time window size for per-chunk top-K filtering (≈5 min)
+  contrarian_markers:
+    - "на самом деле"
+    - "наоборот"
+    - "а вот и нет"
+    - "что интересно"
+    - "однако"
+    - "но дело в том"
+    - "интересно то"
+    - "всё дело в"
+    - "парадокс в том"
+    - "на самом же деле"
+  bad_open_words:         # conjunctions + pronouns + demonstratives that signal dangling context
+    - "поэтому"
+    - "потому"
+    - "однако"
+    - "ведь"
+    - "значит"
+    - "тоже"
+    - "также"
+    - "зато"
+    - "впрочем"
+    - "итак"
+    - "следовательно"
+    - "таким"
+    - "он"
+    - "она"
+    - "они"
+    - "оно"
+    - "его"
+    - "её"
+    - "их"
+    - "им"
+    - "ей"
+    - "тот"
+    - "та"
+    - "те"
+    - "этот"
+    - "эта"
+    - "эти"
+    - "этим"
+
 # Пути к рантайм-промптам R0 (не хардкод в коде — берутся отсюда).
 prompts:
   system: prompts/r0_system.md

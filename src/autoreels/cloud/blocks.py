@@ -47,6 +47,8 @@ class CandidateBlock:
     boundary_reason: str     # "pause" | "paragraph" | "speaker_turn" | "sentence"
     lines: list[_Line] = field(default_factory=list, repr=False)
     has_internal_speaker_change: bool = False  # set by filter_blocks; stage 3 treats as strong negative
+    heuristic_score: float = 0.0              # set by score_block (M1.6 stage 3)
+    score_breakdown: dict = field(default_factory=dict, repr=False)  # per-feature contributions
 
 
 # --------------------------------------------------------------------------- parsing
@@ -333,3 +335,113 @@ def candidate_blocks(
         expanded.extend(_split_recursive(lns, reason, max_sec))
     sized = _merge_short(expanded, min_sec, max_sec)
     return [_make_block(lns, reason) for lns, reason in sized]
+
+
+# --------------------------------------------------------------------------- stage 3: heuristic scoring
+
+def _duration_sweet_score(duration: float, min_sec: float, sweet_min: float, sweet_max: float) -> float:
+    """0.0-1.0 bell curve: ramp up from min_sec to sweet_min, flat peak, fall off symmetrically."""
+    if duration <= min_sec:
+        return 0.0
+    if duration <= sweet_min:
+        return (duration - min_sec) / (sweet_min - min_sec)
+    if duration <= sweet_max:
+        return 1.0
+    falloff_end = sweet_max + (sweet_max - sweet_min)
+    return max(0.0, 1.0 - (duration - sweet_max) / (sweet_max - sweet_min))
+
+
+def score_block(block: "CandidateBlock", cfg: "BlockScoringConfig") -> tuple[float, dict]:
+    """Compute heuristic score (0-100) and per-feature breakdown for one block.
+
+    Returns (score, breakdown) where breakdown maps feature name → raw points contributed.
+    Positive entries add to score, negative subtract. Clamped to [0, 100].
+    """
+    from autoreels.core.config import BlockScoringConfig as _BSC  # local to avoid top-level cycle
+    text = block.text
+    text_lower = text.lower()
+
+    # -- positive features --
+    dur_raw = _duration_sweet_score(block.duration, cfg.min_sec, cfg.sweet_spot_min, cfg.sweet_spot_max)
+    dur_pts = cfg.w_duration * dur_raw
+
+    ends_sent = 1.0 if _ends_terminal(text.rstrip()) else 0.0
+    ends_pts = cfg.w_ends_sentence * ends_sent
+
+    bad_set = {w.lower() for w in cfg.bad_open_words}
+    first_word = _WORD_RE.match(text_lower.lstrip("—– \t"))
+    opens_clean = 0.0 if (first_word and first_word.group() in bad_set) else 1.0
+    opens_pts = cfg.w_opens_sentence * opens_clean
+
+    has_q = 1.0 if "?" in text else 0.0
+    q_pts = cfg.w_question * has_q
+
+    has_contr = 1.0 if any(m.lower() in text_lower for m in cfg.contrarian_markers) else 0.0
+    contr_pts = cfg.w_contrarian * has_contr
+
+    words = _WORD_RE.findall(text_lower)
+    lexical = len(set(words)) / len(words) if words else 0.0
+    lex_pts = cfg.w_lexical * lexical
+
+    # -- negative features --
+    # Dangling reference: pronoun/demonstrative density in first sentence > 25%
+    first_sent_end = next((i for i, c in enumerate(text) if c in ".?!…"), -1)
+    first_sent = text_lower[:first_sent_end] if first_sent_end > 0 else text_lower
+    fs_words = _WORD_RE.findall(first_sent)
+    dangling_count = sum(1 for w in fs_words if w in bad_set)
+    dangling = 1.0 if fs_words and dangling_count / len(fs_words) > 0.25 else 0.0
+    dangle_pts = cfg.w_dangling * dangling
+
+    sc_pts = cfg.w_speaker_change * (1.0 if block.has_internal_speaker_change else 0.0)
+
+    speech_time = sum(ln.t1 - ln.t0 for ln in block.lines)
+    density = speech_time / block.duration if block.duration > 0 else 0.0
+    dens_pen = 1.0 if (density < 0.5 or density > 0.95) else 0.0
+    dens_pts = cfg.w_density_penalty * dens_pen
+
+    max_positive = cfg.w_duration + cfg.w_ends_sentence + cfg.w_opens_sentence + cfg.w_question + cfg.w_contrarian + cfg.w_lexical
+    raw = dur_pts + ends_pts + opens_pts + q_pts + contr_pts + lex_pts - dangle_pts - sc_pts - dens_pts
+    score = max(0.0, min(100.0, raw / max_positive * 100.0))
+
+    breakdown = {
+        "duration": round(dur_pts, 2),
+        "ends_sentence": ends_pts,
+        "opens_sentence": opens_pts,
+        "question": q_pts,
+        "contrarian": contr_pts,
+        "lexical": round(lex_pts, 2),
+        "dangling_ref": -round(dangle_pts, 2),
+        "speaker_change": -sc_pts,
+        "density_penalty": -dens_pts,
+    }
+    return score, breakdown
+
+
+def topk_filter(
+    blocks: list[CandidateBlock],
+    *,
+    chunk_window_sec: float,
+    top_k: int,
+) -> tuple[list[CandidateBlock], list[CandidateBlock]]:
+    """Keep top_k highest-scoring blocks per time window; return (kept, cut).
+
+    Blocks must have heuristic_score set before calling.
+    Kept list is sorted by start time; cut list preserves input order.
+    """
+    if not blocks or top_k <= 0:
+        return list(blocks), []
+
+    from collections import defaultdict
+    windows: dict[int, list[CandidateBlock]] = defaultdict(list)
+    for b in blocks:
+        windows[int(b.start / chunk_window_sec)].append(b)
+
+    kept: list[CandidateBlock] = []
+    cut: list[CandidateBlock] = []
+    for blks in windows.values():
+        ranked = sorted(blks, key=lambda b: b.heuristic_score, reverse=True)
+        kept.extend(ranked[:top_k])
+        cut.extend(ranked[top_k:])
+
+    kept.sort(key=lambda b: b.start)
+    return kept, cut
