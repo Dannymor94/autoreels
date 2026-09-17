@@ -1958,12 +1958,13 @@ def test_main_wraps_stage_error_as_clean_message(monkeypatch, capsys):
 
 
 def test_main_run_bad_video_returns_1_with_clean_message(tmp_path, capsys, monkeypatch):
-    # run с фейковым видео (b"x") → ffprobe или extract_audio падает → код 1, нет traceback.
-    monkeypatch.chdir(tmp_path)   # «inputs» приёма — под tmp, не засорять реальный inputs/ репо
+    # run с фейковым видео → extract_audio падает (ExtractAudioError) → код 1, нет traceback.
+    from autoreels.cloud.extract_audio import ExtractAudioError
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x")
     monkeypatch.setattr(cli, "_stage_extract_audio",
-                        lambda *a, **k: pytest.fail("конвейер не должен добраться до extract"))
+                        lambda *a, **k: (_ for _ in ()).throw(ExtractAudioError("ffmpeg: bad data")))
+    monkeypatch.setattr(cli, "build_pool", lambda cfg: type("P", (), {"preflight": lambda s: None})())
 
     rc = cli.main(["run", str(video), "--ffmpeg", "ffmpeg"])
 
@@ -5829,3 +5830,42 @@ def test_doctor_warns_cpu_encoder_on_render_role(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "libx264" in out or "CPU" in out.upper() or "⚠" in out, \
         "doctor must warn when render role uses a CPU encoder"
+
+
+# ─── root resolution: every command must use _project_root(), not cwd ────────
+
+import argparse as _argparse
+
+
+def _cmds_with_root_action():
+    """Return [(cmd_name, argparse.Action)] for every subcommand that declares --root."""
+    parser = cli._build_parser()
+    sub_action = next(
+        a for a in parser._actions if isinstance(a, _argparse._SubParsersAction)
+    )
+    result = []
+    for name, sp in sub_action.choices.items():
+        for action in sp._actions:
+            if getattr(action, "dest", "") == "root":
+                result.append((name, action))
+    return result
+
+
+@pytest.mark.parametrize("cmd,action", _cmds_with_root_action(), ids=[c for c, _ in _cmds_with_root_action()])
+def test_root_argparse_default_is_none(cmd, action):
+    """Every --root flag must default to None so _project_root() is used when not supplied.
+    A newly added command that uses default='.' instead will fail here."""
+    assert action.default is None, (
+        f"'{cmd}': --root default is {action.default!r}, must be None — "
+        "set default=None in _build_parser() and use _project_root() in the function body"
+    )
+
+
+def test_project_root_finds_config_from_any_cwd(tmp_path, monkeypatch):
+    """_project_root() must point to the repo regardless of cwd."""
+    monkeypatch.chdir(tmp_path)
+    root = cli._project_root()
+    assert (root / "config" / "r0.yaml").exists(), (
+        f"_project_root() = {root} has no config/r0.yaml — "
+        "check Path(__file__).resolve().parents[2] in _project_root()"
+    )

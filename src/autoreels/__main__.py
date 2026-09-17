@@ -622,7 +622,7 @@ def _stage_select(compressed, *, r0_cfg, root, provider=None):
     если None — собираем здесь (standalone-путь).
     """
     print("выбор моментов…", flush=True)
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     system_text = (root / r0_cfg.prompts.system).read_text(encoding="utf-8")
     fewshot = json.loads((root / r0_cfg.prompts.fewshot).read_text(encoding="utf-8"))
     if provider is None:
@@ -829,7 +829,7 @@ def _git_pull(root, *, what: str = "свежие данные") -> None:
     if not _should_git_pull():
         return
     import subprocess
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     try:
         pull = _run_git(["pull", "--ff-only"], root=root, timeout=180)
     except subprocess.TimeoutExpired:
@@ -915,7 +915,7 @@ def _commit_push_manifest(manifest_path, n_reels: int, *, root, calibration_path
     if not _should_git_push():
         return   # push выключен (напр. системник: только рендер, PUSH=0) — манифест уже локально
     import subprocess
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     manifest_path = Path(manifest_path)
     stem = manifest_path.stem
     paths = [str(manifest_path)]
@@ -972,7 +972,7 @@ def _commit_push_calibrations(*, root) -> None:
     if not _should_git_push():
         return   # push выключен (PUSH=0/SYNC=0) — калибровки уже на диске, не пушим
     import subprocess
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     if not (root / "calibrations").is_dir():
         return
 
@@ -1174,7 +1174,7 @@ def _should_auto_render(render_cfg, *, failed_chunks: list) -> tuple[bool, str]:
 def cmd_run(
     video,
     *,
-    root=".",
+    root=None,
     calibrations_dir=None,
     manifests_dir=None,
     cache_dir=None,
@@ -1199,7 +1199,7 @@ def cmd_run(
     Попутно (без доп. работы) сохраняет текст транскрипта в transcripts/<stem>.txt —
     он уже посчитан для R0, отдельный `transcribe` на то же видео не нужен.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     if pull_first:
         _git_pull(root, what="калибровки")     # свежие ручные калибровки с системника
     cfg = root / "config"
@@ -1414,7 +1414,7 @@ def cmd_transcribe(
     source=None,
     *,
     fmt: str = "text",
-    root=".",
+    root=None,
     out_dir=None,
     cache_dir=None,
     ffmpeg: str = "ffmpeg",
@@ -1431,7 +1431,7 @@ def cmd_transcribe(
     Нужен когда видео на другой машине, но транскрипт уже закэширован локально.
     source в этом режиме необязателен — используется только для именования выходного файла.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     cfg = root / "config"
     r0_cfg = load_r0_config(cfg / "r0.yaml")
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
@@ -1656,7 +1656,7 @@ def cmd_render(
     out_dir=None,
     archive_dir=None,
     calibrations_dir=None,
-    root=".",
+    root=None,
     ffmpeg: str | None = None,
     encoder=None,
     profile=None,
@@ -1678,7 +1678,7 @@ def cmd_render(
     Манифесты в manifests/ НЕ трогаются — git ими управляет (Mac→системник через pull).
     Идемпотентность обеспечивается проверкой выходных файлов, а не перемещением манифеста.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     if pull_first:
         _git_pull(root, what="манифесты")       # свежие манифесты с Mac (после run)
     render_cfg = load_render_config(root / "config" / "render.yaml")
@@ -1850,7 +1850,7 @@ def cmd_preview(
     seconds: float = 6.0,
     reel_id=None,
     zoom=None,
-    root=".",
+    root=None,
     manifests_dir=None,
     inputs_dir=None,
     out_dir=None,
@@ -1862,7 +1862,7 @@ def cmd_preview(
     полного рендера всех клипов. `arl preview <манифест> --palettes neutral,vivid,sharp` →
     reels-out/_preview/<id>__<palette>.mp4 рядом для сравнения. Без --palettes — все пресеты.
     `zoom`: None (из конфига) | "on" | "off" | "compare" (рендерит оба варианта — с зумом и без)."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     render_cfg = load_render_config(root / "config" / "render.yaml")
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
@@ -1963,7 +1963,7 @@ def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir, ffprob
 def cmd_recrop(
     video=None,
     *,
-    root=".",
+    root=None,
     manifests_dir=None,
     calibrations_dir=None,
     inputs_dir=None,
@@ -1977,7 +1977,7 @@ def cmd_recrop(
     меняется лишь crop). Эта команда читает калибровку по sha видео (или автокроп), обновляет
     setup (crop/scale/frame) в манифесте и всё; reels байт-в-байт те же. Без <video> — batch по
     всем манифестам с устаревшим кропом. Валидация: кроп в отображаемом кадре, 9:16. Авто-push."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     if pull_first:
         _git_pull(root, what="калибровки")
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
@@ -2100,7 +2100,7 @@ def _resnap_reels(reels, transcript, r0_cfg) -> None:
 def cmd_resnap(
     video=None,
     *,
-    root=".",
+    root=None,
     manifests_dir=None,
     cache_dir=None,
     push: bool = True,
@@ -2112,7 +2112,7 @@ def cmd_resnap(
     Выбор моментов (R0), тексты, субтитры — НЕ трогаются: те же r0_start/r0_end прогоняются
     заново детерминированным слоем. Транскрипт берётся из кэша (как diagnose-cuts). Без <video>
     — batch по всем манифестам. Манифест без r0_start (снят до фичи) → нужен один полный run."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     if pull_first:
         _git_pull(root, what="манифесты")
     r0_cfg = load_r0_config(root / "config" / "r0.yaml")
@@ -2312,7 +2312,7 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def _blocks_do_apply(review_path: str, *, root: str) -> int:
+def _blocks_do_apply(review_path: str, *, root=None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
@@ -2330,7 +2330,7 @@ def _blocks_do_apply(review_path: str, *, root: str) -> int:
     from autoreels.cloud.chunk_transcribe import renumber_reels
     from autoreels.core.models import Reel
 
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     review_content = Path(review_path).read_text(encoding="utf-8")
     source_ref, entries, errors = parse_review(review_content)
 
@@ -2517,7 +2517,7 @@ def _blocks_do_apply(review_path: str, *, root: str) -> int:
 def cmd_blocks(
     target: str | None,
     *,
-    root: str = ".",
+    root=None,
     scored: bool = False,
     review: bool = False,
     out: str | None = None,
@@ -2542,6 +2542,7 @@ def cmd_blocks(
     )
     from autoreels.cloud.compress import compress_transcript
 
+    root = Path(root) if root is not None else _project_root()
     if apply_review:
         return _blocks_do_apply(apply_review, root=root)
 
@@ -2549,7 +2550,6 @@ def cmd_blocks(
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
         return 1
 
-    root = Path(root)
     target_path = Path(target)
 
     r0_cfg = load_r0_config(root / "config" / "r0.yaml")
@@ -2764,14 +2764,14 @@ def cmd_blocks(
     return 0
 
 
-def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
+def cmd_resume(*, root=None, ffmpeg=None, encoder=None, profile=None) -> int:
     """Продолжить прерванное: доделать рендер недостающих клипов + сообщить о недокачках.
 
     Тяжёлые шаги проекта идемпотентны и «продолжаемы» by design: render дорисовывает
     недостающие клипы, докачка Я.Диска возобновляется по той же ссылке, run переиспользует
     кэш. Эта команда сводит их: локально чинит рендер, а по остальному даёт подсказку.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     inputs = root / "inputs"
     manifests_dir = root / "manifests"
     out_root = root / "reels-out"
@@ -2807,7 +2807,7 @@ def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
 
 def cmd_migrate_calibrations(
     *,
-    root=".",
+    root=None,
     inputs_dir=None,
     archive_dir=None,
     calibrations_dir=None,
@@ -2820,7 +2820,7 @@ def cmd_migrate_calibrations(
     inputs-archive/), считает его partial-ключ и перекладывает ручную калибровку туда
     (перекрывая автокроп — ручная важнее). Авто-калибровки не трогает. Идемпотентно.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
@@ -2931,7 +2931,7 @@ def _warn_if_manifest_stale(video, *, root, calibrations_dir=None) -> str | None
 
     Ручная калибровка после run не применяется сама — манифест несёт старый (авто)кроп.
     Печатает предупреждение в stderr, возвращает его текст (или None, если манифеста нет/синхрон)."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     stem = Path(video).stem
     mf = root / "manifests" / f"{stem}.json"
     if not mf.is_file():
@@ -2977,7 +2977,7 @@ def _ask_batch_action(name: str, kind: str) -> str:
 
 def cmd_calibrate_batch(
     *,
-    root=".",
+    root=None,
     inputs_dir=None,
     calibrations_dir=None,
     cache_dir=None,
@@ -2991,7 +2991,7 @@ def cmd_calibrate_batch(
     «Калибровать всё» молча ничего не делало). к → браузер; а → автокроп; п/Enter → оставить.
     В конце — сводка, чтобы всегда была видна реакция на выбор пункта меню.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
@@ -3127,7 +3127,7 @@ def _print_diag_table(stem, diags) -> None:
               f"{pa:>6}  {mark}{d.verdict:<5}{d.cause}")
 
 
-def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
+def cmd_diagnose_cuts(target=None, *, root=None, rerun=False, cache_dir=None,
                       manifests_dir=None) -> int:
     """Классифицировать концы клипов: CLEAN / SOFT / HARD (обрыв) с причиной — быстрая проверка
     после правок snap/padding/рубрики.
@@ -3135,7 +3135,7 @@ def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
     По умолчанию — анализ существующих манифестов (без LLM). `--rerun` — честный пере-прогон R0
     от кэш-транскрипта (для before/after: границы готового манифеста уже пост-snap+padding,
     сравнивать по ним НЕЛЬЗЯ — предупреждаем)."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     r0_cfg = load_r0_config(root / "config" / "r0.yaml")
     render_cfg = load_render_config(root / "config" / "render.yaml")
     audio_format = render_cfg.audio_extract.format
@@ -3210,9 +3210,9 @@ def cmd_diagnose_cuts(target=None, *, root=".", rerun=False, cache_dir=None,
 
 # --------------------------------------------------------------------------- status
 
-def cmd_status(*, root=".") -> int:
+def cmd_status(*, root=None) -> int:
     """Сводка текущего состояния проекта: inputs / manifests / reels-out / archive + предупреждения."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     inputs_dir      = root / "inputs"
     manifests_dir   = root / "manifests"
     reels_out_dir   = root / "reels-out"
@@ -3341,7 +3341,7 @@ def _doctor_tool_line(tool: str, root, *, runner=None) -> str:
     return _tool_status_line(res, version_line=version_line, runnable=runnable)
 
 
-def cmd_doctor(*, root=".", probe=None, environ=None) -> int:
+def cmd_doctor(*, root=None, probe=None, environ=None) -> int:
     """Преflight окружения: по пунктам печатает, что найдено и что сломано — ДО тяжёлой работы.
 
     Проверяет: .env (абсолютный путь / .env.txt), ключи провайдеров (ТОЛЬКО префикс, не секрет),
@@ -3356,7 +3356,7 @@ def cmd_doctor(*, root=".", probe=None, environ=None) -> int:
 
     environ = environ if environ is not None else os.environ
     probe = probe or (lambda url, api_key: probe_provider(url, api_key=api_key))
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
 
     print("─── autoreels doctor ───────────────────────────────")
 
@@ -3440,7 +3440,7 @@ def _next_hint(root=".") -> str | None:
     Возвращает одну строку вида «→ arl go» или None если не очевидно что делать.
     Видео в inputs/ приоритетнее манифестов: сначала run, потом render.
     """
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     inputs = list((root / "inputs").glob("*.mp4")) if (root / "inputs").is_dir() else []
     manifests = _glob_manifests(root / "manifests") if (root / "manifests").is_dir() else []
 
@@ -3589,7 +3589,7 @@ def _settings_action(choice: str) -> str | None:
 
 def _menu_state(root=".") -> dict[str, int]:
     """Счётчики состояния для шапки меню: inputs / manifests / rendered."""
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     inputs = len(list((root / "inputs").glob("*.mp4"))) if (root / "inputs").is_dir() else 0
     manifests = len(_glob_manifests(root / "manifests")) if (root / "manifests").is_dir() else 0
     reels_out = root / "reels-out"
@@ -4152,7 +4152,7 @@ autoreels — длинное talking-head видео → вертикальны�
 """
 
 
-def cmd_models(*, root=".") -> int:
+def cmd_models(*, root=None) -> int:
     """Показать доступные модели на Groq и OpenRouter, проверить сконфигурированные.
 
     Для Groq — проверка по каталогу (/models).
@@ -4167,7 +4167,7 @@ def cmd_models(*, root=".") -> int:
         _openrouter_shared_pool_blocked,
     )
 
-    root = Path(root)
+    root = Path(root) if root is not None else _project_root()
     cfg_path = root / "config" / "r0.yaml"
     try:
         r0_cfg = load_r0_config(cfg_path)
@@ -4306,7 +4306,7 @@ def _build_parser():
                     help="настроить фоновую музыку: 'off' или имя трека из music/")
     pm.add_argument("--set-audio", default=None, dest="set_audio", choices=["on", "off"],
                     help="вкл/выкл нормализацию громкости (loudnorm)")
-    pm.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    pm.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
 
     ps = sub.add_parser(
         "status",
@@ -4322,7 +4322,7 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ps.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    ps.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
 
     pdoc = sub.add_parser(
         "doctor",
@@ -4341,7 +4341,7 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    pdoc.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    pdoc.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
 
     pc = sub.add_parser(
         "calibrate",
@@ -4369,8 +4369,8 @@ def _build_parser():
                     help="путь к ffmpeg (иначе env RENDER_FFMPEG / render.local.yaml / автопоиск)")
     pc.add_argument("--ffprobe", default=None,
                     help="путь к ffprobe (иначе env RENDER_FFPROBE / PATH / рядом с ffmpeg)")
-    pc.add_argument("--root", default=".",
-                    help="корень проекта (по умолчанию: .)")
+    pc.add_argument("--root", default=None,
+                    help="корень проекта (по умолчанию: проект)")
     pc.add_argument("--port", type=int, default=8765,
                     help="порт localhost-сервера калибровки (по умолчанию: 8765)")
     pc.add_argument("--frame-at", default=None, dest="frame_at",
@@ -4623,7 +4623,7 @@ def _build_parser():
                       help="манифест(ы) (иначе — все из manifests/)")
     pdcl.add_argument("--out", default="tests/fixtures/clips", metavar="каталог",
                       help="каталог для фикстур (по умолчанию tests/fixtures/clips)")
-    pdcl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    pdcl.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
 
     pmod = sub.add_parser(
         "models",
@@ -4636,7 +4636,7 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    pmod.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    pmod.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
 
     pbl = sub.add_parser(
         "blocks",
@@ -4655,7 +4655,7 @@ def _build_parser():
         "target", nargs="?",
         help="манифест (.json) или транскрипт (.transcript.json); не нужен при --apply",
     )
-    pbl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+    pbl.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
     pbl.add_argument(
         "--scored",
         action="store_true",
@@ -4692,6 +4692,10 @@ def main(argv=None) -> int:
 
     _load_env()
     args = _build_parser().parse_args(argv)
+
+    # Resolve --root once at the CLI boundary so all dispatch paths get a Path.
+    if hasattr(args, "root"):
+        args.root = Path(args.root) if args.root is not None else _project_root()
 
     if args.cmd is None:
         cmd_status()
