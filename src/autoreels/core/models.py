@@ -169,6 +169,7 @@ class Manifest(BaseModel):
     # resnap-записи). "" = легаси-манифест, снятый до этого поля: resnap для него отказан (нельзя
     # проверить совпадение), нужен один полный run. Ставит cmd_run из stamped-мета транскрипта.
     transcript_params_key: str = ""
+    selection_source: str = ""  # "human" = manual review path; "" = automatic (LLM)
     status: ProjectStatus = ProjectStatus.pending
     # Пустой список валиден: «хороших моментов нет» — ожидаемый исход, не ошибка.
     reels: list[Reel] = Field(default_factory=list)

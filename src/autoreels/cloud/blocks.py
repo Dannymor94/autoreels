@@ -449,3 +449,129 @@ def topk_filter(
 
     kept.sort(key=lambda b: b.start)
     return kept, cut
+
+
+# --------------------------------------------------------------------------- stage 4-alt: manual review
+
+_REVIEW_HDR_RE = re.compile(
+    r"^\[\s*(\d+)\s*\]\s+([\d.]+)s\s+id=([0-9a-f]+)\s+score:\s*(.*)$"
+)
+_REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
+
+
+class _ReviewEntry(NamedTuple):
+    seq: int
+    block_id: str
+    score: int | None   # None = reviewer left blank
+    merge_next: bool    # trailing '+' on score
+
+
+def export_review(
+    blocks: list[CandidateBlock],
+    *,
+    source_ref: str,
+    filter_removed_count: int,
+) -> str:
+    """Render a human-editable review file for kept candidate blocks.
+
+    Blocks are in chronological order. Heuristic scores are NOT included —
+    the reviewer must not be anchored by them (they are the reference dataset we are building).
+    """
+    lines: list[str] = [
+        "# AutoReels block review",
+        f"# source: {source_ref}",
+        f"# blocks: {len(blocks)}  |  filter_removed: {filter_removed_count}",
+        "#",
+        "# Score (0-100) to select a block; leave blank to skip.",
+        "# Append '+' after a score to merge with the following block.",
+        "#",
+        "",
+    ]
+    for i, b in enumerate(blocks, 1):
+        lines.append(f"[ {i} ]  {b.duration:.1f}s  id={b.id}  score: __")
+        lines.append(b.text)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def parse_review(
+    content: str,
+) -> tuple[str | None, list[_ReviewEntry], list[tuple[int, str]]]:
+    """Parse a block review file produced by export_review.
+
+    Returns (source_ref, entries, errors) where:
+    - source_ref: manifest path from the '# source:' header, or None
+    - entries: all block header lines (scored and unscored) in file order, for merge lookup
+    - errors: (line_number, message) for malformed score fields; other entries still parse
+    """
+    source_ref: str | None = None
+    entries: list[_ReviewEntry] = []
+    errors: list[tuple[int, str]] = []
+
+    for lineno, raw in enumerate(content.splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            m = _REVIEW_SRC_RE.match(line)
+            if m:
+                source_ref = m.group(1).strip()
+            continue
+        m = _REVIEW_HDR_RE.match(line)
+        if not m:
+            continue  # block text or other — ignored silently
+        seq, block_id, score_str = int(m.group(1)), m.group(3), m.group(4).strip()
+        if not score_str or score_str in ("__", "-"):
+            entries.append(_ReviewEntry(seq, block_id, None, False))
+            continue
+        merge = score_str.endswith("+")
+        if merge:
+            score_str = score_str[:-1].strip()
+        try:
+            score = int(score_str)
+        except ValueError:
+            errors.append((lineno, f"expected integer score, got {score_str!r}"))
+            continue
+        if not 0 <= score <= 100:
+            errors.append((lineno, f"score {score} out of range [0, 100]"))
+            continue
+        entries.append(_ReviewEntry(seq, block_id, score, merge))
+
+    return source_ref, entries, errors
+
+
+def _make_merged_block(first: CandidateBlock, second: CandidateBlock) -> CandidateBlock:
+    """Combine two adjacent blocks into one (for review '+' continuation)."""
+    text = first.text + " " + second.text
+    merged_lines = first.lines + second.lines
+    return CandidateBlock(
+        id=_block_id(text),
+        start=first.start,
+        end=second.end,
+        duration=second.end - first.start,
+        text=text,
+        boundary_reason=first.boundary_reason,
+        lines=merged_lines,
+        has_internal_speaker_change=(
+            first.has_internal_speaker_change or second.has_internal_speaker_change
+        ),
+    )
+
+
+def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str) -> dict:
+    """Build a dataset row for one reviewed block (both human and heuristic scores).
+
+    The dataset lets stage 3 correlation be measured once enough labels accumulate.
+    Human scores are appended, never overwritten.
+    """
+    return {
+        "source": source_stem,
+        "block_id": block.id,
+        "start": block.start,
+        "end": block.end,
+        "duration": round(block.duration, 3),
+        "text": block.text,
+        "human_score": human_score,
+        "heuristic_score": round(block.heuristic_score, 2),
+        "features": dict(block.score_breakdown),
+    }

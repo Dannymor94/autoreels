@@ -2312,19 +2312,240 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def cmd_blocks(target: str, *, root: str = ".", scored: bool = False) -> int:
+def _blocks_do_apply(review_path: str, *, root: str) -> int:
+    """Build a manifest from a scored review file (M1.6 stage 4-alt).
+
+    Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
+    snap → filter_dangling_start → interview_snap → apply_top_n → renumber → padding →
+    trim → min_clip_filter → subtitles → trim_hanging_subtitles → manifest.
+    """
+    import json as _json
+
+    from autoreels.cloud.blocks import (
+        candidate_blocks, filter_blocks, score_block,
+        parse_review, _make_merged_block, make_dataset_row,
+    )
+    from autoreels.cloud.compress import compress_transcript
+    from autoreels.cloud.snap import trim_hanging_subtitles
+    from autoreels.cloud.chunk_transcribe import renumber_reels
+    from autoreels.core.models import Reel
+
+    root = Path(root)
+    review_content = Path(review_path).read_text(encoding="utf-8")
+    source_ref, entries, errors = parse_review(review_content)
+
+    for lineno, msg in errors:
+        print(f"  review:{lineno}: {msg}", file=sys.stderr)
+
+    if source_ref is None:
+        print("error: review file has no '# source:' line", file=sys.stderr)
+        return 1
+
+    manifest_path = Path(source_ref)
+    if not manifest_path.is_absolute():
+        manifest_path = root / source_ref
+
+    if not manifest_path.exists():
+        print(f"error: source manifest not found: {manifest_path}", file=sys.stderr)
+        return 1
+
+    manifest = Manifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    r0_cfg = load_r0_config(root / "config" / "r0.yaml")
+
+    # Load transcript (same lookup as cmd_blocks)
+    cache_dir = root / "data" / "cache"
+    transcript = None
+    audio = cache_dir / f"{manifest.source_sha256}.mp3"
+    if audio.is_file():
+        ahash = state.audio_hash(audio)
+        pkey = manifest.transcript_params_key
+        if pkey:
+            exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
+            if exact.exists():
+                transcript = Transcript.model_validate_json(exact.read_text(encoding="utf-8"))
+        if transcript is None:
+            cands = sorted(
+                cache_dir.glob(f"{ahash}*.transcript.json"),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )
+            if cands:
+                transcript = Transcript.model_validate_json(cands[0].read_text(encoding="utf-8"))
+
+    if transcript is None:
+        print(f"error: transcript not found for {manifest_path.name}", file=sys.stderr)
+        return 1
+
+    # Stages 1-3: blocks → filter → score (heuristic scores needed for dataset)
+    compressed = compress_transcript(
+        transcript, pause_sec=r0_cfg.sentence_pause_sec, max_sentence_sec=r0_cfg.max_sentence_sec,
+    )
+    all_blocks = candidate_blocks(
+        compressed,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
+        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+    )
+    total_duration = all_blocks[-1].end if all_blocks else 0.0
+    bf = r0_cfg.blocks_filter
+    _source_kind = manifest.source_kind or r0_cfg.source_kind
+    sc_affirmations = r0_cfg.host_affirmations if _source_kind == "interview" else []
+    kept, dropped_blks = filter_blocks(
+        all_blocks,
+        total_duration=total_duration,
+        head_skip_sec=bf.head_skip_sec,
+        tail_skip_sec=bf.tail_skip_sec,
+        speech_density_min=bf.speech_density_min,
+        repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
+        artefact_markers=bf.artefact_markers,
+        promo_keywords=bf.promo_keywords,
+        signoff_phrases=bf.signoff_phrases,
+        host_affirmations=sc_affirmations,
+    )
+    bs_cfg = r0_cfg.block_scoring
+    id_to_block = {}
+    for b in kept:
+        b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
+        id_to_block[b.id] = b
+
+    # Process review entries → Reels
+    seq_to_entry = {e.seq: e for e in entries}
+    reels: list = []
+    dataset_rows: list[dict] = []
+    processed_seqs: set[int] = set()
+
+    for entry in entries:
+        if entry.seq in processed_seqs or entry.score is None:
+            continue
+        block = id_to_block.get(entry.block_id)
+        if block is None:
+            print(
+                f"  warning: block {entry.block_id[:8]}… not in kept blocks "
+                f"(filtered or id mismatch)", file=sys.stderr,
+            )
+            continue
+
+        if entry.merge_next:
+            next_entry = seq_to_entry.get(entry.seq + 1)
+            if next_entry:
+                next_block = id_to_block.get(next_entry.block_id)
+                if next_block:
+                    combined_dur = next_block.end - block.start
+                    if combined_dur <= r0_cfg.max_duration:
+                        block = _make_merged_block(block, next_block)
+                        block.heuristic_score, block.score_breakdown = score_block(block, bs_cfg)
+                        id_to_block[block.id] = block
+                        processed_seqs.add(next_entry.seq)
+                        print(f"  + merged blocks {entry.seq}+{entry.seq + 1}: {block.duration:.1f}s")
+                    else:
+                        print(
+                            f"  note: blocks {entry.seq}+{entry.seq + 1} combined "
+                            f"({combined_dur:.1f}s) exceeds max ({r0_cfg.max_duration:.0f}s) "
+                            f"— kept separate"
+                        )
+
+        reel = Reel(
+            id=block.id,
+            start=block.start,
+            end=block.end,
+            score=entry.score,
+            hook=block.text.split(".")[0][:300].strip() or block.text[:100],
+            title="",
+            description="",
+            reason="human review",
+        )
+        reel.r0_start = reel.start
+        reel.r0_end = reel.end
+        reels.append(reel)
+        dataset_rows.append(make_dataset_row(block, entry.score, manifest_path.stem))
+        processed_seqs.add(entry.seq)
+
+    print(f"review: {len(reels)} blocks selected")
+
+    # Downstream pipeline (entry point = after _stage_select in cmd_run)
+    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
+    tx_words = getattr(transcript, "words", [])
+    reels, _ = filter_dangling_start(
+        reels, tx_words,
+        dangling_words=getattr(r0_cfg, "dangling_words", None),
+        min_duration=r0_cfg.min_clip_duration,
+    )
+    host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
+    if host_turns:
+        reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg)
+    reels, _ = apply_top_n(reels, max_reels=r0_cfg.max_reels, transcript_words=tx_words)
+    reels = renumber_reels(reels)
+    reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
+    reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
+    reels, _ = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
+    reels = _stage_subtitles(reels, transcript)
+    trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
+
+    # Assemble manifest with selection_source="human"
+    out_manifest = Manifest(
+        source=manifest.source,
+        source_sha256=manifest.source_sha256,
+        source_hash_scheme=manifest.source_hash_scheme,
+        source_kind=manifest.source_kind,
+        duration_preset=manifest.duration_preset,
+        setup=manifest.setup,
+        run_key=manifest.run_key,
+        transcript_params_key=manifest.transcript_params_key,
+        selection_source="human",
+        reels=reels,
+    )
+    manifests_dir = root / "manifests"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    out_path = manifests_dir / f"{manifest_path.stem}.review.json"
+    out_path.write_text(out_manifest.model_dump_json(indent=2), encoding="utf-8")
+    print(f"manifest → {out_path} ({len(reels)} reels, selection_source=human)")
+
+    # Append dataset rows (human scores never overwritten — append mode)
+    if dataset_rows:
+        ds_dir = root / "data" / "blocks_dataset"
+        ds_dir.mkdir(parents=True, exist_ok=True)
+        ds_path = ds_dir / f"{manifest_path.stem}.jsonl"
+        with ds_path.open("a", encoding="utf-8") as f:
+            for row in dataset_rows:
+                f.write(_json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"dataset: {len(dataset_rows)} rows appended → {ds_path}")
+
+    return 0
+
+
+def cmd_blocks(
+    target: str | None,
+    *,
+    root: str = ".",
+    scored: bool = False,
+    review: bool = False,
+    out: str | None = None,
+    apply_review: str | None = None,
+) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
     Loads the transcript, compresses it sentence-by-sentence, segments into candidate blocks
     (stage 1), then applies the deterministic pre-filter (stage 2).
     Writes a .blocks.dropped.json sidecar next to the manifest (when target is a manifest).
     Accepts a manifest (.json) or a transcript cache file (.transcript.json).
+
+    --review: export a human-editable review file (stage 4-alt).
+    --apply FILE: import a scored review file and build a manifest.
     """
     import json as _json
     import statistics
 
-    from autoreels.cloud.blocks import candidate_blocks, filter_blocks, score_block, topk_filter
+    from autoreels.cloud.blocks import (
+        candidate_blocks, filter_blocks, score_block, topk_filter,
+        export_review, make_dataset_row, _make_merged_block,
+    )
     from autoreels.cloud.compress import compress_transcript
+
+    if apply_review:
+        return _blocks_do_apply(apply_review, root=root)
+
+    if target is None:
+        print("error: target required (or use --apply <review.md>)", file=sys.stderr)
+        return 1
 
     root = Path(root)
     target_path = Path(target)
@@ -2445,6 +2666,21 @@ def cmd_blocks(target: str, *, root: str = ".", scored: bool = False) -> int:
             for b, r in dropped
         ]
         sidecar.write_text(_json.dumps(sidecar_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Stage 4-alt: export review file (only when --review)
+    if review and kept:
+        out_path = (
+            Path(out) if out
+            else (manifest_path.with_suffix(".review.md") if manifest_path
+                  else target_path.with_suffix(".review.md"))
+        )
+        review_content = export_review(
+            kept, source_ref=str(target_path), filter_removed_count=len(dropped),
+        )
+        out_path.write_text(review_content, encoding="utf-8")
+        print(f"\nreview: {len(kept)} блоков → {out_path}")
+        print(f"  ({len(dropped)} блоков удалено фильтрами — используйте arl blocks без --review для деталей)")
+        return 0
 
     # Stage 3: heuristic scoring (only when --scored)
     topk_cut: list = []
@@ -4411,12 +4647,32 @@ def _build_parser():
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    pbl.add_argument("target", help="манифест (.json) или транскрипт (.transcript.json)")
+    pbl.add_argument(
+        "target", nargs="?",
+        help="манифест (.json) или транскрипт (.transcript.json); не нужен при --apply",
+    )
     pbl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
     pbl.add_argument(
         "--scored",
         action="store_true",
         help="score kept blocks by heuristic and apply top-K per window (M1.6 stage 3)",
+    )
+    pbl.add_argument(
+        "--review",
+        action="store_true",
+        help="export a human-editable review file (M1.6 stage 4-alt); requires target = manifest",
+    )
+    pbl.add_argument(
+        "--out",
+        default=None,
+        metavar="FILE",
+        help="output path for --review (default: <manifest>.review.md next to manifest)",
+    )
+    pbl.add_argument(
+        "--apply",
+        default=None,
+        metavar="REVIEW_FILE",
+        help="import a scored review file and build a manifest (M1.6 stage 4-alt)",
     )
 
     return p
@@ -4603,7 +4859,10 @@ def main(argv=None) -> int:
         elif args.cmd == "models":
             return cmd_models(root=args.root)
         elif args.cmd == "blocks":
-            return cmd_blocks(args.target, root=args.root, scored=args.scored)
+            return cmd_blocks(
+                args.target, root=args.root, scored=args.scored,
+                review=args.review, out=args.out, apply_review=args.apply,
+            )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":

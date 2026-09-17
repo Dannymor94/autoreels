@@ -601,3 +601,131 @@ def test_block_64s_from_end_without_signoff_phrase_is_kept():
                                   signoff_phrases=[],
                                   host_affirmations=[])
     assert len(kept) == 1, f"block 64s from end should be kept; got dropped={dropped}"
+
+
+# ---------------------------------------------------------------------------
+# Stage 4-alt: manual review export / import (M1.6 stage 4-alt)
+# ---------------------------------------------------------------------------
+
+from autoreels.cloud.blocks import (
+    export_review, parse_review, _make_merged_block, make_dataset_row,
+)
+
+
+def test_export_one_entry_per_kept_block_chronological():
+    """Export produces one entry per kept block in chronological order with full text."""
+    import re as _re
+    b1 = _make_block("Первый блок содержит полный текст без обрезки.", start=10.0, end=45.0)
+    b2 = _make_block("Второй блок тоже содержит полный текст длинной фразы.", start=50.0, end=80.0)
+    # Give them stable ids so regex match is deterministic
+    b1.id = "aaa111bbb222ccc3"
+    b2.id = "ddd444eee555fff6"
+    out = export_review([b1, b2], source_ref="manifests/test.json", filter_removed_count=5)
+
+    headers = _re.findall(r"^\[\s*\d+\s*\]", out, _re.MULTILINE)
+    assert len(headers) == 2, f"expected 2 block headers, got {len(headers)}"
+    assert out.index("[ 1 ]") < out.index("[ 2 ]"), "blocks must be in chronological (seq) order"
+    assert "Первый блок содержит полный текст без обрезки." in out
+    assert "Второй блок тоже содержит полный текст длинной фразы." in out
+    assert "filter_removed: 5" in out
+
+
+def test_export_no_heuristic_score():
+    """Export must NOT contain the heuristic score anywhere — reviewer must not be anchored."""
+    b = _make_block("Текст блока для проверки отсутствия скора.")
+    b.id = "aaa111bbb222ccc3"
+    b.heuristic_score = 98.765          # distinctive value
+    b.score_breakdown = {"duration": 18.0, "ends_sentence": 10.0}
+    out = export_review([b], source_ref="test.json", filter_removed_count=0)
+    assert "98.765" not in out, "heuristic_score value must not appear in review file"
+    assert "98.7" not in out
+    # score placeholder is present but not filled
+    assert "score: __" in out
+
+
+def test_import_selects_only_numeric_scores():
+    """Only blocks with a numeric score are selected; empty/__ fields are skipped."""
+    content = "\n".join([
+        "# source: manifests/test.json",
+        "# blocks: 3  |  filter_removed: 0",
+        "",
+        "[ 1 ]  30.0s  id=aaa111  score: 85",
+        "Текст первого блока.",
+        "",
+        "[ 2 ]  25.0s  id=bbb222  score: __",
+        "Текст второго блока.",
+        "",
+        "[ 3 ]  35.0s  id=ccc333  score: ",
+        "Текст третьего блока.",
+    ])
+    source, entries, errors = parse_review(content)
+    selected = [e for e in entries if e.score is not None]
+    assert source == "manifests/test.json"
+    assert len(selected) == 1
+    assert selected[0].block_id == "aaa111"
+    assert selected[0].score == 85
+    assert len(errors) == 0
+
+
+def test_import_merge_plus_and_make_merged_block():
+    """'+' in score is parsed as merge_next=True; _make_merged_block combines two blocks."""
+    content = "\n".join([
+        "# source: test.json",
+        "[ 1 ]  30.0s  id=aaa111  score: 82+",
+        "[ 2 ]  25.0s  id=bbb222  score: __",
+    ])
+    source, entries, errors = parse_review(content)
+    assert entries[0].merge_next is True
+    assert entries[0].score == 82
+    assert entries[1].merge_next is False
+    assert len(errors) == 0
+
+    # _make_merged_block combines text and extends time range
+    b1 = _make_block("Первый блок.", start=10.0, end=40.0)
+    b2 = _make_block("Второй блок.", start=41.0, end=66.0)
+    merged = _make_merged_block(b1, b2)
+    assert merged.start == pytest.approx(10.0)
+    assert merged.end == pytest.approx(66.0)
+    assert merged.duration == pytest.approx(56.0)
+    assert "Первый блок." in merged.text
+    assert "Второй блок." in merged.text
+
+
+def test_import_malformed_line_reported_rest_applies():
+    """A malformed score is reported with its line number; other entries still parse."""
+    content = "\n".join([
+        "# source: test.json",
+        "[ 1 ]  30.0s  id=aaa111  score: пять",
+        "[ 2 ]  25.0s  id=bbb222  score: 75",
+    ])
+    source, entries, errors = parse_review(content)
+    assert len(errors) == 1
+    assert errors[0][0] == 2, f"error should be on line 2, got line {errors[0][0]}"
+    assert "пять" in errors[0][1]
+    selected = [e for e in entries if e.score is not None]
+    assert len(selected) == 1
+    assert selected[0].score == 75
+
+
+def test_manifest_selection_source_field():
+    """Manifest.selection_source defaults to '' and distinguishes human from LLM selections."""
+    from autoreels.core.models import Manifest
+    fields = Manifest.model_fields
+    assert "selection_source" in fields, "Manifest must have selection_source field"
+    assert fields["selection_source"].default == "", "default must be '' (LLM/auto path)"
+
+
+def test_dataset_row_records_both_scores():
+    """make_dataset_row includes human_score, heuristic_score, and all features."""
+    b = _make_block("Тестовый текст блока для датасета из нескольких слов.")
+    b.id = "abc123def456789a"
+    b.heuristic_score = 73.5
+    b.score_breakdown = {"duration": 15.0, "ends_sentence": 10.0, "opens_sentence": 10.0}
+    row = make_dataset_row(b, human_score=85, source_stem="test_video")
+    assert row["human_score"] == 85
+    assert row["heuristic_score"] == pytest.approx(73.5)
+    assert "features" in row
+    assert row["features"]["duration"] == 15.0
+    assert row["text"] == b.text
+    assert row["source"] == "test_video"
+    assert row["block_id"] == b.id
