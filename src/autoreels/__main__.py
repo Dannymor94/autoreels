@@ -2312,6 +2312,98 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
+def cmd_blocks(target: str, *, root: str = ".") -> int:
+    """Print candidate blocks from a manifest or transcript cache (M1.6 stage 1).
+
+    Loads the transcript, compresses it sentence-by-sentence, then runs deterministic
+    boundary detection to produce candidate blocks for later LLM scoring.
+    Accepts a manifest (.json) or a transcript cache file (.transcript.json).
+    """
+    import statistics
+
+    from autoreels.cloud.blocks import candidate_blocks
+    from autoreels.cloud.compress import compress_transcript
+
+    root = Path(root)
+    target_path = Path(target)
+
+    r0_cfg = load_r0_config(root / "config" / "r0.yaml")
+
+    # Load transcript: transcript cache file → direct load; manifest → look up by sha + pkey
+    transcript: Transcript | None = None
+    if target_path.name.endswith(".transcript.json"):
+        transcript = Transcript.model_validate_json(target_path.read_text(encoding="utf-8"))
+    elif target_path.suffix == ".json":
+        try:
+            manifest = Manifest.model_validate_json(target_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"ошибка разбора манифеста: {exc}", file=sys.stderr)
+            return 1
+        cache_dir = root / "data" / "cache"
+        # Resolve: audio file (named by source_sha256) → audio content hash → transcript
+        audio = cache_dir / f"{manifest.source_sha256}.mp3"
+        if audio.is_file():
+            ahash = state.audio_hash(audio)
+            pkey = manifest.transcript_params_key
+            if pkey:
+                exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
+                if exact.exists():
+                    transcript = Transcript.model_validate_json(
+                        exact.read_text(encoding="utf-8")
+                    )
+            if transcript is None:
+                cands = sorted(
+                    cache_dir.glob(f"{ahash}*.transcript.json"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if cands:
+                    transcript = Transcript.model_validate_json(
+                        cands[0].read_text(encoding="utf-8")
+                    )
+    else:
+        print(f"ошибка: ожидается .json (манифест) или .transcript.json: {target}",
+              file=sys.stderr)
+        return 1
+
+    if transcript is None:
+        print(f"ошибка: транскрипт не найден для {target}", file=sys.stderr)
+        return 1
+
+    compressed = compress_transcript(
+        transcript,
+        pause_sec=r0_cfg.sentence_pause_sec,
+        max_sentence_sec=r0_cfg.max_sentence_sec,
+    )
+    blocks = candidate_blocks(
+        compressed,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
+        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+    )
+
+    reason_counts: dict[str, int] = {}
+    durations: list[float] = []
+    for i, b in enumerate(blocks, 1):
+        words = b.text.split()
+        snippet = " ".join(words[:10]) + ("…" if len(words) > 10 else "")
+        print(f"{i:3d} [{b.boundary_reason:13s}] {b.duration:5.1f}s  {snippet}", flush=True)
+        reason_counts[b.boundary_reason] = reason_counts.get(b.boundary_reason, 0) + 1
+        durations.append(b.duration)
+
+    if durations:
+        print(f"\nВсего: {len(blocks)} блоков")
+        print(
+            f"Длительность: min={min(durations):.1f}s, "
+            f"median={statistics.median(durations):.1f}s, "
+            f"max={max(durations):.1f}s"
+        )
+        print(f"По границам: {dict(sorted(reason_counts.items()))}")
+    else:
+        print("Блоков нет.")
+    return 0
+
+
 def cmd_resume(*, root=".", ffmpeg=None, encoder=None, profile=None) -> int:
     """Продолжить прерванное: доделать рендер недостающих клипов + сообщить о недокачках.
 
@@ -4186,6 +4278,22 @@ def _build_parser():
     )
     pmod.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
 
+    pbl = sub.add_parser(
+        "blocks",
+        help="показать блоки-кандидаты из транскрипта (M1.6 stage 1, без LLM)",
+        description=(
+            "Детерминированная нарезка транскрипта на блоки-кандидаты для R0-скоринга.\n"
+            "Принимает манифест (.json) или файл транскрипта (.transcript.json).\n"
+            "Код определяет границы; LLM оценивает блоки только на следующем этапе.\n\n"
+            "Примеры:\n"
+            '  autoreels blocks "manifests/2026-08-08 10h 59m 38s.json"\n'
+            "  autoreels blocks data/cache/sha256.transcript.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pbl.add_argument("target", help="манифест (.json) или транскрипт (.transcript.json)")
+    pbl.add_argument("--root", default=".", help="корень проекта (по умолчанию: .)")
+
     return p
 
 
@@ -4369,6 +4477,8 @@ def main(argv=None) -> int:
             return cmd_dump_clips(manifests, out=args.out, root=args.root if args.root != "." else None)
         elif args.cmd == "models":
             return cmd_models(root=args.root)
+        elif args.cmd == "blocks":
+            return cmd_blocks(args.target, root=args.root)
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
         elif args.cmd == "install-aliases":
