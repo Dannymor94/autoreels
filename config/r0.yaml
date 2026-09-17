@@ -132,8 +132,8 @@ presets:
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
 # A filter that removes a good block is worse than one that lets junk through (stage 3 can rank it down).
 blocks_filter:
-  head_skip_sec: 60       # drop blocks whose midpoint falls in the first N seconds (greetings)
-  tail_skip_sec: 120      # drop blocks whose midpoint falls in the last N seconds (sign-offs)
+  head_skip_sec: 30       # drop blocks whose midpoint falls in the first N seconds (greetings)
+  tail_skip_sec: 30       # drop blocks whose midpoint falls in the last N seconds (sign-offs)
   speech_density_min: 0.4 # drop if spoken_words_time / wall_time < threshold (guided practice silences)
   repetition_unique_ratio_min: 0.3  # drop if unique_words/total_words < threshold (Whisper loops)
   artefact_markers:       # case-insensitive substrings that identify Whisper training-data hallucinations
@@ -151,6 +151,17 @@ blocks_filter:
     - "запись идёт"
     - "подписывайтесь"
   # Price pattern (\d+\s*рубл) is matched by code — no need to list here.
+  signoff_phrases:        # dropped when phrase opens a sentence (block start or after .!?…)
+    - "спасибо, что были"
+    - "спасибо за внимание"
+    - "до встречи"
+    - "всем пока"
+    - "на этом всё"
+    - "до новых встреч"
+    - "здравствуйте"
+    - "добрый день"
+    - "рад вас видеть"
+    - "давайте начнём"
 
 # Пути к рантайм-промптам R0 (не хардкод в коде — берутся отсюда).
 prompts:

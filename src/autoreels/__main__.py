@@ -2402,6 +2402,7 @@ def cmd_blocks(target: str, *, root: str = ".") -> int:
         repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
         artefact_markers=bf.artefact_markers,
         promo_keywords=bf.promo_keywords,
+        signoff_phrases=bf.signoff_phrases,
         host_affirmations=sc_affirmations,
     )
 

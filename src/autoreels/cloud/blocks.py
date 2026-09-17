@@ -190,6 +190,21 @@ def _make_block(lines: list[_Line], reason: str) -> CandidateBlock:
 
 _PRICE_RE = re.compile(r"\d[\d\s]*рубл", re.IGNORECASE)
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
+_SENT_END_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _has_signoff_at_sentence_start(text: str, phrases: Sequence[str]) -> bool:
+    """True if any phrase opens a sentence (block start or after punctuation)."""
+    if not phrases:
+        return False
+    text_lower = text.lstrip("—– \t").lower()
+    sentences = _SENT_END_RE.split(text_lower)
+    for sent in sentences:
+        sent_stripped = sent.lstrip("—– \t")
+        for phrase in phrases:
+            if sent_stripped.startswith(phrase.lower()):
+                return True
+    return False
 
 
 def _filter_reason(
@@ -201,6 +216,7 @@ def _filter_reason(
     repetition_unique_ratio_min: float,
     artefact_markers: Sequence[str],
     promo_keywords: Sequence[str],
+    signoff_phrases: Sequence[str] = (),
 ) -> str | None:
     """Return a drop reason string, or None if the block should be kept."""
     text_lower = block.text.lower()
@@ -210,6 +226,9 @@ def _filter_reason(
 
     if any(kw.lower() in text_lower for kw in promo_keywords) or _PRICE_RE.search(block.text):
         return "promo"
+
+    if _has_signoff_at_sentence_start(block.text, signoff_phrases):
+        return "signoff"
 
     mid = (block.start + block.end) / 2
     if mid < head_skip_sec:
@@ -250,19 +269,20 @@ def filter_blocks(
     blocks: list[CandidateBlock],
     *,
     total_duration: float,
-    head_skip_sec: float = 60.0,
-    tail_skip_sec: float = 120.0,
+    head_skip_sec: float = 30.0,
+    tail_skip_sec: float = 30.0,
     speech_density_min: float = 0.4,
     repetition_unique_ratio_min: float = 0.3,
     artefact_markers: Sequence[str] = (),
     promo_keywords: Sequence[str] = (),
+    signoff_phrases: Sequence[str] = (),
     host_affirmations: Sequence[str] = (),
 ) -> tuple[list[CandidateBlock], list[tuple[CandidateBlock, str]]]:
     """Apply deterministic pre-filters (M1.6 stage 2).
 
     Returns (kept, dropped) where dropped is a list of (block, reason) pairs.
     Kept blocks have has_internal_speaker_change set if an internal turn was detected.
-    Priority: artefact → promo → head → tail → low_density → repetition.
+    Priority: artefact → promo → signoff → head → tail → low_density → repetition.
     """
     kept: list[CandidateBlock] = []
     dropped: list[tuple[CandidateBlock, str]] = []
@@ -272,6 +292,7 @@ def filter_blocks(
             head_skip_sec, tail_skip_sec,
             speech_density_min, repetition_unique_ratio_min,
             artefact_markers, promo_keywords,
+            signoff_phrases,
         )
         if reason is not None:
             dropped.append((block, reason))

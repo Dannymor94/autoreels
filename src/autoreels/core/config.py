@@ -69,8 +69,8 @@ class BlocksFilterConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    head_skip_sec: float = 60.0          # drop blocks whose midpoint < this (greetings)
-    tail_skip_sec: float = 120.0         # drop blocks whose midpoint > total-this (sign-offs)
+    head_skip_sec: float = 30.0          # drop blocks whose midpoint < this (greetings)
+    tail_skip_sec: float = 30.0          # drop blocks whose midpoint > total-this (sign-offs)
     speech_density_min: float = 0.4      # drop if spoken_time/wall_time < threshold
     repetition_unique_ratio_min: float = 0.3  # drop if unique_words/total_words < threshold
     artefact_markers: list[str] = Field(default_factory=lambda: [
@@ -88,6 +88,18 @@ class BlocksFilterConfig(BaseModel):
         "слышно меня",
         "запись идёт",
         "подписывайтесь",
+    ])
+    signoff_phrases: list[str] = Field(default_factory=lambda: [
+        "спасибо, что были",
+        "спасибо за внимание",
+        "до встречи",
+        "всем пока",
+        "на этом всё",
+        "до новых встреч",
+        "здравствуйте",
+        "добрый день",
+        "рад вас видеть",
+        "давайте начнём",
     ])
 
 

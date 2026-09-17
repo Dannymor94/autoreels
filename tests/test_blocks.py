@@ -233,16 +233,19 @@ def test_blocks_command_registered_in_argparse():
 
 _ARTEFACT_MARKERS = ["субтитры создавал", "субтитры сделал", "続きは", "字幕"]
 _PROMO_KEYWORDS = ["приходите на", "подписывайтесь", "включите звук"]
+_SIGNOFF_PHRASES = ["спасибо, что были", "спасибо за внимание", "до встречи", "всем пока",
+                    "на этом всё", "до новых встреч", "здравствуйте", "добрый день"]
 _HOST_AFFIRMATIONS = ["здорово", "отлично", "хорошо"]
 
 _FILTER_DEFAULTS = dict(
     total_duration=600.0,
-    head_skip_sec=60.0,
-    tail_skip_sec=120.0,
+    head_skip_sec=30.0,
+    tail_skip_sec=30.0,
     speech_density_min=0.4,
     repetition_unique_ratio_min=0.3,
     artefact_markers=_ARTEFACT_MARKERS,
     promo_keywords=_PROMO_KEYWORDS,
+    signoff_phrases=_SIGNOFF_PHRASES,
     host_affirmations=_HOST_AFFIRMATIONS,
 )
 
@@ -334,9 +337,9 @@ def test_same_text_in_middle_is_kept():
 
 def test_tail_block_dropped():
     """A block whose midpoint is in the last tail_skip_sec is dropped as 'tail'."""
-    # total_duration=600, tail=120 → tail zone starts at 480s
-    b = _make_block("До свидания спасибо что были с нами сегодня всем пока",
-                    start=500.0, end=522.0)
+    # total_duration=600, tail=30 → tail zone starts at 570s; mid=[578+600]/2=589 > 570
+    b = _make_block("До свидания надеюсь увидеть вас снова в следующий раз",
+                    start=578.0, end=600.0)
     kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
     assert len(dropped) == 1
     assert dropped[0][1] == "tail"
@@ -430,9 +433,11 @@ def test_normal_block_not_flagged():
 
 def test_dropped_blocks_carry_sidecar_fields():
     """filter_blocks returns dropped tuples with block.id, reason, and block.text."""
-    b_artefact = _make_block("Субтитры создавал DimaTorzok некий текст здесь")
+    # Position block_artefact in the safe middle zone (not head/tail with new 30s defaults)
+    b_artefact = _make_block("Субтитры создавал DimaTorzok некий текст здесь",
+                             start=200.0, end=222.0)
     b_normal = _make_block("Это нормальный блок с интересным содержанием речи",
-                           start=200.0, end=222.0)
+                           start=250.0, end=272.0)
     kept, dropped = filter_blocks([b_artefact, b_normal], **_FILTER_DEFAULTS)
 
     assert len(dropped) == 1
@@ -442,3 +447,52 @@ def test_dropped_blocks_carry_sidecar_fields():
     # first 8 words are accessible from drop_block.text
     first_8 = " ".join(drop_block.text.split()[:8])
     assert "субтитры" in first_8.lower() or "DimaTorzok" in first_8
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 fixes: position-independent sign-off/greeting detection (M1.6 s2 v2)
+# ---------------------------------------------------------------------------
+
+def test_signoff_phrase_opening_block_dropped_regardless_of_position():
+    """A block that opens with a sign-off phrase is dropped as 'signoff' even if mid-recording."""
+    # Block is firmly in the middle of the recording — not near head or tail
+    b = _make_block("Спасибо, что были с нами сегодня на нашей лекции",
+                    start=280.0, end=302.0)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "signoff"
+
+
+def test_signoff_phrase_mid_sentence_not_dropped():
+    """A block that only mentions a sign-off phrase mid-sentence is kept."""
+    # "спасибо" appears after "он сказал" — not at a sentence opening
+    b = _make_block(
+        "Он произнёс спасибо за внимание и продолжил рассуждать о смысле жизни",
+        start=280.0, end=302.0,
+    )
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert not any(r == "signoff" for _, r in dropped)
+
+
+def test_block_64s_from_end_without_signoff_phrase_is_kept():
+    """Regression: a block 64s before the end with no sign-off phrase must survive tail=30s.
+
+    This is the direct regression test for PXL block 116 ('Если вы здесь находитесь…').
+    """
+    total = 2846.0
+    # mid = total - 64 = 2782s; tail zone with 30s = mid > 2816s → this is NOT in the tail zone
+    b = _make_block(
+        "Если вы здесь находитесь и такие как вы вы уникальны ваша жизнь важна",
+        start=total - 93.0,   # start=2753s
+        end=total - 64.0,     # end=2782s  →  mid=2767.5s < 2816s
+    )
+    kept, dropped = filter_blocks([b], total_duration=total,
+                                  head_skip_sec=30.0, tail_skip_sec=30.0,
+                                  speech_density_min=0.4,
+                                  repetition_unique_ratio_min=0.3,
+                                  artefact_markers=[],
+                                  promo_keywords=[],
+                                  signoff_phrases=[],
+                                  host_affirmations=[])
+    assert len(kept) == 1, f"block 64s from end should be kept; got dropped={dropped}"
