@@ -289,6 +289,50 @@ def test_artefact_match_is_case_insensitive():
     assert any(reason == "artefact" for _, reason in dropped)
 
 
+def test_artefact_in_tail_stripped_block_kept():
+    """A multi-line block whose last line contains artefact text is kept with the artefact stripped.
+
+    Regression for blocks 5 and 64 from PXL transcript: real speech followed by
+    a Whisper credit line was being dropped as artefact; it should be kept.
+    """
+    real = _Line(100.0, 115.0, "то ты приходишь к тому, что надо быть ближе")
+    art = _Line(115.0, 118.0, "Субтитры создавал DimaTorzok и другое.")
+    b = _make_block("", lines=[real, art])
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+    assert "Субтитры создавал" not in kept[0].text
+    assert "приходишь" in kept[0].text
+
+
+def test_artefact_in_first_line_drops_block():
+    """A multi-line block whose first line is artefact is still dropped.
+
+    Regression for block 117: starts with 'Субтитры создавал DimaTorzok', rest is real speech.
+    The block should be dropped because the hallucinated credit opens it.
+    """
+    art = _Line(100.0, 103.0, "Субтитры создавал DimaTorzok")
+    real = _Line(103.0, 122.0, "Чем-то вы, возможно, передавлены сейчас")
+    b = _make_block("", lines=[art, real])
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 0
+    assert dropped[0][1] == "artefact"
+
+
+def test_promo_keyword_not_matched_as_word_prefix():
+    """A promo keyword that is a prefix of a longer Russian word is not matched.
+
+    'перерыв' is a strict substring of its genitive 'перерывов'; bare 'in' matching
+    would false-positive. Word-boundary regex must not fire on inflected forms.
+    """
+    b = _make_block("Работали перерывов не было совсем, весь день подряд очень много")
+    kept, dropped = filter_blocks(
+        [b], **{**_FILTER_DEFAULTS, "promo_keywords": ["перерыв"]},
+    )
+    assert len(kept) == 1
+    assert len(dropped) == 0
+
+
 # ---------------------------------------------------------------------------
 # Filter 2: promotional / organisational
 # ---------------------------------------------------------------------------

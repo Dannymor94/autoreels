@@ -209,6 +209,34 @@ def _has_signoff_at_sentence_start(text: str, phrases: Sequence[str]) -> bool:
     return False
 
 
+def _scrub_artefact_lines(block: CandidateBlock, artefact_markers: Sequence[str]) -> bool:
+    """Strip lines containing artefact markers in-place.
+
+    Returns False (drop the block) if artefact is in the first line — the block starts on
+    hallucinated content so nothing real precedes it. Returns True (keep) otherwise: lines
+    from the artefact onwards are stripped and the block fields are updated.
+    """
+    if not artefact_markers:
+        return True
+    lower_markers = [m.lower() for m in artefact_markers]
+    first_idx = next(
+        (i for i, ln in enumerate(block.lines)
+         if any(m in ln.text.lower() for m in lower_markers)),
+        None,
+    )
+    if first_idx is None:
+        return True
+    if first_idx == 0:
+        return False  # artefact opens the block → drop
+    clean = block.lines[:first_idx]
+    block.lines = clean
+    block.text = " ".join(ln.text for ln in clean)
+    block.end = clean[-1].t1
+    block.duration = block.end - block.start
+    block.id = _block_id(block.text)
+    return True
+
+
 def _filter_reason(
     block: CandidateBlock,
     total_duration: float,
@@ -226,7 +254,10 @@ def _filter_reason(
     if any(m.lower() in text_lower for m in artefact_markers):
         return "artefact"
 
-    if any(kw.lower() in text_lower for kw in promo_keywords) or _PRICE_RE.search(block.text):
+    if any(
+        re.search(r"\b" + re.escape(kw.lower()) + r"\b", text_lower)
+        for kw in promo_keywords
+    ) or _PRICE_RE.search(block.text):
         return "promo"
 
     if _has_signoff_at_sentence_start(block.text, signoff_phrases):
@@ -289,11 +320,18 @@ def filter_blocks(
     kept: list[CandidateBlock] = []
     dropped: list[tuple[CandidateBlock, str]] = []
     for block in blocks:
+        # Artefact scrubbing first: strip artefact lines from the tail of the block.
+        # Drop only if artefact opens the block (first line) — real speech preceded by
+        # hallucinated credit text is salvageable; a block that starts on artefact is not.
+        if not _scrub_artefact_lines(block, artefact_markers):
+            dropped.append((block, "artefact"))
+            continue
+        # After scrubbing, no artefact markers remain; pass () to _filter_reason.
         reason = _filter_reason(
             block, total_duration,
             head_skip_sec, tail_skip_sec,
             speech_density_min, repetition_unique_ratio_min,
-            artefact_markers, promo_keywords,
+            (), promo_keywords,
             signoff_phrases,
         )
         if reason is not None:

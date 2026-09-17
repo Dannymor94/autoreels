@@ -647,7 +647,8 @@ def test_corpus_sidecar_valid():
     """Every existing manifest's sidecar (if present) is a valid list with id+reason."""
     import json
     manifest_dir = ROOT / "manifests"
-    manifests = [p for p in manifest_dir.glob("*.json") if ".discarded" not in p.name]
+    manifests = [p for p in manifest_dir.glob("*.json")
+                 if ".discarded" not in p.name and ".blocks" not in p.name]
     if not manifests:
         pytest.skip("no manifests")
     for mp in manifests:

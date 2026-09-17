@@ -2660,7 +2660,7 @@ def cmd_blocks(
                 "start": b.start,
                 "end": b.end,
                 "boundary_reason": b.boundary_reason,
-                "filter_reason": r,
+                "reason": r,
                 "first_words": " ".join(b.text.split()[:8]),
             }
             for b, r in dropped

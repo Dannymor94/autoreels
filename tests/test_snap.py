@@ -603,7 +603,8 @@ def test_corpus_max_drift_within_cap():
     from pathlib import Path as _Path
     from autoreels.core.models import Manifest
     manifest_dir = _Path(__file__).resolve().parents[1] / "manifests"
-    manifests = [p for p in manifest_dir.glob("*.json") if ".discarded" not in p.name]
+    manifests = [p for p in manifest_dir.glob("*.json")
+                 if ".discarded" not in p.name and ".blocks" not in p.name]
     if not manifests:
         pytest.skip("no manifests/ to run corpus check against")
 
@@ -735,7 +736,8 @@ def test_task5_corpus_still_passes_after_fix():
     from pathlib import Path as _Path
     from autoreels.core.models import Manifest as _Manifest
     manifest_dir = _Path(__file__).resolve().parents[1] / "manifests"
-    manifests = [p for p in manifest_dir.glob("*.json") if ".discarded" not in p.name]
+    manifests = [p for p in manifest_dir.glob("*.json")
+                 if ".discarded" not in p.name and ".blocks" not in p.name]
     if not manifests:
         pytest.skip("no manifests/ to run corpus check against")
 
