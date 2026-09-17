@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -45,6 +46,7 @@ class CandidateBlock:
     text: str
     boundary_reason: str     # "pause" | "paragraph" | "speaker_turn" | "sentence"
     lines: list[_Line] = field(default_factory=list, repr=False)
+    has_internal_speaker_change: bool = False  # set by filter_blocks; stage 3 treats as strong negative
 
 
 # --------------------------------------------------------------------------- parsing
@@ -184,6 +186,101 @@ def _make_block(lines: list[_Line], reason: str) -> CandidateBlock:
         boundary_reason=reason,
         lines=list(lines),
     )
+
+
+_PRICE_RE = re.compile(r"\d[\d\s]*рубл", re.IGNORECASE)
+_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _filter_reason(
+    block: CandidateBlock,
+    total_duration: float,
+    head_skip_sec: float,
+    tail_skip_sec: float,
+    speech_density_min: float,
+    repetition_unique_ratio_min: float,
+    artefact_markers: Sequence[str],
+    promo_keywords: Sequence[str],
+) -> str | None:
+    """Return a drop reason string, or None if the block should be kept."""
+    text_lower = block.text.lower()
+
+    if any(m.lower() in text_lower for m in artefact_markers):
+        return "artefact"
+
+    if any(kw.lower() in text_lower for kw in promo_keywords) or _PRICE_RE.search(block.text):
+        return "promo"
+
+    mid = (block.start + block.end) / 2
+    if mid < head_skip_sec:
+        return "head"
+    if mid > total_duration - tail_skip_sec:
+        return "tail"
+
+    speech_time = sum(ln.t1 - ln.t0 for ln in block.lines)
+    if block.duration > 0 and speech_time / block.duration < speech_density_min:
+        return "low_density"
+
+    words = _WORD_RE.findall(text_lower)
+    if words and len(set(words)) / len(words) < repetition_unique_ratio_min:
+        return "repetition"
+
+    return None
+
+
+def _detect_internal_speaker_change(block: CandidateBlock, host_affirmations: Sequence[str]) -> bool:
+    """True if a non-first line starts with a dash or a host-affirmation word.
+
+    Pass an empty host_affirmations to disable entirely (use for lecture material).
+    """
+    if not host_affirmations or len(block.lines) < 2:
+        return False
+    aff_lower = {a.lower() for a in host_affirmations}
+    for ln in block.lines[1:]:
+        txt = ln.text.lstrip()
+        if txt.startswith(_DASH_CHARS):
+            return True
+        m = _WORD_RE.match(txt)
+        if m and m.group().lower() in aff_lower:
+            return True
+    return False
+
+
+def filter_blocks(
+    blocks: list[CandidateBlock],
+    *,
+    total_duration: float,
+    head_skip_sec: float = 60.0,
+    tail_skip_sec: float = 120.0,
+    speech_density_min: float = 0.4,
+    repetition_unique_ratio_min: float = 0.3,
+    artefact_markers: Sequence[str] = (),
+    promo_keywords: Sequence[str] = (),
+    host_affirmations: Sequence[str] = (),
+) -> tuple[list[CandidateBlock], list[tuple[CandidateBlock, str]]]:
+    """Apply deterministic pre-filters (M1.6 stage 2).
+
+    Returns (kept, dropped) where dropped is a list of (block, reason) pairs.
+    Kept blocks have has_internal_speaker_change set if an internal turn was detected.
+    Priority: artefact → promo → head → tail → low_density → repetition.
+    """
+    kept: list[CandidateBlock] = []
+    dropped: list[tuple[CandidateBlock, str]] = []
+    for block in blocks:
+        reason = _filter_reason(
+            block, total_duration,
+            head_skip_sec, tail_skip_sec,
+            speech_density_min, repetition_unique_ratio_min,
+            artefact_markers, promo_keywords,
+        )
+        if reason is not None:
+            dropped.append((block, reason))
+        else:
+            block.has_internal_speaker_change = _detect_internal_speaker_change(
+                block, host_affirmations
+            )
+            kept.append(block)
+    return kept, dropped
 
 
 def candidate_blocks(

@@ -1,4 +1,4 @@
-"""Tests for candidate block segmentation (M1.6 stage 1).
+"""Tests for candidate block segmentation (M1.6 stage 1 + 2).
 
 All tests are fixture-only — no network, no LLM, no ffmpeg.
 """
@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from autoreels.cloud.blocks import CandidateBlock, candidate_blocks
+from autoreels.cloud.blocks import CandidateBlock, _Line, candidate_blocks, filter_blocks
 
 MIN_SEC = 18.0
 MAX_SEC = 90.0
@@ -225,3 +225,220 @@ def test_blocks_command_registered_in_argparse():
     parser = cli._build_parser()
     sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
     assert "blocks" in sub.choices, "'blocks' command not registered in _build_parser()"
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 filter tests — fixture-only, no network
+# ---------------------------------------------------------------------------
+
+_ARTEFACT_MARKERS = ["субтитры создавал", "субтитры сделал", "続きは", "字幕"]
+_PROMO_KEYWORDS = ["приходите на", "подписывайтесь", "включите звук"]
+_HOST_AFFIRMATIONS = ["здорово", "отлично", "хорошо"]
+
+_FILTER_DEFAULTS = dict(
+    total_duration=600.0,
+    head_skip_sec=60.0,
+    tail_skip_sec=120.0,
+    speech_density_min=0.4,
+    repetition_unique_ratio_min=0.3,
+    artefact_markers=_ARTEFACT_MARKERS,
+    promo_keywords=_PROMO_KEYWORDS,
+    host_affirmations=_HOST_AFFIRMATIONS,
+)
+
+
+def _make_block(text: str, start: float = 100.0, end: float = 122.0,
+                lines: list | None = None) -> CandidateBlock:
+    """Convenience: CandidateBlock with explicit or auto-generated lines."""
+    if lines is None:
+        lines = [_Line(start, end, text)]
+    return CandidateBlock(
+        id="test",
+        start=lines[0].t0,
+        end=lines[-1].t1,
+        duration=lines[-1].t1 - lines[0].t0,
+        text=" ".join(ln.text for ln in lines),
+        boundary_reason="sentence",
+        lines=lines,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Filter 1: transcription artefacts
+# ---------------------------------------------------------------------------
+
+def test_artefact_marker_drops_block():
+    """A block containing an artefact marker string is dropped."""
+    b = _make_block("Субтитры создавал DimaTorzok дальше идёт содержание")
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 0
+    assert len(dropped) == 1
+    assert dropped[0][1] == "artefact"
+
+
+def test_artefact_match_is_case_insensitive():
+    """Artefact markers match regardless of capitalisation."""
+    b = _make_block("СУБТИТРЫ СОЗДАВАЛ кто-то здесь ещё несколько слов")
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert any(reason == "artefact" for _, reason in dropped)
+
+
+# ---------------------------------------------------------------------------
+# Filter 2: promotional / organisational
+# ---------------------------------------------------------------------------
+
+def test_price_block_dropped_as_promo():
+    """A block containing a price ('N рублей') is dropped as promo."""
+    b = _make_block("Так она стоит 1000 рублей но сегодня по акции")
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "promo"
+
+
+def test_plain_number_block_not_dropped():
+    """A block that mentions a year or count but no price is kept."""
+    b = _make_block("В 2023 году всё изменилось для меня навсегда очень сильно")
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+
+
+def test_promo_keyword_drops_block():
+    """A block containing a promo keyword is dropped as promo."""
+    b = _make_block("Приходите на Фурмановскую улицу в субботу ждём вас")
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "promo"
+
+
+# ---------------------------------------------------------------------------
+# Filter 3: head / tail skip
+# ---------------------------------------------------------------------------
+
+def test_head_block_dropped():
+    """A block whose midpoint falls inside the first head_skip_sec is dropped as 'head'."""
+    b = _make_block("Привет всем добро пожаловать на нашу лекцию сегодня", start=0.0, end=20.0)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "head"
+
+
+def test_same_text_in_middle_is_kept():
+    """The same text block in the middle of the recording survives the head/tail filter."""
+    b = _make_block("Привет всем добро пожаловать на нашу лекцию сегодня",
+                    start=300.0, end=320.0)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+
+
+def test_tail_block_dropped():
+    """A block whose midpoint is in the last tail_skip_sec is dropped as 'tail'."""
+    # total_duration=600, tail=120 → tail zone starts at 480s
+    b = _make_block("До свидания спасибо что были с нами сегодня всем пока",
+                    start=500.0, end=522.0)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "tail"
+
+
+# ---------------------------------------------------------------------------
+# Filter 4: speech density
+# ---------------------------------------------------------------------------
+
+def test_low_density_block_dropped():
+    """A block with sparse speech (guided-practice silences) is dropped."""
+    # Three lines of 2s speech, spaced 14s apart → density = 6/30 = 0.2 < 0.4
+    lines = [
+        _Line(300.0, 302.0, "Закройте глаза"),
+        _Line(314.0, 316.0, "Дышите"),
+        _Line(328.0, 330.0, "Откройте глаза"),
+    ]
+    b = _make_block("Закройте глаза Дышите Откройте глаза", start=300.0, end=330.0, lines=lines)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "low_density"
+
+
+def test_normal_density_block_kept():
+    """A block with continuous speech is not dropped for density."""
+    lines = [
+        _Line(100.0, 109.0, "Первая половина фразы продолжается здесь"),
+        _Line(109.2, 120.0, "Вторая половина фразы завершается тут"),
+    ]
+    b = _make_block("...", lines=lines)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert not any(r == "low_density" for _, r in dropped)
+
+
+# ---------------------------------------------------------------------------
+# Filter 5: repetition (Whisper loop)
+# ---------------------------------------------------------------------------
+
+def test_looping_block_dropped():
+    """A Whisper-loop block (very low unique-word ratio) is dropped."""
+    looping = " ".join(["то что я заметил"] * 8)   # 4 unique / 32 total = 0.125 < 0.3
+    b = _make_block(looping)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(dropped) == 1
+    assert dropped[0][1] == "repetition"
+
+
+def test_natural_repetition_kept():
+    """Emphatic natural repetition ('ещё больше, ещё больше') is kept (ratio ≥ 0.3)."""
+    text = "ещё больше ещё больше это очень важно понять всем нам сегодня"
+    # unique/total = 8/12 ≈ 0.67 → kept
+    b = _make_block(text)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert not any(r == "repetition" for _, r in dropped)
+
+
+# ---------------------------------------------------------------------------
+# Filter 6: internal speaker change — FLAG, do not drop
+# ---------------------------------------------------------------------------
+
+def test_internal_speaker_change_flagged_not_dropped():
+    """A block with an internal dash line is KEPT but flagged has_internal_speaker_change."""
+    lines = [
+        _Line(100.0, 120.0, "Гость заканчивает свою мысль о природе вещей"),
+        _Line(120.5, 142.0, "— Вопрос ведущего к гостю о смысле жизни"),
+    ]
+    b = _make_block("...", lines=lines)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+    assert kept[0].has_internal_speaker_change is True
+
+
+def test_normal_block_not_flagged():
+    """A block without speaker-change signals is not flagged."""
+    lines = [
+        _Line(100.0, 110.0, "Говорит один человек без остановки"),
+        _Line(110.3, 122.0, "И продолжает свою мысль дальше"),
+    ]
+    b = _make_block("...", lines=lines)
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert kept[0].has_internal_speaker_change is False
+
+
+# ---------------------------------------------------------------------------
+# Filter 7: sidecar data — dropped blocks carry id, reason, and first_words
+# ---------------------------------------------------------------------------
+
+def test_dropped_blocks_carry_sidecar_fields():
+    """filter_blocks returns dropped tuples with block.id, reason, and block.text."""
+    b_artefact = _make_block("Субтитры создавал DimaTorzok некий текст здесь")
+    b_normal = _make_block("Это нормальный блок с интересным содержанием речи",
+                           start=200.0, end=222.0)
+    kept, dropped = filter_blocks([b_artefact, b_normal], **_FILTER_DEFAULTS)
+
+    assert len(dropped) == 1
+    drop_block, drop_reason = dropped[0]
+    assert drop_block.id == b_artefact.id
+    assert drop_reason == "artefact"
+    # first 8 words are accessible from drop_block.text
+    first_8 = " ".join(drop_block.text.split()[:8])
+    assert "субтитры" in first_8.lower() or "DimaTorzok" in first_8

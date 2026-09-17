@@ -128,6 +128,30 @@ presets:
   reels:  { min: 15, max: 90 }
   tiktok: { min: 15, max: 180 }
 
+# M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
+# Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
+# A filter that removes a good block is worse than one that lets junk through (stage 3 can rank it down).
+blocks_filter:
+  head_skip_sec: 60       # drop blocks whose midpoint falls in the first N seconds (greetings)
+  tail_skip_sec: 120      # drop blocks whose midpoint falls in the last N seconds (sign-offs)
+  speech_density_min: 0.4 # drop if spoken_words_time / wall_time < threshold (guided practice silences)
+  repetition_unique_ratio_min: 0.3  # drop if unique_words/total_words < threshold (Whisper loops)
+  artefact_markers:       # case-insensitive substrings that identify Whisper training-data hallucinations
+    - "субтитры создавал"
+    - "субтитры созданы"   # variant found in PXL: "Субтитры созданы сообществом Авиакатастроф"
+    - "субтитры сделал"
+    - "редактор субтитров"
+    - "続きは"            # Japanese credit string Whisper sometimes hallucinates
+    - "字幕"              # Chinese subtitle credit
+  promo_keywords:         # organisational / promotional talk — case-insensitive substring match
+    - "приходите на"      # street addresses ("приходите на Фурмановскую")
+    - "перерыв"
+    - "включите звук"
+    - "слышно меня"
+    - "запись идёт"
+    - "подписывайтесь"
+  # Price pattern (\d+\s*рубл) is matched by code — no need to list here.
+
 # Пути к рантайм-промптам R0 (не хардкод в коде — берутся отсюда).
 prompts:
   system: prompts/r0_system.md

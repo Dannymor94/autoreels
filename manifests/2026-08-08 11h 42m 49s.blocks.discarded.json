@@ -1,0 +1,58 @@
+[
+  {
+    "id": "3c47d6dddadf453c",
+    "start": 0.0,
+    "end": 18.2,
+    "boundary_reason": "sentence",
+    "filter_reason": "head",
+    "first_words": "Как вы с папой накидали за свою жизнь?"
+  },
+  {
+    "id": "9a7614000e63d4e7",
+    "start": 19.0,
+    "end": 40.2,
+    "boundary_reason": "sentence",
+    "filter_reason": "head",
+    "first_words": "Какой у вас темперамент изначально? Потом нажимает мама"
+  },
+  {
+    "id": "ac35b9a7f35779cd",
+    "start": 40.2,
+    "end": 62.2,
+    "boundary_reason": "sentence",
+    "filter_reason": "head",
+    "first_words": "Действуете, думаете и так далее. Вот это и"
+  },
+  {
+    "id": "bb7bd24ff2acb9b7",
+    "start": 617.2,
+    "end": 635.6,
+    "boundary_reason": "sentence",
+    "filter_reason": "promo",
+    "first_words": "Так она стоит 1000 рублей, но так как"
+  },
+  {
+    "id": "d712c9014a6bfe92",
+    "start": 636.5,
+    "end": 698.6,
+    "boundary_reason": "sentence",
+    "filter_reason": "artefact",
+    "first_words": "Приходите на Фурмановскую. Субтитры создавал DimaTorzok Владимиру Дагадаева,"
+  },
+  {
+    "id": "b21ce9e75127f163",
+    "start": 698.6,
+    "end": 716.9,
+    "boundary_reason": "sentence",
+    "filter_reason": "tail",
+    "first_words": "Да. И вот он у нас тренер по"
+  },
+  {
+    "id": "a40f8d044c1717e3",
+    "start": 716.0,
+    "end": 783.8,
+    "boundary_reason": "sentence",
+    "filter_reason": "artefact",
+    "first_words": "Вот. Ну, что-то сейчас будет интересное. Так, я"
+  }
+]

@@ -2313,15 +2313,17 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
 
 
 def cmd_blocks(target: str, *, root: str = ".") -> int:
-    """Print candidate blocks from a manifest or transcript cache (M1.6 stage 1).
+    """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
-    Loads the transcript, compresses it sentence-by-sentence, then runs deterministic
-    boundary detection to produce candidate blocks for later LLM scoring.
+    Loads the transcript, compresses it sentence-by-sentence, segments into candidate blocks
+    (stage 1), then applies the deterministic pre-filter (stage 2).
+    Writes a .blocks.dropped.json sidecar next to the manifest (when target is a manifest).
     Accepts a manifest (.json) or a transcript cache file (.transcript.json).
     """
+    import json as _json
     import statistics
 
-    from autoreels.cloud.blocks import candidate_blocks
+    from autoreels.cloud.blocks import candidate_blocks, filter_blocks
     from autoreels.cloud.compress import compress_transcript
 
     root = Path(root)
@@ -2331,11 +2333,14 @@ def cmd_blocks(target: str, *, root: str = ".") -> int:
 
     # Load transcript: transcript cache file → direct load; manifest → look up by sha + pkey
     transcript: Transcript | None = None
+    manifest_path: Path | None = None
+    manifest: Manifest | None = None
     if target_path.name.endswith(".transcript.json"):
         transcript = Transcript.model_validate_json(target_path.read_text(encoding="utf-8"))
     elif target_path.suffix == ".json":
         try:
             manifest = Manifest.model_validate_json(target_path.read_text(encoding="utf-8"))
+            manifest_path = target_path
         except Exception as exc:
             print(f"ошибка разбора манифеста: {exc}", file=sys.stderr)
             return 1
@@ -2375,30 +2380,85 @@ def cmd_blocks(target: str, *, root: str = ".") -> int:
         pause_sec=r0_cfg.sentence_pause_sec,
         max_sentence_sec=r0_cfg.max_sentence_sec,
     )
-    blocks = candidate_blocks(
+    all_blocks = candidate_blocks(
         compressed,
         min_sec=r0_cfg.min_meaningful_sec,
         max_sec=r0_cfg.max_duration,
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
     )
 
-    reason_counts: dict[str, int] = {}
-    durations: list[float] = []
-    for i, b in enumerate(blocks, 1):
-        words = b.text.split()
-        snippet = " ".join(words[:10]) + ("…" if len(words) > 10 else "")
-        print(f"{i:3d} [{b.boundary_reason:13s}] {b.duration:5.1f}s  {snippet}", flush=True)
-        reason_counts[b.boundary_reason] = reason_counts.get(b.boundary_reason, 0) + 1
-        durations.append(b.duration)
+    total_duration = all_blocks[-1].end if all_blocks else 0.0
+    bf = r0_cfg.blocks_filter
+    # SC detection (host affirmations + dash signal) only makes sense for interview material.
+    # Prefer manifest.source_kind (per-video) over r0_cfg.source_kind (config default).
+    _source_kind = manifest.source_kind if manifest is not None else r0_cfg.source_kind
+    sc_affirmations = r0_cfg.host_affirmations if _source_kind == "interview" else []
+    kept, dropped = filter_blocks(
+        all_blocks,
+        total_duration=total_duration,
+        head_skip_sec=bf.head_skip_sec,
+        tail_skip_sec=bf.tail_skip_sec,
+        speech_density_min=bf.speech_density_min,
+        repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
+        artefact_markers=bf.artefact_markers,
+        promo_keywords=bf.promo_keywords,
+        host_affirmations=sc_affirmations,
+    )
 
-    if durations:
-        print(f"\nВсего: {len(blocks)} блоков")
+    # Build verdict map for output (all_blocks order preserved)
+    drop_map: dict[str, str] = {b.id: r for b, r in dropped}
+
+    boundary_counts: dict[str, int] = {}
+    drop_reason_counts: dict[str, int] = {}
+    durations: list[float] = []
+    sc_flag_count = 0
+    for i, b in enumerate(all_blocks, 1):
+        words = b.text.split()
+        snippet = " ".join(words[:8]) + ("…" if len(words) > 8 else "")
+        verdict = drop_map.get(b.id, "KEPT")
+        flag = " [SC]" if getattr(b, "has_internal_speaker_change", False) else ""
         print(
-            f"Длительность: min={min(durations):.1f}s, "
-            f"median={statistics.median(durations):.1f}s, "
-            f"max={max(durations):.1f}s"
+            f"{i:3d} [{b.boundary_reason:13s}] {b.duration:5.1f}s  [{verdict:<12s}]{flag}  {snippet}",
+            flush=True,
         )
-        print(f"По границам: {dict(sorted(reason_counts.items()))}")
+        if verdict == "KEPT":
+            boundary_counts[b.boundary_reason] = boundary_counts.get(b.boundary_reason, 0) + 1
+            durations.append(b.duration)
+            if b.has_internal_speaker_change:
+                sc_flag_count += 1
+        else:
+            drop_reason_counts[verdict] = drop_reason_counts.get(verdict, 0) + 1
+
+    # Write sidecar (naming mirrors .discarded.json — excluded by corpus tests' filter)
+    if manifest_path is not None and dropped:
+        sidecar = manifest_path.with_suffix(".blocks.discarded.json")
+        sidecar_data = [
+            {
+                "id": b.id,
+                "start": b.start,
+                "end": b.end,
+                "boundary_reason": b.boundary_reason,
+                "filter_reason": r,
+                "first_words": " ".join(b.text.split()[:8]),
+            }
+            for b, r in dropped
+        ]
+        sidecar.write_text(_json.dumps(sidecar_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Summary
+    if all_blocks:
+        print(f"\nВсего: {len(all_blocks)} блоков → Удержано: {len(kept)}, Удалено: {len(dropped)}")
+        if drop_reason_counts:
+            print(f"Удалено по причинам: {dict(sorted(drop_reason_counts.items()))}")
+        if durations:
+            print(
+                f"Длительность (kept): min={min(durations):.1f}s, "
+                f"median={statistics.median(durations):.1f}s, "
+                f"max={max(durations):.1f}s"
+            )
+            print(f"По границам (kept): {dict(sorted(boundary_counts.items()))}")
+        if sc_flag_count:
+            print(f"Флаг speaker_change внутри блока: {sc_flag_count}")
     else:
         print("Блоков нет.")
     return 0

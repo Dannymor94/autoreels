@@ -64,6 +64,33 @@ class ChunkingConfig(BaseModel):
     fail_fast: bool = False                     # False → продолжать при провале чанка
 
 
+class BlocksFilterConfig(BaseModel):
+    """Stage-2 filter config: deterministic pre-filter before LLM scoring."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    head_skip_sec: float = 60.0          # drop blocks whose midpoint < this (greetings)
+    tail_skip_sec: float = 120.0         # drop blocks whose midpoint > total-this (sign-offs)
+    speech_density_min: float = 0.4      # drop if spoken_time/wall_time < threshold
+    repetition_unique_ratio_min: float = 0.3  # drop if unique_words/total_words < threshold
+    artefact_markers: list[str] = Field(default_factory=lambda: [
+        "субтитры создавал",
+        "субтитры созданы",
+        "субтитры сделал",
+        "редактор субтитров",
+        "続きは",
+        "字幕",
+    ])
+    promo_keywords: list[str] = Field(default_factory=lambda: [
+        "приходите на",
+        "перерыв",
+        "включите звук",
+        "слышно меня",
+        "запись идёт",
+        "подписывайтесь",
+    ])
+
+
 class R0Config(BaseModel):
     """Типизированный config/r0.yaml. Пресет резолвится в числа через свойства ниже."""
 
@@ -131,6 +158,7 @@ class R0Config(BaseModel):
     presets: dict[str, Preset]
     prompts: PromptPaths
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
+    blocks_filter: BlocksFilterConfig = Field(default_factory=BlocksFilterConfig)
 
     @property
     def min_duration(self) -> int:
