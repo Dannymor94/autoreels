@@ -298,6 +298,11 @@ def _detect_internal_speaker_change(block: CandidateBlock, host_affirmations: Se
     return False
 
 
+def _merge_consecutive(a: CandidateBlock, b: CandidateBlock) -> CandidateBlock:
+    """Merge two adjacent blocks into one, keeping a's boundary_reason."""
+    return _make_block(a.lines + b.lines, a.boundary_reason)
+
+
 def filter_blocks(
     blocks: list[CandidateBlock],
     *,
@@ -310,22 +315,46 @@ def filter_blocks(
     promo_keywords: Sequence[str] = (),
     signoff_phrases: Sequence[str] = (),
     host_affirmations: Sequence[str] = (),
+    min_sec: float = 0.0,
+    max_sec: float = float("inf"),
 ) -> tuple[list[CandidateBlock], list[tuple[CandidateBlock, str]]]:
     """Apply deterministic pre-filters (M1.6 stage 2).
 
     Returns (kept, dropped) where dropped is a list of (block, reason) pairs.
     Kept blocks have has_internal_speaker_change set if an internal turn was detected.
-    Priority: artefact → promo → signoff → head → tail → low_density → repetition.
+    Priority: artefact → too_short_after_scrub → promo → signoff → head → tail →
+              low_density → repetition.
+
+    min_sec / max_sec: after artefact scrubbing, a block that falls below min_sec is
+    merged with the following block when the combined duration fits max_sec; otherwise
+    dropped as "too_short_after_scrub".  Defaults keep backward-compatible behaviour
+    (no duration re-check).
     """
     kept: list[CandidateBlock] = []
     dropped: list[tuple[CandidateBlock, str]] = []
-    for block in blocks:
+    work = list(blocks)  # copy; entries may be replaced during merge
+    i = 0
+    while i < len(work):
+        block = work[i]
         # Artefact scrubbing first: strip artefact lines from the tail of the block.
         # Drop only if artefact opens the block (first line) — real speech preceded by
         # hallucinated credit text is salvageable; a block that starts on artefact is not.
         if not _scrub_artefact_lines(block, artefact_markers):
             dropped.append((block, "artefact"))
+            i += 1
             continue
+
+        # Re-check duration floor after scrubbing (scrubbing may have shortened the block).
+        if min_sec > 0 and block.duration < min_sec:
+            if i + 1 < len(work):
+                combined_dur = work[i + 1].end - block.start
+                if combined_dur <= max_sec:
+                    work[i:i + 2] = [_merge_consecutive(block, work[i + 1])]
+                    continue  # re-process merged block at same index
+            dropped.append((block, "too_short_after_scrub"))
+            i += 1
+            continue
+
         # After scrubbing, no artefact markers remain; pass () to _filter_reason.
         reason = _filter_reason(
             block, total_duration,
@@ -341,6 +370,7 @@ def filter_blocks(
                 block, host_affirmations
             )
             kept.append(block)
+        i += 1
     return kept, dropped
 
 

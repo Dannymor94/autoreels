@@ -2400,6 +2400,8 @@ def _blocks_do_apply(review_path: str, *, root: str) -> int:
         promo_keywords=bf.promo_keywords,
         signoff_phrases=bf.signoff_phrases,
         host_affirmations=sc_affirmations,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
     )
     bs_cfg = r0_cfg.block_scoring
     id_to_block = {}
@@ -2625,6 +2627,8 @@ def cmd_blocks(
         promo_keywords=bf.promo_keywords,
         signoff_phrases=bf.signoff_phrases,
         host_affirmations=sc_affirmations,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
     )
 
     # Build verdict map for output (all_blocks order preserved)

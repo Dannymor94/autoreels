@@ -333,6 +333,69 @@ def test_promo_keyword_not_matched_as_word_prefix():
     assert len(dropped) == 0
 
 
+_MIN_SEC = 18.0
+_MAX_SEC = 90.0
+_SIZING_DEFAULTS = {**_FILTER_DEFAULTS, "min_sec": _MIN_SEC, "max_sec": _MAX_SEC,
+                    "total_duration": 300.0}
+
+
+def test_scrub_below_floor_merges_with_next():
+    """After artefact tail is stripped, a too-short block merges with the following block.
+
+    Block A: 100-117s raw; last line is artefact; after scrub 100-112s = 12s < 18s floor.
+    Block B: 117-160s = 43s.  Combined 60s ≤ 90s max → merged, both in kept.
+    """
+    real_a = _Line(100.0, 112.0, "Действительно интересная мысль была здесь давно")
+    art_a  = _Line(112.0, 117.0, "Субтитры создавал DimaTorzok")
+    block_a = _make_block("", lines=[real_a, art_a])
+
+    real_b = _Line(117.0, 160.0, "Следующая очень длинная мысль о важном и интересном")
+    block_b = _make_block("", lines=[real_b])
+
+    kept, dropped = filter_blocks([block_a, block_b], **_SIZING_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+    assert "интересная мысль" in kept[0].text
+    assert "длинная мысль" in kept[0].text
+
+
+def test_scrub_below_floor_dropped_when_merge_exceeds_max():
+    """After artefact scrub, a too-short block is dropped when merging would exceed max_sec.
+
+    Block A: after scrub 100-112s = 12s < 18s.  Block B: 117-210s = 93s.
+    Combined 110s > 90s max → A dropped as too_short_after_scrub, B kept normally.
+    """
+    real_a = _Line(100.0, 112.0, "Действительно интересная мысль была здесь давно")
+    art_a  = _Line(112.0, 117.0, "Субтитры создавал DimaTorzok")
+    block_a = _make_block("", lines=[real_a, art_a])
+
+    real_b = _Line(117.0, 210.0, "Очень длинный блок который значительно превышает максимум")
+    block_b = _make_block("", lines=[real_b])
+
+    kept, dropped = filter_blocks([block_a, block_b], **_SIZING_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 1
+    assert dropped[0][1] == "too_short_after_scrub"
+    assert "длинный блок" in kept[0].text
+
+
+def test_scrub_above_floor_block_untouched():
+    """A block that still exceeds min_sec after artefact strip passes through unchanged.
+
+    Three lines: two real-speech lines (28s) + artefact tail.  After scrub 28s > 18s.
+    """
+    s1  = _Line(100.0, 115.0, "Первая мысль очень длинная и важная для понимания")
+    s2  = _Line(115.0, 128.0, "Вторая мысль тоже важная и нужная нам сейчас здесь")
+    art = _Line(128.0, 130.0, "Субтитры создавал DimaTorzok")
+    b = _make_block("", lines=[s1, s2, art])
+
+    kept, dropped = filter_blocks([b], **_SIZING_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+    assert "Субтитры создавал" not in kept[0].text
+    assert kept[0].duration == pytest.approx(28.0)
+
+
 # ---------------------------------------------------------------------------
 # Filter 2: promotional / organisational
 # ---------------------------------------------------------------------------
