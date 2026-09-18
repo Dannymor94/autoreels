@@ -18,8 +18,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue as _queue
 import shutil
 import sys
+import threading as _threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1221,6 +1223,7 @@ def cmd_run(
     pull_first: bool = True,
     force_transcribe: bool = False,
     auto_render: bool = False,
+    _render_queue=None,
 ) -> Path:
     """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
 
@@ -1412,8 +1415,12 @@ def cmd_run(
         if auto_render:
             _ok, _reason = _should_auto_render(render_cfg, failed_chunks=failed_chunks)
             if _ok:
-                print(f"\n▶ авто-рендер манифеста {path.name}…", flush=True)
-                cmd_render(root=root, manifests_dir=manifests_dir, pull_first=False)
+                if _render_queue is not None:
+                    _render_queue.put(path)
+                    print(f"  ▶ манифест поставлен в очередь рендера: {path.name}", flush=True)
+                else:
+                    print(f"\n▶ авто-рендер манифеста {path.name}…", flush=True)
+                    cmd_render(root=root, manifests_dir=manifests_dir, pull_first=False)
             else:
                 print(f"  авто-рендер пропущен: {_reason}", flush=True)
     return path
@@ -1530,6 +1537,7 @@ def cmd_run_batch(
     push: bool = False,
     force_transcribe: bool = False,
     auto_render: bool = False,
+    parallel_render: bool = True,
 ) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Batch: обработать все видео в inputs/ по очереди. Один упал → остальные продолжают.
 
@@ -1537,8 +1545,10 @@ def cmd_run_batch(
     Явный `root=<путь>` переопределяет дефолт — для тестов и нестандартных раскладок.
     `push=True` → каждый успешный манифест сразу коммитится+пушится (per-video, не в конце):
     упади прогон на середине — уже готовые манифесты УЖЕ на системнике.
+    `parallel_render=True` → рендер запускается в фоновом потоке сразу после анализа каждого
+    источника, не дожидаясь следующего анализа. Не более одного активного рендера одновременно.
     Возвращает (ok_names, failed_list, skipped_list, zero_harvest_list):
-    failed = [(name, exc), …] (реальные ошибки);
+    failed = [(name, exc), …] (реальные ошибки, включая ошибки рендера);
     skipped = [(name, причина), …] (битые/пустые файлы — их НЕ архивируем, остаются в inputs/);
     zero_harvest = [(name, причина), …] (непустой транскрипт, но 0 рилов — источник в inputs/).
     """
@@ -1549,6 +1559,7 @@ def cmd_run_batch(
     _preflight_tools(ffmpeg, resolve_ffprobe(None, ffmpeg=ffmpeg))
     _git_pull(root, what="калибровки")          # один pull на всю пачку (не на каждое видео)
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+    manifests_dir_resolved = Path(manifests_dir) if manifests_dir else root / "manifests"
     videos = _scan_inputs(inputs_dir)
     if not videos:
         _report_empty_inputs(inputs_dir)
@@ -1558,13 +1569,47 @@ def cmd_run_batch(
     failed: list[tuple[str, Exception]] = []
     skipped: list[tuple[str, str]] = []
     zero_harvest: list[tuple[str, str]] = []
+
+    # Background render worker: at most one render at a time.
+    # ponytail: single worker thread + queue — two ffmpeg on one GPU is slower than one.
+    render_q: _queue.Queue | None = None
+    render_failed: list[tuple[str, Exception]] = []
+    worker: _threading.Thread | None = None
+
+    if auto_render and parallel_render:
+        render_q = _queue.Queue()
+
+        def _render_worker() -> None:
+            while True:
+                item = render_q.get()
+                if item is None:
+                    render_q.task_done()
+                    break
+                mf_path = item
+                stem = mf_path.stem
+                try:
+                    print(f"\n[рендер] ▶ {stem}…", flush=True)
+                    cmd_render(
+                        root=root, manifests_dir=manifests_dir_resolved, pull_first=False,
+                        _manifest_paths=[mf_path], background=True, _raise_on_failure=True,
+                    )
+                    print(f"[рендер] ✓ {stem}", flush=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"\n[рендер] ✗ {stem}: {e}", file=sys.stderr, flush=True)
+                    render_failed.append((f"{stem} (рендер)", e))
+                finally:
+                    render_q.task_done()
+
+        worker = _threading.Thread(target=_render_worker, daemon=True, name="render-worker")
+        worker.start()
+
     for v in videos:
         try:
             cmd_run(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
                 ffmpeg=ffmpeg, push=push, pull_first=False, force_transcribe=force_transcribe,
-                auto_render=auto_render,
+                auto_render=auto_render, _render_queue=render_q,
             )
             ok.append(v.name)
         except InputInvalid as e:               # битый/пустой файл — пропуск, НЕ ошибка
@@ -1576,6 +1621,12 @@ def cmd_run_batch(
         except Exception as e:  # noqa: BLE001
             print(f"\n[ОШИБКА] {v.name}: {e}", file=sys.stderr, flush=True)
             failed.append((v.name, e))
+
+    if worker is not None:
+        render_q.put(None)        # sentinel: worker exits after draining queue
+        render_q.join()           # wait until sentinel is processed (all renders done)
+        worker.join()
+        failed.extend(render_failed)
 
     parts = [f"{len(ok)} ok"]
     if zero_harvest:
@@ -1707,6 +1758,9 @@ def cmd_render(
     allow_stale: bool = False,
     auto_recrop: bool = True,
     pull_first: bool = True,
+    _manifest_paths: list | None = None,
+    background: bool = False,
+    _raise_on_failure: bool = False,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -1736,7 +1790,7 @@ def cmd_render(
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
 
-    manifest_files = _glob_manifests(manifests_dir)
+    manifest_files = _manifest_paths if _manifest_paths is not None else _glob_manifests(manifests_dir)
     if not manifest_files:
         print("manifests/ пуст — нечего рендерить", flush=True)
         return []
@@ -1849,7 +1903,7 @@ def cmd_render(
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
                 profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
-                subtitles_cfg=subtitles_cfg,
+                subtitles_cfg=subtitles_cfg, background=background,
             )
             all_outputs.extend(outputs)
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
@@ -1880,6 +1934,9 @@ def cmd_render(
         print(f"\n=== batch render: {' / '.join(parts)} ===", flush=True)
         for name, err in failed:
             print(f"  ✗ {name}: {err}", file=sys.stderr)
+    if _raise_on_failure and failed:
+        _, first_exc = failed[0]
+        raise first_exc
     return all_outputs
 
 
@@ -4487,6 +4544,10 @@ def _build_parser():
                          "(нужно после смены initial_prompt/модели, если кэш уже прогрет)")
     pr.add_argument("--render", dest="auto_render", action="store_true",
                     help="после успешного анализа сразу запустить рендер (если role позволяет)")
+    pr.add_argument("--no-parallel-render", dest="parallel_render", action="store_false",
+                    help="не рендерить в фоне: ждать окончания рендера перед следующим "
+                         "анализом (для слабых машин; по умолчанию фоновый рендер включён)")
+    pr.set_defaults(parallel_render=True)
 
     ptx = sub.add_parser(
         "transcribe",
@@ -4892,6 +4953,7 @@ def main(argv=None) -> int:
                     ffmpeg=ffmpeg, push=not args.no_push,
                     force_transcribe=args.force_transcribe,
                     auto_render=getattr(args, "auto_render", False),
+                    parallel_render=getattr(args, "parallel_render", True),
                 )
                 if failed or zero_harvest:
                     return 1

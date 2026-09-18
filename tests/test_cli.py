@@ -2922,7 +2922,7 @@ def test_cmd_render_uses_config_ffmpeg_when_no_flag(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, music_path, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, music_path, subtitles_cfg, **_kw):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -2949,7 +2949,7 @@ def test_cmd_render_explicit_ffmpeg_overrides_config(monkeypatch, tmp_path):
 
     ffmpeg_used = []
 
-    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, music_path, subtitles_cfg):
+    def _fake_render(manifest, *, inputs_dir, out_dir, render_cfg, ffmpeg, encoder, profile, palette, zoom, music_path, subtitles_cfg, **_kw):
         ffmpeg_used.append(ffmpeg)
         return []
 
@@ -5912,3 +5912,255 @@ def test_run_dispatch_ingest_goes_to_project_inputs_not_cwd(monkeypatch, tmp_pat
         "Likely Path('inputs') was not replaced with _project_root()/'inputs'."
     )
     assert not (other / "inputs").exists(), "source must not land in cwd/inputs/"
+
+
+# ------------------------------------------------------------------ background render (Part 2)
+import threading as _threading
+import queue as _queue
+
+
+def test_background_analysis_2_starts_before_render_1_finishes(monkeypatch, tmp_path):
+    """Analysis of source 2 starts while render of source 1 is still running (background=True)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    render_started = _threading.Event()
+    render_gate = _threading.Event()
+    analysis_2_started = _threading.Event()
+
+    stage_calls = [0]
+    orig_select = cli._stage_select
+
+    def mock_select(*a, **k):
+        stage_calls[0] += 1
+        if stage_calls[0] == 2:
+            analysis_2_started.set()
+        return orig_select(*a, **k)
+
+    monkeypatch.setattr(cli, "_stage_select", mock_select)
+
+    def mock_render_crop(manifest, **kwargs):
+        render_started.set()
+        render_gate.wait(timeout=5)
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", mock_render_crop)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    result_holder = []
+
+    def run_batch():
+        result_holder.append(cli.cmd_run_batch(
+            root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+            archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+            auto_render=True, parallel_render=True,
+        ))
+
+    t = _threading.Thread(target=run_batch)
+    t.start()
+    assert render_started.wait(timeout=5), "render of source 1 should start"
+    assert analysis_2_started.wait(timeout=5), "analysis of source 2 should start before render 1 finishes"
+    render_gate.set()
+    t.join(timeout=10)
+
+
+def test_background_only_one_render_at_a_time(monkeypatch, tmp_path):
+    """Two manifests never render concurrently; the second queues behind the first."""
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    concurrent = [0]
+    max_concurrent = [0]
+    lock = _threading.Lock()
+    gate_a = _threading.Event()
+    gate_b = _threading.Event()
+    gate_a.set()
+    gate_b.set()
+
+    def mock_render_crop(manifest, **kwargs):
+        name = Path(manifest.source).stem
+        with lock:
+            concurrent[0] += 1
+            max_concurrent[0] = max(max_concurrent[0], concurrent[0])
+        (gate_a if name == "a" else gate_b).wait(timeout=5)
+        with lock:
+            concurrent[0] -= 1
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", mock_render_crop)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+        auto_render=True, parallel_render=True,
+    )
+
+    assert max_concurrent[0] <= 1, f"max concurrent renders={max_concurrent[0]}, expected ≤1"
+
+
+def test_background_batch_waits_for_all_renders(monkeypatch, tmp_path):
+    """cmd_run_batch does not return until all queued renders have finished."""
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    render_completed = []
+    render_gate = _threading.Event()
+
+    def mock_render_crop(manifest, **kwargs):
+        render_gate.wait(timeout=5)
+        render_completed.append(Path(manifest.source).stem)
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", mock_render_crop)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+
+    batch_done = _threading.Event()
+
+    def run():
+        cli.cmd_run_batch(
+            root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+            archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+            auto_render=True, parallel_render=True,
+        )
+        batch_done.set()
+
+    t = _threading.Thread(target=run)
+    t.start()
+
+    import time as _time
+    _time.sleep(0.15)
+    assert not batch_done.is_set(), "batch should wait while render is blocked"
+    render_gate.set()
+    assert batch_done.wait(timeout=5), "batch should finish after render completes"
+    assert "a" in render_completed
+    t.join(timeout=5)
+
+
+def test_background_render_failure_isolated_from_analysis(monkeypatch, tmp_path):
+    """A render failure does not abort analysis of remaining sources; both appear in summary."""
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    call_n = [0]
+
+    def mock_render_crop(manifest, **kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            raise Exception("render boom")
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", mock_render_crop)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+        auto_render=True, parallel_render=True,
+    )
+
+    assert sorted(ok) == ["a.mp4", "b.mp4"], "both analyses should succeed"
+    render_failures = [n for n, _ in failed if "рендер" in n]
+    assert len(render_failures) == 1, f"expected 1 render failure, got {render_failures}"
+
+
+def test_background_empty_manifest_not_queued(monkeypatch, tmp_path):
+    """ZeroHarvestError (0 reels) → manifest not written → render not queued."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], [], []))
+    monkeypatch.setattr(cli, "_stage_compress", lambda *a, **k: "non-empty")
+
+    render_called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: render_called.append(m) or [])
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+        auto_render=True, parallel_render=True,
+    )
+
+    assert render_called == [], "render must not be queued for zero-harvest"
+    assert len(zero_harvest) == 1
+
+
+def test_background_disabled_is_sequential(monkeypatch, tmp_path):
+    """parallel_render=False → render blocks before next analysis (today's behaviour)."""
+    _mock_pipeline(monkeypatch, tmp_path)
+
+    order = []
+
+    def mock_render_crop(manifest, **kwargs):
+        order.append(("render", Path(manifest.source).stem))
+        return []
+
+    monkeypatch.setattr(cli, "render_crop", mock_render_crop)
+
+    stage_calls = [0]
+    orig_select = cli._stage_select
+
+    def mock_select(*a, **k):
+        stage_calls[0] += 1
+        order.append(("analysis", stage_calls[0]))
+        return orig_select(*a, **k)
+
+    monkeypatch.setattr(cli, "_stage_select", mock_select)
+
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "a.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"x")
+
+    cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+        auto_render=True, parallel_render=False,
+    )
+
+    # Sequential: analysis 1, render a, analysis 2, render b
+    assert order[0] == ("analysis", 1)
+    assert order[1][0] == "render"
+    assert order[2] == ("analysis", 2)
+    assert order[3][0] == "render"
+
+
+def test_non_tty_render_no_carriage_returns(monkeypatch, tmp_path, capsys):
+    """Non-TTY: _run_ffmpeg_with_progress must not emit \\r in output."""
+    import subprocess
+    from autoreels.local.render import _run_ffmpeg_with_progress
+
+    monkeypatch.setenv("AUTOREELS_NO_TTY", "1")
+
+    class _FakeProc:
+        returncode = 0
+        stderr = iter([])
+        stdout = iter([])
+        def wait(self): pass
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: _FakeProc())
+
+    rc, _ = _run_ffmpeg_with_progress(
+        ["ffmpeg", "-i", "in.mp4", "out.mp4"],
+        reel_id="abc123", idx=1, total=3, duration_sec=30.0,
+        batch_total_secs=90.0, background=False,
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert len(lines) >= 1, "should print at least one line per clip"
+    assert not any("\r" in ln for ln in lines), "non-TTY output must not contain \\r"

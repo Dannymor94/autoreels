@@ -21,8 +21,10 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
+import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
@@ -32,6 +34,7 @@ from autoreels.core import state
 from autoreels.core.config import (
     AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
+from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.models import Manifest, SetupProfile
 from autoreels.local.subtitles import build_ass
 
@@ -94,22 +97,45 @@ def _run_ffmpeg_with_progress(
     total: int,
     duration_sec: float,
     cwd: str | None = None,
+    batch_encoded_secs: float = 0.0,
+    batch_total_secs: float = 0.0,
+    batch_wall_sec: float = 0.0,
+    background: bool = False,
 ) -> tuple[int, str]:
-    """Запустить ffmpeg с отображением прогресса через -progress pipe:1.
+    """Запустить ffmpeg с отображением прогресса.
 
-    Печатает «клип N/M: id (D:DD)…» затем обновляемую строку «\\r  T/D (P%)».
+    TTY: перезаписываемая строка с баром, elapsed, ETA.
+    Non-TTY / background: одна строка старт + одна строка финиш на клип (нет \\r).
     Возвращает (returncode, stderr_text).
     """
+    _CLEAR_EOL = "\033[K"
+    _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    header = f"клип {idx}/{total}: {reel_id} ({_fmt_time(duration_sec)})"
+    tty = is_tty() and not background
+
+    if not tty:
+        # Non-TTY / background: plain subprocess, one start line, one done line.
+        print(f"\n{header}…", flush=True)
+        stderr_chunks: list[str] = []
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", cwd=cwd,
+        )
+        for line in proc.stderr:
+            stderr_chunks.append(line)
+        proc.wait()
+        wall = time.time()  # approx; no clip_start in this path
+        print(f"  ✓ {header} готово", flush=True)
+        return proc.returncode, "".join(stderr_chunks)
+
+    # TTY: -progress pipe:1 for live updates.
     prog_cmd = [cmd[0], "-progress", "pipe:1"] + cmd[1:]
-    stderr_chunks: list[str] = []
+    stderr_chunks = []
 
     proc = subprocess.Popen(
-        prog_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        cwd=cwd,
+        prog_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", cwd=cwd,
     )
 
     def _drain_stderr() -> None:
@@ -119,24 +145,45 @@ def _run_ffmpeg_with_progress(
     t = threading.Thread(target=_drain_stderr, daemon=True)
     t.start()
 
-    print(f"\nклип {idx}/{total}: {reel_id} ({_fmt_time(duration_sec)})…", flush=True)
+    clip_start_wall = time.time()
+    tick = 0
+    print(f"\n{header}…", flush=True)
     for line in proc.stdout:
         key, _, val = line.strip().partition("=")
         if key == "out_time_ms":
             try:
-                elapsed = max(0.0, int(val) / 1_000_000)
-                pct = min(100, int(elapsed / duration_sec * 100)) if duration_sec > 0 else 0
-                print(
-                    f"\r  {_fmt_time(elapsed)}/{_fmt_time(duration_sec)} ({pct}%)",
-                    end="", flush=True,
+                clip_elapsed = max(0.0, int(val) / 1_000_000)
+                clip_pct = min(100, int(clip_elapsed / duration_sec * 100)) if duration_sec > 0 else 0
+                total_encoded = batch_encoded_secs + clip_elapsed
+                total_wall = batch_wall_sec + (time.time() - clip_start_wall)
+                vps = total_encoded / total_wall if total_wall > 0 else 0.0
+                remaining = max(0.0, batch_total_secs - total_encoded)
+                eta = remaining / vps if vps > 0 else 0.0
+                bar = render_bar(clip_pct)
+                spin = _SPINNER[tick % len(_SPINNER)]
+                tick += 1
+                eta_str = f"  ETA ~{_fmt_time(eta)}" if eta > 1 else ""
+                msg = (
+                    f"  {bar} {clip_pct:3d}%  "
+                    f"{_fmt_time(clip_elapsed)}/{_fmt_time(duration_sec)}"
+                    f"  ел {_fmt_time(total_wall)}{eta_str}  {spin}"
                 )
+                width = shutil.get_terminal_size(fallback=(120, 24)).columns
+                if len(msg) > width:
+                    msg = msg[:width - 1] + "…"
+                sys.stdout.write(f"\r{_CLEAR_EOL}{msg}")
+                sys.stdout.flush()
             except (ValueError, ZeroDivisionError):
                 pass
         elif key == "progress" and val.strip() == "end":
-            print(
-                f"\r  {_fmt_time(duration_sec)}/{_fmt_time(duration_sec)} (100%)",
-                end="", flush=True,
+            bar = render_bar(100)
+            total_wall = batch_wall_sec + (time.time() - clip_start_wall)
+            sys.stdout.write(
+                f"\r{_CLEAR_EOL}  {bar} 100%  "
+                f"{_fmt_time(duration_sec)}/{_fmt_time(duration_sec)}"
+                f"  ел {_fmt_time(total_wall)}"
             )
+            sys.stdout.flush()
 
     proc.wait()
     t.join(timeout=2)
@@ -614,6 +661,7 @@ def _render_segments(
     progress: Callable[[str], None] | None = None,
     emit_text: bool = False,
     subtitles_cfg: SubtitlesConfig | None = None,
+    background: bool = False,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
@@ -655,6 +703,11 @@ def _render_segments(
         tmp_ass_dir = Path(_tmp_ass)
         outputs: list[Path] = []
         total = len(manifest.reels)
+        batch_total_secs = sum(
+            r.end - r.start for r in manifest.reels if r.end - r.start >= _MIN_CLIP_RENDER_SEC
+        )
+        batch_encoded_secs = 0.0
+        batch_start_wall = time.time()
         for idx, reel in enumerate(manifest.reels, 1):
             clip_dur = reel.end - reel.start
             if clip_dur < _MIN_CLIP_RENDER_SEC:
@@ -709,11 +762,16 @@ def _render_segments(
                 music_path=music_path, filter_complex=reel_fc,
                 quality=active.quality, rate_control=active.rate_control, qp=active.qp,
             )
+            clip_dur_s = reel.end - reel.start
             returncode, stderr_text = _run_ffmpeg_with_progress(
                 cmd, reel_id=reel.id, idx=idx, total=total,
-                duration_sec=reel.end - reel.start,
-                cwd=ass_cwd,
+                duration_sec=clip_dur_s, cwd=ass_cwd,
+                batch_encoded_secs=batch_encoded_secs,
+                batch_total_secs=batch_total_secs,
+                batch_wall_sec=time.time() - batch_start_wall,
+                background=background,
             )
+            batch_encoded_secs += clip_dur_s
             if returncode != 0:
                 out.unlink(missing_ok=True)         # не оставлять битый частичный выход
                 stderr = stderr_text.strip() or "(пустой stderr)"
@@ -749,6 +807,7 @@ def render_cut(
     encoder: str | None = None,
     profile: str | None = None,
     progress: Callable[[str], None] | None = None,
+    background: bool = False,
 ) -> list[Path]:
     """R1a: для каждого reel вырезать окно из исходника КАК ЕСТЬ → `out_dir`/<id>_raw.mp4.
 
@@ -758,7 +817,7 @@ def render_cut(
     return _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=None, suffix="_raw", profile=profile,
-        progress=progress,
+        progress=progress, background=background,
     )
 
 
@@ -776,6 +835,7 @@ def render_crop(
     music_path: str | Path | None = None,
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
+    background: bool = False,
 ) -> list[Path]:
     """R1b+R3: вырезать окно, применить кроп-профиль, цветокор и (опц.) выжечь субтитры → <id>.mp4.
 
@@ -795,6 +855,7 @@ def render_crop(
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup, zoom_cfg), suffix="",
         palette_vf=palette_vf, music_path=music_path,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
+        background=background,
     )
 
 

@@ -485,7 +485,8 @@ class RenderConfig(BaseModel):
         default_factory=lambda: {k: Palette(**v) for k, v in _DEFAULT_PALETTES.items()}
     )
     role: str = "both"        # "analyze" | "render" | "both" (machine-local, render.local.yaml)
-    auto_render: bool = False  # авто-рендер после анализа (machine-local, render.local.yaml)
+    auto_render: bool = False   # авто-рендер после анализа (machine-local, render.local.yaml)
+    parallel_render: bool = True  # рендер в фоне пока идёт следующий анализ (render.local.yaml)
 
     @field_validator("role")
     @classmethod
