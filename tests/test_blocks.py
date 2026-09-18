@@ -1116,3 +1116,237 @@ def test_review_warns_when_existing_file_has_scores(tmp_path, monkeypatch, capsy
     err = capsys.readouterr().err
     assert "ВНИМАНИЕ" in err
     assert "оцен" in err
+
+
+# ---------------------------------------------------------------------------
+# Compact export + compact answer import
+# ---------------------------------------------------------------------------
+
+def _make_blocks_for_compact():
+    """Two kept blocks with multi-word text (no newlines, no empty lines)."""
+    b1 = _make_block(
+        "Первая мысль, которая звучит убедительно и должна пройти в клип.",
+        start=10.0, end=36.0,
+    )
+    b2 = _make_block(
+        "Вторая мысль — отдельная тема, не связана с первой.",
+        start=40.0, end=62.0,
+    )
+    b1.has_internal_speaker_change = False
+    b2.has_internal_speaker_change = False
+    return [b1, b2]
+
+
+def test_compact_export_one_line_per_block():
+    """export_compact_review produces exactly one data line per block with collapsed text."""
+    from autoreels.cloud.blocks import export_compact_review
+
+    blocks = _make_blocks_for_compact()
+    out = export_compact_review(blocks, source_ref="manifests/vid.json", filter_removed_count=3)
+
+    data_lines = [ln for ln in out.splitlines() if ln and not ln.startswith("#")]
+    assert len(data_lines) == len(blocks), "one data line per block"
+
+    # Each data line: N | Xs | text
+    import re
+    for i, (line, b) in enumerate(zip(data_lines, blocks), 1):
+        assert line.startswith(f"{i} | "), f"line {i} must start with seq number"
+        assert "|" in line
+        # Text must be present and must not contain newlines
+        parts = line.split(" | ", 2)
+        assert len(parts) == 3
+        text_part = parts[2]
+        assert "\n" not in text_part
+        assert text_part == " ".join(b.text.split()), "text must match collapsed block text"
+
+
+def test_compact_export_has_embedded_prompt():
+    """export_compact_review includes the scoring rubric in the header."""
+    from autoreels.cloud.blocks import export_compact_review
+
+    blocks = _make_blocks_for_compact()
+    out = export_compact_review(blocks, source_ref="manifests/vid.json", filter_removed_count=0)
+
+    assert "# source:" in out
+    assert "# format: compact" in out
+    assert "80-100" in out, "rubric must be present"
+    assert "60-79" in out
+    assert "Reply with ONLY" in out or "reply with ONLY" in out.lower()
+
+
+def test_apply_compact_answer_bare_scores(tmp_path, monkeypatch, capsys):
+    """A bare 'number score' answer is applied correctly, including merges."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Word, Crop, SetupProfile
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+
+    sha = "b" * 64
+    setup = SetupProfile(
+        setup_id="s", crop=Crop(x=0, y=0, w=720, h=1280),
+        scale=[720, 1280], frame=[1920, 1080],
+    )
+    m = Manifest(
+        source="v.mp4", source_sha256=sha, source_hash_scheme="sha256",
+        duration_preset="default", setup=setup, run_key="k", reels=[],
+    )
+    (tmp_path / "manifests" / "v.json").write_text(m.model_dump_json())
+
+    # Transcript with enough words to form blocks
+    words = [Word(word=f"слово{i}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(60)]
+    tx = Transcript(language="ru", words=words)
+    ahash = "txhash"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    # Two fake kept blocks
+    from autoreels.cloud.blocks import CandidateBlock, _Line
+    b1 = CandidateBlock(
+        id="id1111", start=10.0, end=40.0, duration=30.0,
+        text="Текст первого блока здесь",
+        boundary_reason="pause", lines=[_Line(10.0, 40.0, "Текст первого блока здесь")],
+    )
+    b2 = CandidateBlock(
+        id="id2222", start=42.0, end=72.0, duration=30.0,
+        text="Текст второго блока здесь",
+        boundary_reason="pause", lines=[_Line(42.0, 72.0, "Текст второго блока здесь")],
+    )
+
+    # Bare answer: score block 1 with merge, block 2 alone (prose around)
+    answer = (
+        "# source: manifests/v.json\n"
+        "1 85+\n"
+        "2 70\n"
+    )
+    answer_path = tmp_path / "reviews" / "v.answer.txt"
+    answer_path.write_text(answer)
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [b1, b2])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([b1, b2], []))
+
+    rc = cli._blocks_do_apply(str(answer_path), root=str(tmp_path))
+    assert rc == 0
+    out_text = capsys.readouterr().out
+    # 1+2 merged → should report "merged blocks 1+2" or just "2 blocks selected"
+    assert "block" in out_text.lower() or "выбрано" in out_text.lower() or "merged" in out_text.lower()
+    # manifest written
+    assert (tmp_path / "reviews" / "v.review.json").exists()
+
+
+def test_apply_compact_answer_ignores_prose(tmp_path, monkeypatch, capsys):
+    """A compact answer wrapped in model commentary: ignored lines are counted and reported."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Word, Crop, SetupProfile
+    from autoreels.cloud.blocks import CandidateBlock, _Line
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+
+    sha = "c" * 64
+    setup = SetupProfile(
+        setup_id="s", crop=Crop(x=0, y=0, w=720, h=1280),
+        scale=[720, 1280], frame=[1920, 1080],
+    )
+    m = Manifest(
+        source="w.mp4", source_sha256=sha, source_hash_scheme="sha256",
+        duration_preset="default", setup=setup, run_key="k", reels=[],
+    )
+    (tmp_path / "manifests" / "w.json").write_text(m.model_dump_json())
+
+    words = [Word(word=f"word{i}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(30)]
+    tx = Transcript(language="ru", words=words)
+    ahash = "txhash2"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    b1 = CandidateBlock(
+        id="idAA", start=10.0, end=40.0, duration=30.0,
+        text="Блок один",
+        boundary_reason="pause", lines=[_Line(10.0, 40.0, "Блок один")],
+    )
+
+    answer = (
+        "# source: manifests/w.json\n"
+        "Here are the blocks I found suitable:\n"
+        "1 80\n"
+        "Let me know if you need more.\n"
+    )
+    answer_path = tmp_path / "reviews" / "w.answer.txt"
+    answer_path.write_text(answer)
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [b1])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([b1], []))
+
+    rc = cli._blocks_do_apply(str(answer_path), root=str(tmp_path))
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Ignored-line count must be reported (2 prose lines)
+    assert "2" in out and "skip" in out.lower(), f"expected ignored-count in output, got: {out!r}"
+
+
+def test_apply_compact_answer_out_of_range_refused(tmp_path, monkeypatch, capsys):
+    """Compact answer referencing blocks beyond the manifest range is refused."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Word, Crop, SetupProfile
+    from autoreels.cloud.blocks import CandidateBlock, _Line
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+
+    sha = "d" * 64
+    setup = SetupProfile(
+        setup_id="s", crop=Crop(x=0, y=0, w=720, h=1280),
+        scale=[720, 1280], frame=[1920, 1080],
+    )
+    m = Manifest(
+        source="x.mp4", source_sha256=sha, source_hash_scheme="sha256",
+        duration_preset="default", setup=setup, run_key="k", reels=[],
+    )
+    (tmp_path / "manifests" / "x.json").write_text(m.model_dump_json())
+
+    words = [Word(word=f"w{i}", t0=float(i), t1=float(i + 0.5)) for i in range(10)]
+    tx = Transcript(language="ru", words=words)
+    ahash = "txhash3"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    b1 = CandidateBlock(
+        id="idBB", start=0.0, end=20.0, duration=20.0,
+        text="Единственный блок",
+        boundary_reason="pause", lines=[_Line(0.0, 20.0, "Единственный блок")],
+    )
+
+    # Answer references block 99, but manifest only has 1 block
+    answer = "# source: manifests/x.json\n99 85\n"
+    answer_path = tmp_path / "reviews" / "x.answer.txt"
+    answer_path.write_text(answer)
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [b1])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([b1], []))
+
+    rc = cli._blocks_do_apply(str(answer_path), root=str(tmp_path))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "out of range" in err or "not in this manifest" in err

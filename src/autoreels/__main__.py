@@ -2422,9 +2422,11 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     """
     import json as _json
 
+    import re as _re
+
     from autoreels.cloud.blocks import (
         candidate_blocks, filter_blocks, score_block,
-        parse_review, _make_merged_block, make_dataset_row,
+        parse_review, parse_compact_answer, _make_merged_block, make_dataset_row,
     )
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
@@ -2437,10 +2439,19 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     if not rpath.is_absolute() and rpath.parent == Path("."):
         rpath = root / "reviews" / rpath
     review_content = rpath.read_text(encoding="utf-8")
-    source_ref, entries, errors = parse_review(review_content)
+
+    # Format detection: verbose has "[ N ] ... id=..." headers; everything else is compact answer.
+    _is_compact = not _re.search(r"^\[\s*\d+\s*\].*\bid=", review_content, _re.MULTILINE)
+    ignored_count = 0
+    if _is_compact:
+        source_ref, entries, errors, ignored_count = parse_compact_answer(review_content)
+    else:
+        source_ref, entries, errors = parse_review(review_content)
 
     for lineno, msg in errors:
         print(f"  review:{lineno}: {msg}", file=sys.stderr)
+    if ignored_count:
+        print(f"  ({ignored_count} lines skipped — not score lines)")
 
     if source_ref is None:
         print("error: review file has no '# source:' line", file=sys.stderr)
@@ -2510,32 +2521,49 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     )
     bs_cfg = r0_cfg.block_scoring
     id_to_block = {}
-    for b in kept:
+    seq_to_block = {}
+    for i, b in enumerate(kept, 1):
         b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
         id_to_block[b.id] = b
+        seq_to_block[i] = b
 
     # Process review entries → Reels
     seq_to_entry = {e.seq: e for e in entries}
     reels: list = []
     dataset_rows: list[dict] = []
     processed_seqs: set[int] = set()
+    compact_lookup_errors = 0
 
     for entry in entries:
         if entry.seq in processed_seqs or entry.score is None:
             continue
-        block = id_to_block.get(entry.block_id)
-        if block is None:
-            print(
-                f"  warning: block {entry.block_id[:8]}… not in kept blocks "
-                f"(filtered or id mismatch)", file=sys.stderr,
-            )
-            continue
+        if entry.block_id:
+            block = id_to_block.get(entry.block_id)
+            if block is None:
+                print(
+                    f"  warning: block {entry.block_id[:8]}… not in kept blocks "
+                    f"(filtered or id mismatch)", file=sys.stderr,
+                )
+                continue
+        else:
+            # compact format: seq number → position in kept list
+            block = seq_to_block.get(entry.seq)
+            if block is None:
+                print(
+                    f"  error: block {entry.seq} out of range (1-{len(kept)})",
+                    file=sys.stderr,
+                )
+                compact_lookup_errors += 1
+                continue
 
         is_merged = False
         if entry.merge_next:
             next_entry = seq_to_entry.get(entry.seq + 1)
             if next_entry:
-                next_block = id_to_block.get(next_entry.block_id)
+                next_block = (
+                    id_to_block.get(next_entry.block_id) if next_entry.block_id
+                    else seq_to_block.get(next_entry.seq)
+                )
                 if next_block:
                     combined_dur = next_block.end - block.start
                     if combined_dur <= r0_cfg.max_duration:
@@ -2569,6 +2597,14 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
         reels.append(reel)
         dataset_rows.append(make_dataset_row(block, entry.score, manifest_path.stem))
         processed_seqs.add(entry.seq)
+
+    if _is_compact and compact_lookup_errors > 0 and len(reels) == 0:
+        print(
+            "error: answer references blocks not in this manifest — "
+            f"manifest has {len(kept)} blocks (1-{len(kept)}), check source",
+            file=sys.stderr,
+        )
+        return 1
 
     print(f"review: {len(reels)} blocks selected")
 
@@ -2680,6 +2716,7 @@ def cmd_blocks(
     apply_review: str | None = None,
     install: bool = False,
     render: bool = False,
+    compact: bool = False,
 ) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
@@ -2696,7 +2733,8 @@ def cmd_blocks(
 
     from autoreels.cloud.blocks import (
         candidate_blocks, filter_blocks, score_block, topk_filter,
-        export_review, parse_review as _parse_review, make_dataset_row, _make_merged_block,
+        export_review, export_compact_review, parse_review as _parse_review,
+        make_dataset_row, _make_merged_block,
     )
     from autoreels.cloud.compress import compress_transcript
 
@@ -2847,11 +2885,16 @@ def cmd_blocks(
                     "перезапись сотрёт результаты ревью",
                     file=sys.stderr,
                 )
-        review_content = export_review(
-            kept, source_ref=str(target_path), filter_removed_count=len(dropped),
-        )
+        if compact:
+            review_content = export_compact_review(
+                kept, source_ref=str(target_path), filter_removed_count=len(dropped),
+            )
+        else:
+            review_content = export_review(
+                kept, source_ref=str(target_path), filter_removed_count=len(dropped),
+            )
         out_path.write_text(review_content, encoding="utf-8")
-        print(f"\nreview: {len(kept)} блоков → {out_path}")
+        print(f"\nreview: {len(kept)} блоков → {out_path}  ({len(review_content)} chars)")
         print(f"  ({len(dropped)} блоков удалено фильтрами — используйте arl blocks без --review для деталей)")
         return 0
 
@@ -4869,6 +4912,12 @@ def _build_parser():
         action="store_true",
         help="render immediately after apply; implies --install",
     )
+    pbl.add_argument(
+        "--compact",
+        action="store_true",
+        help="export one-line-per-block format with embedded prompt, for pasting into a chat; "
+             "use with --review",
+    )
 
     return p
 
@@ -5062,7 +5111,7 @@ def main(argv=None) -> int:
             return cmd_blocks(
                 args.target, root=args.root, scored=args.scored,
                 review=args.review, out=args.out, apply_review=args.apply,
-                install=args.install, render=args.render,
+                install=args.install, render=args.render, compact=args.compact,
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()

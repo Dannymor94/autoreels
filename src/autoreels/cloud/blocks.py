@@ -525,6 +525,26 @@ _REVIEW_HDR_RE = re.compile(
     r"^\[\s*(\d+)\s*\]\s+([\d.]+)s\s+id=([0-9a-f]+)\s+score:\s*(.*)$"
 )
 _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
+_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(\d+)(\+)?\s*$")
+
+_COMPACT_PROMPT = (
+    "# Score each block 0-100 for standalone short-video quality.\n"
+    "# Leave weak blocks unscored (omit the number).\n"
+    "#\n"
+    "# 80-100  complete thought, self-contained opening, quotable line,\n"
+    "#         payoff or closed question-answer arc\n"
+    "# 60-79   complete but unremarkable\n"
+    "# blank   broken thought, dangling reference, organisational talk,\n"
+    "#         or a speaker change that breaks the thought\n"
+    "#\n"
+    "# Append + after a score to join with the next block (thought continues).\n"
+    "#\n"
+    "# Reply with ONLY lines of:  <number> <score>[+]\n"
+    "# No commentary, no restating of text.  Example:\n"
+    "#   3 85\n"
+    "#   7 72+\n"
+    "#   8 90"
+)
 
 
 class _ReviewEntry(NamedTuple):
@@ -606,6 +626,72 @@ def parse_review(
         entries.append(_ReviewEntry(seq, block_id, score, merge))
 
     return source_ref, entries, errors
+
+
+def export_compact_review(
+    blocks: list[CandidateBlock],
+    *,
+    source_ref: str,
+    filter_removed_count: int,
+) -> str:
+    """Render a compact one-line-per-block review file for pasting into a chat.
+
+    Block seq numbers (1..N) are the canonical reference — no trailing id map.
+    Rationale: a trailing id section can be cut off or accidentally deleted; the seq
+    number in each data line survives any partial copy-paste or model reformat.
+    """
+    lines: list[str] = [
+        "# AutoReels block review",
+        f"# source: {source_ref}",
+        f"# blocks: {len(blocks)}  |  filter_removed: {filter_removed_count}",
+        "# format: compact",
+        "#",
+        _COMPACT_PROMPT,
+        "#",
+        "",
+    ]
+    for i, b in enumerate(blocks, 1):
+        text = " ".join(b.text.split())  # collapse newlines / whitespace runs
+        lines.append(f"{i} | {b.duration:.1f}s | {text}")
+    return "\n".join(lines) + "\n"
+
+
+def parse_compact_answer(
+    content: str,
+) -> tuple[str | None, list[_ReviewEntry], list[tuple[int, str]], int]:
+    """Parse a bare 'number score[+]?' answer from a model.
+
+    Returns (source_ref, entries, errors, ignored_count).
+    entries have block_id="" — caller maps seq to block by position in kept list.
+    ignored_count: non-comment, non-score lines (prose a model may have added).
+    """
+    source_ref: str | None = None
+    entries: list[_ReviewEntry] = []
+    errors: list[tuple[int, str]] = []
+    ignored = 0
+
+    for lineno, raw in enumerate(content.splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            m = _REVIEW_SRC_RE.match(line)
+            if m:
+                source_ref = m.group(1).strip()
+            continue
+        m = _COMPACT_SCORE_RE.match(line)
+        if m:
+            seq = int(m.group(1))
+            score_val = int(m.group(2))
+            merge = m.group(3) == "+"
+            if not 0 <= score_val <= 100:
+                errors.append((lineno, f"score {score_val} out of range [0, 100]"))
+                continue
+            entries.append(_ReviewEntry(seq, "", score_val, merge))
+        else:
+            ignored += 1
+
+    return source_ref, entries, errors, ignored
 
 
 def _make_merged_block(first: CandidateBlock, second: CandidateBlock) -> CandidateBlock:
