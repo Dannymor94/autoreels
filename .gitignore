@@ -9,6 +9,7 @@ inputs/
 inputs-archive/
 reels-out/
 transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
+reviews/                # review files (working material, not shared)
 music/                  # аудио-треки фоновой музыки (бинарь, не в git; кладутся на машину рендера)
 
 # per-file кроп-калибровки (calibrations/<sha>.json) ВЕРСИОНИРУЮТСЯ: лёгкий JSON, чтобы

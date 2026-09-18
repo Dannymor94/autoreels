@@ -2370,7 +2370,11 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
     from autoreels.core.models import Reel
 
     root = Path(root) if root is not None else _project_root()
-    review_content = Path(review_path).read_text(encoding="utf-8")
+    rpath = Path(review_path)
+    # Bare filename (no directory) → look in reviews/ by default.
+    if not rpath.is_absolute() and rpath.parent == Path("."):
+        rpath = root / "reviews" / rpath
+    review_content = rpath.read_text(encoding="utf-8")
     source_ref, entries, errors = parse_review(review_content)
 
     for lineno, msg in errors:
@@ -2534,9 +2538,9 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
         selection_source="human",
         reels=reels,
     )
-    manifests_dir = root / "manifests"
-    manifests_dir.mkdir(parents=True, exist_ok=True)
-    out_path = manifests_dir / f"{manifest_path.stem}.review.json"
+    reviews_dir = root / "reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    out_path = reviews_dir / f"{manifest_path.stem}.review.json"
     out_path.write_text(out_manifest.model_dump_json(indent=2), encoding="utf-8")
     print(f"manifest → {out_path} ({len(reels)} reels, selection_source=human)")
 
@@ -2712,11 +2716,13 @@ def cmd_blocks(
 
     # Stage 4-alt: export review file (only when --review)
     if review and kept:
-        out_path = (
-            Path(out) if out
-            else (manifest_path.with_suffix(".review.md") if manifest_path
-                  else target_path.with_suffix(".review.md"))
-        )
+        if out:
+            out_path = Path(out)
+        else:
+            stem = manifest_path.stem if manifest_path else target_path.stem
+            reviews_dir = root / "reviews"
+            reviews_dir.mkdir(parents=True, exist_ok=True)
+            out_path = reviews_dir / f"{stem}.review.md"
         review_content = export_review(
             kept, source_ref=str(target_path), filter_removed_count=len(dropped),
         )
@@ -4709,13 +4715,14 @@ def _build_parser():
         "--out",
         default=None,
         metavar="FILE",
-        help="output path for --review (default: <manifest>.review.md next to manifest)",
+        help="output path for --review (default: reviews/<manifest>.review.md)",
     )
     pbl.add_argument(
         "--apply",
         default=None,
         metavar="REVIEW_FILE",
-        help="import a scored review file and build a manifest (M1.6 stage 4-alt)",
+        help="import a scored review file and build a manifest (M1.6 stage 4-alt); "
+             "bare filename resolved against reviews/ by default",
     )
 
     return p

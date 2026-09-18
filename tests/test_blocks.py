@@ -836,3 +836,123 @@ def test_dataset_row_records_both_scores():
     assert row["text"] == b.text
     assert row["source"] == "test_video"
     assert row["block_id"] == b.id
+
+
+# ---------------------------------------------------------------------------
+# reviews/ routing: --review and --apply
+# ---------------------------------------------------------------------------
+
+def _r0_cfg_stub():
+    from types import SimpleNamespace
+    bf = SimpleNamespace(
+        head_skip_sec=30.0, tail_skip_sec=30.0, speech_density_min=0.4,
+        repetition_unique_ratio_min=0.3, artefact_markers=[], promo_keywords=[],
+        signoff_phrases=[],
+    )
+    return SimpleNamespace(
+        sentence_pause_sec=1.0, max_sentence_sec=100.0,
+        min_meaningful_sec=18.0, max_duration=90, min_pause_for_phrase_end=1.5,
+        blocks_filter=bf, source_kind="lecture", host_affirmations=[],
+        max_reels=None, min_clip_duration=8.0,
+    )
+
+
+def test_review_writes_to_reviews_dir(tmp_path, monkeypatch):
+    """--review writes to reviews/<stem>.review.md regardless of cwd."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Transcript, Word
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+
+    tx_file = tmp_path / "lecture.transcript.json"
+    tx = Transcript(language="ru", words=[Word(word="Тест", t0=30.0, t1=30.5)])
+    tx_file.write_text(tx.model_dump_json())
+
+    fake = _make_block("Текст блока достаточно длинный для review файла.")
+    fake.has_internal_speaker_change = False
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_stub())
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "compressed")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [fake])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([fake], []))
+    monkeypatch.setattr(_b, "export_review", lambda *a, **k: "# REVIEW CONTENT")
+
+    rc = cli.cmd_blocks(str(tx_file), root=str(tmp_path), review=True, out=None)
+
+    assert rc == 0
+    # stem of "lecture.transcript.json" → "lecture.transcript"
+    out = tmp_path / "reviews" / "lecture.transcript.review.md"
+    assert out.exists(), f"expected file at {out}"
+    assert out.read_text() == "# REVIEW CONTENT"
+    assert not list(other.glob("*.review.md")), "must not write to cwd"
+
+
+def test_review_explicit_out_wins(tmp_path, monkeypatch):
+    """--review --out <path> writes to the given path, not reviews/."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Transcript, Word
+
+    tx_file = tmp_path / "x.transcript.json"
+    tx = Transcript(language="ru", words=[Word(word="X", t0=30.0, t1=30.5)])
+    tx_file.write_text(tx.model_dump_json())
+    custom_out = tmp_path / "custom" / "my_review.md"
+
+    fake = _make_block("Текст достаточно длинный.")
+    fake.has_internal_speaker_change = False
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_stub())
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "compressed")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [fake])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([fake], []))
+    monkeypatch.setattr(_b, "export_review", lambda *a, **k: "EXPLICIT")
+
+    custom_out.parent.mkdir(parents=True, exist_ok=True)
+    rc = cli.cmd_blocks(str(tx_file), root=str(tmp_path), review=True, out=str(custom_out))
+
+    assert rc == 0
+    assert custom_out.read_text() == "EXPLICIT"
+    assert not (tmp_path / "reviews").exists(), "reviews/ must not be created when --out given"
+
+
+def test_apply_reads_bare_filename_from_reviews_dir(tmp_path, monkeypatch):
+    """_blocks_do_apply with a bare filename resolves against reviews/, not cwd."""
+    from autoreels import __main__ as cli
+
+    reviews = tmp_path / "reviews"
+    reviews.mkdir()
+    (reviews / "video.review.md").write_text("# source: manifests/video.json\n")
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+
+    # Should read from reviews/ (not cwd/other). Fails on missing manifest, not on review read.
+    rc = cli._blocks_do_apply("video.review.md", root=str(tmp_path))
+    assert rc == 1  # fails: manifest not found — not FileNotFoundError on the review file
+    # Verify: if the review file were NOT in reviews/, it would raise FileNotFoundError.
+    (reviews / "video.review.md").unlink()
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        cli._blocks_do_apply("video.review.md", root=str(tmp_path))
+
+
+def test_apply_accepts_explicit_absolute_path(tmp_path, monkeypatch):
+    """_blocks_do_apply with an explicit absolute path reads from that path."""
+    from autoreels import __main__ as cli
+
+    custom = tmp_path / "custom" / "review.md"
+    custom.parent.mkdir()
+    custom.write_text("# source: manifests/video.json\n")
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+
+    rc = cli._blocks_do_apply(str(custom), root=str(tmp_path))
+    assert rc == 1  # manifest not found — not review-file-not-found

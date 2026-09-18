@@ -224,30 +224,27 @@ def _fake_render_cfg():
 # ---------------------------------------------------------------------------
 
 def test_glob_manifests_excludes_all_project_sidecars(tmp_path):
-    """A manifests/ dir with every sidecar the project writes yields only real manifests."""
+    """A manifests/ dir with every artefact the project writes there yields only real manifests.
+
+    review files live in reviews/ now, so they never appear in manifests/ at all.
+    """
     d = tmp_path / "manifests"
     d.mkdir()
     real = _write_manifest(d, "video")
 
-    # Every sidecar suffix produced by the project writers.
+    # Every sidecar suffix produced by the project writers that goes to manifests/.
     sidecars = [
         d / "video.discarded.json",
         d / "video.blocks.discarded.json",
         d / "video.failed_chunks.json",
         d / "video.blocks.topk_cut.json",
-        d / "video.review.json",        # intentionally deferred — still must not appear as manifest
     ]
     for s in sidecars:
         s.write_text("[]")
 
     result = cli._glob_manifests(d)
 
-    # Only the real manifest passes; review.json will fail Manifest validation at discovery time
-    # but we can check glob excludes the registered ones outright.
-    for p in result:
-        assert p == real or not any(p.name.endswith(s) for s in (".discarded.json",
-                                                                   ".failed_chunks.json",
-                                                                   ".blocks.topk_cut.json"))
+    assert result == [real]
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +274,8 @@ def test_sidecar_suffix_registration():
     for m in re.finditer(r'manifests_dir\s*/\s*f"[^"]*\.([\w.]+\.json)"', src):
         found.add("." + m.group(1))
 
-    # .review.json semantics are deferred — excluded from discovery is TBD.
-    deferred: set[str] = {".review.json"}
+    # No deferred suffixes: review files now live in reviews/, not manifests/.
+    deferred: set[str] = set()
 
     registered = set(_cli._SIDECAR_SUFFIXES)
 
