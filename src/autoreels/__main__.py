@@ -722,7 +722,7 @@ def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, list[dic
     disc: list[dict] = []
 
     for r in reels:
-        if r.end - r.start >= min_dur:
+        if r.end - r.start >= min_dur or "human_merged" in r.flags:
             kept.append(r)
             continue
 
@@ -767,6 +767,9 @@ def _stage_meaningful_sec_recheck(reels, transcript, *, r0_cfg) -> tuple[list, l
     kept = []
     disc = []
     for r in reels:
+        if "human_merged" in r.flags:
+            kept.append(r)
+            continue
         dur = r.end - r.start
         if dur < floor:
             r0_dur = (r.r0_end - r.r0_start) if r.r0_start is not None else None
@@ -2469,6 +2472,7 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
             )
             continue
 
+        is_merged = False
         if entry.merge_next:
             next_entry = seq_to_entry.get(entry.seq + 1)
             if next_entry:
@@ -2480,12 +2484,13 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
                         block.heuristic_score, block.score_breakdown = score_block(block, bs_cfg)
                         id_to_block[block.id] = block
                         processed_seqs.add(next_entry.seq)
+                        is_merged = True
                         print(f"  + merged blocks {entry.seq}+{entry.seq + 1}: {block.duration:.1f}s")
                     else:
                         print(
-                            f"  note: blocks {entry.seq}+{entry.seq + 1} combined "
-                            f"({combined_dur:.1f}s) exceeds max ({r0_cfg.max_duration:.0f}s) "
-                            f"— kept separate"
+                            f"  WARNING: merge {entry.seq}+{entry.seq + 1} span ({combined_dur:.1f}s) "
+                            f"exceeds max_duration ({r0_cfg.max_duration:.0f}s) — blocks kept separate",
+                            file=sys.stderr,
                         )
 
         reel = Reel(
@@ -2500,6 +2505,8 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
         )
         reel.r0_start = reel.start
         reel.r0_end = reel.end
+        if is_merged:
+            reel.flags.append("human_merged")
         reels.append(reel)
         dataset_rows.append(make_dataset_row(block, entry.score, manifest_path.stem))
         processed_seqs.add(entry.seq)
@@ -2517,11 +2524,13 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
     host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
     if host_turns:
         reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg)
-    reels, _ = apply_top_n(reels, max_reels=r0_cfg.max_reels, transcript_words=tx_words)
+    # Human review: all selections are intentional — top-N must not drop any of them.
+    reels, _ = apply_top_n(reels, max_reels=None, transcript_words=tx_words)
     reels = renumber_reels(reels)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels, _ = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
+    reels, _ = _stage_meaningful_sec_recheck(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
 

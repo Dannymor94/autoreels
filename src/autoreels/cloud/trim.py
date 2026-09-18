@@ -14,6 +14,7 @@ _trim_start живёт в snap.py: snap.py импортировать из trim 
 а trim.py уже импортирует из snap.py.
 """
 from __future__ import annotations
+import sys
 
 from autoreels.cloud.snap import _is_sentence_end, _trim_start
 from autoreels.core.models import Reel, Word
@@ -51,6 +52,16 @@ def trim_too_long(
         to_remove: list[Reel] = []
         for r in reels:
             if _FLAG not in r.flags:
+                continue
+
+            if "human_merged" in r.flags:
+                # Human explicitly chose this combined span — report but never trim.
+                print(
+                    f"  warning: merged reel {r.id[:8]}… ({r.end - r.start:.1f}s) exceeds "
+                    f"max_duration ({max_duration:.0f}s) — keeping as-is (human merge)",
+                    file=sys.stderr,
+                )
+                r.flags = [f for f in r.flags if f != _FLAG]
                 continue
 
             orig_start = r.start

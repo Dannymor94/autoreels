@@ -336,13 +336,21 @@ def apply_top_n(
     max_reels: int | None,
     transcript_words: list | None = None,
 ) -> tuple[list[Reel], list[dict]]:
-    """Sort by score desc, apply top-N cut, assign rank 1-N. Returns (kept, discarded_entries)."""
+    """Sort by score desc, apply top-N cut, assign rank 1-N. Returns (kept, discarded_entries).
+
+    Human-merged reels (flags contains 'human_merged') are always kept and do not count
+    against the max_reels budget.
+    """
     from autoreels.local.subtitles import words_in_window
     reels_sorted = sorted(reels, key=lambda r: -r.score)
     if max_reels is None:
         kept, cut = reels_sorted, []
     else:
-        kept, cut = reels_sorted[:max_reels], reels_sorted[max_reels:]
+        merged = [r for r in reels_sorted if "human_merged" in r.flags]
+        others = [r for r in reels_sorted if "human_merged" not in r.flags]
+        n_others = max(0, max_reels - len(merged))
+        kept = merged + others[:n_others]
+        cut = others[n_others:]
     disc = []
     for pos, r in enumerate(cut, (max_reels or 0) + 1):
         first_8 = ""
@@ -680,6 +688,12 @@ def _stage_interview_snap(
     affirmations = frozenset(getattr(r0_cfg, "host_affirmations", []))
 
     for r in reels:
+        # Human-merged reels span exactly what the reviewer chose (including any host questions
+        # between the two merged blocks). Skip all interview-snap cuts for them.
+        if "human_merged" in r.flags:
+            kept.append(r)
+            continue
+
         # --- end rule: move back before earliest host turn that starts after r0_start ---
         r0_start = r.r0_start if r.r0_start is not None else r.start
         intruding = [
