@@ -47,3 +47,4 @@ manifests/*.blocks.*.json
 clips-review/
 clips_*.txt
 review-*.md
+reviews/
