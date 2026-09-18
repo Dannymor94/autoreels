@@ -43,3 +43,7 @@ config/render.local.yaml
 .DS_Store
 tests/fixtures/clips/
 clips*.txt
+manifests/*.blocks.*.json
+clips-review/
+clips_*.txt
+review-*.md
