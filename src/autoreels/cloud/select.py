@@ -268,6 +268,9 @@ def filter_dangling_start(
     (b) Otherwise, scan for first uppercase non-dangling word within the window.
     (c) Only if neither works: drop.
 
+    Pre-pass: an opening sentence that ends in '…'/'...' (ellipsis) is an incomplete fragment;
+    the clip is advanced past it (up to 3 such sentences) before the main check runs.
+
     The connective list applies only to path (b), not to words following a terminal mark.
     Must be called AFTER snap. Returns (kept, discarded_entries).
     """
@@ -275,6 +278,34 @@ def filter_dangling_start(
     dw = _DEFAULT_DANGLING | set(dangling_words or [])
     kept, disc = [], []
     for r in reels:
+        # Pre-pass: skip opening sentences that end in ellipsis ('…' / '...').
+        for _ in range(3):
+            clip_words = words_in_window(transcript_words, r.start, r.end)
+            if not clip_words:
+                break
+            deadline = r.start + max_start_repair_sec
+            ellipsis_idx = None
+            for i, w in enumerate(clip_words):
+                if w.t0 > deadline:
+                    break
+                ws = w.word.rstrip()
+                if ws.endswith(("…", "...")):
+                    ellipsis_idx = i
+                    break
+                if ws.endswith((".", "?", "!")):
+                    break   # clean sentence end — stop looking for ellipsis
+            if ellipsis_idx is None:
+                break
+            if ellipsis_idx + 1 >= len(clip_words):
+                break
+            nw = clip_words[ellipsis_idx + 1]
+            if nw.t0 > deadline or r.end - nw.t0 < min_duration:
+                break
+            r.start = nw.t0
+            r.start_snap_reason = "repaired_to_sentence"
+            if "start_repaired" not in r.flags:
+                r.flags.append("start_repaired")
+
         clip_words = words_in_window(transcript_words, r.start, r.end)
         first_8 = " ".join(w.word for w in clip_words[:8])
         if not clip_words:
@@ -594,6 +625,14 @@ def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
     (c) is supplementary — it adds a handful of turns the heuristic would otherwise miss.
     The primary signal is (a)+(b).
 
+    Condition (b) already catches declarative host turns like "Ты коснулся книги, ты стал
+    автором книги…" because the sentence starts with "Ты". A potential condition (d) —
+    short sentence with ты/вы + past-tense verb mid-sentence — is NOT added: in Russian,
+    the guest freely uses ты to address the viewer ("когда ты честен с собой"), and a
+    past-tense verb + ты mid-sentence is common in guest speech too. No reliable
+    structural feature separates host address from guest narrative without a speaker-ID
+    model; adding (d) would eat guest speech.
+
     ponytail: O(n) scan over word list; splits on terminal punct.
     """
     if not transcript_words:
@@ -636,6 +675,52 @@ def detect_host_turns(transcript_words) -> list[tuple[float, float]]:
 
 
 # ---- interview snap stage ----
+
+_MERGED_TAIL_SEC = 15.0   # look-back window for host turns at the tail of a merged reel
+
+
+def _trim_tail_question(r, tx_words, max_tail_words: int = 8) -> bool:
+    """Cut before a trailing question + short answer at the end of a clip.
+
+    Pattern: '…resolved thought. Question? Short fragment.' — the question opens a new
+    topic that belongs to the next exchange. Cut before the question when fewer than
+    max_tail_words follow it.
+
+    Returns True when the clip was shortened.
+    """
+    from autoreels.local.subtitles import words_in_window
+    clip_words = words_in_window(tx_words, r.start, r.end)
+    if not clip_words:
+        return False
+
+    # Find the last '?' in the clip.
+    last_q_idx = None
+    for i, w in enumerate(clip_words):
+        if w.word.rstrip().endswith("?"):
+            last_q_idx = i
+
+    if last_q_idx is None:
+        return False
+    words_after = len(clip_words) - last_q_idx - 1
+    if words_after >= max_tail_words:
+        return False
+    # Require at least some content before the question to avoid trimming the whole clip.
+    if last_q_idx < 3:
+        return False
+
+    # Walk back to the start of the question sentence (first word after previous terminal).
+    sent_start = last_q_idx
+    for j in range(last_q_idx - 1, -1, -1):
+        if clip_words[j].word.rstrip().endswith((".", "!", "?")):
+            sent_start = j + 1
+            break
+    else:
+        sent_start = 0
+
+    r.end = clip_words[sent_start].t0 - 0.15
+    r.end_snap_reason = "before_trailing_question"
+    return True
+
 
 def _trim_tail_affirmation(r, tx_words, affirmations: frozenset) -> bool:
     """If the last sentence of the clip is a single-word affirmation, trim it.
@@ -687,25 +772,39 @@ def _stage_interview_snap(
     min_dur = getattr(r0_cfg, "min_clip_duration", 15.0)
     affirmations = frozenset(getattr(r0_cfg, "host_affirmations", []))
 
+    max_tail_words = getattr(r0_cfg, "trailing_question_words", 8)
+
     for r in reels:
-        # Human-merged reels span exactly what the reviewer chose (including any host questions
-        # between the two merged blocks). Skip all interview-snap cuts for them.
-        if "human_merged" in r.flags:
-            kept.append(r)
-            continue
+        is_merged = "human_merged" in r.flags
 
-        # --- end rule: move back before earliest host turn that starts after r0_start ---
-        r0_start = r.r0_start if r.r0_start is not None else r.start
-        intruding = [
-            (ts, te) for ts, te in host_turns
-            if ts > r0_start and ts < r.end + 10.0 and te <= r.end + 10.0
-        ]
-        if intruding:
-            earliest_ts = min(ts for ts, _ in intruding)
-            r.end = earliest_ts - 0.15
-            r.end_snap_reason = "before_host_turn"
+        if is_merged:
+            # Internal host turns between merged blocks are intentional — keep them.
+            # Only trim host turns that appear in the last _MERGED_TAIL_SEC of the merged
+            # span: those are closing remarks the reviewer did not intend to include.
+            r0_end = r.r0_end if r.r0_end is not None else r.end
+            tail_turns = [
+                (ts, te) for ts, te in host_turns
+                if ts >= r0_end - _MERGED_TAIL_SEC and ts < r.end + 10.0
+                and te <= r.end + 10.0
+            ]
+            if tail_turns:
+                earliest_ts = min(ts for ts, _ in tail_turns)
+                r.end = earliest_ts - 0.15
+                r.end_snap_reason = "before_host_turn"
+        else:
+            # --- end rule: move back before earliest host turn after r0_start ---
+            r0_start = r.r0_start if r.r0_start is not None else r.start
+            intruding = [
+                (ts, te) for ts, te in host_turns
+                if ts > r0_start and ts < r.end + 10.0 and te <= r.end + 10.0
+            ]
+            if intruding:
+                earliest_ts = min(ts for ts, _ in intruding)
+                r.end = earliest_ts - 0.15
+                r.end_snap_reason = "before_host_turn"
 
-        # --- affirmation tail trim: one-word closing affirmation ("Здорово.", "Понятно.") ---
+        # --- trailing trims applied to all reels ---
+        _trim_tail_question(r, tx_words, max_tail_words)
         _trim_tail_affirmation(r, tx_words, affirmations)
 
         # drop if too short after end adjustment
@@ -719,15 +818,17 @@ def _stage_interview_snap(
             })
             continue
 
-        # --- start rule: include preceding host question if close and short enough ---
-        preceding = [
-            (ts, te) for ts, te in host_turns
-            if te <= r0_start and (r0_start - te) <= 8.0 and (te - ts) <= 12.0
-        ]
-        if preceding:
-            closest = max(preceding, key=lambda x: x[1])  # closest end to r0_start
-            r.start = closest[0]
-            r.start_snap_reason = "host_question_included"
+        # --- start rule: include preceding host question (non-merged only) ---
+        if not is_merged:
+            r0_start = r.r0_start if r.r0_start is not None else r.start
+            preceding = [
+                (ts, te) for ts, te in host_turns
+                if te <= r0_start and (r0_start - te) <= 8.0 and (te - ts) <= 12.0
+            ]
+            if preceding:
+                closest = max(preceding, key=lambda x: x[1])
+                r.start = closest[0]
+                r.start_snap_reason = "host_question_included"
 
         kept.append(r)
 

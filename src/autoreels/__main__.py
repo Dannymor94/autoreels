@@ -1324,22 +1324,8 @@ def cmd_run(
         r.r0_start, r.r0_end = r.start, r.end
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
     memtrace.mark("after snap")
-    # Dangling-start gate: post-snap, deterministic — checks actual first snapped word.
-    # Whisper capitalises sentence-initial words, so first-word-lowercase = mid-sentence start.
     tx_words = getattr(transcript, "words", [])
-    reels, dangling_disc = filter_dangling_start(
-        reels, tx_words,
-        dangling_words=getattr(r0_cfg, "dangling_words", None),
-        min_duration=r0_cfg.min_clip_duration,
-        max_start_repair_sec=getattr(r0_cfg, "max_start_repair_sec", 6.0),
-    )
-    repaired = sum(1 for r in reels if "start_repaired" in r.flags)
-    dropped_dangling = len(dangling_disc)
-    if dropped_dangling or repaired:
-        print(
-            f"  dangling_start: снято {dropped_dangling}, отремонтировано {repaired}",
-            flush=True,
-        )
+    dangling_disc: list = []
     # Interview: enforce host-turn clip boundaries.
     host_turns = (
         detect_host_turns(tx_words)
@@ -1358,6 +1344,22 @@ def cmd_run(
                 flush=True,
             )
         dangling_disc += interview_disc
+    # Dangling-start gate: runs after interview_snap so that the START rule pulling r.start
+    # back to a host question (which may itself end in an ellipsis) is also repaired.
+    reels, post_dangling_disc = filter_dangling_start(
+        reels, tx_words,
+        dangling_words=getattr(r0_cfg, "dangling_words", None),
+        min_duration=r0_cfg.min_clip_duration,
+        max_start_repair_sec=getattr(r0_cfg, "max_start_repair_sec", 6.0),
+    )
+    repaired = sum(1 for r in reels if "start_repaired" in r.flags)
+    dropped_dangling = len(post_dangling_disc)
+    if dropped_dangling or repaired:
+        print(
+            f"  dangling_start: снято {dropped_dangling}, отремонтировано {repaired}",
+            flush=True,
+        )
+    dangling_disc += post_dangling_disc
     # Compute ends_on_host_turn diagnostic on all kept reels (False for lecture; measurable for interview).
     for r in reels:
         r0_s = r.r0_start if r.r0_start is not None else r.start
@@ -2516,14 +2518,16 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
     # Downstream pipeline (entry point = after _stage_select in cmd_run)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
     tx_words = getattr(transcript, "words", [])
+    host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
+    if host_turns:
+        reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg)
+    # Run after interview_snap: the START rule can pull r.start back to a host question that
+    # itself ends in an ellipsis — the dangling fix must see the final post-snap start.
     reels, _ = filter_dangling_start(
         reels, tx_words,
         dangling_words=getattr(r0_cfg, "dangling_words", None),
         min_duration=r0_cfg.min_clip_duration,
     )
-    host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
-    if host_turns:
-        reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg)
     # Human review: all selections are intentional — top-N must not drop any of them.
     reels, _ = apply_top_n(reels, max_reels=None, transcript_words=tx_words)
     reels = renumber_reels(reels)
@@ -2553,15 +2557,33 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
     out_path.write_text(out_manifest.model_dump_json(indent=2), encoding="utf-8")
     print(f"manifest → {out_path} ({len(reels)} reels, selection_source=human)")
 
-    # Append dataset rows (human scores never overwritten — append mode)
+    # Write dataset rows, deduplicating by (block_id, source).
+    # A re-apply updates rows rather than appending duplicates.
     if dataset_rows:
         ds_dir = root / "data" / "blocks_dataset"
         ds_dir.mkdir(parents=True, exist_ok=True)
         ds_path = ds_dir / f"{manifest_path.stem}.jsonl"
-        with ds_path.open("a", encoding="utf-8") as f:
-            for row in dataset_rows:
+        existing: dict[tuple, dict] = {}
+        if ds_path.exists():
+            for line in ds_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = _json.loads(line)
+                    existing[(row["block_id"], row["source"])] = row
+                except Exception:
+                    pass
+        before = len(existing)
+        for row in dataset_rows:
+            existing[(row["block_id"], row["source"])] = row
+        collapsed = before - max(0, before - len(dataset_rows))
+        if collapsed:
+            print(f"dataset: {collapsed} duplicate rows collapsed")
+        with ds_path.open("w", encoding="utf-8") as f:
+            for row in existing.values():
                 f.write(_json.dumps(row, ensure_ascii=False) + "\n")
-        print(f"dataset: {len(dataset_rows)} rows appended → {ds_path}")
+        print(f"dataset: {len(dataset_rows)} rows written → {ds_path} ({len(existing)} total)")
 
     return 0
 
