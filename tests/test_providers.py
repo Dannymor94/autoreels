@@ -1533,3 +1533,28 @@ def test_pool_fast_fails_when_all_providers_get_connect_error():
     assert exc.value.is_connect_error is True
     msg = str(exc.value)
     assert "network" in exc.value.provider.lower() or "ssl" in msg.lower() or "сеть" in msg.lower() or "соедин" in msg.lower()
+
+
+# ----------------------------------------------------------------- token_scale path
+
+def test_token_scale_cwd_independent(tmp_path, monkeypatch):
+    """_save/_load_token_scale works from any cwd — path is anchored to package, not cwd."""
+    import os
+    import autoreels.cloud.providers as P
+
+    scale_file = tmp_path / "data" / "token_scale.json"
+    monkeypatch.setattr(P, "_TOKEN_SCALE_FILE", scale_file)
+
+    other_dir = tmp_path / "unrelated"
+    other_dir.mkdir()
+    original = os.getcwd()
+    try:
+        os.chdir(other_dir)
+        P._save_token_scale("test-model", 1.37)
+        factor = P._load_token_scale("test-model")
+    finally:
+        os.chdir(original)
+
+    assert factor == pytest.approx(1.37)
+    assert scale_file.exists()
+    assert not (other_dir / "data" / "token_scale.json").exists()  # not written to cwd

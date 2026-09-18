@@ -95,7 +95,7 @@ _GROQ_CHAT_TEMPLATE_OVERHEAD = 400  # conservative: 200 template + 200 buffer
 # each successful request and persisted to _TOKEN_SCALE_FILE, keyed by model name.
 _TOKEN_SCALE_DEFAULT = 1.45   # start conservative; calibrates down to observed 1.37-1.40
 _TOKEN_SCALE_EMA_ALPHA = 0.3  # EMA weight for new observations (fast-ish convergence)
-_TOKEN_SCALE_FILE = Path("data/token_scale.json")
+_TOKEN_SCALE_FILE = Path(__file__).resolve().parents[3] / "data" / "token_scale.json"
 
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")

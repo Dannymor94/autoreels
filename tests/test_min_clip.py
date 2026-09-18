@@ -225,3 +225,75 @@ def test_render_skips_do_not_count_in_outputs(tmp_path, monkeypatch):
                                     local_path=tmp_path / "nolocal.yaml")
     outputs = render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
     assert outputs == []
+
+
+# -------------------------------------------------------- _stage_meaningful_sec_recheck
+
+def test_meaningful_sec_recheck_drops_snapped_down_clip():
+    """Clip snapped from 22s to 12s is dropped by the 18s floor; reason is recorded."""
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+
+    r = _reel(0.0, 12.0, r0_start=0.0, r0_end=22.0)
+    r.flags = []
+    transcript = SimpleNamespace(words=[])
+    r0_cfg = SimpleNamespace(min_meaningful_sec=18.0, min_duration=60, max_duration=90)
+
+    kept, disc = cli._stage_meaningful_sec_recheck([r], transcript, r0_cfg=r0_cfg)
+
+    assert kept == []
+    assert len(disc) == 1
+    assert "too_short_after_snap" in disc[0]["reason"]
+    assert "12" in disc[0]["reason"]
+    assert "22" in disc[0]["reason"]
+
+
+def test_meaningful_sec_recheck_keeps_at_floor():
+    """Clips at exactly 18s or above pass the recheck."""
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+
+    at_floor = _reel(0.0, 18.0)
+    above = _reel(20.0, 50.0)
+    transcript = SimpleNamespace(words=[])
+    r0_cfg = SimpleNamespace(min_meaningful_sec=18.0, min_duration=60, max_duration=90)
+
+    kept, disc = cli._stage_meaningful_sec_recheck([at_floor, above], transcript, r0_cfg=r0_cfg)
+
+    assert len(kept) == 2
+    assert disc == []
+
+
+def test_meaningful_sec_recheck_clears_stale_too_long_flag():
+    """Stale R0-era too_long flag is cleared when final boundaries are within max."""
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+    from autoreels.cloud.select import FLAG_TOO_LONG, FLAG_TOO_SHORT
+
+    r = _reel(0.0, 85.0)
+    r.flags = [FLAG_TOO_LONG]  # set when R0 boundaries exceeded max, snap brought it back
+    transcript = SimpleNamespace(words=[])
+    r0_cfg = SimpleNamespace(min_meaningful_sec=18.0, min_duration=60, max_duration=90)
+
+    kept, _ = cli._stage_meaningful_sec_recheck([r], transcript, r0_cfg=r0_cfg)
+
+    assert len(kept) == 1
+    assert FLAG_TOO_LONG not in kept[0].flags
+    assert FLAG_TOO_SHORT not in kept[0].flags
+
+
+def test_meaningful_sec_recheck_sets_too_short_on_final():
+    """Clip ≥18s but below preset min_duration gets too_short flag from final boundaries."""
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+    from autoreels.cloud.select import FLAG_TOO_SHORT
+
+    r = _reel(0.0, 25.0)  # 25s >= 18s floor but < 60s preset min_duration
+    r.flags = []
+    transcript = SimpleNamespace(words=[])
+    r0_cfg = SimpleNamespace(min_meaningful_sec=18.0, min_duration=60, max_duration=90)
+
+    kept, _ = cli._stage_meaningful_sec_recheck([r], transcript, r0_cfg=r0_cfg)
+
+    assert len(kept) == 1
+    assert FLAG_TOO_SHORT in kept[0].flags

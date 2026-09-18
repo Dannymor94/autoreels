@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from autoreels.core.models import SetupProfile
 
@@ -241,6 +241,12 @@ class R0Config(BaseModel):
         if self.max_reels is None:
             return None
         return max(self.max_reels, round(self.max_reels * self.candidate_multiplier))
+
+    @model_validator(mode="after")
+    def _sync_block_min_sec(self) -> "R0Config":
+        """Keep block_scoring.min_sec in sync with min_meaningful_sec (single source of truth)."""
+        self.block_scoring.min_sec = self.min_meaningful_sec
+        return self
 
     @property
     def max_sentence_sec(self) -> float:

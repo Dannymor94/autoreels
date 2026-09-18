@@ -266,8 +266,9 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
     midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
                    description="d", reason="r", topic="x")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([midword], [], []))
-    # Этот тест проверяет snap/padding, а не min_clip_filter → минуем фильтр.
+    # Этот тест проверяет snap/padding, а не min_clip_filter → минуем оба фильтра.
     monkeypatch.setattr(cli, "_stage_min_clip_filter", lambda reels, transcript, *, r0_cfg: (reels, []))
+    monkeypatch.setattr(cli, "_stage_meaningful_sec_recheck", lambda reels, transcript, *, r0_cfg: (reels, []))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"vid")
@@ -3440,6 +3441,8 @@ def test_ingest_expands_user_and_resolves(tmp_path):
 def test_run_dispatch_ingests_external_path(monkeypatch, tmp_path):
     """main('run <внешний путь>') прогоняет приём: копирует в inputs/ и зовёт cmd_run с ним."""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(cli, "require_key", lambda *a, **k: None)
     ext = tmp_path / "Downloads"
     ext.mkdir()
     src = ext / "clip.mp4"
@@ -5869,3 +5872,43 @@ def test_project_root_finds_config_from_any_cwd(tmp_path, monkeypatch):
         f"_project_root() = {root} has no config/r0.yaml — "
         "check Path(__file__).resolve().parents[2] in _project_root()"
     )
+
+
+def test_run_dispatch_ingest_goes_to_project_inputs_not_cwd(monkeypatch, tmp_path):
+    """arl run <file> from any cwd places the source in the project's inputs/, not cwd/inputs/.
+
+    Regression guard for Class-1 fix: Path("inputs") replaced with _project_root()/"inputs".
+    """
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.setattr(cli, "_project_root", lambda: proj)
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+
+    src = other / "lecture.mp4"
+    src.write_bytes(b"fake-video")
+
+    ingested = {}
+
+    def fake_ingest(video, inputs_dir):
+        ingested["inputs_dir"] = inputs_dir
+        dest = inputs_dir / video.name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"fake-video")
+        return dest
+
+    monkeypatch.setattr(cli, "_ingest_source", fake_ingest)
+    monkeypatch.setattr(cli, "cmd_run", lambda video, **k: None)
+    monkeypatch.setattr(cli, "require_key", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_cli_resolve_ffmpeg", lambda *a, **k: "/fake/ffmpeg")
+
+    cli.main(["run", str(src)])
+
+    assert ingested.get("inputs_dir") is not None
+    assert ingested["inputs_dir"] == proj / "inputs", (
+        f"source ingested to {ingested['inputs_dir']!r}, expected {proj / 'inputs'!r}. "
+        "Likely Path('inputs') was not replaced with _project_root()/'inputs'."
+    )
+    assert not (other / "inputs").exists(), "source must not land in cwd/inputs/"

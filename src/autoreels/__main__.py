@@ -28,8 +28,9 @@ from autoreels.cloud.diagnose import classify_end, summarize
 from autoreels.cloud.extract_audio import ExtractAudioError, extract_audio
 from autoreels.cloud.providers import ProviderError, build_pool
 from autoreels.cloud.select import (
+    FLAG_TOO_LONG, FLAG_TOO_SHORT,
     SelectError, apply_top_n, detect_host_turns, diagnose_collapse,
-    filter_dangling_start, filter_min_clip_duration, select, _stage_interview_snap,
+    filter_dangling_start, filter_min_clip_duration, flag_durations, select, _stage_interview_snap,
 )
 from autoreels.cloud.chunk_transcribe import renumber_reels
 from autoreels.cloud.snap import apply_padding, snap_segments, trim_hanging_subtitles, try_rescue_clip
@@ -755,6 +756,38 @@ def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, list[dic
     return kept, disc
 
 
+def _stage_meaningful_sec_recheck(reels, transcript, *, r0_cfg) -> tuple[list, list[dict]]:
+    """Re-apply min_meaningful_sec floor after snap+padding; also recomputes too_long/too_short.
+
+    snap() may shorten a clip that passed the pre-snap 18s filter down to 8-17s. _stage_min_clip_filter
+    only guards the 8s floor, so clips between 8s and 18s slip through. This catches them.
+    Also clears stale R0-boundary flags and re-sets them from final boundaries.
+    """
+    floor = r0_cfg.min_meaningful_sec
+    kept = []
+    disc = []
+    for r in reels:
+        dur = r.end - r.start
+        if dur < floor:
+            r0_dur = (r.r0_end - r.r0_start) if r.r0_start is not None else None
+            if r0_dur is not None:
+                reason = f"too_short_after_snap: R0={r0_dur:.1f}s → final={dur:.1f}s < {floor:.0f}s"
+            else:
+                reason = f"too_short_after_snap: {dur:.1f}s < {floor:.0f}s floor"
+            cw = words_in_window(transcript.words, r.start, r.end)
+            first_8 = " ".join(w.word for w in cw[:8])
+            disc.append({"id": r.id, "score": r.score, "reason": reason, "first_words": first_8})
+        else:
+            kept.append(r)
+    if disc:
+        print(f"meaningful_sec_recheck: снято {len(disc)} (snap < {floor:.0f}s)", flush=True)
+    # Recompute too_long/too_short from final boundaries (R0-era flags are stale post-snap).
+    for r in kept:
+        r.flags = [f for f in r.flags if f not in (FLAG_TOO_LONG, FLAG_TOO_SHORT)]
+    flag_durations(kept, min_duration=r0_cfg.min_duration, max_duration=r0_cfg.max_duration)
+    return kept, disc
+
+
 def _stage_subtitles(reels, transcript):
     """R3: привязать word-level транскрипта к каждому reel."""
     print("субтитры: привязка слов к сегментам…", flush=True)
@@ -1335,6 +1368,8 @@ def cmd_run(
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels, short_disc = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
     discarded += short_disc
+    reels, meaningful_disc = _stage_meaningful_sec_recheck(reels, transcript, r0_cfg=r0_cfg)
+    discarded += meaningful_disc
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
@@ -2202,7 +2237,11 @@ def cmd_resnap(
     return 0
 
 
-_SIDECAR_SUFFIXES = (".discarded.json",)
+_SIDECAR_SUFFIXES = (
+    ".discarded.json",        # discarded candidates + blocks.discarded.json (suffix-match covers both)
+    ".failed_chunks.json",
+    ".blocks.topk_cut.json",
+)
 
 
 def _glob_manifests(d: Path) -> list[Path]:
@@ -4797,11 +4836,11 @@ def main(argv=None) -> int:
             if args.video:
                 if _is_url(args.video):
                     if _is_yandex_disk(args.video):
-                        video = _download_yandex_disk(args.video, Path("inputs"))
+                        video = _download_yandex_disk(args.video, _project_root() / "inputs")
                     else:
-                        video = _download_url(args.video, Path("inputs"))
+                        video = _download_url(args.video, _project_root() / "inputs")
                 else:
-                    video = _ingest_source(Path(args.video), Path("inputs"))
+                    video = _ingest_source(Path(args.video), _project_root() / "inputs")
                 try:
                     cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push,
                             force_transcribe=args.force_transcribe,
@@ -4832,9 +4871,9 @@ def main(argv=None) -> int:
                 # копировать в inputs/ незачем); url/Яндекс.Диск скачиваются в inputs/.
                 if _is_url(args.source):
                     if _is_yandex_disk(args.source):
-                        src = _download_yandex_disk(args.source, Path("inputs"))
+                        src = _download_yandex_disk(args.source, _project_root() / "inputs")
                     else:
-                        src = _download_url(args.source, Path("inputs"))
+                        src = _download_url(args.source, _project_root() / "inputs")
                 else:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)

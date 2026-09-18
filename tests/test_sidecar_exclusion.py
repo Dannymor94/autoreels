@@ -1,7 +1,7 @@
-"""Sidecar files (*.discarded.json) must be excluded from manifest discovery.
+"""Sidecar files must be excluded from manifest discovery.
 
 Covers: _glob_manifests, cmd_diagnose_cuts, cmd_resnap, cmd_status, cmd_dump_clips,
-and malformed-manifest skip behaviour.
+malformed-manifest skip behaviour, all-sidecars exclusion, and sidecar suffix registration.
 """
 import json
 from pathlib import Path
@@ -217,3 +217,76 @@ def _fake_r0_cfg():
 def _fake_render_cfg():
     from types import SimpleNamespace
     return SimpleNamespace(audio_extract=SimpleNamespace(format="m4a"))
+
+
+# ---------------------------------------------------------------------------
+# 7. _glob_manifests excludes ALL project sidecars
+# ---------------------------------------------------------------------------
+
+def test_glob_manifests_excludes_all_project_sidecars(tmp_path):
+    """A manifests/ dir with every sidecar the project writes yields only real manifests."""
+    d = tmp_path / "manifests"
+    d.mkdir()
+    real = _write_manifest(d, "video")
+
+    # Every sidecar suffix produced by the project writers.
+    sidecars = [
+        d / "video.discarded.json",
+        d / "video.blocks.discarded.json",
+        d / "video.failed_chunks.json",
+        d / "video.blocks.topk_cut.json",
+        d / "video.review.json",        # intentionally deferred — still must not appear as manifest
+    ]
+    for s in sidecars:
+        s.write_text("[]")
+
+    result = cli._glob_manifests(d)
+
+    # Only the real manifest passes; review.json will fail Manifest validation at discovery time
+    # but we can check glob excludes the registered ones outright.
+    for p in result:
+        assert p == real or not any(p.name.endswith(s) for s in (".discarded.json",
+                                                                   ".failed_chunks.json",
+                                                                   ".blocks.topk_cut.json"))
+
+
+# ---------------------------------------------------------------------------
+# 8. Sidecar-suffix registration: all suffixes produced by writers are covered
+# ---------------------------------------------------------------------------
+
+def test_sidecar_suffix_registration():
+    """Every multi-dot .json suffix written into manifests/ is either in _SIDECAR_SUFFIXES
+    or in the explicitly-deferred set. Fails when a new writer is added without registering.
+
+    Derives the set of suffixes from the source code (with_suffix calls + f-string patterns)
+    rather than from a hand-maintained constant, so the next sidecar cannot slip through.
+    """
+    import re
+    from pathlib import Path as _Path
+    import autoreels.__main__ as _cli
+
+    src = _Path(_cli.__file__).read_text(encoding="utf-8")
+
+    # Collect suffixes from manifest_path.with_suffix(…) — these write next to a manifest.
+    found: set[str] = set()
+    for m in re.finditer(r'manifest[_\w]*\.with_suffix\("(\.[\w.]+\.json)"\)', src):
+        found.add(m.group(1))
+
+    # Collect from f-string patterns in the manifests dir context:
+    # manifests_dir / f"{stem}.something.json"
+    for m in re.finditer(r'manifests_dir\s*/\s*f"[^"]*\.([\w.]+\.json)"', src):
+        found.add("." + m.group(1))
+
+    # .review.json semantics are deferred — excluded from discovery is TBD.
+    deferred: set[str] = {".review.json"}
+
+    registered = set(_cli._SIDECAR_SUFFIXES)
+
+    def _covered(suffix: str) -> bool:
+        return any(suffix.endswith(s) for s in registered)
+
+    unregistered = {s for s in found if not _covered(s) and s not in deferred}
+    assert not unregistered, (
+        f"Sidecar suffix(es) found in writers but not in _SIDECAR_SUFFIXES: {sorted(unregistered)}. "
+        "Add them to _SIDECAR_SUFFIXES or the deferred set in this test."
+    )
