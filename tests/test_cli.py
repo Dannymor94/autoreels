@@ -6164,3 +6164,106 @@ def test_non_tty_render_no_carriage_returns(monkeypatch, tmp_path, capsys):
     lines = [ln for ln in out.splitlines() if ln.strip()]
     assert len(lines) >= 1, "should print at least one line per clip"
     assert not any("\r" in ln for ln in lines), "non-TTY output must not contain \\r"
+
+
+# ---------------------------------------------------------------------------
+# Compact review format — menu integration
+# ---------------------------------------------------------------------------
+
+def test_review_export_bash_handler_offers_compact_option():
+    """The review_export bash case contains the --compact branch (single source of truth)."""
+    text = ALIASES_SH.read_text(encoding="utf-8")
+    # Body of the review_export) case must reference --compact
+    assert "--compact" in text, "aliases.sh review_export case must offer --compact"
+    # The format prompt must be there
+    assert "компактный" in text or "compact" in text.lower()
+
+
+def test_compact_export_matches_cli_output(tmp_path):
+    """export_compact_review (used by --compact flag) produces same format as CLI --review --compact."""
+    from autoreels.cloud.blocks import export_compact_review, CandidateBlock, _Line
+
+    b = CandidateBlock(
+        id="abc123", start=10.0, end=40.0, duration=30.0,
+        text="Тестовый блок с текстом.",
+        boundary_reason="pause", lines=[_Line(10.0, 40.0, "Тестовый блок с текстом.")],
+    )
+    out = export_compact_review([b], source_ref="manifests/test.json", filter_removed_count=2)
+
+    # Check structure: source header, format marker, prompt, data line
+    assert "# source: manifests/test.json" in out
+    assert "# format: compact" in out
+    assert "80-100" in out          # rubric present
+    assert "1 | 30.0s |" in out     # data line with seq, duration, text
+    assert "Тестовый блок с текстом." in out
+
+    # Data lines must not contain block id — seq only
+    data_lines = [ln for ln in out.splitlines() if ln and not ln.startswith("#")]
+    assert len(data_lines) == 1
+    assert "id=" not in data_lines[0]
+
+
+def test_review_apply_accepts_compact_format_file(tmp_path, monkeypatch):
+    """_blocks_do_apply accepts a file in compact-answer format (as item 15 would find it)."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Word, Crop, SetupProfile
+    from autoreels.cloud.blocks import CandidateBlock, _Line
+    from tests.test_blocks import _r0_cfg_full_stub  # reuse helper
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+
+    sha = "e" * 64
+    setup = SetupProfile(
+        setup_id="s", crop=Crop(x=0, y=0, w=720, h=1280),
+        scale=[720, 1280], frame=[1920, 1080],
+    )
+    m = Manifest(
+        source="y.mp4", source_sha256=sha, source_hash_scheme="sha256",
+        duration_preset="default", setup=setup, run_key="k", reels=[],
+    )
+    (tmp_path / "manifests" / "y.json").write_text(m.model_dump_json())
+
+    words = [Word(word=f"w{i}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(40)]
+    tx = Transcript(language="ru", words=words)
+    ahash = "txh4"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    b1 = CandidateBlock(
+        id="idCC", start=5.0, end=35.0, duration=30.0,
+        text="Блок для компактного ревью.",
+        boundary_reason="pause", lines=[_Line(5.0, 35.0, "Блок для компактного ревью.")],
+    )
+
+    # File as item 15 would pick it: compact answer with source header
+    compact_answer = (
+        "# source: manifests/y.json\n"
+        "1 75\n"
+    )
+    answer_path = tmp_path / "reviews" / "y.review.md"
+    answer_path.write_text(compact_answer)
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [b1])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([b1], []))
+
+    rc = cli._blocks_do_apply(str(answer_path), root=str(tmp_path))
+    assert rc == 0
+    out_manifest = tmp_path / "reviews" / "y.review.json"
+    assert out_manifest.exists(), "manifest must be written after successful apply"
+    from autoreels.core.models import Manifest as M
+    result = M.model_validate_json(out_manifest.read_text())
+    assert result.selection_source == "human"
+    # Dataset row proves the compact entry was parsed and the block looked up by seq number.
+    import json as _json
+    ds_path = tmp_path / "data" / "blocks_dataset" / "y.jsonl"
+    assert ds_path.exists(), "dataset row must be written for the scored block"
+    rows = [_json.loads(ln) for ln in ds_path.read_text().splitlines() if ln.strip()]
+    assert len(rows) == 1, "one dataset row for the one scored block"

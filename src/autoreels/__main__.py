@@ -2895,6 +2895,9 @@ def cmd_blocks(
             )
         out_path.write_text(review_content, encoding="utf-8")
         print(f"\nreview: {len(kept)} блоков → {out_path}  ({len(review_content)} chars)")
+        if compact:
+            print(f"  ↑ вставьте файл целиком в любой чат (промпт включён); "
+                  f"ответ сохраните и передайте: arl blocks --apply <файл>")
         print(f"  ({len(dropped)} блоков удалено фильтрами — используйте arl blocks без --review для деталей)")
         return 0
 
@@ -3689,9 +3692,9 @@ _MENU_ITEMS: list[tuple[str, str, str, str, str]] = [
                         "КАЧЕСТВО"),
     ("12", "dumpclips",      "Выгрузить тексты клипов",      "→ фикстуры для разметки (tests/fixtures/clips/)",
                              "КАЧЕСТВО"),
-    ("14", "review_export", "Экспорт блоков для ревью",    "blocks --review → reviews/<stem>.review.md",
+    ("14", "review_export", "Экспорт блоков для ревью",    "blocks --review [--compact] → reviews/<stem>.review.md",
                              "КАЧЕСТВО"),
-    ("15", "review_apply",  "Применить ревью",              "blocks --apply --install → manifest (human)",
+    ("15", "review_apply",  "Применить ревью",              "blocks --apply --install → manifest (human) · verbose и compact",
                              "КАЧЕСТВО"),
     ("8", "settings",   "Настройки рендера",            "профиль, палитра, музыка, звук",
                         "НАСТРОЙКИ"),
@@ -4246,6 +4249,12 @@ autoreels — длинное talking-head видео → вертикальны�
   arl rc [видео]   recrop: обновить кроп в манифесте по свежей калибровке (без R0)
   arl rs [видео]   resnap: пересчитать границы клипов из R0-границ (snap/padding, без LLM)
   arl dc [--rerun] diagnose-cuts: проверить обрывы фраз (CLEAN/SOFT/HARD + причина)
+
+  ручной ревью (меню 14/15, или CLI напрямую):
+    arl blocks <манифест> --review           подробный файл (редактировать в текстовом редакторе)
+    arl blocks <манифест> --review --compact компактный: одна строка на блок + промпт → вставить в чат
+    arl blocks --apply <файл> --install      применить ответ (оба формата; --install → manifests/)
+    arl blocks --apply <файл> --render       применить + рендер сразу (подразумевает --install)
   arl s            status
   arl c            calibrate --all
   arl t <ист>      транскрибация (видео/аудио/url → текст для контента)

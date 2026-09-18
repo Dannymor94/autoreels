@@ -137,7 +137,12 @@ _ar_menu() {
                     if [ -z "$_n" ]; then echo "отменено — назад в меню"; continue; fi
                     _idx=$((_n - 1))
                     if [ "$_idx" -ge 0 ] && [ "$_idx" -lt "${#_manifests[@]}" ]; then
-                        _ar_cli blocks "${_manifests[$_idx]}" --review
+                        printf "Формат: [1] подробный (редактор)  [2] компактный (вставить в чат): "
+                        read -r _fmt; _fmt="$(printf '%s' "$_fmt" | tr -d '\r')"
+                        case "$_fmt" in
+                            2|compact) _ar_cli blocks "${_manifests[$_idx]}" --review --compact ;;
+                            *)         _ar_cli blocks "${_manifests[$_idx]}" --review ;;
+                        esac
                     else
                         echo "  неизвестный номер: $_n"
                     fi
