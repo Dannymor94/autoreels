@@ -119,6 +119,53 @@ _ar_menu() {
             resnap)    arl rs ;;
             diagnose)  arl dc ;;
             dumpclips) arl dump-clips ;;
+            review_export)
+                # Список манифестов (без сайдкаров) → пользователь выбирает номер
+                _manifests=()
+                while IFS= read -r _mf; do
+                    [ -n "$_mf" ] && _manifests+=("$_mf")
+                done < <(find "$_AR_ROOT/manifests" -maxdepth 1 -name "*.json" 2>/dev/null \
+                    | grep -v '\.\(blocks\|discarded\|topk_cut\)\.' | sort)
+                if [ "${#_manifests[@]}" -eq 0 ]; then
+                    echo "manifests/ пуст — сначала запустите анализ (пункт 1)"
+                else
+                    for _i in "${!_manifests[@]}"; do
+                        printf "  %d) %s\n" "$((_i+1))" "$(basename "${_manifests[$_i]}")"
+                    done
+                    printf "Выбери манифест [1-%d], Enter — отмена: " "${#_manifests[@]}"
+                    read -r _n; _n="$(printf '%s' "$_n" | tr -d '\r')"
+                    if [ -z "$_n" ]; then echo "отменено — назад в меню"; continue; fi
+                    _idx=$((_n - 1))
+                    if [ "$_idx" -ge 0 ] && [ "$_idx" -lt "${#_manifests[@]}" ]; then
+                        _ar_cli blocks "${_manifests[$_idx]}" --review
+                    else
+                        echo "  неизвестный номер: $_n"
+                    fi
+                fi
+                ;;
+            review_apply)
+                # Список review-файлов → пользователь выбирает номер → apply + install
+                _reviews=()
+                while IFS= read -r _rf; do
+                    [ -n "$_rf" ] && _reviews+=("$_rf")
+                done < <(find "$_AR_ROOT/reviews" -maxdepth 1 -name "*.review.md" 2>/dev/null | sort)
+                if [ "${#_reviews[@]}" -eq 0 ]; then
+                    echo "reviews/ пуст — сначала экспортируйте (пункт 14)"
+                else
+                    for _i in "${!_reviews[@]}"; do
+                        printf "  %d) %s\n" "$((_i+1))" "$(basename "${_reviews[$_i]}")"
+                    done
+                    printf "Выбери файл ревью [1-%d], Enter — отмена: " "${#_reviews[@]}"
+                    read -r _n; _n="$(printf '%s' "$_n" | tr -d '\r')"
+                    if [ -z "$_n" ]; then echo "отменено — назад в меню"; continue; fi
+                    _idx=$((_n - 1))
+                    if [ "$_idx" -ge 0 ] && [ "$_idx" -lt "${#_reviews[@]}" ]; then
+                        _ar_cli blocks --apply "${_reviews[$_idx]}" --install
+                    else
+                        echo "  неизвестный номер: $_n"
+                    fi
+                fi
+                ;;
             path)
                 printf "Вставь ссылку (URL / Яндекс.Диск / YouTube) или путь к файлу: "
                 read -r _src

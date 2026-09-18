@@ -2413,7 +2413,7 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def _blocks_do_apply(review_path: str, *, root=None) -> int:
+def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, render: bool = False) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
@@ -2614,6 +2614,31 @@ def _blocks_do_apply(review_path: str, *, root=None) -> int:
     out_path.write_text(out_manifest.model_dump_json(indent=2), encoding="utf-8")
     print(f"manifest → {out_path} ({len(reels)} reels, selection_source=human)")
 
+    # Install: copy to manifests/ so render picks up the human selection.
+    # --render implies --install.
+    if render:
+        install = True
+    manifests_dir = root / "manifests"
+    installed_path = manifests_dir / f"{manifest_path.stem}.json"
+    if install:
+        import shutil as _shutil
+        manifests_dir.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(out_path, installed_path)
+        print(f"installed → {installed_path}  (рендер будет использовать этот манифест)")
+    else:
+        print(
+            f"  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install\n"
+            f"    (заменит {installed_path})"
+        )
+
+    if render:
+        render_cfg = load_render_config(root / "config" / "render.yaml")
+        if render_cfg.role == "analyze":
+            print("  рендер пропущен: role=analyze запрещает рендер на этой машине",
+                  file=sys.stderr)
+            return 0
+        cmd_render(root=root, _manifest_paths=[installed_path], pull_first=False)
+
     # Write dataset rows, deduplicating by (block_id, source).
     # A re-apply updates rows rather than appending duplicates.
     if dataset_rows:
@@ -2653,6 +2678,8 @@ def cmd_blocks(
     review: bool = False,
     out: str | None = None,
     apply_review: str | None = None,
+    install: bool = False,
+    render: bool = False,
 ) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
@@ -2669,13 +2696,13 @@ def cmd_blocks(
 
     from autoreels.cloud.blocks import (
         candidate_blocks, filter_blocks, score_block, topk_filter,
-        export_review, make_dataset_row, _make_merged_block,
+        export_review, parse_review as _parse_review, make_dataset_row, _make_merged_block,
     )
     from autoreels.cloud.compress import compress_transcript
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root)
+        return _blocks_do_apply(apply_review, root=root, install=install, render=render)
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
@@ -2811,6 +2838,15 @@ def cmd_blocks(
             reviews_dir = root / "reviews"
             reviews_dir.mkdir(parents=True, exist_ok=True)
             out_path = reviews_dir / f"{stem}.review.md"
+        # Warn if an existing review file already has scores — regenerating would discard them.
+        if out_path.exists():
+            _, _ex_entries, _ = _parse_review(out_path.read_text(encoding="utf-8"))
+            if any(e.score is not None for e in _ex_entries):
+                print(
+                    f"  ВНИМАНИЕ: {out_path.name} уже содержит оценки — "
+                    "перезапись сотрёт результаты ревью",
+                    file=sys.stderr,
+                )
         review_content = export_review(
             kept, source_ref=str(target_path), filter_removed_count=len(dropped),
         )
@@ -3608,8 +3644,12 @@ _MENU_ITEMS: list[tuple[str, str, str, str, str]] = [
                         "КАЧЕСТВО"),
     ("7", "resnap",     "Пересчитать границы",          "snap/padding из R0-границ, без LLM",
                         "КАЧЕСТВО"),
-    ("12", "dumpclips", "Выгрузить тексты клипов",       "→ фикстуры для разметки (tests/fixtures/clips/)",
-                        "КАЧЕСТВО"),
+    ("12", "dumpclips",      "Выгрузить тексты клипов",      "→ фикстуры для разметки (tests/fixtures/clips/)",
+                             "КАЧЕСТВО"),
+    ("14", "review_export", "Экспорт блоков для ревью",    "blocks --review → reviews/<stem>.review.md",
+                             "КАЧЕСТВО"),
+    ("15", "review_apply",  "Применить ревью",              "blocks --apply --install → manifest (human)",
+                             "КАЧЕСТВО"),
     ("8", "settings",   "Настройки рендера",            "профиль, палитра, музыка, звук",
                         "НАСТРОЙКИ"),
     ("9", "status",     "Статус",                        "", "ПРОЧЕЕ"),
@@ -3645,7 +3685,9 @@ _MENU_CLI_TARGET: dict[str, str] = {
     "transcribe": "transcribe",
     "diagnose": "diagnose-cuts",
     "resnap": "resnap",
-    "dumpclips": "dump-clips",
+    "dumpclips":     "dump-clips",
+    "review_export": "blocks",
+    "review_apply":  "blocks",
     "settings": "interactive",
     "status": "status",
     "resume": "resume",
@@ -4816,6 +4858,17 @@ def _build_parser():
         help="import a scored review file and build a manifest (M1.6 stage 4-alt); "
              "bare filename resolved against reviews/ by default",
     )
+    pbl.add_argument(
+        "--install",
+        action="store_true",
+        help="copy the resulting manifest to manifests/ (replacing the automatic one); "
+             "implies --apply",
+    )
+    pbl.add_argument(
+        "--render",
+        action="store_true",
+        help="render immediately after apply; implies --install",
+    )
 
     return p
 
@@ -5009,6 +5062,7 @@ def main(argv=None) -> int:
             return cmd_blocks(
                 args.target, root=args.root, scored=args.scored,
                 review=args.review, out=args.out, apply_review=args.apply,
+                install=args.install, render=args.render,
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()

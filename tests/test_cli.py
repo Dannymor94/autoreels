@@ -3503,7 +3503,7 @@ def test_menu_action_strips_whitespace():
 
 def test_menu_action_invalid_returns_none():
     """Пустой ввод / вне диапазона / мусор → None (меню повторит запрос)."""
-    for c in ("", "99", "abc", "  ", "14"):
+    for c in ("", "99", "abc", "  ", "16"):
         assert cli._menu_action(c) is None
 
 

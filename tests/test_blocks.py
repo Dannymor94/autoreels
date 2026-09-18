@@ -956,3 +956,163 @@ def test_apply_accepts_explicit_absolute_path(tmp_path, monkeypatch):
 
     rc = cli._blocks_do_apply(str(custom), root=str(tmp_path))
     assert rc == 1  # manifest not found — not review-file-not-found
+
+
+# ---------------------------------------------------------------------------
+# --install / --render / scored-review warning
+# ---------------------------------------------------------------------------
+
+def _r0_cfg_full_stub():
+    """r0 config stub with all attributes needed by _blocks_do_apply pipeline."""
+    from types import SimpleNamespace
+    bf = SimpleNamespace(
+        head_skip_sec=30.0, tail_skip_sec=30.0, speech_density_min=0.4,
+        repetition_unique_ratio_min=0.3, artefact_markers=[], promo_keywords=[],
+        signoff_phrases=[],
+    )
+    return SimpleNamespace(
+        sentence_pause_sec=1.0, max_sentence_sec=100.0,
+        min_meaningful_sec=18.0, max_duration=90.0, min_pause_for_phrase_end=1.5,
+        blocks_filter=bf, source_kind="lecture", host_affirmations=[],
+        max_reels=None, min_clip_duration=8.0,
+        block_scoring=BlockScoringConfig(),
+        dangling_words=[], hanging_words=[],
+        tail_sec=0.5, snap_window_sec=3.0, max_micro_pause=0.3,
+        max_end_search_sec=5.0, tail_pad_sec=0.7, lead_pad_sec=0.2,
+        too_long_policy="keep", min_duration=8.0,
+    )
+
+
+def _setup_apply_env(tmp_path, monkeypatch):
+    """Minimal filesystem + monkeypatches for _blocks_do_apply with no scored entries.
+
+    Returns (manifest_path, review_path). The pipeline runs on empty reels (review has
+    no scored entries). After completion, the reviews/<stem>.review.json is written.
+    """
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Word
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+
+    sha = "a" * 64
+    from autoreels.core.models import Crop, SetupProfile
+    setup = SetupProfile(
+        setup_id="test", crop=Crop(x=0, y=0, w=720, h=1280),
+        scale=[720, 1280], frame=[1920, 1080],
+    )
+    auto = Manifest(
+        source="vid.mp4", source_sha256=sha, source_hash_scheme="sha256",
+        duration_preset="default", setup=setup, run_key="testkey", reels=[],
+    )
+    manifest_path = tmp_path / "manifests" / "vid.json"
+    manifest_path.write_text(auto.model_dump_json())
+
+    tx = Transcript(language="ru", words=[Word(word="Тест", t0=10.0, t1=10.5)])
+    ahash = "fakehash"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    # No scored entries → reels=[] after pipeline
+    review_path = tmp_path / "reviews" / "vid.review.md"
+    review_path.write_text(
+        "# source: manifests/vid.json\n"
+        "# blocks: 1\n\n"
+        "[ 1 ]  30.0s  id=aaa111  score: __\n"
+        "Текст блока.\n"
+    )
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([], []))
+
+    return manifest_path, review_path
+
+
+def test_install_copies_to_manifests_dir(tmp_path, monkeypatch):
+    """--install overwrites manifests/<stem>.json with the human-selection manifest."""
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Manifest
+
+    manifest_path, _ = _setup_apply_env(tmp_path, monkeypatch)
+    orig = manifest_path.read_text()
+
+    rc = cli._blocks_do_apply("vid.review.md", root=str(tmp_path), install=True)
+    assert rc == 0
+    new_text = manifest_path.read_text()
+    assert new_text != orig, "installed manifest must differ from the auto manifest"
+    assert Manifest.model_validate_json(new_text).selection_source == "human"
+
+
+def test_no_install_leaves_manifest_untouched(tmp_path, monkeypatch):
+    """Without --install, manifests/<stem>.json is not changed."""
+    from autoreels import __main__ as cli
+
+    manifest_path, _ = _setup_apply_env(tmp_path, monkeypatch)
+    orig = manifest_path.read_text()
+
+    rc = cli._blocks_do_apply("vid.review.md", root=str(tmp_path), install=False)
+    assert rc == 0
+    assert manifest_path.read_text() == orig, "manifest must not change without --install"
+
+
+def test_render_flag_installs_and_calls_cmd_render_with_manifests_path(tmp_path, monkeypatch):
+    """--render installs the manifest and calls cmd_render with the installed (manifests/) path."""
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+
+    _setup_apply_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "load_render_config",
+                        lambda p: SimpleNamespace(role="both", encoder=SimpleNamespace()))
+    rendered = []
+    monkeypatch.setattr(cli, "cmd_render", lambda **kw: rendered.append(kw) or [])
+
+    rc = cli._blocks_do_apply("vid.review.md", root=str(tmp_path), render=True)
+    assert rc == 0
+    assert len(rendered) == 1, "cmd_render must be called once"
+    paths = rendered[0].get("_manifest_paths", [])
+    assert len(paths) == 1
+    assert "reviews" not in str(paths[0]), "render must use installed manifest, not reviews/ path"
+    assert "manifests" in str(paths[0]), "render must use installed manifest in manifests/"
+
+
+def test_review_warns_when_existing_file_has_scores(tmp_path, monkeypatch, capsys):
+    """--review warns when the target review file already contains scores."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Transcript, Word
+
+    tx_file = tmp_path / "vid.transcript.json"
+    tx = Transcript(language="ru", words=[Word(word="Тест", t0=30.0, t1=30.5)])
+    tx_file.write_text(tx.model_dump_json())
+
+    fake = _make_block("Текст блока достаточно длинный для файла ревью чтобы пройти фильтр.")
+    fake.has_internal_speaker_change = False
+
+    reviews_dir = tmp_path / "reviews"
+    reviews_dir.mkdir()
+    existing = reviews_dir / "vid.transcript.review.md"
+    existing.write_text(
+        "# source: manifests/vid.json\n"
+        "[ 1 ]  30.0s  id=aaa111  score: 85\n"
+        "Текст блока.\n"
+    )
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_stub())
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [fake])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([fake], []))
+    monkeypatch.setattr(_b, "export_review", lambda *a, **k: "CONTENT")
+
+    rc = cli.cmd_blocks(str(tx_file), root=str(tmp_path), review=True, out=None)
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "ВНИМАНИЕ" in err
+    assert "оцен" in err
