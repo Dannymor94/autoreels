@@ -1538,12 +1538,12 @@ def test_pool_fast_fails_when_all_providers_get_connect_error():
 # ----------------------------------------------------------------- token_scale path
 
 def test_token_scale_cwd_independent(tmp_path, monkeypatch):
-    """_save/_load_token_scale works from any cwd — path is anchored to package, not cwd."""
+    """_save/_load_token_scale works from any cwd — path is fixed (env/package), not cwd-relative."""
     import os
     import autoreels.cloud.providers as P
 
     scale_file = tmp_path / "data" / "token_scale.json"
-    monkeypatch.setattr(P, "_TOKEN_SCALE_FILE", scale_file)
+    monkeypatch.setenv("AUTOREELS_TOKEN_SCALE_FILE", str(scale_file))
 
     other_dir = tmp_path / "unrelated"
     other_dir.mkdir()

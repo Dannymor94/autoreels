@@ -23,6 +23,9 @@ from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Transcript
 from autoreels.local.render import RenderError, SourceNotFoundError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+# conftest._sandbox_repo_root swaps REPO_ROOT for a per-test tmp sandbox (config copied in) so
+# that root=REPO_ROOT never writes cache/archive/manifests into the real repo. See conftest.
+USE_SANDBOX_ROOT = True
 
 # Реальный _run_git, захваченный ДО autouse-мока (_no_real_git) — для теста самого _run_git.
 _REAL_RUN_GIT = cli._run_git
@@ -5753,14 +5756,15 @@ def test_scanner_drift_menu_items():
 
 def test_dump_clips_finds_manifests_from_different_cwd(monkeypatch, tmp_path):
     """(7) dump-clips auto-discovers manifests/ via _project_root(), not cwd."""
-    # Change cwd to tmp_path (a directory with no manifests/).
-    monkeypatch.chdir(tmp_path)
-    # Patch _project_root to point to REPO_ROOT so manifests/ is found.
+    # Seed a manifest under the project root (REPO_ROOT = tmp sandbox), then run from a DIFFERENT
+    # cwd with no manifests/: discovery must find it via _project_root(), not the cwd.
+    (REPO_ROOT / "manifests").mkdir(parents=True, exist_ok=True)
+    (REPO_ROOT / "manifests" / "seed.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)                       # cwd has no manifests/
     monkeypatch.setattr(cli, "_project_root", lambda: REPO_ROOT)
-    # Run with no explicit manifests list → auto-discovery.
-    out = tmp_path / "clips"
     found = cli._auto_discover_manifests(root=None)
-    assert len(found) > 0, "no manifests found — cwd-dependency not fixed"
+    assert any(p.name == "seed.json" for p in found), \
+        "auto-discovery must use _project_root(), not cwd"
 
 
 def test_auto_discover_excludes_discarded_sidecar(tmp_path):

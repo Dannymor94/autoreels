@@ -44,4 +44,5 @@ pythonpath = ["src"]
 addopts = "-m 'not integration'"
 markers = [
     "integration: реальный внешний прогон (faster-whisper/сеть); skip по умолчанию",
+    "uses_real_repo: тест намеренно читает/пишет под реальным корнем репо; guard пропускает его (обоснуй в тесте)",
 ]

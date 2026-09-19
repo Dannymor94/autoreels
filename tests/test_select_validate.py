@@ -921,7 +921,7 @@ def test_token_scale_persisted_and_reloaded(tmp_path, monkeypatch):
     import autoreels.cloud.providers as P
 
     scale_file = tmp_path / "token_scale.json"
-    monkeypatch.setattr(P, "_TOKEN_SCALE_FILE", scale_file)
+    monkeypatch.setenv("AUTOREELS_TOKEN_SCALE_FILE", str(scale_file))
 
     model = "test-model"
     # Save initial factor

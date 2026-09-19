@@ -95,7 +95,13 @@ _GROQ_CHAT_TEMPLATE_OVERHEAD = 400  # conservative: 200 template + 200 buffer
 # each successful request and persisted to _TOKEN_SCALE_FILE, keyed by model name.
 _TOKEN_SCALE_DEFAULT = 1.45   # start conservative; calibrates down to observed 1.37-1.40
 _TOKEN_SCALE_EMA_ALPHA = 0.3  # EMA weight for new observations (fast-ish convergence)
-_TOKEN_SCALE_FILE = Path(__file__).resolve().parents[3] / "data" / "token_scale.json"
+# Machine-local calibration state (not in git). Path is env-overridable so tests never write to
+# the real repo copy (env AUTOREELS_TOKEN_SCALE_FILE); default = <repo>/data/token_scale.json.
+_TOKEN_SCALE_FILE_DEFAULT = Path(__file__).resolve().parents[3] / "data" / "token_scale.json"
+
+
+def _token_scale_file() -> Path:
+    return Path(os.environ.get("AUTOREELS_TOKEN_SCALE_FILE") or _TOKEN_SCALE_FILE_DEFAULT)
 
 # Допустимые стратегии распределения пула (валидируются на входе, fail-fast).
 POOL_STRATEGIES = ("adaptive", "round_robin")
@@ -109,7 +115,7 @@ def _count_tokens_approx(text: str) -> int:
 def _load_token_scale(model: str) -> float | None:
     """Return persisted underestimation factor for model, or None if not found/readable."""
     try:
-        data = json.loads(_TOKEN_SCALE_FILE.read_text())
+        data = json.loads(_token_scale_file().read_text())
         v = data.get(model)
         return float(v) if v is not None else None
     except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
@@ -119,14 +125,15 @@ def _load_token_scale(model: str) -> float | None:
 def _save_token_scale(model: str, factor: float) -> None:
     """Persist updated underestimation factor for model (non-fatal on write errors)."""
     try:
-        _TOKEN_SCALE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        path = _token_scale_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
         data: dict = {}
         try:
-            data = json.loads(_TOKEN_SCALE_FILE.read_text())
+            data = json.loads(path.read_text())
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             pass
         data[model] = round(factor, 4)
-        _TOKEN_SCALE_FILE.write_text(json.dumps(data, indent=2))
+        path.write_text(json.dumps(data, indent=2))
     except OSError:
         pass
 
