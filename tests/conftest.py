@@ -14,6 +14,16 @@ FFMPEG = shutil.which("ffmpeg")
 SYNTH_DURATION = 5
 
 
+@pytest.fixture(autouse=True)
+def _isolate_history(tmp_path, monkeypatch):
+    """Каждый тест пишет историю прогонов в свой tmp, а не в реальный data/history.jsonl.
+
+    cmd_run/cmd_status зовут root=REPO_ROOT (там конфиги) → без изоляции история копилась бы
+    в рабочем репо на каждом прогоне тестов (та же ловушка, что с manifests/). Тесты истории
+    могут переопределить env своим путём."""
+    monkeypatch.setenv("AUTOREELS_HISTORY_PATH", str(tmp_path / "history.jsonl"))
+
+
 @pytest.fixture(scope="session")
 def synthetic_video(tmp_path_factory) -> Path:
     """Синтетический клип (sine 440 Гц + testsrc) под тесты извлечения аудио.

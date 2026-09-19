@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from autoreels import __main__ as cli
-from autoreels.core import state
+from autoreels.core import history, state
 from autoreels.core.calibration import save_calibration
 from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Transcript, Word
 from autoreels.local.render import RenderError, SourceNotFoundError
@@ -989,6 +989,107 @@ def test_run_key_identical_for_same_content(monkeypatch, tmp_path):
     rk2 = Manifest.model_validate_json((manifests / "b.json").read_text(encoding="utf-8")).run_key
 
     assert rk1 == rk2
+
+
+# ---------------------------------- in-place обработка (файл дан путём, не копируется/не архивируется)
+
+def _in_place_kw(tmp_path, hp=None):
+    return dict(root=REPO_ROOT, manifests_dir=tmp_path / "m", cache_dir=tmp_path / "c",
+                archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
+                pull_first=False, archive=False, history_path=hp)
+
+
+def test_cmd_run_in_place_not_archived_records_abs_path(monkeypatch, tmp_path):
+    """(1,2) in-place: файл не двигается в архив; манифест хранит абсолютный путь; render его резолвит."""
+    from autoreels.local.render import resolve_source
+    _mock_pipeline(monkeypatch, tmp_path)
+    home = tmp_path / "home"; home.mkdir()
+    src = home / "lecture.mp4"; src.write_bytes(b"in-place-bytes")
+
+    path = cli.cmd_run(src, **_in_place_kw(tmp_path))
+
+    assert src.exists()                                   # источник на месте
+    assert not (tmp_path / "arch").exists()               # архив не создавали
+    assert not (tmp_path / "inputs").exists()             # в inputs/ не копировали
+    m = Manifest.model_validate_json(path.read_text(encoding="utf-8"))
+    assert m.source_path == str(src.resolve())            # абсолютный путь записан
+    assert resolve_source(m, tmp_path / "inputs") == src.resolve()   # render находит по нему
+
+
+def test_cmd_run_in_place_rerun_already_processed_force_overrides(monkeypatch, tmp_path):
+    """(3) повторный in-place прогон того же файла → already processed; --force прогоняет заново."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    home = tmp_path / "home"; home.mkdir()
+    src = home / "lec.mp4"; src.write_bytes(b"content-x")
+
+    cli.cmd_run(src, **_in_place_kw(tmp_path))
+    with pytest.raises(cli.AlreadyProcessedError):
+        cli.cmd_run(src, **_in_place_kw(tmp_path))
+    cli.cmd_run(src, force=True, **_in_place_kw(tmp_path))   # --force → без исключения
+
+
+def test_cmd_run_in_place_rename_recognized_edit_reprocessed(monkeypatch, tmp_path):
+    """(4) переименован без изменений → распознан обработанным; отредактирован (новый хэш) → нет."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    home = tmp_path / "home"; home.mkdir()
+    a = home / "a.mp4"; a.write_bytes(b"same-content")
+
+    cli.cmd_run(a, **_in_place_kw(tmp_path))
+
+    b = home / "b.mp4"; a.rename(b)                        # переименован, содержимое то же
+    with pytest.raises(cli.AlreadyProcessedError):
+        cli.cmd_run(b, **_in_place_kw(tmp_path))
+
+    c = home / "c.mp4"; c.write_bytes(b"EDITED-new-content")   # новое содержимое → новый хэш
+    p = cli.cmd_run(c, **_in_place_kw(tmp_path))           # не бросает — обрабатывается
+    assert p.is_file()
+
+
+# ---------------------------------- история прогонов (data/history.jsonl)
+
+def test_history_records_outcomes_status_tail_and_filters(monkeypatch, tmp_path, capsys):
+    """(6) история пишет ok/zero-harvest/failed; arl s показывает хвост; history --limit/--outcome фильтруют."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    hp = tmp_path / "hist.jsonl"
+    home = tmp_path / "home"; home.mkdir()
+
+    ok_src = home / "ok.mp4"; ok_src.write_bytes(b"ok-content")
+    cli.cmd_run(ok_src, **_in_place_kw(tmp_path, hp))                  # ok (1 рил)
+
+    monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([], [], []))
+    zh_src = home / "zh.mp4"; zh_src.write_bytes(b"zh-content")
+    with pytest.raises(cli.ZeroHarvestError):                          # непустой транскрипт, 0 рилов
+        cli.cmd_run(zh_src, **_in_place_kw(tmp_path, hp))
+
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(cli, "_stage_extract_audio", _boom)
+    fail_src = home / "fail.mp4"; fail_src.write_bytes(b"fail-content")
+    with pytest.raises(RuntimeError):                                  # краш до манифеста
+        cli.cmd_run(fail_src, **_in_place_kw(tmp_path, hp))
+
+    runs = history.read_runs(hp)                                       # новейшие первыми
+    assert [r["outcome"] for r in runs] == ["failed", "zero-harvest", "ok"]
+    assert runs[-1]["source"] == "ok.mp4" and runs[-1]["reel_count"] == 1
+    assert runs[-1]["source_path"] == str(ok_src.resolve())
+
+    cli.cmd_status(root=REPO_ROOT, history_path=hp, history_tail=2)
+    out = capsys.readouterr().out
+    assert "последние прогоны" in out and "fail.mp4" in out and "zh.mp4" in out
+
+    assert len(history.read_runs(hp, limit=1)) == 1                    # --limit
+    assert [r["outcome"] for r in history.read_runs(hp, outcome="failed")] == ["failed"]  # --outcome
+
+
+def test_history_trim_keeps_newest_and_reports(tmp_path, capsys):
+    """(7) при превышении cap история обрезается до последних cap (сообщая об этом); новейшие сохранены."""
+    hp = tmp_path / "h.jsonl"
+    for i in range(5):
+        history.append_run(hp, source=f"v{i}.mp4", source_path=f"/x/v{i}.mp4", sha256="a" * 64,
+                           duration_sec=1.0, outcome="ok", reel_count=i, selection_source="auto",
+                           manifest_path="m", cap=3, now=1_700_000_000 + i)
+    assert [r["source"] for r in history.read_runs(hp)] == ["v4.mp4", "v3.mp4", "v2.mp4"]
+    assert "обрезана до последних 3" in capsys.readouterr().out
 
 
 # ------------------------------------- рассинхронизация калибровка ↔ манифест (кроп устарел)
@@ -3569,11 +3670,12 @@ def test_ingest_expands_user_and_resolves(tmp_path):
         cli._ingest_source(d, tmp_path / "inputs")
 
 
-def test_run_dispatch_ingests_external_path(monkeypatch, tmp_path):
-    """main('run <внешний путь>') прогоняет приём: копирует в inputs/ и зовёт cmd_run с ним."""
+def test_run_dispatch_processes_external_path_in_place(monkeypatch, tmp_path):
+    """(1) main('run <внешний путь>') обрабатывает файл НА МЕСТЕ: не копирует в inputs/, archive=False."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(cli, "require_key", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_cli_resolve_ffmpeg", lambda *a, **k: "ffmpeg")
     ext = tmp_path / "Downloads"
     ext.mkdir()
     src = ext / "clip.mp4"
@@ -3583,6 +3685,7 @@ def test_run_dispatch_ingests_external_path(monkeypatch, tmp_path):
 
     def _fake_cmd_run(video, **kwargs):
         seen["video"] = Path(video)
+        seen["archive"] = kwargs.get("archive")
         return tmp_path / "manifests" / "clip.json"
 
     monkeypatch.setattr(cli, "cmd_run", _fake_cmd_run)
@@ -3590,8 +3693,9 @@ def test_run_dispatch_ingests_external_path(monkeypatch, tmp_path):
     rc = cli.main(["run", str(src)])
 
     assert rc == 0
-    assert seen["video"] == (tmp_path / "inputs" / "clip.mp4")
-    assert (tmp_path / "inputs" / "clip.mp4").exists()
+    assert seen["video"] == src.resolve()                       # обрабатываем на месте
+    assert seen["archive"] is False                             # не архивируем
+    assert not (tmp_path / "inputs" / "clip.mp4").exists()      # не копировали в inputs/
 
 
 def test_run_dispatch_bad_path_returns_error(monkeypatch, tmp_path, capsys):
@@ -6005,44 +6109,44 @@ def test_project_root_finds_config_from_any_cwd(tmp_path, monkeypatch):
     )
 
 
-def test_run_dispatch_ingest_goes_to_project_inputs_not_cwd(monkeypatch, tmp_path):
-    """arl run <file> from any cwd places the source in the project's inputs/, not cwd/inputs/.
+def test_run_dispatch_inputs_path_uses_project_inputs_not_cwd(monkeypatch, tmp_path):
+    """(5) arl run <файл уже в inputs/> из любой cwd: inputs/ резолвится от корня проекта, не cwd;
+    источник из inputs/ идёт в inputs-поток (archive=True) — сегодняшнее поведение сохранено.
 
     Regression guard for Class-1 fix: Path("inputs") replaced with _project_root()/"inputs".
     """
     proj = tmp_path / "proj"
-    proj.mkdir()
+    (proj / "inputs").mkdir(parents=True)
     monkeypatch.setattr(cli, "_project_root", lambda: proj)
 
     other = tmp_path / "other"
     other.mkdir()
     monkeypatch.chdir(other)
 
-    src = other / "lecture.mp4"
+    src = proj / "inputs" / "lecture.mp4"       # файл УЖЕ внутри inputs/
     src.write_bytes(b"fake-video")
 
     ingested = {}
 
     def fake_ingest(video, inputs_dir):
         ingested["inputs_dir"] = inputs_dir
-        dest = inputs_dir / video.name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"fake-video")
-        return dest
+        return Path(video)
 
+    seen = {}
     monkeypatch.setattr(cli, "_ingest_source", fake_ingest)
-    monkeypatch.setattr(cli, "cmd_run", lambda video, **k: None)
+    monkeypatch.setattr(cli, "cmd_run",
+                        lambda video, **k: seen.update(video=Path(video), archive=k.get("archive")))
     monkeypatch.setattr(cli, "require_key", lambda *a, **k: None)
     monkeypatch.setattr(cli, "_cli_resolve_ffmpeg", lambda *a, **k: "/fake/ffmpeg")
 
     cli.main(["run", str(src)])
 
-    assert ingested.get("inputs_dir") is not None
-    assert ingested["inputs_dir"] == proj / "inputs", (
-        f"source ingested to {ingested['inputs_dir']!r}, expected {proj / 'inputs'!r}. "
+    assert ingested.get("inputs_dir") == proj / "inputs", (
+        f"inputs_dir resolved to {ingested.get('inputs_dir')!r}, expected {proj / 'inputs'!r}. "
         "Likely Path('inputs') was not replaced with _project_root()/'inputs'."
     )
-    assert not (other / "inputs").exists(), "source must not land in cwd/inputs/"
+    assert seen["archive"] is True              # источник из inputs/ архивируется как раньше
+    assert not (other / "inputs").exists(), "inputs/ must resolve from project root, not cwd"
 
 
 # ------------------------------------------------------------------ background render (Part 2)

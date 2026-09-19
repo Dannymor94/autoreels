@@ -22,6 +22,7 @@ import queue as _queue
 import shutil
 import sys
 import threading as _threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,7 +47,7 @@ from autoreels.cloud.transcribe import (
     transcript_identity,
 )
 from autoreels.cloud.transcribe_formats import to_json, to_srt, to_text, to_vtt
-from autoreels.core import state
+from autoreels.core import history, state
 from autoreels.core.env import MissingKeyError, require_key
 from autoreels.core.calibration import (
     CalibrationError,
@@ -276,6 +277,15 @@ def _guard_already_processed(video: Path, sha: str, duration_preset: str,
 
 
 # ----------------------------------------------------- приём исходника (путь → inputs/)
+
+def _path_inside(path: Path, base: Path) -> bool:
+    """Лежит ли `path` внутри каталога `base` (по абсолютным путям)? Ошибка резолва → False."""
+    try:
+        Path(path).expanduser().resolve().relative_to(Path(base).resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
 
 def _ingest_source(video: Path, inputs_dir: Path) -> Path:
     """Втянуть исходник в inputs/ так, чтобы `render` нашёл его по sha256.
@@ -871,6 +881,7 @@ def _assemble_manifest(video, reels, *, sha, setup, duration_preset, source_kind
     resnap/diagnose найти ТОТ ЖЕ транскрипт, а не «сироту» без params_key."""
     return Manifest(
         source=Path(video).name,
+        source_path=str(Path(video).resolve()),   # абсолютный путь, откуда читали (in-place — реальное место)
         source_sha256=sha,
         source_hash_scheme="partial-p1",
         duration_preset=duration_preset,
@@ -1286,18 +1297,101 @@ def cmd_run(
     force: bool = False,
     force_transcribe: bool = False,
     auto_render: bool = False,
+    archive: bool = True,
+    history_path=None,
     _render_queue=None,
 ) -> Path:
-    """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json + архив источника.
+    """Обёртка над `_cmd_run_impl`, дописывающая КАЖДЫЙ прогон в историю (core.history).
+
+    История пишется на любом исходе — ok / zero-harvest / failed / skipped — включая ранний
+    краш (до манифеста: sha ещё не посчитан, пишем пустой). Пропуски-дедупы (AlreadyProcessed)
+    и отказ над ручным манифестом (ManualManifest) в историю НЕ пишутся: это «ничего не делали,
+    и правильно», а не событие прогона. Детали успеха (рилы, selection) читаются из записанного
+    манифеста — он и есть источник истины.
+    """
+    root = Path(root) if root is not None else _project_root()
+    hist_path = history.resolve_path(history_path, root)
+    manifests_dir_r = Path(manifests_dir) if manifests_dir else root / "manifests"
+    t0 = time.monotonic()
+    outcome = "ok"
+    sha = ""
+    reels = 0
+    selection = "auto"
+    manifest_out = ""
+    record = True
+
+    def _from_manifest(mf: Path) -> None:
+        nonlocal sha, reels, selection, manifest_out
+        if mf.is_file():
+            manifest_out = str(mf)
+            try:
+                m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+                sha, reels, selection = m.source_sha256, len(m.reels), (m.selection_source or "auto")
+            except Exception:  # noqa: BLE001 — детали для истории не критичны
+                pass
+
+    try:
+        path = _cmd_run_impl(
+            video, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
+            cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
+            ffmpeg=ffmpeg, push=push, pull_first=pull_first, force=force,
+            force_transcribe=force_transcribe, auto_render=auto_render, archive=archive,
+            _render_queue=_render_queue,
+        )
+        outcome = "ok"
+        _from_manifest(path)
+        return path
+    except (AlreadyProcessedError, ManualManifestError):
+        record = False
+        raise
+    except InputInvalid:
+        outcome = "skipped"
+        raise
+    except ZeroHarvestError:
+        outcome = "zero-harvest"
+        _from_manifest(manifests_dir_r / f"{Path(video).stem}.json")  # манифест уже записан до raise
+        raise
+    except Exception:
+        outcome = "failed"
+        raise
+    finally:
+        if record:
+            history.append_run(
+                hist_path, source=Path(video).name, source_path=str(Path(video).resolve()),
+                sha256=sha, duration_sec=time.monotonic() - t0, outcome=outcome,
+                reel_count=reels, selection_source=selection, manifest_path=manifest_out,
+            )
+
+
+def _cmd_run_impl(
+    video,
+    *,
+    root=None,
+    calibrations_dir=None,
+    manifests_dir=None,
+    cache_dir=None,
+    archive_dir=None,
+    transcripts_dir=None,
+    ffmpeg: str = "ffmpeg",
+    push: bool = False,
+    pull_first: bool = True,
+    force: bool = False,
+    force_transcribe: bool = False,
+    auto_render: bool = False,
+    archive: bool = True,
+    _render_queue=None,
+) -> Path:
+    """ОБЛАЧНЫЙ тир: одно видео → manifests/<stem>.json (+ архив источника, если archive=True).
 
     `push=True` → сразу закоммитить+запушить манифест (per-video sync на системник);
     ошибка git не роняет прогон. По умолчанию False (git не трогается).
     `pull_first=True` → git pull ПЕРЕД стартом (подтянуть свежие калибровки с системника,
     чтобы не строить манифест на старом кропе). Batch тянет один раз и зовёт с pull_first=False.
+    `archive=True` → после успеха видео уходит в inputs-archive/ (поток inputs/). Для in-place
+    источников (файл дан путём вне inputs/) вызывающий ставит archive=False — файл не двигается.
 
     Кроп per-file: берётся из `calibrations/<sha256>.json` (пишет `autoreels calibrate`).
     Нет калибровки → авто-кроп по центру (9:16, полная высота) с сообщением.
-    После записи манифеста видео перемещается в inputs-archive/.
     Попутно (без доп. работы) сохраняет текст транскрипта в transcripts/<stem>.txt —
     он уже посчитан для R0, отдельный `transcribe` на то же видео не нужен.
     """
@@ -1465,19 +1559,23 @@ def cmd_run(
     is_empty_transcript = not compressed.strip()
     if not manifest.reels:
         if is_empty_transcript:
-            print(f"⊘ транскрипт пуст (тишина) — архивируем {Path(video).name}", flush=True)
-            _archive_video(Path(video), archive_dir)
+            if archive:
+                print(f"⊘ транскрипт пуст (тишина) — архивируем {Path(video).name}", flush=True)
+                _archive_video(Path(video), archive_dir)
+            else:
+                print(f"⊘ транскрипт пуст (тишина) — {Path(video).name} (in-place, не двигаем)", flush=True)
         else:
             raise ZeroHarvestError(
                 f"R0 не нашёл ни одного рила (транскрипт непустой) — "
-                f"источник оставлен в inputs/ для ручной проверки: {Path(video).name}"
+                f"источник оставлен на месте для ручной проверки: {Path(video).name}"
             )
     else:
         if push:
             # Калибровку кропа этого видео шлём вместе с манифестом — чтобы уехала на системник.
             _commit_push_manifest(path, len(manifest.reels), root=root,
                                   calibration_path=calibration_path(calibrations_dir, sha))
-        _archive_video(Path(video), archive_dir)
+        if archive:
+            _archive_video(Path(video), archive_dir)
         if auto_render:
             _ok, _reason = _should_auto_render(render_cfg, failed_chunks=failed_chunks)
             if _ok:
@@ -1605,8 +1703,11 @@ def cmd_run_batch(
     force_transcribe: bool = False,
     auto_render: bool = False,
     parallel_render: bool = True,
+    history_path=None,
 ) -> tuple[list[str], list[tuple[str, Exception]], list[tuple[str, str]], list[tuple[str, str]]]:
     """Batch: обработать все видео в inputs/ по очереди. Один упал → остальные продолжают.
+
+    inputs-поток НЕ меняется: источники архивируются как раньше (archive=True по умолчанию).
 
     `root=None` → корень проекта из `_project_root()` (по расположению пакета, НЕ по cwd).
     Явный `root=<путь>` переопределяет дефолт — для тестов и нестандартных раскладок.
@@ -1677,7 +1778,7 @@ def cmd_run_batch(
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
                 ffmpeg=ffmpeg, push=push, pull_first=False, force=force,
                 force_transcribe=force_transcribe,
-                auto_render=auto_render, _render_queue=render_q,
+                auto_render=auto_render, history_path=history_path, _render_queue=render_q,
             )
             ok.append(v.name)
         except AlreadyProcessedError as e:       # run_key совпал — уже обработан, пропуск
@@ -3500,7 +3601,34 @@ def cmd_diagnose_cuts(target=None, *, root=None, rerun=False, cache_dir=None,
 
 # --------------------------------------------------------------------------- status
 
-def cmd_status(*, root=None) -> int:
+def _print_history_table(runs: list[dict], *, indent: str = "  ") -> None:
+    """Компактная таблица прогонов (новейшие первыми): время · исход · рилы · выборка · источник."""
+    mark = {"ok": "✓", "zero-harvest": "∅", "failed": "✗", "skipped": "⊘"}
+    print(f"{indent}{'время':<19}  {'исход':<12} {'рилы':>4}  {'выборка':<7}  источник")
+    for r in runs:
+        m = mark.get(r.get("outcome", ""), "?")
+        oc = f"{m} {r.get('outcome', '?')}"
+        print(f"{indent}{r.get('ts', ''):<19}  {oc:<12} {r.get('reel_count', 0):>4}  "
+              f"{(r.get('selection_source') or 'auto'):<7}  {r.get('source', '')}")
+
+
+def cmd_history(*, root=None, limit: int | None = None, outcome: str | None = None,
+                history_path=None) -> int:
+    """Полная история прогонов (JSONL под data/), новейшие первыми. `--limit`/`--outcome` фильтруют."""
+    root = Path(root) if root is not None else _project_root()
+    path = history.resolve_path(history_path, root)
+    runs = history.read_runs(path, limit=limit, outcome=outcome)
+    if not runs:
+        suffix = f" (outcome={outcome})" if outcome else ""
+        print(f"история пуста{suffix} — ещё ничего не прогонялось ({path})")
+        return 0
+    print(f"─── история прогонов ({len(runs)}{f', outcome={outcome}' if outcome else ''}) ───")
+    _print_history_table(runs)
+    print("────────────────────────────────────────────────────")
+    return 0
+
+
+def cmd_status(*, root=None, history_path=None, history_tail: int = 10) -> int:
     """Сводка текущего состояния проекта: inputs / manifests / reels-out / archive + предупреждения."""
     root = Path(root) if root is not None else _project_root()
     inputs_dir      = root / "inputs"
@@ -3568,6 +3696,15 @@ def cmd_status(*, root=None) -> int:
         print()
         for w in warnings:
             print(w)
+
+    # Хвост истории прогонов: последние N (не зависит от расположения файлов — отвечает на
+    # «что я гонял недавно?», в т.ч. по in-place источникам, которых нет ни в inputs/, ни в архиве).
+    recent = history.read_runs(history.resolve_path(history_path, root), limit=history_tail)
+    if recent:
+        print()
+        print(f"  ┌─ последние прогоны ({len(recent)}) ─ полный список: arl history ─────")
+        _print_history_table(recent, indent="  │ ")
+        print("  └──────────────────────────────────────────────────")
 
     print("────────────────────────────────────────────────────")
     return 0
@@ -4626,6 +4763,25 @@ def _build_parser():
     )
     ps.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
 
+    phist = sub.add_parser(
+        "history",
+        help="история прогонов (что уже гонялось) — не зависит от расположения файлов",
+        description=(
+            "Показывает историю прогонов из data/history.jsonl (append-only, не в git):\n"
+            "  время · исход (ok/zero-harvest/failed/skipped) · рилы · выборка · источник.\n"
+            "Отвечает на «я это уже обрабатывал?» без опоры на то, где лежит файл.\n\n"
+            "Примеры:\n"
+            "  autoreels history                 последние прогоны\n"
+            "  autoreels history --limit 50      больше строк\n"
+            "  autoreels history --outcome failed  только падения"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    phist.add_argument("--root", default=None, help="корень проекта (по умолчанию: проект)")
+    phist.add_argument("--limit", type=int, default=None, help="сколько последних записей показать")
+    phist.add_argument("--outcome", default=None, choices=list(history.OUTCOMES),
+                       help="фильтр по исходу: ok | zero-harvest | failed | skipped")
+
     pdoc = sub.add_parser(
         "doctor",
         help="преflight окружения: .env, ключи, провайдеры (200/401/403), ffmpeg, git, каталоги",
@@ -5097,6 +5253,9 @@ def main(argv=None) -> int:
     if args.cmd == "status":
         return cmd_status(root=args.root)
 
+    if args.cmd == "history":
+        return cmd_history(root=args.root, limit=args.limit, outcome=args.outcome)
+
     if args.cmd == "doctor":
         return cmd_doctor(root=args.root)
 
@@ -5123,16 +5282,26 @@ def main(argv=None) -> int:
             require_key("GROQ_API_KEY", _ENV_REPORT)
             ffmpeg = _cli_resolve_ffmpeg(args.ffmpeg)   # флаг>env>local.yaml>render.yaml>автопоиск
             if args.video:
+                inputs_dir = _project_root() / "inputs"
+                # in-place по умолчанию для файла, данного путём: не копируем в inputs/ и не
+                # архивируем — источник обрабатывается там, где лежит (крупные файлы 14 ГБ не
+                # дублируем). Исключения, сохраняющие сегодняшнее поведение (архивация вкл.):
+                #   • URL/Яндекс.Диск — качаем в inputs/ (это и есть inputs-поток);
+                #   • путь, УЖЕ указывающий внутрь inputs/ — трактуем как inputs-источник.
+                archive = True
                 if _is_url(args.video):
                     if _is_yandex_disk(args.video):
-                        video = _download_yandex_disk(args.video, _project_root() / "inputs")
+                        video = _download_yandex_disk(args.video, inputs_dir)
                     else:
-                        video = _download_url(args.video, _project_root() / "inputs")
+                        video = _download_url(args.video, inputs_dir)
+                elif _path_inside(Path(args.video), inputs_dir):
+                    video = _ingest_source(Path(args.video), inputs_dir)   # no-op копия: уже в inputs/
                 else:
-                    video = _ingest_source(Path(args.video), _project_root() / "inputs")
+                    video = _validate_media(Path(args.video), exts=_VIDEO_EXTS)  # in-place, абсолютный путь
+                    archive = False
                 try:
                     cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push,
-                            force=args.force,
+                            force=args.force, archive=archive,
                             force_transcribe=args.force_transcribe,
                             auto_render=getattr(args, "auto_render", False))
                 except AlreadyProcessedError as e:

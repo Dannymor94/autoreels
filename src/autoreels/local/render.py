@@ -265,39 +265,48 @@ def _diagnose_crop_space(source: Path, manifest: Manifest, ffmpeg_bin: str) -> N
 
 
 def resolve_source(manifest: Manifest, inputs_dir: str | Path) -> Path:
-    """Найти исходник в `inputs_dir` по `manifest.source_sha256`.
+    """Найти исходник по `manifest.source_sha256` (идентичность по содержимому, не по пути).
 
-    Mac-путь из `manifest.source` игнорируется (на машине рендера невалиден) — используется
-    как подсказка по имени для быстрого пути. Файл с нужным хэшем не найден → RenderError.
+    Порядок разрешения:
+      1. `manifest.source_path` — абсолютный путь, откуда файл читали при анализе (in-place
+         источник лежит там же). Быстрый путь: если файл на месте И хэш совпал — берём его.
+      2. `inputs_dir` — сперва по имени-подсказке, затем скан по хэшу (inputs-поток).
+      3. `<inputs_dir>-archive/` — то же (заархивированный inputs-источник).
+    Совпадение — только по хэшу. Если записанный путь исчез или содержимое изменилось,
+    (1) молча пропускается и файл ищется по хэшу в (2)/(3). Ничего не нашли → SourceNotFoundError.
     """
-    inputs_dir = Path(inputs_dir)
-    if not inputs_dir.is_dir():
-        raise RenderError(f"папка inputs/ не найдена: {inputs_dir}")
-
     want = manifest.source_sha256
     if not want:
         raise RenderError("в манифесте нет source_sha256 — нечем идентифицировать исходник")
 
-    # Порядок проверки: сначала файл с тем же именем (подсказка), затем остальные файлы
-    # папки — чтобы не хэшировать всю inputs/, когда имя уцелело.
-    hint = _basename_hint(manifest.source)
-    by_name = inputs_dir / hint
-    ordered: list[Path] = []
-    if by_name.is_file():
-        ordered.append(by_name)
-    for p in sorted(inputs_dir.iterdir()):
-        if p.is_file() and p != by_name:
-            ordered.append(p)
-
     scheme = getattr(manifest, "source_hash_scheme", "full")
     hash_fn = state.file_sha256_partial if scheme == "partial-p1" else state.file_sha256
-    for p in ordered:
-        if hash_fn(p) == want:
-            return p
+
+    # 1. Записанный абсолютный путь (in-place — реальное место файла).
+    rec = getattr(manifest, "source_path", "")
+    if rec:
+        rp = Path(rec)
+        if rp.is_file() and hash_fn(rp) == want:
+            return rp
+
+    # 2+3. inputs/ затем архив (inputs-archive/ рядом): по имени-подсказке, затем скан.
+    inputs_dir = Path(inputs_dir)
+    archive_dir = inputs_dir.parent / f"{inputs_dir.name}-archive"
+    hint = _basename_hint(manifest.source)
+    for d in (inputs_dir, archive_dir):
+        if not d.is_dir():
+            continue
+        by_name = d / hint
+        ordered: list[Path] = [by_name] if by_name.is_file() else []
+        ordered += [p for p in sorted(d.iterdir()) if p.is_file() and p != by_name]
+        for p in ordered:
+            if hash_fn(p) == want:
+                return p
 
     raise SourceNotFoundError(
-        f"исходник не найден в {inputs_dir}: нет файла с sha256={want[:12]}… "
-        f"(имя-подсказка из манифеста: {hint!r})"
+        f"исходник не найден по sha256={want[:12]}…: ни по записанному пути "
+        f"({rec or '—'}), ни в {inputs_dir}, ни в {archive_dir} "
+        f"(имя-подсказка: {hint!r})"
     )
 
 

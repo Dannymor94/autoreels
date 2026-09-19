@@ -471,6 +471,40 @@ def test_resolve_source_uses_full_hash_when_scheme_is_full(tmp_path):
     assert resolve_source(m, inputs) == p
 
 
+def test_resolve_source_from_recorded_source_path(tmp_path):
+    """(2) source_path указывает на файл вне inputs/ → resolve_source берёт его напрямую (in-place)."""
+    home = tmp_path / "home"
+    p = home / "big.mp4"
+    sha = _make_source(home, "big.mp4", b"in-place-video-bytes")
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()                                   # inputs/ пуст — файла тут нет
+    m = _manifest("big.mp4", sha, [])
+    m.source_path = str(p)
+    assert resolve_source(m, inputs) == p
+
+
+def test_resolve_source_falls_back_to_archive_when_path_gone(tmp_path):
+    """Записанный source_path исчез (файл в архиве) → находим по хэшу в inputs-archive/."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    archive = tmp_path / "inputs-archive"            # сосед inputs/ — как в проде
+    sha = _make_source(archive, "lecture.mp4", b"archived-bytes")
+    m = _manifest("lecture.mp4", sha, [])
+    m.source_path = str(tmp_path / "gone" / "lecture.mp4")   # путь больше не существует
+    assert resolve_source(m, inputs) == archive / "lecture.mp4"
+
+
+def test_resolve_source_stale_path_with_changed_content_falls_through(tmp_path):
+    """source_path на месте, но содержимое иное (хэш не тот) → путь игнорируется, ищем по хэшу."""
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "clip.mp4", b"the-real-content")
+    stale = tmp_path / "stale.mp4"
+    stale.write_bytes(b"DIFFERENT-content-now")      # существует, но не тот файл
+    m = _manifest("clip.mp4", sha, [])
+    m.source_path = str(stale)
+    assert resolve_source(m, inputs) == inputs / "clip.mp4"
+
+
 def test_manifest_model_default_scheme_is_full_for_compat():
     """Дефолт модели 'full' — чтобы старые JSON без поля читались корректно."""
     m = Manifest(
