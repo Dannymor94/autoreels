@@ -775,16 +775,17 @@ def test_import_selects_only_numeric_scores():
 
 
 def test_import_merge_plus_and_make_merged_block():
-    """'+' in score is parsed as merge_next=True; _make_merged_block combines two blocks."""
+    """'+' in score parses as merge_fwd=1; _make_merged_block combines two blocks."""
     content = "\n".join([
         "# source: test.json",
         "[ 1 ]  30.0s  id=aaa111  score: 82+",
         "[ 2 ]  25.0s  id=bbb222  score: __",
     ])
     source, entries, errors = parse_review(content)
-    assert entries[0].merge_next is True
+    assert entries[0].merge_fwd == 1
+    assert entries[0].merge_back is False
     assert entries[0].score == 82
-    assert entries[1].merge_next is False
+    assert entries[1].merge_fwd == 0
     assert len(errors) == 0
 
     # _make_merged_block combines text and extends time range
@@ -1350,3 +1351,61 @@ def test_apply_compact_answer_out_of_range_refused(tmp_path, monkeypatch, capsys
     assert rc == 1
     err = capsys.readouterr().err
     assert "out of range" in err or "not in this manifest" in err
+
+
+# --------------------------------------------------------------------------- Fix 2: merge markers
+
+def test_resolve_merge_groups_multi_backward_and_dedup():
+    """(4) '++' joins three; '-' joins backward; forward+backward on the same pair → one merge."""
+    from autoreels.cloud.blocks import resolve_merge_groups, merge_blocks, _ReviewEntry
+    blocks = {i: _make_block(f"b{i}.", start=(i - 1) * 20.0, end=(i - 1) * 20.0 + 15.0)
+              for i in range(1, 6)}   # 1:[0,15] 2:[20,35] 3:[40,55] 4:[60,75] 5:[80,95]
+
+    # '++' on block 1 → join 1+2+3; '-' on block 5 → join 4+5 (run-up 4 is unscored)
+    entries = [_ReviewEntry(1, "", 80, 2, False), _ReviewEntry(5, "", 70, 0, True)]
+    groups, over = resolve_merge_groups(entries, blocks, max_duration=90)
+    assert groups == [[1, 2, 3], [4, 5]]
+    assert over == []
+
+    # forward '+' on 1 and backward '-' on 2 name the SAME edge (1,2) → one merge, not two
+    entries2 = [_ReviewEntry(1, "", 80, 1, False), _ReviewEntry(2, "", 60, 0, True)]
+    groups2, _ = resolve_merge_groups(entries2, {1: blocks[1], 2: blocks[2]}, max_duration=90)
+    assert groups2 == [[1, 2]]
+
+    # merge_blocks folds three adjacent blocks into one spanning 1..3
+    merged = merge_blocks([blocks[1], blocks[2], blocks[3]])
+    assert merged.start == pytest.approx(0.0)
+    assert merged.end == pytest.approx(55.0)
+
+
+def test_resolve_merge_over_max_reported_and_split():
+    """(5) a merge whose span exceeds max_duration is reported (over_max) and split, not trimmed."""
+    from autoreels.cloud.blocks import resolve_merge_groups, _ReviewEntry
+    blocks = {1: _make_block("a.", start=0.0, end=80.0), 2: _make_block("b.", start=81.0, end=140.0)}
+    entries = [_ReviewEntry(1, "", 80, 1, False)]   # '+' would join 1+2 → span 140s > 90
+    groups, over = resolve_merge_groups(entries, blocks, max_duration=90)
+    assert over == [[1, 2]]            # reported by block number
+    assert groups == [[1], [2]]        # split back to singletons — span not trimmed
+
+
+def test_compact_export_prompt_documents_merge_markers():
+    """(6) the compact export's embedded prompt documents ++ and the backward '-' marker."""
+    from autoreels.cloud.blocks import export_compact_review
+    out = export_compact_review([_make_block("hi", start=0.0, end=20.0)],
+                                source_ref="m.json", filter_removed_count=0)
+    assert "++" in out
+    assert "next TWO" in out                       # ++ = join the next two
+    assert "PRECEDING" in out                       # '-' = join with the preceding block
+
+
+def test_parse_score_markers_backward_and_double_forward():
+    """Score-field parser: '-NN' → backward, 'NN++' → merge_fwd=2, bare '-'/'__' → skip."""
+    from autoreels.cloud.blocks import _parse_score_markers
+    assert _parse_score_markers("85") == (85, 0, False, None)
+    assert _parse_score_markers("85+") == (85, 1, False, None)
+    assert _parse_score_markers("85++") == (85, 2, False, None)
+    assert _parse_score_markers("-90") == (90, 0, True, None)
+    assert _parse_score_markers("-90+") == (90, 1, True, None)
+    assert _parse_score_markers("__")[0] is None
+    assert _parse_score_markers("-")[0] is None      # bare dash still means skip
+    assert _parse_score_markers("++")[3] is not None  # marker without a score → error

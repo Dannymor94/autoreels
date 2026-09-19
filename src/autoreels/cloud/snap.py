@@ -548,3 +548,56 @@ def trim_hanging_subtitles(reels: list[Reel], *, hanging_words) -> None:
             trimmed = True
         if trimmed and r.end_snap_reason in ("sentence", "no_punctuation"):
             r.end_snap_reason = "sentence_trimmed_hanging"
+
+
+# --------------------------------------------------------------------------- final speech density
+# Fix 1 (video review): density is computed on the FINISHED clip — after merges, snap, padding —
+# because a clip assembled from two blocks across a long pause passes the block-level check yet
+# plays with dead air on screen (r08: 54.7s clip, 72.7% speech, one 14.6s interviewer pause).
+
+def clip_speech_density(start: float, end: float, words: list[Word]) -> float:
+    """Doля времени клипа, занятая речью: sum(overlap слова с [start,end]) / (end-start).
+
+    1.0 — сплошная речь; ниже — паузы/тишина внутри клипа. Пустой/нулевой клип → 0.0.
+    """
+    dur = end - start
+    if dur <= 0:
+        return 0.0
+    speech = 0.0
+    for w in words:
+        lo, hi = max(start, w.t0), min(end, w.t1)
+        if hi > lo:
+            speech += hi - lo
+    return min(1.0, speech / dur)
+
+
+def split_clip_at_largest_gap(
+    start: float, end: float, words: list[Word], *,
+    min_gap: float, min_duration: float, max_duration: float,
+) -> tuple[float, float] | None:
+    """Срезать клип по САМОЙ длинной внутренней паузе между словами, вернуть более длинную половину.
+
+    Возвращает (new_start, new_end) более длинной половины, если:
+      - есть пауза между соседними словами длиннее `min_gap`, и
+      - длиннейшая половина укладывается в [min_duration, max_duration].
+    Иначе None (клип не спасти срезом — вызывающий его снимет). Границы половин выравнены по
+    словам (левая кончается на t1 слова перед паузой, правая начинается с t0 слова после),
+    исходные start/end (с паддингом) сохраняются на внешних краях.
+    """
+    win = [w for w in words if w.t1 > start and w.t0 < end]
+    if len(win) < 2:
+        return None
+    best_k, best_gap = None, min_gap
+    for k in range(1, len(win)):
+        gap = win[k].t0 - win[k - 1].t1
+        if gap > best_gap:
+            best_gap, best_k = gap, k
+    if best_k is None:
+        return None                       # ни одной паузы длиннее порога — резать негде
+    left = (start, win[best_k - 1].t1)
+    right = (win[best_k].t0, end)
+    longer = left if (left[1] - left[0]) >= (right[1] - right[0]) else right
+    dur = longer[1] - longer[0]
+    if min_duration <= dur <= max_duration:
+        return longer
+    return None

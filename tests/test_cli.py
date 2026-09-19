@@ -266,9 +266,11 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
     midword = Reel(id="r01", start=30.0, end=31.3, score=80, hook="h", title="t",
                    description="d", reason="r", topic="x")
     monkeypatch.setattr(cli, "_stage_select", lambda *a, **k: ([midword], [], []))
-    # Этот тест проверяет snap/padding, а не min_clip_filter → минуем оба фильтра.
+    # Этот тест проверяет snap/padding, а не пост-фильтры → минуем их все (короткий тест-клип
+    # заведомо ниже порога плотности и был бы снят density-стадией).
     monkeypatch.setattr(cli, "_stage_min_clip_filter", lambda reels, transcript, *, r0_cfg: (reels, []))
     monkeypatch.setattr(cli, "_stage_meaningful_sec_recheck", lambda reels, transcript, *, r0_cfg: (reels, []))
+    monkeypatch.setattr(cli, "_stage_speech_density", lambda reels, transcript, *, r0_cfg: (reels, []))
 
     video = tmp_path / "v.mp4"
     video.write_bytes(b"vid")

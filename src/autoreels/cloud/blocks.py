@@ -525,7 +525,9 @@ _REVIEW_HDR_RE = re.compile(
     r"^\[\s*(\d+)\s*\]\s+([\d.]+)s\s+id=([0-9a-f]+)\s+score:\s*(.*)$"
 )
 _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
-_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(\d+)(\+)?\s*$")
+# Compact answer line: <seq> <score-token>, where the token is an optional leading '-'
+# (join backward), digits, and trailing '+'/'++' (join 1 or 2 following blocks).
+_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*)\s*$")
 
 _COMPACT_PROMPT = (
     "# Score each block 0-100 for standalone short-video quality.\n"
@@ -537,12 +539,17 @@ _COMPACT_PROMPT = (
     "# blank   broken thought, dangling reference, organisational talk,\n"
     "#         or a speaker change that breaks the thought\n"
     "#\n"
-    "# Append + after a score to join with the next block (thought continues).\n"
+    "# Merge markers (a thought split across blocks — score the block it belongs to):\n"
+    "#   +   after the score: join with the NEXT block\n"
+    "#   ++  after the score: join with the next TWO blocks (a thought across three)\n"
+    "#   -   before the score: join with the PRECEDING block (attach a run-up)\n"
+    "# A forward '+' on a block and a backward '-' on the next name the same join — counted once.\n"
     "#\n"
-    "# Reply with ONLY lines of:  <number> <score>[+]\n"
+    "# Reply with ONLY lines of:  <number> [-]<score>[+|++]\n"
     "# No commentary, no restating of text.  Example:\n"
-    "#   3 85\n"
-    "#   7 72+\n"
+    "#   3 85+      (join 3 with 4)\n"
+    "#   5 -90      (join 5 back into 4)\n"
+    "#   7 72++     (join 7 with 8 and 9)\n"
     "#   8 90"
 )
 
@@ -551,7 +558,40 @@ class _ReviewEntry(NamedTuple):
     seq: int
     block_id: str
     score: int | None   # None = reviewer left blank
-    merge_next: bool    # trailing '+' on score
+    merge_fwd: int = 0   # 0 none | 1 '+' (join next) | 2 '++' (join next two)
+    merge_back: bool = False  # '-' before score: join with the PRECEDING block
+
+
+def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, str | None]:
+    """Parse a score field with merge markers → (score, merge_fwd, merge_back, error).
+
+    Accepts: '' / '__' / '-' (blank/skip), 'NN', 'NN+', 'NN++', '-NN', '-NN+', etc.
+    merge_fwd is 0/1/2 (trailing '+' count, capped at 2 = join next two).
+    merge_back True when a single leading '-' precedes the digits.
+    Returns error (str) instead of a score when the token is malformed.
+    """
+    s = score_str.strip()
+    if not s or s in ("__", "-"):
+        return None, 0, False, None            # blank / skip (bare '-' stays "skip", legacy)
+    back = False
+    if s.startswith("-"):
+        back = True
+        s = s[1:].strip()
+    fwd = 0
+    while s.endswith("+"):
+        fwd += 1
+        s = s[:-1]
+    fwd = min(fwd, 2)                           # '+++' or more → cap at "join next two"
+    s = s.strip()
+    if not s:
+        return None, 0, False, "merge marker without a score"
+    try:
+        score = int(s)
+    except ValueError:
+        return None, 0, False, f"expected integer score, got {s!r}"
+    if not 0 <= score <= 100:
+        return None, 0, False, f"score {score} out of range [0, 100]"
+    return score, fwd, back, None
 
 
 def export_review(
@@ -571,7 +611,10 @@ def export_review(
         f"# blocks: {len(blocks)}  |  filter_removed: {filter_removed_count}",
         "#",
         "# Score (0-100) to select a block; leave blank to skip.",
-        "# Append '+' after a score to merge with the following block.",
+        "# Merge markers on the score:",
+        "#   '+'  join with the NEXT block   '++' join with the next TWO (thought across three)",
+        "#   '-'  BEFORE the score: join with the PRECEDING block (attach a run-up)",
+        "# A '+' on a block and a '-' on the next name the same join — counted once.",
         "#",
         "",
     ]
@@ -609,21 +652,11 @@ def parse_review(
         if not m:
             continue  # block text or other — ignored silently
         seq, block_id, score_str = int(m.group(1)), m.group(3), m.group(4).strip()
-        if not score_str or score_str in ("__", "-"):
-            entries.append(_ReviewEntry(seq, block_id, None, False))
+        score, fwd, back, err = _parse_score_markers(score_str)
+        if err:
+            errors.append((lineno, err))
             continue
-        merge = score_str.endswith("+")
-        if merge:
-            score_str = score_str[:-1].strip()
-        try:
-            score = int(score_str)
-        except ValueError:
-            errors.append((lineno, f"expected integer score, got {score_str!r}"))
-            continue
-        if not 0 <= score <= 100:
-            errors.append((lineno, f"score {score} out of range [0, 100]"))
-            continue
-        entries.append(_ReviewEntry(seq, block_id, score, merge))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back))
 
     return source_ref, entries, errors
 
@@ -682,34 +715,84 @@ def parse_compact_answer(
         m = _COMPACT_SCORE_RE.match(line)
         if m:
             seq = int(m.group(1))
-            score_val = int(m.group(2))
-            merge = m.group(3) == "+"
-            if not 0 <= score_val <= 100:
-                errors.append((lineno, f"score {score_val} out of range [0, 100]"))
+            score_val, fwd, back, err = _parse_score_markers(m.group(2))
+            if err:
+                errors.append((lineno, err))
                 continue
-            entries.append(_ReviewEntry(seq, "", score_val, merge))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back))
         else:
             ignored += 1
 
     return source_ref, entries, errors, ignored
 
 
+def merge_blocks(blocks: list[CandidateBlock]) -> CandidateBlock:
+    """Combine one or more adjacent blocks into a single block (review merge).
+
+    Reuses _make_block so text/id/duration derive from the concatenated lines exactly like a
+    freshly-segmented block. boundary_reason inherited from the first; speaker-change ORed.
+    """
+    if len(blocks) == 1:
+        return blocks[0]
+    lines = [ln for b in blocks for ln in b.lines]
+    merged = _make_block(lines, blocks[0].boundary_reason)
+    merged.has_internal_speaker_change = any(b.has_internal_speaker_change for b in blocks)
+    return merged
+
+
 def _make_merged_block(first: CandidateBlock, second: CandidateBlock) -> CandidateBlock:
-    """Combine two adjacent blocks into one (for review '+' continuation)."""
-    text = first.text + " " + second.text
-    merged_lines = first.lines + second.lines
-    return CandidateBlock(
-        id=_block_id(text),
-        start=first.start,
-        end=second.end,
-        duration=second.end - first.start,
-        text=text,
-        boundary_reason=first.boundary_reason,
-        lines=merged_lines,
-        has_internal_speaker_change=(
-            first.has_internal_speaker_change or second.has_internal_speaker_change
-        ),
-    )
+    """Combine two adjacent blocks into one (kept for callers/tests; delegates to merge_blocks)."""
+    return merge_blocks([first, second])
+
+
+def resolve_merge_groups(
+    entries: list[_ReviewEntry],
+    seq_to_block: dict[int, CandidateBlock],
+    max_duration: float,
+) -> tuple[list[list[int]], list[list[int]]]:
+    """Resolve +, ++, - markers into deterministic contiguous merge groups over kept blocks.
+
+    seq_to_block: {seq: block} for every seq eligible to merge (1..N, minus stale/invalid).
+    Returns (groups, over_max):
+      groups   — contiguous seq runs (len ≥ 1); every eligible seq appears exactly once.
+      over_max — groups whose merged span exceeds max_duration: reported to the reviewer by
+                 number and SPLIT back into singletons in `groups` (never silently trimmed).
+    Idempotent on the same pair: a forward '+' on block i and a backward '-' on i+1 both name
+    the edge (i, i+1) → one merge, not two.  '++' on i names edges (i,i+1) and (i+1,i+2).
+    """
+    present = set(seq_to_block)
+    edges: set[tuple[int, int]] = set()
+    for e in entries:
+        if e.merge_fwd >= 1 and e.seq in present and (e.seq + 1) in present:
+            edges.add((e.seq, e.seq + 1))
+        if e.merge_fwd >= 2 and (e.seq + 1) in present and (e.seq + 2) in present:
+            edges.add((e.seq + 1, e.seq + 2))
+        if e.merge_back and (e.seq - 1) in present and e.seq in present:
+            edges.add((e.seq - 1, e.seq))
+
+    seqs = sorted(present)
+    groups: list[list[int]] = []
+    cur: list[int] = [seqs[0]] if seqs else []
+    for s in seqs[1:]:
+        if (cur[-1], s) in edges:
+            cur.append(s)
+        else:
+            groups.append(cur)
+            cur = [s]
+    if cur:
+        groups.append(cur)
+
+    final: list[list[int]] = []
+    over: list[list[int]] = []
+    for g in groups:
+        if len(g) > 1:
+            span = seq_to_block[g[-1]].end - seq_to_block[g[0]].start
+            if span > max_duration:
+                over.append(g)
+                final.extend([s] for s in g)   # keep separate — do not trim the span they asked for
+                continue
+        final.append(g)
+    return final, over
 
 
 def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str) -> dict:

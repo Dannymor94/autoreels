@@ -865,6 +865,59 @@ def _stage_meaningful_sec_recheck(reels, transcript, *, r0_cfg) -> tuple[list, l
     return kept, disc
 
 
+def _stage_speech_density(reels, transcript, *, r0_cfg) -> tuple[list, list[dict]]:
+    """Fix 1: плотность речи на ГОТОВОМ клипе (после всех границ), ДО субтитров.
+
+    Клип ниже final_speech_density_min: сперва пробуем срезать по единой длинной паузе
+    (≥ speech_density_split_gap_sec) и оставить более длинную половину, если та укладывается
+    в [min_clip_duration, max_duration]. Не вышло → снять с причиной low_speech_density в sidecar.
+    Плотность каждого клипа печатается ДО и ПОСЛЕ — эффект виден. Применяется и к human_merged:
+    r08 (ручная выборка) — ровно тот клип, что надо чинить.
+    Returns (kept, discarded).
+    """
+    from autoreels.cloud.snap import clip_speech_density, split_clip_at_largest_gap
+    from autoreels.local.subtitles import words_in_window
+
+    floor = getattr(r0_cfg, "final_speech_density_min", 0.0)
+    words = getattr(transcript, "words", None)
+    if floor <= 0 or not words:
+        return reels, []
+
+    gap = r0_cfg.speech_density_split_gap_sec
+    kept: list = []
+    disc: list[dict] = []
+    print(f"плотность речи финальных клипов (порог {floor:.0%}, срез по паузе ≥{gap:.0f}с):", flush=True)
+    for r in reels:
+        d0 = clip_speech_density(r.start, r.end, words)
+        if d0 >= floor:
+            print(f"  · {r.id}: {d0:.0%} ({r.end - r.start:.1f}с) — ок", flush=True)
+            kept.append(r)
+            continue
+        split = split_clip_at_largest_gap(
+            r.start, r.end, words,
+            min_gap=gap, min_duration=r0_cfg.min_clip_duration, max_duration=r0_cfg.max_duration,
+        )
+        if split is not None:
+            old_dur = r.end - r.start
+            r.start, r.end = split
+            d1 = clip_speech_density(r.start, r.end, words)
+            r.end_snap_reason = "split_low_density"
+            print(f"  ✂ {r.id}: {d0:.0%} ({old_dur:.1f}с) → срез по паузе → "
+                  f"{d1:.0%} ({r.end - r.start:.1f}с)", flush=True)
+            kept.append(r)
+        else:
+            cw = words_in_window(words, r.start, r.end)
+            first_8 = " ".join(w.word for w in cw[:8])
+            print(f"  ✗ {r.id}: {d0:.0%} ({r.end - r.start:.1f}с) — единой паузы ≥{gap:.0f}с нет → снят",
+                  flush=True)
+            disc.append({"id": r.id, "score": r.score,
+                         "reason": f"low_speech_density: {d0:.2f} < {floor:.2f}",
+                         "first_words": first_8})
+    if disc:
+        print(f"speech_density: снято {len(disc)} клип(ов) с низкой плотностью речи", flush=True)
+    return kept, disc
+
+
 def _stage_subtitles(reels, transcript):
     """R3: привязать word-level транскрипта к каждому reel."""
     print("субтитры: привязка слов к сегментам…", flush=True)
@@ -1538,6 +1591,8 @@ def _cmd_run_impl(
     discarded += short_disc
     reels, meaningful_disc = _stage_meaningful_sec_recheck(reels, transcript, r0_cfg=r0_cfg)
     discarded += meaningful_disc
+    reels, density_disc = _stage_speech_density(reels, transcript, r0_cfg=r0_cfg)
+    discarded += density_disc
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
@@ -2602,7 +2657,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
 
     from autoreels.cloud.blocks import (
         candidate_blocks, filter_blocks, score_block,
-        parse_review, parse_compact_answer, _make_merged_block, make_dataset_row,
+        parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
@@ -2696,71 +2751,61 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
         max_sec=r0_cfg.max_duration,
     )
     bs_cfg = r0_cfg.block_scoring
-    id_to_block = {}
     seq_to_block = {}
     for i, b in enumerate(kept, 1):
         b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
-        id_to_block[b.id] = b
         seq_to_block[i] = b
 
-    # Process review entries → Reels
+    # Process review entries → Reels.
+    # seq_to_block maps 1..N to kept blocks by position; the verbose format also carries the
+    # block id, which we cross-check to catch a stale review (blocks changed since export).
     seq_to_entry = {e.seq: e for e in entries}
     reels: list = []
     dataset_rows: list[dict] = []
-    processed_seqs: set[int] = set()
     compact_lookup_errors = 0
 
-    for entry in entries:
-        if entry.seq in processed_seqs or entry.score is None:
-            continue
-        if entry.block_id:
-            block = id_to_block.get(entry.block_id)
-            if block is None:
-                print(
-                    f"  warning: block {entry.block_id[:8]}… not in kept blocks "
-                    f"(filtered or id mismatch)", file=sys.stderr,
-                )
-                continue
-        else:
-            # compact format: seq number → position in kept list
-            block = seq_to_block.get(entry.seq)
-            if block is None:
-                print(
-                    f"  error: block {entry.seq} out of range (1-{len(kept)})",
-                    file=sys.stderr,
-                )
+    # Determine which seqs are eligible to merge/select (drop stale verbose ids, flag compact OOB).
+    eligible: set[int] = set(seq_to_block)
+    if _is_compact:
+        for e in entries:
+            if e.score is not None and e.seq not in seq_to_block:
+                print(f"  error: block {e.seq} out of range (1-{len(kept)})", file=sys.stderr)
                 compact_lookup_errors += 1
-                continue
+    else:
+        for e in entries:
+            if e.block_id and e.seq in seq_to_block and seq_to_block[e.seq].id != e.block_id:
+                print(f"  warning: block {e.block_id[:8]}… (seq {e.seq}) does not match kept "
+                      f"block (filtered or id mismatch) — skipped", file=sys.stderr)
+                eligible.discard(e.seq)
 
-        is_merged = False
-        if entry.merge_next:
-            next_entry = seq_to_entry.get(entry.seq + 1)
-            if next_entry:
-                next_block = (
-                    id_to_block.get(next_entry.block_id) if next_entry.block_id
-                    else seq_to_block.get(next_entry.seq)
-                )
-                if next_block:
-                    combined_dur = next_block.end - block.start
-                    if combined_dur <= r0_cfg.max_duration:
-                        block = _make_merged_block(block, next_block)
-                        block.heuristic_score, block.score_breakdown = score_block(block, bs_cfg)
-                        id_to_block[block.id] = block
-                        processed_seqs.add(next_entry.seq)
-                        is_merged = True
-                        print(f"  + merged blocks {entry.seq}+{entry.seq + 1}: {block.duration:.1f}s")
-                    else:
-                        print(
-                            f"  WARNING: merge {entry.seq}+{entry.seq + 1} span ({combined_dur:.1f}s) "
-                            f"exceeds max_duration ({r0_cfg.max_duration:.0f}s) — blocks kept separate",
-                            file=sys.stderr,
-                        )
+    active = {s: seq_to_block[s] for s in eligible}
+    groups, over_max = resolve_merge_groups(list(entries), active, r0_cfg.max_duration)
+    for g in over_max:
+        span = active[g[-1]].end - active[g[0]].start
+        print(
+            f"  WARNING: merge {'+'.join(str(s) for s in g)} span ({span:.1f}s) exceeds "
+            f"max_duration ({r0_cfg.max_duration:.0f}s) — blocks kept separate (not trimmed)",
+            file=sys.stderr,
+        )
+
+    for g in groups:
+        # Score = the EARLIEST scored block in the group (deterministic anchor).
+        scored = [(s, seq_to_entry[s].score) for s in g
+                  if s in seq_to_entry and seq_to_entry[s].score is not None]
+        if not scored:
+            continue                                   # no selection in this group → not a clip
+        _anchor_seq, score = scored[0]
+        block = merge_blocks([active[s] for s in g])
+        is_merged = len(g) > 1
+        if is_merged:
+            block.heuristic_score, block.score_breakdown = score_block(block, bs_cfg)
+            print(f"  + merged blocks {'+'.join(str(s) for s in g)}: {block.duration:.1f}s")
 
         reel = Reel(
             id=block.id,
             start=block.start,
             end=block.end,
-            score=entry.score,
+            score=score,
             hook=block.text.split(".")[0][:300].strip() or block.text[:100],
             title="",
             description="",
@@ -2771,8 +2816,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
         if is_merged:
             reel.flags.append("human_merged")
         reels.append(reel)
-        dataset_rows.append(make_dataset_row(block, entry.score, manifest_path.stem))
-        processed_seqs.add(entry.seq)
+        dataset_rows.append(make_dataset_row(block, score, manifest_path.stem))
 
     if _is_compact and compact_lookup_errors > 0 and len(reels) == 0:
         print(
@@ -2804,6 +2848,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels, _ = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
     reels, _ = _stage_meaningful_sec_recheck(reels, transcript, r0_cfg=r0_cfg)
+    reels, density_disc = _stage_speech_density(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
 
@@ -2824,6 +2869,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     reviews_dir.mkdir(parents=True, exist_ok=True)
     out_path = reviews_dir / f"{manifest_path.stem}.review.json"
     out_path.write_text(out_manifest.model_dump_json(indent=2), encoding="utf-8")
+    _write_discarded(density_disc, out_path)   # low_speech_density → sidecar рядом с ревью-манифестом
     print(f"manifest → {out_path} ({len(reels)} reels, selection_source=human)")
 
     # Install: copy to manifests/ so render picks up the human selection.
@@ -2836,6 +2882,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
         import shutil as _shutil
         manifests_dir.mkdir(parents=True, exist_ok=True)
         _shutil.copy2(out_path, installed_path)
+        _write_discarded(density_disc, installed_path)   # и рядом с установленным манифестом
         print(f"installed → {installed_path}  (рендер будет использовать этот манифест)")
     else:
         print(
