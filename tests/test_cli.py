@@ -372,8 +372,8 @@ def test_run_batch_processes_all_mp4_in_inputs(monkeypatch, tmp_path):
 
     inputs = tmp_path / "inputs"
     inputs.mkdir()
-    (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "a.mp4").write_bytes(b"aaaa")   # различное содержимое → различный run_key
+    (inputs / "b.mp4").write_bytes(b"bbbb")   # (иначе дедуп по run_key пропустит второй)
     manifests = tmp_path / "manifests"
 
     ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
@@ -805,8 +805,8 @@ def test_batch_commits_each_video(monkeypatch, tmp_path):
 
     inputs = tmp_path / "inputs"
     inputs.mkdir()
-    (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "a.mp4").write_bytes(b"aaaa")   # различное содержимое → различный run_key
+    (inputs / "b.mp4").write_bytes(b"bbbb")
 
     cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
                       archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
@@ -830,7 +830,7 @@ def test_batch_failed_video_keeps_previous_pushes(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     for name in ("a.mp4", "b.mp4", "c.mp4"):
-        (inputs / name).write_bytes(b"x")
+        (inputs / name).write_bytes(name.encode())   # различное содержимое → различный run_key
 
     ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
@@ -858,6 +858,137 @@ def test_batch_no_push_when_disabled(monkeypatch, tmp_path):
                       cache_dir=tmp_path / "c", push=False)
 
     assert pushed == []
+
+
+# ---------------------------------- идемпотентность: run_key-дедуп + защита ручной выборки
+
+def test_batch_skips_source_with_matching_run_key(monkeypatch, tmp_path):
+    """(1) Источник с run_key существующего манифеста пропускается (манифест назван), batch продолжает."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    inputs = tmp_path / "inputs"; inputs.mkdir()
+    (inputs / "done.mp4").write_bytes(b"already-processed-content")
+    (inputs / "fresh.mp4").write_bytes(b"brand-new-content")
+    manifests = tmp_path / "m"; manifests.mkdir()
+    cache = tmp_path / "c"
+    # Манифест под другим именем, уже несущий run_key done.mp4 (как будто обработан ранее).
+    sha_done = cli.state.file_sha256_cached_fast(inputs / "done.mp4", cache)
+    seed = _manifest(source="done.mp4")
+    seed.run_key = cli._run_key(sha_done, "shorts")
+    (manifests / "prev.json").write_text(seed.model_dump_json(), encoding="utf-8")
+
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=manifests,
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t", cache_dir=cache,
+    )
+
+    assert ok == ["fresh.mp4"]                       # batch продолжил с остальными
+    assert [n for n, _ in skipped] == ["done.mp4"]
+    assert "prev.json" in skipped[0][1]              # манифест назван в причине
+    assert failed == []
+    assert (inputs / "done.mp4").exists()            # не обрабатывали → не заархивирован
+
+
+def test_batch_force_reruns_already_processed(monkeypatch, tmp_path):
+    """(2) --force прогоняет источник заново, даже если run_key уже есть в манифесте."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    inputs = tmp_path / "inputs"; inputs.mkdir()
+    (inputs / "done.mp4").write_bytes(b"already-processed-content")
+    manifests = tmp_path / "m"; manifests.mkdir()
+    cache = tmp_path / "c"
+    sha_done = cli.state.file_sha256_cached_fast(inputs / "done.mp4", cache)
+    seed = _manifest(source="done.mp4")
+    seed.run_key = cli._run_key(sha_done, "shorts")
+    (manifests / "prev.json").write_text(seed.model_dump_json(), encoding="utf-8")
+
+    ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
+        root=REPO_ROOT, inputs_dir=inputs, manifests_dir=manifests,
+        archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t", cache_dir=cache,
+        force=True,
+    )
+
+    assert ok == ["done.mp4"]                        # прогнали заново
+    assert skipped == []
+    assert (manifests / "done.json").is_file()       # новый манифест записан
+
+
+def test_run_refuses_to_overwrite_human_manifest(monkeypatch, tmp_path):
+    """(3) Авто-прогон отказывается стирать selection_source=human; сообщение называет манифест и --force."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    inputs = tmp_path / "inputs"; inputs.mkdir()
+    (inputs / "lecture.mp4").write_bytes(b"lecture-content")
+    manifests = tmp_path / "m"; manifests.mkdir()
+    human = _manifest(source="lecture.mp4", reels=[_reel("r01"), _reel("r02")])
+    human.selection_source = "human"
+    original = human.model_dump_json()
+    (manifests / "lecture.json").write_text(original, encoding="utf-8")
+
+    with pytest.raises(cli.ManualManifestError) as ei:
+        cli.cmd_run(inputs / "lecture.mp4", root=REPO_ROOT, manifests_dir=manifests,
+                    cache_dir=tmp_path / "c", archive_dir=tmp_path / "arch",
+                    transcripts_dir=tmp_path / "t", pull_first=False)
+
+    assert "lecture.json" in str(ei.value)
+    assert "--force" in str(ei.value)
+    # манифест не тронут (ручная выборка цела)
+    assert (manifests / "lecture.json").read_text(encoding="utf-8") == original
+
+
+def test_run_force_over_human_manifest_warns_reel_count(monkeypatch, tmp_path, capsys):
+    """(4) --force над ручным манифестом предупреждает, называя число выбрасываемых рилов, и прогоняет."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    inputs = tmp_path / "inputs"; inputs.mkdir()
+    (inputs / "lecture.mp4").write_bytes(b"lecture-content")
+    manifests = tmp_path / "m"; manifests.mkdir()
+    human = _manifest(source="lecture.mp4", reels=[_reel("r01"), _reel("r02"), _reel("r03")])
+    human.selection_source = "human"
+    (manifests / "lecture.json").write_text(human.model_dump_json(), encoding="utf-8")
+
+    cli.cmd_run(inputs / "lecture.mp4", root=REPO_ROOT, manifests_dir=manifests,
+                cache_dir=tmp_path / "c", archive_dir=tmp_path / "arch",
+                transcripts_dir=tmp_path / "t", pull_first=False, force=True)
+
+    out = capsys.readouterr().out
+    assert "--force" in out and "3 рилов" in out          # предупреждение с числом
+    # манифест перезаписан авто-выборкой (ручная метка снята)
+    rewritten = Manifest.model_validate_json((manifests / "lecture.json").read_text(encoding="utf-8"))
+    assert rewritten.selection_source != "human"
+
+
+def test_guard_preset_change_reprocesses(tmp_path):
+    """(5) Смена duration_preset меняет run_key → источник переобрабатывается, а не пропускается."""
+    manifests = tmp_path / "m"; manifests.mkdir()
+    video = tmp_path / "v.mp4"; video.write_bytes(b"z")
+    sha = "d" * 64
+    seed = _manifest(source="v.mp4")
+    seed.run_key = cli._run_key(sha, "shorts")
+    (manifests / "v.json").write_text(seed.model_dump_json(), encoding="utf-8")
+
+    # тот же preset → run_key совпадает → пропуск
+    with pytest.raises(cli.AlreadyProcessedError):
+        cli._guard_already_processed(video, sha, "shorts", manifests, force=False)
+    # другой preset → run_key иной → не пропускаем (гард возвращает None)
+    assert cli._guard_already_processed(video, sha, "reels", manifests, force=False) is None
+
+
+def test_run_key_identical_for_same_content(monkeypatch, tmp_path):
+    """(6) Тот же контент (даже под другим именем) → тот же run_key на повторных прогонах."""
+    _mock_pipeline(monkeypatch, tmp_path)
+    manifests = tmp_path / "m"; manifests.mkdir()
+    cache = tmp_path / "c"
+
+    in1 = tmp_path / "in1"; in1.mkdir(); (in1 / "a.mp4").write_bytes(b"identical-bytes")
+    cli.cmd_run(in1 / "a.mp4", root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache,
+                archive_dir=tmp_path / "arch1", transcripts_dir=tmp_path / "t", pull_first=False)
+    rk1 = Manifest.model_validate_json((manifests / "a.json").read_text(encoding="utf-8")).run_key
+
+    # тот же контент под другим именем; force, иначе сработал бы дедуп по run_key
+    in2 = tmp_path / "in2"; in2.mkdir(); (in2 / "b.mp4").write_bytes(b"identical-bytes")
+    cli.cmd_run(in2 / "b.mp4", root=REPO_ROOT, manifests_dir=manifests, cache_dir=cache,
+                archive_dir=tmp_path / "arch2", transcripts_dir=tmp_path / "t",
+                pull_first=False, force=True)
+    rk2 = Manifest.model_validate_json((manifests / "b.json").read_text(encoding="utf-8")).run_key
+
+    assert rk1 == rk2
 
 
 # ------------------------------------- рассинхронизация калибровка ↔ манифест (кроп устарел)
@@ -1010,7 +1141,7 @@ def test_run_batch_pulls_once_not_per_video(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
     cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
                       archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
@@ -2206,7 +2337,7 @@ def test_status_counts_inputs(tmp_path, capsys):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
     rc = cli.cmd_status(root=tmp_path)
 
@@ -4871,7 +5002,7 @@ def test_run_batch_saves_transcript_for_each_video(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     for name in ("a.mp4", "b.mp4", "c.mp4"):
-        (inputs / name).write_bytes(b"x")
+        (inputs / name).write_bytes(name.encode())   # различное содержимое → различный run_key
     transcripts = tmp_path / "transcripts"
 
     ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
@@ -5170,7 +5301,7 @@ def test_run_batch_preflight_before_any_hashing(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir(parents=True)
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
     with pytest.raises(cli.FFmpegNotFoundError):
         cli.cmd_run_batch(root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
                           cache_dir=tmp_path / "c", transcripts_dir=tmp_path / "t",
@@ -5948,7 +6079,7 @@ def test_background_analysis_2_starts_before_render_1_finishes(monkeypatch, tmp_
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
     result_holder = []
 
@@ -5994,7 +6125,7 @@ def test_background_only_one_render_at_a_time(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
     cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
@@ -6062,7 +6193,7 @@ def test_background_render_failure_isolated_from_analysis(monkeypatch, tmp_path)
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
     ok, failed, skipped, zero_harvest = cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
@@ -6123,7 +6254,7 @@ def test_background_disabled_is_sequential(monkeypatch, tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "a.mp4").write_bytes(b"x")
-    (inputs / "b.mp4").write_bytes(b"x")
+    (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
     cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",

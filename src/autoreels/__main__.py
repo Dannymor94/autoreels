@@ -93,6 +93,22 @@ class ZeroHarvestError(Exception):
     """
 
 
+class AlreadyProcessedError(Exception):
+    """run_key источника уже есть в манифесте → повторный прогон не нужен (--force прогонит).
+
+    Заменяет «файл ушёл в архив, значит готово» контентной проверкой (инвариант #4):
+    тот же source+preset → тот же run_key → пропуск, а не повторный недетерминированный R0.
+    """
+
+
+class ManualManifestError(Exception):
+    """Автопрогон стёр бы манифест с ручной выборкой (selection_source=human) → отказ.
+
+    Двадцать минут ручной разметки не должны молча пропасть под авто-R0. --force
+    перезапишет, предупредив, сколько рилов выбрасывается.
+    """
+
+
 # Ошибки тиров, которые CLI превращает во внятное сообщение (а не голый traceback).
 class FFmpegNotFoundError(Exception):
     """ffmpeg не найден (ни флаг/env/render.local.yaml, ни PATH, ни типичные пути).
@@ -211,6 +227,52 @@ def _load_env() -> None:
 def _run_key(source_sha256: str, duration_preset: str) -> str:
     """Детерминированный ключ прогона от source+preset (полноценная версия рубрики — M1)."""
     return hashlib.sha256(f"{source_sha256}:{duration_preset}".encode()).hexdigest()[:16]
+
+
+def _load_manifest_or_none(path: Path) -> "Manifest | None":
+    """Прочитать манифест, вернуть None на битом/невалидном (чужой JSON в manifests/ не роняет прогон)."""
+    try:
+        return Manifest.model_validate_json(Path(path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — битый/чужой файл в manifests/ не должен ронять batch
+        return None
+
+
+def _guard_already_processed(video: Path, sha: str, duration_preset: str,
+                             manifests_dir: Path, *, force: bool) -> None:
+    """Проверка ДО дорогого анализа (extract/Whisper/R0). Заменяет «ушло в архив = готово».
+
+    Порядок (сначала защита ручного труда, потом дедуп):
+    1. Манифест, который этот прогон ПЕРЕЗАПИСАЛ бы (manifests/<stem>.json — тот же выход),
+       с selection_source=human → ManualManifestError (без force). С force — предупреждаем,
+       сколько рилов выбрасываем, и прогоняем.
+    2. run_key (sha+preset) уже встречается в любом манифесте → AlreadyProcessedError (без force).
+    `--force` прогоняет всегда.
+    """
+    manifests_dir = Path(manifests_dir)
+    # 1. Ручная выборка на том же выходном пути (перезапись стёрла бы её).
+    target = manifests_dir / f"{Path(video).stem}.json"
+    existing = _load_manifest_or_none(target) if target.is_file() else None
+    if existing is not None and existing.selection_source == "human":
+        n = len(existing.reels)
+        if not force:
+            raise ManualManifestError(
+                f"{target.name} — ручная выборка ({n} рилов, selection_source=human); "
+                f"автопрогон её бы стёр. Проверьте вручную, затем --force для перезаписи."
+            )
+        print(f"  ⚠ --force: перезаписываю ручную выборку {target.name} "
+              f"(выбрасываю {n} рилов)", flush=True)
+        return  # force над ручным: прогоняем, дедуп ниже пропускаем
+    # 2. Дедуп по run_key (контентная идентичность + preset).
+    if force:
+        return
+    run_key = _run_key(sha, duration_preset)
+    for mf in sorted(manifests_dir.glob("*.json")):
+        m = _load_manifest_or_none(mf)
+        if m is not None and m.run_key == run_key:
+            raise AlreadyProcessedError(
+                f"{Path(video).name} уже обработан (run_key={run_key}) → {mf.name}; "
+                f"--force прогонит заново"
+            )
 
 
 # ----------------------------------------------------- приём исходника (путь → inputs/)
@@ -1221,6 +1283,7 @@ def cmd_run(
     ffmpeg: str = "ffmpeg",
     push: bool = False,
     pull_first: bool = True,
+    force: bool = False,
     force_transcribe: bool = False,
     auto_render: bool = False,
     _render_queue=None,
@@ -1266,6 +1329,9 @@ def cmd_run(
     print(f"считаю хэш видео ({size_gb:.1f} ГБ)…", flush=True)
     sha = state.file_sha256_cached_fast(video, cache_dir)
     print("хэш готов.", flush=True)
+    # Гард ДО дорогой работы (калибровка/аудио/Whisper/R0): уже обработан по run_key →
+    # пропуск; ручную выборку (selection_source=human) авто-прогон не стирает без --force.
+    _guard_already_processed(video, sha, r0_cfg.duration_preset, manifests_dir, force=force)
     setup = load_or_auto_calibrate(
         calibrations_dir, sha, Path(video).name,
         get_frame_size=lambda: _probe_frame_size_for_auto(video, ffprobe=ffprobe),
@@ -1535,6 +1601,7 @@ def cmd_run_batch(
     transcripts_dir=None,
     ffmpeg: str = "ffmpeg",
     push: bool = False,
+    force: bool = False,
     force_transcribe: bool = False,
     auto_render: bool = False,
     parallel_render: bool = True,
@@ -1608,10 +1675,17 @@ def cmd_run_batch(
             cmd_run(
                 v, root=root, calibrations_dir=calibrations_dir, manifests_dir=manifests_dir,
                 cache_dir=cache_dir, archive_dir=archive_dir, transcripts_dir=transcripts_dir,
-                ffmpeg=ffmpeg, push=push, pull_first=False, force_transcribe=force_transcribe,
+                ffmpeg=ffmpeg, push=push, pull_first=False, force=force,
+                force_transcribe=force_transcribe,
                 auto_render=auto_render, _render_queue=render_q,
             )
             ok.append(v.name)
+        except AlreadyProcessedError as e:       # run_key совпал — уже обработан, пропуск
+            print(f"\n✓ {v.name}: {e}", flush=True)
+            skipped.append((v.name, str(e)))
+        except ManualManifestError as e:         # ручная выборка — не стираем без --force
+            print(f"\n✋ {v.name}: {e}", file=sys.stderr, flush=True)
+            skipped.append((v.name, str(e)))
         except InputInvalid as e:               # битый/пустой файл — пропуск, НЕ ошибка
             print(f"\n⊘ пропущен {v.name}: {e}", file=sys.stderr, flush=True)
             skipped.append((v.name, str(e)))
@@ -1632,7 +1706,7 @@ def cmd_run_batch(
     if zero_harvest:
         parts.append(f"{len(zero_harvest)} нулевой урожай")
     if skipped:
-        parts.append(f"{len(skipped)} пропущено (битые)")
+        parts.append(f"{len(skipped)} пропущено")
     parts.append(f"{len(failed)} ошибок")
     print(f"\n=== batch run: {' / '.join(parts)} ===", flush=True)
     for name, err in failed:
@@ -1645,8 +1719,9 @@ def cmd_run_batch(
         print(f"\n⚠ {len(zero_harvest)} видео без рилов — транскрипт непустой, "
               f"но R0 ничего не нашёл; файлы оставлены в inputs/ для ручной проверки", flush=True)
     if skipped:
-        print(f"\n⚠ пропущено {len(skipped)} файла(ов) — проверь inputs/, они битые "
-              f"(остались на месте, не заархивированы; удали или перекачай)", flush=True)
+        print(f"\n⚠ пропущено {len(skipped)} файла(ов) — не обработаны, оставлены в inputs/ "
+              f"(причина у каждого выше: битый / уже обработан / ручная выборка); "
+              f"проверь inputs/", flush=True)
     return ok, failed, skipped, zero_harvest
 
 
@@ -4633,6 +4708,10 @@ def _build_parser():
     pr.add_argument("--no-push", action="store_true",
                     help="не коммитить/пушить манифесты в git (по умолчанию каждый успешный "
                          "манифест сразу пушится на системник)")
+    pr.add_argument("--force", action="store_true",
+                    help="прогнать заново, даже если источник уже обработан (run_key совпал) "
+                         "или манифест содержит ручную выборку (selection_source=human) — "
+                         "перезапишет её, предупредив, сколько рилов выбрасывается")
     pr.add_argument("--force-transcribe", action="store_true",
                     help="перетранскрибировать безусловно, игнорируя кэш транскрипта и чанков "
                          "(нужно после смены initial_prompt/модели, если кэш уже прогрет)")
@@ -5053,8 +5132,15 @@ def main(argv=None) -> int:
                     video = _ingest_source(Path(args.video), _project_root() / "inputs")
                 try:
                     cmd_run(video, ffmpeg=ffmpeg, push=not args.no_push,
+                            force=args.force,
                             force_transcribe=args.force_transcribe,
                             auto_render=getattr(args, "auto_render", False))
+                except AlreadyProcessedError as e:
+                    print(f"✓ {e}", flush=True)          # уже обработан — не ошибка
+                    return 0
+                except ManualManifestError as e:
+                    print(f"✋ {e}", file=sys.stderr)     # ручная выборка — отказ до --force
+                    return 1
                 except InputInvalid as e:
                     print(f"⊘ пропущен {Path(video).name}: {e}\n"
                           f"  файл битый/пустой — перекачай/пересними и повтори", file=sys.stderr)
@@ -5062,6 +5148,7 @@ def main(argv=None) -> int:
             else:
                 _, failed, _skipped, zero_harvest = cmd_run_batch(
                     ffmpeg=ffmpeg, push=not args.no_push,
+                    force=args.force,
                     force_transcribe=args.force_transcribe,
                     auto_render=getattr(args, "auto_render", False),
                     parallel_render=getattr(args, "parallel_render", True),
