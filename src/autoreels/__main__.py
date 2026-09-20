@@ -2731,6 +2731,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
         min_sec=r0_cfg.min_meaningful_sec,
         max_sec=r0_cfg.max_duration,
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+        block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
     )
     total_duration = all_blocks[-1].end if all_blocks else 0.0
     bf = r0_cfg.blocks_filter
@@ -3027,6 +3028,7 @@ def cmd_blocks(
         min_sec=r0_cfg.min_meaningful_sec,
         max_sec=r0_cfg.max_duration,
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+        block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
     )
 
     total_duration = all_blocks[-1].end if all_blocks else 0.0

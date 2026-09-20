@@ -1409,3 +1409,82 @@ def test_parse_score_markers_backward_and_double_forward():
     assert _parse_score_markers("__")[0] is None
     assert _parse_score_markers("-")[0] is None      # bare dash still means skip
     assert _parse_score_markers("++")[3] is not None  # marker without a score → error
+
+
+# --------------------------------------------------------------------------- block_target_sec (M1.6)
+# "Let a block run to the length of a thought, not to the first full stop." A soft boundary
+# (sentence end, no pause) holds the block open until block_target_sec; hard boundaries always close.
+
+def test_soft_boundary_below_target_does_not_close():
+    """(1) a sentence end with no pause does NOT close a block below the target length."""
+    # Two 15s sentences, gap 0.3s (< min_pause) → soft boundary between them. target=40 → one block.
+    compressed = _compressed(
+        _line(0, 15, "Первая короткая законченная мысль спикера."),
+        _line(15.3, 30.3, "Он тут же продолжил второй короткой мыслью."),
+    )
+    blocks = candidate_blocks(compressed, min_sec=MIN_SEC, max_sec=MAX_SEC,
+                              min_pause_for_phrase_end=MIN_PAUSE, block_target_sec=40.0)
+    assert len(blocks) == 1
+    assert blocks[0].duration == pytest.approx(30.3)
+
+
+def test_soft_boundary_above_target_closes():
+    """(2) a sentence end past the target length DOES close the block."""
+    # First sentence already 42s (> target 40); soft boundary after it closes the block.
+    compressed = _compressed(
+        _line(0, 42, "Очень длинная но грамматически законченная мысль на сорок две секунды."),
+        _line(42.3, 62.3, "Следующая мысль после точки без паузы."),
+    )
+    blocks = candidate_blocks(compressed, min_sec=MIN_SEC, max_sec=MAX_SEC,
+                              min_pause_for_phrase_end=MIN_PAUSE, block_target_sec=40.0)
+    assert len(blocks) == 2
+    assert blocks[0].duration == pytest.approx(42.0)
+
+
+def test_hard_pause_closes_regardless_of_length():
+    """(3) a pause above the threshold closes a block regardless of length (even below target)."""
+    # Two 20s lines (each >= min_sec so neither is merged away), gap 2.0s (> min_pause) → hard
+    # pause boundary closes the first block at 20s, well below the 40s target.
+    compressed = _compressed(
+        _line(0, 20, "Первая мысль всего двадцать секунд."),
+        _line(22.0, 42.0, "Вторая мысль после реальной паузы в две секунды."),
+    )
+    blocks = candidate_blocks(compressed, min_sec=MIN_SEC, max_sec=MAX_SEC,
+                              min_pause_for_phrase_end=MIN_PAUSE, block_target_sec=40.0)
+    assert len(blocks) == 2
+    assert blocks[0].duration == pytest.approx(20.0)   # closed below target by the hard pause
+    assert blocks[1].boundary_reason == "pause"
+
+
+def test_target_corpus_still_within_bounds():
+    """(4) duration bounds still hold across a generated corpus with the target-length policy."""
+    rng = random.Random(7)
+    t = 0.0
+    lines = []
+    for _ in range(80):
+        dur = rng.uniform(3.0, 24.0)
+        gap = rng.uniform(0.05, 2.5)
+        words = ["слово"] * rng.randint(3, 12)
+        if rng.random() > 0.4:
+            words[-1] += "."                    # ~60% end on a full stop → soft boundaries
+        lines.append(_line(t, t + dur, " ".join(words)))
+        t += dur + gap
+    blocks = candidate_blocks(_compressed(*lines), min_sec=MIN_SEC, max_sec=MAX_SEC,
+                              min_pause_for_phrase_end=MIN_PAUSE, block_target_sec=40.0)
+    violations = [f"[{b.start:.1f}-{b.end:.1f}] {b.duration:.1f}s" for b in blocks
+                  if not (MIN_SEC <= b.duration <= MAX_SEC)]
+    assert not violations, f"blocks out of [{MIN_SEC},{MAX_SEC}]: {violations}"
+
+
+def test_soft_accumulation_cannot_exceed_max():
+    """(5) a block cannot exceed max_duration by continuing through soft boundaries."""
+    # target=40, max=50, sentences of 30s each with no pause (soft boundaries).
+    # After the first 30s sentence (< target) continuing to the next boundary would reach 60s > 50,
+    # so the block must close at 30s rather than overrun the ceiling.
+    lines = [_line(i * 30.3, i * 30.3 + 30, f"Законченная мысль номер {i} на тридцать секунд.")
+             for i in range(4)]
+    blocks = candidate_blocks(_compressed(*lines), min_sec=MIN_SEC, max_sec=50.0,
+                              min_pause_for_phrase_end=MIN_PAUSE, block_target_sec=40.0)
+    assert blocks, "expected at least one block"
+    for b in blocks:
+        assert b.duration <= 50.0, f"block exceeded max: {b.duration:.1f}s"

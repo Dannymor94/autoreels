@@ -91,26 +91,60 @@ def _boundary_reason(prev: _Line, curr: _Line, min_pause: float) -> str | None:
 
 # --------------------------------------------------------------------------- grouping
 
-def _group_into_raw_blocks(lines: list[_Line], min_pause: float) -> list[tuple[list[_Line], str]]:
-    """Walk lines left-to-right, opening a new group at each boundary signal.
+_HARD_REASONS = frozenset({"pause", "paragraph", "speaker_turn"})
 
-    Returns list of (lines, boundary_reason) pairs.
-    The first group uses "sentence" as a nominal reason (no preceding boundary).
+
+def _next_boundary_end(lines: list[_Line], i: int, min_pause: float) -> float:
+    """End time (t1) of the run that would be appended by continuing PAST a soft boundary at i.
+
+    Scans from line i to the next boundary; returns the t1 of the last line before it (or the end
+    of the transcript). Used to check whether continuing would push the block over max_duration.
+    """
+    j = i + 1
+    while j < len(lines):
+        if _boundary_reason(lines[j - 1], lines[j], min_pause) is not None:
+            return lines[j - 1].t1
+        j += 1
+    return lines[-1].t1
+
+
+def _group_into_raw_blocks(
+    lines: list[_Line], min_pause: float, *, target_sec: float, max_sec: float
+) -> list[tuple[list[_Line], str]]:
+    """Walk lines left-to-right, letting a block run to the length of a thought.
+
+    A block closes at:
+      - a HARD boundary (pause > min_pause / paragraph / speaker turn) — always; or
+      - a SOFT boundary (sentence-terminal mark with no pause behind it — the speaker finished a
+        sentence and carried on) ONLY once the block has reached `target_sec`, or when continuing
+        to the next boundary would push it over `max_sec`.
+    So a run of short sentences the speaker delivered back-to-back becomes one block up to the
+    target, instead of one block per full stop. Oversize/undersize handling stays downstream
+    (_split_recursive / _merge_short). First group's reason is nominal "sentence".
     """
     if not lines:
         return []
     groups: list[tuple[list[_Line], str]] = []
-    current: list[_Line] = [lines[0]]
+    start = 0                       # index of the first line of the current block
     current_reason = "sentence"
     for i in range(1, len(lines)):
         reason = _boundary_reason(lines[i - 1], lines[i], min_pause)
-        if reason is not None:
-            groups.append((current, current_reason))
-            current = [lines[i]]
+        if reason is None:
+            continue
+        if reason in _HARD_REASONS:
+            close = True
+        else:                       # soft (sentence) boundary — hold open until target/max
+            block_dur = lines[i - 1].t1 - lines[start].t0
+            if block_dur >= target_sec:
+                close = True
+            else:
+                would_be = _next_boundary_end(lines, i, min_pause) - lines[start].t0
+                close = would_be > max_sec   # continuing would overrun → close here instead
+        if close:
+            groups.append((lines[start:i], current_reason))
+            start = i
             current_reason = reason
-        else:
-            current.append(lines[i])
-    groups.append((current, current_reason))
+    groups.append((lines[start:], current_reason))
     return groups
 
 
@@ -380,6 +414,7 @@ def candidate_blocks(
     min_sec: float,
     max_sec: float,
     min_pause_for_phrase_end: float,
+    block_target_sec: float = 40.0,
 ) -> list[CandidateBlock]:
     """Segment compressed transcript into candidate blocks ready for LLM scoring.
 
@@ -388,6 +423,9 @@ def candidate_blocks(
         min_sec: minimum block duration in seconds (from r0_cfg.min_meaningful_sec)
         max_sec: maximum block duration in seconds (from r0_cfg.max_duration)
         min_pause_for_phrase_end: pause threshold to open a boundary (from r0.yaml)
+        block_target_sec: length a block must reach before a SOFT (sentence) boundary closes it;
+            hard boundaries (pause/paragraph/speaker turn) always close. Lets a block run to the
+            length of a thought rather than to the first full stop (from r0_cfg.block_target_sec).
 
     Returns:
         List of CandidateBlock, each with duration in [min_sec, max_sec].
@@ -396,7 +434,9 @@ def candidate_blocks(
     lines = _parse_lines(compressed)
     if not lines:
         return []
-    raw = _group_into_raw_blocks(lines, min_pause_for_phrase_end)
+    raw = _group_into_raw_blocks(
+        lines, min_pause_for_phrase_end, target_sec=block_target_sec, max_sec=max_sec
+    )
     # Split oversized, then merge undersized
     expanded: list[tuple[list[_Line], str]] = []
     for lns, reason in raw:

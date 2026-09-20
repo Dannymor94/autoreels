@@ -126,3 +126,57 @@ boundaries where the speaker kept going, capped at a soft target (~50s) and neve
 "complete-sentence, incomplete-thought" endings. It does **not** replace Fix 2 (the reviewer still
 needs explicit joins for the cases the heuristic won't reach) nor Fix 1 (a longer target makes the
 dead-air check more important, not less). Decision pending; no segmentation change in this commit.
+
+---
+
+## Follow-up — segmentation now runs to a target length (implemented)
+
+The segmentation change the audit above recommended is now in `candidate_blocks`
+(`block_target_sec: 40`): a **soft** boundary (sentence-terminal mark with no pause behind it)
+no longer closes a block until it has reached the target; a **hard** boundary (pause >
+`min_pause_for_phrase_end`, paragraph, speaker turn) still closes it always; and a soft boundary
+also closes early if continuing to the next boundary would exceed `max_duration`. Short-merge and
+over-long-split are unchanged.
+
+### Before → after, both cached sources
+
+BEFORE = old behaviour (close at every boundary, i.e. `block_target_sec=0`); AFTER = `40`.
+
+| source | count | median | mean | max | bands `<18 / 18-30 / 30-40 / 40-50 / 50-70 / 70-90` |
+|---|---|---|---|---|---|
+| PXL interview — before | 119 | 22.0s | 23.3s | 45.2s | 0 / 110 / 7 / 2 / 0 / 0 |
+| PXL interview — **after** | **63** | **42.6s** | 43.0s | 73.9s | 0 / 8 / 10 / 32 / 12 / 1 |
+| lecture B — before | 75 | 22.2s | 36.3s | 109.6s | 0 / 48 / 4 / 1 / 14 / 7 |
+| lecture B — **after** | **54** | **43.8s** | 50.0s | 109.6s | 0 / 13 / 4 / 13 / 13 / 10 |
+
+Boundary-reason breakdown (what closed each block):
+- PXL: sentence `103 → 37`, pause `14 → 24`, speaker_turn `2 → 2` — soft closures more than halve;
+  blocks now end predominantly on real pauses, not on mid-flow full stops.
+- lecture B: sentence `56 → 28`, pause `19 → 26`.
+
+The aggregate prediction from the audit **holds**: PXL block count roughly halves (119 → 63) and the
+median moves from 22s to ~43s, with the mass landing in the 40-50s band.
+
+### Against the reference — did the reviewer's twelve hand-merges collapse into single blocks?
+
+Re-exported PXL blocks (old kept-block numbering, 113 kept — matches the review). A pair is
+"covered" when a single new block spans it:
+
+`44+45`, `59+60`, `80+81` covered → **3 of 12** (strict: one new block spans the whole pair;
+4 of 12 by the looser test of both halves sharing a new block).
+
+**Reported plainly: few.** The distribution moved as predicted, but the change does **not**
+reproduce the reviewer's specific joins, for two reasons:
+- **Phase misalignment (most pairs).** Accumulation is greedy from the previous hard boundary, so
+  the ~40s budget fills at a point that need not line up with the reviewer's chosen pair. `23+24`,
+  `84+85`, `94+95`, `98+99`, `102+103` are all *contiguous* (0.00s gap — a soft boundary) yet land
+  on opposite sides of a new block edge, because the block boundary fell exactly between them. The
+  policy targets a *length*, not a *thought*; where it lands is incidental to the pair.
+- **Hard pause inside a pair (`65+66`, gap 2.10s > 1.5s).** The reviewer merged across a real pause;
+  this change never crosses a hard boundary by design, so that pair is uncoverable here.
+
+Conclusion: the target-length policy does what the *aggregate* evidence predicted — it halves the
+block count and centres durations near 40s, which should reduce how *often* the reviewer must merge.
+It does not, and cannot on its own, land the *specific* joins: those remain the job of the manual
+`+`/`++`/`-` markers (Fix 2). The two are complementary — this lowers the volume of manual joining,
+the markers handle the exact pairs and the across-a-pause cases.
