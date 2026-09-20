@@ -2704,12 +2704,16 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, install: bool = False, render: bool = False) -> int:
+def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
     snap → filter_dangling_start → interview_snap → apply_top_n → renumber → padding →
     trim → min_clip_filter → subtitles → trim_hanging_subtitles → manifest.
+
+    source: the manifest or transcript the review was exported from; overrides the '# source:'
+    header in the review file (required when the header is absent; error when both present and
+    different).
     """
     import json as _json
 
@@ -2744,39 +2748,115 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, install: bo
     if ignored_count:
         print(f"  ({ignored_count} lines skipped — not score lines)")
 
-    if source_ref is None:
-        print("error: review file has no '# source:' line", file=sys.stderr)
-        return 1
-
-    manifest_path = Path(source_ref)
-    if not manifest_path.is_absolute():
-        manifest_path = root / source_ref
-
-    if not manifest_path.exists():
-        print(f"error: source manifest not found: {manifest_path}", file=sys.stderr)
-        return 1
-
-    manifest = Manifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-    r0_cfg = load_r0_config(root / "config" / "r0.yaml")
-
-    # Load transcript (same lookup as cmd_blocks)
-    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
-    transcript = None
-    audio = cache_dir / f"{manifest.source_sha256}.mp3"
-    if audio.is_file():
-        ahash = state.audio_hash(audio)
-        pkey = manifest.transcript_params_key
-        if pkey:
-            exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
-            if exact.exists():
-                transcript = Transcript.model_validate_json(exact.read_text(encoding="utf-8"))
-        if transcript is None:
-            cands = sorted(
-                cache_dir.glob(f"{ahash}*.transcript.json"),
-                key=lambda p: p.stat().st_mtime, reverse=True,
+    # Resolve effective source: CLI arg takes precedence; header is fallback; conflict → refuse.
+    if source_ref and source:
+        # Normalise to absolute for comparison (different path spellings = same file)
+        def _abs(p: str) -> Path:
+            q = Path(p)
+            return q if q.is_absolute() else (root / q)
+        if _abs(source_ref).resolve() != _abs(source).resolve():
+            print(
+                f"error: source conflict — argument {source!r} ≠ header {source_ref!r}; "
+                f"remove one or make them point to the same file",
+                file=sys.stderr,
             )
-            if cands:
-                transcript = Transcript.model_validate_json(cands[0].read_text(encoding="utf-8"))
+            return 1
+        effective_source = source
+    elif source:
+        effective_source = source
+    elif source_ref:
+        effective_source = source_ref
+    else:
+        print(
+            "error: source not given — pass as argument (arl blocks <source> --apply <file>) "
+            "or add '# source: <path>' to the review file",
+            file=sys.stderr,
+        )
+        return 1
+
+    source_file = Path(effective_source)
+    if not source_file.is_absolute():
+        source_file = root / effective_source
+
+    if not source_file.exists():
+        print(f"error: source not found: {source_file}", file=sys.stderr)
+        return 1
+
+    r0_cfg = load_r0_config(root / "config" / "r0.yaml")
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+
+    # Load manifest + transcript.
+    # Source can be a manifest (.json) or a cached transcript (.transcript.json).
+    manifest: Manifest | None = None
+    manifest_path: Path = source_file   # used for output filename stem
+    transcript: Transcript | None = None
+
+    if source_file.name.endswith(".transcript.json"):
+        # Source is a transcript — load it directly, then look up a matching manifest by audio hash.
+        transcript = Transcript.model_validate_json(source_file.read_text(encoding="utf-8"))
+        # Transcript filename convention: {audio_hash}.{pkey}.transcript.json
+        # Extract audio hash = first dot-separated segment of the stem-without-.transcript
+        tx_stem = source_file.stem  # removes .json → "{ahash}.{pkey}.transcript"
+        tx_stem = tx_stem[: -len(".transcript")] if tx_stem.endswith(".transcript") else tx_stem
+        ahash_from_name = tx_stem.split(".")[0]
+        # Scan mp3 files in cache: find the one whose content-hash matches.
+        matched_sha256: str | None = None
+        for mp3 in cache_dir.glob("*.mp3"):
+            if state.audio_hash(mp3) == ahash_from_name:
+                matched_sha256 = mp3.stem   # mp3 stem = source_sha256
+                break
+        if matched_sha256 is None:
+            print(
+                f"error: cannot find a matching audio file in cache for transcript "
+                f"{source_file.name} (audio_hash={ahash_from_name[:16]}…). "
+                f"Missing fields: source, source_sha256, setup, run_key, duration_preset. "
+                f"Run arl run (or ensure the mp3 is in {cache_dir}) so the source can be traced.",
+                file=sys.stderr,
+            )
+            return 1
+        # Find a manifest with this source_sha256 in manifests/.
+        _mdir = Path(manifests_dir) if manifests_dir else root / "manifests"
+        cands = [p for p in _glob_manifests(_mdir)
+                 if not p.name.endswith(".review.json")]
+        matched: list[tuple[Path, Manifest]] = []
+        for p in cands:
+            try:
+                m = Manifest.model_validate_json(p.read_text(encoding="utf-8"))
+                if m.source_sha256 == matched_sha256:
+                    matched.append((p, m))
+            except Exception:  # noqa: BLE001
+                pass
+        if not matched:
+            print(
+                f"error: no manifest in {_mdir} has source_sha256={matched_sha256[:16]}… "
+                f"(matched from transcript {source_file.name}). "
+                f"Missing fields: source, setup, run_key, duration_preset. "
+                f"Run arl run first to produce a base manifest, then re-apply.",
+                file=sys.stderr,
+            )
+            return 1
+        # Most-recently modified manifest wins.
+        manifest_path, manifest = max(matched, key=lambda t: t[0].stat().st_mtime)
+    else:
+        # Source is a manifest.
+        manifest = Manifest.model_validate_json(source_file.read_text(encoding="utf-8"))
+
+        # Load transcript from cache.
+        audio = cache_dir / f"{manifest.source_sha256}.mp3"
+        if audio.is_file():
+            ahash = state.audio_hash(audio)
+            pkey = manifest.transcript_params_key
+            if pkey:
+                exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
+                if exact.exists():
+                    transcript = Transcript.model_validate_json(exact.read_text(encoding="utf-8"))
+            if transcript is None:
+                cands_tx = sorted(
+                    cache_dir.glob(f"{ahash}*.transcript.json"),
+                    key=lambda p: p.stat().st_mtime, reverse=True,
+                )
+                if cands_tx:
+                    transcript = Transcript.model_validate_json(cands_tx[0].read_text(encoding="utf-8"))
 
     if transcript is None:
         print(f"error: transcript not found for {manifest_path.name}", file=sys.stderr)
@@ -3030,7 +3110,7 @@ def cmd_blocks(
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root, install=install, render=render)
+        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render)
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
