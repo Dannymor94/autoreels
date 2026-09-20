@@ -2704,7 +2704,7 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, render: bool = False) -> int:
+def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, install: bool = False, render: bool = False) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
@@ -2760,7 +2760,7 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     r0_cfg = load_r0_config(root / "config" / "r0.yaml")
 
     # Load transcript (same lookup as cmd_blocks)
-    cache_dir = root / "data" / "cache"
+    cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
     transcript = None
     audio = cache_dir / f"{manifest.source_sha256}.mp3"
     if audio.is_file():
@@ -2913,16 +2913,21 @@ def _blocks_do_apply(review_path: str, *, root=None, install: bool = False, rend
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
 
-    # Assemble manifest with selection_source="human"
+    # Assemble manifest with selection_source="human".
+    # Stamp transcript_params_key from the transcript actually used (mirrors cmd_run at
+    # _assemble_manifest). If the source manifest already carries a key it is preserved
+    # only if the transcript loaded matches it; otherwise we stamp what we have.
+    # source_path carried forward so downstream tools can locate the file.
     out_manifest = Manifest(
         source=manifest.source,
+        source_path=manifest.source_path,
         source_sha256=manifest.source_sha256,
         source_hash_scheme=manifest.source_hash_scheme,
         source_kind=manifest.source_kind,
         duration_preset=manifest.duration_preset,
         setup=manifest.setup,
         run_key=manifest.run_key,
-        transcript_params_key=manifest.transcript_params_key,
+        transcript_params_key=transcript_identity(transcript),
         selection_source="human",
         reels=reels,
     )
@@ -3070,6 +3075,19 @@ def cmd_blocks(
                     transcript = Transcript.model_validate_json(
                         cands[0].read_text(encoding="utf-8")
                     )
+                    # Warn: using fallback (oldest/newest) because params_key is missing.
+                    # A manifest without transcript_params_key was built before this field existed
+                    # (legacy) — not corrupt, just old. Blocks/filter results are reliable only if
+                    # the fallback transcript is the right one. Run `arl backfill-params-key` to fix.
+                    used_pkey = transcript_identity(transcript) or "(orphan — no stamped metadata)"
+                    if not pkey:
+                        print(
+                            f"  ⚠ {target_path.name}: transcript_params_key пуст (легаси-манифест) "
+                            f"— использован последний транскрипт ({cands[0].name[:40]}…, "
+                            f"params_key={used_pkey}). "
+                            f"Для надёжной привязки: arl backfill-params-key",
+                            file=sys.stderr,
+                        )
     else:
         print(f"ошибка: ожидается .json (манифест) или .transcript.json: {target}",
               file=sys.stderr)
@@ -3329,6 +3347,136 @@ def cmd_resume(*, root=None, ffmpeg=None, encoder=None, profile=None) -> int:
     if not did_something:
         print("нечего продолжать — всё готово (нет .part и недорендеренных манифестов).",
               flush=True)
+    return 0
+
+
+def cmd_backfill_pkey(
+    manifest_path: str,
+    transcript_path: str | None = None,
+    *,
+    root=None,
+    cache_dir=None,
+    force: bool = False,
+) -> int:
+    """Stamp transcript_params_key on a manifest that lacks it.
+
+    For manifests built before the field was added (legacy, selection_source="human" or LLM)
+    or by an old --apply that did not stamp the key. Verifies the transcript is the right one
+    by audio hash (if the mp3 is in cache) then writes the manifest in place.
+
+    Refuses when:
+    - the transcript has no stamped metadata (orphan, can't produce a valid key)
+    - audio is in cache and audio_hash does not match the transcript filename prefix
+    - manifest already has a non-empty transcript_params_key (unless --force)
+    """
+    root = Path(root) if root is not None else _project_root()
+    _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+    audio_format: str | None = None  # resolved lazily when needed
+
+    mpath = Path(manifest_path)
+    if not mpath.is_absolute():
+        mpath = root / mpath
+    if not mpath.exists():
+        print(f"ошибка: манифест не найден: {mpath}", file=sys.stderr)
+        return 1
+
+    try:
+        manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        print(f"ошибка: не удалось разобрать манифест: {e}", file=sys.stderr)
+        return 1
+
+    stem = Path(manifest.source).stem
+
+    if manifest.transcript_params_key and not force:
+        print(
+            f"  ⚠ {stem}: transcript_params_key уже установлен "
+            f"({manifest.transcript_params_key}) — пропуск. "
+            f"Передай --force чтобы перезаписать.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve transcript
+    if transcript_path is not None:
+        tpath = Path(transcript_path)
+        try:
+            tr = Transcript.model_validate_json(tpath.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print(f"ошибка: не удалось загрузить транскрипт: {e}", file=sys.stderr)
+            return 1
+    else:
+        # Auto-discover from cache — load render.yaml only when needed
+        render_cfg = load_render_config(root / "config" / "render.yaml")
+        audio_format = render_cfg.audio_extract.format
+        audio = _cache_dir / f"{manifest.source_sha256}.{audio_format}"
+        if not audio.is_file():
+            print(
+                f"  ⚠ {stem}: mp3 не найден в кэше ({audio.name}) — "
+                f"передай путь к транскрипту явно: arl backfill-params-key {mpath.name} <transcript>",
+                file=sys.stderr,
+            )
+            return 1
+        ahash = state.audio_hash(audio)
+        tr, _ = _resolve_transcript(manifest, _cache_dir, audio_format=audio_format,
+                                    config_pkey=_config_params_key(root))
+        if tr is None:
+            print(
+                f"  ⚠ {stem}: транскрипт не найден в кэше (audio_hash={ahash[:16]}…) — "
+                f"передай путь явно: arl backfill-params-key {mpath.name} <transcript>",
+                file=sys.stderr,
+            )
+            return 1
+        tpath = None
+
+    # Verify transcript has stamped metadata
+    new_pkey = transcript_identity(tr)
+    if not new_pkey:
+        print(
+            f"  ⚠ {stem}: транскрипт не содержит штампованных мета-данных (orphan — "
+            f"нет model/provider/prompt_hash) — нельзя получить надёжный params_key. "
+            f"Нужен транскрипт с атрибутами модели (снятый после фичи штампования).",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Audio-hash verification: if mp3 is in cache, check the transcript file name prefix.
+    # Resolve audio_format lazily; fall back to "mp3" if render.yaml unavailable.
+    if audio_format is None:
+        try:
+            render_cfg = load_render_config(root / "config" / "render.yaml")
+            audio_format = render_cfg.audio_extract.format
+        except Exception:  # noqa: BLE001
+            audio_format = "mp3"
+    audio = _cache_dir / f"{manifest.source_sha256}.{audio_format}"
+    if audio.is_file() and transcript_path is not None:
+        ahash = state.audio_hash(audio)
+        tname = Path(transcript_path).name
+        if not tname.startswith(ahash):
+            print(
+                f"  ⚠ {stem}: audio_hash={ahash[:16]}… не совпадает с префиксом транскрипта "
+                f"({tname[:40]}) — ОТКАЗАН. Транскрипт не от этого источника.",
+                file=sys.stderr,
+            )
+            return 1
+    elif audio.is_file():
+        # Auto-discovered — verified by _resolve_transcript above (same ahash lookup)
+        pass
+    else:
+        # No mp3 in cache — can't verify by audio hash.
+        print(
+            f"  ⚠ {stem}: mp3 не найден в кэше — верификация по audio_hash пропущена. "
+            f"Убедись, что транскрипт действительно от этого видео.",
+            file=sys.stderr,
+        )
+
+    # Write manifest with stamped key
+    updated = manifest.model_copy(update={"transcript_params_key": new_pkey})
+    mpath.write_text(updated.model_dump_json(indent=2), encoding="utf-8")
+    print(
+        f"  ✓ {stem}: transcript_params_key установлен ({new_pkey})",
+        flush=True,
+    )
     return 0
 
 
@@ -3700,6 +3848,14 @@ def cmd_diagnose_cuts(target=None, *, root=None, rerun=False, cache_dir=None,
             continue
         transcript, expected = _resolve_transcript(
             manifest, cache_dir, audio_format=audio_format, config_pkey=config_pkey)
+        if transcript is not None and not manifest.transcript_params_key:
+            # Legacy manifest (built before transcript_params_key was added): best-effort fallback.
+            # Not corrupt — just old. Diagnose results are reliable if the fallback is the right
+            # transcript. Run `arl backfill-params-key` to pin the key.
+            print(f"  ⚠ {mf.stem}: transcript_params_key пуст (легаси-манифест) — "
+                  f"использован транскрипт конфига (params_key={expected}); "
+                  f"для надёжной привязки: arl backfill-params-key",
+                  file=sys.stderr, flush=True)
         if transcript is None:
             # НЕ подставляем «сироту»: неверное измерение хуже отсутствия измерения.
             why = ("нет аудио в кэше" if expected is None
@@ -5302,6 +5458,27 @@ def _build_parser():
              "use with --review",
     )
 
+    pbp = sub.add_parser(
+        "backfill-params-key",
+        help="stamp transcript_params_key on a manifest that lacks it (one-off repair for legacy/human manifests)",
+        description=(
+            "Sets transcript_params_key on a manifest built before this field was added,\n"
+            "or by an old --apply that did not stamp it. Verifies by audio hash when the mp3\n"
+            "is in cache; warns and proceeds when it is not. Refuses an orphan transcript (no\n"
+            "stamped metadata) or a hash mismatch.\n\n"
+            "Пример: autoreels backfill-params-key manifests/video.json\n"
+            "        autoreels backfill-params-key manifests/video.json path/to/audio.transcript.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pbp.add_argument("manifest", metavar="манифест",
+                     help="манифест для обновления (.json)")
+    pbp.add_argument("transcript", nargs="?", default=None, metavar="транскрипт",
+                     help="путь к .transcript.json (если не задан — ищет в data/cache/)")
+    pbp.add_argument("--force", action="store_true", default=False,
+                     help="перезаписать существующий transcript_params_key")
+    pbp.add_argument("--root", default=None, help="корень проекта (по умолчанию: авто)")
+
     return p
 
 
@@ -5519,6 +5696,12 @@ def main(argv=None) -> int:
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
+        elif args.cmd == "backfill-params-key":
+            return cmd_backfill_pkey(
+                args.manifest, args.transcript,
+                root=args.root if hasattr(args, "root") and args.root else None,
+                force=args.force,
+            )
         elif args.cmd == "install-aliases":
             return cmd_install_aliases(
                 aliases_path=_find_aliases_sh(),
