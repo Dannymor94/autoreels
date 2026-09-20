@@ -99,6 +99,10 @@ class Transcript(BaseModel):
     prompt_hash: str = ""
     # Count of words removed by the prompt-leak filter across all chunks.
     prompt_leak_removed: int = 0
+    # source_sha256 of the video the audio was extracted from.  "" in old transcripts
+    # (created before this field was added); used to resolve transcript → manifest without
+    # scanning mp3 content hashes.
+    source_sha256: str = ""
 
 
 class Reel(BaseModel):

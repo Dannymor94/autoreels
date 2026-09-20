@@ -221,3 +221,51 @@ def test_backfill_refuses_already_set_without_force(tmp_path, capsys):
 
     err = capsys.readouterr().err
     assert "force" in err.lower() or "--force" in err
+
+
+# ---------------------------------------------------------------------------
+# backfill-source-sha: stamps source_sha256 on legacy transcripts
+# ---------------------------------------------------------------------------
+
+def test_backfill_source_sha_stamps_existing_transcript(tmp_path, capsys):
+    """backfill-source-sha scans mp3 content hash and stamps source_sha256."""
+    root, manifests, cache, mpath, transcript_file = _setup(tmp_path, manifest_key=KEY)
+
+    # Simulate a legacy transcript by writing one without source_sha256
+    sha = "a" * 64
+    mp3 = cache / f"{sha}.mp3"
+    ah = state.audio_hash(mp3)
+    legacy = cache / f"{ah}.{KEY}.legacy.transcript.json"
+    legacy.write_text(
+        json.dumps({"language": "ru", "words": _WORDS, **_META}), encoding="utf-8"
+    )
+    from autoreels.core.models import Transcript as _Tx
+    assert _Tx.model_validate_json(legacy.read_text()).source_sha256 == ""
+
+    from autoreels.__main__ import cmd_backfill_source_sha
+    rc = cmd_backfill_source_sha([str(legacy)], cache_dir=str(cache))
+    assert rc == 0
+
+    updated = _Tx.model_validate_json(legacy.read_text())
+    assert updated.source_sha256 == sha
+
+
+def test_backfill_source_sha_refuses_reextracted_mp3(tmp_path, capsys):
+    """backfill-source-sha refuses when mp3 was re-extracted (content hash mismatch)."""
+    root, manifests, cache, mpath, transcript_file = _setup(tmp_path, manifest_key=KEY)
+
+    sha = "a" * 64
+    mp3 = cache / f"{sha}.mp3"
+    ah = state.audio_hash(mp3)
+    legacy = cache / f"{ah}.{KEY}.legacy2.transcript.json"
+    legacy.write_text(
+        json.dumps({"language": "ru", "words": _WORDS, **_META}), encoding="utf-8"
+    )
+    # Re-extract: overwrite mp3 with different content (content hash changes)
+    mp3.write_bytes(b"REEXTRACTED_AUDIO")
+
+    from autoreels.__main__ import cmd_backfill_source_sha
+    rc = cmd_backfill_source_sha([str(legacy)], cache_dir=str(cache))
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "re-extracted" in err.lower() or "re-run" in err.lower() or "не совпадает" in err.lower() or "mismatch" in err.lower() or "content hash" in err.lower()

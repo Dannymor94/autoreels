@@ -2792,25 +2792,19 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     transcript: Transcript | None = None
 
     if source_file.name.endswith(".transcript.json"):
-        # Source is a transcript — load it directly, then look up a matching manifest by audio hash.
+        # Source is a transcript — load it directly, then look up a matching manifest.
+        # Resolution chain: transcript.source_sha256 (stamped at transcription time) →
+        # manifest in manifests/ with the same source_sha256.
+        # For legacy transcripts (source_sha256=""), there is no reliable link; refuse clearly.
         transcript = Transcript.model_validate_json(source_file.read_text(encoding="utf-8"))
-        # Transcript filename convention: {audio_hash}.{pkey}.transcript.json
-        # Extract audio hash = first dot-separated segment of the stem-without-.transcript
-        tx_stem = source_file.stem  # removes .json → "{ahash}.{pkey}.transcript"
-        tx_stem = tx_stem[: -len(".transcript")] if tx_stem.endswith(".transcript") else tx_stem
-        ahash_from_name = tx_stem.split(".")[0]
-        # Scan mp3 files in cache: find the one whose content-hash matches.
-        matched_sha256: str | None = None
-        for mp3 in cache_dir.glob("*.mp3"):
-            if state.audio_hash(mp3) == ahash_from_name:
-                matched_sha256 = mp3.stem   # mp3 stem = source_sha256
-                break
-        if matched_sha256 is None:
+        matched_sha256 = transcript.source_sha256
+        if not matched_sha256:
             print(
-                f"error: cannot find a matching audio file in cache for transcript "
-                f"{source_file.name} (audio_hash={ahash_from_name[:16]}…). "
+                f"error: transcript {source_file.name} has no source_sha256 stamp "
+                f"(created before this field was added). "
                 f"Missing fields: source, source_sha256, setup, run_key, duration_preset. "
-                f"Run arl run (or ensure the mp3 is in {cache_dir}) so the source can be traced.",
+                f"Run 'arl backfill-source-sha {source_file}' to add the link, "
+                f"or re-run transcription so it is stamped automatically.",
                 file=sys.stderr,
             )
             return 1
@@ -2829,7 +2823,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if not matched:
             print(
                 f"error: no manifest in {_mdir} has source_sha256={matched_sha256[:16]}… "
-                f"(matched from transcript {source_file.name}). "
+                f"(from transcript {source_file.name}). "
                 f"Missing fields: source, setup, run_key, duration_preset. "
                 f"Run arl run first to produce a base manifest, then re-apply.",
                 file=sys.stderr,
@@ -3558,6 +3552,70 @@ def cmd_backfill_pkey(
         flush=True,
     )
     return 0
+
+
+def cmd_backfill_source_sha(
+    transcript_paths: list[str],
+    *,
+    cache_dir: str | None = None,
+    root=None,
+    force: bool = False,
+) -> int:
+    """Stamp source_sha256 on legacy transcripts that lack it.
+
+    Resolves by matching the transcript filename prefix (= sha256 of mp3 content at
+    transcription time) to the mp3 files currently in cache.  Refuses when the mp3's
+    current content hash does not match the transcript filename prefix (mp3 was
+    re-extracted and the link is broken — re-run arl run to create a fresh transcript).
+
+    Returns 0 only when every transcript was stamped or already had the field.
+    """
+    _root = Path(root) if root else _project_root()
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+
+    errors = 0
+    for tpath_str in transcript_paths:
+        tpath = Path(tpath_str)
+        if not tpath.is_absolute():
+            tpath = _cache / tpath_str
+        if not tpath.exists():
+            print(f"  error: not found: {tpath}", file=sys.stderr)
+            errors += 1
+            continue
+
+        tr = Transcript.model_validate_json(tpath.read_text(encoding="utf-8"))
+        if tr.source_sha256 and not force:
+            print(f"  skip {tpath.name}: source_sha256 already set ({tr.source_sha256[:16]}…)")
+            continue
+
+        # Extract audio_hash from the filename: {ahash}[.{pkey}].transcript.json
+        stem = tpath.stem  # removes .json → "...transcript"
+        if stem.endswith(".transcript"):
+            stem = stem[:-len(".transcript")]
+        ahash = stem.split(".")[0]
+
+        # Scan mp3 files: find the one whose content hash matches ahash.
+        found_sha: str | None = None
+        for mp3 in _cache.glob("*.mp3"):
+            if state.audio_hash(mp3) == ahash:
+                found_sha = mp3.stem
+                break
+
+        if found_sha is None:
+            print(
+                f"  error: {tpath.name}: no mp3 in {_cache} has audio_hash={ahash[:16]}… "
+                f"(mp3 was re-extracted or is missing). "
+                f"Re-run 'arl run' to produce a fresh stamped transcript.",
+                file=sys.stderr,
+            )
+            errors += 1
+            continue
+
+        updated = tr.model_copy(update={"source_sha256": found_sha})
+        tpath.write_text(updated.model_dump_json(), encoding="utf-8")
+        print(f"  ✓ {tpath.name}: source_sha256={found_sha[:16]}…")
+
+    return 0 if errors == 0 else 1
 
 
 def cmd_migrate_calibrations(
@@ -5559,6 +5617,28 @@ def _build_parser():
                      help="перезаписать существующий transcript_params_key")
     pbp.add_argument("--root", default=None, help="корень проекта (по умолчанию: авто)")
 
+    pbss = sub.add_parser(
+        "backfill-source-sha",
+        help="stamp source_sha256 on legacy transcripts that lack it (one-off repair)",
+        description=(
+            "Adds source_sha256 to transcript .json files created before this field was introduced.\n"
+            "Matches by computing sha256 of the mp3 content and comparing to the transcript\n"
+            "filename prefix (= audio_hash = sha256(mp3_content) at transcription time).\n"
+            "Refuses when the mp3's current content hash doesn't match (mp3 was re-extracted).\n\n"
+            "Пример: autoreels backfill-source-sha data/cache/*.transcript.json\n"
+            "        autoreels backfill-source-sha data/cache/72a9c867.ba7fe.transcript.json"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    pbss.add_argument(
+        "transcripts", nargs="+", metavar="транскрипт",
+        help="один или несколько .transcript.json файлов",
+    )
+    pbss.add_argument("--cache-dir", default=None, help="путь к кэшу (по умолчанию: data/cache)")
+    pbss.add_argument("--root", default=None, help="корень проекта (по умолчанию: авто)")
+    pbss.add_argument("--force", action="store_true", default=False,
+                      help="перезаписать source_sha256 даже если уже установлен")
+
     return p
 
 
@@ -5779,6 +5859,13 @@ def main(argv=None) -> int:
         elif args.cmd == "backfill-params-key":
             return cmd_backfill_pkey(
                 args.manifest, args.transcript,
+                root=args.root if hasattr(args, "root") and args.root else None,
+                force=args.force,
+            )
+        elif args.cmd == "backfill-source-sha":
+            return cmd_backfill_source_sha(
+                args.transcripts,
+                cache_dir=args.cache_dir if hasattr(args, "cache_dir") else None,
                 root=args.root if hasattr(args, "root") and args.root else None,
                 force=args.force,
             )

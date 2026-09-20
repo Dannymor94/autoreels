@@ -37,7 +37,11 @@ def _setup(tmp_path, *, manifest_key: str = KEY):
     mp3.write_bytes(b"AUDIO")
     ah = state.audio_hash(mp3)
     tpath = cache / f"{ah}.{KEY}.transcript.json"
-    tpath.write_text(json.dumps({"language": "ru", "words": _WORDS, **_META}), encoding="utf-8")
+    # source_sha256 = mp3.stem (stamped at transcription time since the fix)
+    tpath.write_text(
+        json.dumps({"language": "ru", "words": _WORDS, "source_sha256": sha, **_META}),
+        encoding="utf-8",
+    )
     m = Manifest(
         source="v.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
         source_path="/originals/v.mp4",
@@ -169,24 +173,32 @@ def test_apply_from_transcript_no_manifest_refuses(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# Test 3c: --apply from transcript, no mp3 in cache → refuses with audio hash error
+# Test 3c: --apply from legacy transcript (no source_sha256) → clear error
 # ---------------------------------------------------------------------------
 
-def test_apply_from_transcript_no_audio_refuses(tmp_path, capsys):
-    """--apply with transcript as source refuses when the mp3 is not in cache."""
-    root, cache, mpath, tpath = _setup(tmp_path)
-    # Remove the mp3 so the lookup by audio hash fails
-    for mp3 in cache.glob("*.mp3"):
-        mp3.unlink()
+def test_apply_from_legacy_transcript_refuses(tmp_path, capsys):
+    """--apply with a legacy transcript (source_sha256='') refuses with a clear error."""
+    root, cache, mpath, _ = _setup(tmp_path)
+    sha = "c" * 64
+    mp3 = cache / f"{sha}.mp3"
+    ah = state.audio_hash(mp3)
+    # Legacy transcript: no source_sha256 field
+    legacy_tpath = cache / f"{ah}.{KEY}.legacy.transcript.json"
+    legacy_tpath.write_text(
+        json.dumps({"language": "ru", "words": _WORDS, **_META}),  # no source_sha256
+        encoding="utf-8",
+    )
 
     review = "1: 80\n"
-    rpath = tmp_path / "reviews" / "nomp3.review.md"
+    rpath = tmp_path / "reviews" / "legacy.review.md"
     rpath.write_text(review, encoding="utf-8")
 
     rc = cli._blocks_do_apply(
         str(rpath), root=REPO_ROOT, cache_dir=str(cache),
-        source=str(tpath),
+        source=str(legacy_tpath),
     )
     assert rc != 0
     err = capsys.readouterr().err
-    assert "audio" in err.lower() or "mp3" in err.lower() or "cache" in err.lower()
+    # Must name the fix and the missing link
+    assert "source_sha256" in err or "backfill" in err.lower()
+    assert "missing" in err.lower() or "no source_sha256" in err.lower() or "stamp" in err.lower()

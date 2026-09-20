@@ -358,10 +358,12 @@ def transcribe(
 
     def _stamp(tr: Transcript) -> Transcript:
         """Записать в артефакт параметры, которыми он получен (воспроизводимость)."""
+        # audio_path.stem = source_sha256 (mp3 is always named {source_sha256}.{format})
         return tr.model_copy(update={
             "model": meta.get("model", ""),
             "provider": meta.get("provider", ""),
             "prompt_hash": meta.get("prompt_hash", ""),
+            "source_sha256": audio_path.stem,
         })
 
     # Чанкинг: если конфиг передан и аудио превышает порог
