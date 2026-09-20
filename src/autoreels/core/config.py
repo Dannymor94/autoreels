@@ -232,6 +232,8 @@ class R0Config(BaseModel):
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     blocks_filter: BlocksFilterConfig = Field(default_factory=BlocksFilterConfig)
     block_scoring: BlockScoringConfig = Field(default_factory=BlockScoringConfig)
+    manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
+    speed: float = 1.0                       # default playback speed for all clips
 
     @property
     def min_duration(self) -> int:

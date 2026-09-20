@@ -1401,14 +1401,14 @@ def test_compact_export_prompt_documents_merge_markers():
 def test_parse_score_markers_backward_and_double_forward():
     """Score-field parser: '-NN' → backward, 'NN++' → merge_fwd=2, bare '-'/'__' → skip."""
     from autoreels.cloud.blocks import _parse_score_markers
-    assert _parse_score_markers("85") == (85, 0, False, None)
-    assert _parse_score_markers("85+") == (85, 1, False, None)
-    assert _parse_score_markers("85++") == (85, 2, False, None)
-    assert _parse_score_markers("-90") == (90, 0, True, None)
-    assert _parse_score_markers("-90+") == (90, 1, True, None)
+    assert _parse_score_markers("85") == (85, 0, False, None, None)
+    assert _parse_score_markers("85+") == (85, 1, False, None, None)
+    assert _parse_score_markers("85++") == (85, 2, False, None, None)
+    assert _parse_score_markers("-90") == (90, 0, True, None, None)
+    assert _parse_score_markers("-90+") == (90, 1, True, None, None)
     assert _parse_score_markers("__")[0] is None
     assert _parse_score_markers("-")[0] is None      # bare dash still means skip
-    assert _parse_score_markers("++")[3] is not None  # marker without a score → error
+    assert _parse_score_markers("++")[4] is not None  # marker without a score → error
 
 
 # --------------------------------------------------------------------------- block_target_sec (M1.6)

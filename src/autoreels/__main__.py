@@ -2704,7 +2704,7 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False) -> int:
+def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
@@ -2716,6 +2716,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     different).
     """
     import json as _json
+    import math as _math
 
     import re as _re
 
@@ -2914,14 +2915,17 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 eligible.discard(e.seq)
 
     active = {s: seq_to_block[s] for s in eligible}
-    groups, over_max = resolve_merge_groups(list(entries), active, r0_cfg.max_duration)
+    _manual_max = getattr(r0_cfg, "manual_max_duration_sec", 180.0)
+    groups, over_max = resolve_merge_groups(list(entries), active, _manual_max)
     for g in over_max:
         span = active[g[-1]].end - active[g[0]].start
         print(
-            f"  WARNING: merge {'+'.join(str(s) for s in g)} span ({span:.1f}s) exceeds "
-            f"max_duration ({r0_cfg.max_duration:.0f}s) — blocks kept separate (not trimmed)",
+            f"  error: merge {'+'.join(str(s) for s in g)} span ({span:.1f}s) exceeds "
+            f"manual_max_duration_sec ({_manual_max:.0f}s) — refused",
             file=sys.stderr,
         )
+    if over_max:
+        return 1
 
     for g in groups:
         # Score = the EARLIEST scored block in the group (deterministic anchor).
@@ -2950,6 +2954,33 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.r0_end = reel.end
         if is_merged:
             reel.flags.append("human_merged")
+        # Determine per-clip speed: marker > --speed arg > config default
+        _entry_speed = seq_to_entry[_anchor_seq].speed if _anchor_seq in seq_to_entry else None
+        _cfg_speed = getattr(r0_cfg, "speed", 1.0)
+        _clip_speed = _entry_speed if _entry_speed is not None else (speed if speed is not None else _cfg_speed)
+        _preset_max = float(r0_cfg.max_duration)
+        _span = reel.end - reel.start
+        _final_dur = _span / _clip_speed
+        if _final_dur > _preset_max:
+            _needed = _span / _preset_max
+            if _needed > 1.3:
+                _over = _span / 1.3 - _preset_max
+                print(
+                    f"  error: block(s) {'+'.join(str(s) for s in g)} span {_span:.1f}s needs "
+                    f"{_needed:.2f}x to fit under {_preset_max:.0f}s ceiling "
+                    f"(max allowed 1.3x; overshoots by {_over:.1f}s at 1.3x)",
+                    file=sys.stderr,
+                )
+                return 1
+            _auto = _math.ceil(_needed * 100) / 100
+            if _clip_speed < _auto:
+                _clip_speed = _auto
+            print(
+                f"  speed {'+'.join(str(s) for s in g)}: {_span:.1f}s → "
+                f"{_span / _clip_speed:.1f}s at {_clip_speed:.2f}x",
+                file=sys.stderr,
+            )
+        reel._clip_speed = _clip_speed   # stash for post-pipeline subtitle rescaling
         reels.append(reel)
         dataset_rows.append(make_dataset_row(block, score, manifest_path.stem))
 
@@ -2986,6 +3017,21 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels, density_disc = _stage_speech_density(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
+
+    # Apply per-clip speed: rescale subtitle timings, stamp reel.speed.
+    from autoreels.core.models import Word as _Word
+    for reel in reels:
+        _spd = getattr(reel, "_clip_speed", 1.0)
+        if _spd != 1.0:
+            reel.subtitles = [
+                _Word(
+                    word=w.word,
+                    t0=reel.start + (w.t0 - reel.start) / _spd,
+                    t1=reel.start + (w.t1 - reel.start) / _spd,
+                )
+                for w in reel.subtitles
+            ]
+        reel.speed = _spd
 
     # Assemble manifest with selection_source="human".
     # Stamp transcript_params_key from the transcript actually used (mirrors cmd_run at
@@ -3104,7 +3150,7 @@ def cmd_blocks(
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render)
+        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=getattr(args, "speed", None))
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
@@ -5588,6 +5634,14 @@ def _build_parser():
         "--render",
         action="store_true",
         help="render immediately after apply; implies --install",
+    )
+    pbl.add_argument(
+        "--speed",
+        type=float,
+        default=None,
+        metavar="FACTOR",
+        help="default playback speed for all clips (1.0-1.3; overrides r0.yaml speed); "
+             "auto-selected when a clip exceeds the preset ceiling",
     )
     pbl.add_argument(
         "--compact",

@@ -489,7 +489,7 @@ def _audio_filter_chain(ap: AudioProcessing, clip_duration: float) -> str:
 
 
 def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
-                          clip_duration: float) -> str:
+                          clip_duration: float, *, speed: float = 1.0) -> str:
     """filter_complex для микса речи с фоновой музыкой. Второй вход (`-i` музыки) зациклен на
     уровне демуксера (`-stream_loop -1`); длина берётся по речи (`amix duration=first`) — короткий
     трек играет по кругу, длинный обрезается. Порядок аудио: речь(шумоподавление→нормализация) →
@@ -501,7 +501,8 @@ def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
     parts.append(f"[0:v]{video_vf}[v]" if video_vf else "[0:v]null[v]")
 
     speech = _audio_denoise_norm(ap)              # шумоподавление → нормализация речи
-    speech_prefix = (",".join(speech) + ",") if speech else ""
+    _tempo_prefix = f"atempo={speed:.4g}," if speed != 1.0 else ""
+    speech_prefix = _tempo_prefix + ((",".join(speech) + ",") if speech else "")
 
     # Музыка: громкость + фейд в начале/конце (fade-out ложится в конец по длине клипа).
     mfade = ""
@@ -736,6 +737,11 @@ def _render_segments(
             if vf and palette_vf:
                 base_vf = f"{vf},{palette_vf}"
             reel_vf = base_vf
+            # Speed-up via setpts (video) + atempo (audio); both applied before other filters.
+            _reel_speed = getattr(reel, "speed", 1.0)
+            if _reel_speed != 1.0:
+                _pts = f"setpts=PTS/{_reel_speed:.4g}"
+                reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
             ass_cwd: str | None = None
             if subtitles_cfg is not None and reel.subtitles:
                 ass_filename = f"{reel.id}.ass"
@@ -759,9 +765,12 @@ def _render_segments(
             reel_fc = None
             reel_af = None
             if music_path:
-                reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration)
+                reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed)
             else:
                 reel_af = _audio_filter_chain(ap, clip_duration) or None
+                if _reel_speed != 1.0:
+                    _tempo = f"atempo={_reel_speed:.4g}"
+                    reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
             cmd = build_cut_cmd(
                 ffmpeg_bin, source, reel.start, reel.end, out,
                 codec=codec, preset=enc.preset,

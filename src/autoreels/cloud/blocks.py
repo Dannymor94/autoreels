@@ -567,7 +567,7 @@ _REVIEW_HDR_RE = re.compile(
 _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
 # Compact answer line: <seq> <score-token>, where the token is an optional leading '-'
 # (join backward), digits, and trailing '+'/'++' (join 1 or 2 following blocks).
-_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*)\s*$")
+_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*(?:@[\d.]+)?)\s*$")
 
 _COMPACT_PROMPT = (
     "# Score each block 0-100 for standalone short-video quality.\n"
@@ -585,12 +585,18 @@ _COMPACT_PROMPT = (
     "#   -   before the score: join with the PRECEDING block (attach a run-up)\n"
     "# A forward '+' on a block and a backward '-' on the next name the same join — counted once.\n"
     "#\n"
-    "# Reply with ONLY lines of:  <number> [-]<score>[+|++]\n"
+    "# Speed marker (after all other markers): @N.NN requests that speed for this clip.\n"
+    "#   80@1.15   play this clip 15% faster (subtitle sync adjusted automatically)\n"
+    "#   80+@1.1   join with next AND speed up 10%\n"
+    "# Clips that exceed the preset ceiling get the minimum speed that fits, within 1.0-1.3.\n"
+    "#\n"
+    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed]\n"
     "# No commentary, no restating of text.  Example:\n"
     "#   3 85+      (join 3 with 4)\n"
     "#   5 -90      (join 5 back into 4)\n"
     "#   7 72++     (join 7 with 8 and 9)\n"
-    "#   8 90"
+    "#   8 90@1.15  this clip at 1.15x\n"
+    "#   9 90"
 )
 
 
@@ -600,19 +606,35 @@ class _ReviewEntry(NamedTuple):
     score: int | None   # None = reviewer left blank
     merge_fwd: int = 0   # 0 none | 1 '+' (join next) | 2 '++' (join next two)
     merge_back: bool = False  # '-' before score: join with the PRECEDING block
+    speed: float | None = None  # @N.NN per-clip speed override
 
 
-def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, str | None]:
-    """Parse a score field with merge markers → (score, merge_fwd, merge_back, error).
+def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float | None, str | None]:
+    """Parse a score field with merge and speed markers → (score, merge_fwd, merge_back, speed, error).
 
-    Accepts: '' / '__' / '-' (blank/skip), 'NN', 'NN+', 'NN++', '-NN', '-NN+', etc.
+    Accepts: '' / '__' / '-' (blank/skip), 'NN', 'NN+', 'NN++', '-NN', 'NN@1.15', etc.
+    Speed suffix '@N.NN' may appear after digits and '+'/'-' markers: '80@1.15', '80+@1.15'.
     merge_fwd is 0/1/2 (trailing '+' count, capped at 2 = join next two).
     merge_back True when a single leading '-' precedes the digits.
     Returns error (str) instead of a score when the token is malformed.
     """
     s = score_str.strip()
     if not s or s in ("__", "-"):
-        return None, 0, False, None            # blank / skip (bare '-' stays "skip", legacy)
+        return None, 0, False, None, None            # blank / skip (bare '-' stays "skip", legacy)
+
+    # Extract @speed suffix (comes after all other markers)
+    speed: float | None = None
+    if "@" in s:
+        idx = s.index("@")
+        speed_str = s[idx + 1:]
+        s = s[:idx]
+        try:
+            speed = float(speed_str)
+        except ValueError:
+            return None, 0, False, None, f"invalid speed @{speed_str!r}: expected a number like 1.15"
+        if not (1.0 <= speed <= 1.3):
+            return None, 0, False, None, f"speed {speed} out of range [1.0, 1.3]"
+
     back = False
     if s.startswith("-"):
         back = True
@@ -624,14 +646,14 @@ def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, str | N
     fwd = min(fwd, 2)                           # '+++' or more → cap at "join next two"
     s = s.strip()
     if not s:
-        return None, 0, False, "merge marker without a score"
+        return None, 0, False, None, "merge marker without a score"
     try:
         score = int(s)
     except ValueError:
-        return None, 0, False, f"expected integer score, got {s!r}"
+        return None, 0, False, None, f"expected integer score, got {s!r}"
     if not 0 <= score <= 100:
-        return None, 0, False, f"score {score} out of range [0, 100]"
-    return score, fwd, back, None
+        return None, 0, False, None, f"score {score} out of range [0, 100]"
+    return score, fwd, back, speed, None
 
 
 def export_review(
@@ -655,6 +677,7 @@ def export_review(
         "#   '+'  join with the NEXT block   '++' join with the next TWO (thought across three)",
         "#   '-'  BEFORE the score: join with the PRECEDING block (attach a run-up)",
         "# A '+' on a block and a '-' on the next name the same join — counted once.",
+        "# Speed marker: '@N.NN' after score and merge markers — e.g. '80@1.15', '85+@1.1'.",
         "#",
         "",
     ]
@@ -692,11 +715,11 @@ def parse_review(
         if not m:
             continue  # block text or other — ignored silently
         seq, block_id, score_str = int(m.group(1)), m.group(3), m.group(4).strip()
-        score, fwd, back, err = _parse_score_markers(score_str)
+        score, fwd, back, speed, err = _parse_score_markers(score_str)
         if err:
             errors.append((lineno, err))
             continue
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed))
 
     return source_ref, entries, errors
 
@@ -755,11 +778,11 @@ def parse_compact_answer(
         m = _COMPACT_SCORE_RE.match(line)
         if m:
             seq = int(m.group(1))
-            score_val, fwd, back, err = _parse_score_markers(m.group(2))
+            score_val, fwd, back, speed, err = _parse_score_markers(m.group(2))
             if err:
                 errors.append((lineno, err))
                 continue
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed))
         else:
             ignored += 1
 

@@ -143,6 +143,8 @@ class Reel(BaseModel):
     start_snap_reason: str | None = None  # "sentence" | "pause" | "hard_cut" | "repaired_to_sentence" | None
     start_repair_sec: float | None = None  # seconds trimmed from front during dangling-start repair
     ends_on_host_turn: bool = False  # diagnostic: would have ended inside a host question without interview snap
+    # Playback speed applied at render time (1.0 = normal, >1 = faster). Set by --apply.
+    speed: float = 1.0
 
 
 class Manifest(BaseModel):
