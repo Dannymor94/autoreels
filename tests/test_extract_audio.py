@@ -194,3 +194,57 @@ def test_extract_ffmpeg_failure_raises_with_stderr(monkeypatch, tmp_path, audio_
     with pytest.raises(ExtractAudioError) as e:
         extract_audio(src, audio_cfg, cache_dir=tmp_path / "c", source_sha="c" * 64)
     assert "boom decode error" in str(e.value)
+
+
+# ------------------------------------------------------ кэш-гард (тесты 3 и 4 из задачи)
+
+def test_cached_audio_not_re_extracted(monkeypatch, tmp_path, audio_cfg):
+    """Валидный кэш-файл: extract_audio возвращает его сразу, ffmpeg не вызывается (тест 3)."""
+    import autoreels.cloud.extract_audio as EA
+
+    sha = "d" * 64
+    cache_dir = tmp_path / "c"
+    cache_dir.mkdir()
+    out = cache_dir / f"{sha}.{audio_cfg.format}"
+    out.write_bytes(b"fake mp3 content")
+
+    popen_called = []
+    monkeypatch.setattr(EA.shutil, "which", lambda b: f"/fake/{b}")
+    # ffprobe: source = None (won't be called); cached file = valid (dur > 0)
+    monkeypatch.setattr(EA, "_probe_duration_sec",
+                        lambda ffmpeg_bin, path: 42.0 if path == out else None)
+    monkeypatch.setattr(EA.subprocess, "Popen",
+                        lambda *a, **k: popen_called.append(True))
+
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"x")
+    result = extract_audio(src, audio_cfg, cache_dir=cache_dir, source_sha=sha)
+
+    assert result == out
+    assert not popen_called, "ffmpeg должен был быть пропущен (кэш-хит)"
+
+
+def test_truncated_cached_audio_is_re_extracted(monkeypatch, tmp_path, audio_cfg):
+    """Обрезанный кэш-файл (size > 0, но ffprobe возвращает None): перезаписывается (тест 4)."""
+    import autoreels.cloud.extract_audio as EA
+    import autoreels.core.progress as prog
+
+    sha = "e" * 64
+    cache_dir = tmp_path / "c"
+    cache_dir.mkdir()
+    out = cache_dir / f"{sha}.{audio_cfg.format}"
+    out.write_bytes(b"truncated")  # size > 0, но ffprobe не распознаёт
+
+    popen_called = []
+    monkeypatch.setattr(prog, "is_tty", lambda: False)
+    monkeypatch.setattr(EA.shutil, "which", lambda b: f"/fake/{b}")
+    # ffprobe: кэшированный файл → None (обрезан); source → None (без прогресс-бара)
+    monkeypatch.setattr(EA, "_probe_duration_sec", lambda ffmpeg_bin, path: None)
+    monkeypatch.setattr(EA.subprocess, "Popen",
+                        _fake_ffmpeg_progress_proc([10_000_000], returncode=0))
+
+    src = tmp_path / "v.mp4"
+    src.write_bytes(b"x")
+    result = extract_audio(src, audio_cfg, cache_dir=cache_dir, source_sha=sha)
+
+    assert result == out  # путь тот же, но файл перезаписан (ffmpeg прогнан)

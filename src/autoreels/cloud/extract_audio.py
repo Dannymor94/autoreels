@@ -164,6 +164,15 @@ def extract_audio(
     sha = source_sha if source_sha is not None else state.file_sha256(source)
     out = cache_dir / f"{sha}.{audio_cfg.format}"
 
+    # Cache hit: valid = exists, non-empty, ffprobe confirms duration > 0.
+    # A truncated file from an interrupted run will have size > 0 but ffprobe returns None or 0.
+    # Parameter changes (bitrate/codec/sample_rate) are not encoded in the filename; they are
+    # effectively constant from render.yaml — use --force if you intentionally changed them.
+    if out.exists() and out.stat().st_size > 0:
+        cached_dur = _probe_duration_sec(ffmpeg_bin, out)
+        if cached_dur is not None and cached_dur > 0:
+            return out
+
     cmd = build_extract_cmd(ffmpeg_bin, source, out, audio_cfg)
     duration = _probe_duration_sec(ffmpeg_bin, source)
     returncode, stderr_text = _run_extract_with_progress(cmd, duration_sec=duration)

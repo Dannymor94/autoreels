@@ -2425,6 +2425,12 @@ def _resnap_reels(reels, transcript, r0_cfg) -> None:
                   pause_sec=r0_cfg.sentence_pause_sec, policy=r0_cfg.too_long_policy)
 
 
+def _last_words_before(words, end_sec: float, n: int = 5) -> str:
+    """Last n word tokens with t0 < end_sec (for dry-run boundary preview)."""
+    tokens = [w.word for w in words if w.t0 < end_sec]
+    return " ".join(tokens[-n:]) if tokens else ""
+
+
 def cmd_resnap(
     video=None,
     *,
@@ -2433,13 +2439,18 @@ def cmd_resnap(
     cache_dir=None,
     push: bool = True,
     pull_first: bool = True,
+    dry_run: bool = False,
 ) -> int:
     """Пересчитать ГРАНИЦЫ клипов из сохранённых R0-границ (snap→padding→trim текущим кодом),
     БЕЗ повторного R0/LLM. Для проверки правок snap/padding без пересборки манифеста.
 
     Выбор моментов (R0), тексты, субтитры — НЕ трогаются: те же r0_start/r0_end прогоняются
     заново детерминированным слоем. Транскрипт берётся из кэша (как diagnose-cuts). Без <video>
-    — batch по всем манифестам. Манифест без r0_start (снят до фичи) → нужен один полный run."""
+    — batch по всем манифестам. Манифест без r0_start (снят до фичи) → нужен один полный run.
+
+    --dry-run: печатает что изменится (per-reel: старые/новые границы, причина snap, последние
+    слова), ничего не пишет и не пушит. При пустом transcript_params_key делает best-effort
+    резолв через текущий конфиг с предупреждением — запись в этом случае по-прежнему отказана."""
     root = Path(root) if root is not None else _project_root()
     if pull_first:
         _git_pull(root, what="манифесты")
@@ -2480,35 +2491,83 @@ def cmd_resnap(
             continue
         # Идентичность транскрипта ОБЯЗАТЕЛЬНА для записи: без записанного params_key нельзя
         # проверить, что резолвим тот же транскрипт → отказ (порча границ хуже отсутствия правки).
+        # dry-run исключение: можно preview с best-effort транскриптом + предупреждение.
+        used_fallback_transcript = False
         if not manifest.transcript_params_key:
-            print(f"  ⚠ {stem}: манифест без transcript_params_key (снят до этого фикса) — resnap "
-                  f"ОТКАЗАН: нельзя проверить транскрипт. Нужен ОДИН полный run (arl run), "
-                  f"дальше resnap безопасен", file=sys.stderr, flush=True)
-            refused.append(mf.name)
-            continue
-        # Резолв ТОЛЬКО по записанному ключу (config_pkey="" не подставляем — иначе можно уехать
-        # на транскрипт текущего конфига, если он сменился после сборки манифеста).
-        transcript, expected = _resolve_transcript(manifest, cache_dir, audio_format=audio_format)
-        if transcript is None:
-            why = ("нет аудио в кэше" if expected is None
-                   else f"нет транскрипта с params_key={expected}")
-            print(f"  ⚠ {stem}: {why} (тот, на котором собран манифест) — resnap ОТКАЗАН",
+            if not dry_run:
+                print(f"  ⚠ {stem}: манифест без transcript_params_key (снят до этого фикса) — resnap "
+                      f"ОТКАЗАН: нельзя проверить транскрипт. Нужен ОДИН полный run (arl run), "
+                      f"дальше resnap безопасен", file=sys.stderr, flush=True)
+                refused.append(mf.name)
+                continue
+            # dry-run: best-effort — попробовать текущий конфиг как запасной вариант
+            config_pkey = _config_params_key(root)
+            transcript, expected = _resolve_transcript(manifest, cache_dir,
+                                                       audio_format=audio_format,
+                                                       config_pkey=config_pkey)
+            if transcript is None:
+                print(f"  ⚠ {stem}: dry-run, transcript_params_key пуст и транскрипт не найден "
+                      f"(params_key={config_pkey or '—'}) — пропуск",
+                      file=sys.stderr, flush=True)
+                skipped.append(mf.name)
+                continue
+            print(f"  ℹ {stem}: dry-run — transcript_params_key пуст, использован транскрипт "
+                  f"текущего конфига ({config_pkey}); запись по-прежнему отказана",
                   file=sys.stderr, flush=True)
-            refused.append(mf.name)
-            continue
-        # Guard: имя файла говорит params_key X, но stamped-мета внутри — Y? Не писать.
-        actual = transcript_identity(transcript)
-        if actual != manifest.transcript_params_key:
-            print(f"  ⚠ {stem}: params_key транскрипта расходится (манифест="
-                  f"{manifest.transcript_params_key}, транскрипт={actual or '—'}) — resnap ОТКАЗАН",
-                  file=sys.stderr, flush=True)
-            refused.append(mf.name)
-            continue
+            used_fallback_transcript = True
+        else:
+            # Резолв ТОЛЬКО по записанному ключу (config_pkey="" не подставляем — иначе можно уехать
+            # на транскрипт текущего конфига, если он сменился после сборки манифеста).
+            transcript, expected = _resolve_transcript(manifest, cache_dir, audio_format=audio_format)
+            if transcript is None:
+                why = ("нет аудио в кэше" if expected is None
+                       else f"нет транскрипта с params_key={expected}")
+                print(f"  ⚠ {stem}: {why} (тот, на котором собран манифест) — resnap ОТКАЗАН",
+                      file=sys.stderr, flush=True)
+                refused.append(mf.name)
+                continue
+            # Guard: имя файла говорит params_key X, но stamped-мета внутри — Y? Не писать.
+            actual = transcript_identity(transcript)
+            if actual != manifest.transcript_params_key:
+                if dry_run:
+                    print(f"  ⚠ {stem}: dry-run — params_key расходится (манифест="
+                          f"{manifest.transcript_params_key}, транскрипт={actual or '—'}); "
+                          f"preview всё равно показан, запись отказана",
+                          file=sys.stderr, flush=True)
+                    used_fallback_transcript = True
+                else:
+                    print(f"  ⚠ {stem}: params_key транскрипта расходится (манифест="
+                          f"{manifest.transcript_params_key}, транскрипт={actual or '—'}) — resnap ОТКАЗАН",
+                          file=sys.stderr, flush=True)
+                    refused.append(mf.name)
+                    continue
 
         reels = [r.model_copy(deep=True) for r in manifest.reels]
         _resnap_reels(reels, transcript, r0_cfg)
         n_changed = sum(1 for a, b in zip(manifest.reels, reels)
                         if (round(a.start, 3), round(a.end, 3)) != (round(b.start, 3), round(b.end, 3)))
+
+        if dry_run:
+            print(f"\n  [dry-run] {stem}: {n_changed}/{len(reels)} клипов изменятся", flush=True)
+            for old_r, new_r in zip(manifest.reels, reels):
+                old_start, old_end = round(old_r.start, 3), round(old_r.end, 3)
+                new_start, new_end = round(new_r.start, 3), round(new_r.end, 3)
+                changed = (old_start, old_end) != (new_start, new_end)
+                marker = "→" if changed else "·"
+                snap = new_r.end_snap_reason or "—"
+                tail = _last_words_before(transcript.words, new_r.end)
+                print(f"    {marker} {old_r.id}  {old_start:.3f}–{old_end:.3f}  "
+                      f"→ {new_start:.3f}–{new_end:.3f}  snap={snap}  «{tail}»",
+                      flush=True)
+            skipped.append(mf.name)  # не считаем как updated (ничего не записано)
+            continue
+
+        if used_fallback_transcript:
+            print(f"  ⚠ {stem}: запись отказана (fallback-транскрипт в non-dry-run — "
+                  f"это не должно происходить)", file=sys.stderr, flush=True)
+            refused.append(mf.name)
+            continue
+
         _write_manifest(manifest.model_copy(update={"reels": reels}), manifests_dir)
         print(f"  ✓ {stem}: границы пересчитаны из R0 без LLM "
               f"({n_changed}/{len(reels)} клипов сдвинулись; тексты/субтитры/выбор те же)", flush=True)
@@ -2534,6 +2593,7 @@ _SIDECAR_SUFFIXES = (
     ".discarded.json",        # discarded candidates + blocks.discarded.json (suffix-match covers both)
     ".failed_chunks.json",
     ".blocks.topk_cut.json",
+    ".blocks.json",           # block set sidecar written by cmd_blocks
 )
 
 
@@ -2934,6 +2994,7 @@ def cmd_blocks(
     target: str | None,
     *,
     root=None,
+    cache_dir=None,
     scored: bool = False,
     review: bool = False,
     out: str | None = None,
@@ -2987,21 +3048,21 @@ def cmd_blocks(
         except Exception as exc:
             print(f"ошибка разбора манифеста: {exc}", file=sys.stderr)
             return 1
-        cache_dir = root / "data" / "cache"
+        _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
         # Resolve: audio file (named by source_sha256) → audio content hash → transcript
-        audio = cache_dir / f"{manifest.source_sha256}.mp3"
+        audio = _cache_dir / f"{manifest.source_sha256}.mp3"
         if audio.is_file():
             ahash = state.audio_hash(audio)
             pkey = manifest.transcript_params_key
             if pkey:
-                exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
+                exact = _cache_dir / f"{ahash}.{pkey}.transcript.json"
                 if exact.exists():
                     transcript = Transcript.model_validate_json(
                         exact.read_text(encoding="utf-8")
                     )
             if transcript is None:
                 cands = sorted(
-                    cache_dir.glob(f"{ahash}*.transcript.json"),
+                    _cache_dir.glob(f"{ahash}*.transcript.json"),
                     key=lambda p: p.stat().st_mtime,
                     reverse=True,
                 )
@@ -3054,6 +3115,34 @@ def cmd_blocks(
 
     # Build verdict map for output (all_blocks order preserved)
     drop_map: dict[str, str] = {b.id: r for b, r in dropped}
+
+    # Always score all blocks (needed for sidecar; also pre-computes for --scored display below).
+    bs_cfg_for_sidecar = getattr(r0_cfg, "block_scoring", None)
+    if bs_cfg_for_sidecar is not None:
+        for b in all_blocks:
+            if b.heuristic_score == 0.0:
+                b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg_for_sidecar)
+
+    # Write block-set sidecar next to the manifest (always, not only when --scored or --review).
+    # Text omitted — recoverable from transcript by timecode; keeps the file small.
+    if manifest_path is not None:
+        sidecar_blocks = manifest_path.with_suffix(".blocks.json")
+        sidecar_blocks_data = [
+            {
+                "id": b.id,
+                "start": b.start,
+                "end": b.end,
+                "boundary_reason": b.boundary_reason,
+                "verdict": drop_map.get(b.id, "KEPT"),
+                "heuristic_score": round(b.heuristic_score, 2),
+            }
+            for b in all_blocks
+        ]
+        sidecar_blocks.write_text(
+            _json.dumps(sidecar_blocks_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"  → блок-сайдкар: {sidecar_blocks.name} "
+              f"({len(all_blocks)} блоков, {sidecar_blocks.stat().st_size} байт)", flush=True)
 
     boundary_counts: dict[str, int] = {}
     drop_reason_counts: dict[str, int] = {}
@@ -3126,12 +3215,10 @@ def cmd_blocks(
         print(f"  ({len(dropped)} блоков удалено фильтрами — используйте arl blocks без --review для деталей)")
         return 0
 
-    # Stage 3: heuristic scoring (only when --scored)
+    # Stage 3: heuristic scoring display (scores already computed above for the sidecar)
     topk_cut: list = []
     if scored and kept:
         bs_cfg = r0_cfg.block_scoring
-        for b in kept:
-            b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
         kept_scored, topk_cut = topk_filter(
             kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk
         )
@@ -5091,6 +5178,9 @@ def _build_parser():
                      help="конкретное видео (иначе — все манифесты)")
     prn.add_argument("--no-push", action="store_true", dest="no_push",
                      help="не пушить обновлённый манифест в git")
+    prn.add_argument("--dry-run", action="store_true", dest="dry_run", default=False,
+                     help="показать что изменится (per-reel: границы, snap-причина, последние слова), "
+                          "ничего не записывать и не пушить")
 
     sub.add_parser(
         "migrate-calibrations",
@@ -5409,7 +5499,7 @@ def main(argv=None) -> int:
         elif args.cmd == "recrop":
             return cmd_recrop(args.video, push=not args.no_push)
         elif args.cmd == "resnap":
-            return cmd_resnap(args.video, push=not args.no_push)
+            return cmd_resnap(args.video, push=not args.no_push, dry_run=args.dry_run)
         elif args.cmd == "diagnose-cuts":
             return cmd_diagnose_cuts(args.target, rerun=args.rerun)
         elif args.cmd == "dump-clips":
