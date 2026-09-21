@@ -217,6 +217,30 @@ def test_speed_out_of_range_refused():
 # Test 7: manifest records speed; re-read gives same value
 # ---------------------------------------------------------------------------
 
+def test_cmd_blocks_apply_with_speed(tmp_path):
+    """cmd_blocks called directly with apply_review+speed does not crash with NameError.
+
+    Regression for the bug where speed=getattr(args, ...) referenced 'args' which
+    only exists in main(), not in cmd_blocks itself.
+    """
+    root, cache, mpath, _ = _setup(tmp_path)
+    test_mpath = tmp_path / "manifests" / "v__spd_t8__.json"
+    test_mpath.write_text(mpath.read_text(), encoding="utf-8")
+    review = f"# source: {test_mpath}\n1 80\n"
+    rpath = tmp_path / "reviews" / "v__spd_t8__.review.md"
+    rpath.write_text(review, encoding="utf-8")
+    # This must not raise NameError — args is not in scope inside cmd_blocks
+    rc = cli.cmd_blocks(
+        None, root=tmp_path, cache_dir=str(cache),
+        apply_review=str(rpath), speed=1.1,
+    )
+    assert rc == 0
+    out = tmp_path / "reviews" / "v__spd_t8__.review.json"
+    result = Manifest.model_validate_json(out.read_text())
+    assert result.reels
+    assert result.reels[0].speed == pytest.approx(1.1, abs=0.001)
+
+
 def test_manifest_records_speed(tmp_path):
     """Manifest reel.speed matches what was applied; re-read gives same value."""
     rc, out_path = _apply(tmp_path, "1 80@1.1\n", out_stem="v__spd_t7__")

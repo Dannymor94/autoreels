@@ -3129,6 +3129,7 @@ def cmd_blocks(
     install: bool = False,
     render: bool = False,
     compact: bool = False,
+    speed: float | None = None,
 ) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
@@ -3152,7 +3153,7 @@ def cmd_blocks(
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=getattr(args, "speed", None))
+        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed)
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
@@ -5909,6 +5910,7 @@ def main(argv=None) -> int:
                 args.target, root=args.root, scored=args.scored,
                 review=args.review, out=args.out, apply_review=args.apply,
                 install=args.install, render=args.render, compact=args.compact,
+                speed=args.speed,
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()
