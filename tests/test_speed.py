@@ -93,20 +93,23 @@ def _apply(tmp_path, review_content, *, out_stem, speed=None, words=None):
 
 
 # ---------------------------------------------------------------------------
-# Test 1: 3-block merge > 90s accepted under 180s manual ceiling with auto-speed
+# Test 1: 3-block merge > 90s accepted under 180s manual ceiling at speed 1.0
 # ---------------------------------------------------------------------------
 
 def test_three_block_merge_accepted_under_manual_ceiling(tmp_path):
-    """A merge spanning ~109s is accepted (manual ceiling 180s) with auto-speed."""
+    """A merge spanning ~109s is accepted under the 180s manual ceiling at speed 1.0.
+
+    Human merges are measured against manual_max_duration_sec (180s), not the preset
+    ceiling (90s).  No auto-speed is applied because 109s is well within 180s.
+    """
     rc, out_path = _apply(tmp_path, "1 90++\n", out_stem="v__spd_t1__")
-    assert rc == 0, "merge should be accepted under 180s manual ceiling with auto-speed"
+    assert rc == 0, "109s merge should be accepted under 180s manual ceiling"
     result = Manifest.model_validate_json(out_path.read_text())
     assert result.reels, "should produce at least one reel"
     reel = result.reels[0]
-    assert reel.speed > 1.0, "auto-speed must be > 1.0 to fit under 90s"
-    assert reel.speed <= 1.3
-    final_dur = (reel.end - reel.start) / reel.speed
-    assert final_dur <= 90.0 + 0.5, f"final duration {final_dur:.1f}s must fit under ~90s"
+    span = reel.end - reel.start
+    assert reel.speed == 1.0, f"no speed-up needed: {span:.1f}s < 180s manual ceiling"
+    assert span <= 180.0, f"span {span:.1f}s should be within manual ceiling"
 
 
 # ---------------------------------------------------------------------------
@@ -127,23 +130,30 @@ def test_auto_selection_single_block_no_speed(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_auto_speed_refuses_when_too_long(tmp_path, capsys):
-    """A 3-block merge needing > 1.3x speed is refused with the overshoot named."""
-    # 4 groups of 50 words at t=35/87/139/191 (2.05s gaps, sentinel 4th group in tail zone).
-    # Groups 1-3 kept, group 4 filtered by tail_skip.
-    # Merged span of groups 1+2+3: ~188.95-35 = 153.95s; needs 153.95/90=1.71x > 1.3x → refused.
+    """A 3-block merge whose span exceeds 1.3×manual_max is refused with overshoot named.
+
+    manual_max_duration_sec = 180s; 1.3 × 180 = 234s.
+    Groups 1-3 at t=35/140/250 (40 words each) → span ≈ 290 - 35 = 255s > 234s → refused.
+    Group 4 at t=500 (sentinel, 40 words) pushes total_duration to ~540s so that group 3
+    midpoint 270s is NOT in the tail_skip zone (last 30s of 540s = t>510s).
+    """
     words_long = []
-    for _go in (35.0, 87.0, 139.0, 191.0):
-        for _i in range(50):
+    for _go in (35.0, 140.0, 250.0, 500.0):
+        for _i in range(40):
             words_long.append({
                 "word": f"слово{_i}.",
                 "t0": _go + _i * 1.0,
                 "t1": _go + _i * 1.0 + 0.95,
             })
     rc, _ = _apply(tmp_path, "1 80++\n", out_stem="v__spd_t3__", words=words_long)
-    assert rc != 0, "should refuse a merge needing > 1.3x speed"
+    assert rc != 0, "should refuse a merge whose span exceeds manual_max_duration_sec"
     err = capsys.readouterr().err
-    assert "1.3x" in err or "max allowed" in err.lower() or "overshoot" in err.lower(), (
-        f"error message should name the 1.3x limit; got: {err!r}"
+    # Merge refused at ceiling check (resolve_merge_groups) with the ceiling named.
+    assert "manual_max" in err or "180" in err or "refused" in err.lower(), (
+        f"error message should name the manual ceiling; got: {err!r}"
+    )
+    assert "254" in err or "255" in err or "span" in err.lower(), (
+        f"error message should name the span; got: {err!r}"
     )
 
 

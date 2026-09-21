@@ -2958,16 +2958,18 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _entry_speed = seq_to_entry[_anchor_seq].speed if _anchor_seq in seq_to_entry else None
         _cfg_speed = getattr(r0_cfg, "speed", 1.0)
         _clip_speed = _entry_speed if _entry_speed is not None else (speed if speed is not None else _cfg_speed)
-        _preset_max = float(r0_cfg.max_duration)
         _span = reel.end - reel.start
         _final_dur = _span / _clip_speed
-        if _final_dur > _preset_max:
-            _needed = _span / _preset_max
+        # Human merges are measured against manual_max_duration_sec (e.g. 180s), not the
+        # preset ceiling (90s).  Auto-speed only kicks in when the span is above the manual
+        # ceiling even at the requested speed.
+        if _final_dur > _manual_max:
+            _needed = _span / _manual_max
             if _needed > 1.3:
-                _over = _span / 1.3 - _preset_max
+                _over = _span / 1.3 - _manual_max
                 print(
                     f"  error: block(s) {'+'.join(str(s) for s in g)} span {_span:.1f}s needs "
-                    f"{_needed:.2f}x to fit under {_preset_max:.0f}s ceiling "
+                    f"{_needed:.2f}x to fit under manual ceiling {_manual_max:.0f}s "
                     f"(max allowed 1.3x; overshoots by {_over:.1f}s at 1.3x)",
                     file=sys.stderr,
                 )
@@ -2977,7 +2979,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 _clip_speed = _auto
             print(
                 f"  speed {'+'.join(str(s) for s in g)}: {_span:.1f}s → "
-                f"{_span / _clip_speed:.1f}s at {_clip_speed:.2f}x",
+                f"{_span / _clip_speed:.1f}s at {_clip_speed:.2f}x (ceiling {_manual_max:.0f}s)",
                 file=sys.stderr,
             )
         reel._clip_speed = _clip_speed   # stash for post-pipeline subtitle rescaling
@@ -5640,8 +5642,8 @@ def _build_parser():
         type=float,
         default=None,
         metavar="FACTOR",
-        help="default playback speed for all clips (1.0-1.3; overrides r0.yaml speed); "
-             "auto-selected when a clip exceeds the preset ceiling",
+        help="default playback speed for all clips (1.0-1.3 policy; atempo itself accepts 0.5-100); "
+             "overrides r0.yaml speed; auto-applied when span exceeds manual_max_duration_sec",
     )
     pbl.add_argument(
         "--compact",
