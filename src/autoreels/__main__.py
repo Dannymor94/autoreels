@@ -726,13 +726,17 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
     sidecar.write_text(json.dumps(discarded, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _stage_snap(reels, transcript, *, r0_cfg):
-    """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM)."""
+def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None):
+    """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM).
+
+    max_duration override: human merges use manual_max_duration_sec so snap does not cap a
+    long-but-intentional clip back to the preset ceiling. Default None → preset ceiling.
+    """
     print("подтяжка границ к словам…", flush=True)
     snap_segments(
         reels, transcript.words,
         tail_sec=r0_cfg.tail_sec, window_sec=r0_cfg.snap_window_sec,
-        max_duration=r0_cfg.max_duration,
+        max_duration=r0_cfg.max_duration if max_duration is None else max_duration,
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
         max_micro_pause=r0_cfg.max_micro_pause,
         hanging_words=r0_cfg.hanging_words,
@@ -742,15 +746,17 @@ def _stage_snap(reels, transcript, *, r0_cfg):
     return reels
 
 
-def _stage_padding(reels, transcript, *, r0_cfg):
-    """Добавить «воздух» до/после слов клипа (lead_pad_sec / tail_pad_sec)."""
+def _stage_padding(reels, transcript, *, r0_cfg, max_duration=None):
+    """Добавить «воздух» до/после слов клипа (lead_pad_sec / tail_pad_sec).
+
+    max_duration override: human merges use manual_max_duration_sec (see _stage_snap)."""
     print("паддинг границ…", flush=True)
     video_duration = transcript.words[-1].t1 if transcript.words else None
     apply_padding(
         reels, transcript.words,
         tail_pad_sec=r0_cfg.tail_pad_sec,
         lead_pad_sec=r0_cfg.lead_pad_sec,
-        max_duration=r0_cfg.max_duration,
+        max_duration=r0_cfg.max_duration if max_duration is None else max_duration,
         video_duration=video_duration,
         hanging_words=r0_cfg.hanging_words,
     )
@@ -924,6 +930,68 @@ def _stage_subtitles(reels, transcript):
     for reel in reels:
         reel.subtitles = words_in_window(transcript.words, reel.start, reel.end)
     return reels
+
+
+# --- Manual (human-review) path: which stages may touch a human selection ------------------
+# A human selection is formatted, never second-guessed. FORMATTING stages adjust a clip's
+# boundaries/subtitles; DECIDING stages choose whether a clip exists or how much of it survives,
+# and MUST NOT run on the manual path — they run only for model candidates in cmd_run. The
+# manual path replaces every deciding stage with collect_human_warnings (warns, never drops).
+# test_manual_bypass asserts _blocks_do_apply calls no _DECIDING_STAGE, so a stage added to the
+# automatic pipeline is not silently wired into the human path too.
+_MANUAL_FORMATTING_STAGES = (
+    "_stage_snap", "renumber_reels",
+    "_stage_padding", "_stage_subtitles", "trim_hanging_subtitles",
+)
+_DECIDING_STAGES = (
+    "filter_dangling_start", "apply_top_n", "dedup", "_stage_trim",
+    "_stage_min_clip_filter", "_stage_meaningful_sec_recheck", "_stage_speech_density",
+    # interview-snap moves a clip's end back before a host turn and drops clips that fall
+    # below min_dur — it shortens/removes a human selection, so it is deciding, not formatting.
+    "_stage_interview_snap",
+)
+
+
+def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
+    """Warn (never drop/trim/split) on what a bypassed deciding stage would have acted on.
+
+    For each human-selected reel, attach a warning for: a dangling opening word, a long internal
+    pause, a clip under the meaningful-duration floor, or an overlap with another selection. The
+    human sees them and decides; warnings are recorded in reel.warnings (kept in the manifest).
+    Returns [(reel, message)] in reel order for printing after apply.
+    """
+    from autoreels.cloud.select import _DEFAULT_DANGLING
+    from autoreels.local.subtitles import words_in_window
+    words = getattr(transcript, "words", []) or []
+    dangling = _DEFAULT_DANGLING | set(getattr(r0_cfg, "dangling_words", None) or [])
+    floor = getattr(r0_cfg, "min_meaningful_sec", 18.0)
+    gap = getattr(r0_cfg, "speech_density_split_gap_sec", 6.0)
+    out: list[tuple] = []
+
+    def warn(r, msg):
+        r.warnings.append(msg)
+        out.append((r, msg))
+
+    for r in reels:
+        cw = words_in_window(words, r.start, r.end)
+        if cw:
+            fw = cw[0].word.strip()
+            fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
+            if (fw and fw[0].islower()) or fw_clean in dangling:
+                warn(r, f"dangling start: opens on «{fw or fw_clean}»")
+        max_gap = max((b.t0 - a.t1 for a, b in zip(cw, cw[1:])), default=0.0)
+        if max_gap >= gap:
+            warn(r, f"internal pause {max_gap:.1f}s (≥{gap:.0f}s)")
+        dur = r.end - r.start
+        if dur < floor:
+            warn(r, f"short clip {dur:.1f}s (< {floor:.0f}s floor)")
+
+    # Overlap between two selected clips: name both, warn only (never dedup one away).
+    ordered = sorted(reels, key=lambda x: x.start)
+    for a, b in zip(ordered, ordered[1:]):
+        if b.start < a.end:
+            warn(a, f"overlaps reel {b.id} by {a.end - b.start:.1f}s")
+    return out
 
 
 def _assemble_manifest(video, reels, *, sha, setup, duration_preset, source_kind="",
@@ -2707,9 +2775,12 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
-    Entry point into the downstream pipeline is identical to after _stage_select in cmd_run:
-    snap → filter_dangling_start → interview_snap → apply_top_n → renumber → padding →
-    trim → min_clip_filter → subtitles → trim_hanging_subtitles → manifest.
+    A human selection is FORMATTED, never second-guessed: this path runs only the formatting
+    stages (snap → interview-snap → renumber → padding → subtitles → hanging-subtitle trim),
+    all bounded by manual_max_duration_sec, then collect_human_warnings. It never reaches the
+    deciding stages (_DECIDING_STAGES) that the automatic path in cmd_run runs — those drop or
+    shorten clips, which a human selection must not suffer. Every scored line is accounted for
+    after apply (which reel it became / merge it joined / why it could not be placed).
 
     source: the manifest or transcript the review was exported from; overrides the '# source:'
     header in the review file (required when the header is absent; error when both present and
@@ -2927,6 +2998,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     if over_max:
         return 1
 
+    # Accounting: every scored input line must map to a reel or an explicit conflict. Track the
+    # build-order position (0-based) of the reel each scored seq becomes; the formatting-only
+    # pipeline never drops or reorders, so position i survives as final reel i+1.
+    seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
+    seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
+    conflicts: list[str] = []
     for g in groups:
         # Score = the EARLIEST scored block in the group (deterministic anchor).
         scored = [(s, seq_to_entry[s].score) for s in g
@@ -2983,8 +3060,22 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 file=sys.stderr,
             )
         reel._clip_speed = _clip_speed   # stash for post-pipeline subtitle rescaling
+        _pos = len(reels)
         reels.append(reel)
         dataset_rows.append(make_dataset_row(block, score, manifest_path.stem))
+        # Accounting: record every scored line in this group; extra scored lines beyond the
+        # anchor are a conflict (scored both standalone and inside a merge) — earliest wins.
+        _scored_seqs = [s for s, _ in scored]
+        for s in _scored_seqs:
+            seq_pos[s] = _pos
+            seq_group[s] = g
+        if len(_scored_seqs) > 1:
+            _others = ", ".join(str(s) for s in _scored_seqs[1:])
+            conflicts.append(
+                f"lines {_others} scored separately but share merge "
+                f"{'+'.join(str(x) for x in g)} with line {_anchor_seq}; "
+                f"earliest ({_anchor_seq}) anchors, the rest fold into it"
+            )
 
     if _is_compact and compact_lookup_errors > 0 and len(reels) == 0:
         print(
@@ -2996,29 +3087,18 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
 
     print(f"review: {len(reels)} blocks selected")
 
-    # Downstream pipeline (entry point = after _stage_select in cmd_run)
-    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
-    tx_words = getattr(transcript, "words", [])
-    host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
-    if host_turns:
-        reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg)
-    # Run after interview_snap: the START rule can pull r.start back to a host question that
-    # itself ends in an ellipsis — the dangling fix must see the final post-snap start.
-    reels, _ = filter_dangling_start(
-        reels, tx_words,
-        dangling_words=getattr(r0_cfg, "dangling_words", None),
-        min_duration=r0_cfg.min_clip_duration,
-    )
-    # Human review: all selections are intentional — top-N must not drop any of them.
-    reels, _ = apply_top_n(reels, max_reels=None, transcript_words=tx_words)
+    # Human selections are FORMATTED, never second-guessed: this path runs only the formatting
+    # stages (_MANUAL_FORMATTING_STAGES) — snap, interview-snap, renumber, padding, subtitles,
+    # hanging-subtitle trim — all bounded by the manual ceiling, never the preset ceiling. The
+    # DECIDING stages (too-long trim, top-N, dedup, dangling-start drop, density split, the
+    # duration floors) are NOT reached here; collect_human_warnings replaces them with warnings.
+    density_disc: list[dict] = []
+    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
     reels = renumber_reels(reels)
-    reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
-    reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
-    reels, _ = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
-    reels, _ = _stage_meaningful_sec_recheck(reels, transcript, r0_cfg=r0_cfg)
-    reels, density_disc = _stage_speech_density(reels, transcript, r0_cfg=r0_cfg)
+    reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
+    human_warnings = collect_human_warnings(reels, transcript, r0_cfg=r0_cfg)
 
     # Apply per-clip speed: rescale subtitle timings, stamp reel.speed.
     from autoreels.core.models import Word as _Word
@@ -3059,6 +3139,39 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     out_path.write_text(out_manifest.model_dump_json(indent=2), encoding="utf-8")
     _write_discarded(density_disc, out_path)   # low_speech_density → sidecar рядом с ревью-манифестом
     print(f"manifest → {out_path} ({len(reels)} reels, selection_source=human)")
+
+    # Accounting: one line per scored input line — which reel it became / merge it joined, or
+    # (only for a genuine conflict) why it could not be placed as scored. None disappear silently.
+    print("accounting (every scored line):")
+    for e in entries:
+        if e.score is None:
+            continue
+        pos = seq_pos.get(e.seq)
+        if pos is not None and pos < len(reels):
+            g = seq_group.get(e.seq, [e.seq])
+            n = pos + 1
+            if len(g) > 1:
+                joined = "+".join(str(x) for x in g)
+                anchor = min(s for s in g if s in seq_pos)
+                if e.seq == anchor:
+                    print(f"  line {e.seq} (score {e.score}) → reel {n} (merge {joined})")
+                else:
+                    print(f"  line {e.seq} (score {e.score}) → reel {n}, folded into merge {joined}")
+            else:
+                print(f"  line {e.seq} (score {e.score}) → reel {n}")
+        elif e.seq not in seq_to_block:
+            print(f"  line {e.seq} (score {e.score}) → NOT PLACED: block out of range (1-{len(kept)})")
+        else:
+            print(f"  line {e.seq} (score {e.score}) → NOT PLACED: block filtered / id mismatch (see above)")
+    for c in conflicts:
+        print(f"  conflict: {c}")
+
+    # Warnings: what a bypassed deciding stage would have flagged. Human decides; nothing removed.
+    if human_warnings:
+        _final_num = {id(r): i for i, r in enumerate(reels, 1)}
+        print(f"warnings ({len(human_warnings)} — nothing removed, review manually):")
+        for r, msg in human_warnings:
+            print(f"  reel {_final_num.get(id(r), '?')} ({r.id}): {msg}")
 
     # Install: copy to manifests/ so render picks up the human selection.
     # --render implies --install.

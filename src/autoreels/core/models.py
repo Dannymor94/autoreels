@@ -145,6 +145,10 @@ class Reel(BaseModel):
     ends_on_host_turn: bool = False  # diagnostic: would have ended inside a host question without interview snap
     # Playback speed applied at render time (1.0 = normal, >1 = faster). Set by --apply.
     speed: float = 1.0
+    # Human-review warnings: what a bypassed deciding stage would have flagged (dangling start,
+    # long internal pause, short clip, overlap). Warn-only — nothing is dropped on the human's
+    # behalf. Empty for the automatic path (those stages actually run there).
+    warnings: list[str] = Field(default_factory=list)
 
 
 class Manifest(BaseModel):
