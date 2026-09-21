@@ -79,7 +79,8 @@ def _apply(tmp_path, review, *, stem, words):
 
 # --- Test 1: every scored line is placed; none disappear -----------------------------------
 def test_every_scored_line_placed(tmp_path, capsys):
-    # Four standalone blocks; block 2 opens on a dangling word that the old path would DROP.
+    # Four standalone blocks; block 2 opens on a dangling word the old path could drop — now
+    # repaired or warned, never dropped.
     words = (_group(30) + _group(78, first_word="Это") + _group(126) + _group(174)
              + _group(400))  # sentinel keeps block 4 out of the tail-skip zone
     rc, out = _apply(tmp_path, "1 80\n2 80\n3 80\n4 80\n", stem="mb1", words=words)
@@ -113,14 +114,56 @@ def test_human_merge_not_trimmed(tmp_path):
     assert res.reels[0].speed == 1.0, "126s < 180s manual ceiling → no speed-up"
 
 
-# --- Test 3: dangling opening word kept, with a warning ------------------------------------
-def test_dangling_start_kept_with_warning(tmp_path):
-    words = _group(40, first_word="Это") + _group(400)
-    rc, out = _apply(tmp_path, "1 80\n", stem="mb3", words=words)
+# --- Test 3a: a repairable dangling start is MOVED forward, no warning ----------------------
+def test_dangling_start_repaired(tmp_path):
+    # Opens on "Это" but a sentence ends one word in ("фраза."); a >1s gap then a new sentence
+    # ("Новое …"). Repair moves the start to "Новое"; the 0.3s lead-pad does not reach back to
+    # "фраза.". Formatting half runs on the human path; no dangling warning remains.
+    lead = [
+        {"word": "Это", "t0": 30.0, "t1": 30.9},
+        {"word": "фраза.", "t0": 31.0, "t1": 31.9},
+    ]
+    rest = [{"word": ("Новое" if i == 0 else f"мысль{i}"), "t0": 33.0 + i, "t1": 33.0 + i + 0.9}
+            for i in range(30)]
+    words = lead + rest + _group(400)
+    rc, out = _apply(tmp_path, "1 80\n", stem="mb3a", words=words)
     assert rc == 0
     res = Manifest.model_validate_json(out.read_text())
-    assert len(res.reels) == 1, "a dangling-start clip must be kept, not dropped"
+    assert len(res.reels) == 1
+    r = res.reels[0]
+    assert r.start > 32.0, f"start should move past «Это фраза.» to «Новое», got {r.start}"
+    assert not any("dangling" in w for w in r.warnings), f"repaired → no warning: {r.warnings}"
+
+
+# --- Test 3b: an unrepairable dangling start is kept, with a warning ------------------------
+def test_dangling_start_unrepairable_warned(tmp_path):
+    # Unique lowercase words, no sentence marks → nothing to repair to → kept + warned.
+    words = ([{"word": ("это" if i == 0 else f"мысль{i}"), "t0": 30.0 + i, "t1": 30.0 + i + 0.9}
+              for i in range(30)] + _group(400))
+    rc, out = _apply(tmp_path, "1 80\n", stem="mb3b", words=words)
+    assert rc == 0
+    res = Manifest.model_validate_json(out.read_text())
+    assert len(res.reels) == 1, "an unrepairable dangling-start clip must be kept, not dropped"
     assert any("dangling" in w for w in res.reels[0].warnings), res.reels[0].warnings
+
+
+# --- Test 3c: repair is bounded — never crosses a merge boundary (unit) ---------------------
+def test_repair_bounded_by_merge_boundary():
+    from autoreels.cloud.select import filter_dangling_start
+    # Sentence boundary ("Новое") sits at t=20, but the merge boundary is at t=10 → repair may
+    # not cross it; the start stays and the clip is kept (repair_only), to be warned by caller.
+    words = ([{"word": "это", "t0": 0.0, "t1": 0.9}]
+             + [{"word": "слово", "t0": float(i), "t1": i + 0.9} for i in range(1, 20)]
+             + [{"word": "конец.", "t0": 19.0, "t1": 19.9}]
+             + [{"word": "Новое", "t0": 20.0, "t1": 20.9}]
+             + [{"word": "слово", "t0": float(i), "t1": i + 0.9} for i in range(21, 60)])
+    tx_words = [Word(**w) for w in words]
+    reel = Reel(id="m", start=0.0, end=59.0, score=80, hook="h", title="", description="")
+    reel._merge_boundary = 10.0
+    kept, disc = filter_dangling_start(tx_words and [reel], tx_words, min_duration=5.0,
+                                       repair_only=True, max_start_fraction=1.0 / 3.0)
+    assert kept and not disc, "repair_only must keep the clip"
+    assert reel.start == 0.0, f"start must not cross the merge boundary at 10s; got {reel.start}"
 
 
 # --- Test 4: internal pause kept, warned, not split ----------------------------------------
@@ -156,12 +199,17 @@ def test_automatic_path_still_decides():
         assert f"{name}(" in src, f"automatic path must still run {name}"
 
 
-# --- Test 7: no deciding stage is reachable from the manual path ----------------------------
+# --- Test 7: no pure deciding stage reachable; split stages run repair-only ------------------
 def test_manual_bypass():
     assert set(cli._MANUAL_FORMATTING_STAGES).isdisjoint(cli._DECIDING_STAGES)
+    assert set(cli._MANUAL_REPAIR_STAGES).isdisjoint(cli._DECIDING_STAGES)
     src = inspect.getsource(cli._blocks_do_apply)
     for name in cli._DECIDING_STAGES:
         assert f"{name}(" not in src, (
             f"manual path must not call the deciding stage {name}; "
             f"format a human selection, never second-guess it"
         )
+    # The split stages DO run here, but only their repair half (the no-drop flag must be present).
+    for name, flag in cli._MANUAL_REPAIR_STAGES.items():
+        assert f"{name}(" in src, f"manual path must run the repair half of {name}"
+        assert flag in src, f"manual path must call {name} with {flag} (repair half only)"

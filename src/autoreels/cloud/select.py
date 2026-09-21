@@ -259,14 +259,25 @@ def filter_dangling_start(
     dangling_words: list[str] | None = None,
     min_duration: float = 15.0,
     max_start_repair_sec: float = 10.0,
+    repair_only: bool = False,
+    max_start_fraction: float | None = None,
 ) -> tuple[list[Reel], list[dict]]:
     """Drop (or repair) clips whose snapped first word begins lowercase or is a dangling connective.
 
+    This stage has two halves. MOVING the start forward to a sentence boundary is FORMATTING;
+    DROPPING a clip whose start cannot be repaired is DECIDING.
+      repair_only=True: run only the repair half — an unrepairable clip is kept (never dropped),
+        so the manual path warns instead. The automatic path leaves this False and still drops.
+      max_start_fraction: cap how far the start may move — never past this fraction of the clip
+        (measured from the reel's original start), and never past a reel's `_merge_boundary`
+        (the end of the first block of a human merge). If the only reachable sentence start lies
+        beyond either bound, the start is left as is (and warned, under repair_only).
+
     Repair priority (in order):
-    (a) If a sentence-terminal mark (.?!) exists within max_start_repair_sec, move start to the
+    (a) If a sentence-terminal mark (.?!) exists within the repair window, move start to the
         word immediately after it — regardless of case or connective status.
     (b) Otherwise, scan for first uppercase non-dangling word within the window.
-    (c) Only if neither works: drop.
+    (c) Only if neither works: drop (or, under repair_only, keep and let the caller warn).
 
     Pre-pass: an opening sentence that ends in '…'/'...' (ellipsis) is an incomplete fragment;
     the clip is advanced past it (up to 3 such sentences) before the main check runs.
@@ -278,12 +289,20 @@ def filter_dangling_start(
     dw = _DEFAULT_DANGLING | set(dangling_words or [])
     kept, disc = [], []
     for r in reels:
+        # Bound the repair window: seconds cap (both paths), plus fraction-of-clip and
+        # merge-boundary caps (manual path only, via max_start_fraction / _merge_boundary).
+        _cap = float("inf")
+        if max_start_fraction is not None:
+            _cap = min(_cap, r.start + max_start_fraction * (r.end - r.start))
+        _mb = getattr(r, "_merge_boundary", None)
+        if _mb is not None:
+            _cap = min(_cap, _mb)
         # Pre-pass: skip opening sentences that end in ellipsis ('…' / '...').
         for _ in range(3):
             clip_words = words_in_window(transcript_words, r.start, r.end)
             if not clip_words:
                 break
-            deadline = r.start + max_start_repair_sec
+            deadline = min(r.start + max_start_repair_sec, _cap)
             ellipsis_idx = None
             for i, w in enumerate(clip_words):
                 if w.t0 > deadline:
@@ -317,7 +336,7 @@ def filter_dangling_start(
         is_dangling = fw_clean in dw
         orig_start = r.start
         if is_lowercase or is_dangling:
-            repair_deadline = orig_start + max_start_repair_sec
+            repair_deadline = min(orig_start + max_start_repair_sec, _cap)
             repaired = False
             # (a) terminal-mark scan: first word after a sentence-ending word
             for i, w in enumerate(clip_words[:-1]):
@@ -353,7 +372,10 @@ def filter_dangling_start(
                     else f"висячее слово «{fw_clean}»"
                 )
                 r.flags.append("dangling_start")
-                disc.append({"id": r.id, "score": r.score, "reason": reason, "first_words": first_8})
+                if repair_only:
+                    kept.append(r)   # repair unreachable within bounds → keep; caller warns
+                else:
+                    disc.append({"id": r.id, "score": r.score, "reason": reason, "first_words": first_8})
             else:
                 kept.append(r)
         else:
@@ -763,8 +785,17 @@ def _stage_interview_snap(
     *,
     tx_words: list,
     r0_cfg,
+    drop_short: bool = True,
 ) -> tuple[list, list[dict]]:
-    """Enforce interview clip boundaries: end before host turn, optionally include host question."""
+    """Enforce interview clip boundaries: end before host turn, optionally include host question.
+
+    Two halves: moving the end back before the host's line (and including a preceding host
+    question) is FORMATTING; DROPPING what remains when it is too short is DECIDING.
+    drop_short=False runs only the repair half. The end-move is a bounded adjustment: if it
+    would collapse the clip below min_dur, the human's original end is RESTORED (the clip keeps
+    the span the human chose) rather than left degenerate — nothing is shortened on their behalf.
+    The automatic path leaves this True and drops a too-short remainder.
+    """
     from autoreels.local.subtitles import words_in_window
 
     kept = []
@@ -776,6 +807,7 @@ def _stage_interview_snap(
 
     for r in reels:
         is_merged = "human_merged" in r.flags
+        orig_end = r.end   # for drop_short=False: revert the end-move if it collapses the clip
 
         if is_merged:
             # Internal host turns between merged blocks are intentional — keep them.
@@ -807,16 +839,20 @@ def _stage_interview_snap(
         _trim_tail_question(r, tx_words, max_tail_words)
         _trim_tail_affirmation(r, tx_words, affirmations)
 
-        # drop if too short after end adjustment
+        # Too short after end adjustment: the deciding half. drop_short → drop (automatic path).
+        # Otherwise (manual path) revert the end-move and keep the human's chosen span.
         if r.end - r.start < min_dur:
-            first_words = " ".join(w.word for w in words_in_window(tx_words, r.start, r.end)[:8])
-            disc.append({
-                "id": r.id,
-                "score": r.score,
-                "reason": "interview_snap_too_short",
-                "first_words": first_words,
-            })
-            continue
+            if drop_short:
+                first_words = " ".join(w.word for w in words_in_window(tx_words, r.start, r.end)[:8])
+                disc.append({
+                    "id": r.id,
+                    "score": r.score,
+                    "reason": "interview_snap_too_short",
+                    "first_words": first_words,
+                })
+                continue
+            r.end = orig_end
+            r.end_snap_reason = None
 
         # --- start rule: include preceding host question (non-merged only) ---
         if not is_merged:

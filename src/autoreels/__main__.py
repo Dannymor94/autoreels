@@ -943,12 +943,16 @@ _MANUAL_FORMATTING_STAGES = (
     "_stage_snap", "renumber_reels",
     "_stage_padding", "_stage_subtitles", "trim_hanging_subtitles",
 )
+# Two stages are split: each has a repair half (moves boundaries — formatting) and a drop half
+# (removes a clip — deciding). The manual path runs their repair half only, via the flags below;
+# their drop half never fires there. test_manual_bypass asserts both the call and the flag.
+_MANUAL_REPAIR_STAGES = {
+    "filter_dangling_start": "repair_only=True",   # move start to a sentence boundary, never drop
+    "_stage_interview_snap": "drop_short=False",    # move end before host turn, never drop
+}
 _DECIDING_STAGES = (
-    "filter_dangling_start", "apply_top_n", "dedup", "_stage_trim",
+    "apply_top_n", "dedup", "_stage_trim",
     "_stage_min_clip_filter", "_stage_meaningful_sec_recheck", "_stage_speech_density",
-    # interview-snap moves a clip's end back before a host turn and drops clips that fall
-    # below min_dur — it shortens/removes a human selection, so it is deciding, not formatting.
-    "_stage_interview_snap",
 )
 
 
@@ -2775,12 +2779,14 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
-    A human selection is FORMATTED, never second-guessed: this path runs only the formatting
-    stages (snap → interview-snap → renumber → padding → subtitles → hanging-subtitle trim),
-    all bounded by manual_max_duration_sec, then collect_human_warnings. It never reaches the
-    deciding stages (_DECIDING_STAGES) that the automatic path in cmd_run runs — those drop or
-    shorten clips, which a human selection must not suffer. Every scored line is accounted for
-    after apply (which reel it became / merge it joined / why it could not be placed).
+    A human selection is FORMATTED, never second-guessed: this path runs the formatting stages
+    (snap → interview-snap repair → dangling-start repair → renumber → padding → subtitles →
+    hanging-subtitle trim), all bounded by manual_max_duration_sec, then collect_human_warnings.
+    interview-snap and dangling-start are split (see _MANUAL_REPAIR_STAGES): only their repair
+    half runs (move a boundary), never their drop half. It never reaches the deciding stages
+    (_DECIDING_STAGES) that the automatic path runs — those drop or shorten clips, which a human
+    selection must not suffer. Every scored line is accounted for after apply (which reel it
+    became / merge it joined / why it could not be placed).
 
     source: the manifest or transcript the review was exported from; overrides the '# source:'
     header in the review file (required when the header is absent; error when both present and
@@ -3031,6 +3037,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.r0_end = reel.end
         if is_merged:
             reel.flags.append("human_merged")
+            # First internal join of the merge: dangling-start repair may not move the start
+            # across it (that would discard the first block the human chose).
+            reel._merge_boundary = active[g[0]].end
         # Determine per-clip speed: marker > --speed arg > config default
         _entry_speed = seq_to_entry[_anchor_seq].speed if _anchor_seq in seq_to_entry else None
         _cfg_speed = getattr(r0_cfg, "speed", 1.0)
@@ -3087,13 +3096,26 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
 
     print(f"review: {len(reels)} blocks selected")
 
-    # Human selections are FORMATTED, never second-guessed: this path runs only the formatting
-    # stages (_MANUAL_FORMATTING_STAGES) — snap, interview-snap, renumber, padding, subtitles,
-    # hanging-subtitle trim — all bounded by the manual ceiling, never the preset ceiling. The
-    # DECIDING stages (too-long trim, top-N, dedup, dangling-start drop, density split, the
-    # duration floors) are NOT reached here; collect_human_warnings replaces them with warnings.
+    # Human selections are FORMATTED, never second-guessed: this path runs the formatting stages
+    # (_MANUAL_FORMATTING_STAGES) plus the repair half of the two split stages
+    # (_MANUAL_REPAIR_STAGES) — all bounded by the manual ceiling, never the preset ceiling. The
+    # pure DECIDING stages (too-long trim, top-N, dedup, density split, the duration floors) are
+    # NOT reached here; collect_human_warnings reports what a bypassed drop-half would have flagged.
     density_disc: list[dict] = []
+    tx_words = getattr(transcript, "words", [])
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
+    # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
+    # cannot repair within bounds stays, and collect_human_warnings reports it.
+    host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
+    if host_turns:
+        reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg,
+                                         drop_short=False)
+    reels, _ = filter_dangling_start(
+        reels, tx_words,
+        dangling_words=getattr(r0_cfg, "dangling_words", None),
+        min_duration=r0_cfg.min_clip_duration,
+        repair_only=True, max_start_fraction=1.0 / 3.0,
+    )
     reels = renumber_reels(reels)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
     reels = _stage_subtitles(reels, transcript)
