@@ -6159,6 +6159,14 @@ def test_run_dispatch_inputs_path_uses_project_inputs_not_cwd(monkeypatch, tmp_p
 import threading as _threading
 import queue as _queue
 
+# Deadlock guard for the threaded batch tests below: generous, and never the thing
+# under test. Correctness is decided by event ordering (a render blocks on an
+# un-timed gate the test alone releases, so CPU starvation can never let it finish
+# early and scramble ordering); this bound only turns a real regression — a render or
+# analysis that never runs — into a fast failure instead of a hung suite. It is never
+# an elapsed-time assertion.
+_GUARD = 30.0
+
 
 def test_background_analysis_2_starts_before_render_1_finishes(monkeypatch, tmp_path):
     """Analysis of source 2 starts while render of source 1 is still running (background=True)."""
@@ -6181,7 +6189,7 @@ def test_background_analysis_2_starts_before_render_1_finishes(monkeypatch, tmp_
 
     def mock_render_crop(manifest, **kwargs):
         render_started.set()
-        render_gate.wait(timeout=5)
+        render_gate.wait()          # no timeout: only the test releases render 1
         return []
 
     monkeypatch.setattr(cli, "render_crop", mock_render_crop)
@@ -6202,33 +6210,33 @@ def test_background_analysis_2_starts_before_render_1_finishes(monkeypatch, tmp_
 
     t = _threading.Thread(target=run_batch)
     t.start()
-    assert render_started.wait(timeout=5), "render of source 1 should start"
-    assert analysis_2_started.wait(timeout=5), "analysis of source 2 should start before render 1 finishes"
-    render_gate.set()
-    t.join(timeout=10)
+    try:
+        assert render_started.wait(_GUARD), "render of source 1 should start"
+        # render 1 is now blocked on the gate; analysis 2 must proceed meanwhile
+        assert analysis_2_started.wait(_GUARD), "analysis of source 2 should start before render 1 finishes"
+    finally:
+        render_gate.set()           # release even if an assert failed, so the thread can join
+        t.join(_GUARD)
+    assert not t.is_alive(), "batch thread should finish once render is released"
 
 
 def test_background_only_one_render_at_a_time(monkeypatch, tmp_path):
-    """Two manifests never render concurrently; the second queues behind the first."""
+    """Two manifests never render concurrently; a second worker would trip the counter."""
     _mock_pipeline(monkeypatch, tmp_path)
 
     concurrent = [0]
     max_concurrent = [0]
     lock = _threading.Lock()
-    gate_a = _threading.Event()
-    gate_b = _threading.Event()
-    gate_a.set()
-    gate_b.set()
 
     def mock_render_crop(manifest, **kwargs):
-        name = Path(manifest.source).stem
         with lock:
             concurrent[0] += 1
             max_concurrent[0] = max(max_concurrent[0], concurrent[0])
-        (gate_a if name == "a" else gate_b).wait(timeout=5)
-        with lock:
-            concurrent[0] -= 1
-        return []
+        try:
+            return []
+        finally:
+            with lock:
+                concurrent[0] -= 1
 
     monkeypatch.setattr(cli, "render_crop", mock_render_crop)
 
@@ -6237,6 +6245,8 @@ def test_background_only_one_render_at_a_time(monkeypatch, tmp_path):
     (inputs / "a.mp4").write_bytes(b"x")
     (inputs / "b.mp4").write_bytes(b"yy")   # ≠ a.mp4 → различный run_key (иначе дедуп)
 
+    # Synchronous: cmd_run_batch blocks on the worker's queue.join()/join() before returning,
+    # so the counter is fully settled by the time we assert — no sleep, no timeout.
     cli.cmd_run_batch(
         root=REPO_ROOT, inputs_dir=inputs, manifests_dir=tmp_path / "m",
         archive_dir=tmp_path / "arch", transcripts_dir=tmp_path / "t",
@@ -6251,10 +6261,12 @@ def test_background_batch_waits_for_all_renders(monkeypatch, tmp_path):
     _mock_pipeline(monkeypatch, tmp_path)
 
     render_completed = []
+    render_entered = _threading.Event()
     render_gate = _threading.Event()
 
     def mock_render_crop(manifest, **kwargs):
-        render_gate.wait(timeout=5)
+        render_entered.set()
+        render_gate.wait()          # no timeout: render cannot finish until the test releases it
         render_completed.append(Path(manifest.source).stem)
         return []
 
@@ -6276,14 +6288,17 @@ def test_background_batch_waits_for_all_renders(monkeypatch, tmp_path):
 
     t = _threading.Thread(target=run)
     t.start()
-
-    import time as _time
-    _time.sleep(0.15)
-    assert not batch_done.is_set(), "batch should wait while render is blocked"
-    render_gate.set()
-    assert batch_done.wait(timeout=5), "batch should finish after render completes"
+    try:
+        # Sync on the render actually starting, not on a wall-clock sleep. Because the gate
+        # has no timeout, the render is provably still blocked here, so the batch cannot have
+        # returned — the assertion holds under any scheduling / load.
+        assert render_entered.wait(_GUARD), "render should start"
+        assert not batch_done.is_set(), "batch should wait while render is blocked"
+    finally:
+        render_gate.set()
+        assert batch_done.wait(_GUARD), "batch should finish after render completes"
+        t.join(_GUARD)
     assert "a" in render_completed
-    t.join(timeout=5)
 
 
 def test_background_render_failure_isolated_from_analysis(monkeypatch, tmp_path):
