@@ -977,7 +977,7 @@ def _r0_cfg_full_stub():
         blocks_filter=bf, source_kind="lecture", host_affirmations=[],
         max_reels=None, min_clip_duration=8.0,
         block_scoring=BlockScoringConfig(),
-        dangling_words=[], hanging_words=[],
+        dangling_words=[], hanging_end_words=[], hanging_start_words=[],
         tail_sec=0.5, snap_window_sec=3.0, max_micro_pause=0.3,
         max_end_search_sec=5.0, tail_pad_sec=0.7, lead_pad_sec=0.2,
         too_long_policy="keep", min_duration=8.0,

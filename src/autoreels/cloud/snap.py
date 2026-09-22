@@ -298,8 +298,11 @@ def _snap_end_punctuation_first(
 
 
 def _snap_start(start: float, end: float, words: list[Word], *, window_sec: float,
-                min_pause: float, hanging_words) -> float | None:
-    """Новый start: к началу фразы рядом (после паузы), НЕ на висячем слове (сдвиг вперёд)."""
+                min_pause: float, hanging_start_words) -> float | None:
+    """Новый start: к началу фразы рядом (после паузы), НЕ на висячем НАЧАЛЬНОМ слове (сдвиг вперёд).
+
+    `hanging_start_words` — короткий список слов-отсылок, с которых клип не должен начинаться
+    (не end-список: «Если…»/«Когда…»/«Я…» — нормальные начала предложения)."""
     start_idx = _phrase_start_indices(words, min_pause=min_pause)
     cands = [words[i].t0 for i in start_idx]
     target = _nearest_in_window(start, cands, window_sec)
@@ -310,7 +313,7 @@ def _snap_start(start: float, end: float, words: list[Word], *, window_sec: floa
     # Не начинать с висячего слова: сдвинуть вперёд, пока слово-начало не «висячее».
     idx = next((i for i, w in enumerate(words) if abs(w.t0 - target) < 1e-6), None)
     if idx is not None:
-        while idx < len(words) and words[idx].t0 < end and _is_hanging(words[idx].word, hanging_words):
+        while idx < len(words) and words[idx].t0 < end and _is_hanging(words[idx].word, hanging_start_words):
             idx += 1
         if idx < len(words):
             target = words[idx].t0
@@ -360,12 +363,16 @@ def try_rescue_clip(
 
 def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, window_sec: float,
                   max_duration: float, min_pause_for_phrase_end: float, max_micro_pause: float,
-                  hanging_words, prefer_longer_below_ratio: float = 0.0,
+                  hanging_words, hanging_start_words=None, prefer_longer_below_ratio: float = 0.0,
                   max_extra_sentences: int = 0, max_end_search_sec: float | None = None,
                   min_clip_duration: float | None = None) -> None:
     """Подтянуть start/end каждого reel к завершению мысли (мутирует на месте).
 
     Пустой `words` → границы не трогаем. Порядок в пайплайне: snap → padding → trim.
+
+    `hanging_words` решает КОНЕЦ (клип не заканчивается на висячем слове). START-подтяжка
+    использует `hanging_start_words` — короткий список слов-отсылок, с которых клип не должен
+    начинаться; None → падает обратно на `hanging_words` (совместимость со старыми вызовами).
 
     Если max_end_search_sec задан и r.r0_end не None — использует punctuation-first snap
     (конец предложения в окне r0_end + max_end_search_sec, без prefer_longer).
@@ -375,12 +382,14 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
     """
     if not words:
         return
+    hanging_start_words = hanging_words if hanging_start_words is None else hanging_start_words
     for r in reels:
         # An explicit review start (s:N) is the reviewer's exact choice — snap must land on that
         # sentence's first word, not the nearest phrase boundary, or it skips the intended word.
         if not getattr(r, "_explicit_start", False):
             new_start = _snap_start(r.start, r.end, words, window_sec=window_sec,
-                                    min_pause=min_pause_for_phrase_end, hanging_words=hanging_words)
+                                    min_pause=min_pause_for_phrase_end,
+                                    hanging_start_words=hanging_start_words)
             if new_start is not None:
                 r.start = new_start
 

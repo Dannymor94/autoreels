@@ -209,7 +209,8 @@ def _fake_r0_cfg():
         min_pause_for_phrase_end=0.4,
         max_micro_pause=0.15,
         tail_pad_sec=0.7,
-        hanging_words=SimpleNamespace(enabled=False),
+        hanging_end_words=[],
+        hanging_start_words=[],
         presets={"short": SimpleNamespace(max=60)},
     )
 

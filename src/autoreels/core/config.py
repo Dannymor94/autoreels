@@ -232,9 +232,19 @@ class R0Config(BaseModel):
     # ratio=0 отключает. Проверяется мгновенно через resnap (LLM не нужен).
     prefer_longer_below_ratio: float = 0.7  # <70% лимита (напр. <63с при 90с) → тянуть дальше
     max_extra_sentences: int = 2            # но не более +2 предложений (чтобы не уйти в др. тему)
-    hanging_words: list[str] = Field(default_factory=lambda: [
+    # Two lists, two decisions (a clip's start and its end are not symmetric): a clip must not
+    # END on these connectives/prepositions/fillers (they leave the thought hanging)…
+    hanging_end_words: list[str] = Field(default_factory=lambda: [
         "и", "а", "но", "что", "это", "как", "в", "на",
         "потому", "чтобы", "если", "когда", "то", "есть", "вот",
+    ])
+    # …but a clip may perfectly well START with most of them ("Если объединить…", "Когда ты…").
+    # Only a genuinely dangling opener — a single word that refers back to something before the
+    # clip — is repaired away from the start. Much shorter than the end list on purpose. (The
+    # matcher is single-token, so multi-word connectives like "то есть"/"так что" fall through;
+    # a bare "то"/"так" is not listed because it would also strip "То, что…"/"Так вот…".)
+    hanging_start_words: list[str] = Field(default_factory=lambda: [
+        "и", "а", "но", "поэтому", "потому",
     ])
     dangling_words: list[str] = Field(default_factory=list)  # extra blocklist for dangling_start gate
     host_affirmations: list[str] = Field(default_factory=list)  # tail sentences to trim (case-insensitive)

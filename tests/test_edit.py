@@ -156,13 +156,14 @@ def test_s_marker_first_body_word_matches_export_end_to_end():
     reels = [reel]
     snap_segments(reels, ws, tail_sec=r0.tail_sec, window_sec=r0.snap_window_sec,
                   max_duration=180.0, min_pause_for_phrase_end=r0.min_pause_for_phrase_end,
-                  max_micro_pause=r0.max_micro_pause, hanging_words=r0.hanging_words,
+                  max_micro_pause=r0.max_micro_pause, hanging_words=r0.hanging_end_words,
+                  hanging_start_words=r0.hanging_start_words,
                   max_end_search_sec=r0.max_end_search_sec, min_clip_duration=r0.min_clip_duration)
     filter_dangling_start(reels, ws, dangling_words=getattr(r0, "dangling_words", None),
                           min_duration=r0.min_clip_duration, repair_only=True,
                           max_start_fraction=1.0 / 3.0)
     apply_padding(reels, ws, tail_pad_sec=r0.tail_pad_sec, lead_pad_sec=r0.lead_pad_sec,
-                  max_duration=180.0, video_duration=ws[-1].t1, hanging_words=r0.hanging_words)
+                  max_duration=180.0, video_duration=ws[-1].t1, hanging_words=r0.hanging_end_words)
 
     first_body = words_in_window(ws, reel.start, reel.end)[0].word
     assert first_body == "Если", f"clip opened on {first_body!r}, expected the s:2 word 'Если'"

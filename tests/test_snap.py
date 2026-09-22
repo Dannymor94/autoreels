@@ -956,3 +956,42 @@ def test_source_kind_persisted_in_manifest():
         setup=setup, run_key="key",
     )
     assert m2.source_kind == ""  # default for old manifests
+
+
+# --- hanging_start_words vs hanging_end_words: two lists, two decisions -----------------------
+# A clip must not END on a connective/preposition/filler (thought left hanging), but it may well
+# START with most of them ("Если объединить…"). Only genuinely dangling openers are repaired.
+HANGING_START = ["и", "а", "но", "поэтому", "потому"]  # short: no "если"/"когда"/"я"/…
+
+
+def test_start_keeps_normal_sentence_opener_esli():
+    # Sentence opens on «Если» — a normal opening, NOT in the start list → the start stays on it.
+    # (With the old single list, which contained "если", snap advanced past it to «объединить».)
+    words = [_w(9.0, 9.4, "конец."), _w(11.0, 11.4, "Если"), _w(11.5, 12.0, "объединить"),
+             _w(12.1, 30.0, "всё.")]
+    r = _reel(11.0, 30.0)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
+                  min_pause_for_phrase_end=0.6, max_micro_pause=0.4,
+                  hanging_words=HANGING, hanging_start_words=HANGING_START)
+    assert abs(r.start - 11.0) < 1e-6                    # «Если» kept, not skipped
+
+
+def test_start_still_repairs_dangling_opener_i():
+    # Sentence opens on «И» — a genuinely dangling opener (in the start list) → advanced past it.
+    words = [_w(9.0, 9.4, "конец."), _w(11.0, 11.4, "И"), _w(11.5, 12.0, "поэтому"),
+             _w(12.1, 30.0, "Хорошо.")]
+    r = _reel(11.0, 30.0)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
+                  min_pause_for_phrase_end=0.6, max_micro_pause=0.4,
+                  hanging_words=HANGING, hanging_start_words=HANGING_START)
+    assert r.start >= 12.1 - 1e-6                        # past «И» and «поэтому» to «Хорошо.»
+
+
+def test_end_still_trims_back_from_esli():
+    # A clip whose last word is «если» must not END on it — the end list still contains "если".
+    words = [_w(10.0, 10.4, "Я"), _w(10.5, 11.0, "думаю"), _w(11.1, 11.5, "если"),
+             _w(13.5, 14.0, "потом")]
+    r = _reel(10.0, 11.5)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  video_duration=14.0, hanging_words=HANGING)
+    assert r.end < 11.1                                  # trimmed back before the hanging «если»

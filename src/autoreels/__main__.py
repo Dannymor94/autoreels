@@ -739,7 +739,8 @@ def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None):
         max_duration=r0_cfg.max_duration if max_duration is None else max_duration,
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
         max_micro_pause=r0_cfg.max_micro_pause,
-        hanging_words=r0_cfg.hanging_words,
+        hanging_words=r0_cfg.hanging_end_words,
+        hanging_start_words=r0_cfg.hanging_start_words,
         max_end_search_sec=r0_cfg.max_end_search_sec,
         min_clip_duration=r0_cfg.min_clip_duration,
     )
@@ -758,7 +759,7 @@ def _stage_padding(reels, transcript, *, r0_cfg, max_duration=None):
         lead_pad_sec=r0_cfg.lead_pad_sec,
         max_duration=r0_cfg.max_duration if max_duration is None else max_duration,
         video_duration=video_duration,
-        hanging_words=r0_cfg.hanging_words,
+        hanging_words=r0_cfg.hanging_end_words,
     )
     return reels
 
@@ -815,7 +816,7 @@ def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, list[dic
             max_duration=r0_cfg.max_duration,
             min_pause=r0_cfg.min_pause_for_phrase_end,
             max_micro_pause=r0_cfg.max_micro_pause,
-            hanging_words=r0_cfg.hanging_words,
+            hanging_words=r0_cfg.hanging_end_words,
         )
         if rescued:
             print(
@@ -1676,7 +1677,7 @@ def _cmd_run_impl(
     discarded += density_disc
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
-    trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
+    trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
         source_kind=getattr(r0_cfg, "source_kind", ""),
@@ -2501,13 +2502,14 @@ def _resnap_reels(reels, transcript, r0_cfg) -> int:
     snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
                   window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
                   min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
-                  max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_words,
+                  max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_end_words,
+                  hanging_start_words=r0_cfg.hanging_start_words,
                   max_end_search_sec=r0_cfg.max_end_search_sec,
                   min_clip_duration=r0_cfg.min_clip_duration)
     apply_padding(reels, transcript.words, tail_pad_sec=r0_cfg.tail_pad_sec,
                   lead_pad_sec=r0_cfg.lead_pad_sec, max_duration=r0_cfg.max_duration,
                   video_duration=transcript.words[-1].t1 if transcript.words else None,
-                  hanging_words=r0_cfg.hanging_words)
+                  hanging_words=r0_cfg.hanging_end_words)
     trim_too_long(reels, transcript.words, max_duration=r0_cfg.max_duration,
                   pause_sec=r0_cfg.sentence_pause_sec, policy=r0_cfg.too_long_policy)
     return len(segmented)
@@ -3172,7 +3174,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = renumber_reels(reels)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
     reels = _stage_subtitles(reels, transcript)
-    trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
+    trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
 
     # Part 3 — filler removal (deterministic). Cuts standalone fillers, immediate repetitions and
     # over-long pauses into gaps → reel.segments (render concatenates them). On per clip: review
@@ -4224,13 +4226,14 @@ def _rerun_reels(transcript, r0_cfg, root):
     snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
                   window_sec=r0_cfg.snap_window_sec, max_duration=r0_cfg.max_duration,
                   min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
-                  max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_words,
+                  max_micro_pause=r0_cfg.max_micro_pause, hanging_words=r0_cfg.hanging_end_words,
+                  hanging_start_words=r0_cfg.hanging_start_words,
                   max_end_search_sec=r0_cfg.max_end_search_sec,
                   min_clip_duration=r0_cfg.min_clip_duration)
     apply_padding(reels, transcript.words, tail_pad_sec=r0_cfg.tail_pad_sec,
                   lead_pad_sec=r0_cfg.lead_pad_sec, max_duration=r0_cfg.max_duration,
                   video_duration=transcript.words[-1].t1 if transcript.words else None,
-                  hanging_words=r0_cfg.hanging_words)
+                  hanging_words=r0_cfg.hanging_end_words)
     trim_too_long(reels, transcript.words, max_duration=r0_cfg.max_duration,
                   pause_sec=r0_cfg.sentence_pause_sec, policy=r0_cfg.too_long_policy)
     return reels
@@ -4281,7 +4284,7 @@ def cmd_diagnose_cuts(target=None, *, root=None, rerun=False, cache_dir=None,
               "манифеста уже пост-snap+padding (дают ложные срабатывания).", flush=True)
 
     cfg = dict(min_pause=r0_cfg.min_pause_for_phrase_end, max_micro_pause=r0_cfg.max_micro_pause,
-               tail_pad_sec=r0_cfg.tail_pad_sec, hanging_words=r0_cfg.hanging_words)
+               tail_pad_sec=r0_cfg.tail_pad_sec, hanging_words=r0_cfg.hanging_end_words)
     config_pkey = _config_params_key(root)
     total = {"clean": 0, "soft": 0, "hard": 0, "causes": {}}
     analyzed = 0
