@@ -4357,13 +4357,30 @@ def _resolve_transcript(manifest, cache_dir, *, audio_format="mp3", config_pkey=
     (<hash>.transcript.json): другая пунктуация → фантомные обрывы при чтении и порча границ
     при resnap-записи. Возвращает (Transcript|None, expected_pkey).
 
-    Резолв резнапа (запись) должен звать с config_pkey="" → только записанный в манифесте ключ."""
-    audio = Path(cache_dir) / f"{manifest.source_sha256}.{audio_format}"
-    if not audio.is_file():
-        return None, None
+    Резолв резнапа (запись) должен звать с config_pkey="" → только записанный в манифесте ключ.
+
+    Резолвит СНАЧАЛА по source_sha256 (стабилен при пере-извлечении аудио), всё ещё требуя
+    совпадения params_key (сироту/мислейбл не берём); ФОЛБЭК — по хэшу аудио в имени файла (легаси-
+    транскрипты без штампа source_sha256). Пере-извлечение mp3 меняло его хэш и «сиротило» транскрипт."""
+    cache_dir = Path(cache_dir)
     expected = manifest.transcript_params_key or config_pkey
     if not expected:                       # нет отпечатка — резолвить нечем (сироту не берём)
         return None, expected
+    # 1) content match on source_sha256 + the expected params_key (stable across re-extraction).
+    sha = manifest.source_sha256
+    if sha:
+        for p in sorted(cache_dir.glob("*.transcript.json"),
+                        key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                t = Transcript.model_validate_json(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if getattr(t, "source_sha256", "") == sha and transcript_identity(t) == expected:
+                return t, expected
+    # 2) fallback: audio-hash filename (legacy transcripts with no source_sha256 stamp).
+    audio = cache_dir / f"{sha}.{audio_format}"
+    if not audio.is_file():
+        return None, None                  # no audio in cache (distinct from "transcript missing")
     tp = state.transcript_cache_path(cache_dir, audio, expected)
     if not tp.is_file():
         return None, expected
