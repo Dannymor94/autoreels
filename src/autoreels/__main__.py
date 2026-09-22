@@ -2025,12 +2025,74 @@ def cmd_run_batch(
     return ok, failed, skipped, zero_harvest
 
 
-def _missing_reels(manifest: Manifest, out_dir: Path) -> list:
-    """Вернуть reel-объекты из манифеста, для которых ещё нет выходного mp4.
+def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_path) -> str:
+    """Hash of everything that determines a reel's rendered bytes, so a stale clip is re-rendered.
 
-    Выходной файл: out_dir/<reel.id>.mp4  (render_crop без суффикса — вертикальный рез).
+    Inputs, and why each is here (a change in any changes the output):
+    - windows: the exact source spans cut and concatenated (cold open + body) — new review bounds;
+    - speed: setpts/atempo factor — retimes every frame and the audio;
+    - title: burned-in title-plate text (t:);
+    - cold_open: the replayed hook span (also inside windows; kept explicit per the spec);
+    - crop / scale / rotation / zoom: geometry of the 1080×1920 frame (setup + the render zoom flag);
+    - palette: colour grade burned in after scale;
+    - profile: encoder profile (bitrate / rate-control / quality). The concrete codec impl
+      (hevc_amf vs hevc_videotoolbox) is deliberately EXCLUDED — it is per-machine, and the same
+      profile on Mac vs Windows should not force a re-render of an otherwise-identical clip;
+    - music: background track mixed under the speech;
+    - subtitles: burned-in words (change when bounds or the transcript change);
+    - tail_last_word_end / tail_next_word_start: drive the tail fade that mutes a pulled-in word.
+    NOT included: global render.yaml audio settings (a rare, cross-cutting change, out of scope).
     """
-    return [r for r in manifest.reels if not (out_dir / f"{r.id}.mp4").exists()]
+    payload = {
+        "windows": [[round(w.start, 4), round(w.end, 4)] for w in reel.playback_windows()],
+        "speed": round(getattr(reel, "speed", 1.0), 6),
+        "title": getattr(reel, "title_overlay", "") or "",
+        "cold_open": ([round(reel.cold_open.start, 4), round(reel.cold_open.end, 4)]
+                      if reel.cold_open else None),
+        "crop": setup.crop.model_dump() if getattr(setup, "crop", None) else None,
+        "scale": list(setup.scale) if getattr(setup, "scale", None) else None,
+        "rotation": getattr(setup, "rotation_deg", 0.0),
+        "palette": palette,
+        "profile": profile,
+        "zoom": bool(zoom_on),
+        "music": Path(music_path).name if music_path else None,
+        "subtitles": [[round(w.t0, 3), round(w.t1, 3), w.word] for w in reel.subtitles],
+        "tail": [getattr(reel, "tail_last_word_end", None), getattr(reel, "tail_next_word_start", None)],
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
+def _render_fp_path(out_dir: Path, reel_id: str) -> Path:
+    return out_dir / f"{reel_id}.render.json"   # sidecar next to out_dir/<id>.mp4
+
+
+def _read_render_fingerprint(out_dir: Path, reel_id: str) -> str | None:
+    try:
+        return json.loads(_render_fp_path(out_dir, reel_id).read_text(encoding="utf-8")).get("fingerprint")
+    except (OSError, ValueError):
+        return None
+
+
+def _write_render_fingerprint(out_dir: Path, reel_id: str, fingerprint: str) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)   # render_crop makes it too; be robust if it did not
+    _render_fp_path(out_dir, reel_id).write_text(
+        json.dumps({"fingerprint": fingerprint}), encoding="utf-8")
+
+
+def _missing_reels(manifest: Manifest, out_dir: Path, fingerprint=None) -> list:
+    """Reels needing (re-)render: no output mp4 yet, OR the stored render fingerprint differs from
+    the current reel definition (a re-applied review with new bounds must not keep the old clip).
+
+    `fingerprint`: callable reel → hash. None (legacy callers) → existence-only check, as before.
+    """
+    out = []
+    for r in manifest.reels:
+        if not (out_dir / f"{r.id}.mp4").exists():
+            out.append(r)
+        elif fingerprint is not None and _read_render_fingerprint(out_dir, r.id) != fingerprint(r):
+            out.append(r)   # definition changed since the clip was rendered → re-render
+    return out
 
 
 # Фоллбэк энкодеров: менее→более совместимый с GPU. av1 (нужен RX 7000+) → hevc → h264.
@@ -2245,30 +2307,39 @@ def cmd_render(
                     skipped_stale.append(mf.name)
                     continue
 
-            # Идемпотентность: пропускаем манифесты, для которых все клипы уже есть
-            missing = _missing_reels(manifest, out_dir_final)
+            # Палитра этого видео: флаг/env > setup.palette (калибратор) > конфиг. Неизвестную —
+            # игнорируем с предупреждением (не роняем весь рендер из-за опечатки в манифесте).
+            # Считается ДО проверки идемпотентности: палитра входит в отпечаток клипа.
+            eff_pal = pal_override or manifest.setup.palette or render_cfg.palette
+            if eff_pal not in render_cfg.palettes:
+                print(f"  ⚠ палитра «{eff_pal}» неизвестна — беру {render_cfg.palette}",
+                      file=sys.stderr, flush=True)
+                eff_pal = render_cfg.palette
+            zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
+
+            # Отпечаток определения рила (окна, скорость, заголовок, cold open, кроп, палитра,
+            # профиль…). Клип с несовпавшим отпечатком перерендеривается, даже если файл на месте —
+            # иначе пере-применённое ревью с новыми границами оставляло бы старый клип в reels-out/.
+            def _fp(r, _setup=manifest.setup, _pal=eff_pal, _prof=prof_name, _zoom=zoom_on):
+                return _reel_render_fingerprint(r, setup=_setup, palette=_pal, profile=_prof,
+                                                zoom_on=_zoom, music_path=music_path)
+
+            # Идемпотентность: пропускаем манифесты, где все клипы есть И их отпечаток совпадает.
+            missing = _missing_reels(manifest, out_dir_final, _fp)
             if not missing:
                 print(f"✓ {stem}: все {len(manifest.reels)} клипов уже готовы — пропуск",
                       flush=True)
                 skipped_done.append(mf.name)
                 continue
 
-            # Рендерим только недостающие клипы (при частичном завершении)
+            # Рендерим только недостающие/устаревшие клипы (при частичном завершении)
             render_manifest = manifest if len(missing) == len(manifest.reels) else (
                 manifest.model_copy(update={"reels": missing})
             )
             n_missing = len(missing)
             n_total = len(manifest.reels)
             label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
-            # Палитра этого видео: флаг/env > setup.palette (калибратор) > конфиг. Неизвестную —
-            # игнорируем с предупреждением (не роняем весь рендер из-за опечатки в манифесте).
-            eff_pal = pal_override or manifest.setup.palette or render_cfg.palette
-            if eff_pal not in render_cfg.palettes:
-                print(f"  ⚠ палитра «{eff_pal}» неизвестна — беру {render_cfg.palette}",
-                      file=sys.stderr, flush=True)
-                eff_pal = render_cfg.palette
             pal_tag = "" if eff_pal == "neutral" else f", палитра {eff_pal}"
-            zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
             zoom_tag = ", зум" if zoom_on else ""
             music_tag = f", музыка {Path(music_path).name}" if music_path else ""
             print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}{music_tag}) "
@@ -2281,6 +2352,13 @@ def cmd_render(
                 subtitles_cfg=subtitles_cfg, background=background,
             )
             all_outputs.extend(outputs)
+            # Record each rendered clip's fingerprint next to it, so a later run re-renders only when
+            # the reel definition changes. Keyed by output stem == reel.id (skipped reels emit none).
+            _reel_by_id = {r.id: r for r in manifest.reels}
+            for out_path in outputs:
+                r = _reel_by_id.get(out_path.stem)
+                if r is not None:
+                    _write_render_fingerprint(out_dir_final, r.id, _fp(r))
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
             _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
         except SourceNotFoundError:

@@ -115,6 +115,18 @@ def _manifest(reels=None, source="v.mp4") -> Manifest:
     )
 
 
+def _stamp_render_fingerprints(out_dir: Path, manifest: Manifest) -> None:
+    """Write the render-fingerprint sidecar cmd_render compares against, so a matching clip counts
+    as up-to-date (Part D: a skip now requires a matching fingerprint, not just an existing file)."""
+    rc = cli.load_render_config(REPO_ROOT / "config" / "render.yaml")
+    pal = manifest.setup.palette or rc.palette
+    for r in manifest.reels:
+        fp = cli._reel_render_fingerprint(r, setup=manifest.setup, palette=pal,
+                                          profile=rc.encoder.profile, zoom_on=rc.zoom.enabled,
+                                          music_path=None)
+        cli._write_render_fingerprint(out_dir, r.id, fp)
+
+
 def _manifest_with_crop(stem, sha, crop: Crop, setup_id) -> Manifest:
     return Manifest(
         source=f"{stem}.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
@@ -2091,6 +2103,7 @@ def test_render_skips_when_all_reels_done(monkeypatch, tmp_path, capsys):
     out_dir.mkdir(parents=True)
     (out_dir / "r01.mp4").write_bytes(b"x")
     (out_dir / "r02.mp4").write_bytes(b"x")
+    _stamp_render_fingerprints(out_dir, m)          # clips match their definition → up-to-date
 
     called = []
     monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(1) or [])
@@ -2114,6 +2127,7 @@ def test_render_rerenders_partial_completion(monkeypatch, tmp_path):
     out_dir = tmp_path / "reels-out" / "v"
     out_dir.mkdir(parents=True)
     (out_dir / "r01.mp4").write_bytes(b"x")   # r01 готов, r02 нет
+    _stamp_render_fingerprints(out_dir, m)    # r01's fingerprint matches → only missing r02 renders
 
     seen_reels = []
     def fake_crop(manifest, **k):
