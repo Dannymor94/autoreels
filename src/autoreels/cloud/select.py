@@ -859,7 +859,9 @@ def _stage_interview_snap(
             r.end_snap_reason = None
 
         # --- start rule: include preceding host question (non-merged only) ---
-        if not is_merged:
+        # An explicit review start (s:N) is the reviewer's exact choice — never prepend a host
+        # question in front of it (that would move the start off the chosen sentence).
+        if not is_merged and not getattr(r, "_explicit_start", False):
             r0_start = r.r0_start if r.r0_start is not None else r.start
             preceding = [
                 (ts, te) for ts, te in host_turns

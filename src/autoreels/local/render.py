@@ -447,27 +447,28 @@ def build_cut_cmd(
     ]
 
 
-def _concat_segments_graph(segments, edge_fade_sec: float, *, base: float = 0.0) -> tuple[str, str, str]:
-    """Filtergraph prefix that trims each segment from the single input and joins them in order.
+def _concat_segments_graph(segments, edge_fade_sec: float) -> tuple[str, str, str]:
+    """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
-    Video is hard-concatenated (`concat`, no overlap) → `[vseg]`, so the output timeline matches
-    the subtitle remap (offset within a segment + accumulated segment durations). Audio is joined
-    the SAME way — plain `concat`, no overlap — after a micro fade-out at each segment's end and a
+    Each window is a SEPARATE ffmpeg input, opened with its own input-side `-ss`/`-t` (see
+    build_concat_cmd), so input i already carries exactly window i's frames: here we only reset the
+    PTS (`setpts=PTS-STARTPTS`) and concat. Nothing is trimmed from a shared decode, so a cold-open
+    hook that sits LATER in the source than the body no longer forces ffmpeg to buffer every frame
+    between them — that unbounded buffering was the OOM on long cold opens.
+
+    Video is hard-concatenated (`concat`, no overlap) → `[vseg]`, so the output timeline matches the
+    subtitle remap (offset within a segment + accumulated segment durations). Audio is joined the
+    SAME way — plain `concat`, no overlap — after a micro fade-out at each segment's end and a
     fade-in at each start (`edge_fade_sec`, default 10 ms) to suppress the click at a splice. Unlike
     a crossfade, edge fades do not overlap the sides, so the audio length stays exactly equal to the
     video length (no lip-sync drift). edge_fade 0 → hard joins, no fades. Returns (prefix, [vseg], [aseg]).
-
-    `base` is subtracted from every trim time: the caller fast-seeks the input with `-ss base`
-    (resetting the decoded timestamps to ~0), so trims are relative to the first segment — the
-    decoder never grinds from 0 to a clip 40 minutes in, same speed as the single-cut path.
     """
     n = len(segments)
     f = edge_fade_sec
     parts: list[str] = []
     for i, s in enumerate(segments):
-        s0, s1 = _ts(s.start - base), _ts(s.end - base)
-        parts.append(f"[0:v]trim=start={s0}:end={s1},setpts=PTS-STARTPTS[v{i}]")
-        achain = f"[0:a]atrim=start={s0}:end={s1},asetpts=PTS-STARTPTS"
+        parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+        achain = f"[{i}:a]asetpts=PTS-STARTPTS"
         if f > 0:
             out_st = max(0.0, (s.end - s.start) - f)
             achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
@@ -482,10 +483,10 @@ def build_concat_cmd(
     source: str | Path,
     out: str | Path,
     *,
+    windows: list[tuple[float, float]],
     filter_complex: str,
     codec: str,
     preset: str,
-    seek: float = 0.0,
     video_bitrate: str = "7M",
     pix_fmt: str = "yuv420p",
     faststart: bool = True,
@@ -496,17 +497,18 @@ def build_concat_cmd(
     rate_control: str | None = None,
     qp: int | None = None,
 ) -> list[str]:
-    """ffmpeg-команда для многосегментного клипа: `filter_complex` режет и склеивает сегменты
-    из ОДНОГО входа и выдаёт `[v]`/`[a]` — один проход энкодера (границы заданы trim'ами в графе).
-    `-ss seek` перед `-i` быстро перематывает к первому сегменту (trim-времена в графе уже заданы
-    относительно `seek`), чтобы декодер не молол от нуля. С музыкой добавляется зациклённый второй
-    вход. Чистая функция (без ФС) — единица под тесты, как build_cut_cmd для одиночного окна."""
+    """ffmpeg-команда для многосегментного клипа: КАЖДОЕ окно — отдельный вход с собственным
+    input-side seek (`-ss start -t dur -i source`), а `filter_complex` только сбрасывает PTS и
+    склеивает их в один проход энкодера. Раздельные входы декодируются независимо: холодный старт,
+    чей хук лежит в исходнике ПОЗЖЕ тела, больше не заставляет ffmpeg буферизовать все кадры между
+    ними (это была причина OOM). `windows` — список (start, duration) в порядке воспроизведения;
+    input-side seek так же точен, как в build_cut_cmd (одиночное окно). С музыкой добавляется
+    зациклённый вход после всех окон (его индекс = len(windows))."""
     quality_args = _video_quality_args(codec, preset, video_bitrate, pix_fmt,
                                        quality=quality, rate_control=rate_control, qp=qp)
     cmd = [str(ffmpeg), "-y", "-loglevel", "error"]
-    if seek > 0:
-        cmd += ["-ss", _ts(seek)]
-    cmd += ["-i", str(source)]
+    for st, dur in windows:
+        cmd += ["-ss", _ts(st), "-t", _ts(dur), "-i", str(source)]
     if music_path:
         cmd += ["-stream_loop", "-1", "-i", str(music_path)]
     cmd += [
@@ -877,21 +879,23 @@ def _render_segments(
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
                 )
             else:
-                # Multi-window: trim+concat the windows (cold open + body) from the one source in a
-                # single encode. Fast-seek to the EARLIEST window start (a cold-open hook may sit
-                # later than the body start), so trims stay relative and decoding starts there.
-                base = min(w.start for w in segs)
-                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec, base=base)
+                # Multi-window: concat the windows (cold open + body) in a single encode. Each
+                # window is its OWN input with input-side seek (build_concat_cmd), so decodes are
+                # independent — a cold-open hook later in the source than the body no longer buffers
+                # every frame in between (was an OOM). Input i supplies [i:v]/[i:a]; music is [n:a].
+                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec)
+                windows = [(w.start, w.end - w.start) for w in segs]
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
-                                                     speed=_reel_speed, vin=vseg, ain=aseg)
+                                                     speed=_reel_speed, vin=vseg, ain=aseg,
+                                                     music_in=f"[{len(segs)}:a]")
                     fc = f"{prefix};{music_fc}"
                 else:
                     vtail = f"{vseg}{reel_vf}[v]" if reel_vf else f"{vseg}null[v]"
                     atail = f"{aseg}{reel_af}[a]" if reel_af else f"{aseg}anull[a]"
                     fc = f"{prefix};{vtail};{atail}"
                 cmd = build_concat_cmd(
-                    ffmpeg_bin, source, out, filter_complex=fc, seek=base,
+                    ffmpeg_bin, source, out, windows=windows, filter_complex=fc,
                     codec=codec, preset=enc.preset,
                     video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                     audio_codec=aud.codec, audio_bitrate=aud.bitrate,

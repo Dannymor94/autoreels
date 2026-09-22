@@ -376,10 +376,13 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
     if not words:
         return
     for r in reels:
-        new_start = _snap_start(r.start, r.end, words, window_sec=window_sec,
-                                min_pause=min_pause_for_phrase_end, hanging_words=hanging_words)
-        if new_start is not None:
-            r.start = new_start
+        # An explicit review start (s:N) is the reviewer's exact choice — snap must land on that
+        # sentence's first word, not the nearest phrase boundary, or it skips the intended word.
+        if not getattr(r, "_explicit_start", False):
+            new_start = _snap_start(r.start, r.end, words, window_sec=window_sec,
+                                    min_pause=min_pause_for_phrase_end, hanging_words=hanging_words)
+            if new_start is not None:
+                r.start = new_start
 
         if max_end_search_sec is not None and r.r0_end is not None:
             # If clip already exceeds max_duration before snap, trim START first so that

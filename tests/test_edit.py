@@ -8,6 +8,7 @@
 8. The automatic path never runs filler removal (it is manual-only).
 """
 import inspect
+from pathlib import Path
 
 from autoreels.cloud import edit
 from autoreels.cloud.blocks import parse_compact_answer
@@ -54,15 +55,24 @@ _FR = dict(filler_words=["ну", "вот", "как бы"], pause_shorten_sec=0.8
 
 
 def test_filler_cuts_standalone_keeps_inside_phrase():
-    # "Ну," standalone at a sentence start (trailing comma) → cut. "ну" in "ну и что" (no right
-    # boundary) → kept.
-    ws = [_w(0.0, 0.4, "Ну,"), _w(0.5, 1.0, "смысл"), _w(1.0, 1.5, "такой."),
-          _w(1.6, 2.0, "ну"), _w(2.05, 2.4, "и"), _w(2.45, 3.0, "что")]
-    segs, removed, cuts = edit.remove_fillers(ws, 0.0, 3.0, **_FR)
-    assert cuts == 1                          # only the standalone "Ну," is cut
+    # A standalone "ну," at a clause edge (after "такой.", trailing comma) → cut. "ну" in "ну и что"
+    # (no right boundary) → kept. The filler is NOT the clip's first word (index 0 is never cut).
+    ws = [_w(0.0, 0.4, "Смысл"), _w(0.5, 1.0, "такой."), _w(1.2, 1.6, "ну,"),
+          _w(2.0, 2.4, "смысл"), _w(2.5, 3.0, "такой."),
+          _w(3.1, 3.4, "ну"), _w(3.45, 3.8, "и"), _w(3.85, 4.2, "что")]
+    segs, removed, cuts = edit.remove_fillers(ws, 0.0, 4.2, **_FR)
+    assert cuts == 1                          # only the standalone "ну," is cut
     assert removed > 0
-    # the cut covers the leading "Ну," and the silence up to "смысл"
-    assert segs and abs(segs[0].start - 0.5) < 0.06
+    # the cut covers "ну," and the silence up to the next word; the clip keeps its opening "Смысл"
+    assert segs and segs[0].start == 0.0 and abs(segs[0].end - 1.2) < 0.06
+
+
+def test_filler_never_cuts_opening_word():
+    # The clip opens on a standalone filler at a clause edge; it must NOT be cut (it is the first
+    # word of the clip's first sentence — chosen by s:N or the default start).
+    ws = [_w(0.0, 0.4, "Ну,"), _w(0.5, 1.0, "смысл"), _w(1.0, 1.5, "такой.")]
+    segs, removed, cuts = edit.remove_fillers(ws, 0.0, 1.5, **_FR)
+    assert cuts == 0 and removed == 0.0 and segs == []
 
 
 def test_filler_collapses_immediate_repetition():
@@ -100,6 +110,62 @@ def test_grammar_all_fields_and_malformed():
     e4 = next(e for e in entries if e.seq == 4)
     assert e4.e == 3                     # the valid e:3 still applied
     assert any("s" in msg for _, msg in errs)   # malformed s:bad reported, not fatal
+
+
+# --- s:N lands exactly: export → parse → the CLI's own formatting stages -------------------
+def test_s_marker_first_body_word_matches_export_end_to_end():
+    """Applying s:N puts the first body word on sentence N's first word — as the export numbers it.
+
+    Threads the real code the CLI uses: export_compact_review (numbering) → parse_compact_answer →
+    sentence_bounds → snap_segments → filter_dangling_start → apply_padding. Sentence 2 opens on a
+    hanging word ("Если"), which snap would otherwise skip past — the _explicit_start guard must
+    keep the start on it.
+    """
+    from autoreels.cloud.blocks import CandidateBlock, export_compact_review
+    from autoreels.cloud.edit import split_sentences, words_in_span, sentence_bounds
+    from autoreels.cloud.snap import snap_segments, apply_padding
+    from autoreels.cloud.select import filter_dangling_start
+    from autoreels.core.config import load_r0_config
+    from autoreels.core.models import Reel
+    from autoreels.local.subtitles import words_in_window
+
+    # Two clear sentences; sentence 2 opens on the hanging word "Если".
+    ws = [_w(0.0, 0.4, "Раз"), _w(0.5, 1.0, "два."),
+          _w(2.0, 2.4, "Если"), _w(2.5, 3.0, "тепло"), _w(3.1, 4.0, "дома."),
+          _w(4.2, 4.6, "Семь"), _w(4.7, 20.0, "восемь.")]
+    block = CandidateBlock(id="b1", start=0.0, end=20.0, duration=20.0,
+                           text=" ".join(w.word for w in ws), boundary_reason="sentence")
+
+    export = export_compact_review([block], source_ref="t.json", filter_removed_count=0, words=ws)
+    assert "[2] Если тепло дома." in export                   # numbering the reviewer sees
+
+    _, entries, _, _ = parse_compact_answer("1 90 | s:2\n")
+    e = entries[0]
+    sent2_first = split_sentences(words_in_span(ws, block.start, block.end))[e.s - 1][0].word
+    assert sent2_first == "Если"
+
+    r0 = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml")
+    ns, ne, expl, _ = sentence_bounds(ws, block.start, block.end, s=e.s, e=e.e,
+                                      wind_down_phrases=r0.wind_down_phrases,
+                                      filler_words=r0.filler_removal.filler_words)
+    reel = Reel(id="r", start=ns, end=ne, score=90, hook="h", title="", description="", reason="x")
+    assert expl
+    reel._explicit_start = True
+    reel.r0_start, reel.r0_end = reel.start, reel.end
+
+    reels = [reel]
+    snap_segments(reels, ws, tail_sec=r0.tail_sec, window_sec=r0.snap_window_sec,
+                  max_duration=180.0, min_pause_for_phrase_end=r0.min_pause_for_phrase_end,
+                  max_micro_pause=r0.max_micro_pause, hanging_words=r0.hanging_words,
+                  max_end_search_sec=r0.max_end_search_sec, min_clip_duration=r0.min_clip_duration)
+    filter_dangling_start(reels, ws, dangling_words=getattr(r0, "dangling_words", None),
+                          min_duration=r0.min_clip_duration, repair_only=True,
+                          max_start_fraction=1.0 / 3.0)
+    apply_padding(reels, ws, tail_pad_sec=r0.tail_pad_sec, lead_pad_sec=r0.lead_pad_sec,
+                  max_duration=180.0, video_duration=ws[-1].t1, hanging_words=r0.hanging_words)
+
+    first_body = words_in_window(ws, reel.start, reel.end)[0].word
+    assert first_body == "Если", f"clip opened on {first_body!r}, expected the s:2 word 'Если'"
 
 
 # --- Test 8: the manual-only features never touch the automatic path ------------------------

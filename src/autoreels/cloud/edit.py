@@ -190,7 +190,9 @@ def remove_fillers(words: list, start: float, end: float, *, filler_words, pause
     cuts: list[tuple[float, float]] = []
 
     # 1. standalone filler phrases at clause edges
-    i = 0
+    # i == 0 is skipped: the clip's opening word is the first word of its first sentence (chosen by
+    # s:N or the default start) — never cut it, even if it reads as a filler.
+    i = 1
     while i < n:
         hit = 0
         for ph in phrases:

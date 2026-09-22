@@ -978,8 +978,13 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
 
     for r in reels:
         cw = words_in_window(words, r.start, r.end)
-        if cw:
-            fw = cw[0].word.strip()
+        # Dangling check inspects the word actually heard first: the start of the BODY (the first
+        # effective segment). A cold open replays a hook before it, but the dangling test is about
+        # whether the body opens mid-thought, so it reads the body start, not the hook.
+        body = r.effective_segments()
+        body_words = words_in_window(words, body[0].start, body[0].end) if body else cw
+        if body_words:
+            fw = body_words[0].word.strip()
             fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
             if (fw and fw[0].islower()) or fw_clean in dangling:
                 warn(r, f"dangling start: opens on «{fw or fw_clean}»")
