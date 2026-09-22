@@ -55,6 +55,42 @@ def test_start_midword_snaps_to_word_boundary():
     assert r.start != 30.6
 
 
+# Клип, естественно начинающийся с «Если»: пауза 4.5с перед ним → это начало фразы.
+_IF_WORDS = [
+    _w(5.0, 5.5, "prev"),                 # далеко, пауза 4.5с после
+    _w(10.0, 10.4, "Если"),               # начало фразы — валидное начало клипа
+    _w(10.5, 10.9, "объединить"),
+    _w(11.0, 11.5, "усилия."),
+    _w(13.0, 13.4, "конец"),
+]
+_IF_CFG = dict(tail_sec=0.3, window_sec=1.5, max_duration=59,
+               min_pause_for_phrase_end=0.6, max_micro_pause=0.4, hanging_words=HANGING)
+
+
+def test_missing_start_words_falls_back_to_short_list_not_end_list(capsys):
+    # hanging_start_words omitted → built-in SHORT list. «Если» is NOT in it, so the clip keeps its
+    # «Если» start. The end list (HANGING) DOES contain «если» — falling back to it would wrongly
+    # push the start to «объединить» (the ee01883 regression). One-shot warning on stderr.
+    import autoreels.cloud.snap as snap
+    snap._warned_missing_start_words = False
+    r = _reel(10.0, 12.0)
+    snap_segments([r], _IF_WORDS, **_IF_CFG)          # note: no hanging_start_words → None fallback
+    assert abs(r.start - 10.0) < 1e-6                 # «Если» kept, not trimmed to 10.5
+    assert "hanging_start_words not provided" in capsys.readouterr().err
+    # warns only once
+    snap_segments([_reel(10.0, 12.0)], _IF_WORDS, **_IF_CFG)
+    assert "hanging_start_words" not in capsys.readouterr().err
+
+
+def test_explicit_start_words_keeps_if_and_does_not_warn(capsys):
+    import autoreels.cloud.snap as snap
+    snap._warned_missing_start_words = False
+    r = _reel(10.0, 12.0)
+    snap_segments([r], _IF_WORDS, hanging_start_words=["и", "а", "но"], **_IF_CFG)
+    assert abs(r.start - 10.0) < 1e-6                 # «Если» kept
+    assert "hanging_start_words not provided" not in capsys.readouterr().err
+
+
 def test_start_pulled_to_phrase_beginning_within_window():
     # start=33.7 в середине «ещё» → к началу мысли 33.0 в пределах окна ±1.5с
     r = _reel(33.7, 36.4)

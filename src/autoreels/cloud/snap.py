@@ -19,7 +19,15 @@ PySceneDetect намеренно НЕ используется: статична
 """
 from __future__ import annotations
 
+import sys
+
 from autoreels.core.models import Reel, Word
+
+# START-snap fallback when a caller omits hanging_start_words. It must NOT be the (much longer) end
+# list — that strips valid openers like «Если», «Когда», «Я» (the ee01883 regression). Mirrors the
+# R0Config.hanging_start_words default so a caller with no config still gets the short, safe list.
+_DEFAULT_HANGING_START = ["и", "а", "но", "поэтому", "потому"]
+_warned_missing_start_words = False
 
 # Символы конца предложения (Whisper на русском роняет часть пунктуации, но не всю — где
 # есть, доверяем ей как самому сильному сигналу завершения мысли).
@@ -372,7 +380,8 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
 
     `hanging_words` решает КОНЕЦ (клип не заканчивается на висячем слове). START-подтяжка
     использует `hanging_start_words` — короткий список слов-отсылок, с которых клип не должен
-    начинаться; None → падает обратно на `hanging_words` (совместимость со старыми вызовами).
+    начинаться; None → встроенный короткий список `_DEFAULT_HANGING_START` (НЕ end-список — тот
+    срезал бы «Если»/«Когда»/«Я» из первой фразы, баг ee01883), с одноразовым предупреждением.
 
     Если max_end_search_sec задан и r.r0_end не None — использует punctuation-first snap
     (конец предложения в окне r0_end + max_end_search_sec, без prefer_longer).
@@ -382,7 +391,16 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
     """
     if not words:
         return
-    hanging_start_words = hanging_words if hanging_start_words is None else hanging_start_words
+    if hanging_start_words is None:
+        # Fall back to the built-in SHORT list, never the end list (which would drop «Если»/«Когда»/
+        # «Я» from a clip's first sentence — the ee01883 bug). Warn once so a stale config is noticed.
+        global _warned_missing_start_words
+        if not _warned_missing_start_words:
+            print("  warning: hanging_start_words not provided — using built-in short list "
+                  f"{_DEFAULT_HANGING_START}; add the key to config/r0.yaml to silence this",
+                  file=sys.stderr)
+            _warned_missing_start_words = True
+        hanging_start_words = _DEFAULT_HANGING_START
     for r in reels:
         # An explicit review start (s:N) is the reviewer's exact choice — snap must land on that
         # sentence's first word, not the nearest phrase boundary, or it skips the intended word.
