@@ -983,10 +983,14 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
             fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
             if (fw and fw[0].islower()) or fw_clean in dangling:
                 warn(r, f"dangling start: opens on «{fw or fw_clean}»")
-        max_gap = max((b.t0 - a.t1 for a, b in zip(cw, cw[1:])), default=0.0)
+        # Pause check ignores gaps that filler removal cut away: only count a gap when both words
+        # sit in the SAME playback segment (single-span reel → the whole clip is one segment).
+        segs = r.effective_segments()
+        max_gap = max((b.t0 - a.t1 for a, b in zip(cw, cw[1:])
+                       if any(sg.start <= a.t1 and b.t0 <= sg.end for sg in segs)), default=0.0)
         if max_gap >= gap:
             warn(r, f"internal pause {max_gap:.1f}s (≥{gap:.0f}s)")
-        dur = r.end - r.start
+        dur = r.playback_duration()   # played length (filler gaps removed), not the raw span
         if dur < floor:
             warn(r, f"short clip {dur:.1f}s (< {floor:.0f}s floor)")
 
@@ -2786,7 +2790,7 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
-def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None) -> int:
+def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     A human selection is FORMATTED, never second-guessed: this path runs the formatting stages
@@ -2811,6 +2815,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         candidate_blocks, filter_blocks, score_block,
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
+    from autoreels.cloud.edit import sentence_bounds, remove_fillers
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
     from autoreels.cloud.chunk_transcribe import renumber_reels
@@ -3017,6 +3022,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # Accounting: every scored input line must map to a reel or an explicit conflict. Track the
     # build-order position (0-based) of the reel each scored seq becomes; the formatting-only
     # pipeline never drops or reorders, so position i survives as final reel i+1.
+    _tx_words = getattr(transcript, "words", [])
     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
     conflicts: list[str] = []
@@ -3043,6 +3049,23 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             description="",
             reason="human review",
         )
+        # Part 2 — sentence bounds. Explicit s:/e: (the reviewer's choice) win; otherwise start is
+        # left to the dangling-start repair and end drops trailing pure wind-down. Numbering runs
+        # over the whole (merged) span, matching the numbered export.
+        _ae = seq_to_entry.get(_anchor_seq)
+        _fr_cfg = getattr(r0_cfg, "filler_removal", None)
+        nb_start, nb_end, _expl_start, _bnote = sentence_bounds(
+            _tx_words, reel.start, reel.end,
+            s=(getattr(_ae, "s", None) if _ae else None), e=(getattr(_ae, "e", None) if _ae else None),
+            wind_down_phrases=getattr(r0_cfg, "wind_down_phrases", []),
+            filler_words=(_fr_cfg.filler_words if _fr_cfg else []),
+        )
+        reel.start, reel.end = nb_start, nb_end
+        if _expl_start:
+            reel._explicit_start = True   # the human fixed the start → dangling repair must not move it
+        reel._filler_override = getattr(_ae, "filler", None) if _ae else None   # per-clip f:0/f:1
+        if _bnote:
+            print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
         reel.r0_start = reel.start
         reel.r0_end = reel.end
         if is_merged:
@@ -3130,22 +3153,37 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_words", []))
+
+    # Part 3 — filler removal (deterministic). Cuts standalone fillers, immediate repetitions and
+    # over-long pauses into gaps → reel.segments (render concatenates them). On per clip: review
+    # marker f:0/f:1 > --filler/--no-filler flag > config default. Nothing textual is dropped
+    # beyond fillers; the cap (max_removed_share) keeps the speaker's cadence.
+    _fr = getattr(r0_cfg, "filler_removal", None)
+    filler_stats: list[tuple] = []   # (reel, removed_sec, cut_count)
+    if _fr is not None:
+        for reel in reels:
+            _ov = getattr(reel, "_filler_override", None)
+            _on = _ov if _ov is not None else (filler if filler is not None else _fr.enabled)
+            if not _on:
+                continue
+            segs, removed, count = remove_fillers(
+                tx_words, reel.start, reel.end,
+                filler_words=_fr.filler_words, pause_shorten_sec=_fr.pause_shorten_sec,
+                pause_residual_sec=_fr.pause_residual_sec, max_removed_share=_fr.max_removed_share,
+            )
+            if count:
+                if len(segs) >= 2:
+                    reel.segments = segs
+                reel.start, reel.end = segs[0].start, segs[-1].end
+                filler_stats.append((reel, removed, count))
+
     human_warnings = collect_human_warnings(reels, transcript, r0_cfg=r0_cfg)
 
-    # Apply per-clip speed: rescale subtitle timings, stamp reel.speed.
-    from autoreels.core.models import Word as _Word
+    # Stamp per-clip speed. Subtitles stay in source time; render remaps them onto the
+    # concatenated, speed-adjusted output timeline (subtitles.remap_to_output), so speed and the
+    # filler segments share one timeline instead of being pre-rescaled here against a plain span.
     for reel in reels:
-        _spd = getattr(reel, "_clip_speed", 1.0)
-        if _spd != 1.0:
-            reel.subtitles = [
-                _Word(
-                    word=w.word,
-                    t0=reel.start + (w.t0 - reel.start) / _spd,
-                    t1=reel.start + (w.t1 - reel.start) / _spd,
-                )
-                for w in reel.subtitles
-            ]
-        reel.speed = _spd
+        reel.speed = getattr(reel, "_clip_speed", 1.0)
 
     # Assemble manifest with selection_source="human".
     # Stamp transcript_params_key from the transcript actually used (mirrors cmd_run at
@@ -3199,11 +3237,20 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         print(f"  conflict: {c}")
 
     # Warnings: what a bypassed deciding stage would have flagged. Human decides; nothing removed.
+    _final_num = {id(r): i for i, r in enumerate(reels, 1)}
     if human_warnings:
-        _final_num = {id(r): i for i, r in enumerate(reels, 1)}
         print(f"warnings ({len(human_warnings)} — nothing removed, review manually):")
         for r, msg in human_warnings:
             print(f"  reel {_final_num.get(id(r), '?')} ({r.id}): {msg}")
+
+    # Filler removal report: per reel, seconds cut and number of cuts (Part 3).
+    if filler_stats:
+        _total_cut = sum(rem for _, rem, _ in filler_stats)
+        print(f"filler removal ({len(filler_stats)} clips, {_total_cut:.1f}s cut total):")
+        for r, removed, count in filler_stats:
+            n_seg = len(r.segments) or 1
+            print(f"  reel {_final_num.get(id(r), '?')} ({r.id}): −{removed:.1f}s in {count} cut(s) "
+                  f"→ {n_seg} segment(s), {r.playback_duration():.1f}s played")
 
     # Install: copy to manifests/ so render picks up the human selection.
     # --render implies --install.
@@ -3275,6 +3322,7 @@ def cmd_blocks(
     render: bool = False,
     compact: bool = False,
     speed: float | None = None,
+    filler: bool | None = None,
 ) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
@@ -3298,7 +3346,7 @@ def cmd_blocks(
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed)
+        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed, filler=filler)
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
@@ -3488,6 +3536,7 @@ def cmd_blocks(
         if compact:
             review_content = export_compact_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
+                words=transcript.words,
             )
         else:
             review_content = export_review(
@@ -5797,6 +5846,14 @@ def _build_parser():
         help="export one-line-per-block format with embedded prompt, for pasting into a chat; "
              "use with --review",
     )
+    pbl.add_argument(
+        "--filler", dest="filler", action="store_true", default=None,
+        help="force filler removal on for --apply (overrides config; per-clip f:0 still wins)",
+    )
+    pbl.add_argument(
+        "--no-filler", dest="filler", action="store_false",
+        help="turn filler removal off for --apply (overrides config; per-clip f:1 still wins)",
+    )
 
     pbp = sub.add_parser(
         "backfill-params-key",
@@ -6055,7 +6112,7 @@ def main(argv=None) -> int:
                 args.target, root=args.root, scored=args.scored,
                 review=args.review, out=args.out, apply_review=args.apply,
                 install=args.install, render=args.render, compact=args.compact,
-                speed=args.speed,
+                speed=args.speed, filler=args.filler,
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()

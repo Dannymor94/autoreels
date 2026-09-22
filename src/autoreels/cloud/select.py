@@ -289,6 +289,10 @@ def filter_dangling_start(
     dw = _DEFAULT_DANGLING | set(dangling_words or [])
     kept, disc = [], []
     for r in reels:
+        # An explicit review start (s:N) is the reviewer's choice — do not repair it away.
+        if getattr(r, "_explicit_start", False):
+            kept.append(r)
+            continue
         # Bound the repair window: seconds cap (both paths), plus fraction-of-clip and
         # merge-boundary caps (manual path only, via max_start_fraction / _merge_boundary).
         _cap = float("inf")

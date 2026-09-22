@@ -33,21 +33,22 @@ def words_in_window(words: list[Word], start: float, end: float) -> list[Word]:
     return [w for w in words if start <= w.t0 < end]
 
 
-def remap_to_output(words: list[Word], segments) -> list[Word]:
-    """Remap word times onto the concatenated output timeline of a multi-segment reel.
+def remap_to_output(words: list[Word], segments, speed: float = 1.0) -> list[Word]:
+    """Remap word times onto the concatenated, speed-adjusted output timeline of a reel.
 
     Each word keeps its offset within its segment plus the accumulated duration of preceding
-    segments; a word whose start falls in a removed gap (outside every segment) is dropped. For a
-    single segment [s, e] this is exactly a shift by s — the same result as feeding the raw words
-    to build_ass with clip_start=s — so callers pass the remapped words with clip_start=0.
+    segments, all divided by `speed` (render compresses the whole clip by the same factor); a word
+    whose start falls in a removed gap (outside every segment) is dropped. For a single segment
+    [s, e] at speed 1 this is a plain shift by s — identical to feeding raw words to build_ass with
+    clip_start=s — so callers pass the remapped words with clip_start=0.
     """
     out: list[Word] = []
     offset = 0.0
     for seg in segments:
         for w in words:
             if seg.start <= w.t0 < seg.end:
-                out.append(Word(word=w.word, t0=w.t0 - seg.start + offset,
-                                t1=w.t1 - seg.start + offset))
+                out.append(Word(word=w.word, t0=(w.t0 - seg.start + offset) / speed,
+                                t1=(w.t1 - seg.start + offset) / speed))
         offset += seg.end - seg.start
     return out
 

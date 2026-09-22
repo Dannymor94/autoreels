@@ -153,6 +153,23 @@ class BlockScoringConfig(BaseModel):
     ])
 
 
+class FillerRemovalConfig(BaseModel):
+    """Deterministic filler removal inside a chosen span (manual/edit path). Each removal becomes
+    a gap between playback segments. On by default for human selections; a per-clip review marker
+    (`f:0`/`f:1`) then a command flag then this config decide, mirroring the speed precedence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    # Standalone fillers cut only at a clause edge (see cloud/edit.remove_fillers for the exact rule).
+    filler_words: list[str] = Field(default_factory=lambda: [
+        "ну", "вот", "как бы", "наверное", "значит", "типа", "короче",
+    ])
+    pause_shorten_sec: float = 0.8    # a silence longer than this is shortened…
+    pause_residual_sec: float = 0.25  # …down to this residual (not removed entirely — no breathlessness)
+    max_removed_share: float = 0.25   # never remove more than this share of the span
+
+
 class R0Config(BaseModel):
     """Типизированный config/r0.yaml. Пресет резолвится в числа через свойства ниже."""
 
@@ -234,6 +251,13 @@ class R0Config(BaseModel):
     block_scoring: BlockScoringConfig = Field(default_factory=BlockScoringConfig)
     manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
     speed: float = 1.0                       # default playback speed for all clips
+    filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
+    # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
+    # A sentence is pure wind-down when, after dropping filler words, its text is empty or equals
+    # one of these phrases (see cloud/edit.default_end_sentence).
+    wind_down_phrases: list[str] = Field(default_factory=lambda: [
+        "наверное, как-то так", "вот", "да", "понятно", "как-то так", "ну вот",
+    ])
 
     @property
     def min_duration(self) -> int:

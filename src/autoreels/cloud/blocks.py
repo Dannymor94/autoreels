@@ -567,7 +567,7 @@ _REVIEW_HDR_RE = re.compile(
 _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
 # Compact answer line: <seq> <score-token>, where the token is an optional leading '-'
 # (join backward), digits, and trailing '+'/'++' (join 1 or 2 following blocks).
-_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*(?:@[\d.]+)?)\s*$")
+_COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*(?:@[\d.]+)?)\s*(?:\|(.*))?$")
 
 _COMPACT_PROMPT = (
     "# Score each block 0-100 for standalone short-video quality.\n"
@@ -591,13 +591,22 @@ _COMPACT_PROMPT = (
     "# Allowed range 1.0-1.3 (content policy; atempo itself accepts 0.5-100 without chaining).\n"
     "# Clips that exceed the manual ceiling get the minimum speed that fits, within that range.\n"
     "#\n"
-    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed]\n"
+    "# Optional fields after the score, introduced by '|' (each independent, t: must be last):\n"
+    "#   s:N   start at sentence N of the selection (sentences are numbered [1] [2]… below)\n"
+    "#   e:N   end at sentence N (numbering is continuous across a merge)\n"
+    "#   h:N   cold open: play sentence N first, then the clip from its start\n"
+    "#   t: …  overlay this title on the first seconds of the clip\n"
+    "# Omit s:/e: and the clip starts at the first clean sentence and ends before trailing\n"
+    "# wind-down ('да', 'вот', 'как-то так'). Unknown/garbled fields are ignored, not fatal.\n"
+    "#\n"
+    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| h:N] [| t: text]\n"
     "# No commentary, no restating of text.  Example:\n"
-    "#   3 85+      (join 3 with 4)\n"
-    "#   5 -90      (join 5 back into 4)\n"
-    "#   7 72++     (join 7 with 8 and 9)\n"
-    "#   8 90@1.15  this clip at 1.15x\n"
-    "#   9 90"
+    "#   3 85+            (join 3 with 4)\n"
+    "#   5 -90           (join 5 back into 4)\n"
+    "#   7 72++          (join 7 with 8 and 9)\n"
+    "#   8 90@1.15       this clip at 1.15x\n"
+    "#   9 90 | s:2 e:9  start at sentence 2, end at sentence 9\n"
+    "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу"
 )
 
 
@@ -608,6 +617,45 @@ class _ReviewEntry(NamedTuple):
     merge_fwd: int = 0   # 0 none | 1 '+' (join next) | 2 '++' (join next two)
     merge_back: bool = False  # '-' before score: join with the PRECEDING block
     speed: float | None = None  # @N.NN per-clip speed override
+    s: int | None = None        # s:N — start at sentence N of the selected span (Part 2)
+    e: int | None = None        # e:N — end at sentence N of the selected span (Part 2)
+    hook: int | None = None     # h:N — open with sentence N as a cold-open segment (Part 5)
+    title: str | None = None    # t: text — overlay title plate (Part 4)
+    filler: bool | None = None  # f:0/f:1 — per-clip filler-removal override (Part 3)
+
+
+_FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
+_FIELD_T_RE = re.compile(r"(?:^|[|\s])t:\s*(.*)$")
+_FIELD_F_RE = re.compile(r"(?:^|[|\s])f:\s*([01])")
+_STRAY_FIELD_RE = re.compile(r"(?:^|[|\s])([a-zA-Z]+):")
+
+
+def _parse_fields(text: str):
+    """Parse the optional trailing fields of an answer line: s:N e:N h:N f:0|1 t: text.
+
+    Fields are independent and order-free except t: (title), which takes the rest of the line and
+    so must come last. Returns (s, e, hook, title, filler, errors); an unrecognised or malformed
+    field is reported (never fatal). s/e/h are 1-based sentence indices; f is a 0/1 filler toggle."""
+    errors: list[str] = []
+    title: str | None = None
+    mt = _FIELD_T_RE.search(text)
+    if mt:
+        title = mt.group(1).strip() or None
+        text = text[:mt.start()]              # t: consumes to end; drop it before scanning others
+    filler: bool | None = None
+    mf = _FIELD_F_RE.search(text)
+    if mf:
+        filler = mf.group(1) == "1"
+        text = text[:mf.start()] + text[mf.end():]
+    vals: dict[str, int | None] = {"s": None, "e": None, "h": None}
+    for name, rx in _FIELD_NUM_RE.items():
+        m = rx.search(text)
+        if m:
+            vals[name] = int(m.group(1))
+            text = text[:m.start()] + text[m.end():]   # consume so it is not flagged as stray
+    for m in _STRAY_FIELD_RE.finditer(text):
+        errors.append(f"unrecognised or malformed field '{m.group(1)}:'")
+    return vals["s"], vals["e"], vals["h"], title, filler, errors
 
 
 def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float | None, str | None]:
@@ -715,14 +763,34 @@ def parse_review(
         m = _REVIEW_HDR_RE.match(line)
         if not m:
             continue  # block text or other — ignored silently
-        seq, block_id, score_str = int(m.group(1)), m.group(3), m.group(4).strip()
-        score, fwd, back, speed, err = _parse_score_markers(score_str)
+        seq, block_id, rest = int(m.group(1)), m.group(3), m.group(4).strip()
+        score_tok, _, fields = rest.partition("|")
+        score, fwd, back, speed, err = _parse_score_markers(score_tok.strip())
         if err:
             errors.append((lineno, err))
             continue
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed))
+        s, e, hook, title, filler, ferrs = _parse_fields(fields)
+        for fe in ferrs:
+            errors.append((lineno, fe))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler))
 
     return source_ref, entries, errors
+
+
+def _numbered_sentences(block: CandidateBlock, words) -> str:
+    """Block text with each sentence prefixed [1] [2]… so a review can name them with s:/e:.
+
+    Sentences are split from the transcript words in the block's span by the same rule apply uses
+    (edit.split_sentences), so the numbering the reviewer sees is the numbering apply resolves.
+    Falls back to the collapsed block text when no words are available.
+    """
+    if not words:
+        return " ".join(block.text.split())
+    from autoreels.cloud.edit import split_sentences, words_in_span
+    sents = split_sentences(words_in_span(words, block.start, block.end))
+    if len(sents) <= 1:
+        return " ".join(block.text.split())
+    return " ".join(f"[{k}] " + " ".join(w.word for w in s) for k, s in enumerate(sents, 1))
 
 
 def export_compact_review(
@@ -730,12 +798,15 @@ def export_compact_review(
     *,
     source_ref: str,
     filter_removed_count: int,
+    words=None,
 ) -> str:
     """Render a compact one-line-per-block review file for pasting into a chat.
 
     Block seq numbers (1..N) are the canonical reference — no trailing id map.
     Rationale: a trailing id section can be cut off or accidentally deleted; the seq
     number in each data line survives any partial copy-paste or model reformat.
+    When `words` (the transcript words) are given, each block's sentences are numbered inline so a
+    reply can bound the clip with s:/e:.
     """
     lines: list[str] = [
         "# AutoReels block review",
@@ -748,8 +819,7 @@ def export_compact_review(
         "",
     ]
     for i, b in enumerate(blocks, 1):
-        text = " ".join(b.text.split())  # collapse newlines / whitespace runs
-        lines.append(f"{i} | {b.duration:.1f}s | {text}")
+        lines.append(f"{i} | {b.duration:.1f}s | {_numbered_sentences(b, words)}")
     return "\n".join(lines) + "\n"
 
 
@@ -783,7 +853,10 @@ def parse_compact_answer(
             if err:
                 errors.append((lineno, err))
                 continue
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed))
+            s, e, hook, title, filler, ferrs = _parse_fields(m.group(3) or "")
+            for fe in ferrs:
+                errors.append((lineno, fe))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler))
         else:
             ignored += 1
 

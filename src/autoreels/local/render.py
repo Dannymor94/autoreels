@@ -824,16 +824,14 @@ def _render_segments(
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
             ass_cwd: str | None = None
             if subtitles_cfg is not None and reel.subtitles:
-                # Single span: raw words shifted by reel.start (unchanged). Multi-segment: remap
-                # onto the concatenated output timeline (gap words dropped), clip_start already 0.
-                if len(segs) == 1:
-                    ass_words, ass_clip_start = reel.subtitles, reel.start
-                else:
-                    ass_words, ass_clip_start = remap_to_output(reel.subtitles, segs), 0.0
+                # Remap word times onto the concatenated, speed-adjusted output timeline (gap words
+                # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
+                # output is identical to the pre-segments renderer.
+                ass_words = remap_to_output(reel.subtitles, segs, speed=_reel_speed)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
                 ass_path.write_text(
-                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=ass_clip_start),
+                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.

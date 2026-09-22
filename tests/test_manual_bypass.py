@@ -66,13 +66,14 @@ def _setup(tmp_path, words):
     return cache, mpath
 
 
-def _apply(tmp_path, review, *, stem, words):
+def _apply(tmp_path, review, *, stem, words, filler=None):
     cache, mpath = _setup(tmp_path, words)
     tmpath = tmp_path / "manifests" / f"{stem}.json"
     tmpath.write_text(mpath.read_text(), encoding="utf-8")
     rpath = tmp_path / "reviews" / f"{stem}.review.md"
     rpath.write_text(f"# source: {tmpath}\n{review}", encoding="utf-8")
-    rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(cache), source=str(tmpath))
+    rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(cache), source=str(tmpath),
+                              filler=filler)
     out = tmp_path / "reviews" / f"{stem}.review.json"
     return rc, out
 
@@ -169,12 +170,27 @@ def test_repair_bounded_by_merge_boundary():
 # --- Test 4: internal pause kept, warned, not split ----------------------------------------
 def test_internal_pause_kept_not_split(tmp_path):
     # Two blocks separated by a 6s gap, merged → one clip with a 6s internal pause.
+    # Filler removal off (--no-filler) isolates the warn-not-split behaviour: with it on the
+    # pause would be shortened (Part 3), which test_internal_pause_shortened_by_filler covers.
     words = _group(30, n=30) + _group(66, n=30) + _group(300)
-    rc, out = _apply(tmp_path, "1 80+\n", stem="mb4", words=words)
+    rc, out = _apply(tmp_path, "1 80+\n", stem="mb4", words=words, filler=False)
     assert rc == 0
     res = Manifest.model_validate_json(out.read_text())
     assert len(res.reels) == 1, "a clip with a long internal pause must not be split into two"
     assert any("pause" in w for w in res.reels[0].warnings), res.reels[0].warnings
+
+
+# --- Part 3: with filler removal on, a long internal pause is shortened into a segment gap -----
+def test_internal_pause_shortened_by_filler(tmp_path):
+    # Same 6s-gap merge, but filler removal on (default): the pause is shortened to the residual,
+    # the clip stays ONE reel with two playback segments, and no pause warning remains.
+    words = _group(30, n=30) + _group(66, n=30) + _group(300)
+    rc, out = _apply(tmp_path, "1 80+\n", stem="mb4f", words=words, filler=True)
+    assert rc == 0
+    res = Manifest.model_validate_json(out.read_text())
+    assert len(res.reels) == 1, "shortening a pause must not split the clip into two reels"
+    assert len(res.reels[0].segments) == 2, "the 6s pause becomes one internal segment gap"
+    assert not any("pause" in w for w in res.reels[0].warnings), res.reels[0].warnings
 
 
 # --- Test 5: short clip kept, warned (unit on collect_human_warnings) -----------------------
