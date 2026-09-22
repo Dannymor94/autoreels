@@ -283,21 +283,23 @@ def test_apply_tail_air_clean_tail_records_no_intruder():
 
 
 def test_tail_speech_fade_silences_word_pulled_into_tail():
+    # Intruder at 18.5, guard=0.12 → fade starts at 8.5-0.12=8.38 (out), ends at 8.5 (nw_start).
     r = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.5)
-    fade = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0)
+    fade = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0, guard=0.12)
     assert fade is not None
     st, dur = fade
-    assert abs(st - 8.0) < 1e-6                       # (18.0 - 10.0) on the output timeline
-    assert abs(dur - 0.5) < 1e-6                      # fade completes exactly as the intruder begins
+    n_out = 18.5 - 10.0   # 8.5
+    assert abs(st - (n_out - 0.12)) < 1e-6              # fade starts guard=0.12 before intruder
+    assert abs(st + dur - n_out) < 1e-6                 # fade completes exactly as the intruder begins
 
 
 def test_tail_speech_fade_butting_intruder_uses_min_fade():
-    # 0 ms gap (intruder starts at the last word's end): fade over the minimum window ending exactly
-    # at the intruder, so the tail still reaches silence before the next word is heard.
+    # 0 ms gap (intruder at last-word end): fade=guard (0.12), starts before lw_end (clamped to 0).
     r = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.0)
-    st, dur = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0)
-    assert abs(dur - 0.05) < 1e-6                     # _TAIL_MIN_FADE
-    assert abs((st + dur) - 8.0) < 1e-6              # completes exactly at the intruder (18.0→out 8.0)
+    st, dur = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0, guard=0.12)
+    n_out = 18.0 - 10.0   # 8.0
+    assert abs(dur - 0.12) < 1e-6                       # exactly guard
+    assert abs(st + dur - n_out) < 1e-6                 # ends at intruder
 
 
 def test_tail_speech_fade_clean_and_legacy_return_none():
@@ -308,10 +310,11 @@ def test_tail_speech_fade_clean_and_legacy_return_none():
 
 
 def test_tail_speech_fade_maps_speed_and_prior_windows():
-    # Two windows; the 5s first window shifts the tail forward on the output timeline, speed halves it.
+    # Two windows; the 5s first window shifts the tail; speed=2 halves output times.
     r = _tail_reel(start=0.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.5,
                    segments=[Segment(start=0.0, end=5.0), Segment(start=10.0, end=18.7)])
-    st, dur = _tail_speech_fade(r, r.playback_windows(), 2.0)
-    assert abs(st - (5.0 + 18.0 - 10.0) / 2.0) < 1e-6   # (offset 5 + 8) / speed 2 = 6.5
-    assert abs(dur - 0.25) < 1e-6                        # 0.5s gap / speed 2
+    st, dur = _tail_speech_fade(r, r.playback_windows(), 2.0, guard=0.12)
+    n_out = (18.5 - 10.0 + 5.0) / 2.0   # offset=5, nw_src=18.5, seg_start=10 → 13.5/2 = 6.75
+    assert abs(st - max(0.0, n_out - 0.12)) < 1e-6     # guard applied in output time
+    assert abs(st + dur - n_out) < 1e-6                # always ends at intruder
     assert _check_tail_air([r], tail_pad_sec=0.7, video_duration=20.0) is None
