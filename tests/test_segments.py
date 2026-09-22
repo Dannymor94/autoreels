@@ -16,7 +16,13 @@ import pytest
 
 from autoreels.core.config import load_subtitles_config
 from autoreels.core.models import Reel, Segment, Word
-from autoreels.local.render import _concat_segments_graph, build_concat_cmd
+from autoreels.local.render import (
+    RenderError,
+    _assert_windows_frame_aligned,
+    _concat_segments_graph,
+    _snap_windows_to_frames,
+    build_concat_cmd,
+)
 from autoreels.local.subtitles import build_ass, remap_to_output
 
 _SUB_CFG = load_subtitles_config(Path(__file__).resolve().parents[1] / "config" / "subtitles.yaml")
@@ -167,6 +173,35 @@ def test_build_concat_cmd_opens_each_window_as_its_own_input():
     assert "-filter_complex" in cmd and cmd[-1] == "out.mp4"
     assert cmd[cmd.index("-map") + 1] == "[v]"
     assert "-shortest" in cmd    # clamp audio to the (authoritative) video length → equal durations
+
+
+# --- frame-grid snap: multi-window windows must be whole frames (no lip-sync drift) -----------
+def test_snap_windows_makes_every_window_whole_frames():
+    # Arbitrary (non-frame-aligned) boundaries taken from the r11 regression.
+    segs = [Segment(start=2414.798719, end=2421.468719),
+            Segment(start=2422.578719, end=2444.108719),
+            Segment(start=2444.738719, end=2467.478719)]
+    fps = 30.0
+    snapped = _snap_windows_to_frames(segs, fps)
+    for s in snapped:
+        frames = (s.end - s.start) * fps
+        assert abs(frames - round(frames)) < 1e-6, f"{s} is not a whole number of frames"
+    # boundaries move by at most half a frame
+    for orig, snap in zip(segs, snapped):
+        assert abs(snap.start - orig.start) <= 0.5 / fps + 1e-9
+        assert abs(snap.end - orig.end) <= 0.5 / fps + 1e-9
+
+
+def test_frame_aligned_invariant_passes_on_whole_frames_and_fails_on_drift():
+    fps = 30.0
+    # snapped windows → whole frames → invariant holds
+    segs = _snap_windows_to_frames(
+        [Segment(start=100.017, end=106.673), Segment(start=200.331, end=222.118)], fps)
+    windows = [(s.start, s.end - s.start) for s in segs]
+    _assert_windows_frame_aligned(windows, fps)     # no raise
+    # a window off by ~half a frame → invariant catches it (this is exactly the drift source)
+    with pytest.raises(RenderError, match="not frame-aligned"):
+        _assert_windows_frame_aligned([(0.0, 5.0), (0.0, 6.6667 + 0.5 / fps)], fps)
 
 
 # --- tail air: exactly tail_pad_sec after the last heard word, on every path ------------------

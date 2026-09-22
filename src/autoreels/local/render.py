@@ -447,6 +447,64 @@ def build_cut_cmd(
     ]
 
 
+def _probe_source_fps(source, ffprobe: str) -> float:
+    """Source video frame rate (frames/sec) from `r_frame_rate` via ffprobe.
+
+    r_frame_rate is the base grid ffmpeg re-samples the CFR output onto (e.g. "30/1"). The
+    playback windows are snapped to this grid (see `_snap_windows_to_frames`) so each window is
+    a whole number of frames — the one thing that keeps a multi-window concat lip-synced.
+    """
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", str(source)],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    num, _, den = out.partition("/")
+    try:
+        fps = float(num) / float(den or "1")
+    except (ValueError, ZeroDivisionError):
+        fps = 0.0
+    if not fps > 0:
+        raise RenderError(f"не удалось прочитать частоту кадров источника (r_frame_rate={out!r})")
+    return fps
+
+
+def _snap_windows_to_frames(segments, fps: float):
+    """Quantise each playback window's start/end onto the source frame grid (1/fps).
+
+    Why: ffmpeg cuts video to whole frames but audio to the sample. A window whose length is not
+    an integer number of frames therefore renders with up to one frame of audio-vs-video mismatch;
+    concatenated windows accumulate that mismatch (measured: r11 drifted 0→−30→−33→−60 ms across
+    three segments), then `-shortest` hides it by clamping only the TOTAL at the end — equal totals,
+    desynced middle. Snapping every boundary onto the frame grid makes each window a whole number of
+    frames, so its audio and video are the same length and nothing accumulates (measured: 0 ms at
+    every boundary after the fix). Applied only on the multi-window path; a single window keeps the
+    byte-identical fast -ss/-t cut.
+    """
+    from autoreels.core.models import Segment
+    return [Segment(start=round(s.start * fps) / fps, end=round(s.end * fps) / fps)
+            for s in segments]
+
+
+def _assert_windows_frame_aligned(windows, fps: float) -> None:
+    """Sync invariant: every playback window spans a whole number of source frames.
+
+    A frame-aligned window has equal audio and video length (video cut to whole frames, audio to
+    the sample land on the same boundary), so per-segment audio and video match within one audio
+    sample and no lip-sync drift can accumulate across the concat. This replaces the old end-of-file
+    total-duration check, which `-shortest` made vacuous: it is verified on the exact windows handed
+    to ffmpeg, so a boundary that is not frame-aligned fails the render instead of drifting silently.
+    """
+    for i, (_st, dur) in enumerate(windows):
+        frames = dur * fps
+        off = abs(frames - round(frames))
+        if off > 1e-4:
+            raise RenderError(
+                f"segment {i}: {dur:.4f}s at {fps:.3f} fps = {frames:.4f} frames — not frame-aligned; "
+                f"audio and video would differ by {off / fps * 1000:.1f} ms (lip-sync drift)"
+            )
+
+
 def _concat_segments_graph(segments, edge_fade_sec: float) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
@@ -812,6 +870,12 @@ def _render_segments(
         _diagnose_crop_space(source, manifest, ffmpeg_bin)
 
     # .ass живут в tempdir: после ffmpeg убираются автоматически, в out_dir не остаются.
+    _fps_holder: list[float] = []   # source fps probed once, only if a multi-window reel needs it
+    def _fps() -> float:
+        if not _fps_holder:
+            _fps_holder.append(_probe_source_fps(source, _sibling_ffprobe(ffmpeg_bin)))
+        return _fps_holder[0]
+
     with tempfile.TemporaryDirectory(prefix="autoreels_ass_") as _tmp_ass:
         tmp_ass_dir = Path(_tmp_ass)
         outputs: list[Path] = []
@@ -828,7 +892,12 @@ def _render_segments(
             except ValueError as e:
                 raise RenderError(str(e)) from e
             segs = reel.playback_windows()   # cold-open hook (if any) + body windows
-            clip_dur = reel.playback_duration()
+            if len(segs) > 1:
+                # Frame-align every window so its audio and video have identical length — otherwise
+                # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
+                # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
+                segs = _snap_windows_to_frames(segs, _fps())
+            clip_dur = sum(s.end - s.start for s in segs)   # == playback_duration() for single-window
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
                     f"  ⚠ {reel.id}: {clip_dur:.1f}с < {_MIN_CLIP_RENDER_SEC}с — "
@@ -908,6 +977,7 @@ def _render_segments(
                 # every frame in between (was an OOM). Input i supplies [i:v]/[i:a]; music is [n:a].
                 prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec)
                 windows = [(w.start, w.end - w.start) for w in segs]
+                _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
                                                      speed=_reel_speed, vin=vseg, ain=aseg,
