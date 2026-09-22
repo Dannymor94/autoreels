@@ -172,9 +172,13 @@ class Reel(BaseModel):
     speed: float = 1.0
     # Source-time end of the last INTENDED word, stashed by _apply_tail_air after all bound edits.
     # reel.end sits tail_pad_sec of air past it; a next-phrase word can be pulled into that air.
-    # Render reads this to fade the tail to silence from here to the intruding word's start.
     # None = legacy manifest (render falls back to the configured audio_tail_fade_sec tail fade).
     tail_last_word_end: float | None = None
+    # Source-time start of the next transcript word that falls inside the trailing air (the intruder
+    # pulled into the tail), or None when the tail is clean. Recorded at apply time from the FULL
+    # transcript — the intruder is trimmed out of `subtitles`, so render cannot rediscover it there.
+    # Render fades the tail to silence from tail_last_word_end to here so the intruder plays muted.
+    tail_next_word_start: float | None = None
     # Human-review warnings: what a bypassed deciding stage would have flagged (dangling start,
     # long internal pause, short clip, overlap). Warn-only — nothing is dropped on the human's
     # behalf. Empty for the automatic path (those stages actually run there).

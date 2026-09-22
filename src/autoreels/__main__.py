@@ -988,6 +988,12 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         if video_duration is not None:
             desired = min(desired, video_duration)
         r.tail_last_word_end = lw_end
+        # Intruder: the first transcript word that starts inside the trailing air (at or after the
+        # last intended word's end — a next phrase often begins the instant the last word ends — and
+        # before the tail_pad end). Recorded now — it is trimmed out of subtitles, so render fades
+        # the tail to silence over it using this source-time start.
+        _intr = [w.t0 for w in words if lw_end - 1e-6 <= w.t0 < desired]
+        r.tail_next_word_start = min(_intr) if _intr else None
         if abs(desired - last.end) < 1e-6:
             continue
         if r.segments:

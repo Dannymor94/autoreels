@@ -254,39 +254,62 @@ def test_multisegment_reel_keeps_tail_air():
     r.check_segments()                                # invariant still holds
 
 
+def test_apply_tail_air_records_intruder_pulled_into_tail():
+    # The next phrase «Следующее» starts 40 ms after the last intended word, inside the 0.7s air.
+    # It is trimmed out of subtitles, so the intruder start must be recorded from the full words.
+    words = [Word(word="итог.", t0=1.5, t1=2.0), Word(word="Следующее", t0=2.04, t1=2.6)]
+    r = _tail_reel(start=0.0, end=2.0)                 # end on the last intended word
+    _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=20.0)
+    assert abs(r.tail_last_word_end - 2.0) < 1e-6
+    assert abs(r.tail_next_word_start - 2.04) < 1e-6   # intruder recorded from the transcript
+    assert abs(r.end - 2.7) < 1e-6                      # tail_pad still added
+
+
+def test_apply_tail_air_records_intruder_that_butts_against_last_word():
+    # The worst case (r01/r05/r10 in the PXL export): the next phrase starts the instant the last
+    # word ends (0 ms gap). It must still be recorded, not mistaken for the last intended word.
+    words = [Word(word="любили.", t0=1.4, t1=2.0), Word(word="Наверное,", t0=2.0, t1=2.5)]
+    r = _tail_reel(start=0.0, end=2.0)
+    _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=20.0)
+    assert abs(r.tail_last_word_end - 2.0) < 1e-6
+    assert abs(r.tail_next_word_start - 2.0) < 1e-6    # intruder at exactly lw_end still caught
+
+
+def test_apply_tail_air_clean_tail_records_no_intruder():
+    words = [Word(word="итог.", t0=1.5, t1=2.0), Word(word="Далеко", t0=5.0, t1=5.5)]  # next word past tail
+    r = _tail_reel(start=0.0, end=2.0)
+    _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=20.0)
+    assert r.tail_next_word_start is None              # nothing inside the 0.7s air → clean
+
+
 def test_tail_speech_fade_silences_word_pulled_into_tail():
-    # Last intended word ends at 18.0; the next phrase starts at 18.5 inside the 0.7s tail air.
-    words = [Word(word="итог.", t0=17.5, t1=18.0), Word(word="Следующее", t0=18.5, t1=19.0)]
-    r = _tail_reel(start=10.0, end=18.7, subtitles=words, tail_last_word_end=18.0)
-    segs = [Segment(start=10.0, end=18.7)]
-    fade = _tail_speech_fade(r, segs, 1.0)
+    r = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.5)
+    fade = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0)
     assert fade is not None
     st, dur = fade
     assert abs(st - 8.0) < 1e-6                       # (18.0 - 10.0) on the output timeline
     assert abs(dur - 0.5) < 1e-6                      # fade completes exactly as the intruder begins
 
 
-def test_tail_speech_fade_tiny_gap():
-    # The reported case: the next word starts 40 ms after the last — a 0.04s fade to silence.
-    words = [Word(word="итог.", t0=17.5, t1=18.0), Word(word="Ещё", t0=18.04, t1=18.4)]
-    r = _tail_reel(start=10.0, end=18.7, subtitles=words, tail_last_word_end=18.0)
+def test_tail_speech_fade_butting_intruder_uses_min_fade():
+    # 0 ms gap (intruder starts at the last word's end): fade over the minimum window ending exactly
+    # at the intruder, so the tail still reaches silence before the next word is heard.
+    r = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.0)
     st, dur = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0)
-    assert abs(dur - 0.04) < 1e-6
+    assert abs(dur - 0.05) < 1e-6                     # _TAIL_MIN_FADE
+    assert abs((st + dur) - 8.0) < 1e-6              # completes exactly at the intruder (18.0→out 8.0)
 
 
 def test_tail_speech_fade_clean_and_legacy_return_none():
-    words = [Word(word="итог.", t0=17.5, t1=18.0)]    # nothing after the last word
-    clean = _tail_reel(start=10.0, end=18.7, subtitles=words, tail_last_word_end=18.0)
+    clean = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=None)
     assert _tail_speech_fade(clean, [Segment(start=10.0, end=18.7)], 1.0) is None
-    legacy = _tail_reel(start=10.0, end=18.7,          # legacy manifest: no stashed word end
-                        subtitles=[Word(word="Следующее", t0=18.5, t1=19.0)])
+    legacy = _tail_reel(start=10.0, end=18.7)          # legacy manifest: both fields None
     assert _tail_speech_fade(legacy, [Segment(start=10.0, end=18.7)], 1.0) is None
 
 
 def test_tail_speech_fade_maps_speed_and_prior_windows():
-    words = [Word(word="итог.", t0=17.5, t1=18.0), Word(word="Следующее", t0=18.5, t1=19.0)]
     # Two windows; the 5s first window shifts the tail forward on the output timeline, speed halves it.
-    r = _tail_reel(start=0.0, end=18.7, subtitles=words, tail_last_word_end=18.0,
+    r = _tail_reel(start=0.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.5,
                    segments=[Segment(start=0.0, end=5.0), Segment(start=10.0, end=18.7)])
     st, dur = _tail_speech_fade(r, r.playback_windows(), 2.0)
     assert abs(st - (5.0 + 18.0 - 10.0) / 2.0) < 1e-6   # (offset 5 + 8) / speed 2 = 6.5

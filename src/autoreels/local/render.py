@@ -619,28 +619,36 @@ def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
     return [f"afade=t=in:st=0:d={_num(d)}", f"afade=t=out:st={_num(out_st)}:d={_num(d)}"]
 
 
+# Minimum tail fade-out when a next-phrase word butts right against the last word (≈0 gap): the fade
+# begins this much before the intruder so it can reach silence, eating at most this of the last word.
+_TAIL_MIN_FADE = 0.05
+
+
 def _tail_speech_fade(reel, segs, speed: float) -> tuple[float, float] | None:
     """(fade_start, fade_dur) on the OUTPUT timeline to silence a next-phrase word pulled into the
     trailing air, or None when the tail is clean.
 
-    reel.end sits `tail_pad_sec` of air past the last INTENDED word (its source-time end recorded in
-    reel.tail_last_word_end by _apply_tail_air). A following phrase can begin inside that air and be
-    heard. When such an intruder exists in the last window, fade from the intended word's end to the
-    intruder's start so the intruder plays entirely under silence (afade=out stays silent after it).
-    Legacy manifests without the field, or a clean tail, return None → the configured tail fade
-    stands. Times are mapped through the (frame-snapped) windows and divided by `speed`."""
+    reel.end sits `tail_pad_sec` of air past the last INTENDED word; a following phrase can begin
+    inside that air and be heard. _apply_tail_air records the intended word's end
+    (reel.tail_last_word_end) and the intruder's start (reel.tail_next_word_start) in SOURCE time —
+    the intruder is trimmed out of `subtitles`, so it cannot be found there. Both fall in the last
+    window; map them onto the output timeline (prior windows + /speed) and fade from the word's end
+    to the intruder's start, so the intruder plays entirely under silence (afade=out stays muted
+    after). A clean tail or a legacy manifest (fields None) returns None → configured tail fade."""
     lw_end = getattr(reel, "tail_last_word_end", None)
-    if lw_end is None or not reel.subtitles or not segs:
+    nw_start = getattr(reel, "tail_next_word_start", None)
+    if lw_end is None or nw_start is None or not segs:
         return None
     last = segs[-1]
     offset = sum(s.end - s.start for s in segs[:-1])   # output time before the last window (pre-speed)
-    intruders = [w.t0 for w in reel.subtitles if lw_end + 1e-3 < w.t0 < last.end]
-    if not intruders:
-        return None
     l_out = (min(lw_end, last.end) - last.start + offset) / speed
-    n_out = (min(intruders) - last.start + offset) / speed
-    dur = n_out - l_out
-    return (l_out, dur) if dur > 1e-3 else None
+    n_out = (nw_start - last.start + offset) / speed
+    # Fade must reach silence by the intruder's start (n_out). Ideally begin at the last word's end
+    # (l_out); when the next phrase butts right against it, begin _TAIL_MIN_FADE earlier so there is
+    # room to fade — eating at most that much of the last word's decay. Never start before 0.
+    start = max(0.0, min(l_out, n_out - _TAIL_MIN_FADE))
+    dur = n_out - start
+    return (start, dur) if dur > 1e-3 else None
 
 
 def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
