@@ -102,10 +102,12 @@ def test_grammar_all_fields_and_malformed():
     assert any("s" in msg for _, msg in errs)   # malformed s:bad reported, not fatal
 
 
-# --- Test 8: automatic path never removes filler --------------------------------------------
-def test_automatic_path_has_no_filler_removal():
+# --- Test 8: the manual-only features never touch the automatic path ------------------------
+def test_automatic_path_untouched_by_edit_features():
     from autoreels.cloud import select as _sel
     from autoreels import __main__ as cli
-    # remove_fillers must not be wired into the automatic selection pipeline or its command path.
-    assert "remove_fillers" not in inspect.getsource(_sel)
-    assert "remove_fillers" not in inspect.getsource(cli._cmd_run_impl)
+    src = inspect.getsource(_sel) + inspect.getsource(cli._cmd_run_impl)
+    # filler removal, cold open and the title plate are set only on the manual/edit path.
+    assert "remove_fillers" not in src
+    assert "cold_open" not in src
+    assert "title_overlay" not in src

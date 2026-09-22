@@ -10,11 +10,16 @@ the current renderer — is verified by an actual render, not here):
    audio with acrossfade; build_concat_cmd fast-seeks the input to the first segment.
 4. A single-segment reel still routes through the fast -ss/-t build_cut_cmd (no concat graph).
 """
+from pathlib import Path
+
 import pytest
 
+from autoreels.core.config import load_subtitles_config
 from autoreels.core.models import Reel, Segment, Word
 from autoreels.local.render import _concat_segments_graph, build_concat_cmd
-from autoreels.local.subtitles import remap_to_output
+from autoreels.local.subtitles import build_ass, remap_to_output
+
+_SUB_CFG = load_subtitles_config(Path(__file__).resolve().parents[1] / "config" / "subtitles.yaml")
 
 
 def _reel(**kw):
@@ -89,6 +94,32 @@ def test_concat_graph_zero_fade_hard_joins_audio():
     graph, _, _ = _concat_segments_graph(segs, 0.0)
     assert "afade" not in graph
     assert "concat=n=2:v=0:a=1[aseg]" in graph
+
+
+# --- Part 4: title plate renders only for its duration and does not overlap subtitles -------
+def test_title_plate_only_when_given_and_bounded():
+    words = [Word(word="привет", t0=0.0, t1=0.5), Word(word="мир", t0=0.5, t1=1.0)]
+    # No title → no plate.
+    assert "Style: Title" not in build_ass(words, cfg=_SUB_CFG, clip_start=0.0)
+    # With title → a Title style + one Dialogue spanning exactly [0, title_lead_sec].
+    ass = build_ass(words, cfg=_SUB_CFG, clip_start=0.0, title="Сожми книгу до одной сутры")
+    assert "Style: Title" in ass
+    title_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:") and ",Title,," in l]
+    assert len(title_lines) == 1, title_lines
+    end = title_lines[0].split(",")[2]
+    assert end == "0:00:03.50", end                     # cfg.title_lead_sec = 3.5
+    assert "\\N" in title_lines[0]                        # long title wrapped, not clipped
+
+
+def test_title_plate_does_not_overlap_subtitles():
+    # Title style is top-aligned (8); subtitle Default is bottom (2). Their vertical zones are
+    # disjoint: title MarginV is measured from the top, subtitle position_v from the bottom.
+    ass = build_ass([Word(word="w", t0=0.0, t1=0.5)], cfg=_SUB_CFG, clip_start=0.0, title="T")
+    title_style = next(l for l in ass.splitlines() if l.startswith("Style: Title"))
+    default_style = next(l for l in ass.splitlines() if l.startswith("Style: Default"))
+    # field order: …, Alignment(19th), MarginL, MarginR, MarginV, Encoding
+    assert title_style.split(",")[18] == "8"             # top-centre
+    assert default_style.split(",")[18] == str({"center": 2, "left": 1, "right": 3}[_SUB_CFG.alignment])
 
 
 # --- invariant: segments must stay consistent with the reel's final bounds -----------------

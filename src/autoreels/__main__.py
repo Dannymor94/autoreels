@@ -2815,7 +2815,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         candidate_blocks, filter_blocks, score_block,
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
-    from autoreels.cloud.edit import sentence_bounds, remove_fillers
+    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span
+    from autoreels.core.models import Segment as _Segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
     from autoreels.cloud.chunk_transcribe import renumber_reels
@@ -3064,6 +3065,20 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if _expl_start:
             reel._explicit_start = True   # the human fixed the start → dangling repair must not move it
         reel._filler_override = getattr(_ae, "filler", None) if _ae else None   # per-clip f:0/f:1
+        # Part 4 — title plate text (only from the review `t:`; empty on the automatic path).
+        reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""
+        # Part 5 — cold open: resolve the hook sentence (h:N) over the same block-span numbering the
+        # export showed; stash its window, apply the cap after segmentation below.
+        reel._hook_window = None
+        _hook = getattr(_ae, "hook", None) if _ae else None
+        if _hook:
+            _sents = split_sentences(words_in_span(_tx_words, block.start, block.end))
+            if 1 <= _hook <= len(_sents):
+                _hs = _sents[_hook - 1]
+                reel._hook_window = (_hook, _hs[0].t0, _hs[-1].t1)
+            else:
+                print(f"  warning: h:{_hook} out of range (1-{len(_sents)}) — cold open skipped",
+                      file=sys.stderr)
         if _bnote:
             print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
         reel.r0_start = reel.start
@@ -3177,6 +3192,30 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.start, reel.end = segs[0].start, segs[-1].end
                 filler_stats.append((reel, removed, count))
 
+    # Part 5 — cold open: prepend the hook sentence as a replayed window (kept in the body too).
+    # Refuse a hook longer than the cap with a warning. Ensure the hook's words are in subtitles so
+    # the plate/subtitle shows during the cold open even if the hook sits outside the trimmed body.
+    from autoreels.local.subtitles import words_in_window as _wiw
+    _hook_max = getattr(r0_cfg, "hook_max_sec", 6.0)
+    cold_open_stats: list[tuple] = []
+    for reel in reels:
+        hw = getattr(reel, "_hook_window", None)
+        if not hw:
+            continue
+        seq_n, ht0, ht1 = hw
+        if ht1 - ht0 > _hook_max:
+            msg = f"cold open: hook sentence {seq_n} is {ht1 - ht0:.1f}s > cap {_hook_max:.0f}s — refused"
+            reel.warnings.append(msg)
+            print(f"  warning ({reel.id}): {msg}", file=sys.stderr)
+            continue
+        reel.cold_open = _Segment(start=ht0, end=ht1)
+        _have = {round(w.t0, 3) for w in reel.subtitles}
+        for w in _wiw(tx_words, ht0, ht1):
+            if round(w.t0, 3) not in _have:
+                reel.subtitles.append(w)
+        reel.subtitles.sort(key=lambda w: w.t0)
+        cold_open_stats.append((reel, seq_n, ht1 - ht0))
+
     # Fail fast if any reel's segments desynced from its final bounds (never emit such a manifest).
     for reel in reels:
         try:
@@ -3259,6 +3298,18 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             n_seg = len(r.segments) or 1
             print(f"  reel {_final_num.get(id(r), '?')} ({r.id}): −{removed:.1f}s in {count} cut(s) "
                   f"→ {n_seg} segment(s), {r.playback_duration():.1f}s played")
+
+    # Cold open (Part 5) and title plate (Part 4) reports.
+    if cold_open_stats:
+        print(f"cold open ({len(cold_open_stats)} clips):")
+        for r, seq_n, dur in cold_open_stats:
+            print(f"  reel {_final_num.get(id(r), '?')} ({r.id}): hook sentence {seq_n} ({dur:.1f}s) "
+                  f"replayed first, kept in place")
+    _titled = [r for r in reels if getattr(r, "title_overlay", "")]
+    if _titled:
+        print(f"title plate ({len(_titled)} clips):")
+        for r in _titled:
+            print(f"  reel {_final_num.get(id(r), '?')} ({r.id}): «{r.title_overlay}»")
 
     # Install: copy to manifests/ so render picks up the human selection.
     # --render implies --install.

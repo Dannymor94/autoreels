@@ -149,6 +149,8 @@ filler_removal:
   max_removed_share: 0.25      # never remove more than this share of the span
 # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
 wind_down_phrases: ["наверное, как-то так", "вот", "да", "понятно", "как-то так", "ну вот"]
+# Cold open (Part 5): a hook sentence (h:N) longer than this is refused with a warning.
+hook_max_sec: 6.0
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.

@@ -133,11 +133,49 @@ def _style_line(cfg: SubtitlesConfig) -> str:
     return "Style: " + ",".join(str(x) for x in fields)
 
 
+def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float) -> str:
+    """Greedily wrap `text` into lines that fit `max_px` (estimated width), joined with ASS \\N.
+
+    WrapStyle is 2 (no auto-wrap — \\N only), so a long title plate would otherwise run off the
+    frame; this packs it into fitting lines. A single over-wide word stays on its own line."""
+    words = text.split()
+    out: list[str] = []
+    cur: list[str] = []
+    for w in words:
+        if cur and _estimate_width(" ".join(cur + [w]), font_size, char_width_ratio) > max_px:
+            out.append(" ".join(cur))
+            cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        out.append(" ".join(cur))
+    return "\\N".join(out)
+
+
+def _title_style_line(cfg: SubtitlesConfig) -> str:
+    """Title-plate style: a filled box (BackColour) at the top of the frame (alignment 8), sized by
+    title_font_size (0 → font_size), MarginV measured from the top. Distinct from the subtitle
+    Default style and positioned above the subtitle zone so the two never overlap."""
+    primary = ass_color(cfg.text_color)
+    outline = ass_color(cfg.outline_color)
+    back = ass_color(cfg.fill_color, alpha=_alpha_from_opacity(cfg.fill_opacity))
+    size = cfg.title_font_size or cfg.font_size
+    bold = -1 if cfg.bold else 0
+    fields = [
+        "Title", cfg.font, size, primary, primary, outline, back,
+        bold, 0, 0, 0, 100, 100, 0, 0, 3, cfg.outline_width, 0,
+        8, 40, 40, cfg.title_position_v, 1,     # alignment 8 = top-centre; MarginV from top
+    ]
+    return "Style: " + ",".join(str(x) for x in fields)
+
+
 def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
-              play_res: tuple[int, int] = (1080, 1920)) -> str:
+              play_res: tuple[int, int] = (1080, 1920), title: str = "") -> str:
     """Собрать .ass из слов сегмента: Style из конфига + Dialogue по группам поп-апом.
 
     Времена Dialogue — относительно начала клипа (clip_start вычитается). uppercase из конфига.
+    `title` (Part 4) непусто → плашка сверху (стиль Title) на первые cfg.title_lead_sec секунд с
+    фейдом, над зоной субтитров (не пересекается). Пусто → плашки нет.
     """
     pw, ph = play_res
     groups = group_words(
@@ -145,6 +183,9 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         font_size=cfg.font_size, char_width_ratio=cfg.char_width_ratio,
         break_pause_sec=cfg.subtitle_break_pause_sec,
     )
+    styles = [_style_line(cfg)]
+    if title:
+        styles.append(_title_style_line(cfg))
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -156,11 +197,19 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         ("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
          "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
          "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"),
-        _style_line(cfg),
+        *styles,
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
+    if title:
+        ttext = title.upper() if cfg.uppercase else title
+        tsize = cfg.title_font_size or cfg.font_size
+        ttext = _wrap_ass(ttext, max_px=cfg.max_text_width_px, font_size=tsize,
+                          char_width_ratio=cfg.char_width_ratio)   # wrap so a long title never clips
+        fi = fo = cfg.title_fade_ms
+        ttext = f"{{\\fad({fi},{fo})}}" + ttext
+        lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
     for g in groups:
         text = " ".join(w.word for w in g)
         if cfg.uppercase:

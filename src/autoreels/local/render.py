@@ -805,7 +805,7 @@ def _render_segments(
                 reel.check_segments()   # never render a reel whose segments desynced from its bounds
             except ValueError as e:
                 raise RenderError(str(e)) from e
-            segs = reel.effective_segments()
+            segs = reel.playback_windows()   # cold-open hook (if any) + body windows
             clip_dur = reel.playback_duration()
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
@@ -830,15 +830,17 @@ def _render_segments(
                 _pts = f"setpts=PTS/{_reel_speed:.4g}"
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
             ass_cwd: str | None = None
-            if subtitles_cfg is not None and reel.subtitles:
+            _title = getattr(reel, "title_overlay", "") or ""
+            if subtitles_cfg is not None and (reel.subtitles or _title):
                 # Remap word times onto the concatenated, speed-adjusted output timeline (gap words
                 # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
-                # output is identical to the pre-segments renderer.
+                # output is identical to the pre-segments renderer. A title plate (Part 4) is drawn
+                # on top for the first seconds when the reel carries title_overlay.
                 ass_words = remap_to_output(reel.subtitles, segs, speed=_reel_speed)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
                 ass_path.write_text(
-                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0),
+                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0, title=_title),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.
@@ -875,9 +877,10 @@ def _render_segments(
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
                 )
             else:
-                # Multi-segment: trim+concat the segments from the one source in a single encode.
-                # Fast-seek to the first segment so trims stay relative and decoding starts there.
-                base = segs[0].start
+                # Multi-window: trim+concat the windows (cold open + body) from the one source in a
+                # single encode. Fast-seek to the EARLIEST window start (a cold-open hook may sit
+                # later than the body start), so trims stay relative and decoding starts there.
+                base = min(w.start for w in segs)
                 prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec, base=base)
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,

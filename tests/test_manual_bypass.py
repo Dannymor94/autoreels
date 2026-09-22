@@ -180,6 +180,31 @@ def test_internal_pause_kept_not_split(tmp_path):
     assert any("pause" in w for w in res.reels[0].warnings), res.reels[0].warnings
 
 
+# --- Part 5: cold open — hook sentence leads the clip and stays in place; over-cap is refused ----
+def test_cold_open_hook_leads_and_kept(tmp_path):
+    words = _group(30) + _group(400)          # each word is its own sentence; block 1 = seqs 1..30
+    rc, out = _apply(tmp_path, "1 80 | h:3\n", stem="mbco", words=words, filler=False)
+    assert rc == 0
+    r = Manifest.model_validate_json(out.read_text()).reels[0]
+    assert r.cold_open is not None, "h:3 must produce a cold-open window"
+    assert abs(r.cold_open.start - 32.0) < 0.2, r.cold_open   # sentence 3 = «слово2.» at t=32
+    # the hook sentence is KEPT in place (still inside the body span), heard again in context
+    assert r.start <= r.cold_open.start <= r.end
+    assert r.playback_windows()[0].start == r.cold_open.start, "cold open plays FIRST"
+
+
+def test_cold_open_over_cap_refused(tmp_path):
+    # Sentence 1 is a single 7s token — over the 6s hook cap → refused with a warning, no cold open.
+    words = ([{"word": "длиннаяфраза.", "t0": 30.0, "t1": 37.0}]
+             + [{"word": f"слово{i}.", "t0": 38.0 + i, "t1": 38.0 + i + 0.9} for i in range(25)]
+             + _group(400))
+    rc, out = _apply(tmp_path, "1 80 | h:1\n", stem="mbcocap", words=words, filler=False)
+    assert rc == 0
+    r = Manifest.model_validate_json(out.read_text()).reels[0]
+    assert r.cold_open is None, "an over-cap hook must be refused"
+    assert any("cold open" in w and "refused" in w for w in r.warnings), r.warnings
+
+
 # --- Segment/bounds consistency: repaired start feeds the segments (not the pre-repair position) --
 def test_repaired_start_drives_segments(tmp_path):
     # Opens on dangling «Это фраза.» (repairable to «Новое»); a 3s pause mid-clip makes filler cut

@@ -127,10 +127,17 @@ class Reel(BaseModel):
     id: str
     start: float
     end: float
-    # Ordered source windows played back-to-back. Empty = one contiguous window [start, end]
-    # (legacy / automatic path). Non-empty = an edited reel (cut filler, sentence bounds, cold
-    # open); `start`/`end` remain the overall span. Populated by the manual/edit path only.
+    # Ordered source windows of the clip BODY, played back-to-back. Empty = one contiguous window
+    # [start, end] (legacy / automatic path). Non-empty = an edited body (cut filler, sentence
+    # bounds); `start`/`end` remain the body span and the segment invariant (check_segments) holds.
     segments: list[Segment] = Field(default_factory=list)
+    # Cold open (Part 5): a hook sentence replayed BEFORE the body, then the body plays from its
+    # start (the sentence stays in place, so it is heard again in context). Kept OUT of `segments`
+    # because it is intentionally non-monotonic in source time — the body invariant stays strict.
+    cold_open: Segment | None = None
+    # Title plate text (Part 4): overlaid at the top for the first seconds. Set only from the review
+    # `t:` field — empty on the automatic path, so no plate renders there.
+    title_overlay: str = ""
     score: int = Field(ge=0, le=100)
     hook: str
     title: str
@@ -177,12 +184,21 @@ class Reel(BaseModel):
         """
         return list(self.segments) if self.segments else [Segment(start=self.start, end=self.end)]
 
-    def playback_duration(self) -> float:
-        """Total played length = sum of segment durations (gaps between segments are removed).
+    def playback_windows(self) -> list["Segment"]:
+        """The full ordered playback: the cold-open hook (if any) then the body windows.
 
-        Equals `end - start` for a single-span reel; smaller once filler is cut into gaps.
+        This is what render concatenates and what subtitles remap onto — a hook sentence that also
+        lives in the body appears in both windows (heard in the cold open, then again in context).
         """
-        return sum(s.end - s.start for s in self.effective_segments())
+        body = self.effective_segments()
+        return ([self.cold_open] if self.cold_open else []) + body
+
+    def playback_duration(self) -> float:
+        """Total played length = sum of every playback window (cold open + body, gaps removed).
+
+        Equals `end - start` for a single-span reel with no cold open.
+        """
+        return sum(s.end - s.start for s in self.playback_windows())
 
     def check_segments(self, *, eps: float = 1e-3) -> None:
         """Assert the segment list is consistent with [start, end]; raise ValueError otherwise.
@@ -192,6 +208,9 @@ class Reel(BaseModel):
         reel.start, the last must end at reel.end, and segments must be ordered, non-overlapping and
         inside [start, end]. A single-span reel (no explicit segments) is always valid.
         """
+        if self.cold_open is not None and self.cold_open.end <= self.cold_open.start:
+            raise ValueError(f"reel {self.id}: cold_open is empty/reversed "
+                             f"[{self.cold_open.start:.3f}, {self.cold_open.end:.3f}]")
         segs = self.segments
         if not segs:
             return

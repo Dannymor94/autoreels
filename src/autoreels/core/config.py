@@ -258,6 +258,8 @@ class R0Config(BaseModel):
     wind_down_phrases: list[str] = Field(default_factory=lambda: [
         "наверное, как-то так", "вот", "да", "понятно", "как-то так", "ну вот",
     ])
+    # Cold open (Part 5): a hook sentence (h:N) longer than this is refused with a warning.
+    hook_max_sec: float = 6.0
 
     @property
     def min_duration(self) -> int:
@@ -572,6 +574,13 @@ class SubtitlesConfig(BaseModel):
     alignment: str             # center | left | right
     char_width_ratio: float    # оценка ширины символа (доля font_size) для подгонки строки
     max_text_width_px: int     # макс. ширина строки в px
+    # Title plate (Part 4): overlay at the TOP for the first seconds, above the subtitle zone.
+    # Rendered only when a reel carries title_overlay (review `t:`). Defaults keep old subtitles.yaml
+    # valid; title_font_size 0 → reuse font_size.
+    title_lead_sec: float = 3.5       # seconds the plate stays on
+    title_font_size: int = 0          # 0 → same as font_size
+    title_position_v: int = 150       # MarginV from the TOP (alignment 8, top-centre)
+    title_fade_ms: int = 250          # plate fade in/out
 
 
 # --------------------------------------------------------------------- Transcribe
