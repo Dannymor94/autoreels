@@ -801,6 +801,10 @@ def _render_segments(
         batch_encoded_secs = 0.0
         batch_start_wall = time.time()
         for idx, reel in enumerate(manifest.reels, 1):
+            try:
+                reel.check_segments()   # never render a reel whose segments desynced from its bounds
+            except ValueError as e:
+                raise RenderError(str(e)) from e
             segs = reel.effective_segments()
             clip_dur = reel.playback_duration()
             if clip_dur < _MIN_CLIP_RENDER_SEC:

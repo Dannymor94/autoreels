@@ -180,6 +180,29 @@ def test_internal_pause_kept_not_split(tmp_path):
     assert any("pause" in w for w in res.reels[0].warnings), res.reels[0].warnings
 
 
+# --- Segment/bounds consistency: repaired start feeds the segments (not the pre-repair position) --
+def test_repaired_start_drives_segments(tmp_path):
+    # Opens on dangling «Это фраза.» (repairable to «Новое»); a 3s pause mid-clip makes filler cut
+    # a segment. The first segment must begin at the REPAIRED start, not the old «Это» position.
+    lead = [{"word": "Это", "t0": 30.0, "t1": 30.9}, {"word": "фраза.", "t0": 31.0, "t1": 31.9}]
+    part1 = [{"word": ("Новое" if i == 0 else f"мысль{i}"), "t0": 33.0 + i, "t1": 33.0 + i + 0.9}
+             for i in range(20)]                        # 33.0 .. 52.9
+    # 1.2s pause: above filler's 0.8s (→ cut) but below snap's 1.5s phrase-end (→ stays internal).
+    part2 = [{"word": (f"идея{i}" if i < 19 else "конец."), "t0": 54.1 + i, "t1": 54.1 + i + 0.9}
+             for i in range(20)]
+    words = lead + part1 + part2 + _group(400)
+    rc, out = _apply(tmp_path, "1 80\n", stem="mbseg", words=words, filler=True)
+    assert rc == 0
+    res = Manifest.model_validate_json(out.read_text())
+    r = res.reels[0]
+    assert r.start > 32.0, f"start should be repaired past «Это фраза.»; got {r.start}"
+    assert r.segments, "the 3s pause should have produced filler segments"
+    assert abs(r.segments[0].start - r.start) < 1e-3, (
+        f"first segment {r.segments[0].start} must begin at the repaired start {r.start}"
+    )
+    r.check_segments()   # invariant holds end to end
+
+
 # --- Part 3: with filler removal on, a long internal pause is shortened into a segment gap -----
 def test_internal_pause_shortened_by_filler(tmp_path):
     # Same 6s-gap merge, but filler removal on (default): the pause is shortened to the residual,

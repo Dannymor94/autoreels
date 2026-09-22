@@ -3177,6 +3177,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.start, reel.end = segs[0].start, segs[-1].end
                 filler_stats.append((reel, removed, count))
 
+    # Fail fast if any reel's segments desynced from its final bounds (never emit such a manifest).
+    for reel in reels:
+        try:
+            reel.check_segments()
+        except ValueError as e:
+            print(f"  error: {e}", file=sys.stderr)
+            return 1
+
     human_warnings = collect_human_warnings(reels, transcript, r0_cfg=r0_cfg)
 
     # Stamp per-clip speed. Subtitles stay in source time; render remaps them onto the

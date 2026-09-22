@@ -184,6 +184,35 @@ class Reel(BaseModel):
         """
         return sum(s.end - s.start for s in self.effective_segments())
 
+    def check_segments(self, *, eps: float = 1e-3) -> None:
+        """Assert the segment list is consistent with [start, end]; raise ValueError otherwise.
+
+        The one enforced invariant so a bound moved after segmentation (dangling repair, interview
+        snap, sentence bounds, padding) can never render silently: the first segment must start at
+        reel.start, the last must end at reel.end, and segments must be ordered, non-overlapping and
+        inside [start, end]. A single-span reel (no explicit segments) is always valid.
+        """
+        segs = self.segments
+        if not segs:
+            return
+        if abs(segs[0].start - self.start) > eps:
+            raise ValueError(f"reel {self.id}: segments[0].start {segs[0].start:.3f} != "
+                             f"reel.start {self.start:.3f} (a bound moved after segmentation?)")
+        if abs(segs[-1].end - self.end) > eps:
+            raise ValueError(f"reel {self.id}: segments[-1].end {segs[-1].end:.3f} != "
+                             f"reel.end {self.end:.3f}")
+        prev = self.start
+        for i, s in enumerate(segs):
+            if s.end <= s.start:
+                raise ValueError(f"reel {self.id}: segment {i} empty/reversed [{s.start:.3f}, {s.end:.3f}]")
+            if s.start < prev - eps:
+                raise ValueError(f"reel {self.id}: segment {i} starts {s.start:.3f} before the previous "
+                                 f"segment ends {prev:.3f} (unordered or overlapping)")
+            if s.start < self.start - eps or s.end > self.end + eps:
+                raise ValueError(f"reel {self.id}: segment {i} [{s.start:.3f}, {s.end:.3f}] outside "
+                                 f"reel [start, end] [{self.start:.3f}, {self.end:.3f}]")
+            prev = s.end
+
 
 class Manifest(BaseModel):
     """Лёгкий JSON-план — единственный мост ОБЛАКО→ЛОКАЛЬ. Видео сюда не попадает."""

@@ -10,6 +10,8 @@ the current renderer — is verified by an actual render, not here):
    audio with acrossfade; build_concat_cmd fast-seeks the input to the first segment.
 4. A single-segment reel still routes through the fast -ss/-t build_cut_cmd (no concat graph).
 """
+import pytest
+
 from autoreels.core.models import Reel, Segment, Word
 from autoreels.local.render import _concat_segments_graph, build_concat_cmd
 from autoreels.local.subtitles import remap_to_output
@@ -87,6 +89,31 @@ def test_concat_graph_zero_fade_hard_joins_audio():
     graph, _, _ = _concat_segments_graph(segs, 0.0)
     assert "afade" not in graph
     assert "concat=n=2:v=0:a=1[aseg]" in graph
+
+
+# --- invariant: segments must stay consistent with the reel's final bounds -----------------
+def test_check_segments_rejects_first_segment_before_start():
+    # A reel whose start was moved forward (e.g. dangling repair) AFTER segments were built:
+    # the first segment still begins at the old position → must be rejected, not rendered.
+    r = _reel(start=10.0, end=50.0,
+              segments=[Segment(start=8.0, end=20.0), Segment(start=30.0, end=50.0)])
+    with pytest.raises(ValueError, match="segments\\[0\\].start"):
+        r.check_segments()
+
+
+def test_check_segments_accepts_consistent_and_single_span():
+    _reel(start=10.0, end=50.0).check_segments()   # single span: always valid
+    _reel(start=10.0, end=50.0,
+          segments=[Segment(start=10.0, end=20.0), Segment(start=30.0, end=50.0)]).check_segments()
+
+
+def test_check_segments_rejects_overlap_and_end_mismatch():
+    with pytest.raises(ValueError, match="unordered or overlapping"):
+        _reel(start=0.0, end=50.0,
+              segments=[Segment(start=0.0, end=25.0), Segment(start=20.0, end=50.0)]).check_segments()
+    with pytest.raises(ValueError, match="segments\\[-1\\].end"):
+        _reel(start=0.0, end=50.0,
+              segments=[Segment(start=0.0, end=20.0), Segment(start=30.0, end=60.0)]).check_segments()
 
 
 def test_build_concat_cmd_fast_seeks_first_segment():
