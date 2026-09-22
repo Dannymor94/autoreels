@@ -957,6 +957,62 @@ _DECIDING_STAGES = (
 )
 
 
+_TAIL_FRAME_TOL = 0.05   # ~one video frame (25-30 fps) of slack for the tail-air invariant
+
+
+def _last_heard_word_end(words, seg) -> float | None:
+    """End time of the last word actually heard in a body segment: the greatest t1 among words that
+    START inside [seg.start, seg.end). Uses max(t1) (not list order) to be robust to Whisper's
+    overlapping timestamps, and to a segment end that currently sits mid-last-word (negative air)."""
+    ends = [w.t1 for w in words if seg.start <= w.t0 < seg.end]
+    return max(ends) if ends else None
+
+
+def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float | None) -> None:
+    """Set every reel's end to exactly tail_pad_sec of air after the last heard word.
+
+    Runs LAST, after snap/padding/filler/cold-open: each of those erodes the trailing air (padding
+    clamps the end to the next word / an overlapping timestamp, filler rebuilds the segments, an
+    explicit e: lands the end on the last word). The last body segment's end (and reel.end) is set
+    to last_word_end + tail_pad_sec, clamped to the video length. The word used is stashed on the
+    reel so the invariant checks against the same value (extension must not redefine "last word").
+    A short audio fade at render masks any next-phrase speech pulled into the tail."""
+    from autoreels.core.models import Segment as _Seg
+    for r in reels:
+        segs = r.effective_segments()
+        last = segs[-1]
+        lw_end = _last_heard_word_end(words, last)
+        if lw_end is None:
+            continue
+        desired = lw_end + tail_pad_sec
+        if video_duration is not None:
+            desired = min(desired, video_duration)
+        r._tail_last_word_end = lw_end
+        if abs(desired - last.end) < 1e-6:
+            continue
+        if r.segments:
+            r.segments[-1] = _Seg(start=r.segments[-1].start, end=desired)
+        r.end = desired
+
+
+def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
+                    tol: float = _TAIL_FRAME_TOL) -> str | None:
+    """Invariant: every reel's end is no earlier than last_word_end + tail_pad_sec − one frame
+    (or the video end, whichever is smaller). Returns an error string naming the first offender,
+    or None. Reads the last-word end stashed by _apply_tail_air (stable across the extension)."""
+    for r in reels:
+        lw_end = getattr(r, "_tail_last_word_end", None)
+        if lw_end is None:
+            continue
+        floor = lw_end + tail_pad_sec - tol
+        if video_duration is not None:
+            floor = min(floor, video_duration - tol)
+        if r.end < floor:
+            return (f"{r.id}: audio ends {floor - r.end:.3f}s too early — "
+                    f"tail air {r.end - lw_end:.3f}s < required {tail_pad_sec:.2f}s")
+    return None
+
+
 def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
     """Warn (never drop/trim/split) on what a bypassed deciding stage would have acted on.
 
@@ -3223,6 +3279,13 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.subtitles.sort(key=lambda w: w.t0)
         cold_open_stats.append((reel, seq_n, ht1 - ht0))
 
+    # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
+    # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,
+    # multi-segment, cold open, explicit e:). Runs LAST so nothing downstream shortens it.
+    _video_dur = tx_words[-1].t1 if tx_words else None
+    _tail_pad = getattr(r0_cfg, "tail_pad_sec", 0.7)
+    _apply_tail_air(reels, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur)
+
     # Fail fast if any reel's segments desynced from its final bounds (never emit such a manifest).
     for reel in reels:
         try:
@@ -3230,6 +3293,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         except ValueError as e:
             print(f"  error: {e}", file=sys.stderr)
             return 1
+
+    # Invariant: audio ends no earlier than last_word_end + tail_pad_sec − one frame.
+    _tail_err = _check_tail_air(reels, tail_pad_sec=_tail_pad, video_duration=_video_dur)
+    if _tail_err:
+        print(f"  error: tail-air invariant: {_tail_err}", file=sys.stderr)
+        return 1
 
     human_warnings = collect_human_warnings(reels, transcript, r0_cfg=r0_cfg)
 

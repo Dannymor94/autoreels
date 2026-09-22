@@ -561,10 +561,28 @@ def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
     return [f"afade=t=in:st=0:d={_num(d)}", f"afade=t=out:st={_num(out_st)}:d={_num(d)}"]
 
 
-def _audio_filter_chain(ap: AudioProcessing, clip_duration: float) -> str:
-    """Аудиофильтры клипа (БЕЗ музыки). Порядок: шумоподавление → нормализация → фейд.
-    Пусто — всё выключено (команда без -af)."""
-    return ",".join(_audio_denoise_norm(ap) + _audio_fade_parts(ap, clip_duration))
+def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float) -> list[str]:
+    """Always-on audio-only fade-out over the last `audio_tail_fade_sec` of the clip.
+
+    Separate from `_audio_fade_parts` (the optional symmetric in/out, off by default) and from the
+    10 ms segment edge fades. It rides on the tail_pad air after the last word, so the clip ends
+    gracefully and any speech of the next phrase pulled into the tail is faded to silence. NO video
+    fade — audio only. `out_duration` is the FINAL (post-speed) clip length so the fade lands on the
+    real end. Placed last in the audio chain (after normalisation)."""
+    tf = getattr(ap, "audio_tail_fade_sec", 0.0)
+    if tf <= 0:
+        return []
+    out_st = max(0.0, round(out_duration - tf, 3))
+    return [f"afade=t=out:st={_num(out_st)}:d={_num(tf)}"]
+
+
+def _audio_filter_chain(ap: AudioProcessing, clip_duration: float, *, out_duration: float | None = None) -> str:
+    """Аудиофильтры клипа (БЕЗ музыки). Порядок: шумоподавление → нормализация → фейд → tail-фейд.
+    tail-фейд считается по ФИНАЛЬной длине (`out_duration`, по умолчанию = clip_duration). Пусто
+    только если всё выключено И tail-фейд отключён."""
+    out_dur = clip_duration if out_duration is None else out_duration
+    return ",".join(_audio_denoise_norm(ap) + _audio_fade_parts(ap, clip_duration)
+                    + _audio_tail_fade_parts(ap, out_dur))
 
 
 def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
@@ -613,6 +631,8 @@ def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
     if music.final_normalize:
         post.append(_loudnorm_str(ap))     # финальная нормализация микса (анти-клиппинг)
     post += _audio_fade_parts(ap, clip_duration)
+    # Always-on audio tail fade, on the FINAL (post-speed) length of the mixed track.
+    post += _audio_tail_fade_parts(ap, clip_duration / speed if speed else clip_duration)
     mix_str = tail[0] + ("".join("," + p for p in post))
     parts.append(f"{mix_str}[a]")
     return ";".join(parts)
@@ -860,10 +880,13 @@ def _render_segments(
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
             reel_fc = None
             reel_af = None
+            # Final (post-speed) length: the tail fade must land on the real end of the clip.
+            _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
             if music_path:
                 reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed)
             else:
-                reel_af = _audio_filter_chain(ap, clip_duration) or None
+                # atempo goes FIRST; the fade st (in _out_dur / post-speed time) then lands correctly.
+                reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur) or None
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo

@@ -1041,29 +1041,41 @@ from autoreels.core.config import AudioProcessing
 from autoreels.local.render import _audio_filter_chain, _video_fade_filter
 
 
-def test_audio_chain_default_is_loudnorm_only():
-    # дефолт: только нормализация громкости к -14 LUFS
+def test_audio_chain_default_is_loudnorm_plus_tail_fade():
+    # дефолт: нормализация к -14 LUFS + всегда-включённый tail-фейд (0.35с, только звук).
     af = _audio_filter_chain(AudioProcessing(), 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
 
 
 def test_audio_chain_empty_when_all_disabled():
-    ap = AudioProcessing(loudnorm_enabled=False, denoise_enabled=False, fade_enabled=False)
+    # tail-фейд тоже выключен → цепочка пуста (команда без -af).
+    ap = AudioProcessing(loudnorm_enabled=False, denoise_enabled=False, fade_enabled=False,
+                         audio_tail_fade_sec=0.0)
     assert _audio_filter_chain(ap, 30.0) == ""
 
 
 def test_audio_chain_denoise_before_loudnorm():
     ap = AudioProcessing(denoise_enabled=True, denoise_strength=10)
     af = _audio_filter_chain(ap, 30.0)
-    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11"
+    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
     assert af.index("afftdn") < af.index("loudnorm")
 
 
 def test_audio_chain_fade_last_and_out_start_from_duration():
-    ap = AudioProcessing(fade_enabled=True, fade_duration=0.25)
+    # symmetric fade isolated (tail fade off) — порядок loudnorm → afade in → afade out.
+    ap = AudioProcessing(fade_enabled=True, fade_duration=0.25, audio_tail_fade_sec=0.0)
     af = _audio_filter_chain(ap, 30.0)
-    # порядок: loudnorm → afade in → afade out; out стартует в конце минус длительность фейда
     assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.25,afade=t=out:st=29.75:d=0.25"
+
+
+def test_audio_tail_fade_always_on_and_uses_output_duration():
+    # tail-фейд включён по умолчанию, стартует в (out_duration − tail); out_duration отражает speed.
+    ap = AudioProcessing(loudnorm_enabled=False)   # isolate: only the tail fade
+    assert _audio_filter_chain(ap, 30.0) == "afade=t=out:st=29.65:d=0.35"
+    # sped-up clip: out_duration passed shorter → fade lands on the real (post-speed) end
+    assert _audio_filter_chain(ap, 30.0, out_duration=20.0) == "afade=t=out:st=19.65:d=0.35"
+    # NO video fade emitted by the tail fade (audio only)
+    assert _video_fade_filter(ap, 30.0) == ""
 
 
 def test_video_fade_off_by_default():
@@ -1094,7 +1106,9 @@ def test_render_loudnorm_disabled_by_config_omits_af(tmp_path, render_cfg, fake_
 
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
-    assert "-af" not in fake_ffmpeg[0]
+    # loudnorm gone, but the always-on tail fade keeps an -af present (audio only).
+    af = _val_after(fake_ffmpeg[0], "-af")
+    assert "loudnorm" not in af and "afade=t=out" in af
 
 
 def test_render_denoise_flag_adds_afftdn(tmp_path, render_cfg, fake_ffmpeg):

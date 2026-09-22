@@ -167,3 +167,53 @@ def test_build_concat_cmd_opens_each_window_as_its_own_input():
     assert "-filter_complex" in cmd and cmd[-1] == "out.mp4"
     assert cmd[cmd.index("-map") + 1] == "[v]"
     assert "-shortest" in cmd    # clamp audio to the (authoritative) video length → equal durations
+
+
+# --- tail air: exactly tail_pad_sec after the last heard word, on every path ------------------
+from autoreels.__main__ import _apply_tail_air, _check_tail_air
+from autoreels.cloud.edit import remove_fillers
+
+_FR = dict(filler_words=["ну", "вот"], pause_shorten_sec=0.8, pause_residual_sec=0.25,
+           max_removed_share=0.25)
+
+
+def _tail_reel(**kw):
+    base = dict(id="r", start=0.0, end=0.0, score=80, hook="h", title="", description="")
+    base.update(kw)
+    return Reel(**base)
+
+
+def test_explicit_e_ends_tail_pad_after_last_word():
+    # An explicit e: lands the end exactly on the last word (no air); the tail step adds it back.
+    words = [Word(word="Раз.", t0=0.0, t1=0.5), Word(word="Два.", t0=1.0, t1=1.5),
+             Word(word="конец.", t0=2.0, t1=2.5), Word(word="Дальше", t0=3.4, t1=3.9)]
+    r = _tail_reel(start=0.0, end=2.5)               # e: put the end on «конец.» — zero air
+    _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=10.0)
+    assert abs(r.end - (2.5 + 0.7)) < 1e-6           # exactly tail_pad after the last word
+    assert _check_tail_air([r], tail_pad_sec=0.7, video_duration=10.0) is None
+
+
+def test_filler_removal_leaves_trailing_air_intact():
+    # Padding put 0.7s of air after the last word; a mid-clip filler is cut, the tail is untouched.
+    words = [Word(word="Смысл", t0=0.0, t1=0.4), Word(word="такой.", t0=0.5, t1=1.0),
+             Word(word="ну,", t0=1.2, t1=1.6), Word(word="дальше.", t0=2.0, t1=2.5)]
+    end = 2.5 + 0.7                                   # last word + tail_pad (post-padding end)
+    segs, removed, cuts = remove_fillers(words, 0.0, end, **_FR)
+    assert cuts == 1 and removed > 0                  # the standalone «ну,» was cut
+    assert abs(segs[-1].end - end) < 1e-6             # trailing air preserved (not shortened)
+
+
+def test_multisegment_reel_keeps_tail_air():
+    # Two body segments; the tail step extends the LAST segment to last_word + tail_pad.
+    words = [Word(word="a", t0=0.0, t1=0.5), Word(word="b.", t0=1.0, t1=1.9),
+             Word(word="c", t0=3.0, t1=3.5), Word(word="итог.", t0=4.0, t1=4.8),
+             Word(word="Следующее", t0=6.0, t1=6.5)]
+    r = _tail_reel(start=0.0, end=4.8,
+                   segments=[Segment(start=0.0, end=1.9), Segment(start=3.0, end=4.8)])
+    _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=20.0)
+    assert abs(r.segments[-1].end - (4.8 + 0.7)) < 1e-6
+    assert abs(r.end - (4.8 + 0.7)) < 1e-6
+    # played length = seg0 (1.9) + seg1 (extended to 5.5-3.0=2.5) = 4.4
+    assert abs(r.playback_duration() - (1.9 + 2.5)) < 1e-6
+    r.check_segments()                                # invariant still holds
+    assert _check_tail_air([r], tail_pad_sec=0.7, video_duration=20.0) is None
