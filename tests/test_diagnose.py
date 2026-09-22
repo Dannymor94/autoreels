@@ -88,3 +88,40 @@ def test_summarize_counts_and_causes():
     s = summarize(diags)
     assert s["clean"] == 1 and s["soft"] == 1 and s["hard"] == 1
     assert sum(s["causes"].values()) == 1                # одна HARD-причина
+
+
+# Part F: diagnose-cuts reports PLAYBACK duration; the source span (with removed gaps) is shown
+# separately for a multi-segment reel.
+def test_diag_table_shows_playback_duration_and_span(capsys):
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Reel, Segment
+
+    words = [_w(0.0, 4.8, "речь"), _w(10.0, 14.8, "продолжение.")]
+    single = Reel(id="r01", start=0.0, end=4.8, score=80, hook="h", title="t", description="d")
+    multi = Reel(id="r02", start=0.0, end=14.8, score=80, hook="h", title="t", description="d",
+                 segments=[Segment(start=0.0, end=4.8), Segment(start=10.0, end=14.8)])
+    diags = [classify_end(r.id, r.start, r.end, words, **CFG) for r in (single, multi)]
+    cli._print_diag_table("v", diags, [single, multi])
+    out = capsys.readouterr().out
+    lines = {ln.split()[0]: ln for ln in out.splitlines() if ln.strip().startswith("r0")}
+    # single-window: playback == span, no span note
+    assert "4.8с" in lines["r01"] and "span" not in lines["r01"]
+    # multi-window: playback 9.6s shown; source span 14.8s and window count noted separately
+    assert "9.6с" in lines["r02"]
+    assert "span 14.8с" in lines["r02"] and "2 окон" in lines["r02"]
+
+
+def test_diag_table_cold_open_reel_shows_replay_not_negative_cut(capsys):
+    # A cold-open reel replays its hook before the body → playback is LONGER than the span; the note
+    # must say +cold-open, never a nonsensical negative "removed" figure.
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Reel, Segment
+
+    words = [_w(0.0, 4.8, "тело."), _w(10.0, 14.8, "продолжение.")]
+    r = Reel(id="r09", start=0.0, end=4.8, score=80, hook="h", title="t", description="d",
+             cold_open=Segment(start=2.0, end=4.0))          # 2s hook replayed first
+    d = classify_end(r.id, r.start, r.end, words, **CFG)
+    cli._print_diag_table("v", [d], [r])
+    row = next(ln for ln in capsys.readouterr().out.splitlines() if ln.strip().startswith("r09"))
+    assert "6.8с" in row                                     # playback = body 4.8 + hook 2.0
+    assert "+cold-open 2.0с" in row and "вырезано" not in row and "−-" not in row

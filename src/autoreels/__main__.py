@@ -2776,7 +2776,11 @@ def cmd_resnap(
         n_segmented = _resnap_reels(reels, transcript, r0_cfg)
         if n_segmented:
             print(f"  · {stem}: {n_segmented} многосегментных клипов пропущены "
-                  f"(resnap оперирует одним span'ом — сегментную раскладку не трогаем)", flush=True)
+                  f"(resnap оперирует одним span'ом). Чтобы поддержать их, нужно: (1) хранить R0-"
+                  f"границы ПОКАДРОВО для каждого сегмента (сейчас r0_start/r0_end — только на весь "
+                  f"клип), (2) пере-снапить каждое окно независимо и (3) сохранить ручную раскладку "
+                  f"предложений/вырезанного филлера (границы «+»/«s:»/«e:»), не сливая их в один span",
+                  flush=True)
         n_changed = sum(1 for a, b in zip(manifest.reels, reels)
                         if (round(a.start, 3), round(a.end, 3)) != (round(b.start, 3), round(b.end, 3)))
 
@@ -4419,15 +4423,30 @@ def _rerun_reels(transcript, r0_cfg, root):
     return reels
 
 
-def _print_diag_table(stem, diags) -> None:
+def _print_diag_table(stem, diags, reels) -> None:
     print(f"\n### {stem}")
-    print(f"  {'id':<4}{'dur':>6}  {'последние слова':<34}{'тип конца':<13}{'пауза':>6}  "
+    # `играет` = playback duration (what the viewer sees). For a multi-segment reel that is SHORTER
+    # than the source span end−start (removed gaps); the span is shown separately in `причина`.
+    print(f"  {'id':<4}{'играет':>7}  {'последние слова':<34}{'тип конца':<13}{'пауза':>6}  "
           f"{'вердикт':<8} причина")
-    for d in diags:
+    for d, r in zip(diags, reels):
         pa = f"{d.pause_after:.2f}" if d.pause_after is not None else "—"
         mark = {"CLEAN": "✓ ", "SOFT": "· ", "HARD": "⛔ "}.get(d.verdict, "")
-        print(f"  {d.reel_id:<4}{d.duration:>5.1f}с {d.last_words[-33:]:<34}{d.end_type:<13}"
-              f"{pa:>6}  {mark}{d.verdict:<5}{d.cause}")
+        pdur = r.playback_duration()          # == d.duration (end−start) for a single-window reel
+        span = r.end - r.start                # source span of the body (includes any removed gaps)
+        cause = d.cause
+        segs = getattr(r, "segments", []) or []
+        has_cold = getattr(r, "cold_open", None) is not None
+        if len(segs) > 1 or has_cold:
+            # playback != span: gaps removed (filler/sentence cuts) shorten it; a cold-open hook,
+            # replayed before the body, lengthens it. Show span and window count separately.
+            nwin = len(r.playback_windows())
+            note = f"span {span:.1f}с, {nwin} окон"
+            if has_cold:
+                note += f" (+cold-open {r.cold_open.end - r.cold_open.start:.1f}с)"
+            cause = f"{note}; {cause}" if cause else note
+        print(f"  {d.reel_id:<4}{pdur:>6.1f}с {d.last_words[-33:]:<34}{d.end_type:<13}"
+              f"{pa:>6}  {mark}{d.verdict:<5}{cause}")
 
 
 def cmd_diagnose_cuts(target=None, *, root=None, rerun=False, cache_dir=None,
@@ -4497,7 +4516,7 @@ def cmd_diagnose_cuts(target=None, *, root=None, rerun=False, cache_dir=None,
             reels = manifest.reels
         diags = [classify_end(r.id, r.start, r.end, transcript.words,
                               stored_reason=r.end_snap_reason, **cfg) for r in reels]
-        _print_diag_table(mf.stem, diags)
+        _print_diag_table(mf.stem, diags, reels)
         s = summarize(diags)
         for k in ("clean", "soft", "hard"):
             total[k] += s[k]
