@@ -619,14 +619,42 @@ def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
     return [f"afade=t=in:st=0:d={_num(d)}", f"afade=t=out:st={_num(out_st)}:d={_num(d)}"]
 
 
-def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float) -> list[str]:
-    """Always-on audio-only fade-out over the last `audio_tail_fade_sec` of the clip.
+def _tail_speech_fade(reel, segs, speed: float) -> tuple[float, float] | None:
+    """(fade_start, fade_dur) on the OUTPUT timeline to silence a next-phrase word pulled into the
+    trailing air, or None when the tail is clean.
 
-    Separate from `_audio_fade_parts` (the optional symmetric in/out, off by default) and from the
-    10 ms segment edge fades. It rides on the tail_pad air after the last word, so the clip ends
-    gracefully and any speech of the next phrase pulled into the tail is faded to silence. NO video
-    fade — audio only. `out_duration` is the FINAL (post-speed) clip length so the fade lands on the
-    real end. Placed last in the audio chain (after normalisation)."""
+    reel.end sits `tail_pad_sec` of air past the last INTENDED word (its source-time end recorded in
+    reel.tail_last_word_end by _apply_tail_air). A following phrase can begin inside that air and be
+    heard. When such an intruder exists in the last window, fade from the intended word's end to the
+    intruder's start so the intruder plays entirely under silence (afade=out stays silent after it).
+    Legacy manifests without the field, or a clean tail, return None → the configured tail fade
+    stands. Times are mapped through the (frame-snapped) windows and divided by `speed`."""
+    lw_end = getattr(reel, "tail_last_word_end", None)
+    if lw_end is None or not reel.subtitles or not segs:
+        return None
+    last = segs[-1]
+    offset = sum(s.end - s.start for s in segs[:-1])   # output time before the last window (pre-speed)
+    intruders = [w.t0 for w in reel.subtitles if lw_end + 1e-3 < w.t0 < last.end]
+    if not intruders:
+        return None
+    l_out = (min(lw_end, last.end) - last.start + offset) / speed
+    n_out = (min(intruders) - last.start + offset) / speed
+    dur = n_out - l_out
+    return (l_out, dur) if dur > 1e-3 else None
+
+
+def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
+                           tail_fade: tuple[float, float] | None = None) -> list[str]:
+    """Always-on audio-only fade-out. Separate from `_audio_fade_parts` (the optional symmetric
+    in/out, off by default) and from the 10 ms segment edge fades. NO video fade — audio only.
+
+    With `tail_fade=(start, dur)` (a next-phrase word pulled into the tail, from _tail_speech_fade),
+    fade there so the intruding speech plays under silence. Otherwise ride the configured
+    `audio_tail_fade_sec` over the last of the clip so it ends gracefully on the tail_pad air.
+    `out_duration` is the FINAL (post-speed) clip length. Placed last in the audio chain."""
+    if tail_fade is not None:
+        st, d = tail_fade
+        return [f"afade=t=out:st={_num(max(0.0, round(st, 3)))}:d={_num(round(d, 3))}"] if d > 0 else []
     tf = getattr(ap, "audio_tail_fade_sec", 0.0)
     if tf <= 0:
         return []
@@ -634,18 +662,21 @@ def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float) -> list[str
     return [f"afade=t=out:st={_num(out_st)}:d={_num(tf)}"]
 
 
-def _audio_filter_chain(ap: AudioProcessing, clip_duration: float, *, out_duration: float | None = None) -> str:
+def _audio_filter_chain(ap: AudioProcessing, clip_duration: float, *, out_duration: float | None = None,
+                        tail_fade: tuple[float, float] | None = None) -> str:
     """Аудиофильтры клипа (БЕЗ музыки). Порядок: шумоподавление → нормализация → фейд → tail-фейд.
-    tail-фейд считается по ФИНАЛЬной длине (`out_duration`, по умолчанию = clip_duration). Пусто
-    только если всё выключено И tail-фейд отключён."""
+    tail-фейд считается по ФИНАЛЬной длине (`out_duration`, по умолчанию = clip_duration); `tail_fade`
+    (start, dur) заглушает слово следующей фразы, попавшее в хвост. Пусто только если всё выключено И
+    tail-фейд отключён."""
     out_dur = clip_duration if out_duration is None else out_duration
     return ",".join(_audio_denoise_norm(ap) + _audio_fade_parts(ap, clip_duration)
-                    + _audio_tail_fade_parts(ap, out_dur))
+                    + _audio_tail_fade_parts(ap, out_dur, tail_fade))
 
 
 def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
                           clip_duration: float, *, speed: float = 1.0,
-                          vin: str = "[0:v]", ain: str = "[0:a]", music_in: str = "[1:a]") -> str:
+                          vin: str = "[0:v]", ain: str = "[0:a]", music_in: str = "[1:a]",
+                          tail_fade: tuple[float, float] | None = None) -> str:
     """filter_complex для микса речи с фоновой музыкой. Второй вход (`-i` музыки) зациклен на
     уровне демуксера (`-stream_loop -1`); длина берётся по речи (`amix duration=first`) — короткий
     трек играет по кругу, длинный обрезается. Порядок аудио: речь(шумоподавление→нормализация) →
@@ -690,7 +721,7 @@ def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
         post.append(_loudnorm_str(ap))     # финальная нормализация микса (анти-клиппинг)
     post += _audio_fade_parts(ap, clip_duration)
     # Always-on audio tail fade, on the FINAL (post-speed) length of the mixed track.
-    post += _audio_tail_fade_parts(ap, clip_duration / speed if speed else clip_duration)
+    post += _audio_tail_fade_parts(ap, clip_duration / speed if speed else clip_duration, tail_fade)
     mix_str = tail[0] + ("".join("," + p for p in post))
     parts.append(f"{mix_str}[a]")
     return ";".join(parts)
@@ -951,11 +982,15 @@ def _render_segments(
             reel_af = None
             # Final (post-speed) length: the tail fade must land on the real end of the clip.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
+            # Fade the tail to silence over any next-phrase word pulled into the trailing air.
+            _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0)
             if music_path:
-                reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed)
+                reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed,
+                                                tail_fade=_tail_fade)
             else:
                 # atempo goes FIRST; the fade st (in _out_dur / post-speed time) then lands correctly.
-                reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur) or None
+                reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur,
+                                              tail_fade=_tail_fade) or None
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
@@ -981,7 +1016,7 @@ def _render_segments(
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
                                                      speed=_reel_speed, vin=vseg, ain=aseg,
-                                                     music_in=f"[{len(segs)}:a]")
+                                                     music_in=f"[{len(segs)}:a]", tail_fade=_tail_fade)
                     fc = f"{prefix};{music_fc}"
                 else:
                     vtail = f"{vseg}{reel_vf}[v]" if reel_vf else f"{vseg}null[v]"

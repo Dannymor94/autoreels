@@ -170,6 +170,11 @@ class Reel(BaseModel):
     ends_on_host_turn: bool = False  # diagnostic: would have ended inside a host question without interview snap
     # Playback speed applied at render time (1.0 = normal, >1 = faster). Set by --apply.
     speed: float = 1.0
+    # Source-time end of the last INTENDED word, stashed by _apply_tail_air after all bound edits.
+    # reel.end sits tail_pad_sec of air past it; a next-phrase word can be pulled into that air.
+    # Render reads this to fade the tail to silence from here to the intruding word's start.
+    # None = legacy manifest (render falls back to the configured audio_tail_fade_sec tail fade).
+    tail_last_word_end: float | None = None
     # Human-review warnings: what a bypassed deciding stage would have flagged (dangling start,
     # long internal pause, short clip, overlap). Warn-only — nothing is dropped on the human's
     # behalf. Empty for the automatic path (those stages actually run there).

@@ -207,6 +207,7 @@ def test_frame_aligned_invariant_passes_on_whole_frames_and_fails_on_drift():
 # --- tail air: exactly tail_pad_sec after the last heard word, on every path ------------------
 from autoreels.__main__ import _apply_tail_air, _check_tail_air
 from autoreels.cloud.edit import remove_fillers
+from autoreels.local.render import _tail_speech_fade
 
 _FR = dict(filler_words=["ну", "вот"], pause_shorten_sec=0.8, pause_residual_sec=0.25,
            max_removed_share=0.25)
@@ -251,4 +252,43 @@ def test_multisegment_reel_keeps_tail_air():
     # played length = seg0 (1.9) + seg1 (extended to 5.5-3.0=2.5) = 4.4
     assert abs(r.playback_duration() - (1.9 + 2.5)) < 1e-6
     r.check_segments()                                # invariant still holds
+
+
+def test_tail_speech_fade_silences_word_pulled_into_tail():
+    # Last intended word ends at 18.0; the next phrase starts at 18.5 inside the 0.7s tail air.
+    words = [Word(word="итог.", t0=17.5, t1=18.0), Word(word="Следующее", t0=18.5, t1=19.0)]
+    r = _tail_reel(start=10.0, end=18.7, subtitles=words, tail_last_word_end=18.0)
+    segs = [Segment(start=10.0, end=18.7)]
+    fade = _tail_speech_fade(r, segs, 1.0)
+    assert fade is not None
+    st, dur = fade
+    assert abs(st - 8.0) < 1e-6                       # (18.0 - 10.0) on the output timeline
+    assert abs(dur - 0.5) < 1e-6                      # fade completes exactly as the intruder begins
+
+
+def test_tail_speech_fade_tiny_gap():
+    # The reported case: the next word starts 40 ms after the last — a 0.04s fade to silence.
+    words = [Word(word="итог.", t0=17.5, t1=18.0), Word(word="Ещё", t0=18.04, t1=18.4)]
+    r = _tail_reel(start=10.0, end=18.7, subtitles=words, tail_last_word_end=18.0)
+    st, dur = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0)
+    assert abs(dur - 0.04) < 1e-6
+
+
+def test_tail_speech_fade_clean_and_legacy_return_none():
+    words = [Word(word="итог.", t0=17.5, t1=18.0)]    # nothing after the last word
+    clean = _tail_reel(start=10.0, end=18.7, subtitles=words, tail_last_word_end=18.0)
+    assert _tail_speech_fade(clean, [Segment(start=10.0, end=18.7)], 1.0) is None
+    legacy = _tail_reel(start=10.0, end=18.7,          # legacy manifest: no stashed word end
+                        subtitles=[Word(word="Следующее", t0=18.5, t1=19.0)])
+    assert _tail_speech_fade(legacy, [Segment(start=10.0, end=18.7)], 1.0) is None
+
+
+def test_tail_speech_fade_maps_speed_and_prior_windows():
+    words = [Word(word="итог.", t0=17.5, t1=18.0), Word(word="Следующее", t0=18.5, t1=19.0)]
+    # Two windows; the 5s first window shifts the tail forward on the output timeline, speed halves it.
+    r = _tail_reel(start=0.0, end=18.7, subtitles=words, tail_last_word_end=18.0,
+                   segments=[Segment(start=0.0, end=5.0), Segment(start=10.0, end=18.7)])
+    st, dur = _tail_speech_fade(r, r.playback_windows(), 2.0)
+    assert abs(st - (5.0 + 18.0 - 10.0) / 2.0) < 1e-6   # (offset 5 + 8) / speed 2 = 6.5
+    assert abs(dur - 0.25) < 1e-6                        # 0.5s gap / speed 2
     assert _check_tail_air([r], tail_pad_sec=0.7, video_duration=20.0) is None

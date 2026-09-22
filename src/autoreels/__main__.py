@@ -987,7 +987,7 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         desired = lw_end + tail_pad_sec
         if video_duration is not None:
             desired = min(desired, video_duration)
-        r._tail_last_word_end = lw_end
+        r.tail_last_word_end = lw_end
         if abs(desired - last.end) < 1e-6:
             continue
         if r.segments:
@@ -1001,7 +1001,7 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
     (or the video end, whichever is smaller). Returns an error string naming the first offender,
     or None. Reads the last-word end stashed by _apply_tail_air (stable across the extension)."""
     for r in reels:
-        lw_end = getattr(r, "_tail_last_word_end", None)
+        lw_end = r.tail_last_word_end
         if lw_end is None:
             continue
         floor = lw_end + tail_pad_sec - tol
