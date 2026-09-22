@@ -36,7 +36,7 @@ from autoreels.core.config import (
 )
 from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.models import Manifest, SetupProfile
-from autoreels.local.subtitles import build_ass
+from autoreels.local.subtitles import build_ass, remap_to_output
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
 _MANIFEST_NAME = "manifest.json"
@@ -447,6 +447,80 @@ def build_cut_cmd(
     ]
 
 
+def _concat_segments_graph(segments, crossfade_sec: float, *, base: float = 0.0) -> tuple[str, str, str]:
+    """Filtergraph prefix that trims each segment from the single input and joins them in order.
+
+    Video is hard-concatenated (`concat`, no overlap) → `[vseg]`, so the output timeline matches
+    the subtitle remap (offset within a segment + accumulated segment durations). Audio is joined
+    with a short `acrossfade` (`crossfade_sec`) at every internal cut to kill click artefacts →
+    `[aseg]`; that shortens audio by ~`crossfade_sec·(N−1)` (sub-frame — sync verified by eye).
+    crossfade 0 falls back to a hard audio `concat`. Returns (prefix, "[vseg]", "[aseg]").
+
+    `base` is subtracted from every trim time: the caller fast-seeks the input with `-ss base`
+    (resetting the decoded timestamps to ~0), so trims are relative to the first segment — the
+    decoder never grinds from 0 to a clip 40 minutes in, same speed as the single-cut path.
+    """
+    n = len(segments)
+    parts: list[str] = []
+    for i, s in enumerate(segments):
+        s0, s1 = _ts(s.start - base), _ts(s.end - base)
+        parts.append(f"[0:v]trim=start={s0}:end={s1},setpts=PTS-STARTPTS[v{i}]")
+        parts.append(f"[0:a]atrim=start={s0}:end={s1},asetpts=PTS-STARTPTS[a{i}]")
+    parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
+    if crossfade_sec > 0 and n > 1:
+        cur = "[a0]"
+        for i in range(1, n):
+            nxt = "[aseg]" if i == n - 1 else f"[ax{i}]"
+            parts.append(f"{cur}[a{i}]acrossfade=d={_num(crossfade_sec)}:c1=tri:c2=tri{nxt}")
+            cur = nxt
+    else:
+        parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
+    return ";".join(parts), "[vseg]", "[aseg]"
+
+
+def build_concat_cmd(
+    ffmpeg: str,
+    source: str | Path,
+    out: str | Path,
+    *,
+    filter_complex: str,
+    codec: str,
+    preset: str,
+    seek: float = 0.0,
+    video_bitrate: str = "7M",
+    pix_fmt: str = "yuv420p",
+    faststart: bool = True,
+    audio_codec: str,
+    audio_bitrate: str,
+    music_path: str | Path | None = None,
+    quality: str | None = None,
+    rate_control: str | None = None,
+    qp: int | None = None,
+) -> list[str]:
+    """ffmpeg-команда для многосегментного клипа: `filter_complex` режет и склеивает сегменты
+    из ОДНОГО входа и выдаёт `[v]`/`[a]` — один проход энкодера (границы заданы trim'ами в графе).
+    `-ss seek` перед `-i` быстро перематывает к первому сегменту (trim-времена в графе уже заданы
+    относительно `seek`), чтобы декодер не молол от нуля. С музыкой добавляется зациклённый второй
+    вход. Чистая функция (без ФС) — единица под тесты, как build_cut_cmd для одиночного окна."""
+    quality_args = _video_quality_args(codec, preset, video_bitrate, pix_fmt,
+                                       quality=quality, rate_control=rate_control, qp=qp)
+    cmd = [str(ffmpeg), "-y", "-loglevel", "error"]
+    if seek > 0:
+        cmd += ["-ss", _ts(seek)]
+    cmd += ["-i", str(source)]
+    if music_path:
+        cmd += ["-stream_loop", "-1", "-i", str(music_path)]
+    cmd += [
+        "-filter_complex", filter_complex,
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", codec, *quality_args,
+        "-c:a", audio_codec, "-b:a", audio_bitrate,
+        *(["-movflags", "+faststart"] if faststart else []),
+        str(out),
+    ]
+    return cmd
+
+
 def _rotate_vf(rotation_deg: float) -> str:
     """Фильтр выравнивания горизонта: `rotate=<рад>` (+ = по часовой, как CSS-превью калибратора),
     билинейная интерполяция (дефолт ffmpeg), чёрная заливка углов. Угол 0 → пустая строка (фильтр
@@ -489,19 +563,23 @@ def _audio_filter_chain(ap: AudioProcessing, clip_duration: float) -> str:
 
 
 def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
-                          clip_duration: float, *, speed: float = 1.0) -> str:
+                          clip_duration: float, *, speed: float = 1.0,
+                          vin: str = "[0:v]", ain: str = "[0:a]", music_in: str = "[1:a]") -> str:
     """filter_complex для микса речи с фоновой музыкой. Второй вход (`-i` музыки) зациклен на
     уровне демуксера (`-stream_loop -1`); длина берётся по речи (`amix duration=first`) — короткий
     трек играет по кругу, длинный обрезается. Порядок аудио: речь(шумоподавление→нормализация) →
     микс с музыкой(громкость+фейд[+ducking]) → финальная нормализация(анти-клиппинг) → фейд клипа.
 
     Выходы графа: `[v]` (видео = `video_vf`) и `[a]` (готовый звук). Музыка заметно тише голоса
-    (`volume`); ducking (sidechaincompress) приглушает музыку, когда звучит речь."""
+    (`volume`); ducking (sidechaincompress) приглушает музыку, когда звучит речь. `vin`/`ain`/
+    `music_in` — входные лейблы: по умолчанию сырой источник (`[0:v]`/`[0:a]`, музыка `[1:a]`),
+    но многосегментный клип подаёт сюда уже склеенные `[vseg]`/`[aseg]`."""
     parts: list[str] = []
-    parts.append(f"[0:v]{video_vf}[v]" if video_vf else "[0:v]null[v]")
+    parts.append(f"{vin}{video_vf}[v]" if video_vf else f"{vin}null[v]")
 
     speech = _audio_denoise_norm(ap)              # шумоподавление → нормализация речи
     _tempo_prefix = f"atempo={speed:.4g}," if speed != 1.0 else ""
+    _src = ain                                    # входной лейбл речи ([0:a] или склейка [aseg])
     speech_prefix = _tempo_prefix + ((",".join(speech) + ",") if speech else "")
 
     # Музыка: громкость + фейд в начале/конце (fade-out ложится в конец по длине клипа).
@@ -514,14 +592,14 @@ def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
 
     if music.ducking:
         # Речь используется дважды (в микс и как сайдчейн-триггер) → split.
-        parts.append(f"[0:a]{speech_prefix}asplit=2[spmix][spsc]")
-        parts.append(f"[1:a]{music_chain}[mu0]")
+        parts.append(f"{_src}{speech_prefix}asplit=2[spmix][spsc]")
+        parts.append(f"{music_in}{music_chain}[mu0]")
         parts.append("[mu0][spsc]sidechaincompress=threshold=0.03:ratio=8"
                      ":attack=20:release=250[mu]")
         mix_in = "[spmix][mu]"
     else:
-        parts.append(f"[0:a]{speech_prefix}anull[sp]" if speech_prefix else "[0:a]anull[sp]")
-        parts.append(f"[1:a]{music_chain}[mu]")
+        parts.append(f"{_src}{speech_prefix}anull[sp]" if speech_prefix else f"{_src}anull[sp]")
+        parts.append(f"{music_in}{music_chain}[mu]")
         mix_in = "[sp][mu]"
 
     # Микс: normalize=0 — речь остаётся на полном уровне, музыка на своей громкости.
@@ -714,12 +792,14 @@ def _render_segments(
         outputs: list[Path] = []
         total = len(manifest.reels)
         batch_total_secs = sum(
-            r.end - r.start for r in manifest.reels if r.end - r.start >= _MIN_CLIP_RENDER_SEC
+            r.playback_duration() for r in manifest.reels
+            if r.playback_duration() >= _MIN_CLIP_RENDER_SEC
         )
         batch_encoded_secs = 0.0
         batch_start_wall = time.time()
         for idx, reel in enumerate(manifest.reels, 1):
-            clip_dur = reel.end - reel.start
+            segs = reel.effective_segments()
+            clip_dur = reel.playback_duration()
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
                     f"  ⚠ {reel.id}: {clip_dur:.1f}с < {_MIN_CLIP_RENDER_SEC}с — "
@@ -744,10 +824,16 @@ def _render_segments(
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
             ass_cwd: str | None = None
             if subtitles_cfg is not None and reel.subtitles:
+                # Single span: raw words shifted by reel.start (unchanged). Multi-segment: remap
+                # onto the concatenated output timeline (gap words dropped), clip_start already 0.
+                if len(segs) == 1:
+                    ass_words, ass_clip_start = reel.subtitles, reel.start
+                else:
+                    ass_words, ass_clip_start = remap_to_output(reel.subtitles, segs), 0.0
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
                 ass_path.write_text(
-                    build_ass(reel.subtitles, cfg=subtitles_cfg, clip_start=reel.start),
+                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=ass_clip_start),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.
@@ -757,7 +843,8 @@ def _render_segments(
                 reel_vf = f"{base_vf},{ass_filter}" if base_vf else ass_filter
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
-            clip_duration = reel.end - reel.start
+            # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
+            clip_duration = clip_dur
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
@@ -771,16 +858,39 @@ def _render_segments(
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
-            cmd = build_cut_cmd(
-                ffmpeg_bin, source, reel.start, reel.end, out,
-                codec=codec, preset=enc.preset,
-                video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
-                audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-                vf=(None if reel_fc else reel_vf), af=reel_af,
-                music_path=music_path, filter_complex=reel_fc,
-                quality=active.quality, rate_control=active.rate_control, qp=active.qp,
-            )
-            clip_dur_s = reel.end - reel.start
+            if len(segs) == 1:
+                # Single window: unchanged fast -ss/-t cut (identical output for legacy manifests).
+                cmd = build_cut_cmd(
+                    ffmpeg_bin, source, segs[0].start, segs[0].end, out,
+                    codec=codec, preset=enc.preset,
+                    video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
+                    audio_codec=aud.codec, audio_bitrate=aud.bitrate,
+                    vf=(None if reel_fc else reel_vf), af=reel_af,
+                    music_path=music_path, filter_complex=reel_fc,
+                    quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                )
+            else:
+                # Multi-segment: trim+concat the segments from the one source in a single encode.
+                # Fast-seek to the first segment so trims stay relative and decoding starts there.
+                base = segs[0].start
+                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_crossfade_sec, base=base)
+                if music_path:
+                    music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
+                                                     speed=_reel_speed, vin=vseg, ain=aseg)
+                    fc = f"{prefix};{music_fc}"
+                else:
+                    vtail = f"{vseg}{reel_vf}[v]" if reel_vf else f"{vseg}null[v]"
+                    atail = f"{aseg}{reel_af}[a]" if reel_af else f"{aseg}anull[a]"
+                    fc = f"{prefix};{vtail};{atail}"
+                cmd = build_concat_cmd(
+                    ffmpeg_bin, source, out, filter_complex=fc, seek=base,
+                    codec=codec, preset=enc.preset,
+                    video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
+                    audio_codec=aud.codec, audio_bitrate=aud.bitrate,
+                    music_path=music_path,
+                    quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                )
+            clip_dur_s = clip_dur
             returncode, stderr_text = _run_ffmpeg_with_progress(
                 cmd, reel_id=reel.id, idx=idx, total=total,
                 duration_sec=clip_dur_s, cwd=ass_cwd,

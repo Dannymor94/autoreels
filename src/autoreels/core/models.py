@@ -105,6 +105,20 @@ class Transcript(BaseModel):
     source_sha256: str = ""
 
 
+class Segment(BaseModel):
+    """One contiguous source window of a reel. A reel plays its segments concatenated in order.
+
+    A single-span reel carries no segments (empty list) and is read as the one window [start, end]
+    — old manifests keep working. Multi-segment reels (sentence bounds, filler removal, cold open)
+    list two or more windows; `reel.start`/`reel.end` stay the overall span for range-only tools.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    start: float
+    end: float
+
+
 class Reel(BaseModel):
     """Один кандидат-клип. Без crop/scale — наследует их из `manifest.setup`."""
 
@@ -113,6 +127,10 @@ class Reel(BaseModel):
     id: str
     start: float
     end: float
+    # Ordered source windows played back-to-back. Empty = one contiguous window [start, end]
+    # (legacy / automatic path). Non-empty = an edited reel (cut filler, sentence bounds, cold
+    # open); `start`/`end` remain the overall span. Populated by the manual/edit path only.
+    segments: list[Segment] = Field(default_factory=list)
     score: int = Field(ge=0, le=100)
     hook: str
     title: str
@@ -149,6 +167,22 @@ class Reel(BaseModel):
     # long internal pause, short clip, overlap). Warn-only — nothing is dropped on the human's
     # behalf. Empty for the automatic path (those stages actually run there).
     warnings: list[str] = Field(default_factory=list)
+
+    def effective_segments(self) -> list["Segment"]:
+        """Playback windows: the explicit `segments`, or the single span [start, end] if none.
+
+        The one place code turns a possibly-segmented reel into a concrete list of windows —
+        render, subtitle remap and duration all read through here so legacy single-span reels
+        and edited multi-segment reels take one path.
+        """
+        return list(self.segments) if self.segments else [Segment(start=self.start, end=self.end)]
+
+    def playback_duration(self) -> float:
+        """Total played length = sum of segment durations (gaps between segments are removed).
+
+        Equals `end - start` for a single-span reel; smaller once filler is cut into gaps.
+        """
+        return sum(s.end - s.start for s in self.effective_segments())
 
 
 class Manifest(BaseModel):

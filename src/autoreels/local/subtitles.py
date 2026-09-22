@@ -33,6 +33,25 @@ def words_in_window(words: list[Word], start: float, end: float) -> list[Word]:
     return [w for w in words if start <= w.t0 < end]
 
 
+def remap_to_output(words: list[Word], segments) -> list[Word]:
+    """Remap word times onto the concatenated output timeline of a multi-segment reel.
+
+    Each word keeps its offset within its segment plus the accumulated duration of preceding
+    segments; a word whose start falls in a removed gap (outside every segment) is dropped. For a
+    single segment [s, e] this is exactly a shift by s — the same result as feeding the raw words
+    to build_ass with clip_start=s — so callers pass the remapped words with clip_start=0.
+    """
+    out: list[Word] = []
+    offset = 0.0
+    for seg in segments:
+        for w in words:
+            if seg.start <= w.t0 < seg.end:
+                out.append(Word(word=w.word, t0=w.t0 - seg.start + offset,
+                                t1=w.t1 - seg.start + offset))
+        offset += seg.end - seg.start
+    return out
+
+
 def _estimate_width(text: str, font_size: int, char_width_ratio: float) -> float:
     return len(text) * font_size * char_width_ratio
 

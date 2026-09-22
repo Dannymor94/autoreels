@@ -2478,9 +2478,15 @@ def cmd_recrop(
     return 0
 
 
-def _resnap_reels(reels, transcript, r0_cfg) -> None:
+def _resnap_reels(reels, transcript, r0_cfg) -> int:
     """Пересчитать границы клипов из сохранённых R0-границ: сброс start/end к r0_start/r0_end,
-    затем snap → padding → trim текущим кодом. Мутирует reels; тексты/субтитры не трогает."""
+    затем snap → padding → trim текущим кодом. Мутирует reels; тексты/субтитры не трогает.
+
+    Многосегментные клипы (заданные вручную границы предложений / вырезанный филлер) ПРОПУСКАЮТСЯ:
+    resnap оперирует одним span'ом [start, end], а пере-снап затёр бы сегментную раскладку.
+    Возвращает число пропущенных сегментных клипов (для предупреждения в cmd_resnap)."""
+    segmented = [r for r in reels if len(getattr(r, "segments", []) or []) > 1]
+    reels = [r for r in reels if len(getattr(r, "segments", []) or []) <= 1]
     for r in reels:
         r.start, r.end = r.r0_start, r.r0_end
     snap_segments(reels, transcript.words, tail_sec=r0_cfg.tail_sec,
@@ -2495,6 +2501,7 @@ def _resnap_reels(reels, transcript, r0_cfg) -> None:
                   hanging_words=r0_cfg.hanging_words)
     trim_too_long(reels, transcript.words, max_duration=r0_cfg.max_duration,
                   pause_sec=r0_cfg.sentence_pause_sec, policy=r0_cfg.too_long_policy)
+    return len(segmented)
 
 
 def _last_words_before(words, end_sec: float, n: int = 5) -> str:
@@ -2615,7 +2622,10 @@ def cmd_resnap(
                     continue
 
         reels = [r.model_copy(deep=True) for r in manifest.reels]
-        _resnap_reels(reels, transcript, r0_cfg)
+        n_segmented = _resnap_reels(reels, transcript, r0_cfg)
+        if n_segmented:
+            print(f"  · {stem}: {n_segmented} многосегментных клипов пропущены "
+                  f"(resnap оперирует одним span'ом — сегментную раскладку не трогаем)", flush=True)
         n_changed = sum(1 for a, b in zip(manifest.reels, reels)
                         if (round(a.start, 3), round(a.end, 3)) != (round(b.start, 3), round(b.end, 3)))
 
