@@ -447,34 +447,33 @@ def build_cut_cmd(
     ]
 
 
-def _concat_segments_graph(segments, crossfade_sec: float, *, base: float = 0.0) -> tuple[str, str, str]:
+def _concat_segments_graph(segments, edge_fade_sec: float, *, base: float = 0.0) -> tuple[str, str, str]:
     """Filtergraph prefix that trims each segment from the single input and joins them in order.
 
     Video is hard-concatenated (`concat`, no overlap) → `[vseg]`, so the output timeline matches
     the subtitle remap (offset within a segment + accumulated segment durations). Audio is joined
-    with a short `acrossfade` (`crossfade_sec`) at every internal cut to kill click artefacts →
-    `[aseg]`; that shortens audio by ~`crossfade_sec·(N−1)` (sub-frame — sync verified by eye).
-    crossfade 0 falls back to a hard audio `concat`. Returns (prefix, "[vseg]", "[aseg]").
+    the SAME way — plain `concat`, no overlap — after a micro fade-out at each segment's end and a
+    fade-in at each start (`edge_fade_sec`, default 10 ms) to suppress the click at a splice. Unlike
+    a crossfade, edge fades do not overlap the sides, so the audio length stays exactly equal to the
+    video length (no lip-sync drift). edge_fade 0 → hard joins, no fades. Returns (prefix, [vseg], [aseg]).
 
     `base` is subtracted from every trim time: the caller fast-seeks the input with `-ss base`
     (resetting the decoded timestamps to ~0), so trims are relative to the first segment — the
     decoder never grinds from 0 to a clip 40 minutes in, same speed as the single-cut path.
     """
     n = len(segments)
+    f = edge_fade_sec
     parts: list[str] = []
     for i, s in enumerate(segments):
         s0, s1 = _ts(s.start - base), _ts(s.end - base)
         parts.append(f"[0:v]trim=start={s0}:end={s1},setpts=PTS-STARTPTS[v{i}]")
-        parts.append(f"[0:a]atrim=start={s0}:end={s1},asetpts=PTS-STARTPTS[a{i}]")
+        achain = f"[0:a]atrim=start={s0}:end={s1},asetpts=PTS-STARTPTS"
+        if f > 0:
+            out_st = max(0.0, (s.end - s.start) - f)
+            achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
+        parts.append(f"{achain}[a{i}]")
     parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
-    if crossfade_sec > 0 and n > 1:
-        cur = "[a0]"
-        for i in range(1, n):
-            nxt = "[aseg]" if i == n - 1 else f"[ax{i}]"
-            parts.append(f"{cur}[a{i}]acrossfade=d={_num(crossfade_sec)}:c1=tri:c2=tri{nxt}")
-            cur = nxt
-    else:
-        parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
+    parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
     return ";".join(parts), "[vseg]", "[aseg]"
 
 
@@ -515,6 +514,10 @@ def build_concat_cmd(
         "-map", "[v]", "-map", "[a]",
         "-c:v", codec, *quality_args,
         "-c:a", audio_codec, "-b:a", audio_bitrate,
+        # Video is the authoritative timeline (subtitles map onto it); -shortest clamps the audio
+        # to it so the two stream durations are equal. The edge-fade concat already makes the audio
+        # the segment-sum length; this trims only loudnorm's trailing tail / the sub-frame remainder.
+        "-shortest",
         *(["-movflags", "+faststart"] if faststart else []),
         str(out),
     ]
@@ -871,7 +874,7 @@ def _render_segments(
                 # Multi-segment: trim+concat the segments from the one source in a single encode.
                 # Fast-seek to the first segment so trims stay relative and decoding starts there.
                 base = segs[0].start
-                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_crossfade_sec, base=base)
+                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec, base=base)
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
                                                      speed=_reel_speed, vin=vseg, ain=aseg)

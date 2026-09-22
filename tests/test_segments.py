@@ -66,21 +66,26 @@ def test_remap_single_segment_equals_shift():
 
 
 # --- 3: concat filtergraph + command --------------------------------------------------------
-def test_concat_graph_trims_relative_and_crossfades():
+def test_concat_graph_trims_relative_and_edge_fades():
     segs = [Segment(start=100.0, end=118.0), Segment(start=123.0, end=140.0)]
-    graph, vseg, aseg = _concat_segments_graph(segs, 0.03, base=100.0)
+    graph, vseg, aseg = _concat_segments_graph(segs, 0.01, base=100.0)
     assert (vseg, aseg) == ("[vseg]", "[aseg]")
     # trims are relative to base=100 → first segment starts at 0, not 100
     assert "trim=start=0.000:end=18.000" in graph
     assert "trim=start=23.000:end=40.000" in graph
     assert "concat=n=2:v=1:a=0[vseg]" in graph      # video hard concat
-    assert "acrossfade=d=0.03" in graph              # audio crossfade at the cut
+    assert "concat=n=2:v=0:a=1[aseg]" in graph      # audio also plain concat (no overlap → no drift)
+    assert "acrossfade" not in graph                 # NOT a crossfade
+    # non-overlapping edge fades: fade-in at 0, fade-out near each segment's own end (18s, 17s)
+    assert "afade=t=in:st=0:d=0.01" in graph
+    assert "afade=t=out:st=17.99:d=0.01" in graph    # 18.0 - 0.01
+    assert "afade=t=out:st=16.99:d=0.01" in graph    # 17.0 - 0.01
 
 
-def test_concat_graph_zero_crossfade_hard_joins_audio():
+def test_concat_graph_zero_fade_hard_joins_audio():
     segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0)]
     graph, _, _ = _concat_segments_graph(segs, 0.0)
-    assert "acrossfade" not in graph
+    assert "afade" not in graph
     assert "concat=n=2:v=0:a=1[aseg]" in graph
 
 
@@ -94,3 +99,4 @@ def test_build_concat_cmd_fast_seeks_first_segment():
     assert cmd.index("-ss") < cmd.index("-i")
     assert "-filter_complex" in cmd and cmd[-1] == "out.mp4"
     assert cmd[cmd.index("-map") + 1] == "[v]"
+    assert "-shortest" in cmd    # clamp audio to the (authoritative) video length → equal durations
