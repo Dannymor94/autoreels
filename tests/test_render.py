@@ -1044,7 +1044,7 @@ from autoreels.local.render import _audio_filter_chain, _video_fade_filter
 def test_audio_chain_default_is_loudnorm_plus_tail_fade():
     # дефолт: нормализация к -14 LUFS + всегда-включённый tail-фейд (0.35с, только звук).
     af = _audio_filter_chain(AudioProcessing(), 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.3:d=0.7"
 
 
 def test_audio_chain_empty_when_all_disabled():
@@ -1057,7 +1057,7 @@ def test_audio_chain_empty_when_all_disabled():
 def test_audio_chain_denoise_before_loudnorm():
     ap = AudioProcessing(denoise_enabled=True, denoise_strength=10)
     af = _audio_filter_chain(ap, 30.0)
-    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
+    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.3:d=0.7"
     assert af.index("afftdn") < af.index("loudnorm")
 
 
@@ -1071,11 +1071,55 @@ def test_audio_chain_fade_last_and_out_start_from_duration():
 def test_audio_tail_fade_always_on_and_uses_output_duration():
     # tail-фейд включён по умолчанию, стартует в (out_duration − tail); out_duration отражает speed.
     ap = AudioProcessing(loudnorm_enabled=False)   # isolate: only the tail fade
-    assert _audio_filter_chain(ap, 30.0) == "afade=t=out:st=29.65:d=0.35"
+    assert _audio_filter_chain(ap, 30.0) == "afade=t=out:st=29.3:d=0.7"
     # sped-up clip: out_duration passed shorter → fade lands on the real (post-speed) end
-    assert _audio_filter_chain(ap, 30.0, out_duration=20.0) == "afade=t=out:st=19.65:d=0.35"
+    assert _audio_filter_chain(ap, 30.0, out_duration=20.0) == "afade=t=out:st=19.3:d=0.7"
     # NO video fade emitted by the tail fade (audio only)
     assert _video_fade_filter(ap, 30.0) == ""
+
+
+def test_audio_tail_fade_rms_decreases_monotonically():
+    """afade covers the full 0.7s tail: RMS must fall monotonically over the last 0.35s.
+    Uses a synthetic 3s sine + an intruder tone at t=2.3s (inside the 0.7s tail air).
+    Without the 0.7s fade the intruder would be clearly audible; with it the RMS must drop
+    each 100ms window through the final 0.35s.
+    """
+    import subprocess, tempfile, os, math
+
+    dur = 3.0
+    # sine at 440 Hz for 2.3s, then a loud 880 Hz intruder for the rest (tail air region)
+    gen = (
+        "sine=frequency=440:duration=2.3[s];"
+        "sine=frequency=880:duration=0.7[i];"
+        "[s][i]concat=n=2:v=0:a=1"
+    )
+    af = f"afade=t=out:st={dur - 0.7}:d=0.7"
+
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "out.wav")
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", gen, "-af", af, "-t", str(dur), out],
+            capture_output=True, check=True,
+        )
+        # measure RMS in 100ms windows over the last 0.35s (3 windows: 2.65, 2.75, 2.85)
+        windows = [2.65, 2.75, 2.85]
+        rms_vals = []
+        for start in windows:
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-ss", str(start), "-t", "0.1", "-i", out,
+                 "-af", "volumedetect", "-f", "null", "-"],
+                capture_output=True, text=True,
+            )
+            for line in r.stderr.splitlines():
+                if "mean_volume" in line:
+                    rms_vals.append(float(line.split(":")[1].strip().split()[0]))
+                    break
+
+    assert len(rms_vals) == 3, f"volumedetect produced {len(rms_vals)} values"
+    # each window must be quieter (lower dBFS) than the previous
+    assert rms_vals[0] > rms_vals[1] > rms_vals[2], (
+        f"RMS not monotonically decreasing over last 0.35s: {rms_vals}"
+    )
 
 
 def test_video_fade_off_by_default():
