@@ -305,15 +305,29 @@ def test_artefact_in_tail_stripped_block_kept():
     assert "приходишь" in kept[0].text
 
 
-def test_artefact_in_first_line_drops_block():
-    """A multi-line block whose first line is artefact is still dropped.
+def test_artefact_in_first_line_stripped_block_kept():
+    """A block whose FIRST line is a credit is kept with the leading credit stripped (Part C).
 
-    Regression for block 117: starts with 'Субтитры создавал DimaTorzok', rest is real speech.
-    The block should be dropped because the hallucinated credit opens it.
+    Blocks 3/35/63 in the PXL export opened with a Whisper credit but carried 40-55 s of real
+    speech after it. A leading credit is scrubbed the same way a trailing one is; only a block that
+    is entirely credit is dropped. The kept block starts at the first real line.
     """
     art = _Line(100.0, 103.0, "Субтитры создавал DimaTorzok")
     real = _Line(103.0, 122.0, "Чем-то вы, возможно, передавлены сейчас")
     b = _make_block("", lines=[art, real])
+    kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
+    assert len(kept) == 1
+    assert len(dropped) == 0
+    assert "Субтитры создавал" not in kept[0].text
+    assert "передавлены" in kept[0].text
+    assert abs(kept[0].start - 103.0) < 1e-6           # start moved past the credit
+
+
+def test_artefact_only_block_dropped():
+    """A block that is nothing BUT credit lines is still dropped (nothing real to keep)."""
+    a1 = _Line(100.0, 103.0, "Субтитры создавал DimaTorzok")
+    a2 = _Line(103.0, 106.0, "Субтитры сделал кто-то ещё")
+    b = _make_block("", lines=[a1, a2])
     kept, dropped = filter_blocks([b], **_FILTER_DEFAULTS)
     assert len(kept) == 0
     assert dropped[0][1] == "artefact"

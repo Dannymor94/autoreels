@@ -244,29 +244,38 @@ def _has_signoff_at_sentence_start(text: str, phrases: Sequence[str]) -> bool:
 
 
 def _scrub_artefact_lines(block: CandidateBlock, artefact_markers: Sequence[str]) -> bool:
-    """Strip lines containing artefact markers in-place.
+    """Strip hallucinated Whisper-credit lines from BOTH ends of the block, in-place.
 
-    Returns False (drop the block) if artefact is in the first line — the block starts on
-    hallucinated content so nothing real precedes it. Returns True (keep) otherwise: lines
-    from the artefact onwards are stripped and the block fields are updated.
+    A LEADING credit and the contiguous run of credits at the front is dropped, keeping the tail —
+    a block that merely opens with a credit still carries real speech after it (blocks 3/35/63 in
+    the PXL export each hold 40-55 s of speech past the credit; block 35 is the book's backstory).
+    A TRAILING credit and everything after it is dropped, keeping the head (unchanged behaviour).
+    Returns False only when nothing real remains (the block is entirely credit). Updates
+    start/end/text/duration/id; the caller re-applies the duration floor.
     """
     if not artefact_markers:
         return True
     lower_markers = [m.lower() for m in artefact_markers]
-    first_idx = next(
-        (i for i, ln in enumerate(block.lines)
-         if any(m in ln.text.lower() for m in lower_markers)),
-        None,
-    )
-    if first_idx is None:
-        return True
-    if first_idx == 0:
-        return False  # artefact opens the block → drop
-    clean = block.lines[:first_idx]
-    block.lines = clean
-    block.text = " ".join(ln.text for ln in clean)
+
+    def _is_artefact(ln) -> bool:
+        return any(m in ln.text.lower() for m in lower_markers)
+
+    lines = block.lines
+    lo = 0
+    while lo < len(lines) and _is_artefact(lines[lo]):   # strip the leading run of credits
+        lo += 1
+    rest = lines[lo:]
+    hi = next((k for k, ln in enumerate(rest) if _is_artefact(ln)), len(rest))  # cut a trailing credit
+    clean = rest[:hi]
+    if not clean:
+        return False                                     # all artefact → drop
+    if len(clean) == len(lines):
+        return True                                      # no credit anywhere → unchanged
+    block.lines = list(clean)
+    block.start = clean[0].t0
     block.end = clean[-1].t1
     block.duration = block.end - block.start
+    block.text = " ".join(ln.text for ln in clean)
     block.id = _block_id(block.text)
     return True
 
@@ -370,9 +379,8 @@ def filter_blocks(
     i = 0
     while i < len(work):
         block = work[i]
-        # Artefact scrubbing first: strip artefact lines from the tail of the block.
-        # Drop only if artefact opens the block (first line) — real speech preceded by
-        # hallucinated credit text is salvageable; a block that starts on artefact is not.
+        # Artefact scrubbing first: strip credit lines from BOTH ends (leading run and a trailing
+        # credit), keeping the real speech between. Drop only if the block is entirely credit.
         if not _scrub_artefact_lines(block, artefact_markers):
             dropped.append((block, "artefact"))
             i += 1
