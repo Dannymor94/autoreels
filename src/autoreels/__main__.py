@@ -2937,6 +2937,49 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
     return 0
 
 
+def _resolve_cached_transcript(manifest: Manifest, cache_dir: Path):
+    """Find the cached transcript a manifest was built on, or None.
+
+    Resolves by `source_sha256` FIRST: a transcript now records the source's sha256, which is stable
+    across audio re-extraction. The legacy path keyed the transcript filename by the extracted mp3's
+    hash — re-extracting the audio changed that hash and orphaned the transcript. So:
+
+    1. content match on transcript.source_sha256 == manifest.source_sha256 (prefer the manifest's
+       transcript_params_key when several match; else most recent);
+    2. fall back to the audio-hash filename chain (legacy transcripts with no source_sha256 stamp).
+    """
+    sha = manifest.source_sha256
+    pkey = manifest.transcript_params_key
+    by_sha: list[tuple[Path, "Transcript"]] = []
+    for p in cache_dir.glob("*.transcript.json"):
+        try:
+            t = Transcript.model_validate_json(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if getattr(t, "source_sha256", "") and t.source_sha256 == sha:
+            by_sha.append((p, t))
+    if by_sha:
+        if pkey:
+            keyed = [(p, t) for p, t in by_sha if transcript_identity(t) == pkey]
+            if keyed:
+                return max(keyed, key=lambda pt: pt[0].stat().st_mtime)[1]
+        return max(by_sha, key=lambda pt: pt[0].stat().st_mtime)[1]
+
+    # Fallback: audio-hash chain (may orphan if the mp3 was re-extracted).
+    audio = cache_dir / f"{sha}.mp3"
+    if audio.is_file():
+        ahash = state.audio_hash(audio)
+        if pkey:
+            exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
+            if exact.exists():
+                return Transcript.model_validate_json(exact.read_text(encoding="utf-8"))
+        cands = sorted(cache_dir.glob(f"{ahash}*.transcript.json"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+        if cands:
+            return Transcript.model_validate_json(cands[0].read_text(encoding="utf-8"))
+    return None
+
+
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
@@ -3075,23 +3118,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     else:
         # Source is a manifest.
         manifest = Manifest.model_validate_json(source_file.read_text(encoding="utf-8"))
-
-        # Load transcript from cache.
-        audio = cache_dir / f"{manifest.source_sha256}.mp3"
-        if audio.is_file():
-            ahash = state.audio_hash(audio)
-            pkey = manifest.transcript_params_key
-            if pkey:
-                exact = cache_dir / f"{ahash}.{pkey}.transcript.json"
-                if exact.exists():
-                    transcript = Transcript.model_validate_json(exact.read_text(encoding="utf-8"))
-            if transcript is None:
-                cands_tx = sorted(
-                    cache_dir.glob(f"{ahash}*.transcript.json"),
-                    key=lambda p: p.stat().st_mtime, reverse=True,
-                )
-                if cands_tx:
-                    transcript = Transcript.model_validate_json(cands_tx[0].read_text(encoding="utf-8"))
+        # Resolve by source_sha256 first (stable), audio hash as fallback (see _resolve_cached_transcript).
+        transcript = _resolve_cached_transcript(manifest, cache_dir)
 
     if transcript is None:
         print(f"error: transcript not found for {manifest_path.name}", file=sys.stderr)
@@ -3589,40 +3617,19 @@ def cmd_blocks(
             print(f"ошибка разбора манифеста: {exc}", file=sys.stderr)
             return 1
         _cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
-        # Resolve: audio file (named by source_sha256) → audio content hash → transcript
-        audio = _cache_dir / f"{manifest.source_sha256}.mp3"
-        if audio.is_file():
-            ahash = state.audio_hash(audio)
-            pkey = manifest.transcript_params_key
-            if pkey:
-                exact = _cache_dir / f"{ahash}.{pkey}.transcript.json"
-                if exact.exists():
-                    transcript = Transcript.model_validate_json(
-                        exact.read_text(encoding="utf-8")
-                    )
-            if transcript is None:
-                cands = sorted(
-                    _cache_dir.glob(f"{ahash}*.transcript.json"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
-                if cands:
-                    transcript = Transcript.model_validate_json(
-                        cands[0].read_text(encoding="utf-8")
-                    )
-                    # Warn: using fallback (oldest/newest) because params_key is missing.
-                    # A manifest without transcript_params_key was built before this field existed
-                    # (legacy) — not corrupt, just old. Blocks/filter results are reliable only if
-                    # the fallback transcript is the right one. Run `arl backfill-params-key` to fix.
-                    used_pkey = transcript_identity(transcript) or "(orphan — no stamped metadata)"
-                    if not pkey:
-                        print(
-                            f"  ⚠ {target_path.name}: transcript_params_key пуст (легаси-манифест) "
-                            f"— использован последний транскрипт ({cands[0].name[:40]}…, "
-                            f"params_key={used_pkey}). "
-                            f"Для надёжной привязки: arl backfill-params-key",
-                            file=sys.stderr,
-                        )
+        # Resolve by source_sha256 first (stable across audio re-extraction), audio hash as
+        # fallback — see _resolve_cached_transcript.
+        transcript = _resolve_cached_transcript(manifest, _cache_dir)
+        if transcript is not None and not manifest.transcript_params_key:
+            # Legacy manifest with no params_key — resolved by source_sha256, not the key. Reliable
+            # only if that transcript is the intended one; backfill-params-key pins it explicitly.
+            used_pkey = transcript_identity(transcript) or "(orphan — no stamped metadata)"
+            print(
+                f"  ⚠ {target_path.name}: transcript_params_key пуст (легаси-манифест) "
+                f"— транскрипт найден по source_sha256 (params_key={used_pkey}). "
+                f"Для надёжной привязки: arl backfill-params-key",
+                file=sys.stderr,
+            )
     else:
         print(f"ошибка: ожидается .json (манифест) или .transcript.json: {target}",
               file=sys.stderr)
@@ -4037,11 +4044,14 @@ def cmd_backfill_source_sha(
 
     errors = 0
     for tpath_str in transcript_paths:
+        # Accept both a path (relative to cwd, e.g. the shell-expanded data/cache/x.transcript.json)
+        # and a bare filename. Only fall back to the cache dir when the given path does not exist —
+        # and by BASENAME, so a path that already contains data/cache/ is not doubled.
         tpath = Path(tpath_str)
-        if not tpath.is_absolute():
-            tpath = _cache / tpath_str
         if not tpath.exists():
-            print(f"  error: not found: {tpath}", file=sys.stderr)
+            tpath = _cache / tpath.name
+        if not tpath.exists():
+            print(f"  error: not found: {tpath_str}", file=sys.stderr)
             errors += 1
             continue
 
