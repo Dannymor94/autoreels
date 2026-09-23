@@ -16,6 +16,7 @@ inputs/, не в архив).
 from __future__ import annotations
 
 import shutil
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,3 +62,55 @@ def archive_input(video: str | Path, archive_dir: str | Path) -> ArchiveResult:
     archive_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(str(video), str(target))
     return ArchiveResult(status="archived", dest=target)
+
+
+@contextmanager
+def borrow_from_archive(manifest, *, inputs_dir: str | Path, archive_dir: str | Path | None = None):
+    """Temporarily move source to inputs/ if it lives only in inputs-archive/.
+
+    Finds the source by sha256 (via resolve_source). If it is already in inputs/, yields
+    the path unchanged. If it is only in archive, moves it to inputs/, yields the new path,
+    and moves it back on exit — even if the body raises or is interrupted. If _archive_video
+    (or anything else) moves the file to archive while the context is open, the finally is a
+    no-op (file already returned).
+
+    If the source is in neither location, raises SourceNotFoundError naming both dirs.
+    Reports every move to stdout so it is never a silent side effect.
+    """
+    # Lazy import avoids making archive.py depend on the heavy render module at import time.
+    from autoreels.local.render import resolve_source, SourceNotFoundError  # noqa: PLC0415
+
+    inputs_dir = Path(inputs_dir)
+    if archive_dir is None:
+        archive_dir = inputs_dir.parent / f"{inputs_dir.name}-archive"
+    else:
+        archive_dir = Path(archive_dir)
+
+    try:
+        source = resolve_source(manifest, inputs_dir)
+    except SourceNotFoundError:
+        raise SourceNotFoundError(
+            f"исходник не найден (sha256={manifest.source_sha256[:12] if manifest.source_sha256 else '?'}…): "
+            f"ни в {inputs_dir}, ни в {archive_dir}"
+        )
+
+    # Already in inputs/ — nothing to move.
+    try:
+        source.relative_to(inputs_dir)
+        yield source
+        return
+    except ValueError:
+        pass
+
+    # Source is in archive — borrow it.
+    dest = inputs_dir / source.name
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source), str(dest))
+    print(f"взят из архива: {source.name} → inputs/", flush=True)
+    try:
+        yield dest
+    finally:
+        if dest.exists():
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(dest), str(source))
+            print(f"возвращён в архив: {source.name} → inputs-archive/", flush=True)

@@ -2081,3 +2081,57 @@ def test_real_rotated_video_calibration_and_render_same_space(tmp_path):
     ], capture_output=True, text=True)
     v = _json.loads(probe.stdout)["streams"][0]
     assert (v["width"], v["height"]) == (1080, 1920), "выход не 1080×1920"
+
+
+# --- borrow_from_archive ---
+
+from autoreels.local.archive import borrow_from_archive  # noqa: E402
+from autoreels.local.render import SourceNotFoundError   # noqa: E402 (already imported via render module)
+
+
+def test_borrow_finds_source_in_archive_and_returns_it(tmp_path):
+    """Source only in inputs-archive/ → borrow moves it to inputs/, restores it on exit."""
+    inputs = tmp_path / "inputs"
+    archive = tmp_path / "inputs-archive"
+    sha = _make_source(archive, "lecture.mp4", b"video-bytes")
+    m = _manifest("lecture.mp4", sha, [])
+
+    with borrow_from_archive(m, inputs_dir=inputs, archive_dir=archive) as p:
+        assert p == inputs / "lecture.mp4"
+        assert p.is_file()
+        assert not (archive / "lecture.mp4").exists()
+
+    assert (archive / "lecture.mp4").is_file()
+    assert not (inputs / "lecture.mp4").exists()
+
+
+def test_borrow_returns_to_archive_on_failure(tmp_path):
+    """File returns to inputs-archive/ even if the body raises."""
+    inputs = tmp_path / "inputs"
+    archive = tmp_path / "inputs-archive"
+    sha = _make_source(archive, "clip.mp4", b"content")
+    m = _manifest("clip.mp4", sha, [])
+
+    with pytest.raises(RuntimeError):
+        with borrow_from_archive(m, inputs_dir=inputs, archive_dir=archive):
+            raise RuntimeError("simulated failure")
+
+    assert (archive / "clip.mp4").is_file()
+    assert not (inputs / "clip.mp4").exists()
+
+
+def test_borrow_names_both_dirs_when_source_not_found(tmp_path):
+    """Neither inputs/ nor archive has the source → SourceNotFoundError names both dirs."""
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    archive = tmp_path / "inputs-archive"
+    archive.mkdir()
+    m = _manifest("missing.mp4", "a" * 64, [])
+
+    with pytest.raises(SourceNotFoundError) as exc_info:
+        with borrow_from_archive(m, inputs_dir=inputs, archive_dir=archive):
+            pass
+
+    msg = str(exc_info.value)
+    assert str(inputs) in msg
+    assert str(archive) in msg

@@ -71,9 +71,10 @@ from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import (
     CalibrateError, InputInvalid, cmd_calibrate, validate_input,
 )
+from autoreels.local.archive import borrow_from_archive
 from autoreels.local.render import (
     RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
-    render_preview,
+    render_preview, resolve_source,
 )
 from autoreels.local.subtitles import words_in_window
 
@@ -2421,25 +2422,26 @@ def cmd_render(
             music_tag = f", музыка {Path(music_path).name}" if music_path else ""
             print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}{music_tag}) "
                   f"→ {out_dir_final} ===", flush=True)
-            outputs = render_crop(
-                render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
-                render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
-                encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
-                profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
-                subtitles_cfg=subtitles_cfg, background=background,
-            )
-            all_outputs.extend(outputs)
-            # Record each rendered clip's fingerprint next to it, so a later run re-renders only when
-            # the reel definition changes. Keyed by output stem == reel.id (skipped reels emit none).
-            _reel_by_id = {r.id: r for r in manifest.reels}
-            for out_path in outputs:
-                r = _reel_by_id.get(out_path.stem)
-                if r is not None:
-                    _write_render_fingerprint(out_dir_final, r.id, _fp(r))
-            print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
-            _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
-        except SourceNotFoundError:
-            print(f"⊘ пропущен {mf.stem}: исходник не найден в inputs/", flush=True)
+            with borrow_from_archive(manifest, inputs_dir=inputs_dir, archive_dir=archive_dir):
+                outputs = render_crop(
+                    render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
+                    render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
+                    encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
+                    profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
+                    subtitles_cfg=subtitles_cfg, background=background,
+                )
+                all_outputs.extend(outputs)
+                # Record each rendered clip's fingerprint next to it, so a later run re-renders only
+                # when the reel definition changes. Keyed by output stem == reel.id.
+                _reel_by_id = {r.id: r for r in manifest.reels}
+                for out_path in outputs:
+                    r = _reel_by_id.get(out_path.stem)
+                    if r is not None:
+                        _write_render_fingerprint(out_dir_final, r.id, _fp(r))
+                print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
+                _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
+        except SourceNotFoundError as e:
+            print(f"⊘ пропущен {mf.stem}: {e}", flush=True)
             skipped_no_video.append(mf.name)
         except Exception as e:  # noqa: BLE001
             print(f"\n[ОШИБКА] {mf.name}: {e}", file=sys.stderr, flush=True)
@@ -2556,15 +2558,6 @@ def cmd_preview(
     return 0
 
 
-def _find_source_video(source_name, *, inputs_dir, archive_dir):
-    """Найти видеофайл по имени в inputs/ или архиве (для probe размера при автокропе)."""
-    for d in (inputs_dir, archive_dir):
-        p = Path(d) / source_name
-        if p.is_file():
-            return p
-    return None
-
-
 def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir, ffprobe="ffprobe"):
     """Свежий setup для манифеста: калибровка по sha (или автокроп по отображаемому кадру).
 
@@ -2572,11 +2565,12 @@ def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir, ffprob
     иначе CalibrationError (нечем определить размер кадра). `ffprobe` — резолвнутый путь (не
     голое имя): иначе автокроп-ветка падает WinError 2, если ffprobe не в PATH. Reels не участвуют."""
     def _frame_size():
-        video = _find_source_video(manifest.source, inputs_dir=inputs_dir, archive_dir=archive_dir)
-        if video is None:
+        try:
+            video = resolve_source(manifest, inputs_dir)
+        except SourceNotFoundError:
             raise CalibrationError(
-                f"нет калибровки и видео «{manifest.source}» недоступно (ни inputs/, ни архив) — "
-                f"нечем считать автокроп"
+                f"нет калибровки и видео «{manifest.source}» недоступно "
+                f"(ни inputs/, ни архив) — нечем считать автокроп"
             )
         return _probe_frame_size_for_auto(video, ffprobe=ffprobe)
 
