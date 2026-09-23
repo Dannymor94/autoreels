@@ -1253,6 +1253,49 @@ def test_intruded_end_snaps_to_next_frame():
     assert abs(new_end_snapped * fps - round(new_end_snapped * fps)) < 1e-9  # on frame grid
 
 
+from autoreels.local.render import _expected_output_duration, _concat_segments_graph
+
+
+def test_duration_invariant_passes_ceil_snapped_end():
+    """A reel whose last window was ceil-snapped up (last-word coverage) passes the invariant:
+    expected is computed from the SAME post-snap windows the graph gets, so they agree to the ms."""
+    fps = 30.0
+    xf = round(0.08 * fps) / fps                      # 2 frames
+    # 3 windows, last one ceil-snapped up onto the frame grid.
+    segs = [_simple_seg(0.0, 7.8333), _simple_seg(20.0, 88.5),
+            _simple_seg(100.0, 100.0 + math.ceil(1.9512 * fps) / fps)]
+    expected = _expected_output_duration(segs, xfade_sec=xf)
+    # ffmpeg would emit `expected`; a real container reads back within one frame → passes.
+    for actual in (expected, expected + 1.0 / fps - 1e-4, expected - 1.0 / fps + 1e-4):
+        assert abs(actual - expected) <= 1.0 / fps
+
+
+def test_duration_invariant_matches_crossfade_graph_length():
+    """Expected duration equals the length the xfade concat graph actually produces: the last
+    seam's offset plus the last window covers the whole timeline, shortened by (n-1) xfades."""
+    import re
+    fps = 30.0
+    xf = round(0.08 * fps) / fps
+    segs = [_simple_seg(0.0, 8.0), _simple_seg(20.0, 88.5), _simple_seg(100.0, 102.0)]
+    expected = _expected_output_duration(segs, xfade_sec=xf)
+    prefix, _, _ = _concat_segments_graph(segs, 0.01, video_xfade_sec=xf)
+    last_offset = float(re.findall(r"offset=([0-9.]+)", prefix)[-1])
+    graph_len = last_offset + (segs[-1].end - segs[-1].start)   # xfade out = offset + 2nd input
+    assert abs(graph_len - expected) < 1e-3   # _num() rounds the printed offset; well under a frame
+    # sanity: three windows lose exactly two crossfades vs the bare sum.
+    assert abs(expected - (sum(s.end - s.start for s in segs) - 2 * xf)) < 1e-9
+
+
+def test_duration_invariant_rejects_silent_length_change():
+    """A stage that silently changes the length (actual off by >1 frame) still fails."""
+    fps = 30.0
+    xf = round(0.08 * fps) / fps
+    segs = [_simple_seg(0.0, 8.0), _simple_seg(20.0, 30.0)]
+    expected = _expected_output_duration(segs, xfade_sec=xf)
+    actual = expected + 3.0 / fps                     # a stage dropped/added 3 frames
+    assert abs(actual - expected) > 1.0 / fps         # invariant's condition → raises
+
+
 def test_video_fade_off_by_default():
     assert _video_fade_filter(AudioProcessing(), 30.0) == ""
 

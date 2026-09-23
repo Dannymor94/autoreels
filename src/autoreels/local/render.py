@@ -501,6 +501,26 @@ def _snap_windows_to_frames(segments, fps: float):
             for s in segments]
 
 
+def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float = 1.0) -> float:
+    """Length ffmpeg emits for these playback windows — the single source of truth shared by the
+    concat graph's xfade offsets (`_concat_segments_graph`) and the post-render duration invariant.
+
+    Computed by the same running accumulation the graph uses: each seam overlaps the running output
+    by one xfade, so N windows lose (N−1) xfades. A plain concat (xfade 0 or a single window) is the
+    bare sum. Because both the graph and the invariant read length from THIS function on the final,
+    post-snap windows, they cannot drift — the class of bug where the invariant re-derived the length
+    with its own `sum − (N−1)·xfade` assumption and disagreed with what ffmpeg actually produced.
+    """
+    if not windows:
+        return 0.0
+    out_len = windows[0].end - windows[0].start
+    for w in windows[1:]:
+        out_len += w.end - w.start
+        if xfade_sec > 0:
+            out_len -= xfade_sec
+    return out_len / speed if speed else out_len
+
+
 def _assert_windows_frame_aligned(windows, fps: float) -> None:
     """Sync invariant: every playback window spans a whole number of source frames.
 
@@ -551,17 +571,22 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
         parts.append(f"{achain}[a{i}]")
     # Video: xfade chain (dissolve at each seam) or plain hard concat.
     if video_xfade_sec > 0 and n > 1:
-        accum = 0.0
+        # Each seam blends the RUNNING output (out_len) with the next window. The offset is
+        # out_len − xfade so the transition ends exactly where the left input ends: deriving it from
+        # the running length (not `sum − (k+1)·xfade`) keeps offset+duration == out_len in the same
+        # float, so it can never sub-frame-overshoot the left input — an overshoot makes ffmpeg emit
+        # the un-shortened concat for that seam, one xfade longer than expected (the r11 abort).
+        out_len = segments[0].end - segments[0].start
         for k in range(n - 1):
             left = f"t{k - 1}" if k > 0 else "v0"
             right = f"v{k + 1}"
             label = "vseg" if k == n - 2 else f"t{k}"
-            accum += segments[k].end - segments[k].start
-            xf_offset = round(accum - (k + 1) * video_xfade_sec, 9)
+            xf_offset = round(out_len - video_xfade_sec, 9)
             parts.append(
                 f"[{left}][{right}]xfade=transition=fade"
                 f":duration={_num(video_xfade_sec)}:offset={_num(xf_offset)}[{label}]"
             )
+            out_len = xf_offset + (segments[k + 1].end - segments[k + 1].start)
     else:
         parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
     parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
@@ -1063,8 +1088,10 @@ def _render_segments(
                 _tail_fade = None   # no audio mute; tail_fade_sec gives the clean soft end
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
-            # Audio is plain concat (no crossfade) and is trimmed to this by -shortest.
-            clip_duration = clip_dur - (len(segs) - 1) * _xfade_actual
+            # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
+            # the final post-snap `segs` by the same helper the invariant checks against, so the
+            # expected length always matches what the concat graph emits (no re-derivation drift).
+            clip_duration = _expected_output_duration(segs, xfade_sec=_xfade_actual)
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
@@ -1138,16 +1165,18 @@ def _render_segments(
                     f"({_ts(reel.start)}→{_ts(reel.end)}, код {returncode}): {stderr}"
                 )
             outputs.append(out)
-            # Invariant: the file must last the playback duration the manifest implies — clip_duration
-            # (playback windows − xfade) at speed. A silent drift means a stage shortened the clip
-            # without the manifest saying so (the class of bug that lost the tail air). One-frame
-            # tolerance absorbs container/encoder rounding.
+            # Invariant: the file must last exactly the length _expected_output_duration derived from
+            # the final post-snap windows — the same values fed to the concat graph. Comparing like
+            # with like, a one-frame tolerance is enough (it only absorbs container/AAC rounding); a
+            # larger drift means a stage shortened the clip without the windows saying so (the class
+            # of bug that lost the tail air).
+            _inv_fps = _fps_holder[0] if _fps_holder else 30.0
             _actual = _probe_duration_sec(out, _sibling_ffprobe(ffmpeg_bin)) if out.exists() else None
-            if _actual is not None and abs(_actual - _out_dur) > 1.5 / _fps():
+            if _actual is not None and abs(_actual - _out_dur) > 1.0 / _inv_fps:
                 raise RenderError(
-                    f"{reel.id}: rendered {_actual:.3f}s but manifest implies {_out_dur:.3f}s "
+                    f"{reel.id}: rendered {_actual:.3f}s but windows imply {_out_dur:.3f}s "
                     f"(Δ{_actual - _out_dur:+.3f}s > 1 frame) — a render stage changed the "
-                    f"duration the manifest does not describe"
+                    f"duration the windows do not describe"
                 )
             if emit_text:
                 _write_sidecar_text(out, reel, render_cfg)
