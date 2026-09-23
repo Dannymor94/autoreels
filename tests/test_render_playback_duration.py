@@ -54,26 +54,50 @@ def test_cold_open_duration_is_hook_plus_body():
     assert abs(_expected_output_sec(reel) - (14.5 - _XFADE_ACTUAL)) < _FRAME
 
 
-# ── Test 3: trailing air survives an intruder ─────────────────────────────────
-def test_tail_air_survives_intruder_word():
+# ── Test 3: intruded tail — clip ends before the intruder ────────────────────
+def test_intruded_tail_clip_ends_before_intruder():
+    """Intruded tail: render cuts the clip before the intruder; no audio mute stretch.
+    The manifest still carries the full reel.end (air in the source); what changes is the
+    rendered file length, which ends before next_word_start."""
     tail_pad = 1.5
-    # Body ends on the last intended word (108.6s); _apply_tail_air then extends it by tail_pad.
+    guard = 0.12
     reel = _reel(id="r", start=100.0, end=108.6, segments=[Segment(start=100.0, end=108.6)])
     words = [
-        Word(word="конец.", t0=108.4, t1=108.6),   # last intended word (inside the body)
-        Word(word="Дальше", t0=108.9, t1=109.4),   # intruder: starts INSIDE the added tail air
+        Word(word="конец.", t0=108.4, t1=108.6),   # last intended word
+        Word(word="Дальше", t0=108.9, t1=109.4),   # intruder inside the added tail air
     ]
     _apply_tail_air([reel], words, tail_pad_sec=tail_pad, video_duration=None)
 
-    # Manifest carries the full tail air past the last word — reel.end extended, not trimmed.
-    assert abs(reel.end - reel.tail_last_word_end - tail_pad) < _FRAME
-    assert reel.tail_next_word_start == 108.9          # intruder recorded (render silences it)
+    assert reel.tail_next_word_start == 108.9          # intruder recorded
+    assert reel.end > 108.9                            # manifest carries air beyond the intruder
 
-    # Render keeps the air: single window, no xfade → output = full span, so the air to EOF == tail_pad.
-    out_dur = _expected_output_sec(reel)
-    last_word_out = reel.tail_last_word_end - reel.start
-    assert abs((out_dur - last_word_out) - tail_pad) < _FRAME
-
-    # The intruder is handled by an AUDIO fade (not by shortening the clip).
+    # _tail_speech_fade reports the cut point on the output timeline.
     fade = _tail_speech_fade(reel, reel.playback_windows(), speed=1.0, guard=0.12)
     assert fade is not None
+    cut_out, _ = fade   # output-timeline time just before the intruder
+
+    # Render trim arithmetic (single window, speed=1, offset=0): source_end = start + cut_out.
+    new_end_src = reel.start + cut_out
+    new_end_snapped = round(new_end_src * _FPS) / _FPS
+
+    # Clip ends BEFORE the intruder — intruder never plays.
+    assert new_end_snapped < reel.tail_next_word_start
+
+    # Some tail air is preserved (clip is longer than the last word).
+    last_word_out = reel.tail_last_word_end - reel.start
+    assert new_end_snapped - reel.start > last_word_out
+
+
+# ── Test 4: clean tail — full tail_pad_sec preserved ──────────────────────────
+def test_clean_tail_keeps_full_tail_pad():
+    """Clean tail (no intruder): no trim, full tail_pad_sec of air to EOF."""
+    tail_pad = 1.5
+    reel = _reel(id="r", start=100.0, end=108.6, segments=[Segment(start=100.0, end=108.6)])
+    words = [Word(word="конец.", t0=108.4, t1=108.6)]
+    _apply_tail_air([reel], words, tail_pad_sec=tail_pad, video_duration=None)
+
+    assert reel.tail_next_word_start is None    # no intruder
+    out_dur = _expected_output_sec(reel)
+    last_word_out = reel.tail_last_word_end - reel.start
+    # air = out_dur − last_word_out must equal tail_pad within a frame.
+    assert abs((out_dur - last_word_out) - tail_pad) < _FRAME

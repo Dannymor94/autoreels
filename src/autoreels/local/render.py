@@ -1012,13 +1012,20 @@ def _render_segments(
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
-            # Intruded tail: a next-phrase word inside the trailing air is silenced by an AUDIO fade
-            # (afade=out holds silence through the rest of the air). The video air is KEPT — the clip
-            # runs the full playback_duration the manifest states, so `_apply_tail_air`'s tail_pad_sec
-            # survives to the file. (Previously the clip was trimmed back to the intruder, which threw
-            # the tail air away — the "tail lost on render" bug.)
             _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
                                            guard=getattr(ap, "intrusion_guard_sec", 0.12))
+            if _tail_fade is not None:
+                # Intruded tail: end clip before the intruder — video and audio cut together, no mute.
+                # Map the output-timeline cut point back to source time on the last segment and snap.
+                _fade_st, _ = _tail_fade
+                _offset = sum(s.end - s.start for s in segs[:-1])
+                _spd = _reel_speed or 1.0
+                _new_end = segs[-1].start + _fade_st * _spd - _offset
+                _new_end = round(_new_end * _fps()) / _fps()   # frame-grid alignment
+                if _new_end > segs[-1].start:
+                    segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_new_end)]
+                    clip_dur = sum(s.end - s.start for s in segs)
+                _tail_fade = None   # no audio mute; tail_fade_sec gives the clean soft end
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest.
             clip_duration = clip_dur - (len(segs) - 1) * _xfade_actual

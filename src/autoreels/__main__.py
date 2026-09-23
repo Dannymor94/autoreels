@@ -1143,11 +1143,6 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
         if dur < floor:
             warn(r, f"short clip {dur:.1f}s (< {floor:.0f}s floor)")
 
-    # Overlap between two selected clips: name both, warn only (never dedup one away).
-    ordered = sorted(reels, key=lambda x: x.start)
-    for a, b in zip(ordered, ordered[1:]):
-        if b.start < a.end:
-            warn(a, f"overlaps reel {b.id} by {a.end - b.start:.1f}s")
     return out
 
 

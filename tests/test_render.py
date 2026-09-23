@@ -1157,18 +1157,23 @@ def test_filter_order_tail_fade_after_loudnorm():
     assert af.index("loudnorm") < af.index("afade")
 
 
-def test_intruded_tail_keeps_air_fades_audio_only():
-    """Intruded tail: the clip is NOT trimmed — the full tail air (video) survives, and the audio
-    fade silences the intruder in place. This is the fix for the "tail lost on render" bug: render
-    keeps `segs` intact, so file duration == playback_duration; only the audio goes silent over the
-    next-phrase word."""
+def test_intruded_tail_cuts_before_intruder():
+    """Intruded tail: clip ends before the intruder — video and audio cut together, no mute stretch.
+    _tail_speech_fade reports the cut point; render maps it to source time and frame-snaps it;
+    then _tail_fade is set to None so no audio mute is applied."""
     segs = [_simple_seg(0.0, 30.0)]
     reel = _reel_with_tail(lw_end=29.3, nw_start=29.5)
     tail_fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
     assert tail_fade is not None
-    # audio fade reaches silence at the intruder (29.5s) — the intruder is never heard
-    assert abs(tail_fade[0] + tail_fade[1] - 29.5) < 1e-6
-    # segments are untouched → full 30s tail air preserved in the video
+    # cut point on output timeline is before the intruder
+    cut_out, _ = tail_fade
+    assert cut_out < 29.5
+    # simulate render trim arithmetic: source_end = last.start + cut_out (offset=0, speed=1)
+    fps = 30.0
+    new_end = round((segs[-1].start + cut_out) * fps) / fps
+    assert new_end < 29.5          # intruder gone
+    assert new_end > 29.0          # tail air still present
+    # _tail_speech_fade does not mutate segs (render does the actual trimming)
     assert abs(sum(s.end - s.start for s in segs) - 30.0) < 1e-6
 
 

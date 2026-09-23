@@ -252,6 +252,31 @@ def test_short_clip_warned_not_dropped():
     assert any("short clip" in w for w in reel.warnings), "warning must be recorded on the reel"
 
 
+# --- Test 5b: human overlap — allowed, no warning ----------------------------------------
+def test_human_overlap_allowed_no_warning():
+    """Two human-selected reels sharing 6s of source: both kept, no overlap warning emitted."""
+    from autoreels.core.models import Transcript
+    r0 = load_r0_config(REPO_ROOT / "config" / "r0.yaml")
+    words = [Word(word=f"w{i}.", t0=float(i), t1=float(i) + 0.9) for i in range(60)]
+    tx = Transcript(language="ru", words=words)
+    # r1 ends at 30s, r2 starts at 24s → 6s overlap.
+    r1 = Reel(id="h1", start=0.0, end=30.0, score=80, hook="h", title="", description="")
+    r2 = Reel(id="h2", start=24.0, end=54.0, score=70, hook="h", title="", description="")
+    warns = cli.collect_human_warnings([r1, r2], tx, r0_cfg=r0)
+    overlap_warns = [(r, m) for r, m in warns if "overlap" in m]
+    assert not overlap_warns, f"human overlap must be silent, got: {overlap_warns}"
+
+
+# --- Test 5c: auto dedup still removes overlapping candidate ------------------------------
+def test_auto_dedup_removes_overlap():
+    """Automatic path: dedup still drops the lower-score reel when two overlap."""
+    from autoreels.cloud.select import dedup
+    a = Reel(id="a", start=100.0, end=130.0, score=80, hook="h", title="", description="")
+    b = Reel(id="b", start=110.0, end=140.0, score=60, hook="h", title="", description="")
+    kept = dedup([a, b], overlap_threshold=0.3)
+    assert a in kept and b not in kept
+
+
 # --- Test 6: automatic path still runs every deciding stage --------------------------------
 def test_automatic_path_still_decides():
     # The deciding stages still run for model candidates: in _cmd_run_impl's pipeline, and
