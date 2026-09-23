@@ -688,12 +688,18 @@ def _intruded_end_src(fade_start_out: float, segs, speed: float,
     return new_end
 
 
-def _assert_end_covers_last_word(reel, segs) -> None:
-    """Invariant: clip end must not precede the last subtitle word's end. Raised before render."""
+def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
+    """Invariant: clip end must not precede the last subtitle word's end.
+
+    Tolerance = 1 frame at fps: snapping to the frame grid legitimately moves an end
+    by up to half a frame; using the full frame as slack absorbs that without masking
+    genuine truncation (which is measured in hundreds of ms, not single frames).
+    """
     if not getattr(reel, "subtitles", None):
         return
     last_t1 = reel.subtitles[-1].t1
-    if segs[-1].end < last_t1 - 1e-6:
+    tolerance = 1.0 / fps
+    if segs[-1].end < last_t1 - tolerance:
         raise RuntimeError(
             f"{getattr(reel, 'id', '?')}: clip end {segs[-1].end:.4f}s precedes "
             f"last subtitle word end {last_t1:.4f}s"
@@ -1048,12 +1054,14 @@ def _render_segments(
                 _spd = _reel_speed or 1.0
                 _last_t1 = reel.subtitles[-1].t1 if reel.subtitles else None
                 _new_end = _intruded_end_src(_fade_st, segs, _spd, _last_t1)
-                _new_end = round(_new_end * _fps()) / _fps()   # frame-grid alignment
+                # Snap UP (ceil) so the last word is always fully covered; round could step
+                # below last_word.t1 when they are within one frame of each other.
+                _new_end = math.ceil(_new_end * _fps()) / _fps()
                 if _new_end > segs[-1].start:
                     segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_new_end)]
                     clip_dur = sum(s.end - s.start for s in segs)
                 _tail_fade = None   # no audio mute; tail_fade_sec gives the clean soft end
-            _assert_end_covers_last_word(reel, segs)
+            _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest.
             clip_duration = clip_dur - (len(segs) - 1) * _xfade_actual

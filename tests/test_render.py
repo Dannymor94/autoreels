@@ -8,6 +8,7 @@
 - все пути через pathlib, кроссплатформенно (basename Mac/Windows-строки извлекается верно);
 - несколько reel → несколько вызовов ffmpeg.
 """
+import math
 import subprocess
 from pathlib import Path, PureWindowsPath
 
@@ -1218,7 +1219,38 @@ def test_invariant_rejects_clip_end_before_last_word():
     reel = SimpleNamespace(id="r01", subtitles=[word])
     segs = [_simple_seg(0.0, 4.5)]   # ends at 4.5 < word.t1=5.0
     with pytest.raises(RuntimeError, match="precedes"):
-        _assert_end_covers_last_word(reel, segs)
+        _assert_end_covers_last_word(reel, segs, fps=30.0)
+
+
+def test_invariant_passes_sub_frame_offset_at_30fps():
+    """12 ms before last word end at 30 fps is within one-frame tolerance — must not raise."""
+    from types import SimpleNamespace
+    # 1 frame at 30 fps ≈ 33.3 ms; 12 ms < 33.3 ms → acceptable from frame-grid rounding.
+    word = SimpleNamespace(t1=5.0)
+    reel = SimpleNamespace(id="r01", subtitles=[word])
+    segs = [_simple_seg(0.0, 4.988)]   # 5.0 - 0.012 = 4.988
+    _assert_end_covers_last_word(reel, segs, fps=30.0)   # must not raise
+
+
+def test_invariant_rejects_200ms_offset():
+    """200 ms before last word end far exceeds one frame — must raise."""
+    from types import SimpleNamespace
+    word = SimpleNamespace(t1=5.0)
+    reel = SimpleNamespace(id="r01", subtitles=[word])
+    segs = [_simple_seg(0.0, 4.8)]   # 5.0 - 0.2 = 4.8
+    with pytest.raises(RuntimeError, match="precedes"):
+        _assert_end_covers_last_word(reel, segs, fps=30.0)
+
+
+def test_intruded_end_snaps_to_next_frame():
+    """After the clamp, ceil ensures the end is on the frame grid and >= last_word.t1."""
+    # This replicates the r01 pathology: round(608.1128 * 30)/30 = 608.1 (below word end),
+    # ceil(608.1128 * 30)/30 = 608.1333 (above word end, on frame grid).
+    fps = 30.0
+    new_end_raw = 608.1128   # = _intruded_end_src result after clamping to last_word.t1
+    new_end_snapped = math.ceil(new_end_raw * fps) / fps
+    assert new_end_snapped >= new_end_raw                        # snapped up, covers last word
+    assert abs(new_end_snapped * fps - round(new_end_snapped * fps)) < 1e-9  # on frame grid
 
 
 def test_video_fade_off_by_default():
