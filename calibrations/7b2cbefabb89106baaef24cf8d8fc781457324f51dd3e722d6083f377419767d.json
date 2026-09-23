@@ -1,0 +1,22 @@
+{
+  "source_name": "Pxl 20260621 122006193.mp4",
+  "source_sha256": "7b2cbefabb89106baaef24cf8d8fc781457324f51dd3e722d6083f377419767d",
+  "setup_label": "Pxl 20260621 122006193",
+  "crop": {
+    "x": 1418,
+    "y": 0,
+    "w": 1215,
+    "h": 2160
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    3840,
+    2160
+  ],
+  "rotation_deg": 0.0,
+  "palette": null,
+  "rotation_applied": true
+}
