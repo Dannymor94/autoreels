@@ -35,7 +35,7 @@ from autoreels.core.config import (
     AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.progress import is_tty, render_bar
-from autoreels.core.models import Manifest, SetupProfile
+from autoreels.core.models import Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
@@ -481,7 +481,6 @@ def _snap_windows_to_frames(segments, fps: float):
     every boundary after the fix). Applied only on the multi-window path; a single window keeps the
     byte-identical fast -ss/-t cut.
     """
-    from autoreels.core.models import Segment
     return [Segment(start=round(s.start * fps) / fps, end=round(s.end * fps) / fps)
             for s in segments]
 
@@ -639,6 +638,20 @@ def _tail_speech_fade(reel, segs, speed: float,
     start = max(0.0, n_out - guard)
     dur = n_out - start
     return (start, dur) if dur > 1e-3 else None
+
+
+def _trim_segs_to_tail(segs, tail_fade: tuple[float, float], speed: float) -> list:
+    """Shorten the last segment so the total output duration == tail_fade[0] + tail_fade[1].
+
+    Used for intruded tails: clip video and audio end where the fade ends, eliminating the
+    mute stretch that would otherwise follow."""
+    new_out_dur = tail_fade[0] + tail_fade[1]
+    new_src_dur = new_out_dur * (speed or 1.0)
+    preceding_src = sum(s.end - s.start for s in segs[:-1])
+    last_s = segs[-1]
+    new_last = Segment(start=last_s.start,
+                       end=last_s.start + max(0.0, new_src_dur - preceding_src))
+    return list(segs[:-1]) + [new_last]
 
 
 def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
@@ -971,6 +984,19 @@ def _render_segments(
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
+            # Tail fade computed first: intruded tail trims the clip so video and audio end together.
+            _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
+                                           guard=getattr(ap, "intrusion_guard_sec", 0.12))
+            if _tail_fade is not None:
+                # Shorten clip to the point where audio goes silent; no mute video after that.
+                segs = _trim_segs_to_tail(segs, _tail_fade, _reel_speed or 1.0)
+                clip_dur = sum(s.end - s.start for s in segs)
+                if clip_dur < _MIN_CLIP_RENDER_SEC:
+                    print(
+                        f"  ⚠ {reel.id}: intruded tail shortens clip to {new_out_dur:.2f}s "
+                        f"— below minimum, rendered anyway",
+                        flush=True,
+                    )
             clip_duration = clip_dur
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
@@ -980,9 +1006,6 @@ def _render_segments(
             reel_af = None
             # Final (post-speed) length: the tail fade must land on the real end of the clip.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
-            # Fade the tail to silence over any next-phrase word pulled into the trailing air.
-            _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
-                                           guard=getattr(ap, "intrusion_guard_sec", 0.12))
             if music_path:
                 reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed,
                                                 tail_fade=_tail_fade)
