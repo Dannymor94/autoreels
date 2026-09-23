@@ -499,6 +499,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 595.3696,
+      "tail_next_word_start": 595.3696,
       "warnings": []
     },
     {
@@ -874,6 +876,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 679.912844,
+      "tail_next_word_start": 680.372844,
       "warnings": []
     },
     {
@@ -1229,6 +1233,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 1016.233164,
+      "tail_next_word_start": 1016.2731739999999,
       "warnings": []
     },
     {
@@ -1970,6 +1976,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 1183.163284,
+      "tail_next_word_start": null,
       "warnings": []
     },
     {
@@ -2130,6 +2138,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 1220.493438,
+      "tail_next_word_start": 1220.493438,
       "warnings": []
     },
     {
@@ -2814,6 +2824,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 1537.661838,
+      "tail_next_word_start": null,
       "warnings": []
     },
     {
@@ -3072,6 +3084,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 1722.1361379999998,
+      "tail_next_word_start": 1722.676108,
       "warnings": []
     },
     {
@@ -3791,6 +3805,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 1961.0924325,
+      "tail_next_word_start": null,
       "warnings": []
     },
     {
@@ -4119,6 +4135,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 2057.2324325,
+      "tail_next_word_start": 2057.7124425,
       "warnings": [
         "dangling start: opens on «То»"
       ]
@@ -5005,6 +5023,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 2158.1945625,
+      "tail_next_word_start": 2158.1945625,
       "warnings": []
     },
     {
@@ -5605,6 +5625,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 2466.778719,
+      "tail_next_word_start": 2466.778719,
       "warnings": []
     },
     {
@@ -5969,6 +5991,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 2537.639699,
+      "tail_next_word_start": 2537.639699,
       "warnings": []
     },
     {
@@ -6273,6 +6297,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 2659.720689,
+      "tail_next_word_start": 2659.7606690000002,
       "warnings": []
     },
     {
@@ -6616,6 +6642,8 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "speed": 1.0,
+      "tail_last_word_end": 2747.620679,
+      "tail_next_word_start": null,
       "warnings": []
     }
   ]

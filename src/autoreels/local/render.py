@@ -990,10 +990,17 @@ def _render_segments(
             if _tail_fade is not None:
                 # Shorten clip to the point where audio goes silent; no mute video after that.
                 segs = _trim_segs_to_tail(segs, _tail_fade, _reel_speed or 1.0)
+                if len(segs) > 1:
+                    # Re-snap after trimming: trim can break frame alignment for multi-window reels.
+                    segs = _snap_windows_to_frames(segs, _fps())
                 clip_dur = sum(s.end - s.start for s in segs)
+                # Recompute tail fade to land at the actual (post-snap) clip end.
+                _new_out = clip_dur / (_reel_speed or 1.0)
+                _guard = getattr(ap, "intrusion_guard_sec", 0.12)
+                _tail_fade = (max(0.0, _new_out - _guard), min(_guard, _new_out))
                 if clip_dur < _MIN_CLIP_RENDER_SEC:
                     print(
-                        f"  ⚠ {reel.id}: intruded tail shortens clip to {new_out_dur:.2f}s "
+                        f"  ⚠ {reel.id}: intruded tail shortens clip to {_new_out:.2f}s "
                         f"— below minimum, rendered anyway",
                         flush=True,
                     )
