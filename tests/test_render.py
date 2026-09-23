@@ -1189,6 +1189,38 @@ def test_clean_tail_clip_keeps_full_tail_pad():
     assert abs(clip_dur - 30.0) < 1e-6
 
 
+from autoreels.local.render import _intruded_end_src, _assert_end_covers_last_word
+
+
+def test_intruded_end_clamps_to_last_word_end():
+    """guard lands inside the last word (nw_start ≈ word.t1) → cut clamped to word's end."""
+    # word [4.0, 5.0]; intruder starts at 5.0 (right at word end, 0 gap)
+    # nw_start - guard = 4.88 — inside the word. Fix must clamp to 5.0.
+    segs = [_simple_seg(0.0, 6.0)]
+    # _tail_speech_fade gives fade_start_out = n_out - guard
+    # n_out = (5.0 - 0.0 + 0) / 1.0 = 5.0; fade_start = 5.0 - 0.12 = 4.88
+    new_end = _intruded_end_src(fade_start_out=4.88, segs=segs, speed=1.0, last_word_t1=5.0)
+    assert abs(new_end - 5.0) < 1e-6, f"expected 5.0, got {new_end}"
+
+
+def test_intruded_end_clean_gap_unaffected():
+    """Intruder well after last word (gap > guard) → cut not affected by clamp."""
+    # word [4.0, 5.0]; intruder at 5.5; cut = 5.38 — after word end, no clamp needed
+    segs = [_simple_seg(0.0, 6.0)]
+    new_end = _intruded_end_src(fade_start_out=5.38, segs=segs, speed=1.0, last_word_t1=5.0)
+    assert abs(new_end - 5.38) < 1e-6, f"expected 5.38, got {new_end}"
+
+
+def test_invariant_rejects_clip_end_before_last_word():
+    """_assert_end_covers_last_word raises when clip end < last subtitle word end."""
+    from types import SimpleNamespace
+    word = SimpleNamespace(t1=5.0)
+    reel = SimpleNamespace(id="r01", subtitles=[word])
+    segs = [_simple_seg(0.0, 4.5)]   # ends at 4.5 < word.t1=5.0
+    with pytest.raises(RuntimeError, match="precedes"):
+        _assert_end_covers_last_word(reel, segs)
+
+
 def test_video_fade_off_by_default():
     assert _video_fade_filter(AudioProcessing(), 30.0) == ""
 

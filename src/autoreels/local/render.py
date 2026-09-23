@@ -673,6 +673,33 @@ def _tail_speech_fade(reel, segs, speed: float,
     return (start, dur) if dur > 1e-3 else None
 
 
+def _intruded_end_src(fade_start_out: float, segs, speed: float,
+                      last_word_t1: float | None) -> float:
+    """Source-time end for an intruded-tail clip.
+
+    Converts fade_start_out (output timeline) back to source time, then clamps so the cut
+    never precedes last_word_t1: guard can land inside the final word when nw_start ≈ t1
+    (Whisper places the intruder adjacent to the last subtitle word).
+    """
+    offset = sum(s.end - s.start for s in segs[:-1])
+    new_end = segs[-1].start + fade_start_out * speed - offset
+    if last_word_t1 is not None:
+        new_end = max(new_end, last_word_t1)
+    return new_end
+
+
+def _assert_end_covers_last_word(reel, segs) -> None:
+    """Invariant: clip end must not precede the last subtitle word's end. Raised before render."""
+    if not getattr(reel, "subtitles", None):
+        return
+    last_t1 = reel.subtitles[-1].t1
+    if segs[-1].end < last_t1 - 1e-6:
+        raise RuntimeError(
+            f"{getattr(reel, 'id', '?')}: clip end {segs[-1].end:.4f}s precedes "
+            f"last subtitle word end {last_t1:.4f}s"
+        )
+
+
 def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
                            tail_fade: tuple[float, float] | None = None) -> list[str]:
     """Always-on audio-only fade-out. Separate from `_audio_fade_parts` (the optional symmetric
@@ -1018,14 +1045,15 @@ def _render_segments(
                 # Intruded tail: end clip before the intruder — video and audio cut together, no mute.
                 # Map the output-timeline cut point back to source time on the last segment and snap.
                 _fade_st, _ = _tail_fade
-                _offset = sum(s.end - s.start for s in segs[:-1])
                 _spd = _reel_speed or 1.0
-                _new_end = segs[-1].start + _fade_st * _spd - _offset
+                _last_t1 = reel.subtitles[-1].t1 if reel.subtitles else None
+                _new_end = _intruded_end_src(_fade_st, segs, _spd, _last_t1)
                 _new_end = round(_new_end * _fps()) / _fps()   # frame-grid alignment
                 if _new_end > segs[-1].start:
                     segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_new_end)]
                     clip_dur = sum(s.end - s.start for s in segs)
                 _tail_fade = None   # no audio mute; tail_fade_sec gives the clean soft end
+            _assert_end_covers_last_word(reel, segs)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest.
             clip_duration = clip_dur - (len(segs) - 1) * _xfade_actual
