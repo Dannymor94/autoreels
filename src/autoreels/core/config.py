@@ -558,6 +558,10 @@ class RenderConfig(BaseModel):
     role: str = "both"        # "analyze" | "render" | "both" (machine-local, render.local.yaml)
     auto_render: bool = False   # авто-рендер после анализа (machine-local, render.local.yaml)
     parallel_render: bool = True  # рендер в фоне пока идёт следующий анализ (render.local.yaml)
+    # Hashtags for publish sidecars. hashtags_always: fixed tags for every clip of this source
+    # (e.g. speaker's topic area). hashtags_max: total cap including always-tags.
+    hashtags_always: list[str] = Field(default_factory=list)
+    hashtags_max: int = 5
 
     @field_validator("role")
     @classmethod

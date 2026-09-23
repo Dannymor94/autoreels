@@ -604,22 +604,24 @@ _COMPACT_PROMPT = (
     "# Allowed range 1.0-1.3 (content policy; atempo itself accepts 0.5-100 without chaining).\n"
     "# Clips that exceed the manual ceiling get the minimum speed that fits, within that range.\n"
     "#\n"
-    "# Optional fields after the score, introduced by '|' (each independent, t: must be last):\n"
+    "# Optional fields after the score, introduced by '|' (each independent):\n"
     "#   s:N   start at sentence N of the selection (sentences are numbered [1] [2]… below)\n"
     "#   e:N   end at sentence N (numbering is continuous across a merge)\n"
     "#   h:N   cold open: play sentence N first, then the clip from its start\n"
-    "#   t: …  overlay this title on the first seconds of the clip\n"
+    "#   t: …  overlay this title on the first seconds of the clip  (second-to-last field)\n"
+    "#   d: …  post caption: 1-2 sentences shown under the clip when posted  (LAST field)\n"
     "# Omit s:/e: and the clip starts at the first clean sentence and ends before trailing\n"
     "# wind-down ('да', 'вот', 'как-то так'). Unknown/garbled fields are ignored, not fatal.\n"
     "#\n"
-    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| h:N] [| t: text]\n"
+    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| h:N] [| t: text] [| d: text]\n"
     "# No commentary, no restating of text.  Example:\n"
     "#   3 85+            (join 3 with 4)\n"
     "#   5 -90           (join 5 back into 4)\n"
     "#   7 72++          (join 7 with 8 and 9)\n"
     "#   8 90@1.15       this clip at 1.15x\n"
     "#   9 90 | s:2 e:9  start at sentence 2, end at sentence 9\n"
-    "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу"
+    "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу\n"
+    "#   12 85 | t: Страх — это не страх, а сигнал | d: Тело подаёт сигнал, а мы принимаем его за страх."
 )
 
 
@@ -635,21 +637,34 @@ class _ReviewEntry(NamedTuple):
     hook: int | None = None     # h:N — open with sentence N as a cold-open segment (Part 5)
     title: str | None = None    # t: text — overlay title plate (Part 4)
     filler: bool | None = None  # f:0/f:1 — per-clip filler-removal override (Part 3)
+    description: str | None = None  # d: text — post caption (stored in reel.description)
 
 
 _FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
 _FIELD_T_RE = re.compile(r"(?:^|[|\s])t:\s*(.*)$")
+_FIELD_D_RE = re.compile(r"(?:^|[|\s])d:\s*(.*)$")
 _FIELD_F_RE = re.compile(r"(?:^|[|\s])f:\s*([01])")
 _STRAY_FIELD_RE = re.compile(r"(?:^|[|\s])([a-zA-Z]+):")
 
 
 def _parse_fields(text: str):
-    """Parse the optional trailing fields of an answer line: s:N e:N h:N f:0|1 t: text.
+    """Parse the optional trailing fields of an answer line: s:N e:N h:N f:0|1 t: text [d: text].
 
-    Fields are independent and order-free except t: (title), which takes the rest of the line and
-    so must come last. Returns (s, e, hook, title, filler, errors); an unrecognised or malformed
-    field is reported (never fatal). s/e/h are 1-based sentence indices; f is a 0/1 filler toggle."""
+    Ordering: d: is the absolute last field (greedy to end of line); t: must precede it and is
+    second-to-last. Both carry free text including commas and punctuation. The pipe | character
+    is treated as a field separator; within d: or t: text it must be escaped as \\| (rare in
+    practice — captions seldom contain |). Example with both fields:
+        11 88 | t: Ты не поломан — ты забыл свою силу | d: Тело подаёт сигнал, а мы принимаем его за страх.
+
+    Returns (s, e, hook, title, filler, description, errors); unrecognised/malformed fields
+    are reported (never fatal). s/e/h are 1-based sentence indices; f is a 0/1 filler toggle."""
     errors: list[str] = []
+    # d: is the absolute last field — parse first so t: is not contaminated by it
+    description: str | None = None
+    md = _FIELD_D_RE.search(text)
+    if md:
+        description = md.group(1).strip() or None
+        text = text[:md.start()].rstrip("| \t")  # strip separator left by d: removal
     title: str | None = None
     mt = _FIELD_T_RE.search(text)
     if mt:
@@ -668,7 +683,7 @@ def _parse_fields(text: str):
             text = text[:m.start()] + text[m.end():]   # consume so it is not flagged as stray
     for m in _STRAY_FIELD_RE.finditer(text):
         errors.append(f"unrecognised or malformed field '{m.group(1)}:'")
-    return vals["s"], vals["e"], vals["h"], title, filler, errors
+    return vals["s"], vals["e"], vals["h"], title, filler, description, errors
 
 
 def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float | None, str | None]:
@@ -782,10 +797,10 @@ def parse_review(
         if err:
             errors.append((lineno, err))
             continue
-        s, e, hook, title, filler, ferrs = _parse_fields(fields)
+        s, e, hook, title, filler, description, ferrs = _parse_fields(fields)
         for fe in ferrs:
             errors.append((lineno, fe))
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description))
 
     return source_ref, entries, errors
 
@@ -883,10 +898,10 @@ def parse_compact_answer(
             if err:
                 errors.append((lineno, err))
                 continue
-            s, e, hook, title, filler, ferrs = _parse_fields(m.group(3) or "")
+            s, e, hook, title, filler, description, ferrs = _parse_fields(m.group(3) or "")
             for fe in ferrs:
                 errors.append((lineno, fe))
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description))
         else:
             ignored += 1
 

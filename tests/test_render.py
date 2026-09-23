@@ -859,7 +859,8 @@ def test_crop_no_subtitles_when_cfg_absent(tmp_path, render_cfg, fake_ffmpeg):
 
 
 def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffmpeg):
-    # Текст публикации (title/description) кладётся РЯДОМ с клипом, НЕ вшивается в видео.
+    # Publish sidecar: <reel>.txt = caption (description) + blank line + hashtags.
+    # Title goes on the video plate, not in .txt.
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "v.mp4", b"sidecar-text-video")
     out_dir = tmp_path / "out"
@@ -872,8 +873,8 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     txt = out_dir / "r01.txt"
     assert txt.exists()
     content = txt.read_text(encoding="utf-8")
-    assert "ЗА ТРАВМОЙ скрыт ДАР 🫀…" in content
-    assert "#травма #психология" in content
+    # caption (description field) appears in the sidecar
+    assert "Контринтуитивный момент" in content
 
 
 # ------------------------------------------------------------ фоновая музыка (микс/loop/ducking)
@@ -1491,9 +1492,10 @@ def test_crop_sidecar_txt_format_is_title_blankline_description_utf8(tmp_path, r
 
     render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
 
-    # формат: заголовок, пустая строка, описание; utf-8 (декодируем явно из байтов)
+    # формат: caption (description), опционально пустая строка + хэштеги; utf-8
     raw = (out_dir / "r01.txt").read_bytes()
-    assert raw.decode("utf-8") == "Заголовок\n\nОписание #тег\n"
+    content = raw.decode("utf-8")
+    assert content.startswith("Описание #тег\n")
 
 
 def test_crop_sidecar_txt_per_reel(tmp_path, render_cfg, fake_ffmpeg):
@@ -1507,8 +1509,8 @@ def test_crop_sidecar_txt_per_reel(tmp_path, render_cfg, fake_ffmpeg):
 
     render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
 
-    assert (out_dir / "r01.txt").read_text(encoding="utf-8").startswith("Первый\n\nОпис 1")
-    assert (out_dir / "r02.txt").read_text(encoding="utf-8").startswith("Второй\n\nОпис 2")
+    assert (out_dir / "r01.txt").read_text(encoding="utf-8").startswith("Опис 1")
+    assert (out_dir / "r02.txt").read_text(encoding="utf-8").startswith("Опис 2")
 
 
 # ------------------------------------------------- Windows: subprocess encoding

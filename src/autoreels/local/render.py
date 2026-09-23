@@ -1114,20 +1114,62 @@ def _render_segments(
                     f"duration the manifest does not describe"
                 )
             if emit_text:
-                _write_sidecar_text(out, reel)
+                _write_sidecar_text(out, reel, render_cfg)
         return outputs
 
 
-def _write_sidecar_text(clip_path: Path, reel) -> None:
-    """Текст публикации рядом с клипом: <id>.txt = title, пустая строка, description.
+def _write_sidecar_text(clip_path: Path, reel, render_cfg=None) -> None:
+    """Publish sidecars next to the rendered clip.
 
-    Это НЕ субтитры (их вшивает R3) — это заголовок и описание поста (description уже
-    несёт хэштеги по схеме R0). utf-8. Пусто и там, и там — файл не создаём.
+    <reel>.txt          — ready-to-paste: caption (description), blank line, hashtags.
+    <reel>.transcript.txt — spoken words from subtitles, plain, no timecodes.
+
+    Both are always written (overwriting stale versions). utf-8.
     """
-    if not (reel.title or reel.description):
-        return
-    txt_path = clip_path.with_suffix(".txt")
-    txt_path.write_text(f"{reel.title}\n\n{reel.description}\n", encoding="utf-8")
+    from autoreels.local.hashtags import derive_hashtags
+    hashtags_always = getattr(render_cfg, "hashtags_always", []) if render_cfg else []
+    hashtags_max = getattr(render_cfg, "hashtags_max", 5) if render_cfg else 5
+    tags = derive_hashtags(reel.subtitles, hashtags_always=hashtags_always, hashtags_max=hashtags_max)
+    caption = (reel.description or "").strip()
+    tags_str = " ".join(tags)
+    if caption and tags_str:
+        txt_content = f"{caption}\n\n{tags_str}\n"
+    elif caption:
+        txt_content = f"{caption}\n"
+    elif tags_str:
+        txt_content = f"{tags_str}\n"
+    else:
+        txt_content = ""
+    if txt_content:
+        clip_path.with_suffix(".txt").write_text(txt_content, encoding="utf-8")
+    transcript = " ".join(w.word for w in reel.subtitles).strip()
+    if transcript:
+        clip_path.with_name(clip_path.stem + ".transcript.txt").write_text(
+            transcript + "\n", encoding="utf-8"
+        )
+
+
+def _write_index_md(manifest: Manifest, out_dir: Path, render_cfg=None) -> None:
+    """Write index.md to out_dir listing every reel: number, duration, title, caption, hashtags."""
+    from autoreels.local.hashtags import derive_hashtags
+    hashtags_always = getattr(render_cfg, "hashtags_always", []) if render_cfg else []
+    hashtags_max = getattr(render_cfg, "hashtags_max", 5) if render_cfg else 5
+    lines = [f"# {Path(manifest.source).stem}\n"]
+    for i, reel in enumerate(manifest.reels, 1):
+        dur = reel.playback_duration()
+        mins, secs = divmod(int(dur), 60)
+        dur_str = f"{mins}:{secs:02d}"
+        title = (getattr(reel, "title_overlay", "") or reel.title or "").strip()
+        caption = (reel.description or "").strip()
+        tags = derive_hashtags(reel.subtitles, hashtags_always=hashtags_always, hashtags_max=hashtags_max)
+        tags_str = " ".join(tags)
+        lines.append(f"## {i}. [{dur_str}] {title or reel.id}")
+        if caption:
+            lines.append(f"\n{caption}")
+        if tags_str:
+            lines.append(f"\n{tags_str}")
+        lines.append("")
+    (out_dir / "index.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def render_cut(
@@ -1183,13 +1225,15 @@ def render_crop(
     zoom_cfg = render_cfg.zoom
     if zoom is not None and zoom != zoom_cfg.enabled:
         zoom_cfg = zoom_cfg.model_copy(update={"enabled": zoom})
-    return _render_segments(
+    outputs = _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup, zoom_cfg), suffix="",
         palette_vf=palette_vf, music_path=music_path,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
         background=background,
     )
+    _write_index_md(manifest, Path(out_dir).resolve(), render_cfg)
+    return outputs
 
 
 def render_preview(

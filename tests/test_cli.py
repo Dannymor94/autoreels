@@ -299,9 +299,9 @@ def test_run_snaps_segment_bounds_using_transcript(monkeypatch, tmp_path):
 
     m = Manifest.model_validate_json((manifests / "v.json").read_text(encoding="utf-8"))
     # После snap: end = 31.6 (граница слова «стоп») + tail_sec 0.3 = 31.9
-    # После apply_padding: last_word.t1 + tail_pad_sec = 31.6 + 0.7 = 32.3
+    # После apply_padding: last_word.t1 + tail_pad_sec = 31.6 + 1.5 = 33.1
     #                       first_word.t0 - lead_pad_sec = 30.0 - 0.3 = 29.7
-    assert abs(m.reels[0].end - 32.3) < 1e-6
+    assert abs(m.reels[0].end - 33.1) < 1e-6
     assert abs(m.reels[0].start - 29.7) < 1e-6
 
 

@@ -146,6 +146,12 @@ zoom:
   hook_seconds: 2.5        # длина hook-жеста от начала клипа (наезд+удержание+возврат)
   fps: 30                  # выходной fps зум-клипа (zoompan форсит постоянный fps)
 
+# Publish sidecars (<reel>.txt and index.md written at render time).
+# hashtags_always: fixed tags for every clip of this source (e.g. speaker's topic area).
+# hashtags_max: total cap (always + frequency-derived). 0 = no hashtags.
+hashtags_always: []
+hashtags_max: 5
+
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
   font: Montserrat
