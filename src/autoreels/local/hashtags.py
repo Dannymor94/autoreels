@@ -34,6 +34,23 @@ _STOPWORDS = frozenset({
     "нельзя", "такой", "им", "более", "всегда", "конечно", "всю", "между",
     "значит", "вроде", "этим", "буду", "рядом", "видеть", "идти", "идет",
     "просто", "очень", "уже", "этих", "свой", "они", "нам", "этому",
+    # Possessives / personal pronouns missing above
+    "наш", "ваш", "наши", "ваши", "вами", "нами", "нашу", "нашим", "нашей",
+    "вашу", "вашим", "вашей", "твой", "твоя", "твои", "твою", "тебе",
+    "своих", "своим", "своими", "свои",
+    # Generic filler / discourse words
+    "наверное", "вообще", "именно", "честно", "правильно", "правда",
+    "скажем", "сказать", "говорить", "понятно", "понимаешь", "понимаете",
+    "нужно", "нужен", "нужна", "нужны", "хочу", "хочет", "хотим", "хотят",
+    "делать", "делает", "делаем", "сделать", "брать", "взять",
+    "какое", "каком", "каких", "какими", "каком",
+    "такое", "таком", "таких", "таким", "такими", "такого",
+    "самое", "самом", "самых", "самым", "самыми", "самого",
+    "первое", "первого", "первому", "первом", "первых",
+    "второе", "второго", "второму",
+    "который", "которая", "которые", "которого", "которому", "которых",
+    "одного", "одному", "одном", "одних", "одним",
+    "нашего", "нашему", "нашем",
 })
 
 _morph = None
@@ -61,6 +78,7 @@ def derive_hashtags(
     *,
     hashtags_always: list[str],
     hashtags_max: int = 5,
+    min_freq: int = 2,
 ) -> list[str]:
     """Return deduplicated hashtag list from clip words + fixed always-tags.
 
@@ -84,18 +102,20 @@ def derive_hashtags(
             if lower not in _STOPWORDS:
                 content.append(_lemma(tok))
 
-    # Most frequent first (stable: Counter preserves insertion order on ties in 3.7+)
+    # Most frequent first (stable: Counter preserves insertion order on ties in 3.7+).
+    # min_freq: hapax words (appearing only once in a short clip) are generic filler, not topics.
     freq = Counter(content)
-    derived = [lemma for lemma, _ in freq.most_common() if lemma not in _STOPWORDS]
+    derived = [lemma for lemma, cnt in freq.most_common()
+               if cnt >= min_freq and lemma not in _STOPWORDS]
 
     # Combine: always-tags first, then derived; deduplicate (first occurrence wins)
     seen: set[str] = set()
     result: list[str] = []
     for tag in always + derived:
+        if len(result) >= hashtags_max:
+            break
         if tag and tag not in seen:
             seen.add(tag)
             result.append(f"#{tag}")
-            if len(result) >= hashtags_max:
-                break
 
     return result

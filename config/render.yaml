@@ -148,9 +148,10 @@ zoom:
 
 # Publish sidecars (<reel>.txt and index.md written at render time).
 # hashtags_always: fixed tags for every clip of this source (e.g. speaker's topic area).
-# hashtags_max: total cap (always + frequency-derived). 0 = no hashtags.
+# hashtags_max: total cap (always + frequency-derived). 0 = no frequency-derived hashtags
+#   (manual path: hashtags written by reviewer in d: field; hashtags_always still applied).
 hashtags_always: []
-hashtags_max: 5
+hashtags_max: 0
 
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
