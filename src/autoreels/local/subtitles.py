@@ -33,7 +33,8 @@ def words_in_window(words: list[Word], start: float, end: float) -> list[Word]:
     return [w for w in words if start <= w.t0 < end]
 
 
-def remap_to_output(words: list[Word], segments, speed: float = 1.0) -> list[Word]:
+def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
+                    xfade_sec: float = 0.0) -> list[Word]:
     """Remap word times onto the concatenated, speed-adjusted output timeline of a reel.
 
     Each word keeps its offset within its segment plus the accumulated duration of preceding
@@ -41,15 +42,22 @@ def remap_to_output(words: list[Word], segments, speed: float = 1.0) -> list[Wor
     whose start falls in a removed gap (outside every segment) is dropped. For a single segment
     [s, e] at speed 1 this is a plain shift by s — identical to feeding raw words to build_ass with
     clip_start=s — so callers pass the remapped words with clip_start=0.
+
+    `xfade_sec`: when the video has a crossfade at each segment seam (xfade filter), each
+    subsequent segment starts `xfade_sec` earlier in the output timeline. Pass the actual
+    (frame-snapped) xfade duration used in the filtergraph so subtitles land on the right frames.
     """
     out: list[Word] = []
     offset = 0.0
-    for seg in segments:
+    segs = list(segments)
+    for i, seg in enumerate(segs):
         for w in words:
             if seg.start <= w.t0 < seg.end:
                 out.append(Word(word=w.word, t0=(w.t0 - seg.start + offset) / speed,
                                 t1=(w.t1 - seg.start + offset) / speed))
         offset += seg.end - seg.start
+        if xfade_sec > 0 and i < len(segs) - 1:
+            offset -= xfade_sec   # xfade overlaps: next seg starts xfade_sec earlier in output
     return out
 
 

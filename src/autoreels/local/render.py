@@ -504,7 +504,8 @@ def _assert_windows_frame_aligned(windows, fps: float) -> None:
             )
 
 
-def _concat_segments_graph(segments, edge_fade_sec: float) -> tuple[str, str, str]:
+def _concat_segments_graph(segments, edge_fade_sec: float, *,
+                           video_xfade_sec: float = 0.0) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
     Each window is a SEPARATE ffmpeg input, opened with its own input-side `-ss`/`-t` (see
@@ -513,12 +514,14 @@ def _concat_segments_graph(segments, edge_fade_sec: float) -> tuple[str, str, st
     hook that sits LATER in the source than the body no longer forces ffmpeg to buffer every frame
     between them — that unbounded buffering was the OOM on long cold opens.
 
-    Video is hard-concatenated (`concat`, no overlap) → `[vseg]`, so the output timeline matches the
-    subtitle remap (offset within a segment + accumulated segment durations). Audio is joined the
-    SAME way — plain `concat`, no overlap — after a micro fade-out at each segment's end and a
-    fade-in at each start (`edge_fade_sec`, default 10 ms) to suppress the click at a splice. Unlike
-    a crossfade, edge fades do not overlap the sides, so the audio length stays exactly equal to the
-    video length (no lip-sync drift). edge_fade 0 → hard joins, no fades. Returns (prefix, [vseg], [aseg]).
+    Video: when `video_xfade_sec > 0`, joins with a chain of xfade filters (one per seam) so the
+    pose change is masked by a short dissolve; the output is shorter than the segment sum by
+    (N−1)×video_xfade_sec. When 0, plain hard concat — byte-identical to the pre-xfade path.
+
+    Audio is joined with plain concat (no crossfade) after micro edge fades (`edge_fade_sec`, default
+    10 ms). Unlike a crossfade, edge fades do not overlap the sides → audio length = video sum (not
+    the shorter xfade-adjusted length); -shortest in build_concat_cmd trims it to the video.
+    Returns (prefix, [vseg], [aseg]).
     """
     n = len(segments)
     f = edge_fade_sec
@@ -530,7 +533,21 @@ def _concat_segments_graph(segments, edge_fade_sec: float) -> tuple[str, str, st
             out_st = max(0.0, (s.end - s.start) - f)
             achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
         parts.append(f"{achain}[a{i}]")
-    parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
+    # Video: xfade chain (dissolve at each seam) or plain hard concat.
+    if video_xfade_sec > 0 and n > 1:
+        accum = 0.0
+        for k in range(n - 1):
+            left = f"t{k - 1}" if k > 0 else "v0"
+            right = f"v{k + 1}"
+            label = "vseg" if k == n - 2 else f"t{k}"
+            accum += segments[k].end - segments[k].start
+            xf_offset = round(accum - (k + 1) * video_xfade_sec, 9)
+            parts.append(
+                f"[{left}][{right}]xfade=transition=fade"
+                f":duration={_num(video_xfade_sec)}:offset={_num(xf_offset)}[{label}]"
+            )
+    else:
+        parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
     parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
     return ";".join(parts), "[vseg]", "[aseg]"
 
@@ -940,6 +957,13 @@ def _render_segments(
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
                 segs = _snap_windows_to_frames(segs, _fps())
             clip_dur = sum(s.end - s.start for s in segs)   # == playback_duration() for single-window
+            # Snap video_xfade to frame grid for multi-window reels (fps already probed above).
+            # Single-window reels never use the multi-window path, so xfade is always 0 there.
+            _xfade_actual = 0.0
+            if len(segs) > 1:
+                _x = getattr(ap, "video_xfade_sec", 0.0)
+                if _x > 0:
+                    _xfade_actual = round(_x * _fps()) / _fps()
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
                     f"  ⚠ {reel.id}: {clip_dur:.1f}с < {_MIN_CLIP_RENDER_SEC}с — "
@@ -969,7 +993,9 @@ def _render_segments(
                 # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
                 # output is identical to the pre-segments renderer. A title plate (Part 4) is drawn
                 # on top for the first seconds when the reel carries title_overlay.
-                ass_words = remap_to_output(reel.subtitles, segs, speed=_reel_speed)
+                # Pass xfade_actual so each segment's subtitle offset is shifted back by the dissolve.
+                ass_words = remap_to_output(reel.subtitles, segs, speed=_reel_speed,
+                                            xfade_sec=_xfade_actual)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
                 ass_path.write_text(
@@ -1004,7 +1030,9 @@ def _render_segments(
                         f"— below minimum, rendered anyway",
                         flush=True,
                     )
-            clip_duration = clip_dur
+            # clip_duration = video output length, accounting for xfade overlap at each seam.
+            # Audio is plain concat (no crossfade) and is trimmed to this by -shortest.
+            clip_duration = clip_dur - (len(segs) - 1) * _xfade_actual
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
@@ -1039,7 +1067,8 @@ def _render_segments(
                 # window is its OWN input with input-side seek (build_concat_cmd), so decodes are
                 # independent — a cold-open hook later in the source than the body no longer buffers
                 # every frame in between (was an OOM). Input i supplies [i:v]/[i:a]; music is [n:a].
-                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec)
+                prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec,
+                                                             video_xfade_sec=_xfade_actual)
                 windows = [(w.start, w.end - w.start) for w in segs]
                 _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
                 if music_path:
@@ -1059,7 +1088,7 @@ def _render_segments(
                     music_path=music_path,
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
                 )
-            clip_dur_s = clip_dur
+            clip_dur_s = clip_duration  # actual output length (xfade-adjusted for multi-window)
             returncode, stderr_text = _run_ffmpeg_with_progress(
                 cmd, reel_id=reel.id, idx=idx, total=total,
                 duration_sec=clip_dur_s, cwd=ass_cwd,
