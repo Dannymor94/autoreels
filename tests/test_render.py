@@ -1253,7 +1253,8 @@ def test_intruded_end_snaps_to_next_frame():
     assert abs(new_end_snapped * fps - round(new_end_snapped * fps)) < 1e-9  # on frame grid
 
 
-from autoreels.local.render import _expected_output_duration, _concat_segments_graph
+from autoreels.local.render import (_expected_output_duration, _concat_segments_graph,
+                                     _duration_within_tolerance)
 
 
 def test_duration_invariant_passes_ceil_snapped_end():
@@ -1286,14 +1287,24 @@ def test_duration_invariant_matches_crossfade_graph_length():
     assert abs(expected - (sum(s.end - s.start for s in segs) - 2 * xf)) < 1e-9
 
 
-def test_duration_invariant_rejects_silent_length_change():
-    """A stage that silently changes the length (actual off by >1 frame) still fails."""
+def test_duration_invariant_one_frame_passes_half_second_fails():
+    """A one-frame difference (normal ffmpeg whole-frame landing) passes; a 0.5 s drift fails."""
     fps = 30.0
-    xf = round(0.08 * fps) / fps
-    segs = [_simple_seg(0.0, 8.0), _simple_seg(20.0, 30.0)]
-    expected = _expected_output_duration(segs, xfade_sec=xf)
-    actual = expected + 3.0 / fps                     # a stage dropped/added 3 frames
-    assert abs(actual - expected) > 1.0 / fps         # invariant's condition → raises
+    expected = 23.367
+    assert _duration_within_tolerance(expected + 1.0 / fps, expected, fps)   # one frame → ok
+    assert _duration_within_tolerance(expected - 1.0 / fps, expected, fps)   # either direction
+    assert not _duration_within_tolerance(expected + 0.5, expected, fps)     # lost half a second
+
+
+def test_duration_invariant_tolerance_scales_with_fps():
+    """The 1.5-frame window narrows as fps rises: 40 ms passes at 30 fps but fails at 60."""
+    expected = 60.0
+    delta = 0.040   # 1.2 frames at 30 fps, 2.4 frames at 60 fps
+    assert _duration_within_tolerance(expected + delta, expected, 30.0)
+    assert not _duration_within_tolerance(expected + delta, expected, 60.0)
+    # exact 1.5-frame boundary passes (epsilon covers the float dust) at both rates.
+    assert _duration_within_tolerance(expected + 1.5 / 30.0, expected, 30.0)
+    assert _duration_within_tolerance(expected + 1.5 / 60.0, expected, 60.0)
 
 
 def test_video_fade_off_by_default():

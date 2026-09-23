@@ -521,6 +521,17 @@ def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float =
     return out_len / speed if speed else out_len
 
 
+def _duration_within_tolerance(actual: float, expected: float, fps: float) -> bool:
+    """True when a rendered clip's length matches the expected length closely enough.
+
+    Tolerance is 1.5 frames at the source fps, plus a 1e-6 epsilon so an exact one-frame difference
+    (ffmpeg emits whole frames; a concat lands one frame either way) never fails on float dust
+    (0.0333 vs 0.03333). Smallest defect still caught: >1.5 frames = 50 ms at 30 fps, 25 ms at 60 —
+    far below a lost tail (~1.5 s) or a dropped-crossfade accumulation across seams. Scales with fps.
+    """
+    return abs(actual - expected) <= 1.5 / fps + 1e-6
+
+
 def _assert_windows_frame_aligned(windows, fps: float) -> None:
     """Sync invariant: every playback window spans a whole number of source frames.
 
@@ -1165,17 +1176,16 @@ def _render_segments(
                     f"({_ts(reel.start)}→{_ts(reel.end)}, код {returncode}): {stderr}"
                 )
             outputs.append(out)
-            # Invariant: the file must last exactly the length _expected_output_duration derived from
-            # the final post-snap windows — the same values fed to the concat graph. Comparing like
-            # with like, a one-frame tolerance is enough (it only absorbs container/AAC rounding); a
-            # larger drift means a stage shortened the clip without the windows saying so (the class
-            # of bug that lost the tail air).
+            # Invariant: the file must last the length _expected_output_duration derived from the
+            # final post-snap windows — the same values fed to the concat graph. Tolerance is 1.5
+            # frames at source fps (see _duration_within_tolerance); a larger drift means a stage
+            # changed the duration the windows do not describe (the class of bug that lost the tail).
             _inv_fps = _fps_holder[0] if _fps_holder else 30.0
             _actual = _probe_duration_sec(out, _sibling_ffprobe(ffmpeg_bin)) if out.exists() else None
-            if _actual is not None and abs(_actual - _out_dur) > 1.0 / _inv_fps:
+            if _actual is not None and not _duration_within_tolerance(_actual, _out_dur, _inv_fps):
                 raise RenderError(
                     f"{reel.id}: rendered {_actual:.3f}s but windows imply {_out_dur:.3f}s "
-                    f"(Δ{_actual - _out_dur:+.3f}s > 1 frame) — a render stage changed the "
+                    f"(Δ{_actual - _out_dur:+.3f}s > 1.5 frames) — a render stage changed the "
                     f"duration the windows do not describe"
                 )
             if emit_text:
