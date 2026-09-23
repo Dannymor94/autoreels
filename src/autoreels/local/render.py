@@ -732,17 +732,18 @@ def _tail_speech_fade(reel, segs, speed: float,
 
 
 def _intruded_end_src(fade_start_out: float, segs, speed: float,
-                      last_word_t1: float | None) -> float:
+                      last_word_t1: float | None, margin: float = 0.0) -> float:
     """Source-time end for an intruded-tail clip.
 
     Converts fade_start_out (output timeline) back to source time, then clamps so the cut
-    never precedes last_word_t1: guard can land inside the final word when nw_start ≈ t1
-    (Whisper places the intruder adjacent to the last subtitle word).
+    never precedes last_word_t1 + margin: guard can land inside the final word when
+    nw_start ≈ t1 (Whisper places the intruder adjacent to the last subtitle word).
+    margin gives extra time for Whisper t1 shortfall.
     """
     offset = sum(s.end - s.start for s in segs[:-1])
     new_end = segs[-1].start + fade_start_out * speed - offset
     if last_word_t1 is not None:
-        new_end = max(new_end, last_word_t1)
+        new_end = max(new_end, last_word_t1 + margin)
     return new_end
 
 
@@ -1103,22 +1104,30 @@ def _render_segments(
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
+            _lw_margin = getattr(ap, "last_word_margin_sec", 0.2)
             _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
                                            guard=getattr(ap, "intrusion_guard_sec", 0.12))
             if _tail_fade is not None:
-                # Intruded tail: end clip before the intruder — video and audio cut together, no mute.
-                # Map the output-timeline cut point back to source time on the last segment and snap.
+                # Intruded tail: extend clip to last_t1 + margin so the final syllable isn't cut;
+                # keep _tail_fade active — it mutes the intruder and holds silence in the margin window.
                 _fade_st, _ = _tail_fade
                 _spd = _reel_speed or 1.0
                 _last_t1 = reel.subtitles[-1].t1 if reel.subtitles else None
-                _new_end = _intruded_end_src(_fade_st, segs, _spd, _last_t1)
-                # Snap UP (ceil) so the last word is always fully covered; round could step
-                # below last_word.t1 when they are within one frame of each other.
+                _new_end = _intruded_end_src(_fade_st, segs, _spd, _last_t1, margin=_lw_margin)
+                # Snap UP (ceil) so the frame boundary never lands inside the margin.
                 _new_end = math.ceil(_new_end * _fps()) / _fps()
                 if _new_end > segs[-1].start:
                     segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_new_end)]
                     clip_dur = sum(s.end - s.start for s in segs)
-                _tail_fade = None   # no audio mute; tail_fade_sec gives the clean soft end
+            elif reel.subtitles:
+                # Clean tail: ensure end >= last_t1 + margin (Whisper t1 ends slightly early).
+                # No frame-snap here: single-window reels don't snap; multi-window reels already
+                # have _fps() and would rarely reach this branch (tail_pad >> margin).
+                _last_t1 = reel.subtitles[-1].t1
+                _min_end = _last_t1 + _lw_margin
+                if segs[-1].end < _min_end:
+                    segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_min_end)]
+                    clip_dur = sum(s.end - s.start for s in segs)
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from

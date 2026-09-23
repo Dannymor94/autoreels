@@ -1161,9 +1161,9 @@ def test_filter_order_tail_fade_after_loudnorm():
 
 
 def test_intruded_tail_cuts_before_intruder():
-    """Intruded tail: clip ends before the intruder — video and audio cut together, no mute stretch.
-    _tail_speech_fade reports the cut point; render maps it to source time and frame-snaps it;
-    then _tail_fade is set to None so no audio mute is applied."""
+    """Intruded tail: _tail_speech_fade reports a fade start before the intruder.
+    Render extends the clip to last_t1 + margin and keeps the speech fade active to mute
+    the intruder region; the fade start on the output timeline is before the intruder."""
     segs = [_simple_seg(0.0, 30.0)]
     reel = _reel_with_tail(lw_end=29.3, nw_start=29.5)
     tail_fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
@@ -1252,6 +1252,47 @@ def test_intruded_end_snaps_to_next_frame():
     new_end_snapped = math.ceil(new_end_raw * fps) / fps
     assert new_end_snapped >= new_end_raw                        # snapped up, covers last word
     assert abs(new_end_snapped * fps - round(new_end_snapped * fps)) < 1e-9  # on frame grid
+
+
+# --- last_word_margin_sec ---
+
+def test_last_word_margin_covers_whisper_shortfall():
+    """Margin 0.2 s covers a word that actually ends 0.15 s after its recorded t1."""
+    fps = 30.0
+    last_t1 = 5.0
+    margin = 0.2
+    real_word_end = last_t1 + 0.15   # Whisper was 0.15 s early
+    segs = [_simple_seg(0.0, 6.0)]
+    # nw_start = last_t1 (adjacent intruder): fade_start = last_t1 - guard = 4.88
+    new_end = _intruded_end_src(fade_start_out=4.88, segs=segs, speed=1.0,
+                                last_word_t1=last_t1, margin=margin)
+    snapped = math.ceil(new_end * fps) / fps
+    assert snapped >= real_word_end, f"clip end {snapped:.4f} < real word end {real_word_end}"
+
+
+def test_last_word_margin_wins_over_intruder_guard():
+    """When nw_start == last_t1 (margin > guard gap), margin wins — clip extends to last_t1 + margin."""
+    last_t1 = 5.0
+    margin = 0.2
+    guard = 0.12
+    segs = [_simple_seg(0.0, 6.0)]
+    # fade_start_out = nw_start - guard = last_t1 - guard = 4.88
+    new_end = _intruded_end_src(fade_start_out=last_t1 - guard, segs=segs, speed=1.0,
+                                last_word_t1=last_t1, margin=margin)
+    assert new_end == pytest.approx(last_t1 + margin, abs=1e-6)
+
+
+def test_clean_tail_satisfies_margin_without_extension():
+    """Clean tail with tail_pad_sec=0.7 already ends well past last_t1 + margin=0.2 — no change."""
+    fps = 30.0
+    last_t1 = 29.3
+    tail_pad = 0.7
+    margin = 0.2
+    segs = [_simple_seg(0.0, last_t1 + tail_pad)]   # end = 30.0
+    # margin check: min_end = ceil((29.3 + 0.2) * 30) / 30 = 29.5+something
+    min_end = math.ceil((last_t1 + margin) * fps) / fps
+    assert segs[-1].end >= min_end                   # already satisfies margin
+    assert abs(segs[-1].end - (last_t1 + tail_pad)) < 1e-6  # end unchanged
 
 
 from autoreels.local.render import (_expected_output_duration, _concat_segments_graph,

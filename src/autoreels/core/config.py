@@ -421,6 +421,7 @@ class AudioProcessing(BaseModel):
     # Оба случая вычисляются из tail_last_word_end/tail_next_word_start манифеста при рендере.
     tail_fade_sec: float = 0.25          # clean tail: длина fade в конце клипа
     intrusion_guard_sec: float = 0.12   # intruded tail: начало fade за это время до следующего слова
+    last_word_margin_sec: float = 0.2   # safety margin added after last subtitle word's t1 on every path
     # Микро-фейд на КРАЯХ каждого аудиосегмента многосегментного клипа (гасит щелчок на склейке).
     # НЕ кроссфейд: fade-out в конце сегмента + fade-in в начале следующего, затем обычный concat —
     # без перекрытия, поэтому длина звука в ТОЧНОСТИ равна длине видео (нет дрейфа губ-синка). Только
