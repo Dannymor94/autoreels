@@ -785,6 +785,86 @@ def _stage_trim(reels, transcript, *, r0_cfg):
     return reels
 
 
+def _stage_min_end_gap(reels, transcript, *, r0_cfg):
+    """Soft minimum-gap guard: if the gap from a clip's last word to the next source word is
+    below min_end_gap_sec, extend the end to the next sentence-terminal word followed by a gap
+    of at least target_end_gap_sec, within end_gap_search_sec.
+
+    Never fires when _explicit_end is True (reviewer's choice is final).
+    Runs on both paths, before padding so the new end picks up normal tail padding.
+    """
+    import re as _re
+    _SENT_END = _re.compile(r'[.!?…]\s*$')
+    words = getattr(transcript, "words", [])
+    if not words:
+        return reels
+    min_gap = getattr(r0_cfg, "min_end_gap_sec", 0.15)
+    target = getattr(r0_cfg, "target_end_gap_sec", 0.30)
+    search = getattr(r0_cfg, "end_gap_search_sec", 20.0)
+
+    for r in reels:
+        if getattr(r, "_explicit_end", False):
+            continue
+        # The semantic last word of the clip is the last sentence-terminal word whose t0 is
+        # inside the clip window. Using the raw last-by-t0 is wrong when Whisper's overlapping
+        # timestamps pull the next phrase's opening words (t0 < r.end) into the window; they
+        # are trimmed away by apply_padding's spillover guard, but we run before padding.
+        clip_sent_idxs = [
+            i for i, w in enumerate(words)
+            if w.t0 < r.end and _SENT_END.search(w.word.rstrip())
+        ]
+        if not clip_sent_idxs:
+            # No sentence end in clip — fall back to last word by t0.
+            clip_sent_idxs = [i for i, w in enumerate(words) if w.t0 < r.end]
+            if not clip_sent_idxs:
+                continue
+        la = clip_sent_idxs[-1]
+        last_w = words[la]
+        # First word that genuinely starts after last_w's t1 (skip any that overlap it).
+        ni = la + 1
+        while ni < len(words) and words[ni].t0 <= last_w.t1:
+            ni += 1
+        if ni >= len(words):
+            continue  # end of source
+        gap = words[ni].t0 - last_w.t1
+        if gap >= min_gap:
+            continue  # already fine
+        # Scan forward for the next sentence-terminal word with gap >= target.
+        search_limit = r.end + search
+        new_end = None
+        for k in range(la + 1, len(words) - 1):
+            w = words[k]
+            if w.t0 > search_limit:
+                break
+            if not _SENT_END.search(w.word.rstrip()):
+                continue
+            # Find the first word that genuinely starts after w.t1.
+            j = k + 1
+            while j < len(words) and words[j].t0 <= w.t1:
+                j += 1
+            if j >= len(words):
+                break
+            after_gap = words[j].t0 - w.t1
+            if after_gap >= target:
+                new_end = w.t1
+                break
+        if new_end is None:
+            print(
+                f"  ⚠ {r.id}: end gap {gap:.2f}s < {min_gap}s, "
+                f"no pause ≥ {target}s within {search}s — keeping current end",
+                file=sys.stderr, flush=True,
+            )
+            continue
+        old_end = r.end
+        r.end = new_end
+        r.end_snap_reason = "min_end_gap"
+        print(
+            f"  {r.id}: end gap {gap:.2f}s → extended {old_end:.3f} → {new_end:.3f}",
+            file=sys.stderr, flush=True,
+        )
+    return reels
+
+
 def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, list[dict]]:
     """Пост-snap: убрать клипы короче min_clip_duration, попытавшись расширить до фразы.
 
@@ -942,6 +1022,7 @@ def _stage_subtitles(reels, transcript):
 # automatic pipeline is not silently wired into the human path too.
 _MANUAL_FORMATTING_STAGES = (
     "_stage_snap", "renumber_reels",
+    "_stage_min_end_gap",
     "_stage_padding", "_stage_subtitles", "trim_hanging_subtitles",
 )
 # Two stages are split: each has a repair half (moves boundaries — formatting) and a drop half
@@ -1729,6 +1810,7 @@ def _cmd_run_impl(
     )
     discarded = dedup_disc + dangling_disc + topn_disc
     reels = renumber_reels(reels)
+    reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_trim(reels, transcript, r0_cfg=r0_cfg)
     reels, short_disc = _stage_min_clip_filter(reels, transcript, r0_cfg=r0_cfg)
@@ -3243,6 +3325,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.start, reel.end = nb_start, nb_end
         if _expl_start:
             reel._explicit_start = True   # the human fixed the start → dangling repair must not move it
+        if (getattr(_ae, "e", None) if _ae else None) is not None:
+            reel._explicit_end = True     # reviewer's e: choice → min_end_gap rule must not move it
         reel._filler_override = getattr(_ae, "filler", None) if _ae else None   # per-clip f:0/f:1
         # Part 4 — title plate text (only from the review `t:`; empty on the automatic path).
         reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""
@@ -3344,6 +3428,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         repair_only=True, max_start_fraction=1.0 / 3.0,
     )
     reels = renumber_reels(reels)
+    reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))

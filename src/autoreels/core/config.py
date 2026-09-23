@@ -221,6 +221,12 @@ class R0Config(BaseModel):
     block_target_sec: float = 40.0
     max_micro_pause: float = 0.4            # пауза < порога = микропауза внутри фразы (не конец)
     max_end_search_sec: float = 12.0        # окно поиска конца предложения от r0_end (сек)
+    # Soft minimum-gap rule: if the gap from the clip's last word to the next source word is
+    # below min_end_gap_sec, extend the end to the next sentence-terminal word whose following
+    # gap is >= target_end_gap_sec, within end_gap_search_sec. Never fires on explicit e:.
+    min_end_gap_sec: float = 0.15
+    target_end_gap_sec: float = 0.30
+    end_gap_search_sec: float = 20.0
     # Fix 1 (video review): плотность речи считается на ГОТОВОМ клипе (после merge/snap/padding).
     # Клип ниже порога сперва пробуют срезать по единой длинной паузе (оставив длинную половину),
     # и только если не вышло — снимают с причиной low_speech_density.
