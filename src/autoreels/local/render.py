@@ -1217,7 +1217,7 @@ def _render_segments(
             if _actual is not None and not _duration_within_tolerance(_actual, _out_dur, _inv_fps):
                 raise RenderError(
                     f"{reel.id}: rendered {_actual:.3f}s but windows imply {_out_dur:.3f}s "
-                    f"(Δ{_actual - _out_dur:+.3f}s > 1.5 frames) — a render stage changed the "
+                    f"(Δ{_actual - _out_dur:+.3f}s > 2.5 frames) — a render stage changed the "
                     f"duration the windows do not describe"
                 )
             if emit_text:
