@@ -733,6 +733,12 @@ def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float |
     return score, fwd, back, speed, None
 
 
+def _block_fingerprint(blocks: list) -> str:
+    """SHA-1 of block IDs in order; first 16 hex chars."""
+    data = "|".join(b.id for b in blocks).encode()
+    return hashlib.sha1(data).hexdigest()[:16]
+
+
 def export_review(
     blocks: list[CandidateBlock],
     *,
@@ -748,6 +754,7 @@ def export_review(
         "# AutoReels block review",
         f"# source: {source_ref}",
         f"# blocks: {len(blocks)}  |  filter_removed: {filter_removed_count}",
+        f"# fingerprint: {_block_fingerprint(blocks)}",
         "#",
         "# Score (0-100) to select a block; leave blank to skip.",
         "# Merge markers on the score:",
@@ -857,6 +864,7 @@ def export_compact_review(
         "# AutoReels block review",
         f"# source: {source_ref}",
         f"# blocks: {len(blocks)}  |  filter_removed: {filter_removed_count}",
+        f"# fingerprint: {_block_fingerprint(blocks)}",
         "# format: compact",
         "#",
         _COMPACT_PROMPT,

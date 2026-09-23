@@ -3234,6 +3234,25 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
         seq_to_block[i] = b
 
+    # Fingerprint check: refuse if the block set changed since the review was exported.
+    _fp_m = _re.search(r"^#\s*fingerprint:\s*([0-9a-f]+)", review_content, _re.MULTILINE)
+    if _fp_m:
+        from autoreels.cloud.blocks import _block_fingerprint
+        _current_fp = _block_fingerprint(kept)
+        if _fp_m.group(1) != _current_fp:
+            _bc_m = _re.search(r"^#\s*blocks:\s*(\d+)", review_content, _re.MULTILINE)
+            _stored_n = int(_bc_m.group(1)) if _bc_m else "?"
+            if _stored_n != len(kept):
+                _detail = f"block count changed: review has {_stored_n}, current has {len(kept)}"
+            else:
+                _detail = f"same count ({len(kept)}) but block boundaries differ — re-segment changed"
+            print(
+                f"error: stale review — {_detail}. "
+                f"Re-export with 'arl blocks <source>' to get a fresh review.",
+                file=sys.stderr,
+            )
+            return 1
+
     # Process review entries → Reels.
     # seq_to_block maps 1..N to kept blocks by position; the verbose format also carries the
     # block id, which we cross-check to catch a stale review (blocks changed since export).
