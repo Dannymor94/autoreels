@@ -3852,6 +3852,8 @@ def cmd_blocks(
             review_content = export_compact_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
                 words=transcript.words,
+                pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
+                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
             )
         else:
             review_content = export_review(

@@ -587,6 +587,11 @@ _COMPACT_PROMPT = (
     "# blank   broken thought, dangling reference, organisational talk,\n"
     "#         or a speaker change that breaks the thought\n"
     "#\n"
+    "# Pause markers after a sentence (speaker actually stopped there):\n"
+    "#   ⏸N.N   gap of N.N seconds — noticeable stop, decent ending point\n"
+    "#   ⏸⏸N.N  gap of N.N seconds — long stop, natural phrase end (best e: target)\n"
+    "# An e: on a sentence followed by ⏸⏸ gives a clip that ends where the speaker stopped.\n"
+    "#\n"
     "# Merge markers (a thought split across blocks — score the block it belongs to):\n"
     "#   +   after the score: join with the NEXT block\n"
     "#   ++  after the score: join with the next TWO blocks (a thought across three)\n"
@@ -785,12 +790,17 @@ def parse_review(
     return source_ref, entries, errors
 
 
-def _numbered_sentences(block: CandidateBlock, words) -> str:
+def _numbered_sentences(block: CandidateBlock, words, *,
+                        pause_show_sec: float = 0.0,
+                        pause_strong_sec: float = 0.0) -> str:
     """Block text with each sentence prefixed [1] [2]… so a review can name them with s:/e:.
 
     Sentences are split from the transcript words in the block's span by the same rule apply uses
     (edit.split_sentences), so the numbering the reviewer sees is the numbering apply resolves.
     Falls back to the collapsed block text when no words are available.
+
+    When `pause_show_sec` > 0, appends ⏸N.N after a sentence when the gap to the next sentence is
+    >= pause_show_sec; uses ⏸⏸N.N when the gap also >= pause_strong_sec (natural phrase end).
     """
     if not words:
         return " ".join(block.text.split())
@@ -798,7 +808,16 @@ def _numbered_sentences(block: CandidateBlock, words) -> str:
     sents = split_sentences(words_in_span(words, block.start, block.end))
     if len(sents) <= 1:
         return " ".join(block.text.split())
-    return " ".join(f"[{k}] " + " ".join(w.word for w in s) for k, s in enumerate(sents, 1))
+    parts = []
+    for k, s in enumerate(sents, 1):
+        text = " ".join(w.word for w in s)
+        if pause_show_sec > 0 and k < len(sents):
+            gap = sents[k][0].t0 - s[-1].t1   # sents[k] is next sentence (k is 1-based)
+            if gap >= pause_show_sec:
+                sym = "⏸⏸" if pause_strong_sec > 0 and gap >= pause_strong_sec else "⏸"
+                text += f" {sym}{gap:.1f}"
+        parts.append(f"[{k}] {text}")
+    return " ".join(parts)
 
 
 def export_compact_review(
@@ -807,6 +826,8 @@ def export_compact_review(
     source_ref: str,
     filter_removed_count: int,
     words=None,
+    pause_show_sec: float = 0.3,
+    min_pause_for_phrase_end: float = 0.0,
 ) -> str:
     """Render a compact one-line-per-block review file for pasting into a chat.
 
@@ -814,7 +835,8 @@ def export_compact_review(
     Rationale: a trailing id section can be cut off or accidentally deleted; the seq
     number in each data line survives any partial copy-paste or model reformat.
     When `words` (the transcript words) are given, each block's sentences are numbered inline so a
-    reply can bound the clip with s:/e:.
+    reply can bound the clip with s:/e:. Pause gaps >= `pause_show_sec` are shown as ⏸N.N after the
+    sentence; gaps >= `min_pause_for_phrase_end` use ⏸⏸ (natural phrase end — best e: target).
     """
     lines: list[str] = [
         "# AutoReels block review",
@@ -827,7 +849,7 @@ def export_compact_review(
         "",
     ]
     for i, b in enumerate(blocks, 1):
-        lines.append(f"{i} | {b.duration:.1f}s | {_numbered_sentences(b, words)}")
+        lines.append(f"{i} | {b.duration:.1f}s | {_numbered_sentences(b, words, pause_show_sec=pause_show_sec, pause_strong_sec=min_pause_for_phrase_end)}")
     return "\n".join(lines) + "\n"
 
 
