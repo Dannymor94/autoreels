@@ -453,25 +453,53 @@ def build_cut_cmd(
     ]
 
 
-def _probe_source_fps(source, ffprobe: str) -> float:
-    """Source video frame rate (frames/sec) from `r_frame_rate` via ffprobe.
+_FPS_FALLBACK = 30.0
+_FPS_MAX_PLAUSIBLE = 1000.0  # rejects container timebases like 90000/1
 
-    r_frame_rate is the base grid ffmpeg re-samples the CFR output onto (e.g. "30/1"). The
-    playback windows are snapped to this grid (see `_snap_windows_to_frames`) so each window is
-    a whole number of frames — the one thing that keeps a multi-window concat lip-synced.
-    """
-    out = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", "v:0",
-         "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", str(source)],
-        capture_output=True, text=True, check=False,
-    ).stdout.strip()
-    num, _, den = out.partition("/")
+
+def _parse_fps_token(token: str) -> float:
+    """Parse 'num/den' or 'num' fps token; returns 0.0 if unparseable or implausible."""
+    token = token.strip().rstrip(",;")
+    num, _, den = token.partition("/")
     try:
         fps = float(num) / float(den or "1")
     except (ValueError, ZeroDivisionError):
-        fps = 0.0
+        return 0.0
+    return fps if 0 < fps <= _FPS_MAX_PLAUSIBLE else 0.0
+
+
+def _probe_source_fps(source, ffprobe: str) -> float:
+    """Source video frame rate (frames/sec) via ffprobe.
+
+    Reads avg_frame_rate first (correct for VFR sources); falls back to r_frame_rate when
+    avg is 0/0.  Rejects implausible values (e.g. container timebase 90000/1).  On failure
+    warns and returns _FPS_FALLBACK so a probe quirk never aborts a render.
+    """
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+         "-of", "csv=p=0", str(source)],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+
+    # csv=p=0 with two fields → "avg/den,r/den" on one line; newlines possible if stream
+    # selection returns more than one row.  Split on both separators.
+    import re as _re2
+    tokens = [t for t in _re2.split(r"[,\n]", out) if t.strip()]
+    fps = 0.0
+    for tok in tokens:
+        fps = _parse_fps_token(tok)
+        if fps > 0:
+            break
+
     if not fps > 0:
-        raise RenderError(f"не удалось прочитать частоту кадров источника (r_frame_rate={out!r})")
+        import sys as _sys
+        print(
+            f"warning: could not determine frame rate for {Path(source).name!r} "
+            f"(raw: {out!r}); using fallback {_FPS_FALLBACK} fps",
+            file=_sys.stderr,
+        )
+        return _FPS_FALLBACK
     return fps
 
 

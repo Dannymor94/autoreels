@@ -2135,3 +2135,45 @@ def test_borrow_names_both_dirs_when_source_not_found(tmp_path):
     msg = str(exc_info.value)
     assert str(inputs) in msg
     assert str(archive) in msg
+
+
+# ------------------------------------------------ _probe_source_fps / _parse_fps_token
+
+def test_parse_fps_token_trailing_comma():
+    from autoreels.local.render import _parse_fps_token
+    assert _parse_fps_token("30/1,") == pytest.approx(30.0)
+
+
+def test_parse_fps_token_rejects_timebase():
+    """90000/1 is a container timebase (90 000 fps), not a real frame rate."""
+    from autoreels.local.render import _parse_fps_token, _FPS_MAX_PLAUSIBLE
+    assert _parse_fps_token("90000/1") == 0.0
+    assert 90000 > _FPS_MAX_PLAUSIBLE  # confirm the rejection threshold
+
+
+def test_probe_source_fps_avg_zero_falls_back_to_r(tmp_path, capsys):
+    """avg_frame_rate=0/0 → falls back to r_frame_rate."""
+    from autoreels.local.render import _probe_source_fps
+    # Write a fake ffprobe that outputs avg=0/0 and r=25/1
+    fake = tmp_path / "ffprobe"
+    fake.write_text("#!/bin/sh\necho '0/0,25/1'\n")
+    fake.chmod(0o755)
+    source = tmp_path / "v.mp4"
+    source.write_text("")
+    fps = _probe_source_fps(source, str(fake))
+    assert fps == pytest.approx(25.0)
+
+
+def test_probe_source_fps_unparseable_uses_fallback(tmp_path, capsys):
+    """Completely unparseable ffprobe output → falls back to 30 fps and warns."""
+    from autoreels.local.render import _probe_source_fps, _FPS_FALLBACK
+    fake = tmp_path / "ffprobe"
+    fake.write_text("#!/bin/sh\necho 'garbage'\n")
+    fake.chmod(0o755)
+    source = tmp_path / "v.mp4"
+    source.write_text("")
+    fps = _probe_source_fps(source, str(fake))
+    assert fps == pytest.approx(_FPS_FALLBACK)
+    captured = capsys.readouterr()
+    assert "warning" in captured.err
+    assert "fallback" in captured.err
