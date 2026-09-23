@@ -25,6 +25,7 @@ from autoreels.core.config import load_render_config, load_subtitles_config
 from autoreels.local import render
 from autoreels.local.render import (
     RenderError,
+    build_concat_cmd,
     build_cut_cmd,
     load_manifest,
     probe_encoder,
@@ -1272,8 +1273,8 @@ def test_duration_invariant_passes_ceil_snapped_end():
 
 
 def test_duration_invariant_matches_crossfade_graph_length():
-    """Expected duration equals the length the xfade concat graph actually produces: the last
-    seam's offset plus the last window covers the whole timeline, shortened by (n-1) xfades."""
+    """Expected duration = sum − (n−1)×xfade. The accumulator places offset = out_len − xfade
+    (boundary), so graph_len matches expected exactly for frame-aligned inputs."""
     import re
     fps = 30.0
     xf = round(0.08 * fps) / fps
@@ -1281,10 +1282,50 @@ def test_duration_invariant_matches_crossfade_graph_length():
     expected = _expected_output_duration(segs, xfade_sec=xf)
     prefix, _, _ = _concat_segments_graph(segs, 0.01, video_xfade_sec=xf)
     last_offset = float(re.findall(r"offset=([0-9.]+)", prefix)[-1])
-    graph_len = last_offset + (segs[-1].end - segs[-1].start)   # xfade out = offset + 2nd input
-    assert abs(graph_len - expected) < 1e-3   # _num() rounds the printed offset; well under a frame
+    graph_len = last_offset + (segs[-1].end - segs[-1].start)   # accumulator prediction
+    # boundary placement: graph_len tracks expected within rounding noise of _num (6 sig figs)
+    assert abs(graph_len - expected) <= 1e-3
     # sanity: three windows lose exactly two crossfades vs the bare sum.
     assert abs(expected - (sum(s.end - s.start for s in segs) - 2 * xf)) < 1e-9
+
+
+def test_xfade_offset_at_boundary():
+    """Offset lands at the boundary of the left input (offset+xfade ≤ left_input_duration).
+    Empirically, ffmpeg xfade fires at the boundary and produces A+B−D output — no plain-concat
+    fallback. The offset must not exceed the boundary (past-boundary adds extra frames)."""
+    import re
+    fps = 30.0
+    xf = round(0.08 * fps) / fps
+    segs = [_simple_seg(0.0, 7.833333), _simple_seg(20.0, 88.5), _simple_seg(100.0, 101.966667)]
+    prefix, _, _ = _concat_segments_graph(segs, 0.01, video_xfade_sec=xf)
+    offsets = [float(x) for x in re.findall(r"offset=([0-9.e+-]+)", prefix)]
+    out_len = segs[0].end - segs[0].start
+    for k, off in enumerate(offsets):
+        # offset must not EXCEED left_input by more than rounding (< 1 frame).
+        # _num rounds to 6 sig figs, so parsed float may be O(1e-4) above exact offset; that is
+        # sub-frame and irrelevant to ffmpeg (integer frame indexing). A full-frame overshoot
+        # (1/fps = 0.033s) is the defect we are guarding against.
+        assert off + xf <= out_len + 1 / fps, (
+            f"seam {k}: offset+xfade={off+xf:.9f} > left_input={out_len:.9f}; "
+            f"would push offset past left boundary by a full frame or more"
+        )
+        out_len = off + (segs[k + 1].end - segs[k + 1].start)
+
+
+def test_xfade_seam_count_2_3_6_at_boundary():
+    """All seam counts (2, 3, 6 windows) keep offset+xfade at or within the left input."""
+    import re
+    fps = 30.0
+    xf = round(0.08 * fps) / fps
+    seg_durs = [8.0, 12.0, 5.333333, 20.0, 7.833333, 15.5]
+    for n in (2, 3, 6):
+        segs = [_simple_seg(float(i * 30), float(i * 30) + seg_durs[i]) for i in range(n)]
+        prefix, _, _ = _concat_segments_graph(segs, 0.01, video_xfade_sec=xf)
+        offsets = [float(x) for x in re.findall(r"offset=([0-9.e+-]+)", prefix)]
+        out_len = segs[0].end - segs[0].start
+        for k, off in enumerate(offsets):
+            assert off + xf <= out_len + 1 / fps, f"n={n} seam {k}: past boundary by >= 1 frame"
+            out_len = off + (segs[k + 1].end - segs[k + 1].start)
 
 
 def test_duration_invariant_one_frame_passes_half_second_fails():
@@ -1297,14 +1338,54 @@ def test_duration_invariant_one_frame_passes_half_second_fails():
 
 
 def test_duration_invariant_tolerance_scales_with_fps():
-    """The 1.5-frame window narrows as fps rises: 40 ms passes at 30 fps but fails at 60."""
+    """The 2.5-frame window narrows as fps rises: 70 ms passes at 30 fps but fails at 60."""
     expected = 60.0
-    delta = 0.040   # 1.2 frames at 30 fps, 2.4 frames at 60 fps
+    delta = 0.070   # 2.1 frames at 30 fps, 4.2 frames at 60 fps
     assert _duration_within_tolerance(expected + delta, expected, 30.0)
     assert not _duration_within_tolerance(expected + delta, expected, 60.0)
-    # exact 1.5-frame boundary passes (epsilon covers the float dust) at both rates.
-    assert _duration_within_tolerance(expected + 1.5 / 30.0, expected, 30.0)
-    assert _duration_within_tolerance(expected + 1.5 / 60.0, expected, 60.0)
+    # exact 2.5-frame boundary passes (epsilon covers the float dust) at both rates.
+    assert _duration_within_tolerance(expected + 2.5 / 30.0, expected, 30.0)
+    assert _duration_within_tolerance(expected + 2.5 / 60.0, expected, 60.0)
+
+
+def test_build_concat_cmd_xfade_padding():
+    """Non-last windows get +1-frame -t padding when xfade_fps is given; last window does not."""
+    fps = 30.0
+    windows = [(0.0, 7.833333), (20.0, 68.5), (100.0, 14.8)]
+    cmd = build_concat_cmd(
+        "ffmpeg", "/src.mp4", "/out.mp4",
+        windows=windows, filter_complex="dummy",
+        codec="libx264", preset="fast",
+        audio_codec="aac", audio_bitrate="192k",
+        xfade_fps=fps,
+    )
+    import math
+    pad = 1 / fps
+    # Extract the -t values: they appear right after each -ss in the command.
+    ts_args = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-t"]
+    assert len(ts_args) == 3
+    # First two windows padded; last is not.
+    assert float(ts_args[0]) == pytest.approx(math.floor((7.833333 + pad) * 1000) / 1000, abs=1e-6)
+    assert float(ts_args[1]) == pytest.approx(math.floor((68.5 + pad) * 1000) / 1000, abs=1e-6)
+    assert float(ts_args[2]) == pytest.approx(math.floor(14.8 * 1000) / 1000, abs=1e-6)
+
+
+def test_duration_invariant_ts_rounding_one_frame_over():
+    """When _ts rounds a segment duration UP (e.g. 59/30 → "1.967"), ffmpeg extracts one extra
+    frame, making nb_frames/fps exceed expected by 1/30.  The invariant must pass because 1/30 <
+    1.5/30 tolerance.  This models the r11 tail-trim scenario."""
+    fps = 30.0
+    xf = round(0.08 * fps) / fps           # 2/30
+    # Segment durations after snap + tail trim: 235/30, 2055/30 (68.5), 59/30
+    segs = [_simple_seg(0.0, 235 / fps), _simple_seg(20.0, 20.0 + 2055 / fps),
+            _simple_seg(100.0, 100.0 + 59 / fps)]
+    expected = _expected_output_duration(segs, xfade_sec=xf)  # 78.1666...
+    # _ts rounds 59/30 → "1.967" → ffmpeg gets 60 frames; invariant probe returns nb_frames/fps.
+    actual_nb_frames_per_fps = expected + 1 / fps   # one extra frame from rounding
+    assert _duration_within_tolerance(actual_nb_frames_per_fps, expected, fps), (
+        f"1-frame rounding delta should pass: actual={actual_nb_frames_per_fps:.6f} "
+        f"expected={expected:.6f} tol={2.5/fps:.6f}"
+    )
 
 
 def test_video_fade_off_by_default():

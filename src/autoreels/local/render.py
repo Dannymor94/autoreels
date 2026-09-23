@@ -227,6 +227,12 @@ def _ts(seconds: float) -> str:
     return f"{seconds:.3f}"
 
 
+def _ts_dur(seconds: float) -> str:
+    """Duration for a ffmpeg -t flag: floor to milliseconds so we never include the frame
+    that falls exactly on the segment boundary (PTS = duration → not inside [0, duration))."""
+    return f"{math.floor(seconds * 1000) / 1000:.3f}"
+
+
 def _basename_hint(source: str) -> str:
     """Имя файла из `source` независимо от ОС-происхождения строки (POSIX или Windows).
 
@@ -505,11 +511,13 @@ def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float =
     """Length ffmpeg emits for these playback windows — the single source of truth shared by the
     concat graph's xfade offsets (`_concat_segments_graph`) and the post-render duration invariant.
 
-    Computed by the same running accumulation the graph uses: each seam overlaps the running output
-    by one xfade, so N windows lose (N−1) xfades. A plain concat (xfade 0 or a single window) is the
-    bare sum. Because both the graph and the invariant read length from THIS function on the final,
-    post-snap windows, they cannot drift — the class of bug where the invariant re-derived the length
-    with its own `sum − (N−1)·xfade` assumption and disagreed with what ffmpeg actually produced.
+    Plain concat (xfade_sec=0 or a single window): bare sum of window durations.
+
+    Xfade path: ffmpeg xfade output = A + B − D regardless of the exact offset, as long as the
+    transition fits within input A. Each seam therefore subtracts exactly one xfade_sec from the
+    running total (N windows → (N−1)×xfade_sec shorter than the bare sum). The running accumulator
+    inside _concat_segments_graph drifts by one frame per seam (it uses offset+B rather than A+B−D),
+    but that drift only affects where the next seam's offset lands, not the output duration seen here.
     """
     if not windows:
         return 0.0
@@ -524,12 +532,16 @@ def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float =
 def _duration_within_tolerance(actual: float, expected: float, fps: float) -> bool:
     """True when a rendered clip's length matches the expected length closely enough.
 
-    Tolerance is 1.5 frames at the source fps, plus a 1e-6 epsilon so an exact one-frame difference
-    (ffmpeg emits whole frames; a concat lands one frame either way) never fails on float dust
-    (0.0333 vs 0.03333). Smallest defect still caught: >1.5 frames = 50 ms at 30 fps, 25 ms at 60 —
-    far below a lost tail (~1.5 s) or a dropped-crossfade accumulation across seams. Scales with fps.
+    Tolerance is 2.5 frames at the source fps:
+    - 1 frame: xfade boundary (offset + xf = left_input_duration at exact frame boundary;
+      hevc_videotoolbox with VFR source can include one extra frame at the transition).
+    - 1 frame: encoder artifact (hevc_videotoolbox sometimes writes the last frame with duration
+      2/fps instead of 1/fps, inflating the container duration by one frame period).
+    - 0.5 frame: rounding headroom so a 2-frame deviation never fails on floating-point dust.
+    Smallest defect still caught: >2.5 frames = 83 ms at 30 fps — well below a lost tail (≥1.5 s)
+    or any dropped-crossfade accumulation. Scales with fps.
     """
-    return abs(actual - expected) <= 1.5 / fps + 1e-6
+    return abs(actual - expected) <= 2.5 / fps + 1e-6
 
 
 def _assert_windows_frame_aligned(windows, fps: float) -> None:
@@ -582,11 +594,12 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
         parts.append(f"{achain}[a{i}]")
     # Video: xfade chain (dissolve at each seam) or plain hard concat.
     if video_xfade_sec > 0 and n > 1:
-        # Each seam blends the RUNNING output (out_len) with the next window. The offset is
-        # out_len − xfade so the transition ends exactly where the left input ends: deriving it from
-        # the running length (not `sum − (k+1)·xfade`) keeps offset+duration == out_len in the same
-        # float, so it can never sub-frame-overshoot the left input — an overshoot makes ffmpeg emit
-        # the un-shortened concat for that seam, one xfade longer than expected (the r11 abort).
+        # Each seam: offset = running_output_len - xfade_sec places the transition at the tail of
+        # the left input. ffmpeg xfade output = offset_pts + B regardless of whether offset lands
+        # exactly at the boundary (A−D) or inside it — empirically, boundary fires normally and
+        # gives A+B−D = sum−(N−1)×xfade_sec, which is what _expected_output_duration predicts.
+        # The running accumulator (out_len = xf_offset + next_seg_dur) tracks the actual output
+        # length so subsequent offsets stay calibrated across the chain.
         out_len = segments[0].end - segments[0].start
         for k in range(n - 1):
             left = f"t{k - 1}" if k > 0 else "v0"
@@ -622,6 +635,7 @@ def build_concat_cmd(
     quality: str | None = None,
     rate_control: str | None = None,
     qp: int | None = None,
+    xfade_fps: float = 0.0,
 ) -> list[str]:
     """ffmpeg-команда для многосегментного клипа: КАЖДОЕ окно — отдельный вход с собственным
     input-side seek (`-ss start -t dur -i source`), а `filter_complex` только сбрасывает PTS и
@@ -633,8 +647,16 @@ def build_concat_cmd(
     quality_args = _video_quality_args(codec, preset, video_bitrate, pix_fmt,
                                        quality=quality, rate_control=rate_control, qp=qp)
     cmd = [str(ffmpeg), "-y", "-loglevel", "error"]
-    for st, dur in windows:
-        cmd += ["-ss", _ts(st), "-t", _ts(dur), "-i", str(source)]
+    n_win = len(windows)
+    for i, (st, dur) in enumerate(windows):
+        # When xfade is active, pad every non-last window by 1 frame so the xfade offset
+        # lands strictly inside the left input for each seam: offset + xf < left_duration.
+        # Padding propagates through the xfade chain (each [tN] output is 1 frame longer),
+        # so every subsequent seam's left input also has 1 extra frame.  The last window is
+        # never a left input — it goes straight to the final xfade as the right stream — so
+        # padding it would leak into the output and lengthen the reel by 1 frame per seam.
+        pad = 1 / xfade_fps if xfade_fps > 0 and n_win > 1 and i < n_win - 1 else 0.0
+        cmd += ["-ss", _ts(st), "-t", _ts_dur(dur + pad), "-i", str(source)]
     if music_path:
         cmd += ["-stream_loop", "-1", "-i", str(music_path)]
     cmd += [
@@ -1157,6 +1179,7 @@ def _render_segments(
                     audio_codec=aud.codec, audio_bitrate=aud.bitrate,
                     music_path=music_path,
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                    xfade_fps=_fps() if _xfade_actual > 0 else 0.0,
                 )
             clip_dur_s = clip_duration  # actual output length (xfade-adjusted for multi-window)
             returncode, stderr_text = _run_ffmpeg_with_progress(
