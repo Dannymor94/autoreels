@@ -1091,7 +1091,7 @@ def _reel_with_tail(lw_end, nw_start=None):
     return SimpleNamespace(tail_last_word_end=lw_end, tail_next_word_start=nw_start)
 
 
-from autoreels.local.render import _tail_speech_fade, _audio_tail_fade_parts, _trim_segs_to_tail
+from autoreels.local.render import _tail_speech_fade, _audio_tail_fade_parts
 
 
 def test_clean_tail_full_level_then_25ms_decay():
@@ -1157,20 +1157,19 @@ def test_filter_order_tail_fade_after_loudnorm():
     assert af.index("loudnorm") < af.index("afade")
 
 
-def test_intruded_tail_clip_ends_with_audio():
-    """Intruded tail: _trim_segs_to_tail shortens the last segment so output duration == fade end.
-    Video and audio both end at nw_start - guard; no mute stretch follows."""
+def test_intruded_tail_keeps_air_fades_audio_only():
+    """Intruded tail: the clip is NOT trimmed — the full tail air (video) survives, and the audio
+    fade silences the intruder in place. This is the fix for the "tail lost on render" bug: render
+    keeps `segs` intact, so file duration == playback_duration; only the audio goes silent over the
+    next-phrase word."""
     segs = [_simple_seg(0.0, 30.0)]
     reel = _reel_with_tail(lw_end=29.3, nw_start=29.5)
     tail_fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
     assert tail_fade is not None
-    new_segs = _trim_segs_to_tail(segs, tail_fade, speed=1.0)
-    clip_dur = sum(s.end - s.start for s in new_segs)
-    out_dur = clip_dur  # speed=1
-    # output duration equals the fade end point (= nw_start = 29.5)
-    assert abs(out_dur - (tail_fade[0] + tail_fade[1])) < 1e-6
-    # ends strictly before the intruding word (nw_start=29.5)
-    assert out_dur < 29.5 + 1e-6
+    # audio fade reaches silence at the intruder (29.5s) — the intruder is never heard
+    assert abs(tail_fade[0] + tail_fade[1] - 29.5) < 1e-6
+    # segments are untouched → full 30s tail air preserved in the video
+    assert abs(sum(s.end - s.start for s in segs) - 30.0) < 1e-6
 
 
 def test_clean_tail_clip_keeps_full_tail_pad():
@@ -1182,19 +1181,6 @@ def test_clean_tail_clip_keeps_full_tail_pad():
     # no trimming applied: full clip_dur intact
     clip_dur = sum(s.end - s.start for s in segs)
     assert abs(clip_dur - 30.0) < 1e-6
-
-
-def test_intrusion_very_close_yields_short_non_mute_tail():
-    """Intrusion 0.05s after last word: clip ends just before the intruder — very short but audible."""
-    segs = [_simple_seg(0.0, 5.0)]
-    reel = _reel_with_tail(lw_end=4.3, nw_start=4.35)
-    tail_fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
-    assert tail_fade is not None
-    new_segs = _trim_segs_to_tail(segs, tail_fade, speed=1.0)
-    out_dur = sum(s.end - s.start for s in new_segs)
-    # clip ends at or before nw_start (4.35); tail is short but non-zero
-    assert out_dur <= 4.35 + 1e-6
-    assert out_dur > 0.0
 
 
 def test_video_fade_off_by_default():

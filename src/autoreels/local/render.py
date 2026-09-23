@@ -469,6 +469,22 @@ def _probe_source_fps(source, ffprobe: str) -> float:
     return fps
 
 
+def _probe_duration_sec(path, ffprobe: str) -> float | None:
+    """Container duration (seconds) of a rendered file, or None if it can't be read.
+
+    Used only by the post-render playback-duration invariant — a read failure must not mask a
+    real render, so it degrades to None (skip the check) rather than raising.
+    """
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return None
+
+
 def _snap_windows_to_frames(segments, fps: float):
     """Quantise each playback window's start/end onto the source frame grid (1/fps).
 
@@ -655,20 +671,6 @@ def _tail_speech_fade(reel, segs, speed: float,
     start = max(0.0, n_out - guard)
     dur = n_out - start
     return (start, dur) if dur > 1e-3 else None
-
-
-def _trim_segs_to_tail(segs, tail_fade: tuple[float, float], speed: float) -> list:
-    """Shorten the last segment so the total output duration == tail_fade[0] + tail_fade[1].
-
-    Used for intruded tails: clip video and audio end where the fade ends, eliminating the
-    mute stretch that would otherwise follow."""
-    new_out_dur = tail_fade[0] + tail_fade[1]
-    new_src_dur = new_out_dur * (speed or 1.0)
-    preceding_src = sum(s.end - s.start for s in segs[:-1])
-    last_s = segs[-1]
-    new_last = Segment(start=last_s.start,
-                       end=last_s.start + max(0.0, new_src_dur - preceding_src))
-    return list(segs[:-1]) + [new_last]
 
 
 def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
@@ -1010,26 +1012,13 @@ def _render_segments(
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
-            # Tail fade computed first: intruded tail trims the clip so video and audio end together.
+            # Intruded tail: a next-phrase word inside the trailing air is silenced by an AUDIO fade
+            # (afade=out holds silence through the rest of the air). The video air is KEPT — the clip
+            # runs the full playback_duration the manifest states, so `_apply_tail_air`'s tail_pad_sec
+            # survives to the file. (Previously the clip was trimmed back to the intruder, which threw
+            # the tail air away — the "tail lost on render" bug.)
             _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
                                            guard=getattr(ap, "intrusion_guard_sec", 0.12))
-            if _tail_fade is not None:
-                # Shorten clip to the point where audio goes silent; no mute video after that.
-                segs = _trim_segs_to_tail(segs, _tail_fade, _reel_speed or 1.0)
-                if len(segs) > 1:
-                    # Re-snap after trimming: trim can break frame alignment for multi-window reels.
-                    segs = _snap_windows_to_frames(segs, _fps())
-                clip_dur = sum(s.end - s.start for s in segs)
-                # Recompute tail fade to land at the actual (post-snap) clip end.
-                _new_out = clip_dur / (_reel_speed or 1.0)
-                _guard = getattr(ap, "intrusion_guard_sec", 0.12)
-                _tail_fade = (max(0.0, _new_out - _guard), min(_guard, _new_out))
-                if clip_dur < _MIN_CLIP_RENDER_SEC:
-                    print(
-                        f"  ⚠ {reel.id}: intruded tail shortens clip to {_new_out:.2f}s "
-                        f"— below minimum, rendered anyway",
-                        flush=True,
-                    )
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest.
             clip_duration = clip_dur - (len(segs) - 1) * _xfade_actual
@@ -1106,6 +1095,17 @@ def _render_segments(
                     f"({_ts(reel.start)}→{_ts(reel.end)}, код {returncode}): {stderr}"
                 )
             outputs.append(out)
+            # Invariant: the file must last the playback duration the manifest implies — clip_duration
+            # (playback windows − xfade) at speed. A silent drift means a stage shortened the clip
+            # without the manifest saying so (the class of bug that lost the tail air). One-frame
+            # tolerance absorbs container/encoder rounding.
+            _actual = _probe_duration_sec(out, _sibling_ffprobe(ffmpeg_bin)) if out.exists() else None
+            if _actual is not None and abs(_actual - _out_dur) > 1.5 / _fps():
+                raise RenderError(
+                    f"{reel.id}: rendered {_actual:.3f}s but manifest implies {_out_dur:.3f}s "
+                    f"(Δ{_actual - _out_dur:+.3f}s > 1 frame) — a render stage changed the "
+                    f"duration the manifest does not describe"
+                )
             if emit_text:
                 _write_sidecar_text(out, reel)
         return outputs
