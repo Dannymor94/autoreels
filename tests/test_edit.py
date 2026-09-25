@@ -260,3 +260,68 @@ def test_exclude_head_collapses_to_bound_movement():
     assert ns == 2.0           # moved to sentence 2 start
     assert ne == 5.0           # end unchanged
     assert "→ s:2" in note
+
+
+# --- Test 10: segments[0].start == reel.start invariant after snap/pad sync ------------------
+
+def _apply_segment_sync(reel):
+    """Reproduce the sync loop from _blocks_do_apply (same logic, tested here in isolation)."""
+    from autoreels.core.models import Segment
+    if reel.segments:
+        segs = list(reel.segments)
+        segs[0] = Segment(start=reel.start, end=segs[0].end)
+        segs[-1] = Segment(start=segs[-1].start, end=reel.end)
+        reel.segments = segs
+
+
+def test_x_adjacent_to_start_invariant_holds_after_sync():
+    """x: on first sentence: head collapse sets new_start; snap then shifts reel.start earlier.
+    The sync loop must clamp segments[0].start back to reel.start."""
+    from autoreels.core.models import Reel, Segment
+    # exclude_sentences with x:1 (head) → segs=[], reel.start moved to sentence 2 start (2.0)
+    sents = [[_w(0.0, 1.0, "Раз.")], [_w(2.0, 3.0, "Два.")], [_w(4.0, 5.0, "Три.")]]
+    segs, ns, ne, applied, _, note = edit.exclude_sentences([], 0.0, 5.0, [1], sents)
+    assert segs == [] and ns == 2.0 and ne == 5.0  # head collapse confirmed
+
+    # Simulate: reviewer writes a middle exclusion on a different clip → 2 segments set.
+    # snap/pad then moves reel.start 17ms earlier than segments[0].start.
+    reel = Reel(id="r", start=2.0, end=5.0, score=90, hook="", title="", description="", reason="x")
+    reel.segments = [Segment(start=2.0, end=3.5), Segment(start=4.0, end=5.0)]
+    reel.start = 2.0 - 0.017   # simulate lead_pad_sec shifted start earlier
+    _apply_segment_sync(reel)
+    assert reel.segments[0].start == reel.start
+
+
+def test_x_adjacent_to_end_invariant_holds_after_sync():
+    """x: on last sentence: tail collapse sets new_end; padding then shifts reel.end later.
+    sync must clamp segments[-1].end to reel.end."""
+    from autoreels.core.models import Reel, Segment
+    sents = [[_w(0.0, 1.0, "Раз.")], [_w(2.0, 3.0, "Два.")], [_w(4.0, 5.0, "Три.")]]
+    segs, ns, ne, applied, _, note = edit.exclude_sentences([], 0.0, 5.0, [3], sents)
+    assert segs == [] and ne == 3.0  # tail collapse confirmed
+
+    reel = Reel(id="r", start=0.0, end=3.0, score=90, hook="", title="", description="", reason="x")
+    reel.segments = [Segment(start=0.0, end=1.5), Segment(start=2.0, end=3.0)]
+    reel.end = 3.0 + 0.017   # padding shifted end later
+    _apply_segment_sync(reel)
+    assert reel.segments[-1].end == reel.end
+
+
+def test_x_mid_clip_still_two_windows_after_sync():
+    """Middle exclusion produces 2 windows; sync preserves both and clamps outer bounds."""
+    from autoreels.core.models import Reel, Segment
+    sents = [
+        [_w(0.0, 1.0, "А.")], [_w(2.0, 3.0, "Б.")],
+        [_w(4.0, 5.0, "В.")], [_w(6.0, 7.0, "Г.")],
+    ]
+    segs, ns, ne, applied, _, _ = edit.exclude_sentences([], 0.0, 7.0, [2], sents)
+    assert len(segs) == 2
+
+    reel = Reel(id="r", start=0.0, end=7.0, score=90, hook="", title="", description="", reason="x")
+    reel.segments = segs
+    reel.start = 0.0 - 0.017
+    reel.end = 7.0 + 0.017
+    _apply_segment_sync(reel)
+    assert len(reel.segments) == 2
+    assert reel.segments[0].start == reel.start
+    assert reel.segments[-1].end == reel.end

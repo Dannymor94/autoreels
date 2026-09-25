@@ -3557,6 +3557,15 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = renumber_reels(reels)
     reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
+    # Sync x:-exclusion segment bounds to the final reel.start / reel.end.
+    # snap, filter_dangling, and padding all move reel.start/end without touching reel.segments;
+    # this ensures segments[0].start == reel.start and segments[-1].end == reel.end.
+    for _reel in reels:
+        if _reel.segments:
+            _segs = list(_reel.segments)
+            _segs[0] = _Segment(start=_reel.start, end=_segs[0].end)
+            _segs[-1] = _Segment(start=_segs[-1].start, end=_reel.end)
+            _reel.segments = _segs
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
 
