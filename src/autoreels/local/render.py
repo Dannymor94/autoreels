@@ -442,6 +442,22 @@ def build_cut_cmd(
             *(["-movflags", "+faststart"] if faststart else []),
             str(out),
         ]
+    if filter_complex:
+        # Single-window overlay (two-shot within window, no music). Pre-roll baked into the
+        # filter_complex as trim=start={pr}; input seeked to start-pr.
+        pr = min(pre_roll, start) if pre_roll > 0 else 0.0
+        return [
+            str(ffmpeg), "-y", "-loglevel", "error",
+            "-ss", _ts(start - pr),
+            "-i", str(source),
+            "-t", _ts(duration),
+            "-filter_complex", filter_complex,
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", codec, *quality_args,
+            "-c:a", audio_codec, "-b:a", audio_bitrate,
+            *(["-movflags", "+faststart"] if faststart else []),
+            str(out),
+        ]
     # Decoder warm-up: seek pre_roll seconds before start; after input-side seek, ffmpeg resets
     # frame PTS to 0, so trim uses the relative offset (pr), not the source-absolute start time.
     # pr = 0 → identical to the old path.
@@ -553,7 +569,8 @@ def _snap_windows_to_frames(segments, fps: float):
     every boundary after the fix). Applied only on the multi-window path; a single window keeps the
     byte-identical fast -ss/-t cut.
     """
-    return [Segment(start=round(s.start * fps) / fps, end=round(s.end * fps) / fps)
+    return [s.model_copy(update={"start": round(s.start * fps) / fps,
+                                 "end":   round(s.end   * fps) / fps})
             for s in segments]
 
 
@@ -616,7 +633,9 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            video_xfade_sec: float = 0.0,
                            pre_roll: float = 0.0,
                            segment_vfs: list[str] | None = None,
-                           seam_xfades: list[float] | None = None) -> tuple[str, str, str]:
+                           seam_xfades: list[float] | None = None,
+                           segment_overlays: "list[tuple[str, str, str] | None] | None" = None,
+                           ) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
     Each window is a SEPARATE ffmpeg input, opened with its own input-side `-ss`/`-t` (see
@@ -645,16 +664,27 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     for i, s in enumerate(segments):
         pr = min(pre_roll, s.start) if pre_roll > 0 else 0.0
         svf = segment_vfs[i] if segment_vfs else None
+        ovl = segment_overlays[i] if segment_overlays else None
         if pr > 0:
             # Input-side seek resets PTS to 0; trim relative pre-roll seconds, then reset.
-            vchain = f"[{i}:v]trim=start={_num(pr)},setpts=PTS-STARTPTS"
+            vtrim = f"trim=start={_num(pr)},setpts=PTS-STARTPTS"
             achain = f"[{i}:a]atrim=start={_num(pr)},asetpts=PTS-STARTPTS"
         else:
-            vchain = f"[{i}:v]setpts=PTS-STARTPTS"
+            vtrim = "setpts=PTS-STARTPTS"
             achain = f"[{i}:a]asetpts=PTS-STARTPTS"
-        if svf:
-            vchain += f",{svf}"
-        parts.append(f"{vchain}[v{i}]")
+        if ovl:
+            # Overlay: split → wide+close branches → overlay with enable expression.
+            wide_vf_o, close_vf_o, enable_o = ovl
+            parts.append(f"[{i}:v]{vtrim}[raw{i}]")
+            parts.append(f"[raw{i}]split=2[wi{i}][ci{i}]")
+            parts.append(f"[wi{i}]{wide_vf_o}[wo{i}]")
+            parts.append(f"[ci{i}]{close_vf_o}[co{i}]")
+            parts.append(f"[wo{i}][co{i}]overlay=enable='{enable_o}'[v{i}]")
+        else:
+            vchain = f"[{i}:v]{vtrim}"
+            if svf:
+                vchain += f",{svf}"
+            parts.append(f"{vchain}[v{i}]")
         if f > 0:
             out_st = max(0.0, (s.end - s.start) - f)
             achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
@@ -692,7 +722,9 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                 )
                 out_len = xf_offset + (segments[k + 1].end - segments[k + 1].start)
             else:
-                parts.append(f"[{prev}][{right}]concat=n=2:v=1:a=0[{label}]")
+                # setsar=1 sets timebase to 1/1000000; normalize back so xfade seams
+                # that follow see matching timebases on both inputs (main vs right stream).
+                parts.append(f"[{prev}][{right}]concat=n=2:v=1:a=0,settb=expr=1/90000[{label}]")
                 out_len += segments[k + 1].end - segments[k + 1].start
             prev = label
     else:
@@ -982,7 +1014,7 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None) -> str:
     sw, sh = setup.scale
     rot = _rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)
     zoom_vf = _zoom_vf(setup.scale, zoom) if zoom is not None else ""
-    tail = zoom_vf if zoom_vf else f"scale={sw}:{sh}"
+    tail = zoom_vf if zoom_vf else f"scale={sw}:{sh},setsar=1"
     crop_scale = f"crop={c.w}:{c.h}:{c.x}:{c.y},{tail}"
     return f"{rot},{crop_scale}" if rot else crop_scale
 
@@ -1015,7 +1047,7 @@ def _crop_vf_for_crop(setup: SetupProfile, crop: Crop) -> str:
     """Video filter for an arbitrary crop rectangle: [rotate,]crop=W:H:X:Y,scale=SW:SH."""
     sw, sh = setup.scale
     rot = _rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)
-    crop_scale = f"crop={crop.w}:{crop.h}:{crop.x}:{crop.y},scale={sw}:{sh}"
+    crop_scale = f"crop={crop.w}:{crop.h}:{crop.x}:{crop.y},scale={sw}:{sh},setsar=1"
     return f"{rot},{crop_scale}" if rot else crop_scale
 
 
@@ -1222,6 +1254,7 @@ def _render_segments(
             _ts_on = getattr(render_cfg, "two_shot", False) and vf and manifest.setup is not None
             _ts_seg_vfs: list[str] | None = None
             _ts_seam_xfades: list[float] | None = None
+            _ts_seg_overlays: "list[tuple[str, str, str] | None] | None" = None
             _effective_vf = vf  # the crop vf to use for base_vf; replaced for single-window close
             if _ts_on:
                 _cscale = getattr(render_cfg, "close_shot_scale", 1.25)
@@ -1239,6 +1272,20 @@ def _render_segments(
                         for k in range(len(segs) - 1)
                     ]
                     _effective_vf = None  # crops are in segment_vfs; vtail uses palette only
+                    # Segments with close_intervals: overlay instead of plain seg_vf.
+                    _has_ci = any(getattr(s, "close_intervals", []) for s in segs)
+                    if _has_ci:
+                        _ts_seg_overlays = [
+                            (vf, _close_vf_str, _close_intervals_enable(s.close_intervals))  # type: ignore[arg-type]
+                            if getattr(s, "close_intervals", []) else None
+                            for s in segs
+                        ]
+                        # Segments with overlay get None in seg_vfs (overlay subgraph handles crop).
+                        _ts_seg_vfs = [
+                            None if getattr(s, "close_intervals", []) else
+                            (_close_vf_str if s.shot == "close" else vf)
+                            for s in segs
+                        ]
                 elif segs[0].shot == "close":
                     _effective_vf = _close_vf_str
 
@@ -1341,13 +1388,46 @@ def _render_segments(
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
+            # Single-window close_intervals: build overlay filter_complex (within-window shot change).
+            if len(segs) == 1 and _ts_on and not reel_fc and _reel_speed == 1.0:
+                _ci1 = getattr(segs[0], "close_intervals", [])
+                if _ci1:
+                    _pr1 = min(_PRE_ROLL_SEC, segs[0].start)
+                    _vtrim1 = (f"trim=start={_num(_pr1)},setpts=PTS-STARTPTS"
+                               if _pr1 > 0 else "setpts=PTS-STARTPTS")
+                    _atrim1 = (f"atrim=start={_num(_pr1)},asetpts=PTS-STARTPTS"
+                               if _pr1 > 0 else "asetpts=PTS-STARTPTS")
+                    _enable1 = _close_intervals_enable(_ci1)
+                    # post-overlay chain: palette → ass → vfade (no crop — overlay outputs scaled video)
+                    _post_parts1: list[str] = []
+                    if palette_vf:
+                        _post_parts1.append(palette_vf)
+                    if ass_cwd:
+                        _post_parts1.append(f"ass={reel.id}.ass")
+                    _vfade1 = _video_fade_filter(ap, clip_duration)
+                    if _vfade1:
+                        _post_parts1.append(_vfade1)
+                    _post1 = ",".join(_post_parts1)
+                    _v_fc = [
+                        f"[0:v]{_vtrim1}[raw1]",
+                        "[raw1]split=2[wi1][ci1]",
+                        f"[wi1]{vf}[wo1]",
+                        f"[ci1]{_close_vf_str}[co1]",
+                        f"[wo1][co1]overlay=enable='{_enable1}'[vm1]",
+                        f"[vm1]{_post1}[v]" if _post1 else "[vm1]null[v]",
+                    ]
+                    _a_fc_str = f"[0:a]{_atrim1}"
+                    if reel_af:
+                        _a_fc_str += f",{reel_af}"
+                    _a_fc_str += "[a]"
+                    reel_fc = ";".join(_v_fc) + ";" + _a_fc_str
             if len(segs) == 1:
                 cmd = build_cut_cmd(
                     ffmpeg_bin, source, segs[0].start, segs[0].end, out,
                     codec=codec, preset=enc.preset,
                     video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                     audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-                    vf=(None if reel_fc else reel_vf), af=reel_af,
+                    vf=(None if reel_fc else reel_vf), af=(None if reel_fc else reel_af),
                     music_path=music_path, filter_complex=reel_fc,
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
                     pre_roll=_PRE_ROLL_SEC,
@@ -1361,7 +1441,8 @@ def _render_segments(
                                                              video_xfade_sec=_xfade_actual,
                                                              pre_roll=_PRE_ROLL_SEC,
                                                              segment_vfs=_ts_seg_vfs,
-                                                             seam_xfades=_ts_seam_xfades)
+                                                             seam_xfades=_ts_seam_xfades,
+                                                             segment_overlays=_ts_seg_overlays)
                 windows = [(w.start, w.end - w.start) for w in segs]
                 _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
                 if music_path:

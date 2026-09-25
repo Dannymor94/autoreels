@@ -1033,7 +1033,7 @@ def test_zoom_disabled_gives_plain_scale():
     # выкл (дефолт) → обычный scale, без zoompan
     assert _zoom_vf([1080, 1920], Zoom()) == ""
     vf = _crop_vf(_crop_setup(), Zoom())
-    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+    assert vf == "crop=1215:2160:1240:0,scale=1080:1920,setsar=1"
     assert "zoompan" not in vf
 
 
@@ -1747,7 +1747,7 @@ def test_crop_palette_arg_inserts_eq_between_scale_and_end(tmp_path, render_cfg,
                 palette="vivid")
 
     vf = _val_after(fake_ffmpeg[0], "-vf")
-    assert "crop=1215:2160:1240:0,scale=1080:1920,eq=contrast=1.1:saturation=1.15" in vf
+    assert "crop=1215:2160:1240:0,scale=1080:1920,setsar=1,eq=contrast=1.1:saturation=1.15" in vf
     assert vf.index("eq=") > vf.index("scale=")
 
 
