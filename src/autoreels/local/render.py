@@ -1081,9 +1081,9 @@ def assign_close_shots(segs: list[Segment], close_ranges: list[tuple[float, floa
         if not intervals:
             result.append(seg)
         elif len(intervals) == 1 and intervals[0][0] <= 0 and intervals[0][1] >= seg_dur - 1e-6:
-            result.append(Segment(start=seg.start, end=seg.end, shot="close"))
+            result.append(seg.model_copy(update={"shot": "close", "close_intervals": []}))
         else:
-            result.append(Segment(start=seg.start, end=seg.end, shot="wide", close_intervals=intervals))
+            result.append(seg.model_copy(update={"shot": "wide", "close_intervals": intervals}))
     return result
 
 
@@ -1092,7 +1092,7 @@ def _seg_starts_close(seg: Segment) -> bool:
     if seg.shot == "close":
         return True
     ci = seg.close_intervals
-    return bool(ci) and ci[0][0] < 0.034  # 1 frame at 30fps
+    return bool(ci) and ci[0][0] < 0.05  # within 1 frame at 20–30 fps
 
 
 def _seg_ends_close(seg: Segment) -> bool:
@@ -1102,7 +1102,7 @@ def _seg_ends_close(seg: Segment) -> bool:
     ci = seg.close_intervals
     if not ci:
         return False
-    return ci[-1][1] > (seg.end - seg.start) - 0.034
+    return ci[-1][1] > (seg.end - seg.start) - 0.05  # within 1 frame at 20–30 fps
 
 
 def _num(x: float) -> str:
@@ -1370,7 +1370,7 @@ def _render_segments(
                 # Snap UP (ceil) so the frame boundary never lands inside the margin.
                 _new_end = math.ceil(_new_end * _fps()) / _fps()
                 if _new_end > segs[-1].start:
-                    segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_new_end)]
+                    segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                     clip_dur = sum(s.end - s.start for s in segs)
             elif reel.subtitles:
                 # Clean tail: ensure end >= last_t1 + margin (Whisper t1 ends slightly early).
@@ -1379,7 +1379,7 @@ def _render_segments(
                 _last_t1 = reel.subtitles[-1].t1
                 _min_end = _last_t1 + _lw_margin
                 if segs[-1].end < _min_end:
-                    segs = list(segs[:-1]) + [Segment(start=segs[-1].start, end=_min_end)]
+                    segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _min_end})]
                     clip_dur = sum(s.end - s.start for s in segs)
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.

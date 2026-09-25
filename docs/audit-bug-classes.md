@@ -161,6 +161,11 @@ Rendered as wide even after `--apply` had written `shot="close"`.
 when modifying fields of a model — never reconstruct from another model's fields.
 
 **Grep for similar sites:** `Segment(start=`, `Segment(s.start`, any place that constructs a
-model from another model's fields. Known clean as of M1.7.1:
-`_snap_windows_to_frames` fixed in commit 12175ed.  Other `Segment(start=…)` calls create
-segments from scratch (new blocks, not copies) — safe.
+model from another model's fields.
+
+**All sites fixed (af39631+):**
+- `_snap_windows_to_frames` — `Segment(start=snapped, end=snapped)` → `s.model_copy(update={…})` (commit 12175ed)
+- `assign_close_shots` — two `Segment(start=seg.start, end=seg.end, shot=…)` → `seg.model_copy(update={…})`
+- Tail-trim (render.py ×2) — `Segment(start=segs[-1].start, end=_new_end)` → `segs[-1].model_copy(update={"end": …})`
+
+**Test guard:** `test_snap_preserves_all_segment_fields` and `test_assign_close_shots_preserves_extra_fields` in `tests/test_two_shot.py` — fail immediately if this class recurs.

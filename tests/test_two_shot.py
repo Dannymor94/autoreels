@@ -301,3 +301,26 @@ def test_seam_no_change_when_mid_window_close_interval():
     assert not _seg_starts_close(seg1), "close_interval at t=3 (not 0) → starts wide"
     assert not _seg_ends_close(seg1), "close_interval ends at 7 (not near 10) → ends wide"
     assert _seg_ends_close(seg0) == _seg_starts_close(seg1)  # both False → xfade preserved
+
+
+def test_snap_preserves_all_segment_fields():
+    """_snap_windows_to_frames must not drop shot/close_intervals (class 7 guard)."""
+    from autoreels.local.render import _snap_windows_to_frames
+    segs = [
+        Segment(start=0.033, end=5.067, shot="close"),
+        Segment(start=10.017, end=20.083, shot="wide", close_intervals=[[3.0, 8.0]]),
+    ]
+    snapped = _snap_windows_to_frames(segs, fps=30.0)
+    assert snapped[0].shot == "close", "shot='close' must survive snap"
+    assert snapped[1].shot == "wide"
+    assert snapped[1].close_intervals == [[3.0, 8.0]], "close_intervals must survive snap"
+
+
+def test_assign_close_shots_preserves_extra_fields():
+    """assign_close_shots uses model_copy → any extra fields on Segment survive (class 7)."""
+    from autoreels.local.render import assign_close_shots
+    seg = Segment(start=10.0, end=20.0)
+    result = assign_close_shots([seg], [(12.0, 18.0)])
+    assert result[0].start == 10.0
+    assert result[0].end == 20.0
+    assert result[0].close_intervals == [[2.0, 8.0]]
