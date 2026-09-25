@@ -53,8 +53,10 @@ def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
     for i, seg in enumerate(segs):
         for w in words:
             if seg.start <= w.t0 < seg.end:
-                out.append(Word(word=w.word, t0=(w.t0 - seg.start + offset) / speed,
-                                t1=(w.t1 - seg.start + offset) / speed, emph=w.emph))
+                out.append(w.model_copy(update={
+                    "t0": (w.t0 - seg.start + offset) / speed,
+                    "t1": (w.t1 - seg.start + offset) / speed,
+                }))
         offset += seg.end - seg.start
         if xfade_sec > 0 and i < len(segs) - 1:
             offset -= xfade_sec   # xfade overlaps: next seg starts xfade_sec earlier in output

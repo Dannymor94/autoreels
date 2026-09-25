@@ -49,9 +49,11 @@
 
 ---
 
-## Шаг 2 — ритм субтитров ✅ ЗАКРЫТ
+## Шаг 2 — ритм субтитров 🔧 IMPLEMENTED, GATE PENDING
 
-**Гейт пройден.** `k:N=word,word;M=word` syntax, `Word.emph` flag, `Keyword` ASS style, `subtitle_keywords` feature flag (off → byte-identical). 1601 tests pass. commit e06ef49.
+**Реализовано** (commit e06ef49): `k:N=word,word;M=word` syntax, `Word.emph` flag, `Keyword` ASS style, `subtitle_keywords` feature flag (off → byte-identical). 1601 tests pass.
+
+**Гейт не пройден** — нужен рендер трёх клипов на PXL с визуальной проверкой. Только он закрывает шаг.
 
 Флаг `subtitle_keywords` (по умолчанию `false`).
 

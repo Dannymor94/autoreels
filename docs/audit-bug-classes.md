@@ -169,3 +169,14 @@ model from another model's fields.
 - Tail-trim (render.py ×2) — `Segment(start=segs[-1].start, end=_new_end)` → `segs[-1].model_copy(update={"end": …})`
 
 **Test guard:** `test_snap_preserves_all_segment_fields` and `test_assign_close_shots_preserves_extra_fields` in `tests/test_two_shot.py` — fail immediately if this class recurs.
+
+**Extension to Word (M1.7 step 2):** `Word.emph` (bool, step 2) is the first Word field beyond the original schema. Same class applies: rebuilding `Word(word=w.word, t0=…, t1=…)` from an existing Word silently drops `emph`.
+
+Grep: `Word(word=w.word`, `Word(word=w\.word`.
+
+| # | Location | State | Fix |
+|---|----------|-------|-----|
+| 1 | `subtitles.py` `remap_to_output` — `Word(word=w.word, t0=…, emph=w.emph)` | **RESOLVED** (explicit `emph=` carry, then model_copy in commit e06ef49+) | `w.model_copy(update={"t0":…, "t1":…})` |
+| 2 | `chunk_transcribe.py` `apply_offset` — `Word(word=w.word, t0=w.t0+off, t1=w.t1+off)` | **RESOLVED** (model_copy) — note: transcript words always have `emph=False`; the fix is defensive | `w.model_copy(update={"t0":…, "t1":…})` |
+
+**Test guard:** `test_apply_offset_preserves_emph` in `tests/test_keywords.py` — fails if `apply_offset` drops any Word field.

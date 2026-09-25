@@ -13,6 +13,8 @@ import io
 import re
 import sys
 
+import pytest
+
 from autoreels.cloud.blocks import parse_compact_answer
 from autoreels.core.config import SubtitlesConfig
 from autoreels.core.models import Segment, Word
@@ -212,7 +214,7 @@ def test_parser_k_absent_gives_empty_tuple():
 # ── Test 7: remap_to_output carries emph flag ─────────────────────────────────
 
 def test_remap_carries_emph_flag():
-    """remap_to_output preserves word.emph through timeline remapping."""
+    """remap_to_output preserves word.emph through timeline remapping (class-7 guard)."""
     words = [
         Word(word="страх", t0=5.0, t1=5.4, emph=True),
         Word(word="это", t0=5.5, t1=5.7),
@@ -225,3 +227,17 @@ def test_remap_carries_emph_flag():
     assert len(remapped) == 2
     assert remapped[0].emph is True
     assert remapped[1].emph is False
+
+
+def test_apply_offset_preserves_emph():
+    """apply_offset (chunk_transcribe) preserves word.emph — class-7 guard for Word."""
+    from autoreels.core.models import Transcript
+    from autoreels.cloud.chunk_transcribe import apply_offset
+
+    words = [Word(word="тест", t0=1.0, t1=1.5, emph=True)]
+    tx = Transcript(language="ru", words=words)
+
+    shifted = apply_offset(tx, 10.0)
+
+    assert shifted.words[0].emph is True
+    assert shifted.words[0].t0 == pytest.approx(11.0)

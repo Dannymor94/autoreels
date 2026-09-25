@@ -36,7 +36,7 @@ def apply_offset(transcript: Transcript, offset_sec: float) -> Transcript:
     смещение слов у границ чанков (см. test_overlap_zone_consistency).
     """
     shifted = [
-        Word(word=w.word, t0=w.t0 + offset_sec, t1=w.t1 + offset_sec)
+        w.model_copy(update={"t0": w.t0 + offset_sec, "t1": w.t1 + offset_sec})
         for w in transcript.words
     ]
     return Transcript(language=transcript.language, words=shifted)
