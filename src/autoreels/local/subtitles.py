@@ -254,7 +254,10 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
                     parts.append(" ")
                 wtext = w.word.upper() if cfg.uppercase else w.word
                 if w.emph:
-                    parts.append(f"{{\\rKeyword}}{wtext}{{\\r}}")
+                    # Punctuation stays outside the highlight so it renders in Default style.
+                    body = wtext.rstrip(".,!?;:…—–")
+                    trail = wtext[len(body):]
+                    parts.append(f"{{\\rKeyword}}{body}{{\\r}}{trail}")
                 else:
                     parts.append(wtext)
             text = "".join(parts)

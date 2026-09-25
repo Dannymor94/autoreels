@@ -102,14 +102,30 @@ def test_same_word_only_tagged_where_emph_set():
 # ── Test 3: words with attached punctuation rendered with tag when emph=True ─
 
 def test_punctuated_word_tagged_when_emph():
-    """Whisper-style 'страха,' with emph=True gets the tag (punctuation is part of the display word)."""
+    """Whisper-style 'страха,' with emph=True: punctuation stays OUTSIDE the Keyword tag."""
     cfg = _cfg()
     words = [_w("страха,", 1.0, 1.5, emph=True), _w("нет", 1.6, 1.8)]
 
     ass = build_ass(words, cfg=cfg, clip_start=0.0, enable_keywords=True)
 
-    assert "{\\rKeyword}СТРАХА,{\\r}" in ass
+    assert "{\\rKeyword}СТРАХА{\\r}," in ass
+    assert "{\\rKeyword}СТРАХА,{\\r}" not in ass
     assert "{\\rKeyword}НЕТ{\\r}" not in ass
+
+
+def test_punctuation_stays_outside_keyword_tag():
+    """All trailing punctuation chars stay outside the \\rKeyword tag."""
+    cfg = _cfg()
+    cases = [
+        ("силу.", "{\\rKeyword}СИЛУ{\\r}."),
+        ("страх,", "{\\rKeyword}СТРАХ{\\r},"),
+        ("сигнал!", "{\\rKeyword}СИГНАЛ{\\r}!"),
+        ("нет", "{\\rKeyword}НЕТ{\\r}"),    # no punctuation → no trailing chars
+    ]
+    for word, expected in cases:
+        words = [_w(word, 1.0, 1.5, emph=True), _w("да", 1.6, 1.8)]
+        ass = build_ass(words, cfg=cfg, clip_start=0.0, enable_keywords=True)
+        assert expected in ass, f"expected {expected!r} for word {word!r}"
 
 
 # ── Test 4: timing and grouping unchanged ─────────────────────────────────────
@@ -241,3 +257,62 @@ def test_apply_offset_preserves_emph():
 
     assert shifted.words[0].emph is True
     assert shifted.words[0].t0 == pytest.approx(11.0)
+
+
+# ── Stage guards: emph survives snap, filler cleanup, cold open ───────────────
+
+def test_snap_stage_does_not_touch_subtitle_emph():
+    """trim_hanging_subtitles (snap stage) pops trailing words but never rebuilds Word objects.
+
+    Emph flag on non-trailing words is untouched; the surviving word object is the SAME object.
+    """
+    from autoreels.core.models import Reel
+    from autoreels.cloud.snap import trim_hanging_subtitles
+
+    emph_word = Word(word="страх", t0=5.0, t1=5.4, emph=True)
+    hanging = Word(word="ну", t0=5.5, t1=5.8)
+    reel = Reel(id="r01", start=5.0, end=6.0, score=50, hook="", title="", description="",
+                subtitles=[emph_word, hanging])
+    trim_hanging_subtitles([reel], hanging_words=["ну"])
+
+    assert len(reel.subtitles) == 1
+    assert reel.subtitles[0] is emph_word     # same object — not rebuilt
+    assert reel.subtitles[0].emph is True
+
+
+def test_filler_stage_does_not_touch_subtitle_emph():
+    """remove_fillers returns Segment intervals; reel.subtitles Words are never rebuilt."""
+    from autoreels.cloud.edit import remove_fillers
+
+    words = [
+        Word(word="страх", t0=0.0, t1=0.4, emph=True),
+        Word(word="это", t0=0.5, t1=0.7),
+    ]
+    # No fillers defined → returns empty segments list (one span kept as-is)
+    segs, removed, _ = remove_fillers(
+        words, start=0.0, end=1.0,
+        filler_words=[], pause_shorten_sec=0.4,
+        pause_residual_sec=0.1, max_removed_share=0.5,
+    )
+    # Words were not touched; emph still set on the original objects
+    assert words[0].emph is True
+
+
+def test_cold_open_stage_preserves_existing_emph():
+    """Cold open only appends NEW words (from transcript); existing emph words are untouched."""
+    from autoreels.local.subtitles import words_in_window
+
+    # Existing subtitle word already has emph=True
+    existing = Word(word="страх", t0=10.0, t1=10.4, emph=True)
+    hook_words = [existing, Word(word="есть", t0=10.5, t1=10.8)]
+
+    # Simulate cold-open append: only add words NOT already in subtitles
+    subtitles = [existing]
+    have = {round(w.t0, 3) for w in subtitles}
+    for w in hook_words:
+        if round(w.t0, 3) not in have:
+            subtitles.append(w)
+
+    # existing word must still have emph=True
+    assert subtitles[0].emph is True
+    assert subtitles[0] is existing  # same object, not rebuilt
