@@ -113,7 +113,15 @@ _ar_menu() {
         case "$_action" in
             go)        arl go ;;
             go_render) arl run --render ;;
-            render)    arl r ;;
+            render)
+                printf "Рендер: [Enter] — все рилы  или spec (r03 / 3 / 3-5): "
+                read -r _reels_spec; _reels_spec="$(printf '%s' "$_reels_spec" | tr -d '\r')"
+                if [ -z "$_reels_spec" ]; then
+                    arl r
+                else
+                    arl r --reels "$_reels_spec"
+                fi
+                ;;
             status)    arl s ;;
             calibrate) arl c ;;
             resnap)    arl rs ;;

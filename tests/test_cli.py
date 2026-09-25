@@ -1353,6 +1353,111 @@ def test_render_allow_stale_renders_old_crop(monkeypatch, tmp_path):
     assert called[0].setup.crop.model_dump()["w"] == 956   # СТАРЫЙ кроп (не тронут)
 
 
+# -------------------------------------------------- render --reels selection
+
+
+def _multi_manifest_setup(tmp_path):
+    """Three reels in one manifest + source file. Returns (manifests_dir, inputs_dir, manifest)."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "v.mp4").write_bytes(b"x")
+    m = Manifest(
+        source="v.mp4", source_sha256="a" * 64, duration_preset="shorts",
+        setup=_setup(), run_key="rk1",
+        reels=[_reel("r01"), _reel("r02"), _reel("r03")],
+    )
+    (manifests / "v.json").write_text(m.model_dump_json(), encoding="utf-8")
+    return manifests, inputs, m
+
+
+def test_render_reels_filter_selects_one_reel(monkeypatch, tmp_path):
+    """--reels r03 renders only r03; other reels are untouched."""
+    manifests, inputs, _ = _multi_manifest_setup(tmp_path)
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [Path("r03.mp4")])
+
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                   reels_filter="r03")
+
+    assert len(called) == 1
+    assert [r.id for r in called[0].reels] == ["r03"]
+
+
+def test_render_reels_filter_ordinal_and_range(monkeypatch, tmp_path):
+    """Ordinal '2' and range '1-2' each select the expected reels."""
+    manifests, inputs, _ = _multi_manifest_setup(tmp_path)
+    called = []
+    monkeypatch.setattr(cli, "render_crop",
+                        lambda m, **k: called.append([r.id for r in m.reels]) or [Path("x.mp4")])
+
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                   reels_filter="2")
+    assert called[-1] == ["r02"]
+
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                   reels_filter="1-2")
+    assert called[-1] == ["r01", "r02"]
+
+
+def test_render_reels_filter_unknown_id_errors(monkeypatch, tmp_path):
+    """Unknown reel id raises SystemExit naming what is available."""
+    manifests, inputs, _ = _multi_manifest_setup(tmp_path)
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: [])
+
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                       reels_filter="r99")
+    msg = str(exc.value)
+    assert "r99" in msg
+    assert "r01" in msg   # available reels listed
+
+
+def test_render_reels_filter_multi_manifest_refuses(monkeypatch, tmp_path):
+    """Multiple manifests with no --manifest and --reels given → SystemExit listing manifests."""
+    manifests = tmp_path / "manifests"
+    manifests.mkdir()
+    inputs = tmp_path / "inputs"; inputs.mkdir()
+    m = Manifest(source="a.mp4", source_sha256="a" * 64, duration_preset="shorts",
+                 setup=_setup(), run_key="rk1", reels=[_reel()])
+    (manifests / "a.json").write_text(m.model_dump_json(), encoding="utf-8")
+    m2 = m.model_copy(update={"source": "b.mp4", "source_sha256": "b" * 64})
+    (manifests / "b.json").write_text(m2.model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: [])
+
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                       reels_filter="r01")
+    msg = str(exc.value)
+    assert "a.json" in msg and "b.json" in msg
+
+
+def test_render_reels_filter_bypasses_fingerprint(monkeypatch, tmp_path):
+    """A selected reel renders even when its fingerprint is current (up-to-date)."""
+    manifests, inputs, m = _multi_manifest_setup(tmp_path)
+    out = tmp_path / "reels-out" / "v"
+    out.mkdir(parents=True)
+    # Write a current fingerprint for r01 so it would normally be skipped.
+    rc = cli.load_render_config(REPO_ROOT / "config" / "render.yaml")
+    pal = m.setup.palette or rc.palette
+    r01 = m.reels[0]
+    fp = cli._reel_render_fingerprint(r01, setup=m.setup, palette=pal,
+                                      profile=rc.encoder.profile, zoom_on=rc.zoom.enabled,
+                                      music_path=None)
+    cli._write_render_fingerprint(out, r01.id, fp)
+    (out / "r01.mp4").write_bytes(b"existing")
+
+    called = []
+    monkeypatch.setattr(cli, "render_crop", lambda m, **k: called.append(m) or [Path("r01.mp4")])
+
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, out_dir=tmp_path / "reels-out",
+                   root=REPO_ROOT, reels_filter="r01")
+
+    assert len(called) == 1
+    assert [r.id for r in called[0].reels] == ["r01"]
+
+
 def test_status_shows_manifest_sync_marks(monkeypatch, tmp_path, capsys):
     """status по каждому видео показывает состояние манифеста: ✓ / кроп устарел → recrop / нет."""
     root = tmp_path

@@ -2173,6 +2173,66 @@ def _missing_reels(manifest: Manifest, out_dir: Path, fingerprint=None) -> list:
     return out
 
 
+def _parse_reel_selection(spec: str, reels: list) -> tuple[list, list[str]]:
+    """Parse --reels spec ('r03', '3', 'r03,r07', '3-5') against manifest reels.
+
+    Returns (matched_reels_in_manifest_order, description_lines).
+    Raises SystemExit listing unknown ids/ordinals and available reels.
+    """
+    import re as _re
+    all_ids = [r.id for r in reels]
+    id_to_reel = {r.id: r for r in reels}
+    ordinal_to_reel = {i + 1: r for i, r in enumerate(reels)}
+    selected_ids: list[str] = []
+    descriptions: list[str] = []
+    errors: list[str] = []
+
+    for token in spec.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        range_m = _re.fullmatch(r"(\d+)-(\d+)", token)
+        if range_m:
+            lo, hi = int(range_m.group(1)), int(range_m.group(2))
+            matched = [ordinal_to_reel[i] for i in range(lo, hi + 1) if i in ordinal_to_reel]
+            bad = [i for i in range(lo, hi + 1) if i not in ordinal_to_reel]
+            if bad:
+                errors.append(f"  '{token}': позиции вне диапазона: {bad} (всего {len(reels)})")
+            else:
+                for r in matched:
+                    if r.id not in selected_ids:
+                        selected_ids.append(r.id)
+                descriptions.append(f"  {token} → {', '.join(r.id for r in matched)}")
+            continue
+        if _re.fullmatch(r"r\d+", token):
+            if token in id_to_reel:
+                idx = all_ids.index(token) + 1
+                if token not in selected_ids:
+                    selected_ids.append(token)
+                descriptions.append(f"  {token} (позиция {idx})")
+            else:
+                errors.append(f"  '{token}': рил не найден. Доступны: {', '.join(all_ids)}")
+            continue
+        if _re.fullmatch(r"\d+", token):
+            n = int(token)
+            if n in ordinal_to_reel:
+                r = ordinal_to_reel[n]
+                if r.id not in selected_ids:
+                    selected_ids.append(r.id)
+                descriptions.append(f"  {token} → {r.id}")
+            else:
+                errors.append(f"  '{token}': нет позиции {n} (манифест: {len(reels)} рилов)")
+            continue
+        errors.append(f"  '{token}': неизвестный формат (нужно: r03, 3, 3-5)")
+
+    if errors:
+        available = "\n".join(f"  {i+1}) {r.id}" for i, r in enumerate(reels))
+        raise SystemExit(
+            "ошибка --reels:\n" + "\n".join(errors) + f"\n\nДоступные рилы:\n{available}"
+        )
+    return [id_to_reel[rid] for rid in selected_ids], descriptions
+
+
 # Фоллбэк энкодеров: менее→более совместимый с GPU. av1 (нужен RX 7000+) → hevc → h264.
 _ENCODER_FALLBACK_CHAIN = ["av1", "hevc", "h264"]
 
@@ -2276,6 +2336,8 @@ def cmd_render(
     _manifest_paths: list | None = None,
     background: bool = False,
     _raise_on_failure: bool = False,
+    manifest_name: str | None = None,
+    reels_filter: str | None = None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -2306,6 +2368,22 @@ def cmd_render(
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
 
     manifest_files = _manifest_paths if _manifest_paths is not None else _glob_manifests(manifests_dir)
+
+    # --reels: select a single manifest and force-render specific reels.
+    if reels_filter is not None:
+        if manifest_name:
+            mf = Path(manifest_name)
+            if not mf.is_file():
+                mf = manifests_dir / f"{Path(manifest_name).stem}.json"
+            if not mf.is_file():
+                raise SystemExit(f"манифест не найден: {manifest_name}")
+            manifest_files = [mf]
+        elif len(manifest_files) > 1:
+            names = "\n".join(f"  {mf.name}" for mf in sorted(manifest_files))
+            raise SystemExit(
+                f"--reels: найдено {len(manifest_files)} манифестов — укажи --manifest <имя>:\n{names}"
+            )
+
     if not manifest_files:
         print("manifests/ пуст — нечего рендерить", flush=True)
         return []
@@ -2402,21 +2480,31 @@ def cmd_render(
                 return _reel_render_fingerprint(r, setup=_setup, palette=_pal, profile=_prof,
                                                 zoom_on=_zoom, music_path=music_path)
 
-            # Идемпотентность: пропускаем манифесты, где все клипы есть И их отпечаток совпадает.
-            missing = _missing_reels(manifest, out_dir_final, _fp)
-            if not missing:
-                print(f"✓ {stem}: все {len(manifest.reels)} клипов уже готовы — пропуск",
-                      flush=True)
-                skipped_done.append(mf.name)
-                continue
+            if reels_filter is not None:
+                # --reels: force-render selected reels, bypass fingerprint check.
+                selected, sel_descs = _parse_reel_selection(reels_filter, manifest.reels)
+                print("→ выбраны рилы (отпечаток игнорируется — принудительный рендер):")
+                for d in sel_descs:
+                    print(d, flush=True)
+                reels_to_render = selected
+            else:
+                # Идемпотентность: пропускаем манифесты, где все клипы есть И отпечаток совпадает.
+                missing = _missing_reels(manifest, out_dir_final, _fp)
+                if not missing:
+                    print(f"✓ {stem}: все {len(manifest.reels)} клипов уже готовы — пропуск",
+                          flush=True)
+                    skipped_done.append(mf.name)
+                    continue
+                reels_to_render = missing
 
-            # Рендерим только недостающие/устаревшие клипы (при частичном завершении)
-            render_manifest = manifest if len(missing) == len(manifest.reels) else (
-                manifest.model_copy(update={"reels": missing})
+            render_manifest = manifest if len(reels_to_render) == len(manifest.reels) else (
+                manifest.model_copy(update={"reels": reels_to_render})
             )
-            n_missing = len(missing)
+            n_missing = len(reels_to_render)
             n_total = len(manifest.reels)
-            label = f"{n_missing}/{n_total} клипов" if n_missing < n_total else f"{n_total} клипов"
+            force_note = " принудит." if reels_filter else ""
+            label = (f"{n_missing}/{n_total} клипов{force_note}" if n_missing < n_total
+                     else f"{n_total} клипов{force_note}")
             pal_tag = "" if eff_pal == "neutral" else f", палитра {eff_pal}"
             zoom_tag = ", зум" if zoom_on else ""
             music_tag = f", музыка {Path(music_path).name}" if music_path else ""
@@ -5976,6 +6064,11 @@ def _build_parser():
     pd.add_argument("--no-auto-recrop", action="store_true", dest="no_auto_recrop",
                     help="не авто-применять калибровку при устаревшем кропе (строго блокировать, "
                          "как раньше — обновлять вручную через arl recrop)")
+    pd.add_argument("--reels", default=None, dest="reels_filter",
+                    help="рилы для рендера: r03 | 3 | r03,r07 | 3-5. "
+                         "Отпечаток игнорируется — рендер принудительный.")
+    pd.add_argument("--manifest", default=None, dest="manifest_name",
+                    help="имя/стем манифеста (нужен когда несколько манифестов и задан --reels)")
 
     ppv = sub.add_parser(
         "preview",
@@ -6444,7 +6537,8 @@ def main(argv=None) -> int:
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
                        palette=args.palette, zoom=zoom_flag, music=args.music,
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
-                       auto_recrop=not args.no_auto_recrop)
+                       auto_recrop=not args.no_auto_recrop,
+                       reels_filter=args.reels_filter, manifest_name=args.manifest_name)
         elif args.cmd == "preview":
             pals = [p.strip() for p in args.palettes.split(",") if p.strip()] if args.palettes else None
             return cmd_preview(args.manifest, palettes=pals, seconds=args.seconds,
