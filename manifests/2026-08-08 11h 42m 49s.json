@@ -441,12 +441,7 @@
           "start": 131.24,
           "end": 151.52,
           "shot": "wide",
-          "close_intervals": [
-            [
-              17.379999999999995,
-              20.28
-            ]
-          ]
+          "close_intervals": []
         },
         {
           "start": 154.36,
@@ -458,18 +453,18 @@
           "start": 159.4,
           "end": 169.49,
           "shot": "wide",
-          "close_intervals": [
-            [
-              7.159999999999997,
-              10.090000000000003
-            ]
-          ]
+          "close_intervals": []
         },
         {
           "start": 170.12,
           "end": 195.72,
-          "shot": "close",
-          "close_intervals": []
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              14.879999999999995
+            ]
+          ]
         }
       ],
       "cold_open": null,
@@ -1216,12 +1211,7 @@
           "start": 340.5832,
           "end": 363.94318,
           "shot": "wide",
-          "close_intervals": [
-            [
-              13.019950000000051,
-              23.359980000000007
-            ]
-          ]
+          "close_intervals": []
         },
         {
           "start": 364.7032,
@@ -2293,12 +2283,7 @@
           "start": 452.48635,
           "end": 473.22635,
           "shot": "wide",
-          "close_intervals": [
-            [
-              14.859989999999982,
-              20.74000000000001
-            ]
-          ]
+          "close_intervals": []
         }
       ],
       "cold_open": null,
