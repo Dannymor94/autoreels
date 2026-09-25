@@ -153,6 +153,13 @@ zoom:
 hashtags_always: []
 hashtags_max: 0
 
+# M1.7 step 1: two-shot mode (wide/close crop within a clip). Off by default.
+# When off, render is byte-identical to M1.6 output (or same argv for non-deterministic encoders).
+two_shot: false
+two_shot_xfade: false
+close_shot_scale: 1.25
+close_shot_anchor_y: 0.35
+
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
   font: Montserrat

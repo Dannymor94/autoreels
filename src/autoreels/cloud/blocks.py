@@ -610,12 +610,14 @@ _COMPACT_PROMPT = (
     "#   x:N,M,N-M  exclude sentences by number: cut them out and join what remains.\n"
     "#              Example: s:3 e:12 | x:7,9-10  keeps sentences 3-12 minus 7, 9, 10.\n"
     "#   h:N   cold open: play sentence N first, then the clip from its start\n"
+    "#   c:N,M,N-M  close shot on these sentences (two_shot: true only); same numbering as s:/e:/x:\n"
+    "#              Interim field — will become part of the 'emph' beat syntax in a future update.\n"
     "#   t: …  overlay this title on the first seconds of the clip  (second-to-last field)\n"
     "#   d: …  post caption: 1-2 sentences shown under the clip when posted  (LAST field)\n"
     "# Omit s:/e: and the clip starts at the first clean sentence and ends before trailing\n"
     "# wind-down ('да', 'вот', 'как-то так'). Unknown/garbled fields are ignored, not fatal.\n"
     "#\n"
-    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| x:…] [| h:N] [| t: text] [| d: text]\n"
+    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| x:…] [| h:N] [| c:…] [| t: text] [| d: text]\n"
     "# No commentary, no restating of text.  Example:\n"
     "#   3 85+            (join 3 with 4)\n"
     "#   5 -90           (join 5 back into 4)\n"
@@ -642,6 +644,9 @@ class _ReviewEntry(NamedTuple):
     filler: bool | None = None  # f:0/f:1 — per-clip filler-removal override (Part 3)
     description: str | None = None  # d: text — post caption (stored in reel.description)
     x: tuple[int, ...] = ()     # x:N,M,N-M — sentence indices to cut out of the middle
+    # c:N,M,N-M — sentence indices for close shot (M1.7 step 1; interim until 'emph' beats).
+    # Sentences not listed stay in the wide shot. t: and d: always come last.
+    c: tuple[int, ...] = ()
 
 
 _FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
@@ -649,11 +654,12 @@ _FIELD_T_RE = re.compile(r"(?:^|[|\s])t:\s*(.*)$")
 _FIELD_D_RE = re.compile(r"(?:^|[|\s])d:\s*(.*)$")
 _FIELD_F_RE = re.compile(r"(?:^|[|\s])f:\s*([01])")
 _FIELD_X_RE = re.compile(r"(?:^|[|\s])x:\s*([\d,\-\s]+)")
+_FIELD_C_RE = re.compile(r"(?:^|[|\s])c:\s*([\d,\-\s]+)")
 _STRAY_FIELD_RE = re.compile(r"(?:^|[|\s])([a-zA-Z]+):")
 
 
 def _parse_fields(text: str):
-    """Parse the optional trailing fields of an answer line: s:N e:N h:N f:0|1 x:... t: text [d: text].
+    """Parse the optional trailing fields of an answer line: s:N e:N h:N f:0|1 x:... c:... t: text [d: text].
 
     Ordering: d: is the absolute last field (greedy to end of line); t: must precede it and is
     second-to-last. Both carry free text including commas and punctuation. The pipe | character
@@ -661,9 +667,9 @@ def _parse_fields(text: str):
     practice — captions seldom contain |). Example with both fields:
         11 88 | t: Ты не поломан — ты забыл свою силу | d: Тело подаёт сигнал, а мы принимаем его за страх.
 
-    Returns (s, e, hook, title, filler, description, x_list, errors); unrecognised/malformed fields
-    are reported (never fatal). s/e/h are 1-based sentence indices; f is a 0/1 filler toggle;
-    x_list is a list of 1-based sentence indices to exclude."""
+    Returns (s, e, hook, title, filler, description, x_list, c_list, errors); unrecognised/malformed
+    fields are reported (never fatal). s/e/h are 1-based sentence indices; f is a 0/1 filler toggle;
+    x_list/c_list are lists of 1-based sentence indices."""
     errors: list[str] = []
     # d: is the absolute last field — parse first so t: is not contaminated by it
     description: str | None = None
@@ -701,6 +707,26 @@ def _parse_fields(text: str):
                 x_list.append(int(tok))
             elif tok:
                 errors.append(f"malformed x: token '{tok}'")
+    c_list: list[int] = []
+    mc = _FIELD_C_RE.search(text)
+    if mc:
+        c_val = mc.group(1)
+        text = text[:mc.start()] + text[mc.end():]
+        for tok in re.split(r",\s*", c_val.strip()):
+            tok = tok.strip()
+            if not tok:
+                continue
+            rm = re.fullmatch(r"(\d+)-(\d+)", tok)
+            if rm:
+                lo, hi = int(rm.group(1)), int(rm.group(2))
+                if lo <= hi:
+                    c_list.extend(range(lo, hi + 1))
+                else:
+                    errors.append(f"malformed c: range '{tok}' (lo > hi)")
+            elif tok.isdigit():
+                c_list.append(int(tok))
+            elif tok:
+                errors.append(f"malformed c: token '{tok}'")
     vals: dict[str, int | None] = {"s": None, "e": None, "h": None}
     for name, rx in _FIELD_NUM_RE.items():
         m = rx.search(text)
@@ -709,7 +735,7 @@ def _parse_fields(text: str):
             text = text[:m.start()] + text[m.end():]   # consume so it is not flagged as stray
     for m in _STRAY_FIELD_RE.finditer(text):
         errors.append(f"unrecognised or malformed field '{m.group(1)}:'")
-    return vals["s"], vals["e"], vals["h"], title, filler, description, x_list, errors
+    return vals["s"], vals["e"], vals["h"], title, filler, description, x_list, c_list, errors
 
 
 def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float | None, str | None]:
@@ -830,10 +856,10 @@ def parse_review(
         if err:
             errors.append((lineno, err))
             continue
-        s, e, hook, title, filler, description, x_list, ferrs = _parse_fields(fields)
+        s, e, hook, title, filler, description, x_list, c_list, ferrs = _parse_fields(fields)
         for fe in ferrs:
             errors.append((lineno, fe))
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list)))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list)))
 
     return source_ref, entries, errors
 
@@ -932,10 +958,10 @@ def parse_compact_answer(
             if err:
                 errors.append((lineno, err))
                 continue
-            s, e, hook, title, filler, description, x_list, ferrs = _parse_fields(m.group(3) or "")
+            s, e, hook, title, filler, description, x_list, c_list, ferrs = _parse_fields(m.group(3) or "")
             for fe in ferrs:
                 errors.append((lineno, fe))
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list)))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list)))
         else:
             ignored += 1
 

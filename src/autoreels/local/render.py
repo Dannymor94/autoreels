@@ -35,7 +35,7 @@ from autoreels.core.config import (
     AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.progress import is_tty, render_bar
-from autoreels.core.models import Manifest, Segment, SetupProfile
+from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
@@ -557,25 +557,24 @@ def _snap_windows_to_frames(segments, fps: float):
             for s in segments]
 
 
-def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float = 1.0) -> float:
+def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float = 1.0,
+                              seam_xfades=None) -> float:
     """Length ffmpeg emits for these playback windows — the single source of truth shared by the
     concat graph's xfade offsets (`_concat_segments_graph`) and the post-render duration invariant.
 
     Plain concat (xfade_sec=0 or a single window): bare sum of window durations.
 
-    Xfade path: ffmpeg xfade output = A + B − D regardless of the exact offset, as long as the
-    transition fits within input A. Each seam therefore subtracts exactly one xfade_sec from the
-    running total (N windows → (N−1)×xfade_sec shorter than the bare sum). The running accumulator
-    inside _concat_segments_graph drifts by one frame per seam (it uses offset+B rather than A+B−D),
-    but that drift only affects where the next seam's offset lands, not the output duration seen here.
+    Xfade path: each xfade seam subtracts its duration from the running total.
+    seam_xfades (list[float] of length N-1): per-seam override; takes precedence over xfade_sec.
     """
     if not windows:
         return 0.0
     out_len = windows[0].end - windows[0].start
-    for w in windows[1:]:
+    for k, w in enumerate(windows[1:]):
         out_len += w.end - w.start
-        if xfade_sec > 0:
-            out_len -= xfade_sec
+        xf = seam_xfades[k] if seam_xfades is not None else xfade_sec
+        if xf > 0:
+            out_len -= xf
     return out_len / speed if speed else out_len
 
 
@@ -615,7 +614,9 @@ def _assert_windows_frame_aligned(windows, fps: float) -> None:
 
 def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            video_xfade_sec: float = 0.0,
-                           pre_roll: float = 0.0) -> tuple[str, str, str]:
+                           pre_roll: float = 0.0,
+                           segment_vfs: list[str] | None = None,
+                           seam_xfades: list[float] | None = None) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
     Each window is a SEPARATE ffmpeg input, opened with its own input-side `-ss`/`-t` (see
@@ -643,27 +644,27 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     parts: list[str] = []
     for i, s in enumerate(segments):
         pr = min(pre_roll, s.start) if pre_roll > 0 else 0.0
+        svf = segment_vfs[i] if segment_vfs else None
         if pr > 0:
             # Input-side seek resets PTS to 0; trim relative pre-roll seconds, then reset.
-            parts.append(
-                f"[{i}:v]trim=start={_num(pr)},setpts=PTS-STARTPTS[v{i}]"
-            )
+            vchain = f"[{i}:v]trim=start={_num(pr)},setpts=PTS-STARTPTS"
             achain = f"[{i}:a]atrim=start={_num(pr)},asetpts=PTS-STARTPTS"
         else:
-            parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+            vchain = f"[{i}:v]setpts=PTS-STARTPTS"
             achain = f"[{i}:a]asetpts=PTS-STARTPTS"
+        if svf:
+            vchain += f",{svf}"
+        parts.append(f"{vchain}[v{i}]")
         if f > 0:
             out_st = max(0.0, (s.end - s.start) - f)
             achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
         parts.append(f"{achain}[a{i}]")
-    # Video: xfade chain (dissolve at each seam) or plain hard concat.
-    if video_xfade_sec > 0 and n > 1:
-        # Each seam: offset = running_output_len - xfade_sec places the transition at the tail of
-        # the left input. ffmpeg xfade output = offset_pts + B regardless of whether offset lands
-        # exactly at the boundary (A−D) or inside it — empirically, boundary fires normally and
-        # gives A+B−D = sum−(N−1)×xfade_sec, which is what _expected_output_duration predicts.
-        # The running accumulator (out_len = xf_offset + next_seg_dur) tracks the actual output
-        # length so subsequent offsets stay calibrated across the chain.
+    # Video: seam_xfades (per-seam), uniform video_xfade_sec, or plain hard concat.
+    # seam_xfades takes precedence when provided; 0.0 = hard cut, >0 = xfade.
+    _use_seam_xf = seam_xfades is not None and n > 1
+    _use_uniform_xf = not _use_seam_xf and video_xfade_sec > 0 and n > 1
+    if _use_uniform_xf:
+        # All-xfade chain (existing logic).
         out_len = segments[0].end - segments[0].start
         for k in range(n - 1):
             left = f"t{k - 1}" if k > 0 else "v0"
@@ -675,6 +676,25 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                 f":duration={_num(video_xfade_sec)}:offset={_num(xf_offset)}[{label}]"
             )
             out_len = xf_offset + (segments[k + 1].end - segments[k + 1].start)
+    elif _use_seam_xf:
+        # Per-seam: xfade where seam_xfades[k] > 0, hard cut where 0.0.
+        out_len = segments[0].end - segments[0].start
+        prev = "v0"
+        for k in range(n - 1):
+            xf = seam_xfades[k]  # type: ignore[index]
+            right = f"v{k + 1}"
+            label = "vseg" if k == n - 2 else f"t{k}"
+            if xf > 0:
+                xf_offset = round(out_len - xf, 9)
+                parts.append(
+                    f"[{prev}][{right}]xfade=transition=fade"
+                    f":duration={_num(xf)}:offset={_num(xf_offset)}[{label}]"
+                )
+                out_len = xf_offset + (segments[k + 1].end - segments[k + 1].start)
+            else:
+                parts.append(f"[{prev}][{right}]concat=n=2:v=1:a=0[{label}]")
+                out_len += segments[k + 1].end - segments[k + 1].start
+            prev = label
     else:
         parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
     parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
@@ -968,6 +988,73 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None) -> str:
 
 
 
+def _close_crop(setup: SetupProfile, scale: float = 1.25, anchor_y: float = 0.35) -> Crop:
+    """Close-shot crop rectangle: tighter by `scale`, horizontally centred, vertically anchored.
+
+    anchor_y: the point at anchor_y × wide_height stays at anchor_y × close_height (head stays in
+    frame). scale < 1.0 → clamped to 1.0 with a warning. Dimensions even; rectangle inside frame.
+    """
+    import sys as _sys
+    if scale < 1.0:
+        print(f"warning: close_shot_scale {scale} < 1.0 — clamped to 1.0", file=_sys.stderr)
+        scale = 1.0
+    c = setup.crop
+    frame_w, frame_h = setup.frame
+    ch = max(2, int(c.h / scale)) & ~1
+    cw = max(2, round(ch * c.w / c.h / 2) * 2)
+    cx = c.x + (c.w - cw) // 2
+    cy = c.y + int(anchor_y * (c.h - ch))
+    cx = max(0, min(cx, frame_w - cw))
+    cy = max(0, min(cy, frame_h - ch))
+    cw = min(cw, frame_w - cx) & ~1
+    ch = min(ch, frame_h - cy) & ~1
+    return Crop(x=cx, y=cy, w=max(2, cw), h=max(2, ch))
+
+
+def _crop_vf_for_crop(setup: SetupProfile, crop: Crop) -> str:
+    """Video filter for an arbitrary crop rectangle: [rotate,]crop=W:H:X:Y,scale=SW:SH."""
+    sw, sh = setup.scale
+    rot = _rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)
+    crop_scale = f"crop={crop.w}:{crop.h}:{crop.x}:{crop.y},scale={sw}:{sh}"
+    return f"{rot},{crop_scale}" if rot else crop_scale
+
+
+def _close_intervals_enable(intervals: list[list[float]]) -> str:
+    """between(t,t0,t1)+... for ffmpeg overlay enable=; times are segment-relative (post-PTS-reset)."""
+    return "+".join(f"between(t,{_num(t0)},{_num(t1)})" for t0, t1 in intervals)
+
+
+def assign_close_shots(segs: list[Segment], close_ranges: list[tuple[float, float]]) -> list[Segment]:
+    """Mark each segment as wide/close or set close_intervals for partial coverage.
+
+    close_ranges: source-time (start, end) pairs for the close shot.
+    Segments wholly inside a close range get shot='close'.
+    Segments partially overlapping get close_intervals set (segment-relative times).
+    No segment is split.
+    """
+    if not close_ranges:
+        return segs
+    result = []
+    for seg in segs:
+        seg_dur = seg.end - seg.start
+        intervals: list[list[float]] = []
+        for r_start, r_end in close_ranges:
+            overlap_start = max(seg.start, r_start)
+            overlap_end = min(seg.end, r_end)
+            if overlap_end <= overlap_start:
+                continue
+            rel_start = overlap_start - seg.start
+            rel_end = overlap_end - seg.start
+            intervals.append([round(rel_start, 6), round(rel_end, 6)])
+        if not intervals:
+            result.append(seg)
+        elif len(intervals) == 1 and intervals[0][0] <= 0 and intervals[0][1] >= seg_dur - 1e-6:
+            result.append(Segment(start=seg.start, end=seg.end, shot="close"))
+        else:
+            result.append(Segment(start=seg.start, end=seg.end, shot="wide", close_intervals=intervals))
+    return result
+
+
 def _num(x: float) -> str:
     """Короткая запись числа для ffmpeg: 1.0→'1', 1.15→'1.15' (без хвостовых нулей)."""
     return f"{x:g}"
@@ -1130,6 +1217,31 @@ def _render_segments(
                 _x = getattr(ap, "video_xfade_sec", 0.0)
                 if _x > 0:
                     _xfade_actual = round(_x * _fps()) / _fps()
+
+            # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
+            _ts_on = getattr(render_cfg, "two_shot", False) and vf and manifest.setup is not None
+            _ts_seg_vfs: list[str] | None = None
+            _ts_seam_xfades: list[float] | None = None
+            _effective_vf = vf  # the crop vf to use for base_vf; replaced for single-window close
+            if _ts_on:
+                _cscale = getattr(render_cfg, "close_shot_scale", 1.25)
+                _canchy = getattr(render_cfg, "close_shot_anchor_y", 0.35)
+                _ccrop = _close_crop(manifest.setup, scale=_cscale, anchor_y=_canchy)
+                _close_vf_str = _crop_vf_for_crop(manifest.setup, _ccrop)
+                if len(segs) > 1:
+                    # Per-segment crops go into the prefix; vtail gets palette+ass+vfade only.
+                    _ts_seg_vfs = [_close_vf_str if s.shot == "close" else vf for s in segs]  # type: ignore[list-item]
+                    _ts_xf = getattr(render_cfg, "two_shot_xfade", False)
+                    _ts_seam_xfades = [
+                        (_xfade_actual if _ts_xf else 0.0)
+                        if segs[k].shot != segs[k + 1].shot
+                        else _xfade_actual
+                        for k in range(len(segs) - 1)
+                    ]
+                    _effective_vf = None  # crops are in segment_vfs; vtail uses palette only
+                elif segs[0].shot == "close":
+                    _effective_vf = _close_vf_str
+
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
                     f"  ⚠ {reel.id}: {clip_dur:.1f}с < {_MIN_CLIP_RENDER_SEC}с — "
@@ -1143,9 +1255,13 @@ def _render_segments(
             # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale
             # (в координатах финального кадра 1080×1920). Слова берутся из reel.subtitles.
             # Цветокор (палитра) — ПОСЛЕ crop/scale, ДО ass. Порядок: crop→scale→eq/unsharp→ass.
-            base_vf = vf
-            if vf and palette_vf:
-                base_vf = f"{vf},{palette_vf}"
+            # Two-shot: _effective_vf is None when per-segment crops go into the prefix — vtail
+            # then only carries palette+ass+vfade (crops are already in segment_vfs).
+            base_vf = _effective_vf  # type: ignore[assignment]
+            if _effective_vf and palette_vf:
+                base_vf = f"{_effective_vf},{palette_vf}"
+            elif not _effective_vf and palette_vf:
+                base_vf = palette_vf
             reel_vf = base_vf
             # Speed-up via setpts (video) + atempo (audio); both applied before other filters.
             _reel_speed = getattr(reel, "speed", 1.0)
@@ -1205,7 +1321,8 @@ def _render_segments(
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
             # the final post-snap `segs` by the same helper the invariant checks against, so the
             # expected length always matches what the concat graph emits (no re-derivation drift).
-            clip_duration = _expected_output_duration(segs, xfade_sec=_xfade_actual)
+            clip_duration = _expected_output_duration(segs, xfade_sec=_xfade_actual,
+                                                        seam_xfades=_ts_seam_xfades)
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
@@ -1242,7 +1359,9 @@ def _render_segments(
                 # every frame in between (was an OOM). Input i supplies [i:v]/[i:a]; music is [n:a].
                 prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec,
                                                              video_xfade_sec=_xfade_actual,
-                                                             pre_roll=_PRE_ROLL_SEC)
+                                                             pre_roll=_PRE_ROLL_SEC,
+                                                             segment_vfs=_ts_seg_vfs,
+                                                             seam_xfades=_ts_seam_xfades)
                 windows = [(w.start, w.end - w.start) for w in segs]
                 _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
                 if music_path:
@@ -1261,7 +1380,10 @@ def _render_segments(
                     audio_codec=aud.codec, audio_bitrate=aud.bitrate,
                     music_path=music_path,
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
-                    xfade_fps=_fps() if _xfade_actual > 0 else 0.0,
+                    xfade_fps=_fps() if (
+                        _xfade_actual > 0 or
+                        (_ts_seam_xfades and any(x > 0 for x in _ts_seam_xfades))
+                    ) else 0.0,
                     duration_sec=_out_dur,
                     pre_roll=_PRE_ROLL_SEC,
                 )

@@ -3439,6 +3439,19 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             else:
                 print(f"  warning: h:{_hook} out of range (1-{len(_sents)}) — cold open skipped",
                       file=sys.stderr)
+        # M1.7 step 1: c: close-shot sentence indices — stash source-time ranges on the reel.
+        # assign_close_shots (called after the cold_open loop) converts these to Segment.close_intervals.
+        reel._c_close_ranges = []
+        _c = (getattr(_ae, "c", ()) if _ae else ()) or ()
+        if _c:
+            _blk_sents_for_c = split_sentences(words_in_span(_tx_words, block.start, block.end))
+            for _ci in _c:
+                if 1 <= _ci <= len(_blk_sents_for_c):
+                    _cs = _blk_sents_for_c[_ci - 1]
+                    reel._c_close_ranges.append((_cs[0].t0, _cs[-1].t1))
+                else:
+                    print(f"  warning: c:{_ci} out of range (1-{len(_blk_sents_for_c)}) — skipped",
+                          file=sys.stderr)
         if _bnote:
             print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
         # x: manual sentence exclusions — cut listed sentences out of the span as gaps.
@@ -3630,13 +3643,24 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             reel.warnings.append(msg)
             print(f"  warning ({reel.id}): {msg}", file=sys.stderr)
             continue
-        reel.cold_open = _Segment(start=ht0, end=ht1)
+        reel.cold_open = _Segment(start=ht0, end=ht1, shot="close")
         _have = {round(w.t0, 3) for w in reel.subtitles}
         for w in _wiw(tx_words, ht0, ht1):
             if round(w.t0, 3) not in _have:
                 reel.subtitles.append(w)
         reel.subtitles.sort(key=lambda w: w.t0)
         cold_open_stats.append((reel, seq_n, ht1 - ht0))
+
+    # M1.7 step 1: assign close shot windows from c: sentence ranges stashed during block loop.
+    # assign_close_shots marks Segment.shot='close' or sets Segment.close_intervals (relative times).
+    from autoreels.local.render import assign_close_shots as _assign_close_shots
+    for reel in reels:
+        _c_ranges = getattr(reel, "_c_close_ranges", [])
+        if _c_ranges:
+            _body_segs = reel.effective_segments()
+            reel.segments = _assign_close_shots(_body_segs, _c_ranges)
+            if len(reel.segments) == 1 and reel.segments[0].start == reel.start and reel.segments[0].end == reel.end:
+                reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,

@@ -56,7 +56,7 @@ def _cfg(always=None, max_=5):
 
 def test_description_roundtrip_punctuation():
     """d: text with commas, dashes, and terminal punctuation survives parse → description."""
-    s, e, hook, title, filler, description, x_list, errors = _parse_fields(
+    s, e, hook, title, filler, description, x_list, c_list, errors = _parse_fields(
         " d: Тело подаёт сигнал, а мы — принимаем его за страх."
     )
     assert errors == []
@@ -78,7 +78,7 @@ def test_description_roundtrip_via_parse_compact_answer():
 # ---------------------------------------------------------------------------
 
 def test_both_t_and_d_parse():
-    s, e, hook, title, filler, description, x_list, errors = _parse_fields(
+    s, e, hook, title, filler, description, x_list, c_list, errors = _parse_fields(
         " t: Страх — это не страх, а сигнал | d: Второе предложение."
     )
     assert errors == []
@@ -87,21 +87,21 @@ def test_both_t_and_d_parse():
 
 
 def test_only_t_parses():
-    s, e, hook, title, filler, description, x_list, errors = _parse_fields(" t: Только заголовок")
+    s, e, hook, title, filler, description, x_list, c_list, errors = _parse_fields(" t: Только заголовок")
     assert errors == []
     assert title == "Только заголовок"
     assert description is None
 
 
 def test_only_d_parses():
-    s, e, hook, title, filler, description, x_list, errors = _parse_fields(" d: Только описание.")
+    s, e, hook, title, filler, description, x_list, c_list, errors = _parse_fields(" d: Только описание.")
     assert errors == []
     assert title is None
     assert description == "Только описание."
 
 
 def test_neither_t_nor_d_is_fine():
-    s, e, hook, title, filler, description, x_list, errors = _parse_fields(" s:2 e:5")
+    s, e, hook, title, filler, description, x_list, c_list, errors = _parse_fields(" s:2 e:5")
     assert errors == []
     assert title is None
     assert description is None

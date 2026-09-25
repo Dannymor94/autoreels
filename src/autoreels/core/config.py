@@ -563,6 +563,12 @@ class RenderConfig(BaseModel):
     # (e.g. speaker's topic area). hashtags_max: total cap including always-tags.
     hashtags_always: list[str] = Field(default_factory=list)
     hashtags_max: int = 5
+    # M1.7 step 1: two-shot switching (wide/close crop within a clip). Off by default — feature-off
+    # renders are byte-identical (or same argv when encoder is non-deterministic).
+    two_shot: bool = False
+    two_shot_xfade: bool = False   # crossfade at shot-change seams instead of hard cut
+    close_shot_scale: float = 1.25  # close shot is this many times tighter than wide
+    close_shot_anchor_y: float = 0.35  # anchor point: 35% of wide height stays at 35% of close height
 
     @field_validator("role")
     @classmethod

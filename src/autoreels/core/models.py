@@ -117,6 +117,13 @@ class Segment(BaseModel):
 
     start: float
     end: float
+    # M1.7 step 1: shot plan for this window. "wide" = calibrated crop (default, backward-compat).
+    # "close" = tighter crop by close_shot_scale. Written at --apply; defaults keep old manifests valid.
+    shot: str = "wide"
+    # Sub-segment intervals (relative to segment start) for a within-window close shot. Each entry
+    # is [t_start, t_end] in seconds from this segment's own t=0 (post-PTS-reset). Empty = no
+    # within-window switch (shot field governs the whole window).
+    close_intervals: list[list[float]] = Field(default_factory=list)
 
 
 class Reel(BaseModel):
