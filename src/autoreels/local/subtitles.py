@@ -54,7 +54,7 @@ def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
         for w in words:
             if seg.start <= w.t0 < seg.end:
                 out.append(Word(word=w.word, t0=(w.t0 - seg.start + offset) / speed,
-                                t1=(w.t1 - seg.start + offset) / speed))
+                                t1=(w.t1 - seg.start + offset) / speed, emph=w.emph))
         offset += seg.end - seg.start
         if xfade_sec > 0 and i < len(segs) - 1:
             offset -= xfade_sec   # xfade overlaps: next seg starts xfade_sec earlier in output
@@ -160,9 +160,9 @@ def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float
     return "\\N".join(out)
 
 
-def _emph_style_line(cfg: SubtitlesConfig) -> str:
-    """Emphasis style: same geometry as Default but with emph_color and emph_bold."""
-    primary = ass_color(cfg.emph_color)
+def _keyword_style_line(cfg: SubtitlesConfig) -> str:
+    """Keyword style: same geometry as Default but with keyword_color and keyword_bold."""
+    primary = ass_color(cfg.keyword_color)
     outline = ass_color(cfg.outline_color)
     if cfg.fill_enabled:
         border_style = 3
@@ -170,11 +170,11 @@ def _emph_style_line(cfg: SubtitlesConfig) -> str:
     else:
         border_style = 1
         back = ass_color("000000")
-    bold = -1 if cfg.emph_bold else 0
+    bold = -1 if cfg.keyword_bold else 0
     align = _ALIGN.get(cfg.alignment, 2)
     fields = [
-        "Emph", cfg.font, cfg.font_size, primary, primary, outline, back,
-        bold, 0, 0, 0, 100, 100, 0, 0, border_style, cfg.emph_outline_width, cfg.shadow,
+        "Keyword", cfg.font, cfg.font_size, primary, primary, outline, back,
+        bold, 0, 0, 0, 100, 100, 0, 0, border_style, cfg.outline_width, cfg.shadow,
         align, 40, 40, cfg.position_v, 1,
     ]
     return "Style: " + ",".join(str(x) for x in fields)
@@ -199,14 +199,14 @@ def _title_style_line(cfg: SubtitlesConfig) -> str:
 
 def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
               play_res: tuple[int, int] = (1080, 1920), title: str = "",
-              emph_words: frozenset[str] = frozenset()) -> str:
+              enable_keywords: bool = False) -> str:
     """Собрать .ass из слов сегмента: Style из конфига + Dialogue по группам поп-апом.
 
     Времена Dialogue — относительно начала клипа (clip_start вычитается). uppercase из конфига.
     `title` (Part 4) непусто → плашка сверху (стиль Title) на первые cfg.title_lead_sec секунд с
     фейдом, над зоной субтитров (не пересекается). Пусто → плашки нет.
-    `emph_words` — frozenset lowercase слов для Emph-стиля. Пусто → никаких изменений (побайтово
-    идентично pre-M1.7).
+    `enable_keywords=True` активирует стиль Keyword для слов с `w.emph=True`. False → побайтово
+    идентично pre-M1.7 (стиль Keyword не добавляется, теги не вставляются).
     """
     pw, ph = play_res
     groups = group_words(
@@ -214,11 +214,12 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         font_size=cfg.font_size, char_width_ratio=cfg.char_width_ratio,
         break_pause_sec=cfg.subtitle_break_pause_sec,
     )
+    _has_kw = enable_keywords and any(w.emph for w in words)
     styles = [_style_line(cfg)]
     if title:
         styles.append(_title_style_line(cfg))
-    if emph_words:
-        styles.append(_emph_style_line(cfg))
+    if _has_kw:
+        styles.append(_keyword_style_line(cfg))
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -244,17 +245,14 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         ttext = f"{{\\fad({fi},{fo})}}" + ttext
         lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
     for g in groups:
-        if emph_words:
+        if _has_kw:
             parts: list[str] = []
             for i, w in enumerate(g):
                 if i > 0:
                     parts.append(" ")
                 wtext = w.word.upper() if cfg.uppercase else w.word
-                # Strip leading/trailing punctuation before matching: Whisper attaches
-                # punctuation to words ("себя," → "себя"), user writes clean words in k:.
-                w_norm = w.word.lower().strip(".,!?;:—–-\"'«»()[]")
-                if w_norm in emph_words:
-                    parts.append(f"{{\\rEmph}}{wtext}{{\\r}}")
+                if w.emph:
+                    parts.append(f"{{\\rKeyword}}{wtext}{{\\r}}")
                 else:
                     parts.append(wtext)
             text = "".join(parts)

@@ -612,14 +612,14 @@ _COMPACT_PROMPT = (
     "#   h:N   cold open: play sentence N first, then the clip from its start\n"
     "#   c:N,M,N-M  close shot on these sentences (two_shot: true only); same numbering as s:/e:/x:\n"
     "#              Interim field — will become part of the 'emph' beat syntax in a future update.\n"
-    "#   k: word1,word2  emphasise these words in subtitles (case-insensitive, all occurrences).\n"
-    "#              Example: k: страх,сигнал  — highlights those words wherever they appear.\n"
+    "#   k:N=word1,word2[;M=word3]  highlight words in sentence(s) (case-insensitive, ё→е, *=prefix).\n"
+    "#              Example: k:4=страх,сигнал;7=тело  — highlights those words in sentences 4 and 7.\n"
     "#   t: …  overlay this title on the first seconds of the clip  (second-to-last field)\n"
     "#   d: …  post caption: 1-2 sentences shown under the clip when posted  (LAST field)\n"
     "# Omit s:/e: and the clip starts at the first clean sentence and ends before trailing\n"
     "# wind-down ('да', 'вот', 'как-то так'). Unknown/garbled fields are ignored, not fatal.\n"
     "#\n"
-    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| x:…] [| h:N] [| c:…] [| k: words] [| t: text] [| d: text]\n"
+    "# Reply with ONLY lines of:  <number> [-]<score>[+|++][@speed] [| s:N] [| e:N] [| x:…] [| h:N] [| c:…] [| k:N=words] [| t: text] [| d: text]\n"
     "# No commentary, no restating of text.  Example:\n"
     "#   3 85+            (join 3 with 4)\n"
     "#   5 -90           (join 5 back into 4)\n"
@@ -649,9 +649,9 @@ class _ReviewEntry(NamedTuple):
     # c:N,M,N-M — sentence indices for close shot (M1.7 step 1; interim until 'emph' beats).
     # Sentences not listed stay in the wide shot. t: and d: always come last.
     c: tuple[int, ...] = ()
-    # k: word1,word2 — emphasise these words in subtitles (M1.7 step 2). Comma-separated,
-    # matched case-insensitively against subtitle words throughout the clip.
-    k: tuple[str, ...] = ()
+    # k:N=word1,word2[;M=word3] — highlight these words in the listed sentences (M1.7 step 2).
+    # Sentence numbering same as s:/e:/x:/c:. Trailing * = prefix match.
+    k: tuple[tuple[int, tuple[str, ...]], ...] = ()
 
 
 _FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
@@ -734,15 +734,23 @@ def _parse_fields(text: str):
                 c_list.append(int(tok))
             elif tok:
                 errors.append(f"malformed c: token '{tok}'")
-    k_list: list[str] = []
+    k_list: list[tuple[int, list[str]]] = []
     mk = _FIELD_K_RE.search(text)
     if mk:
-        k_val = mk.group(1)
+        k_val = mk.group(1).strip()
         text = text[:mk.start()] + text[mk.end():]
-        for tok in re.split(r",\s*", k_val.strip()):
-            tok = tok.strip().lower()
-            if tok:
-                k_list.append(tok)
+        for part in re.split(r";", k_val):
+            part = part.strip()
+            if not part:
+                continue
+            m_kpart = re.match(r"(\d+)=(.+)$", part)
+            if m_kpart:
+                sent_idx = int(m_kpart.group(1))
+                words_raw = [w.strip().lower() for w in re.split(r",", m_kpart.group(2)) if w.strip()]
+                if words_raw:
+                    k_list.append((sent_idx, words_raw))
+            else:
+                errors.append(f"k: bad format (expected N=word,...): {part!r}")
     vals: dict[str, int | None] = {"s": None, "e": None, "h": None}
     for name, rx in _FIELD_NUM_RE.items():
         m = rx.search(text)
@@ -875,7 +883,7 @@ def parse_review(
         s, e, hook, title, filler, description, x_list, c_list, k_list, ferrs = _parse_fields(fields)
         for fe in ferrs:
             errors.append((lineno, fe))
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple(k_list)))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list)))
 
     return source_ref, entries, errors
 
@@ -977,7 +985,7 @@ def parse_compact_answer(
             s, e, hook, title, filler, description, x_list, c_list, k_list, ferrs = _parse_fields(m.group(3) or "")
             for fe in ferrs:
                 errors.append((lineno, fe))
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple(k_list)))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list)))
         else:
             ignored += 1
 

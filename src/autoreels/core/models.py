@@ -78,6 +78,7 @@ class Word(BaseModel):
     word: str
     t0: float
     t1: float
+    emph: bool = False
 
 
 class Transcript(BaseModel):

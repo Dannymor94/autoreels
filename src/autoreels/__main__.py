@@ -3427,8 +3427,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""
         # Post caption from review `d:` (only from the manual path; automatic path leaves it as-is).
         reel.description = (getattr(_ae, "description", None) or "") if _ae else ""
-        # M1.7 step 2 — emphasis words from review `k:` (lowercase; matched case-insensitively).
-        reel.subtitle_emph_words = list(getattr(_ae, "k", ()) or ()) if _ae else []
+        # M1.7 step 2 — stash k: keyword spec for resolution after _stage_subtitles.
+        reel._keyword_spec = getattr(_ae, "k", ()) if _ae else ()
         # Part 5 — cold open: resolve the hook sentence (h:N) over the same block-span numbering the
         # export showed; stash its window, apply the cap after segmentation below.
         reel._hook_window = None
@@ -3583,6 +3583,35 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _reel.segments = _segs
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+
+    # M1.7 step 2: resolve k: sentence-keyword specs to word.emph flags.
+    # Runs after _stage_subtitles so reel.subtitles is populated.
+    def _normalize_kw(w: str) -> str:
+        return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
+
+    for reel in reels:
+        _kw_spec = getattr(reel, "_keyword_spec", ()) or ()
+        if not _kw_spec:
+            continue
+        _kw_sents = split_sentences(reel.subtitles)
+        for sent_idx, kwords in _kw_spec:
+            if sent_idx < 1 or sent_idx > len(_kw_sents):
+                print(f"  warning ({reel.id}): k:{sent_idx} out of range (1-{len(_kw_sents)}) — skipped",
+                      file=sys.stderr)
+                continue
+            sent_words = _kw_sents[sent_idx - 1]
+            for kw in kwords:
+                is_prefix = kw.endswith("*")
+                kw_pat = kw[:-1] if is_prefix else kw
+                matched = False
+                for w in sent_words:
+                    w_norm = _normalize_kw(w.word)
+                    if (is_prefix and w_norm.startswith(kw_pat)) or (not is_prefix and w_norm == kw_pat):
+                        w.emph = True
+                        matched = True
+                if not matched:
+                    print(f"  warning ({reel.id}): k:{sent_idx} word '{kw}' not found in sentence — skipped",
+                          file=sys.stderr)
 
     # Part 3 — filler removal (deterministic). Cuts standalone fillers, immediate repetitions and
     # over-long pauses into gaps → reel.segments (render concatenates them). On per clip: review

@@ -1366,10 +1366,14 @@ def _render_segments(
                                             xfade_sec=_xfade_actual)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
-                _emph_words = frozenset(getattr(reel, "subtitle_emph_words", None) or [])
+                _kw_on = getattr(render_cfg, "subtitle_keywords", False)
+                if not _kw_on and any(getattr(w, "emph", False) for w in reel.subtitles):
+                    import sys as _sys
+                    print(f"  warning ({reel.id}): has k: keywords but subtitle_keywords=False"
+                          " — highlighting skipped", file=_sys.stderr)
                 ass_path.write_text(
                     build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0, title=_title,
-                              emph_words=_emph_words),
+                              enable_keywords=_kw_on),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.

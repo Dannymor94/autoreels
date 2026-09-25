@@ -569,6 +569,9 @@ class RenderConfig(BaseModel):
     two_shot_xfade: bool = False   # crossfade at shot-change seams instead of hard cut
     close_shot_scale: float = 1.25  # close shot is this many times tighter than wide
     close_shot_anchor_y: float = 0.35  # anchor point: 35% of wide height stays at 35% of close height
+    # M1.7 step 2: per-word keyword highlighting in subtitles. Off by default — feature-off
+    # renders are byte-identical. k: review field specifies words per sentence.
+    subtitle_keywords: bool = False
 
     @field_validator("role")
     @classmethod
@@ -620,12 +623,11 @@ class SubtitlesConfig(BaseModel):
     title_font_size: int = 0          # 0 → same as font_size
     title_position_v: int = 150       # MarginV from the TOP (alignment 8, top-centre)
     title_fade_ms: int = 250          # plate fade in/out
-    # Emphasis style (M1.7 step 2): applied to words listed in review `k:`. Only rendered when
-    # `k:` is present; absent k: → output byte-identical to pre-M1.7. Font size unchanged (a size
-    # jump reflows the line and makes text dance).
-    emph_color: str = "FFE000"        # bright yellow — readable on dark and light backgrounds
-    emph_bold: bool = True
-    emph_outline_width: int = 3
+    # Keyword style (M1.7 step 2): applied to words marked in review `k:N=word,...`.
+    # Only rendered when subtitle_keywords=True in RenderConfig AND k: is present; otherwise
+    # output is byte-identical. Font size unchanged (size change reflows the line).
+    keyword_color: str = "FFE000"     # bright yellow — readable on dark and light backgrounds
+    keyword_bold: bool = True
 
 
 # --------------------------------------------------------------------- Transcribe
