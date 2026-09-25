@@ -49,7 +49,9 @@
 
 ---
 
-## Шаг 2 — ритм субтитров
+## Шаг 2 — ритм субтитров ✅ ЗАКРЫТ
+
+**Гейт пройден.** `k:N=word,word;M=word` syntax, `Word.emph` flag, `Keyword` ASS style, `subtitle_keywords` feature flag (off → byte-identical). 1601 tests pass. commit e06ef49.
 
 Флаг `subtitle_keywords` (по умолчанию `false`).
 
