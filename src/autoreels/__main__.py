@@ -3384,6 +3384,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     if over_max:
         return 1
 
+    def _normalize_kw(w: str) -> str:
+        return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
+
     # Accounting: every scored input line must map to a reel or an explicit conflict. Track the
     # build-order position (0-based) of the reel each scored seq becomes; the formatting-only
     # pipeline never drops or reorders, so position i survives as final reel i+1.
@@ -3451,17 +3454,51 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                       file=sys.stderr)
         # M1.7 step 1: c: close-shot sentence indices — stash source-time ranges on the reel.
         # assign_close_shots (called after the cold_open loop) converts these to Segment.close_intervals.
+        # When c:N and k:N=word coincide, the shot change falls at the k:-word's t0 (hard cut on beat).
         reel._c_close_ranges = []
         _c = (getattr(_ae, "c", ()) if _ae else ()) or ()
+        _kw_spec_for_c = (getattr(_ae, "k", ()) if _ae else ()) or ()
         if _c:
             _blk_sents_for_c = split_sentences(words_in_span(_tx_words, block.start, block.end))
             for _ci in _c:
                 if 1 <= _ci <= len(_blk_sents_for_c):
                     _cs = _blk_sents_for_c[_ci - 1]
-                    reel._c_close_ranges.append((_cs[0].t0, _cs[-1].t1))
+                    _range_start = _cs[0].t0  # default: sentence boundary
+                    # If any k: spec targets the same sentence, start shot at that word's t0.
+                    for _ki, _kws in _kw_spec_for_c:
+                        if _ki == _ci:
+                            for _kw in _kws:
+                                _is_pfx = _kw.endswith("*")
+                                _kw_p = _kw[:-1] if _is_pfx else _kw
+                                for _sw in _cs:
+                                    _sw_norm = _normalize_kw(_sw.word)
+                                    if (_is_pfx and _sw_norm.startswith(_kw_p)) or (not _is_pfx and _sw_norm == _kw_p):
+                                        _range_start = _sw.t0
+                                        break
+                                else:
+                                    continue
+                                break
+                            break
+                    reel._c_close_ranges.append((_range_start, _cs[-1].t1))
                 else:
                     print(f"  warning: c:{_ci} out of range (1-{len(_blk_sents_for_c)}) — skipped",
                           file=sys.stderr)
+        # z:N — zoom gesture on sentence N; stash source-time t0 (resolved same as c:).
+        # Rule: z: and c: on the same sentence → close shot overrides zoom (c: takes precedence).
+        reel._zoom_source_t0 = None
+        _z = getattr(_ae, "z", None) if _ae else None
+        if _z is not None:
+            _blk_sents_for_z = split_sentences(words_in_span(_tx_words, block.start, block.end))
+            if 1 <= _z <= len(_blk_sents_for_z):
+                if _z in _c:
+                    print(f"  warning ({reel.id}): z:{_z} and c:{_z} on same sentence — "
+                          "close shot overrides zoom (z: dropped)", file=sys.stderr)
+                else:
+                    _zs = _blk_sents_for_z[_z - 1]
+                    reel._zoom_source_t0 = _zs[0].t0
+            else:
+                print(f"  warning ({reel.id}): z:{_z} out of range (1-{len(_blk_sents_for_z)}) — "
+                      "zoom skipped", file=sys.stderr)
         if _bnote:
             print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
         # x: manual sentence exclusions — cut listed sentences out of the span as gaps.
@@ -3594,9 +3631,6 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
 
     # M1.7 step 2: resolve k: sentence-keyword specs to word.emph flags.
     # Runs after _stage_subtitles so reel.subtitles is populated.
-    def _normalize_kw(w: str) -> str:
-        return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
-
     for reel in reels:
         _kw_spec = getattr(reel, "_keyword_spec", ()) or ()
         if not _kw_spec:
@@ -3620,6 +3654,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 if not matched:
                     print(f"  warning ({reel.id}): k:{sent_idx} word '{kw}' not found in sentence — skipped",
                           file=sys.stderr)
+
+    # Stamp zoom_source_t0 onto each reel (stashed as _zoom_source_t0 in the block loop above).
+    for reel in reels:
+        reel.zoom_source_t0 = getattr(reel, "_zoom_source_t0", None)
 
     # Part 3 — filler removal (deterministic). Cuts standalone fillers, immediate repetitions and
     # over-long pauses into gaps → reel.segments (render concatenates them). On per clip: review

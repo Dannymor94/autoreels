@@ -652,6 +652,8 @@ class _ReviewEntry(NamedTuple):
     # k:N=word1,word2[;M=word3] — highlight these words in the listed sentences (M1.7 step 2).
     # Sentence numbering same as s:/e:/x:/c:. Trailing * = prefix match.
     k: tuple[tuple[int, tuple[str, ...]], ...] = ()
+    # z:N — zoom gesture starts at sentence N (M1.7 step 3). One per clip; two z: → error.
+    z: int | None = None
 
 
 _FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
@@ -661,6 +663,7 @@ _FIELD_F_RE = re.compile(r"(?:^|[|\s])f:\s*([01])")
 _FIELD_X_RE = re.compile(r"(?:^|[|\s])x:\s*([\d,\-\s]+)")
 _FIELD_C_RE = re.compile(r"(?:^|[|\s])c:\s*([\d,\-\s]+)")
 _FIELD_K_RE = re.compile(r"(?:^|[|\s])k:\s*([^|\n]+)")
+_FIELD_Z_RE = re.compile(r"(?:^|[|\s])z:\s*(\d+)")
 _STRAY_FIELD_RE = re.compile(r"(?:^|[|\s])([a-zA-Z]+):")
 
 
@@ -757,9 +760,18 @@ def _parse_fields(text: str):
         if m:
             vals[name] = int(m.group(1))
             text = text[:m.start()] + text[m.end():]   # consume so it is not flagged as stray
+    # z:N — zoom at sentence N; refuse more than one (two z: = unclear intent)
+    z_val: int | None = None
+    mz_all = list(_FIELD_Z_RE.finditer(text))
+    if len(mz_all) > 1:
+        errors.append("z: may appear at most once per line")
+    elif mz_all:
+        z_val = int(mz_all[0].group(1))
+        m = mz_all[0]
+        text = text[:m.start()] + text[m.end():]
     for m in _STRAY_FIELD_RE.finditer(text):
         errors.append(f"unrecognised or malformed field '{m.group(1)}:'")
-    return vals["s"], vals["e"], vals["h"], title, filler, description, x_list, c_list, k_list, errors
+    return vals["s"], vals["e"], vals["h"], title, filler, description, x_list, c_list, k_list, z_val, errors
 
 
 def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float | None, str | None]:
@@ -880,10 +892,10 @@ def parse_review(
         if err:
             errors.append((lineno, err))
             continue
-        s, e, hook, title, filler, description, x_list, c_list, k_list, ferrs = _parse_fields(fields)
+        s, e, hook, title, filler, description, x_list, c_list, k_list, z_val, ferrs = _parse_fields(fields)
         for fe in ferrs:
             errors.append((lineno, fe))
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list)))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val))
 
     return source_ref, entries, errors
 
@@ -982,10 +994,10 @@ def parse_compact_answer(
             if err:
                 errors.append((lineno, err))
                 continue
-            s, e, hook, title, filler, description, x_list, c_list, k_list, ferrs = _parse_fields(m.group(3) or "")
+            s, e, hook, title, filler, description, x_list, c_list, k_list, z_val, ferrs = _parse_fields(m.group(3) or "")
             for fe in ferrs:
                 errors.append((lineno, fe))
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list)))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val))
         else:
             ignored += 1
 

@@ -983,12 +983,14 @@ def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
     return f"fade=t=in:st=0:d={_num(d)},fade=t=out:st={_num(out_st)}:d={_num(d)}"
 
 
-def _zoom_vf(scale, zoom: Zoom) -> str:
+def _zoom_vf(scale, zoom: Zoom, fps: float = 30.0, offset_sec: float = 0.0) -> str:
     """zoompan hook-зума ВМЕСТО статичного scale. Качество: сэмплит уже вырезанный ПОЛНОРАЗМЕРНЫЙ
     регион (вход фильтра) и выводит SW×SH — динамический кроп меньшей области, НЕ апскейл готового
     кадра. z(t) — трапеция по времени `ot`: наезд за duration → удержание → плавный возврат к 1 в
     пределах hook_seconds, дальше базовый кадр. Пусто, если зум выключен/scheme=none → обычный scale.
 
+    fps: source frame rate — zoompan output fps must match source to prevent A/V drift.
+    offset_sec: time in output clip (seconds) where the zoom gesture starts; 0 = clip start (hook).
     Запятые внутри выражения экранированы (`\\,`), чтобы filtergraph не разбил zoompan на фильтры.
     """
     if not zoom.enabled or zoom.scheme == "none" or zoom.percent <= 0:
@@ -997,23 +999,33 @@ def _zoom_vf(scale, zoom: Zoom) -> str:
     p = zoom.percent / 100.0
     d = zoom.duration
     h = zoom.hook_seconds
-    # трапеция 0→1→0: rise за d, плато, fall за d в конце hook-окна, дальше 0 (clip max→0)
-    z = f"1+{_num(p)}*max(0\\,min(ot/{_num(d)}\\,min(({_num(h)}-ot)/{_num(d)}\\,1)))"
+    o = offset_sec
+    if o == 0.0:
+        # hook at clip start: compact form preserves backward compat in tests and logs
+        z = f"1+{_num(p)}*max(0\\,min(ot/{_num(d)}\\,min(({_num(h)}-ot)/{_num(d)}\\,1)))"
+    else:
+        # z:N offset: trapezoid shifted by o seconds
+        z = (f"1+{_num(p)}*max(0\\,"
+             f"min((ot-{_num(o)})/{_num(d)}\\,"
+             f"min(({_num(o + h)}-ot)/{_num(d)}\\,1)))")
     return (f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-            f":d=1:s={sw}x{sh}:fps={zoom.fps}")
+            f":d=1:s={sw}x{sh}:fps={_num(fps)}")
 
 
-def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None) -> str:
+def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
+             offset_sec: float = 0.0) -> str:
     """Видеофильтр выравнивания+кропа+скейла из профиля сетапа: `[rotate=…,]crop=w:h:x:y,scale=SW:SH`.
 
     Числа — данные манифеста (`setup.crop` + `setup.scale` + `setup.rotation_deg`), НЕ хардкод.
     Порядок: rotate → crop → scale. При включённом `zoom` статичный scale заменяется на zoompan
     (зум ИЗ полноразмерного региона, без апскейла готового кадра). Кроп один на все клипы.
+    fps: source frame rate passed to zoompan; ignored when zoom is None/disabled.
+    offset_sec: output-time start of zoom gesture (0 = hook at clip start).
     """
     c = setup.crop
     sw, sh = setup.scale
     rot = _rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)
-    zoom_vf = _zoom_vf(setup.scale, zoom) if zoom is not None else ""
+    zoom_vf = _zoom_vf(setup.scale, zoom, fps, offset_sec) if zoom is not None else ""
     tail = zoom_vf if zoom_vf else f"scale={sw}:{sh},setsar=1"
     crop_scale = f"crop={c.w}:{c.h}:{c.x}:{c.y},{tail}"
     return f"{rot},{crop_scale}" if rot else crop_scale
@@ -1211,6 +1223,7 @@ def _render_segments(
     emit_text: bool = False,
     subtitles_cfg: SubtitlesConfig | None = None,
     background: bool = False,
+    zoom_cfg: "Zoom | None" = None,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
@@ -1253,6 +1266,7 @@ def _render_segments(
         if not _fps_holder:
             _fps_holder.append(_probe_source_fps(source, _sibling_ffprobe(ffmpeg_bin)))
         return _fps_holder[0]
+
 
     with tempfile.TemporaryDirectory(prefix="autoreels_ass_") as _tmp_ass:
         tmp_ass_dir = Path(_tmp_ass)
@@ -1327,6 +1341,25 @@ def _render_segments(
                         ]
                 elif segs[0].shot == "close":
                     _effective_vf = _close_vf_str
+
+            # Zoom vf: always built per-reel so zoompan runs at probed source fps (prevents A/V
+            # drift). Also positions the gesture at z: sentence offset when set.
+            # Skipped when two-shot overrides vf management for this reel.
+            if zoom_cfg is not None and zoom_cfg.enabled and not _ts_on:
+                _z_speed = getattr(reel, "speed", 1.0) or 1.0
+                _z_src_t0 = getattr(reel, "zoom_source_t0", None)
+                _z_offset = 0.0  # default: hook at clip start
+                if _z_src_t0 is not None:
+                    # Convert source timestamp to output time (accounts for speed + xfade).
+                    _z_acc = 0.0
+                    for _zi, _zs in enumerate(segs):
+                        if _zs.start <= _z_src_t0 < _zs.end:
+                            _z_offset = (_z_src_t0 - _zs.start + _z_acc) / _z_speed
+                            break
+                        _z_acc += _zs.end - _zs.start
+                        if _xfade_actual > 0 and _zi < len(segs) - 1:
+                            _z_acc -= _xfade_actual
+                _effective_vf = _crop_vf(manifest.setup, zoom_cfg, _fps(), _z_offset)
 
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
@@ -1657,10 +1690,10 @@ def render_crop(
         zoom_cfg = zoom_cfg.model_copy(update={"enabled": zoom})
     outputs = _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup, zoom_cfg), suffix="",
+        ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
         palette_vf=palette_vf, music_path=music_path,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
-        background=background,
+        background=background, zoom_cfg=zoom_cfg,
     )
     _write_index_md(manifest, Path(out_dir).resolve(), render_cfg)
     return outputs
@@ -1713,7 +1746,8 @@ def render_preview(
         mini = manifest.model_copy(update={"reels": [preview_reel]})
         outputs.extend(_render_segments(
             mini, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
-            ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(mini.setup, zoom_cfg), suffix="",
+            ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(mini.setup), suffix="",
             palette_vf=palette_vf, profile=profile, progress=progress,
+            zoom_cfg=zoom_cfg,
         ))
     return outputs

@@ -141,10 +141,10 @@ music:
 zoom:
   enabled: false
   percent: 8.0             # величина наезда, % (8% = зум до 1.08)
-  duration: 0.4            # секунды на наезд и на возврат
+  duration: 0.25           # секунды на наезд и на возврат
   scheme: hook             # hook | none
   hook_seconds: 2.5        # длина hook-жеста от начала клипа (наезд+удержание+возврат)
-  fps: 30                  # выходной fps зум-клипа (zoompan форсит постоянный fps)
+  fps: 30                  # ignored — рендерер следует fps источника, чтобы не было дрейфа A/V
 
 # Publish sidecars (<reel>.txt and index.md written at render time).
 # hashtags_always: fixed tags for every clip of this source (e.g. speaker's topic area).

@@ -194,6 +194,9 @@ class Reel(BaseModel):
     # M1.7 step 2: emphasis words from review `k:`. Lowercase; matched case-insensitively against
     # subtitle words at render time. Empty → no Emph style rendered (byte-identical to pre-M1.7).
     subtitle_emph_words: list[str] = Field(default_factory=list)
+    # z:N zoom placement: source-time start of sentence N (resolved at --apply from block sentences).
+    # None = hook scheme (zoom at clip start). Stored as source timestamp so render can remap it.
+    zoom_source_t0: float | None = None
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

@@ -470,10 +470,10 @@ class Zoom(BaseModel):
 
     enabled: bool = False
     percent: float = 8.0        # величина наезда, % (8% = z до 1.08)
-    duration: float = 0.4       # секунды на наезд и на возврат
+    duration: float = 0.25      # секунды на наезд и на возврат
     scheme: str = "hook"        # hook (лёгкий зум в начале + возврат) | none
     hook_seconds: float = 2.5   # длина hook-жеста от начала клипа (наезд+удержание+возврат)
-    fps: int = 30               # выходной fps зум-клипа (zoompan форсит постоянный fps)
+    fps: int = 30               # ignored: renderer follows source fps to prevent A/V drift
 
 
 class SubtitleStyle(BaseModel):

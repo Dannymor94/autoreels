@@ -574,6 +574,7 @@ def fake_ffmpeg(monkeypatch):
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
+            self.args = cmd
             if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
                 calls.append(cmd)
             self.returncode = 0
@@ -582,6 +583,19 @@ def fake_ffmpeg(monkeypatch):
 
         def wait(self):
             return 0
+
+        def communicate(self, *a, **kw):
+            # subprocess.run uses communicate(); return empty fps so _probe_source_fps falls back
+            return ("", "")
+
+        def poll(self):
+            return 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/bin/ffmpeg")
     monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
@@ -1058,13 +1072,13 @@ def test_zoom_is_dynamic_crop_not_upscale_of_finished_frame():
 
 
 def test_zoom_params_from_config_in_expression():
-    # параметры (percent/duration/hook/fps) попадают в выражение zoompan
+    # параметры (percent/duration/hook) попадают в выражение zoompan; fps из параметра, не из Zoom
     vf = _zoom_vf([1080, 1920], Zoom(enabled=True, percent=12, duration=0.5,
-                                     hook_seconds=3.0, fps=25))
+                                     hook_seconds=3.0), fps=25)
     assert "1+0.12*" in vf                                    # percent 12 → 0.12
     assert "ot/0.5" in vf                                     # duration 0.5
     assert "(3-ot)/0.5" in vf                                 # hook_seconds 3.0
-    assert "fps=25" in vf
+    assert "fps=25" in vf                                     # fps from parameter, not Zoom.fps
 
 
 def test_zoom_zooms_into_center():
