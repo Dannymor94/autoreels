@@ -144,3 +144,23 @@ No live Class-6 finding. (Note: `providers.py:98`'s relative path is a Class-1 c
 9. **Class 5 · legacy-manifest transcript mtime fallback** (`__main__.py:2368/2584`). Only bites
    pre-`transcript_params_key` manifests. **Structural:** backfill `params_key` or refuse the
    ambiguous fallback.
+
+---
+
+## Class 7 — Rebuilding a model by constructor drops new fields
+
+**Pattern:** `Segment(start=s.start, end=s.end)` anywhere in the pipeline discards every field
+added after the original schema (`shot`, `close_intervals`, and any future M1.7+ additions).
+The constructor creates a fresh model with all defaults.
+
+**Where it bit us:** `_snap_windows_to_frames` (`render.py`) iterated over segments and rebuilt
+each as `Segment(start=snapped, end=snapped)`, silently dropping `shot` and `close_intervals`.
+Rendered as wide even after `--apply` had written `shot="close"`.
+
+**Fix:** `s.model_copy(update={"start": …, "end": …})` (Pydantic v2). Always copy-with-update
+when modifying fields of a model — never reconstruct from another model's fields.
+
+**Grep for similar sites:** `Segment(start=`, `Segment(s.start`, any place that constructs a
+model from another model's fields. Known clean as of M1.7.1:
+`_snap_windows_to_frames` fixed in commit 12175ed.  Other `Segment(start=…)` calls create
+segments from scratch (new blocks, not copies) — safe.

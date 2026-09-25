@@ -1087,6 +1087,24 @@ def assign_close_shots(segs: list[Segment], close_ranges: list[tuple[float, floa
     return result
 
 
+def _seg_starts_close(seg: Segment) -> bool:
+    """True if segment's visual opens as close: shot=close, or close_intervals[0][0] ≈ 0."""
+    if seg.shot == "close":
+        return True
+    ci = seg.close_intervals
+    return bool(ci) and ci[0][0] < 0.034  # 1 frame at 30fps
+
+
+def _seg_ends_close(seg: Segment) -> bool:
+    """True if segment's visual closes as close: shot=close, or close_intervals[-1][1] ≈ duration."""
+    if seg.shot == "close":
+        return True
+    ci = seg.close_intervals
+    if not ci:
+        return False
+    return ci[-1][1] > (seg.end - seg.start) - 0.034
+
+
 def _num(x: float) -> str:
     """Короткая запись числа для ffmpeg: 1.0→'1', 1.15→'1.15' (без хвостовых нулей)."""
     return f"{x:g}"
@@ -1267,7 +1285,7 @@ def _render_segments(
                     _ts_xf = getattr(render_cfg, "two_shot_xfade", False)
                     _ts_seam_xfades = [
                         (_xfade_actual if _ts_xf else 0.0)
-                        if segs[k].shot != segs[k + 1].shot
+                        if _seg_ends_close(segs[k]) != _seg_starts_close(segs[k + 1])
                         else _xfade_actual
                         for k in range(len(segs) - 1)
                     ]

@@ -16,6 +16,8 @@ from autoreels.local.render import (
     _close_crop,
     _concat_segments_graph,
     _expected_output_duration,
+    _seg_ends_close,
+    _seg_starts_close,
     assign_close_shots,
 )
 
@@ -245,3 +247,57 @@ def test_mid_window_multiple_ranges():
     assert abs(result[0].close_intervals[0][1] - 6.0) < 1e-6
     assert abs(result[0].close_intervals[1][0] - 15.0) < 1e-6
     assert abs(result[0].close_intervals[1][1] - 20.0) < 1e-6
+
+
+# ── Test 9: seam hard-cut when close_intervals starts at 0 ───────────────────
+
+def test_seam_hard_cut_when_close_interval_at_start():
+    """seg[1] with close_intervals=[[0.0, X]] means visual starts close → seam should be hard cut.
+
+    _seg_starts_close / _seg_ends_close detect this boundary case.
+    """
+    # seg[0] ends wide; seg[1] starts with a close interval at t=0
+    seg0 = _seg(0.0, 5.0)  # shot=wide, no close_intervals
+    seg1 = _seg(10.0, 20.0, close_intervals=[[0.0, 8.0]])  # wide shot but opens close
+
+    assert not _seg_ends_close(seg0), "seg0 ends wide"
+    assert _seg_starts_close(seg1), "seg1 opens with close interval at t=0"
+    # seam: ends_close(seg0) != starts_close(seg1) → hard cut
+    assert _seg_ends_close(seg0) != _seg_starts_close(seg1)
+
+    # Verify filtergraph has hard concat, no xfade
+    xfade = 0.08
+    seam_xfades = [
+        0.0 if _seg_ends_close(segs[k]) != _seg_starts_close(segs[k + 1]) else xfade
+        for segs, k in [([seg0, seg1], 0)]
+    ]
+    assert seam_xfades == [0.0]
+
+
+def test_seam_hard_cut_when_close_interval_at_end():
+    """seg[0] ending with a close interval at the segment boundary → seam with seg[1]=wide is hard cut."""
+    seg0 = _seg(0.0, 10.0, close_intervals=[[7.0, 10.0]])  # ends close (10.0-10.0 = 0 gap)
+    seg1 = _seg(15.0, 25.0)  # shot=wide
+
+    assert _seg_ends_close(seg0), "seg0 ends with close interval at segment end"
+    assert not _seg_starts_close(seg1), "seg1 starts wide"
+    assert _seg_ends_close(seg0) != _seg_starts_close(seg1)
+
+
+def test_seam_no_change_when_both_wide():
+    """Both segments wide → seam keeps xfade."""
+    seg0 = _seg(0.0, 5.0)
+    seg1 = _seg(10.0, 20.0)
+    assert not _seg_ends_close(seg0)
+    assert not _seg_starts_close(seg1)
+    assert _seg_ends_close(seg0) == _seg_starts_close(seg1)  # both False → no change
+
+
+def test_seam_no_change_when_mid_window_close_interval():
+    """close_intervals that don't touch segment boundaries → seam unchanged (wide→wide at seam)."""
+    seg0 = _seg(0.0, 5.0)
+    seg1 = _seg(10.0, 20.0, close_intervals=[[3.0, 7.0]])  # starts wide, ends wide
+
+    assert not _seg_starts_close(seg1), "close_interval at t=3 (not 0) → starts wide"
+    assert not _seg_ends_close(seg1), "close_interval ends at 7 (not near 10) → ends wide"
+    assert _seg_ends_close(seg0) == _seg_starts_close(seg1)  # both False → xfade preserved
