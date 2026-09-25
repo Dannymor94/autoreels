@@ -324,3 +324,61 @@ def test_assign_close_shots_preserves_extra_fields():
     assert result[0].start == 10.0
     assert result[0].end == 20.0
     assert result[0].close_intervals == [[2.0, 8.0]]
+
+
+# ── Carry-over: close_intervals frame-grid snapping ───────────────────────────
+
+def test_snap_close_intervals_at_25fps():
+    """Interval boundaries are snapped to 1/25 s grid at 25 fps."""
+    from autoreels.local.render import _snap_close_intervals
+    segs = [_seg(0.0, 30.0, close_intervals=[[4.999, 8.001], [15.0, 20.0]])]
+    result = _snap_close_intervals(segs, fps=25.0)
+    ci = result[0].close_intervals
+    assert abs(ci[0][0] - 5.0) < 1e-9
+    assert abs(ci[0][1] - 8.0) < 1e-9
+    assert abs(ci[1][0] - 15.0) < 1e-9
+    assert abs(ci[1][1] - 20.0) < 1e-9
+
+
+def test_snap_close_intervals_at_30fps():
+    """Interval boundaries are snapped to 1/30 s grid at 30 fps."""
+    from autoreels.local.render import _snap_close_intervals
+    segs = [_seg(0.0, 30.0, close_intervals=[[3.017, 7.983]])]
+    result = _snap_close_intervals(segs, fps=30.0)
+    ci = result[0].close_intervals
+    expected_t0 = round(3.017 * 30.0) / 30.0
+    expected_t1 = round(7.983 * 30.0) / 30.0
+    assert abs(ci[0][0] - expected_t0) < 1e-9
+    assert abs(ci[0][1] - expected_t1) < 1e-9
+
+
+def test_snap_close_intervals_vfr_fps():
+    """Interval boundaries are snapped correctly at VFR-derived fps (30000/1001 ≈ 29.97)."""
+    from autoreels.local.render import _snap_close_intervals
+    fps = 30000 / 1001
+    segs = [_seg(0.0, 30.0, close_intervals=[[5.001, 10.002]])]
+    result = _snap_close_intervals(segs, fps=fps)
+    ci = result[0].close_intervals
+    expected_t0 = round(5.001 * fps) / fps
+    expected_t1 = round(10.002 * fps) / fps
+    assert abs(ci[0][0] - expected_t0) < 1e-9
+    assert abs(ci[0][1] - expected_t1) < 1e-9
+
+
+def test_seg_starts_close_half_frame_threshold_25fps():
+    """_seg_starts_close uses fps-based half_frame (0.5/fps), not hardcoded 0.05."""
+    half_frame_25 = 0.5 / 25.0
+    seg = _seg(0.0, 10.0, close_intervals=[[0.015, 5.0]])
+    assert _seg_starts_close(seg, half_frame_25)
+    seg2 = _seg(0.0, 10.0, close_intervals=[[0.025, 5.0]])
+    assert not _seg_starts_close(seg2, half_frame_25)
+
+
+def test_seg_ends_close_half_frame_threshold_30fps():
+    """_seg_ends_close uses fps-based half_frame (0.5/fps) to test if interval reaches segment end."""
+    half_frame_30 = 0.5 / 30.0
+    dur = 10.0
+    seg = _seg(0.0, dur, close_intervals=[[0.0, 9.985]])
+    assert _seg_ends_close(seg, half_frame_30)
+    seg2 = _seg(0.0, dur, close_intervals=[[0.0, 9.97]])
+    assert not _seg_ends_close(seg2, half_frame_30)

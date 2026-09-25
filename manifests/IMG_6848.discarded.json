@@ -1,0 +1,32 @@
+[
+  {
+    "id": "r01",
+    "score": 85,
+    "reason": "overlap_dedup: overlaps r03",
+    "first_words": "У папы был рак... Я ему говорю, что у тебя все классно, анализы супер"
+  },
+  {
+    "id": "r01",
+    "score": 72,
+    "reason": "overlap_dedup: overlaps r02",
+    "first_words": "Когда ты повышаешь уровень профессионализма, понимаешь, что это работает на людя"
+  },
+  {
+    "id": "r01",
+    "score": 72,
+    "reason": "overlap_dedup: overlaps r03",
+    "first_words": "Этап взросления — это когда взрослый понимает, кто он"
+  },
+  {
+    "id": "r05",
+    "score": 75,
+    "reason": "too_short_after_snap: R0=18.0s → final=10.7s < 18s",
+    "first_words": "Но он попал в то самое общество, где"
+  },
+  {
+    "id": "r10",
+    "score": 70,
+    "reason": "too_short_after_snap: R0=18.7s → final=13.2s < 18s",
+    "first_words": "себя. понимание, а потом инструменты для того, чтобы"
+  }
+]

@@ -1087,22 +1087,38 @@ def assign_close_shots(segs: list[Segment], close_ranges: list[tuple[float, floa
     return result
 
 
-def _seg_starts_close(seg: Segment) -> bool:
+def _snap_close_intervals(segs: list[Segment], fps: float) -> list[Segment]:
+    """Snap each segment's close_intervals boundaries to the source frame grid (1/fps).
+
+    Same grid as _snap_windows_to_frames so overlay enable= expressions align with decoded frames.
+    """
+    result = []
+    for seg in segs:
+        ci = getattr(seg, "close_intervals", [])
+        if not ci:
+            result.append(seg)
+        else:
+            snapped = [[round(t0 * fps) / fps, round(t1 * fps) / fps] for t0, t1 in ci]
+            result.append(seg.model_copy(update={"close_intervals": snapped}))
+    return result
+
+
+def _seg_starts_close(seg: Segment, half_frame: float = 0.05) -> bool:
     """True if segment's visual opens as close: shot=close, or close_intervals[0][0] ≈ 0."""
     if seg.shot == "close":
         return True
     ci = seg.close_intervals
-    return bool(ci) and ci[0][0] < 0.05  # within 1 frame at 20–30 fps
+    return bool(ci) and ci[0][0] < half_frame
 
 
-def _seg_ends_close(seg: Segment) -> bool:
+def _seg_ends_close(seg: Segment, half_frame: float = 0.05) -> bool:
     """True if segment's visual closes as close: shot=close, or close_intervals[-1][1] ≈ duration."""
     if seg.shot == "close":
         return True
     ci = seg.close_intervals
     if not ci:
         return False
-    return ci[-1][1] > (seg.end - seg.start) - 0.05  # within 1 frame at 20–30 fps
+    return ci[-1][1] > (seg.end - seg.start) - half_frame
 
 
 def _num(x: float) -> str:
@@ -1259,6 +1275,10 @@ def _render_segments(
                 # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
                 segs = _snap_windows_to_frames(segs, _fps())
+            # Snap close_intervals to the same frame grid so overlay enable= expressions land on
+            # decoded frames. Done for both multi-window and single-window close paths.
+            if any(getattr(s, "close_intervals", []) for s in segs):
+                segs = _snap_close_intervals(segs, _fps())
             clip_dur = sum(s.end - s.start for s in segs)   # == playback_duration() for single-window
             # Snap video_xfade to frame grid for multi-window reels (fps already probed above).
             # Single-window reels never use the multi-window path, so xfade is always 0 there.
@@ -1283,9 +1303,10 @@ def _render_segments(
                     # Per-segment crops go into the prefix; vtail gets palette+ass+vfade only.
                     _ts_seg_vfs = [_close_vf_str if s.shot == "close" else vf for s in segs]  # type: ignore[list-item]
                     _ts_xf = getattr(render_cfg, "two_shot_xfade", False)
+                    _half_f = 0.5 / _fps()
                     _ts_seam_xfades = [
                         (_xfade_actual if _ts_xf else 0.0)
-                        if _seg_ends_close(segs[k]) != _seg_starts_close(segs[k + 1])
+                        if _seg_ends_close(segs[k], _half_f) != _seg_starts_close(segs[k + 1], _half_f)
                         else _xfade_actual
                         for k in range(len(segs) - 1)
                     ]
