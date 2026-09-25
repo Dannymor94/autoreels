@@ -285,6 +285,19 @@ def test_cut_cmd_faststart_off_omits_flag():
     assert "-movflags" not in cmd
 
 
+def test_concat_cmd_has_faststart_before_output():
+    """-movflags +faststart в concat-пути (стрим-оптимизация, moov перед mdat)."""
+    cmd = build_concat_cmd(
+        "ffmpeg", "/src.mp4", "/out/r01.mp4",
+        windows=[(0.0, 10.0)], filter_complex="[0:v]null[v];[0:a]anull[a]",
+        codec="libx264", preset="medium",
+        audio_codec="aac", audio_bitrate="128k",
+        faststart=True,
+    )
+    assert _val_after(cmd, "-movflags") == "+faststart"
+    assert cmd.index("-movflags") < cmd.index("/out/r01.mp4")
+
+
 def test_cut_cmd_hevc_gets_hvc1_tag():
     """HEVC в mp4 → тег hvc1 (иначе Apple/Safari/часть соцсетей не проигрывают)."""
     cmd = build_cut_cmd(
@@ -2062,6 +2075,52 @@ def test_real_render_hevc_is_compact_and_tagged_hvc1(tmp_path):
 
     head = out.read_bytes()
     assert head.index(b"moov") < head.index(b"mdat"), "moov после mdat — faststart не сработал"
+
+
+@pytest.mark.integration
+def test_real_render_keyframe_interval(tmp_path):
+    """Интеграция: keyframe interval в рендере ≤ 2 с — подходит для коротких клипов и стрима.
+
+    hevc_videotoolbox ставит ключевые кадры каждые ~0.4 с по умолчанию (проверено 2026-09).
+    Тест ловит регрессию, если флаги энкодера когда-нибудь подавят ключевые кадры.
+    """
+    import shutil, json as _json
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe не установлены")
+
+    src = tmp_path / "src.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc2=s=640x360:d=10",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+        "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+        "-shortest", str(src),
+    ], check=True, capture_output=True)
+
+    out = tmp_path / "clip.mp4"
+    cmd = build_cut_cmd(
+        ffmpeg, src, 0.0, 10.0, out,
+        codec="libx264", preset="medium", video_bitrate="4M", pix_fmt="yuv420p",
+        faststart=True, audio_codec="aac", audio_bitrate="128k",
+    )
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    assert r.returncode == 0, f"ffmpeg упал: {r.stderr}"
+
+    probe = subprocess.run([
+        ffprobe, "-v", "error", "-select_streams", "v:0",
+        "-show_frames", "-show_entries", "frame=pkt_dts_time,key_frame",
+        "-of", "json", str(out),
+    ], capture_output=True, text=True)
+    frames = _json.loads(probe.stdout)["frames"]
+    kf_times = [float(f["pkt_dts_time"]) for f in frames if f.get("key_frame") == 1]
+    assert len(kf_times) >= 2, "слишком мало ключевых кадров для оценки интервала"
+    intervals = [b - a for a, b in zip(kf_times, kf_times[1:])]
+    max_interval = max(intervals)
+    assert max_interval <= 2.0, (
+        f"keyframe interval {max_interval:.3f}s > 2.0s — слишком редко для стрима"
+    )
 
 
 @pytest.mark.integration

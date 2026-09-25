@@ -361,7 +361,9 @@ def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: st
     """
     args: list[str] = []
     if codec in _SOFTWARE_X26X:
-        args += ["-preset", preset]
+        # -g 30: ~1 s keyframe interval at 30 fps — suits streaming; libx264/x265 default (250) is
+        # too sparse for cloud-streaming players that need a keyframe to seek/start quickly.
+        args += ["-preset", preset, "-g", "30"]
     if _is_amf(codec) and quality:
         args += ["-quality", quality]
     if _is_amf(codec) and rate_control == "cqp" and qp is not None:
