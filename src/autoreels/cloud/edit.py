@@ -219,3 +219,85 @@ def remove_fillers(words: list, start: float, end: float, *, filler_words, pause
             cuts.append((ws[k].t1 + pause_residual_sec, ws[k + 1].t0))
 
     return _apply_cuts(start, end, cuts, max_removed_share * span)
+
+
+# --------------------------------------------------------------------------- manual sentence exclusion
+
+def exclude_sentences(
+    words: list, reel_start: float, reel_end: float,
+    exclude_1based, all_sents: list,
+) -> tuple[list, float, float, list[int], list[int], str]:
+    """Cut specific sentences (1-based in all_sents) out of [reel_start, reel_end].
+
+    Sentences outside [reel_start, reel_end] are returned as out_of_span and ignored.
+    Leading/trailing excluded sentences collapse into a bound movement rather than a zero-length
+    window.
+
+    Returns (segs, new_start, new_end, applied_1based, out_of_span_1based, note).
+    segs is empty when only bounds moved (no interior gaps needed).
+    new_end < new_start signals "everything excluded" (caller must refuse and skip the reel).
+    """
+    eps = 1e-3
+    in_span_set = {
+        k for k, s in enumerate(all_sents)
+        if s and s[0].t0 >= reel_start - eps and s[-1].t1 <= reel_end + eps
+    }
+    applied_0: list[int] = []
+    out_of_span_1: list[int] = []
+    for n1 in sorted({int(n) for n in exclude_1based}):
+        k = n1 - 1
+        if k < 0 or k >= len(all_sents) or k not in in_span_set:
+            out_of_span_1.append(n1)
+        else:
+            applied_0.append(k)
+    if not applied_0:
+        return [], reel_start, reel_end, [], out_of_span_1, ""
+    applied_set = set(applied_0)
+    if applied_set >= in_span_set:  # everything excluded — sentinel
+        return [], reel_start, reel_start - 1.0, [k + 1 for k in sorted(applied_set)], out_of_span_1, "all excluded"
+    in_span_sorted = sorted(in_span_set)
+    first_kept = next(k for k in in_span_sorted if k not in applied_set)
+    last_kept = next(k for k in reversed(in_span_sorted) if k not in applied_set)
+    head_ex = [k for k in in_span_sorted if k < first_kept]
+    tail_ex = [k for k in in_span_sorted if k > last_kept]
+    notes: list[str] = []
+    new_start = all_sents[first_kept][0].t0 if head_ex else reel_start
+    new_end = all_sents[last_kept][-1].t1 if tail_ex else reel_end
+    if head_ex:
+        notes.append(f"x:{','.join(str(k+1) for k in head_ex)} → s:{first_kept+1}")
+    if tail_ex:
+        notes.append(f"x:{','.join(str(k+1) for k in tail_ex)} → e:{last_kept+1}")
+    # Middle gaps: build merged cut intervals for consecutive excluded sentences
+    cuts: list[tuple[float, float]] = []
+    cut_start: float | None = None
+    cut_end: float | None = None
+    for k in in_span_sorted:
+        if k == first_kept or k == last_kept:
+            if cut_start is not None:
+                cuts.append((cut_start, cut_end))   # type: ignore[arg-type]
+                cut_start = cut_end = None
+            continue
+        if k < first_kept or k > last_kept:
+            continue
+        s = all_sents[k]
+        if k in applied_set:
+            if cut_start is None:
+                cut_start = s[0].t0
+            cut_end = s[-1].t1
+        else:
+            if cut_start is not None:
+                cuts.append((cut_start, cut_end))   # type: ignore[arg-type]
+                cut_start = cut_end = None
+    if cut_start is not None:
+        cuts.append((cut_start, cut_end))            # type: ignore[arg-type]
+    if not cuts:
+        return [], new_start, new_end, [k + 1 for k in sorted(applied_set)], out_of_span_1, "; ".join(notes)
+    segs: list[Segment] = []
+    cur = new_start
+    for a, b in cuts:
+        if a > cur + eps:
+            segs.append(Segment(start=cur, end=a))
+        cur = b
+    if new_end > cur + eps:
+        segs.append(Segment(start=cur, end=new_end))
+    return segs, new_start, new_end, [k + 1 for k in sorted(applied_set)], out_of_span_1, "; ".join(notes)

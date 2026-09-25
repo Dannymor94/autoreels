@@ -3167,7 +3167,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         candidate_blocks, filter_blocks, score_block,
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
-    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span
+    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences
     from autoreels.core.models import Segment as _Segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
@@ -3441,6 +3441,34 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                       file=sys.stderr)
         if _bnote:
             print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
+        # x: manual sentence exclusions — cut listed sentences out of the span as gaps.
+        _x = (_ae.x if _ae else ()) or ()
+        _x_refuse = False
+        if _x:
+            _blk_sents = split_sentences(words_in_span(_tx_words, block.start, block.end))
+            _xsegs, _x_start, _x_end, _x_applied, _x_out, _x_note = exclude_sentences(
+                _tx_words, reel.start, reel.end, _x, _blk_sents
+            )
+            _grp = '+'.join(str(s) for s in g)
+            if _x_out:
+                print(f"  warning {_grp}: x:{','.join(str(n) for n in _x_out)} outside span — ignored")
+            if _x_end < _x_start:   # sentinel: everything excluded
+                print(f"  error {_grp}: x: excludes the entire clip — skipping", file=sys.stderr)
+                _x_refuse = True
+            elif _x_applied:
+                _x_removed = (reel.end - reel.start) - sum(
+                    s.end - s.start for s in (_xsegs if _xsegs else [_Segment(start=_x_start, end=_x_end)])
+                )
+                reel.start, reel.end = _x_start, _x_end
+                if _xsegs:
+                    reel.segments = _xsegs
+                _x_msg = (
+                    f"  x: {_grp}: excluded {len(_x_applied)} sentence(s) "
+                    f"({_x_removed:.1f}s removed, {len(reel.effective_segments())} window(s))"
+                )
+                if _x_note:
+                    _x_msg += f"; {_x_note}"
+                print(_x_msg)
         reel.r0_start = reel.start
         reel.r0_end = reel.end
         if is_merged:
@@ -3477,6 +3505,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 file=sys.stderr,
             )
         reel._clip_speed = _clip_speed   # stash for post-pipeline subtitle rescaling
+        if _x_refuse:
+            continue
         _pos = len(reels)
         reels.append(reel)
         dataset_rows.append(make_dataset_row(block, score, manifest_path.stem))
@@ -3542,16 +3572,38 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _on = _ov if _ov is not None else (filler if filler is not None else _fr.enabled)
             if not _on:
                 continue
-            segs, removed, count = remove_fillers(
-                tx_words, reel.start, reel.end,
-                filler_words=_fr.filler_words, pause_shorten_sec=_fr.pause_shorten_sec,
-                pause_residual_sec=_fr.pause_residual_sec, max_removed_share=_fr.max_removed_share,
-            )
-            if count:
-                if len(segs) >= 2:
-                    reel.segments = segs
-                reel.start, reel.end = segs[0].start, segs[-1].end
-                filler_stats.append((reel, removed, count))
+            if reel.segments:
+                # x: exclusions already set segments; run filler removal on each window separately
+                new_segs: list = []
+                total_removed = 0.0
+                total_count = 0
+                for seg in reel.segments:
+                    sub, rem, cnt = remove_fillers(
+                        tx_words, seg.start, seg.end,
+                        filler_words=_fr.filler_words, pause_shorten_sec=_fr.pause_shorten_sec,
+                        pause_residual_sec=_fr.pause_residual_sec, max_removed_share=_fr.max_removed_share,
+                    )
+                    if cnt and len(sub) >= 2:
+                        new_segs.extend(sub)
+                        total_removed += rem
+                        total_count += cnt
+                    else:
+                        new_segs.append(seg)
+                if total_count:
+                    reel.segments = new_segs
+                    reel.start, reel.end = new_segs[0].start, new_segs[-1].end
+                    filler_stats.append((reel, total_removed, total_count))
+            else:
+                segs, removed, count = remove_fillers(
+                    tx_words, reel.start, reel.end,
+                    filler_words=_fr.filler_words, pause_shorten_sec=_fr.pause_shorten_sec,
+                    pause_residual_sec=_fr.pause_residual_sec, max_removed_share=_fr.max_removed_share,
+                )
+                if count:
+                    if len(segs) >= 2:
+                        reel.segments = segs
+                    reel.start, reel.end = segs[0].start, segs[-1].end
+                    filler_stats.append((reel, removed, count))
 
     # Part 5 — cold open: prepend the hook sentence as a replayed window (kept in the body too).
     # Refuse a hook longer than the cap with a warning. Ensure the hook's words are in subtitles so

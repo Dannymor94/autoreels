@@ -6,6 +6,7 @@
    collapse; a long pause shortens to the residual; the removed-share cap holds.
 7. An answer line with every field applies; a malformed field is reported and the rest applies.
 8. The automatic path never runs filler removal (it is manual-only).
+9. x: excludes sentences as interior gaps or bound movements; refusal on full exclusion.
 """
 import inspect
 from pathlib import Path
@@ -178,3 +179,84 @@ def test_automatic_path_untouched_by_edit_features():
     assert "remove_fillers" not in src
     assert "cold_open" not in src
     assert "title_overlay" not in src
+
+
+# --- Test 9: exclude_sentences ---------------------------------------------------------------
+
+def _sents(starts):
+    """Build synthetic sentence list from (t0_word, t1_word, term_punct) per sentence."""
+    result = []
+    for t0, t1, word in starts:
+        result.append([_w(t0, t1, word)])
+    return result
+
+
+def test_exclude_middle_sentence_creates_two_windows():
+    # 4 sentences: [0-1] [2-3] [4-5] [6-7]. Exclude #2 → two windows: [0-1.5] and [3.5-7].
+    sents = [
+        [_w(0.0, 1.0, "А."), ],
+        [_w(2.0, 3.0, "Б."), ],
+        [_w(4.0, 5.0, "В."), ],
+        [_w(6.0, 7.0, "Г."), ],
+    ]
+    segs, ns, ne, applied, out_of_span, note = edit.exclude_sentences(
+        [], 0.0, 7.0, [2], sents
+    )
+    assert applied == [2]
+    assert out_of_span == []
+    assert ns == 0.0
+    assert ne == 7.0
+    assert len(segs) == 2
+    assert segs[0].start == 0.0 and segs[0].end == 2.0   # up to sentence 2 start
+    assert segs[1].start == 3.0 and segs[1].end == 7.0   # after sentence 2 end
+
+
+def test_exclude_range_removes_three_sentences():
+    # 6 sentences; exclude 3-5 (range). Middle gap, bounds unchanged.
+    sents = [[_w(float(i) * 2, float(i) * 2 + 1.0, f"S{i+1}.")] for i in range(6)]
+    segs, ns, ne, applied, out_of_span, note = edit.exclude_sentences(
+        [], 0.0, 11.0, [3, 4, 5], sents
+    )
+    assert applied == [3, 4, 5]
+    assert out_of_span == []
+    assert len(segs) == 2
+    # window 0 ends before sentence 3 (0-based idx 2 start = 4.0)
+    assert segs[0].end == sents[2][0].t0     # == 4.0
+    # window 1 starts after sentence 5 (0-based idx 4 end = 9.0)
+    assert segs[1].start == sents[4][0].t1   # == 9.0
+
+
+def test_exclude_out_of_span_ignored_rest_applies():
+    # sentences 1-3 in span; ask to exclude 2 and 99 (out of range).
+    sents = [[_w(float(i), float(i) + 0.5, f"W{i}.")] for i in range(3)]
+    segs, ns, ne, applied, out_of_span, note = edit.exclude_sentences(
+        [], 0.0, 2.5, [2, 99], sents
+    )
+    assert 99 in out_of_span
+    assert 2 in applied
+    assert ne >= ns   # not refused
+
+
+def test_exclude_all_sentences_signals_refusal():
+    sents = [[_w(float(i), float(i) + 0.5, f"X{i}.")] for i in range(3)]
+    segs, ns, ne, applied, out_of_span, note = edit.exclude_sentences(
+        [], 0.0, 2.5, [1, 2, 3], sents
+    )
+    # sentinel: new_end < new_start
+    assert ne < ns
+
+
+def test_exclude_head_collapses_to_bound_movement():
+    # Exclude sentence 1 (first) → not a gap, just bound moves to sentence 2 start.
+    sents = [
+        [_w(0.0, 1.0, "Раз.")],
+        [_w(2.0, 3.0, "Два.")],
+        [_w(4.0, 5.0, "Три.")],
+    ]
+    segs, ns, ne, applied, out_of_span, note = edit.exclude_sentences(
+        [], 0.0, 5.0, [1], sents
+    )
+    assert segs == []          # no interior gaps, just bound moved
+    assert ns == 2.0           # moved to sentence 2 start
+    assert ne == 5.0           # end unchanged
+    assert "→ s:2" in note
