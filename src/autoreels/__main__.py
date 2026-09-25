@@ -1034,8 +1034,40 @@ def _find_pause_boundary(words, t_start: float, t_end: float, *, target: float, 
     return min(candidates, key=lambda b: abs(b - target))
 
 
+def _shot_spans_merged(segs) -> "list[tuple[str, float]]":
+    """Return merged (shot_type, duration) spans for segs, treating filler gaps as wide."""
+    raw: list = []
+    for k, seg in enumerate(segs):
+        if k > 0:
+            filler = max(0.0, seg.start - segs[k - 1].end)
+            if filler > 0.001:
+                raw.append(("wide", filler))
+        seg_dur = seg.end - seg.start
+        ci = getattr(seg, "close_intervals", [])
+        if seg.shot == "close" and not ci:
+            raw.append(("close", seg_dur))
+        elif ci:
+            pos = 0.0
+            for t0, t1 in ci:
+                if t0 > pos + 0.001:
+                    raw.append(("wide", t0 - pos))
+                raw.append(("close", t1 - t0))
+                pos = t1
+            if pos < seg_dur - 0.001:
+                raw.append(("wide", seg_dur - pos))
+        else:
+            raw.append(("wide", seg_dur))
+    merged: list = []
+    for stype, dur in raw:
+        if merged and merged[-1][0] == stype:
+            merged[-1] = (stype, merged[-1][1] + dur)
+        else:
+            merged.append((stype, dur))
+    return merged
+
+
 def _stage_two_shot_auto(reels, words, *, render_cfg) -> list:
-    """Auto-alternate wide/close at segment seams; add max-wide close_intervals at pause boundaries.
+    """Auto-alternate wide/close at segment seams; enforce max-shot for both wide and close.
 
     Formatting stage for both auto and human paths. Manual c: assignments (shot='close' or
     non-empty close_intervals) are preserved — auto only fills unassigned segments.
@@ -1043,15 +1075,17 @@ def _stage_two_shot_auto(reels, words, *, render_cfg) -> list:
     """
     if not (getattr(render_cfg, "two_shot", False) and getattr(render_cfg, "two_shot_auto", False)):
         return reels
-    max_wide = getattr(render_cfg, "two_shot_max_wide_sec", 9.0)
+    # two_shot_max_shot_sec is the canonical key; two_shot_max_wide_sec is a backward-compat alias.
+    max_shot = getattr(render_cfg, "two_shot_max_shot_sec",
+                       getattr(render_cfg, "two_shot_max_wide_sec", 9.0))
     min_shot = getattr(render_cfg, "two_shot_min_sec", 2.5)
 
     for reel in reels:
-        _apply_two_shot_auto_reel(reel, words, max_wide=max_wide, min_shot=min_shot)
+        _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot)
     return reels
 
 
-def _apply_two_shot_auto_reel(reel, words, *, max_wide: float, min_shot: float) -> None:
+def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
     from autoreels.cloud.edit import split_sentences as _sp
     segs = reel.effective_segments()
@@ -1099,44 +1133,101 @@ def _apply_two_shot_auto_reel(reel, words, *, max_wide: float, min_shot: float) 
         else:
             new_segs.append(seg.model_copy(update={"shot": "wide", "close_intervals": []}))
 
-    # Pass 3: max-wide check — scan consecutive wide stretches, insert close_intervals if too long.
-    i = 0
-    result: list = []
-    while i < len(new_segs):
-        seg = new_segs[i]
-        if seg.shot != "close" and not seg.close_intervals:
-            stretch = [i]
-            while (i + 1 < len(new_segs)
-                   and new_segs[i + 1].shot != "close"
-                   and not new_segs[i + 1].close_intervals):
-                i += 1
-                stretch.append(i)
-            wide_total = sum(new_segs[j].end - new_segs[j].start for j in stretch)
-            if wide_total > max_wide:
-                stretch_start = new_segs[stretch[0]].start
-                stretch_end = new_segs[stretch[-1]].end
-                target_abs = stretch_start + max_wide
-                switch_abs = _find_pause_boundary(
-                    words, stretch_start, stretch_end, target=target_abs, min_pause=0.3
-                )
-                if switch_abs is not None:
-                    for j in stretch:
-                        s = new_segs[j]
-                        if s.start <= switch_abs < s.end:
-                            rel = switch_abs - s.start
-                            seg_dur = s.end - s.start
-                            if rel >= min_shot and (seg_dur - rel) >= min_shot:
-                                new_segs[j] = s.model_copy(update={"close_intervals": [[rel, seg_dur]]})
-                            break
-            for j in stretch:
-                result.append(new_segs[j])
-            i = stretch[-1] + 1
-        else:
-            result.append(seg)
+    # Pass 3: max-shot rule — symmetric: fires for both wide and close stretches.
+    # Wide stretch: insert close_intervals=[rel, ci_end] with filler-aware end adjustment.
+    # Close stretch: change switch segment to wide + ci=[[0, switch_rel]] (close 0→rel, wide rel→end).
+    # After a max switch, remaining stretch segments take the new shot type (close lasts to next seam).
+    result = list(new_segs)
+    warnings: list = []
+
+    def _filler_gap(j: int) -> float:
+        if j + 1 < len(result):
+            return max(0.0, result[j + 1].start - result[j].end)
+        return 0.0
+
+    def _process_wide_stretch(stretch: list) -> None:
+        total = sum(result[j].end - result[j].start for j in stretch)
+        if total <= max_shot:
+            return
+        s_start = result[stretch[0]].start
+        s_end = result[stretch[-1]].end
+        sw = _find_pause_boundary(words, s_start, s_end, target=s_start + max_shot, min_pause=0.3)
+        if sw is None:
+            warnings.append(f"no pause in wide {s_start:.1f}–{s_end:.1f}")
+            return
+        for ji, j in enumerate(stretch):
+            s = result[j]
+            if not (s.start <= sw < s.end):
+                continue
+            rel = sw - s.start
+            seg_dur = s.end - s.start
+            # Filler-aware: ensure wide tail + filler >= min_shot when next is close
+            ci_end = seg_dur
+            filler = _filler_gap(j)
+            nj = j + 1
+            if filler > 0.001 and filler < min_shot and nj < len(result):
+                if result[nj].shot == "close" and not result[nj].close_intervals:
+                    ci_end = seg_dur - (min_shot - filler)
+            if rel < min_shot or (ci_end - rel) < min_shot:
+                warnings.append(f"no valid wide switch at {sw:.1f} (min-shot constraint)")
+                break
+            result[j] = s.model_copy(update={"close_intervals": [[rel, ci_end]]})
+            for k in stretch[ji + 1:]:
+                result[k] = result[k].model_copy(update={"shot": "close", "close_intervals": []})
+            break
+
+    def _process_close_stretch(stretch: list) -> None:
+        total = sum(result[j].end - result[j].start for j in stretch)
+        if total <= max_shot:
+            return
+        s_start = result[stretch[0]].start
+        s_end = result[stretch[-1]].end
+        sw = _find_pause_boundary(words, s_start, s_end, target=s_start + max_shot, min_pause=0.3)
+        if sw is None:
+            warnings.append(f"no pause in close {s_start:.1f}–{s_end:.1f}")
+            return
+        for ji, j in enumerate(stretch):
+            s = result[j]
+            if not (s.start <= sw < s.end):
+                continue
+            rel = sw - s.start
+            seg_dur = s.end - s.start
+            if rel < min_shot or (seg_dur - rel) < min_shot:
+                warnings.append(f"no valid close switch at {sw:.1f} (min-shot constraint)")
+                break
+            # ci=[0, rel]: close 0–rel, wide rel–end (shot→wide so overlay means "close first")
+            result[j] = s.model_copy(update={"shot": "wide", "close_intervals": [[0.0, rel]]})
+            for k in stretch[ji + 1:]:
+                result[k] = result[k].model_copy(update={"shot": "wide", "close_intervals": []})
+            break
+
+    # Two-pass scan: wide first, then close (close scan sees wide-pass results).
+    for pass_shot in ("wide", "close"):
+        i = 0
+        while i < len(result):
+            seg = result[i]
+            if seg.shot == pass_shot and not seg.close_intervals:
+                stretch = [i]
+                while (i + 1 < len(result)
+                       and result[i + 1].shot == pass_shot
+                       and not result[i + 1].close_intervals):
+                    i += 1
+                    stretch.append(i)
+                if pass_shot == "wide":
+                    _process_wide_stretch(stretch)
+                else:
+                    _process_close_stretch(stretch)
             i += 1
+
+    # Pass 4: final min-shot check — warn if any merged span (including fillers) is < min_shot.
+    for stype, dur in _shot_spans_merged(result):
+        if dur < min_shot:
+            warnings.append(f"short {stype} span remaining: {dur:.2f}s < {min_shot}s")
 
     if result != list(segs):
         reel.segments = result
+    if warnings:
+        reel._two_shot_warnings = getattr(reel, "_two_shot_warnings", []) + warnings
 
 
 # --- Manual (human-review) path: which stages may touch a human selection ------------------
@@ -3649,8 +3740,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 print(f"  error {_grp}: x: excludes the entire clip — skipping", file=sys.stderr)
                 _x_refuse = True
             elif _x_applied:
-                _x_removed = (reel.end - reel.start) - sum(
-                    s.end - s.start for s in (_xsegs if _xsegs else [_Segment(start=_x_start, end=_x_end)])
+                _x_removed = (reel.end - reel.start) - (
+                    sum(s.end - s.start for s in _xsegs) if _xsegs else (_x_end - _x_start)
                 )
                 reel.start, reel.end = _x_start, _x_end
                 if _xsegs:
@@ -3756,8 +3847,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     for _reel in reels:
         if _reel.segments:
             _segs = list(_reel.segments)
-            _segs[0] = _Segment(start=_reel.start, end=_segs[0].end)
-            _segs[-1] = _Segment(start=_segs[-1].start, end=_reel.end)
+            _segs[0] = _segs[0].model_copy(update={"start": _reel.start})
+            _segs[-1] = _segs[-1].model_copy(update={"end": _reel.end})
             _reel.segments = _segs
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
