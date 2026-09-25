@@ -1345,8 +1345,10 @@ def _render_segments(
                                             xfade_sec=_xfade_actual)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
+                _emph_words = frozenset(getattr(reel, "subtitle_emph_words", None) or [])
                 ass_path.write_text(
-                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0, title=_title),
+                    build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0, title=_title,
+                              emph_words=_emph_words),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.

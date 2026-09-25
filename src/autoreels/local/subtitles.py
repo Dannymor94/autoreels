@@ -160,6 +160,26 @@ def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float
     return "\\N".join(out)
 
 
+def _emph_style_line(cfg: SubtitlesConfig) -> str:
+    """Emphasis style: same geometry as Default but with emph_color and emph_bold."""
+    primary = ass_color(cfg.emph_color)
+    outline = ass_color(cfg.outline_color)
+    if cfg.fill_enabled:
+        border_style = 3
+        back = ass_color(cfg.fill_color, alpha=_alpha_from_opacity(cfg.fill_opacity))
+    else:
+        border_style = 1
+        back = ass_color("000000")
+    bold = -1 if cfg.emph_bold else 0
+    align = _ALIGN.get(cfg.alignment, 2)
+    fields = [
+        "Emph", cfg.font, cfg.font_size, primary, primary, outline, back,
+        bold, 0, 0, 0, 100, 100, 0, 0, border_style, cfg.emph_outline_width, cfg.shadow,
+        align, 40, 40, cfg.position_v, 1,
+    ]
+    return "Style: " + ",".join(str(x) for x in fields)
+
+
 def _title_style_line(cfg: SubtitlesConfig) -> str:
     """Title-plate style: a filled box (BackColour) at the top of the frame (alignment 8), sized by
     title_font_size (0 → font_size), MarginV measured from the top. Distinct from the subtitle
@@ -178,12 +198,15 @@ def _title_style_line(cfg: SubtitlesConfig) -> str:
 
 
 def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
-              play_res: tuple[int, int] = (1080, 1920), title: str = "") -> str:
+              play_res: tuple[int, int] = (1080, 1920), title: str = "",
+              emph_words: frozenset[str] = frozenset()) -> str:
     """Собрать .ass из слов сегмента: Style из конфига + Dialogue по группам поп-апом.
 
     Времена Dialogue — относительно начала клипа (clip_start вычитается). uppercase из конфига.
     `title` (Part 4) непусто → плашка сверху (стиль Title) на первые cfg.title_lead_sec секунд с
     фейдом, над зоной субтитров (не пересекается). Пусто → плашки нет.
+    `emph_words` — frozenset lowercase слов для Emph-стиля. Пусто → никаких изменений (побайтово
+    идентично pre-M1.7).
     """
     pw, ph = play_res
     groups = group_words(
@@ -194,6 +217,8 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
     styles = [_style_line(cfg)]
     if title:
         styles.append(_title_style_line(cfg))
+    if emph_words:
+        styles.append(_emph_style_line(cfg))
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -219,9 +244,24 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         ttext = f"{{\\fad({fi},{fo})}}" + ttext
         lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
     for g in groups:
-        text = " ".join(w.word for w in g)
-        if cfg.uppercase:
-            text = text.upper()
+        if emph_words:
+            parts: list[str] = []
+            for i, w in enumerate(g):
+                if i > 0:
+                    parts.append(" ")
+                wtext = w.word.upper() if cfg.uppercase else w.word
+                # Strip leading/trailing punctuation before matching: Whisper attaches
+                # punctuation to words ("себя," → "себя"), user writes clean words in k:.
+                w_norm = w.word.lower().strip(".,!?;:—–-\"'«»()[]")
+                if w_norm in emph_words:
+                    parts.append(f"{{\\rEmph}}{wtext}{{\\r}}")
+                else:
+                    parts.append(wtext)
+            text = "".join(parts)
+        else:
+            text = " ".join(w.word for w in g)
+            if cfg.uppercase:
+                text = text.upper()
         start = _ass_time(g[0].t0 - clip_start)
         end = _ass_time(g[-1].t1 - clip_start)
         fade_in, fade_out = _fade_ms(g[-1].t1 - g[0].t0, cfg.fade_in_ms, cfg.fade_out_ms)

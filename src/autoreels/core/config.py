@@ -620,6 +620,12 @@ class SubtitlesConfig(BaseModel):
     title_font_size: int = 0          # 0 → same as font_size
     title_position_v: int = 150       # MarginV from the TOP (alignment 8, top-centre)
     title_fade_ms: int = 250          # plate fade in/out
+    # Emphasis style (M1.7 step 2): applied to words listed in review `k:`. Only rendered when
+    # `k:` is present; absent k: → output byte-identical to pre-M1.7. Font size unchanged (a size
+    # jump reflows the line and makes text dance).
+    emph_color: str = "FFE000"        # bright yellow — readable on dark and light backgrounds
+    emph_bold: bool = True
+    emph_outline_width: int = 3
 
 
 # --------------------------------------------------------------------- Transcribe

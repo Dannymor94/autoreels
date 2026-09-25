@@ -3427,6 +3427,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""
         # Post caption from review `d:` (only from the manual path; automatic path leaves it as-is).
         reel.description = (getattr(_ae, "description", None) or "") if _ae else ""
+        # M1.7 step 2 — emphasis words from review `k:` (lowercase; matched case-insensitively).
+        reel.subtitle_emph_words = list(getattr(_ae, "k", ()) or ()) if _ae else []
         # Part 5 — cold open: resolve the hook sentence (h:N) over the same block-span numbering the
         # export showed; stash its window, apply the cap after segmentation below.
         reel._hook_window = None

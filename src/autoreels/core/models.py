@@ -190,6 +190,9 @@ class Reel(BaseModel):
     # long internal pause, short clip, overlap). Warn-only — nothing is dropped on the human's
     # behalf. Empty for the automatic path (those stages actually run there).
     warnings: list[str] = Field(default_factory=list)
+    # M1.7 step 2: emphasis words from review `k:`. Lowercase; matched case-insensitively against
+    # subtitle words at render time. Empty → no Emph style rendered (byte-identical to pre-M1.7).
+    subtitle_emph_words: list[str] = Field(default_factory=list)
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.
