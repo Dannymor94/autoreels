@@ -1,0 +1,32 @@
+{
+  "source": "2026-08-08 10h 59m 38s.mp4",
+  "source_path": "/Users/danny/Documents/autoreels/inputs/2026-08-08 10h 59m 38s.mp4",
+  "source_sha256": "3c083b60f8577d4801f898d063c6b521ce7b72c37f4569b2d1f0dd66ba4d4047",
+  "source_hash_scheme": "partial-p1",
+  "source_kind": "lecture",
+  "duration_preset": "shorts",
+  "setup": {
+    "setup_id": "2026-08-08 10h 59m 38s",
+    "crop": {
+      "x": 0,
+      "y": 0,
+      "w": 1512,
+      "h": 2688
+    },
+    "scale": [
+      1080,
+      1920
+    ],
+    "frame": [
+      1512,
+      2688
+    ],
+    "rotation_deg": 0.0,
+    "palette": null
+  },
+  "run_key": "1414214dbaf74ac7",
+  "transcript_params_key": "84b62c5276da",
+  "selection_source": "",
+  "status": "pending",
+  "reels": []
+}
