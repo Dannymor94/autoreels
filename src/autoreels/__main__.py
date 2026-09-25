@@ -1093,11 +1093,12 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
         return
 
     # Pass 1: alternation at seams, preserving manual assignments.
-    # Manual = shot='close' OR non-empty close_intervals.
+    # Manual = shot='close' only. wide+ci is auto-computed by Pass 3 and gets recomputed each time
+    # (so filler-aware ci_end stays current across renders).
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
     cur = "wide"
     for i, seg in enumerate(segs):
-        manual = (seg.shot == "close") or bool(getattr(seg, "close_intervals", []))
+        manual = seg.shot == "close"
         if i > 0:
             prev_dur = segs[i - 1].end - segs[i - 1].start
             cur_dur = seg.end - seg.start

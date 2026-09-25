@@ -4,13 +4,17 @@ from pathlib import Path
 
 _SRC = Path(__file__).parent.parent / "src" / "autoreels"
 
-# Allowed (file_relative_to_src, optional line substring for disambiguation)
-_ALLOWED = {
+# Whole-file allowlists (these files ARE the factories).
+_ALLOWED_FILES = {
     "cloud/edit.py",
     "cloud/transcribe.py",
-    "core/models.py",         # effective_segments default fallback
-    "__main__.py:3947",       # reel.cold_open factory
+    "core/models.py",
 }
+
+# Substring patterns on the CODE part of the line that are allowed anywhere.
+_ALLOWED_LINE_PATTERNS = [
+    "cold_open",   # reel.cold_open = _Segment(...) — legitimate factory
+]
 
 _PATTERN = re.compile(r"(?<!\w)(Segment|Word|_Segment|_Seg)\s*\(")
 
@@ -22,20 +26,16 @@ def _violations():
     hits = []
     for py in sorted(_SRC.rglob("*.py")):
         rel = py.relative_to(_SRC).as_posix()
-        # Whole-file allowlist
-        if rel in _ALLOWED:
+        if rel in _ALLOWED_FILES:
             continue
         for lineno, raw in enumerate(py.read_text().splitlines(), 1):
             line = raw.strip()
             if _SKIP.match(raw):
                 continue
-            # Strip inline comments
             code = raw.split("#")[0]
             if not _PATTERN.search(code):
                 continue
-            # Per-line allowlist
-            key = f"{rel}:{lineno}"
-            if key in _ALLOWED:
+            if any(p in code for p in _ALLOWED_LINE_PATTERNS):
                 continue
             hits.append(f"{rel}:{lineno}: {line}")
     return hits
