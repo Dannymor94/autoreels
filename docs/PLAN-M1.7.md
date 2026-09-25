@@ -49,11 +49,17 @@
 
 ---
 
-## Шаг 2 — ритм субтитров 🔧 IMPLEMENTED, GATE PENDING
+## Шаг 2 — ритм субтитров ✅ ЗАКРЫТ
 
-**Реализовано** (commit e06ef49): `k:N=word,word;M=word` syntax, `Word.emph` flag, `Keyword` ASS style, `subtitle_keywords` feature flag (off → byte-identical). 1601 tests pass.
+**Реализовано** (commit e06ef49): `k:N=word,word;M=word` syntax, `Word.emph` flag, `Keyword` ASS style, `subtitle_keywords` feature flag (off → byte-identical). 1601 tests pass.  
+**Class-7 guard** (commit 35e5dcd): `model_copy` в `remap_to_output` и `apply_offset`; тест `test_apply_offset_preserves_emph`.  
+**Fingerprint** (commit после гейта): `emph` per word + `subtitle_keywords` в `_reel_render_fingerprint`.
 
-**Гейт не пройден** — нужен рендер трёх клипов на PXL с визуальной проверкой. Только он закрывает шаг.
+**Гейт пройден** (25 сен 2026, PXL_20260729_085910095_34f06abf, 4 клипа):  
+- r04 `h:3 | k:3=страх;4=сигнал` — cold open + 6 emph слов ✓  
+- r02 `85@1.15 | k:2=поломан;2=силу` — @speed + 2 emph слова ✓  
+- r03 `k:2=сигнал*` — prefix match `сигнал*` → `сигналит,` ×2 ✓  
+- r01 `k:2=страх` — deliberate miss → warning, рендер ok ✓
 
 Флаг `subtitle_keywords` (по умолчанию `false`).
 
