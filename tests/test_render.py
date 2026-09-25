@@ -879,6 +879,40 @@ def test_crop_emits_title_description_sidecar_txt(tmp_path, render_cfg, fake_ffm
     assert "Контринтуитивный момент" in content
 
 
+# ------------------------------------------------------------ title plate in filter chain
+
+@pytest.mark.parametrize("fps", [30.0, 29.97])
+def test_title_overlay_in_filter_chain_at_fps(tmp_path, render_cfg, fake_ffmpeg, monkeypatch, fps):
+    monkeypatch.setattr(render, "_probe_source_fps", lambda *_: fps)
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"plate-fps-test")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.5)]
+    reel.title_overlay = "Тест"
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, subtitles_cfg=subs_cfg)
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert "ass=" in vf
+
+
+def test_no_plate_without_title_overlay(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"no-plate-video")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.5)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+    built = []
+    orig = render.build_ass
+    monkeypatch.setattr(render, "build_ass", lambda *a, **kw: built.append(r := orig(*a, **kw)) or r)
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, subtitles_cfg=subs_cfg)
+    assert built
+    assert "Style: Title" not in built[0]
+
+
 # ------------------------------------------------------------ фоновая музыка (микс/loop/ducking)
 
 from autoreels.core.config import Music

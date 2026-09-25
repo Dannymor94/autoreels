@@ -3962,7 +3962,6 @@ def cmd_resume(*, root=None, ffmpeg=None, encoder=None, profile=None) -> int:
     root = Path(root) if root is not None else _project_root()
     inputs = root / "inputs"
     manifests_dir = root / "manifests"
-    out_root = root / "reels-out"
     did_something = False
 
     parts = sorted(inputs.glob("*.part")) if inputs.is_dir() else []
@@ -3978,13 +3977,12 @@ def cmd_resume(*, root=None, ffmpeg=None, encoder=None, profile=None) -> int:
     for mf in (_glob_manifests(manifests_dir) if manifests_dir.is_dir() else []):
         try:
             m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
-            if _missing_reels(m, out_root / Path(m.source).stem):
-                pending.append(mf.name)
+            pending.append(mf.name)
         except Exception:  # noqa: BLE001
             continue
     if pending:
         did_something = True
-        print(f"дорендериваю {len(pending)} манифест(ов) с недостающими клипами…", flush=True)
+        print(f"проверяю/дорендериваю {len(pending)} манифест(ов)…", flush=True)
         cmd_render(root=root, ffmpeg=ffmpeg, encoder=encoder, profile=profile)
 
     if not did_something:
