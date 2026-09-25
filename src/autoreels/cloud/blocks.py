@@ -577,6 +577,14 @@ _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
 # (join backward), digits, and trailing '+'/'++' (join 1 or 2 following blocks).
 _COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*(?:@[\d.]+)?)\s*(?:\|(.*))?$")
 
+# Single source for c:/k: field docs — shared by compact and verbose review exports.
+_CK_FIELDS_DOC = (
+    "#   c:N,M,N-M  close shot on sentences — the line that should land (two_shot: true only).\n"
+    "#              Same numbering as s:/e:/x:. Example: 9 85 | c:3\n"
+    "#   k:N=word1,word2[;M=word3]  stress key words — 1–2 words that carry the meaning.\n"
+    "#              Case-insensitive, ё→е, *=prefix. Example: 11 90 | k:4=страх,сигнал\n"
+)
+
 _COMPACT_PROMPT = (
     "# Score each block 0-100 for standalone short-video quality.\n"
     "# Leave weak blocks unscored (omit the number).\n"
@@ -610,11 +618,8 @@ _COMPACT_PROMPT = (
     "#   x:N,M,N-M  exclude sentences by number: cut them out and join what remains.\n"
     "#              Example: s:3 e:12 | x:7,9-10  keeps sentences 3-12 minus 7, 9, 10.\n"
     "#   h:N   cold open: play sentence N first, then the clip from its start\n"
-    "#   c:N,M,N-M  close shot on these sentences (two_shot: true only); same numbering as s:/e:/x:\n"
-    "#              Interim field — will become part of the 'emph' beat syntax in a future update.\n"
-    "#   k:N=word1,word2[;M=word3]  highlight words in sentence(s) (case-insensitive, ё→е, *=prefix).\n"
-    "#              Example: k:4=страх,сигнал;7=тело  — highlights those words in sentences 4 and 7.\n"
-    "#   t: …  overlay this title on the first seconds of the clip  (second-to-last field)\n"
+    + _CK_FIELDS_DOC
+    + "#   t: …  overlay this title on the first seconds of the clip  (second-to-last field)\n"
     "#   d: …  post caption: 1-2 sentences shown under the clip when posted  (LAST field)\n"
     "# Omit s:/e: and the clip starts at the first clean sentence and ends before trailing\n"
     "# wind-down ('да', 'вот', 'как-то так'). Unknown/garbled fields are ignored, not fatal.\n"
@@ -628,7 +633,9 @@ _COMPACT_PROMPT = (
     "#   9 90 | s:2 e:9  start at sentence 2, end at sentence 9\n"
     "#   9 85 | s:7 | e:14 | x:9,10  keep sentences 7-14, drop 9 and 10 from the middle\n"
     "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу\n"
-    "#   12 85 | t: Страх — это не страх, а сигнал | d: Тело подаёт сигнал, а мы принимаем его за страх."
+    "#   12 85 | t: Страх — это не страх, а сигнал | d: Тело подаёт сигнал, а мы принимаем его за страх.\n"
+    "#   5 90 | c:3          close shot on sentence 3 (the line that lands)\n"
+    "#   8 87 | k:2=страх   stress the word 'страх' in sentence 2"
 )
 
 
@@ -850,6 +857,8 @@ def export_review(
         "#   '-'  BEFORE the score: join with the PRECEDING block (attach a run-up)",
         "# A '+' on a block and a '-' on the next name the same join — counted once.",
         "# Speed marker: '@N.NN' after score and merge markers — e.g. '80@1.15', '85+@1.1'.",
+        "#",
+    ] + _CK_FIELDS_DOC.rstrip("\n").splitlines() + [
         "#",
         "",
     ]

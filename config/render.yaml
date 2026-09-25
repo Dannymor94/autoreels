@@ -159,6 +159,10 @@ two_shot: false
 two_shot_xfade: false
 close_shot_scale: 1.25
 close_shot_anchor_y: 0.35
+# M1.7 step 1b: automatic shot alternation. Requires two_shot: true. Off by default.
+two_shot_auto: false
+two_shot_max_wide_sec: 9.0   # seconds of continuous wide before forcing a switch
+two_shot_min_sec: 2.5        # minimum shot duration; suppress switch that would go shorter
 
 # M1.7 step 2: sentence-scoped keyword highlighting in subtitles. Off by default.
 # When off, render is byte-identical to pre-M1.7-step-2 output even if k: fields present.

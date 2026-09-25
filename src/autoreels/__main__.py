@@ -1014,6 +1014,131 @@ def _stage_subtitles(reels, transcript):
     return reels
 
 
+def _find_pause_boundary(words, t_start: float, t_end: float, *, target: float, min_pause: float) -> "float | None":
+    """Find a sentence boundary with inter-sentence gap >= min_pause nearest to target in [t_start, t_end]."""
+    from autoreels.cloud.edit import split_sentences as _sp
+    span = [w for w in words if w.t0 >= t_start - 0.05 and w.t1 <= t_end + 0.05]
+    if len(span) < 2:
+        return None
+    sents = _sp(span)
+    if len(sents) < 2:
+        return None
+    candidates = []
+    for i in range(len(sents) - 1):
+        boundary = sents[i][-1].t1
+        gap = sents[i + 1][0].t0 - boundary
+        if gap >= min_pause and t_start <= boundary <= t_end:
+            candidates.append(boundary)
+    if not candidates:
+        return None
+    return min(candidates, key=lambda b: abs(b - target))
+
+
+def _stage_two_shot_auto(reels, words, *, render_cfg) -> list:
+    """Auto-alternate wide/close at segment seams; add max-wide close_intervals at pause boundaries.
+
+    Formatting stage for both auto and human paths. Manual c: assignments (shot='close' or
+    non-empty close_intervals) are preserved — auto only fills unassigned segments.
+    Requires render_cfg.two_shot=True and render_cfg.two_shot_auto=True.
+    """
+    if not (getattr(render_cfg, "two_shot", False) and getattr(render_cfg, "two_shot_auto", False)):
+        return reels
+    max_wide = getattr(render_cfg, "two_shot_max_wide_sec", 9.0)
+    min_shot = getattr(render_cfg, "two_shot_min_sec", 2.5)
+
+    for reel in reels:
+        _apply_two_shot_auto_reel(reel, words, max_wide=max_wide, min_shot=min_shot)
+    return reels
+
+
+def _apply_two_shot_auto_reel(reel, words, *, max_wide: float, min_shot: float) -> None:
+    """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
+    from autoreels.cloud.edit import split_sentences as _sp
+    segs = reel.effective_segments()
+    if not segs:
+        return
+
+    # Pass 1: alternation at seams, preserving manual assignments.
+    # Manual = shot='close' OR non-empty close_intervals.
+    shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
+    cur = "wide"
+    for i, seg in enumerate(segs):
+        manual = (seg.shot == "close") or bool(getattr(seg, "close_intervals", []))
+        if i > 0:
+            prev_dur = segs[i - 1].end - segs[i - 1].start
+            cur_dur = seg.end - seg.start
+            if prev_dur >= min_shot and cur_dur >= min_shot:
+                cur = "close" if cur == "wide" else "wide"
+        if manual:
+            shot_assign.append(None)
+            cur = "close" if seg.shot == "close" else "wide"
+        else:
+            shot_assign.append(cur)
+
+    # Pass 2: k: sentences prefer close (override "wide" → "close").
+    _k_sents: set = set()
+    if hasattr(reel, "_keyword_spec") and reel._keyword_spec:
+        _k_sents = {idx for idx, _ in reel._keyword_spec}
+    if _k_sents and reel.subtitles:
+        sents = _sp(reel.subtitles)
+        for i, seg in enumerate(segs):
+            if shot_assign[i] != "wide":
+                continue
+            for si, sent in enumerate(sents, 1):
+                if si in _k_sents and sent[0].t0 < seg.end and sent[-1].t1 > seg.start:
+                    shot_assign[i] = "close"
+                    break
+
+    # Apply assignments.
+    new_segs = []
+    for seg, assign in zip(segs, shot_assign):
+        if assign is None:
+            new_segs.append(seg)
+        elif assign == "close":
+            new_segs.append(seg.model_copy(update={"shot": "close", "close_intervals": []}))
+        else:
+            new_segs.append(seg.model_copy(update={"shot": "wide", "close_intervals": []}))
+
+    # Pass 3: max-wide check — scan consecutive wide stretches, insert close_intervals if too long.
+    i = 0
+    result: list = []
+    while i < len(new_segs):
+        seg = new_segs[i]
+        if seg.shot != "close" and not seg.close_intervals:
+            stretch = [i]
+            while (i + 1 < len(new_segs)
+                   and new_segs[i + 1].shot != "close"
+                   and not new_segs[i + 1].close_intervals):
+                i += 1
+                stretch.append(i)
+            wide_total = sum(new_segs[j].end - new_segs[j].start for j in stretch)
+            if wide_total > max_wide:
+                stretch_start = new_segs[stretch[0]].start
+                stretch_end = new_segs[stretch[-1]].end
+                target_abs = stretch_start + max_wide
+                switch_abs = _find_pause_boundary(
+                    words, stretch_start, stretch_end, target=target_abs, min_pause=0.3
+                )
+                if switch_abs is not None:
+                    for j in stretch:
+                        s = new_segs[j]
+                        if s.start <= switch_abs < s.end:
+                            rel = switch_abs - s.start
+                            seg_dur = s.end - s.start
+                            if rel >= min_shot and (seg_dur - rel) >= min_shot:
+                                new_segs[j] = s.model_copy(update={"close_intervals": [[rel, seg_dur]]})
+                            break
+            for j in stretch:
+                result.append(new_segs[j])
+            i = stretch[-1] + 1
+        else:
+            result.append(seg)
+            i += 1
+
+    if result != list(segs):
+        reel.segments = result
+
+
 # --- Manual (human-review) path: which stages may touch a human selection ------------------
 # A human selection is formatted, never second-guessed. FORMATTING stages adjust a clip's
 # boundaries/subtitles; DECIDING stages choose whether a clip exists or how much of it survives,
@@ -1025,6 +1150,7 @@ _MANUAL_FORMATTING_STAGES = (
     "_stage_snap", "renumber_reels",
     "_stage_min_end_gap",
     "_stage_padding", "_stage_subtitles", "trim_hanging_subtitles",
+    "_stage_two_shot_auto",
 )
 # Two stages are split: each has a repair half (moves boundaries — formatting) and a drop half
 # (removes a clip — deciding). The manual path runs their repair half only, via the flags below;
@@ -1079,7 +1205,7 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         if abs(desired - last.end) < 1e-6:
             continue
         if r.segments:
-            r.segments[-1] = _Seg(start=r.segments[-1].start, end=desired)
+            r.segments[-1] = r.segments[-1].model_copy(update={"end": desired})
         r.end = desired
 
 
@@ -1818,6 +1944,7 @@ def _cmd_run_impl(
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
         source_kind=getattr(r0_cfg, "source_kind", ""),
@@ -3237,6 +3364,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         return 1
 
     r0_cfg = load_r0_config(root / "config" / "r0.yaml")
+    _render_yaml = root / "config" / "render.yaml"
+    if _render_yaml.exists():
+        render_cfg = load_render_config(_render_yaml)
+    else:
+        from types import SimpleNamespace as _NS
+        render_cfg = _NS(two_shot=False, two_shot_auto=False, role="both")
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
 
     # Load manifest + transcript.
@@ -3739,6 +3872,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             if len(reel.segments) == 1 and reel.segments[0].start == reel.start and reel.segments[0].end == reel.end:
                 reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
+    # M1.7 step 1b: auto wide/close alternation at seams (formatting — runs on human and auto paths).
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg)
+
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,
     # multi-segment, cold open, explicit e:). Runs LAST so nothing downstream shortens it.
@@ -3866,7 +4002,6 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         )
 
     if render:
-        render_cfg = load_render_config(root / "config" / "render.yaml")
         if render_cfg.role == "analyze":
             print("  рендер пропущен: role=analyze запрещает рендер на этой машине",
                   file=sys.stderr)
