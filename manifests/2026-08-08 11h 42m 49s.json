@@ -274,14 +274,10 @@
       "segments": [
         {
           "start": 131.24,
-          "end": 148.87
+          "end": 151.52
         },
         {
-          "start": 151.52,
-          "end": 154.61
-        },
-        {
-          "start": 156.56,
+          "start": 154.36,
           "end": 158.75
         },
         {
@@ -1287,14 +1283,18 @@
       "segments": [
         {
           "start": 340.5832,
-          "end": 363.31317
+          "end": 363.94318
         },
         {
-          "start": 363.94318,
-          "end": 367.79315
+          "start": 364.7032,
+          "end": 368.90317
         },
         {
-          "start": 368.90317,
+          "start": 369.38318,
+          "end": 373.32318
+        },
+        {
+          "start": 373.38318,
           "end": 380.66318
         }
       ],
@@ -1752,10 +1752,10 @@
       "segments": [
         {
           "start": 395.62316,
-          "end": 397.75317
+          "end": 398.60315
         },
         {
-          "start": 398.60315,
+          "start": 402.36316,
           "end": 427.74634
         }
       ],
@@ -2357,7 +2357,16 @@
       "id": "r07",
       "start": 546.7263700000001,
       "end": 572.18634,
-      "segments": [],
+      "segments": [
+        {
+          "start": 546.7263700000001,
+          "end": 557.32635
+        },
+        {
+          "start": 565.92633,
+          "end": 572.18634
+        }
+      ],
       "cold_open": null,
       "title_overlay": "За маской прячется ваш дар",
       "score": 85,
@@ -2688,7 +2697,9 @@
       "speed": 1.0,
       "tail_last_word_end": 570.68634,
       "tail_next_word_start": 571.18634,
-      "warnings": []
+      "warnings": [
+        "short clip 16.9s (< 18s floor)"
+      ]
     },
     {
       "id": "r08",
@@ -2701,6 +2712,10 @@
         },
         {
           "start": 597.52637,
+          "end": 600.86633
+        },
+        {
+          "start": 607.30634,
           "end": 610.20636
         }
       ],
@@ -2960,7 +2975,8 @@
       "tail_last_word_end": 608.70636,
       "tail_next_word_start": 609.52637,
       "warnings": [
-        "dangling start: opens on «То»"
+        "dangling start: opens on «То»",
+        "short clip 14.1s (< 18s floor)"
       ]
     }
   ]

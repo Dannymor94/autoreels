@@ -664,6 +664,7 @@ def build_concat_cmd(
     rate_control: str | None = None,
     qp: int | None = None,
     xfade_fps: float = 0.0,
+    duration_sec: float | None = None,
 ) -> list[str]:
     """ffmpeg-команда для многосегментного клипа: КАЖДОЕ окно — отдельный вход с собственным
     input-side seek (`-ss start -t dur -i source`), а `filter_complex` только сбрасывает PTS и
@@ -696,6 +697,9 @@ def build_concat_cmd(
         # to it so the two stream durations are equal. The edge-fade concat already makes the audio
         # the segment-sum length; this trims only loudnorm's trailing tail / the sub-frame remainder.
         "-shortest",
+        # Trim to expected duration: hardware encoders (hevc_videotoolbox, hevc_amf) add 1 extra
+        # frame per xfade seam; for N windows that is N-1 frames over the 2.5-frame invariant limit.
+        *(["-t", _ts_dur(duration_sec)] if duration_sec else []),
         *(["-movflags", "+faststart"] if faststart else []),
         str(out),
     ]
@@ -1217,6 +1221,7 @@ def _render_segments(
                     music_path=music_path,
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
                     xfade_fps=_fps() if _xfade_actual > 0 else 0.0,
+                    duration_sec=_out_dur,
                 )
             clip_dur_s = clip_duration  # actual output length (xfade-adjusted for multi-window)
             returncode, stderr_text = _run_ffmpeg_with_progress(

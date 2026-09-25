@@ -3,9 +3,14 @@
 1. Two-segment reel with xfade has duration = sum − 1 × xfade; subtitles land correctly.
 2. video_xfade_sec=0 → hard concat (byte-identical filtergraph to pre-xfade path).
 3. Frame-alignment invariant: xfade snapped to frame grid → output duration is frame-aligned.
+4. build_concat_cmd with 4 windows (3 seams) includes -t matching expected duration.
+5. build_concat_cmd without duration_sec does not add -t (no-seams path unchanged).
 """
 from autoreels.core.models import Segment
-from autoreels.local.render import _concat_segments_graph, _snap_windows_to_frames
+from autoreels.local.render import (
+    _concat_segments_graph, _snap_windows_to_frames, _expected_output_duration,
+    build_concat_cmd, _ts_dur,
+)
 from autoreels.local.subtitles import remap_to_output
 from autoreels.core.models import Word
 
@@ -84,3 +89,52 @@ def test_xfade_frame_aligned():
     out_frames = out_dur * fps
     assert abs(out_frames - round(out_frames)) < 1e-9, \
         f"output duration {out_dur}s = {out_frames} frames — not integer"
+
+
+# ── Test 4: 3-seam clip command includes -t capping at expected duration ──────
+def test_three_seam_cmd_includes_t_duration():
+    """build_concat_cmd with 4 windows passes -t equal to _ts_dur(expected_duration),
+    so hevc_videotoolbox/amf encoder artifacts (1 frame per seam) are trimmed off."""
+    fps = 29.97
+    # r02 segment values from the manifest (post-snap approximation)
+    segs = [
+        _seg(131.231, 151.517),
+        _seg(154.354, 158.758),
+        _seg(159.393, 169.503),
+        _seg(170.103, 195.728),
+    ]
+    xfade = round(0.0667 * fps) / fps  # 2 frames at 29.97
+
+    expected = _expected_output_duration(segs, xfade_sec=xfade)
+    windows = [(s.start, s.end - s.start) for s in segs]
+
+    cmd = build_concat_cmd(
+        "ffmpeg", "source.mp4", "out.mp4",
+        windows=windows, filter_complex="[0:v]null[v];[0:a]anull[a]",
+        codec="hevc_videotoolbox", preset="medium",
+        audio_codec="aac", audio_bitrate="128k",
+        xfade_fps=fps, duration_sec=expected,
+    )
+    shortest_idx = cmd.index("-shortest")
+    tail = cmd[shortest_idx:]
+    assert "-t" in tail, "output -t not found after -shortest"
+    t_val = tail[tail.index("-t") + 1]
+    assert t_val == _ts_dur(expected), f"-t {t_val!r} != {_ts_dur(expected)!r}"
+
+
+# ── Test 5: no-seams path — duration_sec=None does not inject -t ──────────────
+def test_no_seams_cmd_no_t_duration():
+    """build_concat_cmd without duration_sec (or duration_sec=None) must NOT add -t;
+    callers that don't pass it are unaffected."""
+    windows = [(0.0, 30.0)]
+    cmd = build_concat_cmd(
+        "ffmpeg", "source.mp4", "out.mp4",
+        windows=windows, filter_complex="[0:v]null[v];[0:a]anull[a]",
+        codec="libx264", preset="fast",
+        audio_codec="aac", audio_bitrate="128k",
+    )
+    # -t for OUTPUT must not appear (INPUT -t args come in pairs with -ss/-i)
+    # All -t values are input-side; if no duration_sec, there is no output -t.
+    # The output is the last non-flag argument; check no -t appears after -shortest.
+    shortest_idx = cmd.index("-shortest")
+    assert "-t" not in cmd[shortest_idx:], "unexpected -t after -shortest"
