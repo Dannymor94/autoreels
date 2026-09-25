@@ -5,11 +5,13 @@
 3. Frame-alignment invariant: xfade snapped to frame grid → output duration is frame-aligned.
 4. build_concat_cmd with 4 windows (3 seams) includes -t matching expected duration.
 5. build_concat_cmd without duration_sec does not add -t (no-seams path unchanged).
+6. pre_roll: build_cut_cmd with pre_roll seeks earlier and adds trim=start={pr} in vf/af.
+7. pre_roll: build_concat_cmd with pre_roll seeks each window earlier; filtergraph adds trim.
 """
 from autoreels.core.models import Segment
 from autoreels.local.render import (
     _concat_segments_graph, _snap_windows_to_frames, _expected_output_duration,
-    build_concat_cmd, _ts_dur,
+    build_concat_cmd, build_cut_cmd, _ts_dur, _ts, _num,
 )
 from autoreels.local.subtitles import remap_to_output
 from autoreels.core.models import Word
@@ -138,3 +140,66 @@ def test_no_seams_cmd_no_t_duration():
     # The output is the last non-flag argument; check no -t appears after -shortest.
     shortest_idx = cmd.index("-shortest")
     assert "-t" not in cmd[shortest_idx:], "unexpected -t after -shortest"
+
+
+# ── Test 6: build_cut_cmd pre_roll seeks earlier + adds trim filter ───────────
+def test_cut_cmd_pre_roll_seek_and_trim():
+    """build_cut_cmd(pre_roll=2.0) must seek 2 s before start and prepend
+    trim=start={pre_roll},setpts=PTS-STARTPTS to vf/af (relative, because
+    input-side seek resets frame PTS to 0)."""
+    start = 66.1
+    pre_roll = 2.0
+    vf = "crop=960:1700:864:350,scale=1080:1920"
+    af = "loudnorm=I=-14:TP=-1.5:LRA=11"
+    cmd = build_cut_cmd(
+        "ffmpeg", "source.mp4", start, start + 17.0, "out.mp4",
+        codec="hevc_videotoolbox", preset="medium",
+        audio_codec="aac", audio_bitrate="128k",
+        vf=vf, af=af, pre_roll=pre_roll,
+    )
+    # Input seek must be pre_roll seconds before start
+    ss_idx = cmd.index("-ss")
+    assert cmd[ss_idx + 1] == _ts(start - pre_roll), \
+        f"-ss should be {_ts(start - pre_roll)}, got {cmd[ss_idx + 1]}"
+    # vf must start with trim=start={_num(pre_roll)},setpts=PTS-STARTPTS (relative PTS after seek)
+    vf_idx = cmd.index("-vf")
+    vf_val = cmd[vf_idx + 1]
+    assert vf_val.startswith(f"trim=start={_num(pre_roll)},setpts=PTS-STARTPTS,"), \
+        f"-vf doesn't start with trim prefix: {vf_val!r}"
+    assert vf in vf_val, f"original vf missing from -vf: {vf_val!r}"
+    # af must start with atrim=start={_num(pre_roll)},asetpts=PTS-STARTPTS
+    af_idx = cmd.index("-af")
+    af_val = cmd[af_idx + 1]
+    assert af_val.startswith(f"atrim=start={_num(pre_roll)},asetpts=PTS-STARTPTS,"), \
+        f"-af doesn't start with atrim prefix: {af_val!r}"
+
+
+# ── Test 7: build_concat_cmd pre_roll seeks each window earlier ───────────────
+def test_concat_cmd_pre_roll_seek():
+    """build_concat_cmd(pre_roll=2.0) seeks each window 2 s before its start;
+    _concat_segments_graph(pre_roll=2.0) adds trim=start={pr} (relative) in the graph."""
+    segs = [_seg(131.231, 151.517), _seg(159.393, 169.503)]
+    windows = [(s.start, s.end - s.start) for s in segs]
+    pre_roll = 2.0
+    prefix, _, _ = _concat_segments_graph(segs, 0.01, pre_roll=pre_roll)
+
+    # Graph must contain trim=start={_num(pr)} (relative) for each segment; both segs start > 2.0
+    for s in segs:
+        pr = min(pre_roll, s.start)
+        assert f"trim=start={_num(pr)}" in prefix, \
+            f"trim=start={_num(pr)} not found in filtergraph prefix"
+
+    cmd = build_concat_cmd(
+        "ffmpeg", "source.mp4", "out.mp4",
+        windows=windows, filter_complex=f"{prefix};[vseg]null[v];[aseg]anull[a]",
+        codec="hevc_videotoolbox", preset="medium",
+        audio_codec="aac", audio_bitrate="128k",
+        pre_roll=pre_roll,
+    )
+    # Each -ss must be (start - min(pre_roll, start)) seconds before window start
+    ss_positions = [i for i, tok in enumerate(cmd) if tok == "-ss"]
+    for idx, (st, _dur) in zip(ss_positions, windows):
+        pr = min(pre_roll, st)
+        expected_ss = _ts(st - pr)
+        assert cmd[idx + 1] == expected_ss, \
+            f"window start={st}: expected -ss {expected_ss}, got {cmd[idx + 1]}"

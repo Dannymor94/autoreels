@@ -402,6 +402,7 @@ def build_cut_cmd(
     quality: str | None = None,
     rate_control: str | None = None,
     qp: int | None = None,
+    pre_roll: float = 0.0,
 ) -> list[str]:
     """Собрать команду ffmpeg: вырезать окно start→end из `source`.
 
@@ -413,6 +414,12 @@ def build_cut_cmd(
     Rate-control — целевой битрейт (`video_bitrate`) под соцсети: компактный файл сразу,
     без второго прохода. `faststart` кладёт moov-atom в начало (совместимость соцсетей).
     `cq` больше не влияет на команду (битрейт-режим), оставлен для совместимости вызовов.
+
+    `pre_roll` — seek this many seconds before `start` so the decoder crosses a keyframe
+    boundary and has settled by the time the first content frame arrives. trim=start={start}
+    (video) / atrim=start={start} (audio) remove the pre-roll from the encoded output.
+    Not applied to the filter_complex (music) path — timing offsets in that graph are relative
+    to the source start and would need separate adjustments.
     """
     duration = round(end - start, 3)
     quality_args = _video_quality_args(codec, preset, video_bitrate, pix_fmt,
@@ -433,17 +440,26 @@ def build_cut_cmd(
             *(["-movflags", "+faststart"] if faststart else []),
             str(out),
         ]
+    # Decoder warm-up: seek pre_roll seconds before start; after input-side seek, ffmpeg resets
+    # frame PTS to 0, so trim uses the relative offset (pr), not the source-absolute start time.
+    # pr = 0 → identical to the old path.
+    pr = min(pre_roll, start) if pre_roll > 0 else 0.0
+    vf_trim = f"trim=start={_num(pr)},setpts=PTS-STARTPTS"
+    af_trim = f"atrim=start={_num(pr)},asetpts=PTS-STARTPTS"
+    vf_full = f"{vf_trim},{vf}" if (pr > 0 and vf) else (vf_trim if pr > 0 else vf)
+    af_full = f"{af_trim},{af}" if (pr > 0 and af) else (af_trim if pr > 0 else af)
     return [
         str(ffmpeg), "-y", "-loglevel", "error",
         # autorotate (ПО УМОЛЧАНИЮ, без -noautorotate): rotation-метаданные применяются ДО
         # -vf, поэтому crop-фильтр видит кадр в ОТОБРАЖАЕМОМ пространстве — том же, что и
         # калибратор (тоже autorotate). Кадр НЕ поворачиваем сами (никакого transpose):
         # вертикальность рилса даёт кроп внутри отображаемого кадра.
-        "-ss", _ts(start),
+        "-ss", _ts(start - pr),
+        *(["-t", _ts_dur(pr + duration)] if pr > 0 else []),  # input-side limit
         "-i", str(source),
         "-t", _ts(duration),
-        *(["-vf", vf] if vf else []),
-        *(["-af", af] if af else []),
+        *(["-vf", vf_full] if vf_full else []),
+        *(["-af", af_full] if af_full else []),
         "-c:v", codec,
         *quality_args,
         "-c:a", audio_codec,
@@ -455,6 +471,10 @@ def build_cut_cmd(
 
 _FPS_FALLBACK = 30.0
 _FPS_MAX_PLAUSIBLE = 1000.0  # rejects container timebases like 90000/1
+# Decoder warm-up: seek this far before each window start so the decoder has settled before
+# the first content frame arrives. Covers the ~1 s keyframe interval of typical phone footage
+# with a 1 s safety margin. build_cut_cmd and build_concat_cmd both honour this.
+_PRE_ROLL_SEC = 2.0
 
 
 def _parse_fps_token(token: str) -> float:
@@ -592,7 +612,8 @@ def _assert_windows_frame_aligned(windows, fps: float) -> None:
 
 
 def _concat_segments_graph(segments, edge_fade_sec: float, *,
-                           video_xfade_sec: float = 0.0) -> tuple[str, str, str]:
+                           video_xfade_sec: float = 0.0,
+                           pre_roll: float = 0.0) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
     Each window is a SEPARATE ffmpeg input, opened with its own input-side `-ss`/`-t` (see
@@ -600,6 +621,11 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     PTS (`setpts=PTS-STARTPTS`) and concat. Nothing is trimmed from a shared decode, so a cold-open
     hook that sits LATER in the source than the body no longer forces ffmpeg to buffer every frame
     between them — that unbounded buffering was the OOM on long cold opens.
+
+    `pre_roll > 0`: build_concat_cmd has seeked each input up to `pre_roll` seconds before the
+    window start so the decoder settles before the content frame arrives. After input-side seek,
+    ffmpeg resets frame PTS to 0, so the pre-roll is stripped with `trim=start={pr}` (relative),
+    where `pr = min(pre_roll, s.start)`, then `setpts=PTS-STARTPTS` resets the output to PTS=0.
 
     Video: when `video_xfade_sec > 0`, joins with a chain of xfade filters (one per seam) so the
     pose change is masked by a short dissolve; the output is shorter than the segment sum by
@@ -614,8 +640,16 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     f = edge_fade_sec
     parts: list[str] = []
     for i, s in enumerate(segments):
-        parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
-        achain = f"[{i}:a]asetpts=PTS-STARTPTS"
+        pr = min(pre_roll, s.start) if pre_roll > 0 else 0.0
+        if pr > 0:
+            # Input-side seek resets PTS to 0; trim relative pre-roll seconds, then reset.
+            parts.append(
+                f"[{i}:v]trim=start={_num(pr)},setpts=PTS-STARTPTS[v{i}]"
+            )
+            achain = f"[{i}:a]atrim=start={_num(pr)},asetpts=PTS-STARTPTS"
+        else:
+            parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+            achain = f"[{i}:a]asetpts=PTS-STARTPTS"
         if f > 0:
             out_st = max(0.0, (s.end - s.start) - f)
             achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
@@ -665,6 +699,7 @@ def build_concat_cmd(
     qp: int | None = None,
     xfade_fps: float = 0.0,
     duration_sec: float | None = None,
+    pre_roll: float = 0.0,
 ) -> list[str]:
     """ffmpeg-команда для многосегментного клипа: КАЖДОЕ окно — отдельный вход с собственным
     input-side seek (`-ss start -t dur -i source`), а `filter_complex` только сбрасывает PTS и
@@ -685,7 +720,10 @@ def build_concat_cmd(
         # never a left input — it goes straight to the final xfade as the right stream — so
         # padding it would leak into the output and lengthen the reel by 1 frame per seam.
         pad = 1 / xfade_fps if xfade_fps > 0 and n_win > 1 and i < n_win - 1 else 0.0
-        cmd += ["-ss", _ts(st), "-t", _ts_dur(dur + pad), "-i", str(source)]
+        # Decoder warm-up: seek pre_roll seconds before window start; _concat_segments_graph
+        # strips the pre-roll via trim=start={pr} (relative, because input-side seek resets PTS).
+        pr = min(pre_roll, st) if pre_roll > 0 else 0.0
+        cmd += ["-ss", _ts(st - pr), "-t", _ts_dur(pr + dur + pad), "-i", str(source)]
     if music_path:
         cmd += ["-stream_loop", "-1", "-i", str(music_path)]
     cmd += [
@@ -1185,7 +1223,6 @@ def _render_segments(
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
             if len(segs) == 1:
-                # Single window: unchanged fast -ss/-t cut (identical output for legacy manifests).
                 cmd = build_cut_cmd(
                     ffmpeg_bin, source, segs[0].start, segs[0].end, out,
                     codec=codec, preset=enc.preset,
@@ -1194,6 +1231,7 @@ def _render_segments(
                     vf=(None if reel_fc else reel_vf), af=reel_af,
                     music_path=music_path, filter_complex=reel_fc,
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                    pre_roll=_PRE_ROLL_SEC,
                 )
             else:
                 # Multi-window: concat the windows (cold open + body) in a single encode. Each
@@ -1201,7 +1239,8 @@ def _render_segments(
                 # independent — a cold-open hook later in the source than the body no longer buffers
                 # every frame in between (was an OOM). Input i supplies [i:v]/[i:a]; music is [n:a].
                 prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec,
-                                                             video_xfade_sec=_xfade_actual)
+                                                             video_xfade_sec=_xfade_actual,
+                                                             pre_roll=_PRE_ROLL_SEC)
                 windows = [(w.start, w.end - w.start) for w in segs]
                 _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
                 if music_path:
@@ -1222,6 +1261,7 @@ def _render_segments(
                     quality=active.quality, rate_control=active.rate_control, qp=active.qp,
                     xfade_fps=_fps() if _xfade_actual > 0 else 0.0,
                     duration_sec=_out_dur,
+                    pre_roll=_PRE_ROLL_SEC,
                 )
             clip_dur_s = clip_duration  # actual output length (xfade-adjusted for multi-window)
             returncode, stderr_text = _run_ffmpeg_with_progress(

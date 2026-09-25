@@ -593,10 +593,13 @@ def test_render_cut_one_command_per_reel(tmp_path, render_cfg, fake_ffmpeg):
         out_dir / "r02_raw.mp4",
         out_dir / "r03_raw.mp4",
     ]
-    # окно второго клипа попало в его команду
+    # окно второго клипа попало в его команду; -ss учитывает pre_roll (100-2=98)
     cmd2 = fake_ffmpeg[1]
-    assert _val_after(cmd2, "-ss") == "100.000"
-    assert _val_after(cmd2, "-t") == "30.000"
+    assert _val_after(cmd2, "-ss") == "98.000"
+    # output-side -t (after -i) is still the window duration 30s
+    i_idx = cmd2.index("-i")
+    t_after_i = next(cmd2[j + 1] for j in range(i_idx + 1, len(cmd2)) if cmd2[j] == "-t")
+    assert t_after_i == "30.000"
 
 
 def test_render_cut_output_paths_are_pathlib_under_out_dir(tmp_path, render_cfg, fake_ffmpeg):
@@ -767,7 +770,8 @@ def test_crop_cmd_has_crop_and_scale_from_setup(tmp_path, render_cfg, fake_ffmpe
 
     vf = _val_after(fake_ffmpeg[0], "-vf")
     # crop=w:h:x:y из setup.crop, затем scale=1080:1920 из setup.scale.
-    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+    # pre_roll adds a trim prefix; the crop/scale content must follow it.
+    assert "crop=1215:2160:1240:0,scale=1080:1920" in vf
 
 
 def test_crop_numbers_come_from_setup_not_reel(tmp_path, render_cfg, fake_ffmpeg):
@@ -781,9 +785,11 @@ def test_crop_numbers_come_from_setup_not_reel(tmp_path, render_cfg, fake_ffmpeg
 
     vf0 = _val_after(fake_ffmpeg[0], "-vf")
     vf1 = _val_after(fake_ffmpeg[1], "-vf")
-    assert vf0 == vf1 == "crop=1215:2160:1240:0,scale=1080:1920"
-    # окно реза по-прежнему разное у разных reel — кроп его не подменяет
-    assert _val_after(fake_ffmpeg[1], "-ss") == "99.000"
+    # pre_roll adds trim prefix; crop/scale content must be present in both
+    assert "crop=1215:2160:1240:0,scale=1080:1920" in vf0
+    assert "crop=1215:2160:1240:0,scale=1080:1920" in vf1
+    # окно реза по-прежнему разное у разных reel; -ss = start - 2s pre_roll
+    assert _val_after(fake_ffmpeg[1], "-ss") == "97.000"  # 99.0 - 2.0
 
 
 def test_crop_output_is_vertical_id_mp4_not_raw(tmp_path, render_cfg, fake_ffmpeg):
@@ -811,8 +817,11 @@ def test_crop_cuts_window_and_passes_encoder(tmp_path, render_cfg, fake_ffmpeg, 
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
     cmd = fake_ffmpeg[0]
-    assert _val_after(cmd, "-ss") == "284.500"
-    assert _val_after(cmd, "-t") == "57.000"
+    assert _val_after(cmd, "-ss") == "282.500"   # 284.5 - 2.0 pre_roll
+    # output-side -t (after -i) is the actual clip duration
+    i_idx = cmd.index("-i")
+    t_out = next(cmd[j + 1] for j in range(i_idx + 1, len(cmd)) if cmd[j] == "-t")
+    assert t_out == "57.000"
     assert _val_after(cmd, "-c:v") == "h264_amf"
 
 
@@ -1548,7 +1557,7 @@ def test_crop_rotation_zero_adds_no_rotate_filter(tmp_path, render_cfg, fake_ffm
 
     vf = _val_after(fake_ffmpeg[0], "-vf")
     assert "rotate=" not in vf
-    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+    assert "crop=1215:2160:1240:0,scale=1080:1920" in vf
 
 
 def test_crop_rotation_prepends_rotate_before_crop(tmp_path, render_cfg, fake_ffmpeg):
@@ -1562,7 +1571,7 @@ def test_crop_rotation_prepends_rotate_before_crop(tmp_path, render_cfg, fake_ff
 
     vf = _val_after(fake_ffmpeg[0], "-vf")
     rad = math.radians(3.0)
-    assert vf == f"rotate={rad:.6f},crop=1215:2160:1240:0,scale=1080:1920"
+    assert f"rotate={rad:.6f},crop=1215:2160:1240:0,scale=1080:1920" in vf
     assert vf.index("rotate=") < vf.index("crop=") < vf.index("scale=")
 
 
@@ -1711,7 +1720,7 @@ def test_crop_default_neutral_palette_leaves_vf_unchanged(tmp_path, render_cfg, 
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
     vf = _val_after(fake_ffmpeg[0], "-vf")
-    assert vf == "crop=1215:2160:1240:0,scale=1080:1920"
+    assert "crop=1215:2160:1240:0,scale=1080:1920" in vf
     assert "eq=" not in vf and "unsharp=" not in vf
 
 
@@ -1725,7 +1734,7 @@ def test_crop_palette_arg_inserts_eq_between_scale_and_end(tmp_path, render_cfg,
                 palette="vivid")
 
     vf = _val_after(fake_ffmpeg[0], "-vf")
-    assert vf == "crop=1215:2160:1240:0,scale=1080:1920,eq=contrast=1.1:saturation=1.15"
+    assert "crop=1215:2160:1240:0,scale=1080:1920,eq=contrast=1.1:saturation=1.15" in vf
     assert vf.index("eq=") > vf.index("scale=")
 
 
