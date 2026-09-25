@@ -160,6 +160,10 @@ two_shot_xfade: false
 close_shot_scale: 1.25
 close_shot_anchor_y: 0.35
 
+# M1.7 step 2: sentence-scoped keyword highlighting in subtitles. Off by default.
+# When off, render is byte-identical to pre-M1.7-step-2 output even if k: fields present.
+subtitle_keywords: false
+
 subtitles:
   # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
   font: Montserrat

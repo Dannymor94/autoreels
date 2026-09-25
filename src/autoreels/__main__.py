@@ -2103,7 +2103,8 @@ def cmd_run_batch(
     return ok, failed, skipped, zero_harvest
 
 
-def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_path) -> str:
+def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_path,
+                             subtitle_keywords: bool = False) -> str:
     """Hash of everything that determines a reel's rendered bytes, so a stale clip is re-rendered.
 
     Inputs, and why each is here (a change in any changes the output):
@@ -2117,7 +2118,9 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
       (hevc_amf vs hevc_videotoolbox) is deliberately EXCLUDED — it is per-machine, and the same
       profile on Mac vs Windows should not force a re-render of an otherwise-identical clip;
     - music: background track mixed under the speech;
-    - subtitles: burned-in words (change when bounds or the transcript change);
+    - subtitles: burned-in words (change when bounds or the transcript change); emph field included
+      so turning on k: keywords forces re-render;
+    - subtitle_keywords: the on/off flag — changing it changes the burned-in .ass;
     - tail_last_word_end / tail_next_word_start: drive the tail fade that mutes a pulled-in word.
     NOT included: global render.yaml audio settings (a rare, cross-cutting change, out of scope).
     """
@@ -2134,7 +2137,9 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
         "profile": profile,
         "zoom": bool(zoom_on),
         "music": Path(music_path).name if music_path else None,
-        "subtitles": [[round(w.t0, 3), round(w.t1, 3), w.word] for w in reel.subtitles],
+        "subtitles": [[round(w.t0, 3), round(w.t1, 3), w.word,
+                       bool(getattr(w, "emph", False))] for w in reel.subtitles],
+        "subtitle_keywords": subtitle_keywords,
         "tail": [getattr(reel, "tail_last_word_end", None), getattr(reel, "tail_next_word_start", None)],
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
@@ -2476,9 +2481,12 @@ def cmd_render(
             # Отпечаток определения рила (окна, скорость, заголовок, cold open, кроп, палитра,
             # профиль…). Клип с несовпавшим отпечатком перерендеривается, даже если файл на месте —
             # иначе пере-применённое ревью с новыми границами оставляло бы старый клип в reels-out/.
-            def _fp(r, _setup=manifest.setup, _pal=eff_pal, _prof=prof_name, _zoom=zoom_on):
+            _kw_on = getattr(render_cfg, "subtitle_keywords", False)
+            def _fp(r, _setup=manifest.setup, _pal=eff_pal, _prof=prof_name, _zoom=zoom_on,
+                    _kw=_kw_on):
                 return _reel_render_fingerprint(r, setup=_setup, palette=_pal, profile=_prof,
-                                                zoom_on=_zoom, music_path=music_path)
+                                                zoom_on=_zoom, music_path=music_path,
+                                                subtitle_keywords=_kw)
 
             if reels_filter is not None:
                 # --reels: force-render selected reels, bypass fingerprint check.
