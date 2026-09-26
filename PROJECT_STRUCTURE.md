@@ -28,7 +28,11 @@ autoreels/
 ├── scripts/                  # утилиты (не часть пайплайна)
 │   └── probe_groq.py         # прямой пробник Groq/OpenRouter лимитов (OTPM-измерение)
 │
-├── docs/                     # аудиты и технические разборы
+├── docs/                     # планы шагов, аудиты и технические разборы
+│   ├── PLAN-M1.7.md          # подача: два плана, авторитм, перестановка, ключевые слова…
+│   ├── task-scripted-clips.md  # сценарная разметка тактами (`>`, zoom:/hold:/emph)
+│   ├── pipeline-order.md     # порядок стадий сборки клипа
+│   ├── audit-bug-classes.md  # классы багов, всплывавшие ≥2 раз, и их гварды
 │   ├── audit-groq-413.md     # корень 429: OTPM = 1000 tok/min (не входной TPM)
 │   ├── audit-groq-throttling.md
 │   ├── audit-inputs-scanner.md
@@ -39,7 +43,8 @@ autoreels/
 │
 ├── src/autoreels/
 │   ├── __main__.py           # CLI: run / transcribe / select / render / calibrate /
-│   │                         #      resnap / dump-clips / diagnose-cuts / models / ...
+│   │                         #      blocks (--review / --apply) / resnap / dump-clips /
+│   │                         #      diagnose-cuts / models / history / ...
 │   │
 │   ├── core/                 # ОБЩЕЕ (оба тира)
 │   │   ├── models.py         # Pydantic-схема манифеста — ЕДИНСТВЕННЫЙ контракт
@@ -57,6 +62,8 @@ autoreels/
 │   │   ├── transcribe_formats.py  # конвертация word-level → srt/vtt/text
 │   │   ├── compress.py       # word-level → sentence-level + таймкоды
 │   │   ├── select.py         # R0: чанкинг → LLM → парсинг → валидация → дедуп
+│   │   ├── blocks.py         # M1.6: блоки-кандидаты, отсев, эвристика, выгрузка/разбор разметки
+│   │   ├── edit.py           # сегментная модель: филлеры, x:, h:, такты `>` → окна (фабрика Segment)
 │   │   ├── snap.py           # snap границ к словам/паузам (R4-min)
 │   │   ├── trim.py           # обрезка висячих слов на хвосте клипа
 │   │   ├── diagnose.py       # классификация границ фраз (CLEAN/SOFT/HARD)
@@ -65,9 +72,9 @@ autoreels/
 │   ├── local/                # ЛОКАЛЬНЫЙ ТИР — рендер, исходник не уходит
 │   │   ├── calibrate.py      # калибровка кропа по кадрам видео
 │   │   ├── crop.py           # статичный прямоугольник из профиля
-│   │   ├── subtitles.py      # word-level → ASS (стиль + группировка слов)
+│   │   ├── subtitles.py      # word-level → ASS (стиль + группировка слов, стиль Keyword)
 │   │   ├── scenes.py         # PySceneDetect (M1)
-│   │   ├── render.py         # ffmpeg: cut → crop → burn ASS → mp4
+│   │   ├── render.py         # ffmpeg: окна → кроп (общий/крупный) → склейка → ASS → хвост → mp4
 │   │   └── archive.py        # перенос обработанных видео в inputs-archive/
 │   │
 │   └── orchestr/             # ОРКЕСТРАЦИЯ (M1+)
@@ -75,19 +82,25 @@ autoreels/
 │       ├── queue.py          # очередь прогонов (заглушка)
 │       └── ingest.py         # yt-dlp приём по ссылке (M2, заглушка)
 │
-├── tests/                    # TDD: детерминированный слой покрыт, LLM мокается (~1190 тестов)
+├── tests/                    # TDD: детерминированный слой покрыт, LLM мокается (~1650 тестов)
+│   │                         #   гварды: запись в репо, голые конструкторы Segment/Word,
+│   │                         #   список стадий ручного пути, суффиксы sidecar
 │   ├── conftest.py
 │   ├── fixtures/             # реальные ответы LLM, короткие транскрипты
 │   └── test_*.py             # по одному файлу на модуль
 │
 ├── inputs/                   # исходные видео (gitignored)
 ├── inputs-archive/           # обработанные видео после архивирования
-├── manifests/                # JSON-манифесты прогонов (gitignored кроме dev-примеров)
-├── reels-out/                # готовые mp4 (gitignored)
+├── manifests/                # JSON-манифесты прогонов (в git — контракт между машинами)
+├── reels-out/                # готовые mp4 + .txt/.transcript.txt/index.md (gitignored)
+│   └── <stem>/_gate/<имя>/   # проверочные рендеры, отдельно от настоящих клипов
+├── reviews/                  # файлы ручной разметки (НЕ в git — порча невосстановима)
 ├── transcripts/              # текстовые транскрипты (gitignored)
-├── calibrations/             # JSON + PNG кадров калибровки (gitignored)
+├── calibrations/             # JSON + PNG кадров калибровки (в git — нужны обеим машинам)
 └── data/                     # рантайм (gitignored)
-    ├── cache/                # транскрипты по хэшу аудио
+    ├── cache/                # транскрипты по хэшу аудио + параметрам транскрипции
+    ├── blocks_dataset/       # эталонные оценки человека (в git)
+    ├── history.jsonl         # история прогонов (`arl history`)
     └── token_scale.json      # EMA-калибровка оценки токенов
 ```
 
@@ -98,3 +111,5 @@ autoreels/
 - **`config/` + `profiles/`** — всё настраиваемое вынесено сюда. В коде — ноль магических чисел.
 - **`core/models.py`** — единственное место схемы манифеста. Меняешь контракт между тирами — только здесь.
 - **`orchestr/`** появляется в M1 (заглушки в репо); наполняется не раньше R2-review-UI.
+- **`cloud/edit.py` — фабрика окон.** Сегменты и слова создаются в фабриках (`cloud/edit.py`, `cloud/transcribe.py`, `core/models.py`); в остальном коде — только `model_copy`. Гвард-тест это проверяет.
+- **Проверочные рендеры** — только в `reels-out/<stem>/_gate/`: запись демо поверх настоящих клипов запрещена кодом.
