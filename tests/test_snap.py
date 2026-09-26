@@ -11,7 +11,7 @@ from autoreels.cloud.snap import apply_padding, snap_segments
 from autoreels.core.models import Reel, Word
 
 HANGING = ["и", "а", "но", "что", "это", "как", "в", "на",
-           "потому", "чтобы", "если", "когда", "то", "есть", "вот"]
+           "потому", "чтобы", "если", "когда", "то", "вот"]
 
 
 def _w(t0: float, t1: float, word: str = "x") -> Word:
@@ -969,6 +969,48 @@ def test_trim_hanging_subtitles_leaves_normal_clip_untouched():
 
     assert len(r.subtitles) == 1
     assert r.end_snap_reason == "sentence"  # reason unchanged
+
+
+def test_hanging_которая_есть_not_trimmed():
+    """'которая есть.' is not a hanging connective — must not be trimmed."""
+    r = _reel(0.0, 2.0)
+    r.end_snap_reason = "sentence"
+    r.subtitles = [_w(0.0, 0.5, "которая"), _w(0.5, 1.0, "есть.")]
+    # production list: "есть" removed (Fix-4, M1.7 step 1c)
+    hw = [w for w in HANGING_EX if w != "есть"]
+    trim_hanging_subtitles([r], hanging_words=hw)
+    assert len(r.subtitles) == 2
+    assert r.subtitles[-1].word == "есть."
+
+
+def test_hanging_вот_так_not_trimmed():
+    """'вот так.' ends on 'так' which is not a hanging word or phrase — must not be trimmed."""
+    r = _reel(0.0, 2.0)
+    r.end_snap_reason = "sentence"
+    r.subtitles = [_w(0.0, 0.5, "вот"), _w(0.5, 1.0, "так.")]
+    trim_hanging_subtitles([r], hanging_words=HANGING_EX)
+    assert len(r.subtitles) == 2
+    assert r.subtitles[-1].word == "так."
+
+
+def test_hanging_потому_что_trimmed():
+    """'потому что.' matches _HANGING_END_PHRASES — trailing 'что.' must be removed."""
+    r = _reel(0.0, 3.0)
+    r.end_snap_reason = "sentence"
+    r.subtitles = [_w(0.0, 0.5, "думал"), _w(0.5, 1.0, "потому"), _w(1.0, 1.5, "что.")]
+    trim_hanging_subtitles([r], hanging_words=[])
+    assert len(r.subtitles) < 3
+    assert all(w.word != "что." for w in r.subtitles)
+
+
+def test_hanging_так_как_trimmed():
+    """'так как' matches _HANGING_END_PHRASES — trailing 'как' must be removed."""
+    r = _reel(0.0, 3.0)
+    r.end_snap_reason = "sentence"
+    r.subtitles = [_w(0.0, 0.5, "работает"), _w(0.5, 1.0, "так"), _w(1.0, 1.5, "как")]
+    trim_hanging_subtitles([r], hanging_words=[])
+    assert len(r.subtitles) < 3
+    assert all(w.word != "как" for w in r.subtitles)
 
 
 def test_source_kind_persisted_in_manifest():

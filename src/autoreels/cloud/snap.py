@@ -612,7 +612,7 @@ def trim_hanging_subtitles(reels: list[Reel], *, hanging_words) -> None:
     """
     hw_set = set(hanging_words or [])
     for r in reels:
-        if not r.subtitles or not hw_set:
+        if not r.subtitles:
             continue
         trimmed = False
         while r.subtitles and (
