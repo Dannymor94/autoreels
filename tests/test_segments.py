@@ -103,6 +103,24 @@ def test_concat_graph_zero_fade_hard_joins_audio():
     assert "concat=n=2:v=0:a=1[aseg]" in graph
 
 
+def test_concat_graph_overlay_path_has_settb():
+    """Overlay path must emit settb=expr=1/90000 so xfade seams don't get a 1/600 timebase."""
+    segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0)]
+    ovl = [("crop=1080:1920:0:0,scale=1080:1920", "crop=540:960:270:480,scale=1080:1920",
+            "between(t,0,5)"), None]
+    graph, _, _ = _concat_segments_graph(segs, 0.01, segment_overlays=ovl)
+    assert "settb=expr=1/90000[v0]" in graph
+    assert "settb=expr=1/90000[v1]" in graph
+
+
+def test_concat_graph_mixed_seam_hard_cut_has_settb():
+    """Mixed seam_xfades: hard-cut seam uses concat+settb so a following xfade sees 1/90000."""
+    segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0),
+            Segment(start=20.0, end=25.0)]
+    graph, _, _ = _concat_segments_graph(segs, 0.01, seam_xfades=[0.0, 0.1])
+    assert "concat=n=2:v=1:a=0,settb=expr=1/90000" in graph
+
+
 # --- Part 4: title plate renders only for its duration and does not overlap subtitles -------
 def test_title_plate_only_when_given_and_bounded():
     words = [Word(word="привет", t0=0.0, t1=0.5), Word(word="мир", t0=0.5, t1=1.0)]
