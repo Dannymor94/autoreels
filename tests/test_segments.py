@@ -368,8 +368,8 @@ def test_punch_blend_expr_contains_ease():
     """_punch_blend_expr produces A*/B* weight expression with smooth-step ease structure."""
     expr = _punch_blend_expr([[5.0, 15.0]], punch_frames=7, fps=30.0)
     assert "A*(1-" in expr
-    assert "B*(" in expr
-    # ease: 3*x*x-2*x*x*x pattern
+    assert "B*" in expr
+    # ease: 3*x*x-2*x*x*x pattern (via ld() or direct)
     assert "3*" in expr and "2*" in expr
 
 

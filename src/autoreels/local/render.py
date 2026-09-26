@@ -1152,6 +1152,8 @@ def _punch_blend_expr(ci: list[list[float]], punch_frames: int, fps: float) -> s
 
     Merges adjacent ci intervals that share a boundary to avoid a wobble at the shared point.
     Uses smooth-step ease (3x²−2x³) over punch_frames frames at each ci boundary.
+    Uses ffmpeg st()/ld() to avoid repeating the clamped-ramp subexpression 3× per boundary,
+    which would exceed ffmpeg's expression-parser depth limit.
     """
     punch_sec = punch_frames / fps
     # Merge adjacent intervals sharing a boundary.
@@ -1161,26 +1163,30 @@ def _punch_blend_expr(ci: list[list[float]], punch_frames: int, fps: float) -> s
             merged[-1][1] = b
         else:
             merged.append([a, b])
-    terms: list[str] = []
-    for a, b in merged:
+    setup: list[str] = []
+    w_terms: list[str] = []
+    for idx, (a, b) in enumerate(merged):
         pa, pb, ps = _num(a), _num(b), _num(punch_sec)
-        x_in = f"min(1,max(0,(t-{pa})/{ps}))"
-        ease_in = f"(3*{x_in}*{x_in}-2*{x_in}*{x_in}*{x_in})"
-        x_out = f"min(1,max(0,(t-({pb}-{ps}))/{ps}))"
-        ease_out = f"(3*{x_out}*{x_out}-2*{x_out}*{x_out}*{x_out})"
+        si, so = 2 * idx, 2 * idx + 1
+        setup.append(f"st({si},min(1,max(0,(t-{pa})/{ps})))")
+        setup.append(f"st({so},min(1,max(0,(t-({pb}-{ps}))/{ps})))")
+        ease_in = f"(3*ld({si})*ld({si})-2*ld({si})*ld({si})*ld({si}))"
+        ease_out = f"(3*ld({so})*ld({so})-2*ld({so})*ld({so})*ld({so}))"
         mid_a, mid_b = _num(a + punch_sec), _num(b - punch_sec)
         if b - a > 2 * punch_sec:
-            term = (f"between(t,{pa},{mid_a})*{ease_in}"
-                    f"+between(t,{mid_a},{mid_b})"
-                    f"+between(t,{mid_b},{pb})*(1-{ease_out})")
+            wt = (f"between(t,{pa},{mid_a})*{ease_in}"
+                  f"+between(t,{mid_a},{mid_b})"
+                  f"+between(t,{mid_b},{pb})*(1-{ease_out})")
         else:
             # Short interval: center split between entry/exit eases
             mid = _num((a + b) / 2)
-            term = (f"between(t,{pa},{mid})*{ease_in}"
-                    f"+between(t,{mid},{pb})*(1-{ease_out})")
-        terms.append(f"({term})")
-    w = "+".join(terms) if terms else "0"
-    return f"A*(1-({w}))+B*({w})"
+            wt = (f"between(t,{pa},{mid})*{ease_in}"
+                  f"+between(t,{mid},{pb})*(1-{ease_out})")
+        w_terms.append(f"({wt})")
+    w_slot = 2 * len(merged)
+    w_expr = "+".join(w_terms) if w_terms else "0"
+    preamble = ";".join(setup)
+    return f"{preamble};st({w_slot},{w_expr});A*(1-ld({w_slot}))+B*ld({w_slot})"
 
 
 def _two_shot_seam_xfades(
