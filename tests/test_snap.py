@@ -1031,3 +1031,49 @@ def test_end_still_trims_back_from_esli():
     apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
                   video_duration=14.0, hanging_words=HANGING)
     assert r.end < 11.1                                  # trimmed back before the hanging «если»
+
+
+# --- multi-word connective hanging phrase trimming ------------------------------------
+
+def test_multi_word_connective_trimmed_auto():
+    # Clip ends "...думаю потому что" — last word "что" is in HANGING, but "потому что"
+    # as a phrase is caught by phrase check too. After trim: ends before "потому".
+    words = [
+        _w(10.0, 10.4, "Я"), _w(10.5, 11.0, "думаю."),
+        _w(11.1, 11.5, "Но"), _w(11.6, 12.0, "потому"),
+        _w(12.1, 12.5, "что"), _w(15.0, 15.5, "позже"),
+    ]
+    r = _reel(10.0, 12.5)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  video_duration=16.0, hanging_words=HANGING)
+    # "что" and "потому" are both trimmed; ends on "думаю."
+    assert r.end <= 11.1, f"expected end before 'Но' at 11.1, got {r.end}"
+
+
+def test_multi_word_dla_togo_trimmed():
+    # "для того" is a hanging sub-phrase (prefix of "для того чтобы"); "того" not in HANGING.
+    words = [
+        _w(10.0, 10.4, "нужно."),
+        _w(11.0, 11.4, "для"), _w(11.5, 12.0, "того"),
+        _w(15.0, 15.5, "чтобы"),
+    ]
+    r = _reel(10.0, 12.0)
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  video_duration=16.0, hanging_words=HANGING)
+    # "для того" matches the phrase → both words trimmed; ends after "нужно." with padding
+    assert r.end < 11.0, f"expected end before 'для' at 11.0, got {r.end}"
+
+
+def test_multi_word_connective_explicit_end_not_trimmed():
+    # Explicit e: clip ending on "потому что" must NOT be trimmed — only warned.
+    words = [
+        _w(10.0, 10.4, "Я"), _w(10.5, 11.0, "думаю."),
+        _w(11.1, 11.5, "потому"), _w(11.6, 12.5, "что"),
+        _w(15.0, 15.5, "позже"),
+    ]
+    r = _reel(10.0, 12.5)
+    r._explicit_end = True
+    apply_padding([r], words, tail_pad_sec=0.7, lead_pad_sec=0.3, max_duration=59,
+                  video_duration=16.0, hanging_words=HANGING)
+    # Explicit end → not trimmed; "что" stays as last word
+    assert r.end >= 12.5, f"explicit end must not be trimmed, got {r.end}"

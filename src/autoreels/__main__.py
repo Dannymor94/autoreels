@@ -1429,6 +1429,7 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
     """
     from autoreels.cloud.select import _DEFAULT_DANGLING
     from autoreels.local.subtitles import words_in_window
+    from autoreels.cloud.snap import _is_hanging, tail_is_hanging_phrase, _HANGING_PHRASE_MAXLEN
     words = getattr(transcript, "words", []) or []
     dangling = _DEFAULT_DANGLING | set(getattr(r0_cfg, "dangling_words", None) or [])
     floor = getattr(r0_cfg, "min_meaningful_sec", 18.0)
@@ -1461,6 +1462,13 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
         dur = r.playback_duration()   # played length (filler gaps removed), not the raw span
         if dur < floor:
             warn(r, f"short clip {dur:.1f}s (< {floor:.0f}s floor)")
+        # Hanging-phrase end: warn if explicit e: lands on a multi-word connective (don't trim).
+        if getattr(r, "_explicit_end", False) and cw:
+            hw = getattr(r0_cfg, "hanging_end_words", [])
+            tail_ws = [w.word for w in cw[-_HANGING_PHRASE_MAXLEN:]]
+            lw = cw[-1].word
+            if _is_hanging(lw, hw) or tail_is_hanging_phrase(tail_ws):
+                warn(r, f"ends on hanging phrase «{' '.join(tail_ws[-2:])}» (explicit e: — not moved)")
 
     return out
 

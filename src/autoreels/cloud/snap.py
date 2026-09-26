@@ -41,6 +41,22 @@ _PAD_EPS = 0.05
 # следующей фразы (втянуто snap-хвостом ~tail_sec=0.3), а не отдельным содержательным словом.
 _PAD_SPILL_MAX = 0.4
 
+# Multi-word connectives that leave the thought hanging — the LAST word alone may not be in
+# hanging_words, but the final N words together signal "more is coming". Listed as tuples of
+# cleaned (lowercased, punctuation-stripped) tokens. Includes sub-phrases so that after the
+# innermost word is trimmed (e.g. "чтобы" from "для того чтобы") the phrase "для того" is
+# also caught by the next loop iteration.
+_HANGING_END_PHRASES: frozenset[tuple[str, ...]] = frozenset({
+    ("потому", "что"),
+    ("так", "как"),
+    ("то", "есть"),
+    ("для", "того", "чтобы"),
+    ("для", "того"),
+    ("в", "то", "время", "как"),
+    ("в", "то", "время"),
+})
+_HANGING_PHRASE_MAXLEN: int = max(len(p) for p in _HANGING_END_PHRASES)
+
 
 def _clean(word: str) -> str:
     """Слово без обрамляющей пунктуации, в нижнем регистре — для сверки с hanging_words."""
@@ -62,6 +78,16 @@ def _ends_midphrase(word: str) -> bool:
 def _is_hanging(word: str, hanging_words) -> bool:
     """Висячее слово (союз/предлог/вводное) — на нём мысль не завершают."""
     return _clean(word) in set(hanging_words)
+
+
+def tail_is_hanging_phrase(word_strs: list[str]) -> bool:
+    """True if the last N cleaned tokens of word_strs match a known multi-word hanging phrase."""
+    for phrase in _HANGING_END_PHRASES:
+        n = len(phrase)
+        if len(word_strs) >= n:
+            if tuple(_clean(w) for w in word_strs[-n:]) == phrase:
+                return True
+    return False
 
 
 def _nearest_in_window(target: float, candidates: list[float], window_sec: float) -> float | None:
@@ -515,16 +541,20 @@ def apply_padding(
 
         # (2) Хвостовые слова, на которых клип не должен заканчиваться: висячее, с запятой,
         # или сразу за концом предложения. Пока не упрёмся в содержательный конец.
-        while len(idxs) >= 2:
-            li, pi = idxs[-1], idxs[-2]
-            if _is_sentence_end(words[li].word):
-                break   # само слово завершает предложение — чистый конец, не срезаем
-            if (_is_sentence_end(words[pi].word)
-                    or _is_hanging(words[li].word, hanging_words)
-                    or _ends_midphrase(words[li].word)):
-                idxs.pop()
-            else:
-                break
+        # Пропускаем для явного e: (reviewer's choice — warn, not trim).
+        if not getattr(r, "_explicit_end", False):
+            while len(idxs) >= 2:
+                li, pi = idxs[-1], idxs[-2]
+                if _is_sentence_end(words[li].word):
+                    break   # само слово завершает предложение — чистый конец, не срезаем
+                tail_ws = [words[j].word for j in idxs[-_HANGING_PHRASE_MAXLEN:]]
+                if (_is_sentence_end(words[pi].word)
+                        or _is_hanging(words[li].word, hanging_words)
+                        or _ends_midphrase(words[li].word)
+                        or tail_is_hanging_phrase(tail_ws)):
+                    idxs.pop()
+                else:
+                    break
 
         fi, la = idxs[0], idxs[-1]
         first_word, last_word = words[fi], words[la]
@@ -573,7 +603,9 @@ def trim_hanging_subtitles(reels: list[Reel], *, hanging_words) -> None:
         if not r.subtitles or not hw_set:
             continue
         trimmed = False
-        while r.subtitles and _clean(r.subtitles[-1].word) in hw_set:
+        while r.subtitles and (
+                _clean(r.subtitles[-1].word) in hw_set
+                or tail_is_hanging_phrase([s.word for s in r.subtitles[-_HANGING_PHRASE_MAXLEN:]])):
             r.subtitles.pop()
             trimmed = True
         if trimmed and r.end_snap_reason in ("sentence", "no_punctuation"):
