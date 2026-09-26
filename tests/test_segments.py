@@ -20,7 +20,6 @@ from autoreels.local.render import (
     RenderError,
     _assert_windows_frame_aligned,
     _concat_segments_graph,
-    _punch_blend_expr,
     _seg_ends_close,
     _seg_starts_close,
     _snap_windows_to_frames,
@@ -343,43 +342,15 @@ def test_beat_reel_concat_uses_hard_cuts():
     assert "xfade" not in prefix
 
 
-# --- step 1d: punch + dissolve ----------------------------------------------------------------
+# --- step 1d: dissolve ----------------------------------------------------------------
 
-def test_punch_blend_replaces_overlay_in_segment_overlays():
-    """'blend:' prefix in segment_overlay enable field → blend= filter, not overlay=enable."""
-    segs = [Segment(start=0.0, end=20.0), Segment(start=30.0, end=40.0)]
-    blend_expr = _punch_blend_expr([[5.0, 15.0]], punch_frames=7, fps=30.0)
-    ovl = [("wvf", "cvf", "blend:" + blend_expr), None]
-    graph, _, _ = _concat_segments_graph(segs, 0.0, segment_overlays=ovl)
-    assert "blend=all_expr=" in graph
-    assert "overlay=enable=" not in graph
-
-
-def test_punch_cut_uses_overlay_enable_baseline():
-    """Without 'blend:' prefix, overlay=enable is used — baseline is unchanged."""
+def test_overlay_enable_used_for_ci():
+    """segment_overlay with enable string → overlay=enable filter."""
     segs = [Segment(start=0.0, end=20.0), Segment(start=30.0, end=40.0)]
     ovl = [("wvf", "cvf", "between(t,5,15)"), None]
     graph, _, _ = _concat_segments_graph(segs, 0.0, segment_overlays=ovl)
     assert "overlay=enable='between(t,5,15)'" in graph
     assert "blend=all_expr=" not in graph
-
-
-def test_punch_blend_expr_contains_ease():
-    """_punch_blend_expr produces A*/B* weight expression with smooth-step ease structure."""
-    expr = _punch_blend_expr([[5.0, 15.0]], punch_frames=7, fps=30.0)
-    assert "A*(1-" in expr
-    assert "B*" in expr
-    # ease: 3*x*x-2*x*x*x pattern (via ld() or direct)
-    assert "3*" in expr and "2*" in expr
-
-
-def test_punch_blend_merges_adjacent_ci():
-    """Adjacent ci intervals sharing a boundary are merged — no wobble at shared point."""
-    # [[5,10],[10,15]]: shared boundary at t=10 must be merged to [[5,15]]
-    expr = _punch_blend_expr([[5.0, 10.0], [10.0, 15.0]], punch_frames=2, fps=30.0)
-    # Should have exactly one "between" group for the merged interval [5,15]
-    # (not two separate punch-out-then-punch-in sequences at t=10)
-    assert expr.count("between(t,5") == 1 or "15" in expr  # merged single interval
 
 
 def test_same_shot_seam_gets_dissolve():

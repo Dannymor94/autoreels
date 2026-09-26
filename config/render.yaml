@@ -164,12 +164,11 @@ close_shot_scale: 1.25
 close_shot_anchor_y: 0.35
 # M1.7 step 1b: automatic shot alternation. Requires two_shot: true. Off by default.
 two_shot_auto: false
-two_shot_max_shot_sec: 9.0   # max duration for any shot (wide OR close); two_shot_max_wide_sec is an alias
+two_shot_max_shot_sec: 14.0  # max duration for any shot (wide OR close); two_shot_max_wide_sec is an alias
 two_shot_min_sec: 2.5        # minimum shot duration; suppress switch that would go shorter
 # M1.7 step 1d: transitions at ci shot-changes and same-shot seams. Off by default.
-shot_transition: cut         # "cut" | "punch": eased blend wide↔close over punch_frames at ci boundaries
-punch_frames: 7              # blend duration in frames for punch transition
-same_shot_dissolve_frames: 0 # dissolve on same-shot seams (0 = disabled; uses video_xfade_sec fallback)
+shot_transition: cut         # "cut" only; punch (crop-animation) is a future task
+same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses video_xfade_sec fallback)
 
 # M1.7 step 2: sentence-scoped keyword highlighting in subtitles. Off by default.
 # When off, render is byte-identical to pre-M1.7-step-2 output even if k: fields present.

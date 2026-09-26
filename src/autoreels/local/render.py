@@ -695,10 +695,7 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
             parts.append(f"[raw{i}]split=2[wi{i}][ci{i}]")
             parts.append(f"[wi{i}]{wide_vf_o}[wo{i}]")
             parts.append(f"[ci{i}]{close_vf_o}[co{i}]")
-            if enable_o.startswith("blend:"):
-                parts.append(f"[wo{i}][co{i}]blend=all_expr='{enable_o[6:]}',settb=expr=1/90000[v{i}]")
-            else:
-                parts.append(f"[wo{i}][co{i}]overlay=enable='{enable_o}',settb=expr=1/90000[v{i}]")
+            parts.append(f"[wo{i}][co{i}]overlay=enable='{enable_o}',settb=expr=1/90000[v{i}]")
         else:
             vchain = f"[{i}:v]{vtrim}"
             if svf:
@@ -1147,49 +1144,6 @@ def _close_intervals_enable(intervals: list[list[float]]) -> str:
     return "+".join(f"between(t,{_num(t0)},{_num(t1)})" for t0, t1 in intervals)
 
 
-def _punch_blend_expr(ci: list[list[float]], punch_frames: int, fps: float) -> str:
-    """blend=all_expr string for punch transition: A=wide, B=close, weight 0→1 at ci start, 1→0 at ci end.
-
-    Merges adjacent ci intervals that share a boundary to avoid a wobble at the shared point.
-    Uses smooth-step ease (3x²−2x³) over punch_frames frames at each ci boundary.
-    Uses ffmpeg st()/ld() to avoid repeating the clamped-ramp subexpression 3× per boundary,
-    which would exceed ffmpeg's expression-parser depth limit.
-    """
-    punch_sec = punch_frames / fps
-    # Merge adjacent intervals sharing a boundary.
-    merged: list[list[float]] = []
-    for a, b in ci:
-        if merged and abs(a - merged[-1][1]) < 1e-4:
-            merged[-1][1] = b
-        else:
-            merged.append([a, b])
-    setup: list[str] = []
-    w_terms: list[str] = []
-    for idx, (a, b) in enumerate(merged):
-        pa, pb, ps = _num(a), _num(b), _num(punch_sec)
-        si, so = 2 * idx, 2 * idx + 1
-        # blend uses T (not t) and gt/lt (not between) in its expression evaluator
-        setup.append(f"st({si},min(1,max(0,(T-{pa})/{ps})))")
-        setup.append(f"st({so},min(1,max(0,(T-({pb}-{ps}))/{ps})))")
-        ease_in = f"(3*ld({si})*ld({si})-2*ld({si})*ld({si})*ld({si}))"
-        ease_out = f"(3*ld({so})*ld({so})-2*ld({so})*ld({so})*ld({so}))"
-        mid_a, mid_b = _num(a + punch_sec), _num(b - punch_sec)
-        if b - a > 2 * punch_sec:
-            wt = (f"gte(T,{pa})*lte(T,{mid_a})*{ease_in}"
-                  f"+gte(T,{mid_a})*lte(T,{mid_b})"
-                  f"+gte(T,{mid_b})*lte(T,{pb})*(1-{ease_out})")
-        else:
-            # Short interval: center split between entry/exit eases
-            mid = _num((a + b) / 2)
-            wt = (f"gte(T,{pa})*lte(T,{mid})*{ease_in}"
-                  f"+gte(T,{mid})*lte(T,{pb})*(1-{ease_out})")
-        w_terms.append(f"({wt})")
-    w_slot = 2 * len(merged)
-    w_expr = "+".join(w_terms) if w_terms else "0"
-    preamble = ";".join(setup)
-    return f"{preamble};st({w_slot},{w_expr});A*(1-ld({w_slot}))+B*ld({w_slot})"
-
-
 def _two_shot_seam_xfades(
     segs: "list[Segment]",
     fps: float,
@@ -1466,13 +1420,9 @@ def _render_segments(
                     _effective_vf = None  # crops are in segment_vfs; vtail uses palette only
                     # Segments with close_intervals: overlay instead of plain seg_vf.
                     _has_ci = any(getattr(s, "close_intervals", []) for s in segs)
-                    _punch_on = getattr(render_cfg, "shot_transition", "cut") == "punch"
-                    _punch_fr = getattr(render_cfg, "punch_frames", 7)
                     if _has_ci:
                         def _ci_enable(s):  # type: ignore[no-untyped-def]
                             ci = s.close_intervals  # type: ignore[attr-defined]
-                            if _punch_on:
-                                return "blend:" + _punch_blend_expr(ci, _punch_fr, _fps())
                             return _close_intervals_enable(ci)
                         _ts_seg_overlays = [
                             (vf, _close_vf_str, _ci_enable(s))  # type: ignore[arg-type]
@@ -1665,8 +1615,6 @@ def _render_segments(
                                if _pr1 > 0 else "setpts=PTS-STARTPTS")
                     _atrim1 = (f"atrim=start={_num(_pr1)},asetpts=PTS-STARTPTS"
                                if _pr1 > 0 else "asetpts=PTS-STARTPTS")
-                    _punch_on1 = getattr(render_cfg, "shot_transition", "cut") == "punch"
-                    _punch_fr1 = getattr(render_cfg, "punch_frames", 7)
                     # post-overlay chain: palette → ass → vfade (no crop — overlay outputs scaled video)
                     _post_parts1: list[str] = []
                     if palette_vf:
@@ -1680,12 +1628,8 @@ def _render_segments(
                     if _tvfade1:
                         _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
-                    if _punch_on1:
-                        _blend_expr1 = _punch_blend_expr(_ci1, _punch_fr1, _fps())
-                        _merge_filter1 = f"[wo1][co1]blend=all_expr='{_blend_expr1}'[vm1]"
-                    else:
-                        _enable1 = _close_intervals_enable(_ci1)
-                        _merge_filter1 = f"[wo1][co1]overlay=enable='{_enable1}'[vm1]"
+                    _enable1 = _close_intervals_enable(_ci1)
+                    _merge_filter1 = f"[wo1][co1]overlay=enable='{_enable1}'[vm1]"
                     _v_fc = [
                         f"[0:v]{_vtrim1}[raw1]",
                         "[raw1]split=2[wi1][ci1]",

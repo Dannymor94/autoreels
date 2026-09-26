@@ -581,9 +581,8 @@ class RenderConfig(BaseModel):
     two_shot_max_shot_sec: float = 9.0   # force a switch if any shot (wide OR close) exceeds this
     two_shot_min_sec: float = 2.5        # suppress a switch that would create a shorter shot
     # M1.7 step 1d: shot-change transitions inside close_intervals windows. Off by default.
-    # "punch": eased blend wide↔close over punch_frames (ease-in-out). Flag off → identical cmd.
-    shot_transition: str = "cut"         # "cut" | "punch"
-    punch_frames: int = 7                # blend duration in frames for punch transition
+    # Flag off → identical cmd. ("punch" crop-animation: future task, deferred.)
+    shot_transition: str = "cut"         # "cut" only; punch deferred
     # M1.7 step 1d: dissolve on same-shot seams (filler/splice without shot change). Off by default.
     # 0 = disabled (falls back to video_xfade_sec). Flag off → identical cmd.
     same_shot_dissolve_frames: int = 0   # dissolve duration in frames (0 = disabled)
@@ -592,13 +591,6 @@ class RenderConfig(BaseModel):
     def two_shot_max_wide_sec(self) -> float:
         """Backward-compat alias for two_shot_max_shot_sec."""
         return self.two_shot_max_shot_sec
-
-    @field_validator("shot_transition")
-    @classmethod
-    def _validate_shot_transition(cls, v: str) -> str:
-        if v not in ("cut", "punch"):
-            raise ValueError(f"shot_transition must be 'cut' or 'punch'; got '{v}'")
-        return v
 
     # M1.7 step 2: per-word keyword highlighting in subtitles. Off by default — feature-off
     # renders are byte-identical. k: review field specifies words per sentence.
