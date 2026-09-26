@@ -244,6 +244,8 @@ class R0Config(BaseModel):
     hanging_end_words: list[str] = Field(default_factory=lambda: [
         "и", "а", "но", "что", "это", "как", "в", "на",
         "потому", "чтобы", "если", "когда", "то", "есть", "вот",
+        # bare prepositions
+        "с", "к", "по", "о", "от", "из", "у", "для", "про",
     ])
     # …but a clip may perfectly well START with most of them ("Если объединить…", "Когда ты…").
     # Only a genuinely dangling opener — a single word that refers back to something before the

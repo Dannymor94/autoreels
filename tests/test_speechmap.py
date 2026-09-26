@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from autoreels.local.speechmap import (
+from autoreels.cloud.speechmap import (
     SPEECHMAP_VERSION,
     _merge_speech_mask,
     _params_hash,
@@ -185,16 +185,16 @@ def test_params_hash_changes_on_any_param():
 
 def test_cache_hit_on_second_load(tmp_path):
     """build_or_load writes the map; second call returns cached without re-extracting."""
-    from autoreels.local.speechmap import build_or_load
+    from autoreels.cloud.speechmap import build_or_load
 
     # Write a pre-built map as the cache file
     samples, sr = _make_audio()
     intervals, noise_floor, threshold = build_speech_intervals(samples, sr)
 
-    from autoreels.local.speechmap import _params_hash as ph
-    from autoreels.local.speechmap import DEFAULT_FRAME_SEC, DEFAULT_HEADROOM_DB
-    from autoreels.local.speechmap import DEFAULT_MIN_SILENCE_SEC, DEFAULT_NOISE_PERCENTILE
-    from autoreels.local.speechmap import DEFAULT_PAUSE_MIN_SEC
+    from autoreels.cloud.speechmap import _params_hash as ph
+    from autoreels.cloud.speechmap import DEFAULT_FRAME_SEC, DEFAULT_HEADROOM_DB
+    from autoreels.cloud.speechmap import DEFAULT_MIN_SILENCE_SEC, DEFAULT_NOISE_PERCENTILE
+    from autoreels.cloud.speechmap import DEFAULT_PAUSE_MIN_SEC
 
     hash_val = ph(frame_sec=DEFAULT_FRAME_SEC, noise_percentile=DEFAULT_NOISE_PERCENTILE,
                   headroom_db=DEFAULT_HEADROOM_DB, min_silence_sec=DEFAULT_MIN_SILENCE_SEC,
@@ -233,7 +233,7 @@ def test_cache_miss_on_param_change(tmp_path):
 
     # Should raise (no real ffmpeg source) because stale cache is rejected
     with pytest.raises(Exception):
-        from autoreels.local.speechmap import build_or_load
+        from autoreels.cloud.speechmap import build_or_load
         build_or_load(source=Path("/no.mp4"), source_sha256="abc",
                       words=[], out_path=cache_file)
 

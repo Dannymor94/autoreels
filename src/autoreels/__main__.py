@@ -4875,7 +4875,7 @@ def cmd_speech_map(
 
     Stage A — no consumer changes.  Prints stats, writes transcripts/<stem>.speechmap.json.
     """
-    from autoreels.local.speechmap import (
+    from autoreels.cloud.speechmap import (
         boundary_pauses, build_or_load, whisper_gaps,
         DEFAULT_FRAME_SEC, DEFAULT_HEADROOM_DB, DEFAULT_MIN_SILENCE_SEC,
         DEFAULT_NOISE_PERCENTILE, DEFAULT_PAUSE_MIN_SEC,

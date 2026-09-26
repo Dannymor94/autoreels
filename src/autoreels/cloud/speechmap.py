@@ -144,24 +144,26 @@ def refine_word_boundaries(
 ) -> list[dict]:
     """Find audible_start/audible_end for each word from speech intervals.
 
-    Stop-consonant rule: a gap < pause_min_sec inside a word's search window
-    is bridged — it does not end the word.  A gap >= pause_min_sec is a real
-    boundary and audible_end is set before it.
+    audible_start looks back past win_start when a preceding Whisper-bloated word
+    hid the real speech onset: if the interval containing w.t0 started earlier than
+    t0-epsilon (i.e. was clamped), we use the actual onset bounded by prev_ae+epsilon.
+    Stop-consonant rule: bridge gaps < pause_min_sec only when the gap does not
+    straddle a Whisper word boundary (w.t1 or next_t0).
     """
     refined: list[dict] = []
     for idx, w in enumerate(words):
         next_t0 = words[idx + 1].t0 if idx + 1 < len(words) else w.t1 + 1.0
         search_end = min(next_t0 + epsilon, w.t1 + 1.5)
-
-        # Collect interval fragments within [w.t0 - epsilon, search_end]
         win_start = max(0.0, w.t0 - epsilon)
-        frags: list[tuple[float, float]] = []
+
+        # Each frag: (clamped_onset, offset, original_onset)
+        frags: list[tuple[float, float, float]] = []
         for onset, offset in intervals:
             if offset <= win_start:
                 continue
             if onset >= search_end:
                 break
-            frags.append((max(onset, win_start), min(offset, search_end)))
+            frags.append((max(onset, win_start), min(offset, search_end), onset))
 
         if not frags:
             # No energy near this word — fall back to Whisper timestamps
@@ -171,24 +173,29 @@ def refine_word_boundaries(
             })
             continue
 
-        # audible_start: first fragment onset within [w.t0 - epsilon, w.t0 + epsilon]
-        audible_start = w.t0
-        for onset, offset in frags:
-            if onset <= w.t0 + epsilon:
-                audible_start = onset
-                break
+        # audible_start: use actual interval onset when the interval was clamped at
+        # win_start (Whisper bloated prev word, real speech started before t0-epsilon).
+        clamped_onset, frag_offset, orig_onset = frags[0]
+        if orig_onset < win_start:
+            # Interval straddles win_start — find the earliest position that is
+            # still past the previous word's audible end.
+            lower_bound = refined[-1]["audible_end"] + epsilon if refined else 0.0
+            candidate = max(orig_onset, lower_bound)
+            # Only use it if the candidate still falls within the speech region
+            audible_start = candidate if candidate < frag_offset else clamped_onset
+        else:
+            audible_start = clamped_onset
 
-        # audible_end: merge frags applying stop-consonant bridging, find last end
+        # audible_end: bridge gaps inside the word span; stop at word boundaries
         audible_end = frags[0][1]
-        for i, (onset, offset) in enumerate(frags[1:], start=1):
-            gap = onset - frags[i - 1][1]
-            if gap < pause_min_sec:
-                # bridge the gap (stop-consonant closure)
+        for i, (onset, offset, _) in enumerate(frags[1:], start=1):
+            gap_start_t = frags[i - 1][1]
+            gap = onset - gap_start_t
+            at_boundary = (gap_start_t <= w.t1 <= onset) or (gap_start_t <= next_t0 <= onset)
+            if not at_boundary and gap < pause_min_sec:
                 audible_end = offset
             else:
-                # real pause — this fragment belongs to a later word
                 break
-            audible_end = offset
 
         refined.append({
             "idx": idx, "t0": w.t0, "t1": w.t1,
