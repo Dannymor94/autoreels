@@ -1245,18 +1245,30 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
                 warnings.append(f"switched wide→close at {sw:.2f}s ({level})")
                 return True
         else:  # close
-            # Case A: span is a ci interval within a wide segment — truncate it at sw.
+            # Case A: close span covered by adjacent ci intervals of a wide segment.
+            # Find the first ci that starts at span_start, then find where sw lands.
             for ji, s in enumerate(result):
                 if s.shot != "wide":
                     continue
-                for ci_idx, (ct0, ct1) in enumerate(getattr(s, "close_intervals", [])):
-                    if abs(s.start + ct0 - span_start) < 0.05 and abs(s.start + ct1 - span_end) < 0.05:
-                        rel_sw = sw - s.start
-                        new_ci = list(s.close_intervals)
-                        new_ci[ci_idx] = [ct0, rel_sw]
-                        result[ji] = s.model_copy(update={"close_intervals": new_ci})
-                        warnings.append(f"switched close→wide at {sw:.2f}s ({level})")
-                        return True
+                ci = list(getattr(s, "close_intervals", []))
+                if not ci:
+                    continue
+                for ci_start_idx, (ct0, _) in enumerate(ci):
+                    if abs(s.start + ct0 - span_start) > 0.05:
+                        continue
+                    # Found the run starting at span_start; find which interval contains sw.
+                    for ci_idx in range(ci_start_idx, len(ci)):
+                        abs_ct0 = s.start + ci[ci_idx][0]
+                        abs_ct1 = s.start + ci[ci_idx][1]
+                        if abs_ct0 <= sw <= abs_ct1 + 0.001:
+                            rel_sw = sw - s.start
+                            new_ci = list(ci[:ci_idx])
+                            if rel_sw > ci[ci_idx][0] + 0.001:
+                                new_ci.append([ci[ci_idx][0], rel_sw])
+                            result[ji] = s.model_copy(update={"close_intervals": new_ci})
+                            warnings.append(f"switched close→wide at {sw:.2f}s ({level})")
+                            return True
+                    break
             # Case B: span covers close segments.
             for ji, s in enumerate(result):
                 if not (s.start <= sw < s.end and s.shot == "close"
