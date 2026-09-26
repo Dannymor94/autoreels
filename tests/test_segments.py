@@ -207,7 +207,6 @@ def test_frame_aligned_invariant_passes_on_whole_frames_and_fails_on_drift():
 # --- tail air: exactly tail_pad_sec after the last heard word, on every path ------------------
 from autoreels.__main__ import _apply_tail_air, _check_tail_air
 from autoreels.cloud.edit import remove_fillers
-from autoreels.local.render import _tail_speech_fade
 
 _FR = dict(filler_words=["ну", "вот"], pause_shorten_sec=0.8, pause_residual_sec=0.25,
            max_removed_share=0.25)
@@ -282,39 +281,41 @@ def test_apply_tail_air_clean_tail_records_no_intruder():
     assert r.tail_next_word_start is None              # nothing inside the 0.7s air → clean
 
 
-def test_tail_speech_fade_silences_word_pulled_into_tail():
-    # Intruder at 18.5, guard=0.12 → fade starts at 8.5-0.12=8.38 (out), ends at 8.5 (nw_start).
-    r = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.5)
-    fade = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0, guard=0.12)
-    assert fade is not None
-    st, dur = fade
-    n_out = 18.5 - 10.0   # 8.5
-    assert abs(st - (n_out - 0.12)) < 1e-6              # fade starts guard=0.12 before intruder
-    assert abs(st + dur - n_out) < 1e-6                 # fade completes exactly as the intruder begins
 
 
-def test_tail_speech_fade_butting_intruder_uses_min_fade():
-    # 0 ms gap (intruder at last-word end): fade=guard (0.12), starts before lw_end (clamped to 0).
-    r = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.0)
-    st, dur = _tail_speech_fade(r, [Segment(start=10.0, end=18.7)], 1.0, guard=0.12)
-    n_out = 18.0 - 10.0   # 8.0
-    assert abs(dur - 0.12) < 1e-6                       # exactly guard
-    assert abs(st + dur - n_out) < 1e-6                 # ends at intruder
+# --- M1.7 step 1c: beat reels (non-monotonic segments) ---------------------------------
+
+def test_check_segments_beat_reel_allows_nonmonotonic():
+    # beat_gap_sec set → check_segments must NOT raise for non-monotonic source order.
+    # Sentence 3 (t=100-110) played first, then sentence 1 (t=10-20) — classic reorder.
+    r = _reel(start=100.0, end=20.25,
+              segments=[Segment(start=100.0, end=110.25), Segment(start=10.0, end=20.25)],
+              beat_gap_sec=0.25)
+    r.check_segments()   # must not raise
 
 
-def test_tail_speech_fade_clean_and_legacy_return_none():
-    clean = _tail_reel(start=10.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=None)
-    assert _tail_speech_fade(clean, [Segment(start=10.0, end=18.7)], 1.0) is None
-    legacy = _tail_reel(start=10.0, end=18.7)          # legacy manifest: both fields None
-    assert _tail_speech_fade(legacy, [Segment(start=10.0, end=18.7)], 1.0) is None
+def test_check_segments_beat_reel_still_rejects_empty_segment():
+    # Even beat reels must not contain zero-length segments.
+    r = _reel(start=100.0, end=20.0,
+              segments=[Segment(start=100.0, end=100.0), Segment(start=10.0, end=20.0)],
+              beat_gap_sec=0.25)
+    with pytest.raises(ValueError, match="empty/reversed"):
+        r.check_segments()
 
 
-def test_tail_speech_fade_maps_speed_and_prior_windows():
-    # Two windows; the 5s first window shifts the tail; speed=2 halves output times.
-    r = _tail_reel(start=0.0, end=18.7, tail_last_word_end=18.0, tail_next_word_start=18.5,
-                   segments=[Segment(start=0.0, end=5.0), Segment(start=10.0, end=18.7)])
-    st, dur = _tail_speech_fade(r, r.playback_windows(), 2.0, guard=0.12)
-    n_out = (18.5 - 10.0 + 5.0) / 2.0   # offset=5, nw_src=18.5, seg_start=10 → 13.5/2 = 6.75
-    assert abs(st - max(0.0, n_out - 0.12)) < 1e-6     # guard applied in output time
-    assert abs(st + dur - n_out) < 1e-6                # always ends at intruder
-    assert _check_tail_air([r], tail_pad_sec=0.7, video_duration=20.0) is None
+def test_beat_reel_playback_duration_is_sum_of_segments():
+    # playback_duration sums all beat segments regardless of source order.
+    segs = [Segment(start=100.0, end=110.25), Segment(start=10.0, end=20.25)]
+    r = _reel(start=100.0, end=20.25, segments=segs, beat_gap_sec=0.25)
+    assert abs(r.playback_duration() - (10.25 + 10.25)) < 1e-6
+
+
+def test_beat_reel_concat_uses_hard_cuts():
+    # _concat_segments_graph with beat segments and seam_xfades=[0.0] must produce
+    # hard-cut concat (concat=n=2:v=1:a=0) rather than xfade.
+    segs = [Segment(start=100.0, end=110.0), Segment(start=10.0, end=20.0)]
+    prefix, vseg, aseg = _concat_segments_graph(
+        segs, edge_fade_sec=0.01, seam_xfades=[0.0],
+    )
+    assert "concat=n=2:v=1:a=0" in prefix
+    assert "xfade" not in prefix

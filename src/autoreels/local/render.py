@@ -898,42 +898,6 @@ def _tail_find_word_end(
     return we, next_onset
 
 
-def _tail_speech_fade(reel, segs, speed: float,
-                      guard: float = 0.12) -> tuple[float, float] | None:
-    """(fade_start, fade_dur) on the OUTPUT timeline to silence a next-phrase word pulled into the
-    trailing air, or None when the tail is clean (→ fallback to tail_fade_sec).
-
-    Fade starts `guard` seconds before the intruder so natural air is heard up to that point;
-    afade=out holds at silence after the fade, covering the remainder of the tail. If the intruder
-    is closer than `guard` from the clip start, the fade is truncated to what fits."""
-    nw_start = getattr(reel, "tail_next_word_start", None)
-    if nw_start is None or not segs:
-        return None
-    last = segs[-1]
-    if nw_start >= last.end:
-        # intruder starts at or beyond the segment boundary (Whisper timestamp overflow) — clean tail
-        return None
-    offset = sum(s.end - s.start for s in segs[:-1])
-    n_out = (nw_start - last.start + offset) / speed
-    start = max(0.0, n_out - guard)
-    dur = n_out - start
-    return (start, dur) if dur > 1e-3 else None
-
-
-def _intruded_end_src(fade_start_out: float, segs, speed: float,
-                      last_word_t1: float | None, margin: float = 0.0) -> float:
-    """Source-time end for an intruded-tail clip.
-
-    Converts fade_start_out (output timeline) back to source time, then clamps so the cut
-    never precedes last_word_t1 + margin: guard can land inside the final word when
-    nw_start ≈ t1 (Whisper places the intruder adjacent to the last subtitle word).
-    margin gives extra time for Whisper t1 shortfall.
-    """
-    offset = sum(s.end - s.start for s in segs[:-1])
-    new_end = segs[-1].start + fade_start_out * speed - offset
-    if last_word_t1 is not None:
-        new_end = max(new_end, last_word_t1 + margin)
-    return new_end
 
 
 def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
@@ -1533,19 +1497,21 @@ def _render_segments(
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
             _lw_margin = getattr(ap, "last_word_margin_sec", 0.2)
-            _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
-                                           guard=getattr(ap, "intrusion_guard_sec", 0.12))
+            _tail_fade: tuple[float, float] | None = None   # kept for music path plumbing
             _word_end: float | None = None   # audio-detected last-word end (source time)
-            if _tail_fade is not None:
-                # Intruded tail: extend clip to last_t1 + margin so the final syllable isn't cut;
-                # keep _tail_fade active — it mutes the intruder and holds silence in the margin window.
-                _fade_st, _ = _tail_fade
-                _spd = _reel_speed or 1.0
-                _last_t1 = reel.subtitles[-1].t1 if reel.subtitles else None
-                _new_end = _intruded_end_src(_fade_st, segs, _spd, _last_t1, margin=_lw_margin)
-                # Snap UP (ceil) so the frame boundary never lands inside the margin.
-                _new_end = math.ceil(_new_end * _fps()) / _fps()
-                if _new_end > segs[-1].start:
+            _nw_start = getattr(reel, "tail_next_word_start", None)
+            if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
+                # Intruded tail: next phrase starts before segment end.
+                # Cut to word_end + pad, strictly before the intruder — video and audio end together.
+                _last = reel.subtitles[-1]
+                _word_end, _ = _tail_find_word_end(
+                    ffmpeg_bin, source, _last.t0, _last.t1, margin=_lw_margin)
+                _pad = 0.10
+                _new_end = min(_word_end + _pad, _nw_start - _pad)
+                _new_end = max(_new_end, _last.t0 + 0.04)
+                if len(segs) > 1:
+                    _new_end = round(_new_end * _fps()) / _fps()
+                if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
                     segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                     clip_dur = sum(s.end - s.start for s in segs)
             elif reel.subtitles:
@@ -1584,9 +1550,8 @@ def _render_segments(
                         segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                         clip_dur = sum(s.end - s.start for s in segs)
             # Convert audio word-end to output timeline for fade parameter computation.
-            if _tail_fade is not None:
-                _word_end_out: float | None = _tail_fade[0]   # intruded: already in output time
-            elif _word_end is not None:
+            _word_end_out: float | None
+            if _word_end is not None:
                 _word_end_out = _compute_word_end_out(
                     _word_end, segs, _reel_speed or 1.0, _ts_seam_xfades, _xfade_actual)
             else:
@@ -1723,14 +1688,14 @@ def _render_segments(
                 )
             outputs.append(out)
             # Invariant: the file must last the length _expected_output_duration derived from the
-            # final post-snap windows — the same values fed to the concat graph. Tolerance is 1.5
+            # final post-snap windows — the same values fed to the concat graph. Tolerance is 2.5
             # frames at OUTPUT fps (see _duration_within_tolerance); a larger drift means a stage
             # changed the duration the windows do not describe (the class of bug that lost the tail).
-            # Output is always ≤30fps (social media); source fps can be 120 on Pixel which would
-            # give 2.5/120=0.021s tolerance — too tight for hevc_videotoolbox encoder artifacts.
-            _inv_fps = 30.0
-            _actual = _probe_duration_sec(out, _sibling_ffprobe(ffmpeg_bin)) if out.exists() else None
-            if _actual is not None and not _duration_within_tolerance(_actual, _out_dur, _inv_fps):
+            # fps is read from the output stream so tolerance scales correctly for any output rate.
+            _ffprobe = _sibling_ffprobe(ffmpeg_bin)
+            _actual = _probe_duration_sec(out, _ffprobe) if out.exists() else None
+            _inv_fps = _probe_source_fps(out, _ffprobe) if out.exists() else 30.0
+            if _actual is not None and _inv_fps > 0 and not _duration_within_tolerance(_actual, _out_dur, _inv_fps):
                 raise RenderError(
                     f"{reel.id}: rendered {_actual:.3f}s but windows imply {_out_dur:.3f}s "
                     f"(Δ{_actual - _out_dur:+.3f}s > 2.5 frames) — a render stage changed the "

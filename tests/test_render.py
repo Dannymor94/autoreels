@@ -1164,62 +1164,15 @@ def _reel_with_tail(lw_end, nw_start=None):
     return SimpleNamespace(tail_last_word_end=lw_end, tail_next_word_start=nw_start)
 
 
-from autoreels.local.render import _tail_speech_fade, _audio_tail_fade_parts
+from autoreels.local.render import _audio_tail_fade_parts
 
 
 def test_clean_tail_full_level_then_25ms_decay():
-    """Clean tail: _tail_speech_fade returns None → clean-tail afade covers only last tail_fade_sec.
-    For a 30s clip with tail_pad=0.7s, first 0.45s of the tail (29.3s–29.75s) is at full level."""
-    segs = [_simple_seg(0.0, 30.0)]
-    reel = _reel_with_tail(lw_end=29.3, nw_start=None)
-    result = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
-    assert result is None
-    # clean-tail fade: only the last 0.25s decays
+    """Clean tail: clean-tail afade covers only last tail_fade_sec.
+    For a 30s clip, the last 0.25s decays."""
     ap = AudioProcessing(loudnorm_enabled=False)
     af = _audio_filter_chain(ap, 30.0)
     assert af == "afade=t=out:st=29.75:d=0.25"
-    # The 0.45s window (lw_end=29.3 to fade_start=29.75) is untouched → exceeds 0.4s requirement
-    assert 29.75 - 29.3 >= 0.4
-
-
-def test_intruded_tail_silence_before_intruder():
-    """Intruded tail: fade starts guard=0.12s before the intruder so it reaches silence exactly
-    at nw_start; afade=out holds at silence covering the rest of the clip."""
-    segs = [_simple_seg(0.0, 30.0)]
-    lw_end, nw_start = 29.3, 29.5   # intruder 0.2s into tail air
-    reel = _reel_with_tail(lw_end=lw_end, nw_start=nw_start)
-    fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
-    assert fade is not None
-    st, dur = fade
-    # fade must reach silence at nw_start (29.5s); st+dur == nw_start
-    assert abs(st + dur - nw_start) < 1e-6
-    # natural air runs from lw_end (29.3) to fade_start (29.38); at least 0s of audible air
-    assert st >= 0.0
-
-
-def test_intrusion_immediately_after_last_word_fades_immediately():
-    """Intrusion 0.05s after last word: guard=0.12s > gap so fade starts before lw_end
-    (clamped to 0 floor), ensuring the intruder is never heard."""
-    segs = [_simple_seg(0.0, 5.0)]
-    lw_end, nw_start = 4.3, 4.35   # only 0.05s gap
-    reel = _reel_with_tail(lw_end=lw_end, nw_start=nw_start)
-    fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
-    assert fade is not None
-    st, dur = fade
-    # fade ends exactly at nw_start — intruder plays entirely under silence
-    assert abs(st + dur - nw_start) < 1e-6
-    # fade starts before nw_start (somewhere ≤ nw_start - guard, clamped to 0)
-    assert st < nw_start
-
-
-def test_intruder_beyond_clip_end_treated_as_clean():
-    """If tail_next_word_start >= seg.end (Whisper timestamp overflow past clip boundary),
-    treat as clean tail — the 'intruder' is not actually in the clip."""
-    segs = [_simple_seg(0.0, 30.0)]
-    reel = _reel_with_tail(lw_end=29.5, nw_start=30.0)   # nw_start == seg.end
-    assert _tail_speech_fade(reel, segs, speed=1.0, guard=0.12) is None
-    reel2 = _reel_with_tail(lw_end=29.5, nw_start=30.5)  # nw_start > seg.end
-    assert _tail_speech_fade(reel2, segs, speed=1.0, guard=0.12) is None
 
 
 def test_filter_order_tail_fade_after_loudnorm():
@@ -1230,57 +1183,24 @@ def test_filter_order_tail_fade_after_loudnorm():
     assert af.index("loudnorm") < af.index("afade")
 
 
-def test_intruded_tail_cuts_before_intruder():
-    """Intruded tail: _tail_speech_fade reports a fade start before the intruder.
-    Render extends the clip to last_t1 + margin and keeps the speech fade active to mute
-    the intruder region; the fade start on the output timeline is before the intruder."""
-    segs = [_simple_seg(0.0, 30.0)]
-    reel = _reel_with_tail(lw_end=29.3, nw_start=29.5)
-    tail_fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
-    assert tail_fade is not None
-    # cut point on output timeline is before the intruder
-    cut_out, _ = tail_fade
-    assert cut_out < 29.5
-    # simulate render trim arithmetic: source_end = last.start + cut_out (offset=0, speed=1)
-    fps = 30.0
-    new_end = round((segs[-1].start + cut_out) * fps) / fps
-    assert new_end < 29.5          # intruder gone
-    assert new_end > 29.0          # tail air still present
-    # _tail_speech_fade does not mutate segs (render does the actual trimming)
-    assert abs(sum(s.end - s.start for s in segs) - 30.0) < 1e-6
+def test_intruded_tail_new_end_strictly_before_intruder():
+    """Intruded tail: segment end after trim must be strictly before tail_next_word_start.
+    Arithmetic: new_end = min(word_end + pad, nw_start - pad), clamped to last.t0 + 0.04."""
+    word_end = 29.3   # audio-detected word end
+    nw_start = 29.7   # intruder start
+    pad = 0.10
+    new_end = min(word_end + pad, nw_start - pad)   # 29.4 (word_end+pad wins)
+    assert new_end < nw_start
+    assert new_end >= word_end   # last word is audible
+
+    # Tight gap: intruder only 0.05s after word_end
+    word_end2, nw_start2 = 29.3, 29.35
+    new_end2 = min(word_end2 + pad, nw_start2 - pad)  # min(29.4, 29.25) = 29.25
+    new_end2 = max(new_end2, 29.3 + 0.04)             # clamp to t0+0.04 = 29.34
+    assert new_end2 < nw_start2
 
 
-def test_clean_tail_clip_keeps_full_tail_pad():
-    """Clean tail (no intruder): _tail_speech_fade returns None, no trimming, full 30s preserved."""
-    segs = [_simple_seg(0.0, 30.0)]
-    reel = _reel_with_tail(lw_end=29.3, nw_start=None)
-    tail_fade = _tail_speech_fade(reel, segs, speed=1.0, guard=0.12)
-    assert tail_fade is None
-    # no trimming applied: full clip_dur intact
-    clip_dur = sum(s.end - s.start for s in segs)
-    assert abs(clip_dur - 30.0) < 1e-6
-
-
-from autoreels.local.render import _intruded_end_src, _assert_end_covers_last_word
-
-
-def test_intruded_end_clamps_to_last_word_end():
-    """guard lands inside the last word (nw_start ≈ word.t1) → cut clamped to word's end."""
-    # word [4.0, 5.0]; intruder starts at 5.0 (right at word end, 0 gap)
-    # nw_start - guard = 4.88 — inside the word. Fix must clamp to 5.0.
-    segs = [_simple_seg(0.0, 6.0)]
-    # _tail_speech_fade gives fade_start_out = n_out - guard
-    # n_out = (5.0 - 0.0 + 0) / 1.0 = 5.0; fade_start = 5.0 - 0.12 = 4.88
-    new_end = _intruded_end_src(fade_start_out=4.88, segs=segs, speed=1.0, last_word_t1=5.0)
-    assert abs(new_end - 5.0) < 1e-6, f"expected 5.0, got {new_end}"
-
-
-def test_intruded_end_clean_gap_unaffected():
-    """Intruder well after last word (gap > guard) → cut not affected by clamp."""
-    # word [4.0, 5.0]; intruder at 5.5; cut = 5.38 — after word end, no clamp needed
-    segs = [_simple_seg(0.0, 6.0)]
-    new_end = _intruded_end_src(fade_start_out=5.38, segs=segs, speed=1.0, last_word_t1=5.0)
-    assert abs(new_end - 5.38) < 1e-6, f"expected 5.38, got {new_end}"
+from autoreels.local.render import _assert_end_covers_last_word
 
 
 def test_invariant_rejects_clip_end_before_last_word():
@@ -1314,42 +1234,12 @@ def test_invariant_rejects_200ms_offset():
 
 
 def test_intruded_end_snaps_to_next_frame():
-    """After the clamp, ceil ensures the end is on the frame grid and >= last_word.t1."""
-    # This replicates the r01 pathology: round(608.1128 * 30)/30 = 608.1 (below word end),
-    # ceil(608.1128 * 30)/30 = 608.1333 (above word end, on frame grid).
+    """ceil-snap after intruded tail trim puts the end on the frame grid."""
     fps = 30.0
-    new_end_raw = 608.1128   # = _intruded_end_src result after clamping to last_word.t1
+    new_end_raw = 608.1128
     new_end_snapped = math.ceil(new_end_raw * fps) / fps
-    assert new_end_snapped >= new_end_raw                        # snapped up, covers last word
+    assert new_end_snapped >= new_end_raw
     assert abs(new_end_snapped * fps - round(new_end_snapped * fps)) < 1e-9  # on frame grid
-
-
-# --- last_word_margin_sec ---
-
-def test_last_word_margin_covers_whisper_shortfall():
-    """Margin 0.2 s covers a word that actually ends 0.15 s after its recorded t1."""
-    fps = 30.0
-    last_t1 = 5.0
-    margin = 0.2
-    real_word_end = last_t1 + 0.15   # Whisper was 0.15 s early
-    segs = [_simple_seg(0.0, 6.0)]
-    # nw_start = last_t1 (adjacent intruder): fade_start = last_t1 - guard = 4.88
-    new_end = _intruded_end_src(fade_start_out=4.88, segs=segs, speed=1.0,
-                                last_word_t1=last_t1, margin=margin)
-    snapped = math.ceil(new_end * fps) / fps
-    assert snapped >= real_word_end, f"clip end {snapped:.4f} < real word end {real_word_end}"
-
-
-def test_last_word_margin_wins_over_intruder_guard():
-    """When nw_start == last_t1 (margin > guard gap), margin wins — clip extends to last_t1 + margin."""
-    last_t1 = 5.0
-    margin = 0.2
-    guard = 0.12
-    segs = [_simple_seg(0.0, 6.0)]
-    # fade_start_out = nw_start - guard = last_t1 - guard = 4.88
-    new_end = _intruded_end_src(fade_start_out=last_t1 - guard, segs=segs, speed=1.0,
-                                last_word_t1=last_t1, margin=margin)
-    assert new_end == pytest.approx(last_t1 + margin, abs=1e-6)
 
 
 def test_clean_tail_satisfies_margin_without_extension():

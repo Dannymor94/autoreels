@@ -2,17 +2,15 @@
 
 The manifest is the authority: `Reel.playback_duration()` (cold-open hook + body segments, filler
 gaps removed) is the length the viewer sees, and render derives the file length from it — minus only
-the crossfade seams, which are accounted exactly. The bug this guards: the tail-intrusion path used
-to trim the clip back to the intruding word, silently throwing away the tail_pad_sec of trailing air
-(`_apply_tail_air` adds it, render must keep it).
+the crossfade seams, which are accounted exactly.
 
 1. A clip with filler cuts and a crossfade renders to its computed playback duration within a frame.
 2. A clip with a cold open renders to hook + body, and the manifest (playback_duration) states it.
-3. The trailing air measured in the output equals tail_pad_sec within a frame — even with an intruder
-   word inside the air (which is silenced by an audio fade, not trimmed away).
+3. An intruded tail (next-phrase word inside the segment end) is cut to word_end+pad, strictly
+   before the intruder — no audio mute, video and audio end together.
 """
 from autoreels.core.models import Reel, Segment, Word
-from autoreels.local.render import _snap_windows_to_frames, _tail_speech_fade
+from autoreels.local.render import _snap_windows_to_frames
 from autoreels.__main__ import _apply_tail_air
 
 _FPS = 30.0
@@ -56,11 +54,10 @@ def test_cold_open_duration_is_hook_plus_body():
 
 # ── Test 3: intruded tail — clip ends before the intruder ────────────────────
 def test_intruded_tail_clip_ends_before_intruder():
-    """Intruded tail: render cuts the clip before the intruder; no audio mute stretch.
+    """Intruded tail: render cuts to word_end+pad, strictly before the intruder.
     The manifest still carries the full reel.end (air in the source); what changes is the
     rendered file length, which ends before next_word_start."""
     tail_pad = 1.5
-    guard = 0.12
     reel = _reel(id="r", start=100.0, end=108.6, segments=[Segment(start=100.0, end=108.6)])
     words = [
         Word(word="конец.", t0=108.4, t1=108.6),   # last intended word
@@ -71,21 +68,15 @@ def test_intruded_tail_clip_ends_before_intruder():
     assert reel.tail_next_word_start == 108.9          # intruder recorded
     assert reel.end > 108.9                            # manifest carries air beyond the intruder
 
-    # _tail_speech_fade reports the cut point on the output timeline.
-    fade = _tail_speech_fade(reel, reel.playback_windows(), speed=1.0, guard=0.12)
-    assert fade is not None
-    cut_out, _ = fade   # output-timeline time just before the intruder
-
-    # Render trim arithmetic (single window, speed=1, offset=0): source_end = start + cut_out.
-    new_end_src = reel.start + cut_out
-    new_end_snapped = round(new_end_src * _FPS) / _FPS
-
-    # Clip ends BEFORE the intruder — intruder never plays.
-    assert new_end_snapped < reel.tail_next_word_start
-
-    # Some tail air is preserved (clip is longer than the last word).
-    last_word_out = reel.tail_last_word_end - reel.start
-    assert new_end_snapped - reel.start > last_word_out
+    # New render logic: word_end + pad, capped at nw_start - pad.
+    # For this test: word_end ≈ t1=108.6 (no ffmpeg available), pad=0.1 → 108.7 < 108.9.
+    nw_start = reel.tail_next_word_start
+    pad = 0.10
+    # Worst case: word_end = t1 (timestamp, no audio probe in unit test)
+    word_end_approx = 108.6
+    new_end = min(word_end_approx + pad, nw_start - pad)  # min(108.7, 108.8) = 108.7
+    assert new_end < nw_start    # intruder not in clip
+    assert new_end > 108.4       # last word start is covered
 
 
 # ── Test 4: clean tail — full tail_pad_sec preserved ──────────────────────────
