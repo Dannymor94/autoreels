@@ -79,6 +79,9 @@ audio_processing:
   # INTRUDED (следующее слово в хвосте): fade от (nw_start − intrusion_guard_sec), гасит вторжение.
   tail_fade_sec: 0.25
   intrusion_guard_sec: 0.12
+  # Видео-фейд в чёрное в конце клипа, синхронный с аудио tail fade. AFTER субтитров.
+  tail_video_fade: true
+  tail_video_fade_min_sec: 0.25
   # Микро-фейд на краях аудиосегментов многосегментного клипа (гасит щелчок склейки, без
   # перекрытия — длина звука = длине видео). Только клипы с >1 сегментом. 0 → встык без фейдов.
   audio_edge_fade_sec: 0.01

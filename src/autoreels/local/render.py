@@ -1034,6 +1034,28 @@ def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
     return f"fade=t=in:st=0:d={_num(d)},fade=t=out:st={_num(out_st)}:d={_num(d)}"
 
 
+def _tail_video_fade_filter(ap: AudioProcessing, out_duration: float,
+                             tail_fade: tuple[float, float] | None = None) -> str:
+    """Video fade to black mirroring the audio tail fade. Appended AFTER subtitle burn-in.
+
+    Only active when ap.tail_video_fade is True.
+    Clean tail (tail_fade=None): same start and duration as audio tail_fade_sec.
+    Intruded tail: short fade of tail_video_fade_min_sec at the very end.
+    """
+    if not getattr(ap, "tail_video_fade", False):
+        return ""
+    if tail_fade is not None:
+        min_sec = getattr(ap, "tail_video_fade_min_sec", 0.25)
+        d = min(min_sec, out_duration)
+        out_st = max(0.0, round(out_duration - d, 3))
+        return f"fade=t=out:st={_num(out_st)}:d={_num(d)}"
+    tf = getattr(ap, "tail_fade_sec", 0.25)
+    if tf <= 0:
+        return ""
+    out_st = max(0.0, round(out_duration - tf, 3))
+    return f"fade=t=out:st={_num(out_st)}:d={_num(tf)}"
+
+
 def _zoom_vf(scale, zoom: Zoom, fps: float = 30.0, offset_sec: float = 0.0) -> str:
     """zoompan hook-зума ВМЕСТО статичного scale. Качество: сэмплит уже вырезанный ПОЛНОРАЗМЕРНЫЙ
     регион (вход фильтра) и выводит SW×SH — динамический кроп меньшей области, НЕ апскейл готового
@@ -1525,14 +1547,18 @@ def _render_segments(
             # expected length always matches what the concat graph emits (no re-derivation drift).
             clip_duration = _expected_output_duration(segs, xfade_sec=_xfade_actual,
                                                         seam_xfades=_ts_seam_xfades)
+            # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
+            _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
+            # Tail video fade: mirrors the audio tail fade, AFTER subtitle burn-in.
+            tvfade = _tail_video_fade_filter(ap, _out_dur, _tail_fade)
+            if tvfade:
+                reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
             reel_fc = None
             reel_af = None
-            # Final (post-speed) length: the tail fade must land on the real end of the clip.
-            _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
             if music_path:
                 reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed,
                                                 tail_fade=_tail_fade)
@@ -1562,6 +1588,9 @@ def _render_segments(
                     _vfade1 = _video_fade_filter(ap, clip_duration)
                     if _vfade1:
                         _post_parts1.append(_vfade1)
+                    _tvfade1 = _tail_video_fade_filter(ap, _out_dur, _tail_fade)
+                    if _tvfade1:
+                        _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
                     _v_fc = [
                         f"[0:v]{_vtrim1}[raw1]",

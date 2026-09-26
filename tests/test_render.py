@@ -1508,6 +1508,58 @@ def test_video_fade_matches_audio_fade_timing():
     assert _video_fade_filter(ap, 20.0) == "fade=t=in:st=0:d=0.3,fade=t=out:st=19.7:d=0.3"
 
 
+# ---- tail video fade (mirrors audio tail fade, AFTER subtitle burn-in) ----
+from autoreels.local.render import _tail_video_fade_filter
+
+
+def test_tail_video_fade_off_by_default():
+    assert _tail_video_fade_filter(AudioProcessing(), 30.0) == ""
+    assert _tail_video_fade_filter(AudioProcessing(), 30.0, tail_fade=(28.0, 0.5)) == ""
+
+
+def test_tail_video_fade_clean_tail_matches_audio_tail_fade_sec():
+    ap = AudioProcessing(tail_video_fade=True, tail_fade_sec=0.25)
+    result = _tail_video_fade_filter(ap, 20.0, tail_fade=None)
+    assert result == "fade=t=out:st=19.75:d=0.25"
+
+
+def test_tail_video_fade_intruded_uses_min_sec():
+    ap = AudioProcessing(tail_video_fade=True, tail_video_fade_min_sec=0.25)
+    result = _tail_video_fade_filter(ap, 20.0, tail_fade=(18.5, 0.8))
+    assert result == "fade=t=out:st=19.75:d=0.25"
+
+
+def test_tail_video_fade_flag_off_identical_render_command(tmp_path, render_cfg, fake_ffmpeg):
+    """tail_video_fade=False → vf unchanged (no tail fade added)."""
+    render_cfg.audio_processing.tail_video_fade = False
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"no-tvfade")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    assert "fade=t=out" not in vf
+
+
+def test_tail_video_fade_appended_after_subtitles(tmp_path, render_cfg, fake_ffmpeg):
+    """tail_video_fade=True: fade=t=out appears in vf AFTER ass= filter."""
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    render_cfg.audio_processing.tail_video_fade = True
+    render_cfg.audio_processing.tail_fade_sec = 0.25
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"tvfade-after-ass")
+    reel = _reel("r01", 10.0, 40.0)
+    reel.subtitles = [Word(word="привет", t0=11.0, t1=11.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg,
+                subtitles_cfg=subs_cfg)
+    vf = _val_after(fake_ffmpeg[0], "-vf")
+    # fade=t=out must appear after ass=
+    assert "ass=" in vf and "fade=t=out" in vf
+    assert vf.index("ass=") < vf.index("fade=t=out")
+    # duration unchanged: st + d = out_duration (30s clip, tail_fade_sec=0.25)
+    assert "fade=t=out:st=29.75:d=0.25" in vf
+
+
 def test_render_default_adds_loudnorm_to_command(tmp_path, render_cfg, fake_ffmpeg):
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "v.mp4", b"loudnorm-video")

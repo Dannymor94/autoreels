@@ -432,6 +432,12 @@ class AudioProcessing(BaseModel):
     # иначе укорочение аудио вернуло бы дрейф. Выход короче суммы сегментов на (N−1)×xfade_sec.
     # Длительность снаппится к сетке кадров при рендере. 0 → жёсткий concat (байт-идентичен старому).
     video_xfade_sec: float = 0.08
+    # Видео-фейд в чёрное в конце клипа, синхронный с аудио-хвостовым фейдом. ВЫКЛ по умолчанию.
+    # CLEAN хвост: fade той же длины, что audio tail_fade_sec (одинаковый старт и длина).
+    # INTRUDED хвост: короткий fade tail_video_fade_min_sec в самом конце клипа.
+    # Фейд ПОСЛЕ субтитров — субтитры уходят вместе с картинкой. Не меняет длину.
+    tail_video_fade: bool = False
+    tail_video_fade_min_sec: float = 0.25
 
 
 class AudioExtract(BaseModel):
