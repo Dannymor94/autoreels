@@ -586,6 +586,8 @@ class RenderConfig(BaseModel):
     # M1.7 step 1d: dissolve on same-shot seams (filler/splice without shot change). Off by default.
     # 0 = disabled (falls back to video_xfade_sec). Flag off → identical cmd.
     same_shot_dissolve_frames: int = 0   # dissolve duration in frames (0 = disabled)
+    # M1.8: energy-based speech map — off by default (Stage A; no consumers yet)
+    speech_map: bool = False
 
     @property
     def two_shot_max_wide_sec(self) -> float:

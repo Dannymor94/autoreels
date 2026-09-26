@@ -4862,6 +4862,121 @@ def cmd_backfill_source_sha(
     return 0 if errors == 0 else 1
 
 
+def cmd_speech_map(
+    manifest_path: str,
+    *,
+    root=None,
+    inputs_dir: str | None = None,
+    transcripts_dir: str | None = None,
+    cache_dir: str | None = None,
+    force: bool = False,
+) -> int:
+    """Build (or load cached) the energy-based speech map for a source.
+
+    Stage A — no consumer changes.  Prints stats, writes transcripts/<stem>.speechmap.json.
+    """
+    from autoreels.local.speechmap import (
+        boundary_pauses, build_or_load, whisper_gaps,
+        DEFAULT_FRAME_SEC, DEFAULT_HEADROOM_DB, DEFAULT_MIN_SILENCE_SEC,
+        DEFAULT_NOISE_PERCENTILE, DEFAULT_PAUSE_MIN_SEC,
+    )
+
+    _root = Path(root) if root else _project_root()
+    _inputs = Path(inputs_dir) if inputs_dir else _root / "inputs"
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    _transcripts_dir = Path(transcripts_dir) if transcripts_dir else _root / "transcripts"
+
+    mpath = Path(manifest_path)
+    if not mpath.is_absolute():
+        mpath = (_root / "manifests" / mpath) if not mpath.exists() else mpath.resolve()
+    if not mpath.exists():
+        mpath = _root / "manifests" / manifest_path
+    if not mpath.exists():
+        print(f"ошибка: манифест не найден: {manifest_path}", file=sys.stderr)
+        return 1
+
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    sha = manifest.source_sha256
+    pkey = manifest.transcript_params_key
+
+    # Find transcript in cache: match by source_sha256 + pkey; pkey-only fallback for legacy
+    tr_path: Path | None = None
+    fallback_candidates: list[Path] = []
+    for p in _cache.glob("*.transcript.json"):
+        try:
+            t = Transcript.model_validate_json(p.read_text(encoding="utf-8"))
+            if t.source_sha256 == sha and (not pkey or pkey in p.name):
+                tr_path = p
+                break
+            if pkey and not t.source_sha256 and pkey in p.name:
+                fallback_candidates.append(p)
+        except Exception:
+            continue
+    if tr_path is None:
+        if fallback_candidates:
+            tr_path = fallback_candidates[0]
+            print(f"  предупреждение: транскрипт без source_sha256 ({len(fallback_candidates)} кандидата), "
+                  f"используем первый: {tr_path.name[:50]}…")
+        else:
+            print(f"ошибка: транскрипт для {sha[:16]}… (pkey={pkey}) не найден в {_cache}", file=sys.stderr)
+            return 1
+
+    transcript = Transcript.model_validate_json(tr_path.read_text(encoding="utf-8"))
+    words = transcript.words
+
+    # Locate source file
+    try:
+        source = resolve_source(manifest, _inputs)
+    except Exception as e:
+        print(f"ошибка: исходник не найден: {e}", file=sys.stderr)
+        return 1
+
+    stem = mpath.stem  # e.g. "2026-08-08 11h 42m 49s"
+    out_path = _transcripts_dir / f"{stem}.speechmap.json"
+    if force and out_path.exists():
+        out_path.unlink()
+
+    print(f"source:   {source.name}")
+    print(f"sha256:   {sha[:16]}…")
+    print(f"words:    {len(words)}")
+    print(f"map out:  {out_path}")
+
+    smap = build_or_load(
+        source=source, source_sha256=sha, words=words, out_path=out_path,
+    )
+
+    intervals = smap["intervals"]
+    n = smap["n_intervals"]
+    dur = smap["duration_sec"]
+    print(f"\nnoise floor:  {smap['noise_floor_db']:.1f} dBFS")
+    print(f"threshold:    {smap['threshold_db']:.1f} dBFS")
+    print(f"duration:     {dur:.1f} s")
+    print(f"intervals:    {n}")
+    if n > 0:
+        speech_sec = sum(b - a for a, b in intervals)
+        print(f"speech:       {speech_sec:.1f} s ({100 * speech_sec / dur:.1f}%)")
+
+    # Pause distribution: map vs Whisper
+    refined = smap["words"]
+    if len(refined) >= 2 and len(words) >= 2:
+        mp = boundary_pauses(refined, words)
+        wg = whisper_gaps(words)
+
+        def _pct_gt(vals, thr):
+            return 100.0 * sum(1 for v in vals if v > thr) / len(vals)
+
+        def _pct_neg(vals):
+            return 100.0 * sum(1 for v in vals if v < 0) / len(vals)
+
+        print(f"\n{'Boundary pauses':32s}  {'map':>8s}  {'whisper':>8s}")
+        print(f"  {'> 0.3 s':30s}  {_pct_gt(mp, 0.3):7.1f}%  {_pct_gt(wg, 0.3):7.1f}%")
+        print(f"  {'> 1.0 s':30s}  {_pct_gt(mp, 1.0):7.1f}%  {_pct_gt(wg, 1.0):7.1f}%")
+        print(f"  {'negative':30s}  {_pct_neg(mp):7.1f}%  {_pct_neg(wg):7.1f}%")
+        print(f"  {'total pairs':30s}  {len(mp):>8d}  {len(wg):>8d}")
+
+    return 0
+
+
 def cmd_migrate_calibrations(
     *,
     root=None,
@@ -6918,6 +7033,21 @@ def _build_parser():
                      help="перезаписать существующий transcript_params_key")
     pbp.add_argument("--root", default=None, help="корень проекта (по умолчанию: авто)")
 
+    psm = sub.add_parser(
+        "speech-map",
+        help="build energy-based speech map for a source (M1.8 Stage A)",
+        description="Builds (or loads cached) speech map from audio energy. "
+                    "Writes transcripts/<stem>.speechmap.json and prints pause stats.",
+    )
+    psm.add_argument("manifest", metavar="манифест",
+                     help="путь к манифесту или имя файла (в manifests/)")
+    psm.add_argument("--root", default=None, help="корень проекта")
+    psm.add_argument("--inputs-dir", default=None, dest="inputs_dir")
+    psm.add_argument("--transcripts-dir", default=None, dest="transcripts_dir")
+    psm.add_argument("--cache-dir", default=None, dest="cache_dir")
+    psm.add_argument("--force", action="store_true", default=False,
+                     help="сбросить кэш и пересчитать")
+
     pbss = sub.add_parser(
         "backfill-source-sha",
         help="stamp source_sha256 on legacy transcripts that lack it (one-off repair)",
@@ -7165,6 +7295,15 @@ def main(argv=None) -> int:
                 args.manifest, args.transcript,
                 root=args.root if hasattr(args, "root") and args.root else None,
                 force=args.force,
+            )
+        elif args.cmd == "speech-map":
+            return cmd_speech_map(
+                args.manifest,
+                root=args.root if hasattr(args, "root") else None,
+                inputs_dir=getattr(args, "inputs_dir", None),
+                transcripts_dir=getattr(args, "transcripts_dir", None),
+                cache_dir=getattr(args, "cache_dir", None),
+                force=getattr(args, "force", False),
             )
         elif args.cmd == "backfill-source-sha":
             return cmd_backfill_source_sha(
