@@ -595,10 +595,26 @@ def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float =
     return out_len / speed if speed else out_len
 
 
+def _compute_word_end_out(word_end: float, segs, speed: float,
+                          seam_xfades=None, xfade_sec: float = 0.0) -> float:
+    """Convert audio-detected word_end (source time, within the last segment) to output timeline.
+
+    Mirrors _expected_output_duration: sums previous segment durations (minus seam xfades) then
+    adds the within-last-segment offset, divided by speed.
+    """
+    out_acc = 0.0
+    for i, s in enumerate(segs[:-1]):
+        out_acc += s.end - s.start
+        xf = seam_xfades[i] if seam_xfades is not None else xfade_sec
+        out_acc -= xf
+    out_acc += word_end - segs[-1].start
+    return out_acc / speed if speed else out_acc
+
+
 def _duration_within_tolerance(actual: float, expected: float, fps: float) -> bool:
     """True when a rendered clip's length matches the expected length closely enough.
 
-    Tolerance is 2.5 frames at the source fps:
+    Tolerance is 2.5 frames at the OUTPUT fps (caller passes 30.0):
     - 1 frame: xfade boundary (offset + xf = left_input_duration at exact frame boundary;
       hevc_videotoolbox with VFR source can include one extra frame at the transition).
     - 1 frame: encoder artifact (hevc_videotoolbox sometimes writes the last frame with duration
@@ -941,13 +957,15 @@ def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
 
 
 def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
-                           tail_fade: tuple[float, float] | None = None) -> list[str]:
+                           tail_fade: tuple[float, float] | None = None,
+                           word_end_out: float | None = None) -> list[str]:
     """Always-on audio-only fade-out. Separate from `_audio_fade_parts` (the optional symmetric
     in/out, off by default) and from the 10 ms segment edge fades. NO video fade — audio only.
 
     With `tail_fade=(start, dur)` (intruded tail from _tail_speech_fade): fade from `start` to
-    `start+dur` so the intruder plays entirely under silence. Otherwise (clean tail): ride only the
-    final `tail_fade_sec` so the clip ends softly while natural breath is audible before it.
+    `start+dur` so the intruder plays entirely under silence. Otherwise (clean tail): fade starts
+    at word_end_out (audio-detected word end) for a natural handoff; duration is at least
+    tail_fade_sec (minimum) and extends to cover any tail air beyond the minimum.
     `out_duration` is the FINAL (post-speed) clip length. Placed last in the audio chain."""
     if tail_fade is not None:
         st, d = tail_fade
@@ -955,25 +973,31 @@ def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
     tf = getattr(ap, "tail_fade_sec", 0.25)
     if tf <= 0:
         return []
-    out_st = max(0.0, round(out_duration - tf, 3))
-    return [f"afade=t=out:st={_num(out_st)}:d={_num(tf)}"]
+    if word_end_out is not None:
+        d = max(tf, round(out_duration - word_end_out, 6))
+    else:
+        d = tf
+    out_st = max(0.0, round(out_duration - d, 3))
+    return [f"afade=t=out:st={_num(out_st)}:d={_num(round(d, 3))}"]
 
 
 def _audio_filter_chain(ap: AudioProcessing, clip_duration: float, *, out_duration: float | None = None,
-                        tail_fade: tuple[float, float] | None = None) -> str:
+                        tail_fade: tuple[float, float] | None = None,
+                        word_end_out: float | None = None) -> str:
     """Аудиофильтры клипа (БЕЗ музыки). Порядок: шумоподавление → нормализация → фейд → tail-фейд.
     tail-фейд считается по ФИНАЛЬной длине (`out_duration`, по умолчанию = clip_duration); `tail_fade`
     (start, dur) заглушает слово следующей фразы, попавшее в хвост. Пусто только если всё выключено И
     tail-фейд отключён."""
     out_dur = clip_duration if out_duration is None else out_duration
     return ",".join(_audio_denoise_norm(ap) + _audio_fade_parts(ap, clip_duration)
-                    + _audio_tail_fade_parts(ap, out_dur, tail_fade))
+                    + _audio_tail_fade_parts(ap, out_dur, tail_fade, word_end_out=word_end_out))
 
 
 def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
                           clip_duration: float, *, speed: float = 1.0,
                           vin: str = "[0:v]", ain: str = "[0:a]", music_in: str = "[1:a]",
-                          tail_fade: tuple[float, float] | None = None) -> str:
+                          tail_fade: tuple[float, float] | None = None,
+                          word_end_out: float | None = None) -> str:
     """filter_complex для микса речи с фоновой музыкой. Второй вход (`-i` музыки) зациклен на
     уровне демуксера (`-stream_loop -1`); длина берётся по речи (`amix duration=first`) — короткий
     трек играет по кругу, длинный обрезается. Порядок аудио: речь(шумоподавление→нормализация) →
@@ -1018,7 +1042,8 @@ def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
         post.append(_loudnorm_str(ap))     # финальная нормализация микса (анти-клиппинг)
     post += _audio_fade_parts(ap, clip_duration)
     # Always-on audio tail fade, on the FINAL (post-speed) length of the mixed track.
-    post += _audio_tail_fade_parts(ap, clip_duration / speed if speed else clip_duration, tail_fade)
+    post += _audio_tail_fade_parts(ap, clip_duration / speed if speed else clip_duration, tail_fade,
+                                   word_end_out=word_end_out)
     mix_str = tail[0] + ("".join("," + p for p in post))
     parts.append(f"{mix_str}[a]")
     return ";".join(parts)
@@ -1035,25 +1060,38 @@ def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
 
 
 def _tail_video_fade_filter(ap: AudioProcessing, out_duration: float,
-                             tail_fade: tuple[float, float] | None = None) -> str:
-    """Video fade to black mirroring the audio tail fade. Appended AFTER subtitle burn-in.
+                             word_end_out: float | None = None,
+                             fps_out: float = 30.0) -> str:
+    """Video fade to black starting at the audible end of the last word.
 
     Only active when ap.tail_video_fade is True.
-    Clean tail (tail_fade=None): same start and duration as audio tail_fade_sec.
-    Intruded tail: short fade of tail_video_fade_min_sec at the very end.
+    Fade covers from word_end_out to the last frame of the clip, minimum tail_video_fade_min_sec.
+    Setting st+d = last_frame_pts ensures the last encoded frame is fully black (gain=0).
+
+    Frame n is included iff (n+1)/fps ≤ out_duration, so last frame index =
+    floor(out_duration * fps) - 1, and last_pts = (floor(out_duration * fps) - 1) / fps.
+    This is exact even when out_duration is not an integer multiple of 1/fps, unlike
+    out_duration - 1/fps which overshoots by up to 1/fps.
+
+    word_end_out: output-timeline position of the audio-detected last-word end.
+        None → defaults to minimum fade at clip end (backwards-compatible behaviour).
+    fps_out: OUTPUT frame rate; 30 is safe for any ≤60fps social media output.
     """
     if not getattr(ap, "tail_video_fade", False):
         return ""
-    if tail_fade is not None:
-        min_sec = getattr(ap, "tail_video_fade_min_sec", 0.25)
-        d = min(min_sec, out_duration)
-        out_st = max(0.0, round(out_duration - d, 3))
-        return f"fade=t=out:st={_num(out_st)}:d={_num(d)}"
-    tf = getattr(ap, "tail_fade_sec", 0.25)
-    if tf <= 0:
-        return ""
-    out_st = max(0.0, round(out_duration - tf, 3))
-    return f"fade=t=out:st={_num(out_st)}:d={_num(tf)}"
+    import math as _math
+    min_sec = getattr(ap, "tail_video_fade_min_sec", 0.25)
+    # Use N-2 (second-to-last output frame PTS) rather than N-1.  VFR sources accumulate a
+    # timing offset between filtergraph PTS (what the fade filter sees) and output file PTS
+    # (what ffprobe reports).  For a 40-second 30fps clip the jitter is ~6.5 ms — enough to
+    # leave gain > 0 at the last frame when st+d = N-1 PTS.  N-2 gives ~33 ms margin which
+    # covers the jitter range for clips up to a few minutes.
+    last_pts = (_math.floor(out_duration * fps_out) - 2) / fps_out
+    if word_end_out is None:
+        word_end_out = last_pts - min_sec
+    fade_dur = max(min_sec, round(last_pts - word_end_out, 6))
+    fade_st = max(0.0, round(last_pts - fade_dur, 3))
+    return f"fade=t=out:st={_num(fade_st)}:d={_num(round(fade_dur, 3))}"
 
 
 def _zoom_vf(scale, zoom: Zoom, fps: float = 30.0, offset_sec: float = 0.0) -> str:
@@ -1493,6 +1531,7 @@ def _render_segments(
             _lw_margin = getattr(ap, "last_word_margin_sec", 0.2)
             _tail_fade = _tail_speech_fade(reel, segs, _reel_speed or 1.0,
                                            guard=getattr(ap, "intrusion_guard_sec", 0.12))
+            _word_end: float | None = None   # audio-detected last-word end (source time)
             if _tail_fade is not None:
                 # Intruded tail: extend clip to last_t1 + margin so the final syllable isn't cut;
                 # keep _tail_fade active — it mutes the intruder and holds silence in the margin window.
@@ -1513,7 +1552,7 @@ def _render_segments(
                 _last = reel.subtitles[-1]
                 _last_t1 = _last.t1
                 if segs[-1].end <= _last_t1 + _lw_margin + 0.05:
-                    _word_end, _next_onset = _tail_find_word_end(
+                    _word_end, _next_onset = _tail_find_word_end(  # type: ignore[assignment]
                         ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
                     )
                     _pad = 0.10
@@ -1540,6 +1579,14 @@ def _render_segments(
                     if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
                         segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                         clip_dur = sum(s.end - s.start for s in segs)
+            # Convert audio word-end to output timeline for fade parameter computation.
+            if _tail_fade is not None:
+                _word_end_out: float | None = _tail_fade[0]   # intruded: already in output time
+            elif _word_end is not None:
+                _word_end_out = _compute_word_end_out(
+                    _word_end, segs, _reel_speed or 1.0, _ts_seam_xfades, _xfade_actual)
+            else:
+                _word_end_out = None
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
@@ -1552,8 +1599,8 @@ def _render_segments(
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
-            # Tail video fade: mirrors the audio tail fade, AFTER subtitle burn-in.
-            tvfade = _tail_video_fade_filter(ap, _out_dur, _tail_fade)
+            # Tail video fade: from audible word-end to clip end, AFTER subtitle burn-in.
+            tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out)
             if tvfade:
                 reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
@@ -1561,11 +1608,11 @@ def _render_segments(
             reel_af = None
             if music_path:
                 reel_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration, speed=_reel_speed,
-                                                tail_fade=_tail_fade)
+                                                tail_fade=_tail_fade, word_end_out=_word_end_out)
             else:
                 # atempo goes FIRST; the fade st (in _out_dur / post-speed time) then lands correctly.
                 reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur,
-                                              tail_fade=_tail_fade) or None
+                                              tail_fade=_tail_fade, word_end_out=_word_end_out) or None
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
@@ -1588,7 +1635,7 @@ def _render_segments(
                     _vfade1 = _video_fade_filter(ap, clip_duration)
                     if _vfade1:
                         _post_parts1.append(_vfade1)
-                    _tvfade1 = _tail_video_fade_filter(ap, _out_dur, _tail_fade)
+                    _tvfade1 = _tail_video_fade_filter(ap, _out_dur, _word_end_out)
                     if _tvfade1:
                         _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
@@ -1632,7 +1679,8 @@ def _render_segments(
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
                                                      speed=_reel_speed, vin=vseg, ain=aseg,
-                                                     music_in=f"[{len(segs)}:a]", tail_fade=_tail_fade)
+                                                     music_in=f"[{len(segs)}:a]", tail_fade=_tail_fade,
+                                                     word_end_out=_word_end_out)
                     fc = f"{prefix};{music_fc}"
                 else:
                     vtail = f"{vseg}{reel_vf}[v]" if reel_vf else f"{vseg}null[v]"
@@ -1672,9 +1720,11 @@ def _render_segments(
             outputs.append(out)
             # Invariant: the file must last the length _expected_output_duration derived from the
             # final post-snap windows — the same values fed to the concat graph. Tolerance is 1.5
-            # frames at source fps (see _duration_within_tolerance); a larger drift means a stage
+            # frames at OUTPUT fps (see _duration_within_tolerance); a larger drift means a stage
             # changed the duration the windows do not describe (the class of bug that lost the tail).
-            _inv_fps = _fps_holder[0] if _fps_holder else 30.0
+            # Output is always ≤30fps (social media); source fps can be 120 on Pixel which would
+            # give 2.5/120=0.021s tolerance — too tight for hevc_videotoolbox encoder artifacts.
+            _inv_fps = 30.0
             _actual = _probe_duration_sec(out, _sibling_ffprobe(ffmpeg_bin)) if out.exists() else None
             if _actual is not None and not _duration_within_tolerance(_actual, _out_dur, _inv_fps):
                 raise RenderError(

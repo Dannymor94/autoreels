@@ -1514,19 +1514,32 @@ from autoreels.local.render import _tail_video_fade_filter
 
 def test_tail_video_fade_off_by_default():
     assert _tail_video_fade_filter(AudioProcessing(), 30.0) == ""
-    assert _tail_video_fade_filter(AudioProcessing(), 30.0, tail_fade=(28.0, 0.5)) == ""
+    assert _tail_video_fade_filter(AudioProcessing(), 30.0, word_end_out=28.0) == ""
 
 
 def test_tail_video_fade_clean_tail_matches_audio_tail_fade_sec():
+    # No word_end_out → defaults to last_pts - min_sec; st+d must == (N-2)/fps_out
+    # N-2 ensures gain=0 at filtergraph last frame even with VFR timing jitter.
     ap = AudioProcessing(tail_video_fade=True, tail_fade_sec=0.25)
-    result = _tail_video_fade_filter(ap, 20.0, tail_fade=None)
-    assert result == "fade=t=out:st=19.75:d=0.25"
+    result = _tail_video_fade_filter(ap, 20.0)
+    assert result == "fade=t=out:st=19.683:d=0.25"
+    # Invariant: st + d == (N-2)/fps_out = (600-2)/30 = 19.933
+    import re as _re
+    m = _re.search(r"st=([\d.]+):d=([\d.]+)", result)
+    st, d = float(m.group(1)), float(m.group(2))
+    assert abs(st + d - (20.0 - 2.0 / 30.0)) < 1e-3
 
 
 def test_tail_video_fade_intruded_uses_min_sec():
+    # Intruded path: caller passes word_end_out=tail_fade[0]; fade starts there, reaches last_pts
     ap = AudioProcessing(tail_video_fade=True, tail_video_fade_min_sec=0.25)
-    result = _tail_video_fade_filter(ap, 20.0, tail_fade=(18.5, 0.8))
-    assert result == "fade=t=out:st=19.75:d=0.25"
+    result = _tail_video_fade_filter(ap, 20.0, word_end_out=18.5)
+    assert result == "fade=t=out:st=18.5:d=1.433"
+    # Invariant: st + d == (N-2)/fps_out = 19.933
+    import re as _re
+    m = _re.search(r"st=([\d.]+):d=([\d.]+)", result)
+    st, d = float(m.group(1)), float(m.group(2))
+    assert abs(st + d - (20.0 - 2.0 / 30.0)) < 1e-3
 
 
 def test_tail_video_fade_flag_off_identical_render_command(tmp_path, render_cfg, fake_ffmpeg):
@@ -1556,8 +1569,9 @@ def test_tail_video_fade_appended_after_subtitles(tmp_path, render_cfg, fake_ffm
     # fade=t=out must appear after ass=
     assert "ass=" in vf and "fade=t=out" in vf
     assert vf.index("ass=") < vf.index("fade=t=out")
-    # duration unchanged: st + d = out_duration (30s clip, tail_fade_sec=0.25)
-    assert "fade=t=out:st=29.75:d=0.25" in vf
+    # st + d = (N-2)/fps_out = (900-2)/30 = 29.933; with word_end_out=None:
+    # st = round(29.933 - 0.25, 3) = 29.683
+    assert "fade=t=out:st=29.683:d=0.25" in vf
 
 
 def test_render_default_adds_loudnorm_to_command(tmp_path, render_cfg, fake_ffmpeg):
