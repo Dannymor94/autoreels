@@ -1183,7 +1183,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
         if i > 0:
             prev_dur = segs[i - 1].end - segs[i - 1].start
             cur_dur = seg.end - seg.start
-            if prev_dur >= min_shot and cur_dur >= min_shot:
+            # Beat seams always toggle (they are explicit reorder points, not auto-switches).
+            # min_shot constrains auto-switching only.
+            if reel.beat_gap_sec is not None or (prev_dur >= min_shot and cur_dur >= min_shot):
                 cur = "close" if cur == "wide" else "wide"
         if manual:
             shot_assign.append(None)
@@ -1400,18 +1402,23 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         desired = lw_end + tail_pad_sec
         if video_duration is not None:
             desired = min(desired, video_duration)
-        r.tail_last_word_end = lw_end
-        # Intruder: the first transcript word that starts inside the trailing air (at or after the
-        # last intended word's end — a next phrase often begins the instant the last word ends — and
-        # before the tail_pad end). Recorded now — it is trimmed out of subtitles, so render fades
-        # the tail to silence over it using this source-time start.
-        _intr = [w.t0 for w in words if lw_end - 1e-6 <= w.t0 < desired]
-        r.tail_next_word_start = min(_intr) if _intr else None
+        # Beat reel: clamp tail to before the next source sentence to prevent Whisper-overlap
+        # contamination (another beat's sentence would otherwise be audible in the tail).
+        _beat_tail_cap = getattr(r, "_beat_tail_cap", None)
+        if _beat_tail_cap is not None:
+            desired = min(desired, _beat_tail_cap)
+        # When the cap caused desired < lw_end (Whisper t1 overlaps next sentence), the tail-air
+        # invariant and intruder detection no longer apply — the clip cuts before lw_end.
+        if desired >= lw_end:
+            r.tail_last_word_end = lw_end
+            _intr = [w.t0 for w in words if lw_end - 1e-6 <= w.t0 < desired]
+            r.tail_next_word_start = min(_intr) if _intr else None
+        # Always sync reel.end (padding may have clobbered it for beat reels).
+        r.end = desired
         if abs(desired - last.end) < 1e-6:
             continue
         if r.segments:
             r.segments[-1] = r.segments[-1].model_copy(update={"end": desired})
-        r.end = desired
 
 
 def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
@@ -2683,6 +2690,7 @@ def cmd_render(
     _raise_on_failure: bool = False,
     manifest_name: str | None = None,
     reels_filter: str | None = None,
+    gate_name: str | None = None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -2766,7 +2774,7 @@ def cmd_render(
         try:
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
             stem = Path(manifest.source).stem
-            out_dir_final = out_dir / stem
+            out_dir_final = out_dir / stem / "_gate" / gate_name if gate_name else out_dir / stem
 
             # Рассинхрон: калибровка новее манифеста (кроп в манифесте устарел). Рендерить —
             # значит выжечь СТАРЫЙ кроп. desync ≠ None ⇒ калибровка ЕСТЬ (иначе сравнивать не с чем).
@@ -3913,19 +3921,32 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     _s_start = _sent[0].t0
                     _s_end = _sent[-1].t1
                     if _bi < len(_valid_beats) - 1:
-                        # extend by beat_gap, cap at next beat's first word only when
-                        # next beat is later in source time (cap > s_end). For reordered
-                        # (non-chronological) beats the cap can be before s_end — skip it.
-                        _next_sent = _all_sents[_valid_beats[_bi + 1] - 1]
-                        _cap = _next_sent[0].t0
-                        if _cap > _s_end:
-                            _s_end = min(_s_end + _beat_gap, _cap)
-                    # last beat: leave end at last word boundary (_apply_tail_air will extend)
+                        _next_bnum = _valid_beats[_bi + 1]
+                        _is_adjacent = (_next_bnum == _bnum + 1)
+                        if not _is_adjacent:
+                            # Non-adjacent source sentences: add beat_gap, cap at next source
+                            # sentence start only when it's ahead in time.
+                            _next_src = _all_sents[_next_bnum - 1][0].t0
+                            if _next_src > _s_end:
+                                _s_end = min(_s_end + _beat_gap, _next_src)
+                            else:
+                                _s_end = _s_end + _beat_gap
+                        # Adjacent sentences: original timing, no gap added.
+                    # Span clamp: beat must not contain audio from the next source sentence
+                    # (Whisper timestamps can overlap across sentence boundaries).
+                    if _bnum < _n:
+                        _src_next = _all_sents[_bnum][0].t0
+                        if _s_end > _src_next - 0.02:
+                            _s_end = max(_s_start, _src_next - 0.02)
                     _beat_segs.append(_make_segment(_s_start, _s_end))
                 reel.segments = _beat_segs
                 reel.beat_gap_sec = _beat_gap
                 reel.start = _beat_segs[0].start
                 reel.end = _beat_segs[-1].end
+                # Cap for _apply_tail_air: last beat must not pull in the next source sentence.
+                _last_bnum = _valid_beats[-1]
+                if _last_bnum < _n:
+                    reel._beat_tail_cap = _all_sents[_last_bnum][0].t0 - 0.02
                 print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
         reel.r0_start = reel.start
         reel.r0_end = reel.end
@@ -4018,11 +4039,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # Sync x:-exclusion segment bounds to the final reel.start / reel.end.
     # snap, filter_dangling, and padding all move reel.start/end without touching reel.segments;
     # this ensures segments[0].start == reel.start and segments[-1].end == reel.end.
+    # Beat reels: skip end-sync — padding uses the whole reel span and overwrites the last beat
+    # segment boundary; _apply_tail_air will set the correct end for that segment.
     for _reel in reels:
         if _reel.segments:
             _segs = list(_reel.segments)
             _segs[0] = _segs[0].model_copy(update={"start": _reel.start})
-            _segs[-1] = _segs[-1].model_copy(update={"end": _reel.end})
+            if _reel.beat_gap_sec is None:
+                _segs[-1] = _segs[-1].model_copy(update={"end": _reel.end})
             _reel.segments = _segs
     reels = _stage_subtitles(reels, transcript)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
@@ -6631,6 +6655,9 @@ def _build_parser():
                          "Отпечаток игнорируется — рендер принудительный.")
     pd.add_argument("--manifest", default=None, dest="manifest_name",
                     help="имя/стем манифеста (нужен когда несколько манифестов и задан --reels)")
+    pd.add_argument("--gate", default=None, dest="gate",
+                    help="название гейт-прогона; вывод идёт в reels-out/<источник>/_gate/<имя>/, "
+                         "никогда не перезаписывает реальные клипы")
 
     ppv = sub.add_parser(
         "preview",
@@ -7100,7 +7127,8 @@ def main(argv=None) -> int:
                        palette=args.palette, zoom=zoom_flag, music=args.music,
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
                        auto_recrop=not args.no_auto_recrop,
-                       reels_filter=args.reels_filter, manifest_name=args.manifest_name)
+                       reels_filter=args.reels_filter, manifest_name=args.manifest_name,
+                       gate_name=args.gate)
         elif args.cmd == "preview":
             pals = [p.strip() for p in args.palettes.split(",") if p.strip()] if args.palettes else None
             return cmd_preview(args.manifest, palettes=pals, seconds=args.seconds,

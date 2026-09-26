@@ -695,11 +695,12 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
             parts.append(f"[raw{i}]split=2[wi{i}][ci{i}]")
             parts.append(f"[wi{i}]{wide_vf_o}[wo{i}]")
             parts.append(f"[ci{i}]{close_vf_o}[co{i}]")
-            parts.append(f"[wo{i}][co{i}]overlay=enable='{enable_o}'[v{i}]")
+            parts.append(f"[wo{i}][co{i}]overlay=enable='{enable_o}',settb=expr=1/90000[v{i}]")
         else:
             vchain = f"[{i}:v]{vtrim}"
             if svf:
                 vchain += f",{svf}"
+            vchain += ",settb=expr=1/90000"
             parts.append(f"{vchain}[v{i}]")
         if f > 0:
             out_st = max(0.0, (s.end - s.start) - f)

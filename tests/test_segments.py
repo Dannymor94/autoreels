@@ -84,8 +84,8 @@ def test_concat_graph_joins_per_input_windows_with_edge_fades():
     graph, vseg, aseg = _concat_segments_graph(segs, 0.01)
     assert (vseg, aseg) == ("[vseg]", "[aseg]")
     # Each window is its own input [i:v]/[i:a] (pre-seeked); we only reset PTS — no shared-decode trim
-    assert "[0:v]setpts=PTS-STARTPTS[v0]" in graph
-    assert "[1:v]setpts=PTS-STARTPTS[v1]" in graph
+    assert "[0:v]setpts=PTS-STARTPTS,settb=expr=1/90000[v0]" in graph
+    assert "[1:v]setpts=PTS-STARTPTS,settb=expr=1/90000[v1]" in graph
     assert "trim=" not in graph                       # no trimming of a single shared decode
     assert "concat=n=2:v=1:a=0[vseg]" in graph        # video hard concat
     assert "concat=n=2:v=0:a=1[aseg]" in graph        # audio also plain concat (no overlap → no drift)

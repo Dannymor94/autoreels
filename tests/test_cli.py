@@ -6710,3 +6710,141 @@ def test_review_apply_accepts_compact_format_file(tmp_path, monkeypatch):
     assert ds_path.exists(), "dataset row must be written for the scored block"
     rows = [_json.loads(ln) for ln in ds_path.read_text().splitlines() if ln.strip()]
     assert len(rows) == 1, "one dataset row for the one scored block"
+
+
+# ─── Fix 0: gate output dir ────────────────────────────────────────────────────
+
+def test_render_gate_routes_to_gate_subdir(monkeypatch, tmp_path):
+    """--gate NAME routes to reels-out/stem/_gate/NAME, never to reels-out/stem."""
+    manifests, inputs, _ = _multi_manifest_setup(tmp_path)
+    out_dir = tmp_path / "reels-out"
+    calls = []
+    monkeypatch.setattr(cli, "render_crop",
+                        lambda m, **k: calls.append(k["out_dir"]) or [])
+
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                   out_dir=out_dir, gate_name="step1c")
+
+    assert len(calls) == 1
+    assert "_gate" in str(calls[0]) and "step1c" in str(calls[0])
+    # Regular output dir must NOT be created by the gate run.
+    assert not (out_dir / "v").exists()
+
+
+def test_render_no_gate_uses_real_dir(monkeypatch, tmp_path):
+    """Without --gate, output goes straight to reels-out/stem (no _gate subdir)."""
+    manifests, inputs, _ = _multi_manifest_setup(tmp_path)
+    out_dir = tmp_path / "reels-out"
+    calls = []
+    monkeypatch.setattr(cli, "render_crop",
+                        lambda m, **k: calls.append(k["out_dir"]) or [])
+
+    cli.cmd_render(manifests_dir=manifests, inputs_dir=inputs, root=REPO_ROOT,
+                   out_dir=out_dir)
+
+    assert len(calls) == 1
+    assert calls[0].name != "_gate" and "_gate" not in calls[0].parts
+
+
+# ─── Fix 1 + Fix 2: beat gap and span clamp ────────────────────────────────────
+
+def _beats_apply_env(tmp_path, words, review_text, monkeypatch):
+    """Minimal env for _blocks_do_apply with custom words and review. Returns rpath."""
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Crop, SetupProfile
+    from autoreels.cloud.blocks import CandidateBlock, _Line
+    from tests.test_blocks import _r0_cfg_full_stub
+
+    (tmp_path / "manifests").mkdir(exist_ok=True)
+    (tmp_path / "reviews").mkdir(exist_ok=True)
+    (tmp_path / "data" / "cache").mkdir(parents=True, exist_ok=True)
+
+    sha = "e" * 64
+    setup = SetupProfile(setup_id="s", crop=Crop(x=0, y=0, w=720, h=1280),
+                         scale=[720, 1280], frame=[1920, 1080])
+    m = Manifest(source="z.mp4", source_sha256=sha, source_hash_scheme="sha256",
+                 duration_preset="default", setup=setup, run_key="k", reels=[])
+    (tmp_path / "manifests" / "z.json").write_text(m.model_dump_json())
+
+    tx = Transcript(language="ru", words=words)
+    ahash = "txbeats"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    blk_start = min(w.t0 for w in words)
+    blk_end = max(w.t1 for w in words)
+    blk = CandidateBlock(id="idZ", start=blk_start, end=blk_end,
+                         duration=blk_end - blk_start, text=" ".join(w.word for w in words),
+                         boundary_reason="sentence",
+                         lines=[_Line(blk_start, blk_end, " ".join(w.word for w in words))])
+
+    rpath = tmp_path / "reviews" / "z.review.md"
+    rpath.write_text(review_text)
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [blk])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([blk], []))
+
+    return rpath
+
+
+def test_review_apply_beats_adjacent_no_gap(tmp_path, monkeypatch):
+    """Adjacent source sentences (s1→s2 in order) must get no gap extension."""
+    from autoreels.core.models import Manifest as M, Word
+
+    words = [Word(word="Сначала.", t0=10.0, t1=11.0),
+             Word(word="Потом.", t0=20.0, t1=21.0)]
+    review = "# source: manifests/z.json\n1 80\n> 1\n> 2\n"
+    rpath = _beats_apply_env(tmp_path, words, review, monkeypatch)
+
+    assert cli._blocks_do_apply(str(rpath), root=str(tmp_path)) == 0
+
+    result = M.model_validate_json((tmp_path / "reviews" / "z.review.json").read_text())
+    segs = result.reels[0].segments
+    assert len(segs) == 2
+    # Adjacent: s1 end must not exceed s1 last word t1 (no gap added). Start may shift by lead_pad.
+    assert segs[0].end <= 11.0 + 1e-6, f"adjacent beat got gap: segs[0].end={segs[0].end}"
+
+
+def test_review_apply_beats_nonadjacent_adds_gap(tmp_path, monkeypatch):
+    """Non-adjacent source sentences (s2→s1, punchline-first) must get beat_gap_sec added."""
+    from autoreels.core.models import Manifest as M, Word
+
+    words = [Word(word="Сначала.", t0=10.0, t1=11.0),
+             Word(word="Потом.", t0=20.0, t1=21.0)]
+    review = "# source: manifests/z.json\n1 80\n> 2\n> 1\n"
+    rpath = _beats_apply_env(tmp_path, words, review, monkeypatch)
+
+    assert cli._blocks_do_apply(str(rpath), root=str(tmp_path)) == 0
+
+    result = M.model_validate_json((tmp_path / "reviews" / "z.review.json").read_text())
+    segs = result.reels[0].segments
+    assert len(segs) == 2
+    assert segs[0].start == pytest.approx(20.0)
+    # Non-adjacent: s2 end must be s2_t1 + beat_gap_sec = 21.25.
+    assert segs[0].end == pytest.approx(21.25, abs=0.01), f"gap not added: segs[0].end={segs[0].end}"
+
+
+def test_review_apply_beats_span_clamp_overlapping_timestamps(tmp_path, monkeypatch):
+    """Beat end must be clamped to < next source sentence start even when Whisper t1 overlaps."""
+    from autoreels.core.models import Manifest as M, Word
+
+    # s1: word ends at 78.58 (Whisper t1) but s2 starts at 78.24 — overlapping timestamps.
+    words = [Word(word="бороться.", t0=77.540, t1=78.580),
+             Word(word="Ребят,", t0=78.240, t1=79.060)]
+    review = "# source: manifests/z.json\n1 80\n> 1\n> 2\n"
+    rpath = _beats_apply_env(tmp_path, words, review, monkeypatch)
+
+    assert cli._blocks_do_apply(str(rpath), root=str(tmp_path)) == 0
+
+    result = M.model_validate_json((tmp_path / "reviews" / "z.review.json").read_text())
+    segs = result.reels[0].segments
+    assert len(segs) == 2
+    # s1 end must be clamped to < s2 start (78.24), regardless of Whisper t1=78.58.
+    assert segs[0].end < segs[1].start, (
+        f"s1 end ({segs[0].end}) overlaps s2 start ({segs[1].start})"
+    )

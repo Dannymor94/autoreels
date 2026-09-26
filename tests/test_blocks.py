@@ -1502,3 +1502,53 @@ def test_soft_accumulation_cannot_exceed_max():
     assert blocks, "expected at least one block"
     for b in blocks:
         assert b.duration <= 50.0, f"block exceeded max: {b.duration:.1f}s"
+
+
+# ---------------------------------------------------------------------------
+# M1.7 step 1c: beat syntax (sentence reordering via > N lines)
+
+def test_beats_parsed_from_compact_answer():
+    """'> N' lines after a score line are collected in entry.beats."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    content = (
+        "# source: manifests/x.json\n"
+        "3 85 | s:2 e:8\n"
+        "> 5\n"
+        "> 3\n"
+        "> 4\n"
+    )
+    _, entries, errors, _ = parse_compact_answer(content)
+    assert not errors
+    assert len(entries) == 1
+    assert entries[0].beats == (5, 3, 4)
+
+
+def test_beats_stop_at_next_score_line():
+    """Beats for entry 1 do not bleed into entry 2."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    content = (
+        "1 85\n"
+        "> 3\n"
+        "> 1\n"
+        "2 70\n"
+        "> 2\n"
+    )
+    _, entries, _, _ = parse_compact_answer(content)
+    assert len(entries) == 2
+    assert entries[0].beats == (3, 1)
+    assert entries[1].beats == (2,)
+
+
+def test_beats_not_present_by_default():
+    """An entry with no > lines has empty beats tuple."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    content = "5 90 | s:1 e:4\n"
+    _, entries, _, _ = parse_compact_answer(content)
+    assert len(entries) == 1
+    assert entries[0].beats == ()
+
+
+def test_beats_grammar_exported_in_compact_prompt():
+    """_COMPACT_PROMPT documents the > syntax."""
+    from autoreels.cloud.blocks import _COMPACT_PROMPT
+    assert ">" in _COMPACT_PROMPT
