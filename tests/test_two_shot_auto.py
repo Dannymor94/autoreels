@@ -224,3 +224,68 @@ def test_fallback_no_candidate_returns_none():
     ]
     result = _find_pause_boundary(words, 0.0, 12.0, target=6.0, min_pause=0.3)
     assert result is None
+
+
+# ── Tests 14-16: iterative max-shot ──────────────────────────────────────────
+
+def test_prefer_le_target_boundary():
+    """With two equidistant candidates, the one <= target is preferred."""
+    from autoreels.__main__ import _find_pause_boundary
+    # target=10, candidates at 8 (<=10, dist=2) and 12 (>10, dist=2): pick 8
+    words = [
+        _w("а", 0.0, 1.0), _w("б.", 1.0, 8.0),
+        _w("в", 8.0, 9.0), _w("г.", 9.0, 12.0),
+        _w("д", 12.0, 20.0),
+    ]
+    result = _find_pause_boundary(words, 0.0, 20.0, target=10.0, min_pause=0.3,
+                                   search_start=2.0, search_end=18.0)
+    assert result is not None
+    boundary, _ = result
+    assert boundary <= 10.0 + 0.1, f"should prefer boundary ≤ target 10.0, got {boundary}"
+    assert abs(boundary - 8.0) < 0.1, f"expected ~8.0, got {boundary}"
+
+
+def test_iterative_splits_30s_into_three():
+    """A 30s wide segment with two boundaries is split into exactly 3 spans."""
+    from autoreels.__main__ import _stage_two_shot_auto, _shot_spans_merged
+    words = [
+        _w("а", 0.0, 5.0), _w("б.", 5.0, 10.0),   # sentence boundary at 10.0
+        _w("в", 10.0, 15.0), _w("г.", 15.0, 20.0), # sentence boundary at 20.0
+        _w("д", 20.0, 30.0),
+    ]
+    segs = [_seg(0.0, 30.0)]
+    reel = _reel(segs)
+    _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_max_shot_sec=11.0, two_shot_min_sec=3.0))
+    spans = _shot_spans_merged(reel.effective_segments())
+    assert len(spans) == 3, f"expected 3 spans, got {len(spans)}: {spans}"
+    for stype, dur in spans:
+        assert 3.0 <= dur <= 11.0, f"span {stype} {dur:.1f}s outside [3.0, 11.0]"
+
+
+def test_property_no_short_spans_random_boundaries():
+    """No output span is shorter than min_shot regardless of boundary placement."""
+    import random
+    from autoreels.__main__ import _stage_two_shot_auto, _shot_spans_merged
+    rng = random.Random(7)
+    min_s, max_s = 2.0, 8.0
+    for _ in range(30):
+        n = rng.randint(1, 5)
+        # Place sentence-ending words at random positions in [3, 27]
+        positions = sorted(rng.uniform(3.0, 27.0) for _ in range(n))
+        words: list = []
+        for i, pos in enumerate(positions):
+            words.append(_w(f"w{i}.", pos - 0.4, pos))
+        words.append(_w("end", 29.0, 30.0))
+        segs = [_seg(0.0, 30.0)]
+        reel = _reel(segs)
+        _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_max_shot_sec=max_s, two_shot_min_sec=min_s))
+        warns = getattr(reel, "_two_shot_warnings", [])
+        for stype, dur in _shot_spans_merged(reel.effective_segments()):
+            assert dur >= min_s, (
+                f"short {stype} {dur:.2f}s < {min_s}s; boundaries={positions}; warns={warns}"
+            )
+            if dur > max_s:
+                assert any("no candidate" in w for w in warns), (
+                    f"{stype} {dur:.1f}s > {max_s}s with no 'no candidate' warning; "
+                    f"boundaries={positions}; warns={warns}"
+                )

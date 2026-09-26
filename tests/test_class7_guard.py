@@ -12,9 +12,7 @@ _ALLOWED_FILES = {
 }
 
 # Substring patterns on the CODE part of the line that are allowed anywhere.
-_ALLOWED_LINE_PATTERNS = [
-    "cold_open",   # reel.cold_open = _Segment(...) — legitimate factory
-]
+_ALLOWED_LINE_PATTERNS: list = []
 
 _PATTERN = re.compile(r"(?<!\w)(Segment|Word|_Segment|_Seg)\s*\(")
 

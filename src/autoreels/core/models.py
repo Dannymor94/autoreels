@@ -293,3 +293,8 @@ class Manifest(BaseModel):
     status: ProjectStatus = ProjectStatus.pending
     # Пустой список валиден: «хороших моментов нет» — ожидаемый исход, не ошибка.
     reels: list[Reel] = Field(default_factory=list)
+
+
+def make_cold_open_segment(start: float, end: float) -> Segment:
+    """Factory for the cold-open hook replay segment."""
+    return Segment(start=start, end=end, shot="close")
