@@ -1014,24 +1014,47 @@ def _stage_subtitles(reels, transcript):
     return reels
 
 
-def _find_pause_boundary(words, t_start: float, t_end: float, *, target: float, min_pause: float) -> "float | None":
-    """Find a sentence boundary with inter-sentence gap >= min_pause nearest to target in [t_start, t_end]."""
+def _find_pause_boundary(words, t_start: float, t_end: float, *, target: float, min_pause: float) -> "tuple[float, str] | None":
+    """Find split boundary using 3-level fallback, nearest to target in [t_start, t_end].
+
+    Level 1: sentence boundary (terminal punctuation) with inter-sentence gap >= min_pause.
+    Level 2: any sentence boundary (terminal punctuation), gap not required.
+             Whisper timestamps are often 0-gap or negative at real pauses — pause is a hint.
+    Level 3: word boundary after a comma.
+
+    Returns (boundary_time, level_label) or None if no candidate exists.
+    """
     from autoreels.cloud.edit import split_sentences as _sp
-    span = [w for w in words if w.t0 >= t_start - 0.05 and w.t1 <= t_end + 0.05]
-    if len(span) < 2:
+    # Filter by t0 (word start), not t1, so sentences ending near t_end are complete.
+    span = [w for w in words if w.t0 >= t_start - 0.05 and w.t0 <= t_end + 0.05]
+    if not span:
         return None
     sents = _sp(span)
-    if len(sents) < 2:
-        return None
-    candidates = []
-    for i in range(len(sents) - 1):
-        boundary = sents[i][-1].t1
-        gap = sents[i + 1][0].t0 - boundary
-        if gap >= min_pause and t_start <= boundary <= t_end:
-            candidates.append(boundary)
-    if not candidates:
-        return None
-    return min(candidates, key=lambda b: abs(b - target))
+
+    def _in_range(b: float) -> bool:
+        return t_start <= b <= t_end
+
+    def _best(cands: list) -> "float | None":
+        valid = [b for b in cands if _in_range(b)]
+        return min(valid, key=lambda b: abs(b - target)) if valid else None
+
+    # Level 1: sentence boundary with gap >= min_pause
+    l1 = [sents[i][-1].t1 for i in range(len(sents) - 1)
+          if sents[i + 1][0].t0 - sents[i][-1].t1 >= min_pause]
+    if (b := _best(l1)) is not None:
+        return b, "pause≥0.3s"
+
+    # Level 2: any sentence boundary (terminal punctuation), gap irrelevant
+    l2 = [sents[i][-1].t1 for i in range(len(sents) - 1)]
+    if (b := _best(l2)) is not None:
+        return b, "sentence"
+
+    # Level 3: word boundary after a comma
+    l3 = [w.t1 for w in span if w.word.rstrip().endswith(",")]
+    if (b := _best(l3)) is not None:
+        return b, "comma"
+
+    return None
 
 
 def _shot_spans_merged(segs) -> "list[tuple[str, float]]":
@@ -1152,10 +1175,11 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
             return
         s_start = result[stretch[0]].start
         s_end = result[stretch[-1]].end
-        sw = _find_pause_boundary(words, s_start, s_end, target=s_start + max_shot, min_pause=0.3)
-        if sw is None:
-            warnings.append(f"no pause in wide {s_start:.1f}–{s_end:.1f}")
+        res = _find_pause_boundary(words, s_start, s_end, target=s_start + max_shot, min_pause=0.3)
+        if res is None:
+            warnings.append(f"no candidate in wide {s_start:.1f}–{s_end:.1f}")
             return
+        sw, level = res
         for ji, j in enumerate(stretch):
             s = result[j]
             if not (s.start <= sw < s.end):
@@ -1170,11 +1194,12 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
                 if result[nj].shot == "close" and not result[nj].close_intervals:
                     ci_end = seg_dur - (min_shot - filler)
             if rel < min_shot or (ci_end - rel) < min_shot:
-                warnings.append(f"no valid wide switch at {sw:.1f} (min-shot constraint)")
+                warnings.append(f"no valid wide switch at {sw:.1f} ({level}, min-shot constraint)")
                 break
             result[j] = s.model_copy(update={"close_intervals": [[rel, ci_end]]})
             for k in stretch[ji + 1:]:
                 result[k] = result[k].model_copy(update={"shot": "close", "close_intervals": []})
+            warnings.append(f"switched wide→close at {sw:.2f}s ({level})")
             break
 
     def _process_close_stretch(stretch: list) -> None:
@@ -1183,10 +1208,11 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
             return
         s_start = result[stretch[0]].start
         s_end = result[stretch[-1]].end
-        sw = _find_pause_boundary(words, s_start, s_end, target=s_start + max_shot, min_pause=0.3)
-        if sw is None:
-            warnings.append(f"no pause in close {s_start:.1f}–{s_end:.1f}")
+        res = _find_pause_boundary(words, s_start, s_end, target=s_start + max_shot, min_pause=0.3)
+        if res is None:
+            warnings.append(f"no candidate in close {s_start:.1f}–{s_end:.1f}")
             return
+        sw, level = res
         for ji, j in enumerate(stretch):
             s = result[j]
             if not (s.start <= sw < s.end):
@@ -1194,12 +1220,13 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
             rel = sw - s.start
             seg_dur = s.end - s.start
             if rel < min_shot or (seg_dur - rel) < min_shot:
-                warnings.append(f"no valid close switch at {sw:.1f} (min-shot constraint)")
+                warnings.append(f"no valid close switch at {sw:.1f} ({level}, min-shot constraint)")
                 break
             # ci=[0, rel]: close 0–rel, wide rel–end (shot→wide so overlay means "close first")
             result[j] = s.model_copy(update={"shot": "wide", "close_intervals": [[0.0, rel]]})
             for k in stretch[ji + 1:]:
                 result[k] = result[k].model_copy(update={"shot": "wide", "close_intervals": []})
+            warnings.append(f"switched close→wide at {sw:.2f}s ({level})")
             break
 
     # Two-pass scan: wide first, then close (close scan sees wide-pass results).

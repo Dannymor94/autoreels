@@ -126,7 +126,7 @@ def test_no_pause_reported_when_no_boundary():
     from autoreels.__main__ import _stage_two_shot_auto
     _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_max_shot_sec=9.0))
     warns = getattr(reel, "_two_shot_warnings", [])
-    assert any("no pause" in w for w in warns), f"expected 'no pause' warning, got {warns}"
+    assert any("no candidate" in w for w in warns), f"expected 'no candidate' warning, got {warns}"
     assert not reel.effective_segments()[0].close_intervals
 
 
@@ -164,3 +164,63 @@ def inspect_src():
     import inspect
     from autoreels import __main__ as cli
     return inspect.getsource(cli._blocks_do_apply)
+
+
+# ── Tests 10-12: _find_pause_boundary fallback levels ────────────────────────
+
+def _w(word, t0, t1):
+    return Word(word=word, t0=t0, t1=t1)
+
+
+def test_fallback_level1_pause_ge_03():
+    """Level 1: sentence boundary with real gap >= 0.3s is used."""
+    from autoreels.__main__ import _find_pause_boundary
+    words = [
+        _w("привет", 0.0, 1.0), _w("мир.", 1.0, 2.0),
+        _w("пауза", 2.4, 3.5),  # gap=0.4s >= 0.3
+        _w("конец.", 3.5, 4.0),
+    ]
+    result = _find_pause_boundary(words, 0.0, 10.0, target=2.0, min_pause=0.3)
+    assert result is not None
+    boundary, level = result
+    assert level == "pause≥0.3s"
+    assert abs(boundary - 2.0) < 0.1
+
+
+def test_fallback_level2_sentence_no_gap():
+    """Level 2: sentence boundary with 0-gap used when no level-1 candidate."""
+    from autoreels.__main__ import _find_pause_boundary
+    words = [
+        _w("привет", 0.0, 1.0), _w("мир.", 1.0, 2.0),
+        _w("сразу", 2.0, 3.0), _w("конец.", 3.0, 4.0),
+        _w("ещё", 4.0, 6.0),
+    ]
+    result = _find_pause_boundary(words, 0.0, 10.0, target=2.0, min_pause=0.3)
+    assert result is not None
+    boundary, level = result
+    assert level == "sentence", f"expected 'sentence', got {level!r}"
+    assert abs(boundary - 2.0) < 0.5
+
+
+def test_fallback_level3_comma_only():
+    """Level 3: comma boundary used when no sentence boundary exists."""
+    from autoreels.__main__ import _find_pause_boundary
+    words = [
+        _w("раз", 0.0, 1.0), _w("два,", 1.0, 2.0),
+        _w("три", 2.0, 3.0), _w("четыре", 3.0, 12.0),
+    ]
+    result = _find_pause_boundary(words, 0.0, 12.0, target=6.0, min_pause=0.3)
+    assert result is not None
+    boundary, level = result
+    assert level == "comma", f"expected 'comma', got {level!r}"
+    assert abs(boundary - 2.0) < 0.1
+
+
+def test_fallback_no_candidate_returns_none():
+    """No candidate when no sentence or comma boundary exists."""
+    from autoreels.__main__ import _find_pause_boundary
+    words = [
+        _w("слово", 0.0, 12.0),
+    ]
+    result = _find_pause_boundary(words, 0.0, 12.0, target=6.0, min_pause=0.3)
+    assert result is None

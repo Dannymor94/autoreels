@@ -43,8 +43,13 @@
         {
           "start": 72.74,
           "end": 93.04,
-          "shot": "close",
-          "close_intervals": []
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              5.540000000000006
+            ]
+          ]
         }
       ],
       "cold_open": null,
@@ -1791,8 +1796,13 @@
         {
           "start": 402.36316,
           "end": 427.74634,
-          "shot": "close",
-          "close_intervals": []
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              22.703190000000006
+            ]
+          ]
         }
       ],
       "cold_open": null,
@@ -2283,7 +2293,12 @@
           "start": 452.48635,
           "end": 473.22635,
           "shot": "wide",
-          "close_intervals": []
+          "close_intervals": [
+            [
+              9.059979999999996,
+              20.74000000000001
+            ]
+          ]
         }
       ],
       "cold_open": null,
