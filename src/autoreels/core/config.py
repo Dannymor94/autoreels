@@ -267,6 +267,7 @@ class R0Config(BaseModel):
     blocks_filter: BlocksFilterConfig = Field(default_factory=BlocksFilterConfig)
     block_scoring: BlockScoringConfig = Field(default_factory=BlockScoringConfig)
     manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
+    beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
     speed: float = 1.0                       # default playback speed for all clips
     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).

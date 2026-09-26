@@ -145,6 +145,7 @@ presets:
   reels:  { min: 15, max: 90 }
   tiktok: { min: 15, max: 180 }
 manual_max_duration_sec: 180  # ceiling for human merges (source span; platforms permit up to 3 min)
+beat_gap_sec: 0.25  # gap between reordered beats (seconds)
 speed: 1.0                    # default playback speed (1.0-1.3); auto-applied when clip exceeds preset
 
 # Deterministic filler removal inside a chosen span (manual/edit path). Each removal becomes a gap

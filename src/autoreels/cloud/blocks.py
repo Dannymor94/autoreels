@@ -576,6 +576,7 @@ _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
 # Compact answer line: <seq> <score-token>, where the token is an optional leading '-'
 # (join backward), digits, and trailing '+'/'++' (join 1 or 2 following blocks).
 _COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*(?:@[\d.]+)?)\s*(?:\|(.*))?$")
+_BEAT_RE = re.compile(r"^\s*>\s*(\d+)\s*$")
 
 # Single source for c:/k: field docs — shared by compact and verbose review exports.
 _CK_FIELDS_DOC = (
@@ -635,7 +636,16 @@ _COMPACT_PROMPT = (
     "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу\n"
     "#   12 85 | t: Страх — это не страх, а сигнал | d: Тело подаёт сигнал, а мы принимаем его за страх.\n"
     "#   5 90 | c:3          close shot on sentence 3 (the line that lands)\n"
-    "#   8 87 | k:2=страх   stress the word 'страх' in sentence 2"
+    "#   8 87 | k:2=страх   stress the word 'страх' in sentence 2\n"
+    "#\n"
+    "# Beat reordering (human review only): play sentences in a custom order.\n"
+    "# Add '> N' lines after the score line, one per sentence to play:\n"
+    "#   9 85 | s:1 e:6\n"
+    "#   > 4\n"
+    "#   > 2\n"
+    "#   > 5\n"
+    "# Each > N plays sentence N from the clip span. Sentences not listed are dropped.\n"
+    "# Gaps between beats are filled with brief silence (beat_gap_sec from config)."
 )
 
 
@@ -661,6 +671,8 @@ class _ReviewEntry(NamedTuple):
     k: tuple[tuple[int, tuple[str, ...]], ...] = ()
     # z:N — zoom gesture starts at sentence N (M1.7 step 3). One per clip; two z: → error.
     z: int | None = None
+    # > N lines after the score: play sentence N at that beat position (M1.7 step 1c).
+    beats: tuple[int, ...] = ()
 
 
 _FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
@@ -882,6 +894,7 @@ def parse_review(
     source_ref: str | None = None
     entries: list[_ReviewEntry] = []
     errors: list[tuple[int, str]] = []
+    pending_beats: list[int] = []
 
     for lineno, raw in enumerate(content.splitlines(), 1):
         line = raw.strip()
@@ -892,9 +905,16 @@ def parse_review(
             if m:
                 source_ref = m.group(1).strip()
             continue
+        mb = _BEAT_RE.match(line)
+        if mb:
+            pending_beats.append(int(mb.group(1)))
+            continue
         m = _REVIEW_HDR_RE.match(line)
         if not m:
             continue  # block text or other — ignored silently
+        if pending_beats and entries:
+            entries[-1] = entries[-1]._replace(beats=tuple(pending_beats))
+        pending_beats = []
         seq, block_id, rest = int(m.group(1)), m.group(3), m.group(4).strip()
         score_tok, _, fields = rest.partition("|")
         score, fwd, back, speed, err = _parse_score_markers(score_tok.strip())
@@ -905,6 +925,9 @@ def parse_review(
         for fe in ferrs:
             errors.append((lineno, fe))
         entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val))
+
+    if pending_beats and entries:
+        entries[-1] = entries[-1]._replace(beats=tuple(pending_beats))
 
     return source_ref, entries, errors
 
@@ -986,6 +1009,7 @@ def parse_compact_answer(
     entries: list[_ReviewEntry] = []
     errors: list[tuple[int, str]] = []
     ignored = 0
+    pending_beats: list[int] = []
 
     for lineno, raw in enumerate(content.splitlines(), 1):
         line = raw.strip()
@@ -996,8 +1020,15 @@ def parse_compact_answer(
             if m:
                 source_ref = m.group(1).strip()
             continue
+        mb = _BEAT_RE.match(line)
+        if mb:
+            pending_beats.append(int(mb.group(1)))
+            continue
         m = _COMPACT_SCORE_RE.match(line)
         if m:
+            if pending_beats and entries:
+                entries[-1] = entries[-1]._replace(beats=tuple(pending_beats))
+            pending_beats = []
             seq = int(m.group(1))
             score_val, fwd, back, speed, err = _parse_score_markers(m.group(2))
             if err:
@@ -1009,6 +1040,9 @@ def parse_compact_answer(
             entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val))
         else:
             ignored += 1
+
+    if pending_beats and entries:
+        entries[-1] = entries[-1]._replace(beats=tuple(pending_beats))
 
     return source_ref, entries, errors, ignored
 

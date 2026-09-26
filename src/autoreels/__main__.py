@@ -3503,7 +3503,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
     from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences
-    from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment
+    from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
     from autoreels.cloud.chunk_transcribe import renumber_reels
@@ -3862,6 +3862,55 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 if _x_note:
                     _x_msg += f"; {_x_note}"
                 print(_x_msg)
+        _beats = (_ae.beats if _ae else ()) or ()
+        if _beats:
+            from autoreels.cloud.select import _DEFAULT_DANGLING
+            _beat_gap = getattr(r0_cfg, "beat_gap_sec", 0.25)
+            _all_sents = split_sentences(words_in_span(_tx_words, reel.start, reel.end))
+            _n = len(_all_sents)
+            _grp = '+'.join(str(s) for s in g)
+            # validate beat indices
+            _valid_beats = []
+            _seen = set()
+            for _bn in _beats:
+                if _bn < 1 or _bn > _n:
+                    reel.warnings.append(f"beat {_bn} out of range 1-{_n} — ignored")
+                    print(f"  warning {_grp}: beat {_bn} out of range 1-{_n} — ignored")
+                    continue
+                if _bn in _seen:
+                    reel.warnings.append(f"beat {_bn} duplicated — second occurrence ignored")
+                    print(f"  warning {_grp}: beat {_bn} duplicated — second occurrence ignored")
+                    continue
+                _seen.add(_bn)
+                _valid_beats.append(_bn)
+            if _valid_beats:
+                # dangling-start warning on first beat
+                _first_sent = _all_sents[_valid_beats[0] - 1]
+                if _first_sent:
+                    _dangling = _DEFAULT_DANGLING | set(getattr(r0_cfg, "dangling_words", None) or [])
+                    _fw = _first_sent[0].word.strip()
+                    _fw_clean = _fw.strip(".,!?;:—–-«»\"'()").lower()
+                    if (_fw and _fw[0].islower()) or _fw_clean in _dangling:
+                        reel.warnings.append(f"beat reorder: first beat {_valid_beats[0]} dangling start «{_fw}»")
+                        print(f"  warning {_grp}: beat reorder: first beat {_valid_beats[0]} dangling start «{_fw}»")
+                # build beat segments
+                _beat_segs = []
+                for _bi, _bnum in enumerate(_valid_beats):
+                    _sent = _all_sents[_bnum - 1]
+                    _s_start = _sent[0].t0
+                    _s_end = _sent[-1].t1
+                    if _bi < len(_valid_beats) - 1:
+                        # extend by beat_gap, cap at next beat's first word
+                        _next_sent = _all_sents[_valid_beats[_bi + 1] - 1]
+                        _cap = _next_sent[0].t0
+                        _s_end = min(_s_end + _beat_gap, _cap)
+                    # last beat: leave end at last word boundary (_apply_tail_air will extend)
+                    _beat_segs.append(_make_segment(_s_start, _s_end))
+                reel.segments = _beat_segs
+                reel.beat_gap_sec = _beat_gap
+                reel.start = _beat_segs[0].start
+                reel.end = _beat_segs[-1].end
+                print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
         reel.r0_start = reel.start
         reel.r0_end = reel.end
         if is_merged:

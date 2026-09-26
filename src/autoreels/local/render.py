@@ -1453,6 +1453,10 @@ def _render_segments(
                 elif segs[0].shot == "close":
                     _effective_vf = _close_vf_str
 
+            # Beat reels: segments are non-monotonic source windows — hard cuts only, no xfade.
+            if reel.beat_gap_sec is not None and len(segs) > 1:
+                _ts_seam_xfades = [0.0] * (len(segs) - 1)
+
             # Zoom vf: always built per-reel so zoompan runs at probed source fps (prevents A/V
             # drift). Also positions the gesture at z: sentence offset when set.
             # Skipped when two-shot overrides vf management for this reel.

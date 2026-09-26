@@ -194,6 +194,10 @@ class Reel(BaseModel):
     # M1.7 step 2: emphasis words from review `k:`. Lowercase; matched case-insensitively against
     # subtitle words at render time. Empty → no Emph style rendered (byte-identical to pre-M1.7).
     subtitle_emph_words: list[str] = Field(default_factory=list)
+    # M1.7 step 1c: beat gap in seconds. When set, segments are beats in beat order (non-monotonic
+    # source time allowed). beat_gap_sec is the silence padding appended after each sentence's last
+    # word when building beat segments at --apply time.
+    beat_gap_sec: float | None = None
     # z:N zoom placement: source-time start of sentence N (resolved at --apply from block sentences).
     # None = hook scheme (zoom at clip start). Stored as source timestamp so render can remap it.
     zoom_source_t0: float | None = None
@@ -230,6 +234,10 @@ class Reel(BaseModel):
         snap, sentence bounds, padding) can never render silently: the first segment must start at
         reel.start, the last must end at reel.end, and segments must be ordered, non-overlapping and
         inside [start, end]. A single-span reel (no explicit segments) is always valid.
+
+        Beat reels (beat_gap_sec is not None) store sentences in beat order which may be
+        non-chronological in source time — monotonicity and bounds checks are skipped; only the
+        empty/reversed invariant per segment is enforced.
         """
         if self.cold_open is not None and self.cold_open.end <= self.cold_open.start:
             raise ValueError(f"reel {self.id}: cold_open is empty/reversed "
@@ -237,22 +245,25 @@ class Reel(BaseModel):
         segs = self.segments
         if not segs:
             return
-        if abs(segs[0].start - self.start) > eps:
-            raise ValueError(f"reel {self.id}: segments[0].start {segs[0].start:.3f} != "
-                             f"reel.start {self.start:.3f} (a bound moved after segmentation?)")
-        if abs(segs[-1].end - self.end) > eps:
-            raise ValueError(f"reel {self.id}: segments[-1].end {segs[-1].end:.3f} != "
-                             f"reel.end {self.end:.3f}")
+        is_beat = self.beat_gap_sec is not None
+        if not is_beat:
+            if abs(segs[0].start - self.start) > eps:
+                raise ValueError(f"reel {self.id}: segments[0].start {segs[0].start:.3f} != "
+                                 f"reel.start {self.start:.3f} (a bound moved after segmentation?)")
+            if abs(segs[-1].end - self.end) > eps:
+                raise ValueError(f"reel {self.id}: segments[-1].end {segs[-1].end:.3f} != "
+                                 f"reel.end {self.end:.3f}")
         prev = self.start
         for i, s in enumerate(segs):
             if s.end <= s.start:
                 raise ValueError(f"reel {self.id}: segment {i} empty/reversed [{s.start:.3f}, {s.end:.3f}]")
-            if s.start < prev - eps:
-                raise ValueError(f"reel {self.id}: segment {i} starts {s.start:.3f} before the previous "
-                                 f"segment ends {prev:.3f} (unordered or overlapping)")
-            if s.start < self.start - eps or s.end > self.end + eps:
-                raise ValueError(f"reel {self.id}: segment {i} [{s.start:.3f}, {s.end:.3f}] outside "
-                                 f"reel [start, end] [{self.start:.3f}, {self.end:.3f}]")
+            if not is_beat:
+                if s.start < prev - eps:
+                    raise ValueError(f"reel {self.id}: segment {i} starts {s.start:.3f} before the previous "
+                                     f"segment ends {prev:.3f} (unordered or overlapping)")
+                if s.start < self.start - eps or s.end > self.end + eps:
+                    raise ValueError(f"reel {self.id}: segment {i} [{s.start:.3f}, {s.end:.3f}] outside "
+                                     f"reel [start, end] [{self.start:.3f}, {self.end:.3f}]")
             prev = s.end
 
 
@@ -298,3 +309,8 @@ class Manifest(BaseModel):
 def make_cold_open_segment(start: float, end: float) -> Segment:
     """Factory for the cold-open hook replay segment."""
     return Segment(start=start, end=end, shot="close")
+
+
+def make_segment(start: float, end: float) -> Segment:
+    """Factory for a plain body segment (beats, x: excludes, etc.)."""
+    return Segment(start=start, end=end)
