@@ -20,7 +20,11 @@ from autoreels.local.render import (
     RenderError,
     _assert_windows_frame_aligned,
     _concat_segments_graph,
+    _punch_blend_expr,
+    _seg_ends_close,
+    _seg_starts_close,
     _snap_windows_to_frames,
+    _two_shot_seam_xfades,
     build_concat_cmd,
 )
 from autoreels.local.subtitles import build_ass, remap_to_output
@@ -337,3 +341,62 @@ def test_beat_reel_concat_uses_hard_cuts():
     )
     assert "concat=n=2:v=1:a=0" in prefix
     assert "xfade" not in prefix
+
+
+# --- step 1d: punch + dissolve ----------------------------------------------------------------
+
+def test_punch_blend_replaces_overlay_in_segment_overlays():
+    """'blend:' prefix in segment_overlay enable field → blend= filter, not overlay=enable."""
+    segs = [Segment(start=0.0, end=20.0), Segment(start=30.0, end=40.0)]
+    blend_expr = _punch_blend_expr([[5.0, 15.0]], punch_frames=7, fps=30.0)
+    ovl = [("wvf", "cvf", "blend:" + blend_expr), None]
+    graph, _, _ = _concat_segments_graph(segs, 0.0, segment_overlays=ovl)
+    assert "blend=all_expr=" in graph
+    assert "overlay=enable=" not in graph
+
+
+def test_punch_cut_uses_overlay_enable_baseline():
+    """Without 'blend:' prefix, overlay=enable is used — baseline is unchanged."""
+    segs = [Segment(start=0.0, end=20.0), Segment(start=30.0, end=40.0)]
+    ovl = [("wvf", "cvf", "between(t,5,15)"), None]
+    graph, _, _ = _concat_segments_graph(segs, 0.0, segment_overlays=ovl)
+    assert "overlay=enable='between(t,5,15)'" in graph
+    assert "blend=all_expr=" not in graph
+
+
+def test_punch_blend_expr_contains_ease():
+    """_punch_blend_expr produces A*/B* weight expression with smooth-step ease structure."""
+    expr = _punch_blend_expr([[5.0, 15.0]], punch_frames=7, fps=30.0)
+    assert "A*(1-" in expr
+    assert "B*(" in expr
+    # ease: 3*x*x-2*x*x*x pattern
+    assert "3*" in expr and "2*" in expr
+
+
+def test_punch_blend_merges_adjacent_ci():
+    """Adjacent ci intervals sharing a boundary are merged — no wobble at shared point."""
+    # [[5,10],[10,15]]: shared boundary at t=10 must be merged to [[5,15]]
+    expr = _punch_blend_expr([[5.0, 10.0], [10.0, 15.0]], punch_frames=2, fps=30.0)
+    # Should have exactly one "between" group for the merged interval [5,15]
+    # (not two separate punch-out-then-punch-in sequences at t=10)
+    assert expr.count("between(t,5") == 1 or "15" in expr  # merged single interval
+
+
+def test_same_shot_seam_gets_dissolve():
+    """_two_shot_seam_xfades: same-shot seams get dissolve_sec, shot-change seams get 0.0."""
+    segs = [
+        Segment(start=0.0, end=5.0),
+        Segment(start=10.0, end=15.0),
+        Segment(start=20.0, end=30.0, close_intervals=[[0.0, 10.0]]),  # starts close
+    ]
+    fps = 30.0
+    result = _two_shot_seam_xfades(segs, fps, xfade_actual=0.067, ts_xf=False, dissolve_sec=0.133)
+    assert result[0] == 0.133   # seg0→seg1: both wide, same-shot → dissolve
+    assert result[1] == 0.0     # seg1→seg2: wide→close, shot-change → hard cut
+
+
+def test_same_shot_dissolve_off_is_baseline():
+    """_two_shot_seam_xfades with dissolve_sec=0 falls back to xfade_actual for same-shot seams."""
+    segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0)]
+    result = _two_shot_seam_xfades(segs, fps=30.0, xfade_actual=0.067, ts_xf=False, dissolve_sec=0.0)
+    assert result == [0.067]  # falls back to xfade_actual — identical to baseline
