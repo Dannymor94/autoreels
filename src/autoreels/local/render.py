@@ -849,6 +849,13 @@ def _tail_find_word_end(
       word_end   – first silence_start after t0 (fallback: t1)
       next_onset – first silence_end after word_end (fallback: None)
 
+    min_sil=0.08 is intentional: smaller values detect tight inter-word gaps
+    (e.g. 99 ms between "понятно?" and "Когда").  Raising to >=0.15 misses those
+    gaps and computes wrong next_onset, causing the fallback to overshoot into the
+    next sentence.  Stop-consonant false positives (50–100 ms closures that put
+    word_end too early) are instead rejected by the 0.6*(t1-t0) sanity floor in
+    the caller.
+
     volumedetect/silencedetect log at INFO; loglevel must not be 'error'.
     """
     import re as _re
@@ -1488,12 +1495,24 @@ def _render_segments(
                         ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
                     )
                     _pad = 0.10
-                    _new_end = _word_end + _pad
-                    if _next_onset is not None:
-                        # Never overshoot next onset; for tight gaps fall back to midpoint
-                        _cap = max(_word_end + 0.04, _next_onset - _pad)
-                        _new_end = min(_new_end, _cap)
-                    _new_end = max(_new_end, _last.t0 + 0.04)  # always past last word start
+                    # Sanity floor: word_end must be >= t0 + 0.6*(t1-t0).
+                    # A shorter detected end is likely a stop-consonant closure (п/т/к),
+                    # not the actual word boundary.  Exception: when next_onset < floor
+                    # the gap is too tight to reach the floor without crossing into the
+                    # next sentence — "next onset forces earlier", accept word_end as-is.
+                    _floor = _last.t0 + 0.6 * (_last_t1 - _last.t0)
+                    _onset_forces = _next_onset is not None and _next_onset < _floor
+                    if not _onset_forces and _word_end < _floor:
+                        # stop-consonant false positive → fall back to timestamp-based end
+                        _new_end = _last_t1 + _lw_margin
+                        if _next_onset is not None:
+                            _new_end = min(_new_end, _next_onset - _pad)
+                    else:
+                        _new_end = _word_end + _pad
+                        if _next_onset is not None:
+                            _cap = max(_word_end + 0.04, _next_onset - _pad)
+                            _new_end = min(_new_end, _cap)
+                    _new_end = max(_new_end, _last.t0 + 0.04)
                     if len(segs) > 1:
                         _new_end = round(_new_end * _fps()) / _fps()
                     if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
