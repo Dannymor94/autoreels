@@ -3900,10 +3900,13 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     _s_start = _sent[0].t0
                     _s_end = _sent[-1].t1
                     if _bi < len(_valid_beats) - 1:
-                        # extend by beat_gap, cap at next beat's first word
+                        # extend by beat_gap, cap at next beat's first word only when
+                        # next beat is later in source time (cap > s_end). For reordered
+                        # (non-chronological) beats the cap can be before s_end — skip it.
                         _next_sent = _all_sents[_valid_beats[_bi + 1] - 1]
                         _cap = _next_sent[0].t0
-                        _s_end = min(_s_end + _beat_gap, _cap)
+                        if _cap > _s_end:
+                            _s_end = min(_s_end + _beat_gap, _cap)
                     # last beat: leave end at last word boundary (_apply_tail_air will extend)
                     _beat_segs.append(_make_segment(_s_start, _s_end))
                 reel.segments = _beat_segs

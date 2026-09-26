@@ -6578,6 +6578,74 @@ def test_compact_export_matches_cli_output(tmp_path):
     assert "id=" not in data_lines[0]
 
 
+def test_review_apply_beats_nonchronological_cap_skipped(tmp_path, monkeypatch):
+    """Non-chronological beats (punchline-first) must not produce reversed segments.
+
+    Beat order s2 → s1 means sentence 2 (higher source time) plays first. The cap-at-next-beat
+    logic must skip capping when the next beat's start is BEFORE the current sentence end.
+    """
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Manifest, Transcript, Word, Crop, SetupProfile
+    from autoreels.cloud.blocks import CandidateBlock, _Line
+    from tests.test_blocks import _r0_cfg_full_stub
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+
+    sha = "f" * 64
+    setup = SetupProfile(setup_id="s", crop=Crop(x=0, y=0, w=720, h=1280),
+                         scale=[720, 1280], frame=[1920, 1080])
+    m = Manifest(source="v.mp4", source_sha256=sha, source_hash_scheme="sha256",
+                 duration_preset="default", setup=setup, run_key="k", reels=[])
+    (tmp_path / "manifests" / "v.json").write_text(m.model_dump_json())
+
+    # Two sentences separated by a clear pause:
+    #   s1: "Сначала." at t=10-11  →  sentence 1 in source
+    #   s2: "Потом."   at t=20-21  →  sentence 2 in source (plays first = punchline)
+    words = [Word(word="Сначала.", t0=10.0, t1=11.0),
+             Word(word="Потом.", t0=20.0, t1=21.0)]
+    tx = Transcript(language="ru", words=words)
+    ahash = "txhB"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    blk = CandidateBlock(id="idB", start=10.0, end=22.0, duration=12.0,
+                         text="Сначала. Потом.",
+                         boundary_reason="sentence",
+                         lines=[_Line(10.0, 22.0, "Сначала. Потом.")])
+
+    # > 2 then > 1 = punchline-first (non-chronological: s2 at t=20 before s1 at t=10)
+    review = "# source: manifests/v.json\n1 80\n> 2\n> 1\n"
+    rpath = tmp_path / "reviews" / "v.review.md"
+    rpath.write_text(review)
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [blk])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([blk], []))
+
+    rc = cli._blocks_do_apply(str(rpath), root=str(tmp_path))
+    assert rc == 0, "apply must succeed for non-chronological beats"
+
+    from autoreels.core.models import Manifest as M
+    result = M.model_validate_json((tmp_path / "reviews" / "v.review.json").read_text())
+    assert len(result.reels) == 1
+    segs = result.reels[0].segments
+    assert len(segs) == 2
+    # Neither segment must be reversed — root of the bug fixed here.
+    for i, seg in enumerate(segs):
+        assert seg.start < seg.end, f"segment {i} is reversed: [{seg.start}, {seg.end}]"
+    # First segment = s2 (punchline, later in source)
+    assert segs[0].start >= 19.0, "first beat must be s2 (source t≈20)"
+    # Second segment = s1 (setup, earlier in source)
+    assert segs[1].start <= 11.0, "second beat must be s1 (source t≈10)"
+
+
 def test_review_apply_accepts_compact_format_file(tmp_path, monkeypatch):
     """_blocks_do_apply accepts a file in compact-answer format (as item 15 would find it)."""
     import autoreels.cloud.blocks as _b
