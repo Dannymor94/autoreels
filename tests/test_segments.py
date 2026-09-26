@@ -371,3 +371,23 @@ def test_same_shot_dissolve_off_is_baseline():
     segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0)]
     result = _two_shot_seam_xfades(segs, fps=30.0, xfade_actual=0.067, ts_xf=False, dissolve_sec=0.0)
     assert result == [0.067]  # falls back to xfade_actual — identical to baseline
+
+
+def test_dissolve_visual_duration_does_not_shorten_clip():
+    """seam_xfade_visual_durations overrides duration= but not offset: clip length unchanged vs baseline."""
+    segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0), Segment(start=20.0, end=30.0)]
+    # accounting: xfade_actual=0.067 at both seams → baseline clip duration
+    # visual: dissolve_sec=0.133 at both seams
+    xf_acc = [0.067, 0.067]
+    xf_vis = [0.133, 0.133]
+    g_baseline, _, _ = _concat_segments_graph(segs, 0.0, seam_xfades=xf_acc)
+    g_dissolve, _, _ = _concat_segments_graph(segs, 0.0, seam_xfades=xf_acc,
+                                               seam_xfade_visual_durations=xf_vis)
+    import re
+    # Visual dissolve uses 0.133s duration
+    durs_dissolve = re.findall(r"duration=([0-9.]+)", g_dissolve)
+    assert all(float(d) == pytest.approx(0.133, abs=1e-4) for d in durs_dissolve)
+    # Offsets are the same as baseline (accounting from xfade_actual=0.067)
+    offsets_baseline = re.findall(r"offset=([0-9.]+)", g_baseline)
+    offsets_dissolve = re.findall(r"offset=([0-9.]+)", g_dissolve)
+    assert offsets_baseline == offsets_dissolve

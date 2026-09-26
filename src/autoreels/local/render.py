@@ -650,6 +650,7 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            pre_roll: float = 0.0,
                            segment_vfs: list[str] | None = None,
                            seam_xfades: list[float] | None = None,
+                           seam_xfade_visual_durations: list[float] | None = None,
                            segment_overlays: "list[tuple[str, str, str] | None] | None" = None,
                            ) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
@@ -725,17 +726,21 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
             out_len = xf_offset + (segments[k + 1].end - segments[k + 1].start)
     elif _use_seam_xf:
         # Per-seam: xfade where seam_xfades[k] > 0, hard cut where 0.0.
+        # seam_xfade_visual_durations[k], when provided, overrides duration= in the filter while
+        # keeping seam_xfades[k] for offset computation (preserves clip duration vs baseline).
         out_len = segments[0].end - segments[0].start
         prev = "v0"
         for k in range(n - 1):
             xf = seam_xfades[k]  # type: ignore[index]
+            xf_vis = (seam_xfade_visual_durations[k]  # type: ignore[index]
+                      if seam_xfade_visual_durations is not None else xf)
             right = f"v{k + 1}"
             label = "vseg" if k == n - 2 else f"t{k}"
             if xf > 0:
                 xf_offset = round(out_len - xf, 9)
                 parts.append(
                     f"[{prev}][{right}]xfade=transition=fade"
-                    f":duration={_num(xf)}:offset={_num(xf_offset)}[{label}]"
+                    f":duration={_num(xf_vis)}:offset={_num(xf_offset)}[{label}]"
                 )
                 out_len = xf_offset + (segments[k + 1].end - segments[k + 1].start)
             else:
@@ -1404,6 +1409,7 @@ def _render_segments(
             _ts_seg_vfs: list[str] | None = None
             _ts_seam_xfades: list[float] | None = None
             _ts_seg_overlays: "list[tuple[str, str, str] | None] | None" = None
+            _ts_seam_visual: list[float] | None = None  # visual xfade durations (dissolve_sec at same-shot seams)
             _effective_vf = vf  # the crop vf to use for base_vf; replaced for single-window close
             if _ts_on:
                 _cscale = getattr(render_cfg, "close_shot_scale", 1.25)
@@ -1416,7 +1422,11 @@ def _render_segments(
                     _ts_xf = getattr(render_cfg, "two_shot_xfade", False)
                     _dissolve_frames = getattr(render_cfg, "same_shot_dissolve_frames", 0)
                     _dissolve_sec = round(_dissolve_frames / _fps() * _fps()) / _fps() if _dissolve_frames else 0.0
-                    _ts_seam_xfades = _two_shot_seam_xfades(segs, _fps(), _xfade_actual, _ts_xf, _dissolve_sec)
+                    # Accounting: same-shot seams use xfade_actual (no extra shortening vs baseline).
+                    _ts_seam_xfades = _two_shot_seam_xfades(segs, _fps(), _xfade_actual, _ts_xf, 0.0)
+                    # Visual: same-shot seams display dissolve_sec transition; offset still uses xfade_actual.
+                    if _dissolve_sec > _xfade_actual:
+                        _ts_seam_visual = _two_shot_seam_xfades(segs, _fps(), _xfade_actual, _ts_xf, _dissolve_sec)
                     _effective_vf = None  # crops are in segment_vfs; vtail uses palette only
                     # Segments with close_intervals: overlay instead of plain seg_vf.
                     _has_ci = any(getattr(s, "close_intervals", []) for s in segs)
@@ -1664,6 +1674,7 @@ def _render_segments(
                                                              pre_roll=_PRE_ROLL_SEC,
                                                              segment_vfs=_ts_seg_vfs,
                                                              seam_xfades=_ts_seam_xfades,
+                                                             seam_xfade_visual_durations=_ts_seam_visual,
                                                              segment_overlays=_ts_seg_overlays)
                 windows = [(w.start, w.end - w.start) for w in segs]
                 _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
