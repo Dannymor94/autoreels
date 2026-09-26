@@ -1168,20 +1168,21 @@ def _punch_blend_expr(ci: list[list[float]], punch_frames: int, fps: float) -> s
     for idx, (a, b) in enumerate(merged):
         pa, pb, ps = _num(a), _num(b), _num(punch_sec)
         si, so = 2 * idx, 2 * idx + 1
-        setup.append(f"st({si},min(1,max(0,(t-{pa})/{ps})))")
-        setup.append(f"st({so},min(1,max(0,(t-({pb}-{ps}))/{ps})))")
+        # blend uses T (not t) and gt/lt (not between) in its expression evaluator
+        setup.append(f"st({si},min(1,max(0,(T-{pa})/{ps})))")
+        setup.append(f"st({so},min(1,max(0,(T-({pb}-{ps}))/{ps})))")
         ease_in = f"(3*ld({si})*ld({si})-2*ld({si})*ld({si})*ld({si}))"
         ease_out = f"(3*ld({so})*ld({so})-2*ld({so})*ld({so})*ld({so}))"
         mid_a, mid_b = _num(a + punch_sec), _num(b - punch_sec)
         if b - a > 2 * punch_sec:
-            wt = (f"between(t,{pa},{mid_a})*{ease_in}"
-                  f"+between(t,{mid_a},{mid_b})"
-                  f"+between(t,{mid_b},{pb})*(1-{ease_out})")
+            wt = (f"gte(T,{pa})*lte(T,{mid_a})*{ease_in}"
+                  f"+gte(T,{mid_a})*lte(T,{mid_b})"
+                  f"+gte(T,{mid_b})*lte(T,{pb})*(1-{ease_out})")
         else:
             # Short interval: center split between entry/exit eases
             mid = _num((a + b) / 2)
-            wt = (f"between(t,{pa},{mid})*{ease_in}"
-                  f"+between(t,{mid},{pb})*(1-{ease_out})")
+            wt = (f"gte(T,{pa})*lte(T,{mid})*{ease_in}"
+                  f"+gte(T,{mid})*lte(T,{pb})*(1-{ease_out})")
         w_terms.append(f"({wt})")
     w_slot = 2 * len(merged)
     w_expr = "+".join(w_terms) if w_terms else "0"
