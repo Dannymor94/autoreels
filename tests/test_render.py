@@ -1284,29 +1284,29 @@ def test_intruded_end_clean_gap_unaffected():
 
 
 def test_invariant_rejects_clip_end_before_last_word():
-    """_assert_end_covers_last_word raises when clip end < last subtitle word end."""
+    """_assert_end_covers_last_word raises when clip end precedes last subtitle word start."""
     from types import SimpleNamespace
-    word = SimpleNamespace(t1=5.0)
+    word = SimpleNamespace(t0=5.0, t1=5.5)
     reel = SimpleNamespace(id="r01", subtitles=[word])
-    segs = [_simple_seg(0.0, 4.5)]   # ends at 4.5 < word.t1=5.0
+    segs = [_simple_seg(0.0, 4.5)]   # ends at 4.5 < word.t0=5.0
     with pytest.raises(RuntimeError, match="precedes"):
         _assert_end_covers_last_word(reel, segs, fps=30.0)
 
 
 def test_invariant_passes_sub_frame_offset_at_30fps():
-    """12 ms before last word end at 30 fps is within one-frame tolerance — must not raise."""
+    """12 ms before last word start at 30 fps is within one-frame tolerance — must not raise."""
     from types import SimpleNamespace
     # 1 frame at 30 fps ≈ 33.3 ms; 12 ms < 33.3 ms → acceptable from frame-grid rounding.
-    word = SimpleNamespace(t1=5.0)
+    word = SimpleNamespace(t0=5.0, t1=5.5)
     reel = SimpleNamespace(id="r01", subtitles=[word])
-    segs = [_simple_seg(0.0, 4.988)]   # 5.0 - 0.012 = 4.988
+    segs = [_simple_seg(0.0, 4.988)]   # 5.0 - 0.012 = 4.988; within tolerance
     _assert_end_covers_last_word(reel, segs, fps=30.0)   # must not raise
 
 
 def test_invariant_rejects_200ms_offset():
-    """200 ms before last word end far exceeds one frame — must raise."""
+    """200 ms before last word start far exceeds one frame — must raise."""
     from types import SimpleNamespace
-    word = SimpleNamespace(t1=5.0)
+    word = SimpleNamespace(t0=5.0, t1=5.5)
     reel = SimpleNamespace(id="r01", subtitles=[word])
     segs = [_simple_seg(0.0, 4.8)]   # 5.0 - 0.2 = 4.8
     with pytest.raises(RuntimeError, match="precedes"):

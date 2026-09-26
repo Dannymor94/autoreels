@@ -590,6 +590,18 @@ def apply_padding(
         r.start = new_start
         r.end = new_end
 
+        # Record the nearest next-speech boundary for the render tier.  When the
+        # overlapping-timestamp guard clamped new_end below last_word.t1, Whisper's
+        # t1 will overshoot into the next sentence; the render's clean-tail extension
+        # must not cross this boundary.  Set whenever the next word falls inside the
+        # potential tail window (last_word.t1 + tail_pad_sec).
+        _next_speech = next(
+            (words[k] for k in range(la + 1, len(words)) if words[k].t0 > last_word.t0),
+            None,
+        )
+        if _next_speech is not None and _next_speech.t0 < last_word.t1 + tail_pad_sec + 0.3:
+            r.tail_next_word_start = _next_speech.t0
+
 
 def trim_hanging_subtitles(reels: list[Reel], *, hanging_words) -> None:
     """Remove trailing hanging words from reel.subtitles (mutates in place).

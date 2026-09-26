@@ -833,6 +833,39 @@ def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
     return [f"afade=t=in:st=0:d={_num(d)}", f"afade=t=out:st={_num(out_st)}:d={_num(d)}"]
 
 
+def _tail_window_has_speech(
+    ffmpeg_bin: str | Path,
+    source: str | Path,
+    t_start: float,
+    t_end: float,
+    *,
+    threshold_db: float = -35.0,
+) -> bool:
+    """Return True if the source audio window [t_start, t_end] contains speech.
+
+    Uses ffmpeg volumedetect: if max_volume > threshold_db → speech present.
+    Returns True (conservative) on error or when window is too short to measure.
+    """
+    import re as _re
+    window = t_end - t_start
+    if window < 0.02:
+        return True  # too short to measure reliably — conservative
+    cmd = [
+        str(ffmpeg_bin), "-hide_banner", "-loglevel", "error",
+        "-ss", f"{t_start:.6f}", "-i", str(source),
+        "-t", f"{window:.6f}", "-ac", "1",
+        "-af", "volumedetect", "-f", "null", "-",
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stderr
+        m = _re.search(r"max_volume:\s*([-\d.]+)\s*dB", out)
+        if m:
+            return float(m.group(1)) > threshold_db
+    except Exception:
+        pass
+    return True  # conservative: assume speech on error
+
+
 def _tail_speech_fade(reel, segs, speed: float,
                       guard: float = 0.12) -> tuple[float, float] | None:
     """(fade_start, fade_dur) on the OUTPUT timeline to silence a next-phrase word pulled into the
@@ -872,20 +905,22 @@ def _intruded_end_src(fade_start_out: float, segs, speed: float,
 
 
 def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
-    """Invariant: clip end must not precede the last subtitle word's end.
+    """Invariant: clip end must include the last subtitle word.
 
-    Tolerance = 1 frame at fps: snapping to the frame grid legitimately moves an end
-    by up to half a frame; using the full frame as slack absorbs that without masking
-    genuine truncation (which is measured in hundreds of ms, not single frames).
+    Uses t0 + 1 frame as the minimum: Whisper t1 can overshoot when timestamps
+    overlap (next word t0 < this word t1), so t1 is not a reliable lower bound in
+    those cases.  t0 is reliable — as long as the clip reaches the word's start
+    the word is audible.  A genuine truncation (hundreds of ms) still fails.
     """
     if not getattr(reel, "subtitles", None):
         return
-    last_t1 = reel.subtitles[-1].t1
+    last = reel.subtitles[-1]
     tolerance = 1.0 / fps
-    if segs[-1].end < last_t1 - tolerance:
+    # Must cover at least the start of the last word (+ one frame grace for snap).
+    if segs[-1].end < last.t0 - tolerance:
         raise RuntimeError(
             f"{getattr(reel, 'id', '?')}: clip end {segs[-1].end:.4f}s precedes "
-            f"last subtitle word end {last_t1:.4f}s"
+            f"last subtitle word start {last.t0:.4f}s"
         )
 
 
@@ -1434,13 +1469,20 @@ def _render_segments(
                     clip_dur = sum(s.end - s.start for s in segs)
             elif reel.subtitles:
                 # Clean tail: ensure end >= last_t1 + margin (Whisper t1 ends slightly early).
-                # No frame-snap here: single-window reels don't snap; multi-window reels already
-                # have _fps() and would rarely reach this branch (tail_pad >> margin).
+                # Guard: when overlapping Whisper timestamps clamped the manifest end below
+                # last_t1, a naive extension would pull in the next sentence.  Check actual
+                # audio energy before extending; if speech is present, keep the current end.
+                # Frame-snap the extension for multi-window reels (single-window don't snap).
                 _last_t1 = reel.subtitles[-1].t1
                 _min_end = _last_t1 + _lw_margin
                 if segs[-1].end < _min_end:
-                    segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _min_end})]
-                    clip_dur = sum(s.end - s.start for s in segs)
+                    if not _tail_window_has_speech(ffmpeg_bin, source,
+                                                   segs[-1].end, _min_end):
+                        if len(segs) > 1:
+                            _min_end = round(_min_end * _fps()) / _fps()
+                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _min_end})]
+                        clip_dur = sum(s.end - s.start for s in segs)
+                    # else: speech in tail → next sentence already started; keep manifest end
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
