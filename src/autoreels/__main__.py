@@ -1010,7 +1010,20 @@ def _stage_subtitles(reels, transcript):
     """R3: привязать word-level транскрипта к каждому reel."""
     print("субтитры: привязка слов к сегментам…", flush=True)
     for reel in reels:
-        reel.subtitles = words_in_window(transcript.words, reel.start, reel.end)
+        if reel.beat_gap_sec is not None and reel.segments:
+            # Beat reel: segments are non-monotonic in source time — collect words
+            # from each segment individually so remap_to_output gets all beats.
+            seen: set[tuple] = set()
+            ws = []
+            for seg in reel.segments:
+                for w in words_in_window(transcript.words, seg.start, seg.end):
+                    key = (round(w.t0, 4), w.word)
+                    if key not in seen:
+                        seen.add(key)
+                        ws.append(w)
+            reel.subtitles = ws
+        else:
+            reel.subtitles = words_in_window(transcript.words, reel.start, reel.end)
     return reels
 
 
