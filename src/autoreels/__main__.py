@@ -1008,9 +1008,17 @@ def _stage_speech_density(reels, transcript, *, r0_cfg) -> tuple[list, list[dict
     return kept, disc
 
 
-def _stage_subtitles(reels, transcript):
-    """R3: привязать word-level транскрипта к каждому reel."""
+def _stage_subtitles(reels, transcript, *, smap=None):
+    """R3: привязать word-level транскрипта к каждому reel.
+
+    Criterion: word starts inside the clip (t0 in [start, end)) and its audible
+    end is within the clip — audible_end from smap when available, else t1 (inclusive).
+    """
     print("субтитры: привязка слов к сегментам…", flush=True)
+    _ae_by_t0: "dict[int, float] | None" = (
+        {round(sw["t0"] * 1000): sw["audible_end"] for sw in smap["words"]}
+        if smap is not None else None
+    )
     for reel in reels:
         if reel.beat_gap_sec is not None and reel.segments:
             # Beat reel: segments are non-monotonic in source time — collect words
@@ -1025,7 +1033,17 @@ def _stage_subtitles(reels, transcript):
                         ws.append(w)
             reel.subtitles = ws
         else:
-            reel.subtitles = words_in_window(transcript.words, reel.start, reel.end)
+            if _ae_by_t0 is not None:
+                reel.subtitles = [
+                    w for w in transcript.words
+                    if reel.start <= w.t0 < reel.end
+                    and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= reel.end
+                ]
+            else:
+                reel.subtitles = [
+                    w for w in transcript.words
+                    if reel.start <= w.t0 < reel.end and w.t1 <= reel.end
+                ]
     return reels
 
 
@@ -2296,7 +2314,7 @@ def _cmd_run_impl(
     discarded += meaningful_disc
     reels, density_disc = _stage_speech_density(reels, transcript, r0_cfg=r0_cfg)
     discarded += density_disc
-    reels = _stage_subtitles(reels, transcript)
+    reels = _stage_subtitles(reels, transcript, smap=_run_smap)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
@@ -4208,7 +4226,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             if _reel.beat_gap_sec is None:
                 _segs[-1] = _segs[-1].model_copy(update={"end": _reel.end})
             _reel.segments = _segs
-    reels = _stage_subtitles(reels, transcript)
+    reels = _stage_subtitles(reels, transcript, smap=_blk_smap)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
 
     # M1.7 step 2: resolve k: sentence-keyword specs to word.emph flags.

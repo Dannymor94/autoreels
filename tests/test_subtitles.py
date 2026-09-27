@@ -128,6 +128,47 @@ def test_words_in_window_selected_by_segment_start_end():
     assert [w.word for w in sel] == ["in1", "in2"]
 
 
+def test_stage_subtitles_includes_word_when_t1_eq_clip_end():
+    """Word with t1 == reel.end is included; word with t1 > reel.end is excluded."""
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    words = [_w(0.5, 1.0, "first"), _w(1.0, 2.0, "last"), _w(1.5, 2.5, "spills")]
+    tx = SimpleNamespace(words=words)
+
+    def _reel(rid):
+        return Reel(id=rid, start=0.0, end=2.0, score=80, hook="h",
+                    title="t", description="d",
+                    segments=[Segment(start=0.0, end=2.0)], subtitles=[])
+
+    r = _reel("r01")
+    _stage_subtitles([r], tx)
+    assert [w.word for w in r.subtitles] == ["first", "last"]   # "spills" (t1=2.5 > 2.0) excluded
+
+
+def test_stage_subtitles_smap_uses_audible_end():
+    """With smap, audible_end from map is used instead of t1."""
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    # word at t0=1.0, t1=2.1 (spills past end=2.0) but audible_end=1.9 (within clip)
+    words = [_w(0.5, 1.0, "first"), _w(1.0, 2.1, "last")]
+    tx = SimpleNamespace(words=words)
+    smap = {"words": [
+        {"t0": 0.5, "t1": 1.0, "audible_start": 0.5, "audible_end": 1.0},
+        {"t0": 1.0, "t1": 2.1, "audible_start": 1.0, "audible_end": 1.9},
+    ]}
+
+    r = Reel(id="r01", start=0.0, end=2.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=2.0)], subtitles=[])
+    _stage_subtitles([r], tx, smap=smap)
+    # "last" has t1=2.1 > 2.0 but audible_end=1.9 <= 2.0 → included
+    assert [w.word for w in r.subtitles] == ["first", "last"]
+
+
 # ----------------------------------------------------------------- ASS-генерация
 
 def test_ass_style_uses_config_font_size_position_alignment():
