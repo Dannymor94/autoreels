@@ -1543,6 +1543,7 @@ def _render_segments(
                 _smap_cfg2 = getattr(render_cfg, "speech_map_cfg", None)
                 _gap = reel.beat_gap_sec
                 segs = _beat_segs_from_smap(segs, smap, beat_gap_sec=_gap)
+                segs = _snap_windows_to_frames(segs, _fps())
                 clip_dur = sum(s.end - s.start for s in segs)
 
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
