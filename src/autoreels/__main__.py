@@ -2719,6 +2719,7 @@ def cmd_render(
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
     archive_dir = Path(archive_dir) if archive_dir else root / "inputs-archive"
     calibrations_dir = Path(calibrations_dir) if calibrations_dir else root / "calibrations"
+    _transcripts_dir_r = root / "transcripts"
 
     manifest_files = _manifest_paths if _manifest_paths is not None else _glob_manifests(manifests_dir)
 
@@ -2866,12 +2867,25 @@ def cmd_render(
             music_tag = f", музыка {Path(music_path).name}" if music_path else ""
             print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}{music_tag}) "
                   f"→ {out_dir_final} ===", flush=True)
+            # M1.8 Stage B: load speech map when flag is on (per-manifest, keyed by source stem).
+            _render_smap: dict | None = None
+            if getattr(render_cfg, "speech_map", False):
+                import json as _json
+                _smap_path = _transcripts_dir_r / f"{stem}.speechmap.json"
+                if _smap_path.is_file():
+                    try:
+                        _render_smap = _json.loads(_smap_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        _render_smap = None
+                if _render_smap is None:
+                    print(f"  ⚠ speech_map=True but no map at {_smap_path.name} — "
+                          "tail placement falls back to silencedetect", flush=True)
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
                 profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
-                subtitles_cfg=subtitles_cfg, background=background,
+                subtitles_cfg=subtitles_cfg, background=background, smap=_render_smap,
             )
             all_outputs.extend(outputs)
             # Record each rendered clip's fingerprint next to it, so a later run re-renders only when

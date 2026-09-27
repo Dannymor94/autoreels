@@ -855,6 +855,88 @@ def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
     return [f"afade=t=in:st=0:d={_num(d)}", f"afade=t=out:st={_num(out_st)}:d={_num(d)}"]
 
 
+def _smap_word_lookup(smap: dict) -> dict[int, tuple[int, dict]]:
+    """Build t0-keyed lookup: round(t0*1000) → (word_idx, word_entry).
+
+    Integer keys avoid float precision issues — 1ms resolution is sufficient
+    for Whisper timestamps (which are quantised at ~10ms).
+    """
+    return {round(w["t0"] * 1000): (i, w) for i, w in enumerate(smap["words"])}
+
+
+_TAIL_PAD = 0.10   # padding added after audible_end in silence case
+
+
+def _tail_from_smap(
+    last_t0: float,
+    seg_end: float,
+    smap: dict,
+    lookup: dict,
+    *,
+    cut_pause_min_sec: float = 0.35,
+    last_t1: float | None = None,
+    margin: float = 0.2,
+) -> float | None:
+    """Compute tail end from speech map data.
+
+    Returns new segment end (source time) or None when:
+    - last_t0 not found in smap
+    - seg_end is far beyond the tail adjustment window (intentional long gap)
+
+    Decision:
+      next_speech_onset = min(next_word.audible_start, first untranscribed_speech onset)
+      gap = next_speech_onset - audible_end
+      gap >= cut_pause_min_sec → silence case: new_end = audible_end + _TAIL_PAD
+      gap <  cut_pause_min_sec → speech-next: new_end = onset - _TAIL_PAD (before onset)
+
+    When there is no next word, the silence case applies with no cap.
+    """
+    key = round(last_t0 * 1000)
+    if key not in lookup:
+        return None
+
+    word_idx, word_entry = lookup[key]
+    audible_end: float = word_entry["audible_end"]
+
+    words = smap["words"]
+    boundaries = smap["boundaries"]
+
+    # Gather next speech onset candidates
+    next_speech_onset: float | None = None
+
+    if word_idx < len(boundaries):
+        bnd = boundaries[word_idx]
+        # Untranscribed speech in the gap
+        untr = bnd.get("untranscribed_speech", [])
+        if untr:
+            next_speech_onset = untr[0][0]
+
+    if word_idx + 1 < len(words):
+        next_as = words[word_idx + 1]["audible_start"]
+        if next_speech_onset is None or next_as < next_speech_onset:
+            next_speech_onset = next_as
+
+    # Make the call
+    if next_speech_onset is None:
+        # Last word of transcript — silence case, no cap
+        new_end = audible_end + _TAIL_PAD
+    else:
+        gap = next_speech_onset - audible_end
+        if gap >= cut_pause_min_sec:
+            # Silence case: clip ends after audible_end, capped before next speech
+            new_end = audible_end + _TAIL_PAD
+            # Don't overshoot into next speech (leave a pad before onset too)
+            cap = max(audible_end + 0.04, next_speech_onset - _TAIL_PAD)
+            new_end = min(new_end, cap)
+        else:
+            # Speech-next case: end strictly before next speech onset
+            new_end = next_speech_onset - _TAIL_PAD
+            new_end = max(new_end, audible_end + 0.04)
+
+    new_end = max(new_end, word_entry["t0"] + 0.04)
+    return new_end
+
+
 def _tail_find_word_end(
     ffmpeg_bin: str | Path,
     source: str | Path,
@@ -1320,6 +1402,7 @@ def _render_segments(
     suffix: str,
     palette_vf: str = "",
     music_path: str | Path | None = None,
+    smap: "dict | None" = None,
     profile: str | None = None,
     progress: Callable[[str], None] | None = None,
     emit_text: bool = False,
@@ -1530,56 +1613,79 @@ def _render_segments(
             _lw_margin = getattr(ap, "last_word_margin_sec", 0.2)
             _tail_fade: tuple[float, float] | None = None   # kept for music path plumbing
             _word_end: float | None = None   # audio-detected last-word end (source time)
-            _nw_start = getattr(reel, "tail_next_word_start", None)
-            if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
-                # Intruded tail: next phrase starts before segment end.
-                # Cut to word_end + pad, strictly before the intruder — video and audio end together.
+            _use_smap_tail = (smap is not None
+                              and getattr(render_cfg, "speech_map", False)
+                              and reel.subtitles and segs)
+            if _use_smap_tail:
+                # M1.8 Stage B consumer 1: tail placement from speech map.
+                # audible_end (map) replaces silencedetect; handles intruded and clean cases
+                # uniformly by checking gap to next speech onset against cut_pause_min_sec.
                 _last = reel.subtitles[-1]
-                _word_end, _ = _tail_find_word_end(
-                    ffmpeg_bin, source, _last.t0, _last.t1, margin=_lw_margin)
-                _pad = 0.10
-                _new_end = min(_word_end + _pad, _nw_start - _pad)
-                _new_end = max(_new_end, _last.t0 + 0.04)
-                if len(segs) > 1:
-                    _new_end = round(_new_end * _fps()) / _fps()
-                if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
-                    segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
-                    clip_dur = sum(s.end - s.start for s in segs)
-            elif reel.subtitles:
-                # Audio-based tail placement: detect where the last word actually ends and where
-                # the next sentence begins, then place the clip end between them.
-                # Only runs when clip end is within the tail adjustment window (end ≤ t1+margin+ε);
-                # if the clip extends far beyond the last subtitle word the gap is intentional.
-                _last = reel.subtitles[-1]
-                _last_t1 = _last.t1
-                if segs[-1].end <= _last_t1 + _lw_margin + 0.05:
-                    _word_end, _next_onset = _tail_find_word_end(  # type: ignore[assignment]
-                        ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
-                    )
+                _smap_cfg = getattr(render_cfg, "speech_map_cfg", None)
+                _cpm = _smap_cfg.cut_pause_min_sec if _smap_cfg else 0.35
+                _smap_lookup = _smap_word_lookup(smap)
+                _new_end = _tail_from_smap(
+                    last_t0=_last.t0, seg_end=segs[-1].end, smap=smap,
+                    lookup=_smap_lookup, cut_pause_min_sec=_cpm,
+                )
+                if _new_end is not None:
+                    _word_end = _new_end  # for fade computation downstream
+                    if len(segs) > 1:
+                        _new_end = round(_new_end * _fps()) / _fps()
+                    if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
+                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
+                        clip_dur = sum(s.end - s.start for s in segs)
+            else:
+                _nw_start = getattr(reel, "tail_next_word_start", None)
+                if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
+                    # Intruded tail: next phrase starts before segment end.
+                    # Cut to word_end + pad, strictly before the intruder — video and audio end together.
+                    _last = reel.subtitles[-1]
+                    _word_end, _ = _tail_find_word_end(
+                        ffmpeg_bin, source, _last.t0, _last.t1, margin=_lw_margin)
                     _pad = 0.10
-                    # Sanity floor: word_end must be >= t0 + 0.6*(t1-t0).
-                    # A shorter detected end is likely a stop-consonant closure (п/т/к),
-                    # not the actual word boundary.  Exception: when next_onset < floor
-                    # the gap is too tight to reach the floor without crossing into the
-                    # next sentence — "next onset forces earlier", accept word_end as-is.
-                    _floor = _last.t0 + 0.6 * (_last_t1 - _last.t0)
-                    _onset_forces = _next_onset is not None and _next_onset < _floor
-                    if not _onset_forces and _word_end < _floor:
-                        # stop-consonant false positive → fall back to timestamp-based end
-                        _new_end = _last_t1 + _lw_margin
-                        if _next_onset is not None:
-                            _new_end = min(_new_end, _next_onset - _pad)
-                    else:
-                        _new_end = _word_end + _pad
-                        if _next_onset is not None:
-                            _cap = max(_word_end + 0.04, _next_onset - _pad)
-                            _new_end = min(_new_end, _cap)
+                    _new_end = min(_word_end + _pad, _nw_start - _pad)
                     _new_end = max(_new_end, _last.t0 + 0.04)
                     if len(segs) > 1:
                         _new_end = round(_new_end * _fps()) / _fps()
                     if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
                         segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                         clip_dur = sum(s.end - s.start for s in segs)
+                elif reel.subtitles:
+                    # Audio-based tail placement: detect where the last word actually ends and where
+                    # the next sentence begins, then place the clip end between them.
+                    # Only runs when clip end is within the tail adjustment window (end ≤ t1+margin+ε);
+                    # if the clip extends far beyond the last subtitle word the gap is intentional.
+                    _last = reel.subtitles[-1]
+                    _last_t1 = _last.t1
+                    if segs[-1].end <= _last_t1 + _lw_margin + 0.05:
+                        _word_end, _next_onset = _tail_find_word_end(  # type: ignore[assignment]
+                            ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
+                        )
+                        _pad = 0.10
+                        # Sanity floor: word_end must be >= t0 + 0.6*(t1-t0).
+                        # A shorter detected end is likely a stop-consonant closure (п/т/к),
+                        # not the actual word boundary.  Exception: when next_onset < floor
+                        # the gap is too tight to reach the floor without crossing into the
+                        # next sentence — "next onset forces earlier", accept word_end as-is.
+                        _floor = _last.t0 + 0.6 * (_last_t1 - _last.t0)
+                        _onset_forces = _next_onset is not None and _next_onset < _floor
+                        if not _onset_forces and _word_end < _floor:
+                            # stop-consonant false positive → fall back to timestamp-based end
+                            _new_end = _last_t1 + _lw_margin
+                            if _next_onset is not None:
+                                _new_end = min(_new_end, _next_onset - _pad)
+                        else:
+                            _new_end = _word_end + _pad
+                            if _next_onset is not None:
+                                _cap = max(_word_end + 0.04, _next_onset - _pad)
+                                _new_end = min(_new_end, _cap)
+                        _new_end = max(_new_end, _last.t0 + 0.04)
+                        if len(segs) > 1:
+                            _new_end = round(_new_end * _fps()) / _fps()
+                        if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
+                            segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
+                            clip_dur = sum(s.end - s.start for s in segs)
             # Convert audio word-end to output timeline for fade parameter computation.
             _word_end_out: float | None
             if _word_end is not None:
@@ -1832,6 +1938,7 @@ def render_crop(
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
     background: bool = False,
+    smap: "dict | None" = None,
 ) -> list[Path]:
     """R1b+R3: вырезать окно, применить кроп-профиль, цветокор и (опц.) выжечь субтитры → <id>.mp4.
 
@@ -1851,7 +1958,7 @@ def render_crop(
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
         palette_vf=palette_vf, music_path=music_path,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
-        background=background, zoom_cfg=zoom_cfg,
+        background=background, zoom_cfg=zoom_cfg, smap=smap,
     )
     _write_index_md(manifest, Path(out_dir).resolve(), render_cfg)
     return outputs
