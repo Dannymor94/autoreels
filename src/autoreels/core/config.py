@@ -547,6 +547,30 @@ _DEFAULT_PALETTES: dict[str, dict] = {
 }
 
 
+class SpeechMapConfig(BaseModel):
+    """M1.8 Stage B: параметры energy-based speech map.
+
+    All fields here are part of the map cache key (except cut_pause_min_sec which is a
+    consumer threshold only).  Changing any field invalidates cached .speechmap.json files.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Energy detection parameters (affect interval detection, part of params_hash)
+    frame_sec: float = 0.01          # energy window length
+    noise_percentile: float = 10.0   # noise floor = Nth percentile of frame energies
+    headroom_db: float = 15.0        # threshold = noise_floor + headroom_db
+    min_silence_sec: float = 0.05    # minimum silence duration to split intervals
+    pause_min_sec: float = 0.15      # minimum pause to count as a word boundary
+    # Residue filter parameters (affect untranscribed_speech, part of params_hash)
+    min_edge_dist: float = 0.060     # interval within this distance of a word edge → residue, dropped
+    untranscribed_min_sec: float = 0.100  # minimum duration for a detached interval to count
+    # Consumer threshold (NOT in params_hash — does not affect stored map output)
+    # Rationale: voiceless stop closures (e.g. "т" in "такая?") produce genuine energy gaps
+    # of ~0.3 s that are continuous speech by ear — see regression case #568 (0.29 s).
+    cut_pause_min_sec: float = 0.35
+
+
 class RenderConfig(BaseModel):
     """Типизированный config/render.yaml."""
 
@@ -590,6 +614,8 @@ class RenderConfig(BaseModel):
     same_shot_dissolve_frames: int = 0   # dissolve duration in frames (0 = disabled)
     # M1.8: energy-based speech map — off by default (Stage A; no consumers yet)
     speech_map: bool = False
+    # M1.8 Stage B: speech map parameters (cache key + consumer thresholds)
+    speech_map_cfg: SpeechMapConfig = Field(default_factory=SpeechMapConfig)
 
     @property
     def two_shot_max_wide_sec(self) -> float:

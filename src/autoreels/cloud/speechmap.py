@@ -26,6 +26,19 @@ DEFAULT_MIN_SILENCE_SEC = 0.05   # minimum silence to split intervals in the map
 DEFAULT_PAUSE_MIN_SEC = 0.15     # minimum pause to count as a word boundary
 DEFAULT_WORD_EPSILON = 0.05      # ±ε search window around Whisper timestamps
 
+# ── boundary pause constants ─────────────────────────────────────────────────
+_MIN_SPEECH_DUR = 0.020   # speech intervals shorter than this are treated as noise
+
+# Defaults — also exposed in SpeechMapConfig (config.py); kept here as module fallbacks.
+_MIN_EDGE_DIST = 0.060    # interval within 60 ms of a word edge → word residue, not untranscribed
+_UNTRANSCRIBED_MIN_SEC = 0.100  # minimum duration for a detached interval to count
+
+# Consumers must use this threshold for pause-based cut decisions, never raw pause > 0.
+# Rationale: voiceless stop closures (e.g. "т" in "такая?") produce genuine energy gaps
+# of ~0.3 s that are continuous speech by ear — see regression case #568 (0.29 s).
+# Default also exposed in SpeechMapConfig.cut_pause_min_sec.
+CUT_PAUSE_MIN_SEC: float = 0.35
+
 
 # ── audio extraction ─────────────────────────────────────────────────────────
 
@@ -215,6 +228,8 @@ def _params_hash(
     headroom_db: float,
     min_silence_sec: float,
     pause_min_sec: float,
+    min_edge_dist: float = _MIN_EDGE_DIST,
+    untranscribed_min_sec: float = _UNTRANSCRIBED_MIN_SEC,
 ) -> str:
     s = json.dumps({
         "frame_sec": frame_sec,
@@ -222,6 +237,8 @@ def _params_hash(
         "headroom_db": headroom_db,
         "min_silence_sec": min_silence_sec,
         "pause_min_sec": pause_min_sec,
+        "min_edge_dist": min_edge_dist,
+        "untranscribed_min_sec": untranscribed_min_sec,
         "version": SPEECHMAP_VERSION,
     }, sort_keys=True)
     return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -242,6 +259,8 @@ def build_or_load(
     min_silence_sec: float = DEFAULT_MIN_SILENCE_SEC,
     pause_min_sec: float = DEFAULT_PAUSE_MIN_SEC,
     epsilon: float = DEFAULT_WORD_EPSILON,
+    min_edge_dist: float = _MIN_EDGE_DIST,
+    untranscribed_min_sec: float = _UNTRANSCRIBED_MIN_SEC,
 ) -> dict:
     """Build the speech map (or load cached) and return the map dict.
 
@@ -252,6 +271,7 @@ def build_or_load(
         frame_sec=frame_sec, noise_percentile=noise_percentile,
         headroom_db=headroom_db, min_silence_sec=min_silence_sec,
         pause_min_sec=pause_min_sec,
+        min_edge_dist=min_edge_dist, untranscribed_min_sec=untranscribed_min_sec,
     )
 
     if out_path.is_file():
@@ -275,7 +295,9 @@ def build_or_load(
         words, intervals, pause_min_sec=pause_min_sec, epsilon=epsilon,
     )
 
-    boundaries = boundary_pauses(word_entries, intervals)
+    boundaries = boundary_pauses(word_entries, intervals,
+                                 min_edge_dist=min_edge_dist,
+                                 untranscribed_min_sec=untranscribed_min_sec)
 
     result: dict = {
         "version": SPEECHMAP_VERSION,
@@ -298,20 +320,14 @@ def build_or_load(
 
 # ── boundary pause stats ─────────────────────────────────────────────────────
 
-_MIN_SPEECH_DUR = 0.020   # speech intervals shorter than this are treated as noise
-_MIN_EDGE_DIST = 0.060    # interval within 60 ms of a word edge → word residue, not untranscribed
-_UNTRANSCRIBED_MIN_SEC = 0.100  # minimum duration for a detached interval to count
-
-# Consumers must use this threshold for pause-based cut decisions, never raw pause > 0.
-# Rationale: voiceless stop closures (e.g. "т" in "такая?") produce genuine energy gaps
-# of ~0.3 s that are continuous speech by ear — see regression case #568 (0.29 s).
-CUT_PAUSE_MIN_SEC: float = 0.35
-
 
 def _gap_analysis(
     ae: float,
     as_: float,
     intervals: list[list[float]],
+    *,
+    min_edge_dist: float = _MIN_EDGE_DIST,
+    untranscribed_min_sec: float = _UNTRANSCRIBED_MIN_SEC,
 ) -> tuple[float, list[list[float]]]:
     """Analyse gap [ae, as_] using speech intervals.
 
@@ -319,10 +335,10 @@ def _gap_analysis(
     pause = trailing silence: silence from the end of the last significant speech
     interval (≥ _MIN_SPEECH_DUR) to as_.  Measures the silence immediately before
     the next word — the only stretch where a cut is actually possible.
-    untranscribed_speech: detached intervals only — those at least _MIN_EDGE_DIST
-    from both word edges and at least _UNTRANSCRIBED_MIN_SEC long.  Intervals
-    closer than 60 ms to ae or as_ are word residue (vowel tail, breath) and are
-    silently dropped.
+    untranscribed_speech: detached intervals only — those at least min_edge_dist
+    from both word edges and at least untranscribed_min_sec long.  Intervals
+    closer than min_edge_dist to ae or as_ are word residue (vowel tail, breath)
+    and are silently dropped.
 
     If no significant speech in the gap, pause = full gap length.
     """
@@ -358,9 +374,9 @@ def _gap_analysis(
     # untranscribed_speech: keep only detached, substantive intervals.
     untranscribed = [
         seg for seg in speech_in_gap
-        if (seg[0] - ae) >= _MIN_EDGE_DIST
-        and (as_ - seg[1]) >= _MIN_EDGE_DIST
-        and (seg[1] - seg[0]) >= _UNTRANSCRIBED_MIN_SEC
+        if (seg[0] - ae) >= min_edge_dist
+        and (as_ - seg[1]) >= min_edge_dist
+        and (seg[1] - seg[0]) >= untranscribed_min_sec
     ]
     return pause, untranscribed
 
@@ -368,6 +384,9 @@ def _gap_analysis(
 def boundary_pauses(
     words_refined: list[dict],
     intervals: list[list[float]],
+    *,
+    min_edge_dist: float = _MIN_EDGE_DIST,
+    untranscribed_min_sec: float = _UNTRANSCRIBED_MIN_SEC,
 ) -> list[dict]:
     """Compute boundary pauses between consecutive words using speech intervals.
 
@@ -379,7 +398,9 @@ def boundary_pauses(
     for i in range(len(words_refined) - 1):
         ae = words_refined[i]["audible_end"]
         as_ = words_refined[i + 1]["audible_start"]
-        pause, untr = _gap_analysis(ae, as_, intervals)
+        pause, untr = _gap_analysis(ae, as_, intervals,
+                                    min_edge_dist=min_edge_dist,
+                                    untranscribed_min_sec=untranscribed_min_sec)
         result.append({
             "pause": round(pause, 4),
             "untranscribed_speech": [[round(a, 4), round(b, 4)] for a, b in untr],

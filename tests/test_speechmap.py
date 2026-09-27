@@ -223,11 +223,13 @@ def test_fallback_to_whisper_when_no_energy():
 
 def test_params_hash_changes_on_any_param():
     base = dict(frame_sec=0.01, noise_percentile=10, headroom_db=15.0,
-                min_silence_sec=0.05, pause_min_sec=0.15)
+                min_silence_sec=0.05, pause_min_sec=0.15,
+                min_edge_dist=0.060, untranscribed_min_sec=0.100)
     h0 = _params_hash(**base)
     for key, new_val in [("frame_sec", 0.02), ("noise_percentile", 20),
                           ("headroom_db", 16.0), ("min_silence_sec", 0.1),
-                          ("pause_min_sec", 0.2)]:
+                          ("pause_min_sec", 0.2),
+                          ("min_edge_dist", 0.080), ("untranscribed_min_sec", 0.150)]:
         params = {**base, key: new_val}
         assert _params_hash(**params) != h0, f"hash did not change when {key} changed"
 
@@ -245,9 +247,11 @@ def test_cache_hit_on_second_load(tmp_path):
     from autoreels.cloud.speechmap import DEFAULT_MIN_SILENCE_SEC, DEFAULT_NOISE_PERCENTILE
     from autoreels.cloud.speechmap import DEFAULT_PAUSE_MIN_SEC
 
+    from autoreels.cloud.speechmap import _MIN_EDGE_DIST, _UNTRANSCRIBED_MIN_SEC
     hash_val = ph(frame_sec=DEFAULT_FRAME_SEC, noise_percentile=DEFAULT_NOISE_PERCENTILE,
                   headroom_db=DEFAULT_HEADROOM_DB, min_silence_sec=DEFAULT_MIN_SILENCE_SEC,
-                  pause_min_sec=DEFAULT_PAUSE_MIN_SEC)
+                  pause_min_sec=DEFAULT_PAUSE_MIN_SEC,
+                  min_edge_dist=_MIN_EDGE_DIST, untranscribed_min_sec=_UNTRANSCRIBED_MIN_SEC)
     cached = {
         "version": SPEECHMAP_VERSION,
         "source_sha256": "deadbeef",

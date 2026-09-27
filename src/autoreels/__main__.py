@@ -4873,18 +4873,19 @@ def cmd_speech_map(
 ) -> int:
     """Build (or load cached) the energy-based speech map for a source.
 
-    Stage A — no consumer changes.  Prints stats, writes transcripts/<stem>.speechmap.json.
+    Prints stats, writes transcripts/<stem>.speechmap.json.
+    Parameters are read from config/render.yaml speech_map_cfg section.
     """
     from autoreels.cloud.speechmap import (
         boundary_pauses, build_or_load, whisper_gaps,
-        DEFAULT_FRAME_SEC, DEFAULT_HEADROOM_DB, DEFAULT_MIN_SILENCE_SEC,
-        DEFAULT_NOISE_PERCENTILE, DEFAULT_PAUSE_MIN_SEC,
     )
 
     _root = Path(root) if root else _project_root()
     _inputs = Path(inputs_dir) if inputs_dir else _root / "inputs"
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     _transcripts_dir = Path(transcripts_dir) if transcripts_dir else _root / "transcripts"
+    _render_cfg = load_render_config(_root / "config" / "render.yaml")
+    _smap_cfg = _render_cfg.speech_map_cfg
 
     mpath = Path(manifest_path)
     if not mpath.is_absolute():
@@ -4943,6 +4944,13 @@ def cmd_speech_map(
 
     smap = build_or_load(
         source=source, source_sha256=sha, words=words, out_path=out_path,
+        frame_sec=_smap_cfg.frame_sec,
+        noise_percentile=_smap_cfg.noise_percentile,
+        headroom_db=_smap_cfg.headroom_db,
+        min_silence_sec=_smap_cfg.min_silence_sec,
+        pause_min_sec=_smap_cfg.pause_min_sec,
+        min_edge_dist=_smap_cfg.min_edge_dist,
+        untranscribed_min_sec=_smap_cfg.untranscribed_min_sec,
     )
 
     intervals = smap["intervals"]
