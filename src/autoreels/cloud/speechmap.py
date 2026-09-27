@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-SPEECHMAP_VERSION = "2"
+SPEECHMAP_VERSION = "3"
 
 # Defaults — all overridable by callers or future config.
 DEFAULT_FRAME_SEC = 0.01         # 10 ms energy window
@@ -298,6 +298,9 @@ def build_or_load(
 
 # ── boundary pause stats ─────────────────────────────────────────────────────
 
+_MIN_SPEECH_DUR = 0.020  # speech intervals shorter than this are treated as noise
+
+
 def _gap_analysis(
     ae: float,
     as_: float,
@@ -305,9 +308,14 @@ def _gap_analysis(
 ) -> tuple[float, list[list[float]]]:
     """Analyse gap [ae, as_] using speech intervals.
 
-    Returns (longest_silence, untranscribed_speech).
-    longest_silence: max contiguous silence run inside the gap.
-    untranscribed_speech: speech interval slices inside the gap.
+    Returns (pause, untranscribed_speech).
+    pause = trailing silence: silence from the end of the last significant speech
+    interval (≥ _MIN_SPEECH_DUR) to as_.  Measures the silence immediately before
+    the next word — the only stretch where a cut is actually possible.
+    untranscribed_speech: all speech interval slices inside the gap (including
+    tiny blips, for consumer inspection).
+
+    If no significant speech in the gap, pause = full gap length.
     """
     if as_ <= ae:
         return 0.0, []
@@ -326,16 +334,18 @@ def _gap_analysis(
     if not speech_in_gap:
         return gap, []
 
-    silences: list[float] = []
-    prev_end = ae
-    for seg_start, seg_end in speech_in_gap:
-        if seg_start > prev_end:
-            silences.append(seg_start - prev_end)
-        prev_end = max(prev_end, seg_end)
-    if prev_end < as_:
-        silences.append(as_ - prev_end)
+    # Find the last significant speech interval; ignore noise blips.
+    last_significant_end: float | None = None
+    for seg in reversed(speech_in_gap):
+        if seg[1] - seg[0] >= _MIN_SPEECH_DUR:
+            last_significant_end = seg[1]
+            break
 
-    return (max(silences) if silences else 0.0), speech_in_gap
+    if last_significant_end is None:
+        # All speech is noise blips — treat gap as silence, but still report blips.
+        return gap, speech_in_gap
+
+    return max(0.0, as_ - last_significant_end), speech_in_gap
 
 
 def boundary_pauses(
@@ -344,7 +354,7 @@ def boundary_pauses(
 ) -> list[dict]:
     """Compute boundary pauses between consecutive words using speech intervals.
 
-    pause = longest contiguous silence inside [ae(w), as(w+1)].
+    pause = trailing silence: silence from end of last significant speech to as(w+1).
     untranscribed_speech = speech intervals inside the gap (energy, no Whisper word).
     Returns N-1 dicts for N words.
     """

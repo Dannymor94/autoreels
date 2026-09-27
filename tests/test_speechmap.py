@@ -13,6 +13,7 @@ import pytest
 
 from autoreels.cloud.speechmap import (
     SPEECHMAP_VERSION,
+    _gap_analysis,
     _merge_speech_mask,
     _params_hash,
     boundary_pauses,
@@ -159,6 +160,43 @@ def test_boundary_pause_never_negative():
     boundaries = boundary_pauses(refined, intervals)
     assert all(b["pause"] >= 0.0 for b in boundaries)
     assert all(isinstance(b["untranscribed_speech"], list) for b in boundaries)
+
+
+def test_gap_analysis_trailing_silence_regression():
+    """_gap_analysis regression: trailing silence, not longest silence.
+
+    Three cases verified by ear on the 11h 42m 49s lecture:
+    #69  поместить→в: untranscribed "а как бы" then pause → trailing silence (~0.8s)
+    #81  Действуете,→думаете: untr "понятно" at END of gap → trailing ~0.07s (no pause)
+    #201 ограничен.→Понятно?: speech IS the word, silence before it is real → trailing 0.63s
+    """
+    # #69-like: speech in middle of gap, silence after last speech
+    # ae=0.0 as=2.0, speech [0.5-0.9] [1.0-1.3] [1.4-1.45], then silence 0.55s to as
+    intervals_69 = [[0.5, 0.9], [1.0, 1.3], [1.4, 1.45]]
+    pause_69, untr_69 = _gap_analysis(0.0, 2.0, intervals_69)
+    # trailing silence from 1.45 to 2.0 = 0.55s
+    assert 0.50 <= pause_69 <= 0.60, f"#69-like pause={pause_69}"
+    assert len(untr_69) == 3
+
+    # #81-like: untr speech at END of gap → tiny trailing silence
+    # ae=0.0 as=1.0, silence [0, 0.45] speech [0.45-0.87] silence [0.87-1.0]=0.13s
+    intervals_81 = [[0.45, 0.87]]
+    pause_81, untr_81 = _gap_analysis(0.0, 1.0, intervals_81)
+    assert pause_81 < 0.15, f"#81-like pause={pause_81} should be < pause_min_sec"
+    assert len(untr_81) == 1
+
+    # #201-like: speech in middle (the word itself), real silence before and after
+    # ae=0.0 as=2.5, speech [1.13-1.84]=710ms, trailing=2.5-1.84=0.66s
+    intervals_201 = [[1.13, 1.84]]
+    pause_201, untr_201 = _gap_analysis(0.0, 2.5, intervals_201)
+    assert 0.60 <= pause_201 <= 0.70, f"#201-like pause={pause_201}"
+    assert len(untr_201) == 1
+
+    # Noise blip: gap with only tiny speech (<20ms) → full gap returned
+    intervals_noise = [[0.5, 0.515]]  # 15ms < 20ms threshold
+    pause_noise, untr_noise = _gap_analysis(0.0, 1.0, intervals_noise)
+    assert pause_noise == pytest.approx(1.0), f"noise blip should not reduce gap: {pause_noise}"
+    assert len(untr_noise) == 1  # blip still reported
 
 
 def test_fallback_to_whisper_when_no_energy():
