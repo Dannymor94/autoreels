@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-SPEECHMAP_VERSION = "1"
+SPEECHMAP_VERSION = "2"
 
 # Defaults — all overridable by callers or future config.
 DEFAULT_FRAME_SEC = 0.01         # 10 ms energy window
@@ -275,6 +275,8 @@ def build_or_load(
         words, intervals, pause_min_sec=pause_min_sec, epsilon=epsilon,
     )
 
+    boundaries = boundary_pauses(word_entries, intervals)
+
     result: dict = {
         "version": SPEECHMAP_VERSION,
         "source_sha256": source_sha256,
@@ -286,6 +288,7 @@ def build_or_load(
         "n_intervals": len(intervals),
         "intervals": [[round(a, 4), round(b, 4)] for a, b in intervals],
         "words": word_entries,
+        "boundaries": boundaries,
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -295,18 +298,66 @@ def build_or_load(
 
 # ── boundary pause stats ─────────────────────────────────────────────────────
 
-def boundary_pauses(words_refined: list[dict], transcript_words: list[Any]) -> list[float]:
-    """Compute boundary pauses (seconds) between consecutive words.
+def _gap_analysis(
+    ae: float,
+    as_: float,
+    intervals: list[list[float]],
+) -> tuple[float, list[list[float]]]:
+    """Analyse gap [ae, as_] using speech intervals.
 
-    Boundary pause = max(0, audible_start(w+1) - audible_end(w)).
-    Returns a list of N-1 values for N words.
+    Returns (longest_silence, untranscribed_speech).
+    longest_silence: max contiguous silence run inside the gap.
+    untranscribed_speech: speech interval slices inside the gap.
     """
-    pauses = []
+    if as_ <= ae:
+        return 0.0, []
+    gap = as_ - ae
+
+    speech_in_gap: list[list[float]] = []
+    for onset, offset in intervals:
+        if offset <= ae:
+            continue
+        if onset >= as_:
+            break
+        clipped = [max(onset, ae), min(offset, as_)]
+        if clipped[1] > clipped[0]:
+            speech_in_gap.append(clipped)
+
+    if not speech_in_gap:
+        return gap, []
+
+    silences: list[float] = []
+    prev_end = ae
+    for seg_start, seg_end in speech_in_gap:
+        if seg_start > prev_end:
+            silences.append(seg_start - prev_end)
+        prev_end = max(prev_end, seg_end)
+    if prev_end < as_:
+        silences.append(as_ - prev_end)
+
+    return (max(silences) if silences else 0.0), speech_in_gap
+
+
+def boundary_pauses(
+    words_refined: list[dict],
+    intervals: list[list[float]],
+) -> list[dict]:
+    """Compute boundary pauses between consecutive words using speech intervals.
+
+    pause = longest contiguous silence inside [ae(w), as(w+1)].
+    untranscribed_speech = speech intervals inside the gap (energy, no Whisper word).
+    Returns N-1 dicts for N words.
+    """
+    result: list[dict] = []
     for i in range(len(words_refined) - 1):
-        end = words_refined[i]["audible_end"]
-        start = words_refined[i + 1]["audible_start"]
-        pauses.append(max(0.0, start - end))
-    return pauses
+        ae = words_refined[i]["audible_end"]
+        as_ = words_refined[i + 1]["audible_start"]
+        pause, untr = _gap_analysis(ae, as_, intervals)
+        result.append({
+            "pause": round(pause, 4),
+            "untranscribed_speech": [[round(a, 4), round(b, 4)] for a, b in untr],
+        })
+    return result
 
 
 def whisper_gaps(transcript_words: list[Any]) -> list[float]:

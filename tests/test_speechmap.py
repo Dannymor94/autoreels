@@ -151,13 +151,14 @@ def test_real_pause_is_word_boundary():
 
 
 def test_boundary_pause_never_negative():
-    """boundary_pauses() clips negatives to 0."""
+    """boundary_pauses() returns non-negative pauses and untranscribed_speech lists."""
     samples, sr = _make_audio()
     intervals, _, _ = build_speech_intervals(samples, sr)
     words = _words((0.0, 0.5), (0.7, 1.2), (1.27, 1.77), (2.07, 2.57))
     refined = refine_word_boundaries(words, intervals)
-    pauses = boundary_pauses(refined, words)
-    assert all(p >= 0.0 for p in pauses)
+    boundaries = boundary_pauses(refined, intervals)
+    assert all(b["pause"] >= 0.0 for b in boundaries)
+    assert all(isinstance(b["untranscribed_speech"], list) for b in boundaries)
 
 
 def test_fallback_to_whisper_when_no_energy():

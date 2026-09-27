@@ -4959,7 +4959,13 @@ def cmd_speech_map(
     # Pause distribution: map vs Whisper
     refined = smap["words"]
     if len(refined) >= 2 and len(words) >= 2:
-        mp = boundary_pauses(refined, words)
+        # Use cached boundaries when available (SPEECHMAP_VERSION >= 2); else recompute.
+        if "boundaries" in smap:
+            boundaries = smap["boundaries"]
+        else:
+            boundaries = boundary_pauses(refined, intervals)
+        mp = [b["pause"] for b in boundaries]
+        untr_count = sum(1 for b in boundaries if b["untranscribed_speech"])
         wg = whisper_gaps(words)
 
         def _pct_gt(vals, thr):
@@ -4972,6 +4978,7 @@ def cmd_speech_map(
         print(f"  {'> 0.3 s':30s}  {_pct_gt(mp, 0.3):7.1f}%  {_pct_gt(wg, 0.3):7.1f}%")
         print(f"  {'> 1.0 s':30s}  {_pct_gt(mp, 1.0):7.1f}%  {_pct_gt(wg, 1.0):7.1f}%")
         print(f"  {'negative':30s}  {_pct_neg(mp):7.1f}%  {_pct_neg(wg):7.1f}%")
+        print(f"  {'untranscribed speech in gap':30s}  {untr_count:>8d}")
         print(f"  {'total pairs':30s}  {len(mp):>8d}  {len(wg):>8d}")
 
     return 0
