@@ -36,8 +36,9 @@ def test_level1_uses_whisper_gap_when_no_smap():
     result = _find_pause_boundary(words, 0.0, 2.0, target=1.0, min_pause=0.3,
                                   search_start=0.5, search_end=1.5)
     assert result is not None
-    sw, level = result
+    sw, level, pause_val = result
     assert "pause" in level or level == "pause≥0.3s"
+    assert pause_val >= 0.3
 
 
 def test_level1_falls_to_level2_when_gap_too_small():
@@ -47,7 +48,7 @@ def test_level1_falls_to_level2_when_gap_too_small():
     result = _find_pause_boundary(words, 0.0, 2.0, target=1.0, min_pause=0.3,
                                   search_start=0.5, search_end=1.5)
     assert result is not None
-    sw, level = result
+    sw, level, pause_val = result
     assert level == "sentence"  # Level 2, not Level 1
 
 
@@ -62,9 +63,10 @@ def test_level1_uses_map_pause_when_smap_provided():
     result = _find_pause_boundary(words, 0.0, 2.0, target=1.0, min_pause=0.3,
                                   search_start=0.5, search_end=1.5, smap=smap)
     assert result is not None
-    sw, level = result
+    sw, level, pause_val = result
     # map pause = 0.5 >= 0.3 → Level 1
     assert "pause" in level
+    assert abs(pause_val - 0.5) < 0.01
 
 
 def test_level1_map_pause_below_threshold_falls_to_level2():
@@ -76,7 +78,7 @@ def test_level1_map_pause_below_threshold_falls_to_level2():
     result = _find_pause_boundary(words, 0.0, 2.0, target=1.0, min_pause=0.3,
                                   search_start=0.5, search_end=1.5, smap=smap)
     assert result is not None
-    sw, level = result
+    sw, level, pause_val = result
     # map pause = 0.1 < 0.3 → misses Level 1, gets Level 2
     assert level == "sentence"
 
@@ -88,4 +90,5 @@ def test_smap_none_behavior_unchanged():
                                      search_start=0.5, search_end=1.5)
     r_smap_none = _find_pause_boundary(words, 0.0, 2.0, target=1.0, min_pause=0.3,
                                        search_start=0.5, search_end=1.5, smap=None)
+    # Both return (sw, level, pause_val); should be identical.
     assert r_no_smap == r_smap_none

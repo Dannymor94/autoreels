@@ -1082,23 +1082,34 @@ def _find_pause_boundary(
     # Level 1: sentence boundary with pause >= min_pause
     if smap is not None:
         # Map pause takes precedence over Whisper gap
-        l1 = [sents[i][-1].t1 for i in range(len(sents) - 1)
-              if _smap_pause(sents[i][-1]) >= min_pause]
+        l1_pairs = [(sents[i][-1].t1, _smap_pause(sents[i][-1]))
+                    for i in range(len(sents) - 1)]
+        l1_pairs = [(t, p) for t, p in l1_pairs if p >= min_pause]
     else:
-        l1 = [sents[i][-1].t1 for i in range(len(sents) - 1)
-              if sents[i + 1][0].t0 - sents[i][-1].t1 >= min_pause]
+        l1_pairs = [(sents[i][-1].t1, sents[i + 1][0].t0 - sents[i][-1].t1)
+                    for i in range(len(sents) - 1)
+                    if sents[i + 1][0].t0 - sents[i][-1].t1 >= min_pause]
+    l1 = [t for t, _ in l1_pairs]
     if (b := _best(l1)) is not None:
-        return b, "pause≥0.3s"
+        pause_val = next(p for t, p in l1_pairs if t == b)
+        return b, "pause≥0.3s", pause_val
 
     # Level 2: any sentence boundary (terminal punctuation), gap irrelevant
-    l2 = [sents[i][-1].t1 for i in range(len(sents) - 1)]
+    l2_pairs: list = []
+    for i in range(len(sents) - 1):
+        t = sents[i][-1].t1
+        p = (_smap_pause(sents[i][-1]) if smap is not None
+             else sents[i + 1][0].t0 - sents[i][-1].t1)
+        l2_pairs.append((t, p))
+    l2 = [t for t, _ in l2_pairs]
     if (b := _best(l2)) is not None:
-        return b, "sentence"
+        pause_val = next(p for t, p in l2_pairs if t == b)
+        return b, "sentence", pause_val
 
     # Level 3: word boundary after a comma
     l3 = [w.t1 for w in span if w.word.rstrip().endswith(",")]
     if (b := _best(l3)) is not None:
-        return b, "comma"
+        return b, "comma", 0.0
 
     return None
 
@@ -1183,14 +1194,42 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
     max_shot = getattr(render_cfg, "two_shot_max_shot_sec",
                        getattr(render_cfg, "two_shot_max_wide_sec", 9.0))
     min_shot = getattr(render_cfg, "two_shot_min_sec", 2.5)
+    # Level-1 threshold: use cut_pause_min_sec from speech_map_cfg (0.35, not 0.3).
+    _smap_cfg = getattr(render_cfg, "speech_map_cfg", None)
+    level1_min_pause = getattr(_smap_cfg, "cut_pause_min_sec", 0.35)
+
+    speech_map_on = getattr(render_cfg, "speech_map", False)
+    if speech_map_on and smap is None:
+        print(f"  ⚠ two_shot_auto: speech_map=True but smap не загружен — "
+              f"level-1 кандидаты используют Whisper-gaps (threshold={level1_min_pause:.2f}s)", flush=True)
+    elif speech_map_on:
+        print(f"  two_shot_auto: speech_map активен ({len(smap.get('words', []))} слов, "
+              f"{len(smap.get('boundaries', []))} границ, threshold={level1_min_pause:.2f}s)", flush=True)
+    elif not speech_map_on:
+        pass  # two_shot_auto without speech_map: threshold used but not printed (no smap context)
 
     for reel in reels:
-        _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot, smap=smap)
+        _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
+                                  smap=smap, level1_min_pause=level1_min_pause)
+
+    # Print switch table — essential for comparing smap-on vs smap-off.
+    for reel in reels:
+        log = getattr(reel, "_two_shot_switch_log", [])
+        if not log:
+            continue
+        title = getattr(reel, "title", "") or f"reel@{getattr(reel.segments[0], 'start', '?'):.1f}s" if getattr(reel, "segments", None) else "reel"
+        smap_tag = f"smap={'on' if (speech_map_on and smap is not None) else 'off'}"
+        print(f"  two_shot switches [{title[:40]}] ({smap_tag}):", flush=True)
+        print(f"    {'time':>8}  {'dir':>12}  {'level':>12}  {'pause':>7}", flush=True)
+        for sw, direction, level, pause_val in log:
+            print(f"    {sw:8.2f}  {direction:>12}  {level:>12}  {pause_val:7.3f}", flush=True)
+
     return reels
 
 
 def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
-                               smap: "dict | None" = None) -> None:
+                               smap: "dict | None" = None,
+                               level1_min_pause: float = 0.35) -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
     from autoreels.cloud.edit import split_sentences as _sp
     segs = reel.effective_segments()
@@ -1252,8 +1291,10 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             return max(0.0, result[j + 1].start - result[j].end)
         return 0.0
 
+    switch_log: list = []  # (time, direction, level, pause)
+
     def _apply_span_split(shot_type: str, span_start: float, span_end: float,
-                           sw: float, level: str) -> bool:
+                           sw: float, level: str, pause_val: float = 0.0) -> bool:
         """Apply a max-shot split at sw. Returns True if applied."""
         if shot_type == "wide":
             for ji, s in enumerate(result):
@@ -1281,7 +1322,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     if result[k].start >= span_end - 0.001:
                         break
                     result[k] = result[k].model_copy(update={"shot": "close", "close_intervals": []})
-                warnings.append(f"switched wide→close at {sw:.2f}s ({level})")
+                switch_log.append((sw, "wide→close", level, pause_val))
+                warnings.append(f"switched wide→close at {sw:.2f}s ({level}, pause={pause_val:.3f}s)")
                 return True
         else:  # close
             # Case A: close span covered by adjacent ci intervals of a wide segment.
@@ -1305,7 +1347,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                             if rel_sw > ci[ci_idx][0] + 0.001:
                                 new_ci.append([ci[ci_idx][0], rel_sw])
                             result[ji] = s.model_copy(update={"close_intervals": new_ci})
-                            warnings.append(f"switched close→wide at {sw:.2f}s ({level})")
+                            switch_log.append((sw, "close→wide", level, pause_val))
+                            warnings.append(f"switched close→wide at {sw:.2f}s ({level}, pause={pause_val:.3f}s)")
                             return True
                     break
             # Case B: span covers close segments.
@@ -1319,7 +1362,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     if result[k].start >= span_end - 0.001:
                         break
                     result[k] = result[k].model_copy(update={"shot": "wide", "close_intervals": []})
-                warnings.append(f"switched close→wide at {sw:.2f}s ({level})")
+                switch_log.append((sw, "close→wide", level, pause_val))
+                warnings.append(f"switched close→wide at {sw:.2f}s ({level}, pause={pause_val:.3f}s)")
                 return True
         return False
 
@@ -1342,7 +1386,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 continue
             res = _find_pause_boundary(
                 words, span_start, span_end,
-                target=span_start + max_shot, min_pause=0.3,
+                target=span_start + max_shot, min_pause=level1_min_pause,
                 search_start=search_lo, search_end=search_hi,
                 smap=smap,
             )
@@ -1350,8 +1394,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 warnings.append(f"no candidate in {shot_type} {span_start:.1f}–{span_end:.1f}")
                 _warned_spans.add(span_key)
                 continue
-            sw, level = res
-            applied = _apply_span_split(shot_type, span_start, span_end, sw, level)
+            sw, level, pause_val = res
+            applied = _apply_span_split(shot_type, span_start, span_end, sw, level, pause_val)
             if applied:
                 progress = True
                 break
@@ -1369,6 +1413,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         reel.segments = result
     if warnings:
         reel._two_shot_warnings = getattr(reel, "_two_shot_warnings", []) + warnings
+    if switch_log:
+        reel._two_shot_switch_log = getattr(reel, "_two_shot_switch_log", []) + switch_log
 
 
 # --- Manual (human-review) path: which stages may touch a human selection ------------------

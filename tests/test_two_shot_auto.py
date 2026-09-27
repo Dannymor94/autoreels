@@ -182,7 +182,7 @@ def test_fallback_level1_pause_ge_03():
     ]
     result = _find_pause_boundary(words, 0.0, 10.0, target=2.0, min_pause=0.3)
     assert result is not None
-    boundary, level = result
+    boundary, level, _ = result
     assert level == "pause≥0.3s"
     assert abs(boundary - 2.0) < 0.1
 
@@ -197,7 +197,7 @@ def test_fallback_level2_sentence_no_gap():
     ]
     result = _find_pause_boundary(words, 0.0, 10.0, target=2.0, min_pause=0.3)
     assert result is not None
-    boundary, level = result
+    boundary, level, _ = result
     assert level == "sentence", f"expected 'sentence', got {level!r}"
     assert abs(boundary - 2.0) < 0.5
 
@@ -211,7 +211,7 @@ def test_fallback_level3_comma_only():
     ]
     result = _find_pause_boundary(words, 0.0, 12.0, target=6.0, min_pause=0.3)
     assert result is not None
-    boundary, level = result
+    boundary, level, _ = result
     assert level == "comma", f"expected 'comma', got {level!r}"
     assert abs(boundary - 2.0) < 0.1
 
@@ -240,7 +240,7 @@ def test_prefer_le_target_boundary():
     result = _find_pause_boundary(words, 0.0, 20.0, target=10.0, min_pause=0.3,
                                    search_start=2.0, search_end=18.0)
     assert result is not None
-    boundary, _ = result
+    boundary, _, _pause = result
     assert boundary <= 10.0 + 0.1, f"should prefer boundary ≤ target 10.0, got {boundary}"
     assert abs(boundary - 8.0) < 0.1, f"expected ~8.0, got {boundary}"
 
