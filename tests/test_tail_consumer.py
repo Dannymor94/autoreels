@@ -223,3 +223,21 @@ def test_tail_residue_adjacent_word_attributed_to_last():
     # After residue attribution: audible_end=5.8, next real onset=7.2 → silence → end ≈ 5.9
     assert result == pytest.approx(5.9, abs=0.02)
     assert result > 5.5  # NOT speech-next (which would cut to ~5.42)
+
+
+# ── invariant: new_end >= audible_end ─────────────────────────────────────────
+
+def test_tail_new_end_never_before_audible_end():
+    """Invariant holds: new_end >= audible_end after residue attribution."""
+    # residue attributed → audible_end = max(5.8, 6.0) = 6.0; last real word → silence
+    smap = _make_smap(
+        [_make_word(5.0, 5.5, ae=5.8), _make_word(5.5, 6.0, ae=6.0)],
+        [_make_boundary(0.0)],
+    )
+    lookup = _smap_word_lookup(smap)
+    result = _tail_from_smap(
+        last_t0=5.0, seg_end=7.0, smap=smap, lookup=lookup,
+        cut_pause_min_sec=0.35, last_t1=5.5,
+    )
+    assert result is not None
+    assert result >= 5.8  # >= original audible_end; actual ≈ 6.1 (6.0 + _TAIL_PAD)

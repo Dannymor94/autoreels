@@ -941,6 +941,11 @@ def _tail_from_smap(
             new_end = max(new_end, audible_end + 0.04)
 
     new_end = max(new_end, word_entry["t0"] + 0.04)
+    # Invariant: clip end must not precede the last word's audible end.
+    assert new_end >= audible_end - 0.001, (
+        f"_tail_from_smap: new_end {new_end:.3f} < audible_end {audible_end:.3f} — "
+        "next_speech_onset fell inside the word's audible range; check residue attribution"
+    )
     return new_end
 
 
