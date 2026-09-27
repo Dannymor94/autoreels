@@ -199,3 +199,27 @@ def test_tail_map_applies_even_when_seg_end_far():
     assert result is not None
     # silence case: audible_end + pad = ~5.9
     assert result == pytest.approx(5.9, abs=0.02)
+
+
+# ── residue attribution ───────────────────────────────────────────────────────
+
+def test_tail_residue_adjacent_word_attributed_to_last():
+    """Smap word whose Whisper t0 == last_word.t1 is residue — merged, not treated as next speech."""
+    # last word: t0=5.0, t1=5.5, ae=5.6; residue: t0=5.5 (== t1), ae=5.8; real next: as=7.2
+    # Without attribution: gap=7.2-5.6=1.6 → silence (fine). But without residue loop:
+    # next audible_start = residue.as (somewhere near 5.5) → gap tiny → speech-next (wrong).
+    smap = _make_smap(
+        [_make_word(5.0, 5.5, ae=5.6), _make_word(5.5, 5.9, ae=5.8), _make_word(7.2, 7.7)],
+        [_make_boundary(0.0), _make_boundary(1.4)],
+    )
+    # Residue word needs audible_start set close to last word's ae to trigger the bug without fix
+    smap["words"][1]["audible_start"] = 5.62  # gap = 5.62 - 5.60 = 0.02 < 0.35 → speech-next without fix
+    lookup = _smap_word_lookup(smap)
+    result = _tail_from_smap(
+        last_t0=5.0, seg_end=8.0, smap=smap, lookup=lookup,
+        cut_pause_min_sec=0.35, last_t1=5.5,
+    )
+    assert result is not None
+    # After residue attribution: audible_end=5.8, next real onset=7.2 → silence → end ≈ 5.9
+    assert result == pytest.approx(5.9, abs=0.02)
+    assert result > 5.5  # NOT speech-next (which would cut to ~5.42)

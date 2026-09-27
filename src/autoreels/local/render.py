@@ -901,6 +901,13 @@ def _tail_from_smap(
     words = smap["words"]
     boundaries = smap["boundaries"]
 
+    # Attribute residue: consecutive smap words whose Whisper t0 <= last_t1 are the
+    # acoustic tail of the same utterance (e.g. a sibilant suffix) — not new speech.
+    if last_t1 is not None:
+        while word_idx + 1 < len(words) and words[word_idx + 1]["t0"] <= last_t1:
+            word_idx += 1
+            audible_end = max(audible_end, words[word_idx]["audible_end"])
+
     # Gather next speech onset candidates
     next_speech_onset: float | None = None
 
@@ -1705,6 +1712,7 @@ def _render_segments(
                 _new_end = _tail_from_smap(
                     last_t0=_last.t0, seg_end=segs[-1].end, smap=smap,
                     lookup=_smap_lookup, cut_pause_min_sec=_cpm,
+                    last_t1=_last.t1,
                 )
                 if _new_end is not None:
                     _word_end = _new_end  # for fade computation downstream
