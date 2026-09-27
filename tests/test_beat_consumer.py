@@ -124,9 +124,9 @@ def test_beat_no_smap_word_in_seg_unchanged():
 
 
 def test_beat_multiple_segs_each_adjusted():
-    """All segments in a beat reel are adjusted independently."""
-    # seg0: word at t0=2.0, t1=2.8, ae=2.6; seg.end=2.8 → new_end=2.6
-    # seg1: word at t0=5.0, t1=5.9, ae=5.7; seg.end=6.15 (gap 0.25) → new_end=5.95
+    """Non-adjacent segments (gap 2.2s > _ADJACENT_MAX_GAP=2.0) both use audible_end."""
+    # seg0: word at t0=2.0, t1=2.8, ae=2.6; seg.end=2.8 → new_end=2.6 (non-adjacent: gap=2.2s)
+    # seg1: word at t0=5.0, t1=5.9, ae=5.7; seg.end=6.15 (gap 0.25) → new_end=5.95 (last)
     smap = _make_smap(
         [_w(2.0, 2.8, ae=2.6), _w(5.0, 5.9, ae=5.7), _w(8.0, 8.5)],
         [_bnd(0.5), _bnd(1.0)],
@@ -135,3 +135,42 @@ def test_beat_multiple_segs_each_adjusted():
     result = _beat_segs_from_smap(segs, smap, beat_gap_sec=0.25)
     assert result[0].end == pytest.approx(2.6, abs=0.02)
     assert result[1].end == pytest.approx(5.95, abs=0.02)
+
+
+# ── adjacent join: natural source pause preserved ────────────────────────────
+
+def test_beat_adjacent_extends_to_next_start():
+    """Adjacent join (gap 0.02s): seg.end extended to next_seg.start."""
+    smap = _make_smap([_w(5.0, 5.9, ae=5.7), _w(7.0, 7.5)], [_bnd(1.0)])
+    # beat2.end=5.9, beat3.start=5.92 → gap=0.02 → adjacent → end=5.92
+    segs = [_seg(5.0, 5.9), _seg(5.92, 7.0)]
+    result = _beat_segs_from_smap(segs, smap, beat_gap_sec=0.25)
+    assert result[0].end == pytest.approx(5.92)
+
+
+def test_beat_adjacent_larger_gap_preserved():
+    """Adjacent join (gap 0.84s < 2.0s): source pause preserved."""
+    smap = _make_smap([_w(5.0, 5.9, ae=5.7), _w(8.0, 8.5)], [_bnd(1.0)])
+    # beat2.end=5.9, beat3.start=6.74 → gap=0.84 → adjacent → end=6.74
+    segs = [_seg(5.0, 5.9), _seg(6.74, 8.0)]
+    result = _beat_segs_from_smap(segs, smap, beat_gap_sec=0.25)
+    assert result[0].end == pytest.approx(6.74)
+
+
+def test_beat_nonadjacent_backward_uses_audible_end():
+    """Non-adjacent (backward jump in source): audible_end cap applies."""
+    smap = _make_smap([_w(5.0, 5.9, ae=5.7), _w(7.0, 7.5)], [_bnd(1.0)])
+    # beat1.end=5.9, beat2.start=2.0 → gap=-3.9s → non-adjacent → audible_end
+    segs = [_seg(5.0, 5.9), _seg(2.0, 3.0)]
+    result = _beat_segs_from_smap(segs, smap, beat_gap_sec=0.25)
+    assert result[0].end == pytest.approx(5.7, abs=0.02)  # audible_end
+
+
+def test_beat_adjacent_last_seg_uses_audible_end():
+    """Last segment is never adjacent — audible_end cap applies."""
+    smap = _make_smap([_w(5.92, 7.0, ae=6.9), _w(8.0, 8.5)], [_bnd(1.0)])
+    segs = [_seg(5.0, 5.9), _seg(5.92, 7.0)]
+    result = _beat_segs_from_smap(segs, smap, beat_gap_sec=0.25)
+    # seg[0] is adjacent → end=5.92; seg[1] is last → audible_end
+    assert result[0].end == pytest.approx(5.92)
+    assert result[1].end == pytest.approx(6.9, abs=0.02)

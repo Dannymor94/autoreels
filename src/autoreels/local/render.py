@@ -937,7 +937,8 @@ def _tail_from_smap(
     return new_end
 
 
-_BEAT_CAP_MARGIN = 0.04  # gap left before next speech onset when capping beat end
+_BEAT_CAP_MARGIN = 0.04    # gap left before next speech onset when capping beat end
+_ADJACENT_MAX_GAP = 2.0   # source gap (s) at or below which consecutive beats are adjacent
 
 
 def _beat_segs_from_smap(
@@ -948,18 +949,36 @@ def _beat_segs_from_smap(
 ) -> "list":
     """Refine beat segment ends using speech map.
 
-    For each segment: find the last smap word at or before seg.end, set
-    new_end = audible_end + (seg.end - word.t1) preserving the original
-    gap delta, then cap at the next source speech onset (incl. untranscribed).
-    Returns a new list; segments with no matching smap word are unchanged.
+    Adjacent join (next beat starts within _ADJACENT_MAX_GAP seconds of this
+    beat's end, going forward in source time): extend seg.end to next_seg.start
+    so the natural source pause is preserved.
+
+    Non-adjacent join (backward jump or large forward gap — reordered beats):
+    clamp to audible_end + (seg.end - word.t1), capped before next source speech.
+
+    The last segment in a beat reel is always treated as non-adjacent.
+    Returns a new list; segments with no matching smap word (non-adjacent path)
+    are unchanged.
     """
     import bisect
     words = smap["words"]
     boundaries = smap["boundaries"]
     t0s = [w["t0"] for w in words]
     result = []
-    for seg in segs:
-        # Last word with t0 < seg.end (strict: word at seg.end belongs to next beat)
+    for i, seg in enumerate(segs):
+        # Adjacent: next beat follows immediately in source time (natural pause kept)
+        next_seg = segs[i + 1] if i + 1 < len(segs) else None
+        if next_seg is not None:
+            src_gap = next_seg.start - seg.end
+            if 0.0 <= src_gap <= _ADJACENT_MAX_GAP:
+                new_end = next_seg.start
+                if abs(new_end - seg.end) > 1e-4:
+                    result.append(seg.model_copy(update={"end": new_end}))
+                else:
+                    result.append(seg)
+                continue
+
+        # Non-adjacent (or last segment): clamp to audible_end of last word
         idx = bisect.bisect_left(t0s, seg.end) - 1
         if idx < 0:
             result.append(seg)
