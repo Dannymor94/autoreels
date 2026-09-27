@@ -48,6 +48,7 @@ class CandidateBlock:
     lines: list[_Line] = field(default_factory=list, repr=False)
     has_internal_speaker_change: bool = False  # set by filter_blocks; stage 3 treats as strong negative
     heuristic_score: float = 0.0              # set by score_block (M1.6 stage 3)
+    llm_score: float | None = None            # set by score_blocks_llm (M1.6 stage 4)
     score_breakdown: dict = field(default_factory=dict, repr=False)  # per-feature contributions
 
 
