@@ -1179,6 +1179,63 @@ def _shot_spans_with_times(segs) -> "list[tuple[str, float, float]]":
     return merged
 
 
+def _ensure_smap(
+    smap_path: "Path",
+    source: "Path | None",
+    source_sha256: str,
+    words,
+    render_cfg,
+) -> "dict | None":
+    """Load smap if valid v4; auto-build if missing or stale. Returns None on failure.
+
+    Called at --apply and render time whenever speech_map=True.
+    """
+    from autoreels.cloud.speechmap import SPEECHMAP_VERSION, _params_hash, build_or_load
+    import json as _json
+
+    _smap_cfg = getattr(render_cfg, "speech_map_cfg", None)
+
+    def _params():
+        if _smap_cfg is None:
+            return {}
+        return dict(
+            frame_sec=_smap_cfg.frame_sec,
+            noise_percentile=_smap_cfg.noise_percentile,
+            headroom_db=_smap_cfg.headroom_db,
+            min_silence_sec=_smap_cfg.min_silence_sec,
+            pause_min_sec=_smap_cfg.pause_min_sec,
+            min_edge_dist=_smap_cfg.min_edge_dist,
+            untranscribed_min_sec=_smap_cfg.untranscribed_min_sec,
+        )
+
+    # Cache hit: file exists, version OK, params match.
+    if smap_path.is_file():
+        try:
+            cached = _json.loads(smap_path.read_text(encoding="utf-8"))
+            if cached.get("version") == SPEECHMAP_VERSION and cached.get("source_sha256") == source_sha256:
+                return cached
+        except Exception:
+            pass
+
+    # Cache miss — try to build.
+    if source is None or not source.is_file():
+        print(f"  ⚠ speech_map: cannot auto-build {smap_path.name} — source not found", flush=True)
+        return None
+    if not words:
+        print(f"  ⚠ speech_map: cannot auto-build {smap_path.name} — no transcript words", flush=True)
+        return None
+
+    print(f"  speech_map: building {smap_path.name} …", flush=True)
+    try:
+        return build_or_load(
+            source=source, source_sha256=source_sha256, words=words,
+            out_path=smap_path, **_params(),
+        )
+    except Exception as e:
+        print(f"  ⚠ speech_map: build failed for {smap_path.name}: {e}", flush=True)
+        return None
+
+
 def _stage_two_shot_auto(reels, words, *, render_cfg,
                          smap: "dict | None" = None) -> list:
     """Auto-alternate wide/close at segment seams; enforce max-shot for both wide and close.
@@ -2235,18 +2292,11 @@ def _cmd_run_impl(
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
-    # M1.8 Stage B consumer 3: load smap for map-based level-1 candidates in two_shot_auto.
+    # M1.8 Stage B consumer 3: smap for two_shot_auto level-1 (auto-built if missing/stale).
     _ts_smap: "dict | None" = None
     if getattr(render_cfg, "speech_map", False):
-        import json as _json
         _ts_smap_path = transcripts_dir / f"{Path(video).stem}.speechmap.json"
-        if _ts_smap_path.is_file():
-            try:
-                _loaded = _json.loads(_ts_smap_path.read_text(encoding="utf-8"))
-                if _loaded.get("version") == "4":
-                    _ts_smap = _loaded
-            except Exception:
-                pass
+        _ts_smap = _ensure_smap(_ts_smap_path, Path(video), sha, tx_words, render_cfg)
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_ts_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
@@ -2950,26 +3000,24 @@ def cmd_render(
             music_tag = f", музыка {Path(music_path).name}" if music_path else ""
             print(f"=== render: {mf.name} ({label}, {prof_name}/{enc}{pal_tag}{zoom_tag}{music_tag}) "
                   f"→ {out_dir_final} ===", flush=True)
-            # M1.8 Stage B: load speech map when flag is on (per-manifest, keyed by source stem).
+            # M1.8 Stage B: load speech map (auto-build if missing/stale) when flag is on.
             _render_smap: dict | None = None
             if getattr(render_cfg, "speech_map", False):
-                import json as _json
                 _smap_path = _transcripts_dir_r / f"{stem}.speechmap.json"
-                if _smap_path.is_file():
-                    try:
-                        _loaded = _json.loads(_smap_path.read_text(encoding="utf-8"))
-                        # Only v4+ maps have boundaries/audible_end — reject older versions.
-                        if _loaded.get("version") == "4":
-                            _render_smap = _loaded
-                        else:
-                            print(f"  ⚠ speech_map: {_smap_path.name} is version "
-                                  f"{_loaded.get('version')} (need v4, run: arl smap) — "
-                                  "falling back to silencedetect", flush=True)
-                    except Exception:
-                        _render_smap = None
-                if _render_smap is None and not _smap_path.is_file():
-                    print(f"  ⚠ speech_map=True but no map at {_smap_path.name} — "
-                          "tail placement falls back to silencedetect", flush=True)
+                _cache_dir_r = root / "data" / "cache"
+                _render_source: "Path | None" = None
+                _render_words = None
+                try:
+                    _render_source = resolve_source(manifest, inputs_dir)
+                except Exception:
+                    pass
+                if _render_source is not None:
+                    _render_tx = _resolve_cached_transcript(manifest, _cache_dir_r)
+                    _render_words = _render_tx.words if _render_tx is not None else None
+                _render_smap = _ensure_smap(
+                    _smap_path, _render_source, manifest.source_sha256,
+                    _render_words or [], render_cfg,
+                )
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
@@ -4266,18 +4314,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
     # M1.7 step 1b: auto wide/close alternation at seams (formatting — runs on human and auto paths).
-    # M1.8 Stage B consumer 3: load smap for map-based level-1 candidates (gated by speech_map).
+    # M1.8 Stage B consumer 3: smap for two_shot_auto level-1 (auto-built if missing/stale).
     _blk_ts_smap: "dict | None" = None
     if getattr(render_cfg, "speech_map", False):
-        import json as _json
         _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
-        if _blk_smap_path.is_file():
-            try:
-                _loaded = _json.loads(_blk_smap_path.read_text(encoding="utf-8"))
-                if _loaded.get("version") == "4":
-                    _blk_ts_smap = _loaded
-            except Exception:
-                pass
+        _blk_source = source_file if source_file.is_file() else None
+        _blk_ts_smap = _ensure_smap(
+            _blk_smap_path, _blk_source, manifest.source_sha256, tx_words, render_cfg,
+        )
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_ts_smap)
 
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
@@ -5008,6 +5052,8 @@ def cmd_speech_map(
         mpath = (_root / "manifests" / mpath) if not mpath.exists() else mpath.resolve()
     if not mpath.exists():
         mpath = _root / "manifests" / manifest_path
+    if not mpath.exists() and not mpath.suffix:
+        mpath = mpath.with_suffix(".json")
     if not mpath.exists():
         print(f"ошибка: манифест не найден: {manifest_path}", file=sys.stderr)
         return 1
