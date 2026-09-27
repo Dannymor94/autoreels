@@ -395,11 +395,39 @@ def try_rescue_clip(
     return False
 
 
+def _words_with_smap_pauses(words: list[Word], smap: dict) -> list[Word]:
+    """Return a copy of words with t0 adjusted so that inter-word gaps equal smap boundary pauses.
+
+    Gap after words[i] = smap["boundaries"][i]["pause"].  Matched by t0*1000 key.
+    Words not found in smap keep their original t0.  Only moves t0 forward (w.t1 + pause ≥ t0).
+    """
+    smap_word_list = smap.get("words", [])
+    smap_bounds = smap.get("boundaries", [])
+    # Build lookup: t0_ms → smap word index (pause after that word is at smap_bounds[idx])
+    idx_by_t0: dict[int, int] = {
+        round(sw["t0"] * 1000): i
+        for i, sw in enumerate(smap_word_list)
+    }
+    result = list(words)
+    for i in range(1, len(result)):
+        prev = result[i - 1]
+        prev_key = round(prev.t0 * 1000)
+        idx = idx_by_t0.get(prev_key)
+        if idx is not None and idx < len(smap_bounds):
+            pause = smap_bounds[idx]["pause"]
+            new_t0 = prev.t1 + pause
+            # Only apply when it shifts t0 forward (negative smap pauses would shrink gaps)
+            if new_t0 > result[i].t0:
+                result[i] = result[i].model_copy(update={"t0": round(new_t0, 4)})
+    return result
+
+
 def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, window_sec: float,
                   max_duration: float, min_pause_for_phrase_end: float, max_micro_pause: float,
                   hanging_words, hanging_start_words=None, prefer_longer_below_ratio: float = 0.0,
                   max_extra_sentences: int = 0, max_end_search_sec: float | None = None,
-                  min_clip_duration: float | None = None) -> None:
+                  min_clip_duration: float | None = None,
+                  smap: "dict | None" = None) -> None:
     """Подтянуть start/end каждого reel к завершению мысли (мутирует на месте).
 
     Пустой `words` → границы не трогаем. Порядок в пайплайне: snap → padding → trim.
@@ -414,9 +442,12 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
     Пишет r.end_drift_sec и r.end_snap_reason для каждого reel.
 
     min_clip_duration: клипы короче порога получают флаг "too_short".
+    smap: M1.8 — when provided, inter-word gap = smap boundary pause (more accurate than Whisper).
     """
     if not words:
         return
+    if smap is not None:
+        words = _words_with_smap_pauses(words, smap)
     if hanging_start_words is None:
         # Fall back to the built-in SHORT list, never the end list (which would drop «Если»/«Когда»/
         # «Я» from a clip's first sentence — the ee01883 bug). Warn once so a stale config is noticed.

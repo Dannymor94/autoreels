@@ -727,11 +727,12 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
     sidecar.write_text(json.dumps(discarded, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None):
+def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None, smap=None):
     """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM).
 
     max_duration override: human merges use manual_max_duration_sec so snap does not cap a
     long-but-intentional clip back to the preset ceiling. Default None → preset ceiling.
+    smap: M1.8 Stage B consumer 4 — map boundary pauses replace Whisper gaps for phrase detection.
     """
     print("подтяжка границ к словам…", flush=True)
     snap_segments(
@@ -744,6 +745,7 @@ def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None):
         hanging_start_words=r0_cfg.hanging_start_words,
         max_end_search_sec=r0_cfg.max_end_search_sec,
         min_clip_duration=r0_cfg.min_clip_duration,
+        smap=smap,
     )
     return reels
 
@@ -2233,9 +2235,14 @@ def _cmd_run_impl(
     memtrace.mark("after select (R0)")
     for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
         r.r0_start, r.r0_end = r.start, r.end
-    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg)
-    memtrace.mark("after snap")
     tx_words = getattr(transcript, "words", [])
+    # M1.8 Stage B: load smap once before snap (consumer 4) and two_shot_auto (consumer 3).
+    _run_smap: "dict | None" = None
+    if getattr(render_cfg, "speech_map", False):
+        _run_smap_path = transcripts_dir / f"{Path(video).stem}.speechmap.json"
+        _run_smap = _ensure_smap(_run_smap_path, Path(video), sha, tx_words, render_cfg)
+    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, smap=_run_smap)
+    memtrace.mark("after snap")
     dangling_disc: list = []
     # Interview: enforce host-turn clip boundaries.
     host_turns = (
@@ -2292,12 +2299,7 @@ def _cmd_run_impl(
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
-    # M1.8 Stage B consumer 3: smap for two_shot_auto level-1 (auto-built if missing/stale).
-    _ts_smap: "dict | None" = None
-    if getattr(render_cfg, "speech_map", False):
-        _ts_smap_path = transcripts_dir / f"{Path(video).stem}.speechmap.json"
-        _ts_smap = _ensure_smap(_ts_smap_path, Path(video), sha, tx_words, render_cfg)
-    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_ts_smap)
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
         source_kind=getattr(r0_cfg, "source_kind", ""),
@@ -4172,7 +4174,13 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # NOT reached here; collect_human_warnings reports what a bypassed drop-half would have flagged.
     density_disc: list[dict] = []
     tx_words = getattr(transcript, "words", [])
-    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
+    # M1.8 Stage B: load smap once before snap (consumer 4) + two_shot_auto (consumer 3).
+    _blk_smap: "dict | None" = None
+    if getattr(render_cfg, "speech_map", False):
+        _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
+        _blk_source = source_file if source_file.is_file() else None
+        _blk_smap = _ensure_smap(_blk_smap_path, _blk_source, manifest.source_sha256, tx_words, render_cfg)
+    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max, smap=_blk_smap)
     # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
     # cannot repair within bounds stays, and collect_human_warnings reports it.
     host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
@@ -4314,15 +4322,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
     # M1.7 step 1b: auto wide/close alternation at seams (formatting — runs on human and auto paths).
-    # M1.8 Stage B consumer 3: smap for two_shot_auto level-1 (auto-built if missing/stale).
-    _blk_ts_smap: "dict | None" = None
-    if getattr(render_cfg, "speech_map", False):
-        _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
-        _blk_source = source_file if source_file.is_file() else None
-        _blk_ts_smap = _ensure_smap(
-            _blk_smap_path, _blk_source, manifest.source_sha256, tx_words, render_cfg,
-        )
-    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_ts_smap)
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_smap)
 
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,
