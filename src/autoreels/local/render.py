@@ -937,6 +937,56 @@ def _tail_from_smap(
     return new_end
 
 
+_BEAT_CAP_MARGIN = 0.04  # gap left before next speech onset when capping beat end
+
+
+def _beat_segs_from_smap(
+    segs: "list",
+    smap: dict,
+    *,
+    beat_gap_sec: float,
+) -> "list":
+    """Refine beat segment ends using speech map.
+
+    For each segment: find the last smap word at or before seg.end, set
+    new_end = audible_end + (seg.end - word.t1) preserving the original
+    gap delta, then cap at the next source speech onset (incl. untranscribed).
+    Returns a new list; segments with no matching smap word are unchanged.
+    """
+    import bisect
+    words = smap["words"]
+    boundaries = smap["boundaries"]
+    t0s = [w["t0"] for w in words]
+    result = []
+    for seg in segs:
+        # Last word with t0 < seg.end (strict: word at seg.end belongs to next beat)
+        idx = bisect.bisect_left(t0s, seg.end) - 1
+        if idx < 0:
+            result.append(seg)
+            continue
+        word = words[idx]
+        audible_end: float = word["audible_end"]
+        delta = max(0.0, seg.end - word["t1"])
+        new_end = audible_end + delta
+        # Cap at next source speech onset (next word audible_start or untranscribed_speech)
+        if idx < len(boundaries):
+            bnd = boundaries[idx]
+            untr = bnd.get("untranscribed_speech", [])
+            next_onset: float | None = untr[0][0] if untr else None
+            if idx + 1 < len(words):
+                nw_as: float = words[idx + 1]["audible_start"]
+                if next_onset is None or nw_as < next_onset:
+                    next_onset = nw_as
+            if next_onset is not None:
+                new_end = min(new_end, next_onset - _BEAT_CAP_MARGIN)
+        new_end = max(new_end, audible_end + 0.01)
+        if abs(new_end - seg.end) > 1e-4:
+            result.append(seg.model_copy(update={"end": new_end}))
+        else:
+            result.append(seg)
+    return result
+
+
 def _tail_find_word_end(
     ffmpeg_bin: str | Path,
     source: str | Path,
@@ -1486,6 +1536,14 @@ def _render_segments(
                 _x = getattr(ap, "video_xfade_sec", 0.0)
                 if _x > 0:
                     _xfade_actual = round(_x * _fps()) / _fps()
+
+            # --- M1.8 Stage B consumer 2: beat segment ends from speech map ---
+            if (smap is not None and getattr(render_cfg, "speech_map", False)
+                    and reel.beat_gap_sec is not None):
+                _smap_cfg2 = getattr(render_cfg, "speech_map_cfg", None)
+                _gap = reel.beat_gap_sec
+                segs = _beat_segs_from_smap(segs, smap, beat_gap_sec=_gap)
+                clip_dur = sum(s.end - s.start for s in segs)
 
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
             _ts_on = getattr(render_cfg, "two_shot", False) and vf and manifest.setup is not None

@@ -1030,14 +1030,16 @@ def _stage_subtitles(reels, transcript):
 def _find_pause_boundary(
     words, t_start: float, t_end: float, *, target: float, min_pause: float,
     search_start: "float | None" = None, search_end: "float | None" = None,
+    smap: "dict | None" = None,
 ) -> "tuple[float, str] | None":
     """Find split boundary using 3-level fallback, nearest to target.
 
     Words are collected from [t_start, t_end] (with fuzz) so sentence context is intact.
     Boundaries must fall in [search_start, search_end] (defaults to [t_start, t_end]).
 
-    Level 1: sentence boundary (terminal punctuation) with inter-sentence gap >= min_pause.
-    Level 2: any sentence boundary (terminal punctuation), gap not required.
+    Level 1: sentence boundary with pause >= min_pause.
+             Without smap: Whisper inter-sentence gap. With smap: map boundary pause.
+    Level 2: any sentence boundary (terminal punctuation), pause not required.
              Whisper timestamps are often 0-gap or negative at real pauses — pause is a hint.
     Level 3: word boundary after a comma.
 
@@ -1063,9 +1065,28 @@ def _find_pause_boundary(
         # Prefer candidates <= target; among ties, pick closest.
         return min(valid, key=lambda b: (b > target, abs(b - target)))
 
-    # Level 1: sentence boundary with gap >= min_pause
-    l1 = [sents[i][-1].t1 for i in range(len(sents) - 1)
-          if sents[i + 1][0].t0 - sents[i][-1].t1 >= min_pause]
+    def _smap_pause(sent_last_word) -> float:
+        """Return map pause after sent_last_word, or -1 if not found."""
+        if smap is None:
+            return -1.0
+        key = round(sent_last_word.t0 * 1000)
+        smap_words = smap["words"]
+        smap_bounds = smap["boundaries"]
+        for idx, sw in enumerate(smap_words):
+            if round(sw["t0"] * 1000) == key:
+                if idx < len(smap_bounds):
+                    return smap_bounds[idx]["pause"]
+                return 0.0
+        return -1.0
+
+    # Level 1: sentence boundary with pause >= min_pause
+    if smap is not None:
+        # Map pause takes precedence over Whisper gap
+        l1 = [sents[i][-1].t1 for i in range(len(sents) - 1)
+              if _smap_pause(sents[i][-1]) >= min_pause]
+    else:
+        l1 = [sents[i][-1].t1 for i in range(len(sents) - 1)
+              if sents[i + 1][0].t0 - sents[i][-1].t1 >= min_pause]
     if (b := _best(l1)) is not None:
         return b, "pause≥0.3s"
 
@@ -1147,12 +1168,14 @@ def _shot_spans_with_times(segs) -> "list[tuple[str, float, float]]":
     return merged
 
 
-def _stage_two_shot_auto(reels, words, *, render_cfg) -> list:
+def _stage_two_shot_auto(reels, words, *, render_cfg,
+                         smap: "dict | None" = None) -> list:
     """Auto-alternate wide/close at segment seams; enforce max-shot for both wide and close.
 
     Formatting stage for both auto and human paths. Manual c: assignments (shot='close' or
     non-empty close_intervals) are preserved — auto only fills unassigned segments.
     Requires render_cfg.two_shot=True and render_cfg.two_shot_auto=True.
+    smap: when provided, Level-1 candidates use map pauses (M1.8 Stage B consumer 3).
     """
     if not (getattr(render_cfg, "two_shot", False) and getattr(render_cfg, "two_shot_auto", False)):
         return reels
@@ -1162,11 +1185,12 @@ def _stage_two_shot_auto(reels, words, *, render_cfg) -> list:
     min_shot = getattr(render_cfg, "two_shot_min_sec", 2.5)
 
     for reel in reels:
-        _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot)
+        _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot, smap=smap)
     return reels
 
 
-def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) -> None:
+def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
+                               smap: "dict | None" = None) -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
     from autoreels.cloud.edit import split_sentences as _sp
     segs = reel.effective_segments()
@@ -1320,6 +1344,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float) 
                 words, span_start, span_end,
                 target=span_start + max_shot, min_pause=0.3,
                 search_start=search_lo, search_end=search_hi,
+                smap=smap,
             )
             if res is None:
                 warnings.append(f"no candidate in {shot_type} {span_start:.1f}–{span_end:.1f}")
@@ -2164,7 +2189,19 @@ def _cmd_run_impl(
     reels = _stage_subtitles(reels, transcript)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
-    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg)
+    # M1.8 Stage B consumer 3: load smap for map-based level-1 candidates in two_shot_auto.
+    _ts_smap: "dict | None" = None
+    if getattr(render_cfg, "speech_map", False):
+        import json as _json
+        _ts_smap_path = transcripts_dir / f"{Path(video).stem}.speechmap.json"
+        if _ts_smap_path.is_file():
+            try:
+                _loaded = _json.loads(_ts_smap_path.read_text(encoding="utf-8"))
+                if _loaded.get("version") == "4":
+                    _ts_smap = _loaded
+            except Exception:
+                pass
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_ts_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
         source_kind=getattr(r0_cfg, "source_kind", ""),
@@ -2874,10 +2911,17 @@ def cmd_render(
                 _smap_path = _transcripts_dir_r / f"{stem}.speechmap.json"
                 if _smap_path.is_file():
                     try:
-                        _render_smap = _json.loads(_smap_path.read_text(encoding="utf-8"))
+                        _loaded = _json.loads(_smap_path.read_text(encoding="utf-8"))
+                        # Only v4+ maps have boundaries/audible_end — reject older versions.
+                        if _loaded.get("version") == "4":
+                            _render_smap = _loaded
+                        else:
+                            print(f"  ⚠ speech_map: {_smap_path.name} is version "
+                                  f"{_loaded.get('version')} (need v4, run: arl smap) — "
+                                  "falling back to silencedetect", flush=True)
                     except Exception:
                         _render_smap = None
-                if _render_smap is None:
+                if _render_smap is None and not _smap_path.is_file():
                     print(f"  ⚠ speech_map=True but no map at {_smap_path.name} — "
                           "tail placement falls back to silencedetect", flush=True)
             outputs = render_crop(
@@ -4176,7 +4220,19 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
     # M1.7 step 1b: auto wide/close alternation at seams (formatting — runs on human and auto paths).
-    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg)
+    # M1.8 Stage B consumer 3: load smap for map-based level-1 candidates (gated by speech_map).
+    _blk_ts_smap: "dict | None" = None
+    if getattr(render_cfg, "speech_map", False):
+        import json as _json
+        _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
+        if _blk_smap_path.is_file():
+            try:
+                _loaded = _json.loads(_blk_smap_path.read_text(encoding="utf-8"))
+                if _loaded.get("version") == "4":
+                    _blk_ts_smap = _loaded
+            except Exception:
+                pass
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_ts_smap)
 
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,
