@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-SPEECHMAP_VERSION = "3"
+SPEECHMAP_VERSION = "4"
 
 # Defaults — all overridable by callers or future config.
 DEFAULT_FRAME_SEC = 0.01         # 10 ms energy window
@@ -298,7 +298,14 @@ def build_or_load(
 
 # ── boundary pause stats ─────────────────────────────────────────────────────
 
-_MIN_SPEECH_DUR = 0.020  # speech intervals shorter than this are treated as noise
+_MIN_SPEECH_DUR = 0.020   # speech intervals shorter than this are treated as noise
+_MIN_EDGE_DIST = 0.060    # interval within 60 ms of a word edge → word residue, not untranscribed
+_UNTRANSCRIBED_MIN_SEC = 0.100  # minimum duration for a detached interval to count
+
+# Consumers must use this threshold for pause-based cut decisions, never raw pause > 0.
+# Rationale: voiceless stop closures (e.g. "т" in "такая?") produce genuine energy gaps
+# of ~0.3 s that are continuous speech by ear — see regression case #568 (0.29 s).
+CUT_PAUSE_MIN_SEC: float = 0.35
 
 
 def _gap_analysis(
@@ -312,8 +319,10 @@ def _gap_analysis(
     pause = trailing silence: silence from the end of the last significant speech
     interval (≥ _MIN_SPEECH_DUR) to as_.  Measures the silence immediately before
     the next word — the only stretch where a cut is actually possible.
-    untranscribed_speech: all speech interval slices inside the gap (including
-    tiny blips, for consumer inspection).
+    untranscribed_speech: detached intervals only — those at least _MIN_EDGE_DIST
+    from both word edges and at least _UNTRANSCRIBED_MIN_SEC long.  Intervals
+    closer than 60 ms to ae or as_ are word residue (vowel tail, breath) and are
+    silently dropped.
 
     If no significant speech in the gap, pause = full gap length.
     """
@@ -342,10 +351,18 @@ def _gap_analysis(
             break
 
     if last_significant_end is None:
-        # All speech is noise blips — treat gap as silence, but still report blips.
-        return gap, speech_in_gap
+        pause = gap
+    else:
+        pause = max(0.0, as_ - last_significant_end)
 
-    return max(0.0, as_ - last_significant_end), speech_in_gap
+    # untranscribed_speech: keep only detached, substantive intervals.
+    untranscribed = [
+        seg for seg in speech_in_gap
+        if (seg[0] - ae) >= _MIN_EDGE_DIST
+        and (as_ - seg[1]) >= _MIN_EDGE_DIST
+        and (seg[1] - seg[0]) >= _UNTRANSCRIBED_MIN_SEC
+    ]
+    return pause, untranscribed
 
 
 def boundary_pauses(

@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from autoreels.cloud.speechmap import (
+    CUT_PAUSE_MIN_SEC,
     SPEECHMAP_VERSION,
     _gap_analysis,
     _merge_speech_mask,
@@ -172,11 +173,13 @@ def test_gap_analysis_trailing_silence_regression():
     """
     # #69-like: speech in middle of gap, silence after last speech
     # ae=0.0 as=2.0, speech [0.5-0.9] [1.0-1.3] [1.4-1.45], then silence 0.55s to as
+    # [0.5-0.9] and [1.0-1.3] kept (dur>=0.10, edge>=60ms)
+    # [1.4-1.45] dropped: dur=0.05s < _UNTRANSCRIBED_MIN_SEC=0.10s
     intervals_69 = [[0.5, 0.9], [1.0, 1.3], [1.4, 1.45]]
     pause_69, untr_69 = _gap_analysis(0.0, 2.0, intervals_69)
-    # trailing silence from 1.45 to 2.0 = 0.55s
+    # trailing silence from 1.45 to 2.0 = 0.55s (uses all speech for pause calc)
     assert 0.50 <= pause_69 <= 0.60, f"#69-like pause={pause_69}"
-    assert len(untr_69) == 3
+    assert len(untr_69) == 2, f"#69-like: tiny seg dropped, expect 2 kept, got {len(untr_69)}"
 
     # #81-like: untr speech at END of gap → tiny trailing silence
     # ae=0.0 as=1.0, silence [0, 0.45] speech [0.45-0.87] silence [0.87-1.0]=0.13s
@@ -192,11 +195,18 @@ def test_gap_analysis_trailing_silence_regression():
     assert 0.60 <= pause_201 <= 0.70, f"#201-like pause={pause_201}"
     assert len(untr_201) == 1
 
-    # Noise blip: gap with only tiny speech (<20ms) → full gap returned
+    # Noise blip: gap with only tiny speech (<20ms) → full gap returned, blip dropped from untr
+    # dur=15ms < _UNTRANSCRIBED_MIN_SEC=100ms → not reported as untranscribed
     intervals_noise = [[0.5, 0.515]]  # 15ms < 20ms threshold
     pause_noise, untr_noise = _gap_analysis(0.0, 1.0, intervals_noise)
     assert pause_noise == pytest.approx(1.0), f"noise blip should not reduce gap: {pause_noise}"
-    assert len(untr_noise) == 1  # blip still reported
+    assert len(untr_noise) == 0, "noise blip < 100ms not reported in untranscribed_speech"
+
+
+def test_cut_pause_min_sec_regression():
+    """CUT_PAUSE_MIN_SEC > 0.29 so #568 (continuous speech, 0.29s gap) is not a cut point."""
+    assert CUT_PAUSE_MIN_SEC > 0.29, f"#568 (0.29s) must be below cut threshold: {CUT_PAUSE_MIN_SEC}"
+    assert CUT_PAUSE_MIN_SEC <= 0.5, "sanity: threshold should not exceed 0.5s"
 
 
 def test_fallback_to_whisper_when_no_energy():
