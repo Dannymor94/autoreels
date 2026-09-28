@@ -787,6 +787,10 @@ def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, e
     from autoreels.cloud.edit import split_sentences, words_in_span
     from autoreels.cloud.snap import is_complete_sentence, _clean
 
+    # Beat-structured reels are explicit human sentence ordering — don't deflate inside them.
+    if reel.beat_gap_sec is not None:
+        return
+
     sents = split_sentences(words_in_span(tx_words, reel.start, reel.end))
     if not sents:
         return
@@ -799,6 +803,7 @@ def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, e
             if is_complete_sentence(s):
                 _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=smap_lookup)
                 reel.end_snap_reason = "repaired_to_sentence"
+                reel._deflate_end_cap = reel.subtitle_gate  # _apply_tail_air must not exceed this
                 return
         return  # no complete predecessor — repair will set open_thought
 
@@ -819,6 +824,7 @@ def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, e
             if is_complete_sentence(s):
                 _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=smap_lookup)
                 reel.end_snap_reason = "repaired_to_sentence"
+                reel._deflate_end_cap = reel.subtitle_gate  # _apply_tail_air must not exceed this
                 return
 
 
@@ -1829,6 +1835,12 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         _beat_tail_cap = getattr(r, "_beat_tail_cap", None)
         if _beat_tail_cap is not None:
             desired = min(desired, _beat_tail_cap)
+        # Deflate cap: _deflate_trailing removed a trailing sentence; prevent tail air from
+        # re-including that sentence's first word in the audible span.
+        _deflate_cap = getattr(r, "_deflate_end_cap", None)
+        if _deflate_cap is not None and desired > _deflate_cap:
+            desired = _deflate_cap
+            r._deflate_cap_applied = True  # tells _check_tail_air to skip this reel
         # When the cap caused desired < lw_end (Whisper t1 overlaps next sentence), the tail-air
         # invariant and intruder detection no longer apply — the clip cuts before lw_end.
         if desired >= lw_end:
@@ -1849,6 +1861,8 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
     (or the video end, whichever is smaller). Returns an error string naming the first offender,
     or None. Reads the last-word end stashed by _apply_tail_air (stable across the extension)."""
     for r in reels:
+        if getattr(r, "_deflate_cap_applied", False):
+            continue  # deflate cap intentionally shortens tail air; skip this reel
         lw_end = r.tail_last_word_end
         if lw_end is None:
             continue
