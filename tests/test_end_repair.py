@@ -71,11 +71,11 @@ def test_repair_end_backs_off_when_no_extension():
 
 
 # ---------------------------------------------------------------------------
-# explicit e: → not moved, open_thought + warning
+# explicit e: → not moved, open_thought + warning (PART 1 revert)
 # ---------------------------------------------------------------------------
 
-def test_repair_end_explicit_e_stump_sets_gate_not_open_thought():
-    """Explicit e: with prev complete sentence: gate set before stump, no open_thought."""
+def test_repair_end_explicit_e_stump_sets_open_thought_not_gate():
+    """Explicit e: with incomplete sentence: open_thought=True, end NOT moved, no gate set."""
     words = [
         _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
         _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
@@ -83,9 +83,10 @@ def test_repair_end_explicit_e_stump_sets_gate_not_open_thought():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
-    assert r.end == pytest.approx(3.0)           # not moved
-    assert r.subtitle_gate == pytest.approx(2.1) # gate before stump
-    assert not r.open_thought
+    assert r.end == pytest.approx(3.0)   # NOT moved
+    assert r.subtitle_gate is None       # gate not set by repair
+    assert r.open_thought is True        # open_thought flag set
+    assert any("incomplete" in w for w in r.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +264,9 @@ def test_repair_smap_extension_uses_acoustic_end():
     # With smap: end = 4.95 + 0.10 = 5.05 (acoustic tail, NOT 8.0 + 0.35 = 8.35)
     assert r.end == pytest.approx(5.05, abs=0.01)
     assert r.end < 8.0  # must NOT be inflated-t1-based
-    # subtitle_gate = audible_start of next word = 6.5
-    assert r.subtitle_gate == pytest.approx(6.5)
+    # subtitle_gate = min(audible_start, next_word.t0) = min(6.5, 6.0) = 6.0
+    # Cap ensures audible_start > t0 never pulls next_word into the gate span.
+    assert r.subtitle_gate == pytest.approx(6.0)
 
 
 def test_repair_smap_backoff_uses_acoustic_end():
@@ -371,3 +373,96 @@ def test_check_no_stump_when_gate_before_stump():
     r = _reel_with_subs(1.0, 3.0, gate=2.1, last_sub_t0=1.6, last_sub_word="думаю.")
     check = _get_check()
     check(r, tx_words)  # must not raise
+
+
+def test_check_stump_fires_for_explicit_e_reel():
+    """After PART 1 revert: explicit_e reel with gate=reel.end and stump word → [CONTENT]."""
+    # Simulates a clip where explicit_e=True was set, repair set open_thought but did NOT set
+    # subtitle_gate, so gate=reel.end. Stump word "потому" leaks into span → [CONTENT].
+    tx_words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
+    ]
+    # gate=reel.end=3.0: span includes stump "потому что" → last sent incomplete
+    r = _reel_with_subs(1.0, 3.0, gate=3.0, last_sub_t0=1.6, last_sub_word="думаю.")
+    check = _get_check()
+    with pytest.raises(ValueError, match=r"\[CONTENT\].*stump"):
+        check(r, tx_words)
+
+
+# ---------------------------------------------------------------------------
+# _deflate_trailing: whole-sentence removal
+# ---------------------------------------------------------------------------
+
+def _get_deflate():
+    import autoreels.__main__ as m
+    return m._deflate_trailing
+
+
+def _r0_hanging(words):
+    from unittest.mock import MagicMock
+    cfg = MagicMock()
+    cfg.hanging_end_words = words
+    return cfg
+
+
+def test_deflate_removes_tag_question_sentence():
+    """Trailing tag-question sentence 'Да?' → removed; reel.end moved to previous complete."""
+    # Sentence 1: complete "думаю." at t0=1.6, t1=2.0
+    # Sentence 2: tag-question "Да?" at t0=2.5, t1=2.8
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.5, 2.8, "Да?"),
+    ]
+    deflate = _get_deflate()
+    r = _reel(1.0, 3.0)
+    deflate(r, words, smap=None, smap_lookup=None,
+            hanging_end_words=[], explicit_e=False)
+    assert r.end == pytest.approx(2.0 + 0.35)  # backed off to "думаю." t1 + pad
+    assert r.end_snap_reason == "repaired_to_sentence"
+
+
+def test_deflate_does_not_cut_inside_sentence():
+    """Sentence ending on filler word but sentence is NOT wholly filler → kept intact."""
+    # "Наверное, так." — "наверное" is not in the hanging list → sentence kept
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.4, "Наверное,"), _w(2.5, 2.8, "так."),
+    ]
+    deflate = _get_deflate()
+    r = _reel(1.0, 3.0)
+    orig_end = r.end
+    deflate(r, words, smap=None, smap_lookup=None,
+            hanging_end_words=["так"], explicit_e=False)
+    assert r.end == pytest.approx(orig_end)   # NOT moved
+    assert r.end_snap_reason is None
+
+
+def test_deflate_skips_explicit_e():
+    """explicit_e=True: deflate step 2 (filler removal) is skipped."""
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.5, 2.8, "Понятно?"),
+    ]
+    deflate = _get_deflate()
+    r = _reel(1.0, 3.0)
+    orig_end = r.end
+    deflate(r, words, smap=None, smap_lookup=None,
+            hanging_end_words=[], explicit_e=True)
+    assert r.end == pytest.approx(orig_end)   # step 2 skipped
+
+
+def test_deflate_removes_stump_all_reels():
+    """Step 1: incomplete trailing sentence (stump) backed off for ALL reels incl explicit_e."""
+    # Span ends with incomplete "потому что" after complete "думаю."
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
+    ]
+    deflate = _get_deflate()
+    for explicit in (False, True):
+        r = _reel(1.0, 3.0)
+        deflate(r, words, smap=None, smap_lookup=None,
+                hanging_end_words=[], explicit_e=explicit)
+        assert r.end == pytest.approx(2.0 + 0.35), f"failed for explicit_e={explicit}"
+        assert r.end_snap_reason == "repaired_to_sentence"

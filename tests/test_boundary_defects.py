@@ -252,3 +252,49 @@ def test_clean_start_unaffected_by_ellipsis_fix():
     kept, disc = filter_dangling_start([r], words, min_duration=8.0)
     assert len(kept) == 1
     assert kept[0].start == orig_start
+
+
+def test_dangling_start_extends_backward_when_within_window():
+    """Clip starts mid-sentence; terminal mark within 6s → backward repair fires."""
+    from autoreels.cloud.select import filter_dangling_start
+
+    # r.start=1893.82, "с" is lowercase → dangling
+    # Terminal mark "нет." at t0=1890.0 (within 6s: back_deadline=1887.82)
+    # Sentence resumes "Если" at t0=1892.0 (also in prev_words window < 1893.82)
+    r = _reel(1893.82, 1960.0)
+    words = [
+        _word(1890.0, 1891.0, "нет."),        # terminal mark, t0=1890.0 > back_deadline=1887.82
+        _word(1892.0, 1893.0, "Если"),         # sentence start (in prev_words range)
+        _word(1893.82, 1894.0, "с"),           # clip starts here (lowercase = dangling)
+        _word(1894.0, 1895.0, "нами"),
+        _word(1895.0, 1960.0, "хорошо."),
+    ]
+    kept, disc = filter_dangling_start([r], words, min_duration=8.0, max_start_repair_sec=6.0)
+    assert len(kept) == 1
+    assert kept[0].start == pytest.approx(1892.0), (
+        f"backward repair should set start=1892.0, got {kept[0].start}"
+    )
+    assert kept[0].start_repair_sec < 0, "repair_sec should be negative for backward"
+
+
+def test_dangling_start_still_goes_forward_when_too_far_back():
+    """Terminal mark > max_start_repair_sec before reel.start → path (0) fails, path (a) fires."""
+    from autoreels.cloud.select import filter_dangling_start
+
+    # Terminal mark "нет." at t0=85.0 (15s before start=100.0, > 6s window) — backward can't fire.
+    # Terminal mark "всё." at t0=102.0 inside clip → next word at 103.0 within repair_deadline=106.0.
+    r = _reel(100.0, 160.0)
+    words = [
+        _word(85.0, 85.5, "нет."),            # terminal mark — out of 6s window (back_deadline=94.0)
+        _word(100.0, 100.5, "и"),             # clip starts lowercase
+        _word(100.5, 101.0, "поэтому"),
+        _word(102.0, 102.5, "всё."),          # terminal mark inside clip → path (a) fires
+        _word(103.0, 109.0, "Новый"),         # within repair_deadline 106.0
+        _word(109.0, 160.0, "старт."),
+    ]
+    kept, disc = filter_dangling_start([r], words, min_duration=8.0, max_start_repair_sec=6.0)
+    assert len(kept) == 1
+    assert kept[0].start == pytest.approx(103.0), (
+        f"forward repair should fire at 103.0, got {kept[0].start}"
+    )
+    assert kept[0].start_repair_sec > 0, "repair_sec should be positive for forward"

@@ -733,6 +733,94 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
 # acoustic residue past Whisper t1 plus the tail-pad that _tail_from_smap adds.
 _REPAIR_END_PAD = 0.35
 
+# Single tag-question words that count as a whole-filler trailing sentence for deflate.
+_TAG_QUESTIONS = frozenset({"понятно", "ясно", "да", "правильно", "верно", "понял", "ладно"})
+
+
+def _move_reel_end_to_sentence(reel, sentence, tx_words, *, smap, smap_lookup) -> None:
+    """Move reel.end + subtitle_gate to the acoustic tail of sentence. Updates last segment."""
+    chosen_idx = next((i for i, w in enumerate(tx_words) if w is sentence[-1]), None)
+    next_word = (
+        tx_words[chosen_idx + 1]
+        if (chosen_idx is not None and chosen_idx + 1 < len(tx_words))
+        else None
+    )
+    if smap is not None and smap_lookup is not None:
+        from autoreels.local.render import _tail_from_smap
+        _tail = _tail_from_smap(sentence[-1].t0, reel.end, smap, smap_lookup, last_t1=sentence[-1].t1)
+        if _tail is not None:
+            reel.end = _tail
+            if next_word is not None:
+                _nw_key = round(next_word.t0 * 1000)
+                _nw_entry = smap_lookup.get(_nw_key)
+                _nw_as = (
+                    _nw_entry[1].get("audible_start", next_word.t0)
+                    if _nw_entry is not None else next_word.t0
+                )
+                # Cap at next_word.t0: audible_start > t0 would pull the word into the gate span.
+                reel.subtitle_gate = min(_nw_as, next_word.t0)
+            else:
+                reel.subtitle_gate = sentence[-1].t1
+            if reel.segments:
+                reel.segments = (
+                    reel.segments[:-1]
+                    + [reel.segments[-1].model_copy(update={"end": reel.end})]
+                )
+            return
+    # Fallback: Whisper t1 + pad
+    reel.end = sentence[-1].t1 + _REPAIR_END_PAD
+    reel.subtitle_gate = next_word.t0 if next_word is not None else sentence[-1].t1
+    if reel.segments:
+        reel.segments = (
+            reel.segments[:-1]
+            + [reel.segments[-1].model_copy(update={"end": reel.end})]
+        )
+
+
+def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, explicit_e: bool) -> None:
+    """Back off reel.end when it falls inside an incomplete sentence (stump removal, all reels),
+    or when the last complete sentence is wholly filler/tag-question (non-explicit_e only).
+
+    Runs before _repair_end_to_complete_sentence; after this, repair sees a complete last
+    sentence and returns early for all stump-repair cases.
+    """
+    from autoreels.cloud.edit import split_sentences, words_in_span
+    from autoreels.cloud.snap import is_complete_sentence, _clean
+
+    sents = split_sentences(words_in_span(tx_words, reel.start, reel.end))
+    if not sents:
+        return
+
+    last = sents[-1]
+
+    if not is_complete_sentence(last):
+        # Step 1 (all reels): stump — back off to previous complete sentence.
+        for s in reversed(sents[:-1]):
+            if is_complete_sentence(s):
+                _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=smap_lookup)
+                reel.end_snap_reason = "repaired_to_sentence"
+                return
+        return  # no complete predecessor — repair will set open_thought
+
+    # Step 2 (non-explicit_e only): remove complete-but-wholly-filler trailing sentence.
+    if explicit_e:
+        return
+
+    hw_set = set(hanging_end_words or [])
+    is_tag_q = (
+        len(last) == 1
+        and last[0].word.rstrip().endswith("?")
+        and _clean(last[0].word) in _TAG_QUESTIONS
+    )
+    is_all_filler = all(_clean(w.word) in hw_set for w in last)
+
+    if is_tag_q or is_all_filler:
+        for s in reversed(sents[:-1]):
+            if is_complete_sentence(s):
+                _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=smap_lookup)
+                reel.end_snap_reason = "repaired_to_sentence"
+                return
+
 
 def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool, smap=None) -> None:
     """In-place: ensure reel.end falls on a complete sentence.
@@ -740,7 +828,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     No explicit e:: extend to the next complete sentence within the search window (at most
     end_repair_max_extend_sec); back off to the last complete sentence in the current span if
     nothing fits; if neither found, set open_thought=True.
-    Explicit e:: never moved; if incomplete, set open_thought=True and add a manifest warning.
+    Explicit e:: never moved; if incomplete after deflate, set open_thought=True and add warning.
 
     With smap: reel.end = acoustic tail of chosen last word (_tail_from_smap); subtitle_gate =
     audible_start of next word. Without smap: reel.end = Whisper t1 + _REPAIR_END_PAD.
@@ -760,14 +848,6 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     last4 = " ".join(w.word for w in last_sent[-4:])
 
     if explicit_e:
-        # Find the last complete sentence; if one exists, gate before all trailing fragments.
-        last_complete_idx = next(
-            (len(sents) - 1 - i for i, s in enumerate(reversed(sents)) if is_complete_sentence(s)),
-            None,
-        )
-        if last_complete_idx is not None:
-            reel.subtitle_gate = sents[last_complete_idx + 1][0].t0
-            return
         reel.open_thought = True
         reel.warnings.append(f"e: ends on incomplete sentence ('{last4}')")
         return
@@ -777,33 +857,6 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     if smap is not None:
         from autoreels.local.render import _smap_word_lookup
         _smap_lookup = _smap_word_lookup(smap)
-
-    def _set_end_and_gate(s):
-        """Set reel.end and subtitle_gate from chosen sentence s. Modifies reel in place."""
-        chosen_idx = next((i for i, w in enumerate(tx_words) if w is s[-1]), None)
-        next_word = (
-            tx_words[chosen_idx + 1]
-            if (chosen_idx is not None and chosen_idx + 1 < len(tx_words))
-            else None
-        )
-        if smap is not None and _smap_lookup is not None:
-            from autoreels.local.render import _tail_from_smap
-            _tail = _tail_from_smap(s[-1].t0, reel.end, smap, _smap_lookup, last_t1=s[-1].t1)
-            if _tail is not None:
-                reel.end = _tail
-                if next_word is not None:
-                    _nw_key = round(next_word.t0 * 1000)
-                    _nw_entry = _smap_lookup.get(_nw_key)
-                    reel.subtitle_gate = (
-                        _nw_entry[1].get("audible_start", next_word.t0)
-                        if _nw_entry is not None else next_word.t0
-                    )
-                else:
-                    reel.subtitle_gate = s[-1].t1
-                return
-        # Fallback: Whisper t1 + pad
-        reel.end = s[-1].t1 + _REPAIR_END_PAD
-        reel.subtitle_gate = next_word.t0 if next_word is not None else s[-1].t1
 
     max_search = getattr(r0_cfg, "max_end_search_sec", 12.0)
     max_extend = getattr(r0_cfg, "end_repair_max_extend_sec", 6.0)
@@ -819,7 +872,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
                 and s[-1].t1 <= search_end          # sentence fully inside window
                 and s[-1].t1 - reel.end <= max_extend   # within extension limit
                 and is_complete_sentence(s)):
-            _set_end_and_gate(s)
+            _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=_smap_lookup)
             # Also extend the last segment so _stage_subtitles (gated by segments[-1].end)
             # reaches the new end.
             if reel.segments:
@@ -833,7 +886,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     # Back off: last complete sentence in the current span
     for s in reversed(sents[:-1]):
         if is_complete_sentence(s):
-            _set_end_and_gate(s)
+            _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=_smap_lookup)
             if reel.segments:
                 reel.segments = (
                     reel.segments[:-1]
@@ -845,7 +898,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     reel.open_thought = True
 
 
-def _check_last_subtitle_word(reel, tx_words) -> None:
+def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None) -> None:
     """Raise ValueError if the subtitle list violates the final-sentence contract.
 
     (a) last subtitle word is beyond the final labelled sentence (extra word leaked in)
@@ -884,12 +937,18 @@ def _check_last_subtitle_word(reel, tx_words) -> None:
             f"(t1={expected_last.t1:.3f})"
         )
     if actual_last.t0 < expected_last.t0 - _eps:
-        # Whisper overlap artifact: expected_last.t1 > reel.end means Whisper placed the
-        # word's end beyond the clip boundary (next word starts before t1 of this one).
-        # The subtitle filter (t1 <= reel.end / ae <= effective_end) correctly excludes it.
-        # Not a content error — the word is audible but can't appear in subtitles.
+        # Whisper overlap artifact: expected_last.t1 is beyond the clip or gate boundary —
+        # the word starts in the gate span but its end extends past the filter cut-off,
+        # so the subtitle filter (t1 <= gate / ae <= effective_end) correctly excludes it.
         if expected_last.t1 > reel.end + _eps:
             return
+        if expected_last.t1 > _gate + _eps:
+            return
+        # Hanging-word trim: trim_hanging_subtitles intentionally removed expected_last.
+        if hanging_words:
+            from autoreels.cloud.snap import _clean as _clean_snap
+            if _clean_snap(expected_last.word) in set(hanging_words):
+                return
         raise ValueError(
             f"[CONTENT] {reel.id}: last word of final sentence '{expected_last.word}' "
             f"(t0={expected_last.t0:.3f}) is missing from subtitles; "
@@ -2511,6 +2570,15 @@ def _cmd_run_impl(
             flush=True,
         )
     dangling_disc += post_dangling_disc
+    # Tail deflate: remove stump fragments and whole-filler trailing sentences before repair.
+    _auto_smap_lookup = None
+    if _run_smap is not None:
+        from autoreels.local.render import _smap_word_lookup
+        _auto_smap_lookup = _smap_word_lookup(_run_smap)
+    for _r in reels:
+        _deflate_trailing(_r, tx_words, smap=_run_smap, smap_lookup=_auto_smap_lookup,
+                          hanging_end_words=getattr(r0_cfg, "hanging_end_words", []),
+                          explicit_e=False)
     # End repair (symmetric to dangling-start): extend/backoff to a complete sentence.
     for _r in reels:
         _repair_end_to_complete_sentence(_r, tx_words, r0_cfg=r0_cfg, explicit_e=False, smap=_run_smap)
@@ -2538,7 +2606,7 @@ def _cmd_run_impl(
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     for _r in reels:
-        _check_last_subtitle_word(_r, tx_words)
+        _check_last_subtitle_word(_r, tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
@@ -4460,6 +4528,15 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         min_duration=r0_cfg.min_clip_duration,
         repair_only=True, max_start_fraction=1.0 / 3.0,
     )
+    # Tail deflate: remove stump fragments and whole-filler trailing sentences before repair.
+    _blk_smap_lookup = None
+    if _blk_smap is not None:
+        from autoreels.local.render import _smap_word_lookup
+        _blk_smap_lookup = _smap_word_lookup(_blk_smap)
+    for _r in reels:
+        _deflate_trailing(_r, tx_words, smap=_blk_smap, smap_lookup=_blk_smap_lookup,
+                          hanging_end_words=getattr(r0_cfg, "hanging_end_words", []),
+                          explicit_e=getattr(_r, "_has_explicit_e", False))
     # End repair (symmetric to dangling-start repair): extend/backoff to a complete sentence.
     # Runs here, after filter_dangling_start, so start changes don't interfere with end duration.
     for _r in reels:
@@ -4487,7 +4564,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = _stage_subtitles(reels, transcript, smap=_blk_smap)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     for _r in reels:
-        _check_last_subtitle_word(_r, _tx_words)
+        _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.

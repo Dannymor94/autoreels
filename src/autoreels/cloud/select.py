@@ -342,19 +342,37 @@ def filter_dangling_start(
         if is_lowercase or is_dangling:
             repair_deadline = min(orig_start + max_start_repair_sec, _cap)
             repaired = False
-            # (a) terminal-mark scan: first word after a sentence-ending word
-            for i, w in enumerate(clip_words[:-1]):
-                if w.t0 > repair_deadline:
-                    break
-                if _word_ends_sentence(w):
-                    nw = clip_words[i + 1]
-                    if nw.t0 <= repair_deadline and r.end - nw.t0 >= min_duration:
-                        r.start = nw.t0
-                        r.start_repair_sec = nw.t0 - orig_start
+            # (0) extend backward to the start of the sentence containing clip_words[0]
+            back_deadline = orig_start - max_start_repair_sec
+            prev_words = [w for w in transcript_words if back_deadline <= w.t0 < orig_start]
+            for i in range(len(prev_words) - 1, -1, -1):
+                if _word_ends_sentence(prev_words[i]):
+                    # Sentence starts at the word immediately after this terminal mark
+                    nw_back = prev_words[i + 1] if i + 1 < len(prev_words) else (clip_words[0] if clip_words else None)
+                    if nw_back is None:
+                        break
+                    new_start = nw_back.t0
+                    if orig_start - new_start <= max_start_repair_sec and r.end - new_start >= min_duration:
+                        r.start = new_start
+                        r.start_repair_sec = new_start - orig_start  # negative = backward
                         r.start_snap_reason = "repaired_to_sentence"
                         r.flags.append("start_repaired")
                         repaired = True
                     break
+            # (a) terminal-mark scan: first word after a sentence-ending word (skip if (0) fired)
+            if not repaired:
+                for i, w in enumerate(clip_words[:-1]):
+                    if w.t0 > repair_deadline:
+                        break
+                    if _word_ends_sentence(w):
+                        nw = clip_words[i + 1]
+                        if nw.t0 <= repair_deadline and r.end - nw.t0 >= min_duration:
+                            r.start = nw.t0
+                            r.start_repair_sec = nw.t0 - orig_start
+                            r.start_snap_reason = "repaired_to_sentence"
+                            r.flags.append("start_repaired")
+                            repaired = True
+                        break
             # (b) uppercase non-dangling scan (only if (a) didn't fire)
             if not repaired:
                 for w in clip_words[1:]:
