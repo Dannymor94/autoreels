@@ -2428,3 +2428,78 @@ def test_smap_tail_multisegment_speed_tail_inside_last_seg(
         if tok == "-t" and j > 0 and cmd[j - 1] != "-map":
             dur = float(cmd[j + 1])
             assert dur >= 0, f"negative -t {dur} in command"
+
+
+def test_audio_invariant_logs_when_speech_after_last_word(
+        tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Audio invariant: [AUDIO-INV] is logged when speech starts between last-word ae and clip_end.
+
+    Scenario: last subtitle word ae=10.4, clip_end=15.0, speech starts at 11.0 (> ae).
+    Expected: [AUDIO-INV] in output with reel id and the violating word's t0.
+    """
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"audio-inv-video")
+
+    reel = _reel("r01", 5.0, 15.0)
+    reel.segments = [Segment(start=5.0, end=15.0)]
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.4)]
+
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    # smap: last word at t0=10.0, ae=10.4; next speech at t0=11.0 starts BEFORE clip_end=15.0
+    # gap = 11.0 - 10.4 = 0.6 >= 0.35 → silence case → tail ≈ 10.5 (ae + pad)
+    # clip_end stays at 15.0 (segs[-1].end >> tail by >>1/fps, so segment gets trimmed to ~10.5)
+    # BUT invariant fires on the segment BEFORE trimming? No — the invariant fires on segs[-1].end
+    # after all adjustments. After trimming: segs[-1].end ≈ 10.5. Speech at 11.0 > 10.5.
+    # Use speech_map=False so segment is NOT trimmed (old path), leaving clip_end=15.0.
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 10.0, "t1": 10.4, "audible_start": 10.0, "audible_end": 10.4},
+            # intruding speech at 11.0 — after ae=10.4, before clip_end=15.0
+            {"t0": 11.0, "t1": 11.5, "audible_start": 11.0, "audible_end": 11.5},
+        ],
+        "boundaries": [
+            {"pause": 0.6, "untranscribed_speech": []},
+            {"pause": 0.0, "untranscribed_speech": []},
+        ],
+        "intervals": [],
+    }
+    # speech_map=False → old audio tail path; segs[-1].end stays at 15.0 (last word t1=10.4,
+    # condition 15.0 <= 10.4+0.25 is False → tail not triggered → clip stays at 15.0)
+    render_cfg = render_cfg.model_copy(update={"speech_map": False})
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, smap=smap)
+
+    captured = capsys.readouterr()
+    assert "[AUDIO-INV]" in captured.out, f"expected [AUDIO-INV] in output:\n{captured.out}"
+    assert "r01" in captured.out
+    assert "11.0" in captured.out or "11.000" in captured.out
+
+
+def test_audio_invariant_silent_when_clean(
+        tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Audio invariant: NO [AUDIO-INV] when no speech between last-word ae and clip_end."""
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"audio-inv-clean-video")
+
+    reel = _reel("r01", 5.0, 12.0)
+    reel.segments = [Segment(start=5.0, end=12.0)]
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.4)]
+
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    # smap: last word at t0=10.0, ae=10.4; next speech at 999.0 — well past clip_end=12.0
+    smap = _smap_for_tail(last_t0=10.0, last_t1=10.4, next_speech_t0=999.0)
+    render_cfg = render_cfg.model_copy(update={"speech_map": False})
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, smap=smap)
+
+    captured = capsys.readouterr()
+    assert "[AUDIO-INV]" not in captured.out, f"unexpected [AUDIO-INV]:\n{captured.out}"

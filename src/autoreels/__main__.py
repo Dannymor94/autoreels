@@ -1052,12 +1052,21 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                 for w in transcript.words:
                     if reel.start <= w.t0 < seg_gate:
                         anchor = w
-                # effective_end: smap tail from anchor (includes audible residue after anchor)
+                # effective_end: smap tail from anchor.
+                # If the tail overshoots reel.end, only allow a small extension (≤ 0.25 s) —
+                # this covers acoustic residue where the last word's ae just grazes past the
+                # segment boundary. A larger overshoot means the anchor is a next-sentence word
+                # that happens to fall inside the labelled window; cap at reel.end so those
+                # next-sentence words (ae >> reel.end) are excluded by the ae gate below.
+                _EFFECTIVE_END_SLACK = 0.25
                 if anchor is not None:
                     tail = _tail_from_smap(
                         anchor.t0, reel.end, smap, _lookup, last_t1=anchor.t1,
                     )
-                    effective_end = tail if tail is not None else reel.end
+                    if tail is not None:
+                        effective_end = tail if tail <= reel.end + _EFFECTIVE_END_SLACK else reel.end
+                    else:
+                        effective_end = reel.end
                 else:
                     effective_end = reel.end
                 reel.subtitles = [

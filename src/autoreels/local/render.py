@@ -867,6 +867,50 @@ def _smap_word_lookup(smap: dict) -> dict[int, tuple[int, dict]]:
 _TAIL_PAD = 0.10   # padding added after audible_end in silence case
 
 
+def _check_silence_at_clip_end(
+    reel_id: str,
+    last_word,
+    clip_end: float,
+    smap: dict,
+    lookup: dict,
+) -> None:
+    """Audio invariant: no speech starts between the last word's audible end and clip_end.
+
+    'Speech' = any smap word whose audible_start falls in (last_word_ae, clip_end).
+    Untranscribed_speech intervals in boundaries are also checked.
+    Logs [AUDIO-INV] and lists the offending entries; does not raise so renders complete.
+    """
+    key = round(last_word.t0 * 1000)
+    if key not in lookup:
+        return
+    _, entry = lookup[key]
+    last_word_ae: float = entry["audible_end"]
+
+    words = smap["words"]
+    boundaries = smap.get("boundaries", [])
+    violations: list[str] = []
+
+    for w in words:
+        as_ = w["audible_start"]
+        if as_ > last_word_ae and as_ < clip_end:
+            violations.append(f"word t0={w['t0']:.3f} audible_start={as_:.3f}")
+
+    # Check untranscribed speech intervals in boundaries
+    for bnd in boundaries:
+        untr = bnd.get("untranscribed_speech") or []
+        for onset, offset in (untr if isinstance(untr, list) else []):
+            if onset > last_word_ae and onset < clip_end:
+                violations.append(f"untranscribed_speech onset={onset:.3f}")
+
+    if violations:
+        print(
+            f"  [AUDIO-INV] {reel_id}: speech between last-word ae={last_word_ae:.3f}s "
+            f"and clip_end={clip_end:.3f}s (last='{last_word.word}' t0={last_word.t0:.3f}): "
+            + "; ".join(violations[:5]) + ("…" if len(violations) > 5 else ""),
+            flush=True,
+        )
+
+
 def _tail_from_smap(
     last_t0: float,
     seg_end: float,
@@ -901,10 +945,20 @@ def _tail_from_smap(
     words = smap["words"]
     boundaries = smap["boundaries"]
 
-    # Attribute residue: consecutive smap words whose Whisper t0 <= last_t1 are the
-    # acoustic tail of the same utterance (e.g. a sibilant suffix) — not new speech.
+    # Attribute residue: chain smap words that are the acoustic tail of the same utterance.
+    # Two conditions must hold:
+    #   (a) next.t0 <= last_t1 — Whisper placed it within the anchor's timespan
+    #   (b) next.audible_start < current audible_end + 0.04 — it starts within 40 ms of
+    #       the acoustic boundary (sibilant/stop suffix), not a new sentence word.
+    # Condition (b) rejects next-sentence words: Whisper sets t1(word_i)==t0(word_i+1)
+    # at every boundary, so (a) alone chains the entire next sentence via sentence-level
+    # t0==t1 equality. (b) distinguishes genuine acoustic overlap (< 40 ms gap) from a
+    # new utterance that merely starts where the previous word ended on Whisper's timeline.
     if last_t1 is not None:
-        while word_idx + 1 < len(words) and words[word_idx + 1]["t0"] <= last_t1:
+        while word_idx + 1 < len(words):
+            nxt = words[word_idx + 1]
+            if not (nxt["t0"] <= last_t1 and nxt.get("audible_start", nxt["t0"]) < audible_end + 0.04):
+                break
             word_idx += 1
             audible_end = max(audible_end, words[word_idx]["audible_end"])
 
@@ -1799,6 +1853,11 @@ def _render_segments(
                     _word_end, segs, _reel_speed or 1.0, _ts_seam_xfades, _xfade_actual)
             else:
                 _word_end_out = None
+            # Audio invariant: no speech between last-word audible end and clip end.
+            if smap is not None and reel.subtitles:
+                _inv_lookup = _smap_word_lookup(smap)
+                _check_silence_at_clip_end(
+                    reel.id, reel.subtitles[-1], segs[-1].end, smap, _inv_lookup)
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
