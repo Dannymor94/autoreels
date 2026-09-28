@@ -1723,6 +1723,12 @@ def _render_segments(
                     _word_end = _new_end  # for fade computation downstream
                     if len(segs) > 1:
                         _new_end = round(_new_end * _fps()) / _fps()
+                    # Cap: smap residue attribution can push tail past the labelled segment end
+                    # (e.g. residue of last word extends into the next gap). Never extend beyond
+                    # the labelled boundary — that reads unlabelled content.
+                    if _new_end > segs[-1].end:
+                        _new_end = segs[-1].end
+                        _word_end = segs[-1].end
                     if _new_end < segs[-1].start:
                         # Invariant violation: tail lands before last segment's start.
                         # _compute_word_end_out assumes word_end is within segs[-1]; if it is not,
