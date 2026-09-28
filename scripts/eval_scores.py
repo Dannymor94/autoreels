@@ -87,7 +87,12 @@ def _precision_at_k(scores: list[float], labels: list[int], k: int) -> float:
     return sum(lbl for _, lbl in top) / k
 
 
-def _load_dataset() -> list[dict]:
+def _blocks_fingerprint(block_ids: list[str]) -> str:
+    import hashlib
+    return hashlib.sha1("|".join(block_ids).encode()).hexdigest()[:16]
+
+
+def _load_dataset(clean_only: bool = False) -> list[dict]:
     rows = []
     for jsonl in sorted((REPO / "data" / "blocks_dataset").glob("*.jsonl")):
         for line in jsonl.open(encoding="utf-8"):
@@ -95,6 +100,8 @@ def _load_dataset() -> list[dict]:
             if line:
                 r = json.loads(line)
                 if r.get("human_score") is not None:
+                    if clean_only and r.get("legacy"):
+                        continue
                     rows.append(r)
     return rows
 
@@ -130,6 +137,7 @@ def _overlap_fraction(s1: float, e1: float, s2: float, e2: float) -> float:
 def _load_unscored_blocks(
     dataset_rows: list[dict],
     transcripts: dict[str, list[dict]],
+    clean_only: bool = False,
 ) -> tuple[list[dict], int]:
     """Load unscored blocks from manifests/*.blocks.json, extract text, filter splices.
 
@@ -151,11 +159,27 @@ def _load_unscored_blocks(
     n_splice = 0
     n_no_text = 0
 
+    # When clean_only: build expected fingerprints from dataset rows (non-legacy rows only)
+    expected_fps: dict[str, str] = {}
+    if clean_only:
+        for r in dataset_rows:
+            fp = r.get("segmentation_fingerprint")
+            if fp and r["source"] not in expected_fps:
+                expected_fps[r["source"]] = fp
+
     for src in sources:
         bfile = manifests_dir / f"{src}.blocks.json"
         if not bfile.exists():
             continue
         blocks = json.loads(bfile.read_text(encoding="utf-8"))
+        if clean_only:
+            expected_fp = expected_fps.get(src)
+            kept_ids = [b["id"] for b in sorted(blocks, key=lambda x: x["start"])
+                        if b.get("verdict", "KEPT") == "KEPT"]
+            current_fp = _blocks_fingerprint(kept_ids)
+            if current_fp != expected_fp:
+                print(f"  {src}: fingerprint mismatch (current={current_fp} expected={expected_fp}) — skipping unscored")
+                continue
         words = transcripts.get(src, [])
         src_intervals = scored_intervals.get(src, [])
 
@@ -202,14 +226,7 @@ def _print_metrics(
     *,
     scored_only_label: str = "human>=80",
     also_any_scored: bool = False,
-    clean_only: bool = False,
 ) -> None:
-    if clean_only and llm_scores is not None:
-        n_before = len(rows)
-        rows = [r for r in rows if r["block_id"] in llm_scores]
-        n_excl = n_before - len(rows)
-        if n_excl:
-            print(f"  (clean-only: excluded {n_excl} block(s) with missing LLM score)")
     n = len(rows)
     human = [float(r["human_score"]) for r in rows]
     heur = [r["heuristic_score"] for r in rows]
@@ -246,10 +263,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="skip LLM calls")
     parser.add_argument("--record-fixture", action="store_true", help="save first batch raw response")
     parser.add_argument("--clean-only", action="store_true",
-                        help="exclude blocks where LLM returned no score (don't count missing as 0)")
+                        help="scored: exclude legacy rows; unscored: skip sources where current segmentation doesn't match the export the human saw")
     args = parser.parse_args()
 
-    rows = _load_dataset()
+    rows = _load_dataset(clean_only=args.clean_only)
     sources = sorted(set(r["source"] for r in rows))
     print(f"Dataset: {len(rows)} blocks with human scores across {len(sources)} sources")
 
@@ -264,7 +281,7 @@ def main() -> None:
 
     print("\nLoading transcripts and unscored blocks...")
     transcripts = _load_transcripts()
-    unscored, n_splice = _load_unscored_blocks(rows, transcripts)
+    unscored, n_splice = _load_unscored_blocks(rows, transcripts, clean_only=args.clean_only)
 
     scored_by_src = Counter(r["source"] for r in rows)
     unscored_by_src = Counter(r["source"] for r in unscored)
@@ -373,7 +390,7 @@ def main() -> None:
     all_llm_scores = {**llm_scored, **llm_unscored}
 
     # Variant 1: scored only
-    _print_metrics("Variant 1: scored only", rows, llm_scored, clean_only=args.clean_only)
+    _print_metrics("Variant 1: scored only", rows, llm_scored)
 
     # Variant 2: scored + unscored
     _print_metrics(
@@ -381,7 +398,6 @@ def main() -> None:
         v2_rows,
         all_llm_scores,
         also_any_scored=True,
-        clean_only=args.clean_only,
     )
 
     # Per-source table
@@ -440,7 +456,7 @@ def main() -> None:
         print(f"  Δ{diff:+4d}  llm={llm_scored[bid]:3d} human={r['human_score']:3d}  {excerpt!r}")
 
     # Verdict
-    v2_rows_eval = [r for r in v2_rows if r["block_id"] in all_llm_scores] if args.clean_only else v2_rows
+    v2_rows_eval = v2_rows
     v2_pos80 = [1 if r["human_score"] >= 80 else 0 for r in v2_rows_eval]
     v2_heur  = [r["heuristic_score"] for r in v2_rows_eval]
     v2_llm   = [float(all_llm_scores.get(r["block_id"], 0)) for r in v2_rows_eval]
