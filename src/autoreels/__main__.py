@@ -1989,6 +1989,7 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
     from autoreels.cloud.snap import _is_hanging, tail_is_hanging_phrase, _HANGING_PHRASE_MAXLEN
     words = getattr(transcript, "words", []) or []
     dangling = _DEFAULT_DANGLING | set(getattr(r0_cfg, "dangling_words", None) or [])
+    _tag_q = set(getattr(r0_cfg, "tag_question_words", None) or [])
     floor = getattr(r0_cfg, "min_meaningful_sec", 18.0)
     gap = getattr(r0_cfg, "speech_density_split_gap_sec", 6.0)
     out: list[tuple] = []
@@ -2007,7 +2008,8 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
         if body_words:
             fw = body_words[0].word.strip()
             fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
-            if (fw and fw[0].islower()) or fw_clean in dangling:
+            _is_tq = fw_clean in _tag_q and fw.rstrip("»\"')").endswith("?")
+            if (fw and fw[0].islower()) or fw_clean in dangling or _is_tq:
                 warn(r, f"dangling start: opens on «{fw or fw_clean}»")
         # Pause check ignores gaps that filler removal cut away: only count a gap when both words
         # sit in the SAME playback segment (single-span reel → the whole clip is one segment).
@@ -2678,6 +2680,7 @@ def _cmd_run_impl(
     reels, post_dangling_disc = filter_dangling_start(
         reels, tx_words,
         dangling_words=getattr(r0_cfg, "dangling_words", None),
+        tag_question_words=getattr(r0_cfg, "tag_question_words", None),
         min_duration=r0_cfg.min_clip_duration,
         max_start_repair_sec=getattr(r0_cfg, "max_start_repair_sec", 6.0),
     )
@@ -4519,9 +4522,11 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 _first_sent = _all_sents[_valid_beats[0] - 1]
                 if _first_sent:
                     _dangling = _DEFAULT_DANGLING | set(getattr(r0_cfg, "dangling_words", None) or [])
+                    _tq_beat = set(getattr(r0_cfg, "tag_question_words", None) or [])
                     _fw = _first_sent[0].word.strip()
                     _fw_clean = _fw.strip(".,!?;:—–-«»\"'()").lower()
-                    if (_fw and _fw[0].islower()) or _fw_clean in _dangling:
+                    _is_tq_beat = _fw_clean in _tq_beat and _fw.rstrip("»\"')").endswith("?")
+                    if (_fw and _fw[0].islower()) or _fw_clean in _dangling or _is_tq_beat:
                         reel.warnings.append(f"beat reorder: first beat {_valid_beats[0]} dangling start «{_fw}»")
                         print(f"  warning {_grp}: beat reorder: first beat {_valid_beats[0]} dangling start «{_fw}»")
                 # build beat segments
@@ -4653,6 +4658,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels, _ = filter_dangling_start(
         reels, tx_words,
         dangling_words=getattr(r0_cfg, "dangling_words", None),
+        tag_question_words=getattr(r0_cfg, "tag_question_words", None),
         min_duration=r0_cfg.min_clip_duration,
         repair_only=True, max_start_fraction=1.0 / 3.0,
     )

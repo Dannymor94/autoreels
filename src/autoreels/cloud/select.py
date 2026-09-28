@@ -257,6 +257,7 @@ def filter_dangling_start(
     transcript_words: list,
     *,
     dangling_words: list[str] | None = None,
+    tag_question_words: list[str] | None = None,
     min_duration: float = 15.0,
     max_start_repair_sec: float = 10.0,
     repair_only: bool = False,
@@ -287,6 +288,7 @@ def filter_dangling_start(
     """
     from autoreels.local.subtitles import words_in_window
     dw = _DEFAULT_DANGLING | set(dangling_words or [])
+    tq = set(tag_question_words or [])
     kept, disc = [], []
     for r in reels:
         # An explicit review start (s:N) is the reviewer's choice — do not repair it away.
@@ -338,8 +340,9 @@ def filter_dangling_start(
         fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
         is_lowercase = bool(fw) and fw[0].islower()
         is_dangling = fw_clean in dw
+        is_tag_question = fw_clean in tq and fw.rstrip("»\"')").endswith("?")
         orig_start = r.start
-        if is_lowercase or is_dangling:
+        if is_lowercase or is_dangling or is_tag_question:
             repair_deadline = min(orig_start + max_start_repair_sec, _cap)
             repaired = False
             # (0) extend backward to the start of the sentence containing clip_words[0]

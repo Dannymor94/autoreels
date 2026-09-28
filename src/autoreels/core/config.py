@@ -263,6 +263,7 @@ class R0Config(BaseModel):
         "и", "а", "но", "поэтому", "потому",
     ])
     dangling_words: list[str] = Field(default_factory=list)  # extra blocklist for dangling_start gate
+    tag_question_words: list[str] = Field(default_factory=list)  # repair start when token matches AND ends with "?"
     host_affirmations: list[str] = Field(default_factory=list)  # tail sentences to trim (case-insensitive)
     max_start_repair_sec: float = 10.0  # scan window to find a sentence-initial word when repairing a dangling start
     source_kind: str = "lecture"  # "lecture" | "interview"

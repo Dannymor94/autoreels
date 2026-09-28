@@ -125,8 +125,8 @@ TAG_CLEAN    = ["ясно", "понятно", "да", "правильно", "с�
 
 
 @pytest.mark.parametrize("word,clean", list(zip(TAG_QUESTIONS, TAG_CLEAN)))
-def test_tag_question_repaired_via_dangling_words(word, clean):
-    """Reel opening on a tag question is repaired to the next word when dangling_words includes it."""
+def test_tag_question_repaired_via_tag_question_words(word, clean):
+    """'Ясно? Но вот…' with tag_question_words=[clean] → start moves to next word."""
     words = _ws([
         (word, 0.0, 0.5),
         ("Но", 0.5, 0.8),
@@ -136,18 +136,40 @@ def test_tag_question_repaired_via_dangling_words(word, clean):
         *[(f"слово{i}.", float(2 + i), float(3 + i)) for i in range(15)],
     ])
     r = _simple_reel("t", start=0.0, end=20.0)
-    kept, disc = filter_dangling_start([r], words, dangling_words=[clean],
+    kept, disc = filter_dangling_start([r], words, tag_question_words=[clean],
                                        min_duration=15.0, max_start_repair_sec=10.0)
     assert len(kept) == 1 and len(disc) == 0
     assert kept[0].start == pytest.approx(0.5), f"{word} not repaired, start={kept[0].start}"
 
 
-def test_tag_question_not_repaired_without_dangling_words():
-    """Without dangling_words, 'Ясно?' (uppercase) passes through unchanged."""
-    words = _ws([("Ясно?", 0.0, 0.5), ("Это", 0.5, 0.9)] +
+def test_tag_question_not_repaired_without_question_mark():
+    """'Понятно, что мы…' — no '?' → NOT treated as tag question, passes unchanged."""
+    words = _ws([("Понятно,", 0.0, 0.5), ("что", 0.5, 0.8), ("мы", 0.8, 1.1)] +
                 [(f"слово{i}.", float(1 + i), float(2 + i)) for i in range(18)])
     r = _simple_reel("t", start=0.0, end=20.0)
-    kept, disc = filter_dangling_start([r], words, dangling_words=None,
+    kept, disc = filter_dangling_start([r], words, tag_question_words=["понятно"],
+                                       min_duration=15.0, max_start_repair_sec=10.0)
+    assert len(kept) == 1
+    assert kept[0].start == pytest.approx(0.0)
+
+
+def test_da_comma_not_repaired():
+    """'Да, это так.' — no '?' → NOT a tag question."""
+    words = _ws([("Да,", 0.0, 0.3), ("это", 0.3, 0.6), ("так.", 0.6, 1.0)] +
+                [(f"слово{i}.", float(1 + i), float(2 + i)) for i in range(18)])
+    r = _simple_reel("t", start=0.0, end=20.0)
+    kept, disc = filter_dangling_start([r], words, tag_question_words=["да"],
+                                       min_duration=15.0, max_start_repair_sec=10.0)
+    assert len(kept) == 1
+    assert kept[0].start == pytest.approx(0.0)
+
+
+def test_pravilno_without_question_not_repaired():
+    """'Правильно ли…' — no '?' → NOT a tag question."""
+    words = _ws([("Правильно", 0.0, 0.5), ("ли", 0.5, 0.8)] +
+                [(f"слово{i}.", float(1 + i), float(2 + i)) for i in range(18)])
+    r = _simple_reel("t", start=0.0, end=20.0)
+    kept, disc = filter_dangling_start([r], words, tag_question_words=["правильно"],
                                        min_duration=15.0, max_start_repair_sec=10.0)
     assert len(kept) == 1
     assert kept[0].start == pytest.approx(0.0)
