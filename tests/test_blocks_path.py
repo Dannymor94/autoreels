@@ -1,9 +1,10 @@
-"""Tests for min_score and dedup on the blocks auto path (_stage_select_blocks)."""
+"""Tests for min_score, dedup, artefact scrubbing, and tag-question dangling starts."""
 import json
 import pytest
 
-from autoreels.cloud.select import dedup, filter_by_score
-from autoreels.core.models import Reel
+from autoreels.cloud.blocks import CandidateBlock, _Line, _scrub_artefact_lines, filter_blocks
+from autoreels.cloud.select import dedup, filter_by_score, filter_dangling_start
+from autoreels.core.models import Reel, Word
 
 
 def _reel(rid, start, end, score):
@@ -58,3 +59,95 @@ def test_dedup_exact_threshold_kept():
     b = _reel("b", 30.0, 90.0, 70)  # overlap=30/60=0.5 for b over a
     kept = dedup([a, b], overlap_threshold=0.5)
     assert len(kept) == 2
+
+
+# ----------------------------------------------------------------- artefact scrub
+
+def _block_with_lines(*lines: tuple[float, float, str]) -> CandidateBlock:
+    ls = [_Line(t0, t1, text) for t0, t1, text in lines]
+    return CandidateBlock(
+        id="test", start=ls[0].t0, end=ls[-1].t1,
+        duration=ls[-1].t1 - ls[0].t0,
+        text=" ".join(l.text for l in ls),
+        boundary_reason="sentence",
+        lines=ls,
+    )
+
+
+def test_scrub_artefact_drops_block_entirely_credit():
+    """Block that is only 'Субтитры делал DimaTorzok' → returns False (drop it)."""
+    block = _block_with_lines((1321.0, 1322.5, "Субтитры делал DimaTorzok"))
+    result = _scrub_artefact_lines(block, ["субтитры делал"])
+    assert result is False, "entirely-credit block should return False"
+
+
+def test_scrub_artefact_strips_leading_credit_line():
+    """Leading 'Субтитры делал …' is stripped; real speech after it survives."""
+    block = _block_with_lines(
+        (1321.0, 1322.5, "Субтитры делал DimaTorzok"),
+        (1322.5, 1360.0, "Холотропное дыхание — глубокая практика."),
+    )
+    result = _scrub_artefact_lines(block, ["субтитры делал"])
+    assert result is True
+    assert "DimaTorzok" not in block.text
+    assert block.start == 1322.5
+
+
+def test_filter_blocks_drops_sole_artefact_line_with_new_marker(tmp_path):
+    """filter_blocks with 'субтитры делал' in artefact_markers drops the block."""
+    credit_line = _Line(1321.0, 1322.5, "Субтитры делал DimaTorzok")
+    block = CandidateBlock(
+        id="art", start=1321.0, end=1322.5, duration=1.5,
+        text="Субтитры делал DimaTorzok", boundary_reason="sentence",
+        lines=[credit_line],
+    )
+    kept, dropped = filter_blocks(
+        [block], total_duration=1500.0,
+        artefact_markers=["субтитры делал"],
+    )
+    assert len(kept) == 0
+    reasons = [r for _, r in dropped]
+    assert "artefact" in reasons
+
+
+# ----------------------------------------------------------------- tag-question dangling start
+
+def _ws(pairs):
+    return [Word(word=w, t0=t0, t1=t1) for w, t0, t1 in pairs]
+
+
+def _simple_reel(rid, start, end, score=80):
+    return Reel(id=rid, start=start, end=end, score=score, hook="h", title="", description="")
+
+
+TAG_QUESTIONS = ["Ясно?", "Понятно?", "Да?", "Правильно?", "Согласны?"]
+TAG_CLEAN    = ["ясно", "понятно", "да", "правильно", "согласны"]
+
+
+@pytest.mark.parametrize("word,clean", list(zip(TAG_QUESTIONS, TAG_CLEAN)))
+def test_tag_question_repaired_via_dangling_words(word, clean):
+    """Reel opening on a tag question is repaired to the next word when dangling_words includes it."""
+    words = _ws([
+        (word, 0.0, 0.5),
+        ("Но", 0.5, 0.8),
+        ("вот", 0.8, 1.2),
+        ("это", 1.2, 1.6),
+        ("важно.", 1.6, 2.0),
+        *[(f"слово{i}.", float(2 + i), float(3 + i)) for i in range(15)],
+    ])
+    r = _simple_reel("t", start=0.0, end=20.0)
+    kept, disc = filter_dangling_start([r], words, dangling_words=[clean],
+                                       min_duration=15.0, max_start_repair_sec=10.0)
+    assert len(kept) == 1 and len(disc) == 0
+    assert kept[0].start == pytest.approx(0.5), f"{word} not repaired, start={kept[0].start}"
+
+
+def test_tag_question_not_repaired_without_dangling_words():
+    """Without dangling_words, 'Ясно?' (uppercase) passes through unchanged."""
+    words = _ws([("Ясно?", 0.0, 0.5), ("Это", 0.5, 0.9)] +
+                [(f"слово{i}.", float(1 + i), float(2 + i)) for i in range(18)])
+    r = _simple_reel("t", start=0.0, end=20.0)
+    kept, disc = filter_dangling_start([r], words, dangling_words=None,
+                                       min_duration=15.0, max_start_repair_sec=10.0)
+    assert len(kept) == 1
+    assert kept[0].start == pytest.approx(0.0)
