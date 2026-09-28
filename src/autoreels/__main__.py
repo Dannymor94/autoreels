@@ -775,24 +775,37 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
 
 
 def _check_last_subtitle_word(reel, tx_words) -> None:
-    """Log an error if the last subtitle word belongs to a sentence beyond the final sentence gate."""
+    """Raise ValueError if the subtitle list violates the final-sentence contract.
+
+    (a) last subtitle word is beyond the final labelled sentence (extra word leaked in)
+    (b) last word of the final labelled sentence is missing from subtitles
+
+    Requires reel.subtitle_gate (set by end-repair stage). Skipped gracefully when gate
+    is absent (legacy manifests without the field).
+    """
     if not reel.subtitles:
         return
-    from autoreels.cloud.edit import split_sentences, words_in_span
-    _gate = getattr(reel, "_subtitle_gate", None)
+    _gate = reel.subtitle_gate
     if _gate is None:
         return
+    from autoreels.cloud.edit import split_sentences, words_in_span
     sents = split_sentences(words_in_span(tx_words, reel.start, _gate))
     if not sents:
         return
     expected_last = sents[-1][-1]
     actual_last = reel.subtitles[-1]
-    # Allow smap ae-extension: actual_last may come from same sentence, just a bit past t1
-    if actual_last.t0 > expected_last.t1 + 0.05:
-        print(
-            f"  [CONTENT] {reel.id}: last subtitle '{actual_last.word}' (t0={actual_last.t0:.3f}) "
-            f"beyond final sentence last '{expected_last.word}' (t1={expected_last.t1:.3f})",
-            flush=True,
+    _eps = 0.05  # tolerance for smap ae-extension within the same word
+    if actual_last.t0 > expected_last.t1 + _eps:
+        raise ValueError(
+            f"[CONTENT] {reel.id}: last subtitle '{actual_last.word}' (t0={actual_last.t0:.3f}) "
+            f"is beyond final sentence; expected last '{expected_last.word}' "
+            f"(t1={expected_last.t1:.3f})"
+        )
+    if actual_last.t0 < expected_last.t0 - _eps:
+        raise ValueError(
+            f"[CONTENT] {reel.id}: last word of final sentence '{expected_last.word}' "
+            f"(t0={expected_last.t0:.3f}) is missing from subtitles; "
+            f"actual last subtitle '{actual_last.word}' (t0={actual_last.t0:.3f})"
         )
 
 
@@ -1119,7 +1132,7 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     seg_gate = min(reel.r0_end, reel.end) if reel.r0_end is not None else reel.end
                 # Cap seg_gate at the pre-padding sentence boundary saved by the end repair /
                 # snap stages so next-phrase words that fall inside the tail air are excluded.
-                _sg = getattr(reel, "_subtitle_gate", None)
+                _sg = reel.subtitle_gate
                 if _sg is not None:
                     seg_gate = min(seg_gate, _sg)
                 anchor = None
@@ -1149,7 +1162,7 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= effective_end
                 ]
             else:
-                _sg_no_smap = getattr(reel, "_subtitle_gate", reel.end)
+                _sg_no_smap = reel.subtitle_gate if reel.subtitle_gate is not None else reel.end
                 reel.subtitles = [
                     w for w in transcript.words
                     if reel.start <= w.t0 < _sg_no_smap and w.t1 <= reel.end
@@ -2409,7 +2422,7 @@ def _cmd_run_impl(
     # End repair (symmetric to dangling-start): extend/backoff to a complete sentence.
     for _r in reels:
         _repair_end_to_complete_sentence(_r, tx_words, r0_cfg=r0_cfg, explicit_e=False)
-        _r._subtitle_gate = _r.end
+        _r.subtitle_gate = _r.end
     # Compute ends_on_host_turn diagnostic on all kept reels (False for lecture; measurable for interview).
     for r in reels:
         r0_s = r.r0_start if r.r0_start is not None else r.start
@@ -3138,18 +3151,19 @@ def cmd_render(
                   f"→ {out_dir_final} ===", flush=True)
             # M1.8 Stage B: load speech map (auto-build if missing/stale) when flag is on.
             _render_smap: dict | None = None
+            _cache_dir_r = root / "data" / "cache"
+            _render_tx = _resolve_cached_transcript(manifest, _cache_dir_r)
+            _render_words = _render_tx.words if _render_tx is not None else None
+            if _render_words:
+                for _r in render_manifest.reels:
+                    _check_last_subtitle_word(_r, _render_words)
+            _render_source: "Path | None" = None
             if getattr(render_cfg, "speech_map", False):
                 _smap_path = _transcripts_dir_r / f"{stem}.speechmap.json"
-                _cache_dir_r = root / "data" / "cache"
-                _render_source: "Path | None" = None
-                _render_words = None
                 try:
                     _render_source = resolve_source(manifest, inputs_dir)
                 except Exception:
                     pass
-                if _render_source is not None:
-                    _render_tx = _resolve_cached_transcript(manifest, _cache_dir_r)
-                    _render_words = _render_tx.words if _render_tx is not None else None
                 _render_smap = _ensure_smap(
                     _smap_path, _render_source, manifest.source_sha256,
                     _render_words or [], render_cfg,
@@ -4335,7 +4349,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _repair_end_to_complete_sentence(
             _r, tx_words, r0_cfg=r0_cfg, explicit_e=getattr(_r, "_has_explicit_e", False),
         )
-        _r._subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles
+        _r.subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles
     reels = renumber_reels(reels)
     reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)

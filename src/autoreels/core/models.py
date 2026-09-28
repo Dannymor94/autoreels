@@ -177,6 +177,7 @@ class Reel(BaseModel):
     start_repair_sec: float | None = None  # seconds trimmed from front during dangling-start repair
     ends_on_host_turn: bool = False  # diagnostic: would have ended inside a host question without interview snap
     open_thought: bool = False      # True when the clip ends on an incomplete sentence with no complete sentence found in search window
+    subtitle_gate: float | None = None  # pre-padding t1 of last word of final labelled sentence; gates _stage_subtitles and the content check
     # Playback speed applied at render time (1.0 = normal, >1 = faster). Set by --apply.
     speed: float = 1.0
     # Source-time end of the last INTENDED word, stashed by _apply_tail_air after all bound edits.
