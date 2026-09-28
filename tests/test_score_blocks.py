@@ -111,6 +111,44 @@ def test_score_blocks_batch_applies_scores():
     assert provider.calls == 1
 
 
+# ----------------------------------------------------------------- score_blocks_batch retry
+
+def test_score_blocks_batch_no_retry_when_complete():
+    """No retry when all ids are present in the first response."""
+    blocks = [_block("id1"), _block("id2")]
+    raw = '{"scores":[{"id":"id1","score":88},{"id":"id2","score":72}]}'
+    provider = _MockProvider([raw])
+    result = score_blocks_batch(blocks, provider=provider, system_text=_SYSTEM, fewshot_examples=[])
+    assert provider.calls == 1
+    assert result == {"id1": 88, "id2": 72}
+
+
+def test_score_blocks_batch_missing_id_retried():
+    """If an id is missing from the first response, batch is retried once."""
+    blocks = [_block("id1"), _block("id2"), _block("id3")]
+    raw1 = '{"scores":[{"id":"id1","score":88},{"id":"id2","score":72}]}'
+    raw2 = '{"scores":[{"id":"id1","score":88},{"id":"id2","score":72},{"id":"id3","score":55}]}'
+    provider = _MockProvider([raw1, raw2])
+    result = score_blocks_batch(blocks, provider=provider, system_text=_SYSTEM, fewshot_examples=[])
+    assert provider.calls == 2
+    assert result["id3"] == 55
+    assert all(b.llm_score_reason is None for b in blocks)
+
+
+def test_score_blocks_batch_still_missing_after_retry():
+    """If id is still missing after retry, block gets llm_score_reason='missing'."""
+    blocks = [_block("id1"), _block("id2"), _block("id3")]
+    raw = '{"scores":[{"id":"id1","score":88},{"id":"id2","score":72}]}'
+    provider = _MockProvider([raw, raw])
+    result = score_blocks_batch(blocks, provider=provider, system_text=_SYSTEM, fewshot_examples=[])
+    assert provider.calls == 2
+    assert "id3" not in result
+    id3 = next(b for b in blocks if b.id == "id3")
+    assert id3.llm_score_reason == "missing"
+    assert blocks[0].llm_score_reason is None
+    assert blocks[1].llm_score_reason is None
+
+
 # ----------------------------------------------------------------- apply_llm_scores
 
 def test_apply_llm_scores_sets_field():
@@ -237,10 +275,12 @@ def test_score_all_blocks_temperature_forwarded():
 # ----------------------------------------------------------------- score_passes averaging
 
 def test_score_passes_2_averages_two_runs():
-    """score_passes=2: each block scored in two different orderings, result is the mean."""
+    """score_passes=2: two passes, result is mean. With 3 blocks < batch_k=8, rotation
+    is a no-op (blocks[4:]+blocks[:4]==[a,b,c]), so mock returns responses in call order."""
     blocks = [_block("a"), _block("b"), _block("c")]
-    # Pass 1 (time order [a,b,c]): a=80, b=60, c=70
-    # Pass 2 (reversed [c,b,a]): a=100, b=80, c=90  → mean: a=90, b=70, c=80
+    # Pass 1: a=80, b=60, c=70
+    # Pass 2 (rotated, no-op for 3 blocks): mock returns second response → a=100, b=80, c=90
+    # Mean: a=90, b=70, c=80
     responses = [
         '{"scores":[{"id":"a","score":80},{"id":"b","score":60},{"id":"c","score":70}]}',
         '{"scores":[{"id":"c","score":90},{"id":"b","score":80},{"id":"a","score":100}]}',
@@ -255,6 +295,27 @@ def test_score_passes_2_averages_two_runs():
     assert blocks[0].llm_score == 90.0
     assert blocks[1].llm_score == 70.0
     assert blocks[2].llm_score == 80.0
+
+
+def test_score_passes_2_uses_other_pass_when_missing():
+    """score_passes=2: block absent in pass 1 but scored in pass 2 → pass 2 score used."""
+    blocks = [_block("a"), _block("b")]
+    # Pass 1: only a scored (b missing)
+    # Pass 2: both scored
+    responses = [
+        '{"scores":[{"id":"a","score":80}]}',
+        '{"scores":[{"id":"a","score":90},{"id":"b","score":70}]}',
+    ]
+    provider = _MockProvider(responses)
+    result = score_all_blocks(blocks, provider=provider, system_text=_SYSTEM,
+                              fewshot_examples=[], score_passes=2)
+    assert result["a"] == 85  # mean(80, 90)
+    assert result["b"] == 70  # pass 2 only
+    # b was missing in pass 1 → score_blocks_batch marks it "missing", but apply_llm_scores
+    # clears reason once b gets a score from the merged result
+    b_block = next(bl for bl in blocks if bl.id == "b")
+    assert b_block.llm_score == 70.0
+    assert b_block.llm_score_reason is None  # cleared by apply_llm_scores
 
 
 def test_score_passes_1_single_run():

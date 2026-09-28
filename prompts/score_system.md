@@ -16,5 +16,5 @@ Rubric (0–100):
 
 Return ONLY valid JSON, no commentary, no markdown fences:
 {"scores":[{"id":"<block_id>","score":<integer>},...]}
-Include ONLY blocks you would score ≥65. Omit weaker blocks entirely.
+Return a score for EVERY id in the input — including low-scoring blocks. Never omit an id.
 ```

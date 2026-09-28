@@ -71,12 +71,17 @@ def parse_score_response(raw: str | None) -> list[dict]:
 
 
 def apply_llm_scores(blocks: list[CandidateBlock], id_to_score: dict[str, int]) -> int:
-    """Set block.llm_score for each matched block. Returns count of matched blocks."""
+    """Set block.llm_score for each matched block. Returns count of matched blocks.
+
+    Also clears llm_score_reason on any block that receives a score (rescues blocks
+    that were marked 'missing' in pass 1 but scored in pass 2).
+    """
     id_map = {b.id: b for b in blocks}
     count = 0
     for bid, score in id_to_score.items():
         if bid in id_map:
             id_map[bid].llm_score = float(score)
+            id_map[bid].llm_score_reason = None
             count += 1
     return count
 
@@ -92,7 +97,9 @@ def score_blocks_batch(
 ) -> dict[str, int]:
     """One LLM call for one batch. Returns {block_id: score}.
 
-    max_output_tokens is informational; configure the provider externally.
+    If any batch ids are missing from the response, retries once with the same messages.
+    Still-missing blocks get llm_score_reason='missing' set on the block object and are
+    excluded from the returned dict (never treated as a low score).
     """
     from autoreels.cloud.providers import ProviderEmptyResponse, ProviderError, ProviderTimeout
 
@@ -102,7 +109,27 @@ def score_blocks_batch(
     except (ProviderError, ProviderEmptyResponse, ProviderTimeout) as e:
         raise ValueError(f"provider error: {e}") from e
     entries = parse_score_response(raw)
-    return {e["id"]: e["score"] for e in entries if "id" in e and "score" in e}
+    scores = {e["id"]: e["score"] for e in entries if "id" in e and "score" in e}
+
+    missing = {b.id for b in blocks} - scores.keys()
+    if missing:
+        print(f"  ⚠ {len(missing)} id(s) missing from response, retrying batch", flush=True)
+        try:
+            raw2 = provider.complete(messages, temperature=temperature)
+            for e in parse_score_response(raw2):
+                if "id" in e and "score" in e and e["id"] not in scores:
+                    scores[e["id"]] = e["score"]
+        except (ProviderError, ProviderEmptyResponse, ProviderTimeout, ValueError) as e2:
+            print(f"  ⚠ retry failed: {e2}", flush=True)
+        still_missing = {b.id for b in blocks} - scores.keys()
+        if still_missing:
+            id_map = {b.id: b for b in blocks}
+            for bid in still_missing:
+                if bid in id_map:
+                    id_map[bid].llm_score_reason = "missing"
+            print(f"  ⚠ still missing after retry, reason='missing': {[bid[:8] for bid in still_missing]}", flush=True)
+
+    return scores
 
 
 def score_all_blocks(
@@ -119,8 +146,8 @@ def score_all_blocks(
     """Score all blocks in batches. Sets block.llm_score; returns merged {id: score}.
 
     score_passes=2: scores each block twice (second pass rotated by batch_k//2 so neighbours
-    differ) and sets llm_score to max(pass1, pass2), rescuing borderline blocks that land
-    in strong-competition batches. Uses 2× the token budget.
+    differ) and sets llm_score to mean(pass1, pass2). If a block is present in only one
+    pass, that score is used. Uses 2× the token budget.
     """
     def _one_pass(ordered_blocks: list[CandidateBlock]) -> dict[str, int]:
         pass_scores: dict[str, int] = {}
@@ -145,15 +172,21 @@ def score_all_blocks(
 
     if score_passes >= 2:
         # Second pass rotated by half a batch so every block sees different neighbours.
-        # Merge: union of both passes, max score when both return a value — rescues
-        # borderline blocks that happen to land in a strong-competition batch in one pass.
+        # Merge: mean when both passes score a block; if one pass is missing, use the other.
         rotated = blocks[batch_k // 2 :] + blocks[: batch_k // 2]
         scores2 = _one_pass(rotated)
-        for bid, s2 in scores2.items():
-            if bid not in all_scores:
-                all_scores[bid] = s2
+        merged: dict[str, int] = {}
+        for bid in set(all_scores) | set(scores2):
+            s1, s2 = all_scores.get(bid), scores2.get(bid)
+            if s1 is not None and s2 is not None:
+                merged[bid] = round((s1 + s2) / 2)
             else:
-                all_scores[bid] = max(all_scores[bid], s2)
+                if s1 is None:
+                    print(f"  ℹ {bid[:8]} missing in pass 1, using pass 2 score", flush=True)
+                else:
+                    print(f"  ℹ {bid[:8]} missing in pass 2, using pass 1 score", flush=True)
+                merged[bid] = s1 if s1 is not None else s2  # type: ignore[assignment]
+        all_scores = merged
 
     apply_llm_scores(blocks, all_scores)
     return all_scores
