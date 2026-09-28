@@ -722,7 +722,7 @@ def _stage_select_blocks(compressed, *, r0_cfg, root, provider):
     """
     from autoreels.cloud.blocks import candidate_blocks, filter_blocks, score_block, topk_filter
     from autoreels.cloud.score_blocks import filter_no_terminal, score_all_blocks
-    from autoreels.cloud.select import _extract_prompt_body
+    from autoreels.cloud.select import _extract_prompt_body, dedup, filter_by_score
     from autoreels.core.models import Reel
 
     root = Path(root) if root is not None else _project_root()
@@ -766,6 +766,8 @@ def _stage_select_blocks(compressed, *, r0_cfg, root, provider):
 
     # LLM scores ALL blocks that pass the gate; heuristic is logged but not used to prune.
     topk_cut: list = []
+    min_score_disc: list[dict] = []
+    dedup_disc: list[dict] = []
     if bs_cfg.score_prompts and kept:
         system_text = _extract_prompt_body((root / bs_cfg.score_prompts.system).read_text(encoding="utf-8"))
         fewshot_raw = json.loads((root / bs_cfg.score_prompts.fewshot).read_text(encoding="utf-8"))
@@ -790,12 +792,23 @@ def _stage_select_blocks(compressed, *, r0_cfg, root, provider):
     for r in reels:
         r.r0_start, r.r0_end = r.start, r.end
 
+    # Apply min_score and dedup — same as R0 path.
+    reels = filter_by_score(reels, min_score=r0_cfg.min_score)
+    min_score_disc = [
+        {"id": b.id, "start": b.start, "end": b.end, "reason": "below_min_score"}
+        for b in kept
+        if max(0, min(100, int(b.llm_score if b.llm_score is not None else b.heuristic_score))) < r0_cfg.min_score
+    ]
+    reels = dedup(reels, overlap_threshold=r0_cfg.dedup_overlap_threshold, dropped=dedup_disc)
+
     discarded: list[dict] = [
         {"id": b.id, "start": b.start, "end": b.end, "reason": reason}
         for b, reason in dropped_blks
     ]
     discarded += [{"id": b.id, "start": b.start, "end": b.end, "reason": "gate_no_terminal"} for b in gated_out]
     discarded += [{"id": b.id, "start": b.start, "end": b.end, "reason": "topk_cut"} for b in topk_cut]
+    discarded += min_score_disc
+    discarded += dedup_disc
 
     print(f"  блок-отбор: всего={len(all_blocks)}, после фильтра={len(reels)}, снято={len(discarded)}", flush=True)
     return reels, discarded, []
