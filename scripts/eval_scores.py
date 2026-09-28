@@ -202,7 +202,14 @@ def _print_metrics(
     *,
     scored_only_label: str = "human>=80",
     also_any_scored: bool = False,
+    clean_only: bool = False,
 ) -> None:
+    if clean_only and llm_scores is not None:
+        n_before = len(rows)
+        rows = [r for r in rows if r["block_id"] in llm_scores]
+        n_excl = n_before - len(rows)
+        if n_excl:
+            print(f"  (clean-only: excluded {n_excl} block(s) with missing LLM score)")
     n = len(rows)
     human = [float(r["human_score"]) for r in rows]
     heur = [r["heuristic_score"] for r in rows]
@@ -238,6 +245,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="skip LLM calls")
     parser.add_argument("--record-fixture", action="store_true", help="save first batch raw response")
+    parser.add_argument("--clean-only", action="store_true",
+                        help="exclude blocks where LLM returned no score (don't count missing as 0)")
     args = parser.parse_args()
 
     rows = _load_dataset()
@@ -288,29 +297,19 @@ def main() -> None:
         print("ERROR: GROQ_API_KEY not set", file=sys.stderr)
         sys.exit(1)
 
+    import autoreels.cloud.providers as _prov_mod
+    _prov_mod._POOL_BUDGET_SEC = 1800.0
+
     from autoreels.cloud.blocks import CandidateBlock
-    from autoreels.cloud.providers import GroqLLM
-    from autoreels.cloud.score_blocks import (
-        SCORE_BATCH_K,
-        SCORE_MAX_OUTPUT_TOKENS,
-        build_score_messages,
-        parse_score_response,
-        apply_llm_scores,
-    )
+    from autoreels.cloud.providers import build_pool
+    from autoreels.cloud.score_blocks import SCORE_BATCH_K, score_blocks_batch, apply_llm_scores
     from autoreels.cloud.select import _extract_prompt_body
     from autoreels.core.config import load_r0_config
 
     r0_cfg = load_r0_config(REPO / "config" / "r0.yaml")
     system_text = _extract_prompt_body((REPO / "prompts" / "score_system.md").read_text(encoding="utf-8"))
-    fewshot = json.loads((REPO / "prompts" / "score_fewshot.json").read_text(encoding="utf-8"))
-    fewshot_examples = fewshot.get("examples", [])
-
-    provider = GroqLLM(
-        model=r0_cfg.model,
-        api_key=api_key,
-        max_output_tokens=SCORE_MAX_OUTPUT_TOKENS,
-        reasoning_effort="none",
-    )
+    fewshot_examples = json.loads((REPO / "prompts" / "score_fewshot.json").read_text(encoding="utf-8")).get("examples", [])
+    provider = build_pool(r0_cfg)
 
     def _to_blocks(row_list: list[dict]) -> list[CandidateBlock]:
         blocks = []
@@ -327,74 +326,111 @@ def main() -> None:
             blocks.append(b)
         return blocks
 
-    def _score_all(
-        blocks: list[CandidateBlock],
-        label: str,
-        first_batch_raw_holder: list,
-    ) -> dict[str, int]:
+    def _score_all(blocks: list[CandidateBlock], label: str) -> tuple[dict[str, int], int]:
+        """Score blocks in batches via score_blocks_batch (includes retry).
+        Returns (id_to_score, n_missing_after_retry)."""
         all_scores: dict[str, int] = {}
         n_batches = (len(blocks) + SCORE_BATCH_K - 1) // SCORE_BATCH_K
+        n_missing = 0
         print(f"\n{label}: {len(blocks)} blocks in {n_batches} batches...")
         for i in range(0, len(blocks), SCORE_BATCH_K):
             batch = blocks[i: i + SCORE_BATCH_K]
             batch_num = i // SCORE_BATCH_K + 1
-            msgs = build_score_messages(batch, system_text=system_text, fewshot_examples=fewshot_examples)
             print(f"  batch {batch_num}/{n_batches}: {len(batch)} blocks ... ", end="", flush=True)
             try:
-                raw = provider.complete(msgs)
-            except Exception as e:
-                print(f"ERROR: {e}")
-                continue
-            if not first_batch_raw_holder:
-                first_batch_raw_holder.append(raw)
-            est = len(raw) // 4
-            print(f"~{est} tok")
-            try:
-                entries = parse_score_response(raw)
-                all_scores.update({e["id"]: e["score"] for e in entries if "id" in e and "score" in e})
+                scores = score_blocks_batch(
+                    batch,
+                    provider=provider,
+                    system_text=system_text,
+                    fewshot_examples=fewshot_examples,
+                    temperature=0.0,
+                )
+                all_scores.update(scores)
+                batch_missing = sum(1 for b in batch if b.llm_score_reason == "missing")
+                n_missing += batch_missing
+                suffix = f" ({batch_missing} missing after retry)" if batch_missing else ""
+                print(f"{len(scores)}/{len(batch)} scored{suffix}", flush=True)
             except ValueError as e:
-                print(f"  parse error: {e}")
-        return all_scores
-
-    first_batch_raw: list[str] = []
+                print(f"ERROR: {e}", flush=True)
+        return all_scores, n_missing
 
     # Score both scored blocks AND unscored blocks
-    scored_blocks = _to_blocks(rows)
+    scored_blocks  = _to_blocks(rows)
     unscored_blocks = _to_blocks(unscored)
 
-    llm_scored = _score_all(scored_blocks, "Scoring scored blocks (v1)", first_batch_raw)
-    llm_unscored = _score_all(unscored_blocks, "Scoring unscored blocks (v2)", first_batch_raw)
+    llm_scored,   n_miss_scored   = _score_all(scored_blocks,   "Scoring human-scored blocks (v1)")
+    llm_unscored, n_miss_unscored = _score_all(unscored_blocks, "Scoring unscored blocks (v2)")
 
-    if args.record_fixture and first_batch_raw:
-        fixture_path = REPO / "tests" / "fixtures" / "score_blocks_response.json"
-        fixture_data = {
-            "_comment": f"Real LLM response from M1.6 stage 4 scoring call. Model: {r0_cfg.model}.",
-            "raw": first_batch_raw[0],
-        }
-        fixture_path.write_text(json.dumps(fixture_data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"\nFixture saved: {fixture_path}")
+    n_missing_total = n_miss_scored + n_miss_unscored
+    print(f"\nIDs missing after retry: {n_missing_total} total ({n_miss_scored} scored, {n_miss_unscored} unscored)")
+    print(f"LLM coverage: {len(llm_scored)}/{len(rows)} scored blocks, {len(llm_unscored)}/{len(unscored)} unscored blocks")
 
-    apply_llm_scores(scored_blocks, llm_scored)
+    if args.record_fixture:
+        pass  # fixture recording removed (score_blocks_batch manages internally)
+
+    apply_llm_scores(scored_blocks,  llm_scored)
     apply_llm_scores(unscored_blocks, llm_unscored)
-
-    # Merge scores for variant 2
     all_llm_scores = {**llm_scored, **llm_unscored}
 
-    print(f"\nLLM returned scores for {len(llm_scored)}/{len(rows)} scored blocks (omitted=0)")
-    print(f"LLM returned scores for {len(llm_unscored)}/{len(unscored)} unscored blocks (omitted=0)")
-
     # Variant 1: scored only
-    _print_metrics("Variant 1: scored only", rows, llm_scored)
+    _print_metrics("Variant 1: scored only", rows, llm_scored, clean_only=args.clean_only)
 
-    # Variant 2: scored + unscored (LLM called on both)
+    # Variant 2: scored + unscored
     _print_metrics(
-        "Variant 2: scored + unscored (real LLM calls on both)",
+        "Variant 2: scored + unscored",
         v2_rows,
         all_llm_scores,
         also_any_scored=True,
+        clean_only=args.clean_only,
     )
 
-    # 10 largest LLM vs human disagreements (scored blocks)
+    # Per-source table
+    from collections import Counter as _Counter
+    print(f"\n--- Per-source breakdown ---")
+    print(f"  {'source':<40} {'h>=80':>5} {'n_sc':>5} {'llm_ok':>6} {'miss':>5}  AUC(>=80) Heur / LLM")
+    for src in sources:
+        src_rows = [r for r in rows if r["source"] == src]
+        src_unscored = [r for r in unscored if r["source"] == src]
+        all_src = src_rows + src_unscored
+        h80 = sum(1 for r in src_rows if r["human_score"] >= 80)
+        llm_ok_sc = sum(1 for r in src_rows if r["block_id"] in llm_scored)
+        llm_ok_un = sum(1 for r in src_unscored if r["block_id"] in llm_unscored)
+        miss_sc = sum(1 for b in scored_blocks if b.id in {r["block_id"] for r in src_rows} and b.llm_score_reason == "missing")
+        miss_un = sum(1 for b in unscored_blocks if b.id in {r["block_id"] for r in src_unscored} and b.llm_score_reason == "missing")
+        miss = miss_sc + miss_un
+        pos80_src = [1 if r["human_score"] >= 80 else 0 for r in all_src]
+        heur_src  = [r["heuristic_score"] for r in all_src]
+        llm_src   = [float(all_llm_scores.get(r["block_id"], 0)) for r in all_src]
+        hauc = _roc_auc(heur_src, pos80_src)
+        lauc = _roc_auc(llm_src,  pos80_src)
+        hauc_s = f"{hauc:.2f}" if not (hauc != hauc) else "  —"  # nan check
+        lauc_s = f"{lauc:.2f}" if not (lauc != lauc) else "  —"
+        print(f"  {src:<40} {h80:>5} {len(src_rows):>5} {llm_ok_sc:>6} {miss:>5}  {hauc_s} / {lauc_s}")
+
+    # 09h33 end-to-end: final block list with llm_score, human coverage
+    src_09h33 = "2026-08-08 09h 33m 14s"
+    rows_09h33 = [r for r in rows if r["source"] == src_09h33]
+    unsc_09h33 = [r for r in unscored if r["source"] == src_09h33]
+    all_09h33  = rows_09h33 + unsc_09h33
+    if all_09h33:
+        min_score = getattr(r0_cfg, "min_score", 65)
+        final_09h33 = sorted(
+            [r for r in all_09h33 if all_llm_scores.get(r["block_id"], 0) >= min_score],
+            key=lambda r: r["start"],
+        )
+        human_ids = {r["block_id"] for r in rows_09h33}
+        n_human_in_final = sum(1 for r in final_09h33 if r["block_id"] in human_ids)
+        print(f"\n--- 09h33 end-to-end (min_score={min_score}) ---")
+        print(f"  {'id':<16}  {'start–end':<18}  llm_score  human?")
+        for r in final_09h33:
+            bid  = r["block_id"]
+            ts   = f"{r['start']:.1f}–{r['end']:.1f}s"
+            sc   = all_llm_scores.get(bid, "?")
+            mark = " ✓" if bid in human_ids else ""
+            print(f"  {bid:<16}  {ts:<18}  {str(sc):<9}  {mark}")
+        print(f"\n  human blocks in final: {n_human_in_final} of {len(rows_09h33)}")
+
+    # 10 largest LLM vs human disagreements
     matched = [r for r in rows if r["block_id"] in llm_scored]
     print(f"\n--- 10 largest LLM vs human disagreements (n_matched={len(matched)}) ---")
     for r in sorted(matched, key=lambda r: abs(llm_scored[r["block_id"]] - r["human_score"]), reverse=True)[:10]:
@@ -403,20 +439,13 @@ def main() -> None:
         excerpt = r["text"][:80].replace("\n", " ")
         print(f"  Δ{diff:+4d}  llm={llm_scored[bid]:3d} human={r['human_score']:3d}  {excerpt!r}")
 
-    # Top-10 highest LLM scores among unscored blocks (false positives or worth a second look)
-    scored_unscored = [(r, llm_unscored[r["block_id"]]) for r in unscored if r["block_id"] in llm_unscored]
-    scored_unscored.sort(key=lambda x: -x[1])
-    print(f"\n--- Top-10 highest LLM scores among unscored blocks ({len(scored_unscored)} LLM-scored) ---")
-    for r, score in scored_unscored[:10]:
-        excerpt = r["text"][:80].replace("\n", " ")
-        print(f"  llm={score:3d} heur={r['heuristic_score']:.0f}  {excerpt!r}")
-
     # Verdict
-    v2_pos80 = [1 if r["human_score"] >= 80 else 0 for r in v2_rows]
-    v2_heur = [r["heuristic_score"] for r in v2_rows]
-    v2_llm = [float(all_llm_scores.get(r["block_id"], 0)) for r in v2_rows]
+    v2_rows_eval = [r for r in v2_rows if r["block_id"] in all_llm_scores] if args.clean_only else v2_rows
+    v2_pos80 = [1 if r["human_score"] >= 80 else 0 for r in v2_rows_eval]
+    v2_heur  = [r["heuristic_score"] for r in v2_rows_eval]
+    v2_llm   = [float(all_llm_scores.get(r["block_id"], 0)) for r in v2_rows_eval]
     heur_auc2 = _roc_auc(v2_heur, v2_pos80)
-    llm_auc2 = _roc_auc(v2_llm, v2_pos80)
+    llm_auc2  = _roc_auc(v2_llm,  v2_pos80)
 
     print(f"\n--- Verdict (Variant 2 ROC AUC, human>=80 vs all negatives) ---")
     if llm_auc2 > 0.75 and llm_auc2 > heur_auc2 + 0.10:
