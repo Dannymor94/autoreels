@@ -1308,7 +1308,7 @@ def test_r0_output_parsing_survives_lower_max_tokens():
     from autoreels.cloud.select import parse_segments
 
     live_path = os.path.join(
-        os.path.dirname(__file__), "..", "data", "runs", "r0_live_response.json"
+        os.path.dirname(__file__), "fixtures", "r0_live_response.json"
     )
     with open(live_path) as f:
         raw_obj = json.load(f)

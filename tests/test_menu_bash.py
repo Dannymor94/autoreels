@@ -32,6 +32,7 @@ def _run_menu(keys: str) -> subprocess.CompletedProcess:
 
 # -------------------- фолбэк CLI: прямой autoreels сломан → python -m autoreels
 
+@pytest.mark.integration  # requires .venv/bin/python → python with autoreels installed; fails when python→python3.9
 def test_ar_cli_falls_back_to_module_when_direct_broken(tmp_path):
     """Прямой `autoreels` не запускается (как на Windows Py3.14) → зовём python -m autoreels.
 
@@ -102,6 +103,7 @@ def test_arl_works_from_any_directory(tmp_path):
     assert "CLI:status" in r.stdout, (r.stdout, r.stderr)
 
 
+@pytest.mark.integration  # requires .venv/bin/python → python with autoreels installed; fails when python→python3.9
 def test_ar_menu_works_via_module_fallback(tmp_path):
     """Меню целиком работает через python -m, когда прямой autoreels сломан."""
     fake = tmp_path / "autoreels"
