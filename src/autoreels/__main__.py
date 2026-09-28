@@ -1048,6 +1048,13 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     seg_gate = reel.segments[-1].end
                 else:
                     seg_gate = min(reel.r0_end, reel.end) if reel.r0_end is not None else reel.end
+                # Human reels: cap at existing last subtitle's t1 so _stage_subtitles cannot
+                # pull transcript words beyond what the reviewer labelled. Without this cap,
+                # seg_gate = last_seg.end (includes trailing air), and smap effective_end can
+                # admit the first words of the next phrase that fall inside the segment window.
+                _existing_subs = reel.subtitles
+                if _existing_subs and getattr(reel, "reason", "") == "human review":
+                    seg_gate = min(seg_gate, _existing_subs[-1].t1)
                 anchor = None
                 for w in transcript.words:
                     if reel.start <= w.t0 < seg_gate:

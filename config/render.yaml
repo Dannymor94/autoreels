@@ -157,7 +157,7 @@ hashtags_always: []
 hashtags_max: 0
 
 # M1.8: energy-based speech map — off by default (Stage A). Stage B consumers behind this flag.
-speech_map: true
+speech_map: false
 # M1.8 speech map parameters. These feed the cache key; changing any param rebuilds the map.
 # cut_pause_min_sec: consumer threshold only (does not affect stored map). Regression #568: 0.29s
 # gap from voiceless stop closure must be below this threshold so it is never treated as a cut.
