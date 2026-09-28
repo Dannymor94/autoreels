@@ -74,8 +74,8 @@ def test_repair_end_backs_off_when_no_extension():
 # explicit e: → not moved, open_thought + warning
 # ---------------------------------------------------------------------------
 
-def test_repair_end_explicit_e_not_moved_sets_open_thought():
-    """Explicit e: on incomplete sentence: end stays, open_thought=True, warning added."""
+def test_repair_end_explicit_e_stump_sets_gate_not_open_thought():
+    """Explicit e: with prev complete sentence: gate set before stump, no open_thought."""
     words = [
         _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
         _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
@@ -83,9 +83,9 @@ def test_repair_end_explicit_e_not_moved_sets_open_thought():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
-    assert r.end == pytest.approx(3.0)      # not moved
-    assert r.open_thought is True
-    assert any("incomplete" in w for w in r.warnings)
+    assert r.end == pytest.approx(3.0)           # not moved
+    assert r.subtitle_gate == pytest.approx(2.1) # gate before stump
+    assert not r.open_thought
 
 
 # ---------------------------------------------------------------------------
@@ -310,3 +310,64 @@ def test_repair_smap_fallback_when_word_not_in_smap():
     assert r.end_snap_reason == "repaired_to_sentence"
     # Falls back to Whisper t1 + 0.35
     assert r.end == pytest.approx(5.0 + 0.35)
+
+
+# ---------------------------------------------------------------------------
+# explicit e: genuine open_thought (no prev complete sentence)
+# ---------------------------------------------------------------------------
+
+def test_repair_explicit_e_no_prev_complete_open_thought():
+    """Explicit e: with NO previous complete sentence → open_thought=True."""
+    words = [
+        _w(1.0, 1.5, "потому"), _w(1.6, 2.0, "что"),
+    ]
+    repair = _get_repair()
+    r = _reel(1.0, 2.0)
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
+    assert r.open_thought is True
+    assert any("incomplete" in w for w in r.warnings)
+    assert r.subtitle_gate is None
+
+
+# ---------------------------------------------------------------------------
+# _check_last_subtitle_word stump detection
+# ---------------------------------------------------------------------------
+
+def _get_check():
+    import autoreels.__main__ as m
+    return m._check_last_subtitle_word
+
+
+def _reel_with_subs(start, end, gate, last_sub_t0, last_sub_word):
+    from autoreels.core.models import Word
+    r = _reel(start, end)
+    r.subtitle_gate = gate
+    r.subtitles = [Word(word=last_sub_word, t0=last_sub_t0, t1=last_sub_t0 + 0.3)]
+    return r
+
+
+def test_check_stump_fires():
+    """Stump word after expected_last within gate raises [CONTENT]."""
+    # Sentence: "думаю." at t0=1.6 (expected_last)
+    # Stump: "потому" at t0=2.1
+    # gate=3.0 (reel.end — repair not yet run), stump.t0=2.1 < gate
+    tx_words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
+    ]
+    r = _reel_with_subs(1.0, 3.0, gate=3.0, last_sub_t0=1.6, last_sub_word="думаю.")
+    check = _get_check()
+    with pytest.raises(ValueError, match=r"\[CONTENT\].*stump"):
+        check(r, tx_words)
+
+
+def test_check_no_stump_when_gate_before_stump():
+    """After repair (gate = stump.t0), stump excluded from span → check passes."""
+    tx_words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
+    ]
+    # gate = stump.t0 = 2.1 → stump word has t0=2.1, condition t0 < 2.1 is False
+    r = _reel_with_subs(1.0, 3.0, gate=2.1, last_sub_t0=1.6, last_sub_word="думаю.")
+    check = _get_check()
+    check(r, tx_words)  # must not raise

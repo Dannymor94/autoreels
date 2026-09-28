@@ -760,6 +760,14 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     last4 = " ".join(w.word for w in last_sent[-4:])
 
     if explicit_e:
+        # Find the last complete sentence; if one exists, gate before all trailing fragments.
+        last_complete_idx = next(
+            (len(sents) - 1 - i for i, s in enumerate(reversed(sents)) if is_complete_sentence(s)),
+            None,
+        )
+        if last_complete_idx is not None:
+            reel.subtitle_gate = sents[last_complete_idx + 1][0].t0
+            return
         reel.open_thought = True
         reel.warnings.append(f"e: ends on incomplete sentence ('{last4}')")
         return
@@ -862,6 +870,13 @@ def _check_last_subtitle_word(reel, tx_words) -> None:
     expected_last = complete_sents[-1][-1]
     actual_last = reel.subtitles[-1]
     _eps = 0.05  # tolerance for smap ae-extension within the same word
+    # Stump check: gate span must end on a complete sentence; incomplete tail = leaked fragment
+    if sents and not _ics(sents[-1]):
+        raise ValueError(
+            f"[CONTENT] {reel.id}: stump after '{expected_last.word}' "
+            f"(t0={expected_last.t0:.3f}): "
+            f"'{sents[-1][0].word}'(t0={sents[-1][0].t0:.3f})"
+        )
     if actual_last.t0 > expected_last.t1 + _eps:
         raise ValueError(
             f"[CONTENT] {reel.id}: last subtitle '{actual_last.word}' (t0={actual_last.t0:.3f}) "
