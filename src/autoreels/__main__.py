@@ -4250,6 +4250,26 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = _stage_subtitles(reels, transcript, smap=_blk_smap)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
 
+    # Warn when the last subtitle word is not the last transcript word before r0_end.
+    # A word excluded by the audible_end criterion drops silently; this surfaces it.
+    if _blk_smap is not None:
+        for _reel in reels:
+            if not _reel.subtitles:
+                continue
+            _r0 = (min(_reel.r0_end, _reel.end) if _reel.r0_end is not None else _reel.end)
+            _last_tx = None
+            for _w in transcript.words:
+                if _reel.start <= _w.t0 < _r0:
+                    _last_tx = _w
+            if _last_tx is not None and _last_tx.word != _reel.subtitles[-1].word:
+                _msg = (
+                    f"last subtitle word {_reel.subtitles[-1].word!r} (t0={_reel.subtitles[-1].t0:.3f}s) "
+                    f"!= last transcript word before r0_end {_last_tx.word!r} (t0={_last_tx.t0:.3f}s, "
+                    f"r0_end={_r0:.3f}s) — word was excluded by audible_end"
+                )
+                _reel.warnings.append(_msg)
+                print(f"  warning ({_reel.id}): {_msg}", file=sys.stderr)
+
     # M1.7 step 2: resolve k: sentence-keyword specs to word.emph flags.
     # Runs after _stage_subtitles so reel.subtitles is populated.
     for reel in reels:

@@ -1723,7 +1723,20 @@ def _render_segments(
                     _word_end = _new_end  # for fade computation downstream
                     if len(segs) > 1:
                         _new_end = round(_new_end * _fps()) / _fps()
-                    if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
+                    if _new_end < segs[-1].start:
+                        # Invariant violation: tail lands before last segment's start.
+                        # Applying it would produce a negative-duration segment.
+                        # Last subtitle word is in an earlier segment (not segs[-1]).
+                        # Do not modify segs — the labelled last segment is preserved.
+                        print(
+                            f"  [ERROR] {reel.id}: smap tail {_new_end:.3f}s lands before "
+                            f"segs[-1].start {segs[-1].start:.3f}s "
+                            f"(last subtitle '{_last.word}' t0={_last.t0:.3f}s not in last segment "
+                            f"{segs[-1].start:.3f}–{segs[-1].end:.3f}s); "
+                            f"tail adjustment skipped — last segment content is preserved",
+                            flush=True,
+                        )
+                    elif abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
                         segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                         clip_dur = sum(s.end - s.start for s in segs)
             else:

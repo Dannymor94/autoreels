@@ -2249,3 +2249,107 @@ def test_probe_source_fps_unparseable_uses_fallback(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "warning" in captured.err
     assert "fallback" in captured.err
+
+
+# ---- smap tail invariant: tail must not land before last segment's start ----
+
+def _smap_for_tail(last_t0: float, last_t1: float, next_speech_t0: float = 999.0) -> dict:
+    """Minimal valid smap (version 4) with a large pause after last_t0 → silence tail case."""
+    return {
+        "version": "4",
+        "words": [
+            {"t0": last_t0, "t1": last_t1,
+             "audible_start": last_t0, "audible_end": last_t0 + 0.4},
+            {"t0": next_speech_t0, "t1": next_speech_t0 + 0.3,
+             "audible_start": next_speech_t0, "audible_end": next_speech_t0 + 0.25},
+        ],
+        "boundaries": [
+            # boundary after last word: large pause → silence case in _tail_from_smap
+            {"pause": 2.0, "untranscribed_speech": False},
+            {"pause": 0.0, "untranscribed_speech": False},
+        ],
+        "intervals": [],
+    }
+
+
+def test_smap_tail_before_last_segment_start_logs_error_and_keeps_segs(
+        tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Invariant: smap tail must not land before segs[-1].start.
+
+    Regression: PXL_20260729 r02 — speed=1.15, 4 segments, last subtitle in seg[2],
+    _tail_from_smap returned a value before seg[3].start → negative -t for in#3.
+
+    Expected: [ERROR] logged, segs unchanged (no negative-duration segment), no crash.
+    """
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"multi-seg-speed-tail-video")
+
+    # Two segments with a gap. Last subtitle word is in seg[0] (t0=10.0 < 10.8 = seg[0].end).
+    # seg[1] starts at 13.0 — well after the speech tail (~10.5s).
+    seg0 = Segment(start=5.0, end=10.8)
+    seg1 = Segment(start=13.0, end=20.0)
+
+    reel = _reel("r01", 5.0, 20.0)
+    reel.segments = [seg0, seg1]
+    reel.speed = 1.15
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.5)]
+
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    # smap: large pause after last word → _tail_from_smap returns ~10.5s (inside seg[0])
+    # next speech far away (999s) → silence case
+    smap = _smap_for_tail(last_t0=10.0, last_t1=10.5, next_speech_t0=25.0)
+
+    render_cfg = render_cfg.model_copy(update={"speech_map": True})
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, smap=smap)
+
+    captured = capsys.readouterr()
+    assert "[ERROR]" in captured.out, "expected [ERROR] message about tail before last segment"
+    assert "r01" in captured.out
+    assert "13.0" in captured.out or "13.00" in captured.out, "segs[-1].start must appear in error"
+
+    # ffmpeg was still called (render proceeded) and no -t is negative
+    assert len(fake_ffmpeg) >= 1
+    cmd = fake_ffmpeg[0]
+    i_indices = [i for i, tok in enumerate(cmd) if tok == "-i"]
+    for i_idx in i_indices:
+        # find -t immediately before this -i (input-side -t)
+        t_idx = next((j for j in range(i_idx - 1, -1, -1) if cmd[j] == "-t"), None)
+        if t_idx is not None:
+            dur = float(cmd[t_idx + 1])
+            assert dur >= 0, f"negative -t {dur} at position {t_idx} for input at {i_idx}"
+
+
+def test_smap_tail_within_last_segment_is_applied(tmp_path, render_cfg, fake_ffmpeg):
+    """When tail lands inside segs[-1], the segment end is trimmed normally (no error)."""
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"tail-within-seg-video")
+
+    # One segment; last subtitle at 28.0, tail ~28.5 < seg.end=40.0.
+    seg = Segment(start=20.0, end=40.0)
+    reel = _reel("r01", 20.0, 40.0)
+    reel.segments = [seg]
+    reel.subtitles = [Word(word="ok", t0=28.0, t1=28.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    smap = _smap_for_tail(last_t0=28.0, last_t1=28.4, next_speech_t0=999.0)
+    render_cfg = render_cfg.model_copy(update={"speech_map": True})
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, smap=smap)
+
+    # No error — tail stays within the one segment
+    assert len(fake_ffmpeg) >= 1
+    cmd = fake_ffmpeg[0]
+    # output-side -t (after the last -i) should be ~8.5s (28.5 - 20.0), not 20.0 (original)
+    i_indices = [i for i, tok in enumerate(cmd) if tok == "-i"]
+    last_i = i_indices[-1]
+    t_after_i = next((cmd[j + 1] for j in range(last_i + 1, len(cmd)) if cmd[j] == "-t"), None)
+    if t_after_i is not None:
+        assert float(t_after_i) < 20.0, "segment end should have been trimmed by tail"
