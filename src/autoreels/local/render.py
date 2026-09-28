@@ -1776,7 +1776,8 @@ def _render_segments(
                 if _new_end is not None:
                     _word_end = _new_end  # for fade computation downstream
                     if len(segs) > 1:
-                        _new_end = round(_new_end * _fps()) / _fps()
+                        # floor, not round: smap new_end ≤ next onset; round can push past it
+                        _new_end = math.floor(_new_end * _fps()) / _fps()
                     if _new_end < segs[-1].start:
                         # Invariant violation: tail lands before last segment's start.
                         # _compute_word_end_out assumes word_end is within segs[-1]; if it is not,
