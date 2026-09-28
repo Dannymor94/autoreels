@@ -4282,10 +4282,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         seq_to_block[i] = b
 
     # Fingerprint check: refuse if the block set changed since the review was exported.
+    # Also capture the export fingerprint for dataset rows (same-fingerprint = clean negatives).
     _fp_m = _re.search(r"^#\s*fingerprint:\s*([0-9a-f]+)", review_content, _re.MULTILINE)
+    from autoreels.cloud.blocks import _block_fingerprint
+    _current_fp = _block_fingerprint(kept)
+    _export_fp: str | None = _fp_m.group(1) if _fp_m else _current_fp
     if _fp_m:
-        from autoreels.cloud.blocks import _block_fingerprint
-        _current_fp = _block_fingerprint(kept)
         if _fp_m.group(1) != _current_fp:
             _bc_m = _re.search(r"^#\s*blocks:\s*(\d+)", review_content, _re.MULTILINE)
             _stored_n = int(_bc_m.group(1)) if _bc_m else "?"
@@ -4587,7 +4589,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             continue
         _pos = len(reels)
         reels.append(reel)
-        dataset_rows.append(make_dataset_row(block, score, manifest_path.stem))
+        _constituent_ids = [active[s].id for s in g]
+        _constituent_durs = {active[s].id: round(active[s].duration, 3) for s in g}
+        dataset_rows.append(make_dataset_row(
+            block, score, manifest_path.stem,
+            block_ids=_constituent_ids,
+            block_durations=_constituent_durs,
+            segmentation_fingerprint=_export_fp,
+        ))
         # Accounting: record every scored line in this group; extra scored lines beyond the
         # anchor are a conflict (scored both standalone and inside a merge) — earliest wins.
         _scored_seqs = [s for s, _ in scored]

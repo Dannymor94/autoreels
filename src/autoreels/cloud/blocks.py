@@ -1137,18 +1137,31 @@ def resolve_merge_groups(
     return final, over
 
 
-def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str) -> dict:
+def make_dataset_row(
+    block: CandidateBlock,
+    human_score: int,
+    source_stem: str,
+    *,
+    block_ids: list[str] | None = None,
+    block_durations: dict[str, float] | None = None,
+    segmentation_fingerprint: str | None = None,
+) -> dict:
     """Build a dataset row for one reviewed block (both human and heuristic scores).
 
-    The dataset lets stage 3 correlation be measured once enough labels accumulate.
-    Human scores are appended, never overwritten.
+    block_ids: constituent block IDs (>1 for spliced/merged clips).
+    block_durations: each constituent block's own duration (not the merged total).
+    segmentation_fingerprint: _block_fingerprint(kept) at the time of review export —
+        used to verify the "unscored" negatives came from the same segmentation the human saw.
     """
     return {
         "source": source_stem,
         "block_id": block.id,
+        "block_ids": block_ids or [block.id],
         "start": block.start,
         "end": block.end,
         "duration": round(block.duration, 3),
+        "block_durations": block_durations or {block.id: round(block.duration, 3)},
+        "segmentation_fingerprint": segmentation_fingerprint,
         "text": block.text,
         "human_score": human_score,
         "heuristic_score": round(block.heuristic_score, 2),

@@ -67,7 +67,7 @@ def _precision_at_k(scores: list[float], labels: list[int], k: int) -> float:
 
 # ──────────────────────────────────────────────────── data loading
 
-def _load_dataset() -> list[dict]:
+def _load_dataset(clean_only: bool = False) -> list[dict]:
     rows = []
     for jsonl in sorted((REPO / "data" / "blocks_dataset").glob("*.jsonl")):
         for line in jsonl.open(encoding="utf-8"):
@@ -75,6 +75,8 @@ def _load_dataset() -> list[dict]:
             if line:
                 r = json.loads(line)
                 if r.get("human_score") is not None:
+                    if clean_only and r.get("legacy"):
+                        continue
                     rows.append(r)
     return rows
 
@@ -100,21 +102,57 @@ def _overlap_frac(s1: float, e1: float, s2: float, e2: float) -> float:
     return max(0.0, min(e1, e2) - max(s1, s2)) / dur
 
 
-def _load_unscored_blocks(dataset_rows: list[dict], transcripts: dict[str, list[dict]]) -> tuple[list[dict], int]:
+def _load_unscored_blocks(
+    dataset_rows: list[dict],
+    transcripts: dict[str, list[dict]],
+    *,
+    clean_only: bool = False,
+) -> tuple[list[dict], int]:
     ds_ids = {r["block_id"] for r in dataset_rows}
+    # For clean_only: also exclude any constituent block IDs (splice members)
+    if clean_only:
+        for r in dataset_rows:
+            ds_ids.update(r.get("block_ids") or [])
+
     scored_intervals: dict[str, list[tuple[float, float]]] = {}
     for r in dataset_rows:
         scored_intervals.setdefault(r["source"], []).append((r["start"], r["end"]))
 
+    # When clean_only: only use sources where we can verify the segmentation fingerprint.
+    # A source is "clean" when at least one non-legacy scored row has a fingerprint that
+    # matches the current blocks.json (i.e. the segmentation the human saw is unchanged).
+    if clean_only:
+        import hashlib as _hl
+        clean_sources: set[str] = set()
+        fp_by_source: dict[str, str | None] = {}
+        for r in dataset_rows:
+            if not r.get("legacy"):
+                fp_by_source[r["source"]] = r.get("segmentation_fingerprint")
+        for src, stored_fp in fp_by_source.items():
+            bfile = REPO / "manifests" / f"{src}.blocks.json"
+            if not bfile.exists() or stored_fp is None:
+                continue
+            bj = json.loads(bfile.read_text(encoding="utf-8"))
+            kept_ids = [b["id"] for b in sorted(bj, key=lambda x: x["start"])
+                        if b.get("verdict", "KEPT") == "KEPT"]
+            current_fp = _hl.sha1("|".join(kept_ids).encode()).hexdigest()[:16]
+            if current_fp == stored_fp:
+                clean_sources.add(src)
+        sources_iter = sorted(clean_sources)
+    else:
+        sources_iter = sorted(set(r["source"] for r in dataset_rows))
+
     unscored: list[dict] = []
     n_splice = 0
-    for src in sorted(set(r["source"] for r in dataset_rows)):
+    for src in sources_iter:
         bfile = REPO / "manifests" / f"{src}.blocks.json"
         if not bfile.exists():
             continue
         words = transcripts.get(src, [])
         for b in json.loads(bfile.read_text(encoding="utf-8")):
             if b["id"] in ds_ids:
+                continue
+            if b.get("verdict", "KEPT") != "KEPT":
                 continue
             bs, be = b.get("start", 0.0), b.get("end", 0.0)
             if max((_overlap_frac(bs, be, s, e) for s, e in scored_intervals.get(src, [])), default=0.0) > 0.5:
@@ -128,6 +166,8 @@ def _load_unscored_blocks(dataset_rows: list[dict], transcripts: dict[str, list[
                 "start": bs, "end": be, "duration": be - bs,
                 "text": text, "human_score": 0,
                 "heuristic_score": b.get("heuristic_score", 0.0), "features": {},
+                "segmentation_fingerprint": b.get("segmentation_fingerprint"),
+                "legacy": False,
             })
     return unscored, n_splice
 
@@ -329,13 +369,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--llm", action="store_true", help="run LLM scoring if no cache")
     ap.add_argument("--llm-cache", type=Path, default=LLM_CACHE_DEFAULT)
+    ap.add_argument("--clean-only", action="store_true",
+                    help="use only non-legacy rows and same-fingerprint unscored blocks")
     args = ap.parse_args()
 
     # ── load V2 dataset
     print("Loading dataset...", flush=True)
-    scored = _load_dataset()
+    scored = _load_dataset(clean_only=args.clean_only)
     transcripts = _load_transcripts()
-    unscored, n_splice = _load_unscored_blocks(scored, transcripts)
+    unscored, n_splice = _load_unscored_blocks(scored, transcripts, clean_only=args.clean_only)
     rows = scored + unscored
     feats = [compute_features(r) for r in rows]
 
@@ -344,7 +386,18 @@ def main() -> None:
     labels_any = [1 if r["human_score"] > 0 else 0 for r in rows]
     n80 = sum(labels80)
 
-    print(f"  scored={len(scored)}, unscored={len(unscored)}, splice_excl={n_splice}, total={len(rows)}")
+    mode = "clean-only" if args.clean_only else "all"
+    print(f"  mode={mode}, scored={len(scored)}, unscored={len(unscored)}, splice_excl={n_splice}, total={len(rows)}")
+    print(f"  n per source:")
+    from collections import Counter
+    src_scored = Counter(r["source"] for r in scored)
+    src_unscored = Counter(r["source"] for r in unscored)
+    for src in sorted(set(src_scored) | set(src_unscored)):
+        sc = src_scored.get(src, 0)
+        un = src_unscored.get(src, 0)
+        legacy_n = sum(1 for r in scored if r["source"] == src and r.get("legacy"))
+        legacy_tag = f"  [{legacy_n} legacy]" if legacy_n else ""
+        print(f"    {src}: scored={sc}, unscored={un}{legacy_tag}")
 
     # ══════════════════════════════════════════════════════ PART 1: univariate AUC
 
