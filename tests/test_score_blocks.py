@@ -200,6 +200,74 @@ def test_fixture_response_parsing():
         assert 0 <= entry["score"] <= 100
 
 
+# ----------------------------------------------------------------- temperature forwarding
+
+def test_score_blocks_batch_forwards_temperature():
+    """temperature kwarg is forwarded to provider.complete()."""
+    blocks = [_block("a1")]
+    raw = '{"scores":[{"id":"a1","score":80}]}'
+    calls: list[float] = []
+
+    class _CapturingProvider:
+        def complete(self, messages, *, temperature=0.0):
+            calls.append(temperature)
+            return raw
+
+    score_blocks_batch(blocks, provider=_CapturingProvider(),
+                       system_text=_SYSTEM, fewshot_examples=[], temperature=0.3)
+    assert calls == [0.3]
+
+
+def test_score_all_blocks_temperature_forwarded():
+    """score_all_blocks passes temperature to every batch."""
+    blocks = [_block("a1"), _block("a2")]
+    raw = '{"scores":[{"id":"a1","score":70},{"id":"a2","score":80}]}'
+    temps: list[float] = []
+
+    class _CapturingProvider:
+        def complete(self, messages, *, temperature=0.0):
+            temps.append(temperature)
+            return raw
+
+    score_all_blocks(blocks, provider=_CapturingProvider(),
+                     system_text=_SYSTEM, fewshot_examples=[], temperature=0.0)
+    assert temps == [0.0]
+
+
+# ----------------------------------------------------------------- score_passes averaging
+
+def test_score_passes_2_averages_two_runs():
+    """score_passes=2: each block scored in two different orderings, result is the mean."""
+    blocks = [_block("a"), _block("b"), _block("c")]
+    # Pass 1 (time order [a,b,c]): a=80, b=60, c=70
+    # Pass 2 (reversed [c,b,a]): a=100, b=80, c=90  → mean: a=90, b=70, c=80
+    responses = [
+        '{"scores":[{"id":"a","score":80},{"id":"b","score":60},{"id":"c","score":70}]}',
+        '{"scores":[{"id":"c","score":90},{"id":"b","score":80},{"id":"a","score":100}]}',
+    ]
+    provider = _MockProvider(responses)
+    result = score_all_blocks(blocks, provider=provider, system_text=_SYSTEM,
+                              fewshot_examples=[], score_passes=2)
+    assert provider.calls == 2
+    assert result["a"] == 90   # round((80+100)/2)
+    assert result["b"] == 70   # round((60+80)/2)
+    assert result["c"] == 80   # round((70+90)/2)
+    assert blocks[0].llm_score == 90.0
+    assert blocks[1].llm_score == 70.0
+    assert blocks[2].llm_score == 80.0
+
+
+def test_score_passes_1_single_run():
+    """score_passes=1 (default): provider called once per batch, no averaging."""
+    blocks = [_block("x1"), _block("x2")]
+    raw = '{"scores":[{"id":"x1","score":75},{"id":"x2","score":65}]}'
+    provider = _MockProvider([raw])
+    score_all_blocks(blocks, provider=provider, system_text=_SYSTEM,
+                     fewshot_examples=[], score_passes=1)
+    assert provider.calls == 1
+    assert blocks[0].llm_score == 75.0
+
+
 # ----------------------------------------------------------------- heuristic does not prune before LLM
 
 def test_heuristic_does_not_prune_before_llm():

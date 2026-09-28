@@ -773,7 +773,8 @@ def _stage_select_blocks(compressed, *, r0_cfg, root, provider):
         fewshot_raw = json.loads((root / bs_cfg.score_prompts.fewshot).read_text(encoding="utf-8"))
         fewshot = fewshot_raw.get("examples", [])
         print(f"  LLM scoring {len(kept)} блоков…", flush=True)
-        score_all_blocks(kept, provider=provider, system_text=system_text, fewshot_examples=fewshot)
+        score_all_blocks(kept, provider=provider, system_text=system_text, fewshot_examples=fewshot,
+                         temperature=bs_cfg.score_temperature, score_passes=bs_cfg.score_passes)
         kept, topk_cut = topk_filter(kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk)
 
     reels = [

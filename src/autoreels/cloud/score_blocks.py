@@ -88,6 +88,7 @@ def score_blocks_batch(
     system_text: str,
     fewshot_examples: list[dict],
     max_output_tokens: int = SCORE_MAX_OUTPUT_TOKENS,
+    temperature: float = 0.0,
 ) -> dict[str, int]:
     """One LLM call for one batch. Returns {block_id: score}.
 
@@ -97,7 +98,7 @@ def score_blocks_batch(
 
     messages = build_score_messages(blocks, system_text=system_text, fewshot_examples=fewshot_examples)
     try:
-        raw = provider.complete(messages)
+        raw = provider.complete(messages, temperature=temperature)
     except (ProviderError, ProviderEmptyResponse, ProviderTimeout) as e:
         raise ValueError(f"provider error: {e}") from e
     entries = parse_score_response(raw)
@@ -112,22 +113,42 @@ def score_all_blocks(
     fewshot_examples: list[dict],
     batch_k: int = SCORE_BATCH_K,
     max_output_tokens: int = SCORE_MAX_OUTPUT_TOKENS,
+    temperature: float = 0.0,
+    score_passes: int = 1,
 ) -> dict[str, int]:
-    """Score all blocks in batches. Sets block.llm_score; returns merged {id: score}."""
-    all_scores: dict[str, int] = {}
-    for i in range(0, len(blocks), batch_k):
-        batch = blocks[i : i + batch_k]
-        try:
-            scores = score_blocks_batch(
-                batch,
-                provider=provider,
-                system_text=system_text,
-                fewshot_examples=fewshot_examples,
-                max_output_tokens=max_output_tokens,
-            )
-        except ValueError as e:
-            print(f"  ⚠ score_all_blocks batch {i // batch_k + 1} failed: {e}", flush=True)
-            continue
-        all_scores.update(scores)
+    """Score all blocks in batches. Sets block.llm_score; returns merged {id: score}.
+
+    score_passes=2: scores each block twice (different batch ordering) and sets llm_score
+    to the mean, reducing per-batch context noise. Uses 2× the token budget.
+    """
+    def _one_pass(ordered_blocks: list[CandidateBlock]) -> dict[str, int]:
+        pass_scores: dict[str, int] = {}
+        for i in range(0, len(ordered_blocks), batch_k):
+            batch = ordered_blocks[i : i + batch_k]
+            try:
+                scores = score_blocks_batch(
+                    batch,
+                    provider=provider,
+                    system_text=system_text,
+                    fewshot_examples=fewshot_examples,
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                )
+            except ValueError as e:
+                print(f"  ⚠ score_all_blocks batch {i // batch_k + 1} failed: {e}", flush=True)
+                continue
+            pass_scores.update(scores)
+        return pass_scores
+
+    all_scores = _one_pass(blocks)
+
+    if score_passes >= 2:
+        # Second pass with reversed order so each block gets different batch-mates.
+        scores2 = _one_pass(list(reversed(blocks)))
+        for bid, s1 in all_scores.items():
+            s2 = scores2.get(bid)
+            if s2 is not None:
+                all_scores[bid] = round((s1 + s2) / 2)
+
     apply_llm_scores(blocks, all_scores)
     return all_scores

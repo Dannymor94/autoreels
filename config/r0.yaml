@@ -227,6 +227,8 @@ block_scoring:
   sweet_spot_max: 60.0    # starts falling off; hits 0 at sweet_max + (sweet_max - sweet_min)
   top_k_per_chunk: 8      # keep this many blocks per time window
   chunk_window_sec: 300.0 # time window size for per-chunk top-K filtering (≈5 min)
+  score_temperature: 0.0  # 0 = greedy/deterministic; sent explicitly to the LLM
+  score_passes: 1         # 1 = single pass; 2 = score twice and average (reduces batching noise)
   contrarian_markers:
     - "на самом деле"
     - "наоборот"
