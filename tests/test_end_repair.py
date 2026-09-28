@@ -46,7 +46,7 @@ def test_repair_end_extends_to_next_complete_sentence():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False)
-    assert r.end == pytest.approx(4.8)
+    assert r.end == pytest.approx(4.8 + 0.35)
     assert r.end_snap_reason == "repaired_to_sentence"
     assert not r.open_thought
 
@@ -65,7 +65,7 @@ def test_repair_end_backs_off_when_no_extension():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False)
-    assert r.end == pytest.approx(2.0)
+    assert r.end == pytest.approx(2.0 + 0.35)
     assert r.end_snap_reason == "repaired_to_sentence"
     assert not r.open_thought
 
@@ -134,8 +134,8 @@ def test_repair_end_backs_off_when_sentence_straddles_window():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(max_end_search_sec=12.0), explicit_e=False)
-    # Should back off to sentence [1] (t1=2.0), not extend to sentence [3]
-    assert r.end == pytest.approx(2.0)
+    # Should back off to sentence [1] (t1=2.0 + pad), not extend to sentence [3]
+    assert r.end == pytest.approx(2.0 + 0.35)
     assert r.end_snap_reason == "repaired_to_sentence"
     assert not r.open_thought
 
@@ -154,8 +154,8 @@ def test_repair_end_backs_off_when_extension_too_long():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(max_end_search_sec=12.0, end_repair_max_extend_sec=6.0), explicit_e=False)
-    # Extension would be 9.5-3.0=6.5 > 6.0 → back off to sentence [1]
-    assert r.end == pytest.approx(2.0)
+    # Extension would be 9.5-3.0=6.5 > 6.0 → back off to sentence [1] (t1=2.0 + pad)
+    assert r.end == pytest.approx(2.0 + 0.35)
     assert not r.open_thought
 
 
@@ -169,7 +169,7 @@ def test_repair_end_extends_when_within_limit():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(max_end_search_sec=12.0, end_repair_max_extend_sec=6.0), explicit_e=False)
-    assert r.end == pytest.approx(8.9)
+    assert r.end == pytest.approx(8.9 + 0.35)
     assert not r.open_thought
 
 
@@ -187,7 +187,7 @@ def test_repair_end_subtitle_gate_is_next_word_t0():
     repair = _get_repair()
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False)
-    assert r.end == pytest.approx(5.5)       # reel.end = t1 of chosen last word
+    assert r.end == pytest.approx(5.5 + 0.35)   # reel.end = t1 of chosen last word + pad
     # subtitle_gate should be next_word.t0 = 5.4, NOT 5.5
     assert r.subtitle_gate == pytest.approx(5.4)
 

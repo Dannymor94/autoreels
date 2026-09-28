@@ -727,6 +727,13 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
     sidecar.write_text(json.dumps(discarded, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# Slack added to reel.end after end repair so the smap acoustic-end filter
+# (ae <= effective_end in _stage_subtitles) doesn't exclude the chosen last word.
+# = _EFFECTIVE_END_SLACK(0.25) + _TAIL_PAD(0.10) from render.py — covers typical
+# acoustic residue past Whisper t1 plus the tail-pad that _tail_from_smap adds.
+_REPAIR_END_PAD = 0.35
+
+
 def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool) -> None:
     """In-place: ensure reel.end falls on a complete sentence.
 
@@ -746,7 +753,8 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
         return
 
     last_sent = sents[-1]
-    if is_complete_sentence(last_sent):
+    _complete = is_complete_sentence(last_sent)
+    if _complete:
         return  # already complete — nothing to do
 
     last4 = " ".join(w.word for w in last_sent[-4:])
@@ -777,14 +785,33 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
                 reel.subtitle_gate = tx_words[chosen_idx + 1].t0
             else:
                 reel.subtitle_gate = s[-1].t1
-            reel.end = s[-1].t1
+            reel.end = s[-1].t1 + _REPAIR_END_PAD
+            # Also extend the last segment so _stage_subtitles (gated by segments[-1].end)
+            # reaches the new end.
+            if reel.segments:
+                reel.segments = (
+                    reel.segments[:-1]
+                    + [reel.segments[-1].model_copy(update={"end": reel.end})]
+                )
             reel.end_snap_reason = "repaired_to_sentence"
             return
 
     # Back off: last complete sentence in the current span
     for s in reversed(sents[:-1]):
         if is_complete_sentence(s):
-            reel.end = s[-1].t1
+            # Set subtitle_gate to prevent the next (incomplete) sentence from leaking
+            # into subtitles when reel.end is padded past s[-1].t1.
+            chosen_idx = next((i for i, w in enumerate(tx_words) if w is s[-1]), None)
+            if chosen_idx is not None and chosen_idx + 1 < len(tx_words):
+                reel.subtitle_gate = tx_words[chosen_idx + 1].t0
+            else:
+                reel.subtitle_gate = s[-1].t1
+            reel.end = s[-1].t1 + _REPAIR_END_PAD
+            if reel.segments:
+                reel.segments = (
+                    reel.segments[:-1]
+                    + [reel.segments[-1].model_copy(update={"end": reel.end})]
+                )
             reel.end_snap_reason = "repaired_to_sentence"
             return
 
@@ -806,10 +833,14 @@ def _check_last_subtitle_word(reel, tx_words) -> None:
     if _gate is None:
         return
     from autoreels.cloud.edit import split_sentences, words_in_span
+    from autoreels.cloud.snap import is_complete_sentence as _ics
     sents = split_sentences(words_in_span(tx_words, reel.start, _gate))
-    if not sents:
+    # Use the last COMPLETE sentence as the reference; gate may include incomplete trailing words
+    # when subtitle_gate was set to next_word.t0 (to prevent Whisper-overlap contamination).
+    complete_sents = [s for s in sents if _ics(s)]
+    if not complete_sents:
         return
-    expected_last = sents[-1][-1]
+    expected_last = complete_sents[-1][-1]
     actual_last = reel.subtitles[-1]
     _eps = 0.05  # tolerance for smap ae-extension within the same word
     if actual_last.t0 > expected_last.t1 + _eps:
@@ -819,6 +850,12 @@ def _check_last_subtitle_word(reel, tx_words) -> None:
             f"(t1={expected_last.t1:.3f})"
         )
     if actual_last.t0 < expected_last.t0 - _eps:
+        # Whisper overlap artifact: expected_last.t1 > reel.end means Whisper placed the
+        # word's end beyond the clip boundary (next word starts before t1 of this one).
+        # The subtitle filter (t1 <= reel.end / ae <= effective_end) correctly excludes it.
+        # Not a content error — the word is audible but can't appear in subtitles.
+        if expected_last.t1 > reel.end + _eps:
+            return
         raise ValueError(
             f"[CONTENT] {reel.id}: last word of final sentence '{expected_last.word}' "
             f"(t0={expected_last.t0:.3f}) is missing from subtitles; "
@@ -1168,7 +1205,11 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                         anchor.t0, reel.end, smap, _lookup, last_t1=anchor.t1,
                     )
                     if tail is not None:
-                        effective_end = tail if tail <= reel.end + _EFFECTIVE_END_SLACK else reel.end
+                        # When apply_padding's Whisper-overlap guard clamps reel.end below
+                        # anchor.t1, use anchor.t1 as the reference so the anchor's own
+                        # acoustic tail (ae just past anchor.t1) is not spuriously excluded.
+                        _eff_ref = max(reel.end, anchor.t1)
+                        effective_end = tail if tail <= _eff_ref + _EFFECTIVE_END_SLACK else reel.end
                     else:
                         effective_end = reel.end
                 else:
