@@ -133,6 +133,8 @@ class BlockScoringConfig(BaseModel):
     # Pre-LLM terminal-punct gate (stage 4, auto path only)
     pre_filter_no_terminal: bool = False           # enable ends-with-.?!… gate before LLM scoring
     pre_filter_density_guard: float = 0.75         # gate inactive when source punct density < this
+    # Stage-4 LLM scoring prompts (None = heuristic-only, no LLM scoring call)
+    score_prompts: PromptPaths | None = None
 
     contrarian_markers: list[str] = Field(default_factory=lambda: [
         "на самом деле", "наоборот", "а вот и нет", "что интересно",
@@ -273,6 +275,7 @@ class R0Config(BaseModel):
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     blocks_filter: BlocksFilterConfig = Field(default_factory=BlocksFilterConfig)
     block_scoring: BlockScoringConfig = Field(default_factory=BlockScoringConfig)
+    use_block_scoring: bool = False  # M1.6 auto path: blocks+LLM instead of R0 (off = R0 as before)
     manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
     beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
     speed: float = 1.0                       # default playback speed for all clips

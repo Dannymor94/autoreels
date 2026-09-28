@@ -1552,3 +1552,38 @@ def test_beats_grammar_exported_in_compact_prompt():
     """_COMPACT_PROMPT documents the > syntax."""
     from autoreels.cloud.blocks import _COMPACT_PROMPT
     assert ">" in _COMPACT_PROMPT
+
+
+def test_topk_prefers_llm_score_over_heuristic():
+    """topk_filter ranks by llm_score when set, ignoring heuristic_score."""
+    from autoreels.cloud.blocks import CandidateBlock, _Line, topk_filter
+    def _b(bid, start, heuristic, llm=None):
+        b = CandidateBlock(id=bid, start=start, end=start + 20, duration=20,
+                           text="текст.", boundary_reason="sentence")
+        b.heuristic_score = heuristic
+        b.llm_score = llm
+        return b
+
+    # Block A: low heuristic but high LLM; Block B: high heuristic but low LLM
+    a = _b("aaa", 0.0, heuristic=10.0, llm=90.0)
+    b = _b("bbb", 25.0, heuristic=80.0, llm=20.0)
+    kept, cut = topk_filter([a, b], chunk_window_sec=300.0, top_k=1)
+    assert len(kept) == 1
+    assert kept[0].id == "aaa", "LLM score should win over heuristic"
+    assert cut[0].id == "bbb"
+
+
+def test_topk_falls_back_to_heuristic_when_no_llm():
+    """Without llm_score, topk_filter uses heuristic_score as before."""
+    from autoreels.cloud.blocks import CandidateBlock, topk_filter
+    def _b(bid, start, heuristic):
+        b = CandidateBlock(id=bid, start=start, end=start + 20, duration=20,
+                           text="текст.", boundary_reason="sentence")
+        b.heuristic_score = heuristic
+        return b
+
+    hi = _b("hi", 0.0, heuristic=80.0)
+    lo = _b("lo", 25.0, heuristic=10.0)
+    kept, cut = topk_filter([hi, lo], chunk_window_sec=300.0, top_k=1)
+    assert kept[0].id == "hi"
+    assert cut[0].id == "lo"

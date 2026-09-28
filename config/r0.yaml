@@ -196,9 +196,13 @@ blocks_filter:
     - "рад вас видеть"
     - "давайте начнём"
 
-# M1.6 stage 3: heuristic pre-scoring. Weights are tunable; final model verdict still wins.
-# A filter that buries a good block is worse than one that lets junk through — tune conservatively.
+# M1.6 stage 3+4: heuristic pre-scoring + optional LLM scoring.
+# score_prompts: set to enable stage-4 LLM scoring; leave absent for heuristic-only.
+# pre_filter_no_terminal: gate blocks without terminal punct (activates only when source density ≥ 0.75).
 block_scoring:
+  score_prompts:
+    system: prompts/score_system.md
+    fewshot: prompts/score_fewshot.json
   w_duration: 20.0        # bell-curve peak inside sweet_spot_min..sweet_spot_max
   w_ends_sentence: 10.0   # block ends on terminal punctuation
   w_opens_sentence: 10.0  # first word is not a dangling opener
@@ -277,6 +281,10 @@ block_scoring:
     - "эта"
     - "эти"
     - "этим"
+
+# M1.6 auto path: set true to use blocks+LLM scoring instead of R0.
+# Off by default — R0 unchanged. Gate and LLM scoring activate per block_scoring settings below.
+use_block_scoring: false
 
 # Пути к рантайм-промптам R0 (не хардкод в коде — берутся отсюда).
 prompts:

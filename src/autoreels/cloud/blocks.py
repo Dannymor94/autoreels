@@ -560,7 +560,7 @@ def topk_filter(
     kept: list[CandidateBlock] = []
     cut: list[CandidateBlock] = []
     for blks in windows.values():
-        ranked = sorted(blks, key=lambda b: b.heuristic_score, reverse=True)
+        ranked = sorted(blks, key=lambda b: b.llm_score if b.llm_score is not None else b.heuristic_score, reverse=True)
         kept.extend(ranked[:top_k])
         cut.extend(ranked[top_k:])
 

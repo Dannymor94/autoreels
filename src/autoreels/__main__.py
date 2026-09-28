@@ -713,6 +713,98 @@ def _stage_select(compressed, *, r0_cfg, root, provider=None):
     return reels, dedup_disc, failed_chunks
 
 
+def _stage_select_blocks(compressed, *, r0_cfg, root, provider):
+    """M1.6 auto path: candidate blocks → filter → gate → LLM score → top-K → Reels.
+
+    Returns (reels, discarded, []) matching the _stage_select signature.
+    Requires r0_cfg.block_scoring.score_prompts to be set for LLM scoring;
+    without it the stage falls back to heuristic-only ranking.
+    """
+    from autoreels.cloud.blocks import candidate_blocks, filter_blocks, score_block, topk_filter
+    from autoreels.cloud.score_blocks import filter_no_terminal, score_all_blocks
+    from autoreels.cloud.select import _extract_prompt_body
+    from autoreels.core.models import Reel
+
+    root = Path(root) if root is not None else _project_root()
+    bs_cfg = r0_cfg.block_scoring
+    bf = r0_cfg.blocks_filter
+
+    all_blocks = candidate_blocks(
+        compressed,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
+        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+        block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
+    )
+    if not all_blocks:
+        return [], [], []
+
+    total_duration = all_blocks[-1].end
+    kept, dropped_blks = filter_blocks(
+        all_blocks,
+        total_duration=total_duration,
+        head_skip_sec=bf.head_skip_sec,
+        tail_skip_sec=bf.tail_skip_sec,
+        speech_density_min=bf.speech_density_min,
+        repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
+        artefact_markers=bf.artefact_markers,
+        promo_keywords=bf.promo_keywords,
+        signoff_phrases=bf.signoff_phrases,
+        host_affirmations=[],
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
+    )
+
+    for b in kept:
+        b.heuristic_score, b.score_breakdown = score_block(b, bs_cfg)
+
+    gated_out: list = []
+    if bs_cfg.pre_filter_no_terminal:
+        kept, gated_out = filter_no_terminal(kept, density_guard=bs_cfg.pre_filter_density_guard)
+        if gated_out:
+            print(f"  ends_terminal gate: снято {len(gated_out)} блоков", flush=True)
+
+    # Stage 3: heuristic top-K per window (narrows before LLM call)
+    kept, topk_cut = topk_filter(kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk)
+
+    # Stage 4: LLM scoring
+    if bs_cfg.score_prompts and kept:
+        system_text = _extract_prompt_body((root / bs_cfg.score_prompts.system).read_text(encoding="utf-8"))
+        fewshot_raw = json.loads((root / bs_cfg.score_prompts.fewshot).read_text(encoding="utf-8"))
+        fewshot = fewshot_raw.get("examples", [])
+        print(f"  LLM scoring {len(kept)} блоков…", flush=True)
+        score_all_blocks(kept, provider=provider, system_text=system_text, fewshot_examples=fewshot)
+        # Re-rank per window by LLM score (topk_filter now prefers llm_score)
+        kept, llm_cut = topk_filter(kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk)
+        topk_cut += llm_cut
+
+    reels = [
+        Reel(
+            id=b.id,
+            start=b.start,
+            end=b.end,
+            score=max(0, min(100, int(b.llm_score if b.llm_score is not None else b.heuristic_score))),
+            hook=b.text.split(".")[0][:300].strip() or b.text[:100],
+            title="",
+            description="",
+            reason="block_scoring",
+        )
+        for b in kept
+    ]
+    for r in reels:
+        r.r0_start, r.r0_end = r.start, r.end
+
+    discarded: list[dict] = [
+        {"id": b.id, "start": b.start, "end": b.end, "reason": reason}
+        for b, reason in dropped_blks
+    ]
+    discarded += [{"id": b.id, "start": b.start, "end": b.end, "reason": "gate_no_terminal"} for b in gated_out]
+    discarded += [{"id": b.id, "start": b.start, "end": b.end, "reason": "topk_cut"} for b in topk_cut]
+
+    print(f"  блок-отбор: всего={len(all_blocks)}, после фильтра={len(reels)}, снято={len(discarded)}", flush=True)
+    return reels, discarded, []
+
+
 def _write_failed_chunks(failed_chunks: list[dict], manifest_path: Path) -> None:
     if not failed_chunks:
         return
@@ -2537,10 +2629,14 @@ def _cmd_run_impl(
     print(f"транскрипт для контента → {tx_path}", flush=True)
     compressed = _stage_compress(transcript, r0_cfg=r0_cfg)
     memtrace.mark("after compress")
-    reels, dedup_disc, failed_chunks = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
-    memtrace.mark("after select (R0)")
-    for r in reels:                        # сохранить R0-границы ДО snap → для resnap без LLM
-        r.r0_start, r.r0_end = r.start, r.end
+    if getattr(r0_cfg, "use_block_scoring", False):
+        reels, dedup_disc, failed_chunks = _stage_select_blocks(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+        memtrace.mark("after select (blocks)")
+    else:
+        reels, dedup_disc, failed_chunks = _stage_select(compressed, r0_cfg=r0_cfg, root=root, provider=provider)
+        memtrace.mark("after select (R0)")
+        for r in reels:                    # сохранить R0-границы ДО snap → для resnap без LLM
+            r.r0_start, r.r0_end = r.start, r.end
     tx_words = getattr(transcript, "words", [])
     # M1.8 Stage B: load smap once before snap (consumer 4) and two_shot_auto (consumer 3).
     _run_smap: "dict | None" = None
