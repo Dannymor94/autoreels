@@ -1052,15 +1052,12 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                 for w in transcript.words:
                     if reel.start <= w.t0 < seg_gate:
                         anchor = w
-                # effective_end: smap tail from anchor, capped to reel.end.
-                # Cap: residue attribution can push tail past reel.end (next-sentence word at
-                # the boundary attributed to last-word residue). Clamping prevents including
-                # words whose audible_end falls beyond the clip boundary.
+                # effective_end: smap tail from anchor (includes audible residue after anchor)
                 if anchor is not None:
                     tail = _tail_from_smap(
                         anchor.t0, reel.end, smap, _lookup, last_t1=anchor.t1,
                     )
-                    effective_end = min(tail, reel.end) if tail is not None else reel.end
+                    effective_end = tail if tail is not None else reel.end
                 else:
                     effective_end = reel.end
                 reel.subtitles = [
