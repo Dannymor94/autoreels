@@ -1724,15 +1724,7 @@ def _render_segments(
                     if len(segs) > 1:
                         _new_end = round(_new_end * _fps()) / _fps()
                     if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
-                        # Find the last segment that starts at or before _new_end.
-                        # If _new_end < segs[-1].start (tail lands in an earlier segment),
-                        # drop the trailing segments that start after _new_end.
-                        last_i = len(segs) - 1
-                        while last_i > 0 and segs[last_i].start > _new_end:
-                            last_i -= 1
-                        segs = list(segs[:last_i]) + [segs[last_i].model_copy(
-                            update={"end": min(_new_end, segs[last_i].end)}
-                        )]
+                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                         clip_dur = sum(s.end - s.start for s in segs)
             else:
                 _nw_start = getattr(reel, "tail_next_word_start", None)
