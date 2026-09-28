@@ -734,7 +734,7 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
 _REPAIR_END_PAD = 0.35
 
 
-def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool) -> None:
+def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool, smap=None) -> None:
     """In-place: ensure reel.end falls on a complete sentence.
 
     No explicit e:: extend to the next complete sentence within the search window (at most
@@ -742,8 +742,8 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     nothing fits; if neither found, set open_thought=True.
     Explicit e:: never moved; if incomplete, set open_thought=True and add a manifest warning.
 
-    Sets reel.subtitle_gate to next_word.t0 when extending, so that Whisper-timestamp overlaps
-    don't pull the next sentence's words into the subtitle list.
+    With smap: reel.end = acoustic tail of chosen last word (_tail_from_smap); subtitle_gate =
+    audible_start of next word. Without smap: reel.end = Whisper t1 + _REPAIR_END_PAD.
     """
     from autoreels.cloud.edit import split_sentences, words_in_span
     from autoreels.cloud.snap import is_complete_sentence
@@ -764,6 +764,39 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
         reel.warnings.append(f"e: ends on incomplete sentence ('{last4}')")
         return
 
+    # Prepare smap lookup once (used in both extension and back-off paths).
+    _smap_lookup = None
+    if smap is not None:
+        from autoreels.local.render import _smap_word_lookup
+        _smap_lookup = _smap_word_lookup(smap)
+
+    def _set_end_and_gate(s):
+        """Set reel.end and subtitle_gate from chosen sentence s. Modifies reel in place."""
+        chosen_idx = next((i for i, w in enumerate(tx_words) if w is s[-1]), None)
+        next_word = (
+            tx_words[chosen_idx + 1]
+            if (chosen_idx is not None and chosen_idx + 1 < len(tx_words))
+            else None
+        )
+        if smap is not None and _smap_lookup is not None:
+            from autoreels.local.render import _tail_from_smap
+            _tail = _tail_from_smap(s[-1].t0, reel.end, smap, _smap_lookup, last_t1=s[-1].t1)
+            if _tail is not None:
+                reel.end = _tail
+                if next_word is not None:
+                    _nw_key = round(next_word.t0 * 1000)
+                    _nw_entry = _smap_lookup.get(_nw_key)
+                    reel.subtitle_gate = (
+                        _nw_entry[1].get("audible_start", next_word.t0)
+                        if _nw_entry is not None else next_word.t0
+                    )
+                else:
+                    reel.subtitle_gate = s[-1].t1
+                return
+        # Fallback: Whisper t1 + pad
+        reel.end = s[-1].t1 + _REPAIR_END_PAD
+        reel.subtitle_gate = next_word.t0 if next_word is not None else s[-1].t1
+
     max_search = getattr(r0_cfg, "max_end_search_sec", 12.0)
     max_extend = getattr(r0_cfg, "end_repair_max_extend_sec", 6.0)
     search_end = reel.end + max_search
@@ -778,14 +811,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
                 and s[-1].t1 <= search_end          # sentence fully inside window
                 and s[-1].t1 - reel.end <= max_extend   # within extension limit
                 and is_complete_sentence(s)):
-            # Set subtitle_gate to the next word's t0 so Whisper timestamp overlaps don't
-            # pull next-sentence words into the subtitle list.
-            chosen_idx = next((i for i, w in enumerate(tx_words) if w is s[-1]), None)
-            if chosen_idx is not None and chosen_idx + 1 < len(tx_words):
-                reel.subtitle_gate = tx_words[chosen_idx + 1].t0
-            else:
-                reel.subtitle_gate = s[-1].t1
-            reel.end = s[-1].t1 + _REPAIR_END_PAD
+            _set_end_and_gate(s)
             # Also extend the last segment so _stage_subtitles (gated by segments[-1].end)
             # reaches the new end.
             if reel.segments:
@@ -799,14 +825,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     # Back off: last complete sentence in the current span
     for s in reversed(sents[:-1]):
         if is_complete_sentence(s):
-            # Set subtitle_gate to prevent the next (incomplete) sentence from leaking
-            # into subtitles when reel.end is padded past s[-1].t1.
-            chosen_idx = next((i for i, w in enumerate(tx_words) if w is s[-1]), None)
-            if chosen_idx is not None and chosen_idx + 1 < len(tx_words):
-                reel.subtitle_gate = tx_words[chosen_idx + 1].t0
-            else:
-                reel.subtitle_gate = s[-1].t1
-            reel.end = s[-1].t1 + _REPAIR_END_PAD
+            _set_end_and_gate(s)
             if reel.segments:
                 reel.segments = (
                     reel.segments[:-1]
@@ -2479,7 +2498,7 @@ def _cmd_run_impl(
     dangling_disc += post_dangling_disc
     # End repair (symmetric to dangling-start): extend/backoff to a complete sentence.
     for _r in reels:
-        _repair_end_to_complete_sentence(_r, tx_words, r0_cfg=r0_cfg, explicit_e=False)
+        _repair_end_to_complete_sentence(_r, tx_words, r0_cfg=r0_cfg, explicit_e=False, smap=_run_smap)
         if _r.subtitle_gate is None:
             _r.subtitle_gate = _r.end
     # Compute ends_on_host_turn diagnostic on all kept reels (False for lecture; measurable for interview).
@@ -3875,6 +3894,30 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     header in the review file (required when the header is absent; error when both present and
     different).
     """
+    # Guard: refuse --install for gate/demo review files (a gate file must never overwrite
+    # the real manifest). Refused when the review filename contains "gate" (case-insensitive)
+    # or the file does not live inside <root>/reviews/.
+    if install or render:
+        _reviews_dir = (_project_root() if root is None else Path(root)).resolve() / "reviews"
+        _rp = Path(review_path)
+        # Mirror the resolution logic below: bare filename → root/reviews/filename
+        if not _rp.is_absolute() and _rp.parent == Path("."):
+            _rp = _reviews_dir / _rp
+        _rp = _rp.resolve()
+        if "gate" in _rp.name.lower():
+            print(
+                f"error: --install refused: review filename contains 'gate' ({_rp.name}). "
+                f"Gate/demo applies must not overwrite manifests/.",
+                file=sys.stderr,
+            )
+            return 1
+        if not str(_rp).startswith(str(_reviews_dir)):
+            print(
+                f"error: --install refused: review file is outside reviews/ ({_rp}). "
+                f"Only files under {_reviews_dir} may be installed.",
+                file=sys.stderr,
+            )
+            return 1
     import json as _json
     import math as _math
 
@@ -4407,6 +4450,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     for _r in reels:
         _repair_end_to_complete_sentence(
             _r, tx_words, r0_cfg=r0_cfg, explicit_e=getattr(_r, "_has_explicit_e", False),
+            smap=_blk_smap,
         )
         if _r.subtitle_gate is None:
             _r.subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles

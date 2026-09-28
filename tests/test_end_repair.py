@@ -220,3 +220,93 @@ def test_numbered_sentences_complete_no_marker():
     block = CandidateBlock(id="b1", start=1.0, end=3.0, text="...", boundary_reason="pause", duration=2.0)
     result = _numbered_sentences(block, words)
     assert "…→" not in result
+
+
+# ---------------------------------------------------------------------------
+# smap-based end: use acoustic tail, not inflated Whisper t1 (Part 2)
+# ---------------------------------------------------------------------------
+
+def _minimal_smap(words_spec):
+    """Build a minimal smap dict for testing.
+
+    words_spec: list of (t0, audible_start, audible_end).
+    boundaries: one entry per word (no untranscribed_speech).
+    """
+    smap_words = [
+        {"t0": t0, "audible_start": a_start, "audible_end": a_end}
+        for t0, a_start, a_end in words_spec
+    ]
+    boundaries = [{} for _ in smap_words]
+    return {"words": smap_words, "boundaries": boundaries}
+
+
+def test_repair_smap_extension_uses_acoustic_end():
+    """With smap, extension end = acoustic tail, NOT inflated Whisper t1 + 0.35."""
+    # Sentence 1: incomplete (reel ends here at t=3.0)
+    # Sentence 2: complete, last word "важно." t0=4.5, t1=8.0 (inflated +2s from 6.0)
+    # Acoustic: audible_end=4.95; next word at t0=6.0, audible_start=6.5
+    # gap = 6.5 - 4.95 = 1.55 >= 0.35 → silence case: tail = 4.95 + 0.10 = 5.05
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 3.0, "думаю"),        # incomplete sentence [1]
+        _w(3.5, 4.5, "это"), _w(4.5, 8.0, "важно."),      # complete sentence [2], t1 inflated
+        _w(6.0, 6.5, "Следующая"),                          # next word after sentence [2]
+    ]
+    smap = _minimal_smap([
+        (1.0, 0.9, 1.4), (1.6, 1.55, 2.9),
+        (3.5, 3.4, 4.4), (4.5, 4.45, 4.95),                # "важно.": ae=4.95
+        (6.0, 6.5, 7.0),                                    # next word: audible_start=6.5
+    ])
+    repair = _get_repair()
+    r = _reel(1.0, 3.0)
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False, smap=smap)
+    assert r.end_snap_reason == "repaired_to_sentence"
+    # With smap: end = 4.95 + 0.10 = 5.05 (acoustic tail, NOT 8.0 + 0.35 = 8.35)
+    assert r.end == pytest.approx(5.05, abs=0.01)
+    assert r.end < 8.0  # must NOT be inflated-t1-based
+    # subtitle_gate = audible_start of next word = 6.5
+    assert r.subtitle_gate == pytest.approx(6.5)
+
+
+def test_repair_smap_backoff_uses_acoustic_end():
+    """With smap, back-off end = acoustic tail of last complete sentence, not inflated t1."""
+    # Sentence 1: complete, last word "думаю." t0=1.6, t1=5.0 (inflated), ae=1.9
+    # Sentence 2: incomplete, reel ends here
+    # Next word after sentence [1]: t0=2.1, audible_start=2.0
+    # gap = 2.0 - 1.9 = 0.1 < 0.35 → speech-next: tail = 2.0 - 0.10 = 1.9, max(1.9, 1.9+0.04)=1.94
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 5.0, "думаю."),        # complete, t1 inflated
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),        # incomplete — reel ends here
+    ]
+    smap = _minimal_smap([
+        (1.0, 0.9, 1.4), (1.6, 1.55, 1.9),                 # "думаю.": ae=1.9
+        (2.1, 2.0, 2.4), (2.6, 2.55, 2.95),                 # "потому": audible_start=2.0
+    ])
+    repair = _get_repair()
+    r = _reel(1.0, 3.0)
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False, smap=smap)
+    assert r.end_snap_reason == "repaired_to_sentence"
+    # speech-next: tail = 2.0 - 0.10 = 1.90, max(1.90, 1.9+0.04=1.94) → 1.94
+    assert r.end == pytest.approx(1.94, abs=0.02)
+    assert r.end < 5.0  # must NOT be inflated-t1-based (5.0 + 0.35 = 5.35)
+
+
+def test_repair_smap_fallback_when_word_not_in_smap():
+    """When chosen word is absent from smap, falls back to Whisper t1 + _REPAIR_END_PAD."""
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 3.0, "думаю"),
+        _w(3.5, 4.5, "это"), _w(4.5, 5.0, "важно."),
+        _w(6.0, 6.5, "Следующая"),
+    ]
+    # smap has no entry for "важно." (t0=4.5)
+    smap = _minimal_smap([
+        (1.0, 0.9, 1.4), (1.6, 1.55, 2.9),
+        (3.5, 3.4, 4.4),
+        # 4.5 intentionally absent
+        (6.0, 6.5, 7.0),
+    ])
+    repair = _get_repair()
+    r = _reel(1.0, 3.0)
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False, smap=smap)
+    assert r.end_snap_reason == "repaired_to_sentence"
+    # Falls back to Whisper t1 + 0.35
+    assert r.end == pytest.approx(5.0 + 0.35)
