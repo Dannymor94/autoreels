@@ -1,0 +1,4 @@
+{
+  "_comment": "Real LLM response from M1.6 stage 4 scoring call. Recorded by eval_scores.py --record-fixture. Model: qwen/qwen3.8-27b.",
+  "raw": "{\"scores\": [{\"id\": \"391a8232633e36c9\", \"score\": 85}, {\"id\": \"8401fc1a4b7e7704\", \"score\": 90}, {\"id\": \"28bebff4ddc23d8d\", \"score\": 80}, {\"id\": \"50e944f613a75ecb\", \"score\": 85}, {\"id\": \"a3452caf5c29a44c\", \"score\": 80}]}"
+}
