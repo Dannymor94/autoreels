@@ -7,7 +7,7 @@ LLM предлагает start/end приблизительно (часто в �
 """
 import pytest
 
-from autoreels.cloud.snap import apply_padding, snap_segments
+from autoreels.cloud.snap import apply_padding, snap_segments, is_complete_sentence
 from autoreels.core.models import Reel, Word
 
 HANGING = ["и", "а", "но", "что", "это", "как", "в", "на",
@@ -1119,3 +1119,52 @@ def test_multi_word_connective_explicit_end_not_trimmed():
                   video_duration=16.0, hanging_words=HANGING)
     # Explicit end → not trimmed; "что" stays as last word
     assert r.end >= 12.5, f"explicit end must not be trimmed, got {r.end}"
+
+
+# ---------------------------------------------------------------------------
+# is_complete_sentence
+# ---------------------------------------------------------------------------
+
+def _sent(words_str: str) -> list:
+    """Build a minimal sentence list (plain strings work in is_complete_sentence)."""
+    return words_str.split()
+
+
+def test_is_complete_sentence_complete():
+    assert is_complete_sentence(_sent("Это хорошее предложение."))
+
+
+def test_is_complete_sentence_ellipsis_unicode():
+    assert not is_complete_sentence(_sent("что-то там…"))
+
+
+def test_is_complete_sentence_dotdotdot():
+    # "для того, чтобы..." — ends with ...
+    assert not is_complete_sentence(_sent("для того, чтобы..."))
+
+
+def test_is_complete_sentence_hanging_phrase_with_period():
+    # "…потому что." — ends with period but "потому что" is a hanging phrase
+    assert not is_complete_sentence(_sent("…потому что."))
+
+
+def test_is_complete_sentence_verb_period_complete():
+    # "…которая есть." — ends with period, no hanging phrase
+    assert is_complete_sentence(_sent("…которая есть."))
+
+
+def test_is_complete_sentence_preposition_no_punct():
+    # preposition at end with no terminal punctuation → incomplete
+    assert not is_complete_sentence(_sent("Это было в"))
+
+
+def test_is_complete_sentence_question():
+    assert is_complete_sentence(_sent("Ты понял?"))
+
+
+def test_is_complete_sentence_exclamation():
+    assert is_complete_sentence(_sent("Вперёд!"))
+
+
+def test_is_complete_sentence_empty():
+    assert not is_complete_sentence([])

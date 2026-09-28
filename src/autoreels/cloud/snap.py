@@ -90,6 +90,30 @@ def tail_is_hanging_phrase(word_strs: list[str]) -> bool:
     return False
 
 
+def is_complete_sentence(sentence: list) -> bool:
+    """True if the sentence ends on a closed thought.
+
+    Complete = ends with . ? ! (NOT '...' or '…') AND the last words do not form a known
+    hanging phrase (_HANGING_END_PHRASES).  Individual hanging_end_words are intentionally
+    not checked for terminal-punctuated words: a verb like 'есть.' or 'был.' closes a real
+    sentence; hanging_words guard unpunctuated tails.  No terminal punct → always incomplete.
+
+    `sentence` is a list of Word objects (with .word attribute) or plain strings.
+    """
+    if not sentence:
+        return False
+    last = sentence[-1]
+    s = (last.word if hasattr(last, "word") else last).strip()
+    if not s:
+        return False
+    if s.endswith("...") or s[-1] == "…":
+        return False
+    if s[-1] not in ".?!":
+        return False
+    word_strs = [(w.word if hasattr(w, "word") else w) for w in sentence]
+    return not tail_is_hanging_phrase(word_strs)
+
+
 def _nearest_in_window(target: float, candidates: list[float], window_sec: float) -> float | None:
     """Ближайший кандидат к target в пределах ±window_sec, иначе None."""
     in_range = [c for c in candidates if abs(c - target) <= window_sec]

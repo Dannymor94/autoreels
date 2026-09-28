@@ -727,6 +727,75 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
     sidecar.write_text(json.dumps(discarded, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool) -> None:
+    """In-place: ensure reel.end falls on a complete sentence.
+
+    No explicit e:: extend to next complete sentence within max_end_search_sec, else back off
+    to the last complete sentence in the current span; if neither found, set open_thought=True.
+    Explicit e:: never moved; if incomplete, set open_thought=True and add a manifest warning.
+    """
+    from autoreels.cloud.edit import split_sentences, words_in_span
+    from autoreels.cloud.snap import is_complete_sentence
+
+    sents = split_sentences(words_in_span(tx_words, reel.start, reel.end))
+    if not sents:
+        return
+
+    last_sent = sents[-1]
+    if is_complete_sentence(last_sent):
+        return  # already complete — nothing to do
+
+    last4 = " ".join(w.word for w in last_sent[-4:])
+
+    if explicit_e:
+        reel.open_thought = True
+        reel.warnings.append(f"e: ends on incomplete sentence ('{last4}')")
+        return
+
+    max_search = getattr(r0_cfg, "max_end_search_sec", 12.0)
+    search_end = reel.end + max_search
+
+    # Try extending: first complete sentence that starts after current end
+    ext_words = words_in_span(tx_words, reel.start, search_end)
+    ext_sents = split_sentences(ext_words)
+    for s in ext_sents:
+        if s[-1].t0 >= last_sent[-1].t0 and s[-1].t1 > reel.end and is_complete_sentence(s):
+            reel.end = s[-1].t1
+            reel.end_snap_reason = "repaired_to_sentence"
+            return
+
+    # Back off: last complete sentence in the current span
+    for s in reversed(sents[:-1]):
+        if is_complete_sentence(s):
+            reel.end = s[-1].t1
+            reel.end_snap_reason = "repaired_to_sentence"
+            return
+
+    reel.open_thought = True
+
+
+def _check_last_subtitle_word(reel, tx_words) -> None:
+    """Log an error if the last subtitle word belongs to a sentence beyond the final sentence gate."""
+    if not reel.subtitles:
+        return
+    from autoreels.cloud.edit import split_sentences, words_in_span
+    _gate = getattr(reel, "_subtitle_gate", None)
+    if _gate is None:
+        return
+    sents = split_sentences(words_in_span(tx_words, reel.start, _gate))
+    if not sents:
+        return
+    expected_last = sents[-1][-1]
+    actual_last = reel.subtitles[-1]
+    # Allow smap ae-extension: actual_last may come from same sentence, just a bit past t1
+    if actual_last.t0 > expected_last.t1 + 0.05:
+        print(
+            f"  [CONTENT] {reel.id}: last subtitle '{actual_last.word}' (t0={actual_last.t0:.3f}) "
+            f"beyond final sentence last '{expected_last.word}' (t1={expected_last.t1:.3f})",
+            flush=True,
+        )
+
+
 def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None, smap=None):
     """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM).
 
@@ -1048,13 +1117,11 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     seg_gate = reel.segments[-1].end
                 else:
                     seg_gate = min(reel.r0_end, reel.end) if reel.r0_end is not None else reel.end
-                # Human reels: cap at existing last subtitle's t1 so _stage_subtitles cannot
-                # pull transcript words beyond what the reviewer labelled. Without this cap,
-                # seg_gate = last_seg.end (includes trailing air), and smap effective_end can
-                # admit the first words of the next phrase that fall inside the segment window.
-                _existing_subs = reel.subtitles
-                if _existing_subs and getattr(reel, "reason", "") == "human review":
-                    seg_gate = min(seg_gate, _existing_subs[-1].t1)
+                # Cap seg_gate at the pre-padding sentence boundary saved by the end repair /
+                # snap stages so next-phrase words that fall inside the tail air are excluded.
+                _sg = getattr(reel, "_subtitle_gate", None)
+                if _sg is not None:
+                    seg_gate = min(seg_gate, _sg)
                 anchor = None
                 for w in transcript.words:
                     if reel.start <= w.t0 < seg_gate:
@@ -1082,9 +1149,10 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= effective_end
                 ]
             else:
+                _sg_no_smap = getattr(reel, "_subtitle_gate", reel.end)
                 reel.subtitles = [
                     w for w in transcript.words
-                    if reel.start <= w.t0 < reel.end and w.t1 <= reel.end
+                    if reel.start <= w.t0 < _sg_no_smap and w.t1 <= reel.end
                 ]
     return reels
 
@@ -2338,6 +2406,10 @@ def _cmd_run_impl(
             flush=True,
         )
     dangling_disc += post_dangling_disc
+    # End repair (symmetric to dangling-start): extend/backoff to a complete sentence.
+    for _r in reels:
+        _repair_end_to_complete_sentence(_r, tx_words, r0_cfg=r0_cfg, explicit_e=False)
+        _r._subtitle_gate = _r.end
     # Compute ends_on_host_turn diagnostic on all kept reels (False for lecture; measurable for interview).
     for r in reels:
         r0_s = r.r0_start if r.r0_start is not None else r.start
@@ -2359,6 +2431,8 @@ def _cmd_run_impl(
     reels = _stage_subtitles(reels, transcript, smap=_run_smap)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+    for _r in reels:
+        _check_last_subtitle_word(_r, tx_words)
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
@@ -3997,10 +4071,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             filler_words=(_fr_cfg.filler_words if _fr_cfg else []),
         )
         reel.start, reel.end = nb_start, nb_end
+        _has_explicit_e = (getattr(_ae, "e", None) if _ae else None) is not None
         if _expl_start:
             reel._explicit_start = True   # the human fixed the start → dangling repair must not move it
-        if (getattr(_ae, "e", None) if _ae else None) is not None:
+        if _has_explicit_e:
             reel._explicit_end = True     # reviewer's e: choice → min_end_gap rule must not move it
+        reel._has_explicit_e = _has_explicit_e  # stash for end repair after filter_dangling_start
         reel._filler_override = getattr(_ae, "filler", None) if _ae else None   # per-clip f:0/f:1
         # Part 4 — title plate text (only from the review `t:`; empty on the automatic path).
         reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""
@@ -4253,6 +4329,13 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         min_duration=r0_cfg.min_clip_duration,
         repair_only=True, max_start_fraction=1.0 / 3.0,
     )
+    # End repair (symmetric to dangling-start repair): extend/backoff to a complete sentence.
+    # Runs here, after filter_dangling_start, so start changes don't interfere with end duration.
+    for _r in reels:
+        _repair_end_to_complete_sentence(
+            _r, tx_words, r0_cfg=r0_cfg, explicit_e=getattr(_r, "_has_explicit_e", False),
+        )
+        _r._subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles
     reels = renumber_reels(reels)
     reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)
@@ -4270,6 +4353,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _reel.segments = _segs
     reels = _stage_subtitles(reels, transcript, smap=_blk_smap)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+    for _r in reels:
+        _check_last_subtitle_word(_r, _tx_words)
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.
@@ -4784,6 +4869,9 @@ def cmd_blocks(
         else:
             review_content = export_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
+                words=transcript.words,
+                pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
+                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
             )
         out_path.write_text(review_content, encoding="utf-8")
         print(f"\nreview: {len(kept)} блоков → {out_path}  ({len(review_content)} chars)")

@@ -645,7 +645,12 @@ _COMPACT_PROMPT = (
     "#   > 2\n"
     "#   > 5\n"
     "# Each > N plays sentence N from the clip span. Sentences not listed are dropped.\n"
-    "# Gaps between beats are filled with brief silence (beat_gap_sec from config)."
+    "# Gaps between beats are filled with brief silence (beat_gap_sec from config).\n"
+    "#\n"
+    "# Sentence completeness: [k]…→ marks an incomplete sentence (no terminal . ? !,\n"
+    "# or ends with a hanging phrase like 'потому что' / 'для того, чтобы').\n"
+    "# Never end a clip (e:) on a sentence marked …→.\n"
+    "# Put the strongest complete sentence LAST (use > lines if needed)."
 )
 
 
@@ -851,11 +856,16 @@ def export_review(
     *,
     source_ref: str,
     filter_removed_count: int,
+    words=None,
+    pause_show_sec: float = 0.3,
+    min_pause_for_phrase_end: float = 0.0,
 ) -> str:
     """Render a human-editable review file for kept candidate blocks.
 
     Blocks are in chronological order. Heuristic scores are NOT included —
     the reviewer must not be anchored by them (they are the reference dataset we are building).
+    When `words` are given, each block's sentences are numbered inline ([k] or [k]…→ for
+    incomplete) so a review can use s:/e: to bound clips precisely.
     """
     lines: list[str] = [
         "# AutoReels block review",
@@ -869,6 +879,9 @@ def export_review(
         "#   '-'  BEFORE the score: join with the PRECEDING block (attach a run-up)",
         "# A '+' on a block and a '-' on the next name the same join — counted once.",
         "# Speed marker: '@N.NN' after score and merge markers — e.g. '80@1.15', '85+@1.1'.",
+        "# Sentence completeness: [k]…→ = incomplete sentence — never use as e: target.",
+        "# Never end a clip (e:) on a sentence marked …→.",
+        "# Put the strongest complete sentence LAST (use > lines if needed).",
         "#",
     ] + _CK_FIELDS_DOC.rstrip("\n").splitlines() + [
         "#",
@@ -876,7 +889,9 @@ def export_review(
     ]
     for i, b in enumerate(blocks, 1):
         lines.append(f"[ {i} ]  {b.duration:.1f}s  id={b.id}  score: __")
-        lines.append(b.text)
+        lines.append(_numbered_sentences(b, words,
+                                         pause_show_sec=pause_show_sec,
+                                         pause_strong_sec=min_pause_for_phrase_end))
         lines.append("")
     return "\n".join(lines)
 
@@ -943,10 +958,14 @@ def _numbered_sentences(block: CandidateBlock, words, *,
 
     When `pause_show_sec` > 0, appends ⏸N.N after a sentence when the gap to the next sentence is
     >= pause_show_sec; uses ⏸⏸N.N when the gap also >= pause_strong_sec (natural phrase end).
+
+    Incomplete sentences (no terminal punctuation or hanging phrase) get the prefix [k]…→ so the
+    reviewer knows e:k would leave the clip on an open thought.
     """
     if not words:
         return " ".join(block.text.split())
     from autoreels.cloud.edit import split_sentences, words_in_span
+    from autoreels.cloud.snap import is_complete_sentence
     sents = split_sentences(words_in_span(words, block.start, block.end))
     if len(sents) <= 1:
         return " ".join(block.text.split())
@@ -958,7 +977,8 @@ def _numbered_sentences(block: CandidateBlock, words, *,
             if gap >= pause_show_sec:
                 sym = "⏸⏸" if pause_strong_sec > 0 and gap >= pause_strong_sec else "⏸"
                 text += f" {sym}{gap:.1f}"
-        parts.append(f"[{k}] {text}")
+        prefix = f"[{k}]" if is_complete_sentence(s) else f"[{k}]…→"
+        parts.append(f"{prefix} {text}")
     return " ".join(parts)
 
 
