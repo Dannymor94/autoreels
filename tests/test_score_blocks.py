@@ -12,6 +12,7 @@ from autoreels.cloud.blocks import CandidateBlock, _Line
 from autoreels.cloud.score_blocks import (
     apply_llm_scores,
     build_score_messages,
+    filter_no_terminal,
     parse_score_response,
     score_all_blocks,
     score_blocks_batch,
@@ -148,6 +149,40 @@ def test_score_all_blocks_batches_correctly():
     assert len(result) == 10
     # All blocks got llm_score set
     assert all(b.llm_score is not None for b in blocks)
+
+
+# ----------------------------------------------------------------- filter_no_terminal
+
+def test_filter_no_terminal_activates_when_dense():
+    # 4 of 4 end with terminal punct → density=1.0 >= 0.75 → gate active
+    blocks = [
+        _block("t1", "Это завершённая мысль."),
+        _block("t2", "Вопрос задан?"),
+        _block("t3", "Восклицание!"),
+        _block("t4", "Незавершённая мысль без знака"),  # no terminal
+    ]
+    kept, gated = filter_no_terminal(blocks, density_guard=0.75)
+    assert len(kept) == 3
+    assert len(gated) == 1
+    assert gated[0].id == "t4"
+
+
+def test_filter_no_terminal_inactive_when_sparse():
+    # only 1 of 4 has terminal punct → density=0.25 < 0.75 → gate inactive
+    blocks = [
+        _block("s1", "Без знака раз"),
+        _block("s2", "Без знака два"),
+        _block("s3", "Без знака три"),
+        _block("s4", "С точкой."),
+    ]
+    kept, gated = filter_no_terminal(blocks, density_guard=0.75)
+    assert kept == blocks
+    assert gated == []
+
+
+def test_filter_no_terminal_empty():
+    kept, gated = filter_no_terminal([])
+    assert kept == [] and gated == []
 
 
 # ----------------------------------------------------------------- real fixture

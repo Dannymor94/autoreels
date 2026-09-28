@@ -551,6 +551,7 @@ def main() -> None:
 
     # ══════════════════════════════════════════════════════ PART 4: per-source breakdown
 
+
     print("\n" + "═" * 74)
     print("PART 4 — Per-source breakdown  (LLM AUC and P@K)")
     print("═" * 74)
@@ -571,6 +572,129 @@ def main() -> None:
         lps = f"{lp:.2f}" if lp == lp else "  nan"
         has = f"{ha:.3f}" if ha == ha else "  nan"
         print(f"  {src:<38}  {n_sc:4d}  {n_un:4d}  {kk:4d}  {las:>9}  {lps:>7}  {has:>10}")
+
+    # ══════════════════════════════════════════════════════ PART 5: LOSO
+    _loso(rows, feats, llm_scores, sources)
+
+
+def _loso(
+    rows: list[dict],
+    feats: list[dict],
+    llm_scores: dict[str, float],
+    sources: list[str],
+) -> None:
+    """Leave-one-source-out cross-validation.
+
+    For each held-out source: grid-search α/β on training 5, evaluate on held-out.
+    Variants: LLM alone | LLM+dur | LLM+dur−lex | gate(no_term)+blend.
+    Duration confound note: scored blocks include spliced clips (longer than unscored);
+    AUC from duration is partly a splice-length effect. LOSO will show whether it generalises.
+    """
+    print("\n" + "═" * 74)
+    print("PART 5 — LOSO cross-validation  (tune α/β on 5 sources, eval on held-out)")
+    print("  NOTE: duration is CONFOUNDED (scored=spliced clips, unscored=single blocks)")
+    print("═" * 74)
+
+    alpha_grid = [0, 2, 5, 8, 10, 15, 20]
+    beta_grid  = [0, 2, 5, 8, 10, 15, 20]
+
+    def _blend_src(llm_v: list[float], dur_z: list[float], lex_z: list[float], a: float, b: float) -> list[float]:
+        return [llm + a * d - b * l for llm, d, l in zip(llm_v, dur_z, lex_z)]
+
+    results: dict[str, dict[str, float]] = {}  # source → {variant: auc}
+
+    for held_src in sources:
+        train_idx = [i for i, r in enumerate(rows) if r["source"] != held_src]
+        held_idx  = [i for i, r in enumerate(rows) if r["source"] == held_src]
+
+        if not train_idx or not held_idx:
+            continue
+
+        tr_rows  = [rows[i]  for i in train_idx]
+        tr_feats = [feats[i] for i in train_idx]
+        ho_rows  = [rows[i]  for i in held_idx]
+        ho_feats = [feats[i] for i in held_idx]
+
+        tr_labels80 = [1 if r["human_score"] >= 80 else 0 for r in tr_rows]
+        ho_labels80 = [1 if r["human_score"] >= 80 else 0 for r in ho_rows]
+
+        tr_llm  = [llm_scores.get(r["block_id"], 0.0) for r in tr_rows]
+        ho_llm  = [llm_scores.get(r["block_id"], 0.0) for r in ho_rows]
+
+        tr_dur_z = _normalize_zscore([f["duration"]    for f in tr_feats])
+        tr_lex_z = _normalize_zscore([f["lexical_div"] for f in tr_feats])
+
+        # For held-out, normalise using train stats to avoid leakage
+        def _zscore_with_stats(vals: list[float], ref: list[float]) -> list[float]:
+            m, s = _mean_std(ref)
+            return [(x - m) / s for x in vals]
+
+        tr_dur_raw = [f["duration"]    for f in tr_feats]
+        tr_lex_raw = [f["lexical_div"] for f in tr_feats]
+        ho_dur_raw = [f["duration"]    for f in ho_feats]
+        ho_lex_raw = [f["lexical_div"] for f in ho_feats]
+        ho_dur_z = _zscore_with_stats(ho_dur_raw, tr_dur_raw)
+        ho_lex_z = _zscore_with_stats(ho_lex_raw, tr_lex_raw)
+
+        # Grid search on train for LLM+dur only (α alone)
+        best_a_dur, best_auc_dur = 0.0, _roc_auc(tr_llm, tr_labels80)
+        for a in alpha_grid[1:]:
+            auc = _roc_auc(_blend_src(tr_llm, tr_dur_z, tr_lex_z, a, 0.0), tr_labels80)
+            if auc > best_auc_dur:
+                best_auc_dur, best_a_dur = auc, float(a)
+
+        # Grid search on train for LLM+dur−lex (α,β)
+        best_a_both, best_b_both = 0.0, 0.0
+        best_auc_both = _roc_auc(tr_llm, tr_labels80)
+        for a in alpha_grid:
+            for b in beta_grid:
+                auc = _roc_auc(_blend_src(tr_llm, tr_dur_z, tr_lex_z, a, b), tr_labels80)
+                if auc > best_auc_both:
+                    best_auc_both, best_a_both, best_b_both = auc, float(a), float(b)
+
+        # Evaluate on held-out
+        ho_term = [f["ends_terminal"] for f in ho_feats]
+        ho_gate = [s if t > 0.5 else 0.0 for s, t in zip(ho_llm, ho_term)]
+        ho_gate_blend = [s if t > 0.5 else 0.0
+                         for s, t in zip(_blend_src(ho_llm, ho_dur_z, ho_lex_z, best_a_both, best_b_both), ho_term)]
+
+        kk = sum(ho_labels80)
+        results[held_src] = {
+            "n_total":    len(ho_rows),
+            "n80":        kk,
+            "llm":        _roc_auc(ho_llm, ho_labels80),
+            "llm+dur":    _roc_auc(_blend_src(ho_llm, ho_dur_z, ho_lex_z, best_a_dur, 0.0), ho_labels80),
+            "llm+dur-lex": _roc_auc(_blend_src(ho_llm, ho_dur_z, ho_lex_z, best_a_both, best_b_both), ho_labels80),
+            "gate+blend": _roc_auc(ho_gate_blend, ho_labels80),
+            "llm_p":      _precision_at_k(ho_llm, ho_labels80, kk) if kk else float("nan"),
+            "blend_p":    _precision_at_k(ho_gate_blend, ho_labels80, kk) if kk else float("nan"),
+            "best_a_dur": best_a_dur,
+            "best_a":     best_a_both,
+            "best_b":     best_b_both,
+        }
+
+    print(f"\n  {'Source':<38}  {'n':>4}  {'n≥80':>4}  {'α,β':>8}  {'LLM':>6}  {'LLM+dur':>8}  {'LLM+d-l':>8}  {'gate+bl':>8}")
+    print("  " + "-" * 88)
+    totals = {"llm": [], "llm+dur": [], "llm+dur-lex": [], "gate+blend": []}
+    for src in sources:
+        if src not in results:
+            continue
+        r = results[src]
+        a_str = f"α{r['best_a']:.0f}β{r['best_b']:.0f}"
+        def _f(v: float) -> str:
+            return f"{v:.3f}" if v == v else "  nan"
+        print(f"  {src:<38}  {r['n_total']:4d}  {r['n80']:4d}  {a_str:>8}  "
+              f"{_f(r['llm']):>6}  {_f(r['llm+dur']):>8}  {_f(r['llm+dur-lex']):>8}  {_f(r['gate+blend']):>8}")
+        for k in totals:
+            if r[k] == r[k]:
+                totals[k].append(r[k])
+
+    print("  " + "-" * 88)
+    n_src = len(sources)
+    def _mean(vals: list[float]) -> str:
+        return f"{sum(vals)/len(vals):.3f}" if vals else "  nan"
+    print(f"  {'MEAN (out-of-sample)':<38}  {'':>4}  {'':>4}  {'':>8}  "
+          f"{_mean(totals['llm']):>6}  {_mean(totals['llm+dur']):>8}  {_mean(totals['llm+dur-lex']):>8}  {_mean(totals['gate+blend']):>8}")
 
 
 if __name__ == "__main__":

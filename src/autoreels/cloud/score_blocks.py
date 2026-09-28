@@ -12,6 +12,31 @@ from autoreels.cloud.blocks import CandidateBlock
 SCORE_BATCH_K = 8
 SCORE_MAX_OUTPUT_TOKENS = 200
 
+_TRAILING = "»\"')]"
+
+
+def filter_no_terminal(
+    blocks: list[CandidateBlock],
+    *,
+    density_guard: float = 0.75,
+) -> tuple[list[CandidateBlock], list[CandidateBlock]]:
+    """Pre-LLM gate: drop blocks that don't end with terminal punctuation (.?!…).
+
+    Only activates when the source's terminal-punct density >= density_guard.
+    Low density means the transcription model didn't add punctuation reliably,
+    so the absence of a period is not a meaningful signal.
+
+    Returns (kept, gated_out). When inactive, returns (blocks, []).
+    """
+    if not blocks:
+        return list(blocks), []
+    n_term = sum(1 for b in blocks if b.text.rstrip(_TRAILING)[-1:] in ".?!…")
+    if n_term / len(blocks) < density_guard:
+        return list(blocks), []
+    kept      = [b for b in blocks if     b.text.rstrip(_TRAILING)[-1:] in ".?!…"]
+    gated_out = [b for b in blocks if not b.text.rstrip(_TRAILING)[-1:] in ".?!…"]
+    return kept, gated_out
+
 
 def build_score_messages(
     blocks: list[CandidateBlock],

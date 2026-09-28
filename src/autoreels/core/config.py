@@ -130,6 +130,10 @@ class BlockScoringConfig(BaseModel):
     top_k_per_chunk: int = 8        # keep this many blocks per time window
     chunk_window_sec: float = 300.0 # time window size for per-chunk filtering (≈ R0 chunk in time)
 
+    # Pre-LLM terminal-punct gate (stage 4, auto path only)
+    pre_filter_no_terminal: bool = False           # enable ends-with-.?!… gate before LLM scoring
+    pre_filter_density_guard: float = 0.75         # gate inactive when source punct density < this
+
     contrarian_markers: list[str] = Field(default_factory=lambda: [
         "на самом деле", "наоборот", "а вот и нет", "что интересно",
         "однако", "но дело в том", "интересно то", "всё дело в",
