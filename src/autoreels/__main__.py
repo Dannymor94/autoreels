@@ -730,9 +730,13 @@ def _write_discarded(discarded: list[dict], manifest_path: Path) -> None:
 def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool) -> None:
     """In-place: ensure reel.end falls on a complete sentence.
 
-    No explicit e:: extend to next complete sentence within max_end_search_sec, else back off
-    to the last complete sentence in the current span; if neither found, set open_thought=True.
+    No explicit e:: extend to the next complete sentence within the search window (at most
+    end_repair_max_extend_sec); back off to the last complete sentence in the current span if
+    nothing fits; if neither found, set open_thought=True.
     Explicit e:: never moved; if incomplete, set open_thought=True and add a manifest warning.
+
+    Sets reel.subtitle_gate to next_word.t0 when extending, so that Whisper-timestamp overlaps
+    don't pull the next sentence's words into the subtitle list.
     """
     from autoreels.cloud.edit import split_sentences, words_in_span
     from autoreels.cloud.snap import is_complete_sentence
@@ -753,13 +757,26 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
         return
 
     max_search = getattr(r0_cfg, "max_end_search_sec", 12.0)
+    max_extend = getattr(r0_cfg, "end_repair_max_extend_sec", 6.0)
     search_end = reel.end + max_search
 
-    # Try extending: first complete sentence that starts after current end
+    # Try extending: first complete sentence whose last word is fully inside the search window
+    # AND whose end is within max_extend seconds of the current reel end.
     ext_words = words_in_span(tx_words, reel.start, search_end)
     ext_sents = split_sentences(ext_words)
     for s in ext_sents:
-        if s[-1].t0 >= last_sent[-1].t0 and s[-1].t1 > reel.end and is_complete_sentence(s):
+        if (s[-1].t0 >= last_sent[-1].t0
+                and s[-1].t1 > reel.end
+                and s[-1].t1 <= search_end          # sentence fully inside window
+                and s[-1].t1 - reel.end <= max_extend   # within extension limit
+                and is_complete_sentence(s)):
+            # Set subtitle_gate to the next word's t0 so Whisper timestamp overlaps don't
+            # pull next-sentence words into the subtitle list.
+            chosen_idx = next((i for i, w in enumerate(tx_words) if w is s[-1]), None)
+            if chosen_idx is not None and chosen_idx + 1 < len(tx_words):
+                reel.subtitle_gate = tx_words[chosen_idx + 1].t0
+            else:
+                reel.subtitle_gate = s[-1].t1
             reel.end = s[-1].t1
             reel.end_snap_reason = "repaired_to_sentence"
             return
@@ -2422,7 +2439,8 @@ def _cmd_run_impl(
     # End repair (symmetric to dangling-start): extend/backoff to a complete sentence.
     for _r in reels:
         _repair_end_to_complete_sentence(_r, tx_words, r0_cfg=r0_cfg, explicit_e=False)
-        _r.subtitle_gate = _r.end
+        if _r.subtitle_gate is None:
+            _r.subtitle_gate = _r.end
     # Compute ends_on_host_turn diagnostic on all kept reels (False for lecture; measurable for interview).
     for r in reels:
         r0_s = r.r0_start if r.r0_start is not None else r.start
@@ -4349,7 +4367,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _repair_end_to_complete_sentence(
             _r, tx_words, r0_cfg=r0_cfg, explicit_e=getattr(_r, "_has_explicit_e", False),
         )
-        _r.subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles
+        if _r.subtitle_gate is None:
+            _r.subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles
     reels = renumber_reels(reels)
     reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)
     reels = _stage_padding(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max)

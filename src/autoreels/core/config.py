@@ -222,6 +222,7 @@ class R0Config(BaseModel):
     block_target_sec: float = 40.0
     max_micro_pause: float = 0.4            # пауза < порога = микропауза внутри фразы (не конец)
     max_end_search_sec: float = 12.0        # окно поиска конца предложения от r0_end (сек)
+    end_repair_max_extend_sec: float = 6.0  # _repair_end: макс прирост к reel.end при продлении
     # Soft minimum-gap rule: if the gap from the clip's last word to the next source word is
     # below min_end_gap_sec, extend the end to the next sentence-terminal word whose following
     # gap is >= target_end_gap_sec, within end_gap_search_sec. Never fires on explicit e:.
