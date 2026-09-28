@@ -2353,3 +2353,78 @@ def test_smap_tail_within_last_segment_is_applied(tmp_path, render_cfg, fake_ffm
     t_after_i = next((cmd[j + 1] for j in range(last_i + 1, len(cmd)) if cmd[j] == "-t"), None)
     if t_after_i is not None:
         assert float(t_after_i) < 20.0, "segment end should have been trimmed by tail"
+
+
+def test_compute_word_end_out_multisegment_speed():
+    """_compute_word_end_out: word_end inside last segment of multi-seg @1.15 reel.
+
+    word_end_out must equal (sum of earlier segs + within-last-offset) / speed.
+    A/V invariant: the value falls within [0, output_clip_duration].
+    """
+    from autoreels.local.render import _compute_word_end_out
+    from autoreels.core.models import Segment
+
+    # seg0: 10-15 (5s), seg1: 20-35 (15s); speed=1.15
+    seg0 = Segment(start=10.0, end=15.0)
+    seg1 = Segment(start=20.0, end=35.0)
+    segs = [seg0, seg1]
+    speed = 1.15
+
+    # word_end at 28.0 (8.0 into seg1)
+    weo = _compute_word_end_out(28.0, segs, speed)
+    # expected: (5.0 + 8.0) / 1.15 ≈ 11.304s
+    expected = (5.0 + 8.0) / 1.15
+    assert abs(weo - expected) < 1e-6, f"word_end_out={weo:.6f} != expected {expected:.6f}"
+
+    clip_out_dur = (5.0 + 15.0) / 1.15
+    assert 0 < weo < clip_out_dur, "word_end_out must be inside clip output duration"
+    # fade_dur = clip - word_end_out < remaining segment duration
+    # 1 frame tolerance at 30fps ≈ 0.033s
+    frames_off = abs(weo - expected) * 30
+    assert frames_off < 1.0, f"A/V offset {frames_off:.3f} frames >= 1 frame"
+
+
+def test_smap_tail_multisegment_speed_tail_inside_last_seg(
+        tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Multi-segment @1.15 reel: tail inside last segment — no [ERROR], seg trimmed.
+
+    Requirements checked:
+    - No [ERROR] (tail is inside segs[-1])
+    - Subtitles span both segments (first word in seg0, last word in seg1)
+    - ffmpeg receives non-negative durations for all inputs
+    """
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"multiseg-speed-inside-video")
+
+    # seg0: 10-15 (5s); seg1: 20-35 (15s); speed=1.15
+    # Last subtitle "last" at t0=28.0 is inside seg1 (20-35).
+    # Tail from smap after 28.4: large pause → audible_end + small tail ≈ 28.8 < 35.0
+    seg0 = Segment(start=10.0, end=15.0)
+    seg1 = Segment(start=20.0, end=35.0)
+    reel = _reel("r01", 10.0, 35.0)
+    reel.segments = [seg0, seg1]
+    reel.speed = 1.15
+    reel.subtitles = [
+        Word(word="first", t0=11.0, t1=11.5),  # in seg0
+        Word(word="last",  t0=28.0, t1=28.4),  # in seg1
+    ]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    smap = _smap_for_tail(last_t0=28.0, last_t1=28.4, next_speech_t0=999.0)
+    render_cfg = render_cfg.model_copy(update={"speech_map": True})
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, smap=smap)
+
+    captured = capsys.readouterr()
+    assert "[ERROR]" not in captured.out, f"unexpected [ERROR]: {captured.out}"
+
+    assert len(fake_ffmpeg) >= 1
+    # All input-side -t values must be non-negative
+    cmd = fake_ffmpeg[0]
+    for j, tok in enumerate(cmd):
+        if tok == "-t" and j > 0 and cmd[j - 1] != "-map":
+            dur = float(cmd[j + 1])
+            assert dur >= 0, f"negative -t {dur} in command"

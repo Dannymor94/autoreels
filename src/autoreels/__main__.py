@@ -1011,8 +1011,9 @@ def _stage_speech_density(reels, transcript, *, r0_cfg) -> tuple[list, list[dict
 def _stage_subtitles(reels, transcript, *, smap=None):
     """R3: привязать word-level транскрипта к каждому reel.
 
-    With smap: t0 < r0_end (snap boundary, not post-tail reel.end) gates inclusion;
-    audible_end <= effective_end (from _tail_from_smap anchored at last word before r0_end).
+    With smap: t0 gate = last_seg.end when explicit segments exist (labelled content boundary);
+    otherwise min(r0_end, reel.end) for single-seg reels (prevents next-sentence leakage when
+    tail extended reel.end past snap boundary). audible_end <= effective_end from _tail_from_smap.
     Without smap: t0 < reel.end and t1 <= reel.end.
     """
     print("субтитры: привязка слов к сегментам…", flush=True)
@@ -1039,13 +1040,17 @@ def _stage_subtitles(reels, transcript, *, smap=None):
             reel.subtitles = ws
         else:
             if smap is not None:
-                # r0_end: snap sentence boundary BEFORE tail adjustment — the correct t0 gate.
-                # Clamp to reel.end: if tail shortened the clip below snap boundary, reel.end wins.
-                r0_end = min(reel.r0_end, reel.end) if reel.r0_end is not None else reel.end
-                # anchor: last transcript word strictly inside snap boundary
+                # Gate: last labelled segment end when explicit segments are defined (multi-seg
+                # and human-path reels — labelled content extends to last_seg.end, not r0_end).
+                # Fallback: min(r0_end, reel.end) for single-seg auto reels where tail extension
+                # may push reel.end past the snap boundary, admitting next-sentence words.
+                if reel.segments:
+                    seg_gate = reel.segments[-1].end
+                else:
+                    seg_gate = min(reel.r0_end, reel.end) if reel.r0_end is not None else reel.end
                 anchor = None
                 for w in transcript.words:
-                    if reel.start <= w.t0 < r0_end:
+                    if reel.start <= w.t0 < seg_gate:
                         anchor = w
                 # effective_end: smap tail from anchor (includes audible residue after anchor)
                 if anchor is not None:
@@ -1057,7 +1062,7 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     effective_end = reel.end
                 reel.subtitles = [
                     w for w in transcript.words
-                    if reel.start <= w.t0 < r0_end
+                    if reel.start <= w.t0 < seg_gate
                     and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= effective_end
                 ]
             else:
@@ -4256,7 +4261,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         for _reel in reels:
             if not _reel.subtitles:
                 continue
-            _r0 = (min(_reel.r0_end, _reel.end) if _reel.r0_end is not None else _reel.end)
+            if _reel.segments:
+                _r0 = _reel.segments[-1].end
+            else:
+                _r0 = (min(_reel.r0_end, _reel.end) if _reel.r0_end is not None else _reel.end)
             _last_tx = None
             for _w in transcript.words:
                 if _reel.start <= _w.t0 < _r0:

@@ -1725,9 +1725,11 @@ def _render_segments(
                         _new_end = round(_new_end * _fps()) / _fps()
                     if _new_end < segs[-1].start:
                         # Invariant violation: tail lands before last segment's start.
-                        # Applying it would produce a negative-duration segment.
-                        # Last subtitle word is in an earlier segment (not segs[-1]).
-                        # Do not modify segs — the labelled last segment is preserved.
+                        # _compute_word_end_out assumes word_end is within segs[-1]; if it is not,
+                        # the within-segment offset is negative and word_end_out is wrong, producing
+                        # a fade that spans the entire last segment. Clear _word_end so the fade
+                        # computation is skipped and the labelled last segment plays without fade.
+                        _word_end = None
                         print(
                             f"  [ERROR] {reel.id}: smap tail {_new_end:.3f}s lands before "
                             f"segs[-1].start {segs[-1].start:.3f}s "

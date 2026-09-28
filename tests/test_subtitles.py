@@ -174,7 +174,7 @@ def test_stage_subtitles_smap_uses_audible_end():
 
     r = Reel(id="r01", start=0.0, end=2.2, r0_end=2.0, score=80, hook="h",
              title="t", description="d",
-             segments=[Segment(start=0.0, end=2.2)], subtitles=[])
+             segments=[], subtitles=[])
     _stage_subtitles([r], tx, smap=smap)
     # "next" excluded (t0=2.0 >= r0_end=2.0); "last" included (ae=1.9 <= effective_end)
     assert [w.word for w in r.subtitles] == ["first", "last"]
@@ -217,7 +217,7 @@ def test_stage_subtitles_last_word_never_from_next_sentence():
     }
     r = Reel(id="r01", start=2.0, end=7.0, r0_end=5.0, score=80, hook="h",
              title="t", description="d",
-             segments=[Segment(start=2.0, end=7.0)], subtitles=[])
+             segments=[], subtitles=[])
     _stage_subtitles([r], tx, smap=smap)
     last = r.subtitles[-1].word if r.subtitles else None
     assert last == "final", f"last subtitle word was {last!r}, expected 'final' (next-sentence words leaked)"
@@ -254,6 +254,50 @@ def test_stage_subtitles_r0_end_clamp_when_greater_than_reel_end():
     _stage_subtitles([r], tx, smap=smap)
     words_included = [w.word for w in r.subtitles]
     assert "beyond" not in words_included, "word beyond reel.end included when r0_end > reel.end"
+
+
+def test_stage_subtitles_multisegment_includes_last_seg_words():
+    """Multi-segment reel: words in last segment are included even when t0 > r0_end.
+
+    Regression: using r0_end as gate excluded labelled content in seg[N-1] when
+    r0_end was set to an earlier sentence boundary (real case: PXL r02/r04).
+    """
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    # Two segments; r0_end=5.0 ends within seg[0].
+    # "last_in_seg1" at t0=7.0 is in seg[1] (beyond r0_end) — must be included.
+    words = [
+        _w(3.0, 3.5, "a"), _w(4.0, 4.8, "end_of_snap"),
+        _w(6.0, 6.5, "first_in_seg1"), _w(7.0, 7.8, "last_in_seg1"),
+    ]
+    tx = SimpleNamespace(words=words)
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 3.0, "t1": 3.5, "audible_start": 3.0, "audible_end": 3.5},
+            {"t0": 4.0, "t1": 4.8, "audible_start": 4.0, "audible_end": 4.7},
+            {"t0": 6.0, "t1": 6.5, "audible_start": 6.0, "audible_end": 6.5},
+            {"t0": 7.0, "t1": 7.8, "audible_start": 7.0, "audible_end": 7.75},
+        ],
+        "boundaries": [
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 0.9, "untranscribed_speech": False},  # gap between seg[0] and seg[1]
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 0.5, "untranscribed_speech": False},
+        ],
+        "intervals": [],
+    }
+    r = Reel(id="r01", start=2.0, end=8.5, r0_end=5.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=2.0, end=5.5), Segment(start=5.8, end=8.5)],
+             subtitles=[])
+    _stage_subtitles([r], tx, smap=smap)
+    words_got = [w.word for w in r.subtitles]
+    assert "last_in_seg1" in words_got, "labelled last-segment word missing (r0_end gate too narrow)"
+    assert "first_in_seg1" in words_got, "first word of last segment missing"
+    assert r.subtitles[-1].word == "last_in_seg1", f"last subtitle should be 'last_in_seg1', got {r.subtitles[-1].word!r}"
 
 
 # ----------------------------------------------------------------- ASS-генерация
