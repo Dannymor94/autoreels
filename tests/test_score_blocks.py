@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from autoreels.cloud.blocks import CandidateBlock, _Line
+from autoreels.cloud.blocks import CandidateBlock, _Line, topk_filter
 from autoreels.cloud.score_blocks import (
     apply_llm_scores,
     build_score_messages,
@@ -198,3 +198,50 @@ def test_fixture_response_parsing():
         assert isinstance(entry.get("id"), str)
         assert isinstance(entry.get("score"), int)
         assert 0 <= entry["score"] <= 100
+
+
+# ----------------------------------------------------------------- heuristic does not prune before LLM
+
+def test_heuristic_does_not_prune_before_llm():
+    """Block with LOWEST heuristic score but HIGHEST llm_score must survive topk_filter.
+
+    Verifies the pipeline order: gate → score_all_blocks (LLM) → topk_filter(by llm_score).
+    The heuristic is never used to prune candidates before the LLM sees them.
+    """
+    import json as _json
+
+    # 20 blocks; block "low_heur" has heuristic=0 but will get llm_score=100
+    N = 20
+    blocks = [_block(f"b{i:02d}") for i in range(N - 1)]
+    low_heur = CandidateBlock(
+        id="low_heur",
+        start=float((N - 1) * 30),
+        end=float(N * 30),
+        duration=30.0,
+        text="Этот блок имеет низкий эвристический балл.",
+        boundary_reason="sentence",
+    )
+    blocks.append(low_heur)
+
+    # Assign heuristic scores: all others get high scores, low_heur gets 0
+    for b in blocks[:-1]:
+        b.heuristic_score = 80.0
+    low_heur.heuristic_score = 0.0
+
+    # Mock LLM: gives low_heur score=100, everyone else score=10
+    mock_response = _json.dumps({
+        "scores": [{"id": "low_heur", "score": 100}]
+        + [{"id": f"b{i:02d}", "score": 10} for i in range(N - 1)]
+    })
+    provider = _MockProvider([mock_response])
+
+    score_all_blocks(blocks, provider=provider, system_text=_SYSTEM, fewshot_examples=[])
+
+    # top_k=1: only the best block per window survives; window covers all blocks
+    window = float(N * 30 + 1)
+    kept, cut = topk_filter(blocks, chunk_window_sec=window, top_k=1)
+
+    assert len(kept) == 1, f"expected 1 kept, got {len(kept)}"
+    assert kept[0].id == "low_heur", (
+        f"expected low_heur (llm=100) to win, got {kept[0].id} (llm={kept[0].llm_score})"
+    )

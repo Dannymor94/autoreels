@@ -764,19 +764,15 @@ def _stage_select_blocks(compressed, *, r0_cfg, root, provider):
         if gated_out:
             print(f"  ends_terminal gate: снято {len(gated_out)} блоков", flush=True)
 
-    # Stage 3: heuristic top-K per window (narrows before LLM call)
-    kept, topk_cut = topk_filter(kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk)
-
-    # Stage 4: LLM scoring
+    # LLM scores ALL blocks that pass the gate; heuristic is logged but not used to prune.
+    topk_cut: list = []
     if bs_cfg.score_prompts and kept:
         system_text = _extract_prompt_body((root / bs_cfg.score_prompts.system).read_text(encoding="utf-8"))
         fewshot_raw = json.loads((root / bs_cfg.score_prompts.fewshot).read_text(encoding="utf-8"))
         fewshot = fewshot_raw.get("examples", [])
         print(f"  LLM scoring {len(kept)} блоков…", flush=True)
         score_all_blocks(kept, provider=provider, system_text=system_text, fewshot_examples=fewshot)
-        # Re-rank per window by LLM score (topk_filter now prefers llm_score)
-        kept, llm_cut = topk_filter(kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk)
-        topk_cut += llm_cut
+        kept, topk_cut = topk_filter(kept, chunk_window_sec=bs_cfg.chunk_window_sec, top_k=bs_cfg.top_k_per_chunk)
 
     reels = [
         Reel(
