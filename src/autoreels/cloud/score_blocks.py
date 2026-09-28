@@ -118,8 +118,9 @@ def score_all_blocks(
 ) -> dict[str, int]:
     """Score all blocks in batches. Sets block.llm_score; returns merged {id: score}.
 
-    score_passes=2: scores each block twice (different batch ordering) and sets llm_score
-    to the mean, reducing per-batch context noise. Uses 2× the token budget.
+    score_passes=2: scores each block twice (second pass rotated by batch_k//2 so neighbours
+    differ) and sets llm_score to max(pass1, pass2), rescuing borderline blocks that land
+    in strong-competition batches. Uses 2× the token budget.
     """
     def _one_pass(ordered_blocks: list[CandidateBlock]) -> dict[str, int]:
         pass_scores: dict[str, int] = {}
@@ -143,12 +144,16 @@ def score_all_blocks(
     all_scores = _one_pass(blocks)
 
     if score_passes >= 2:
-        # Second pass with reversed order so each block gets different batch-mates.
-        scores2 = _one_pass(list(reversed(blocks)))
-        for bid, s1 in all_scores.items():
-            s2 = scores2.get(bid)
-            if s2 is not None:
-                all_scores[bid] = round((s1 + s2) / 2)
+        # Second pass rotated by half a batch so every block sees different neighbours.
+        # Merge: union of both passes, max score when both return a value — rescues
+        # borderline blocks that happen to land in a strong-competition batch in one pass.
+        rotated = blocks[batch_k // 2 :] + blocks[: batch_k // 2]
+        scores2 = _one_pass(rotated)
+        for bid, s2 in scores2.items():
+            if bid not in all_scores:
+                all_scores[bid] = s2
+            else:
+                all_scores[bid] = max(all_scores[bid], s2)
 
     apply_llm_scores(blocks, all_scores)
     return all_scores

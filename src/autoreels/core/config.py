@@ -136,7 +136,7 @@ class BlockScoringConfig(BaseModel):
     # Stage-4 LLM scoring prompts (None = heuristic-only, no LLM scoring call)
     score_prompts: PromptPaths | None = None
     score_temperature: float = 0.0   # temperature for scoring calls (0 = greedy/deterministic)
-    score_passes: int = 1            # 1 = single pass; 2 = score twice, use mean (reduces noise)
+    score_passes: int = 1            # 1 = single pass; 2 = score twice with offset batches, take max
 
     contrarian_markers: list[str] = Field(default_factory=lambda: [
         "на самом деле", "наоборот", "а вот и нет", "что интересно",
