@@ -148,25 +148,112 @@ def test_stage_subtitles_includes_word_when_t1_eq_clip_end():
 
 
 def test_stage_subtitles_smap_uses_audible_end():
-    """With smap, audible_end from map is used instead of t1."""
+    """With smap and r0_end set, audible_end used; next-sentence word (t0>=r0_end) excluded."""
     from types import SimpleNamespace
     from autoreels.__main__ import _stage_subtitles
     from autoreels.core.models import Reel, Segment
 
-    # word at t0=1.0, t1=2.1 (spills past end=2.0) but audible_end=1.9 (within clip)
-    words = [_w(0.5, 1.0, "first"), _w(1.0, 2.1, "last")]
+    # "last" t1=2.1 spills past r0_end=2.0, but audible_end=1.9 → included
+    # "next" t0=2.0 >= r0_end=2.0 → excluded by t0 gate (next-sentence word)
+    words = [_w(0.5, 1.0, "first"), _w(1.0, 2.1, "last"), _w(2.0, 2.3, "next")]
     tx = SimpleNamespace(words=words)
-    smap = {"words": [
-        {"t0": 0.5, "t1": 1.0, "audible_start": 0.5, "audible_end": 1.0},
-        {"t0": 1.0, "t1": 2.1, "audible_start": 1.0, "audible_end": 1.9},
-    ]}
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 0.5, "t1": 1.0, "audible_start": 0.5, "audible_end": 1.0},
+            {"t0": 1.0, "t1": 2.1, "audible_start": 1.0, "audible_end": 1.9},
+            {"t0": 2.0, "t1": 2.3, "audible_start": 2.0, "audible_end": 2.25},
+        ],
+        "boundaries": [
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 0.5, "untranscribed_speech": False},  # pause after "last" → silence tail
+            {"pause": 0.0, "untranscribed_speech": False},
+        ],
+        "intervals": [],
+    }
 
-    r = Reel(id="r01", start=0.0, end=2.0, score=80, hook="h",
+    r = Reel(id="r01", start=0.0, end=2.2, r0_end=2.0, score=80, hook="h",
              title="t", description="d",
-             segments=[Segment(start=0.0, end=2.0)], subtitles=[])
+             segments=[Segment(start=0.0, end=2.2)], subtitles=[])
     _stage_subtitles([r], tx, smap=smap)
-    # "last" has t1=2.1 > 2.0 but audible_end=1.9 <= 2.0 → included
+    # "next" excluded (t0=2.0 >= r0_end=2.0); "last" included (ae=1.9 <= effective_end)
     assert [w.word for w in r.subtitles] == ["first", "last"]
+
+
+def test_stage_subtitles_last_word_never_from_next_sentence():
+    """Invariant: last subtitle word always has t0 < r0_end (never a next-sentence word).
+
+    Regression: using reel.end (post-tail) as t0 gate admitted next-sentence words
+    when tail extended past r0_end.
+    """
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    # Sentence ends at r0_end=5.0; reel.end=7.0 (tail extended 2s past snap boundary).
+    # Next sentence: "next" t0=5.0, "more" t0=5.5 — must never appear in subtitles.
+    words = [
+        _w(3.0, 3.5, "a"), _w(3.5, 4.0, "b"), _w(4.0, 4.8, "final"),
+        _w(5.0, 5.4, "next"), _w(5.5, 6.0, "more"),
+    ]
+    tx = SimpleNamespace(words=words)
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 3.0, "t1": 3.5, "audible_start": 3.0, "audible_end": 3.5},
+            {"t0": 3.5, "t1": 4.0, "audible_start": 3.5, "audible_end": 4.0},
+            {"t0": 4.0, "t1": 4.8, "audible_start": 4.0, "audible_end": 4.7},
+            {"t0": 5.0, "t1": 5.4, "audible_start": 5.0, "audible_end": 5.35},
+            {"t0": 5.5, "t1": 6.0, "audible_start": 5.5, "audible_end": 5.9},
+        ],
+        "boundaries": [
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 0.8, "untranscribed_speech": False},  # sentence boundary pause
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 0.0, "untranscribed_speech": False},
+        ],
+        "intervals": [],
+    }
+    r = Reel(id="r01", start=2.0, end=7.0, r0_end=5.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=2.0, end=7.0)], subtitles=[])
+    _stage_subtitles([r], tx, smap=smap)
+    last = r.subtitles[-1].word if r.subtitles else None
+    assert last == "final", f"last subtitle word was {last!r}, expected 'final' (next-sentence words leaked)"
+    assert all(w.t0 < 5.0 for w in r.subtitles), "next-sentence word (t0 >= r0_end) in subtitles"
+
+
+def test_stage_subtitles_r0_end_clamp_when_greater_than_reel_end():
+    """When r0_end > reel.end (tail shortened clip below snap boundary), clamp to reel.end."""
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    # r0_end=5.0 but reel.end=3.5 (clip was shortened below snap boundary).
+    # Word at t0=3.0 is within clip; word at t0=4.0 is beyond reel.end → must be excluded.
+    words = [_w(2.0, 2.5, "ok"), _w(3.0, 3.4, "edge"), _w(4.0, 4.5, "beyond")]
+    tx = SimpleNamespace(words=words)
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 2.0, "t1": 2.5, "audible_start": 2.0, "audible_end": 2.5},
+            {"t0": 3.0, "t1": 3.4, "audible_start": 3.0, "audible_end": 3.3},
+            {"t0": 4.0, "t1": 4.5, "audible_start": 4.0, "audible_end": 4.4},
+        ],
+        "boundaries": [
+            {"pause": 0.0, "untranscribed_speech": False},
+            {"pause": 2.0, "untranscribed_speech": False},
+            {"pause": 0.0, "untranscribed_speech": False},
+        ],
+        "intervals": [],
+    }
+    r = Reel(id="r01", start=1.0, end=3.5, r0_end=5.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=1.0, end=3.5)], subtitles=[])
+    _stage_subtitles([r], tx, smap=smap)
+    words_included = [w.word for w in r.subtitles]
+    assert "beyond" not in words_included, "word beyond reel.end included when r0_end > reel.end"
 
 
 # ----------------------------------------------------------------- ASS-генерация

@@ -1011,14 +1011,19 @@ def _stage_speech_density(reels, transcript, *, r0_cfg) -> tuple[list, list[dict
 def _stage_subtitles(reels, transcript, *, smap=None):
     """R3: привязать word-level транскрипта к каждому reel.
 
-    Criterion: word starts inside the clip (t0 in [start, end)) and its audible
-    end is within the clip — audible_end from smap when available, else t1 (inclusive).
+    With smap: t0 < r0_end (snap boundary, not post-tail reel.end) gates inclusion;
+    audible_end <= effective_end (from _tail_from_smap anchored at last word before r0_end).
+    Without smap: t0 < reel.end and t1 <= reel.end.
     """
     print("субтитры: привязка слов к сегментам…", flush=True)
-    _ae_by_t0: "dict[int, float] | None" = (
-        {round(sw["t0"] * 1000): sw["audible_end"] for sw in smap["words"]}
-        if smap is not None else None
-    )
+    if smap is not None:
+        from autoreels.local.render import _tail_from_smap, _smap_word_lookup
+        _lookup = _smap_word_lookup(smap)
+        _ae_by_t0 = {round(sw["t0"] * 1000): sw["audible_end"] for sw in smap["words"]}
+    else:
+        _lookup = None
+        _ae_by_t0 = None
+
     for reel in reels:
         if reel.beat_gap_sec is not None and reel.segments:
             # Beat reel: segments are non-monotonic in source time — collect words
@@ -1033,11 +1038,27 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                         ws.append(w)
             reel.subtitles = ws
         else:
-            if _ae_by_t0 is not None:
+            if smap is not None:
+                # r0_end: snap sentence boundary BEFORE tail adjustment — the correct t0 gate.
+                # Clamp to reel.end: if tail shortened the clip below snap boundary, reel.end wins.
+                r0_end = min(reel.r0_end, reel.end) if reel.r0_end is not None else reel.end
+                # anchor: last transcript word strictly inside snap boundary
+                anchor = None
+                for w in transcript.words:
+                    if reel.start <= w.t0 < r0_end:
+                        anchor = w
+                # effective_end: smap tail from anchor (includes audible residue after anchor)
+                if anchor is not None:
+                    tail = _tail_from_smap(
+                        anchor.t0, reel.end, smap, _lookup, last_t1=anchor.t1,
+                    )
+                    effective_end = tail if tail is not None else reel.end
+                else:
+                    effective_end = reel.end
                 reel.subtitles = [
                     w for w in transcript.words
-                    if reel.start <= w.t0 < reel.end
-                    and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= reel.end
+                    if reel.start <= w.t0 < r0_end
+                    and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= effective_end
                 ]
             else:
                 reel.subtitles = [
