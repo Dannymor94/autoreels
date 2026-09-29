@@ -373,6 +373,31 @@ def test_same_shot_dissolve_off_is_baseline():
     assert result == [0.067]  # falls back to xfade_actual — identical to baseline
 
 
+# --- PART 3: _check_tail_air adapts to deflate-capped reels instead of skipping -----------
+
+def test_check_tail_air_deflate_capped_passes_when_end_equals_cap():
+    """Deflate-capped reel: end == cap → check passes (cap was applied correctly)."""
+    words = [Word(word="конец.", t0=2.0, t1=2.5), Word(word="Следующая", t0=2.52, t1=2.9)]
+    r = _tail_reel(start=0.0, end=2.52)   # reel.end == subtitle_gate (cap)
+    r._deflate_end_cap = 2.52
+    r._deflate_cap_applied = True
+    r.tail_last_word_end = 2.5            # acoustic end of "конец."
+    # tail_pad=1.5 would want 4.0, but cap is 2.52 — check should pass because end == cap
+    assert _check_tail_air([r], tail_pad_sec=1.5, video_duration=10.0) is None
+
+
+def test_check_tail_air_deflate_capped_fails_when_end_below_cap():
+    """Deflate-capped reel: end well below min(lw_end + tail_pad, cap) → error."""
+    r = _tail_reel(start=0.0, end=2.0)   # reel.end too short
+    r._deflate_end_cap = 3.0
+    r._deflate_cap_applied = True
+    r.tail_last_word_end = 2.5
+    # min(2.5 + 1.5, 3.0) - tol = 3.0 - tol; reel.end=2.0 < floor
+    err = _check_tail_air([r], tail_pad_sec=1.5, video_duration=10.0)
+    assert err is not None
+    assert "deflate-capped" in err
+
+
 def test_dissolve_visual_duration_does_not_shorten_clip():
     """seam_xfade_visual_durations overrides duration= but not offset: clip length unchanged vs baseline."""
     segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0), Segment(start=20.0, end=30.0)]

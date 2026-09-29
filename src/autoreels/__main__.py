@@ -840,15 +840,30 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     audible_start of next word. Without smap: reel.end = Whisper t1 + _REPAIR_END_PAD.
     """
     from autoreels.cloud.edit import split_sentences, words_in_span
-    from autoreels.cloud.snap import is_complete_sentence
+    from autoreels.cloud.snap import is_complete_sentence, _clean
 
-    sents = split_sentences(words_in_span(tx_words, reel.start, reel.end))
+    # When deflation already backed off the end, use subtitle_gate as the content boundary so
+    # repair doesn't see the stump word that sits between subtitle_gate and reel.end.
+    _deflate_cap = getattr(reel, "_deflate_end_cap", None)
+    span_end = (
+        reel.subtitle_gate
+        if (_deflate_cap is not None and reel.subtitle_gate is not None)
+        else reel.end
+    )
+
+    sents = split_sentences(words_in_span(tx_words, reel.start, span_end))
     if not sents:
         return
 
     last_sent = sents[-1]
     _complete = is_complete_sentence(last_sent)
     if _complete:
+        if explicit_e:
+            # Complete but filler/tag-question ending not removed due to explicit e:.
+            _lw = last_sent[-1]
+            if _clean(_lw.word) in _TAG_QUESTIONS and _lw.word.rstrip().endswith("?"):
+                last4 = " ".join(w.word for w in last_sent[-4:])
+                reel.warnings.append(f"ends_on_filler: '{last4}'")
         return  # already complete — nothing to do
 
     last4 = " ".join(w.word for w in last_sent[-4:])
@@ -1861,10 +1876,21 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
     (or the video end, whichever is smaller). Returns an error string naming the first offender,
     or None. Reads the last-word end stashed by _apply_tail_air (stable across the extension)."""
     for r in reels:
-        if getattr(r, "_deflate_cap_applied", False):
-            continue  # deflate cap intentionally shortens tail air; skip this reel
         lw_end = r.tail_last_word_end
         if lw_end is None:
+            continue
+        if getattr(r, "_deflate_cap_applied", False):
+            # Deflate cap: sentence boundary limits how much tail air we can add. Verify the end
+            # reached at least min(lw_end + tail_pad_sec, _deflate_end_cap) − one frame.
+            _cap = getattr(r, "_deflate_end_cap", None)
+            if _cap is None:
+                continue
+            floor = min(lw_end + tail_pad_sec, _cap) - tol
+            if video_duration is not None:
+                floor = min(floor, video_duration - tol)
+            if r.end < floor:
+                return (f"{r.id}: deflate-capped reel ends {floor - r.end:.3f}s too early "
+                        f"(cap={_cap:.3f}, lw_end={lw_end:.3f})")
             continue
         floor = lw_end + tail_pad_sec - tol
         if video_duration is not None:
@@ -4290,6 +4316,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if _has_explicit_e:
             reel._explicit_end = True     # reviewer's e: choice → min_end_gap rule must not move it
         reel._has_explicit_e = _has_explicit_e  # stash for end repair after filter_dangling_start
+        reel.has_explicit_e = _has_explicit_e  # persisted to manifest (readable by tools/tables)
         reel._filler_override = getattr(_ae, "filler", None) if _ae else None   # per-clip f:0/f:1
         # Part 4 — title plate text (only from the review `t:`; empty on the automatic path).
         reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""

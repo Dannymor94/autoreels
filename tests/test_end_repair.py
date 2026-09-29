@@ -466,3 +466,56 @@ def test_deflate_removes_stump_all_reels():
                 hanging_end_words=[], explicit_e=explicit)
         assert r.end == pytest.approx(2.0 + 0.35), f"failed for explicit_e={explicit}"
         assert r.end_snap_reason == "repaired_to_sentence"
+
+
+# ---------------------------------------------------------------------------
+# PART 1: open_thought only for incomplete; ends_on_filler for tag-question
+# ---------------------------------------------------------------------------
+
+def test_repair_explicit_e_tag_question_sets_ends_on_filler_not_open_thought():
+    """explicit_e + complete sentence ending in tag-question → ends_on_filler warning, no OT."""
+    # Last sentence "и выбирать, понятно?" ends with "понятно?" ∈ _TAG_QUESTIONS.
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.4, "и"), _w(2.5, 2.9, "выбирать,"), _w(3.0, 3.4, "понятно?"),
+    ]
+    repair = _get_repair()
+    r = _reel(1.0, 3.5)
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
+    assert not r.open_thought
+    assert any("ends_on_filler" in w for w in r.warnings)
+    assert not any("incomplete" in w for w in r.warnings)
+
+
+def test_repair_explicit_e_tag_question_after_deflate_stump():
+    """Deflate backed off through a stump; repair sees tag-question → ends_on_filler, no OT.
+
+    Simulates r02 of lecture: explicit e: lands after "Когда" (stump), deflate backs off to
+    "и выбирать, понятно?" (complete, tag-q ending). Repair must not re-see the stump.
+    """
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.4, "и"), _w(2.5, 2.9, "выбирать,"), _w(3.0, 3.4, "понятно?"),
+        _w(3.7, 4.0, "Когда"),   # stump: next sentence, no terminal mark
+    ]
+    repair = _get_repair()
+    r = _reel(1.0, 4.1)   # reel.end past "Когда"
+    # Simulate deflate having backed off: subtitle_gate = t0 of "Когда", _deflate_end_cap set.
+    r.subtitle_gate = 3.7
+    r._deflate_end_cap = 3.7
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
+    assert not r.open_thought
+    assert any("ends_on_filler" in w for w in r.warnings)
+
+
+def test_repair_explicit_e_incomplete_not_tag_question_sets_open_thought():
+    """explicit_e + incomplete sentence not ending in tag-question → open_thought=True."""
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),   # incomplete
+    ]
+    repair = _get_repair()
+    r = _reel(1.0, 3.5)
+    repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
+    assert r.open_thought
+    assert any("incomplete" in w for w in r.warnings)
