@@ -1339,6 +1339,15 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     w for w in transcript.words
                     if reel.start <= w.t0 < _sg_no_smap and w.t1 <= reel.end
                 ]
+            # Drop overlapping Whisper words: adjacent segment boundaries sometimes produce a
+            # word twice with overlapping timestamps; keep first occurrence by t0.
+            _subs = reel.subtitles
+            if len(_subs) > 1:
+                _deduped: list = [_subs[0]]
+                for _ww in _subs[1:]:
+                    if _ww.t0 >= _deduped[-1].t1:
+                        _deduped.append(_ww)
+                reel.subtitles = _deduped
     return reels
 
 

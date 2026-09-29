@@ -383,3 +383,23 @@ def test_ass_borderstyle_box_with_opacity_when_fill_enabled():
     f = _style_fields(build_ass([_w(0.0, 0.5, "x")], cfg=cfg, clip_start=0.0))
     assert f[15] == "3"                              # BorderStyle 3 = подложка-бокс
     assert f[6] == ass_color("112233", alpha=0x66)   # BackColour = fill_color + альфа из opacity
+
+
+def test_stage_subtitles_deduplicates_overlapping_whisper_words():
+    """Overlapping Whisper words (Whisper segment-boundary artifact) → only first kept."""
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    # 'делаю.' appears twice with overlapping timestamps (same as PXL r09 bug)
+    words = [
+        _w(1.0, 1.5, "word1"),
+        _w(2.0, 4.0, "делаю."),   # first: long (Whisper alignment artifact)
+        _w(2.6, 3.5, "делаю."),   # second: overlaps first — should be dropped
+    ]
+    tx = SimpleNamespace(words=words)
+    r = Reel(id="r01", start=0.0, end=5.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=5.0)], subtitles=[])
+    _stage_subtitles([r], tx)
+    assert [w.word for w in r.subtitles] == ["word1", "делаю."]
