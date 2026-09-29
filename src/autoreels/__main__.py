@@ -1961,15 +1961,21 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
     return None
 
 
-def _check_fade_audible(reels, *, smap_lookup: dict | None) -> list[str]:
-    """Return [CONTENT] errors for reels where fade start < ae of the last subtitle word.
+def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], list[str]]:
+    """Check that the last subtitle word is fully audible before the fade.
 
-    fade_start = tail_last_word_end (the point where audio fades out).
-    If fade starts before the last subtitle word finishes, that word is audibly cut off.
+    Returns (errors, warnings):
+    - errors: auto-path reels where the last word is cut (blocks apply).
+    - warnings: explicit_e reels where the last word is cut (stored in reel.warnings; owner decides).
+
+    Two defects detected:
+    1. ae > r.end: last word runs into next phrase; clip end truncates it.
+    2. fade_start (tail_last_word_end) < ae: fade starts before word finishes audibly.
     """
     if not smap_lookup:
-        return []
-    errors = []
+        return [], []
+    errors: list[str] = []
+    warnings: list[str] = []
     for r in reels:
         lw_end = getattr(r, "tail_last_word_end", None)
         if lw_end is None or not r.subtitles:
@@ -1981,14 +1987,22 @@ def _check_fade_audible(reels, *, smap_lookup: dict | None) -> list[str]:
         ae = entry[1].get("audible_end", last_sub.t1)
         if ae < last_sub.t0:  # corrupted smap entry — skip
             continue
-        if ae > r.end + 1e-3:  # word extends past clip — clip itself truncates it, not the fade
+        explicit_e = getattr(r, "has_explicit_e", False)
+        if ae > r.end + 1e-3:
+            msg = (f"[CONTENT] {r.id}: last word '{last_sub.word}' cut by clip end"
+                   f" (continuous speech into next phrase, ae={ae:.3f} > clip={r.end:.3f})")
+            if explicit_e:
+                r.warnings.append(msg)
+                warnings.append(msg)
+            else:
+                errors.append(msg)
             continue
         if lw_end < ae - 1e-6:
             errors.append(
                 f"[CONTENT] {r.id}: fade start {lw_end:.3f} < audible_end {ae:.3f}"
                 f" of last subtitle word '{last_sub.word}'"
             )
-    return errors
+    return errors, warnings
 
 
 def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
@@ -4855,7 +4869,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         print(f"  error: tail-air invariant: {_tail_err}", file=sys.stderr)
         return 1
 
-    _fade_errs = _check_fade_audible(reels, smap_lookup=_blk_smap_lookup)
+    _fade_errs, _fade_warns = _check_fade_audible(reels, smap_lookup=_blk_smap_lookup)
+    for _w in _fade_warns:
+        print(f"  warning: {_w}")
     for _err in _fade_errs:
         print(f"  error: {_err}", file=sys.stderr)
     if _fade_errs:

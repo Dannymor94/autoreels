@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-SPEECHMAP_VERSION = "5"
+SPEECHMAP_VERSION = "6"
 
 # Defaults — all overridable by callers or future config.
 DEFAULT_FRAME_SEC = 0.01         # 10 ms energy window
@@ -169,6 +169,25 @@ def refine_word_boundaries(
         search_end = min(next_t0 + epsilon, w.t1 + 1.5)
         win_start = max(0.0, w.t0 - epsilon)
 
+        # Overlapping Whisper timestamps: next word's t0 < this word's t0, inverting the
+        # search window (search_end < win_start). Normal frag collection would yield ae < t0.
+        # Fix: use the speech interval containing the word's midpoint (or t0 as fallback).
+        if search_end <= win_start:
+            ref_t = (w.t0 + w.t1) / 2
+            c_on, c_off = next(
+                ((on, off) for on, off in intervals if on <= ref_t <= off),
+                next(((on, off) for on, off in intervals if on <= w.t0 <= off),
+                     (w.t0, w.t1)),  # last resort: Whisper bounds
+            )
+            prev_ae = refined[-1]["audible_end"] if refined else 0.0
+            as_ = max(c_on, prev_ae + epsilon, w.t0 - epsilon)
+            ae = max(min(c_off, w.t1 + epsilon), as_)
+            if ae <= w.t0:
+                ae = w.t1  # absolute fallback: Whisper t1 is always > t0
+            refined.append({"idx": idx, "t0": w.t0, "t1": w.t1,
+                            "audible_start": as_, "audible_end": ae})
+            continue
+
         # Each frag: (clamped_onset, offset, original_onset)
         frags: list[tuple[float, float, float]] = []
         for onset, offset in intervals:
@@ -201,7 +220,21 @@ def refine_word_boundaries(
 
         # audible_end: bridge gaps inside the word span; stop at word boundaries
         audible_end = frags[0][1]
-        audible_end = max(audible_end, w.t0)  # guard: overlapping Whisper timestamps can invert the search window, producing ae < t0
+        if audible_end <= w.t0:
+            # Near-inverted window or interval ends before word onset — same midpoint fix.
+            ref_t = (w.t0 + w.t1) / 2
+            c_on, c_off = next(
+                ((on, off) for on, off in intervals if on <= ref_t <= off),
+                next(((on, off) for on, off in intervals if on <= w.t0 <= off), (w.t0, w.t1)),
+            )
+            prev_ae = refined[-1]["audible_end"] if refined else 0.0
+            as_ = max(c_on, prev_ae + epsilon, w.t0 - epsilon)
+            ae = max(min(c_off, w.t1 + epsilon), as_)
+            if ae <= w.t0:
+                ae = w.t1
+            refined.append({"idx": idx, "t0": w.t0, "t1": w.t1,
+                            "audible_start": as_, "audible_end": ae})
+            continue
         for i, (onset, offset, _) in enumerate(frags[1:], start=1):
             gap_start_t = frags[i - 1][1]
             gap = onset - gap_start_t

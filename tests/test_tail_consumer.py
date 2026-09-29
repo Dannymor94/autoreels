@@ -385,13 +385,14 @@ def test_check_fade_audible_violation():
              subtitles=[Word(word="last", t0=9.0, t1=9.5)])
     r.tail_last_word_end = 9.2
     smap_lookup = {round(9.0 * 1000): (0, {"audible_end": 9.6})}  # ae=9.6 <= r.end=10.0
-    errs = _check_fade_audible([r], smap_lookup=smap_lookup)
+    errs, warns = _check_fade_audible([r], smap_lookup=smap_lookup)
     assert len(errs) == 1
     assert "[CONTENT]" in errs[0] and "r01" in errs[0]
+    assert warns == []
 
 
-def test_check_fade_audible_skip_ae_past_clip_end():
-    """PART 4 guard: word with ae > r.end is truncated by clip, not by fade — skip."""
+def test_check_fade_audible_clip_cut_auto_is_error():
+    """PART 2: auto-path reel with ae > r.end → error (not skip)."""
     from autoreels.__main__ import _check_fade_audible
     from autoreels.core.models import Reel, Segment, Word
 
@@ -400,6 +401,27 @@ def test_check_fade_audible_skip_ae_past_clip_end():
              segments=[Segment(start=0.0, end=9.5)],
              subtitles=[Word(word="end_word", t0=9.0, t1=9.8)])
     r.tail_last_word_end = 9.1
+    r.has_explicit_e = False
     smap_lookup = {round(9.0 * 1000): (0, {"audible_end": 9.7})}  # ae=9.7 > r.end=9.5
-    errs = _check_fade_audible([r], smap_lookup=smap_lookup)
-    assert errs == [], "ae > r.end should be skipped"
+    errs, warns = _check_fade_audible([r], smap_lookup=smap_lookup)
+    assert len(errs) == 1, "auto-path clip-cut must be an error"
+    assert "clip end" in errs[0]
+    assert warns == []
+
+
+def test_check_fade_audible_clip_cut_explicit_e_is_warning():
+    """PART 2: explicit_e reel with ae > r.end → warning in reel.warnings, not an error."""
+    from autoreels.__main__ import _check_fade_audible
+    from autoreels.core.models import Reel, Segment, Word
+
+    r = Reel(id="r03", start=0.0, end=9.5, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=9.5)],
+             subtitles=[Word(word="end_word", t0=9.0, t1=9.8)])
+    r.tail_last_word_end = 9.1
+    r.has_explicit_e = True
+    smap_lookup = {round(9.0 * 1000): (0, {"audible_end": 9.7})}  # ae=9.7 > r.end=9.5
+    errs, warns = _check_fade_audible([r], smap_lookup=smap_lookup)
+    assert errs == [], "explicit_e clip-cut must not be an error"
+    assert len(warns) == 1 and "clip end" in warns[0]
+    assert any("clip end" in w for w in r.warnings), "warning must be in reel.warnings"

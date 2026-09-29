@@ -303,11 +303,10 @@ def test_whisper_gaps_can_be_negative():
 # ── PART 3: corrupted smap entries from overlapping timestamps ────────────────
 
 def test_refine_word_boundaries_overlapping_timestamps_no_corrupt_ae():
-    """PART 3: next_t0 < t0 (overlapping Whisper timestamps) must not produce ae < t0 or as > ae.
+    """PART 1: next_t0 < t0 (overlapping Whisper timestamps) → midpoint-based fallback.
 
-    Root cause: overlapping timestamps invert the search window (search_end < win_start),
-    which inverts the fragment's clamped interval — giving ae = search_end < t0.
-    Fix: guard audible_end = max(audible_end, w.t0).
+    Inverted search window (search_end < win_start) previously produced ae < t0 (zero-length).
+    Fix: find the interval containing the word midpoint; ae is derived from that interval.
     """
     # word1: t0=1.0, t1=1.5; word2: t0=0.8 (OVERLAPS — next_t0 < word1.t0)
     words = [SimpleNamespace(word="душе.", t0=1.0, t1=1.5),
@@ -315,9 +314,27 @@ def test_refine_word_boundaries_overlapping_timestamps_no_corrupt_ae():
     intervals = [[0.7, 1.8]]  # speech spans both words
     refined = refine_word_boundaries(words, intervals)
     w1 = refined[0]
-    assert w1["audible_end"] >= w1["t0"], (
-        f"ae={w1['audible_end']:.3f} < t0={w1['t0']:.3f} — corrupted smap entry"
+    assert w1["audible_end"] > w1["t0"], (
+        f"ae={w1['audible_end']:.3f} must be strictly > t0={w1['t0']:.3f}"
     )
     assert w1["audible_start"] <= w1["audible_end"], (
         f"as={w1['audible_start']:.3f} > ae={w1['audible_end']:.3f}"
+    )
+
+
+def test_refine_word_boundaries_overlapping_r03_dusha_case():
+    """PART 1: real r03 'душе.' case — next_t0=378.143 < t0=378.483; ae must come from interval."""
+    words = [
+        SimpleNamespace(word="душе.", t0=378.483, t1=378.883),
+        SimpleNamespace(word="Понятно?", t0=378.143, t1=379.163),  # inverts next_t0
+    ]
+    intervals = [[378.0, 379.3]]  # speech covering the overlapping region
+    refined = refine_word_boundaries(words, intervals)
+    w0 = refined[0]
+    assert w0["audible_end"] > w0["t0"], (
+        f"'душе.' ae={w0['audible_end']:.3f} must be > t0={w0['t0']:.3f} (not zero-length)"
+    )
+    # ae should come from the interval, not from the clamp (which would give t0=378.483)
+    assert w0["audible_end"] > 378.6, (
+        f"ae={w0['audible_end']:.3f} expected to come from interval, not from clamp"
     )
