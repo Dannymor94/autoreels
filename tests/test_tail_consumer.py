@@ -312,6 +312,35 @@ def test_apply_tail_air_deflate_tail_last_word_end_none_when_no_word_fits():
     assert r.tail_last_word_end is None
 
 
+def test_apply_tail_air_explicit_e_caps_from_next_speech_t0():
+    """PART 2: explicit_e without _deflate_end_cap; cap from _next_speech_t0 in _apply_tail_air.
+
+    Scenario: "last?" Whisper t1=10.0 (inflated), smap ae=9.74, next speech t0=9.78.
+    Cap = 9.78 - _DEFLATE_CAP_MARGIN = 9.76 > ae=9.74 → word fits → lw_end = smap ae.
+    """
+    from autoreels.__main__ import _apply_tail_air, _DEFLATE_CAP_MARGIN
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    words = [_w(9.0, 9.4, "prev"), _w(9.5, 10.0, "last?"), _w(9.78, 10.5, "next")]
+    smap_lookup = {round(9.5 * 1000): (1, {"audible_end": 9.74})}
+    r = Reel(id="r01", start=0.0, end=9.76, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=9.76)], subtitles=[])
+    r.has_explicit_e = True
+    r._next_speech_t0 = 9.78  # set by _move_reel_end_to_sentence in deflate step 1
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None,
+                    smap_lookup=smap_lookup)
+
+    assert r.tail_last_word_end == pytest.approx(9.74), (
+        f"expected smap ae of 'last?' (9.74), got {r.tail_last_word_end}"
+    )
+    assert r.end == pytest.approx(9.78 - _DEFLATE_CAP_MARGIN)
+
+
 def test_apply_tail_air_deflate_smap_ae_overrides_whisper_t1():
     """Word with inflated Whisper t1 > cap but smap audible_end ≤ cap is kept; lw_end = smap ae."""
     from autoreels.__main__ import _apply_tail_air

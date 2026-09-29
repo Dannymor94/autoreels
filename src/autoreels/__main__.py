@@ -745,6 +745,7 @@ def _move_reel_end_to_sentence(reel, sentence, tx_words, *, smap, smap_lookup) -
         if (chosen_idx is not None and chosen_idx + 1 < len(tx_words))
         else None
     )
+    reel._next_speech_t0 = next_word.t0 if next_word is not None else None
     if smap is not None and smap_lookup is not None:
         from autoreels.local.render import _tail_from_smap
         _tail = _tail_from_smap(sentence[-1].t0, reel.end, smap, smap_lookup, last_t1=sentence[-1].t1)
@@ -777,6 +778,9 @@ def _move_reel_end_to_sentence(reel, sentence, tx_words, *, smap, smap_lookup) -
         )
 
 
+_DEFLATE_CAP_MARGIN = 0.02  # gap between deflate cap and next speech onset (smap t0)
+
+
 def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, explicit_e: bool) -> None:
     """Back off reel.end when it falls inside an incomplete sentence (stump removal, all reels),
     or when the last complete sentence is wholly filler/tag-question (non-explicit_e only).
@@ -803,7 +807,13 @@ def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, e
             if is_complete_sentence(s):
                 _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=smap_lookup)
                 reel.end_snap_reason = "repaired_to_sentence"
-                reel._deflate_end_cap = reel.subtitle_gate  # _apply_tail_air must not exceed this
+                if not explicit_e:
+                    # explicit_e: user chose the end explicitly; _apply_tail_air caps from
+                    # _next_speech_t0 directly so the last labelled word stays fully audible.
+                    _nst0 = reel._next_speech_t0
+                    reel._deflate_end_cap = (
+                        _nst0 - _DEFLATE_CAP_MARGIN if _nst0 is not None else reel.subtitle_gate
+                    )
                 return
         return  # no complete predecessor — repair will set open_thought
 
@@ -824,7 +834,10 @@ def _deflate_trailing(reel, tx_words, *, smap, smap_lookup, hanging_end_words, e
             if is_complete_sentence(s):
                 _move_reel_end_to_sentence(reel, s, tx_words, smap=smap, smap_lookup=smap_lookup)
                 reel.end_snap_reason = "repaired_to_sentence"
-                reel._deflate_end_cap = reel.subtitle_gate  # _apply_tail_air must not exceed this
+                _nst0 = reel._next_speech_t0
+                reel._deflate_end_cap = (
+                    _nst0 - _DEFLATE_CAP_MARGIN if _nst0 is not None else reel.subtitle_gate
+                )
                 return
 
 
@@ -1874,6 +1887,15 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         if _deflate_cap is not None and desired > _deflate_cap:
             desired = _deflate_cap
             r._deflate_cap_applied = True  # tells _check_tail_air to skip this reel
+        # explicit_e: deflate removed a stump but skipped setting _deflate_end_cap so the last
+        # labelled word stays fully audible; apply the map-based cap here instead.
+        elif _deflate_cap is None and getattr(r, "has_explicit_e", False):
+            _nst0 = getattr(r, "_next_speech_t0", None)
+            if _nst0 is not None:
+                _e_cap = _nst0 - _DEFLATE_CAP_MARGIN
+                if desired > _e_cap:
+                    desired = _e_cap
+                    r._deflate_cap_applied = True
         # When the cap caused desired < lw_end (Whisper t1 overlaps next sentence), the tail-air
         # invariant and intruder detection no longer apply — the clip cuts before lw_end.
         if desired >= lw_end:
@@ -1937,6 +1959,34 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
             return (f"{r.id}: audio ends {floor - r.end:.3f}s too early — "
                     f"tail air {r.end - lw_end:.3f}s < required {tail_pad_sec:.2f}s")
     return None
+
+
+def _check_fade_audible(reels, *, smap_lookup: dict | None) -> list[str]:
+    """Return [CONTENT] errors for reels where fade start < ae of the last subtitle word.
+
+    fade_start = tail_last_word_end (the point where audio fades out).
+    If fade starts before the last subtitle word finishes, that word is audibly cut off.
+    """
+    if not smap_lookup:
+        return []
+    errors = []
+    for r in reels:
+        lw_end = getattr(r, "tail_last_word_end", None)
+        if lw_end is None or not r.subtitles:
+            continue
+        last_sub = r.subtitles[-1]
+        entry = smap_lookup.get(round(last_sub.t0 * 1000))
+        if entry is None:
+            continue
+        ae = entry[1].get("audible_end", last_sub.t1)
+        if ae < last_sub.t0:  # corrupted smap entry — skip
+            continue
+        if lw_end < ae - 1e-6:
+            errors.append(
+                f"[CONTENT] {r.id}: fade start {lw_end:.3f} < audible_end {ae:.3f}"
+                f" of last subtitle word '{last_sub.word}'"
+            )
+    return errors
 
 
 def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
@@ -4801,6 +4851,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     _tail_err = _check_tail_air(reels, tail_pad_sec=_tail_pad, video_duration=_video_dur)
     if _tail_err:
         print(f"  error: tail-air invariant: {_tail_err}", file=sys.stderr)
+        return 1
+
+    _fade_errs = _check_fade_audible(reels, smap_lookup=_blk_smap_lookup)
+    for _err in _fade_errs:
+        print(f"  error: {_err}", file=sys.stderr)
+    if _fade_errs:
         return 1
 
     human_warnings = collect_human_warnings(reels, transcript, r0_cfg=r0_cfg)

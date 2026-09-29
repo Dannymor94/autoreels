@@ -519,3 +519,40 @@ def test_repair_explicit_e_incomplete_not_tag_question_sets_open_thought():
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=True)
     assert r.open_thought
     assert any("incomplete" in w for w in r.warnings)
+
+
+# ---------------------------------------------------------------------------
+# PART 1: deflate cap uses next_speech_t0 - margin (not subtitle_gate)
+# PART 2: explicit_e — step 1 does not set _deflate_end_cap
+# ---------------------------------------------------------------------------
+
+def test_deflate_cap_uses_next_speech_t0_minus_margin():
+    """PART 1: step 1 cap = next_speech_t0 - _DEFLATE_CAP_MARGIN, not subtitle_gate."""
+    import autoreels.__main__ as m
+    # Complete sentence "думаю." followed by stump "потому что".
+    # next_word after "думаю." = "потому" at t0=2.1.
+    # Expected cap = 2.1 - _DEFLATE_CAP_MARGIN.
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
+    ]
+    r = _reel(1.0, 3.0)
+    m._deflate_trailing(r, words, smap=None, smap_lookup=None,
+                        hanging_end_words=[], explicit_e=False)
+    assert r.end_snap_reason == "repaired_to_sentence"
+    assert r._deflate_end_cap == pytest.approx(2.1 - m._DEFLATE_CAP_MARGIN)
+
+
+def test_deflate_stump_explicit_e_no_deflate_cap():
+    """PART 2: explicit_e step 1 removes stump but does NOT set _deflate_end_cap."""
+    import autoreels.__main__ as m
+    words = [
+        _w(1.0, 1.5, "Я"), _w(1.6, 2.0, "думаю."),
+        _w(2.1, 2.5, "потому"), _w(2.6, 3.0, "что"),
+    ]
+    r = _reel(1.0, 3.0)
+    m._deflate_trailing(r, words, smap=None, smap_lookup=None,
+                        hanging_end_words=[], explicit_e=True)
+    assert r.end_snap_reason == "repaired_to_sentence"
+    assert not hasattr(r, "_deflate_end_cap"), "explicit_e must not set _deflate_end_cap"
+    assert r._next_speech_t0 == pytest.approx(2.1)
