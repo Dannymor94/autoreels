@@ -48,10 +48,6 @@
             [
               0.0,
               8.88000000000001
-            ],
-            [
-              17.060000000000002,
-              20.30000000000001
             ]
           ]
         }
@@ -434,11 +430,15 @@
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 91.84,
       "speed": 1.0,
       "tail_last_word_end": 91.54,
       "tail_next_word_start": 92.08,
       "warnings": [],
       "subtitle_emph_words": [],
+      "beat_gap_sec": null,
       "zoom_source_t0": null
     },
     {
@@ -452,12 +452,12 @@
           "shot": "wide",
           "close_intervals": [
             [
-              6.759999999999991,
-              12.95999999999998
+              12.0,
+              14.539999999999992
             ],
             [
-              12.95999999999998,
-              14.539999999999992
+              14.539999999999992,
+              20.28
             ]
           ]
         },
@@ -483,8 +483,8 @@
               5.939999999999998
             ],
             [
-              13.359999999999985,
-              16.25999999999999
+              16.25999999999999,
+              23.609999999999985
             ]
           ]
         }
@@ -1210,24 +1210,29 @@
         }
       ],
       "end_drift_sec": 0.30000000000001137,
-      "end_snap_reason": "sentence",
+      "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 193.73,
       "speed": 1.0,
-      "tail_last_word_end": 194.22,
-      "tail_next_word_start": 194.76,
+      "tail_last_word_end": null,
+      "tail_next_word_start": 193.78,
       "warnings": [
+        "ends_on_filler: 'и начать выбирать, понятно?'",
         "dangling start: opens on «Вот»"
       ],
       "subtitle_emph_words": [],
+      "beat_gap_sec": null,
       "zoom_source_t0": null
     },
     {
       "id": "r03",
       "start": 340.5832,
-      "end": 380.66318,
+      "end": 379.11318,
       "segments": [
         {
           "start": 340.5832,
@@ -1235,8 +1240,8 @@
           "shot": "wide",
           "close_intervals": [
             [
-              8.5,
-              13.019950000000051
+              13.019950000000051,
+              21.620000000000005
             ]
           ]
         },
@@ -1254,7 +1259,7 @@
         },
         {
           "start": 373.38318,
-          "end": 380.66318,
+          "end": 379.11318,
           "shot": "close",
           "close_intervals": []
         }
@@ -1269,7 +1274,9 @@
       "topic": "",
       "r0_start": 340.6,
       "r0_end": 378.88318,
-      "flags": [],
+      "flags": [
+        "start_repaired"
+      ],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
@@ -1780,22 +1787,28 @@
         }
       ],
       "end_drift_sec": 0.30000000000001137,
-      "end_snap_reason": "sentence",
+      "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
-      "start_snap_reason": null,
-      "start_repair_sec": null,
+      "start_snap_reason": "repaired_to_sentence",
+      "start_repair_sec": -0.4000000000000341,
       "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 379.11318,
       "speed": 1.0,
-      "tail_last_word_end": 379.16318,
+      "tail_last_word_end": null,
       "tail_next_word_start": 379.16318,
-      "warnings": [],
+      "warnings": [
+        "ends_on_filler: 'Понятно?'"
+      ],
       "subtitle_emph_words": [],
+      "beat_gap_sec": null,
       "zoom_source_t0": null
     },
     {
       "id": "r04",
       "start": 388.30316,
-      "end": 427.74634,
+      "end": 426.27,
       "segments": [
         {
           "start": 388.30316,
@@ -1817,16 +1830,12 @@
         },
         {
           "start": 402.36316,
-          "end": 427.74634,
+          "end": 426.27,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              7.239990000000034
-            ],
-            [
-              16.00317000000001,
-              22.703190000000006
+              10.560000000000002
             ]
           ]
         }
@@ -2298,16 +2307,20 @@
         }
       ],
       "end_drift_sec": 0.30000000000001137,
-      "end_snap_reason": "sentence",
+      "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 426.27,
       "speed": 1.0,
       "tail_last_word_end": 426.24634,
-      "tail_next_word_start": 426.30634,
+      "tail_next_word_start": null,
       "warnings": [],
       "subtitle_emph_words": [],
+      "beat_gap_sec": null,
       "zoom_source_t0": null
     },
     {
@@ -2321,12 +2334,12 @@
           "shot": "wide",
           "close_intervals": [
             [
-              5.9599999999999795,
-              9.059979999999996
-            ],
-            [
               9.059979999999996,
               14.859989999999982
+            ],
+            [
+              14.859989999999982,
+              20.74000000000001
             ]
           ]
         }
@@ -2605,19 +2618,29 @@
           "t0": 471.24634,
           "t1": 471.46634,
           "emph": false
+        },
+        {
+          "word": "есть.",
+          "t0": 471.46634,
+          "t1": 471.72635,
+          "emph": false
         }
       ],
       "end_drift_sec": 0.30000000000001137,
-      "end_snap_reason": "sentence_trimmed_hanging",
+      "end_snap_reason": "sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 472.02635000000004,
       "speed": 1.0,
       "tail_last_word_end": 471.72635,
       "tail_next_word_start": null,
       "warnings": [],
       "subtitle_emph_words": [],
+      "beat_gap_sec": null,
       "zoom_source_t0": null
     }
   ]
