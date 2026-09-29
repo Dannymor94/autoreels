@@ -370,3 +370,36 @@ def test_apply_tail_air_deflate_smap_ae_overrides_whisper_t1():
     assert r.tail_last_word_end == pytest.approx(10.4), (
         f"expected smap ae of last_word (10.4), got {r.tail_last_word_end}"
     )
+
+
+# ── _check_fade_audible ───────────────────────────────────────────────────────
+
+def test_check_fade_audible_violation():
+    """PART 4: reports [CONTENT] when lw_end < ae and ae <= r.end."""
+    from autoreels.__main__ import _check_fade_audible
+    from autoreels.core.models import Reel, Segment, Word
+
+    r = Reel(id="r01", start=0.0, end=10.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=10.0)],
+             subtitles=[Word(word="last", t0=9.0, t1=9.5)])
+    r.tail_last_word_end = 9.2
+    smap_lookup = {round(9.0 * 1000): (0, {"audible_end": 9.6})}  # ae=9.6 <= r.end=10.0
+    errs = _check_fade_audible([r], smap_lookup=smap_lookup)
+    assert len(errs) == 1
+    assert "[CONTENT]" in errs[0] and "r01" in errs[0]
+
+
+def test_check_fade_audible_skip_ae_past_clip_end():
+    """PART 4 guard: word with ae > r.end is truncated by clip, not by fade — skip."""
+    from autoreels.__main__ import _check_fade_audible
+    from autoreels.core.models import Reel, Segment, Word
+
+    r = Reel(id="r03", start=0.0, end=9.5, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=9.5)],
+             subtitles=[Word(word="end_word", t0=9.0, t1=9.8)])
+    r.tail_last_word_end = 9.1
+    smap_lookup = {round(9.0 * 1000): (0, {"audible_end": 9.7})}  # ae=9.7 > r.end=9.5
+    errs = _check_fade_audible([r], smap_lookup=smap_lookup)
+    assert errs == [], "ae > r.end should be skipped"

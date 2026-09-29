@@ -1981,6 +1981,8 @@ def _check_fade_audible(reels, *, smap_lookup: dict | None) -> list[str]:
         ae = entry[1].get("audible_end", last_sub.t1)
         if ae < last_sub.t0:  # corrupted smap entry — skip
             continue
+        if ae > r.end + 1e-3:  # word extends past clip — clip itself truncates it, not the fade
+            continue
         if lw_end < ae - 1e-6:
             errors.append(
                 f"[CONTENT] {r.id}: fade start {lw_end:.3f} < audible_end {ae:.3f}"
