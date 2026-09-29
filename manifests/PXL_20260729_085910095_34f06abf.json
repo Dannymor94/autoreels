@@ -845,7 +845,7 @@
       "has_explicit_e": true,
       "subtitle_gate": 679.412844,
       "speed": 1.0,
-      "tail_last_word_end": null,
+      "tail_last_word_end": 678.412844,
       "tail_next_word_start": 679.412844,
       "warnings": [
         "dangling start: opens on «Это»"
@@ -2325,7 +2325,7 @@
       "has_explicit_e": true,
       "subtitle_gate": 1196.17,
       "speed": 1.0,
-      "tail_last_word_end": null,
+      "tail_last_word_end": 1194.8032939999998,
       "tail_next_word_start": 1196.643344,
       "warnings": [],
       "subtitle_emph_words": [],
@@ -6664,12 +6664,6 @@
           "word": "там",
           "t0": 2512.978719,
           "t1": 2513.238719,
-          "emph": false
-        },
-        {
-          "word": "делаю.",
-          "t0": 2513.238719,
-          "t1": 2515.178719,
           "emph": false
         },
         {
