@@ -1843,7 +1843,8 @@ def _last_heard_word_end(words, seg) -> float | None:
     return max(ends) if ends else None
 
 
-def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float | None) -> None:
+def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float | None,
+                    smap_lookup: dict | None = None) -> None:
     """Set every reel's end to exactly tail_pad_sec of air after the last heard word.
 
     Runs LAST, after snap/padding/filler/cold-open: each of those erodes the trailing air (padding
@@ -1881,12 +1882,21 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
             r.tail_next_word_start = min(_intr) if _intr else None
         else:
             # Deflate cap cut before the last word's Whisper t1.  Find the last word that
-            # fully fits before the cap; its t1 anchors the tail video fade so the fade
-            # starts right after that word rather than defaulting to the last 0.25 s.
+            # fully fits before the cap using smap audible_end (more accurate than Whisper t1,
+            # which is inflated to the next word's t0 at sentence boundaries).
             _seg_start = last.start
-            _kept = [w for w in words if _seg_start <= w.t0 < desired and w.t1 <= desired]
+            def _ae(w, _sl=smap_lookup):
+                if _sl:
+                    e = _sl.get(round(w.t0 * 1000))
+                    if e:
+                        ae = e[1].get("audible_end", w.t1)
+                        if ae >= w.t0:  # guard against corrupted smap entries
+                            return ae
+                return w.t1
+            _kept = [w for w in words if _seg_start <= w.t0 < desired and _ae(w) <= desired]
             if _kept:
-                r.tail_last_word_end = max(_kept, key=lambda w: w.t0).t1
+                best = max(_kept, key=lambda w: w.t0)
+                r.tail_last_word_end = _ae(best)
             if r.tail_next_word_start is None:
                 _nxt = [w.t0 for w in words if w.t0 >= desired - 1e-6]
                 r.tail_next_word_start = min(_nxt) if _nxt else None
@@ -4776,7 +4786,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # multi-segment, cold open, explicit e:). Runs LAST so nothing downstream shortens it.
     _video_dur = tx_words[-1].t1 if tx_words else None
     _tail_pad = getattr(r0_cfg, "tail_pad_sec", 0.7)
-    _apply_tail_air(reels, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur)
+    _apply_tail_air(reels, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur,
+                    smap_lookup=_blk_smap_lookup)
 
     # Fail fast if any reel's segments desynced from its final bounds (never emit such a manifest).
     for reel in reels:

@@ -310,3 +310,34 @@ def test_apply_tail_air_deflate_tail_last_word_end_none_when_no_word_fits():
     _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None)
 
     assert r.tail_last_word_end is None
+
+
+def test_apply_tail_air_deflate_smap_ae_overrides_whisper_t1():
+    """Word with inflated Whisper t1 > cap but smap audible_end ≤ cap is kept; lw_end = smap ae."""
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    # "last_word": Whisper t1=11.0 overshoots cap=10.5, but smap ae=10.4 fits.
+    # Without smap it would be excluded and "prev_word" (t1=9.5) would be picked.
+    words = [
+        _w(8.0, 9.5, "prev_word"),
+        _w(9.5, 11.0, "last_word"),   # Whisper t1 overshoots cap; smap ae fits
+        _w(10.6, 12.0, "next_sent"),
+    ]
+    smap_lookup = {
+        round(9.5 * 1000): (1, {"audible_end": 10.4}),  # ae ≤ cap 10.5
+    }
+    r = Reel(id="r01", start=0.0, end=10.5, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=10.5)], subtitles=[])
+    r._deflate_end_cap = 10.5
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None,
+                    smap_lookup=smap_lookup)
+
+    assert r.tail_last_word_end == pytest.approx(10.4), (
+        f"expected smap ae of last_word (10.4), got {r.tail_last_word_end}"
+    )
