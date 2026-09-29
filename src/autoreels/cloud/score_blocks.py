@@ -107,7 +107,11 @@ def score_blocks_batch(
     try:
         raw = provider.complete(messages, temperature=temperature)
     except (ProviderError, ProviderEmptyResponse, ProviderTimeout) as e:
-        raise ValueError(f"provider error: {e}") from e
+        print(f"  ⚠ provider error ({e}), retrying batch...", flush=True)
+        try:
+            raw = provider.complete(messages, temperature=temperature)
+        except (ProviderError, ProviderEmptyResponse, ProviderTimeout) as e2:
+            raise ValueError(f"provider error: {e2}") from e2
     entries = parse_score_response(raw)
     scores = {e["id"]: e["score"] for e in entries if "id" in e and "score" in e}
 

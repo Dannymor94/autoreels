@@ -430,21 +430,31 @@ def main() -> None:
     all_09h33  = rows_09h33 + unsc_09h33
     if all_09h33:
         min_score = getattr(r0_cfg, "min_score", 65)
-        final_09h33 = sorted(
+        max_reels = getattr(r0_cfg, "max_reels", None)
+        passing = sorted(
             [r for r in all_09h33 if all_llm_scores.get(r["block_id"], 0) >= min_score],
-            key=lambda r: r["start"],
+            key=lambda r: -all_llm_scores.get(r["block_id"], 0),
         )
+        if max_reels is not None:
+            passing = passing[:max_reels]
+        final_09h33 = sorted(passing, key=lambda r: r["start"])
         human_ids = {r["block_id"] for r in rows_09h33}
         n_human_in_final = sum(1 for r in final_09h33 if r["block_id"] in human_ids)
-        print(f"\n--- 09h33 end-to-end (min_score={min_score}) ---")
-        print(f"  {'id':<16}  {'start–end':<18}  llm_score  human?")
+        llm_rank = {r["block_id"]: i + 1 for i, r in enumerate(passing)}
+        print(f"\n--- 09h33 end-to-end (min_score={min_score}, max_reels={max_reels}) ---")
+        print(f"  {'id':<16}  {'start–end':<18}  llm_score  rank  human?")
         for r in final_09h33:
             bid  = r["block_id"]
             ts   = f"{r['start']:.1f}–{r['end']:.1f}s"
             sc   = all_llm_scores.get(bid, "?")
+            rank = llm_rank.get(bid, "?")
             mark = " ✓" if bid in human_ids else ""
-            print(f"  {bid:<16}  {ts:<18}  {str(sc):<9}  {mark}")
+            print(f"  {bid:<16}  {ts:<18}  {str(sc):<9}  {str(rank):<4}  {mark}")
         print(f"\n  human blocks in final: {n_human_in_final} of {len(rows_09h33)}")
+        human_in_final = [r for r in final_09h33 if r["block_id"] in human_ids]
+        if human_in_final:
+            ranks_str = ", ".join(str(llm_rank[r["block_id"]]) for r in human_in_final)
+            print(f"  human block ranks (LLM order): {ranks_str}")
 
     # 10 largest LLM vs human disagreements
     matched = [r for r in rows if r["block_id"] in llm_scored]

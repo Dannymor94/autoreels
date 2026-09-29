@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from autoreels.cloud.blocks import CandidateBlock, _Line, topk_filter
+from autoreels.cloud.providers import ProviderError
 from autoreels.cloud.score_blocks import (
     apply_llm_scores,
     build_score_messages,
@@ -35,12 +36,15 @@ def _block(bid: str, text: str = "Текст блока.") -> CandidateBlock:
 
 class _MockProvider:
     def __init__(self, responses):
+        """responses: list of str (raw JSON) or Exception instances."""
         self._responses = list(responses)
         self.calls = 0
 
     def complete(self, messages, *, temperature=0.0):
         r = self._responses[min(self.calls, len(self._responses) - 1)]
         self.calls += 1
+        if isinstance(r, Exception):
+            raise r
         return r
 
 
@@ -147,6 +151,25 @@ def test_score_blocks_batch_still_missing_after_retry():
     assert id3.llm_score_reason == "missing"
     assert blocks[0].llm_score_reason is None
     assert blocks[1].llm_score_reason is None
+
+
+def test_score_blocks_batch_provider_error_retried():
+    """ProviderError on first call → retry → success; all blocks scored."""
+    blocks = [_block("id1"), _block("id2")]
+    raw = '{"scores":[{"id":"id1","score":80},{"id":"id2","score":70}]}'
+    provider = _MockProvider([ProviderError("Service overloaded"), raw])
+    result = score_blocks_batch(blocks, provider=provider, system_text=_SYSTEM, fewshot_examples=[])
+    assert provider.calls == 2
+    assert result == {"id1": 80, "id2": 70}
+
+
+def test_score_blocks_batch_provider_error_both_fail():
+    """ProviderError on both attempts → raises ValueError."""
+    blocks = [_block("id1")]
+    provider = _MockProvider([ProviderError("overloaded"), ProviderError("still overloaded")])
+    with pytest.raises(ValueError, match="provider error"):
+        score_blocks_batch(blocks, provider=provider, system_text=_SYSTEM, fewshot_examples=[])
+    assert provider.calls == 2
 
 
 # ----------------------------------------------------------------- apply_llm_scores
