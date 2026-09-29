@@ -298,3 +298,26 @@ def test_whisper_gaps_can_be_negative():
     words = _words((0.0, 1.0), (0.9, 1.8))  # t1=1.0 > t0_next=0.9
     gaps = whisper_gaps(words)
     assert gaps[0] < 0.0
+
+
+# ── PART 3: corrupted smap entries from overlapping timestamps ────────────────
+
+def test_refine_word_boundaries_overlapping_timestamps_no_corrupt_ae():
+    """PART 3: next_t0 < t0 (overlapping Whisper timestamps) must not produce ae < t0 or as > ae.
+
+    Root cause: overlapping timestamps invert the search window (search_end < win_start),
+    which inverts the fragment's clamped interval — giving ae = search_end < t0.
+    Fix: guard audible_end = max(audible_end, w.t0).
+    """
+    # word1: t0=1.0, t1=1.5; word2: t0=0.8 (OVERLAPS — next_t0 < word1.t0)
+    words = [SimpleNamespace(word="душе.", t0=1.0, t1=1.5),
+             SimpleNamespace(word="next", t0=0.8, t1=1.2)]
+    intervals = [[0.7, 1.8]]  # speech spans both words
+    refined = refine_word_boundaries(words, intervals)
+    w1 = refined[0]
+    assert w1["audible_end"] >= w1["t0"], (
+        f"ae={w1['audible_end']:.3f} < t0={w1['t0']:.3f} — corrupted smap entry"
+    )
+    assert w1["audible_start"] <= w1["audible_end"], (
+        f"as={w1['audible_start']:.3f} > ae={w1['audible_end']:.3f}"
+    )

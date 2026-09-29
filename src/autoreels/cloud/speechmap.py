@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-SPEECHMAP_VERSION = "4"
+SPEECHMAP_VERSION = "5"
 
 # Defaults — all overridable by callers or future config.
 DEFAULT_FRAME_SEC = 0.01         # 10 ms energy window
@@ -201,6 +201,7 @@ def refine_word_boundaries(
 
         # audible_end: bridge gaps inside the word span; stop at word boundaries
         audible_end = frags[0][1]
+        audible_end = max(audible_end, w.t0)  # guard: overlapping Whisper timestamps can invert the search window, producing ae < t0
         for i, (onset, offset, _) in enumerate(frags[1:], start=1):
             gap_start_t = frags[i - 1][1]
             gap = onset - gap_start_t
