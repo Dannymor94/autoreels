@@ -1339,14 +1339,22 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                     w for w in transcript.words
                     if reel.start <= w.t0 < _sg_no_smap and w.t1 <= reel.end
                 ]
-            # Drop overlapping Whisper words: adjacent segment boundaries sometimes produce a
-            # word twice with overlapping timestamps; keep first occurrence by t0.
+            # Drop overlapping Whisper words: adjacent segment boundaries sometimes produce the
+            # same word twice with overlapping timestamps.  Only merge when BOTH the text and
+            # timestamps overlap — different words with overlapping Whisper timestamps (common on
+            # this material) must both be kept.  When two same-word entries overlap, keep the
+            # LATER one (shorter, more precise alignment) and drop the earlier (over-extended
+            # artifact that spans to the segment boundary).
             _subs = reel.subtitles
             if len(_subs) > 1:
                 _deduped: list = [_subs[0]]
                 for _ww in _subs[1:]:
-                    if _ww.t0 >= _deduped[-1].t1:
+                    prev = _deduped[-1]
+                    _same = _ww.word.strip(".,!?…;:").lower() == prev.word.strip(".,!?…;:").lower()
+                    if _ww.t0 >= prev.t1 or not _same:
                         _deduped.append(_ww)
+                    else:
+                        _deduped[-1] = _ww  # same word overlap → replace with more precise later entry
                 reel.subtitles = _deduped
     return reels
 
@@ -1871,6 +1879,17 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
             r.tail_last_word_end = lw_end
             _intr = [w.t0 for w in words if lw_end - 1e-6 <= w.t0 < desired]
             r.tail_next_word_start = min(_intr) if _intr else None
+        else:
+            # Deflate cap cut before the last word's Whisper t1.  Find the last word that
+            # fully fits before the cap; its t1 anchors the tail video fade so the fade
+            # starts right after that word rather than defaulting to the last 0.25 s.
+            _seg_start = last.start
+            _kept = [w for w in words if _seg_start <= w.t0 < desired and w.t1 <= desired]
+            if _kept:
+                r.tail_last_word_end = max(_kept, key=lambda w: w.t0).t1
+            if r.tail_next_word_start is None:
+                _nxt = [w.t0 for w in words if w.t0 >= desired - 1e-6]
+                r.tail_next_word_start = min(_nxt) if _nxt else None
         # Always sync reel.end (padding may have clobbered it for beat reels).
         r.end = desired
         if abs(desired - last.end) < 1e-6:

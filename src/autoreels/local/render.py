@@ -990,9 +990,13 @@ def _tail_from_smap(
             cap = max(audible_end + 0.04, next_speech_onset - _TAIL_PAD)
             new_end = min(new_end, cap)
         else:
-            # Speech-next case: end strictly before next speech onset
+            # Speech-next case: end strictly before next speech onset.
+            # Hard cap at onset: when gap <= _TAIL_PAD the subtraction undershoots
+            # below audible_end, the max clamps to audible_end + 0.04, which may
+            # land past onset.  min(…, onset) keeps the invariant end <= onset.
             new_end = next_speech_onset - _TAIL_PAD
             new_end = max(new_end, audible_end + 0.04)
+            new_end = min(new_end, next_speech_onset)
 
     new_end = max(new_end, word_entry["t0"] + 0.04)
     # Invariant: clip end must not precede the last word's audible end.
@@ -1807,6 +1811,7 @@ def _render_segments(
                     _pad = 0.10
                     _new_end = min(_word_end + _pad, _nw_start - _pad)
                     _new_end = max(_new_end, _last.t0 + 0.04)
+                    _new_end = min(_new_end, _nw_start)  # hard cap when gap <= pad
                     if len(segs) > 1:
                         _new_end = round(_new_end * _fps()) / _fps()
                     if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):

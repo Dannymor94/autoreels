@@ -386,16 +386,18 @@ def test_ass_borderstyle_box_with_opacity_when_fill_enabled():
 
 
 def test_stage_subtitles_deduplicates_overlapping_whisper_words():
-    """Overlapping Whisper words (Whisper segment-boundary artifact) → only first kept."""
+    """Same word overlapping (Whisper segment-boundary artifact) → later (precise) kept."""
     from types import SimpleNamespace
     from autoreels.__main__ import _stage_subtitles
     from autoreels.core.models import Reel, Segment
 
-    # 'делаю.' appears twice with overlapping timestamps (same as PXL r09 bug)
+    # 'делаю.' appears twice with overlapping timestamps (PXL r09 case).
+    # t0=2.0,t1=4.0 is the over-extended artifact; t0=2.6,t1=3.5 is the precise one.
+    # The precise (later, shorter) entry is the one the sentence boundary logic expects.
     words = [
         _w(1.0, 1.5, "word1"),
-        _w(2.0, 4.0, "делаю."),   # first: long (Whisper alignment artifact)
-        _w(2.6, 3.5, "делаю."),   # second: overlaps first — should be dropped
+        _w(2.0, 4.0, "делаю."),   # long Whisper artifact — should be replaced
+        _w(2.6, 3.5, "делаю."),   # precise shorter entry — should be kept
     ]
     tx = SimpleNamespace(words=words)
     r = Reel(id="r01", start=0.0, end=5.0, score=80, hook="h",
@@ -403,3 +405,26 @@ def test_stage_subtitles_deduplicates_overlapping_whisper_words():
              segments=[Segment(start=0.0, end=5.0)], subtitles=[])
     _stage_subtitles([r], tx)
     assert [w.word for w in r.subtitles] == ["word1", "делаю."]
+    # The kept entry must be the precise one (t0=2.6), not the artifact (t0=2.0)
+    assert r.subtitles[-1].t0 == 2.6
+
+
+def test_stage_subtitles_keeps_different_words_that_overlap():
+    """Different words with overlapping Whisper timestamps must both be kept."""
+    from types import SimpleNamespace
+    from autoreels.__main__ import _stage_subtitles
+    from autoreels.core.models import Reel, Segment
+
+    # 'понятно?' and 'Когда' overlap in Whisper timestamps (common on this material).
+    # The old broad dedup would drop 'Когда'; the fixed dedup must keep both.
+    words = [
+        _w(1.0, 1.5, "слово"),
+        _w(2.0, 3.5, "понятно?"),
+        _w(2.8, 4.0, "Когда"),   # different word, overlaps — must NOT be dropped
+    ]
+    tx = SimpleNamespace(words=words)
+    r = Reel(id="r01", start=0.0, end=5.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=5.0)], subtitles=[])
+    _stage_subtitles([r], tx)
+    assert [w.word for w in r.subtitles] == ["слово", "понятно?", "Когда"]

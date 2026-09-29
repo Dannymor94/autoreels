@@ -109,6 +109,23 @@ def test_tail_speech_next_case():
     assert result > 5.0
 
 
+def test_tail_speech_next_zero_gap():
+    """Gap = 0 (ae == next audible_start) → end at onset, never past it (PXL r08 case)."""
+    # last word ae=5.8; next word audible_start=5.8 → gap=0 < 0.35 → speech-next
+    smap = _make_smap(
+        [_make_word(5.0, 5.9, ae=5.8), _make_word(5.8, 7.0)],
+        [_make_boundary(0.0)],
+    )
+    lookup = _smap_word_lookup(smap)
+    result = _tail_from_smap(
+        last_t0=5.0, seg_end=7.0, smap=smap, lookup=lookup,
+        cut_pause_min_sec=0.35,
+    )
+    assert result is not None
+    assert result <= 5.8, f"end {result:.4f} overshoots onset 5.8"
+    assert result > 5.0
+
+
 # ── untranscribed speech in gap ───────────────────────────────────────────────
 
 def test_tail_untranscribed_speech_is_next_onset():
@@ -241,3 +258,55 @@ def test_tail_new_end_never_before_audible_end():
     )
     assert result is not None
     assert result >= 5.8  # >= original audible_end; actual ≈ 6.1 (6.0 + _TAIL_PAD)
+
+
+# ── PART 3: deflate-capped tail_last_word_end ─────────────────────────────────
+
+def test_apply_tail_air_deflate_sets_tail_last_word_end():
+    """Deflate cap: last word that fully fits before the cap gets its t1 stored."""
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    # Scenario: clip ends at 10.0 (deflate cap).
+    # "keep_word" fits fully (t1=9.5 < 10.0); "overflow_word" starts at 9.6 but t1=10.4 overshoots.
+    words = [
+        _w(8.0, 9.5, "keep_word"),
+        _w(9.6, 10.4, "overflow_word"),   # t1 overshoots cap
+        _w(10.1, 11.0, "next_sent"),      # first word after cap
+    ]
+    r = Reel(id="r01", start=0.0, end=10.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=10.0)], subtitles=[])
+    r._deflate_end_cap = 10.0
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None)
+
+    assert r.tail_last_word_end == pytest.approx(9.5), (
+        f"expected t1 of last fully-fit word (9.5), got {r.tail_last_word_end}"
+    )
+
+
+def test_apply_tail_air_deflate_tail_last_word_end_none_when_no_word_fits():
+    """Deflate cap: no word finishes before the cap → tail_last_word_end stays None."""
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    # All words that start before cap (10.0) have t1 > 10.0 → none fit fully
+    words = [
+        _w(9.0, 11.0, "overflow"),
+        _w(10.2, 12.0, "next"),
+    ]
+    r = Reel(id="r01", start=0.0, end=10.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=10.0)], subtitles=[])
+    r._deflate_end_cap = 10.0
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None)
+
+    assert r.tail_last_word_end is None
