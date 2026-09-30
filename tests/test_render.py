@@ -2432,10 +2432,10 @@ def test_smap_tail_multisegment_speed_tail_inside_last_seg(
 
 def test_audio_invariant_logs_when_speech_after_last_word(
         tmp_path, render_cfg, fake_ffmpeg, capsys):
-    """Audio invariant: [AUDIO-INV] is logged when speech starts between last-word ae and clip_end.
+    """Audio invariant: [ERROR] is logged when speech starts between last-word ae and clip_end.
 
     Scenario: last subtitle word ae=10.4, clip_end=15.0, speech starts at 11.0 (> ae).
-    Expected: [AUDIO-INV] in output with reel id and the violating word's t0.
+    Expected: [ERROR] in output with reel id and the violating word's t0.
     """
     from autoreels.core.models import Segment
 
@@ -2475,14 +2475,14 @@ def test_audio_invariant_logs_when_speech_after_last_word(
                 render_cfg=render_cfg, smap=smap)
 
     captured = capsys.readouterr()
-    assert "[AUDIO-INV]" in captured.out, f"expected [AUDIO-INV] in output:\n{captured.out}"
+    assert "[ERROR]" in captured.out, f"expected [ERROR] in output:\n{captured.out}"
     assert "r01" in captured.out
     assert "11.0" in captured.out or "11.000" in captured.out
 
 
 def test_audio_invariant_silent_when_clean(
         tmp_path, render_cfg, fake_ffmpeg, capsys):
-    """Audio invariant: NO [AUDIO-INV] when no speech between last-word ae and clip_end."""
+    """Audio invariant: NO [ERROR] when no speech between last-word ae and clip_end."""
     from autoreels.core.models import Segment
 
     inputs = tmp_path / "inputs"
@@ -2502,4 +2502,4 @@ def test_audio_invariant_silent_when_clean(
                 render_cfg=render_cfg, smap=smap)
 
     captured = capsys.readouterr()
-    assert "[AUDIO-INV]" not in captured.out, f"unexpected [AUDIO-INV]:\n{captured.out}"
+    assert "[ERROR]" not in captured.out, f"unexpected [ERROR]:\n{captured.out}"

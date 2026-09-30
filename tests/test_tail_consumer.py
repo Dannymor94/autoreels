@@ -494,10 +494,10 @@ def test_apply_tail_air_no_intruder_when_no_next_speech_in_window():
     assert r.tail_next_word_start is None  # 12.0 > 11.5, outside window
 
 
-# ── render pre-trim invariant ─────────────────────────────────────────────────
+# ── render post-trim invariant ────────────────────────────────────────────────
 
 def test_check_silence_at_clip_end_fires_for_manifest_overshoot():
-    """Pre-trim invariant fires when manifest segment end exceeds next-speech audible_start."""
+    """Post-trim ERROR fires when rendered clip end still overlaps next-speech audible_start."""
     import io, contextlib
     from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
     from autoreels.core.models import Word
@@ -517,11 +517,11 @@ def test_check_silence_at_clip_end_fires_for_manifest_overshoot():
     with contextlib.redirect_stdout(buf):
         _check_silence_at_clip_end("r01", last_word, 10.5, smap, lookup)
     out = buf.getvalue()
-    assert "[AUDIO-INV]" in out, f"invariant must fire; got: {out!r}"
+    assert "[ERROR]" in out, f"invariant must fire; got: {out!r}"
 
 
 def test_check_silence_at_clip_end_silent_when_end_before_onset():
-    """Invariant is silent when clip_end (ae + 0.1) is before next-speech audible_start."""
+    """No [ERROR] when clip_end (ae + 0.1) is before next-speech audible_start."""
     import io, contextlib
     from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
     from autoreels.core.models import Word
@@ -541,4 +541,4 @@ def test_check_silence_at_clip_end_silent_when_end_before_onset():
     with contextlib.redirect_stdout(buf):
         _check_silence_at_clip_end("r01", last_word, 10.0, smap, lookup)
     out = buf.getvalue()
-    assert "[AUDIO-INV]" not in out, f"invariant must be silent; got: {out!r}"
+    assert "[ERROR]" not in out, f"invariant must be silent; got: {out!r}"
