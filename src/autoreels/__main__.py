@@ -1873,6 +1873,17 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         lw_end = _last_heard_word_end(words, last)
         if lw_end is None:
             continue
+        # Prefer smap audible_end over Whisper t1 (smap is more accurate).
+        # Only bump upward — if smap ae < Whisper t1, keep the Whisper value as floor.
+        if smap_lookup:
+            _seg_words = [w for w in words if last.start <= w.t0 < last.end]
+            if _seg_words:
+                _lw = max(_seg_words, key=lambda w: w.t1)
+                _e = smap_lookup.get(round(_lw.t0 * 1000))
+                if _e:
+                    _sae = _e[1].get("audible_end", lw_end)
+                    if _sae > lw_end and _sae >= _lw.t0:
+                        lw_end = _sae
         desired = lw_end + tail_pad_sec
         if video_duration is not None:
             desired = min(desired, video_duration)

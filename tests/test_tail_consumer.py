@@ -341,6 +341,30 @@ def test_apply_tail_air_explicit_e_caps_from_next_speech_t0():
     assert r.end == pytest.approx(9.78 - _DEFLATE_CAP_MARGIN)
 
 
+def test_apply_tail_air_normal_smap_ae_overrides_whisper_t1():
+    """Non-deflate path: smap audible_end > Whisper t1 → lw_end and desired both bump to ae."""
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    # "last_word": Whisper t1=9.540, smap ae=9.600.
+    words = [_w(8.0, 9.0, "prev"), _w(9.0, 9.54, "last")]
+    smap_lookup = {round(9.0 * 1000): (1, {"audible_end": 9.6})}
+    r = Reel(id="r01", start=0.0, end=12.0, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=12.0)], subtitles=[])
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None,
+                    smap_lookup=smap_lookup)
+
+    assert r.tail_last_word_end == pytest.approx(9.6), (
+        f"expected smap ae (9.6), got {r.tail_last_word_end}"
+    )
+    assert r.end == pytest.approx(9.6 + 1.5), f"expected end=11.1, got {r.end}"
+
+
 def test_apply_tail_air_deflate_smap_ae_overrides_whisper_t1():
     """Word with inflated Whisper t1 > cap but smap audible_end ≤ cap is kept; lw_end = smap ae."""
     from autoreels.__main__ import _apply_tail_air

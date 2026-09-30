@@ -32,7 +32,7 @@
     {
       "id": "r01",
       "start": 616.492844,
-      "end": 679.412844,
+      "end": 679.392844,
       "segments": [
         {
           "start": 616.492844,
@@ -54,7 +54,7 @@
         },
         {
           "start": 654.7128439999999,
-          "end": 679.412844,
+          "end": 679.392844,
           "shot": "wide",
           "close_intervals": [
             [
@@ -857,11 +857,11 @@
     {
       "id": "r02",
       "start": 982.533174,
-      "end": 1034.273174,
+      "end": 1034.33,
       "segments": [
         {
           "start": 982.533174,
-          "end": 1034.273174,
+          "end": 1034.33,
           "shot": "wide",
           "close_intervals": [
             [
@@ -1447,7 +1447,7 @@
       "has_explicit_e": true,
       "subtitle_gate": 1033.0731739999999,
       "speed": 1.0,
-      "tail_last_word_end": 1032.773174,
+      "tail_last_word_end": 1032.83,
       "tail_next_word_start": 1033.973144,
       "warnings": [],
       "subtitle_emph_words": [],
@@ -1457,7 +1457,7 @@
     {
       "id": "r03",
       "start": 1132.1433140000001,
-      "end": 1196.17,
+      "end": 1196.623344,
       "segments": [
         {
           "start": 1132.1433140000001,
@@ -1473,7 +1473,7 @@
         },
         {
           "start": 1167.863294,
-          "end": 1196.17,
+          "end": 1196.623344,
           "shot": "wide",
           "close_intervals": [
             [
@@ -2335,7 +2335,7 @@
     {
       "id": "r04",
       "start": 1473.987638,
-      "end": 1539.161838,
+      "end": 1539.21,
       "segments": [
         {
           "start": 1473.987638,
@@ -2360,7 +2360,7 @@
         },
         {
           "start": 1520.221838,
-          "end": 1539.161838,
+          "end": 1539.21,
           "shot": "wide",
           "close_intervals": [
             [
@@ -3171,7 +3171,7 @@
       "has_explicit_e": true,
       "subtitle_gate": 1538.6918779999999,
       "speed": 1.0,
-      "tail_last_word_end": 1537.661838,
+      "tail_last_word_end": 1537.71,
       "tail_next_word_start": 1538.841878,
       "warnings": [],
       "subtitle_emph_words": [],
@@ -5758,7 +5758,7 @@
     {
       "id": "r09",
       "start": 2436.278719,
-      "end": 2516.039699,
+      "end": 2517.4096990000003,
       "segments": [
         {
           "start": 2436.278719,
@@ -5798,7 +5798,7 @@
         },
         {
           "start": 2513.799699,
-          "end": 2516.039699,
+          "end": 2517.4096990000003,
           "shot": "close",
           "close_intervals": []
         }
@@ -6683,11 +6683,9 @@
       "has_explicit_e": true,
       "subtitle_gate": 2514.839699,
       "speed": 1.0,
-      "tail_last_word_end": 2514.539699,
-      "tail_next_word_start": 2515.859699,
-      "warnings": [
-        "ends on hanging phrase «делаю. Когда» (explicit e: — not moved)"
-      ],
+      "tail_last_word_end": 2515.9096990000003,
+      "tail_next_word_start": 2516.1996990000002,
+      "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null

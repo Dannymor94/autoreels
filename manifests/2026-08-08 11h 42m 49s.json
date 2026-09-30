@@ -32,7 +32,7 @@
     {
       "id": "r01",
       "start": 66.10000000000001,
-      "end": 93.04,
+      "end": 93.10000000000001,
       "segments": [
         {
           "start": 66.10000000000001,
@@ -42,7 +42,7 @@
         },
         {
           "start": 72.74,
-          "end": 93.04,
+          "end": 93.10000000000001,
           "shot": "wide",
           "close_intervals": [
             [
@@ -434,7 +434,7 @@
       "has_explicit_e": true,
       "subtitle_gate": 91.84,
       "speed": 1.0,
-      "tail_last_word_end": 91.54,
+      "tail_last_word_end": 91.60000000000001,
       "tail_next_word_start": 92.08,
       "warnings": [],
       "subtitle_emph_words": [],
@@ -444,7 +444,7 @@
     {
       "id": "r02",
       "start": 131.24,
-      "end": 193.73,
+      "end": 193.76,
       "segments": [
         {
           "start": 131.24,
@@ -475,7 +475,7 @@
         },
         {
           "start": 170.12,
-          "end": 193.73,
+          "end": 193.76,
           "shot": "wide",
           "close_intervals": [
             [
@@ -1217,9 +1217,9 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 193.73,
+      "subtitle_gate": 193.78,
       "speed": 1.0,
-      "tail_last_word_end": 193.3,
+      "tail_last_word_end": 193.74,
       "tail_next_word_start": 193.78,
       "warnings": [
         "ends_on_filler: 'и начать выбирать, понятно?'",
@@ -1232,7 +1232,7 @@
     {
       "id": "r03",
       "start": 340.5832,
-      "end": 379.11318,
+      "end": 379.14318000000003,
       "segments": [
         {
           "start": 340.5832,
@@ -1259,7 +1259,7 @@
         },
         {
           "start": 373.38318,
-          "end": 379.11318,
+          "end": 379.14318000000003,
           "shot": "close",
           "close_intervals": []
         }
@@ -1792,14 +1792,15 @@
       "start_snap_reason": "repaired_to_sentence",
       "start_repair_sec": -0.4000000000000341,
       "ends_on_host_turn": false,
-      "open_thought": false,
+      "open_thought": true,
       "has_explicit_e": true,
       "subtitle_gate": 379.11318,
       "speed": 1.0,
-      "tail_last_word_end": 378.88318,
+      "tail_last_word_end": 378.93318,
       "tail_next_word_start": 379.16318,
       "warnings": [
-        "ends_on_filler: 'Понятно?'"
+        "e: ends on incomplete sentence ('Потому')",
+        "[CONTENT] r03: last word 'Понятно?' cut by clip end (continuous speech into next phrase, ae=379.213 > clip=379.143)"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
@@ -1808,7 +1809,7 @@
     {
       "id": "r04",
       "start": 388.30316,
-      "end": 426.27,
+      "end": 426.28634,
       "segments": [
         {
           "start": 388.30316,
@@ -1830,7 +1831,7 @@
         },
         {
           "start": 402.36316,
-          "end": 426.27,
+          "end": 426.28634,
           "shot": "wide",
           "close_intervals": [
             [
