@@ -147,6 +147,31 @@ def test_tail_untranscribed_speech_is_next_onset():
     assert result > 5.0
 
 
+def test_tail_pxl_r08_speech_next_real_numbers():
+    """PXL r08 actual numbers: untranscribed speech triggers speech-next; result is
+    in [ae, first_transcribed_onset] — the exact regression that prompted this fix.
+
+    Render log: last='сильнее.' t0=2146.195 ae=2146.790; untr onset=2147.000 (gap=0.21);
+    first transcribed word t0=2147.255 audible_start=2147.270; seg_end=2148.767.
+    """
+    smap = _make_smap(
+        [
+            _make_word(2146.195, 2146.500, ae=2146.790),
+            _make_word(2147.255, 2147.700),   # audible_start=2147.255 (default = t0)
+        ],
+        [_make_boundary(0.21, untr=[[2147.000, 2147.200]])],
+    )
+    lookup = _smap_word_lookup(smap)
+    result = _tail_from_smap(
+        last_t0=2146.195, seg_end=2148.767, smap=smap, lookup=lookup,
+        cut_pause_min_sec=0.35, last_t1=2146.500,
+    )
+    assert result is not None
+    # speech-next via untranscribed onset 2147.000 (gap 0.21 < 0.35)
+    assert result <= 2147.255, f"render end {result:.3f} overshoots first transcribed onset 2147.255"
+    assert result >= 2146.790, f"render end {result:.3f} precedes last-word ae 2146.790"
+
+
 def test_tail_untr_far_from_ae_silence_case():
     """Untranscribed speech onset far enough → gap >= cut_pause_min_sec → silence case."""
     # last word ae=5.8; untr at [6.2, 6.5] → gap=0.4 >= 0.35 → silence case
