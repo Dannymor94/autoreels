@@ -449,3 +449,96 @@ def test_check_fade_audible_clip_cut_explicit_e_is_warning():
     assert errs == [], "explicit_e clip-cut must not be an error"
     assert len(warns) == 1 and "clip end" in warns[0]
     assert any("clip end" in w for w in r.warnings), "warning must be in reel.warnings"
+
+
+# ── _apply_tail_air: cap at next speech onset ─────────────────────────────────
+
+def test_apply_tail_air_records_intruder_manifest_keeps_full_pad():
+    """Next speech within 1.5s → intruder recorded in tail_next_word_start; manifest end = lw_end + pad.
+    The render (_tail_from_smap) trims the actual clip before onset; apply only records the intruder."""
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    # "next" at t0=10.5 is within the 1.5s pad window (lw_end=10.0, desired=11.5).
+    words = [_w(9.0, 10.0, "last"), _w(10.5, 11.0, "next")]
+    r = Reel(id="r01", start=0.0, end=10.1, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=10.1)], subtitles=[])
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None)
+
+    assert r.end == pytest.approx(10.0 + 1.5), f"expected lw_end+pad=11.5 (full pad), got {r.end}"
+    assert r.tail_next_word_start == pytest.approx(10.5)  # intruder recorded for render-time trim
+
+
+def test_apply_tail_air_no_intruder_when_no_next_speech_in_window():
+    """No next speech within 1.5s → r.end = lw_end + 1.5s, no intruder recorded."""
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.core.models import Reel, Segment, Word
+
+    def _w(t0, t1, word="x"):
+        return Word(word=word, t0=t0, t1=t1)
+
+    # "far_next" at t0=12.0 is beyond the 1.5s tail window (lw_end + 1.5 = 11.5 < 12.0).
+    words = [_w(9.0, 10.0, "last"), _w(12.0, 13.0, "far_next")]
+    r = Reel(id="r01", start=0.0, end=10.1, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=10.1)], subtitles=[])
+
+    _apply_tail_air([r], words, tail_pad_sec=1.5, video_duration=None)
+
+    assert r.end == pytest.approx(10.0 + 1.5), f"expected lw_end+1.5=11.5, got {r.end}"
+    assert r.tail_next_word_start is None  # 12.0 > 11.5, outside window
+
+
+# ── render pre-trim invariant ─────────────────────────────────────────────────
+
+def test_check_silence_at_clip_end_fires_for_manifest_overshoot():
+    """Pre-trim invariant fires when manifest segment end exceeds next-speech audible_start."""
+    import io, contextlib
+    from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
+    from autoreels.core.models import Word
+
+    # clip_end=10.5 overshoots: next word has audible_start=10.2 which is in (ae=9.9, 10.5)
+    smap = {
+        "words": [
+            {"idx": 0, "t0": 8.5, "t1": 9.5, "audible_start": 8.6, "audible_end": 9.9},
+            {"idx": 1, "t0": 10.0, "t1": 10.8, "audible_start": 10.2, "audible_end": 10.8},
+        ],
+        "boundaries": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    last_word = Word(word="last", t0=8.5, t1=9.5)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _check_silence_at_clip_end("r01", last_word, 10.5, smap, lookup)
+    out = buf.getvalue()
+    assert "[AUDIO-INV]" in out, f"invariant must fire; got: {out!r}"
+
+
+def test_check_silence_at_clip_end_silent_when_end_before_onset():
+    """Invariant is silent when clip_end (ae + 0.1) is before next-speech audible_start."""
+    import io, contextlib
+    from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
+    from autoreels.core.models import Word
+
+    # clip_end=10.0 (= ae + 0.1): next word audible_start=10.2 is NOT in (9.9, 10.0)
+    smap = {
+        "words": [
+            {"idx": 0, "t0": 8.5, "t1": 9.5, "audible_start": 8.6, "audible_end": 9.9},
+            {"idx": 1, "t0": 10.0, "t1": 10.8, "audible_start": 10.2, "audible_end": 10.8},
+        ],
+        "boundaries": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    last_word = Word(word="last", t0=8.5, t1=9.5)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _check_silence_at_clip_end("r01", last_word, 10.0, smap, lookup)
+    out = buf.getvalue()
+    assert "[AUDIO-INV]" not in out, f"invariant must be silent; got: {out!r}"

@@ -1761,6 +1761,13 @@ def _render_segments(
             _lw_margin = getattr(ap, "last_word_margin_sec", 0.2)
             _tail_fade: tuple[float, float] | None = None   # kept for music path plumbing
             _word_end: float | None = None   # audio-detected last-word end (source time)
+            # Pre-trim invariant: fires when manifest segment end overshoots into next speech.
+            # Must run BEFORE _tail_from_smap adjusts segs so we check the manifest end, not
+            # the trimmed end. A clean manifest (r.end <= next_onset) never fires here.
+            if smap is not None and reel.subtitles and segs:
+                _pre_lookup = _smap_word_lookup(smap)
+                _check_silence_at_clip_end(
+                    reel.id, reel.subtitles[-1], segs[-1].end, smap, _pre_lookup)
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
                               and reel.subtitles and segs)
