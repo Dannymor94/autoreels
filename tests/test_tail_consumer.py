@@ -168,7 +168,7 @@ def test_tail_pxl_r08_speech_next_real_numbers():
     )
     assert result is not None
     # speech-next via untranscribed onset 2147.000 (gap 0.21 < 0.35)
-    assert result <= 2147.255, f"render end {result:.3f} overshoots first transcribed onset 2147.255"
+    assert result <= 2147.000, f"render end {result:.3f} overshoots untranscribed onset 2147.000"
     assert result >= 2146.790, f"render end {result:.3f} precedes last-word ae 2146.790"
 
 
