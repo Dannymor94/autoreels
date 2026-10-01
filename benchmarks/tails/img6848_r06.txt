@@ -1,0 +1,11 @@
+case: img6848_r06
+last_word: людям.
+window: 1231.224 – 1233.540 s (source time)
+
+A (Whisper t1)         = 1232.484 s  [offset +1.260 s]  — 523 Hz
+B (smap audible_end)   = 1232.550 s  [offset +1.326 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 1232.740 s
+next_onset             = 1232.840 s
+gap_type               = speech_next

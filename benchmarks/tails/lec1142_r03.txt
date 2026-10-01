@@ -1,0 +1,11 @@
+case: lec1142_r03
+last_word: Понятно?
+window: 377.143 – 380.160 s (source time)
+
+A (Whisper t1)         = 378.933 s  [offset +1.790 s]  — 523 Hz
+B (smap audible_end)   = 379.260 s  [offset +2.117 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 379.360 s
+next_onset             = 379.850 s
+gap_type               = silence

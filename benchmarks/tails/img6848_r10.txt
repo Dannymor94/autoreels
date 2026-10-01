@@ -1,0 +1,11 @@
+case: img6848_r10
+last_word: далее.
+window: 1993.060 – 1997.270 s (source time)
+
+A (Whisper t1)         = 1994.800 s  [offset +1.740 s]  — 523 Hz
+B (smap audible_end)   = 1996.300 s  [offset +3.240 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 1996.470 s
+next_onset             = 1996.570 s
+gap_type               = speech_next

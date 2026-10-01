@@ -1,0 +1,11 @@
+case: lec0933_r01
+last_word: собой.
+window: 31.240 – 34.210 s (source time)
+
+A (Whisper t1)         = 32.900 s  [offset +1.660 s]  — 523 Hz
+B (smap audible_end)   = 33.370 s  [offset +2.130 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 33.410 s
+next_onset             = 33.420 s
+gap_type               = speech_next

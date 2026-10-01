@@ -29,6 +29,11 @@ faster-whisper = [
 url = [
     "yt-dlp>=2024.1",
 ]
+# Forced-alignment spike (benchmarks только). CPU fine. Не в prod.
+# pip install 'autoreels[align]'. Модель: jonatasgrosman/wav2vec2-large-xlsr-53-russian.
+align = [
+    "whisperx>=3.0",
+]
 
 [project.scripts]
 autoreels = "autoreels.__main__:main"

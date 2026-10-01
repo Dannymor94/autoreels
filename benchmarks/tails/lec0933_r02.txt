@@ -1,0 +1,11 @@
+case: lec0933_r02
+last_word: напряжение.
+window: 1053.661 – 1056.500 s (source time)
+
+A (Whisper t1)         = 1055.241 s  [offset +1.580 s]  — 523 Hz
+B (smap audible_end)   = 1055.490 s  [offset +1.829 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 1055.700 s
+next_onset             = 1055.800 s
+gap_type               = speech_next

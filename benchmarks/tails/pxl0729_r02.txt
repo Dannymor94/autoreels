@@ -1,0 +1,11 @@
+case: pxl0729_r02
+last_word: выпирающими.
+window: 1031.033 – 1033.730 s (source time)
+
+A (Whisper t1)         = 1032.830 s  [offset +1.797 s]  — 523 Hz
+B (smap audible_end)   = 1032.830 s  [offset +1.797 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 1032.930 s
+next_onset             = 1033.670 s
+gap_type               = silence

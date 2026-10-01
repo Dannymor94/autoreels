@@ -1,0 +1,11 @@
+case: pxl0729_r01
+last_word: притягиваются.
+window: 677.413 – 679.950 s (source time)
+
+A (Whisper t1)         = 679.050 s  [offset +1.637 s]  — 523 Hz
+B (smap audible_end)   = 679.050 s  [offset +1.637 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 679.150 s
+next_onset             = 679.970 s
+gap_type               = silence

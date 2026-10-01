@@ -1,0 +1,11 @@
+case: img6848_r08
+last_word: история.
+window: 1525.067 – 1528.707 s (source time)
+
+A (Whisper t1)         = 1527.907 s  [offset +2.840 s]  — 523 Hz
+B (smap audible_end)   = 1526.560 s  [offset +1.493 s]  — 880 Hz
+C = not yet
+
+render_end (current)   = 1526.660 s
+next_onset             = 1528.710 s
+gap_type               = silence
