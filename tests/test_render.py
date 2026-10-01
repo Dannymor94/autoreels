@@ -575,7 +575,10 @@ def fake_ffmpeg(monkeypatch):
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
             self.args = cmd
-            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+            _is_probe = "ffprobe" in str(cmd[0])
+            _is_freeze = any("freezedetect" in e for e in cmd)
+            _is_integrity = len(cmd) > 2 and cmd[1] == "-v" and cmd[2] == "error"
+            if not _is_probe and not _is_freeze and not _is_integrity:
                 calls.append(cmd)
             self.returncode = 0
             self.stdout = iter([])   # нет progress-строк
@@ -614,8 +617,8 @@ def test_render_cut_one_command_per_reel(tmp_path, render_cfg, fake_ffmpeg):
 
     outputs = render_cut(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
 
-    render_cmds = [c for c in fake_ffmpeg if not any("freezedetect" in e for e in c)]
-    assert len(render_cmds) == 3                       # один вызов ffmpeg на reel
+    assert len(fake_ffmpeg) == 3                       # один вызов ffmpeg на reel
+    render_cmds = fake_ffmpeg
     assert outputs == [
         out_dir / "r01_raw.mp4",
         out_dir / "r02_raw.mp4",
@@ -811,7 +814,7 @@ def test_crop_numbers_come_from_setup_not_reel(tmp_path, render_cfg, fake_ffmpeg
 
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
-    render_cmds = [c for c in fake_ffmpeg if not any("freezedetect" in e for e in c)]
+    render_cmds = fake_ffmpeg
     vf0 = _val_after(render_cmds[0], "-vf")
     vf1 = _val_after(render_cmds[1], "-vf")
     # pre_roll adds trim prefix; crop/scale content must be present in both
@@ -833,7 +836,7 @@ def test_crop_output_is_vertical_id_mp4_not_raw(tmp_path, render_cfg, fake_ffmpe
     # вертикальный выход <id>.mp4 — отдельно от <id>_raw.mp4 из R1a
     assert outputs == [out_dir / "r01.mp4", out_dir / "r02.mp4"]
     assert all(isinstance(p, Path) and "_raw" not in p.name for p in outputs)
-    assert fake_ffmpeg[0][-1] == str(out_dir / "r01.mp4")
+    assert fake_ffmpeg[0][-1] == str(out_dir / "r01.tmp.mp4")
 
 
 def test_crop_cuts_window_and_passes_encoder(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
@@ -2521,3 +2524,159 @@ def test_audio_invariant_silent_when_clean(
 
     captured = capsys.readouterr()
     assert "[ERROR]" not in captured.out, f"unexpected [ERROR]:\n{captured.out}"
+
+
+# --------------------------------------------------------- PART 1: atomic write + integrity + lock
+
+def test_render_ffmpeg_receives_tmp_path(tmp_path, render_cfg, monkeypatch):
+    """ffmpeg is called with <id>.tmp.mp4; outputs list has the final <id>.mp4."""
+    from autoreels.local import render
+    from autoreels.local.render import render_cut
+
+    calls: list = []
+
+    class _FakeProc:
+        def __init__(self, cmd, **kw):
+            self.args = cmd
+            _is_probe = "ffprobe" in str(cmd[0])
+            _is_freeze = any("freezedetect" in e for e in cmd)
+            _is_integrity = len(cmd) > 2 and cmd[1] == "-v" and cmd[2] == "error"
+            if not _is_probe and not _is_freeze and not _is_integrity:
+                calls.append(cmd)
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+
+        def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"atomic-write-test")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)])
+
+    outputs = render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+
+    assert len(calls) == 1
+    assert calls[0][-1].endswith(".tmp.mp4"), f"expected .tmp.mp4 output arg, got: {calls[0][-1]}"
+    assert len(outputs) == 1 and outputs[0].name == "r01_raw.mp4"
+
+
+def test_integrity_failure_excludes_from_outputs(tmp_path, render_cfg, monkeypatch, capsys):
+    """When integrity check finds errors, the clip is unlinked and NOT in outputs."""
+    from autoreels.local import render
+    from autoreels.local.render import render_cut
+
+    class _FakeProc:
+        def __init__(self, cmd, **kw):
+            self.args = cmd
+            self._is_integrity = len(cmd) > 2 and cmd[1] == "-v" and cmd[2] == "error"
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+
+        def wait(self): return 0
+        def communicate(self, *a, **kw):
+            if self._is_integrity:
+                return ("", "Invalid NAL unit size (4355 > 3929)")
+            return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"integrity-fail-test")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)])
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    # Pre-create the tmp file so rename succeeds and integrity runs on the real path
+    (out_dir / "r01_raw.tmp.mp4").write_bytes(b"fake-corrupt-data")
+
+    outputs = render_cut(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+
+    assert outputs == [], f"corrupt clip should not appear in outputs, got {outputs}"
+    captured = capsys.readouterr()
+    assert "[ERROR]" in captured.out and "integrity" in captured.out
+
+
+def test_dir_lock_raises_when_directory_is_locked(tmp_path, render_cfg, monkeypatch):
+    """When _try_lock_dir returns None (locked), render raises RenderError immediately."""
+    from autoreels.local import render
+    from autoreels.local.render import render_cut, RenderError
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render, "_try_lock_dir", lambda _dir: None)
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"lock-test")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)])
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    with pytest.raises(RenderError, match="[Ll]ocked|locked"):
+        render_cut(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+
+
+# --------------------------------------------------------- PART 2: smap tight gap — no extension
+
+def test_smap_speech_next_gap_0_12s_clip_not_extended(tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Speech-next case with 0.12s gap: clip end stays at onset - _TAIL_PAD, never extended.
+
+    Before the fix, the smap path extended the clip to ae + tvfade_min + 3/fps = ae + 0.35,
+    which crosses the next speech onset at ae + 0.12. After the fix, clip end ≤ ae + 0.12.
+    """
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"smap-tight-gap-test")
+
+    reel = _reel("r01", 5.0, 15.0)
+    reel.segments = [Segment(start=5.0, end=15.0)]
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.3)]
+
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    # ae = 10.4; next onset = ae + 0.12 = 10.52 → gap = 0.12 < cut_pause_min_sec (0.35)
+    # _tail_from_smap returns new_end = max(10.52 - 0.10, 10.44) = 10.44
+    ae = 10.4
+    onset = ae + 0.12
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 10.0, "t1": 10.3, "audible_start": 10.0, "audible_end": ae},
+            {"t0": onset, "t1": onset + 0.3, "audible_start": onset, "audible_end": onset + 0.25},
+        ],
+        "boundaries": [
+            {"pause": 0.12, "untranscribed_speech": False},
+            {"pause": 0.0, "untranscribed_speech": False},
+        ],
+        "intervals": [],
+    }
+    render_cfg = render_cfg.model_copy(update={"speech_map": True})
+
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out",
+                render_cfg=render_cfg, smap=smap)
+
+    captured = capsys.readouterr()
+    assert "[ERROR]" not in captured.out, f"unexpected [ERROR]: {captured.out}"
+
+    # Verify: clip end ≤ onset (10.52). The -t arg with pre_roll=2 is (end - (start - pre_roll)).
+    # Expected end = 10.44 → -t = 10.44 - 3.0 = 7.44.
+    # Old (broken) end = 10.75 → -t = 7.75.
+    assert len(fake_ffmpeg) >= 1
+    t_val = float(_val_after(fake_ffmpeg[0], "-t"))
+    # 10.44 - 3.0 = 7.44; we allow ±1 frame (0.04s)
+    assert t_val <= 7.48, (
+        f"clip was extended past next onset: -t={t_val:.3f}s (expected ≤7.48, "
+        f"i.e. clip_end ≤ {3.0 + 7.48:.2f}s ≈ onset {onset:.2f})"
+    )

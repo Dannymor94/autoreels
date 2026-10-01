@@ -587,6 +587,47 @@ def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float,
     return freezes
 
 
+def _try_lock_dir(out_dir: Path):
+    """Non-blocking exclusive lock on out_dir/.render.lock. Returns file handle or None if busy."""
+    lock_path = out_dir / ".render.lock"
+    try:
+        fd = open(lock_path, "w")  # noqa: SIM115 — intentional manual lifecycle
+    except OSError:
+        return None
+    try:
+        import fcntl  # POSIX only; ImportError = Windows (skip locking)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except ImportError:
+        pass
+    except OSError:
+        fd.close()
+        return None
+    return fd
+
+
+def _unlock_dir(fd) -> None:
+    if fd is None:
+        return
+    try:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except (ImportError, OSError):
+        pass
+    try:
+        fd.close()
+    except OSError:
+        pass
+
+
+def _check_integrity(path: Path, ffmpeg_bin: str) -> str:
+    """Run ffmpeg error-level check on `path`. Returns stderr text or '' if clean."""
+    result = subprocess.run(
+        [ffmpeg_bin, "-v", "error", "-i", str(path), "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    return result.stderr.strip()
+
+
 def _snap_windows_to_frames(segments, fps: float):
     """Quantise each playback window's start/end onto the source frame grid (1/fps).
 
@@ -1282,7 +1323,8 @@ def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
 
 def _tail_video_fade_filter(ap: AudioProcessing, out_duration: float,
                              word_end_out: float | None = None,
-                             fps_out: float = 30.0) -> str:
+                             fps_out: float = 30.0,
+                             min_sec_floor: float | None = None) -> str:
     """Video fade to black starting at the audible end of the last word.
 
     Only active when ap.tail_video_fade is True.
@@ -1310,7 +1352,8 @@ def _tail_video_fade_filter(ap: AudioProcessing, out_duration: float,
     last_pts = (_math.floor(out_duration * fps_out) - 2) / fps_out
     if word_end_out is None:
         word_end_out = last_pts - min_sec
-    fade_dur = max(min_sec, round(last_pts - word_end_out, 6))
+    _floor = min_sec_floor if min_sec_floor is not None else min_sec
+    fade_dur = max(_floor, round(last_pts - word_end_out, 6))
     fade_st = max(0.0, round(last_pts - fade_dur, 3))
     return f"fade=t=out:st={_num(fade_st)}:d={_num(round(fade_dur, 3))}"
 
@@ -1597,6 +1640,13 @@ def _render_segments(
 
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    _lock_fd = _try_lock_dir(out_dir)
+    if _lock_fd is None:
+        raise RenderError(
+            f"Rendering directory is already locked by another process: {out_dir}\n"
+            f"(Lock is advisory — it clears automatically when that process exits. "
+            f"Remove {out_dir / '.render.lock'} only if that process is gone.)"
+        )
 
     enc = render_cfg.encoder
     aud = render_cfg.audio
@@ -1742,6 +1792,7 @@ def _render_segments(
             if progress is not None:
                 progress(reel.id)
             out = out_dir / f"{reel.id}{suffix}.mp4"
+            tmp_out = out_dir / f"{reel.id}{suffix}.tmp.mp4"
             # Субтитры (R3): на каждый reel свой .ass; ass-фильтр ПОСЛЕ crop/scale
             # (в координатах финального кадра 1080×1920). Слова берутся из reel.subtitles.
             # Цветокор (палитра) — ПОСЛЕ crop/scale, ДО ass. Порядок: crop→scale→eq/unsharp→ass.
@@ -1791,6 +1842,7 @@ def _render_segments(
             _lw_margin = getattr(ap, "last_word_margin_sec", 0.2)
             _tail_fade: tuple[float, float] | None = None   # kept for music path plumbing
             _word_end: float | None = None   # audio-detected last-word end (source time)
+            _smap_fade_floor: float | None = None  # 2-frame min fade floor when smap path is tight
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
                               and reel.subtitles and segs)
@@ -1815,17 +1867,13 @@ def _render_segments(
                     _smap_ae_e = _smap_lookup.get(round(_last.t0 * 1000))
                     _smap_ae = _smap_ae_e[1]["audible_end"] if _smap_ae_e else None
                     _word_end = _smap_ae if _smap_ae is not None else _new_end
-                    # Ensure there is enough room between audible_end and clip_end for
-                    # the minimum tail fade (tail_video_fade_min_sec, default 0.25 s).
-                    # _tail_video_fade_filter uses (floor(dur*fps)-2)/fps as last_pts;
-                    # to guarantee last_pts - ae_out >= min_sec we need
-                    # clip_end >= ae + min_sec + 3/fps (2 for the N-2 offset, 1 for
-                    # floating-point frame alignment).
-                    _tvfade_min = getattr(ap, "tail_video_fade_min_sec", 0.25)
+                    # When audible_end is known, use a 2-frame minimum fade floor so the
+                    # clip is never extended past next speech onset just to fit min_sec.
+                    # _tail_video_fade_filter will fade to black over whatever room is
+                    # available (down to 2 frames), not pull the fade back into the word.
                     _tvfade_fps = 30.0  # matches fps_out default in _tail_video_fade_filter
-                    if _smap_ae is not None and _new_end < _smap_ae + _tvfade_min + 3.0 / _tvfade_fps:
-                        # Extend clip up to the manifest end; never exceed the source.
-                        _new_end = min(_smap_ae + _tvfade_min + 3.0 / _tvfade_fps, segs[-1].end)
+                    if _smap_ae is not None:
+                        _smap_fade_floor = 2.0 / _tvfade_fps
                     if len(segs) > 1:
                         # floor, not round: smap new_end ≤ next onset; round can push past it
                         _new_end = math.floor(_new_end * _fps()) / _fps()
@@ -1924,7 +1972,8 @@ def _render_segments(
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
             # Tail video fade: from audible word-end to clip end, AFTER subtitle burn-in.
-            tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out)
+            tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
+                                             min_sec_floor=_smap_fade_floor)
             if tvfade:
                 reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
@@ -1958,7 +2007,8 @@ def _render_segments(
                     _vfade1 = _video_fade_filter(ap, clip_duration)
                     if _vfade1:
                         _post_parts1.append(_vfade1)
-                    _tvfade1 = _tail_video_fade_filter(ap, _out_dur, _word_end_out)
+                    _tvfade1 = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
+                                                        min_sec_floor=_smap_fade_floor)
                     if _tvfade1:
                         _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
@@ -1979,7 +2029,7 @@ def _render_segments(
                     reel_fc = ";".join(_v_fc) + ";" + _a_fc_str
             if len(segs) == 1:
                 cmd = build_cut_cmd(
-                    ffmpeg_bin, source, segs[0].start, segs[0].end, out,
+                    ffmpeg_bin, source, segs[0].start, segs[0].end, tmp_out,
                     codec=codec, preset=enc.preset,
                     video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                     audio_codec=aud.codec, audio_bitrate=aud.bitrate,
@@ -2013,7 +2063,7 @@ def _render_segments(
                     atail = f"{aseg}{reel_af}[a]" if reel_af else f"{aseg}anull[a]"
                     fc = f"{prefix};{vtail};{atail}"
                 cmd = build_concat_cmd(
-                    ffmpeg_bin, source, out, windows=windows, filter_complex=fc,
+                    ffmpeg_bin, source, tmp_out, windows=windows, filter_complex=fc,
                     codec=codec, preset=enc.preset,
                     video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
                     audio_codec=aud.codec, audio_bitrate=aud.bitrate,
@@ -2037,12 +2087,19 @@ def _render_segments(
             )
             batch_encoded_secs += clip_dur_s
             if returncode != 0:
-                out.unlink(missing_ok=True)         # не оставлять битый частичный выход
+                tmp_out.unlink(missing_ok=True)     # не оставлять битый частичный выход
                 stderr = stderr_text.strip() or "(пустой stderr)"
                 raise RenderError(
                     f"ffmpeg не смог обработать reel {reel.id} "
                     f"({_ts(reel.start)}→{_ts(reel.end)}, код {returncode}): {stderr}"
                 )
+            if tmp_out.exists():
+                tmp_out.rename(out)
+            _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
+            if _integrity_err:
+                print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
+                out.unlink(missing_ok=True)
+                continue
             outputs.append(out)
             # Invariant: the file must last the length _expected_output_duration derived from the
             # final post-snap windows — the same values fed to the concat graph. Tolerance is 2.5
@@ -2062,6 +2119,7 @@ def _render_segments(
                 print(f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)")
             if emit_text:
                 _write_sidecar_text(out, reel, render_cfg)
+        _unlock_dir(_lock_fd)
         return outputs
 
 
