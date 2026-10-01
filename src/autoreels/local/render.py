@@ -557,6 +557,36 @@ def _probe_duration_sec(path, ffprobe: str) -> float | None:
         return None
 
 
+def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float, float]]:
+    """Run freezedetect on a rendered clip; return (start, end, dur) tuples for each frozen span.
+
+    Uses d=1.0 so only freezes >= 1 s are returned — anything shorter is not a render defect.
+    Returns [] when the clip cannot be read (degraded, not raised — same contract as _probe_duration_sec).
+    """
+    result = subprocess.run(
+        [ffmpeg_bin, "-i", str(path), "-vf", "freezedetect=n=-60dB:d=1.0",
+         "-map", "0:v", "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    freezes: list[tuple[float, float, float]] = []
+    start: float | None = None
+    for line in result.stderr.splitlines():
+        if "freeze_start:" in line:
+            try:
+                start = float(line.split("freeze_start:")[-1].strip())
+            except ValueError:
+                pass
+        elif "freeze_duration:" in line and start is not None:
+            try:
+                dur = float(line.split("freeze_duration:")[-1].strip())
+                end = start + dur
+                freezes.append((start, end, dur))
+                start = None
+            except ValueError:
+                pass
+    return freezes
+
+
 def _snap_windows_to_frames(segments, fps: float):
     """Quantise each playback window's start/end onto the source frame grid (1/fps).
 
@@ -1778,7 +1808,24 @@ def _render_segments(
                     last_t1=_last.t1,
                 )
                 if _new_end is not None:
-                    _word_end = _new_end  # for fade computation downstream
+                    # Use audible_end (not clip_end) as the fade anchor so the fade starts
+                    # where the word stops being heard, not at clip_end = audible_end+0.10.
+                    # Without this, _word_end_out ≈ clip_duration ≥ last_pts, the minimum-
+                    # fade fallback fires, and the fade covers the end of the last word.
+                    _smap_ae_e = _smap_lookup.get(round(_last.t0 * 1000))
+                    _smap_ae = _smap_ae_e[1]["audible_end"] if _smap_ae_e else None
+                    _word_end = _smap_ae if _smap_ae is not None else _new_end
+                    # Ensure there is enough room between audible_end and clip_end for
+                    # the minimum tail fade (tail_video_fade_min_sec, default 0.25 s).
+                    # _tail_video_fade_filter uses (floor(dur*fps)-2)/fps as last_pts;
+                    # to guarantee last_pts - ae_out >= min_sec we need
+                    # clip_end >= ae + min_sec + 3/fps (2 for the N-2 offset, 1 for
+                    # floating-point frame alignment).
+                    _tvfade_min = getattr(ap, "tail_video_fade_min_sec", 0.25)
+                    _tvfade_fps = 30.0  # matches fps_out default in _tail_video_fade_filter
+                    if _smap_ae is not None and _new_end < _smap_ae + _tvfade_min + 3.0 / _tvfade_fps:
+                        # Extend clip up to the manifest end; never exceed the source.
+                        _new_end = min(_smap_ae + _tvfade_min + 3.0 / _tvfade_fps, segs[-1].end)
                     if len(segs) > 1:
                         # floor, not round: smap new_end ≤ next onset; round can push past it
                         _new_end = math.floor(_new_end * _fps()) / _fps()
@@ -2011,6 +2058,8 @@ def _render_segments(
                     f"(Δ{_actual - _out_dur:+.3f}s > 2.5 frames) — a render stage changed the "
                     f"duration the windows do not describe"
                 )
+            for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
+                print(f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)")
             if emit_text:
                 _write_sidecar_text(out, reel, render_cfg)
         return outputs

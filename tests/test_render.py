@@ -614,14 +614,15 @@ def test_render_cut_one_command_per_reel(tmp_path, render_cfg, fake_ffmpeg):
 
     outputs = render_cut(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
 
-    assert len(fake_ffmpeg) == 3                       # один вызов ffmpeg на reel
+    render_cmds = [c for c in fake_ffmpeg if not any("freezedetect" in e for e in c)]
+    assert len(render_cmds) == 3                       # один вызов ffmpeg на reel
     assert outputs == [
         out_dir / "r01_raw.mp4",
         out_dir / "r02_raw.mp4",
         out_dir / "r03_raw.mp4",
     ]
     # окно второго клипа попало в его команду; -ss учитывает pre_roll (100-2=98)
-    cmd2 = fake_ffmpeg[1]
+    cmd2 = render_cmds[1]
     assert _val_after(cmd2, "-ss") == "98.000"
     # output-side -t (after -i) is still the window duration 30s
     i_idx = cmd2.index("-i")
@@ -810,13 +811,14 @@ def test_crop_numbers_come_from_setup_not_reel(tmp_path, render_cfg, fake_ffmpeg
 
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
-    vf0 = _val_after(fake_ffmpeg[0], "-vf")
-    vf1 = _val_after(fake_ffmpeg[1], "-vf")
+    render_cmds = [c for c in fake_ffmpeg if not any("freezedetect" in e for e in c)]
+    vf0 = _val_after(render_cmds[0], "-vf")
+    vf1 = _val_after(render_cmds[1], "-vf")
     # pre_roll adds trim prefix; crop/scale content must be present in both
     assert "crop=1215:2160:1240:0,scale=1080:1920" in vf0
     assert "crop=1215:2160:1240:0,scale=1080:1920" in vf1
     # окно реза по-прежнему разное у разных reel; -ss = start - 2s pre_roll
-    assert _val_after(fake_ffmpeg[1], "-ss") == "97.000"  # 99.0 - 2.0
+    assert _val_after(render_cmds[1], "-ss") == "97.000"  # 99.0 - 2.0
 
 
 def test_crop_output_is_vertical_id_mp4_not_raw(tmp_path, render_cfg, fake_ffmpeg):
@@ -1789,13 +1791,17 @@ def test_render_popen_uses_utf8_encoding(tmp_path, render_cfg, monkeypatch):
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
+            self.args = cmd
             kwargs_seen.append(kwargs)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
 
-        def wait(self):
-            return 0
+        def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
     monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
@@ -1828,14 +1834,18 @@ def test_ass_filter_contains_only_filename_no_path(tmp_path, render_cfg, monkeyp
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
+            self.args = cmd
             if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
                 vf_seen.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
 
-        def wait(self):
-            return 0
+        def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
     monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
@@ -1873,14 +1883,18 @@ def test_source_path_is_absolute_when_cwd_is_set(tmp_path, render_cfg, monkeypat
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
+            self.args = cmd
             if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
                 cmds_seen.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
 
-        def wait(self):
-            return 0
+        def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
     monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
@@ -1916,14 +1930,18 @@ def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, mon
 
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
+            self.args = cmd
             if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
                 popen_kwargs.append(kwargs)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
 
-        def wait(self):
-            return 0
+        def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
     monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)

@@ -175,12 +175,17 @@ def test_render_skips_clip_below_min_and_does_not_call_ffmpeg(tmp_path, monkeypa
 
     class _FakeProc:
         def __init__(self, cmd, **kw):
-            if "ffprobe" not in str(cmd[0]):
+            self.args = cmd
+            if "ffprobe" not in str(cmd[0]) and "freezedetect" not in str(cmd):
                 calls.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
             self.stderr = iter([])
         def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
     monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
     monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)

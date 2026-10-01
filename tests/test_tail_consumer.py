@@ -476,6 +476,27 @@ def test_check_fade_audible_clip_cut_explicit_e_is_warning():
     assert any("clip end" in w for w in r.warnings), "warning must be in reel.warnings"
 
 
+def test_check_fade_audible_clip_too_short_for_min_fade():
+    """Defect 3 (r05 case): clip ends only 0.1s after audible_end.
+    The min tail-video-fade (0.25s) would be pulled back before ae.
+    lw_end >= ae passes the old check; new clip-too-short guard must fire.
+    """
+    from autoreels.__main__ import _check_fade_audible, _TAIL_VIDEO_FADE_MIN_SEC
+    from autoreels.core.models import Reel, Segment, Word
+
+    # ae=9.6, r.end=9.7 → gap=0.1 < 0.25 = min_fade
+    r = Reel(id="r05", start=0.0, end=9.7, score=80, hook="h",
+             title="t", description="d",
+             segments=[Segment(start=0.0, end=9.7)],
+             subtitles=[Word(word="слово", t0=9.0, t1=9.7)])
+    r.tail_last_word_end = 9.7   # lw_end >= ae — old check wouldn't fire
+    smap_lookup = {round(9.0 * 1000): (0, {"audible_end": 9.6})}
+    errs, warns = _check_fade_audible([r], smap_lookup=smap_lookup)
+    assert len(errs) == 1, "clip-too-short must be an error"
+    assert "too short" in errs[0] or "gap" in errs[0]
+    assert warns == []
+
+
 # ── _apply_tail_air: cap at next speech onset ─────────────────────────────────
 
 def test_apply_tail_air_records_intruder_manifest_keeps_full_pad():

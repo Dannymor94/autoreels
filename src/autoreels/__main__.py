@@ -1972,6 +1972,9 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
     return None
 
 
+_TAIL_VIDEO_FADE_MIN_SEC = 0.25   # must match ap.tail_video_fade_min_sec default in render.py
+
+
 def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], list[str]]:
     """Check that the last subtitle word is fully audible before the fade.
 
@@ -1979,9 +1982,11 @@ def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], 
     - errors: auto-path reels where the last word is cut (blocks apply).
     - warnings: explicit_e reels where the last word is cut (stored in reel.warnings; owner decides).
 
-    Two defects detected:
+    Three defects detected:
     1. ae > r.end: last word runs into next phrase; clip end truncates it.
     2. fade_start (tail_last_word_end) < ae: fade starts before word finishes audibly.
+    3. r.end - ae < min_fade_sec: clip too short to fit the minimum tail fade after the word;
+       the fade would be pulled back before ae even though tail_last_word_end looks fine.
     """
     if not smap_lookup:
         return [], []
@@ -2012,6 +2017,17 @@ def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], 
             errors.append(
                 f"[CONTENT] {r.id}: fade start {lw_end:.3f} < audible_end {ae:.3f}"
                 f" of last subtitle word '{last_sub.word}'"
+            )
+            continue
+        # Clip-too-short guard: even when tail_last_word_end >= ae, the tail video fade
+        # (minimum _TAIL_VIDEO_FADE_MIN_SEC) is placed relative to the last output frame;
+        # if the clip ends less than min_sec after ae the minimum fade will reach back
+        # into the word. This was the undetected r05 defect.
+        if r.end - ae < _TAIL_VIDEO_FADE_MIN_SEC - 1e-3:
+            errors.append(
+                f"[CONTENT] {r.id}: clip too short for tail fade after last word"
+                f" '{last_sub.word}' (clip_end={r.end:.3f}, ae={ae:.3f},"
+                f" gap={r.end - ae:.3f}s < min_fade={_TAIL_VIDEO_FADE_MIN_SEC}s)"
             )
     return errors, warnings
 
