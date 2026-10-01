@@ -4,7 +4,7 @@ window: 1831.590 – 1834.050 s (source time)
 
 A (Whisper t1)         = 1833.250 s  [offset +1.660 s]  — 523 Hz
 B (smap audible_end)   = 1832.850 s  [offset +1.260 s]  — 880 Hz
-C = not yet
+C (forced alignment)   = 1832.820 s  [offset +1.230 s]  — 1047 Hz
 
 render_end (current)   = 1832.950 s
 next_onset             = 1833.360 s

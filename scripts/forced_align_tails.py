@@ -32,7 +32,7 @@ ROOT = Path(__file__).parent.parent
 TAILS_DIR = ROOT / "benchmarks" / "tails"
 ANSWERS_CSV = TAILS_DIR / "answers.csv"
 MANIFESTS_DIR = ROOT / "manifests"
-TRANSCRIPTS_DIR = ROOT / "transcripts"
+CACHE_DIR = ROOT / "data" / "cache"
 INPUTS_DIR = ROOT / "inputs-archive"
 
 
@@ -106,79 +106,63 @@ def _extract_wav(source: Path, t_start: float, t_end: float, out_path: Path) -> 
 
 def _align_with_mms(bundle, model, wav_path: Path, words_in_window: list[dict],
                     window_start: float) -> tuple[list[dict], list[str]]:
-    """Align words using MMS_FA + Uroman romanization.
+    """Align words using MMS_FA + Uroman romanization (torchaudio bundle API).
 
     Returns (aligned_words_with_abs_times, list_of_unaligned_word_texts).
     """
-    import torch, torchaudio
-    from torchaudio.functional import forced_align
+    import torch, torchaudio, soundfile as sf
     import ctc_forced_aligner
 
-    waveform, sr = torchaudio.load(str(wav_path))
+    pcm, sr = sf.read(str(wav_path), dtype="float32", always_2d=False)
+    waveform = torch.from_numpy(pcm).unsqueeze(0)  # (1, T)
     if sr != bundle.sample_rate:
         waveform = torchaudio.functional.resample(waveform, sr, bundle.sample_rate)
 
     with torch.inference_mode():
-        emission, _ = model(waveform)
+        emission, _ = model(waveform)  # (1, T, V)
+    emission_2d = emission[0]  # (T, V)
 
-    # Romanize Russian text
+    # Romanize Russian text: preprocess_text returns tokens list with <star> separators
     word_texts = [w["word"] for w in words_in_window]
     all_text = " ".join(word_texts)
-    tokens, romanized_words = ctc_forced_aligner.preprocess_text(
-        all_text, romanize=True, language=ALIGN_LANGUAGE, split_size="word"
+    tokens, _ = ctc_forced_aligner.preprocess_text(
+        all_text, romanize=True, language=ALIGN_LANGUAGE,
+        split_size="word", star_frequency="segment"
     )
+    # tokens looks like ['<star>', 'p r i t i a g i v a i u t s i a', '<star>', ...]
+    # Get per-word romanized strings (drop <star>)
+    word_roman = [tok for tok in tokens if tok != "<star>"]
 
-    # Map romanized tokens to MMS_FA label indices
-    labels = bundle.get_labels(star=None)
-    label_dict = {c: i for i, c in enumerate(labels)}
-    token_ids: list[list[int]] = []
-    for tok in tokens:
-        if tok in ("<star>",):
-            continue  # skip star tokens used as separators
-        ids = [label_dict[c] for c in tok.split() if c in label_dict]
-        if ids:
-            token_ids.extend(ids)
+    if not word_roman:
+        return [], word_texts
 
-    if not token_ids:
-        return [], [w["word"] for w in words_in_window]
+    # Build per-word char strings for torchaudio Tokenizer
+    # 'p r i t i ...' → 'priti...' (torchaudio Tokenizer iterates chars)
+    word_char_strings = ["".join(tok.split()) for tok in word_roman]
 
-    token_tensor = torch.tensor([token_ids])
-    token_lengths = torch.tensor([len(token_ids)])
-    emission_lengths = torch.tensor([emission.shape[1]])
+    # Use torchaudio's built-in tokenizer + aligner for this bundle
+    tokenizer = bundle.get_tokenizer()
+    aligner = bundle.get_aligner()
 
-    # forced_align returns (alignments, scores)
-    aligned_tokens, scores = forced_align(
-        emission, token_tensor, emission_lengths, token_lengths,
-        blank=0
-    )
-    # Convert frame positions to times
-    # MMS_FA stride = model's output rate (320 samples/frame at 16kHz → 20ms/frame)
-    frame_dur = 0.02  # seconds per frame for MMS_FA
-
-    # Map token-level back to word-level using character positions
-    # This is a simplified version: find token boundaries per word
-    aligned: list[dict] = []
     unaligned: list[str] = []
-    aligned_flat = aligned_tokens[0].tolist()
+    try:
+        token_ids = tokenizer(word_char_strings)   # List[List[int]]
+        spans = aligner(emission_2d, token_ids)    # List[List[TokenSpan]]
+    except Exception as e:
+        return [], word_texts
 
-    # Use ctc_forced_aligner's span logic for word segmentation
-    tokenizer = ctc_forced_aligner.Tokenizer(ctc_forced_aligner.VOCAB_DICT)
-    # Build emissions array for ctc_forced_aligner from our emission
-    import numpy as np
-    em_np = emission[0].cpu().numpy()  # shape: [T, V]
-    # get_alignments expects (T, V) emissions
-    aligns, ctc_scores = ctc_forced_aligner.get_alignments(em_np, tokens, tokenizer)
-    spans = ctc_forced_aligner.get_spans(tokens, aligns)
-    stamps = ctc_forced_aligner.get_word_stamps(
-        spans, ctc_scores, stride=frame_dur,
-        t_overlap=window_start, merge_words=False
-    )
-    for stamp in stamps:
-        aligned.append({
-            "word": stamp["word"],
-            "start": stamp["start"],
-            "end": stamp["end"],
-        })
+    # stride: seconds per emission frame
+    stride = waveform.shape[1] / (emission_2d.shape[0] * bundle.sample_rate)
+
+    aligned: list[dict] = []
+    src_words = word_texts[:len(word_roman)]
+    for orig_word, word_spans in zip(src_words, spans):
+        if not word_spans:
+            unaligned.append(orig_word)
+            continue
+        start_sec = word_spans[0].start * stride + window_start
+        end_sec = word_spans[-1].end * stride + window_start
+        aligned.append({"word": orig_word, "start": start_sec, "end": end_sec})
 
     return aligned, unaligned
 
@@ -292,23 +276,41 @@ def run(only_case: str | None = None, backend: str = "mms", dry_run: bool = Fals
     # Load Whisper words once per stem
     _whisper_words_cache: dict[str, list[dict]] = {}
 
-    def _get_whisper_words(stem: str) -> list[dict]:
+    def _get_whisper_words(stem: str, manifest_data: dict | None = None) -> list[dict]:
         if stem not in _whisper_words_cache:
-            txt_path = TRANSCRIPTS_DIR / f"{stem}.txt"
-            if not txt_path.exists():
-                _whisper_words_cache[stem] = []
-            else:
-                data = json.loads(txt_path.read_text())
-                words = []
-                for seg in data.get("segments", []):
-                    for w in seg.get("words", []):
-                        if w.get("word", "").strip():
-                            words.append({
-                                "word": w["word"].strip(),
-                                "start": w.get("start", 0.0),
-                                "end": w.get("end", 0.0),
-                            })
-                _whisper_words_cache[stem] = words
+            words: list[dict] = []
+            # Resolve via data/cache: source_sha256 → mp3 → audio_hash → transcript JSON
+            sha = (manifest_data or {}).get("source_sha256", "")
+            pkey = (manifest_data or {}).get("transcript_params_key", "")
+            found = None
+            if sha:
+                import hashlib
+                mp3 = CACHE_DIR / f"{sha}.mp3"
+                if mp3.exists():
+                    h = hashlib.sha256()
+                    with mp3.open("rb") as f:
+                        for chunk in iter(lambda: f.read(65536), b""):
+                            h.update(chunk)
+                    ahash = h.hexdigest()
+                    if pkey:
+                        exact = CACHE_DIR / f"{ahash}.{pkey}.transcript.json"
+                        if exact.exists():
+                            found = exact
+                    if not found:
+                        cands = sorted(CACHE_DIR.glob(f"{ahash}*.transcript.json"),
+                                       key=lambda p: p.stat().st_mtime, reverse=True)
+                        if cands:
+                            found = cands[0]
+            if found:
+                data = json.loads(found.read_text())
+                for w in data.get("words", []):
+                    if w.get("word", "").strip():
+                        words.append({
+                            "word": w["word"].strip(),
+                            "start": w.get("t0", 0.0),
+                            "end": w.get("t1", 0.0),
+                        })
+            _whisper_words_cache[stem] = words
         return _whisper_words_cache[stem]
 
     updated: list[dict] = []
@@ -353,7 +355,7 @@ def run(only_case: str | None = None, backend: str = "mms", dry_run: bool = Fals
         # Alignment window
         t_win_start = max(0.0, last_word_time - WINDOW_SEC)
         t_win_end = last_word_time + WINDOW_SEC
-        window_words = [w for w in _get_whisper_words(stem)
+        window_words = [w for w in _get_whisper_words(stem, manifest_data)
                         if w["end"] >= t_win_start and w["start"] <= t_win_end]
 
         if not window_words:
