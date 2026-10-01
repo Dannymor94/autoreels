@@ -1,10 +1,10 @@
 case: pxl0729_r03
 last_word: теле.
-window: 1193.803 – 1196.570 s (source time)
+window: 1193.803 – 1197.775 s (source time)
 
-A (Whisper t1)         = 1195.670 s  [offset +1.867 s]  — 523 Hz
+A (Whisper t1)         = 1196.643 s  [offset +2.840 s]  — 523 Hz
 B (smap audible_end)   = 1195.670 s  [offset +1.867 s]  — 880 Hz
-C = not yet
+C (forced alignment)   = 1196.975 s  [offset +3.172 s]  — 1047 Hz
 
 render_end (current)   = 1195.770 s
 next_onset             = 1196.170 s

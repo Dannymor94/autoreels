@@ -1,10 +1,10 @@
 case: img6848_r07
 last_word: другим.
-window: 1439.556 – 1442.716 s (source time)
+window: 1439.556 – 1443.949 s (source time)
 
 A (Whisper t1)         = 1441.916 s  [offset +2.360 s]  — 523 Hz
 B (smap audible_end)   = 1441.030 s  [offset +1.474 s]  — 880 Hz
-C = not yet
+C (forced alignment)   = 1443.149 s  [offset +3.593 s]  — 1047 Hz
 
 render_end (current)   = 1441.130 s
 next_onset             = 1441.620 s

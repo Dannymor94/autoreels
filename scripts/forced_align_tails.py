@@ -48,22 +48,61 @@ STEM_MAP = {
 
 
 def _load_whisper_words(stem: str) -> list[dict]:
-    """Load word-level timestamps from transcripts/<stem>.txt JSON or speechmap."""
-    # Try .txt first (Whisper JSON saved by autoreels)
-    txt_path = TRANSCRIPTS_DIR / f"{stem}.txt"
-    if not txt_path.exists():
+    """Load raw Whisper word timestamps from data/cache/*.transcript.json.
+
+    Falls back to speechmap words when no transcript cache is found.
+    """
+    import sys; sys.path.insert(0, str(ROOT / "src"))
+    from autoreels.core.models import Manifest
+
+    manifest_path = MANIFESTS_DIR / f"{stem}.json"
+    if not manifest_path.exists():
         return []
-    data = json.loads(txt_path.read_text())
-    words: list[dict] = []
-    for seg in data.get("segments", []):
-        for w in seg.get("words", []):
-            if w.get("word", "").strip():
-                words.append({
-                    "word": w["word"].strip(),
-                    "start": w.get("start", 0.0),
-                    "end": w.get("end", 0.0),
-                })
-    return words
+    m = Manifest.model_validate_json(manifest_path.read_text())
+    pkey = m.transcript_params_key or ""
+
+    # Locate cache directory (worktree or main repo)
+    cache_candidates = [
+        ROOT / "data" / "cache",
+        ROOT.parent / "autoreels" / "data" / "cache",
+    ]
+    transcript_file: Path | None = None
+    for cache_dir in cache_candidates:
+        if not cache_dir.exists():
+            continue
+        pattern = f"*.{pkey}.transcript.json" if pkey else "*.transcript.json"
+        candidates = list(cache_dir.glob(pattern))
+        if not candidates:
+            continue
+        # Pick by matching the first subtitle word t0 of the first reel
+        first_reel = m.reels[0] if m.reels else None
+        ref_word = (first_reel.subtitles[0] if first_reel and first_reel.subtitles else None)
+        if ref_word is None:
+            transcript_file = candidates[0]
+            break
+        for tf in candidates:
+            data = json.load(tf.open())
+            raw_words = data.get("words", [])
+            if any(abs(w["t0"] - ref_word.t0) < 0.05 for w in raw_words):
+                transcript_file = tf
+                break
+        if transcript_file:
+            break
+
+    if transcript_file is None:
+        # Fallback: assemble from subtitles in the manifest (same raw t1 values)
+        words = []
+        for reel in m.reels:
+            for sub in (reel.subtitles or []):
+                words.append({"word": sub.word, "start": sub.t0, "end": sub.t1})
+        return words
+
+    data = json.load(transcript_file.open())
+    return [
+        {"word": w["word"], "start": w["t0"], "end": w["t1"]}
+        for w in data.get("words", [])
+        if w.get("word", "").strip()
+    ]
 
 
 def _extract_wav(source: Path, t_start: float, t_end: float, out_path: Path) -> None:
@@ -163,7 +202,11 @@ def run(only_case: str | None = None) -> None:
 
         try:
             manifest = Manifest.model_validate_json(manifest_path.read_text())
-            source = resolve_source(manifest, INPUTS_DIR)
+            try:
+                source = resolve_source(manifest, INPUTS_DIR)
+            except Exception:
+                alt_inputs = ROOT.parent / "autoreels" / "inputs-archive"
+                source = resolve_source(manifest, alt_inputs)
         except Exception as e:
             print(f"  skip {case_id}: {e}")
             updated.append(row)

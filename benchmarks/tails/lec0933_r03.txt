@@ -1,10 +1,10 @@
 case: lec0933_r03
 last_word: могут.
-window: 260.010 – 262.670 s (source time)
+window: 260.010 – 263.799 s (source time)
 
 A (Whisper t1)         = 261.870 s  [offset +1.860 s]  — 523 Hz
 B (smap audible_end)   = 261.410 s  [offset +1.400 s]  — 880 Hz
-C = not yet
+C (forced alignment)   = 262.999 s  [offset +2.989 s]  — 1047 Hz
 
 render_end (current)   = 261.510 s
 next_onset             = 262.060 s

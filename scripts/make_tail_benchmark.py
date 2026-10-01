@@ -179,10 +179,10 @@ def _collect_case_data(stem: str, reel_id: str, smap: dict, manifest: Manifest,
     last_t0: float = last_sub.t0
     last_t1: float = last_sub.t1
 
-    # Candidate A: Whisper t1
-    A = getattr(reel, "tail_last_word_end", None)
-    if A is None:
-        A = last_t1
+    # Candidate A: raw Whisper t1 — from the subtitle word, which inherits it from the
+    # transcript cache (data/cache/*.transcript.json).  tail_last_word_end is smap-based
+    # (map audible_end) and equals B in most cases; we must NOT use it for A.
+    A = last_t1
 
     # Candidate B: smap audible_end after residue chaining
     lkp = _smap_lookup(smap)
@@ -242,9 +242,14 @@ def run(no_audio: bool = False, rebuild_c: bool = False) -> None:
 
         try:
             source = resolve_source(manifest, INPUTS_DIR)
-        except Exception as e:
-            print(f"  skip {stem}: {e}", flush=True)
-            continue
+        except Exception:
+            # Fallback: try main-repo inputs-archive
+            alt_inputs = ROOT.parent / "autoreels" / "inputs-archive"
+            try:
+                source = resolve_source(manifest, alt_inputs)
+            except Exception as e:
+                print(f"  skip {stem}: {e}", flush=True)
+                continue
 
         manifest_reel_ids = {r.id for r in manifest.reels}
         for reel_id in reel_ids:

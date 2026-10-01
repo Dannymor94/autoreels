@@ -1,10 +1,10 @@
 case: pxl0729_r08
 last_word: сильнее.
-window: 2145.195 – 2148.055 s (source time)
+window: 2145.195 – 2148.185 s (source time)
 
 A (Whisper t1)         = 2147.255 s  [offset +2.060 s]  — 523 Hz
 B (smap audible_end)   = 2146.790 s  [offset +1.595 s]  — 880 Hz
-C = not yet
+C (forced alignment)   = 2147.385 s  [offset +2.190 s]  — 1047 Hz
 
 render_end (current)   = 2146.900 s
 next_onset             = 2147.000 s
