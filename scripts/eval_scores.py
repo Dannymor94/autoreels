@@ -19,6 +19,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 TRANSCRIPT_CACHE = Path("/Users/danny/Documents/autoreels/data/cache")
+TRANSFERRED_FILE = REPO / "data" / "transferred_scores.jsonl"
+LLM_CACHE_FILE = REPO / "data" / "llm_scores_cache.json"
 
 # transcript filename for each source (located by source_sha256 or content match)
 SOURCE_TRANSCRIPTS: dict[str, str] = {
@@ -92,7 +94,7 @@ def _blocks_fingerprint(block_ids: list[str]) -> str:
     return hashlib.sha1("|".join(block_ids).encode()).hexdigest()[:16]
 
 
-def _load_dataset(clean_only: bool = False) -> list[dict]:
+def _load_dataset(clean_only: bool = False, with_transferred: bool = False) -> list[dict]:
     rows = []
     for jsonl in sorted((REPO / "data" / "blocks_dataset").glob("*.jsonl")):
         for line in jsonl.open(encoding="utf-8"):
@@ -102,6 +104,14 @@ def _load_dataset(clean_only: bool = False) -> list[dict]:
                 if r.get("human_score") is not None:
                     if clean_only and r.get("legacy"):
                         continue
+                    rows.append(r)
+    if with_transferred and TRANSFERRED_FILE.exists():
+        existing_ids = {r["block_id"] for r in rows}
+        for line in TRANSFERRED_FILE.open(encoding="utf-8"):
+            line = line.strip()
+            if line:
+                r = json.loads(line)
+                if r.get("block_id") not in existing_ids:
                     rows.append(r)
     return rows
 
@@ -258,13 +268,63 @@ def _print_metrics(
             print(f"  LLM        AUC(any scored vs unscored)={llm_auc_any:.3f}")
 
 
+def _run_with_transferred() -> None:
+    """Compare AUC: clean-only vs clean+transferred using cached LLM scores (no API)."""
+    if not TRANSFERRED_FILE.exists():
+        print(f"ERROR: {TRANSFERRED_FILE} not found — run scripts/transfer_legacy_scores.py first",
+              file=sys.stderr)
+        sys.exit(1)
+
+    llm_cache: dict[str, float] = {}
+    if LLM_CACHE_FILE.exists():
+        llm_cache = json.loads(LLM_CACHE_FILE.read_text(encoding="utf-8"))
+    print(f"Cached LLM scores: {len(llm_cache)} block_ids")
+
+    clean_rows = _load_dataset(clean_only=True, with_transferred=False)
+    combined_rows = _load_dataset(clean_only=True, with_transferred=True)
+    n_transferred = len(combined_rows) - len(clean_rows)
+
+    transferred_by_src: dict[str, int] = {}
+    for r in combined_rows:
+        if r.get("origin") == "transferred":
+            transferred_by_src[r["source"]] = transferred_by_src.get(r["source"], 0) + 1
+
+    print(f"\nClean rows: {len(clean_rows)}")
+    print(f"Transferred rows added: {n_transferred}")
+    print(f"Combined total: {len(combined_rows)}")
+    if transferred_by_src:
+        for src, n in sorted(transferred_by_src.items()):
+            print(f"  {src}: +{n} transferred")
+
+    clean_eval = [r for r in clean_rows if r["block_id"] in llm_cache]
+    combined_eval = [r for r in combined_rows if r["block_id"] in llm_cache]
+    n_no_cache_clean = len(clean_rows) - len(clean_eval)
+    n_no_cache_combined = len(combined_rows) - len(combined_eval)
+
+    print(f"\nClean rows with cached LLM score: {len(clean_eval)} (excluded: {n_no_cache_clean})")
+    print(f"Combined rows with cached LLM score: {len(combined_eval)} (excluded: {n_no_cache_combined})")
+
+    clean_llm = {r["block_id"]: llm_cache[r["block_id"]] for r in clean_eval}
+    combined_llm = {r["block_id"]: llm_cache[r["block_id"]] for r in combined_eval}
+
+    _print_metrics("Clean only (cached LLM)", clean_eval, clean_llm)
+    _print_metrics("Clean + transferred (cached LLM)", combined_eval, combined_llm)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dry-run", action="store_true", help="skip LLM calls")
     parser.add_argument("--record-fixture", action="store_true", help="save first batch raw response")
     parser.add_argument("--clean-only", action="store_true",
                         help="scored: exclude legacy rows; unscored: skip sources where current segmentation doesn't match the export the human saw")
+    parser.add_argument("--with-transferred", action="store_true",
+                        help="load transferred rows from data/transferred_scores.jsonl and compare AUC "
+                             "clean-only vs clean+transferred using cached LLM scores only (no API calls)")
     args = parser.parse_args()
+
+    if args.with_transferred:
+        _run_with_transferred()
+        return
 
     rows = _load_dataset(clean_only=args.clean_only)
     sources = sorted(set(r["source"] for r in rows))
