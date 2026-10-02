@@ -1061,17 +1061,19 @@ def _tail_from_smap(
     else:
         end = audible_end + tail_pad_sec
 
-    # Safety clamps
-    end = max(end, max(audible_end, word_entry["t0"] + 0.04))
+    # Safety clamps: floor before and after N cap so end >= audible_end always holds
+    _floor = max(audible_end, word_entry["t0"] + 0.04)
+    end = max(end, _floor)
     if N is not None:
         end = min(end, N)
+    end = max(end, _floor)   # re-apply: N < ae is possible with overlapping Whisper timestamps
 
     # Fade: keep fade_keep_sec unfaded, then fade for up to tail_fade_sec (floor: 2 frames)
     two_frames = 2.0 / fps
     room = end - audible_end
     fade_len = max(two_frames, min(tail_fade_sec, room - fade_keep_sec))
     fade_start = max(audible_end, end - fade_len)
-    fade_len = end - fade_start   # recompute after clamp (may be 0 when room is tiny)
+    fade_len = max(0.0, end - fade_start)   # recompute after clamp; never negative
 
     return end, fade_start, fade_len
 
