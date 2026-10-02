@@ -576,7 +576,7 @@ _REVIEW_SRC_RE = re.compile(r"^#\s*source:\s*(.+)$")
 # Compact answer line: <seq> <score-token>, where the token is an optional leading '-'
 # (join backward), digits, and trailing '+'/'++' (join 1 or 2 following blocks).
 _COMPACT_SCORE_RE = re.compile(r"^\s*(\d+)\s+(-?\d+\+*(?:@[\d.]+)?)\s*(?:\|(.*))?$")
-_BEAT_RE = re.compile(r"^\s*>\s*(\d+)\s*$")
+_BEAT_RE = re.compile(r"^\s*>\s*(\d+(?:-\d+)?)\s*$")
 
 # Single source for c:/k: field docs — shared by compact and verbose review exports.
 _CK_FIELDS_DOC = (
@@ -922,7 +922,12 @@ def parse_review(
             continue
         mb = _BEAT_RE.match(line)
         if mb:
-            pending_beats.append(int(mb.group(1)))
+            _spec = mb.group(1)
+            if "-" in _spec:
+                _a, _b = _spec.split("-")
+                pending_beats.extend(range(int(_a), int(_b) + 1))
+            else:
+                pending_beats.append(int(_spec))
             continue
         m = _REVIEW_HDR_RE.match(line)
         if not m:
@@ -1042,7 +1047,12 @@ def parse_compact_answer(
             continue
         mb = _BEAT_RE.match(line)
         if mb:
-            pending_beats.append(int(mb.group(1)))
+            _spec = mb.group(1)
+            if "-" in _spec:
+                _a, _b = _spec.split("-")
+                pending_beats.extend(range(int(_a), int(_b) + 1))
+            else:
+                pending_beats.append(int(_spec))
             continue
         m = _COMPACT_SCORE_RE.match(line)
         if m:
