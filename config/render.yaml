@@ -77,7 +77,7 @@ audio_processing:
   # Аудио-фейд в конце клипа (ТОЛЬКО звук). Два режима по word-таймингам манифеста:
   # CLEAN (нет следующего слова в хвосте): fade только последних tail_fade_sec — дыхание слышно.
   # INTRUDED (следующее слово в хвосте): fade от (nw_start − intrusion_guard_sec), гасит вторжение.
-  tail_fade_sec: 0.25
+  tail_fade_sec: 0.35
   intrusion_guard_sec: 0.12
   # Видео-фейд в чёрное в конце клипа, синхронный с аудио tail fade. AFTER субтитров.
   tail_video_fade: true
@@ -169,7 +169,10 @@ speech_map_cfg:
   pause_min_sec: 0.15
   min_edge_dist: 0.060
   untranscribed_min_sec: 0.100
-  cut_pause_min_sec: 0.35
+  cut_pause_min_sec: 0.35   # kept for backward compat; no longer used in tail rule
+  tail_pad_sec: 0.70        # max air after audible_end: end = min(N − onset_margin, ae + tail_pad)
+  onset_margin_sec: 0.06    # guard before next speech onset
+  fade_keep_sec: 0.20       # unfaded air after ae before the fade begins
 
 # M1.7 step 1: two-shot mode (wide/close crop within a clip). Off by default.
 # When off, render is byte-identical to M1.6 output (or same argv for non-deterministic encoders).

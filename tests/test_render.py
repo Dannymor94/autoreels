@@ -1120,9 +1120,9 @@ from autoreels.local.render import _audio_filter_chain, _video_fade_filter
 
 
 def test_audio_chain_default_is_loudnorm_plus_tail_fade():
-    # дефолт: нормализация к -14 LUFS + clean-tail fade (0.25с, только звук).
+    # дефолт: нормализация к -14 LUFS + clean-tail fade (0.35с, только звук).
     af = _audio_filter_chain(AudioProcessing(), 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.75:d=0.25"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
 
 
 def test_audio_chain_empty_when_all_disabled():
@@ -1135,7 +1135,7 @@ def test_audio_chain_empty_when_all_disabled():
 def test_audio_chain_denoise_before_loudnorm():
     ap = AudioProcessing(denoise_enabled=True, denoise_strength=10)
     af = _audio_filter_chain(ap, 30.0)
-    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.75:d=0.25"
+    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
     assert af.index("afftdn") < af.index("loudnorm")
 
 
@@ -1147,11 +1147,11 @@ def test_audio_chain_fade_last_and_out_start_from_duration():
 
 
 def test_audio_tail_fade_always_on_and_uses_output_duration():
-    # clean-tail fade включён по умолчанию, стартует в (out_duration − 0.25s).
+    # clean-tail fade включён по умолчанию, стартует в (out_duration − 0.35s).
     ap = AudioProcessing(loudnorm_enabled=False)   # isolate: only the tail fade
-    assert _audio_filter_chain(ap, 30.0) == "afade=t=out:st=29.75:d=0.25"
+    assert _audio_filter_chain(ap, 30.0) == "afade=t=out:st=29.65:d=0.35"
     # sped-up clip: out_duration passed shorter → fade lands on the real (post-speed) end
-    assert _audio_filter_chain(ap, 30.0, out_duration=20.0) == "afade=t=out:st=19.75:d=0.25"
+    assert _audio_filter_chain(ap, 30.0, out_duration=20.0) == "afade=t=out:st=19.65:d=0.35"
     # NO video fade emitted by the tail fade (audio only)
     assert _video_fade_filter(ap, 30.0) == ""
 
@@ -1172,12 +1172,12 @@ def _reel_with_tail(lw_end, nw_start=None):
 from autoreels.local.render import _audio_tail_fade_parts
 
 
-def test_clean_tail_full_level_then_25ms_decay():
-    """Clean tail: clean-tail afade covers only last tail_fade_sec.
-    For a 30s clip, the last 0.25s decays."""
+def test_clean_tail_full_level_then_35ms_decay():
+    """Clean tail: clean-tail afade covers only last tail_fade_sec (0.35s default).
+    For a 30s clip, the last 0.35s decays."""
     ap = AudioProcessing(loudnorm_enabled=False)
     af = _audio_filter_chain(ap, 30.0)
-    assert af == "afade=t=out:st=29.75:d=0.25"
+    assert af == "afade=t=out:st=29.65:d=0.35"
 
 
 def test_filter_order_tail_fade_after_loudnorm():

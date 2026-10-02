@@ -246,7 +246,7 @@ def test_repair_smap_extension_uses_acoustic_end():
     # Sentence 1: incomplete (reel ends here at t=3.0)
     # Sentence 2: complete, last word "важно." t0=4.5, t1=8.0 (inflated +2s from 6.0)
     # Acoustic: audible_end=4.95; next word at t0=6.0, audible_start=6.5
-    # gap = 6.5 - 4.95 = 1.55 >= 0.35 → silence case: tail = 4.95 + 0.10 = 5.05
+    # gap = 6.5 - 4.95 = 1.55 > tail_pad_sec (0.70) → N=None → end = 4.95 + 0.70 = 5.65
     words = [
         _w(1.0, 1.5, "Я"), _w(1.6, 3.0, "думаю"),        # incomplete sentence [1]
         _w(3.5, 4.5, "это"), _w(4.5, 8.0, "важно."),      # complete sentence [2], t1 inflated
@@ -261,8 +261,8 @@ def test_repair_smap_extension_uses_acoustic_end():
     r = _reel(1.0, 3.0)
     repair(r, words, r0_cfg=_r0_cfg(), explicit_e=False, smap=smap)
     assert r.end_snap_reason == "repaired_to_sentence"
-    # With smap: end = 4.95 + 0.10 = 5.05 (acoustic tail, NOT 8.0 + 0.35 = 8.35)
-    assert r.end == pytest.approx(5.05, abs=0.01)
+    # With smap: end = 4.95 + 0.70 = 5.65 (acoustic tail + tail_pad_sec, NOT 8.0 + 0.35 = 8.35)
+    assert r.end == pytest.approx(5.65, abs=0.01)
     assert r.end < 8.0  # must NOT be inflated-t1-based
     # subtitle_gate = min(audible_start, next_word.t0) = min(6.5, 6.0) = 6.0
     # Cap ensures audible_start > t0 never pulls next_word into the gate span.

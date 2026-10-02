@@ -750,7 +750,7 @@ def _move_reel_end_to_sentence(reel, sentence, tx_words, *, smap, smap_lookup) -
         from autoreels.local.render import _tail_from_smap
         _tail = _tail_from_smap(sentence[-1].t0, reel.end, smap, smap_lookup, last_t1=sentence[-1].t1)
         if _tail is not None:
-            reel.end = _tail
+            reel.end = _tail[0]  # (end, fade_start, fade_len)
             if next_word is not None:
                 _nw_key = round(next_word.t0 * 1000)
                 _nw_entry = smap_lookup.get(_nw_key)
@@ -1328,10 +1328,11 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                 # next-sentence words (ae >> reel.end) are excluded by the ae gate below.
                 _EFFECTIVE_END_SLACK = 0.25
                 if anchor is not None:
-                    tail = _tail_from_smap(
+                    _tr = _tail_from_smap(
                         anchor.t0, reel.end, smap, _lookup, last_t1=anchor.t1,
                     )
-                    if tail is not None:
+                    if _tr is not None:
+                        tail = _tr[0]  # (end, fade_start, fade_len)
                         # When apply_padding's Whisper-overlap guard clamps reel.end below
                         # anchor.t1, use anchor.t1 as the reference so the anchor's own
                         # acoustic tail (ae just past anchor.t1) is not spuriously excluded.

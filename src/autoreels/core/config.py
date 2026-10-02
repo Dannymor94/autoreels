@@ -423,7 +423,7 @@ class AudioProcessing(BaseModel):
     # CLEAN — чистый хвост (нет следующего слова): fade только последних tail_fade_sec, дыхание слышно.
     # INTRUDED — следующее слово в хвосте: fade от (nw_start − intrusion_guard_sec), гасит вторжение.
     # Оба случая вычисляются из tail_last_word_end/tail_next_word_start манифеста при рендере.
-    tail_fade_sec: float = 0.25          # clean tail: длина fade в конце клипа
+    tail_fade_sec: float = 0.35          # clean tail: длина fade в конце клипа
     intrusion_guard_sec: float = 0.12   # intruded tail: начало fade за это время до следующего слова
     last_word_margin_sec: float = 0.2   # safety margin added after last subtitle word's t1 on every path
     # Микро-фейд на КРАЯХ каждого аудиосегмента многосегментного клипа (гасит щелчок на склейке).
@@ -566,10 +566,13 @@ class SpeechMapConfig(BaseModel):
     # Residue filter parameters (affect untranscribed_speech, part of params_hash)
     min_edge_dist: float = 0.060     # interval within this distance of a word edge → residue, dropped
     untranscribed_min_sec: float = 0.100  # minimum duration for a detached interval to count
-    # Consumer threshold (NOT in params_hash — does not affect stored map output)
+    # Consumer thresholds / render-stage params (NOT in params_hash — like cut_pause_min_sec)
     # Rationale: voiceless stop closures (e.g. "т" in "такая?") produce genuine energy gaps
     # of ~0.3 s that are continuous speech by ear — see regression case #568 (0.29 s).
     cut_pause_min_sec: float = 0.35
+    tail_pad_sec: float = 0.70      # max silence air after audible_end at render stage
+    onset_margin_sec: float = 0.06  # guard kept before next speech onset
+    fade_keep_sec: float = 0.20     # unfaded air right after audible_end before fade begins
 
 
 class RenderConfig(BaseModel):

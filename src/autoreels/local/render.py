@@ -935,9 +935,6 @@ def _smap_word_lookup(smap: dict) -> dict[int, tuple[int, dict]]:
     return {round(w["t0"] * 1000): (i, w) for i, w in enumerate(smap["words"])}
 
 
-_TAIL_PAD = 0.10   # padding added after audible_end in silence case
-
-
 def _check_silence_at_clip_end(
     reel_id: str,
     last_word,
@@ -988,23 +985,27 @@ def _tail_from_smap(
     smap: dict,
     lookup: dict,
     *,
-    cut_pause_min_sec: float = 0.35,
     last_t1: float | None = None,
+    tail_pad_sec: float = 0.70,
+    onset_margin_sec: float = 0.06,
+    fade_keep_sec: float = 0.20,
+    tail_fade_sec: float = 0.35,
+    fps: float = 30.0,
+    # kept for callers that still pass the old parameter — no longer used
+    cut_pause_min_sec: float = 0.35,
     margin: float = 0.2,
-) -> float | None:
-    """Compute tail end from speech map data.
+) -> tuple[float, float, float] | None:
+    """Compute tail end and audio/video fade from speech map data.
 
-    Returns new segment end (source time) or None when:
-    - last_t0 not found in smap
-    - seg_end is far beyond the tail adjustment window (intentional long gap)
+    Returns (end, fade_start, fade_len) in source time, or None when last_t0 not found.
 
-    Decision:
-      next_speech_onset = min(next_word.audible_start, first untranscribed_speech onset)
-      gap = next_speech_onset - audible_end
-      gap >= cut_pause_min_sec → silence case: new_end = audible_end + _TAIL_PAD
-      gap <  cut_pause_min_sec → speech-next: new_end = onset - _TAIL_PAD (before onset)
-
-    When there is no next word, the silence case applies with no cap.
+    Rule:
+      N = next speech onset if within tail_pad_sec of audible_end, else None
+      end = min(N − onset_margin_sec, ae + tail_pad_sec) if N else ae + tail_pad_sec
+      clamped: end ∈ [ae, N]
+      room = end − ae
+      fade_len = clamp(room − fade_keep_sec, 2 frames, tail_fade_sec)
+      fade_start = max(ae, end − fade_len)
     """
     key = round(last_t0 * 1000)
     if key not in lookup:
@@ -1038,7 +1039,6 @@ def _tail_from_smap(
 
     if word_idx < len(boundaries):
         bnd = boundaries[word_idx]
-        # Untranscribed speech in the gap
         untr = bnd.get("untranscribed_speech", [])
         if untr:
             next_speech_onset = untr[0][0]
@@ -1048,34 +1048,32 @@ def _tail_from_smap(
         if next_speech_onset is None or next_as < next_speech_onset:
             next_speech_onset = next_as
 
-    # Make the call
-    if next_speech_onset is None:
-        # Last word of transcript — silence case, no cap
-        new_end = audible_end + _TAIL_PAD
-    else:
-        gap = next_speech_onset - audible_end
-        if gap >= cut_pause_min_sec:
-            # Silence case: clip ends after audible_end, capped before next speech
-            new_end = audible_end + _TAIL_PAD
-            # Don't overshoot into next speech (leave a pad before onset too)
-            cap = max(audible_end + 0.04, next_speech_onset - _TAIL_PAD)
-            new_end = min(new_end, cap)
-        else:
-            # Speech-next case: end strictly before next speech onset.
-            # Hard cap at onset: when gap <= _TAIL_PAD the subtraction undershoots
-            # below audible_end, the max clamps to audible_end + 0.04, which may
-            # land past onset.  min(…, onset) keeps the invariant end <= onset.
-            new_end = next_speech_onset - _TAIL_PAD
-            new_end = max(new_end, audible_end + 0.04)
-            new_end = min(new_end, next_speech_onset)
-
-    new_end = max(new_end, word_entry["t0"] + 0.04)
-    # Invariant: clip end must not precede the last word's audible end.
-    assert new_end >= audible_end - 0.001, (
-        f"_tail_from_smap: new_end {new_end:.3f} < audible_end {audible_end:.3f} — "
-        "next_speech_onset fell inside the word's audible range; check residue attribution"
+    # N = next onset only when it falls within the pad window; beyond that → uncapped silence.
+    # +1e-9: guard against floating-point rounding (e.g. 6.5-5.8 = 0.7000000000000002 > 0.70).
+    N: float | None = (
+        next_speech_onset
+        if next_speech_onset is not None and next_speech_onset - audible_end <= tail_pad_sec + 1e-9
+        else None
     )
-    return new_end
+
+    if N is not None:
+        end = min(N - onset_margin_sec, audible_end + tail_pad_sec)
+    else:
+        end = audible_end + tail_pad_sec
+
+    # Safety clamps
+    end = max(end, max(audible_end, word_entry["t0"] + 0.04))
+    if N is not None:
+        end = min(end, N)
+
+    # Fade: keep fade_keep_sec unfaded, then fade for up to tail_fade_sec (floor: 2 frames)
+    two_frames = 2.0 / fps
+    room = end - audible_end
+    fade_len = max(two_frames, min(tail_fade_sec, room - fade_keep_sec))
+    fade_start = max(audible_end, end - fade_len)
+    fade_len = end - fade_start   # recompute after clamp (may be 0 when room is tiny)
+
+    return end, fade_start, fade_len
 
 
 _BEAT_CAP_MARGIN = 0.04    # gap left before next speech onset when capping beat end
@@ -1324,10 +1322,11 @@ def _video_fade_filter(ap: AudioProcessing, clip_duration: float) -> str:
 def _tail_video_fade_filter(ap: AudioProcessing, out_duration: float,
                              word_end_out: float | None = None,
                              fps_out: float = 30.0,
-                             min_sec_floor: float | None = None) -> str:
+                             min_sec_floor: float | None = None,
+                             force: bool = False) -> str:
     """Video fade to black starting at the audible end of the last word.
 
-    Only active when ap.tail_video_fade is True.
+    Only active when ap.tail_video_fade is True (or force=True for smap path).
     Fade covers from word_end_out to the last frame of the clip, minimum tail_video_fade_min_sec.
     Setting st+d = last_frame_pts ensures the last encoded frame is fully black (gain=0).
 
@@ -1340,7 +1339,7 @@ def _tail_video_fade_filter(ap: AudioProcessing, out_duration: float,
         None → defaults to minimum fade at clip end (backwards-compatible behaviour).
     fps_out: OUTPUT frame rate; 30 is safe for any ≤60fps social media output.
     """
-    if not getattr(ap, "tail_video_fade", False):
+    if not force and not getattr(ap, "tail_video_fade", False):
         return ""
     import math as _math
     min_sec = getattr(ap, "tail_video_fade_min_sec", 0.25)
@@ -1843,6 +1842,7 @@ def _render_segments(
             _tail_fade: tuple[float, float] | None = None   # kept for music path plumbing
             _word_end: float | None = None   # audio-detected last-word end (source time)
             _smap_fade_floor: float | None = None  # 2-frame min fade floor when smap path is tight
+            _smap_fade_len: float | None = None    # fade_len from _tail_from_smap result
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
                               and reel.subtitles and segs)
@@ -1852,28 +1852,21 @@ def _render_segments(
                 # uniformly by checking gap to next speech onset against cut_pause_min_sec.
                 _last = reel.subtitles[-1]
                 _smap_cfg = getattr(render_cfg, "speech_map_cfg", None)
-                _cpm = _smap_cfg.cut_pause_min_sec if _smap_cfg else 0.35
                 _smap_lookup = _smap_word_lookup(smap)
-                _new_end = _tail_from_smap(
+                _smap_result = _tail_from_smap(
                     last_t0=_last.t0, seg_end=segs[-1].end, smap=smap,
-                    lookup=_smap_lookup, cut_pause_min_sec=_cpm,
-                    last_t1=_last.t1,
+                    lookup=_smap_lookup, last_t1=_last.t1,
+                    tail_pad_sec=_smap_cfg.tail_pad_sec if _smap_cfg else 0.70,
+                    onset_margin_sec=_smap_cfg.onset_margin_sec if _smap_cfg else 0.06,
+                    fade_keep_sec=_smap_cfg.fade_keep_sec if _smap_cfg else 0.20,
+                    tail_fade_sec=getattr(ap, "tail_fade_sec", 0.35),
+                    fps=_fps(),
                 )
-                if _new_end is not None:
-                    # Use audible_end (not clip_end) as the fade anchor so the fade starts
-                    # where the word stops being heard, not at clip_end = audible_end+0.10.
-                    # Without this, _word_end_out ≈ clip_duration ≥ last_pts, the minimum-
-                    # fade fallback fires, and the fade covers the end of the last word.
-                    _smap_ae_e = _smap_lookup.get(round(_last.t0 * 1000))
-                    _smap_ae = _smap_ae_e[1]["audible_end"] if _smap_ae_e else None
-                    _word_end = _smap_ae if _smap_ae is not None else _new_end
-                    # When audible_end is known, use a 2-frame minimum fade floor so the
-                    # clip is never extended past next speech onset just to fit min_sec.
-                    # _tail_video_fade_filter will fade to black over whatever room is
-                    # available (down to 2 frames), not pull the fade back into the word.
-                    _tvfade_fps = 30.0  # matches fps_out default in _tail_video_fade_filter
-                    if _smap_ae is not None:
-                        _smap_fade_floor = 2.0 / _tvfade_fps
+                if _smap_result is not None:
+                    _new_end, _fade_start, _fade_len = _smap_result
+                    _word_end = _fade_start       # source-time fade start
+                    _smap_fade_floor = 2.0 / _fps()
+                    _smap_fade_len = _fade_len    # carry out for _tail_fade after _word_end_out
                     if len(segs) > 1:
                         # floor, not round: smap new_end ≤ next onset; round can push past it
                         _new_end = math.floor(_new_end * _fps()) / _fps()
@@ -1954,6 +1947,9 @@ def _render_segments(
                     _word_end, segs, _reel_speed or 1.0, _ts_seam_xfades, _xfade_actual)
             else:
                 _word_end_out = None
+            # Smap path: set explicit tail fade so audio and video use identical (start, len).
+            if _smap_fade_len is not None and _word_end_out is not None:
+                _tail_fade = (_word_end_out, _smap_fade_len)
             # Audio invariant: no speech between last-word audible end and clip end.
             if smap is not None and reel.subtitles:
                 _inv_lookup = _smap_word_lookup(smap)
@@ -1971,9 +1967,11 @@ def _render_segments(
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
-            # Tail video fade: from audible word-end to clip end, AFTER subtitle burn-in.
+            # Tail video fade: from fade_start to clip end, AFTER subtitle burn-in.
+            # force=True in smap path: always fade to black regardless of tail_video_fade config.
             tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
-                                             min_sec_floor=_smap_fade_floor)
+                                             min_sec_floor=_smap_fade_floor,
+                                             force=_use_smap_tail)
             if tvfade:
                 reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
