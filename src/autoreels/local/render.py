@@ -1273,8 +1273,12 @@ def _build_synth_tail_cmd(
     fade_sec_num = _num(fade_sec)
 
     # Real video: trim to cut_point, apply existing filter chain (crop/scale/subs/etc.)
+    # fps normalizes VFR body to CFR; settb=1/90000 matches v_synth so concat sees
+    # uniform timebases and produces deterministic frame durations at the seam.
     real_vtrim = f"trim=start={_num(pr)}:end={_num(pr + cut_dur)},setpts=PTS-STARTPTS"
-    real_vchain = f"{real_vtrim},{vf_no_tail}" if vf_no_tail else real_vtrim
+    _fps_tb = f"fps={_num(fps)},settb=expr=1/90000"
+    real_vchain = (f"{real_vtrim},{vf_no_tail},{_fps_tb}" if vf_no_tail
+                   else f"{real_vtrim},{_fps_tb}")
 
     # Synthetic video: bridge frames slowed or frozen, then fade to black
     if use_freeze:
@@ -1312,9 +1316,10 @@ def _build_synth_tail_cmd(
     real_atrim = f"atrim=start={_num(pr)}:end={_num(pr + cut_dur)},asetpts=PTS-STARTPTS"
     real_achain = f"{real_atrim},{af_no_tail}" if af_no_tail else real_atrim
 
-    # Synthetic audio: room tone from input 1 with fade-out
+    # Synthetic audio: room tone from input 1 with fade-out.
+    # Trim to exactly tail_sec (not +0.2) so audio doesn't outlast video in concat.
     synth_achain = (
-        f"atrim=0:{_num(tail_sec + 0.2)},asetpts=PTS-STARTPTS,"
+        f"atrim=0:{_num(tail_sec)},asetpts=PTS-STARTPTS,"
         f"afade=t=out:st={fade_st_num}:d={fade_sec_num}"
     )
 

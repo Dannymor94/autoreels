@@ -2698,7 +2698,7 @@ def _synth_params_close():
 
 
 def test_build_synth_tail_cmd_freeze_uses_synth_crop_vf():
-    """Freeze tail: synth_vchain has crop; concat is combined AV (no separate v/a)."""
+    """Freeze tail: synth_vchain has crop; real_vchain has fps+settb; concat is combined AV."""
     crop_vf = _synth_params_wide()
     cmd = _build_synth_tail_cmd(
         "ffmpeg", Path("/src.mp4"), 100.0, Path("/out.mp4"),
@@ -2712,17 +2712,24 @@ def test_build_synth_tail_cmd_freeze_uses_synth_crop_vf():
         synth_crop_vf=crop_vf,
     )
     fc = cmd[cmd.index("-filter_complex") + 1]
+    real_part = fc.split("[v_real]")[0]
     synth_part = fc.split("[v_synth]")[0].split("[v_real]")[-1]
     assert "crop=320:568" in synth_part, f"crop missing from synth_vchain: {synth_part!r}"
     assert "scale=1080:1920" in synth_part
     assert "setsar=1" in synth_part
+    # body normalized to CFR + shared timebase before concat
+    assert "fps=30" in real_part, "fps missing from real_vchain"
+    assert "settb=expr=1/90000" in real_part, "settb missing from real_vchain"
+    # audio trim matches tail_sec exactly (no +0.2 overrun); _num(1.0)="1"
+    assert "atrim=0:1," in fc or "atrim=0:1]" in fc, "synth audio trim must be exact tail_sec"
+    assert "atrim=0:1.2" not in fc, "synth audio must not overrun tail_sec"
     assert "concat=n=2:v=1:a=1" in fc, "combined AV concat missing"
     assert "concat=n=2:v=1:a=0" not in fc
     assert "concat=n=2:v=0:a=1" not in fc
 
 
 def test_build_synth_tail_cmd_slowmo_uses_synth_crop_vf():
-    """Slow-mo tail: synth_vchain has crop, fps, settb; concat is combined AV."""
+    """Slow-mo tail: synth_vchain + real_vchain both have fps+settb; concat is combined AV."""
     crop_vf = _synth_params_wide()
     cmd = _build_synth_tail_cmd(
         "ffmpeg", Path("/src.mp4"), 100.0, Path("/out.mp4"),
@@ -2736,10 +2743,17 @@ def test_build_synth_tail_cmd_slowmo_uses_synth_crop_vf():
         synth_crop_vf=crop_vf,
     )
     fc = cmd[cmd.index("-filter_complex") + 1]
+    real_part = fc.split("[v_real]")[0]
     synth_part = fc.split("[v_synth]")[0].split("[v_real]")[-1]
     assert "crop=320:568" in synth_part
     assert "fps=30" in synth_part, "fps filter missing from slow-mo synth_vchain"
     assert "settb=expr=1/90000" in synth_part
+    # body also normalized to CFR + shared timebase
+    assert "fps=30" in real_part, "fps missing from real_vchain"
+    assert "settb=expr=1/90000" in real_part, "settb missing from real_vchain"
+    # audio trim exact (no +0.2 overrun); _num(1.0)="1"
+    assert "atrim=0:1," in fc or "atrim=0:1]" in fc, "synth audio trim must be exact tail_sec"
+    assert "atrim=0:1.2" not in fc
     # combined AV concat — no separate v/a concat filters
     assert "concat=n=2:v=1:a=1" in fc, "combined AV concat missing"
     assert "concat=n=2:v=1:a=0" not in fc
