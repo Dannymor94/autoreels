@@ -932,7 +932,7 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     reel.open_thought = True
 
 
-def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None) -> None:
+def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None, smap=None) -> None:
     """Raise ValueError if the subtitle list violates the final-sentence contract.
 
     (a) last subtitle word is beyond the final labelled sentence (extra word leaked in)
@@ -982,6 +982,12 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None) -> None:
         if hanging_words:
             from autoreels.cloud.snap import _clean as _clean_snap
             if _clean_snap(expected_last.word) in set(hanging_words):
+                return
+        # Smap ae extension: subtitle builder excluded the word because its acoustic end
+        # (from speech map) extends past subtitle_gate, even though Whisper t1 is within gate.
+        if smap is not None:
+            _ae_map = {round(sw["t0"] * 1000): sw["audible_end"] for sw in smap.get("words", [])}
+            if _ae_map.get(round(expected_last.t0 * 1000), expected_last.t1) > _gate + _eps:
                 return
         # Duplicate-word: the same word text appears twice in the transcript; the subtitle
         # correctly ends on the earlier occurrence (e.g. via explicit e:), while words_in_span
@@ -1897,7 +1903,12 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         # contamination (another beat's sentence would otherwise be audible in the tail).
         _beat_tail_cap = getattr(r, "_beat_tail_cap", None)
         if _beat_tail_cap is not None:
-            desired = min(desired, _beat_tail_cap)
+            if desired > _beat_tail_cap:
+                desired = _beat_tail_cap
+                # If the beat-cap limits the tail air, treat like deflate-cap so the
+                # invariant check uses min(lw_end + tail_pad, cap) as the floor (not a hard fail).
+                r._deflate_cap_applied = True
+                r._deflate_end_cap = _beat_tail_cap
         # Deflate cap: _deflate_trailing removed a trailing sentence; prevent tail air from
         # re-including that sentence's first word in the audible span.
         _deflate_cap = getattr(r, "_deflate_end_cap", None)
@@ -2013,7 +2024,8 @@ def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], 
         if ae > r.end + 1e-3:
             msg = (f"[CONTENT] {r.id}: last word '{last_sub.word}' cut by clip end"
                    f" (continuous speech into next phrase, ae={ae:.3f} > clip={r.end:.3f})")
-            if explicit_e:
+            # Human-chosen boundary (explicit_e or beat-cap): warn, don't fail.
+            if explicit_e or getattr(r, "_beat_tail_cap", None) is not None:
                 r.warnings.append(msg)
                 warnings.append(msg)
             else:
@@ -2030,11 +2042,17 @@ def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], 
         # if the clip ends less than min_sec after ae the minimum fade will reach back
         # into the word. This was the undetected r05 defect.
         if r.end - ae < _TAIL_VIDEO_FADE_MIN_SEC - 1e-3:
-            errors.append(
+            _short_msg = (
                 f"[CONTENT] {r.id}: clip too short for tail fade after last word"
                 f" '{last_sub.word}' (clip_end={r.end:.3f}, ae={ae:.3f},"
                 f" gap={r.end - ae:.3f}s < min_fade={_TAIL_VIDEO_FADE_MIN_SEC}s)"
             )
+            # Human-chosen boundary (explicit_e or beat-cap): warn, don't fail.
+            if explicit_e or getattr(r, "_beat_tail_cap", None) is not None:
+                r.warnings.append(_short_msg)
+                warnings.append(_short_msg)
+            else:
+                errors.append(_short_msg)
     return errors, warnings
 
 
@@ -2783,7 +2801,7 @@ def _cmd_run_impl(
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     for _r in reels:
-        _check_last_subtitle_word(_r, tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+        _check_last_subtitle_word(_r, tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_run_smap)
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
@@ -4469,6 +4487,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel.description = (getattr(_ae, "description", None) or "") if _ae else ""
         # M1.7 step 2 — stash k: keyword spec for resolution after _stage_subtitles.
         reel._keyword_spec = getattr(_ae, "k", ()) if _ae else ()
+        # Full original block sentences (used to map k:N original-block numbers → subtitle positions).
+        reel._blk_sents_full = split_sentences(words_in_span(_tx_words, block.start, block.end))
         # Part 5 — cold open: resolve the hook sentence (h:N) over the same block-span numbering the
         # export showed; stash its window, apply the cap after segmentation below.
         reel._hook_window = None
@@ -4622,6 +4642,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 _last_bnum = _valid_beats[-1]
                 if _last_bnum < _n:
                     reel._beat_tail_cap = _all_sents[_last_bnum][0].t0 - 0.02
+                # Map original block sentence numbers → beat display positions (1-based).
+                # Stored so k: resolution can accept original sentence numbers for beat reels.
+                reel._beat_orig_sents = _valid_beats  # [8, 9, 12, 10, 11] → positions 1-5
                 print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
         reel.r0_start = reel.start
         reel.r0_end = reel.end
@@ -4750,7 +4773,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = _stage_subtitles(reels, transcript, smap=_blk_smap)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     for _r in reels:
-        _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+        _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.
@@ -4782,12 +4805,48 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if not _kw_spec:
             continue
         _kw_sents = split_sentences(reel.subtitles)
+        _beat_orig = getattr(reel, "_beat_orig_sents", None)
+        _blk_sents_full = getattr(reel, "_blk_sents_full", None)
+        # Build t0→subtitle-sentence-index lookup for matching original sentences to display ones.
+        _t0_to_sub_idx: dict[int, int] = {}
+        for _si, _ss in enumerate(_kw_sents, 1):
+            for _sw in _ss:
+                _t0_to_sub_idx.setdefault(round(_sw.t0 * 1000), _si)
         for sent_idx, kwords in _kw_spec:
-            if sent_idx < 1 or sent_idx > len(_kw_sents):
+            # Beat reel: sent_idx is the original block sentence number; map to beat display position.
+            if _beat_orig is not None:
+                try:
+                    _display_idx = _beat_orig.index(sent_idx) + 1
+                except ValueError:
+                    print(f"  warning ({reel.id}): k:{sent_idx} not in beat sentences {_beat_orig} — skipped",
+                          file=sys.stderr)
+                    continue
+            elif _blk_sents_full is not None and 1 <= sent_idx <= len(_blk_sents_full):
+                # Non-beat reel: map original block sentence → subtitle sentence by t0 anchor.
+                _orig_s = _blk_sents_full[sent_idx - 1]
+                _display_idx = None
+                for _ow in _orig_s:
+                    _d = _t0_to_sub_idx.get(round(_ow.t0 * 1000))
+                    if _d is not None:
+                        _display_idx = _d
+                        break
+                if _display_idx is None:
+                    print(f"  warning ({reel.id}): k:{sent_idx} sentence not found in subtitles — skipped",
+                          file=sys.stderr)
+                    continue
+            else:
+                if _blk_sents_full is not None:
+                    print(f"  warning ({reel.id}): k:{sent_idx} out of range (1-{len(_blk_sents_full)}) — skipped",
+                          file=sys.stderr)
+                else:
+                    print(f"  warning ({reel.id}): k:{sent_idx} out of range (1-{len(_kw_sents)}) — skipped",
+                          file=sys.stderr)
+                continue
+            if _display_idx < 1 or _display_idx > len(_kw_sents):
                 print(f"  warning ({reel.id}): k:{sent_idx} out of range (1-{len(_kw_sents)}) — skipped",
                       file=sys.stderr)
                 continue
-            sent_words = _kw_sents[sent_idx - 1]
+            sent_words = _kw_sents[_display_idx - 1]
             for kw in kwords:
                 is_prefix = kw.endswith("*")
                 kw_pat = kw[:-1] if is_prefix else kw
