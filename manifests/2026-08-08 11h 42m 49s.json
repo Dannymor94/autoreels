@@ -435,7 +435,7 @@
     {
       "id": "r02",
       "start": 131.24,
-      "end": 186.35999999999999,
+      "end": 186.23999999999998,
       "segments": [
         {
           "start": 131.24,
@@ -466,7 +466,7 @@
         },
         {
           "start": 170.12,
-          "end": 186.35999999999999,
+          "end": 186.23999999999998,
           "shot": "wide",
           "close_intervals": [
             [
@@ -1128,7 +1128,7 @@
     {
       "id": "r03",
       "start": 211.90317,
-      "end": 237.65318000000002,
+      "end": 236.07999999999998,
       "segments": [
         {
           "start": 211.90317,
@@ -1143,7 +1143,7 @@
         },
         {
           "start": 232.00317,
-          "end": 237.65318000000002,
+          "end": 236.07999999999998,
           "shot": "close",
           "close_intervals": []
         }
@@ -1522,9 +1522,11 @@
       "has_explicit_e": true,
       "subtitle_gate": 236.00317,
       "speed": 1.0,
-      "tail_last_word_end": 236.15318000000002,
-      "tail_next_word_start": 236.26317,
-      "warnings": [],
+      "tail_last_word_end": 235.27318000000002,
+      "tail_next_word_start": 236.10318,
+      "warnings": [
+        "[CONTENT] r03: last word 'работает.' cut by clip end (continuous speech into next phrase, ae=236.153 > clip=236.080)"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null
@@ -1581,12 +1583,6 @@
       "start_justification": "",
       "rank": null,
       "subtitles": [
-        {
-          "word": "Когда",
-          "t0": 340.5832,
-          "t1": 341.16318,
-          "emph": false
-        },
         {
           "word": "у",
           "t0": 341.16318,
@@ -2078,12 +2074,6 @@
           "t0": 378.48315,
           "t1": 378.88318,
           "emph": true
-        },
-        {
-          "word": "Понятно?",
-          "t0": 378.1432,
-          "t1": 379.16318,
-          "emph": false
         }
       ],
       "end_drift_sec": 0.30000000000001137,
@@ -2100,7 +2090,8 @@
       "tail_next_word_start": 379.16318,
       "warnings": [
         "e: ends on incomplete sentence ('Потому')",
-        "[CONTENT] r04: last word 'Понятно?' cut by clip end (continuous speech into next phrase, ae=379.213 > clip=379.143)"
+        "last subtitle word 'душе.' (t0=378.483s) != last transcript word before r0_end 'Понятно?' (t0=378.143s, r0_end=379.163s) — word was excluded by audible_end",
+        "[CONTENT] r04: clip too short for tail fade after last word 'душе.' (clip_end=379.143, ae=378.933, gap=0.210s < min_fade=0.25s)"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
@@ -2109,7 +2100,7 @@
     {
       "id": "r05",
       "start": 388.30316,
-      "end": 426.28634,
+      "end": 426.25,
       "segments": [
         {
           "start": 388.30316,
@@ -2125,7 +2116,7 @@
         },
         {
           "start": 402.36316,
-          "end": 426.28634,
+          "end": 426.25,
           "shot": "wide",
           "close_intervals": [
             [
@@ -2608,7 +2599,7 @@
       "tail_last_word_end": 426.24634,
       "tail_next_word_start": null,
       "warnings": [
-        "[CONTENT] r05: clip too short for tail fade after last word 'работает.' (clip_end=426.286, ae=426.160, gap=0.126s < min_fade=0.25s)"
+        "[CONTENT] r05: clip too short for tail fade after last word 'работает.' (clip_end=426.250, ae=426.160, gap=0.090s < min_fade=0.25s)"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
