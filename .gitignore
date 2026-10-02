@@ -13,6 +13,7 @@ reels-out/
 transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
 reviews/                # review files (working material, not shared)
 music/                  # аудио-треки фоновой музыки (бинарь, не в git; кладутся на машину рендера)
+tails/                  # room-tone WAV clips extracted for synthetic tail (runtime, local)
 
 # per-file кроп-калибровки (calibrations/<sha>.json) ВЕРСИОНИРУЮТСЯ: лёгкий JSON, чтобы
 # калибровка с Mac уезжала на системник (git pull) — иначе status там показывает «кропа нет».

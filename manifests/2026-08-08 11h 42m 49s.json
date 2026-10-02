@@ -32,24 +32,42 @@
     {
       "id": "r01",
       "start": 66.10000000000001,
-      "end": 93.10000000000001,
+      "end": 81.54,
       "segments": [
         {
           "start": 66.10000000000001,
-          "end": 72.15,
+          "end": 69.02000000000001,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 72.74,
-          "end": 93.10000000000001,
+          "start": 69.04,
+          "end": 72.15,
+          "shot": "close",
+          "close_intervals": []
+        },
+        {
+          "start": 81.56,
+          "end": 89.88000000000001,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              8.88000000000001
+              0.060000000000002274,
+              8.320000000000007
             ]
           ]
+        },
+        {
+          "start": 72.74,
+          "end": 78.22,
+          "shot": "close",
+          "close_intervals": []
+        },
+        {
+          "start": 78.24,
+          "end": 81.54,
+          "shot": "close",
+          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -61,7 +79,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 66.4,
-      "r0_end": 91.54,
+      "r0_end": 81.54,
       "flags": [
         "human_merged"
       ],
@@ -91,7 +109,7 @@
           "word": "зажалась.",
           "t0": 67.42,
           "t1": 69.04,
-          "emph": false
+          "emph": true
         },
         {
           "word": "Мамы",
@@ -157,6 +175,96 @@
           "word": "себя.",
           "t0": 71.58,
           "t1": 71.9,
+          "emph": false
+        },
+        {
+          "word": "Вы",
+          "t0": 81.56,
+          "t1": 81.58,
+          "emph": false
+        },
+        {
+          "word": "никогда",
+          "t0": 81.58,
+          "t1": 82.62,
+          "emph": false
+        },
+        {
+          "word": "себя",
+          "t0": 82.62,
+          "t1": 82.94,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 82.94,
+          "t1": 83.06,
+          "emph": false
+        },
+        {
+          "word": "изучали,",
+          "t0": 83.06,
+          "t1": 83.5,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 83.5,
+          "t1": 83.62,
+          "emph": false
+        },
+        {
+          "word": "просто",
+          "t0": 83.62,
+          "t1": 83.84,
+          "emph": false
+        },
+        {
+          "word": "где-то",
+          "t0": 83.84,
+          "t1": 84.32,
+          "emph": false
+        },
+        {
+          "word": "по",
+          "t0": 84.32,
+          "t1": 84.72,
+          "emph": false
+        },
+        {
+          "word": "привычке",
+          "t0": 84.72,
+          "t1": 85.42,
+          "emph": false
+        },
+        {
+          "word": "сами",
+          "t0": 85.42,
+          "t1": 86.98,
+          "emph": false
+        },
+        {
+          "word": "на",
+          "t0": 86.98,
+          "t1": 88.48,
+          "emph": false
+        },
+        {
+          "word": "себя",
+          "t0": 88.48,
+          "t1": 88.74,
+          "emph": false
+        },
+        {
+          "word": "как-то",
+          "t0": 88.74,
+          "t1": 89.14,
+          "emph": false
+        },
+        {
+          "word": "нажимаете.",
+          "t0": 89.14,
+          "t1": 89.8,
           "emph": false
         },
         {
@@ -301,150 +409,33 @@
           "word": "поломаны.",
           "t0": 80.62,
           "t1": 81.62,
-          "emph": false
-        },
-        {
-          "word": "Вы",
-          "t0": 81.56,
-          "t1": 81.58,
-          "emph": false
-        },
-        {
-          "word": "никогда",
-          "t0": 81.58,
-          "t1": 82.62,
-          "emph": false
-        },
-        {
-          "word": "себя",
-          "t0": 82.62,
-          "t1": 82.94,
-          "emph": false
-        },
-        {
-          "word": "не",
-          "t0": 82.94,
-          "t1": 83.06,
-          "emph": false
-        },
-        {
-          "word": "изучали,",
-          "t0": 83.06,
-          "t1": 83.5,
-          "emph": false
-        },
-        {
-          "word": "вы",
-          "t0": 83.5,
-          "t1": 83.62,
-          "emph": false
-        },
-        {
-          "word": "просто",
-          "t0": 83.62,
-          "t1": 83.84,
-          "emph": false
-        },
-        {
-          "word": "где-то",
-          "t0": 83.84,
-          "t1": 84.32,
-          "emph": false
-        },
-        {
-          "word": "по",
-          "t0": 84.32,
-          "t1": 84.72,
-          "emph": false
-        },
-        {
-          "word": "привычке",
-          "t0": 84.72,
-          "t1": 85.42,
-          "emph": false
-        },
-        {
-          "word": "сами",
-          "t0": 85.42,
-          "t1": 86.98,
-          "emph": false
-        },
-        {
-          "word": "на",
-          "t0": 86.98,
-          "t1": 88.48,
-          "emph": false
-        },
-        {
-          "word": "себя",
-          "t0": 88.48,
-          "t1": 88.74,
-          "emph": false
-        },
-        {
-          "word": "как-то",
-          "t0": 88.74,
-          "t1": 89.14,
-          "emph": false
-        },
-        {
-          "word": "нажимаете.",
-          "t0": 89.14,
-          "t1": 89.8,
-          "emph": false
-        },
-        {
-          "word": "Понятно",
-          "t0": 89.9,
-          "t1": 90.22,
-          "emph": false
-        },
-        {
-          "word": "или",
-          "t0": 90.22,
-          "t1": 90.44,
-          "emph": false
-        },
-        {
-          "word": "нет?",
-          "t0": 90.44,
-          "t1": 90.6,
-          "emph": false
-        },
-        {
-          "word": "Это",
-          "t0": 90.6,
-          "t1": 90.92,
-          "emph": false
-        },
-        {
-          "word": "непонятно.",
-          "t0": 90.92,
-          "t1": 91.54,
-          "emph": false
+          "emph": true
         }
       ],
-      "end_drift_sec": 0.29999999999999716,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": 0.37999999999999545,
+      "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
-      "has_explicit_e": true,
-      "subtitle_gate": 91.84,
+      "has_explicit_e": false,
+      "subtitle_gate": 81.51,
       "speed": 1.0,
-      "tail_last_word_end": 91.60000000000001,
-      "tail_next_word_start": 92.08,
-      "warnings": [],
+      "tail_last_word_end": 80.67,
+      "tail_next_word_start": 81.56,
+      "warnings": [
+        "last subtitle word 'поломаны.' (t0=80.620s) != last transcript word before r0_end 'никогда' (t0=81.580s, r0_end=82.150s) — word was excluded by audible_end",
+        "[CONTENT] r01: last word 'поломаны.' cut by clip end (continuous speech into next phrase, ae=81.590 > clip=81.540)"
+      ],
       "subtitle_emph_words": [],
-      "beat_gap_sec": null,
+      "beat_gap_sec": 0.25,
       "zoom_source_t0": null
     },
     {
       "id": "r02",
       "start": 131.24,
-      "end": 193.76,
+      "end": 186.35999999999999,
       "segments": [
         {
           "start": 131.24,
@@ -475,16 +466,12 @@
         },
         {
           "start": 170.12,
-          "end": 193.76,
+          "end": 186.35999999999999,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
               5.939999999999998
-            ],
-            [
-              16.25999999999999,
-              23.609999999999985
             ]
           ]
         }
@@ -498,7 +485,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 131.24,
-      "r0_end": 194.22,
+      "r0_end": 186.38,
       "flags": [
         "human_merged"
       ],
@@ -1068,7 +1055,7 @@
           "word": "взрослый,",
           "t0": 179.32,
           "t1": 180.26,
-          "emph": false
+          "emph": true
         },
         {
           "word": "бесстрашный,",
@@ -1117,96 +1104,6 @@
           "t0": 184.06,
           "t1": 186.38,
           "emph": false
-        },
-        {
-          "word": "Вот",
-          "t0": 186.38,
-          "t1": 186.58,
-          "emph": false
-        },
-        {
-          "word": "книга",
-          "t0": 186.58,
-          "t1": 186.96,
-          "emph": false
-        },
-        {
-          "word": "про",
-          "t0": 186.96,
-          "t1": 187.18,
-          "emph": false
-        },
-        {
-          "word": "то,",
-          "t0": 187.18,
-          "t1": 187.36,
-          "emph": false
-        },
-        {
-          "word": "чтобы",
-          "t0": 187.36,
-          "t1": 187.58,
-          "emph": false
-        },
-        {
-          "word": "найти",
-          "t0": 187.58,
-          "t1": 188.04,
-          "emph": false
-        },
-        {
-          "word": "вот",
-          "t0": 188.04,
-          "t1": 188.74,
-          "emph": false
-        },
-        {
-          "word": "эту",
-          "t0": 188.74,
-          "t1": 188.9,
-          "emph": false
-        },
-        {
-          "word": "свою",
-          "t0": 188.9,
-          "t1": 189.14,
-          "emph": false
-        },
-        {
-          "word": "взрослую",
-          "t0": 189.14,
-          "t1": 189.6,
-          "emph": false
-        },
-        {
-          "word": "часть",
-          "t0": 189.6,
-          "t1": 189.98,
-          "emph": false
-        },
-        {
-          "word": "и",
-          "t0": 189.98,
-          "t1": 192.44,
-          "emph": false
-        },
-        {
-          "word": "начать",
-          "t0": 192.44,
-          "t1": 192.8,
-          "emph": false
-        },
-        {
-          "word": "выбирать,",
-          "t0": 192.8,
-          "t1": 193.48,
-          "emph": false
-        },
-        {
-          "word": "понятно?",
-          "t0": 193.48,
-          "t1": 194.22,
-          "emph": false
         }
       ],
       "end_drift_sec": 0.30000000000001137,
@@ -1217,12 +1114,11 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 193.78,
+      "subtitle_gate": 186.26,
       "speed": 1.0,
-      "tail_last_word_end": 193.74,
-      "tail_next_word_start": 193.78,
+      "tail_last_word_end": 184.61,
+      "tail_next_word_start": 186.38,
       "warnings": [
-        "ends_on_filler: 'и начать выбирать, понятно?'",
         "dangling start: opens on «Вот»"
       ],
       "subtitle_emph_words": [],
@@ -1231,6 +1127,410 @@
     },
     {
       "id": "r03",
+      "start": 211.90317,
+      "end": 237.65318000000002,
+      "segments": [
+        {
+          "start": 211.90317,
+          "end": 231.82317,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              13.640000000000015,
+              17.600000000000023
+            ]
+          ]
+        },
+        {
+          "start": 232.00317,
+          "end": 237.65318000000002,
+          "shot": "close",
+          "close_intervals": []
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "Почему «я же знаю, как правильно» не работает",
+      "score": 85,
+      "hook": "У вас тогда что? Там прям нейробиология расписана",
+      "title": "",
+      "description": "В стрессе осознанный мозг выключается, и включается тот, кого когда-то недолюбили. #психология #стресс",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 211.90317,
+      "r0_end": 235.70317,
+      "flags": [],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "У",
+          "t0": 211.90317,
+          "t1": 211.96317,
+          "emph": false
+        },
+        {
+          "word": "вас",
+          "t0": 211.96317,
+          "t1": 212.54317,
+          "emph": false
+        },
+        {
+          "word": "отключается,",
+          "t0": 212.54317,
+          "t1": 213.42317,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 213.42317,
+          "t1": 213.76317,
+          "emph": false
+        },
+        {
+          "word": "осознанный",
+          "t0": 213.76317,
+          "t1": 214.66318,
+          "emph": false
+        },
+        {
+          "word": "мозг,",
+          "t0": 214.66318,
+          "t1": 215.72318,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 215.72318,
+          "t1": 216.12317,
+          "emph": false
+        },
+        {
+          "word": "выключается,",
+          "t0": 216.12317,
+          "t1": 216.64317,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 216.64317,
+          "t1": 216.92317,
+          "emph": false
+        },
+        {
+          "word": "рептильный",
+          "t0": 216.92317,
+          "t1": 217.42317,
+          "emph": false
+        },
+        {
+          "word": "мозг",
+          "t0": 217.42317,
+          "t1": 217.68317,
+          "emph": false
+        },
+        {
+          "word": "—",
+          "t0": 217.68317,
+          "t1": 217.80318,
+          "emph": false
+        },
+        {
+          "word": "ваш",
+          "t0": 217.80318,
+          "t1": 217.88318,
+          "emph": false
+        },
+        {
+          "word": "внутренний",
+          "t0": 217.88318,
+          "t1": 218.54317,
+          "emph": false
+        },
+        {
+          "word": "ребенок.",
+          "t0": 218.54317,
+          "t1": 219.08318,
+          "emph": false
+        },
+        {
+          "word": "Того",
+          "t0": 219.20317,
+          "t1": 219.70317,
+          "emph": false
+        },
+        {
+          "word": "ребенка,",
+          "t0": 219.70317,
+          "t1": 220.16318,
+          "emph": false
+        },
+        {
+          "word": "которого",
+          "t0": 220.16318,
+          "t1": 220.52316,
+          "emph": false
+        },
+        {
+          "word": "когда-то",
+          "t0": 220.52316,
+          "t1": 220.94318,
+          "emph": false
+        },
+        {
+          "word": "обидели,",
+          "t0": 220.94318,
+          "t1": 222.12317,
+          "emph": false
+        },
+        {
+          "word": "когда-то",
+          "t0": 222.12317,
+          "t1": 222.46317,
+          "emph": false
+        },
+        {
+          "word": "недолюбили,",
+          "t0": 222.46317,
+          "t1": 223.24316,
+          "emph": false
+        },
+        {
+          "word": "недоласкали,",
+          "t0": 223.24316,
+          "t1": 224.08318,
+          "emph": false
+        },
+        {
+          "word": "он",
+          "t0": 224.08318,
+          "t1": 224.18317,
+          "emph": false
+        },
+        {
+          "word": "просто",
+          "t0": 224.18317,
+          "t1": 224.44318,
+          "emph": false
+        },
+        {
+          "word": "восключается,",
+          "t0": 224.44318,
+          "t1": 225.28317,
+          "emph": false
+        },
+        {
+          "word": "ребят.",
+          "t0": 225.28317,
+          "t1": 225.54317,
+          "emph": false
+        },
+        {
+          "word": "И",
+          "t0": 225.88318,
+          "t1": 225.98317,
+          "emph": false
+        },
+        {
+          "word": "осознанность",
+          "t0": 225.98317,
+          "t1": 226.50317,
+          "emph": false
+        },
+        {
+          "word": "напрочь",
+          "t0": 226.50317,
+          "t1": 226.92317,
+          "emph": false
+        },
+        {
+          "word": "выключается.",
+          "t0": 226.92317,
+          "t1": 228.28317,
+          "emph": false
+        },
+        {
+          "word": "И",
+          "t0": 228.22318,
+          "t1": 228.28317,
+          "emph": false
+        },
+        {
+          "word": "вот",
+          "t0": 228.28317,
+          "t1": 228.40317,
+          "emph": false
+        },
+        {
+          "word": "эта",
+          "t0": 228.40317,
+          "t1": 228.56317,
+          "emph": false
+        },
+        {
+          "word": "вот",
+          "t0": 228.56317,
+          "t1": 228.74316,
+          "emph": false
+        },
+        {
+          "word": "тема,",
+          "t0": 228.74316,
+          "t1": 229.14317,
+          "emph": false
+        },
+        {
+          "word": "о",
+          "t0": 229.14317,
+          "t1": 229.38318,
+          "emph": false
+        },
+        {
+          "word": "которой",
+          "t0": 229.38318,
+          "t1": 229.40317,
+          "emph": false
+        },
+        {
+          "word": "знаешь,",
+          "t0": 229.40317,
+          "t1": 230.44318,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 230.44318,
+          "t1": 230.60318,
+          "emph": false
+        },
+        {
+          "word": "ты",
+          "t0": 230.60318,
+          "t1": 230.80318,
+          "emph": false
+        },
+        {
+          "word": "думаешь,",
+          "t0": 230.80318,
+          "t1": 231.48317,
+          "emph": false
+        },
+        {
+          "word": "ну",
+          "t0": 231.48317,
+          "t1": 231.58318,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 231.58318,
+          "t1": 231.72318,
+          "emph": false
+        },
+        {
+          "word": "ж",
+          "t0": 231.72318,
+          "t1": 231.82317,
+          "emph": false
+        },
+        {
+          "word": "я,",
+          "t0": 231.82317,
+          "t1": 232.00317,
+          "emph": false
+        },
+        {
+          "word": "я",
+          "t0": 232.00317,
+          "t1": 232.20317,
+          "emph": false
+        },
+        {
+          "word": "же",
+          "t0": 232.20317,
+          "t1": 232.28317,
+          "emph": false
+        },
+        {
+          "word": "знаю,",
+          "t0": 232.28317,
+          "t1": 232.66318,
+          "emph": true
+        },
+        {
+          "word": "как",
+          "t0": 232.66318,
+          "t1": 232.82317,
+          "emph": false
+        },
+        {
+          "word": "правильно",
+          "t0": 232.82317,
+          "t1": 233.10318,
+          "emph": false
+        },
+        {
+          "word": "поступать.",
+          "t0": 233.10318,
+          "t1": 233.78317,
+          "emph": false
+        },
+        {
+          "word": "Она",
+          "t0": 233.78317,
+          "t1": 233.86317,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 233.86317,
+          "t1": 234.00317,
+          "emph": false
+        },
+        {
+          "word": "работает,",
+          "t0": 234.00317,
+          "t1": 234.62317,
+          "emph": true
+        },
+        {
+          "word": "ребят,",
+          "t0": 234.62317,
+          "t1": 235.06317,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 235.06317,
+          "t1": 235.22318,
+          "emph": false
+        },
+        {
+          "word": "работает.",
+          "t0": 235.22318,
+          "t1": 235.70317,
+          "emph": true
+        }
+      ],
+      "end_drift_sec": 0.30000000000001137,
+      "end_snap_reason": "sentence",
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 236.00317,
+      "speed": 1.0,
+      "tail_last_word_end": 236.15318000000002,
+      "tail_next_word_start": 236.26317,
+      "warnings": [],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null
+    },
+    {
+      "id": "r04",
       "start": 340.5832,
       "end": 379.14318000000003,
       "segments": [
@@ -1753,7 +2053,7 @@
           "word": "душе",
           "t0": 378.0232,
           "t1": 378.22318,
-          "emph": false
+          "emph": true
         },
         {
           "word": "или",
@@ -1777,7 +2077,7 @@
           "word": "душе.",
           "t0": 378.48315,
           "t1": 378.88318,
-          "emph": false
+          "emph": true
         },
         {
           "word": "Понятно?",
@@ -1800,33 +2100,27 @@
       "tail_next_word_start": 379.16318,
       "warnings": [
         "e: ends on incomplete sentence ('Потому')",
-        "[CONTENT] r03: last word 'Понятно?' cut by clip end (continuous speech into next phrase, ae=379.213 > clip=379.143)"
+        "[CONTENT] r04: last word 'Понятно?' cut by clip end (continuous speech into next phrase, ae=379.213 > clip=379.143)"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null
     },
     {
-      "id": "r04",
+      "id": "r05",
       "start": 388.30316,
       "end": 426.28634,
       "segments": [
         {
           "start": 388.30316,
-          "end": 391.68317,
+          "end": 391.76318,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 391.76318,
-          "end": 393.85315,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 395.92316,
+          "start": 393.60315,
           "end": 398.60315,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         },
         {
@@ -2106,7 +2400,7 @@
           "word": "маску",
           "t0": 408.88318,
           "t1": 409.24316,
-          "emph": false
+          "emph": true
         },
         {
           "word": "надеть,",
@@ -2244,7 +2538,7 @@
           "word": "маску,",
           "t0": 422.24634,
           "t1": 422.60635,
-          "emph": false
+          "emph": true
         },
         {
           "word": "а",
@@ -2313,30 +2607,35 @@
       "speed": 1.0,
       "tail_last_word_end": 426.24634,
       "tail_next_word_start": null,
-      "warnings": [],
+      "warnings": [
+        "[CONTENT] r05: clip too short for tail fade after last word 'работает.' (clip_end=426.286, ae=426.160, gap=0.126s < min_fade=0.25s)"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null
     },
     {
-      "id": "r05",
-      "start": 452.48635,
+      "id": "r06",
+      "start": 467.52635,
       "end": 473.22635,
       "segments": [
         {
-          "start": 452.48635,
+          "start": 467.52635,
+          "end": 469.27634,
+          "shot": "wide",
+          "close_intervals": []
+        },
+        {
+          "start": 452.78635,
+          "end": 461.04635,
+          "shot": "close",
+          "close_intervals": []
+        },
+        {
+          "start": 469.68634,
           "end": 473.22635,
           "shot": "wide",
-          "close_intervals": [
-            [
-              9.059979999999996,
-              14.859989999999982
-            ],
-            [
-              14.859989999999982,
-              20.74000000000001
-            ]
-          ]
+          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -2347,15 +2646,51 @@
       "description": "Не «древо боли», а древо жизни. С вами прямо сейчас всё хорошо. #психология #принятие",
       "reason": "human review",
       "topic": "",
-      "r0_start": 452.78635,
+      "r0_start": 467.82635,
       "r0_end": 471.72635,
       "flags": [
-        "human_merged"
+        "too_short"
       ],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
       "subtitles": [
+        {
+          "word": "С",
+          "t0": 467.82635,
+          "t1": 467.90634,
+          "emph": false
+        },
+        {
+          "word": "вами",
+          "t0": 467.90634,
+          "t1": 468.08633,
+          "emph": false
+        },
+        {
+          "word": "все",
+          "t0": 468.08633,
+          "t1": 468.24634,
+          "emph": false
+        },
+        {
+          "word": "прямо",
+          "t0": 468.24634,
+          "t1": 468.48633,
+          "emph": false
+        },
+        {
+          "word": "сейчас",
+          "t0": 468.48633,
+          "t1": 468.64633,
+          "emph": false
+        },
+        {
+          "word": "хорошо.",
+          "t0": 468.64633,
+          "t1": 469.02634,
+          "emph": true
+        },
         {
           "word": "Мы",
           "t0": 452.78635,
@@ -2450,7 +2785,7 @@
           "word": "силу,",
           "t0": 459.72635,
           "t1": 460.08633,
-          "emph": false
+          "emph": true
         },
         {
           "word": "с",
@@ -2474,108 +2809,6 @@
           "word": "нормально.",
           "t0": 460.56635,
           "t1": 461.54633,
-          "emph": false
-        },
-        {
-          "word": "Вы",
-          "t0": 461.06635,
-          "t1": 461.66635,
-          "emph": false
-        },
-        {
-          "word": "просто",
-          "t0": 461.66635,
-          "t1": 462.00635,
-          "emph": false
-        },
-        {
-          "word": "как-то",
-          "t0": 462.00635,
-          "t1": 462.62634,
-          "emph": false
-        },
-        {
-          "word": "о",
-          "t0": 462.62634,
-          "t1": 462.72635,
-          "emph": false
-        },
-        {
-          "word": "себе",
-          "t0": 462.72635,
-          "t1": 462.88635,
-          "emph": false
-        },
-        {
-          "word": "думаете,",
-          "t0": 462.88635,
-          "t1": 464.46634,
-          "emph": false
-        },
-        {
-          "word": "вы",
-          "t0": 464.46634,
-          "t1": 464.60635,
-          "emph": false
-        },
-        {
-          "word": "совсем",
-          "t0": 464.60635,
-          "t1": 465.34634,
-          "emph": false
-        },
-        {
-          "word": "про",
-          "t0": 465.34634,
-          "t1": 466.70636,
-          "emph": false
-        },
-        {
-          "word": "себя",
-          "t0": 466.70636,
-          "t1": 466.90634,
-          "emph": false
-        },
-        {
-          "word": "забыли.",
-          "t0": 466.90634,
-          "t1": 467.34634,
-          "emph": false
-        },
-        {
-          "word": "С",
-          "t0": 467.82635,
-          "t1": 467.90634,
-          "emph": false
-        },
-        {
-          "word": "вами",
-          "t0": 467.90634,
-          "t1": 468.08633,
-          "emph": false
-        },
-        {
-          "word": "все",
-          "t0": 468.08633,
-          "t1": 468.24634,
-          "emph": false
-        },
-        {
-          "word": "прямо",
-          "t0": 468.24634,
-          "t1": 468.48633,
-          "emph": false
-        },
-        {
-          "word": "сейчас",
-          "t0": 468.48633,
-          "t1": 468.64633,
-          "emph": false
-        },
-        {
-          "word": "хорошо.",
-          "t0": 468.64633,
-          "t1": 469.02634,
           "emph": false
         },
         {
@@ -2628,14 +2861,16 @@
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
-      "has_explicit_e": true,
+      "has_explicit_e": false,
       "subtitle_gate": 472.02635000000004,
       "speed": 1.0,
       "tail_last_word_end": 471.72635,
       "tail_next_word_start": null,
-      "warnings": [],
+      "warnings": [
+        "short clip 13.6s (< 18s floor)"
+      ],
       "subtitle_emph_words": [],
-      "beat_gap_sec": null,
+      "beat_gap_sec": 0.25,
       "zoom_source_t0": null
     }
   ]
