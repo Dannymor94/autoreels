@@ -1353,10 +1353,13 @@ def _stage_subtitles(reels, transcript, *, smap=None):
                         effective_end = reel.end
                 else:
                     effective_end = reel.end
+                # Allow a small ae overflow (< tail fade min) — boundary words whose acoustic
+                # end grazes past effective_end are masked by the tail audio fade at render.
+                _AE_SLACK = 0.15
                 reel.subtitles = [
                     w for w in transcript.words
                     if reel.start <= w.t0 < seg_gate
-                    and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= effective_end
+                    and _ae_by_t0.get(round(w.t0 * 1000), w.t1) <= effective_end + _AE_SLACK
                 ]
             else:
                 _sg_no_smap = reel.subtitle_gate if reel.subtitle_gate is not None else reel.end
