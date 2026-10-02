@@ -2680,3 +2680,142 @@ def test_smap_speech_next_gap_0_12s_clip_not_extended(tmp_path, render_cfg, fake
         f"clip was extended past next onset: -t={t_val:.3f}s (expected ≤7.48, "
         f"i.e. clip_end ≤ {3.0 + 7.48:.2f}s ≈ onset {onset:.2f})"
     )
+
+
+# --------------------------------------------------------- synthetic tail crop rectangle
+
+from autoreels.local.render import _build_synth_tail_cmd, _build_synth_tail_clip
+
+
+def _synth_params_wide():
+    """Wide-shot crop vf matching the standard _crop_setup."""
+    return "crop=320:568:40,0,scale=1080:1920,setsar=1"
+
+
+def _synth_params_close():
+    """Close-shot crop vf (tighter rectangle, still same output size)."""
+    return "crop=256:456:72,56,scale=1080:1920,setsar=1"
+
+
+def test_build_synth_tail_cmd_freeze_uses_synth_crop_vf():
+    """Freeze tail: synth_vchain has crop; concat is combined AV (no separate v/a)."""
+    crop_vf = _synth_params_wide()
+    cmd = _build_synth_tail_cmd(
+        "ffmpeg", Path("/src.mp4"), 100.0, Path("/out.mp4"),
+        seg_start=10.0, cut_point=15.0, audible_end=14.5,
+        bridge_dur=0.1, slow_factor=1.0, use_freeze=True,
+        tail_sec=1.0, fade_sec=0.3, fps=30.0,
+        output_w=1080, output_h=1920,
+        vf_no_tail=crop_vf, af_no_tail=None,
+        codec="libx264", quality_args=["-b:v", "7M"],
+        audio_codec="aac", audio_bitrate="128k",
+        synth_crop_vf=crop_vf,
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    synth_part = fc.split("[v_synth]")[0].split("[v_real]")[-1]
+    assert "crop=320:568" in synth_part, f"crop missing from synth_vchain: {synth_part!r}"
+    assert "scale=1080:1920" in synth_part
+    assert "setsar=1" in synth_part
+    assert "concat=n=2:v=1:a=1" in fc, "combined AV concat missing"
+    assert "concat=n=2:v=1:a=0" not in fc
+    assert "concat=n=2:v=0:a=1" not in fc
+
+
+def test_build_synth_tail_cmd_slowmo_uses_synth_crop_vf():
+    """Slow-mo tail: synth_vchain has crop, fps, settb; concat is combined AV."""
+    crop_vf = _synth_params_wide()
+    cmd = _build_synth_tail_cmd(
+        "ffmpeg", Path("/src.mp4"), 100.0, Path("/out.mp4"),
+        seg_start=10.0, cut_point=15.0, audible_end=14.5,
+        bridge_dur=0.3, slow_factor=3.33, use_freeze=False,
+        tail_sec=1.0, fade_sec=0.3, fps=30.0,
+        output_w=1080, output_h=1920,
+        vf_no_tail=crop_vf, af_no_tail=None,
+        codec="libx264", quality_args=["-b:v", "7M"],
+        audio_codec="aac", audio_bitrate="128k",
+        synth_crop_vf=crop_vf,
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    synth_part = fc.split("[v_synth]")[0].split("[v_real]")[-1]
+    assert "crop=320:568" in synth_part
+    assert "fps=30" in synth_part, "fps filter missing from slow-mo synth_vchain"
+    assert "settb=expr=1/90000" in synth_part
+    # combined AV concat — no separate v/a concat filters
+    assert "concat=n=2:v=1:a=1" in fc, "combined AV concat missing"
+    assert "concat=n=2:v=1:a=0" not in fc
+    assert "concat=n=2:v=0:a=1" not in fc
+
+
+def test_build_synth_tail_cmd_close_shot_uses_close_crop_vf():
+    """Close-shot tail uses the close crop rectangle, not the wide one."""
+    close_vf = _synth_params_close()
+    cmd = _build_synth_tail_cmd(
+        "ffmpeg", Path("/src.mp4"), 100.0, Path("/out.mp4"),
+        seg_start=10.0, cut_point=15.0, audible_end=14.5,
+        bridge_dur=0.1, slow_factor=1.0, use_freeze=True,
+        tail_sec=1.0, fade_sec=0.3, fps=30.0,
+        output_w=1080, output_h=1920,
+        vf_no_tail=close_vf, af_no_tail=None,
+        codec="libx264", quality_args=["-b:v", "7M"],
+        audio_codec="aac", audio_bitrate="128k",
+        synth_crop_vf=close_vf,
+    )
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    synth_part = fc.split("[v_synth]")[0].split("[v_real]")[-1]
+    assert "crop=256:456" in synth_part, "close-shot crop rect missing from tail"
+
+
+def test_build_synth_tail_clip_freeze_uses_synth_crop_vf(tmp_path):
+    """_build_synth_tail_clip freeze: scale_part replaced by synth_crop_vf."""
+    crop_vf = _synth_params_wide()
+    cmds: list = []
+
+    def _fake_run(cmd, **kw):
+        cmds.append(cmd)
+        class R: returncode = 0; stderr = ""
+        return R()
+
+    import unittest.mock as _mock
+    with _mock.patch("autoreels.local.render.subprocess.run", side_effect=_fake_run):
+        _build_synth_tail_clip(
+            "ffmpeg", Path("/src.mp4"),
+            bridge_start=14.5, bridge_dur=0.1,
+            use_freeze=True, slow_factor=1.0,
+            room_start=100.0, tail_sec=1.0, fade_sec=0.3,
+            fps=30.0, output_w=1080, output_h=1920,
+            codec="libx264", quality_args=["-b:v", "7M"],
+            audio_codec="aac", audio_bitrate="128k",
+            push=False, tmp_path=tmp_path / "tail.mp4",
+            synth_crop_vf=crop_vf,
+        )
+    assert cmds, "no subprocess.run call"
+    fc = cmds[0][cmds[0].index("-filter_complex") + 1]
+    assert "crop=320:568" in fc, f"crop missing from _build_synth_tail_clip: {fc!r}"
+    assert "scale=1080:1920" in fc
+
+
+def test_build_synth_tail_clip_close_shot(tmp_path):
+    """_build_synth_tail_clip close-shot: uses the close crop rectangle."""
+    close_vf = _synth_params_close()
+    cmds: list = []
+
+    def _fake_run(cmd, **kw):
+        cmds.append(cmd)
+        class R: returncode = 0; stderr = ""
+        return R()
+
+    import unittest.mock as _mock
+    with _mock.patch("autoreels.local.render.subprocess.run", side_effect=_fake_run):
+        _build_synth_tail_clip(
+            "ffmpeg", Path("/src.mp4"),
+            bridge_start=14.5, bridge_dur=0.1,
+            use_freeze=True, slow_factor=1.0,
+            room_start=100.0, tail_sec=1.0, fade_sec=0.3,
+            fps=30.0, output_w=1080, output_h=1920,
+            codec="libx264", quality_args=["-b:v", "7M"],
+            audio_codec="aac", audio_bitrate="128k",
+            push=False, tmp_path=tmp_path / "tail.mp4",
+            synth_crop_vf=close_vf,
+        )
+    fc = cmds[0][cmds[0].index("-filter_complex") + 1]
+    assert "crop=256:456" in fc, "close-shot crop rect missing from _build_synth_tail_clip"

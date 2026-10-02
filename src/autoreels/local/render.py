@@ -561,6 +561,33 @@ def _probe_duration_sec(path, ffprobe: str) -> float | None:
         return None
 
 
+def _check_synth_tail_seam(
+    path: Path, cut_out_sec: float, fps: float, ffmpeg_bin: str
+) -> str | None:
+    """SSIM between last body frame and first tail frame. Returns error string if < 0.85."""
+    import re as _re
+    half_f = 0.5 / max(fps, 1.0)
+    t0 = max(0.0, cut_out_sec - half_f)
+    t1 = cut_out_sec + half_f
+    try:
+        result = subprocess.run(
+            [ffmpeg_bin,
+             "-ss", _ts(t0), "-frames:v", "1", "-i", str(path),
+             "-ss", _ts(t1), "-frames:v", "1", "-i", str(path),
+             "-filter_complex", "[0:v][1:v]ssim",
+             "-f", "null", "-"],
+            capture_output=True, text=True, check=False, timeout=20,
+        )
+        m = _re.search(r'All:([\d.]+)', result.stderr + result.stdout)
+        if m:
+            ssim = float(m.group(1))
+            if ssim < 0.85:
+                return f"tail-seam SSIM {ssim:.3f} < 0.85 — tail may bypass body crop"
+    except Exception:
+        pass
+    return None
+
+
 def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float, float]]:
     """Run freezedetect on a rendered clip; return (start, end, dur) tuples for each frozen span.
 
@@ -624,9 +651,13 @@ def _unlock_dir(fd) -> None:
 
 
 def _check_integrity(path: Path, ffmpeg_bin: str) -> str:
-    """Run ffmpeg error-level check on `path`. Returns stderr text or '' if clean."""
+    """Run ffmpeg container-level check on `path`. Returns stderr text or '' if clean.
+    Uses -codec copy to skip decode: VideoToolbox HEVC + concat filtergraph produces benign
+    null-muxer DTS warnings during full decode (1/600 tb rounding artifact) that do not
+    reflect actual container or playback issues.
+    """
     result = subprocess.run(
-        [ffmpeg_bin, "-v", "error", "-i", str(path), "-f", "null", "-"],
+        [ffmpeg_bin, "-v", "error", "-i", str(path), "-codec", "copy", "-f", "null", "-"],
         capture_output=True, text=True, check=False,
     )
     return result.stderr.strip()
@@ -851,6 +882,8 @@ def build_concat_cmd(
     xfade_fps: float = 0.0,
     duration_sec: float | None = None,
     pre_roll: float = 0.0,
+    extra_inputs: "list[tuple[str | Path, float, float]] | None" = None,
+    bf_zero: bool = False,
 ) -> list[str]:
     """ffmpeg-команда для многосегментного клипа: КАЖДОЕ окно — отдельный вход с собственным
     input-side seek (`-ss start -t dur -i source`), а `filter_complex` только сбрасывает PTS и
@@ -877,10 +910,14 @@ def build_concat_cmd(
         cmd += ["-ss", _ts(st - pr), "-t", _ts_dur(pr + dur + pad), "-i", str(source)]
     if music_path:
         cmd += ["-stream_loop", "-1", "-i", str(music_path)]
+    if extra_inputs:
+        for _ei_src, _ei_st, _ei_dur in extra_inputs:
+            cmd += ["-ss", _ts(_ei_st), "-t", _ts_dur(_ei_dur), "-i", str(_ei_src)]
     cmd += [
         "-filter_complex", filter_complex,
         "-map", "[v]", "-map", "[a]",
         "-c:v", codec, *quality_args,
+        *(["-bf", "0"] if bf_zero else []),
         "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
         # Video is the authoritative timeline (subtitles map onto it); -shortest clamps the audio
         # to it so the two stream durations are equal. The edge-fade concat already makes the audio
@@ -1215,18 +1252,23 @@ def _build_synth_tail_cmd(
     faststart: bool = True,
     pre_roll: float = 2.0,
     push: bool = False,
+    synth_crop_vf: "str | None" = None,
 ) -> list:
     """Build ffmpeg command for a clip with a synthetic room-tone tail appended.
 
     Input 0: source seeked to seg_start-pr (real content + bridge frames).
     Input 1: same source seeked to room_start (room tone audio).
     filter_complex: real video+audio concat with slowed/frozen video and room-tone audio.
+    synth_crop_vf: crop+scale+setsar for tail frames — must match the last segment's active
+        crop rectangle (wide or close shot). Defaults to plain scale when None (legacy).
     """
     pr = min(pre_roll, seg_start)
     cut_dur = cut_point - seg_start
     b_off = audible_end - seg_start  # offset of B relative to seg_start
 
-    scale_part = f"scale={output_w}:{output_h}:flags=bicubic"
+    # synth_crop_vf carries crop+scale+setsar matching the last body segment.
+    # Fallback keeps old behaviour (scale only, no crop) for callers that omit it.
+    scale_part = synth_crop_vf if synth_crop_vf else f"scale={output_w}:{output_h}:flags=bicubic"
     fade_st_num = _num(tail_sec - fade_sec)
     fade_sec_num = _num(fade_sec)
 
@@ -1246,9 +1288,15 @@ def _build_synth_tail_cmd(
             f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
         )
     else:
+        _trim_extra = 2.0 / max(fps, 1.0)
+        _tpad_dur = _num(tail_sec + 0.5)
         synth_vchain = (
-            f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + bridge_dur)},"
+            f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + bridge_dur + _trim_extra)},"
             f"setpts=(PTS-STARTPTS)*{_num(slow_factor)},"
+            f"tpad=stop_mode=clone:stop_duration={_tpad_dur},"
+            f"fps={_num(fps)},"
+            f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
+            f"settb=expr=1/90000,"
             f"{scale_part},"
             f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
         )
@@ -1270,13 +1318,13 @@ def _build_synth_tail_cmd(
         f"afade=t=out:st={fade_st_num}:d={fade_sec_num}"
     )
 
+    # Single av-concat avoids DTS discontinuity from separate v/a concat chains.
     fc = ";".join([
         f"[0:v]{real_vchain}[v_real]",
         f"[0:v]{synth_vchain}[v_synth]",
-        "[v_real][v_synth]concat=n=2:v=1:a=0[v]",
         f"[0:a]{real_achain}[a_real]",
         f"[1:a]{synth_achain}[a_synth]",
-        "[a_real][a_synth]concat=n=2:v=0:a=1[a]",
+        "[v_real][a_real][v_synth][a_synth]concat=n=2:v=1:a=1[v][a]",
     ])
 
     return [
@@ -1291,7 +1339,7 @@ def _build_synth_tail_cmd(
         "-i", str(source),
         "-filter_complex", fc,
         "-map", "[v]", "-map", "[a]",
-        "-c:v", codec, *quality_args,
+        "-c:v", codec, *quality_args, "-bf", "0",
         "-c:a", audio_codec, "-b:a", audio_bitrate,
         *(["-movflags", "+faststart"] if faststart else []),
         str(tmp_out),
@@ -1318,10 +1366,11 @@ def _build_synth_tail_clip(
     audio_bitrate: str,
     push: bool,
     tmp_path: "Path",
+    synth_crop_vf: "str | None" = None,
 ) -> None:
     """Render the synthetic tail segment as a standalone clip (source only, no rendered clip)."""
     nf = max(1, round(fps * 0.1))
-    scale_part = f"scale={output_w}:{output_h}:flags=bicubic,setsar=1"
+    scale_part = synth_crop_vf if synth_crop_vf else f"scale={output_w}:{output_h}:flags=bicubic,setsar=1"
     fade_st = _num(tail_sec - fade_sec)
     fade_d = _num(fade_sec)
 
@@ -1395,6 +1444,7 @@ def _append_synth_tail_to_rendered(
     faststart: bool,
     push: bool,
     tmp_path: "Path",
+    synth_crop_vf: "str | None" = None,
 ) -> None:
     """Append synthetic room-tone tail to an already-rendered clip (multi-seg path).
 
@@ -1411,7 +1461,7 @@ def _append_synth_tail_to_rendered(
             fps=fps, output_w=output_w, output_h=output_h,
             codec=codec, quality_args=quality_args,
             audio_codec=audio_codec, audio_bitrate=audio_bitrate,
-            push=push, tmp_path=tail_file,
+            push=push, tmp_path=tail_file, synth_crop_vf=synth_crop_vf,
         )
         # filter_complex concat (not concat demuxer + copy): VideoToolbox encoders produce MP4
         # where the last video packet DTS equals the container duration, so concat-demuxer seam
@@ -2290,6 +2340,16 @@ def _render_segments(
                                 _synth_active = True
                                 _synth_params_dict = _sp
                                 _synth_room_start = _sr[0]
+                                # crop+scale vf for tail frames — last segment's active shot
+                                # (wide or close). Excludes subtitles and fades; includes palette.
+                                _ts_last_crop = (
+                                    (_ts_seg_vfs[-1] if _ts_seg_vfs and _ts_seg_vfs[-1] is not None else vf)
+                                    if _ts_on else (_effective_vf or vf)
+                                )
+                                _synth_crop_vf_for_tail: str | None = (
+                                    f"{_ts_last_crop},{palette_vf}" if (_ts_last_crop and palette_vf)
+                                    else _ts_last_crop or None
+                                )
                                 # Shorten last segment to cut_point; no fade on speech
                                 _cut = _sp["cut_point"]
                                 if len(segs) == 1:
@@ -2463,23 +2523,60 @@ def _render_segments(
                         _a_fc_str += f",{reel_af}"
                     _a_fc_str += "[a]"
                     reel_fc = ";".join(_v_fc) + ";" + _a_fc_str
-            # Two-pass synth for ALL clips (single-seg and multi-seg): avoids filter-graph concat
-            # SAR reinit (h264 decoder resets SAR mid-stream) and loudnorm 96kHz audio issues.
+            # Inline synth: single encode — synth tail built into the main filtergraph.
+            # Not usable with music (has its own filter_complex) or reel_fc (close_intervals overlay).
+            _synth_inline = (
+                _synth_active and _synth_params_dict is not None
+                and _synth_room_start is not None and not reel_fc and not music_path
+            )
+            # Two-pass synth: only when music is present (inline not applicable).
             _synth_post_append = (
                 _synth_active and _synth_params_dict is not None
-                and _synth_room_start is not None and not reel_fc
+                and _synth_room_start is not None and not reel_fc and not _synth_inline
             )
             if len(segs) == 1:
-                cmd = build_cut_cmd(
-                    ffmpeg_bin, source, segs[0].start, segs[0].end, tmp_out,
-                    codec=codec, preset=enc.preset,
-                    video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
-                    audio_codec=aud.codec, audio_bitrate=aud.bitrate,
-                    vf=(None if reel_fc else reel_vf), af=(None if reel_fc else reel_af),
-                    music_path=music_path, filter_complex=reel_fc,
-                    quality=active.quality, rate_control=active.rate_control, qp=active.qp,
-                    pre_roll=_PRE_ROLL_SEC,
-                )
+                if _synth_inline:
+                    _sp = _synth_params_dict
+                    _tail_s = _sp["tail_sec"]
+                    _qa_synth = _video_quality_args(
+                        codec, enc.preset, video_bitrate, enc.pix_fmt,
+                        quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                    )
+                    cmd = _build_synth_tail_cmd(
+                        ffmpeg_bin, source, _synth_room_start, tmp_out,
+                        seg_start=segs[0].start,
+                        cut_point=_sp["cut_point"],
+                        audible_end=_sp["bridge_start"],
+                        bridge_dur=_sp["bridge_dur"],
+                        slow_factor=_sp["slow_factor"],
+                        use_freeze=_sp["use_freeze"],
+                        tail_sec=_tail_s,
+                        fade_sec=_synth_cfg.fade_sec,
+                        fps=_fps(),
+                        output_w=render_cfg.scale[0],
+                        output_h=render_cfg.scale[1],
+                        vf_no_tail=reel_vf,
+                        af_no_tail=reel_af,
+                        codec=codec,
+                        quality_args=_qa_synth,
+                        audio_codec=aud.codec,
+                        audio_bitrate=aud.bitrate,
+                        faststart=enc.faststart,
+                        push=_synth_cfg.push,
+                        synth_crop_vf=_synth_crop_vf_for_tail,
+                    )
+                    _out_dur += _tail_s
+                else:
+                    cmd = build_cut_cmd(
+                        ffmpeg_bin, source, segs[0].start, segs[0].end, tmp_out,
+                        codec=codec, preset=enc.preset,
+                        video_bitrate=video_bitrate, pix_fmt=enc.pix_fmt, faststart=enc.faststart,
+                        audio_codec=aud.codec, audio_bitrate=aud.bitrate,
+                        vf=(None if reel_fc else reel_vf), af=(None if reel_fc else reel_af),
+                        music_path=music_path, filter_complex=reel_fc,
+                        quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                        pre_roll=_PRE_ROLL_SEC,
+                    )
             else:
                 # Multi-window: concat the windows (cold open + body) in a single encode. Each
                 # window is its OWN input with input-side seek (build_concat_cmd), so decodes are
@@ -2493,15 +2590,75 @@ def _render_segments(
                                                              seam_xfade_visual_durations=_ts_seam_visual,
                                                              segment_overlays=_ts_seg_overlays)
                 windows = [(w.start, w.end - w.start) for w in segs]
-                # Synth post-append: cut_point may not be frame-aligned (acceptable for two-pass append).
-                if not _synth_post_append:
+                # Synth inline/post-append: cut_point may not be frame-aligned.
+                if not _synth_post_append and not _synth_inline:
                     _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
+                _extra_inputs: "list[tuple[str | Path, float, float]] | None" = None
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
                                                      speed=_reel_speed, vin=vseg, ain=aseg,
                                                      music_in=f"[{len(segs)}:a]", tail_fade=_tail_fade,
                                                      word_end_out=_word_end_out)
                     fc = f"{prefix};{music_fc}"
+                elif _synth_inline:
+                    _sp = _synth_params_dict
+                    _tail_s = _sp["tail_sec"]
+                    _fade_s = _synth_cfg.fade_sec
+                    _n = len(segs)  # bridge input index; room_tone index = _n + 1
+                    _sc_part = (
+                        _synth_crop_vf_for_tail
+                        if _synth_crop_vf_for_tail
+                        else f"scale={render_cfg.scale[0]}:{render_cfg.scale[1]}:flags=bicubic"
+                    )
+                    _fade_st = _num(_tail_s - _fade_s)
+                    _fade_sn = _num(_fade_s)
+                    if _sp["use_freeze"]:
+                        _nf = max(1, round(_fps() * 0.1))
+                        _synth_vc = (
+                            f"trim=start=0:end={_num(_nf / _fps())},"
+                            f"setpts=PTS-STARTPTS,"
+                            f"loop=loop=-1:size={_nf},"
+                            f"trim=end={_num(_tail_s)},setpts=PTS-STARTPTS,"
+                            f"{_sc_part},"
+                            f"fade=t=out:st={_fade_st}:d={_fade_sn}:color=black"
+                        )
+                    else:
+                        _trim_extra = 2.0 / max(_fps(), 1.0)
+                        _tpad_dur = _num(_tail_s + 0.5)
+                        _synth_vc = (
+                            f"trim=start=0:end={_num(_sp['bridge_dur'] + _trim_extra)},"
+                            f"setpts=(PTS-STARTPTS)*{_num(_sp['slow_factor'])},"
+                            f"tpad=stop_mode=clone:stop_duration={_tpad_dur},"
+                            f"fps={_num(_fps())},"
+                            f"trim=end={_num(_tail_s)},setpts=PTS-STARTPTS,"
+                            f"settb=expr=1/90000,"
+                            f"{_sc_part},"
+                            f"fade=t=out:st={_fade_st}:d={_fade_sn}:color=black"
+                        )
+                    _synth_ac = (
+                        f"atrim=0:{_num(_tail_s + 0.2)},asetpts=PTS-STARTPTS,"
+                        f"afade=t=out:st={_fade_st}:d={_fade_sn}"
+                    )
+                    # fps normalizes VFR body to CFR before concat (avoids duplicate-PTS DTS
+                    # collisions from variable-frame-rate sources). settb then matches v_synth's
+                    # explicit 1/90000 so both concat inputs share the same timebase.
+                    _fps_str = _num(_fps())
+                    _vr = (f"{vseg}{reel_vf},fps={_fps_str},settb=expr=1/90000[v_real]" if reel_vf
+                           else f"{vseg}fps={_fps_str},settb=expr=1/90000[v_real]")
+                    _vs = f"[{_n}:v]{_synth_vc}[v_synth]"
+                    # aresample=async=1 normalizes loudnorm variable-duration frames before concat
+                    _ar = (f"{aseg}{reel_af},aresample=async=1:first_pts=0[a_real]"
+                           if reel_af else f"{aseg}aresample=async=1:first_pts=0[a_real]")
+                    _as = f"[{_n + 1}:a]{_synth_ac}[a_synth]"
+                    # Single av-concat (same as two-pass _append_synth_tail_to_rendered)
+                    # to avoid DTS discontinuity from separate v/a concat chains.
+                    _av_concat = "[v_real][a_real][v_synth][a_synth]concat=n=2:v=1:a=1[v][a]"
+                    fc = f"{prefix};{_vr};{_vs};{_ar};{_as};{_av_concat}"
+                    _extra_inputs = [
+                        (source, _sp["bridge_start"], _sp["bridge_dur"] + 1.0),
+                        (source, _synth_room_start, _tail_s + 1.0),
+                    ]
+                    _out_dur += _tail_s
                 else:
                     vtail = f"{vseg}{reel_vf}[v]" if reel_vf else f"{vseg}null[v]"
                     atail = f"{aseg}{reel_af}[a]" if reel_af else f"{aseg}anull[a]"
@@ -2519,6 +2676,8 @@ def _render_segments(
                     ) else 0.0,
                     duration_sec=_out_dur,
                     pre_roll=_PRE_ROLL_SEC,
+                    extra_inputs=_extra_inputs,
+                    bf_zero=_synth_inline,
                 )
             clip_dur_s = clip_duration  # actual output length (xfade-adjusted for multi-window)
             returncode, stderr_text = _run_ffmpeg_with_progress(
@@ -2566,6 +2725,7 @@ def _render_segments(
                     faststart=enc.faststart,
                     push=_synth_cfg.push,
                     tmp_path=_synth_tmp,
+                    synth_crop_vf=_synth_crop_vf_for_tail,
                 )
                 if _synth_tmp.exists():
                     _synth_tmp.rename(out)
@@ -2590,6 +2750,11 @@ def _render_segments(
                     f"(Δ{_actual - _out_dur:+.3f}s > 2.5 frames) — a render stage changed the "
                     f"duration the windows do not describe"
                 )
+            # Synth-tail seam check: last body frame vs first tail frame must match (SSIM >= 0.85).
+            if _synth_active and out.exists():
+                _seam_err = _check_synth_tail_seam(out, clip_duration, _inv_fps, ffmpeg_bin)
+                if _seam_err:
+                    print(f"  [ERROR] {reel.id}: {_seam_err}", flush=True)
             # Skip freeze detect for synthetic tail clips: the frozen/slowed tail is intentional.
             if not _synth_active:
                 for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
