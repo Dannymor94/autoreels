@@ -108,23 +108,37 @@ def test_tail_gap_0_4s_within_pad():
 
 
 def test_tail_gap_0_1s_tight():
-    """Gap 0.1s: end just before onset; minimal fade, fade_start >= ae."""
+    """Gap 0.1s: end just before onset; fade floor = 2 frames (room < fade_keep)."""
     ae = 5.8
     end, fs, fl = _call(ae=ae, gap=0.1)
     N = ae + 0.1
-    assert end < N                    # strictly before onset
-    assert end >= ae                  # not before audible_end
-    assert fs >= ae, "fade_start must be >= audible_end"
-    assert fl >= 0.0, "fade_len must be non-negative"
+    two_frames = 2.0 / 30.0
+    assert end < N                         # strictly before onset
+    assert end >= ae                       # end not before audible_end
+    assert fl >= two_frames - 1e-9        # floor: 2 frames
+    assert fs == pytest.approx(end - fl, abs=1e-6)  # fade_start = end − fade_len
 
 
 def test_tail_gap_0_0s_zero_gap():
-    """Gap 0s (next onset == ae): end clamped to ae; fade_len = 0."""
+    """Gap 0s (next onset == ae): end before ae (onset_margin); fade = 2 frames, starts before ae."""
     ae = 5.8
     end, fs, fl = _call(ae=ae, gap=0.0)
-    assert end <= ae + 1e-6, f"end {end:.6f} must be ≤ ae {ae:.3f}"
-    assert fs == pytest.approx(ae, abs=0.01)
-    assert fl == pytest.approx(0.0, abs=0.01)
+    two_frames = 2.0 / 30.0
+    assert end < ae                        # N == ae → end = ae − onset_margin
+    assert fl >= two_frames - 1e-9        # floor: 2 frames
+    assert fs < ae                         # fade starts before ae (room < 0)
+    assert fs == pytest.approx(end - fl, abs=1e-6)
+
+
+# ── fade_len minimum ─────────────────────────────────────────────────────────
+
+def test_fade_len_minimum_two_frames():
+    """fade_len >= 2/fps in every case, even when room is zero or negative."""
+    two_frames = 2.0 / 30.0
+    for gap in [0.0, 0.02, 0.05, 0.1, 0.4, 1.5]:
+        end, fs, fl = _call(ae=5.8, gap=gap)
+        assert fl >= two_frames - 1e-9, f"gap={gap}: fade_len={fl:.5f} < 2 frames"
+        assert fs == pytest.approx(end - fl, abs=1e-6), f"gap={gap}: fs+fl != end"
 
 
 # ── silence case ─────────────────────────────────────────────────────────────
