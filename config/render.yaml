@@ -170,7 +170,7 @@ speech_map_cfg:
   min_edge_dist: 0.060
   untranscribed_min_sec: 0.100
   cut_pause_min_sec: 0.35   # kept for backward compat; no longer used in tail rule
-  tail_pad_sec: 0.70        # max air after audible_end: end = min(N − onset_margin, ae + tail_pad)
+  tail_pad_sec: 1.50        # max air after audible_end: end = min(N − onset_margin, ae + tail_pad)
   onset_margin_sec: 0.06    # guard before next speech onset
   fade_keep_sec: 0.20       # unfaded air after ae before the fade begins
 

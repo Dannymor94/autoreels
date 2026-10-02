@@ -570,7 +570,7 @@ class SpeechMapConfig(BaseModel):
     # Rationale: voiceless stop closures (e.g. "т" in "такая?") produce genuine energy gaps
     # of ~0.3 s that are continuous speech by ear — see regression case #568 (0.29 s).
     cut_pause_min_sec: float = 0.35
-    tail_pad_sec: float = 0.70      # max silence air after audible_end at render stage
+    tail_pad_sec: float = 1.50      # max silence air after audible_end at render stage
     onset_margin_sec: float = 0.06  # guard kept before next speech onset
     fade_keep_sec: float = 0.20     # unfaded air right after audible_end before fade begins
 
