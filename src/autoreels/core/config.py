@@ -260,6 +260,7 @@ class R0Config(BaseModel):
     host_affirmations: list[str] = Field(default_factory=list)  # tail sentences to trim (case-insensitive)
     max_start_repair_sec: float = 10.0  # scan window to find a sentence-initial word when repairing a dangling start
     source_kind: str = "lecture"  # "lecture" | "interview"
+    host_turn_min_pause: float = 0.7  # pause before a sentence to count it as a host turn (interview)
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str

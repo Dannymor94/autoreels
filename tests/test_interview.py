@@ -1,4 +1,8 @@
-"""Tests for interview host-turn clip boundary logic."""
+"""Tests for interview host-turn clip boundary logic.
+
+Includes test for rhetorical-question guard: a question inside continuous guest
+speech (pause < min_pause, no dash) must NOT be flagged as a host turn.
+"""
 from pathlib import Path
 
 import pytest
@@ -325,3 +329,44 @@ def test_stage_interview_snap_accepts_tx_words_param():
     import inspect
     sig = inspect.signature(_stage_interview_snap)
     assert "tx_words" in sig.parameters
+
+
+# ---------- rhetorical-question guard ----------
+
+def test_rhetorical_question_not_host_turn():
+    """Guest's rhetorical question (2p verb, ends '?') inside continuous speech is NOT a host turn.
+
+    PXL line 47 regression: «…находитесь где?» (sentence 10) was incorrectly cut before
+    because 'находитесь' is a second-person verb.  The fix: no dash, pause < min_pause
+    → not a host turn.
+    """
+    # Preceding guest sentence ends at 0.8; "Вы" starts at 1.0 → pause = 0.2 s < min_pause 2.0
+    words = [
+        _word("намного", 0.2, 0.5), _word("сильнее.", 0.5, 0.8),
+        _word("Вы", 1.0, 1.3), _word("находитесь", 1.4, 1.8), _word("где?", 1.9, 2.2),
+        _word("Природа", 2.5, 2.8), _word("ваша", 2.9, 3.1), _word("тело.", 3.2, 3.5),
+    ]
+    turns = detect_host_turns(words, min_pause=2.0)
+    assert turns == [], f"rhetorical question must not be flagged; got {turns}"
+
+
+def test_genuine_host_question_after_pause():
+    """A 2nd-person question preceded by a long pause IS a host turn."""
+    words = [
+        # Guest finishes at t=10.0; host starts at t=12.5 (pause=2.5 s > 2.0 threshold)
+        _word("думал.", 8.0, 10.0),
+        _word("Вы", 12.5, 12.8), _word("согласны?", 12.9, 13.3),
+    ]
+    turns = detect_host_turns(words, min_pause=2.0)
+    assert len(turns) == 1
+    assert turns[0][0] == pytest.approx(12.5)
+
+
+def test_genuine_host_question_with_dash():
+    """A dash-marked 2nd-person question is a host turn regardless of pause."""
+    words = [
+        _word("думал.", 8.0, 10.0),
+        _word("— Вы", 10.1, 10.4), _word("согласны?", 10.5, 10.9),
+    ]
+    turns = detect_host_turns(words, min_pause=2.0)
+    assert len(turns) == 1
