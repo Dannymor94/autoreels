@@ -74,14 +74,14 @@ def _call(ae: float, gap: float | None, t0: float = 5.0, **kw):
 def test_tail_n_none_no_next_speech():
     """N=None (no next speech): end = ae + tail_pad_sec; full fade at end."""
     end, fs, fl = _call(ae=5.8, gap=None)
-    assert end == pytest.approx(5.8 + 0.70, abs=0.01)   # ae + tail_pad_sec
+    assert end == pytest.approx(5.8 + 1.50, abs=0.01)   # ae + tail_pad_sec (1.50)
     assert fs >= 5.8, "fade_start must be >= audible_end"
     assert fl == pytest.approx(0.35, abs=0.01)           # tail_fade_sec = 0.35
 
 
 def test_tail_gap_1_2s_beyond_pad():
     """Gap 1.2s > tail_pad_sec (0.7s) → N=None → same as no next speech."""
-    end, fs, fl = _call(ae=5.8, gap=1.2)
+    end, fs, fl = _call(ae=5.8, gap=1.2, tail_pad_sec=0.70)
     assert end == pytest.approx(5.8 + 0.70, abs=0.01)
     assert fs >= 5.8
     assert fl == pytest.approx(0.35, abs=0.01)
@@ -89,7 +89,7 @@ def test_tail_gap_1_2s_beyond_pad():
 
 def test_tail_gap_0_9s_beyond_pad():
     """Gap 0.9s > tail_pad_sec (0.7s) → N=None → end = ae + 0.7."""
-    end, fs, fl = _call(ae=5.8, gap=0.9)
+    end, fs, fl = _call(ae=5.8, gap=0.9, tail_pad_sec=0.70)
     assert end == pytest.approx(5.8 + 0.70, abs=0.01)
     assert fs >= 5.8
     assert fl == pytest.approx(0.35, abs=0.01)
@@ -250,6 +250,59 @@ def test_tail_untr_far_from_ae_silence_case():
     assert end < 6.2  # before untr onset
 
 
+# ── own-word-tail filter ─────────────────────────────────────────────────────
+
+def test_tail_own_word_tail_extended_b():
+    """Short untranscribed interval close after ae + real gap → own tail, ae extended."""
+    # ae=5.8; untr at [5.95, 6.10] dur=0.15 < 0.25, gap from ae=0.15 < 0.30, gap_after=0.40
+    # Without filter: N=5.95, end=5.89
+    # With filter: ae→6.10, next_as=6.50 gap=0.40, N=6.50, end=min(6.44, 7.60)=6.44
+    smap = _make_smap(
+        [_make_word(5.0, 5.9, ae=5.8), _make_word(6.5, 7.0)],
+        [_make_boundary(0.7, untr=[[5.95, 6.10]])],
+    )
+    lookup = _smap_word_lookup(smap)
+    end, fs, fl = _tail_from_smap(
+        last_t0=5.0, seg_end=7.5, smap=smap, lookup=lookup,
+        own_tail_window_sec=0.30, own_tail_short_sec=0.25, own_tail_gap_min_sec=0.10,
+    )
+    assert end >= 6.10, f"end {end:.3f} must be past own-tail interval end 6.10"
+    assert end < 6.5, f"end {end:.3f} must be before next word onset 6.5"
+    assert end == pytest.approx(6.44, abs=0.01)
+
+
+def test_tail_own_word_tail_not_filtered_when_too_long():
+    """Untranscribed interval dur >= own_tail_short_sec → NOT own tail → end before onset."""
+    # ae=5.8; untr at [5.95, 6.25] dur=0.30 >= 0.25 → treated as next speech
+    smap = _make_smap(
+        [_make_word(5.0, 5.9, ae=5.8), _make_word(6.5, 7.0)],
+        [_make_boundary(0.7, untr=[[5.95, 6.25]])],
+    )
+    lookup = _smap_word_lookup(smap)
+    end, fs, fl = _tail_from_smap(
+        last_t0=5.0, seg_end=7.5, smap=smap, lookup=lookup,
+        own_tail_window_sec=0.30, own_tail_short_sec=0.25, own_tail_gap_min_sec=0.10,
+    )
+    assert end < 5.95, f"long interval must still be next speech, end={end:.3f}"
+
+
+def test_tail_own_word_tail_not_filtered_when_gap_too_small():
+    """Gap from interval end to next word < gap_min → NOT own tail → end before onset."""
+    # ae=5.8; untr at [5.95, 6.10] dur=0.15 (short), but gap_after=5.95+0.15 to 6.15 = 0.05 < 0.10
+    smap = _make_smap(
+        [_make_word(5.0, 5.9, ae=5.8), _make_word(6.15, 7.0)],
+        [_make_boundary(0.35, untr=[[5.95, 6.10]])],
+    )
+    # Make next word audible_start = 6.15 (gap_after = 6.15 - 6.10 = 0.05 < 0.10)
+    smap["words"][1]["audible_start"] = 6.15
+    lookup = _smap_word_lookup(smap)
+    end, fs, fl = _tail_from_smap(
+        last_t0=5.0, seg_end=7.5, smap=smap, lookup=lookup,
+        own_tail_window_sec=0.30, own_tail_short_sec=0.25, own_tail_gap_min_sec=0.10,
+    )
+    assert end < 5.95, f"small gap: must still be next speech, end={end:.3f}"
+
+
 # ── last word of transcript ───────────────────────────────────────────────────
 
 def test_tail_last_word_of_transcript():
@@ -263,7 +316,7 @@ def test_tail_last_word_of_transcript():
         last_t0=5.0, seg_end=6.0, smap=smap, lookup=lookup,
         cut_pause_min_sec=0.35,
     )
-    assert end == pytest.approx(5.8 + 0.70, abs=0.01)   # ae + tail_pad_sec
+    assert end == pytest.approx(5.8 + 1.50, abs=0.01)   # ae + tail_pad_sec (1.50)
     assert fs >= 5.8
 
 
@@ -306,7 +359,7 @@ def test_tail_map_applies_even_when_seg_end_far():
 
 def test_tail_residue_adjacent_word_attributed_to_last():
     """Smap word whose Whisper t0 == last_word.t1 is residue — merged, not treated as next speech."""
-    # ae after residue = 5.8; real next at 7.2, gap=1.4 > tail_pad_sec → N=None, end=6.5
+    # ae after residue = 5.8; real next at 7.2, gap=1.4 > tail_pad_sec 0.7 → N=None, end=6.5
     smap = _make_smap(
         [_make_word(5.0, 5.5, ae=5.6), _make_word(5.5, 5.9, ae=5.8), _make_word(7.2, 7.7)],
         [_make_boundary(0.0), _make_boundary(1.4)],
@@ -315,7 +368,7 @@ def test_tail_residue_adjacent_word_attributed_to_last():
     lookup = _smap_word_lookup(smap)
     end, fs, fl = _tail_from_smap(
         last_t0=5.0, seg_end=8.0, smap=smap, lookup=lookup,
-        cut_pause_min_sec=0.35, last_t1=5.5,
+        tail_pad_sec=0.70, cut_pause_min_sec=0.35, last_t1=5.5,
     )
     # After residue: ae=5.8, next real onset=7.2 > ae+0.7=6.5 → N=None → end=6.5
     assert end == pytest.approx(5.8 + 0.70, abs=0.01)

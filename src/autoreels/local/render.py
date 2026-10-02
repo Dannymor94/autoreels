@@ -986,11 +986,16 @@ def _tail_from_smap(
     lookup: dict,
     *,
     last_t1: float | None = None,
-    tail_pad_sec: float = 0.70,
+    tail_pad_sec: float = 1.50,
     onset_margin_sec: float = 0.06,
     fade_keep_sec: float = 0.20,
     tail_fade_sec: float = 0.35,
     fps: float = 30.0,
+    # own-tail filter: short untranscribed interval right after the word that is
+    # the word's own acoustic decay, not the next speech onset
+    own_tail_window_sec: float = 0.30,
+    own_tail_short_sec: float = 0.25,
+    own_tail_gap_min_sec: float = 0.10,
     # kept for callers that still pass the old parameter — no longer used
     cut_pause_min_sec: float = 0.35,
     margin: float = 0.2,
@@ -1034,12 +1039,30 @@ def _tail_from_smap(
             word_idx += 1
             audible_end = max(audible_end, words[word_idx]["audible_end"])
 
+    # Own-word-tail filter: a short untranscribed interval immediately after the
+    # word's audible end that is separated from the next speech by real silence
+    # is the word's own acoustic decay — extend audible_end past it.
+    untr_offset = 0   # number of untranscribed intervals consumed as own-tail
+    if word_idx < len(boundaries):
+        untr_list = boundaries[word_idx].get("untranscribed_speech", [])
+        if untr_list:
+            iv_s, iv_e = untr_list[0][0], untr_list[0][1]
+            iv_dur = iv_e - iv_s
+            gap_after = float("inf")
+            if word_idx + 1 < len(words):
+                gap_after = words[word_idx + 1]["audible_start"] - iv_e
+            if (iv_s - audible_end <= own_tail_window_sec
+                    and iv_dur < own_tail_short_sec
+                    and gap_after >= own_tail_gap_min_sec):
+                audible_end = iv_e
+                untr_offset = 1
+
     # Gather next speech onset candidates
     next_speech_onset: float | None = None
 
     if word_idx < len(boundaries):
         bnd = boundaries[word_idx]
-        untr = bnd.get("untranscribed_speech", [])
+        untr = bnd.get("untranscribed_speech", [])[untr_offset:]
         if untr:
             next_speech_onset = untr[0][0]
 
@@ -1061,19 +1084,29 @@ def _tail_from_smap(
     else:
         end = audible_end + tail_pad_sec
 
-    # Safety clamps: floor before and after N cap so end >= audible_end always holds
-    _floor = max(audible_end, word_entry["t0"] + 0.04)
-    end = max(end, _floor)
+    # Safety floor: end must be at least past the word start.
+    _t0_floor = word_entry["t0"] + 0.04
+    end = max(end, _t0_floor)
+    # Hard cap: end must never reach the next speech onset.
+    # onset_margin_sec is already applied in the formula above; re-apply as a hard cap
+    # so the floor never pushes end past N - margin.
     if N is not None:
-        end = min(end, N)
-    end = max(end, _floor)   # re-apply: N < ae is possible with overlapping Whisper timestamps
+        end = min(end, N - onset_margin_sec)
+        if end < audible_end:
+            # N < ae: overlapping Whisper timestamps; clip ends before audible_end.
+            print(
+                f"  [WARN] last word overlaps next speech: "
+                f"ae={audible_end:.3f} > N-margin={N - onset_margin_sec:.3f} "
+                f"(N={N:.3f})",
+                flush=True,
+            )
 
     # Fade: keep fade_keep_sec unfaded, then fade for up to tail_fade_sec (floor: 2 frames)
     two_frames = 2.0 / fps
     room = end - audible_end
     fade_len = max(two_frames, min(tail_fade_sec, room - fade_keep_sec))
     fade_start = max(audible_end, end - fade_len)
-    fade_len = max(0.0, end - fade_start)   # recompute after clamp; never negative
+    fade_len = max(0.0, end - fade_start)   # never negative (room can be < 0 when N < ae)
 
     return end, fade_start, fade_len
 
@@ -1858,9 +1891,12 @@ def _render_segments(
                 _smap_result = _tail_from_smap(
                     last_t0=_last.t0, seg_end=segs[-1].end, smap=smap,
                     lookup=_smap_lookup, last_t1=_last.t1,
-                    tail_pad_sec=_smap_cfg.tail_pad_sec if _smap_cfg else 0.70,
+                    tail_pad_sec=_smap_cfg.tail_pad_sec if _smap_cfg else 1.50,
                     onset_margin_sec=_smap_cfg.onset_margin_sec if _smap_cfg else 0.06,
                     fade_keep_sec=_smap_cfg.fade_keep_sec if _smap_cfg else 0.20,
+                    own_tail_window_sec=_smap_cfg.own_tail_window_sec if _smap_cfg else 0.30,
+                    own_tail_short_sec=_smap_cfg.own_tail_short_sec if _smap_cfg else 0.25,
+                    own_tail_gap_min_sec=_smap_cfg.own_tail_gap_min_sec if _smap_cfg else 0.10,
                     tail_fade_sec=getattr(ap, "tail_fade_sec", 0.35),
                     fps=_fps(),
                 )

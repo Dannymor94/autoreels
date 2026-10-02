@@ -173,6 +173,9 @@ speech_map_cfg:
   tail_pad_sec: 1.50        # max air after audible_end: end = min(N − onset_margin, ae + tail_pad)
   onset_margin_sec: 0.06    # guard before next speech onset
   fade_keep_sec: 0.20       # unfaded air after ae before the fade begins
+  own_tail_window_sec: 0.30 # own-tail filter: interval must start within this after ae
+  own_tail_short_sec: 0.25  # own-tail filter: interval must be shorter than this
+  own_tail_gap_min_sec: 0.10 # own-tail filter: gap from interval end to next word
 
 # M1.7 step 1: two-shot mode (wide/close crop within a clip). Off by default.
 # When off, render is byte-identical to M1.6 output (or same argv for non-deterministic encoders).

@@ -573,6 +573,12 @@ class SpeechMapConfig(BaseModel):
     tail_pad_sec: float = 1.50      # max silence air after audible_end at render stage
     onset_margin_sec: float = 0.06  # guard kept before next speech onset
     fade_keep_sec: float = 0.20     # unfaded air right after audible_end before fade begins
+    # Own-word-tail filter: a short untranscribed interval immediately after the last word
+    # that is separated from the next speech by real silence is the word's own acoustic decay.
+    # Extend audible_end past it so it is not mistaken for the next speech onset (N).
+    own_tail_window_sec: float = 0.30   # interval must start within this distance after ae
+    own_tail_short_sec: float = 0.25    # interval must be shorter than this
+    own_tail_gap_min_sec: float = 0.10  # gap from interval end to next word audible_start
 
 
 class RenderConfig(BaseModel):
