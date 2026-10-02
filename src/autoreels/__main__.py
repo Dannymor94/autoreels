@@ -877,6 +877,23 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
             if _clean(_lw.word) in _TAG_QUESTIONS and _lw.word.rstrip().endswith("?"):
                 last4 = " ".join(w.word for w in last_sent[-4:])
                 reel.warnings.append(f"ends_on_filler: '{last4}'")
+            # For synth-tail clips: cap reel.end before next sentence's acoustic onset so
+            # its audio is never heard. Whisper t0 is unreliable here (overlapping timestamps
+            # give next sentence a t0 that precedes the last word of the current one) — use
+            # smap audible_start when available; skip otherwise (no smap = no cap).
+            if smap is not None:
+                _e_val = getattr(reel, "_explicit_e_val", None)
+                _blk_full = getattr(reel, "_blk_sents_full", None)
+                if _e_val is not None and _blk_full and len(_blk_full) > _e_val:
+                    _next_sent = _blk_full[_e_val]
+                    if _next_sent:
+                        from autoreels.local.render import _smap_word_lookup
+                        _sm = _smap_word_lookup(smap)
+                        _sm_entry = _sm.get(round(_next_sent[0].t0 * 1000))
+                        if _sm_entry:
+                            reel._next_speech_t0 = _sm_entry[1].get(
+                                "audible_start", _next_sent[0].t0
+                            )
         return  # already complete — nothing to do
 
     last4 = " ".join(w.word for w in last_sent[-4:])
@@ -948,6 +965,32 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None, smap=None) 
         return
     from autoreels.cloud.edit import split_sentences, words_in_span
     from autoreels.cloud.snap import is_complete_sentence as _ics
+    _eps = 0.05  # tolerance for smap ae-extension within the same word
+    # Explicit e:: reference comes from included block sentences, not gate-based words_in_span.
+    # Gate-based lookup includes next-sentence words when Whisper timestamps overlap, which
+    # makes expected_last resolve to the intruder word rather than the true last sentence word.
+    _e_val = getattr(reel, "_explicit_e_val", None)
+    _blk_full = getattr(reel, "_blk_sents_full", None)
+    if _e_val is not None and _blk_full is not None:
+        _incl_t0s_ck: frozenset[float] = frozenset(w.t0 for s in _blk_full[:_e_val] for w in s)
+        complete_sents = [s for s in _blk_full[:_e_val] if _ics(s)]
+        if not complete_sents:
+            return
+        expected_last = complete_sents[-1][-1]
+        actual_last = reel.subtitles[-1]
+        if actual_last.t0 not in _incl_t0s_ck:
+            raise ValueError(
+                f"[CONTENT] {reel.id}: last subtitle '{actual_last.word}' "
+                f"(t0={actual_last.t0:.3f}s) is from sentence {_e_val + 1}+ "
+                f"(excluded by e:{_e_val})"
+            )
+        if actual_last.t0 > expected_last.t1 + _eps:
+            raise ValueError(
+                f"[CONTENT] {reel.id}: last subtitle '{actual_last.word}' "
+                f"(t0={actual_last.t0:.3f}) is beyond sentence e:{_e_val}; "
+                f"expected last '{expected_last.word}' (t1={expected_last.t1:.3f})"
+            )
+        return
     sents = split_sentences(words_in_span(tx_words, reel.start, _gate))
     # Use the last COMPLETE sentence as the reference; gate may include incomplete trailing words
     # when subtitle_gate was set to next_word.t0 (to prevent Whisper-overlap contamination).
@@ -956,7 +999,6 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None, smap=None) 
         return
     expected_last = complete_sents[-1][-1]
     actual_last = reel.subtitles[-1]
-    _eps = 0.05  # tolerance for smap ae-extension within the same word
     # Stump check: gate span must end on a complete sentence; incomplete tail = leaked fragment
     if sents and not _ics(sents[-1]):
         raise ValueError(
@@ -4483,6 +4525,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             reel._explicit_end = True     # reviewer's e: choice → min_end_gap rule must not move it
         reel._has_explicit_e = _has_explicit_e  # stash for end repair after filter_dangling_start
         reel.has_explicit_e = _has_explicit_e  # persisted to manifest (readable by tools/tables)
+        reel._explicit_e_val = getattr(_ae, "e", None) if _ae else None  # the e:N integer (or None)
         reel._filler_override = getattr(_ae, "filler", None) if _ae else None   # per-clip f:0/f:1
         # Part 4 — title plate text (only from the review `t:`; empty on the automatic path).
         reel.title_overlay = (getattr(_ae, "title", None) or "") if _ae else ""
@@ -4775,6 +4818,25 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _reel.segments = _segs
     reels = _stage_subtitles(reels, transcript, smap=_blk_smap)
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
+    # Explicit-e subtitle guard: remove words from sentences beyond e:N and emit [CONTENT].
+    # Overlapping Whisper timestamps can give next-sentence words a t0 that falls before the
+    # gate, so a t0-based gate alone cannot exclude them — sentence-index filtering is required.
+    for _r in reels:
+        _e_val = getattr(_r, "_explicit_e_val", None)
+        _blk_full = getattr(_r, "_blk_sents_full", None)
+        if _e_val is None or not _blk_full:
+            continue
+        _incl_t0s: frozenset[float] = frozenset(w.t0 for s in _blk_full[:_e_val] for w in s)
+        _excl = [w for w in _r.subtitles if w.t0 not in _incl_t0s]
+        if _excl:
+            for _ew in _excl:
+                print(
+                    f"  [CONTENT] {_r.id}: subtitle word '{_ew.word}' "
+                    f"(t0={_ew.t0:.3f}s) is from sentence {_e_val + 1}+ "
+                    f"(excluded by e:{_e_val}); removing",
+                    file=sys.stderr,
+                )
+            _r.subtitles = [w for w in _r.subtitles if w.t0 in _incl_t0s]
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
 

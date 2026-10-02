@@ -71,3 +71,61 @@ def test_duplicate_word_ok():
     )
     r = r.model_copy(update={"end": 8.0})
     m._check_last_subtitle_word(r, tx)  # must not raise
+
+
+def test_explicit_e_overlapping_timestamps_excluded():
+    """explicit_e with overlapping Whisper timestamps: next-sentence word must be rejected.
+
+    Sentence 11 last word «душе.» t0=378.483; sentence 12 first word «Понятно?» t0=378.143
+    (BEFORE «душе.» due to Whisper timestamp overlap). Gate=379.143 includes both by t0.
+    Without fix: _check_last_subtitle_word would compute expected_last=«Понятно?» and pass.
+    With fix: _blk_sents_full[:11] scopes to sentences 1..11 → expected_last=«душе.».
+    The intruder «Понятно?» with t0=378.143 is NOT in _incl_t0s and is caught by the
+    post-filter in _blocks_do_apply; _check_last_subtitle_word verifies the cleaned state.
+    """
+    from autoreels.cloud.edit import split_sentences
+
+    # Sentence 11: ends with «душе.» t0=378.483
+    sent11 = [
+        _w(376.0, 376.5, "по"),
+        _w(376.6, 377.0, "душе"),
+        _w(377.1, 377.5, "или"),
+        _w(377.6, 378.0, "не"),
+        _w(378.1, 378.483, "по"),
+        _w(378.483, 378.883, "душе."),
+    ]
+    # Sentence 12: «Понятно?» — Whisper gives t0=378.143, BEFORE «душе.» t0=378.483.
+    sent12 = [_w(378.143, 379.163, "Понятно?")]
+
+    all_words = sent11 + sent12  # transcript word list (flattened)
+
+    # _blk_sents_full: full block sentences (index 0=sent1 … index 10=sent11 … index 11=sent12)
+    # We simulate with two sentences at indices 10 and 11; e:11 → include [:11] → sent11 only.
+    blk_sents_full = [sent11, sent12]  # simplified: pretend only these two sentences exist
+    _e_val = 1  # e:1 means include sentence 1 (sent11) only; [:1] = [sent11]
+
+    gate = 379.143
+    r = _reel(
+        subtitles=sent11,  # correct: only sent11 words (post-filter already removed «Понятно?»)
+        subtitle_gate=gate,
+    )
+    r = r.model_copy(update={"end": 379.143})
+    r._explicit_e_val = _e_val
+    r._blk_sents_full = blk_sents_full
+
+    # After explicit-e post-filter, subtitles contain only sent11 words → check must pass.
+    m._check_last_subtitle_word(r, all_words)  # must not raise
+
+    # Now verify that the post-filter itself catches the intruder: subtitles still contain
+    # «Понятно?» (before post-filter ran) → check must detect and raise [CONTENT].
+    r_dirty = _reel(
+        subtitles=sent11 + sent12,  # intruder present
+        subtitle_gate=gate,
+    )
+    r_dirty = r_dirty.model_copy(update={"end": 379.143})
+    r_dirty._explicit_e_val = _e_val
+    r_dirty._blk_sents_full = blk_sents_full
+    # _check_last_subtitle_word uses _blk_sents_full[:1] → expected_last = «душе.»
+    # actual_last = «Понятно?» with t0=378.143 < «душе.» t1=378.883 (within eps=0.05) → raises.
+    with pytest.raises(ValueError, match=r"\[CONTENT\]"):
+        m._check_last_subtitle_word(r_dirty, all_words)
