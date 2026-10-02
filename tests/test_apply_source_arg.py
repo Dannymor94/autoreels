@@ -202,3 +202,74 @@ def test_apply_from_legacy_transcript_refuses(tmp_path, capsys):
     # Must name the fix and the missing link
     assert "source_sha256" in err or "backfill" in err.lower()
     assert "missing" in err.lower() or "no source_sha256" in err.lower() or "stamp" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Test: chained splice warning
+# ---------------------------------------------------------------------------
+
+def _setup_chained(tmp_path):
+    """Like _setup but with 4 groups at t=40,80,120,160 (25 words each).
+    Groups 1-3 survive; group 4 (midpoint 172s > tail_boundary 154s) is dropped → 3 kept blocks.
+    density=0.51 > 0.4 threshold."""
+    from autoreels.core import state
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    sha = "d" * 64
+    mp3 = cache / f"{sha}.mp3"
+    mp3.write_bytes(b"AUDIO")
+    ah = state.audio_hash(mp3)
+    words = []
+    for group_offset in (40.0, 80.0, 120.0, 160.0):
+        for i in range(25):
+            words.append({"word": f"слово{i}.", "t0": group_offset + i * 1.0,
+                          "t1": group_offset + i * 1.0 + 0.5})
+    tpath = cache / f"{ah}.{KEY}.transcript.json"
+    tpath.write_text(
+        json.dumps({"language": "ru", "words": words, "source_sha256": sha, **_META}),
+        encoding="utf-8",
+    )
+    m = Manifest(
+        source="vc.mp4", source_sha256=sha, source_hash_scheme="partial-p1",
+        source_path="/originals/vc.mp4",
+        duration_preset="shorts",
+        setup=SetupProfile(setup_id="t", crop=Crop(x=0, y=0, w=960, h=1700),
+                           scale=[1080, 1920], frame=[1920, 1080]),
+        run_key="rk3", transcript_params_key=KEY,
+        source_kind="lecture", reels=[],
+    )
+    mpath = tmp_path / "manifests" / "vc.json"
+    mpath.write_text(m.model_dump_json(), encoding="utf-8")
+    return tmp_path, cache, mpath, tpath
+
+
+def test_chained_splice_warning(tmp_path, capsys):
+    """Two scored lines both with '+' chain into one group; warn about ignored fields."""
+    root, cache, mpath, _ = _setup_chained(tmp_path)
+    # Rename manifest to a unique stem so output files get a known unique name
+    unique_mpath = tmp_path / "manifests" / "vc__chained__.json"
+    unique_mpath.write_text(mpath.read_text(encoding="utf-8"), encoding="utf-8")
+    out_review = REPO_ROOT / "reviews" / "vc__chained__.review.json"
+    out_dataset = REPO_ROOT / "data" / "blocks_dataset" / "vc__chained__.jsonl"
+    out_review.unlink(missing_ok=True)
+    out_dataset.unlink(missing_ok=True)
+    try:
+        # Score blocks 1 and 2 both with '+': 1+2+3 form one group; line 2's fields ignored
+        review = "1 85+\n2 80+\n"
+        rpath = tmp_path / "reviews" / "chained.review.md"
+        rpath.write_text(review, encoding="utf-8")
+
+        rc = cli._blocks_do_apply(
+            str(rpath), root=REPO_ROOT, cache_dir=str(cache),
+            source=str(unique_mpath),
+        )
+        err = capsys.readouterr().err
+        assert "lines 1 and 2 merged into one clip 1+2+3" in err, (
+            f"chained splice warning not emitted; stderr={err!r}"
+        )
+        assert "fields of line 2 ignored" in err
+    finally:
+        out_review.unlink(missing_ok=True)
+        out_dataset.unlink(missing_ok=True)

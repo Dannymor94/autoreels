@@ -2715,7 +2715,7 @@ def _cmd_run_impl(
     dangling_disc: list = []
     # Interview: enforce host-turn clip boundaries.
     host_turns = (
-        detect_host_turns(tx_words)
+        detect_host_turns(tx_words, min_pause=getattr(r0_cfg, "host_turn_min_pause", 2.0))
         if getattr(r0_cfg, "source_kind", "lecture") == "interview"
         else []
     )
@@ -4419,6 +4419,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if not scored:
             continue                                   # no selection in this group → not a clip
         _anchor_seq, score = scored[0]
+        if len(scored) > 1:
+            clip_label = "+".join(str(s) for s in g)
+            ignored = ", ".join(str(s) for s, _ in scored[1:])
+            print(
+                f"  warning: lines {scored[0][0]} and {scored[1][0]} merged into one clip "
+                f"{clip_label}; fields of line {ignored} ignored",
+                file=sys.stderr,
+            )
         block = merge_blocks([active[s] for s in g])
         is_merged = len(g) > 1
         if is_merged:
@@ -4696,7 +4704,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max, smap=_blk_smap)
     # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
     # cannot repair within bounds stays, and collect_human_warnings reports it.
-    host_turns = detect_host_turns(tx_words) if _source_kind == "interview" else []
+    host_turns = detect_host_turns(tx_words, min_pause=getattr(r0_cfg, "host_turn_min_pause", 2.0)) if _source_kind == "interview" else []
     if host_turns:
         reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg,
                                          drop_short=False)
