@@ -983,6 +983,11 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None) -> None:
             from autoreels.cloud.snap import _clean as _clean_snap
             if _clean_snap(expected_last.word) in set(hanging_words):
                 return
+        # Duplicate-word: the same word text appears twice in the transcript; the subtitle
+        # correctly ends on the earlier occurrence (e.g. via explicit e:), while words_in_span
+        # finds the later one as expected_last. Both texts match → subtitle is correct.
+        if actual_last.word == expected_last.word:
+            return
         raise ValueError(
             f"[CONTENT] {reel.id}: last word of final sentence '{expected_last.word}' "
             f"(t0={expected_last.t0:.3f}) is missing from subtitles; "
