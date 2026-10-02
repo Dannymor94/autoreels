@@ -1010,7 +1010,7 @@ def _tail_from_smap(
       clamped: end ∈ [ae, N]
       room = end − ae
       fade_len = clamp(room − fade_keep_sec, 2 frames, tail_fade_sec)
-      fade_start = max(ae, end − fade_len)
+      fade_start = end − fade_len  # may be before ae when room < 2 frames
     """
     key = round(last_t0 * 1000)
     if key not in lookup:
@@ -1062,7 +1062,7 @@ def _tail_from_smap(
 
     if word_idx < len(boundaries):
         bnd = boundaries[word_idx]
-        untr = bnd.get("untranscribed_speech", [])[untr_offset:]
+        untr = (bnd.get("untranscribed_speech") or [])[untr_offset:]
         if untr:
             next_speech_onset = untr[0][0]
 
@@ -1101,12 +1101,12 @@ def _tail_from_smap(
                 flush=True,
             )
 
-    # Fade: keep fade_keep_sec unfaded, then fade for up to tail_fade_sec (floor: 2 frames)
+    # Fade: keep fade_keep_sec unfaded, then fade for up to tail_fade_sec (floor: 2 frames).
+    # fade_start may be before audible_end when room < 2 frames — that is by spec.
     two_frames = 2.0 / fps
     room = end - audible_end
     fade_len = max(two_frames, min(tail_fade_sec, room - fade_keep_sec))
-    fade_start = max(audible_end, end - fade_len)
-    fade_len = max(0.0, end - fade_start)   # never negative (room can be < 0 when N < ae)
+    fade_start = end - fade_len
 
     return end, fade_start, fade_len
 
