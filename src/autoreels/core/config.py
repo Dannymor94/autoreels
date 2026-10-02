@@ -548,6 +548,27 @@ _DEFAULT_PALETTES: dict[str, dict] = {
 }
 
 
+class SyntheticTailConfig(BaseModel):
+    """M1.8: synthetic tail appended when real room after last word is too short.
+
+    enabled: master switch (default off — renders byte-identical to pre-feature).
+    min_room_sec: room threshold; below this the synthetic tail fires.
+    keep_sec: real source kept past audible_end before the cut (no fade on speech).
+    tail_sec: duration of the synthetic tail (room tone + slowed/frozen video).
+    fade_sec: audio+video fade-out at the end of the synthetic tail.
+    push: optional slow push-in zoom on the frozen/slowed frame (default off).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    min_room_sec: float = 0.60
+    keep_sec: float = 0.15
+    tail_sec: float = 1.0
+    fade_sec: float = 0.60
+    push: bool = False
+
+
 class SpeechMapConfig(BaseModel):
     """M1.8 Stage B: параметры energy-based speech map.
 
@@ -629,6 +650,8 @@ class RenderConfig(BaseModel):
     speech_map: bool = False
     # M1.8 Stage B: speech map parameters (cache key + consumer thresholds)
     speech_map_cfg: SpeechMapConfig = Field(default_factory=SpeechMapConfig)
+    # M1.8 Stage B consumer 2: synthetic tail (room tone + slowed/frozen video). Off by default.
+    synthetic_tail_cfg: SyntheticTailConfig = Field(default_factory=SyntheticTailConfig)
 
     @property
     def two_shot_max_wide_sec(self) -> float:

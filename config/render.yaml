@@ -178,6 +178,15 @@ speech_map_cfg:
   own_tail_gap_min_sec: 0.10 # own-tail filter: gap from interval end to next word
   own_tail_t1_margin_sec: 0.15 # Whisper t1 hint: interval contains or ends within t1+margin → own tail
 
+# M1.8 Stage B consumer 2: synthetic tail. Off by default (enabled: false = identical output).
+synthetic_tail_cfg:
+  enabled: false
+  min_room_sec: 0.60    # room < this triggers synthetic tail
+  keep_sec: 0.15        # real source kept after audible_end (no fade on speech)
+  tail_sec: 1.0         # synthetic tail duration
+  fade_sec: 0.60        # fade-out at end of tail
+  push: false           # slow push-in zoom (optional)
+
 # M1.7 step 1: two-shot mode (wide/close crop within a clip). Off by default.
 # When off, render is byte-identical to M1.6 output (or same argv for non-deterministic encoders).
 two_shot: false

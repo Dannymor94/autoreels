@@ -36,7 +36,10 @@ def _make_boundary(pause: float, untr: list[list[float]] | None = None) -> dict:
 
 # ── import the consumer helper ────────────────────────────────────────────────
 
-from autoreels.local.render import _tail_from_smap, _smap_word_lookup
+from autoreels.local.render import (
+    _tail_from_smap, _smap_word_lookup,
+    _synth_tail_params, _find_room_tone,
+)
 
 
 # ── basic lookup ─────────────────────────────────────────────────────────────
@@ -745,3 +748,61 @@ def test_check_silence_at_clip_end_silent_when_end_before_onset():
         _check_silence_at_clip_end("r01", last_word, 10.0, smap, lookup)
     out = buf.getvalue()
     assert "[ERROR]" not in out, f"invariant must be silent; got: {out!r}"
+
+
+# ── synthetic tail helpers ────────────────────────────────────────────────────
+
+def test_synth_tail_params_room_below_threshold_fires():
+    """room=0.2s < min_room_sec=0.6 → params returned; cut_point, bridge, flags correct."""
+    # ae=5.8, N=6.1 → room=0.2 < 0.6 → synthetic
+    params = _synth_tail_params(
+        audible_end=5.8, N=6.1, end=6.04,
+        min_room_sec=0.60, keep_sec=0.15, tail_sec=1.0,
+    )
+    assert params is not None, "should fire"
+    # cut_point = min(N - onset_margin=0.06, ae + keep_sec=0.15) = min(6.04, 5.95) = 5.95
+    assert params["cut_point"] == pytest.approx(5.95, abs=1e-6)
+    # bridge_dur = min(gap/2, 0.25) = min((6.1-5.8)/2, 0.25) = min(0.15, 0.25) = 0.15
+    assert params["bridge_dur"] == pytest.approx(0.15, abs=1e-6)
+    assert not params["use_freeze"]   # 0.15 >= 0.1 → slow-mo
+    assert params["tail_sec"] == 1.0
+    assert params["room"] == pytest.approx(0.24, abs=0.01)
+
+
+def test_synth_tail_params_room_above_threshold_unchanged():
+    """room=0.7s >= min_room_sec=0.6 → None returned; existing tail rule keeps working."""
+    params = _synth_tail_params(
+        audible_end=5.0, N=8.0, end=5.7,
+        min_room_sec=0.60, keep_sec=0.15, tail_sec=1.0,
+    )
+    assert params is None
+
+
+def test_synth_tail_params_freeze_branch_short_gap():
+    """bridge_dur < 0.1 → use_freeze=True (no slow-mo when gap tiny)."""
+    # ae=5.8, N=5.87 → gap=0.07, bridge_dur=min(0.035, 0.25)=0.035 < 0.1 → freeze
+    params = _synth_tail_params(
+        audible_end=5.8, N=5.87, end=5.81,
+        min_room_sec=0.60, keep_sec=0.15, tail_sec=1.0,
+    )
+    assert params is not None
+    assert params["use_freeze"] is True
+    assert params["bridge_dur"] == pytest.approx(0.035, abs=1e-6)
+
+
+def test_find_room_tone_finds_longest_silence_within_window():
+    """_find_room_tone returns the full gap coords of the longest silence within ±3s of near_t=5."""
+    # window [2, 8]; gaps: [1.0,1.5] out, [2.0,3.5]=1.5s best, [4.0,4.5]=0.5s, [9.0,10.0] out
+    smap = {
+        "intervals": [
+            [0.0, 1.0],
+            [1.5, 2.0],
+            [3.5, 4.0],
+            [4.5, 9.0],
+            [10.0, 11.0],
+        ],
+    }
+    result = _find_room_tone(smap, near_t=5.0, window_sec=3.0)
+    assert result is not None
+    assert result[0] == pytest.approx(2.0, abs=1e-6)
+    assert result[1] == pytest.approx(3.5, abs=1e-6)

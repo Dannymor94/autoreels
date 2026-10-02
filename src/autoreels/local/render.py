@@ -26,7 +26,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from pydantic import ValidationError
 
@@ -979,6 +979,115 @@ def _check_silence_at_clip_end(
         )
 
 
+class _TailFull(NamedTuple):
+    """Extended _tail_from_smap result exposing B and N for downstream consumers."""
+    end: float
+    fade_start: float
+    fade_len: float
+    audible_end: float   # B after own-tail filter
+    N: float | None      # raw next speech onset before onset_margin subtraction
+
+
+def _tail_from_smap_full(
+    last_t0: float,
+    seg_end: float,
+    smap: dict,
+    lookup: dict,
+    *,
+    last_t1: float | None = None,
+    tail_pad_sec: float = 1.50,
+    onset_margin_sec: float = 0.06,
+    fade_keep_sec: float = 0.20,
+    tail_fade_sec: float = 0.35,
+    fps: float = 30.0,
+    own_tail_window_sec: float = 0.30,
+    own_tail_short_sec: float = 0.25,
+    own_tail_gap_min_sec: float = 0.10,
+    own_tail_t1_margin_sec: float = 0.15,
+    cut_pause_min_sec: float = 0.35,
+    margin: float = 0.2,
+) -> "_TailFull | None":
+    """Full computation returning (end, fade_start, fade_len, audible_end, N).
+
+    Same logic as _tail_from_smap; exposes B (audible_end after own-tail filter) and
+    N (raw next-speech onset) for the synthetic-tail consumer.
+    """
+    key = round(last_t0 * 1000)
+    if key not in lookup:
+        return None
+
+    word_idx, word_entry = lookup[key]
+    audible_end: float = word_entry["audible_end"]
+
+    words = smap["words"]
+    boundaries = smap["boundaries"]
+
+    if last_t1 is not None:
+        while word_idx + 1 < len(words):
+            nxt = words[word_idx + 1]
+            if not (nxt["t0"] <= last_t1 and nxt.get("audible_start", nxt["t0"]) < audible_end + 0.04):
+                break
+            word_idx += 1
+            audible_end = max(audible_end, words[word_idx]["audible_end"])
+
+    untr_offset = 0
+    if word_idx < len(boundaries):
+        untr_list = (boundaries[word_idx].get("untranscribed_speech") or [])
+        if untr_list:
+            iv_s, iv_e = untr_list[0][0], untr_list[0][1]
+            iv_dur = iv_e - iv_s
+            gap_after = float("inf")
+            if word_idx + 1 < len(words):
+                gap_after = words[word_idx + 1]["audible_start"] - iv_e
+            word_t1 = words[word_idx]["t1"]
+            duration_rule = (iv_dur < own_tail_short_sec and gap_after >= own_tail_gap_min_sec)
+            t1_hint = (iv_s <= word_t1 <= iv_e) or (iv_e <= word_t1 + own_tail_t1_margin_sec)
+            if iv_s - audible_end <= own_tail_window_sec and (duration_rule or t1_hint):
+                audible_end = iv_e
+                untr_offset = 1
+
+    next_speech_onset: float | None = None
+    if word_idx < len(boundaries):
+        bnd = boundaries[word_idx]
+        untr = (bnd.get("untranscribed_speech") or [])[untr_offset:]
+        if untr:
+            next_speech_onset = untr[0][0]
+    if word_idx + 1 < len(words):
+        next_as = words[word_idx + 1]["audible_start"]
+        if next_speech_onset is None or next_as < next_speech_onset:
+            next_speech_onset = next_as
+
+    N: float | None = (
+        next_speech_onset
+        if next_speech_onset is not None and next_speech_onset - audible_end <= tail_pad_sec + 1e-9
+        else None
+    )
+
+    if N is not None:
+        end = min(N - onset_margin_sec, audible_end + tail_pad_sec)
+    else:
+        end = audible_end + tail_pad_sec
+
+    _t0_floor = word_entry["t0"] + 0.04
+    end = max(end, _t0_floor)
+    if N is not None:
+        end = min(end, N - onset_margin_sec)
+        if end < audible_end:
+            print(
+                f"  [WARN] last word overlaps next speech: "
+                f"ae={audible_end:.3f} > N-margin={N - onset_margin_sec:.3f} "
+                f"(N={N:.3f})",
+                flush=True,
+            )
+
+    two_frames = 2.0 / fps
+    room = end - audible_end
+    fade_len = max(two_frames, min(tail_fade_sec, room - fade_keep_sec))
+    fade_start = end - fade_len
+
+    return _TailFull(end, fade_start, fade_len, audible_end, N)
+
+
 def _tail_from_smap(
     last_t0: float,
     seg_end: float,
@@ -1004,115 +1113,185 @@ def _tail_from_smap(
     """Compute tail end and audio/video fade from speech map data.
 
     Returns (end, fade_start, fade_len) in source time, or None when last_t0 not found.
-
-    Rule:
-      N = next speech onset if within tail_pad_sec of audible_end, else None
-      end = min(N − onset_margin_sec, ae + tail_pad_sec) if N else ae + tail_pad_sec
-      clamped: end ∈ [ae, N]
-      room = end − ae
-      fade_len = clamp(room − fade_keep_sec, 2 frames, tail_fade_sec)
-      fade_start = end − fade_len  # may be before ae when room < 2 frames
+    Delegates to _tail_from_smap_full; kept for backward-compatible callers.
     """
-    key = round(last_t0 * 1000)
-    if key not in lookup:
+    r = _tail_from_smap_full(
+        last_t0, seg_end, smap, lookup,
+        last_t1=last_t1, tail_pad_sec=tail_pad_sec, onset_margin_sec=onset_margin_sec,
+        fade_keep_sec=fade_keep_sec, tail_fade_sec=tail_fade_sec, fps=fps,
+        own_tail_window_sec=own_tail_window_sec, own_tail_short_sec=own_tail_short_sec,
+        own_tail_gap_min_sec=own_tail_gap_min_sec, own_tail_t1_margin_sec=own_tail_t1_margin_sec,
+        cut_pause_min_sec=cut_pause_min_sec, margin=margin,
+    )
+    return None if r is None else (r.end, r.fade_start, r.fade_len)
+
+
+def _find_room_tone(smap: dict, near_t: float, window_sec: float = 60.0) -> tuple[float, float] | None:
+    """Find the longest silence within ±window_sec of near_t using smap speech intervals.
+
+    Silences are gaps between consecutive smap intervals. Returns (start, end) of the
+    best gap (not clipped to the search window), or None when no gap is found.
+    """
+    intervals = smap.get("intervals", [])
+    if len(intervals) < 2:
         return None
+    lo, hi = near_t - window_sec, near_t + window_sec
+    best: tuple[float, float] | None = None
+    best_dur = 0.0
+    for i in range(len(intervals) - 1):
+        gap_s = float(intervals[i][1])
+        gap_e = float(intervals[i + 1][0])
+        if gap_e < lo or gap_s > hi:
+            continue
+        # Measure duration clipped to window (for ranking), but return full gap for use.
+        dur = min(gap_e, hi) - max(gap_s, lo)
+        if dur > best_dur:
+            best_dur = dur
+            best = (gap_s, gap_e)
+    return best
 
-    word_idx, word_entry = lookup[key]
-    audible_end: float = word_entry["audible_end"]
 
-    words = smap["words"]
-    boundaries = smap["boundaries"]
+def _synth_tail_params(
+    audible_end: float,
+    N: float | None,
+    end: float,
+    *,
+    onset_margin_sec: float = 0.06,
+    min_room_sec: float = 0.60,
+    keep_sec: float = 0.15,
+    tail_sec: float = 1.0,
+) -> dict | None:
+    """Return synthetic tail params if room < threshold, else None.
 
-    # Attribute residue: chain smap words that are the acoustic tail of the same utterance.
-    # Two conditions must hold:
-    #   (a) next.t0 <= last_t1 — Whisper placed it within the anchor's timespan
-    #   (b) next.audible_start < current audible_end + 0.04 — it starts within 40 ms of
-    #       the acoustic boundary (sibilant/stop suffix), not a new sentence word.
-    # Condition (b) rejects next-sentence words: Whisper sets t1(word_i)==t0(word_i+1)
-    # at every boundary, so (a) alone chains the entire next sentence via sentence-level
-    # t0==t1 equality. (b) distinguishes genuine acoustic overlap (< 40 ms gap) from a
-    # new utterance that merely starts where the previous word ended on Whisper's timeline.
-    if last_t1 is not None:
-        while word_idx + 1 < len(words):
-            nxt = words[word_idx + 1]
-            if not (nxt["t0"] <= last_t1 and nxt.get("audible_start", nxt["t0"]) < audible_end + 0.04):
-                break
-            word_idx += 1
-            audible_end = max(audible_end, words[word_idx]["audible_end"])
+    Returns dict with keys: cut_point, bridge_start, bridge_dur, use_freeze,
+    slow_factor, tail_sec, room.
+    """
+    room = end - audible_end
+    if room >= min_room_sec:
+        return None
+    cut_point = min(N - onset_margin_sec, audible_end + keep_sec) if N is not None else audible_end + keep_sec
+    # Video bridge: frames from B to B+min(gap/2, 0.25)
+    bridge_dur = min((N - audible_end) / 2.0, 0.25) if N is not None else 0.25
+    use_freeze = bridge_dur < 0.1
+    slow_factor = tail_sec / max(bridge_dur, 1e-6) if not use_freeze else 1.0
+    return {
+        "cut_point": cut_point,
+        "bridge_start": audible_end,
+        "bridge_dur": bridge_dur,
+        "use_freeze": use_freeze,
+        "slow_factor": slow_factor,
+        "tail_sec": tail_sec,
+        "room": room,
+    }
 
-    # Own-word-tail filter: an untranscribed interval immediately after the word's audible
-    # end is the word's own acoustic decay (not next speech) when EITHER:
-    #   (a) duration rule: iv_dur < own_tail_short_sec AND gap to next word >= gap_min
-    #   (b) Whisper-t1 hint: the interval contains last_t1 OR ends within t1_margin of it
-    # In both cases the interval must start within own_tail_window_sec after ae.
-    untr_offset = 0   # number of untranscribed intervals consumed as own-tail
-    if word_idx < len(boundaries):
-        untr_list = (boundaries[word_idx].get("untranscribed_speech") or [])
-        if untr_list:
-            iv_s, iv_e = untr_list[0][0], untr_list[0][1]
-            iv_dur = iv_e - iv_s
-            gap_after = float("inf")
-            if word_idx + 1 < len(words):
-                gap_after = words[word_idx + 1]["audible_start"] - iv_e
-            word_t1 = words[word_idx]["t1"]
-            duration_rule = (iv_dur < own_tail_short_sec and gap_after >= own_tail_gap_min_sec)
-            t1_hint = (iv_s <= word_t1 <= iv_e) or (iv_e <= word_t1 + own_tail_t1_margin_sec)
-            if iv_s - audible_end <= own_tail_window_sec and (duration_rule or t1_hint):
-                audible_end = iv_e
-                untr_offset = 1
 
-    # Gather next speech onset candidates
-    next_speech_onset: float | None = None
+def _build_synth_tail_cmd(
+    ffmpeg_bin: str,
+    source: "Path",
+    room_start: float,
+    tmp_out: "Path",
+    *,
+    seg_start: float,
+    cut_point: float,
+    audible_end: float,
+    bridge_dur: float,
+    slow_factor: float,
+    use_freeze: bool,
+    tail_sec: float,
+    fade_sec: float,
+    fps: float,
+    output_w: int,
+    output_h: int,
+    vf_no_tail: "str | None",
+    af_no_tail: "str | None",
+    codec: str,
+    quality_args: list,
+    audio_codec: str,
+    audio_bitrate: str,
+    faststart: bool = True,
+    pre_roll: float = 2.0,
+    push: bool = False,
+) -> list:
+    """Build ffmpeg command for a clip with a synthetic room-tone tail appended.
 
-    if word_idx < len(boundaries):
-        bnd = boundaries[word_idx]
-        untr = (bnd.get("untranscribed_speech") or [])[untr_offset:]
-        if untr:
-            next_speech_onset = untr[0][0]
+    Input 0: source seeked to seg_start-pr (real content + bridge frames).
+    Input 1: same source seeked to room_start (room tone audio).
+    filter_complex: real video+audio concat with slowed/frozen video and room-tone audio.
+    """
+    pr = min(pre_roll, seg_start)
+    cut_dur = cut_point - seg_start
+    b_off = audible_end - seg_start  # offset of B relative to seg_start
 
-    if word_idx + 1 < len(words):
-        next_as = words[word_idx + 1]["audible_start"]
-        if next_speech_onset is None or next_as < next_speech_onset:
-            next_speech_onset = next_as
+    scale_part = f"scale={output_w}:{output_h}:flags=bicubic"
+    fade_st_num = _num(tail_sec - fade_sec)
+    fade_sec_num = _num(fade_sec)
 
-    # N = next onset only when it falls within the pad window; beyond that → uncapped silence.
-    # +1e-9: guard against floating-point rounding (e.g. 6.5-5.8 = 0.7000000000000002 > 0.70).
-    N: float | None = (
-        next_speech_onset
-        if next_speech_onset is not None and next_speech_onset - audible_end <= tail_pad_sec + 1e-9
-        else None
+    # Real video: trim to cut_point, apply existing filter chain (crop/scale/subs/etc.)
+    real_vtrim = f"trim=start={_num(pr)}:end={_num(pr + cut_dur)},setpts=PTS-STARTPTS"
+    real_vchain = f"{real_vtrim},{vf_no_tail}" if vf_no_tail else real_vtrim
+
+    # Synthetic video: bridge frames slowed or frozen, then fade to black
+    if use_freeze:
+        nf = max(1, round(fps * 0.1))   # ~3 frames pool to smooth freeze
+        synth_vchain = (
+            f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + nf / fps)},"
+            f"setpts=PTS-STARTPTS,"
+            f"loop=loop=-1:size={nf},"
+            f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
+            f"{scale_part},"
+            f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
+        )
+    else:
+        synth_vchain = (
+            f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + bridge_dur)},"
+            f"setpts=(PTS-STARTPTS)*{_num(slow_factor)},"
+            f"{scale_part},"
+            f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
+        )
+    if push:
+        # Slow push-in zoom: 1.0 → 1.05 over the first half, hold 1.05
+        n_push = max(1, int(fps * tail_sec))
+        synth_vchain += (
+            f",zoompan=z='min(1.05,1+0.05*on/{n_push})':d={n_push}:"
+            f"s={output_w}x{output_h}"
+        )
+
+    # Real audio: trim to cut_point, apply existing loudnorm/fade chain
+    real_atrim = f"atrim=start={_num(pr)}:end={_num(pr + cut_dur)},asetpts=PTS-STARTPTS"
+    real_achain = f"{real_atrim},{af_no_tail}" if af_no_tail else real_atrim
+
+    # Synthetic audio: room tone from input 1 with fade-out
+    synth_achain = (
+        f"atrim=0:{_num(tail_sec + 0.2)},asetpts=PTS-STARTPTS,"
+        f"afade=t=out:st={fade_st_num}:d={fade_sec_num}"
     )
 
-    if N is not None:
-        end = min(N - onset_margin_sec, audible_end + tail_pad_sec)
-    else:
-        end = audible_end + tail_pad_sec
+    fc = ";".join([
+        f"[0:v]{real_vchain}[v_real]",
+        f"[0:v]{synth_vchain}[v_synth]",
+        "[v_real][v_synth]concat=n=2:v=1:a=0[v]",
+        f"[0:a]{real_achain}[a_real]",
+        f"[1:a]{synth_achain}[a_synth]",
+        "[a_real][a_synth]concat=n=2:v=0:a=1[a]",
+    ])
 
-    # Safety floor: end must be at least past the word start.
-    _t0_floor = word_entry["t0"] + 0.04
-    end = max(end, _t0_floor)
-    # Hard cap: end must never reach the next speech onset.
-    # onset_margin_sec is already applied in the formula above; re-apply as a hard cap
-    # so the floor never pushes end past N - margin.
-    if N is not None:
-        end = min(end, N - onset_margin_sec)
-        if end < audible_end:
-            # N < ae: overlapping Whisper timestamps; clip ends before audible_end.
-            print(
-                f"  [WARN] last word overlaps next speech: "
-                f"ae={audible_end:.3f} > N-margin={N - onset_margin_sec:.3f} "
-                f"(N={N:.3f})",
-                flush=True,
-            )
-
-    # Fade: keep fade_keep_sec unfaded, then fade for up to tail_fade_sec (floor: 2 frames).
-    # fade_start may be before audible_end when room < 2 frames — that is by spec.
-    two_frames = 2.0 / fps
-    room = end - audible_end
-    fade_len = max(two_frames, min(tail_fade_sec, room - fade_keep_sec))
-    fade_start = end - fade_len
-
-    return end, fade_start, fade_len
+    return [
+        str(ffmpeg_bin), "-y", "-loglevel", "error",
+        # Input 0: real content + enough for bridge frames
+        "-ss", _ts(seg_start - pr),
+        "-t", _ts_dur(pr + cut_dur + bridge_dur + 1.0),
+        "-i", str(source),
+        # Input 1: room tone audio source
+        "-ss", _ts(room_start),
+        "-t", _ts_dur(tail_sec + 1.0),
+        "-i", str(source),
+        "-filter_complex", fc,
+        "-map", "[v]", "-map", "[a]",
+        "-c:v", codec, *quality_args,
+        "-c:a", audio_codec, "-b:a", audio_bitrate,
+        *(["-movflags", "+faststart"] if faststart else []),
+        str(tmp_out),
+    ]
 
 
 _BEAT_CAP_MARGIN = 0.04    # gap left before next speech onset when capping beat end
@@ -1885,6 +2064,9 @@ def _render_segments(
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
                               and reel.subtitles and segs)
+            _synth_active = False    # synthetic tail (room tone + slowed video) active for this reel
+            _synth_params_dict: dict | None = None
+            _synth_room_start: float | None = None
             if _use_smap_tail:
                 # M1.8 Stage B consumer 1: tail placement from speech map.
                 # audible_end (map) replaces silencedetect; handles intruded and clean cases
@@ -1931,6 +2113,65 @@ def _render_segments(
                     elif abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
                         segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
                         clip_dur = sum(s.end - s.start for s in segs)
+                # Synthetic tail: fire when real room < threshold AND single segment, no two-shot/music.
+                # _tail_from_smap_full duplicates the lookup but keeps the main path unchanged.
+                _synth_cfg = getattr(render_cfg, "synthetic_tail_cfg", None)
+                if (
+                    _synth_cfg is not None and _synth_cfg.enabled
+                    and len(segs) == 1
+                    and not _ts_on
+                    and not music_path
+                    and _reel_speed == 1.0
+                ):
+                    _full = _tail_from_smap_full(
+                        last_t0=_last.t0, seg_end=segs[-1].end, smap=smap,
+                        lookup=_smap_lookup, last_t1=_last.t1,
+                        tail_pad_sec=_smap_cfg.tail_pad_sec if _smap_cfg else 1.50,
+                        onset_margin_sec=_smap_cfg.onset_margin_sec if _smap_cfg else 0.06,
+                        fade_keep_sec=_smap_cfg.fade_keep_sec if _smap_cfg else 0.20,
+                        own_tail_window_sec=_smap_cfg.own_tail_window_sec if _smap_cfg else 0.30,
+                        own_tail_short_sec=_smap_cfg.own_tail_short_sec if _smap_cfg else 0.25,
+                        own_tail_gap_min_sec=_smap_cfg.own_tail_gap_min_sec if _smap_cfg else 0.10,
+                        own_tail_t1_margin_sec=_smap_cfg.own_tail_t1_margin_sec if _smap_cfg else 0.15,
+                        tail_fade_sec=getattr(ap, "tail_fade_sec", 0.35),
+                        fps=_fps(),
+                    )
+                    if _full is not None:
+                        _sp = _synth_tail_params(
+                            _full.audible_end, _full.N, _full.end,
+                            onset_margin_sec=_smap_cfg.onset_margin_sec if _smap_cfg else 0.06,
+                            min_room_sec=_synth_cfg.min_room_sec,
+                            keep_sec=_synth_cfg.keep_sec,
+                            tail_sec=_synth_cfg.tail_sec,
+                        )
+                        if _sp is not None:
+                            _sr = _find_room_tone(smap, near_t=_full.audible_end)
+                            if _sr is not None and (_sr[1] - _sr[0]) >= _synth_cfg.tail_sec * 0.8:
+                                _synth_active = True
+                                _synth_params_dict = _sp
+                                _synth_room_start = _sr[0]
+                                # Shorten clip to cut_point; no fade on speech
+                                _cut = _sp["cut_point"]
+                                if _cut >= segs[0].start:
+                                    if abs(_cut - segs[0].end) > 1.0 / max(_fps(), 1.0):
+                                        segs = [segs[0].model_copy(update={"end": _cut})]
+                                        clip_dur = _cut - segs[0].start
+                                _word_end = None
+                                _smap_fade_floor = None
+                                _smap_fade_len = None
+                                print(
+                                    f"  [SYNTH] {reel.id}: room={_sp['room']:.3f}s < "
+                                    f"{_synth_cfg.min_room_sec}s → synthetic tail "
+                                    f"({'freeze' if _sp['use_freeze'] else 'slow-mo'}, "
+                                    f"cut={_cut:.3f}s, room_tone={_sr[0]:.1f}s)",
+                                    flush=True,
+                                )
+                            else:
+                                print(
+                                    f"  [SYNTH] {reel.id}: room={_sp['room']:.3f}s < threshold "
+                                    f"but no room tone found (nearest silence too short), skipping",
+                                    flush=True,
+                                )
             else:
                 _nw_start = getattr(reel, "tail_next_word_start", None)
                 if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
@@ -2007,16 +2248,21 @@ def _render_segments(
                                                         seam_xfades=_ts_seam_xfades)
             # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
+            # Synthetic tail extends expected duration (real clip + appended tail_sec).
+            if _synth_active and _synth_params_dict:
+                _out_dur += _synth_params_dict["tail_sec"]
             vfade = _video_fade_filter(ap, clip_duration)
             if vfade:
                 reel_vf = f"{reel_vf},{vfade}" if reel_vf else vfade
             # Tail video fade: from fade_start to clip end, AFTER subtitle burn-in.
             # force=True in smap path: always fade to black regardless of tail_video_fade config.
-            tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
-                                             min_sec_floor=_smap_fade_floor,
-                                             force=_use_smap_tail)
-            if tvfade:
-                reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
+            # Synthetic tail handles its own fade — skip tvfade to avoid double-fade on real content.
+            if not _synth_active:
+                tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
+                                                 min_sec_floor=_smap_fade_floor,
+                                                 force=_use_smap_tail)
+                if tvfade:
+                    reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
             reel_fc = None
             reel_af = None
@@ -2068,7 +2314,37 @@ def _render_segments(
                         _a_fc_str += f",{reel_af}"
                     _a_fc_str += "[a]"
                     reel_fc = ";".join(_v_fc) + ";" + _a_fc_str
-            if len(segs) == 1:
+            if len(segs) == 1 and _synth_active and _synth_params_dict and _synth_room_start is not None and not reel_fc:
+                # Synthetic tail: real clip + appended room-tone audio + slowed/frozen video.
+                _sp = _synth_params_dict
+                _qa = _video_quality_args(
+                    codec, enc.preset, video_bitrate, enc.pix_fmt,
+                    quality=active.quality, rate_control=active.rate_control, qp=active.qp,
+                )
+                cmd = _build_synth_tail_cmd(
+                    ffmpeg_bin, source, _synth_room_start, tmp_out,
+                    seg_start=segs[0].start,
+                    cut_point=segs[0].end,
+                    audible_end=_sp["bridge_start"],
+                    bridge_dur=_sp["bridge_dur"],
+                    slow_factor=_sp["slow_factor"],
+                    use_freeze=_sp["use_freeze"],
+                    tail_sec=_sp["tail_sec"],
+                    fade_sec=_synth_cfg.fade_sec,
+                    fps=_fps(),
+                    output_w=render_cfg.scale[0],
+                    output_h=render_cfg.scale[1],
+                    vf_no_tail=reel_vf,
+                    af_no_tail=reel_af,
+                    codec=codec,
+                    quality_args=_qa,
+                    audio_codec=aud.codec,
+                    audio_bitrate=aud.bitrate,
+                    faststart=enc.faststart,
+                    pre_roll=_PRE_ROLL_SEC,
+                    push=_synth_cfg.push,
+                )
+            elif len(segs) == 1:
                 cmd = build_cut_cmd(
                     ffmpeg_bin, source, segs[0].start, segs[0].end, tmp_out,
                     codec=codec, preset=enc.preset,
@@ -2156,8 +2432,10 @@ def _render_segments(
                     f"(Δ{_actual - _out_dur:+.3f}s > 2.5 frames) — a render stage changed the "
                     f"duration the windows do not describe"
                 )
-            for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
-                print(f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)")
+            # Skip freeze detect for synthetic tail clips: the frozen/slowed tail is intentional.
+            if not _synth_active:
+                for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
+                    print(f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)")
             if emit_text:
                 _write_sidecar_text(out, reel, render_cfg)
         _unlock_dir(_lock_fd)
