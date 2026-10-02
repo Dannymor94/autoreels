@@ -285,9 +285,46 @@ def test_tail_own_word_tail_extended_b():
     assert end == pytest.approx(6.44, abs=0.01)
 
 
-def test_tail_own_word_tail_not_filtered_when_too_long():
-    """Untranscribed interval dur >= own_tail_short_sec → NOT own tail → end before onset."""
-    # ae=5.8; untr at [5.95, 6.25] dur=0.30 >= 0.25 → treated as next speech
+def test_tail_own_word_tail_t1_inside_interval_fires_regardless_of_length():
+    """t1 inside interval → own tail even when dur >= own_tail_short_sec (PXL r05-like)."""
+    # word t1=5.68 is inside untr [5.60, 5.95] (dur=0.35 >= 0.25 → duration rule would fail)
+    # t1_hint fires: ae → 5.95; next word as=6.5 → N=6.5, end=min(6.44, 7.45)=6.44
+    smap = _make_smap(
+        [_make_word(5.0, 5.68, ae=5.45), _make_word(6.5, 7.0)],
+        [_make_boundary(0.9, untr=[[5.60, 5.95]])],
+    )
+    lookup = _smap_word_lookup(smap)
+    end, fs, fl = _tail_from_smap(
+        last_t0=5.0, seg_end=7.5, smap=smap, lookup=lookup,
+    )
+    assert end >= 5.95, f"end {end:.3f} must be past own-tail interval end 5.95"
+    assert end < 6.5, f"end {end:.3f} must be before next word onset"
+    assert end == pytest.approx(6.44, abs=0.01)
+
+
+def test_tail_own_word_tail_t1_just_past_end_margin_fires(  # PXL r10-like
+):
+    """iv_e <= t1 + t1_margin → own tail even when t1 is slightly past interval end."""
+    # word t1=5.95 just past iv_e=5.88 but within margin 0.15 → t1_hint fires
+    # (t1 is NOT inside the interval; iv_e <= t1+0.15 = 6.10 is the condition)
+    # ae → 5.88; next untr starts at 6.50 → N=6.50, end=min(6.44, 7.38)=6.44
+    smap = _make_smap(
+        [_make_word(5.0, 5.95, ae=5.45), _make_word(7.0, 7.5)],
+        [_make_boundary(1.6, untr=[[5.60, 5.88], [6.50, 6.80]])],
+    )
+    lookup = _smap_word_lookup(smap)
+    end, fs, fl = _tail_from_smap(
+        last_t0=5.0, seg_end=8.0, smap=smap, lookup=lookup,
+    )
+    assert end >= 5.88, f"end {end:.3f} must be past own-tail interval end 5.88"
+    assert end < 6.50, f"end {end:.3f} must be before next onset 6.50"
+    assert end == pytest.approx(6.44, abs=0.01)
+
+
+def test_tail_own_word_tail_not_filtered_when_too_long_and_t1_before():
+    """Interval too long AND t1 before interval → neither rule fires → end before onset."""
+    # ae=5.8; untr at [5.95, 6.25] dur=0.30 >= 0.25; word t1=5.9 before interval start
+    # t1_hint: 5.9 < 5.95 (not inside), iv_e=6.25 > t1+0.15=6.05 (not within margin)
     smap = _make_smap(
         [_make_word(5.0, 5.9, ae=5.8), _make_word(6.5, 7.0)],
         [_make_boundary(0.7, untr=[[5.95, 6.25]])],
@@ -297,7 +334,7 @@ def test_tail_own_word_tail_not_filtered_when_too_long():
         last_t0=5.0, seg_end=7.5, smap=smap, lookup=lookup,
         own_tail_window_sec=0.30, own_tail_short_sec=0.25, own_tail_gap_min_sec=0.10,
     )
-    assert end < 5.95, f"long interval must still be next speech, end={end:.3f}"
+    assert end < 5.95, f"long interval with t1 before it must still be next speech, end={end:.3f}"
 
 
 def test_tail_own_word_tail_not_filtered_when_gap_too_small():

@@ -996,6 +996,7 @@ def _tail_from_smap(
     own_tail_window_sec: float = 0.30,
     own_tail_short_sec: float = 0.25,
     own_tail_gap_min_sec: float = 0.10,
+    own_tail_t1_margin_sec: float = 0.15,
     # kept for callers that still pass the old parameter — no longer used
     cut_pause_min_sec: float = 0.35,
     margin: float = 0.2,
@@ -1039,21 +1040,24 @@ def _tail_from_smap(
             word_idx += 1
             audible_end = max(audible_end, words[word_idx]["audible_end"])
 
-    # Own-word-tail filter: a short untranscribed interval immediately after the
-    # word's audible end that is separated from the next speech by real silence
-    # is the word's own acoustic decay — extend audible_end past it.
+    # Own-word-tail filter: an untranscribed interval immediately after the word's audible
+    # end is the word's own acoustic decay (not next speech) when EITHER:
+    #   (a) duration rule: iv_dur < own_tail_short_sec AND gap to next word >= gap_min
+    #   (b) Whisper-t1 hint: the interval contains last_t1 OR ends within t1_margin of it
+    # In both cases the interval must start within own_tail_window_sec after ae.
     untr_offset = 0   # number of untranscribed intervals consumed as own-tail
     if word_idx < len(boundaries):
-        untr_list = boundaries[word_idx].get("untranscribed_speech", [])
+        untr_list = (boundaries[word_idx].get("untranscribed_speech") or [])
         if untr_list:
             iv_s, iv_e = untr_list[0][0], untr_list[0][1]
             iv_dur = iv_e - iv_s
             gap_after = float("inf")
             if word_idx + 1 < len(words):
                 gap_after = words[word_idx + 1]["audible_start"] - iv_e
-            if (iv_s - audible_end <= own_tail_window_sec
-                    and iv_dur < own_tail_short_sec
-                    and gap_after >= own_tail_gap_min_sec):
+            word_t1 = words[word_idx]["t1"]
+            duration_rule = (iv_dur < own_tail_short_sec and gap_after >= own_tail_gap_min_sec)
+            t1_hint = (iv_s <= word_t1 <= iv_e) or (iv_e <= word_t1 + own_tail_t1_margin_sec)
+            if iv_s - audible_end <= own_tail_window_sec and (duration_rule or t1_hint):
                 audible_end = iv_e
                 untr_offset = 1
 
@@ -1897,6 +1901,7 @@ def _render_segments(
                     own_tail_window_sec=_smap_cfg.own_tail_window_sec if _smap_cfg else 0.30,
                     own_tail_short_sec=_smap_cfg.own_tail_short_sec if _smap_cfg else 0.25,
                     own_tail_gap_min_sec=_smap_cfg.own_tail_gap_min_sec if _smap_cfg else 0.10,
+                    own_tail_t1_margin_sec=_smap_cfg.own_tail_t1_margin_sec if _smap_cfg else 0.15,
                     tail_fade_sec=getattr(ap, "tail_fade_sec", 0.35),
                     fps=_fps(),
                 )

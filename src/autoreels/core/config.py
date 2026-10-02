@@ -577,8 +577,11 @@ class SpeechMapConfig(BaseModel):
     # that is separated from the next speech by real silence is the word's own acoustic decay.
     # Extend audible_end past it so it is not mistaken for the next speech onset (N).
     own_tail_window_sec: float = 0.30   # interval must start within this distance after ae
-    own_tail_short_sec: float = 0.25    # interval must be shorter than this
+    own_tail_short_sec: float = 0.25    # interval must be shorter than this (duration rule)
     own_tail_gap_min_sec: float = 0.10  # gap from interval end to next word audible_start
+    # Whisper-t1 hint: if the interval contains (or ends within this margin of) last_t1,
+    # it is the word's own tail regardless of its length.
+    own_tail_t1_margin_sec: float = 0.15  # iv_e <= last_t1 + margin → own tail (Whisper hint)
 
 
 class RenderConfig(BaseModel):
