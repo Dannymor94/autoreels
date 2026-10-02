@@ -7,7 +7,7 @@ Usage:
     python scripts/gc.py --cat 3      # one category only
 
 Categories:
-  1  reels-out/<stem>/_gate/<name>/ for every name except m18_final.
+  1  reels-out/<stem>/_gate/<name>/ for every name except m18_final and m18_synth.
   2  reels-out/_stage_a_snips/ and reels-out/_stage_a_snips_v2/.
   3  *.tmp.mp4 under reels-out/.
   4  *.render.lock files not held by any live process.
@@ -49,8 +49,11 @@ def _dir_size(p: Path) -> int:
 
 # ─── category 1: non-m18_final gate directories ───────────────────────────────
 
+_CAT1_KEEP = {"m18_final", "m18_synth"}
+
+
 def _cat1_inventory() -> list[Path]:
-    """reels-out/<stem>/_gate/<name>/ for every name != m18_final."""
+    """reels-out/<stem>/_gate/<name>/ for every name not in _CAT1_KEEP."""
     dirs: list[Path] = []
     ro = REPO / "reels-out"
     if not ro.exists():
@@ -59,7 +62,7 @@ def _cat1_inventory() -> list[Path]:
         if not gate_dir.is_dir():
             continue
         for child in sorted(gate_dir.iterdir()):
-            if child.is_dir() and child.name != "m18_final":
+            if child.is_dir() and child.name not in _CAT1_KEEP:
                 dirs.append(child)
     return dirs
 
@@ -76,9 +79,14 @@ def run_cat1(*, delete: bool) -> int:
         rel = d.relative_to(REPO)
         print(f"  {rel}/  ({_fmt(sizes[d])})")
     if delete:
+        removed = 0
         for d in dirs:
-            shutil.rmtree(d)
-        print(f"  → removed {len(dirs)} dir(s), freed {_fmt(total)}")
+            try:
+                shutil.rmtree(d)
+                removed += 1
+            except FileNotFoundError:
+                pass  # parent already removed
+        print(f"  → removed {removed} dir(s), freed {_fmt(total)}")
     else:
         print("  (dry-run: pass --delete to remove)")
     return total
