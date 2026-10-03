@@ -2778,7 +2778,7 @@ def _cmd_run_impl(
     dangling_disc: list = []
     # Interview: enforce host-turn clip boundaries.
     host_turns = (
-        detect_host_turns(tx_words, min_pause=getattr(r0_cfg, "host_turn_min_pause", 2.0))
+        detect_host_turns(tx_words, min_pause=r0_cfg.host_turn_min_pause)
         if getattr(r0_cfg, "source_kind", "lecture") == "interview"
         else []
     )
@@ -4773,7 +4773,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max, smap=_blk_smap)
     # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
     # cannot repair within bounds stays, and collect_human_warnings reports it.
-    host_turns = detect_host_turns(tx_words, min_pause=getattr(r0_cfg, "host_turn_min_pause", 2.0)) if _source_kind == "interview" else []
+    host_turns = detect_host_turns(tx_words, min_pause=r0_cfg.host_turn_min_pause) if _source_kind == "interview" else []
     if host_turns:
         reels, _ = _stage_interview_snap(reels, host_turns, tx_words=tx_words, r0_cfg=r0_cfg,
                                          drop_short=False)

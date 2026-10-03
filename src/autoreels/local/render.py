@@ -1115,7 +1115,7 @@ def _tail_from_smap_full(
         end = min(end, N - onset_margin_sec)
         if end < audible_end:
             print(
-                f"  [WARN] last word overlaps next speech: "
+                f"  [ERROR] last word overlaps next speech: "
                 f"ae={audible_end:.3f} > N-margin={N - onset_margin_sec:.3f} "
                 f"(N={N:.3f})",
                 flush=True,

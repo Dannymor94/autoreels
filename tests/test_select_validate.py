@@ -741,7 +741,7 @@ def test_detect_host_turns_declarative_ты():
         _word("вне", 1541.7, 1542.0),
         _word("полома.", 1542.0, 1542.5),
     ]
-    turns = S.detect_host_turns(words)
+    turns = S.detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
     assert turns[0][0] == pytest.approx(1538.84)
 
@@ -757,7 +757,7 @@ def test_detect_host_turns_dash_marked_no_question():
         _word("этим", 10.6, 10.8),
         _word("занимаетесь.", 10.8, 11.0),
     ]
-    turns = S.detect_host_turns(words)
+    turns = S.detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
 
 
@@ -771,7 +771,7 @@ def test_detect_host_turns_ty_in_reported_speech_not_host():
         _word("ты", 5.5, 5.7),
         _word("прав.", 5.7, 6.0),
     ]
-    turns = S.detect_host_turns(words)
+    turns = S.detect_host_turns(words, min_pause=0.7)
     assert turns == []
 
 

@@ -419,6 +419,27 @@ def try_rescue_clip(
     return False
 
 
+def _dedup_overlapping_words(words: list[Word]) -> list[Word]:
+    """Remove same-word overlapping duplicates from a Whisper word list.
+
+    Whisper sometimes emits the same word twice at chunk boundaries: the first entry has an
+    over-extended t1 (artifact) and the second is the precise one. When two consecutive words
+    share the same text (stripped/lowercased) and their timestamps overlap (second.t0 < first.t1),
+    drop the first (artifact) and keep the second (precise).
+    """
+    if len(words) < 2:
+        return list(words)
+    result: list[Word] = [words[0]]
+    for w in words[1:]:
+        prev = result[-1]
+        same = w.word.strip(".,!?…;:").lower() == prev.word.strip(".,!?…;:").lower()
+        if same and w.t0 < prev.t1:
+            result[-1] = w  # replace over-extended artifact with precise entry
+        else:
+            result.append(w)
+    return result
+
+
 def _words_with_smap_pauses(words: list[Word], smap: dict) -> list[Word]:
     """Return a copy of words with t0 adjusted so that inter-word gaps equal smap boundary pauses.
 
@@ -440,8 +461,8 @@ def _words_with_smap_pauses(words: list[Word], smap: dict) -> list[Word]:
         if idx is not None and idx < len(smap_bounds):
             pause = smap_bounds[idx]["pause"]
             new_t0 = prev.t1 + pause
-            # Only apply when it shifts t0 forward (negative smap pauses would shrink gaps)
-            if new_t0 > result[i].t0:
+            # Only apply when it shifts t0 forward but stays within the word span (never invert)
+            if result[i].t0 < new_t0 < result[i].t1:
                 result[i] = result[i].model_copy(update={"t0": round(new_t0, 4)})
     return result
 
@@ -573,6 +594,7 @@ def apply_padding(
     - end <= video_duration (если задана)
     """
     hanging_words = hanging_words or []
+    words = _dedup_overlapping_words(words)
     for r in reels:
         idxs = [i for i, w in enumerate(words) if w.t0 >= r.start and w.t0 < r.end]
         if not idxs:

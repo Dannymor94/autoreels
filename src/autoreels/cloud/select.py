@@ -660,7 +660,7 @@ def _first_word_clean(word: str) -> str:
 def detect_host_turns(
     transcript_words,
     *,
-    min_pause: float = 0.7,
+    min_pause: float,
 ) -> list[tuple[float, float]]:
     """Return (start, end) spans of host turns (interrogative OR declarative).
 

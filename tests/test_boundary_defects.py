@@ -135,7 +135,7 @@ def test_generic_ty_guest_sentence_not_trimmed():
         _word(103.0, 103.5, "к"),
         _word(103.5, 104.0, "себе."),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     # Sentence: "когда ты честен с собой, ты приходишь к себе." — starts with "когда"
     # Condition (b) requires first word = ты/вы → NOT fired.
     assert len(turns) == 0, f"generic 'ты' sentence should not be a host turn; got {turns}"

@@ -1,5 +1,6 @@
 # R0 — конфиг выбора моментов. Всё, что вынесено из кода (R0_SPEC).
 source_kind: lecture           # "lecture" | "interview"
+host_turn_min_pause: 0.7       # pause (sec) before a sentence to count it as a host turn (interview)
 duration_preset: shorts        # shorts | reels | tiktok
 model: qwen/qwen3.8-27b        # LLM R0 на Groq (основная, сильнее по качеству). Имена моделей
                                # у Groq протухают молча (qwen3-32b → 404, затем qwen3.6-27b снята).

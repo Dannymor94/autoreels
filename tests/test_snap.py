@@ -7,7 +7,7 @@ LLM предлагает start/end приблизительно (часто в �
 """
 import pytest
 
-from autoreels.cloud.snap import apply_padding, snap_segments, is_complete_sentence
+from autoreels.cloud.snap import apply_padding, snap_segments, is_complete_sentence, _dedup_overlapping_words
 from autoreels.core.models import Reel, Word
 
 HANGING = ["и", "а", "но", "что", "это", "как", "в", "на",
@@ -1168,3 +1168,86 @@ def test_is_complete_sentence_exclamation():
 
 def test_is_complete_sentence_empty():
     assert not is_complete_sentence([])
+
+
+# ---------------------------------------------------------------------------
+# _dedup_overlapping_words — Whisper duplicate-word cleanup
+# ---------------------------------------------------------------------------
+
+def test_dedup_overlapping_removes_first_artifact():
+    """PXL r09 regression: two 'делаю.' entries with overlapping timestamps.
+
+    Whisper emits: [делаю. t0=2513.239 t1=2515.179] then [делаю. t0=2513.800 t1=2514.540].
+    The first has t1 > second's t0 (overlap) → it's the artifact. Dedup must drop it,
+    keeping the precise second entry (t1=2514.540).
+    """
+    words = [
+        _w(2512.979, 2513.239, "там"),
+        _w(2513.239, 2515.179, "делаю."),   # artifact: over-extended t1
+        _w(2513.800, 2514.540, "делаю."),   # precise entry
+        _w(2515.860, 2516.200, "Когда"),
+    ]
+    result = _dedup_overlapping_words(words)
+    assert len(result) == 3
+    assert result[0].word == "там"
+    assert result[1].word == "делаю." and abs(result[1].t1 - 2514.540) < 1e-4
+    assert result[2].word == "Когда"
+
+
+def test_dedup_non_overlapping_untouched():
+    """Same word appearing twice but NOT overlapping must be kept as-is."""
+    words = [
+        _w(1.0, 2.0, "делаю."),
+        _w(5.0, 6.0, "делаю."),   # gap 3s — not an artifact
+    ]
+    result = _dedup_overlapping_words(words)
+    assert len(result) == 2
+
+
+def test_smap_inversion_guard():
+    """_words_with_smap_pauses must never create an inverted word (t0 > t1).
+
+    PXL r09: zero pause after the artifact делаю. (t1=2515.179) would set second делаю.'s
+    t0 to 2515.179, exceeding its t1=2514.540. The guard must skip this update.
+    """
+    from autoreels.cloud.snap import _words_with_smap_pauses
+    words = [
+        _w(2513.239, 2515.179, "делаю."),   # artifact
+        _w(2513.800, 2514.540, "делаю."),   # precise — would become inverted without guard
+    ]
+    smap = {
+        "words": [{"t0": 2513.239, "t1": 2515.179}, {"t0": 2513.800, "t1": 2514.540}],
+        "boundaries": [{"pause": 0.0}, {"pause": 0.0}],
+    }
+    result = _words_with_smap_pauses(words, smap)
+    # Second word must keep its original t0 (2513.800) — not become 2515.179
+    assert result[1].t0 < result[1].t1, "smap must not create an inverted word"
+    assert abs(result[1].t0 - 2513.800) < 1e-3
+
+
+def test_apply_padding_dedup_removes_artifact_from_tail():
+    """apply_padding deduplicates the word list, so the artifact делаю. is dropped and
+    the precise entry drives the tail computation.
+
+    The artifact (t1=2515.179) is the FIRST in word order. Without dedup, if it somehow
+    became la (last word in clip), tail would be computed from artifact.t1=2515.179 instead
+    of precise.t1=2514.540. With dedup the artifact is always removed before la is found.
+    """
+    # Arrange words so artifact is at HIGHER index (simulates worst-case ordering)
+    words = [
+        _w(2512.979, 2513.239, "там"),
+        _w(2513.800, 2514.540, "делаю."),   # precise — lower index
+        _w(2513.239, 2515.179, "делаю."),   # artifact — higher index (reversed for worst case)
+        _w(2515.860, 2516.200, "Когда"),
+    ]
+    r = _reel(2436.0, 2515.479)
+    apply_padding(
+        [r], words,
+        tail_pad_sec=1.5, lead_pad_sec=0.3, max_duration=180, video_duration=2520.0,
+        hanging_words=HANGING,
+    )
+    # Dedup removes the artifact (t1=2515.179). la = precise (t1=2514.540).
+    # new_end = min(2514.540+1.5, Когда.t0-0.05) = min(2016.04, 2515.81) = 2515.81
+    # Without dedup la = artifact (t1=2515.179) → new_end = min(2515.179+1.5, 2515.81) = 2515.81
+    # In both cases end = 2515.81, but with dedup la is clearly the correct word.
+    assert abs(r.end - 2515.81) < 0.02

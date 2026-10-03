@@ -47,7 +47,7 @@ def test_detect_host_turns_basic():
         _word("Хорошо", 12.0, 12.4),
         _word("работаете.", 12.4, 12.8),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
     assert turns[0][0] == pytest.approx(10.0)
     assert turns[0][1] == pytest.approx(11.0)
@@ -59,7 +59,7 @@ def test_detect_host_turns_no_question_mark():
         _word("вы", 10.3, 10.5),
         _word("справляетесь", 10.5, 11.0),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert turns == []
 
 
@@ -68,7 +68,7 @@ def test_detect_host_turns_question_no_second_person():
         _word("Это", 10.0, 10.3),
         _word("работает?", 10.3, 10.8),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert turns == []
 
 
@@ -77,12 +77,12 @@ def test_detect_host_turns_host_opener():
         _word("Расскажите", 5.0, 5.4),
         _word("подробнее?", 5.4, 5.9),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
 
 
 def test_detect_host_turns_empty():
-    assert detect_host_turns([]) == []
+    assert detect_host_turns([], min_pause=0.7) == []
 
 
 # ---------- _stage_interview_snap: end rule ----------
@@ -201,7 +201,7 @@ def test_detect_host_turns_ty_second_person():
         _word("этим", 10.9, 11.1),
         _word("работаешь?", 11.1, 11.8),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
     assert turns[0] == pytest.approx((10.0, 11.8))
 
@@ -215,7 +215,7 @@ def test_detect_host_turns_tebe_form():
         _word("с", 5.8, 5.9),
         _word("ними?", 5.9, 6.5),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
 
 
@@ -228,7 +228,7 @@ def test_detect_host_turns_no_question_no_flag():
         _word("ты", 0.8, 1.0),
         _word("молодец.", 1.0, 1.4),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert turns == []
 
 
@@ -238,7 +238,7 @@ def test_detect_host_turns_informal_opener_rasskazhi():
         _word("Расскажи", 3.0, 3.4),
         _word("подробнее?", 3.4, 3.9),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
 
 
@@ -250,7 +250,7 @@ def test_detect_host_turns_a_kak_ty():
         _word("ты", 0.5, 0.7),
         _word("справляешься?", 0.7, 1.3),
     ]
-    turns = detect_host_turns(words)
+    turns = detect_host_turns(words, min_pause=0.7)
     assert len(turns) == 1
 
 
@@ -273,7 +273,7 @@ def test_regression_clip7_host_question_at_end_cut():
     ]
     all_words = guest_words + host_words
 
-    host_turns = detect_host_turns(all_words)
+    host_turns = detect_host_turns(all_words, min_pause=0.7)
     assert len(host_turns) == 1, f"host turn not detected; turns={host_turns}"
 
     r = _reel(start=10.0, end=34.0, r0_start=10.0)
@@ -301,7 +301,7 @@ def test_regression_clip19_trailing_host_question_cut():
         _word("делаешь?", 4.0, 4.8),
     ]
 
-    host_turns = detect_host_turns(words)
+    host_turns = detect_host_turns(words, min_pause=0.7)
     assert len(host_turns) == 1, f"host turn not detected; got {host_turns}"
 
     r = _reel(start=0.0, end=4.8, r0_start=0.0)
