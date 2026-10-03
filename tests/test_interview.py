@@ -362,11 +362,17 @@ def test_genuine_host_question_after_pause():
     assert turns[0][0] == pytest.approx(12.5)
 
 
-def test_genuine_host_question_with_dash():
-    """A dash-marked 2nd-person question is a host turn regardless of pause."""
+def test_dash_start_no_longer_overrides_pause_guard():
+    """Dash-prefixed sentence with pause < min_pause is NOT a host turn.
+
+    The old dash rule (condition c) fired on any sentence starting with "—" regardless of
+    pause — 8 of 9 such detections in PXL were GUEST answers, not host questions. Rule
+    removed: pause guard applies even when the sentence starts with a dash.
+    """
     words = [
         _word("думал.", 8.0, 10.0),
         _word("— Вы", 10.1, 10.4), _word("согласны?", 10.5, 10.9),
     ]
     turns = detect_host_turns(words, min_pause=2.0)
-    assert len(turns) == 1
+    # pause=0.1 < 2.0 → NOT a host turn even though sentence starts with dash
+    assert turns == [], f"dash-start with small pause must not fire; got {turns}"

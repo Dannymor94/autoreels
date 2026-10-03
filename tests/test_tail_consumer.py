@@ -806,3 +806,55 @@ def test_find_room_tone_finds_longest_silence_within_window():
     assert result is not None
     assert result[0] == pytest.approx(2.0, abs=1e-6)
     assert result[1] == pytest.approx(3.5, abs=1e-6)
+
+
+# ── overlap-error tolerance (1 output frame) ─────────────────────────────────
+
+def test_overlap_error_suppressed_within_one_frame(capsys):
+    """[ERROR] must NOT fire when ae - end <= 1 output frame (1/fps).
+
+    PXL r09: ae=2515.910, end=2515.900 → overlap=0.010s. At 30fps one frame=0.033s.
+    0.010 < 0.033 → no message.
+    """
+    from autoreels.local.render import _tail_from_smap_full, _smap_word_lookup
+
+    fps = 30.0
+    # next word starts at N=2515.960, ae=2515.910, so end will be N-onset_margin < ae
+    smap = _make_smap(
+        [_make_word(2513.800, 2514.540, ae=2515.910),
+         _make_word(2515.960, 2516.500)],
+        [_make_boundary(1.42)],
+    )
+    lookup = _smap_word_lookup(smap)
+    result = _tail_from_smap_full(
+        last_t0=2513.800, seg_end=2517.0, smap=smap, lookup=lookup,
+        fps=fps, onset_margin_sec=0.06,
+    )
+    assert result is not None
+    captured = capsys.readouterr()
+    assert "[ERROR]" not in captured.out, (
+        f"must be silent when ae-end <= 1 frame; got: {captured.out!r}"
+    )
+
+
+def test_overlap_error_fires_beyond_one_frame(capsys):
+    """[ERROR] must fire when ae - end > 1 output frame."""
+    from autoreels.local.render import _tail_from_smap_full, _smap_word_lookup
+
+    fps = 30.0
+    # N very close to last word t1: next word starts only 0.05s after t1=2514.540
+    # so end = N - onset_margin = 2514.540+0.05 - 0.06 = 2514.530
+    # ae=2515.910 → ae - end = 1.380 >> 1 frame
+    smap = _make_smap(
+        [_make_word(2513.800, 2514.540, ae=2515.910),
+         _make_word(2514.590, 2515.000)],
+        [_make_boundary(0.05)],
+    )
+    lookup = _smap_word_lookup(smap)
+    result = _tail_from_smap_full(
+        last_t0=2513.800, seg_end=2517.0, smap=smap, lookup=lookup,
+        fps=fps, onset_margin_sec=0.06,
+    )
+    assert result is not None
+    captured = capsys.readouterr()
+    assert "[ERROR]" in captured.out, "must print [ERROR] when ae-end > 1 frame"

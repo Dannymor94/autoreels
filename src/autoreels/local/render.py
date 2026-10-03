@@ -1113,7 +1113,7 @@ def _tail_from_smap_full(
     end = max(end, _t0_floor)
     if N is not None:
         end = min(end, N - onset_margin_sec)
-        if end < audible_end:
+        if end < audible_end and audible_end - end > 1.0 / fps:
             print(
                 f"  [ERROR] last word overlaps next speech: "
                 f"ae={audible_end:.3f} > N-margin={N - onset_margin_sec:.3f} "

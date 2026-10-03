@@ -746,9 +746,14 @@ def test_detect_host_turns_declarative_ты():
     assert turns[0][0] == pytest.approx(1538.84)
 
 
-# Test 2: dash-marked sentence is host turn even without '?'
+# Test 2: dash-start declarative without '?' is NOT detected (dash rule removed)
 def test_detect_host_turns_dash_marked_no_question():
-    """Em-dash at sentence start → host turn regardless of punctuation."""
+    """Dash-start declarative (no '?', no ты/вы as first word) is NOT a host turn.
+
+    Old condition (c) fired on any dash-start; removed because 8/9 such detections in PXL
+    were GUEST answers. A "— Сколько лет вы занимаетесь." now requires pause >= min_pause
+    AND either '?' + 2nd person or first word ты/вы — none of which apply here.
+    """
     words = [
         _word("—", 10.0, 10.05),
         _word("Сколько", 10.05, 10.3),
@@ -758,7 +763,7 @@ def test_detect_host_turns_dash_marked_no_question():
         _word("занимаетесь.", 10.8, 11.0),
     ]
     turns = S.detect_host_turns(words, min_pause=0.7)
-    assert len(turns) == 1
+    assert turns == [], f"dash-start declarative without ты/вы first word must not fire; got {turns}"
 
 
 # Test 3: 'ты' in reported speech (sentence starts with 'Я') → NOT a host turn

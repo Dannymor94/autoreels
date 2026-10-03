@@ -664,26 +664,23 @@ def detect_host_turns(
 ) -> list[tuple[float, float]]:
     """Return (start, end) spans of host turns (interrogative OR declarative).
 
-    A turn qualifies when:
+    A turn qualifies when at a turn boundary (pause >= min_pause before the sentence) AND:
       (a) sentence ends with '?' AND (has second-person word OR starts with a host-opener), OR
-      (b) sentence first word starts with 'ты'/'вы' (direct address to guest), OR
-      (c) sentence first word starts with an em/en dash (Whisper speaker-change marker).
+      (b) sentence first word starts with 'ты'/'вы' (direct address to guest).
 
-    For (a) and (b): a sentence within continuous guest speech (no dash, pause before it
-    < min_pause) is NOT a host turn — rhetorical questions addressed to the viewer sound
-    like (a)/(b) but never follow a speaker-change gap.
-
-    Note on dash marking: in the PXL corpus only ~2 % of sentences carry a dash, so
-    (c) is supplementary — it adds a handful of turns the heuristic would otherwise miss.
-    The primary signal is (a)+(b) guarded by the pause/dash test.
+    The dash rule (old condition c — fire on any dash-prefixed sentence) was removed: in
+    the PXL corpus 8 of 9 dash-prefixed detections were GUEST answers, not host questions
+    (Whisper marks the guest's reply with "—" too). One host question was lost (936s), but
+    8 false positives were eliminated. Use manual e: to guard clips that contain
+    undetected host turns.
 
     Condition (b) already catches declarative host turns like "Ты коснулся книги, ты стал
-    автором книги…" because the sentence starts with "Ты". A potential condition (d) —
+    автором книги…" because the sentence starts with "Ты". A potential condition (c) —
     short sentence with ты/вы + past-tense verb mid-sentence — is NOT added: in Russian,
     the guest freely uses ты to address the viewer ("когда ты честен с собой"), and a
     past-tense verb + ты mid-sentence is common in guest speech too. No reliable
     structural feature separates host address from guest narrative without a speaker-ID
-    model; adding (d) would eat guest speech.
+    model; adding (c) would eat guest speech.
 
     ponytail: O(n) scan over word list; splits on terminal punct.
     """
@@ -702,28 +699,24 @@ def detect_host_turns(
         last = buf[-1].word.rstrip()
         first_clean = _first_word_clean(buf[0].word)
 
-        # Speaker-change signals that override the pause guard.
-        starts_with_dash = buf[0].word.startswith(_DASH_CHARS)
         pause_before = (buf[0].t0 - prev_sent_end) if prev_sent_end is not None else float("inf")
-        is_turn_boundary = starts_with_dash or pause_before >= min_pause
+        at_turn_boundary = pause_before >= min_pause
 
         prev_sent_end = buf[-1].t1
 
-        # (a) interrogative with second-person or opener — only at a turn boundary
+        if not at_turn_boundary:
+            return
+
+        # (a) interrogative with second-person or opener
         if last.endswith("?"):
             has_2p = any(w.word.lower() in _SECOND_PERSON for w in buf)
             has_opener = any(text.startswith(op) for op in _HOST_OPENERS)
-            if (has_2p or has_opener) and is_turn_boundary:
+            if has_2p or has_opener:
                 turns.append((buf[0].t0, buf[-1].t1))
                 return
 
-        # (b) declarative direct address: sentence starts with ты/вы — only at a turn boundary
-        if first_clean in ("ты", "вы") and is_turn_boundary:
-            turns.append((buf[0].t0, buf[-1].t1))
-            return
-
-        # (c) dash-marked speaker change (no extra guard needed — dash IS the marker)
-        if starts_with_dash:
+        # (b) declarative direct address: sentence starts with ты/вы
+        if first_clean in ("ты", "вы"):
             turns.append((buf[0].t0, buf[-1].t1))
 
     for w in transcript_words:
