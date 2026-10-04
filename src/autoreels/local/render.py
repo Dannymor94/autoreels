@@ -912,7 +912,7 @@ def build_concat_cmd(
         cmd += ["-stream_loop", "-1", "-i", str(music_path)]
     if extra_inputs:
         for _ei_src, _ei_st, _ei_dur in extra_inputs:
-            cmd += ["-ss", _ts(_ei_st), "-t", _ts_dur(_ei_dur), "-i", str(_ei_src)]
+            cmd += ["-accurate_seek", "-ss", _ts(_ei_st), "-t", _ts_dur(_ei_dur), "-i", str(_ei_src)]
     cmd += [
         "-filter_complex", filter_complex,
         "-map", "[v]", "-map", "[a]",
@@ -1414,8 +1414,8 @@ def _build_synth_tail_clip(
     fc = f"{vchain};{achain}"
     cmd = [
         str(ffmpeg_bin), "-y", "-loglevel", "error",
-        "-ss", _ts(bridge_start), "-t", _ts_dur(bridge_dur + 1.0), "-i", str(source),
-        "-ss", _ts(room_start), "-t", _ts_dur(tail_sec + 1.0), "-i", str(source),
+        "-accurate_seek", "-ss", _ts(bridge_start), "-t", _ts_dur(bridge_dur + 1.0), "-i", str(source),
+        "-accurate_seek", "-ss", _ts(room_start), "-t", _ts_dur(tail_sec + 1.0), "-i", str(source),
         "-filter_complex", fc,
         "-map", "[v]", "-map", "[a]",
         "-t", _ts_dur(tail_sec),

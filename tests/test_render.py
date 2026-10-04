@@ -2833,3 +2833,80 @@ def test_build_synth_tail_clip_close_shot(tmp_path):
         )
     fc = cmds[0][cmds[0].index("-filter_complex") + 1]
     assert "crop=256:456" in fc, "close-shot crop rect missing from _build_synth_tail_clip"
+
+
+@pytest.mark.integration
+def test_synth_tail_bridge_frame_psnr(tmp_path):
+    """Bridge frame in synthetic tail must match source frame at bridge_start.
+    PSNR > 30 dB confirms accurate seek (not a blocky/corrupted non-keyframe).
+    """
+    import shutil
+    import re as _re
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe not installed")
+
+    # Source: 10s, 30fps, 540x960, testsrc2 for distinct per-frame content
+    src = tmp_path / "src.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc2=size=540x960:rate=30:duration=10",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(src),
+    ], check=True, capture_output=True)
+
+    # bridge_start at 8.3s — between keyframes (ultrafast puts IDR every ~2s)
+    bridge_start = 8.3
+    bridge_dur = 0.2
+    room_start = 2.0
+    tail_sec = 1.0
+    fade_sec = 0.1
+
+    out = tmp_path / "tail.mp4"
+    from autoreels.local.render import _build_synth_tail_clip
+    _build_synth_tail_clip(
+        ffmpeg, src,
+        bridge_start=bridge_start, bridge_dur=bridge_dur,
+        use_freeze=True, slow_factor=8.0,
+        room_start=room_start, tail_sec=tail_sec, fade_sec=fade_sec,
+        fps=30.0, output_w=540, output_h=960,
+        codec="libx264", quality_args=["-preset", "ultrafast", "-crf", "18"],
+        audio_codec="aac", audio_bitrate="128k",
+        push=False, tmp_path=out,
+        synth_crop_vf="scale=540:960:flags=bicubic,setsar=1",
+    )
+    assert out.exists(), "tail clip not created"
+
+    # Extract first video frame of the tail output
+    tail_frame = tmp_path / "tail_frame.png"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-i", str(out), "-vframes", "1", str(tail_frame),
+    ], check=True, capture_output=True)
+
+    # Extract source frame at bridge_start (same resolution as output)
+    src_frame = tmp_path / "src_frame.png"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-accurate_seek", "-ss", str(bridge_start), "-i", str(src),
+        "-vf", "scale=540:960:flags=bicubic",
+        "-vframes", "1", str(src_frame),
+    ], check=True, capture_output=True)
+
+    # Compute PSNR between tail bridge frame and source frame
+    psnr_result = subprocess.run([
+        ffmpeg, "-y",
+        "-i", str(tail_frame), "-i", str(src_frame),
+        "-filter_complex", "[0:v][1:v]psnr",
+        "-f", "null", "-",
+    ], capture_output=True, text=True)
+    m = _re.search(r"average:([\d.]+|inf)", psnr_result.stderr + psnr_result.stdout)
+    assert m, f"could not parse PSNR output: {psnr_result.stderr[:400]}"
+    psnr_str = m.group(1)
+    psnr = float("inf") if psnr_str == "inf" else float(psnr_str)
+    assert psnr > 30.0, (
+        f"Bridge frame PSNR {psnr:.1f} dB < 30 dB — "
+        f"seek may be landing on a wrong/corrupted keyframe"
+    )
