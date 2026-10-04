@@ -1972,13 +1972,25 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             if _ci_end <= _hf:
                 warnings.append(f"jump-seam at {_pa.end:.2f}: prev too short ({_dur_a:.2f}s) for wide tail")
                 continue
+            _JUMP_CLOSE_MIN = 1.0  # drop a ci interval that would be shorter than this
             if _pa.shot == "close":
-                result[_ji - 1] = _pa.model_copy(update={"shot": "wide",
-                                                          "close_intervals": [[0.0, _ci_end]]})
+                _jnci = [] if _ci_end < _JUMP_CLOSE_MIN else [[0.0, _ci_end]]
+                if _jnci:
+                    result[_ji - 1] = _pa.model_copy(update={"shot": "wide",
+                                                              "close_intervals": _jnci})
+                else:
+                    result[_ji - 1] = _pa.model_copy(update={"shot": "wide",
+                                                              "close_intervals": []})
             else:
                 _new_end = min(_ci_a[-1][1], _ci_end) if _ci_a else _ci_end
                 _new_ci = (_ci_a[:-1] + [[_ci_a[-1][0], _new_end]]) if _ci_a else [[0.0, _new_end]]
-                result[_ji - 1] = _pa.model_copy(update={"close_intervals": _new_ci})
+                # Drop last ci if the resulting close interval would be < 1 s.
+                if _new_ci and _new_ci[-1][1] - _new_ci[-1][0] < _JUMP_CLOSE_MIN:
+                    _new_ci = _new_ci[:-1]
+                if _new_ci:
+                    result[_ji - 1] = _pa.model_copy(update={"close_intervals": _new_ci})
+                else:
+                    result[_ji - 1] = _pa.model_copy(update={"shot": "wide", "close_intervals": []})
             warnings.append(f"jump-seam at {_pa.end:.2f}: forced wide tail on prev beat")
 
     # Snap close_intervals within _SNAP_THRESH of window start/end to the boundary.
@@ -2000,15 +2012,20 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
 
     # Option 2: absorb short wide tail of a segment into close when next segment starts close.
     # "Short tail" = < min_shot in output time. Jump-seam seams (forced shot changes) excepted.
+    # Also skip the first effective segment when the reel has a cold_open: cold_open is always
+    # close, so the first regular shot should remain wide (close→wide alternation after the hook).
     _js_set: set = set()
     if reel.beat_gap_sec is not None:
         for _k in range(1, len(result)):
             _g2 = result[_k].start - result[_k - 1].end
             if result[_k].start < result[_k - 1].start or _g2 > _JUMP_GAP_MAX:
                 _js_set.add(_k)
+    _has_cold_open = getattr(reel, "cold_open", None) is not None
     for _i2 in range(len(result) - 1):
         if _i2 + 1 in _js_set:
             continue
+        if _i2 == 0 and _has_cold_open:
+            continue  # preserve wide→close alternation after close cold_open
         _s2 = result[_i2]
         _dur2 = _s2.end - _s2.start
         _ci2 = list(getattr(_s2, "close_intervals", []))
@@ -2030,17 +2047,27 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             else:
                 result[_i2] = _s2.model_copy(update={"close_intervals": [[a, b] for a, b in _new2]})
 
-    # Flash detection: output-time shot spans < 0.5s are errors (source-time fillers excluded).
-    _FLASH_MIN = 0.5
+    # Short-shot check (Pass 4): any output-time span < min_shot is [ERROR].
+    # Exception: a span created by forced jump-seam enforcement may be >= 1.0 s (still a degraded
+    # result but not a render-breaking flash). Compute jump-seam output-time boundary positions.
+    _JUMP_SEAM_MIN = 1.0
+    _jb_out: set = set()
+    if reel.beat_gap_sec is not None:
+        _op = 0.0
+        for _kj, _sj in enumerate(result):
+            _op += _sj.end - _sj.start
+            if _kj + 1 < len(result):
+                _gj = result[_kj + 1].start - _sj.end
+                if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
+                    _jb_out.add(round(_op, 6))
     for _stype, _sa, _se in _shot_spans_output(result):
-        if _se - _sa < _FLASH_MIN:
-            warnings.append(f"[ERROR] flash {_stype} shot {_se - _sa:.3f}s at output {_sa:.2f}-{_se:.2f}")
-
-    # Pass 4: final min-shot check — output-time spans only (source-time fillers excluded).
-    for _stype4, _sa4, _se4 in _shot_spans_output(result):
-        _dur4 = _se4 - _sa4
-        if _dur4 < min_shot:
-            warnings.append(f"short {_stype4} span remaining: {_dur4:.2f}s < {min_shot}s")
+        _dsp = _se - _sa
+        if _dsp >= min_shot:
+            continue
+        if _jb_out and any(abs(_jb - _se) < 0.02 or abs(_jb - _sa) < 0.02 for _jb in _jb_out):
+            if _dsp >= _JUMP_SEAM_MIN:
+                continue  # forced jump-seam span, >= 1.0 s minimum → allowed
+        warnings.append(f"[ERROR] short {_stype} span {_dsp:.3f}s at output {_sa:.2f}-{_se:.2f}")
 
     if result != _orig_segs:
         reel.segments = result

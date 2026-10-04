@@ -407,15 +407,15 @@ def test_snap_does_not_move_ci_outside_threshold():
 
 
 def test_flash_detection_flags_short_wide_gap():
-    """A wide gap < 0.5 s that is not snapped away (> 0.15 s from boundary) gets [ERROR] warning."""
-    # ci starts at 0.3 s → 0.3 s wide flash before close, not snapped (> 0.15 threshold)
+    """A wide gap < min_shot that is not snapped away (> 0.15 s from boundary) gets [ERROR] warning."""
+    # ci starts at 0.3 s → 0.3 s wide span before close, not snapped (> 0.15 threshold)
     segs = [_seg(0, 10, "wide", [[0.3, 8.0]])]
     reel = _reel(segs)
     from autoreels.__main__ import _stage_two_shot_auto
     _stage_two_shot_auto([reel], [], render_cfg=_cfg())
     warns = getattr(reel, "_two_shot_warnings", [])
-    assert any("[ERROR]" in w and "flash" in w for w in warns), (
-        f"expected [ERROR] flash warning for 0.3 s wide gap, got: {warns}"
+    assert any("[ERROR]" in w and "short" in w for w in warns), (
+        f"expected [ERROR] short span warning for 0.3 s wide gap, got: {warns}"
     )
 
 
@@ -445,4 +445,65 @@ def test_small_gap_merged_no_flash():
     warns = getattr(reel, "_two_shot_warnings", [])
     assert not any("[ERROR]" in w for w in warns), (
         f"no [ERROR] expected after merge; got: {warns}"
+    )
+
+
+# ── PART 2: cold_open first effective segment not absorbed by option 2 ───────────────────────
+
+def test_cold_open_first_seg_not_absorbed_by_option2():
+    """Reel with a cold_open: the first effective segment must not be absorbed to close
+    by option 2, even when it is wide and < min_shot.
+
+    cold_open is always close (invariant). After the hook, the first regular shot should
+    remain wide (close→wide alternation). Option 2 must skip i==0 when cold_open is present.
+    """
+    from autoreels.core.models import Reel
+    segs = [
+        _seg(100.0, 102.0),    # seg0: wide 2.0 s — short (< min_shot=2.5s), but after cold_open
+        _seg(103.0, 110.0, "close"),  # seg1: close
+    ]
+    reel = _reel(segs)
+    # Attach a cold_open (always close by rule)
+    reel.cold_open = _seg(110.5, 114.5, "close")
+
+    from autoreels.__main__ import _stage_two_shot_auto
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    result = reel.effective_segments()
+
+    assert result[0].shot == "wide", (
+        "first effective segment must stay wide after cold_open — "
+        "option 2 must not absorb it (cold_open provides the close context)"
+    )
+
+
+# ── PART 3: jump-seam close_interval truncation must not leave a sub-min-shot span ───────────
+
+def test_jump_seam_no_sub_min_shot_span():
+    """Lecture r01: jump-seam enforcement on beat3 truncates ci=[[0.06,8.32]] to [[2.94,3.55]].
+
+    The resulting close span 3.55-2.94=0.61 s is < min_shot (2.5 s). With _JUMP_CLOSE_MIN=1.0,
+    that ci must be dropped entirely → beat3 becomes entirely wide, no [ERROR] warning.
+    """
+    segs = [
+        _seg(66.10, 72.15, "wide", [[0.0, 6.05]]),  # merged_b1b2 after pre-merge (6.05 s close)
+        _seg(81.56, 89.88, "wide", [[0.06, 8.32]]),  # beat3: c: annotation, 8.26 s close span
+        _seg(72.74, 81.54, "close"),                  # merged_b4b5 after pre-merge
+    ]
+    reel = _apply_beat(segs)
+    warns = getattr(reel, "_two_shot_warnings", [])
+
+    # No [ERROR] for short spans
+    error_warns = [w for w in warns if "[ERROR]" in w]
+    assert not error_warns, (
+        f"no [ERROR] expected after jump-seam JUMP_CLOSE_MIN fix; got: {error_warns}"
+    )
+
+    result = reel.effective_segments()
+    # beat3 (result[1]) must be entirely wide — truncated ci was < 1.0 s, so dropped
+    b3 = result[1]
+    b3_has_close_end = b3.shot == "close" or (
+        b3.close_intervals and b3.close_intervals[-1][1] > (b3.end - b3.start) - 1.0 / 60.0
+    )
+    assert not b3_has_close_end, (
+        f"beat3 must end wide (sub-min-shot ci dropped); got shot={b3.shot} ci={b3.close_intervals}"
     )
