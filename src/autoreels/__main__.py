@@ -1581,6 +1581,36 @@ def _shot_spans_with_times(segs) -> "list[tuple[str, float, float]]":
     return merged
 
 
+def _shot_spans_output(segs) -> "list[tuple[str, float, float]]":
+    """(shot_type, out_start, out_end) in output timeline — source-time fillers excluded."""
+    raw: list = []
+    out = 0.0
+    for seg in segs:
+        dur = seg.end - seg.start
+        ci = getattr(seg, "close_intervals", [])
+        if seg.shot == "close" and not ci:
+            raw.append(("close", out, out + dur))
+        elif ci:
+            pos = 0.0
+            for ct0, ct1 in ci:
+                if ct0 > pos + 0.001:
+                    raw.append(("wide", out + pos, out + ct0))
+                raw.append(("close", out + ct0, out + ct1))
+                pos = ct1
+            if pos < dur - 0.001:
+                raw.append(("wide", out + pos, out + dur))
+        else:
+            raw.append(("wide", out, out + dur))
+        out += dur
+    merged: list = []
+    for stype, sa, se in raw:
+        if merged and merged[-1][0] == stype:
+            merged[-1] = (stype, merged[-1][1], se)
+        else:
+            merged.append((stype, sa, se))
+    return [(s, a, e) for s, a, e in merged]
+
+
 def _ensure_smap(
     smap_path: "Path",
     source: "Path | None",
@@ -1694,6 +1724,51 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     segs = reel.effective_segments()
     if not segs:
         return
+    _orig_segs = segs  # saved to detect pre-merge changes in the final update check
+
+    # Pre-merge: adjacent same-source-flow segments with gap < _MERGE_GAP_MAX are merged.
+    # This collapses the sub-2-frame wide flash that appears between Whisper-jittered segment ends.
+    # "Same source flow" = gap >= 0 (not backward) and gap < _MERGE_GAP_MAX (not a jump seam).
+    # The gap is absorbed into the close region of the preceding segment so no wide sliver remains.
+    _MERGE_GAP_MAX = 0.1  # > 2 frames at any fps from 20-60 Hz
+
+    def _seg_eff_ci(s):
+        """close_intervals as effective list: shot=close/no-ci → [(0, dur)]."""
+        ci = list(getattr(s, "close_intervals", []))
+        return ci if (s.shot != "close" or ci) else [(0.0, s.end - s.start)]
+
+    _merged: list = [segs[0]]
+    for _s in segs[1:]:
+        _p = _merged[-1]
+        _gap = _s.start - _p.end
+        if 0.0 <= _gap < _MERGE_GAP_MAX:
+            _pdur = _p.end - _p.start
+            _pci  = _seg_eff_ci(_p)
+            _sci  = _seg_eff_ci(_s)
+            # If prev ends close, absorb the gap into the last close interval.
+            _pci2 = list(_pci)
+            if _pci2 and abs(_pci2[-1][1] - _pdur) < 0.001:
+                _pci2[-1] = (_pci2[-1][0], _pdur + _gap)
+            # Shift seg's ci to the merged coordinate space.
+            _sci2 = [(ct0 + _pdur + _gap, ct1 + _pdur + _gap) for ct0, ct1 in _sci]
+            # Build merged ci, collapsing touching intervals.
+            _mci: list = []
+            for _ct0, _ct1 in _pci2 + _sci2:
+                if _mci and abs(_mci[-1][1] - _ct0) < 0.001:
+                    _mci[-1] = (_mci[-1][0], _ct1)
+                else:
+                    _mci.append((_ct0, _ct1))
+            _new_dur = _pdur + _gap + (_s.end - _s.start)
+            # Full-close if single ci spanning the whole merged segment.
+            if len(_mci) == 1 and _mci[0][0] < 0.001 and abs(_mci[0][1] - _new_dur) < 0.001:
+                _merged[-1] = _p.model_copy(update={"shot": "close", "end": _s.end,
+                                                     "close_intervals": []})
+            else:
+                _merged[-1] = _p.model_copy(update={"shot": "wide", "end": _s.end,
+                                                     "close_intervals": [[ct0, ct1] for ct0, ct1 in _mci]})
+        else:
+            _merged.append(_s)
+    segs = _merged
 
     # Pass 1: alternation at seams, preserving manual assignments.
     # Manual = shot='close' OR non-empty close_intervals (c: annotations). wide+ci from c: is
@@ -1923,18 +1998,51 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         if _changed:
             result[_ji] = _s.model_copy(update={"close_intervals": _nc})
 
-    # Flash detection: any shot span < 0.5s is an error (sub-frame flashes disturb the eye).
+    # Option 2: absorb short wide tail of a segment into close when next segment starts close.
+    # "Short tail" = < min_shot in output time. Jump-seam seams (forced shot changes) excepted.
+    _js_set: set = set()
+    if reel.beat_gap_sec is not None:
+        for _k in range(1, len(result)):
+            _g2 = result[_k].start - result[_k - 1].end
+            if result[_k].start < result[_k - 1].start or _g2 > _JUMP_GAP_MAX:
+                _js_set.add(_k)
+    for _i2 in range(len(result) - 1):
+        if _i2 + 1 in _js_set:
+            continue
+        _s2 = result[_i2]
+        _dur2 = _s2.end - _s2.start
+        _ci2 = list(getattr(_s2, "close_intervals", []))
+        if _s2.shot == "close" and not _ci2:
+            continue
+        _trail2 = (_dur2 - _ci2[-1][1]) if _ci2 else _dur2
+        if not (0.001 < _trail2 < min_shot):
+            continue
+        _nxt2 = result[_i2 + 1]
+        _nci2 = list(getattr(_nxt2, "close_intervals", []))
+        if not ((_nxt2.shot == "close" and not _nci2) or (_nci2 and _nci2[0][0] < 0.001)):
+            continue
+        if not _ci2:
+            result[_i2] = _s2.model_copy(update={"shot": "close", "close_intervals": []})
+        else:
+            _new2 = _ci2[:-1] + [(_ci2[-1][0], _dur2)]
+            if len(_new2) == 1 and _new2[0][0] < 0.001 and abs(_new2[0][1] - _dur2) < 0.001:
+                result[_i2] = _s2.model_copy(update={"shot": "close", "close_intervals": []})
+            else:
+                result[_i2] = _s2.model_copy(update={"close_intervals": [[a, b] for a, b in _new2]})
+
+    # Flash detection: output-time shot spans < 0.5s are errors (source-time fillers excluded).
     _FLASH_MIN = 0.5
-    for _stype, _sa, _se in _shot_spans_with_times(result):
+    for _stype, _sa, _se in _shot_spans_output(result):
         if _se - _sa < _FLASH_MIN:
-            warnings.append(f"[ERROR] flash {_stype} shot {_se - _sa:.3f}s at {_sa:.2f}-{_se:.2f}")
+            warnings.append(f"[ERROR] flash {_stype} shot {_se - _sa:.3f}s at output {_sa:.2f}-{_se:.2f}")
 
-    # Pass 4: final min-shot check — warn if any merged span (including fillers) is < min_shot.
-    for stype, dur in _shot_spans_merged(result):
-        if dur < min_shot:
-            warnings.append(f"short {stype} span remaining: {dur:.2f}s < {min_shot}s")
+    # Pass 4: final min-shot check — output-time spans only (source-time fillers excluded).
+    for _stype4, _sa4, _se4 in _shot_spans_output(result):
+        _dur4 = _se4 - _sa4
+        if _dur4 < min_shot:
+            warnings.append(f"short {_stype4} span remaining: {_dur4:.2f}s < {min_shot}s")
 
-    if result != list(segs):
+    if result != _orig_segs:
         reel.segments = result
     if warnings:
         reel._two_shot_warnings = getattr(reel, "_two_shot_warnings", []) + warnings

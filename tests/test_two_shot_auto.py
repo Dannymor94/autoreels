@@ -317,12 +317,14 @@ def _apply_beat(segs, words=None, **cfg_kw):
 
 
 def test_jump_seam_r01_forces_shot_change():
-    """Lecture r01 beat order: both non-adjacent seams must produce a shot change.
+    """Lecture r01 beat order: non-adjacent source seams must produce shot changes.
 
-    Seam beat2→beat3 (source gap 9.41 s) and seam beat3→beat4 (backward jump)
-    must each have a wide-to-close or close-to-wide transition in the output.
-    Previously: beat3 ci was cleared → seam beat2→beat3 was close→wide-flash→close;
-    seam beat3→beat4 was close→close (no change).
+    beat1=[66.10-69.02] and beat2=[69.04-72.15] have a 0.02 s source gap → pre-merged.
+    beat4=[72.74-78.22] and beat5=[78.24-81.54] have a 0.02 s source gap → pre-merged.
+    After pre-merge: 3 segments — merged_b1b2, beat3, merged_b4b5.
+
+    Jump seam merged_b1b2→beat3 (source gap 9.41 s): merged_b1b2 must end WIDE.
+    Jump seam beat3→merged_b4b5 (backward 89.88→72.74): beat3 must end WIDE.
     """
     segs = [
         _seg(66.10, 69.02),                          # beat1 auto
@@ -333,23 +335,29 @@ def test_jump_seam_r01_forces_shot_change():
     ]
     reel = _apply_beat(segs)
     result = reel.effective_segments()
+    # beat1+beat2 merged (0.02 s gap), beat4+beat5 merged (0.02 s gap) → 3 segments
+    assert len(result) == 3, (
+        f"expected 3 segments after pre-merge; got {len(result)}: {[(s.start, s.end) for s in result]}"
+    )
     hf = 1.0 / 60.0
 
-    # jump seam beat2→beat3 (gap 9.41 s): beat2 must end wide, beat3 must start close
-    b2, b3 = result[1], result[2]
-    dur2 = b2.end - b2.start
-    ci2  = b2.close_intervals
-    b2_ends_close = b2.shot == "close" or (ci2 and ci2[-1][1] > dur2 - hf)
-    assert not b2_ends_close, "jump seam beat2→beat3: beat2 must end WIDE (forced wide tail)"
+    # jump seam result[0]→result[1] (gap 9.41 s): result[0] must end WIDE, result[1] must start CLOSE
+    mb12, b3 = result[0], result[1]
+    dur_mb12 = mb12.end - mb12.start
+    ci_mb12 = mb12.close_intervals
+    assert not (mb12.shot == "close" or (ci_mb12 and ci_mb12[-1][1] > dur_mb12 - hf)), (
+        "jump seam merged_b1b2→beat3: merged_b1b2 must end WIDE (forced wide tail)"
+    )
     b3_starts_close = b3.shot == "close" or (b3.close_intervals and b3.close_intervals[0][0] < hf)
-    assert b3_starts_close, "jump seam beat2→beat3: beat3 must start CLOSE (after snap)"
+    assert b3_starts_close, "jump seam merged_b1b2→beat3: beat3 must start CLOSE (after snap)"
 
-    # jump seam beat3→beat4 (backward, 89.88→72.74): beat3 must end wide, beat4 must start close
+    # jump seam result[1]→result[2] (backward 89.88→72.74): beat3 must end WIDE
     dur3 = b3.end - b3.start
-    ci3  = b3.close_intervals
-    b3_ends_close = b3.shot == "close" or (ci3 and ci3[-1][1] > dur3 - hf)
-    assert not b3_ends_close, "jump seam beat3→beat4: beat3 must end WIDE (forced wide tail)"
-    assert result[3].shot == "close", "jump seam beat3→beat4: beat4 must start CLOSE"
+    ci3 = b3.close_intervals
+    assert not (b3.shot == "close" or (ci3 and ci3[-1][1] > dur3 - hf)), (
+        "jump seam beat3→merged_b4b5: beat3 must end WIDE (forced wide tail)"
+    )
+    assert result[2].shot == "close", "jump seam beat3→merged_b4b5: merged_b4b5 must start CLOSE"
 
 
 def test_jump_seam_r06_shot_changes():
@@ -408,4 +416,33 @@ def test_flash_detection_flags_short_wide_gap():
     warns = getattr(reel, "_two_shot_warnings", [])
     assert any("[ERROR]" in w and "flash" in w for w in warns), (
         f"expected [ERROR] flash warning for 0.3 s wide gap, got: {warns}"
+    )
+
+
+# ── Part 2: pre-merge collapses sub-0.1s gap; no flash ───────────────────────────────────────
+
+def test_small_gap_merged_no_flash():
+    """Lecture r01 case: beat4=[72.74-78.22] close + beat5=[78.24-81.54] close have a 0.02 s gap.
+
+    Pre-merge (gap < 0.1 s) must merge them into a single close segment.
+    The output-time flash check must report no [ERROR] (no source-time filler treated as flash).
+    """
+    segs = [
+        _seg(72.74, 78.22, "close"),   # beat4
+        _seg(78.24, 81.54, "close"),   # beat5, gap=0.02 s < _MERGE_GAP_MAX=0.1 s
+    ]
+    # Use a plain reel (non-beat) — pre-merge applies regardless of beat_gap_sec.
+    from autoreels.__main__ import _stage_two_shot_auto
+    reel = _reel(segs)
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    result = reel.effective_segments()
+
+    assert len(result) == 1, f"pre-merge should collapse 2 segments into 1; got {len(result)}"
+    assert result[0].shot == "close", "merged segment must be close"
+    assert result[0].start == pytest.approx(72.74)
+    assert result[0].end == pytest.approx(81.54)
+
+    warns = getattr(reel, "_two_shot_warnings", [])
+    assert not any("[ERROR]" in w for w in warns), (
+        f"no [ERROR] expected after merge; got: {warns}"
     )
