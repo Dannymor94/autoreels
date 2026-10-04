@@ -289,3 +289,123 @@ def test_property_no_short_spans_random_boundaries():
                     f"{stype} {dur:.1f}s > {max_s}s with no 'no candidate' warning; "
                     f"boundaries={positions}; warns={warns}"
                 )
+
+
+# ── Part 2: c: annotation preserved; jump seams force shot change ─────────────────────────────
+
+def test_ci_annotation_not_cleared_by_pass1():
+    """wide+ci segments (c: annotations) must be treated as manual — Pass 1 must not clear ci."""
+    segs = [_seg(0, 5), _seg(6, 14, "wide", [[2.0, 8.0]])]
+    out = _apply(segs)
+    # c: annotation: ci must be preserved intact
+    assert out[1].shot == "wide",             "shot must stay wide (as annotated)"
+    assert out[1].close_intervals == [[2.0, 8.0]], "ci must not be cleared by Pass 1"
+
+
+def _reel_beat(segs, id="r01"):
+    """Reel with beat_gap_sec set — enables jump-seam logic."""
+    r = _reel(segs, id=id)
+    r.beat_gap_sec = 0.25
+    return r
+
+
+def _apply_beat(segs, words=None, **cfg_kw):
+    from autoreels.__main__ import _stage_two_shot_auto
+    reel = _reel_beat(segs)
+    _stage_two_shot_auto([reel], words or [], render_cfg=_cfg(**cfg_kw))
+    return reel
+
+
+def test_jump_seam_r01_forces_shot_change():
+    """Lecture r01 beat order: both non-adjacent seams must produce a shot change.
+
+    Seam beat2→beat3 (source gap 9.41 s) and seam beat3→beat4 (backward jump)
+    must each have a wide-to-close or close-to-wide transition in the output.
+    Previously: beat3 ci was cleared → seam beat2→beat3 was close→wide-flash→close;
+    seam beat3→beat4 was close→close (no change).
+    """
+    segs = [
+        _seg(66.10, 69.02),                          # beat1 auto
+        _seg(69.04, 72.15, "close"),                  # beat2 manual close
+        _seg(81.56, 89.88, "wide", [[0.06, 8.32]]),   # beat3 c: annotation
+        _seg(72.74, 78.22, "close"),                  # beat4 manual close
+        _seg(78.24, 81.54, "close"),                  # beat5 manual close
+    ]
+    reel = _apply_beat(segs)
+    result = reel.effective_segments()
+    hf = 1.0 / 60.0
+
+    # jump seam beat2→beat3 (gap 9.41 s): beat2 must end wide, beat3 must start close
+    b2, b3 = result[1], result[2]
+    dur2 = b2.end - b2.start
+    ci2  = b2.close_intervals
+    b2_ends_close = b2.shot == "close" or (ci2 and ci2[-1][1] > dur2 - hf)
+    assert not b2_ends_close, "jump seam beat2→beat3: beat2 must end WIDE (forced wide tail)"
+    b3_starts_close = b3.shot == "close" or (b3.close_intervals and b3.close_intervals[0][0] < hf)
+    assert b3_starts_close, "jump seam beat2→beat3: beat3 must start CLOSE (after snap)"
+
+    # jump seam beat3→beat4 (backward, 89.88→72.74): beat3 must end wide, beat4 must start close
+    dur3 = b3.end - b3.start
+    ci3  = b3.close_intervals
+    b3_ends_close = b3.shot == "close" or (ci3 and ci3[-1][1] > dur3 - hf)
+    assert not b3_ends_close, "jump seam beat3→beat4: beat3 must end WIDE (forced wide tail)"
+    assert result[3].shot == "close", "jump seam beat3→beat4: beat4 must start CLOSE"
+
+
+def test_jump_seam_r06_shot_changes():
+    """Lecture r06 beat order: all seams are jump seams; each must change shot.
+
+    beat1=[467.5-469.3] wide, beat2=[452.8-461.0] close, beat3=[469.7-473.2] wide.
+    Seam1 is a backward jump (beat1 ends wide → close ✓ always).
+    Seam2 is a forward jump 8.6 s (beat2 ends close → beat3 starts wide ✓ always).
+    No forced changes needed; this test guards against regression.
+    """
+    segs = [
+        _seg(467.526, 469.276),            # beat1 auto wide
+        _seg(452.786, 461.046, "close"),   # beat2 manual close
+        _seg(469.686, 473.226),            # beat3 auto wide
+    ]
+    reel = _apply_beat(segs)
+    result = reel.effective_segments()
+    assert result[0].shot == "wide",  "beat1 must be wide"
+    assert result[1].shot == "close", "beat2 must stay close (manual)"
+    assert result[2].shot == "wide",  "beat3 must be wide (shot changes at jump seam)"
+
+
+# ── Part 3: snap close_intervals to window boundary; flash detection ──────────────────────────
+
+def test_snap_ci_near_window_start():
+    """close_interval starting within 0.15 s of window start snaps to 0."""
+    segs = [_seg(0, 10, "wide", [[0.06, 5.0]])]
+    out = _apply(segs)
+    assert out[0].close_intervals[0][0] == 0.0, "ci within 0.15 s of start must snap to 0"
+    assert out[0].close_intervals[0][1] == 5.0, "ci end must not be moved"
+
+
+def test_snap_ci_near_window_end():
+    """close_interval ending within 0.15 s of window end snaps to segment duration."""
+    segs = [_seg(0, 10, "wide", [[3.0, 9.92]])]
+    out = _apply(segs)
+    # seg dur = 10.0; 10.0 - 9.92 = 0.08 < 0.15 → snap to 10.0
+    assert out[0].close_intervals[-1][1] == 10.0, "ci within 0.15 s of end must snap to seg dur"
+
+
+def test_snap_does_not_move_ci_outside_threshold():
+    """close_interval boundaries more than 0.15 s from window edge must not be moved."""
+    segs = [_seg(0, 10, "wide", [[0.20, 8.0]])]
+    out = _apply(segs)
+    assert out[0].close_intervals[0][0] == pytest.approx(0.20), "ci > 0.15 from start must not snap"
+    assert out[0].close_intervals[0][1] == pytest.approx(8.0),  "ci > 0.15 from end must not snap"
+
+
+def test_flash_detection_flags_short_wide_gap():
+    """A wide gap < 0.5 s that is not snapped away (> 0.15 s from boundary) gets [ERROR] warning."""
+    # ci starts at 0.3 s → 0.3 s wide flash before close, not snapped (> 0.15 threshold)
+    segs = [_seg(0, 10, "wide", [[0.3, 8.0]])]
+    reel = _reel(segs)
+    from autoreels.__main__ import _stage_two_shot_auto
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    warns = getattr(reel, "_two_shot_warnings", [])
+    assert any("[ERROR]" in w and "flash" in w for w in warns), (
+        f"expected [ERROR] flash warning for 0.3 s wide gap, got: {warns}"
+    )

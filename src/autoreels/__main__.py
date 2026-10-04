@@ -1696,12 +1696,12 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         return
 
     # Pass 1: alternation at seams, preserving manual assignments.
-    # Manual = shot='close' only. wide+ci is auto-computed by Pass 3 and gets recomputed each time
-    # (so filler-aware ci_end stays current across renders).
+    # Manual = shot='close' OR non-empty close_intervals (c: annotations). wide+ci from c: is
+    # preserved intact; Pass 3 only adds ci when a span exceeds max_shot.
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
     cur = "wide"
     for i, seg in enumerate(segs):
-        manual = seg.shot == "close"
+        manual = seg.shot == "close" or bool(getattr(seg, "close_intervals", []))
         if i > 0:
             prev_dur = segs[i - 1].end - segs[i - 1].start
             cur_dur = seg.end - seg.start
@@ -1711,7 +1711,15 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 cur = "close" if cur == "wide" else "wide"
         if manual:
             shot_assign.append(None)
-            cur = "close" if seg.shot == "close" else "wide"
+            # For wide+ci: track what shot the segment ENDS with (drives next-seam toggle).
+            _ci_m = getattr(seg, "close_intervals", [])
+            _dur_m = seg.end - seg.start
+            if seg.shot == "close":
+                cur = "close"
+            elif _ci_m and _ci_m[-1][1] > _dur_m - 1.0 / 60:
+                cur = "close"   # ci runs to end of segment
+            else:
+                cur = "wide"
         else:
             shot_assign.append(cur)
 
@@ -1862,6 +1870,64 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 _warned_spans.add(span_key)
         if not progress:
             break
+
+    # Jump-seam enforcement (beat reels only): non-adjacent source seams must show a shot change.
+    # Priority: forced jump-seam > c: annotation > auto rhythm (line 1704 preserves c:; this
+    # overrides c: only when both sides of a jump are close — prev beat's end is made wide).
+    # "Starts close" uses _SNAP_THRESH because the snap below will bring ci[0] to 0 anyway.
+    _JUMP_GAP_MAX = 2.0       # gap > 2s in source time → non-adjacent
+    _SNAP_THRESH = 0.15       # close_interval within this of window boundary → snap to boundary
+    if reel.beat_gap_sec is not None:
+        _hf = 1.0 / 60.0
+        for _ji in range(1, len(result)):
+            _pa, _pb = result[_ji - 1], result[_ji]
+            if _pb.start >= _pa.end - 0.001 and _pb.start - _pa.end <= _JUMP_GAP_MAX:
+                continue  # adjacent seam
+            _dur_a = _pa.end - _pa.start
+            _ci_a = list(getattr(_pa, "close_intervals", []))
+            _prev_ends_close = (_pa.shot == "close" or
+                                (_ci_a and _ci_a[-1][1] > _dur_a - _hf))
+            _ci_b = list(getattr(_pb, "close_intervals", []))
+            _next_starts_close = (_pb.shot == "close" or
+                                  (_ci_b and _ci_b[0][0] < _SNAP_THRESH))
+            if not (_prev_ends_close and _next_starts_close):
+                continue
+            # Force wide tail of min_shot on prev beat.
+            _ci_end = _dur_a - min_shot
+            if _ci_end <= _hf:
+                warnings.append(f"jump-seam at {_pa.end:.2f}: prev too short ({_dur_a:.2f}s) for wide tail")
+                continue
+            if _pa.shot == "close":
+                result[_ji - 1] = _pa.model_copy(update={"shot": "wide",
+                                                          "close_intervals": [[0.0, _ci_end]]})
+            else:
+                _new_end = min(_ci_a[-1][1], _ci_end) if _ci_a else _ci_end
+                _new_ci = (_ci_a[:-1] + [[_ci_a[-1][0], _new_end]]) if _ci_a else [[0.0, _new_end]]
+                result[_ji - 1] = _pa.model_copy(update={"close_intervals": _new_ci})
+            warnings.append(f"jump-seam at {_pa.end:.2f}: forced wide tail on prev beat")
+
+    # Snap close_intervals within _SNAP_THRESH of window start/end to the boundary.
+    # Eliminates sub-frame wide flashes at segment edges (e.g. ci starting at 0.06s).
+    for _ji, _s in enumerate(result):
+        _ci = list(getattr(_s, "close_intervals", []))
+        if not _ci:
+            continue
+        _dur = _s.end - _s.start
+        _nc, _changed = [], False
+        for _ct0, _ct1 in _ci:
+            if _ct0 < _SNAP_THRESH:
+                _ct0, _changed = 0.0, True
+            if _ct1 > _dur - _SNAP_THRESH:
+                _ct1, _changed = _dur, True
+            _nc.append([_ct0, _ct1])
+        if _changed:
+            result[_ji] = _s.model_copy(update={"close_intervals": _nc})
+
+    # Flash detection: any shot span < 0.5s is an error (sub-frame flashes disturb the eye).
+    _FLASH_MIN = 0.5
+    for _stype, _sa, _se in _shot_spans_with_times(result):
+        if _se - _sa < _FLASH_MIN:
+            warnings.append(f"[ERROR] flash {_stype} shot {_se - _sa:.3f}s at {_sa:.2f}-{_se:.2f}")
 
     # Pass 4: final min-shot check — warn if any merged span (including fillers) is < min_shot.
     for stype, dur in _shot_spans_merged(result):

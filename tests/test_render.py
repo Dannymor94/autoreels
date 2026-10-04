@@ -2910,3 +2910,47 @@ def test_synth_tail_bridge_frame_psnr(tmp_path):
         f"Bridge frame PSNR {psnr:.1f} dB < 30 dB — "
         f"seek may be landing on a wrong/corrupted keyframe"
     )
+
+
+# ── Part 1: cold_open words appear in Default .ass dialogue with Keyword override ────────────
+
+def test_cold_open_words_in_ass_with_keyword():
+    """Cold_open segment words must appear in Default dialogue; emph words get {\\rKeyword} tag.
+
+    render.py uses reel.playback_windows() for remap_to_output, so cold_open words land in
+    the output at t ∈ [0, co_dur). build_ass produces Default dialogue for all remapped words.
+    Both Default and Title dialogue exist and the title plate does not overlap (alignment 8 vs 2).
+    """
+    from autoreels.local.subtitles import build_ass, remap_to_output
+    from autoreels.core.models import make_cold_open_segment, Reel, Segment, Word
+
+    co = make_cold_open_segment(10.0, 13.0)   # 3 s cold-open in source
+    body = Segment(start=20.0, end=30.0)
+    reel = Reel(id="r01", start=20.0, end=30.0, score=80, hook="", title="T", description="d")
+    reel.cold_open = co
+    reel.segments = [body]
+
+    words = [
+        Word(word="ключевое", t0=10.5, t1=11.2, emph=True),  # cold_open, keyword
+        Word(word="слово",    t0=11.5, t1=12.0),               # cold_open, not keyword
+        Word(word="тело",     t0=21.0, t1=21.5),               # body segment
+    ]
+
+    remapped = remap_to_output(words, reel.playback_windows(), speed=1.0, xfade_sec=0.0)
+    # cold_open dur = 3.0 s → cold_open words map to t ∈ [0, 3.0)
+    assert len(remapped) == 3, "all three words must survive remap"
+    co_words = [w for w in remapped if w.t0 < 3.0]
+    assert len(co_words) == 2, "both cold_open words must be remapped to t < 3.0"
+
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    ass = build_ass(remapped, cfg=subs_cfg, clip_start=0.0, title="T", enable_keywords=True)
+
+    dialogues = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:")]
+    default_lines = [ln for ln in dialogues if ",Default," in ln]
+    title_lines   = [ln for ln in dialogues if ",Title,"   in ln]
+
+    assert default_lines, "cold_open words must produce Default dialogue lines in .ass"
+    assert title_lines,   "title plate must produce a Title dialogue line in .ass"
+    assert any("{\\rKeyword}" in ln for ln in default_lines), (
+        "emph word in cold_open must carry {\\rKeyword} override in a Default dialogue line"
+    )
