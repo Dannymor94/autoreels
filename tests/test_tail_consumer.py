@@ -704,7 +704,6 @@ def test_apply_tail_air_no_intruder_when_no_next_speech_in_window():
 
 def test_check_silence_at_clip_end_fires_for_manifest_overshoot():
     """Post-trim ERROR fires when rendered clip end still overlaps next-speech audible_start."""
-    import io, contextlib
     from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
     from autoreels.core.models import Word
 
@@ -719,16 +718,13 @@ def test_check_silence_at_clip_end_fires_for_manifest_overshoot():
     lookup = _smap_word_lookup(smap)
     last_word = Word(word="last", t0=8.5, t1=9.5)
 
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        _check_silence_at_clip_end("r01", last_word, 10.5, smap, lookup)
-    out = buf.getvalue()
-    assert "[ERROR]" in out, f"invariant must fire; got: {out!r}"
+    errors = _check_silence_at_clip_end("r01", last_word, 10.5, smap, lookup)
+    assert errors, "invariant must fire (non-empty list)"
+    assert any("[ERROR]" in e for e in errors), f"errors must contain [ERROR]; got: {errors}"
 
 
 def test_check_silence_at_clip_end_silent_when_end_before_onset():
     """No [ERROR] when clip_end (ae + 0.1) is before next-speech audible_start."""
-    import io, contextlib
     from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
     from autoreels.core.models import Word
 
@@ -743,11 +739,8 @@ def test_check_silence_at_clip_end_silent_when_end_before_onset():
     lookup = _smap_word_lookup(smap)
     last_word = Word(word="last", t0=8.5, t1=9.5)
 
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        _check_silence_at_clip_end("r01", last_word, 10.0, smap, lookup)
-    out = buf.getvalue()
-    assert "[ERROR]" not in out, f"invariant must be silent; got: {out!r}"
+    errors = _check_silence_at_clip_end("r01", last_word, 10.0, smap, lookup)
+    assert errors == [], f"invariant must be silent (empty list); got: {errors}"
 
 
 # ── synthetic tail helpers ────────────────────────────────────────────────────

@@ -2526,6 +2526,84 @@ def test_audio_invariant_silent_when_clean(
     assert "[ERROR]" not in captured.out, f"unexpected [ERROR]:\n{captured.out}"
 
 
+def test_error_clip_renamed_to_error_mp4(tmp_path, render_cfg, monkeypatch, capsys):
+    """[ERROR] clip is renamed to <id>.ERROR.mp4 and excluded from outputs (PART 4)."""
+    from autoreels.core.models import Segment
+    from autoreels.local import render
+    from autoreels.local.render import render_crop
+
+    class _FakeProc:
+        def __init__(self, cmd, **kw):
+            self.args = cmd
+            self.returncode = 0
+            self.stdout = iter([])
+            self.stderr = iter([])
+        def wait(self): return 0
+        def communicate(self, *a, **kw): return ("", "")
+        def poll(self): return 0
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
+    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
+    monkeypatch.setattr(
+        render, "_check_silence_at_clip_end",
+        lambda *a, **kw: ["  [ERROR] r01: speech between last-word ae=10.400s and clip_end=15.000s"],
+    )
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"error-rename-video")
+
+    reel = _reel("r01", 5.0, 15.0)
+    reel.segments = [Segment(start=5.0, end=15.0)]
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    # Pre-create the tmp file so the rename (tmp→final) succeeds, giving us a real file to rename
+    (out_dir / "r01.tmp.mp4").write_bytes(b"fake-rendered-data")
+
+    smap = {
+        "version": "4",
+        "words": [{"t0": 10.0, "t1": 10.4, "audible_start": 10.0, "audible_end": 10.4}],
+        "boundaries": [{"pause": 0.0, "untranscribed_speech": []}],
+        "intervals": [],
+    }
+    render_cfg = render_cfg.model_copy(update={"speech_map": False})
+
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg, smap=smap)
+
+    assert outputs == [], f"ERROR clip must not appear in outputs; got {outputs}"
+    assert (out_dir / "r01.ERROR.mp4").exists(), "clip must be renamed to r01.ERROR.mp4"
+    assert not (out_dir / "r01.mp4").exists(), "r01.mp4 must not exist (was renamed)"
+    captured = capsys.readouterr()
+    assert "[ERROR]" in captured.out
+
+
+def test_clean_clip_not_renamed(tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Clean clip (no [ERROR]) is in outputs and NOT renamed to .ERROR.mp4 (PART 4)."""
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"clean-clip-video")
+
+    reel = _reel("r01", 5.0, 12.0)
+    reel.segments = [Segment(start=5.0, end=12.0)]
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    smap = _smap_for_tail(last_t0=10.0, last_t1=10.4, next_speech_t0=999.0)
+    render_cfg = render_cfg.model_copy(update={"speech_map": False})
+
+    out_dir = tmp_path / "out"
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg, smap=smap)
+
+    assert not (out_dir / "r01.ERROR.mp4").exists(), "clean clip must not be renamed"
+    captured = capsys.readouterr()
+    assert "[ERROR]" not in captured.out
+
+
 # --------------------------------------------------------- PART 1: atomic write + integrity + lock
 
 def test_render_ffmpeg_receives_tmp_path(tmp_path, render_cfg, monkeypatch):

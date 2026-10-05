@@ -982,16 +982,16 @@ def _check_silence_at_clip_end(
     clip_end: float,
     smap: dict,
     lookup: dict,
-) -> None:
+) -> list[str]:
     """Audio invariant: no speech starts between the last word's audible end and clip_end.
 
     'Speech' = any smap word whose audible_start falls in (last_word_ae, clip_end).
     Untranscribed_speech intervals in boundaries are also checked.
-    Logs [AUDIO-INV] and lists the offending entries; does not raise so renders complete.
+    Returns a list of [ERROR] strings (empty = clean).
     """
     key = round(last_word.t0 * 1000)
     if key not in lookup:
-        return
+        return []
     _, entry = lookup[key]
     last_word_ae: float = entry["audible_end"]
 
@@ -1011,13 +1011,13 @@ def _check_silence_at_clip_end(
             if onset > last_word_ae and onset < clip_end:
                 violations.append(f"untranscribed_speech onset={onset:.3f}")
 
-    if violations:
-        print(
-            f"  [ERROR] {reel_id}: speech between last-word ae={last_word_ae:.3f}s "
-            f"and clip_end={clip_end:.3f}s (last='{last_word.word}' t0={last_word.t0:.3f}): "
-            + "; ".join(violations[:5]) + ("…" if len(violations) > 5 else ""),
-            flush=True,
-        )
+    if not violations:
+        return []
+    return [
+        f"  [ERROR] {reel_id}: speech between last-word ae={last_word_ae:.3f}s "
+        f"and clip_end={clip_end:.3f}s (last='{last_word.word}' t0={last_word.t0:.3f}): "
+        + "; ".join(violations[:5]) + ("…" if len(violations) > 5 else "")
+    ]
 
 
 class _TailFull(NamedTuple):
@@ -2435,6 +2435,7 @@ def _render_segments(
                 _tail_fade = (_word_end_out, _smap_fade_len)
             # Audio invariant: no speech between last-word audible end and clip end.
             # Synthetic tail: real content ends at cut_point; tail is room tone (no speech there).
+            _clip_errors: list[str] = []
             if smap is not None and reel.subtitles:
                 _inv_lookup = _smap_word_lookup(smap)
                 _real_content_end = (
@@ -2442,8 +2443,8 @@ def _render_segments(
                     if _synth_active and _synth_params_dict
                     else segs[-1].end
                 )
-                _check_silence_at_clip_end(
-                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup)
+                _clip_errors.extend(_check_silence_at_clip_end(
+                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
@@ -2719,7 +2720,6 @@ def _render_segments(
                 print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
                 out.unlink(missing_ok=True)
                 continue
-            outputs.append(out)
             # Invariant: the file must last the length _expected_output_duration derived from the
             # final post-snap windows — the same values fed to the concat graph. Tolerance is 2.5
             # frames at OUTPUT fps (see _duration_within_tolerance); a larger drift means a stage
@@ -2738,13 +2738,22 @@ def _render_segments(
             if _synth_active and out.exists():
                 _seam_err = _check_synth_tail_seam(out, clip_duration, _inv_fps, ffmpeg_bin)
                 if _seam_err:
-                    print(f"  [ERROR] {reel.id}: {_seam_err}", flush=True)
+                    _clip_errors.append(f"  [ERROR] {reel.id}: {_seam_err}")
             # Skip freeze detect for synthetic tail clips: the frozen/slowed tail is intentional.
             if not _synth_active:
                 for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
-                    print(f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)")
-            if emit_text:
-                _write_sidecar_text(out, reel, render_cfg)
+                    _clip_errors.append(
+                        f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)"
+                    )
+            if _clip_errors:
+                for _ce in _clip_errors:
+                    print(_ce, flush=True)
+                if out.exists():
+                    out.rename(out.with_name(f"{out.stem}.ERROR.mp4"))
+            else:
+                outputs.append(out)
+                if emit_text:
+                    _write_sidecar_text(out, reel, render_cfg)
         _unlock_dir(_lock_fd)
         return outputs
 
