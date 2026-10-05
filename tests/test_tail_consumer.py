@@ -791,8 +791,8 @@ def test_synth_tail_params_freeze_branch_short_gap():
 
 
 def test_find_room_tone_finds_longest_silence_within_window():
-    """_find_room_tone returns the full gap coords of the longest silence within ±3s of near_t=5."""
-    # window [2, 8]; gaps: [1.0,1.5] out, [2.0,3.5]=1.5s best, [4.0,4.5]=0.5s, [9.0,10.0] out
+    """_find_room_tone returns margin-adjusted start of the longest silence within ±3s."""
+    # window [2, 8]; gaps: [1.0,1.5] out, [2.0,3.5]=1.5s ≥ 0.6s best, [4.0,4.5]=0.5s < 0.6s skip
     smap = {
         "intervals": [
             [0.0, 1.0],
@@ -804,8 +804,44 @@ def test_find_room_tone_finds_longest_silence_within_window():
     }
     result = _find_room_tone(smap, near_t=5.0, window_sec=3.0)
     assert result is not None
-    assert result[0] == pytest.approx(2.0, abs=1e-6)
+    # start is gap_s + margin = 2.0 + 0.3 = 2.3 (0.3s margin from speech at 2.0)
+    assert result[0] == pytest.approx(2.3, abs=1e-6)
     assert result[1] == pytest.approx(3.5, abs=1e-6)
+
+
+def test_find_room_tone_speech_inside_silence_rejected():
+    """A gap containing a quiet word (interval inside) is split; both sub-gaps may be too short.
+
+    Regression: room tone was picked starting right at the speech boundary (0 margin),
+    so quiet trailing speech was audible. Fix: 0.3s margin on both sides + gaps < 2*margin skipped.
+    """
+    # [5.0, 5.8] is a gap — but [5.3, 5.6] is a quiet word inside it (sub-gap each 0.3s wide)
+    smap = {
+        "intervals": [
+            [0.0, 5.0],
+            [5.3, 5.6],   # quiet word in the middle of the silence
+            [5.8, 6.0],
+            [10.0, 11.0],
+        ],
+    }
+    # Sub-gaps: [5.0,5.3]=0.3s < 2*0.3=0.6s → skip; [5.6,5.8]=0.2s → skip; [6.0,10.0]=4s → best
+    result = _find_room_tone(smap, near_t=5.5, window_sec=60.0)
+    assert result is not None
+    # The only qualifying gap is [6.0, 10.0]; start = 6.0 + 0.3 = 6.3
+    assert result[0] == pytest.approx(6.3, abs=1e-6)
+    assert result[1] == pytest.approx(10.0, abs=1e-6)
+
+
+def test_find_room_tone_margin_skips_short_gaps():
+    """Gaps shorter than 2 * margin_sec are skipped entirely."""
+    smap = {
+        "intervals": [
+            [0.0, 5.0],
+            [5.5, 10.0],  # gap [5.0, 5.5] = 0.5s < 2*0.3=0.6s → skip
+        ],
+    }
+    result = _find_room_tone(smap, near_t=5.0, window_sec=60.0)
+    assert result is None, "gap < 2*margin_sec must be rejected"
 
 
 # ── overlap-error tolerance (1 output frame) ─────────────────────────────────

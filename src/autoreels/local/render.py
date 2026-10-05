@@ -1167,11 +1167,20 @@ def _tail_from_smap(
     return None if r is None else (r.end, r.fade_start, r.fade_len)
 
 
-def _find_room_tone(smap: dict, near_t: float, window_sec: float = 60.0) -> tuple[float, float] | None:
+def _find_room_tone(
+    smap: dict,
+    near_t: float,
+    window_sec: float = 60.0,
+    margin_sec: float = 0.3,
+) -> tuple[float, float] | None:
     """Find the longest silence within ±window_sec of near_t using smap speech intervals.
 
     Silences are gaps between consecutive smap intervals. Returns (start, end) of the
-    best gap (not clipped to the search window), or None when no gap is found.
+    selected gap where start is already offset by margin_sec away from speech, or None
+    when no suitable gap is found.
+
+    margin_sec: minimum distance from any speech on both sides. The returned start is
+        gap_s + margin_sec. Gaps shorter than 2 * margin_sec are skipped.
     """
     intervals = smap.get("intervals", [])
     if len(intervals) < 2:
@@ -1184,12 +1193,16 @@ def _find_room_tone(smap: dict, near_t: float, window_sec: float = 60.0) -> tupl
         gap_e = float(intervals[i + 1][0])
         if gap_e < lo or gap_s > hi:
             continue
+        if gap_e - gap_s < 2 * margin_sec:
+            continue  # too narrow — margin would overlap speech on either side
         # Measure duration clipped to window (for ranking), but return full gap for use.
         dur = min(gap_e, hi) - max(gap_s, lo)
         if dur > best_dur:
             best_dur = dur
             best = (gap_s, gap_e)
-    return best
+    if best is None:
+        return None
+    return (best[0] + margin_sec, best[1])
 
 
 def _synth_tail_params(
