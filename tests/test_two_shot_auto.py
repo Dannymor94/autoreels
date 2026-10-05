@@ -318,17 +318,22 @@ def _apply_beat(segs, words=None, **cfg_kw):
 
 
 def test_jump_seam_r01_forces_shot_change():
-    """Lecture r01 beat order: non-adjacent source seams must produce shot changes.
+    """Lecture r01 beat order: non-adjacent source seams must produce shot changes,
+    computed from the FINAL shot list after A-B-A.
 
     beat1=[66.10-69.02] and beat2=[69.04-72.15] have a 0.02 s source gap → pre-merged.
     beat4=[72.74-78.22] and beat5=[78.24-81.54] have a 0.02 s source gap → pre-merged.
     After pre-merge: 3 segments — merged_b1b2, beat3, merged_b4b5.
 
-    New rule: the NEXT beat gets the opposite starting shot (prev beat is never modified).
-    Jump seam merged_b1b2→beat3 (gap 9.41 s, both end/start close):
-      → beat3 is made entirely WIDE (min_shot < min_middle → no A-B-A short span).
-    Jump seam beat3→merged_b4b5 (backward): beat3 now ends WIDE → beat3→merged_b4b5
-      shot changes automatically (wide→close), no modification needed.
+    Processing:
+    1. Jump-seam pass 1 (pre-A-B-A): merged_b1b2 ends close (pre-merge ci runs to end)
+       → beat3 forced all-wide (min_shot < min_middle).
+    2. A-B-A: wide→close(3.11s)→wide pattern → removes pre-merge ci from merged_b1b2.
+       merged_b1b2 is now all-wide.
+    3. Jump-seam pass 2 (post-A-B-A): merged_b1b2 now ends wide; beat3 starts wide
+       → same shot → beat3 forced all-CLOSE.
+       beat3 now ends close; merged_b4b5 starts close → same → merged_b4b5 forced all-WIDE.
+    Final output: wide(6.05s) → close(8.32s) → wide(8.80s). All spans ≥ 4.0 s.
     """
     segs = [
         _seg(66.10, 69.02),                          # beat1 auto
@@ -343,35 +348,28 @@ def test_jump_seam_r01_forces_shot_change():
     assert len(result) == 3, (
         f"expected 3 segments after pre-merge; got {len(result)}: {[(s.start, s.end) for s in result]}"
     )
-    hf = 1.0 / 60.0
 
     mb12, b3, mb45 = result[0], result[1], result[2]
 
-    # merged_b1b2: pre-merge creates ci=[[2.94, 6.05]] (3.11s close < min_middle=4.0).
-    # A-B-A rule fires and removes the ci → merged_b1b2 becomes all-wide.
-    # (jump-seam rule still never modifies prev beat; A-B-A fires on the final shot list.)
+    # A-B-A removed 3.11s pre-merge ci → merged_b1b2 is all-wide
     assert mb12.shot == "wide" and not mb12.close_intervals, (
         f"A-B-A must remove 3.11s pre-merge ci from merged_b1b2; "
         f"got shot={mb12.shot} ci={mb12.close_intervals}"
     )
 
-    # jump seam [0]→[1]: beat3 must start WIDE (jump seam fired before A-B-A,
-    # when merged_b1b2 still ended close; decision is locked in _js_forced)
-    b3_starts_wide = b3.shot == "wide" and not (b3.close_intervals and b3.close_intervals[0][0] < hf)
-    assert b3_starts_wide, (
-        f"jump seam merged_b1b2→beat3: beat3 must start WIDE; got shot={b3.shot} ci={b3.close_intervals}"
+    # Jump-seam pass 2: merged_b1b2 ends wide → beat3 must be all-CLOSE (opposite of wide)
+    assert b3.shot == "close" and not b3.close_intervals, (
+        f"jump seam merged_b1b2→beat3: post-A-B-A pass must force beat3 to CLOSE; "
+        f"got shot={b3.shot} ci={b3.close_intervals}"
     )
 
-    # jump seam [1]→[2]: beat3 must end WIDE so shot changes at the seam
-    dur3 = b3.end - b3.start
-    ci3 = list(b3.close_intervals or [])
-    b3_ends_wide = not (b3.shot == "close" or (ci3 and ci3[-1][1] > dur3 - hf))
-    assert b3_ends_wide, (
-        f"jump seam beat3→merged_b4b5: beat3 must end WIDE; got shot={b3.shot} ci={b3.close_intervals}"
+    # Jump-seam pass 2: beat3 ends close → merged_b4b5 must be all-WIDE (opposite of close)
+    assert mb45.shot == "wide" and not mb45.close_intervals, (
+        f"jump seam beat3→merged_b4b5: post-A-B-A pass must force merged_b4b5 to WIDE; "
+        f"got shot={mb45.shot} ci={mb45.close_intervals}"
     )
-    assert mb45.shot == "close", "jump seam beat3→merged_b4b5: merged_b4b5 must start CLOSE"
 
-    # No [ERROR] warnings (no sub-min-shot spans)
+    # No [ERROR] warnings (no sub-min-shot spans, no same-shot jump seams)
     warns = getattr(reel, "_two_shot_warnings", [])
     assert not any("[ERROR]" in w for w in warns), (
         f"no [ERROR] expected; got: {[w for w in warns if '[ERROR]' in w]}"
@@ -396,6 +394,11 @@ def test_jump_seam_r06_shot_changes():
     assert result[0].shot == "wide",  "beat1 must be wide"
     assert result[1].shot == "close", "beat2 must stay close (manual)"
     assert result[2].shot == "wide",  "beat3 must be wide (shot changes at jump seam)"
+    # Both jump seams must produce shot changes (no [ERROR] same-shot-jump-seam warnings)
+    warns = getattr(reel, "_two_shot_warnings", [])
+    assert not any("[ERROR]" in w for w in warns), (
+        f"no [ERROR] expected for r06; got: {[w for w in warns if '[ERROR]' in w]}"
+    )
 
 
 # ── Part 3: snap close_intervals to window boundary; flash detection ──────────────────────────

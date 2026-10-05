@@ -1956,11 +1956,18 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # Jump-seam enforcement (beat reels only): non-adjacent source seams must show a shot change.
     # New rule: force the NEXT beat to start with the opposite shot (never modify prev beat).
     # If min_shot < min_middle: make entire next beat opposite to avoid creating a short A-B-A span.
+    # Called twice: before A-B-A (so A-B-A sees a sensible shot list) and after (to re-validate
+    # any jump seams whose prev beat was changed by A-B-A).
     _JUMP_GAP_MAX = 2.0       # gap > 2s in source time → non-adjacent
     _SNAP_THRESH = 0.15       # close_interval within this of window boundary → snap to boundary
     _js_set: set = set()      # indices where a jump seam STARTS (for Option 2 to skip)
     _js_forced: set = set()   # indices of beats that got forced starting-shot (for A-B-A guard)
-    if reel.beat_gap_sec is not None:
+
+    def _enforce_jump_seams() -> None:
+        _js_forced.clear()
+        _js_set.clear()
+        if reel.beat_gap_sec is None:
+            return
         _hf = 1.0 / 60.0
         for _ji in range(1, len(result)):
             _pa, _pb = result[_ji - 1], result[_ji]
@@ -1980,7 +1987,6 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 if _prev_ends_close:
                     # A ends close, B starts close → make B start wide
                     if min_shot < min_middle:
-                        # Forced wide span would be < min_middle → make entire B wide (no A-B-A)
                         result[_ji] = _pb.model_copy(update={"shot": "wide", "close_intervals": []})
                     else:
                         if _pb.shot == "close" and not _ci_b:
@@ -2006,6 +2012,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                                 "close_intervals": [[0.0, min(min_shot, _dur_b)]]})
                 _js_forced.add(_ji)
                 warnings.append(f"jump-seam at {_pa.end:.2f}: forced opposite start on next beat")
+
+    _enforce_jump_seams()
 
     # Snap close_intervals within _SNAP_THRESH of window start/end to the boundary.
     # Eliminates sub-frame wide flashes at segment edges (e.g. ci starting at 0.06s).
@@ -2112,6 +2120,33 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                         if _p_aba < _dur_aba - 0.001:
                             _spans_aba.append((_t0_aba + _p_aba, _t0_aba + _dur_aba, "wide", _k_aba))
                     _t0_aba += _dur_aba
+
+    # Re-run jump-seam enforcement after A-B-A: A-B-A may have changed the ending shot of a
+    # prev-beat segment, invalidating the first pass's decision for the next beat.
+    # Example (r01): A-B-A removes pre-merge ci from merged_b1b2 (was: ends close, now: ends wide)
+    # → the first pass forced beat3 to wide (opposite of close), but now beat3 should be close.
+    _enforce_jump_seams()
+
+    # Jump-seam final assertion: every jump seam must produce a shot change.
+    if reel.beat_gap_sec is not None:
+        _hf_js = 1.0 / 60.0
+        _out_t_js = 0.0
+        for _kjs in range(len(result)):
+            if _kjs > 0 and _kjs in _js_set:
+                _sp_js = result[_kjs - 1]
+                _dur_sp_js = _sp_js.end - _sp_js.start
+                _ci_sp_js = list(getattr(_sp_js, "close_intervals", []) or [])
+                _pec_js = (_sp_js.shot == "close" or
+                           (_ci_sp_js and _ci_sp_js[-1][1] > _dur_sp_js - _hf_js))
+                _sc_js = result[_kjs]
+                _ci_sc_js = list(getattr(_sc_js, "close_intervals", []) or [])
+                _nsc_js = (_sc_js.shot == "close" or
+                           (_ci_sc_js and _ci_sc_js[0][0] < _SNAP_THRESH))
+                if _pec_js == _nsc_js:
+                    warnings.append(
+                        f"[ERROR] jump seam at t={_out_t_js:.2f}s: same shot on both sides "
+                        f"({'close' if _pec_js else 'wide'}) — {reel.id}")
+            _out_t_js += result[_kjs].end - result[_kjs].start
 
     # Short-shot check (Pass 4): any output-time span < min_shot is [ERROR].
     # Exception: a span created by forced jump-seam enforcement may be >= 1.0 s (still a degraded
