@@ -505,13 +505,14 @@ def test_jump_seam_no_sub_min_shot_span():
     New rule: when same shot at seam and min_shot < min_middle, make entire next beat opposite.
     beat3 had ci=[[0.06,8.32]] (basically all-close). Jump-seam makes it shot=wide, ci=[]
     → no sub-min-shot span possible, no [ERROR] warning.
+    Uses beat_clip_shots_only_at_seams=False (old all-seams-toggle path).
     """
     segs = [
         _seg(66.10, 72.15, "wide", [[0.0, 6.05]]),  # merged_b1b2 after pre-merge (6.05 s close)
         _seg(81.56, 89.88, "wide", [[0.06, 8.32]]),  # beat3: c: annotation, 8.26 s close span
         _seg(72.74, 81.54, "close"),                  # merged_b4b5 after pre-merge
     ]
-    reel = _apply_beat(segs)
+    reel = _apply_beat(segs, beat_clip_shots_only_at_seams=False)
     warns = getattr(reel, "_two_shot_warnings", [])
 
     # No [ERROR] for short spans
@@ -534,13 +535,15 @@ def test_jump_seam_no_sub_min_shot_span():
 # ── PART 4: jump seam modifies NEXT beat; A-B-A merge ────────────────────────────────────────
 
 def test_jump_seam_next_beat_modified_not_prev():
-    """Jump-seam rule modifies the NEXT beat's starting shot, never the previous beat."""
+    """Jump-seam rule modifies the NEXT beat's starting shot, never the previous beat.
+    Uses beat_clip_shots_only_at_seams=False (old all-seams-toggle path).
+    """
     # A→B jump seam, both start/end close. Prev beat must be unchanged.
     segs = [
         _seg(0.0, 5.0, "close"),    # seg0: close (source 0-5)
         _seg(15.0, 20.0, "close"),  # seg1: close (gap 10s > 2s → jump seam)
     ]
-    reel = _apply_beat(segs)
+    reel = _apply_beat(segs, beat_clip_shots_only_at_seams=False)
     result = reel.effective_segments()
     assert len(result) == 2
     # seg0 (prev beat) must be unchanged — still close
@@ -557,13 +560,15 @@ def test_jump_seam_next_beat_modified_not_prev():
 
 
 def test_jump_seam_no_aba_when_min_shot_lt_min_middle():
-    """When min_shot < min_middle, jump seam makes entire next beat opposite (no A-B-A span)."""
+    """When min_shot < min_middle, jump seam makes entire next beat opposite (no A-B-A span).
+    Uses beat_clip_shots_only_at_seams=False (old all-seams-toggle path).
+    """
     # A (close) → B (close, 8s) at jump seam → B should become all-wide (no short-wide flash)
     segs = [
         _seg(0.0, 3.0, "close"),    # seg0: close 3s
         _seg(15.0, 23.0, "close"),  # seg1: close 8s (gap 12s → jump seam)
     ]
-    reel = _apply_beat(segs)
+    reel = _apply_beat(segs, beat_clip_shots_only_at_seams=False)
     result = reel.effective_segments()
     assert len(result) == 2
     seg1 = result[1]
@@ -620,6 +625,7 @@ def test_aba_merge_skips_jump_seam_forced():
 
     seg0(close) → seg1(forced wide by jump seam, 3s) → seg2(close) = A-B-A with short middle.
     A-B-A merge must skip seg1 because it is in _js_forced.
+    Uses beat_clip_shots_only_at_seams=False (old all-seams-toggle path).
     """
     # Gap 0.5 s between seg1 and seg2 to avoid pre-merge (needs < 0.1 s to pre-merge).
     segs = [
@@ -627,7 +633,7 @@ def test_aba_merge_skips_jump_seam_forced():
         _seg(15.0, 18.0, "close"),   # seg1: close 3s (gap 12s → jump seam → forced wide)
         _seg(18.5, 25.5, "close"),   # seg2: close 7s (gap 0.5s → not a jump seam)
     ]
-    reel = _apply_beat(segs)
+    reel = _apply_beat(segs, beat_clip_shots_only_at_seams=False)
     result = reel.effective_segments()
     assert len(result) == 3, f"expected 3 segments; got {len(result)}: {[(s.start, s.end) for s in result]}"
     # seg1 was forced wide by jump seam (3s < min_middle=4.0, so entire seg made wide, in _js_forced)
@@ -638,3 +644,68 @@ def test_aba_merge_skips_jump_seam_forced():
         f"seg1 must stay wide (jump-seam forced, A-B-A guard); got shot={result[1].shot} ci={result[1].close_intervals}"
     )
     assert result[2].shot == "close", "seg2 must remain close"
+
+
+# ── PART 5: beat_clip_shots_only_at_seams — new default rule ─────────────────
+
+def test_beat_shots_only_at_seams_r01():
+    """beat_clip_shots_only_at_seams=True: shot changes ONLY at jump seams.
+
+    r01 segment layout (source order in output, 5 segments):
+      seg0 66.10-69.02  (non-jump to seg1, gap=0.02s)
+      seg1 69.04-72.15  (jump to seg2, gap=9.41s)
+      seg2 81.56-89.88  (jump to seg3, backward 17s)
+      seg3 72.74-78.22  (non-jump to seg4, gap=0.02s)
+      seg4 78.24-81.54
+
+    After pre-merge (gap 0.02 s < 0.1 s merges adjacent segments):
+      merged01 66.10-72.15 (6.05 s)  → wide (no toggle at non-jump seam)
+      seg2     81.56-89.88 (8.32 s)  → close (jump toggle)
+      merged34 72.74-81.54 (8.80 s)  → wide (jump toggle back)
+
+    Expected: wide(0-6.05s) → close(6.05-14.37s) → wide(14.37-end)
+    """
+    segs = [
+        _seg(66.10, 69.02),  # wide (auto)
+        _seg(69.04, 72.15),  # wide (auto)
+        _seg(81.56, 89.88),  # wide (auto)
+        _seg(72.74, 78.22),  # wide (auto)
+        _seg(78.24, 81.54),  # wide (auto)
+    ]
+    reel = _apply_beat(segs)   # beat_clip_shots_only_at_seams=True by default
+    result = reel.effective_segments()
+    # Pre-merge collapses adjacent pairs → 3 segments
+    assert len(result) == 3, f"expected 3 after pre-merge; got {len(result)}: {[(s.start,s.end) for s in result]}"
+    shots = [s.shot for s in result]
+    assert shots == ["wide", "close", "wide"], (
+        f"expected [wide,close,wide] (non-jump seams don't toggle); got {shots}"
+    )
+    durs = [round(s.end - s.start, 2) for s in result]
+    assert durs == [6.05, 8.32, 8.80], f"expected durations [6.05, 8.32, 8.80]; got {durs}"
+    for s in result:
+        assert not s.close_intervals, f"no ci inside beats; got ci={s.close_intervals}"
+
+
+def test_beat_shots_only_at_seams_r06():
+    """beat_clip_shots_only_at_seams=True: r06 has only jump seams → all seams toggle.
+
+    r06 segment layout:
+      seg0 467.52-469.28  (jump to seg1, backward 14.7s)
+      seg1 452.79-461.05  (jump to seg2, gap=8.64s)
+      seg2 469.69-473.23
+
+    Expected shots: [wide, close, wide] — unchanged from the all-seams-toggle path.
+    """
+    segs = [
+        _seg(467.526, 469.276),   # wide (auto)
+        _seg(452.786, 461.046),   # wide (auto)
+        _seg(469.686, 473.226),   # wide (auto)
+    ]
+    reel = _apply_beat(segs, id="r06")
+    result = reel.effective_segments()
+    shots = [s.shot for s in result]
+    assert shots == ["wide", "close", "wide"], (
+        f"expected [wide,close,wide]; got {shots}"
+    )
+    for s in result:
+        assert not s.close_intervals, f"no ci inside beats; got ci={s.close_intervals} on seg {s.start}"

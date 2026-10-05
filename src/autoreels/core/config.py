@@ -642,6 +642,8 @@ class RenderConfig(BaseModel):
     two_shot_max_shot_sec: float = 9.0   # force a switch if any shot (wide OR close) exceeds this
     two_shot_min_sec: float = 2.5        # suppress a switch that would create a shorter shot
     two_shot_min_middle_sec: float = 4.0  # A-B-A middle span shorter than this is merged away
+    # M1.7 step 3: beat-clip shot rule. Shot changes ONLY at jump seams for beat reels.
+    beat_clip_shots_only_at_seams: bool = True
     # M1.7 step 1d: shot-change transitions inside close_intervals windows. Off by default.
     # Flag off → identical cmd. ("punch" crop-animation: future task, deferred.)
     shot_transition: str = "cut"         # "cut" only; punch deferred

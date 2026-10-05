@@ -1698,10 +1698,12 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
         pass  # two_shot_auto without speech_map: threshold used but not printed (no smap context)
 
     _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
+    _beat_seams_only = getattr(render_cfg, "beat_clip_shots_only_at_seams", True)
     for reel in reels:
         _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
                                   min_middle=_min_middle,
-                                  smap=smap, level1_min_pause=level1_min_pause)
+                                  smap=smap, level1_min_pause=level1_min_pause,
+                                  beat_shots_at_seams_only=_beat_seams_only)
 
     # Print switch table — essential for comparing smap-on vs smap-off.
     for reel in reels:
@@ -1721,7 +1723,8 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
 def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                                min_middle: float = 4.0,
                                smap: "dict | None" = None,
-                               level1_min_pause: float = 0.35) -> None:
+                               level1_min_pause: float = 0.35,
+                               beat_shots_at_seams_only: bool = True) -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
     from autoreels.cloud.edit import split_sentences as _sp
     segs = reel.effective_segments()
@@ -1776,16 +1779,34 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # Pass 1: alternation at seams, preserving manual assignments.
     # Manual = shot='close' OR non-empty close_intervals (c: annotations). wide+ci from c: is
     # preserved intact; Pass 3 only adds ci when a span exceeds max_shot.
+    #
+    # beat_shots_at_seams_only: for beat reels, only toggle at jump seams (source gap > 2 s or
+    # backward).  Auto-assigned shots from a prior run are NOT treated as manual — only human
+    # c: annotations (selection_source='human') are preserved.
+    _JUMP_GAP_P1 = 2.0   # same threshold as _JUMP_GAP_MAX defined later for jump-seam enforcement
+    _is_beat_shots_mode = beat_shots_at_seams_only and reel.beat_gap_sec is not None
+    _is_human_reel = getattr(reel, "selection_source", None) == "human"
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
     cur = "wide"
     for i, seg in enumerate(segs):
-        manual = seg.shot == "close" or bool(getattr(seg, "close_intervals", []))
+        # In beat_shots_mode with an auto reel: prior auto-assigned shots are NOT manual;
+        # only human c: annotations are preserved.
+        manual = (seg.shot == "close" or bool(getattr(seg, "close_intervals", []))) and (
+            _is_human_reel or not _is_beat_shots_mode
+        )
         if i > 0:
             prev_dur = segs[i - 1].end - segs[i - 1].start
             cur_dur = seg.end - seg.start
-            # Beat seams always toggle (they are explicit reorder points, not auto-switches).
-            # min_shot constrains auto-switching only.
-            if reel.beat_gap_sec is not None or (prev_dur >= min_shot and cur_dur >= min_shot):
+            if reel.beat_gap_sec is not None:
+                if _is_beat_shots_mode:
+                    # Only toggle at jump seams (non-adjacent source positions).
+                    _gap_i = segs[i].start - segs[i - 1].end
+                    if _gap_i < 0 or _gap_i > _JUMP_GAP_P1:
+                        cur = "close" if cur == "wide" else "wide"
+                else:
+                    # Beat seams always toggle (they are explicit reorder points, not auto-switches).
+                    cur = "close" if cur == "wide" else "wide"
+            elif prev_dur >= min_shot and cur_dur >= min_shot:
                 cur = "close" if cur == "wide" else "wide"
         if manual:
             shot_assign.append(None)
@@ -1800,6 +1821,25 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 cur = "wide"
         else:
             shot_assign.append(cur)
+
+    # Pass 1.5: for beat reels, a manual c: annotation in a beat block decides the WHOLE block.
+    # Adjacent segments (non-jump seams) inherit the closest manual shot.
+    if _is_beat_shots_mode:
+        _block: list[int] = [0]
+        _blocks: list[list[int]] = []
+        for _bi in range(1, len(segs)):
+            _gap = segs[_bi].start - segs[_bi - 1].end
+            if _gap < 0 or _gap > _JUMP_GAP_P1:
+                _blocks.append(_block)
+                _block = [_bi]
+            else:
+                _block.append(_bi)
+        _blocks.append(_block)
+        for _blk in _blocks:
+            if any(shot_assign[_bi] is None for _bi in _blk):
+                for _bi in _blk:
+                    if shot_assign[_bi] == "wide":
+                        shot_assign[_bi] = "close"
 
     # Pass 2: k: sentences prefer close (override "wide" → "close").
     _k_sents: set = set()
@@ -1828,6 +1868,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # Pass 3: iterative max-shot enforcement — loop until no span exceeds max_shot or no
     # candidate remains. Candidates restricted to [span_start+min, span_end-min] so both
     # resulting shots are >= min_shot by construction (filler-aware check for wide splits).
+    # Skipped for beat reels in beat_shots_at_seams_only mode: shot decisions are at jump-seam
+    # boundaries only; no ci splits inside a beat.
     result = list(new_segs)
     warnings: list = []
     _pass3_segs: set = set()  # segment indices that received ci from Pass 3 (max-shot enforcement)
@@ -1918,6 +1960,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
 
     _warned_spans: set = set()
     for _iter in range(50):
+        if _is_beat_shots_mode:    # beat reels: no ci splits inside a beat
+            break
         spans = _shot_spans_with_times(result)
         over = [(st, sa, se) for st, sa, se in spans if se - sa > max_shot]
         if not over:
