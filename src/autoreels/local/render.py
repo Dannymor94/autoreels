@@ -1895,6 +1895,8 @@ def _snap_close_intervals(segs: list[Segment], fps: float) -> list[Segment]:
     """Snap each segment's close_intervals boundaries to the source frame grid (1/fps).
 
     Same grid as _snap_windows_to_frames so overlay enable= expressions align with decoded frames.
+    After snapping: a pre-ci window shorter than 10 frames is also snapped to 0 to prevent
+    a visible flash where the previous segment ended on a different shot.
     """
     result = []
     for seg in segs:
@@ -1903,6 +1905,10 @@ def _snap_close_intervals(segs: list[Segment], fps: float) -> list[Segment]:
             result.append(seg)
         else:
             snapped = [[round(t0 * fps) / fps, round(t1 * fps) / fps] for t0, t1 in ci]
+            # A pre-ci window shorter than 10 frames creates a visible flash when the preceding
+            # segment ends on the other shot.  Snap to 0 so the overlay covers the full segment.
+            if snapped[0][0] * fps < 10:
+                snapped[0][0] = 0.0
             result.append(seg.model_copy(update={"close_intervals": snapped}))
     return result
 
@@ -2158,6 +2164,7 @@ def _render_segments(
             # Beat reels: segments are non-monotonic source windows — hard cuts only, no xfade.
             if reel.beat_gap_sec is not None and len(segs) > 1:
                 _ts_seam_xfades = [0.0] * (len(segs) - 1)
+                _ts_seam_visual = None  # dissolve would blend dissimilar close crops across jumps
 
             # Zoom vf: always built per-reel so zoompan runs at probed source fps (prevents A/V
             # drift). Also positions the gesture at z: sentence offset when set.

@@ -382,3 +382,51 @@ def test_seg_ends_close_half_frame_threshold_30fps():
     assert _seg_ends_close(seg, half_frame_30)
     seg2 = _seg(0.0, dur, close_intervals=[[0.0, 9.97]])
     assert not _seg_ends_close(seg2, half_frame_30)
+
+
+# ── Test 12: short pre-ci window snapped to zero (flash elimination) ──────────
+
+def test_snap_close_intervals_short_pre_window_snapped_to_zero():
+    """ci[0][0] resulting in < 10 rendered frames of pre-ci content is snapped to 0.
+
+    A 2-frame pre-ci window creates a visible flash when the previous segment ends
+    on the other shot (e.g. old auto-generated ci=[[0.06, 8.32]] at 30 fps gives 2 frames).
+    """
+    from autoreels.local.render import _snap_close_intervals
+    # 0.06 s at 30 fps → round(0.06*30)/30 = 2/30 ≈ 0.067 s → 2 frames < 10 → snap to 0
+    segs = [_seg(0.0, 9.0, close_intervals=[[0.06, 8.5]])]
+    result = _snap_close_intervals(segs, fps=30.0)
+    assert result[0].close_intervals[0][0] == 0.0, "2-frame pre-ci window must be snapped to 0"
+
+    # 0.4 s at 30 fps = 12 frames ≥ 10 → NOT snapped (legitimate mid-segment transition)
+    segs2 = [_seg(0.0, 9.0, close_intervals=[[0.4, 8.5]])]
+    result2 = _snap_close_intervals(segs2, fps=30.0)
+    assert result2[0].close_intervals[0][0] > 0.0, "12-frame pre-ci window must be kept"
+
+
+def test_beat_reel_no_visual_dissolve_at_same_shot_seam():
+    """Beat reels get hard cuts at all seams; visual dissolve must not apply even for same-shot seams.
+
+    The dissolve at a same-shot seam blends dissimilar frames (non-adjacent source positions),
+    producing 4 classifier-ambiguous frames that look like a flash.
+    Verified via _concat_segments_graph: seam_xfade_visual_durations=None → no xfade filter.
+    """
+    from autoreels.local.render import _two_shot_seam_xfades
+    segs = [_seg(5.0, 8.0, shot="close"), _seg(72.0, 77.0, shot="close")]
+    fps = 30.0
+    dissolve_sec = 4 / fps  # same as same_shot_dissolve_frames=4
+
+    # Without beat-reel guard, same-shot seam gets dissolve:
+    visual = _two_shot_seam_xfades(segs, fps, xfade_actual=0.0, ts_xf=False, dissolve_sec=dissolve_sec)
+    assert visual[0] > 0, "same-shot seam normally gets dissolve"
+
+    # seam_xfades=[0.0] (what beat-reel guard produces) forces hard cut regardless of visual:
+    fg_hard_cut, _, _ = _concat_segments_graph(
+        segs, 0.0, seam_xfades=[0.0], seam_xfade_visual_durations=None,
+    )
+    assert "xfade" not in fg_hard_cut, "seam_xfades=[0.0] must produce hard cut (no xfade filter)"
+    # seam_xfades=[dissolve] (non-beat same-shot path) applies dissolve:
+    fg_dissolve, _, _ = _concat_segments_graph(
+        segs, 0.0, seam_xfades=[dissolve_sec], seam_xfade_visual_durations=[dissolve_sec],
+    )
+    assert "xfade" in fg_dissolve, "non-beat same-shot seam should have xfade filter"
