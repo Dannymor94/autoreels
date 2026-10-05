@@ -1830,6 +1830,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # resulting shots are >= min_shot by construction (filler-aware check for wide splits).
     result = list(new_segs)
     warnings: list = []
+    _pass3_segs: set = set()  # segment indices that received ci from Pass 3 (max-shot enforcement)
 
     def _filler_gap(j: int) -> float:
         if j + 1 < len(result):
@@ -1863,6 +1864,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     warnings.append(f"no valid wide switch at {sw:.1f} ({level}, min-shot constraint)")
                     return False
                 result[ji] = s.model_copy(update={"close_intervals": ci[:insert_at] + [[rel, ci_end]] + ci[insert_at:]})
+                _pass3_segs.add(ji)
                 for k in range(ji + 1, len(result)):
                     if result[k].start >= span_end - 0.001:
                         break
@@ -1892,6 +1894,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                             if rel_sw > ci[ci_idx][0] + 0.001:
                                 new_ci.append([ci[ci_idx][0], rel_sw])
                             result[ji] = s.model_copy(update={"close_intervals": new_ci})
+                            _pass3_segs.add(ji)
                             switch_log.append((sw, "close→wide", level, pause_val))
                             warnings.append(f"switched close→wide at {sw:.2f}s ({level}, pause={pause_val:.3f}s)")
                             return True
@@ -1903,6 +1906,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     continue
                 rel = sw - s.start
                 result[ji] = s.model_copy(update={"shot": "wide", "close_intervals": [[0.0, rel]]})
+                _pass3_segs.add(ji)
                 for k in range(ji + 1, len(result)):
                     if result[k].start >= span_end - 0.001:
                         break
@@ -2083,8 +2087,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 if _sb_seg in _js_forced:
                     continue  # jump-seam forced shot — keep it
                 _s_mid = result[_sb_seg]
-                if list(getattr(_s_mid, "close_intervals", []) or []):
-                    continue  # partial-segment span from Pass 3 max-shot — preserve it
+                if _sb_seg in _pass3_segs:
+                    continue  # ci inserted by Pass 3 max-shot enforcement — preserve it
                 result[_sb_seg] = _s_mid.model_copy(update={"shot": _sa_sh, "close_intervals": []})
                 warnings.append(
                     f"A-B-A merge: {_sb_sh}({_sb_e - _sb_t:.2f}s) at t={_sb_t:.2f} → {_sa_sh}")

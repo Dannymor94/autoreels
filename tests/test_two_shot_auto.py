@@ -347,15 +347,16 @@ def test_jump_seam_r01_forces_shot_change():
 
     mb12, b3, mb45 = result[0], result[1], result[2]
 
-    # merged_b1b2 must be UNCHANGED — new rule never modifies prev beat
-    dur_mb12 = mb12.end - mb12.start
-    ci_mb12 = list(mb12.close_intervals or [])
-    mb12_ends_close = mb12.shot == "close" or (ci_mb12 and ci_mb12[-1][1] > dur_mb12 - hf)
-    assert mb12_ends_close, (
-        "merged_b1b2 must remain unchanged (prev beat not modified by jump-seam rule)"
+    # merged_b1b2: pre-merge creates ci=[[2.94, 6.05]] (3.11s close < min_middle=4.0).
+    # A-B-A rule fires and removes the ci → merged_b1b2 becomes all-wide.
+    # (jump-seam rule still never modifies prev beat; A-B-A fires on the final shot list.)
+    assert mb12.shot == "wide" and not mb12.close_intervals, (
+        f"A-B-A must remove 3.11s pre-merge ci from merged_b1b2; "
+        f"got shot={mb12.shot} ci={mb12.close_intervals}"
     )
 
-    # jump seam [0]→[1]: beat3 must start WIDE (opposite of merged_b1b2 which ends close)
+    # jump seam [0]→[1]: beat3 must start WIDE (jump seam fired before A-B-A,
+    # when merged_b1b2 still ended close; decision is locked in _js_forced)
     b3_starts_wide = b3.shot == "wide" and not (b3.close_intervals and b3.close_intervals[0][0] < hf)
     assert b3_starts_wide, (
         f"jump seam merged_b1b2→beat3: beat3 must start WIDE; got shot={b3.shot} ci={b3.close_intervals}"
@@ -586,6 +587,28 @@ def test_aba_merge_short_natural_middle():
     # seg1 must be merged into wide (no short close in the middle)
     assert result[1].shot == "wide" and not result[1].close_intervals, (
         f"short close middle must be merged to wide; got shot={result[1].shot} ci={result[1].close_intervals}"
+    )
+
+
+def test_aba_removes_premerge_ci():
+    """A-B-A must fire through pre-merge ci (not blocked by it).
+
+    Before fix: ci-guard blocked A-B-A whenever the middle segment had any ci,
+    including ci created by pre-merge (wide+close gap<0.1s → wide+ci).
+    After fix: only Pass-3 ci is protected (_pass3_segs); pre-merge ci is removed.
+    """
+    # wide(0-5) + close(5.05-7.5, gap=0.05) → pre-merge → wide(0-7.5, ci=[[5.05, 7.5]])
+    # ci span = 2.45s < min_middle=4.0 → A-B-A candidate
+    segs = [
+        _seg(0.0, 5.0),            # seg0: wide 5s
+        _seg(5.05, 7.5, "close"),  # seg1: close 2.45s (gap=0.05 → pre-merge with seg0)
+        _seg(9.0, 17.0),           # seg2: wide 8s
+    ]
+    out = _apply(segs)
+    assert len(out) == 2, f"expected 2 segments after pre-merge; got {len(out)}"
+    # pre-merge ci (2.45s close span) must be removed by A-B-A
+    assert out[0].shot == "wide" and not out[0].close_intervals, (
+        f"A-B-A must remove pre-merge ci; got shot={out[0].shot} ci={out[0].close_intervals}"
     )
 
 
