@@ -2651,9 +2651,11 @@ def _render_segments(
                     _vr = (f"{vseg}{reel_vf},fps={_fps_str},settb=expr=1/90000[v_real]" if reel_vf
                            else f"{vseg}fps={_fps_str},settb=expr=1/90000[v_real]")
                     _vs = f"[{_n}:v]{_synth_vc}[v_synth]"
-                    # aresample=async=1 normalizes loudnorm variable-duration frames before concat
-                    _ar = (f"{aseg}{reel_af},aresample=async=1:first_pts=0[a_real]"
-                           if reel_af else f"{aseg}aresample=async=1:first_pts=0[a_real]")
+                    # Reset PTS after loudnorm (its internal analysis delay shifts output PTS).
+                    # aresample=async=1:first_pts=0 caused ~2s silence at start by inserting
+                    # padding to fill the delayed PTS gap back to 0.
+                    _ar = (f"{aseg}{reel_af},asetpts=PTS-STARTPTS[a_real]"
+                           if reel_af else f"{aseg}asetpts=PTS-STARTPTS[a_real]")
                     _as = f"[{_n + 1}:a]{_synth_ac}[a_synth]"
                     # Single av-concat (same as two-pass _append_synth_tail_to_rendered)
                     # to avoid DTS discontinuity from separate v/a concat chains.

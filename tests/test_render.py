@@ -2954,3 +2954,62 @@ def test_cold_open_words_in_ass_with_keyword():
     assert any("{\\rKeyword}" in ln for ln in default_lines), (
         "emph word in cold_open must carry {\\rKeyword} override in a Default dialogue line"
     )
+
+
+@pytest.mark.integration
+def test_inline_synth_loudnorm_no_start_silence(tmp_path):
+    """loudnorm + asetpts=PTS-STARTPTS must not insert silence at the start.
+
+    Regression: aresample=async=1:first_pts=0 after loudnorm in an inline multi-input
+    filtergraph caused ~2s silence from t≈0.74s when loudnorm's internal analysis delay
+    shifted the output PTS above 0, and first_pts=0 padded it with silence.
+    Fix: replace aresample=async=1:first_pts=0 with asetpts=PTS-STARTPTS.
+    """
+    import shutil
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg not installed")
+
+    # Source: 15s sine wave — clearly non-silent baseline
+    src = tmp_path / "src.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc=size=1080x1920:rate=30:duration=15",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=15",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(src),
+    ], check=True, capture_output=True)
+
+    out = tmp_path / "out.wav"
+    # Replicate inline synth-tail audio chain: 3 windows with 2s pre-roll each → loudnorm → asetpts
+    r = subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-ss", "0.0", "-t", "5.0", "-i", str(src),
+        "-ss", "4.0", "-t", "5.0", "-i", str(src),
+        "-ss", "8.0", "-t", "5.0", "-i", str(src),
+        "-filter_complex",
+        "[0:a]atrim=start=2,asetpts=PTS-STARTPTS[a0];"
+        "[1:a]atrim=start=2,asetpts=PTS-STARTPTS[a1];"
+        "[2:a]atrim=start=2,asetpts=PTS-STARTPTS[a2];"
+        "[a0][a1][a2]concat=n=3:v=0:a=1[aseg];"
+        "[aseg]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS[aout]",
+        "-map", "[aout]", "-vn", str(out),
+    ], capture_output=True, text=True)
+    assert r.returncode == 0, f"ffmpeg failed: {r.stderr[:400]}"
+
+    # No silence > 0.2s starting before t=0.5s (rules out 2s start-silence regression)
+    probe = subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-i", str(out), "-t", "1.0",
+        "-af", "silencedetect=noise=-40dB:duration=0.2",
+        "-vn", "-f", "null", "-",
+    ], capture_output=True, text=True)
+    start_silences = [
+        float(ln.split("silence_start:")[1].strip())
+        for ln in probe.stderr.splitlines()
+        if "silence_start:" in ln and float(ln.split("silence_start:")[1].strip()) < 0.5
+    ]
+    assert not start_silences, (
+        f"Long silence (>0.2s) at start of audio: starts at {start_silences}s\n"
+        f"Regression: aresample=async=1:first_pts=0 was padding PTS-shifted loudnorm output"
+    )
