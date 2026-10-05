@@ -764,7 +764,7 @@ def test_synth_tail_params_room_below_threshold_fires():
     assert params["cut_point"] == pytest.approx(5.95, abs=1e-6)
     # bridge_dur = min(gap/2, 0.25) = min((6.1-5.8)/2, 0.25) = min(0.15, 0.25) = 0.15
     assert params["bridge_dur"] == pytest.approx(0.15, abs=1e-6)
-    assert not params["use_freeze"]   # 0.15 >= 0.1 → slow-mo
+    assert params["use_freeze"] is True   # always freeze (slow-mo removed)
     assert params["tail_sec"] == 1.0
     assert params["room"] == pytest.approx(0.24, abs=0.01)
 

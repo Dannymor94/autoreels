@@ -1213,8 +1213,8 @@ def _synth_tail_params(
     cut_point = min(N - onset_margin_sec, audible_end + keep_sec) if N is not None else audible_end + keep_sec
     # Video bridge: frames from B to B+min(gap/2, 0.25)
     bridge_dur = min((N - audible_end) / 2.0, 0.25) if N is not None else 0.25
-    use_freeze = bridge_dur < 0.1
-    slow_factor = tail_sec / max(bridge_dur, 1e-6) if not use_freeze else 1.0
+    use_freeze = True  # always: single frame frozen for tail_sec (no slow-mo)
+    slow_factor = 1.0
     return {
         "cut_point": cut_point,
         "bridge_start": audible_end,
@@ -1280,30 +1280,15 @@ def _build_synth_tail_cmd(
     real_vchain = (f"{real_vtrim},{vf_no_tail},{_fps_tb}" if vf_no_tail
                    else f"{real_vtrim},{_fps_tb}")
 
-    # Synthetic video: bridge frames slowed or frozen, then fade to black
-    if use_freeze:
-        nf = max(1, round(fps * 0.1))   # ~3 frames pool to smooth freeze
-        synth_vchain = (
-            f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + nf / fps)},"
-            f"setpts=PTS-STARTPTS,"
-            f"loop=loop=-1:size={nf},"
-            f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
-            f"{scale_part},"
-            f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
-        )
-    else:
-        _trim_extra = 2.0 / max(fps, 1.0)
-        _tpad_dur = _num(tail_sec + 0.5)
-        synth_vchain = (
-            f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + bridge_dur + _trim_extra)},"
-            f"setpts=(PTS-STARTPTS)*{_num(slow_factor)},"
-            f"tpad=stop_mode=clone:stop_duration={_tpad_dur},"
-            f"fps={_num(fps)},"
-            f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
-            f"settb=expr=1/90000,"
-            f"{scale_part},"
-            f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
-        )
+    # Synthetic video: one frame at cut point, held for tail_sec, then fade to black
+    synth_vchain = (
+        f"trim=start={_num(pr + b_off)}:end={_num(pr + b_off + 1.0 / fps)},"
+        f"setpts=PTS-STARTPTS,"
+        f"loop=loop=-1:size=1,"
+        f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
+        f"{scale_part},"
+        f"fade=t=out:st={fade_st_num}:d={fade_sec_num}:color=black"
+    )
     if push:
         # Slow push-in zoom: 1.0 → 1.05 over the first half, hold 1.05
         n_push = max(1, int(fps * tail_sec))
@@ -1374,33 +1359,18 @@ def _build_synth_tail_clip(
     synth_crop_vf: "str | None" = None,
 ) -> None:
     """Render the synthetic tail segment as a standalone clip (source only, no rendered clip)."""
-    nf = max(1, round(fps * 0.1))
     scale_part = synth_crop_vf if synth_crop_vf else f"scale={output_w}:{output_h}:flags=bicubic,setsar=1"
     fade_st = _num(tail_sec - fade_sec)
     fade_d = _num(fade_sec)
 
-    if use_freeze:
-        vchain = (
-            f"[0:v]trim=0:{_num(nf/fps)},setpts=PTS-STARTPTS,"
-            f"loop=loop=-1:size={nf},"
-            f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
-            f"{scale_part},"
-            f"fade=t=out:st={fade_st}:d={fade_d}:color=black[v]"
-        )
-    else:
-        # trim=0:bridge_dur may capture too few frames for the full tail_sec after slow-mo
-        # (e.g. 3 frames × 8x = 0.8s < 1.0s). tpad clones the last slow-mo frame,
-        # fps normalises to output rate, then trim=end cuts to exactly tail_sec.
-        trim_extra = 2.0 / max(fps, 1.0)
-        tpad_dur = _num(tail_sec + 0.5)
-        vchain = (
-            f"[0:v]trim=0:{_num(bridge_dur + trim_extra)},setpts=(PTS-STARTPTS)*{_num(slow_factor)},"
-            f"tpad=stop_mode=clone:stop_duration={tpad_dur},"
-            f"fps={_num(fps)},"
-            f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
-            f"{scale_part},"
-            f"fade=t=out:st={fade_st}:d={fade_d}:color=black[v]"
-        )
+    # One frame at cut point, held for tail_sec, then fade to black
+    vchain = (
+        f"[0:v]trim=0:{_num(1.0 / fps)},setpts=PTS-STARTPTS,"
+        f"loop=loop=-1:size=1,"
+        f"trim=end={_num(tail_sec)},setpts=PTS-STARTPTS,"
+        f"{scale_part},"
+        f"fade=t=out:st={fade_st}:d={fade_d}:color=black[v]"
+    )
     if push:
         n_push = max(1, int(fps * tail_sec))
         vchain = vchain.replace(
@@ -2617,29 +2587,16 @@ def _render_segments(
                     )
                     _fade_st = _num(_tail_s - _fade_s)
                     _fade_sn = _num(_fade_s)
-                    if _sp["use_freeze"]:
-                        _nf = max(1, round(_fps() * 0.1))
-                        _synth_vc = (
-                            f"trim=start=0:end={_num(_nf / _fps())},"
-                            f"setpts=PTS-STARTPTS,"
-                            f"loop=loop=-1:size={_nf},"
-                            f"trim=end={_num(_tail_s)},setpts=PTS-STARTPTS,"
-                            f"{_sc_part},"
-                            f"fade=t=out:st={_fade_st}:d={_fade_sn}:color=black"
-                        )
-                    else:
-                        _trim_extra = 2.0 / max(_fps(), 1.0)
-                        _tpad_dur = _num(_tail_s + 0.5)
-                        _synth_vc = (
-                            f"trim=start=0:end={_num(_sp['bridge_dur'] + _trim_extra)},"
-                            f"setpts=(PTS-STARTPTS)*{_num(_sp['slow_factor'])},"
-                            f"tpad=stop_mode=clone:stop_duration={_tpad_dur},"
-                            f"fps={_num(_fps())},"
-                            f"trim=end={_num(_tail_s)},setpts=PTS-STARTPTS,"
-                            f"settb=expr=1/90000,"
-                            f"{_sc_part},"
-                            f"fade=t=out:st={_fade_st}:d={_fade_sn}:color=black"
-                        )
+                    # One frame at cut point, held for tail_sec, then fade to black
+                    _synth_vc = (
+                        f"trim=start=0:end={_num(1.0 / _fps())},"
+                        f"setpts=PTS-STARTPTS,"
+                        f"loop=loop=-1:size=1,"
+                        f"trim=end={_num(_tail_s)},setpts=PTS-STARTPTS,"
+                        f"settb=expr=1/90000,"
+                        f"{_sc_part},"
+                        f"fade=t=out:st={_fade_st}:d={_fade_sn}:color=black"
+                    )
                     _synth_ac = (
                         f"atrim=0:{_num(_tail_s + 0.2)},asetpts=PTS-STARTPTS,"
                         f"afade=t=out:st={_fade_st}:d={_fade_sn}"

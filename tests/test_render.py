@@ -2728,13 +2728,13 @@ def test_build_synth_tail_cmd_freeze_uses_synth_crop_vf():
     assert "concat=n=2:v=0:a=1" not in fc
 
 
-def test_build_synth_tail_cmd_slowmo_uses_synth_crop_vf():
-    """Slow-mo tail: synth_vchain + real_vchain both have fps+settb; concat is combined AV."""
+def test_build_synth_tail_cmd_single_frame_freeze():
+    """Single-frame freeze: synth_vchain uses loop=-1:size=1; real_vchain has fps+settb."""
     crop_vf = _synth_params_wide()
     cmd = _build_synth_tail_cmd(
         "ffmpeg", Path("/src.mp4"), 100.0, Path("/out.mp4"),
         seg_start=10.0, cut_point=15.0, audible_end=14.5,
-        bridge_dur=0.3, slow_factor=3.33, use_freeze=False,
+        bridge_dur=0.25, slow_factor=1.0, use_freeze=True,
         tail_sec=1.0, fade_sec=0.3, fps=30.0,
         output_w=1080, output_h=1920,
         vf_no_tail=crop_vf, af_no_tail=None,
@@ -2746,8 +2746,8 @@ def test_build_synth_tail_cmd_slowmo_uses_synth_crop_vf():
     real_part = fc.split("[v_real]")[0]
     synth_part = fc.split("[v_synth]")[0].split("[v_real]")[-1]
     assert "crop=320:568" in synth_part
-    assert "fps=30" in synth_part, "fps filter missing from slow-mo synth_vchain"
-    assert "settb=expr=1/90000" in synth_part
+    assert "loop=loop=-1:size=1" in synth_part, "single-frame loop missing from synth_vchain"
+    assert "setpts=(PTS-STARTPTS)*" not in synth_part, "slow-mo removed: no speed factor"
     # body also normalized to CFR + shared timebase
     assert "fps=30" in real_part, "fps missing from real_vchain"
     assert "settb=expr=1/90000" in real_part, "settb missing from real_vchain"
@@ -3012,4 +3012,58 @@ def test_inline_synth_loudnorm_no_start_silence(tmp_path):
     assert not start_silences, (
         f"Long silence (>0.2s) at start of audio: starts at {start_silences}s\n"
         f"Regression: aresample=async=1:first_pts=0 was padding PTS-shifted loudnorm output"
+    )
+
+
+@pytest.mark.integration
+def test_synth_tail_single_frozen_frame(tmp_path):
+    """Synthetic tail frames before the fade must all be identical (single frozen frame).
+
+    Regression: loop=-1:size=3 pooled 3 frames, producing a jitter/gif effect.
+    Fix: loop=-1:size=1 holds one frame for the entire tail duration.
+
+    Hash the raw filter output (not the encoded clip) to avoid lossy-codec variance.
+    """
+    import shutil
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("ffmpeg not installed")
+
+    src = tmp_path / "src.mp4"
+    subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc2=size=540x960:rate=30:duration=10",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-shortest", str(src),
+    ], check=True, capture_output=True)
+
+    tail_sec = 1.0
+    fps = 30.0
+    fade_sec = 0.35
+    # Run the frozen-frame filtergraph directly, capture raw frames → framemd5
+    # Trim to pre-fade portion (0 .. tail_sec-fade_sec-margin) to avoid fade variation.
+    pre_fade_dur = tail_sec - fade_sec - 0.05
+    hashes_result = subprocess.run([
+        ffmpeg, "-y", "-loglevel", "error",
+        "-accurate_seek", "-ss", "5.0", "-t", "1.1", "-i", str(src),
+        "-filter_complex",
+        f"[0:v]trim=0:{1.0/fps:.6f},setpts=PTS-STARTPTS,"
+        f"loop=loop=-1:size=1,"
+        f"trim=end={pre_fade_dur:.4f},setpts=PTS-STARTPTS,"
+        f"scale=540:960:flags=bicubic,setsar=1[vout]",
+        "-map", "[vout]", "-an",
+        "-f", "framemd5", "-",
+    ], capture_output=True, text=True)
+    assert hashes_result.returncode == 0, f"ffmpeg failed: {hashes_result.stderr[:300]}"
+
+    hashes = [
+        ln.split(",")[-1].strip()
+        for ln in hashes_result.stdout.splitlines()
+        if ln and not ln.startswith("#") and "," in ln
+    ]
+    assert len(hashes) >= 5, f"expected >=5 pre-fade frames, got {len(hashes)}"
+    assert len(set(hashes)) == 1, (
+        f"tail frames are NOT identical ({len(set(hashes))} unique hashes) — "
+        f"single-frame freeze broken; got hashes: {hashes[:5]}"
     )
