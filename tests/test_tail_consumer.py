@@ -700,6 +700,63 @@ def test_apply_tail_air_no_intruder_when_no_next_speech_in_window():
     assert r.tail_next_word_start is None  # 12.0 > 11.5, outside window
 
 
+def test_apply_tail_air_smap_cap_from_untranscribed_speech(tmp_path):
+    """PART 5: _apply_tail_air caps desired at smap N when own-tail absorbs first untr interval
+    but second untr interval is audible speech within the 1.5 s window.
+
+    Reproduces PXL r10 root cause:
+      - last word ae=0.21, t1=0.62
+      - own-tail: first untr [0.4, 0.68] qualifies (t1_hint: t1=0.62 inside interval)
+        → ae bumped to 0.68, untr_offset=1
+      - second untr [1.4, 1.66] is audible speech → N=1.4
+      - _tail_from_smap_full gives end = 1.4 - 0.06 = 1.34
+      - Without smap cap: desired = lw_end(0.62) + 1.5 = 2.12  (overrides smap cap)
+      - With smap cap: desired = min(2.12, 1.34) = 1.34
+    """
+    from autoreels.__main__ import _apply_tail_air
+    from autoreels.local.render import _smap_word_lookup
+    from autoreels.core.models import Word
+
+    smap = {
+        "version": "4",
+        "words": [
+            {"t0": 0.0, "t1": 0.62, "audible_start": 0.0, "audible_end": 0.21},
+            # next transcribed word far away — not in window
+            {"t0": 24.7, "t1": 25.0, "audible_start": 21.2, "audible_end": 25.0},
+        ],
+        "boundaries": [
+            {
+                "pause": 0.15,
+                "untranscribed_speech": [
+                    [0.4, 0.68],    # own-tail: t1_hint fires (t1=0.62 inside [0.4, 0.68])
+                    [1.4, 1.66],    # audible speech → N=1.4
+                    [2.17, 3.0],    # beyond 1.5 pad window
+                ],
+            },
+            {"pause": 0.0, "untranscribed_speech": []},
+        ],
+        "intervals": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    last_word = Word(word="такие.", t0=0.0, t1=0.62)
+
+    from autoreels.core.models import Reel, Segment
+    r = Reel(id="r01", start=0.0, end=5.0, score=80, hook="h", title="t", description="d",
+             segments=[Segment(start=0.0, end=5.0)])
+    r.subtitles = [last_word]
+
+    words = [last_word]
+    _apply_tail_air(
+        [r], words, tail_pad_sec=1.5, video_duration=None,
+        smap_lookup=lookup, smap=smap,
+    )
+
+    # Without smap cap: 0.62 + 1.5 = 2.12; with cap: 1.4 - 0.06 = 1.34
+    assert r.end == pytest.approx(1.34, abs=1e-3), (
+        f"expected smap-capped end ≈ 1.34; got {r.end}"
+    )
+
+
 # ── render post-trim invariant ────────────────────────────────────────────────
 
 def test_check_silence_at_clip_end_fires_for_manifest_overshoot():

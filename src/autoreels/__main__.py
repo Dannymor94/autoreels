@@ -2260,7 +2260,7 @@ def _last_heard_word_end(words, seg) -> float | None:
 
 
 def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float | None,
-                    smap_lookup: dict | None = None) -> None:
+                    smap_lookup: dict | None = None, smap: dict | None = None) -> None:
     """Set every reel's end to exactly tail_pad_sec of air after the last heard word.
 
     Runs LAST, after snap/padding/filler/cold-open: each of those erodes the trailing air (padding
@@ -2290,6 +2290,20 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         desired = lw_end + tail_pad_sec
         if video_duration is not None:
             desired = min(desired, video_duration)
+        # Smap cap: if untranscribed speech starts before lw_end + tail_pad, cap before it.
+        # _tail_from_smap_full finds the next speech onset (transcribed or untranscribed) and
+        # sets end = N - onset_margin. This fires when the own-tail filter absorbed only the
+        # acoustic decay and left subsequent audible speech in the tail.
+        if smap is not None and smap_lookup is not None:
+            _subs = getattr(r, "subtitles", None) or []
+            if _subs:
+                from autoreels.local.render import _tail_from_smap_full
+                _stail = _tail_from_smap_full(
+                    _subs[-1].t0, desired, smap, smap_lookup,
+                    last_t1=_subs[-1].t1, tail_pad_sec=tail_pad_sec,
+                )
+                if _stail is not None and _stail.end < desired:
+                    desired = _stail.end
         # Beat reel: clamp tail to before the next source sentence to prevent Whisper-overlap
         # contamination (another beat's sentence would otherwise be audible in the tail).
         _beat_tail_cap = getattr(r, "_beat_tail_cap", None)
@@ -5364,7 +5378,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     _video_dur = tx_words[-1].t1 if tx_words else None
     _tail_pad = getattr(r0_cfg, "tail_pad_sec", 0.7)
     _apply_tail_air(reels, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur,
-                    smap_lookup=_blk_smap_lookup)
+                    smap_lookup=_blk_smap_lookup, smap=_blk_smap)
 
     # Fail fast if any reel's segments desynced from its final bounds (never emit such a manifest).
     for reel in reels:
