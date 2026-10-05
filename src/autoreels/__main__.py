@@ -1697,8 +1697,10 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
     elif not speech_map_on:
         pass  # two_shot_auto without speech_map: threshold used but not printed (no smap context)
 
+    _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
     for reel in reels:
         _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
+                                  min_middle=_min_middle,
                                   smap=smap, level1_min_pause=level1_min_pause)
 
     # Print switch table — essential for comparing smap-on vs smap-off.
@@ -1717,6 +1719,7 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
 
 
 def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
+                               min_middle: float = 4.0,
                                smap: "dict | None" = None,
                                level1_min_pause: float = 0.35) -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
@@ -1947,51 +1950,58 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             break
 
     # Jump-seam enforcement (beat reels only): non-adjacent source seams must show a shot change.
-    # Priority: forced jump-seam > c: annotation > auto rhythm (line 1704 preserves c:; this
-    # overrides c: only when both sides of a jump are close — prev beat's end is made wide).
-    # "Starts close" uses _SNAP_THRESH because the snap below will bring ci[0] to 0 anyway.
+    # New rule: force the NEXT beat to start with the opposite shot (never modify prev beat).
+    # If min_shot < min_middle: make entire next beat opposite to avoid creating a short A-B-A span.
     _JUMP_GAP_MAX = 2.0       # gap > 2s in source time → non-adjacent
     _SNAP_THRESH = 0.15       # close_interval within this of window boundary → snap to boundary
+    _js_set: set = set()      # indices where a jump seam STARTS (for Option 2 to skip)
+    _js_forced: set = set()   # indices of beats that got forced starting-shot (for A-B-A guard)
     if reel.beat_gap_sec is not None:
         _hf = 1.0 / 60.0
         for _ji in range(1, len(result)):
             _pa, _pb = result[_ji - 1], result[_ji]
             if _pb.start >= _pa.end - 0.001 and _pb.start - _pa.end <= _JUMP_GAP_MAX:
                 continue  # adjacent seam
+            _js_set.add(_ji)
             _dur_a = _pa.end - _pa.start
-            _ci_a = list(getattr(_pa, "close_intervals", []))
+            _ci_a = list(getattr(_pa, "close_intervals", []) or [])
             _prev_ends_close = (_pa.shot == "close" or
                                 (_ci_a and _ci_a[-1][1] > _dur_a - _hf))
-            _ci_b = list(getattr(_pb, "close_intervals", []))
+            _dur_b = _pb.end - _pb.start
+            _ci_b = list(getattr(_pb, "close_intervals", []) or [])
             _next_starts_close = (_pb.shot == "close" or
                                   (_ci_b and _ci_b[0][0] < _SNAP_THRESH))
-            if not (_prev_ends_close and _next_starts_close):
-                continue
-            # Force wide tail of min_shot on prev beat.
-            _ci_end = _dur_a - min_shot
-            if _ci_end <= _hf:
-                warnings.append(f"jump-seam at {_pa.end:.2f}: prev too short ({_dur_a:.2f}s) for wide tail")
-                continue
-            _JUMP_CLOSE_MIN = 1.0  # drop a ci interval that would be shorter than this
-            if _pa.shot == "close":
-                _jnci = [] if _ci_end < _JUMP_CLOSE_MIN else [[0.0, _ci_end]]
-                if _jnci:
-                    result[_ji - 1] = _pa.model_copy(update={"shot": "wide",
-                                                              "close_intervals": _jnci})
+            if _prev_ends_close == _next_starts_close:
+                # Same shot at seam — force next beat to start with opposite
+                if _prev_ends_close:
+                    # A ends close, B starts close → make B start wide
+                    if min_shot < min_middle:
+                        # Forced wide span would be < min_middle → make entire B wide (no A-B-A)
+                        result[_ji] = _pb.model_copy(update={"shot": "wide", "close_intervals": []})
+                    else:
+                        if _pb.shot == "close" and not _ci_b:
+                            if _dur_b > min_shot:
+                                result[_ji] = _pb.model_copy(update={
+                                    "shot": "wide", "close_intervals": [[min_shot, _dur_b]]})
+                            else:
+                                warnings.append(
+                                    f"jump-seam at {_pa.end:.2f}: B too short for wide start ({_dur_b:.2f}s)")
+                                _js_set.discard(_ji)
+                                continue
+                        elif _ci_b and _ci_b[0][0] < _SNAP_THRESH:
+                            _new_ci_b = ([[min_shot, _ci_b[0][1]]] if _ci_b[0][1] > min_shot
+                                         else []) + _ci_b[1:]
+                            result[_ji] = _pb.model_copy(update={"close_intervals": _new_ci_b})
                 else:
-                    result[_ji - 1] = _pa.model_copy(update={"shot": "wide",
-                                                              "close_intervals": []})
-            else:
-                _new_end = min(_ci_a[-1][1], _ci_end) if _ci_a else _ci_end
-                _new_ci = (_ci_a[:-1] + [[_ci_a[-1][0], _new_end]]) if _ci_a else [[0.0, _new_end]]
-                # Drop last ci if the resulting close interval would be < 1 s.
-                if _new_ci and _new_ci[-1][1] - _new_ci[-1][0] < _JUMP_CLOSE_MIN:
-                    _new_ci = _new_ci[:-1]
-                if _new_ci:
-                    result[_ji - 1] = _pa.model_copy(update={"close_intervals": _new_ci})
-                else:
-                    result[_ji - 1] = _pa.model_copy(update={"shot": "wide", "close_intervals": []})
-            warnings.append(f"jump-seam at {_pa.end:.2f}: forced wide tail on prev beat")
+                    # A ends wide, B starts wide → make B start close
+                    if min_shot < min_middle:
+                        result[_ji] = _pb.model_copy(update={"shot": "close", "close_intervals": []})
+                    else:
+                        if _pb.shot == "wide" and not _ci_b:
+                            result[_ji] = _pb.model_copy(update={
+                                "close_intervals": [[0.0, min(min_shot, _dur_b)]]})
+                _js_forced.add(_ji)
+                warnings.append(f"jump-seam at {_pa.end:.2f}: forced opposite start on next beat")
 
     # Snap close_intervals within _SNAP_THRESH of window start/end to the boundary.
     # Eliminates sub-frame wide flashes at segment edges (e.g. ci starting at 0.06s).
@@ -2014,12 +2024,6 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # "Short tail" = < min_shot in output time. Jump-seam seams (forced shot changes) excepted.
     # Also skip the first effective segment when the reel has a cold_open: cold_open is always
     # close, so the first regular shot should remain wide (close→wide alternation after the hook).
-    _js_set: set = set()
-    if reel.beat_gap_sec is not None:
-        for _k in range(1, len(result)):
-            _g2 = result[_k].start - result[_k - 1].end
-            if result[_k].start < result[_k - 1].start or _g2 > _JUMP_GAP_MAX:
-                _js_set.add(_k)
     _has_cold_open = getattr(reel, "cold_open", None) is not None
     for _i2 in range(len(result) - 1):
         if _i2 + 1 in _js_set:
@@ -2046,6 +2050,64 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 result[_i2] = _s2.model_copy(update={"shot": "close", "close_intervals": []})
             else:
                 result[_i2] = _s2.model_copy(update={"close_intervals": [[a, b] for a, b in _new2]})
+
+    # A-B-A merge: remove short middle spans in shot alternation (e.g. close→wide(2s)→close).
+    # Jump-seam forced segments (_js_forced) are protected — their shot was intentionally set.
+    if min_middle > 0:
+        _t0_aba, _spans_aba = 0.0, []
+        for _k_aba, _s_aba in enumerate(result):
+            _dur_aba = _s_aba.end - _s_aba.start
+            _ci_aba = list(getattr(_s_aba, "close_intervals", []) or [])
+            _sh_aba = _s_aba.shot or "wide"
+            if not _ci_aba:
+                _spans_aba.append((_t0_aba, _t0_aba + _dur_aba, _sh_aba, _k_aba))
+            else:
+                _p_aba = 0.0
+                for _c0_aba, _c1_aba in _ci_aba:
+                    if _c0_aba > _p_aba + 0.001:
+                        _spans_aba.append((_t0_aba + _p_aba, _t0_aba + _c0_aba, "wide", _k_aba))
+                    _spans_aba.append((_t0_aba + _c0_aba, _t0_aba + _c1_aba, "close", _k_aba))
+                    _p_aba = _c1_aba
+                if _p_aba < _dur_aba - 0.001:
+                    _spans_aba.append((_t0_aba + _p_aba, _t0_aba + _dur_aba, "wide", _k_aba))
+            _t0_aba += _dur_aba
+        _aba_changed = True
+        while _aba_changed:
+            _aba_changed = False
+            for _i_aba in range(len(_spans_aba) - 2):
+                _, _, _sa_sh, _ = _spans_aba[_i_aba]
+                _sb_t, _sb_e, _sb_sh, _sb_seg = _spans_aba[_i_aba + 1]
+                _, _, _sc_sh, _ = _spans_aba[_i_aba + 2]
+                if _sa_sh != _sc_sh or _sa_sh == _sb_sh or (_sb_e - _sb_t) >= min_middle:
+                    continue
+                if _sb_seg in _js_forced:
+                    continue  # jump-seam forced shot — keep it
+                _s_mid = result[_sb_seg]
+                if list(getattr(_s_mid, "close_intervals", []) or []):
+                    continue  # partial-segment span from Pass 3 max-shot — preserve it
+                result[_sb_seg] = _s_mid.model_copy(update={"shot": _sa_sh, "close_intervals": []})
+                warnings.append(
+                    f"A-B-A merge: {_sb_sh}({_sb_e - _sb_t:.2f}s) at t={_sb_t:.2f} → {_sa_sh}")
+                _aba_changed = True
+                break
+            if _aba_changed:
+                _t0_aba, _spans_aba = 0.0, []
+                for _k_aba, _s_aba in enumerate(result):
+                    _dur_aba = _s_aba.end - _s_aba.start
+                    _ci_aba = list(getattr(_s_aba, "close_intervals", []) or [])
+                    _sh_aba = _s_aba.shot or "wide"
+                    if not _ci_aba:
+                        _spans_aba.append((_t0_aba, _t0_aba + _dur_aba, _sh_aba, _k_aba))
+                    else:
+                        _p_aba = 0.0
+                        for _c0_aba, _c1_aba in _ci_aba:
+                            if _c0_aba > _p_aba + 0.001:
+                                _spans_aba.append((_t0_aba + _p_aba, _t0_aba + _c0_aba, "wide", _k_aba))
+                            _spans_aba.append((_t0_aba + _c0_aba, _t0_aba + _c1_aba, "close", _k_aba))
+                            _p_aba = _c1_aba
+                        if _p_aba < _dur_aba - 0.001:
+                            _spans_aba.append((_t0_aba + _p_aba, _t0_aba + _dur_aba, "wide", _k_aba))
+                    _t0_aba += _dur_aba
 
     # Short-shot check (Pass 4): any output-time span < min_shot is [ERROR].
     # Exception: a span created by forced jump-seam enforcement may be >= 1.0 s (still a degraded

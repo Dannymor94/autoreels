@@ -197,6 +197,7 @@ close_shot_anchor_y: 0.35
 two_shot_auto: false
 two_shot_max_shot_sec: 14.0  # max duration for any shot (wide OR close); two_shot_max_wide_sec is an alias
 two_shot_min_sec: 2.5        # minimum shot duration; suppress switch that would go shorter
+two_shot_min_middle_sec: 4.0  # A-B-A middle span shorter than this is merged into neighbours
 # M1.7 step 1d: transitions at ci shot-changes and same-shot seams. Off by default.
 shot_transition: cut         # "cut" only; punch (crop-animation) is a future task
 same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses video_xfade_sec fallback)

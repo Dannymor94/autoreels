@@ -641,6 +641,7 @@ class RenderConfig(BaseModel):
     two_shot_auto: bool = False          # auto-alternate wide/close at x:/splice/filler seams
     two_shot_max_shot_sec: float = 9.0   # force a switch if any shot (wide OR close) exceeds this
     two_shot_min_sec: float = 2.5        # suppress a switch that would create a shorter shot
+    two_shot_min_middle_sec: float = 4.0  # A-B-A middle span shorter than this is merged away
     # M1.7 step 1d: shot-change transitions inside close_intervals windows. Off by default.
     # Flag off → identical cmd. ("punch" crop-animation: future task, deferred.)
     shot_transition: str = "cut"         # "cut" only; punch deferred
