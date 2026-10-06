@@ -51,9 +51,9 @@ def test_flag_off_returns_identical():
 def test_alternation_at_three_seams():
     segs = [_seg(0, 5), _seg(6, 12), _seg(13, 20)]
     out = _apply(segs)
-    assert out[0].shot == "wide"
-    assert out[1].shot == "close"
-    assert out[2].shot == "wide"
+    assert out[0].shot == "close"
+    assert out[1].shot == "wide"
+    assert out[2].shot == "close"
 
 
 # ── Test 3: manual assignment preserved ──────────────────────────────────────
@@ -62,7 +62,7 @@ def test_manual_close_not_overridden():
     segs = [_seg(0, 5), _seg(6, 12, shot="close"), _seg(13, 20)]
     out = _apply(segs)
     assert out[1].shot == "close"
-    assert out[0].shot == "wide"
+    assert out[0].shot == "close"
     assert out[2].shot == "wide"
 
 
@@ -71,7 +71,7 @@ def test_manual_close_not_overridden():
 def test_min_length_suppresses_flip():
     segs = [_seg(0, 1.0), _seg(1.5, 10)]
     out = _apply(segs, two_shot_min_sec=2.5)
-    assert out[1].shot == "wide"
+    assert out[1].shot == "close"
 
 
 # ── Test 5: max-wide fires (backward-compat alias) ────────────────────────────
@@ -90,9 +90,10 @@ def test_max_wide_inserts_close_intervals_at_pause():
     reel = _reel([_seg(0, 12)])
     _stage_two_shot_auto([reel], words, render_cfg=cfg)
     out = reel.effective_segments()
-    assert out[0].close_intervals, "max-wide must trigger a close_intervals switch"
-    rel = out[0].close_intervals[0][0]
-    assert 2.9 <= rel <= 3.6, f"switch expected near pause boundary ~3.0s, got {rel}"
+    assert out[0].close_intervals, "max-close must trigger a close_intervals switch"
+    # Single close seg → wide+ci=[[0, switch]]; switch_t = ci[0][1] (end of close portion)
+    switch_t = out[0].close_intervals[0][1]
+    assert 2.9 <= switch_t <= 3.6, f"switch expected near pause boundary ~3.0s, got {switch_t}"
 
 
 # ── Test 6: symmetric max — close shot too long fires wide switch ─────────────
@@ -318,29 +319,25 @@ def _apply_beat(segs, words=None, **cfg_kw):
 
 
 def test_jump_seam_r01_forces_shot_change():
-    """Lecture r01 beat order: non-adjacent source seams must produce shot changes,
-    computed from the FINAL shot list after A-B-A.
+    """Lecture r01 beat order: jump seams produce shot changes with cold-open=close rule.
 
     beat1=[66.10-69.02] and beat2=[69.04-72.15] have a 0.02 s source gap → pre-merged.
     beat4=[72.74-78.22] and beat5=[78.24-81.54] have a 0.02 s source gap → pre-merged.
-    After pre-merge: 3 segments — merged_b1b2, beat3, merged_b4b5.
+    After pre-merge: 3 segments — merged_b1b2(6.05s), beat3(8.32s), merged_b4b5(8.80s).
 
-    Processing:
-    1. Jump-seam pass 1 (pre-A-B-A): merged_b1b2 ends close (pre-merge ci runs to end)
-       → beat3 forced all-wide (min_shot < min_middle).
-    2. A-B-A: wide→close(3.11s)→wide pattern → removes pre-merge ci from merged_b1b2.
-       merged_b1b2 is now all-wide.
-    3. Jump-seam pass 2 (post-A-B-A): merged_b1b2 now ends wide; beat3 starts wide
-       → same shot → beat3 forced all-CLOSE.
-       beat3 now ends close; merged_b4b5 starts close → same → merged_b4b5 forced all-WIDE.
-    Final output: wide(6.05s) → close(8.32s) → wide(8.80s). All spans ≥ 4.0 s.
+    Processing (beat mode, cur=close):
+    1. merged_b1b2: i=0 → close.
+    2. beat3: jump seam (9.41s gap) → toggle → wide.
+    3. merged_b4b5: jump seam (backward 17s) → toggle → close.
+    4. A-B-A: wide middle 8.32s ≥ min_middle=4.0s → no merge.
+    Final output: close(6.05s) → wide(8.32s) → close(8.80s). All spans ≥ 4.0 s.
     """
     segs = [
         _seg(66.10, 69.02),                          # beat1 auto
-        _seg(69.04, 72.15, "close"),                  # beat2 manual close
-        _seg(81.56, 89.88, "wide", [[0.06, 8.32]]),   # beat3 c: annotation
-        _seg(72.74, 78.22, "close"),                  # beat4 manual close
-        _seg(78.24, 81.54, "close"),                  # beat5 manual close
+        _seg(69.04, 72.15, "close"),                  # beat2 (beat mode: not manual)
+        _seg(81.56, 89.88, "wide", [[0.06, 8.32]]),   # beat3 (beat mode: not manual)
+        _seg(72.74, 78.22, "close"),                  # beat4 (beat mode: not manual)
+        _seg(78.24, 81.54, "close"),                  # beat5 (beat mode: not manual)
     ]
     reel = _apply_beat(segs)
     result = reel.effective_segments()
@@ -351,22 +348,17 @@ def test_jump_seam_r01_forces_shot_change():
 
     mb12, b3, mb45 = result[0], result[1], result[2]
 
-    # A-B-A removed 3.11s pre-merge ci → merged_b1b2 is all-wide
-    assert mb12.shot == "wide" and not mb12.close_intervals, (
-        f"A-B-A must remove 3.11s pre-merge ci from merged_b1b2; "
-        f"got shot={mb12.shot} ci={mb12.close_intervals}"
+    # i=0 starts close (cold-open rule); no A-B-A fires (wide middle ≥ min_middle)
+    assert mb12.shot == "close" and not mb12.close_intervals, (
+        f"merged_b1b2 must be close (cold-open rule); got shot={mb12.shot} ci={mb12.close_intervals}"
     )
 
-    # Jump-seam pass 2: merged_b1b2 ends wide → beat3 must be all-CLOSE (opposite of wide)
-    assert b3.shot == "close" and not b3.close_intervals, (
-        f"jump seam merged_b1b2→beat3: post-A-B-A pass must force beat3 to CLOSE; "
-        f"got shot={b3.shot} ci={b3.close_intervals}"
+    assert b3.shot == "wide" and not b3.close_intervals, (
+        f"jump seam → toggle → beat3 must be wide; got shot={b3.shot} ci={b3.close_intervals}"
     )
 
-    # Jump-seam pass 2: beat3 ends close → merged_b4b5 must be all-WIDE (opposite of close)
-    assert mb45.shot == "wide" and not mb45.close_intervals, (
-        f"jump seam beat3→merged_b4b5: post-A-B-A pass must force merged_b4b5 to WIDE; "
-        f"got shot={mb45.shot} ci={mb45.close_intervals}"
+    assert mb45.shot == "close" and not mb45.close_intervals, (
+        f"jump seam → toggle → merged_b4b5 must be close; got shot={mb45.shot} ci={mb45.close_intervals}"
     )
 
     # No [ERROR] warnings (no sub-min-shot spans, no same-shot jump seams)
@@ -379,21 +371,22 @@ def test_jump_seam_r01_forces_shot_change():
 def test_jump_seam_r06_shot_changes():
     """Lecture r06 beat order: all seams are jump seams; each must change shot.
 
-    beat1=[467.5-469.3] wide, beat2=[452.8-461.0] close, beat3=[469.7-473.2] wide.
-    Seam1 is a backward jump (beat1 ends wide → close ✓ always).
-    Seam2 is a forward jump 8.6 s (beat2 ends close → beat3 starts wide ✓ always).
-    No forced changes needed; this test guards against regression.
+    beat1=[467.5-469.3], beat2=[452.8-461.0], beat3=[469.7-473.2].
+    Cold-open rule: beat1 starts close.
+    Seam1: backward jump (-16.5 s) → toggle → beat2=wide.
+    Seam2: forward jump 8.6 s → toggle → beat3=close.
+    Beat mode ignores manual c: annotations.
     """
     segs = [
-        _seg(467.526, 469.276),            # beat1 auto wide
-        _seg(452.786, 461.046, "close"),   # beat2 manual close
-        _seg(469.686, 473.226),            # beat3 auto wide
+        _seg(467.526, 469.276),            # beat1
+        _seg(452.786, 461.046, "close"),   # beat2 (beat mode: not manual)
+        _seg(469.686, 473.226),            # beat3
     ]
     reel = _apply_beat(segs)
     result = reel.effective_segments()
-    assert result[0].shot == "wide",  "beat1 must be wide"
-    assert result[1].shot == "close", "beat2 must stay close (manual)"
-    assert result[2].shot == "wide",  "beat3 must be wide (shot changes at jump seam)"
+    assert result[0].shot == "close", "beat1 must be close (cold-open rule)"
+    assert result[1].shot == "wide",  "beat2: jump seam toggles to wide (beat mode ignores manual)"
+    assert result[2].shot == "close", "beat3: jump seam toggles back to close"
     # Both jump seams must produce shot changes (no [ERROR] same-shot-jump-seam warnings)
     warns = getattr(reel, "_two_shot_warnings", [])
     assert not any("[ERROR]" in w for w in warns), (
@@ -472,28 +465,24 @@ def test_small_gap_merged_no_flash():
 # ── PART 2: cold_open first effective segment not absorbed by option 2 ───────────────────────
 
 def test_cold_open_first_seg_not_absorbed_by_option2():
-    """Reel with a cold_open: the first effective segment must not be absorbed to close
-    by option 2, even when it is wide and < min_shot.
+    """Reel with a cold_open: cold-open=close rule makes the first effective segment close.
 
-    cold_open is always close (invariant). After the hook, the first regular shot should
-    remain wide (close→wide alternation). Option 2 must skip i==0 when cold_open is present.
+    cold_open is always close by construction. The cold-open=close rule (cur="close" start)
+    also makes the first effective segment close, regardless of option 2.
     """
-    from autoreels.core.models import Reel
     segs = [
-        _seg(100.0, 102.0),    # seg0: wide 2.0 s — short (< min_shot=2.5s), but after cold_open
-        _seg(103.0, 110.0, "close"),  # seg1: close
+        _seg(100.0, 102.0),              # seg0: auto, gets close (cold-open=close rule)
+        _seg(103.0, 110.0, "close"),     # seg1: manual close
     ]
     reel = _reel(segs)
-    # Attach a cold_open (always close by rule)
     reel.cold_open = _seg(110.5, 114.5, "close")
 
     from autoreels.__main__ import _stage_two_shot_auto
     _stage_two_shot_auto([reel], [], render_cfg=_cfg())
     result = reel.effective_segments()
 
-    assert result[0].shot == "wide", (
-        "first effective segment must stay wide after cold_open — "
-        "option 2 must not absorb it (cold_open provides the close context)"
+    assert result[0].shot == "close", (
+        "first effective segment must be close (cold-open=close rule)"
     )
 
 
@@ -579,22 +568,23 @@ def test_jump_seam_no_aba_when_min_shot_lt_min_middle():
 
 
 def test_aba_merge_short_natural_middle():
-    """Natural A-B-A with all-close middle segment < min_middle is merged away."""
-    # wide(10s) → close(3s) → wide(10s) — middle 3s < min_middle=4.0 → merge to all-wide
-    # Gaps 0.5 s between segments to avoid pre-merge (which needs gap < 0.1 s to trigger).
+    """Natural A-B-A close→wide(3s)→close — 3s < min_middle=4.0 → merged to all-close."""
+    # All auto segments. cold-open=close rule: seg0=close, seg1=wide(3s), seg2=close.
+    # A-B-A: wide middle 3s < min_middle=4.0 → merge to close.
+    # Gaps 0.5 s between segments to avoid pre-merge (needs gap < 0.1 s).
     segs = [
-        _seg(0.0, 10.0),            # seg0: wide 10s
-        _seg(10.5, 13.5, "close"),  # seg1: close 3s (< min_middle=4.0)
-        _seg(14.0, 24.0),           # seg2: wide 10s
+        _seg(0.0, 10.0),      # seg0: auto → close (cold-open rule)
+        _seg(10.5, 13.5),     # seg1: auto → wide (3s, < min_middle=4.0)
+        _seg(14.0, 24.0),     # seg2: auto → close
     ]
     reel = _reel(segs)
     from autoreels.__main__ import _stage_two_shot_auto
     _stage_two_shot_auto([reel], [], render_cfg=_cfg())
     result = reel.effective_segments()
     assert len(result) == 3, f"expected 3 segments; got {len(result)}"
-    # seg1 must be merged into wide (no short close in the middle)
-    assert result[1].shot == "wide" and not result[1].close_intervals, (
-        f"short close middle must be merged to wide; got shot={result[1].shot} ci={result[1].close_intervals}"
+    # A-B-A must merge the short wide middle to close
+    assert result[1].shot == "close" and not result[1].close_intervals, (
+        f"short wide middle must be merged to close; got shot={result[1].shot} ci={result[1].close_intervals}"
     )
 
 
@@ -663,7 +653,7 @@ def test_beat_shots_only_at_seams_r01():
       seg2     81.56-89.88 (8.32 s)  → close (jump toggle)
       merged34 72.74-81.54 (8.80 s)  → wide (jump toggle back)
 
-    Expected: wide(0-6.05s) → close(6.05-14.37s) → wide(14.37-end)
+    Expected: close(0-6.05s) → wide(6.05-14.37s) → close(14.37-end)
     """
     segs = [
         _seg(66.10, 69.02),  # wide (auto)
@@ -677,8 +667,8 @@ def test_beat_shots_only_at_seams_r01():
     # Pre-merge collapses adjacent pairs → 3 segments
     assert len(result) == 3, f"expected 3 after pre-merge; got {len(result)}: {[(s.start,s.end) for s in result]}"
     shots = [s.shot for s in result]
-    assert shots == ["wide", "close", "wide"], (
-        f"expected [wide,close,wide] (non-jump seams don't toggle); got {shots}"
+    assert shots == ["close", "wide", "close"], (
+        f"expected [close,wide,close] (cold-open rule, non-jump seams don't toggle); got {shots}"
     )
     durs = [round(s.end - s.start, 2) for s in result]
     assert durs == [6.05, 8.32, 8.80], f"expected durations [6.05, 8.32, 8.80]; got {durs}"
@@ -704,7 +694,7 @@ def test_beat_shots_only_at_seams_r01_stale_manifest():
     result = reel.effective_segments()
     assert len(result) == 3, f"expected 3 after pre-merge; got {len(result)}"
     shots = [s.shot for s in result]
-    assert shots == ["wide", "close", "wide"], (
+    assert shots == ["close", "wide", "close"], (
         f"stale manifest shots must be overwritten; got {shots}"
     )
     for s in result:
@@ -729,8 +719,72 @@ def test_beat_shots_only_at_seams_r06():
     reel = _apply_beat(segs, id="r06")
     result = reel.effective_segments()
     shots = [s.shot for s in result]
-    assert shots == ["wide", "close", "wide"], (
-        f"expected [wide,close,wide]; got {shots}"
+    assert shots == ["close", "wide", "close"], (
+        f"expected [close,wide,close]; got {shots}"
     )
     for s in result:
         assert not s.close_intervals, f"no ci inside beats; got ci={s.close_intervals} on seg {s.start}"
+
+
+# ── Part 1 gate: assign_shots public API ─────────────────────────────────────
+
+def test_assign_shots_pxl_r01_cold_open_close():
+    """assign_shots: cold_open always close, c: annotation preserved, no short spans or A-B-A."""
+    from autoreels.__main__ import assign_shots, _shot_spans_merged
+
+    # Gaps >= 2.5s so fillers don't create sub-min_shot wide spans.
+    segs = [
+        _seg(0.0, 5.0),                                           # auto 5s
+        _seg(7.5, 13.5),                                          # auto 6s (gap=2.5s)
+        _seg(16.0, 43.0, "wide", [[0.0, 9.0], [17.0, 27.0]]),    # c: annotation (2 intervals, gap=2.5s)
+    ]
+    reel = _reel(segs)
+    reel.cold_open = _seg(43.0, 47.0, "close")
+
+    assign_shots(reel, [], render_cfg=_cfg())
+
+    # cold_open is always close by construction
+    assert reel.cold_open.shot == "close", "cold_open must be close"
+
+    result = reel.effective_segments()
+
+    # c: annotation must be preserved
+    assert result[2].shot == "wide", "c: annotation shot must stay wide"
+    assert result[2].close_intervals, "c: annotation ci must be preserved"
+
+    # No span < two_shot_min_sec
+    for stype, dur in _shot_spans_merged(result):
+        assert dur >= 2.5, f"short {stype} span: {dur:.2f}s < 2.5s"
+
+    # No A-B-A middle < min_middle=4.0s
+    spans = _shot_spans_merged(result)
+    for i in range(len(spans) - 2):
+        sa, _ = spans[i]
+        sb, sb_d = spans[i + 1]
+        sc, _ = spans[i + 2]
+        if sa == sc and sa != sb:
+            assert sb_d >= 4.0, f"A-B-A middle {sb}({sb_d:.2f}s) < 4.0s at index {i}"
+
+
+def test_assign_shots_lec_r01_beat_seams():
+    """assign_shots: lecture r01 beat reel — shot changes ONLY at jump seams."""
+    from autoreels.__main__ import assign_shots
+
+    segs = [
+        _seg(66.10, 69.02),
+        _seg(69.04, 72.15),
+        _seg(81.56, 89.88),
+        _seg(72.74, 78.22),
+        _seg(78.24, 81.54),
+    ]
+    reel = _reel_beat(segs)
+    assign_shots(reel, [], render_cfg=_cfg())
+    result = reel.effective_segments()
+
+    assert len(result) == 3, f"expected 3 after pre-merge; got {len(result)}"
+    shots = [s.shot for s in result]
+    assert shots == ["close", "wide", "close"], (
+        f"beat reel: shot changes only at jump seams; got {shots}"
+    )
+    durs = [round(s.end - s.start, 2) for s in result]
+    assert durs == [6.05, 8.32, 8.80], f"durations must be unchanged; got {durs}"

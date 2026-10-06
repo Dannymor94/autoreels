@@ -1704,6 +1704,7 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
                                   min_middle=_min_middle,
                                   smap=smap, level1_min_pause=level1_min_pause,
                                   beat_shots_at_seams_only=_beat_seams_only)
+    # assign_shots (single-reel public API) delegates here; _stage_two_shot_auto is the batch wrapper.
 
     # Print switch table — essential for comparing smap-on vs smap-off.
     for reel in reels:
@@ -1718,6 +1719,28 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
             print(f"    {sw:8.2f}  {direction:>12}  {level:>12}  {pause_val:7.3f}", flush=True)
 
     return reels
+
+
+def assign_shots(reel, words, *, render_cfg, smap=None) -> None:
+    """Assign wide/close shots to one reel — single source of truth for both apply and render.
+
+    Runs all passes in fixed order: cold open=close → manual c: → jump seams (beat) /
+    two_shot_auto (non-beat) → snap tiny gaps → A-B-A → min shot → assertions.
+    Mutates reel.segments in place. No-op when two_shot/two_shot_auto is off.
+    """
+    if not (getattr(render_cfg, "two_shot", False) and getattr(render_cfg, "two_shot_auto", False)):
+        return
+    max_shot = getattr(render_cfg, "two_shot_max_shot_sec",
+                       getattr(render_cfg, "two_shot_max_wide_sec", 9.0))
+    min_shot = getattr(render_cfg, "two_shot_min_sec", 2.5)
+    _smap_cfg = getattr(render_cfg, "speech_map_cfg", None)
+    level1_min_pause = getattr(_smap_cfg, "cut_pause_min_sec", 0.35)
+    _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
+    _beat_seams_only = getattr(render_cfg, "beat_clip_shots_only_at_seams", True)
+    _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
+                              min_middle=_min_middle, smap=smap,
+                              level1_min_pause=level1_min_pause,
+                              beat_shots_at_seams_only=_beat_seams_only)
 
 
 def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
@@ -1744,6 +1767,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         return ci if (s.shot != "close" or ci) else [(0.0, s.end - s.start)]
 
     _merged: list = [segs[0]]
+    _premerge_segs: set[int] = set()  # indices in _merged[] that were created by merging
     for _s in segs[1:]:
         _p = _merged[-1]
         _gap = _s.start - _p.end
@@ -1772,6 +1796,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             else:
                 _merged[-1] = _p.model_copy(update={"shot": "wide", "end": _s.end,
                                                      "close_intervals": [[ct0, ct1] for ct0, ct1 in _mci]})
+            _premerge_segs.add(len(_merged) - 1)
         else:
             _merged.append(_s)
     segs = _merged
@@ -1787,7 +1812,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     _is_beat_shots_mode = beat_shots_at_seams_only and reel.beat_gap_sec is not None
     _is_human_reel = getattr(reel, "selection_source", None) == "human"
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
-    cur = "wide"
+    cur = "close"  # cold open = close: every reel opens with the close shot
     for i, seg in enumerate(segs):
         # In beat_shots_mode with an auto reel: prior auto-assigned shots are NOT manual;
         # only human c: annotations are preserved.
@@ -1854,6 +1879,11 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 if si in _k_sents and sent[0].t0 < seg.end and sent[-1].t1 > seg.start:
                     shot_assign[i] = "close"
                     break
+
+    # Manual-segment indices: shot_assign[i] is None (not auto-assigned).
+    # Used by A-B-A guard to protect genuine c: annotations.
+    # Pre-merge segments (_premerge_segs) are exempt — their ci is pipeline-generated, not human.
+    _manual_segs: set[int] = {i for i, a in enumerate(shot_assign) if a is None}
 
     # Apply assignments.
     new_segs = []
@@ -2078,14 +2108,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
 
     # Option 2: absorb short wide tail of a segment into close when next segment starts close.
     # "Short tail" = < min_shot in output time. Jump-seam seams (forced shot changes) excepted.
-    # Also skip the first effective segment when the reel has a cold_open: cold_open is always
-    # close, so the first regular shot should remain wide (close→wide alternation after the hook).
-    _has_cold_open = getattr(reel, "cold_open", None) is not None
     for _i2 in range(len(result) - 1):
         if _i2 + 1 in _js_set:
             continue
-        if _i2 == 0 and _has_cold_open:
-            continue  # preserve wide→close alternation after close cold_open
         _s2 = result[_i2]
         _dur2 = _s2.end - _s2.start
         _ci2 = list(getattr(_s2, "close_intervals", []))
@@ -2141,6 +2166,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 _s_mid = result[_sb_seg]
                 if _sb_seg in _pass3_segs:
                     continue  # ci inserted by Pass 3 max-shot enforcement — preserve it
+                if _sb_seg in _manual_segs and _sb_seg not in _premerge_segs:
+                    continue  # genuine c: annotation — preserve it; pre-merge ci is not protected
                 result[_sb_seg] = _s_mid.model_copy(update={"shot": _sa_sh, "close_intervals": []})
                 warnings.append(
                     f"A-B-A merge: {_sb_sh}({_sb_e - _sb_t:.2f}s) at t={_sb_t:.2f} → {_sa_sh}")
@@ -3929,14 +3956,12 @@ def cmd_render(
                     _smap_path, _render_source, manifest.source_sha256,
                     _render_words or [], render_cfg,
                 )
-            # Re-apply two_shot_auto so beat-reel shot assignments always match the current
-            # beat_clip_shots_only_at_seams rule, even when the manifest was written by an
-            # older run that did not yet know the rule.
-            if _render_words is not None and getattr(render_cfg, "two_shot_auto", False):
-                _stage_two_shot_auto(
-                    list(render_manifest.reels), _render_words,
-                    render_cfg=render_cfg, smap=_render_smap,
-                )
+            # Recompute shots so cold-open rule and beat-seam alternation are always current,
+            # even when the manifest was written by an older run. assign_shots is idempotent.
+            _stage_two_shot_auto(
+                render_manifest.reels, _render_words or [],
+                render_cfg=render_cfg, smap=_render_smap,
+            )
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
