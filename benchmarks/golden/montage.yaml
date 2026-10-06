@@ -1,5 +1,5 @@
 # Golden expectations for the "montage" gate run.
-# 16 clips: lecture 2026-08-08 11h 42m 49s r01–r06, PXL_20260729 r01–r10.
+# 24 clips: lecture 2026-08-08 11h 42m 49s r01–r06, PXL_20260729 r01–r10, IMG_6848 r01–r08.
 # first_words / last_words: first and last 4 whitespace-split tokens from <id>.transcript.txt.
 # cold_open: full text of cold-open segment, or null.
 # reel_end: source timestamp (seconds) — used for speechmap silence check.
@@ -151,3 +151,76 @@ clips:
     first_words: "Друзья, мы с вами"
     last_words: "вы нужны именно такие."
     cold_open: "Вот сколько миллиардов людей, вы единственный неповторимый."
+
+  # ── IMG_6848 ───────────────────────────────────────────────────────────────
+  - clip_id: r01
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r01.mp4"
+    reel_start: 164.297
+    reel_end: 205.739
+    first_words: "У меня был такой"
+    last_words: "полностью изменить свою жизнь."
+    cold_open: null
+
+  - clip_id: r02
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r02.mp4"
+    reel_start: 642.355
+    reel_end: 675.910
+    first_words: "Но я стараюсь идти"
+    last_words: "вот же как нужно."
+    cold_open: null
+
+  - clip_id: r03
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r03.mp4"
+    reel_start: 851.184
+    reel_end: 901.551
+    first_words: "Как ты отдыхаешь? Как"
+    last_words: "это самый лучший отдых."
+    cold_open: null
+
+  - clip_id: r04
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r04.mp4"
+    reel_start: 1030.963
+    reel_end: 1097.980
+    first_words: "Когда человек приходит, иногда"
+    last_words: "вещи с другим человеком."
+    cold_open: null
+
+  - clip_id: r05
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r05.mp4"
+    reel_start: 1201.384
+    reel_end: 1242.241
+    first_words: "Ты всегда стараешься, я"
+    last_words: "вещи ценности, самое главное."
+    cold_open: null
+
+  - clip_id: r06
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r06.mp4"
+    reel_start: 1397.813
+    reel_end: 1441.180
+    first_words: "Чтобы выжить в семье,"
+    last_words: "себе и врет другим."
+    cold_open: null
+
+  - clip_id: r07
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r07.mp4"
+    reel_start: 1463.212
+    reel_end: 1522.260
+    first_words: "Но взрослый что он"
+    last_words: "взрослый его сын, правильно?"
+    cold_open: null
+
+  - clip_id: r08
+    stem: "IMG_6848"
+    path: "reels-out/IMG_6848/_gate/montage2/r08.mp4"
+    reel_start: 1841.707
+    reel_end: 1894.109
+    first_words: "То есть, когда тебя"
+    last_words: "улучшить качественно свою жизнь."
+    cold_open: null

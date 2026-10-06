@@ -2476,9 +2476,15 @@ def _render_segments(
             # Audio invariant: no speech between last-word audible end and clip end.
             # Synthetic tail: real content ends at cut_point; tail is room tone (no speech there).
             _clip_errors: list[str] = []
+            _is_human_manifest = getattr(manifest, "selection_source", None) == "human"
             for _tsw in getattr(reel, "_two_shot_warnings", []):
                 if "[ERROR]" in _tsw:
-                    _clip_errors.append(f"  [ERROR] {reel.id}: shot span — {_tsw.lstrip()}")
+                    if _is_human_manifest:
+                        # Human path: shot-span violations are formatting warnings (CLAUDE.md §5).
+                        # The human's c:/x: annotation is never second-guessed by the render check.
+                        reel.warnings.append(f"[WARN] {reel.id}: shot span (human) — {_tsw.lstrip()}")
+                    else:
+                        _clip_errors.append(f"  [ERROR] {reel.id}: shot span — {_tsw.lstrip()}")
             if smap is not None and reel.subtitles:
                 _inv_lookup = _smap_word_lookup(smap)
                 _real_content_end = (

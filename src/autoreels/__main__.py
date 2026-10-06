@@ -2371,11 +2371,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
                     _jb_out.add(round(_op, 6))
     _p4_spans = _shot_spans_output(result)
-    if reel.cold_open is not None and reel.beat_gap_sec is None:
-        _co_dur_p4 = reel.cold_open.end - reel.cold_open.start
-        _p4_spans = [("close", 0.0, _co_dur_p4)] + [
-            (sh, sa + _co_dur_p4, se + _co_dur_p4) for sh, sa, se in _p4_spans
-        ]
+    # cold_open is a structural header (always close, duration driven by h: sentence).
+    # It is NOT part of the two-shot body and must not shift body-span positions in the
+    # jump-seam check below (the cold_open→body transition is always a jump cut).
     for _stype, _sa, _se in _p4_spans:
         _dsp = _se - _sa
         if _dsp >= min_shot:
