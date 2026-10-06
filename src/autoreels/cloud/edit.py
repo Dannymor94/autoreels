@@ -301,3 +301,57 @@ def exclude_sentences(
     if new_end > cur + eps:
         segs.append(Segment(start=cur, end=new_end))
     return segs, new_start, new_end, [k + 1 for k in sorted(applied_set)], out_of_span_1, "; ".join(notes)
+
+
+def _refine_seams(
+    segs: list[Segment],
+    words: list,
+    smap_words: "list | None",
+    seam_pad: float,
+    fps: float = 30.0,
+) -> list[Segment]:
+    """Refine internal seam endpoints using speech map audible word boundaries.
+
+    A-side end  = audible_end(last kept word before cut) + seam_pad,
+                  capped at audible_start(first cut word).
+    B-side start = audible_start(first kept word after cut) - seam_pad,
+                  floored at audible_end(last cut word).
+    Gap < 2 output frames → cut in the middle. Overlapping Whisper duplicates removed first.
+    """
+    if not smap_words or len(segs) < 2:
+        return segs
+    from autoreels.cloud.snap import _dedup_overlapping_words
+    frame_sec = 1.0 / fps
+    smap_lk = {round(w["t0"] * 1000): w for w in smap_words}
+
+    def _ae(w) -> float:
+        e = smap_lk.get(round(w.t0 * 1000))
+        return e["audible_end"] if e else w.t1
+
+    def _as(w) -> float:
+        e = smap_lk.get(round(w.t0 * 1000))
+        return e["audible_start"] if e else w.t0
+
+    ws = _dedup_overlapping_words(list(words)) if words else []
+    result = list(segs)
+    for i in range(len(result) - 1):
+        a = result[i].end
+        b = result[i + 1].start
+        last_a    = next((w for w in reversed(ws) if w.t0 < a - 1e-4), None)
+        first_cut = next((w for w in ws if w.t0 >= a - 1e-4), None)
+        last_cut  = next((w for w in reversed(ws) if w.t0 < b - 1e-4), None)
+        first_b   = next((w for w in ws if w.t0 >= b - 1e-4), None)
+        new_a = (_ae(last_a) + seam_pad) if last_a else a
+        if first_cut:
+            new_a = min(new_a, _as(first_cut))
+        new_b = (_as(first_b) - seam_pad) if first_b else b
+        if last_cut:
+            new_b = max(new_b, _ae(last_cut))
+        if new_a > new_b:
+            new_a = new_b = (new_a + new_b) / 2
+        elif new_b - new_a < 2 * frame_sec:
+            mid = (new_a + new_b) / 2
+            new_a = new_b = mid
+        result[i] = result[i].model_copy(update={"end": new_a})
+        result[i + 1] = result[i + 1].model_copy(update={"start": new_b})
+    return result

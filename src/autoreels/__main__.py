@@ -1078,6 +1078,26 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
+def _check_seam_inside_word(reel, smap: "dict | None") -> None:
+    """Raise ValueError if any internal seam cut falls inside a word's audible span per smap."""
+    segs = reel.segments
+    if not segs or len(segs) < 2 or not smap:
+        return
+    smap_words = smap.get("words", [])
+    if not smap_words:
+        return
+    intervals = [(w["audible_start"], w["audible_end"]) for w in smap_words
+                 if w.get("audible_end", 0) > w.get("audible_start", 0)]
+    for i in range(len(segs) - 1):
+        for t in (segs[i].end, segs[i + 1].start):
+            for as_, ae_ in intervals:
+                if as_ < t < ae_:
+                    raise ValueError(
+                        f"[ERROR] {reel.id}: seam inside word — cut at {t:.3f}s "
+                        f"is inside [{as_:.3f}, {ae_:.3f}]"
+                    )
+
+
 def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None, smap=None):
     """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM).
 
@@ -4094,6 +4114,9 @@ def cmd_render(
                     _smap_path, _render_source, manifest.source_sha256,
                     _render_words or [], render_cfg,
                 )
+            if _render_smap:
+                for _r in render_manifest.reels:
+                    _check_seam_inside_word(_r, _render_smap)
             # Recompute shots so cold-open rule and beat-seam alternation are always current,
             # even when the manifest was written by an older run. assign_shots is idempotent.
             _stage_two_shot_auto(
@@ -4781,7 +4804,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         candidate_blocks, filter_blocks, score_block,
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
-    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences
+    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences, _refine_seams
     from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
@@ -5003,6 +5026,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # build-order position (0-based) of the reel each scored seq becomes; the formatting-only
     # pipeline never drops or reorders, so position i survives as final reel i+1.
     _tx_words = getattr(transcript, "words", [])
+    # M1.8 Stage B: load smap before the reel-build loop so x:/beat seam refinement can use it.
+    _blk_smap: "dict | None" = None
+    if getattr(render_cfg, "speech_map", False):
+        _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
+        _blk_source = source_file if source_file.is_file() else None
+        _blk_smap = _ensure_smap(_blk_smap_path, _blk_source, manifest.source_sha256, _tx_words, render_cfg)
     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
     conflicts: list[str] = []
@@ -5148,6 +5177,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 )
                 reel.start, reel.end = _x_start, _x_end
                 if _xsegs:
+                    _smap_words = _blk_smap.get("words", []) if _blk_smap else None
+                    if _smap_words and len(_xsegs) >= 2:
+                        _xsegs = _refine_seams(_xsegs, _tx_words, _smap_words,
+                                               getattr(r0_cfg, "seam_pad_sec", 0.04))
                     reel.segments = _xsegs
                 _x_msg = (
                     f"  x: {_grp}: excluded {len(_x_applied)} sentence(s) "
@@ -5212,6 +5245,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                         if _s_end > _src_next - 0.02:
                             _s_end = max(_s_start, _src_next - 0.02)
                     _beat_segs.append(_make_segment(_s_start, _s_end))
+                _smap_words = _blk_smap.get("words", []) if _blk_smap else None
+                if _smap_words and len(_beat_segs) >= 2:
+                    _beat_segs = _refine_seams(_beat_segs, _tx_words, _smap_words,
+                                               getattr(r0_cfg, "seam_pad_sec", 0.04))
                 reel.segments = _beat_segs
                 reel.beat_gap_sec = _beat_gap
                 reel.start = _beat_segs[0].start
@@ -5295,13 +5332,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # pure DECIDING stages (too-long trim, top-N, dedup, density split, the duration floors) are
     # NOT reached here; collect_human_warnings reports what a bypassed drop-half would have flagged.
     density_disc: list[dict] = []
-    tx_words = getattr(transcript, "words", [])
-    # M1.8 Stage B: load smap once before snap (consumer 4) + two_shot_auto (consumer 3).
-    _blk_smap: "dict | None" = None
-    if getattr(render_cfg, "speech_map", False):
-        _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
-        _blk_source = source_file if source_file.is_file() else None
-        _blk_smap = _ensure_smap(_blk_smap_path, _blk_source, manifest.source_sha256, tx_words, render_cfg)
+    tx_words = _tx_words  # alias used by filler removal and post-loop stages
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max, smap=_blk_smap)
     # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
     # cannot repair within bounds stays, and collect_human_warnings reports it.
@@ -5385,6 +5416,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
         _check_first_subtitle_word(_r, _tx_words)
+        _check_seam_inside_word(_r, _blk_smap)
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.
@@ -5499,6 +5531,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                         pause_residual_sec=_fr.pause_residual_sec, max_removed_share=_fr.max_removed_share,
                     )
                     if cnt and len(sub) >= 2:
+                        _smap_words = _blk_smap.get("words", []) if _blk_smap else None
+                        if _smap_words:
+                            sub = _refine_seams(sub, tx_words, _smap_words,
+                                                getattr(r0_cfg, "seam_pad_sec", 0.04))
                         new_segs.extend(sub)
                         total_removed += rem
                         total_count += cnt
@@ -5516,6 +5552,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 )
                 if count:
                     if len(segs) >= 2:
+                        _smap_words = _blk_smap.get("words", []) if _blk_smap else None
+                        if _smap_words:
+                            segs = _refine_seams(segs, tx_words, _smap_words,
+                                                 getattr(r0_cfg, "seam_pad_sec", 0.04))
                         reel.segments = segs
                     reel.start, reel.end = segs[0].start, segs[-1].end
                     filler_stats.append((reel, removed, count))
