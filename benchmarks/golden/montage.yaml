@@ -39,8 +39,8 @@ clips:
     path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r04.mp4"
     reel_start: 340.583
     reel_end: 379.143
-    first_words: "нужно. Когда у вас"
-    last_words: "не по душе. Понятно?"
+    first_words: "у вас не стимул,"
+    last_words: "или не по душе."
     cold_open: null
 
   - clip_id: r05
@@ -77,7 +77,7 @@ clips:
     reel_start: 974.433
     reel_end: 1022.713
     first_words: "Я, наверное, не так,"
-    last_words: "А если брать выходящие"
+    last_words: "его естественное состояние войти."
     cold_open: null
 
   - clip_id: r03
@@ -94,8 +94,8 @@ clips:
     path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r04.mp4"
     reel_start: 1473.988
     reel_end: 1539.210
-    first_words: "— А с какими"
-    last_words: "ему нужно идти. Ты"
+    first_words: "А с какими самыми"
+    last_words: "куда ему нужно идти."
     cold_open: null
 
   - clip_id: r05
@@ -122,7 +122,7 @@ clips:
     reel_start: 2027.792
     reel_end: 2058.732
     first_words: "То есть все ваши"
-    last_words: "А здесь все условия"
+    last_words: "тогда по-настоящему вы меняетесь."
     cold_open: null
 
   - clip_id: r08
@@ -140,7 +140,7 @@ clips:
     reel_start: 2436.279
     reel_end: 2517.410
     first_words: "Если я какой-то не"
-    last_words: "делаю. делаю. Когда природа"
+    last_words: "что я там делаю."
     cold_open: null
 
   - clip_id: r10
