@@ -338,3 +338,20 @@ def test_refine_word_boundaries_overlapping_r03_dusha_case():
     assert w0["audible_end"] > 378.6, (
         f"ae={w0['audible_end']:.3f} expected to come from interval, not from clamp"
     )
+
+
+def test_no_zero_duration_when_c_off_before_lower_bound():
+    """prev_ae + epsilon > c_off must not produce zero-duration entry."""
+    # prev word's ae=100.0; curr word t0=100.0, t1=100.1
+    # interval [99.92, 100.03] — c_off=100.03 < prev_ae+eps=100.05 → was zero-duration
+    words = [
+        SimpleNamespace(word="prev", t0=99.7, t1=100.0),
+        SimpleNamespace(word="curr", t0=100.0, t1=100.1),
+    ]
+    intervals = [(99.7, 100.03)]
+    result = refine_word_boundaries(words, intervals)
+    for entry in result:
+        assert entry["audible_end"] > entry["audible_start"] + 1e-6, (
+            f"zero-duration at idx={entry['idx']}: "
+            f"as={entry['audible_start']:.4f} ae={entry['audible_end']:.4f}"
+        )

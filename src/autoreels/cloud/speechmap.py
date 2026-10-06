@@ -182,6 +182,8 @@ def refine_word_boundaries(
             prev_ae = refined[-1]["audible_end"] if refined else 0.0
             as_ = max(c_on, prev_ae + epsilon, w.t0 - epsilon)
             ae = max(min(c_off, w.t1 + epsilon), as_)
+            if ae <= as_:          # c_off entirely before lower_bound → token duration
+                ae = as_ + epsilon
             if ae <= w.t0:
                 ae = w.t1  # absolute fallback: Whisper t1 is always > t0
             refined.append({"idx": idx, "t0": w.t0, "t1": w.t1,
@@ -230,6 +232,8 @@ def refine_word_boundaries(
             prev_ae = refined[-1]["audible_end"] if refined else 0.0
             as_ = max(c_on, prev_ae + epsilon, w.t0 - epsilon)
             ae = max(min(c_off, w.t1 + epsilon), as_)
+            if ae <= as_:          # c_off entirely before lower_bound → token duration
+                ae = as_ + epsilon
             if ae <= w.t0:
                 ae = w.t1
             refined.append({"idx": idx, "t0": w.t0, "t1": w.t1,
