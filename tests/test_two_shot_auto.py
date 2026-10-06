@@ -465,14 +465,15 @@ def test_small_gap_merged_no_flash():
 # ── PART 2: cold_open first effective segment not absorbed by option 2 ───────────────────────
 
 def test_cold_open_first_seg_not_absorbed_by_option2():
-    """Reel with a cold_open: cold-open=close rule makes the first effective segment close.
+    """cold_open → body jump seam forces body[0] to wide; option 2 must not absorb it.
 
-    cold_open is always close by construction. The cold-open=close rule (cur="close" start)
-    also makes the first effective segment close, regardless of option 2.
+    cold_open is always close. The jump seam forces body[0] to wide (not close).
+    body[0] = 2s < min_shot=2.5s: option 2 would absorb it, but must be skipped (jump seam).
+    cold-open A-B-A extension then widens seg1 to avoid the A-B-A.
     """
     segs = [
-        _seg(100.0, 102.0),              # seg0: auto, gets close (cold-open=close rule)
-        _seg(103.0, 110.0, "close"),     # seg1: manual close
+        _seg(100.0, 102.0),              # seg0: auto, 2s; jump seam → wide; option 2 skipped
+        _seg(103.0, 110.0, "close"),     # seg1: manual close; extended to wide by cold-open A-B-A
     ]
     reel = _reel(segs)
     reel.cold_open = _seg(110.5, 114.5, "close")
@@ -481,8 +482,15 @@ def test_cold_open_first_seg_not_absorbed_by_option2():
     _stage_two_shot_auto([reel], [], render_cfg=_cfg())
     result = reel.effective_segments()
 
-    assert result[0].shot == "close", (
-        "first effective segment must be close (cold-open=close rule)"
+    assert result[0].shot == "wide", (
+        "first effective segment must be wide (cold_open→body jump seam forces opposite shot)"
+    )
+    assert result[1].shot == "wide", (
+        "seg1 extended to wide by cold-open A-B-A (initial wide 2.0s < min_middle 4.0s)"
+    )
+    warns = getattr(reel, "_two_shot_warnings", [])
+    assert any("cold-open A-B-A" in w for w in warns), (
+        f"expected cold-open A-B-A warning; got {warns}"
     )
 
 
@@ -729,8 +737,8 @@ def test_beat_shots_only_at_seams_r06():
 # ── Part 1 gate: assign_shots public API ─────────────────────────────────────
 
 def test_assign_shots_pxl_r01_cold_open_close():
-    """assign_shots: cold_open always close, c: annotation preserved, no short spans or A-B-A."""
-    from autoreels.__main__ import assign_shots, _shot_spans_merged
+    """assign_shots: cold_open→body seam changes shot, c: preserved, no A-B-A incl. cold_open."""
+    from autoreels.__main__ import assign_shots, _shot_spans_merged, _shot_spans_output
 
     # Gaps >= 2.5s so fillers don't create sub-min_shot wide spans.
     segs = [
@@ -748,6 +756,11 @@ def test_assign_shots_pxl_r01_cold_open_close():
 
     result = reel.effective_segments()
 
+    # cold_open→body jump seam changes shot: body[0] must be wide
+    assert result[0].shot == "wide", (
+        "cold_open→body jump seam must force body[0] to wide (opposite of close)"
+    )
+
     # c: annotation must be preserved
     assert result[2].shot == "wide", "c: annotation shot must stay wide"
     assert result[2].close_intervals, "c: annotation ci must be preserved"
@@ -756,14 +769,20 @@ def test_assign_shots_pxl_r01_cold_open_close():
     for stype, dur in _shot_spans_merged(result):
         assert dur >= 2.5, f"short {stype} span: {dur:.2f}s < 2.5s"
 
-    # No A-B-A middle < min_middle=4.0s
-    spans = _shot_spans_merged(result)
-    for i in range(len(spans) - 2):
-        sa, _ = spans[i]
-        sb, sb_d = spans[i + 1]
-        sc, _ = spans[i + 2]
-        if sa == sc and sa != sb:
-            assert sb_d >= 4.0, f"A-B-A middle {sb}({sb_d:.2f}s) < 4.0s at index {i}"
+    # No A-B-A middle < min_middle=4.0s — check includes cold_open span
+    co_dur = reel.cold_open.end - reel.cold_open.start
+    full_spans = [("close", 0.0, co_dur)] + [
+        (sh, sa + co_dur, se + co_dur)
+        for sh, sa, se in _shot_spans_output(result)
+    ]
+    for i in range(len(full_spans) - 2):
+        sa, _, _ = full_spans[i]
+        sb, b0, be = full_spans[i + 1]
+        sc, _, _ = full_spans[i + 2]
+        bd = be - b0
+        assert not (sa == sc and sa != sb and bd < 4.0), (
+            f"A-B-A middle {sb}({bd:.2f}s) at output {b0:.2f}–{be:.2f} < 4.0s (incl. cold_open)"
+        )
 
 
 def test_assign_shots_lec_r01_beat_seams():

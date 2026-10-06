@@ -91,3 +91,35 @@ def test_synthetic_frame_sequence_no_error_when_spans_ok():
     warns = getattr(reel, "_two_shot_warnings", [])
     errors = [w for w in warns if "[ERROR]" in w]
     assert not errors, f"no [ERROR] expected for spans at threshold; got: {errors}"
+
+
+# ── Part 2: Pass 4 includes cold_open in A-B-A check ─────────────────────────
+
+def test_p4_cold_open_aba_close_wide_close_error():
+    """Pass 4 includes cold_open: close(4s)→wide(3.4s)→close triggers [ERROR] A-B-A.
+
+    body[0]=wide+ci=[[0,0.6]] (3.4s wide tail). _js_forced protects it from A-B-A merge.
+    Pass 4 prepends cold_open(close,4s), producing merged close(4.6s)→wide(3.4s)→close.
+    The [ERROR] output time (>4s) proves cold_open was included.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+    segs = [
+        _seg(0.0, 4.0, "wide", [[0.0, 0.6]]),  # wide+ci: close(0.6s)+wide(3.4s tail)
+        _seg(5.0, 13.0, "close"),               # close 8s
+    ]
+    reel = _reel(segs)
+    reel.cold_open = _seg(50.0, 54.0, "close")  # 4s, jump from later source moment
+
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert any("A-B-A" in e or "middle" in e for e in errors), (
+        f"expected [ERROR] A-B-A middle for close→wide(3.4s)→close with cold_open; got {warns}"
+    )
+    # The output time in the [ERROR] must be > 4s (cold_open prepended → span shifted)
+    assert any(
+        ("A-B-A" in e or "middle" in e) and
+        any(float(t) > 4.0 for t in __import__("re").findall(r"\d+\.\d+", e))
+        for e in errors
+    ), f"[ERROR] output time must be >4s (cold_open 4s prepended); got {errors}"

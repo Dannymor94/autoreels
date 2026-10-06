@@ -1812,7 +1812,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     _is_beat_shots_mode = beat_shots_at_seams_only and reel.beat_gap_sec is not None
     _is_human_reel = getattr(reel, "selection_source", None) == "human"
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
-    cur = "close"  # cold open = close: every reel opens with the close shot
+    # cold open = close; its jump seam forces body to start with the opposite shot
+    cur = "wide" if reel.cold_open is not None else "close"
     for i, seg in enumerate(segs):
         # In beat_shots_mode with an auto reel: prior auto-assigned shots are NOT manual;
         # only human c: annotations are preserved.
@@ -2088,6 +2089,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 warnings.append(f"jump-seam at {_pa.end:.2f}: forced opposite start on next beat")
 
     _enforce_jump_seams()
+    # cold_open → body[0] is always a jump seam; protect body[0] from A-B-A removal.
+    if reel.cold_open is not None and result:
+        _js_forced.add(0)
 
     # Snap close_intervals within _SNAP_THRESH of window start/end to the boundary.
     # Eliminates sub-frame wide flashes at segment edges (e.g. ci starting at 0.06s).
@@ -2109,6 +2113,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # Option 2: absorb short wide tail of a segment into close when next segment starts close.
     # "Short tail" = < min_shot in output time. Jump-seam seams (forced shot changes) excepted.
     for _i2 in range(len(result) - 1):
+        if reel.cold_open is not None and _i2 == 0:
+            continue  # cold_open → body jump seam: never absorb body[0]'s shot
         if _i2 + 1 in _js_set:
             continue
         _s2 = result[_i2]
@@ -2192,6 +2198,31 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                             _spans_aba.append((_t0_aba + _p_aba, _t0_aba + _dur_aba, "wide", _k_aba))
                     _t0_aba += _dur_aba
 
+    # Cold-open extension: body[0] is wide at a jump seam (protected from A-B-A removal).
+    # If the initial wide run (body[0] + adjacent simple-wide segments) is < min_middle,
+    # extend it by changing the next simple-close segment to wide (warn if c: annotation).
+    if reel.cold_open is not None and result and min_middle > 0:
+        _co_wide = 0.0
+        _k_ext = len(result)
+        for _k_co, _s_co in enumerate(result):
+            _ci_co = list(getattr(_s_co, "close_intervals", []) or [])
+            if _s_co.shot == "wide" and not _ci_co:
+                _co_wide += _s_co.end - _s_co.start
+            else:
+                _k_ext = _k_co
+                break
+        if 0 < _co_wide < min_middle and _k_ext < len(result):
+            _s_ext = result[_k_ext]
+            _ci_ext = list(getattr(_s_ext, "close_intervals", []) or [])
+            if _s_ext.shot == "close" and not _ci_ext:
+                if _k_ext in _manual_segs:
+                    warnings.append(
+                        f"cold-open A-B-A: c: at body[{_k_ext}] "
+                        f"({_s_ext.end - _s_ext.start:.2f}s) overridden wide "
+                        f"(initial wide {_co_wide:.2f}s < min_middle {min_middle:.1f}s)"
+                    )
+                result[_k_ext] = _s_ext.model_copy(update={"shot": "wide", "close_intervals": []})
+
     # Re-run jump-seam enforcement after A-B-A: A-B-A may have changed the ending shot of a
     # prev-beat segment, invalidating the first pass's decision for the next beat.
     # Example (r01): A-B-A removes pre-merge ci from merged_b1b2 (was: ends close, now: ends wide)
@@ -2233,6 +2264,11 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
                     _jb_out.add(round(_op, 6))
     _p4_spans = _shot_spans_output(result)
+    if reel.cold_open is not None and reel.beat_gap_sec is None:
+        _co_dur_p4 = reel.cold_open.end - reel.cold_open.start
+        _p4_spans = [("close", 0.0, _co_dur_p4)] + [
+            (sh, sa + _co_dur_p4, se + _co_dur_p4) for sh, sa, se in _p4_spans
+        ]
     for _stype, _sa, _se in _p4_spans:
         _dsp = _se - _sa
         if _dsp >= min_shot:
