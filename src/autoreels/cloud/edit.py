@@ -368,6 +368,10 @@ def _refine_seams(
     for i in range(len(result) - 1):
         a = result[i].end
         b = result[i + 1].start
+        if a >= b - 1e-4:
+            # Non-chronological beat seam (B-side start <= A-side end): refining would produce
+            # a midpoint outside both segments' source spans.  Leave beat gap as-is.
+            continue
         last_a    = next((w for w in reversed(ws) if w.t0 < a - 1e-4), None)
         first_cut = next((w for w in ws if w.t0 >= a - 1e-4), None)
         last_cut  = next((w for w in reversed(ws) if w.t0 < b - 1e-4), None)

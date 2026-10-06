@@ -125,6 +125,26 @@ def test_seam_zero_gap_collapsed_not_checked():
     assert msgs == [], f"Expected no error for collapsed seam, got: {msgs}"
 
 
+def test_seam_nonchronological_beat_skipped():
+    """Non-chronological beat seam (A-side end > B-side start) must be left unchanged.
+
+    Beat reels with a backwards beat (e.g. order [5,6,7,4]) have a seam where the
+    A-side ends after the B-side starts in source time.  Refining such a seam produces
+    a midpoint that is INSIDE the B-side segment's source span, creating a reversed segment.
+    The fix: skip refinement when segs[i].end >= segs[i+1].start.
+    """
+    # Backwards seam: A-side ends at 5.0, B-side starts at 3.0 (non-chronological)
+    words = [_word("a", 0.0, 1.0), _word("b", 4.0, 5.5)]
+    smap = [_smap_entry(0.0, 1.0, 0.1, 0.95), _smap_entry(4.0, 5.5, 4.05, 5.45)]
+    segs = [Segment(start=0.0, end=5.0), Segment(start=3.0, end=5.0)]
+    result = _refine_seams(segs, words, smap, seam_pad=0.04)
+    # Must be unchanged: refining would set mid=(5+3)/2=4 → segment[1]=[4,5] which is OK
+    # but actually would destroy the segment if B-side internal span starts > 4.
+    # The guard keeps both segments as-is.
+    assert result[0].end == 5.0
+    assert result[1].start == 3.0
+
+
 def test_seam_push_past_merged_interval_overlapping_smap():
     """Bug: smap dedup dropped word B's interval; new_a landed inside B's merged span.
 
