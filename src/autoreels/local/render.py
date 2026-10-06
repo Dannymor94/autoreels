@@ -2143,6 +2143,7 @@ def _render_segments(
                     _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
                     if segs and segs[0].start > _first_sub_as + 1e-4:
                         segs = [segs[0].model_copy(update={"start": _first_sub_as})] + list(segs[1:])
+                        segs = _snap_windows_to_frames(segs, _fps())
                         clip_dur = sum(s.end - s.start for s in segs)
 
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
@@ -2479,7 +2480,7 @@ def _render_segments(
             # First-word-cut invariant: source_start must not exceed the first subtitle word's
             # acoustic onset (audible_start per smap).  The start-fix above prevents this; the
             # check here catches any remaining violations (e.g., smap lookup mismatch).
-            if _first_sub_as is not None and segs and segs[0].start > _first_sub_as + 1e-4:
+            if _first_sub_as is not None and segs and segs[0].start > _first_sub_as + 1.5 / (_fps_holder[0] if _fps_holder else 30.0):
                 _clip_errors.append(
                     f"  [ERROR] {reel.id}: first word cut — "
                     f"source_start={segs[0].start:.3f}s > audible_start={_first_sub_as:.3f}s "
