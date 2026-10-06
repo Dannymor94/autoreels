@@ -1,0 +1,153 @@
+# Golden expectations for the "montage" gate run.
+# 16 clips: lecture 2026-08-08 11h 42m 49s r01–r06, PXL_20260729 r01–r10.
+# first_words / last_words: first and last 4 whitespace-split tokens from <id>.transcript.txt.
+# cold_open: full text of cold-open segment, or null.
+# reel_end: source timestamp (seconds) — used for speechmap silence check.
+# Generated from manifests + speechmap word tables; update after re-apply.
+
+clips:
+  # ── lecture 2026-08-08 11h 42m 49s ────────────────────────────────────────
+  - clip_id: r01
+    stem: "2026-08-08 11h 42m 49s"
+    path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r01.mp4"
+    reel_start: 66.100
+    reel_end: 81.540
+    first_words: "Ваша нервная система зажалась."
+    last_words: "нормально, вы не поломаны."
+    cold_open: null
+
+  - clip_id: r02
+    stem: "2026-08-08 11h 42m 49s"
+    path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r02.mp4"
+    reel_start: 131.240
+    reel_end: 186.240
+    first_words: "Вот сейчас вспомните какую-то"
+    last_words: "себя, потом остальных человек?"
+    cold_open: null
+
+  - clip_id: r03
+    stem: "2026-08-08 11h 42m 49s"
+    path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r03.mp4"
+    reel_start: 211.903
+    reel_end: 236.080
+    first_words: "У вас отключается, что"
+    last_words: "работает, ребят, не работает."
+    cold_open: null
+
+  - clip_id: r04
+    stem: "2026-08-08 11h 42m 49s"
+    path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r04.mp4"
+    reel_start: 340.583
+    reel_end: 379.143
+    first_words: "нужно. Когда у вас"
+    last_words: "не по душе. Понятно?"
+    cold_open: null
+
+  - clip_id: r05
+    stem: "2026-08-08 11h 42m 49s"
+    path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r05.mp4"
+    reel_start: 388.303
+    reel_end: 426.250
+    first_words: "Из этих трех штук"
+    last_words: "Ребятки, так это работает."
+    cold_open: null
+
+  - clip_id: r06
+    stem: "2026-08-08 11h 42m 49s"
+    path: "reels-out/2026-08-08 11h 42m 49s/_gate/montage/r06.mp4"
+    reel_start: 467.526
+    reel_end: 473.226
+    first_words: "С вами все прямо"
+    last_words: "реальная вещь, которая есть."
+    cold_open: null
+
+  # ── PXL_20260729_085910095_34f06abf ───────────────────────────────────────
+  - clip_id: r01
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r01.mp4"
+    reel_start: 639.983
+    reel_end: 679.393
+    first_words: "В психологии, наоборот, я"
+    last_words: "такие же люди притягиваются."
+    cold_open: "фонариком. Мы психологи не даем советов."
+
+  - clip_id: r02
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r02.mp4"
+    reel_start: 974.433
+    reel_end: 1022.713
+    first_words: "Я, наверное, не так,"
+    last_words: "А если брать выходящие"
+    cold_open: null
+
+  - clip_id: r03
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r03.mp4"
+    reel_start: 1132.143
+    reel_end: 1196.623
+    first_words: "В любом случае, ко"
+    last_words: "оно все-таки в теле."
+    cold_open: null
+
+  - clip_id: r04
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r04.mp4"
+    reel_start: 1473.988
+    reel_end: 1539.210
+    first_words: "— А с какими"
+    last_words: "ему нужно идти. Ты"
+    cold_open: null
+
+  - clip_id: r05
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r05.mp4"
+    reel_start: 1689.756
+    reel_end: 1747.076
+    first_words: "Если собрать всю книгу"
+    last_words: "это вот такая сутра."
+    cold_open: "Ты не поломан, ты просто забыл свою силу."
+
+  - clip_id: r06
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r06.mp4"
+    reel_start: 1893.330
+    reel_end: 1975.232
+    first_words: "Если мы с вами"
+    last_words: "базовую папу-маму любящих родителей."
+    cold_open: null
+
+  - clip_id: r07
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r07.mp4"
+    reel_start: 2027.792
+    reel_end: 2058.732
+    first_words: "То есть все ваши"
+    last_words: "А здесь все условия"
+    cold_open: null
+
+  - clip_id: r08
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r08.mp4"
+    reel_start: 2101.635
+    reel_end: 2158.175
+    first_words: "Что они могут сделать"
+    last_words: "— это ваше тело."
+    cold_open: null
+
+  - clip_id: r09
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r09.mp4"
+    reel_start: 2436.279
+    reel_end: 2517.410
+    first_words: "Если я какой-то не"
+    last_words: "делаю. делаю. Когда природа"
+    cold_open: null
+
+  - clip_id: r10
+    stem: "PXL_20260729_085910095_34f06abf"
+    path: "reels-out/PXL_20260729_085910095_34f06abf/_gate/montage/r10.mp4"
+    reel_start: 2709.601
+    reel_end: 2749.121
+    first_words: "Друзья, мы с вами"
+    last_words: "вы нужны именно такие."
+    cold_open: "Вот сколько миллиардов людей, вы единственный неповторимый."
