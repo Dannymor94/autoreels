@@ -169,8 +169,10 @@ def _check_words(clip_dir: Path, clip_id: str, expected: dict) -> list[str]:
         exp_raw = expected.get(key, "")
         if not exp_raw:
             continue
-        n = len(exp_raw.split())
         exp_norm = _normalize_words(exp_raw)
+        n = len(exp_norm)  # count after normalization: dash tokens stripped to empty
+        if not n:
+            continue
         got = norm[-n:] if take_end else norm[:n]
         if got != exp_norm:
             fails.append(f"{key}:got='{' '.join(got)}'")

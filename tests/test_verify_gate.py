@@ -346,6 +346,24 @@ def test_words_normalization_punct_match(tmp_path):
         f"punct-normalized words should match: {fails}"
 
 
+def test_words_normalization_dash_token_stripped(tmp_path):
+    """PXL r04: golden '— А с какими' has dash stripped → N=3, not 4 — must match."""
+    clip_dir = tmp_path / "gate"
+    clip_dir.mkdir()
+    mp4 = clip_dir / "r01.mp4"
+    _make_mp4_with_audio(mp4)
+    (clip_dir / "r01.transcript.txt").write_text(
+        "а с какими самыми разными клиентами работаешь.\n", encoding="utf-8"
+    )
+    _speechmap(tmp_path / "s.speechmap.json", [])
+    entry = _yaml_entry("r01", str(mp4.relative_to(tmp_path)), "s", 3.0,
+                        "— А с какими",  # dash strips → N=3
+                        "а с какими самыми")
+    fails = vg.check_clip(entry, tmp_path)
+    assert not any("first_words" in f for f in fails), \
+        f"dash-prefixed golden first_words should match after strip: {fails}"
+
+
 # ── Bug 5: frame tolerance — 118fr A-B-A middle passes with 2-frame tolerance ─
 
 def test_span_violations_aba_118fr_tolerance():
