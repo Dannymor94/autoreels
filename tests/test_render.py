@@ -3170,3 +3170,29 @@ def test_synth_tail_single_frozen_frame(tmp_path):
         f"tail frames are NOT identical ({len(set(hashes))} unique hashes) — "
         f"single-frame freeze broken; got hashes: {hashes[:5]}"
     )
+
+
+# ── PART 3: start fix — audible_start lookup (r04 numbers) ────────────────────
+
+def test_start_fix_lookup_r04_numbers():
+    """r04: word t0=340.583 has audible_start=340.41; lookup finds it and start-fix condition fires."""
+    from autoreels.local.render import _smap_word_lookup
+    smap = {
+        "words": [
+            {"idx": 683, "t0": 340.583, "t1": 340.9,
+             "audible_start": 340.41, "audible_end": 340.72},
+        ],
+        "intervals": [[340.41, 340.9]],
+        "boundaries": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    key = round(340.583 * 1000)
+    assert key in lookup, "t0=340.583 not found in lookup"
+    _, entry = lookup[key]
+    as_ = entry.get("audible_start", 340.583)
+    seg_start = 340.583
+    # Start-fix condition: seg_start > audible_start + 1e-4
+    assert seg_start > as_ + 1e-4, \
+        f"start-fix must fire when seg_start={seg_start} > audible_start={as_}"
+    # After fix, seg_start would equal audible_start
+    assert as_ < seg_start, f"audible_start={as_} must be before t0={seg_start}"
