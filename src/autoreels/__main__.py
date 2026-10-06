@@ -1043,6 +1043,35 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None, smap=None) 
         )
 
 
+def _check_first_subtitle_word(reel, tx_words) -> None:
+    """Raise ValueError if the first subtitle word continues a mid-sentence fragment.
+
+    A clip starts mid-sentence when: (a) its first subtitle word starts lowercase AND
+    (b) the preceding transcript word does not end with sentence-final punctuation (.!?…).
+    Both conditions required to avoid false positives from proper nouns.
+    """
+    if not reel.subtitles:
+        return
+    first = reel.subtitles[0]
+    text = first.word.strip(".,!?…;: ")
+    if not text or text[0].isupper():
+        return  # uppercase start → not a mid-sentence continuation
+    from autoreels.cloud.snap import _is_sentence_end as _ise
+    # Find the transcript word immediately before first.t0
+    preceding = None
+    for w in tx_words:
+        if w.t0 < first.t0 - 1e-4:
+            preceding = w
+    if preceding is None:
+        return  # first word in transcript — OK
+    if not _ise(preceding.word):
+        raise ValueError(
+            f"[ERROR] {reel.id}: starts mid-sentence — "
+            f"'{first.word}' (t0={first.t0:.3f}) follows '{preceding.word}' "
+            f"which is not a sentence end"
+        )
+
+
 def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None, smap=None):
     """R4: подтянуть границы reel к словам/паузам транскрипта (код, не LLM).
 
@@ -3288,6 +3317,7 @@ def _cmd_run_impl(
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
     for _r in reels:
         _check_last_subtitle_word(_r, tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_run_smap)
+        _check_first_subtitle_word(_r, tx_words)
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,
@@ -4004,6 +4034,7 @@ def cmd_render(
             if _render_words:
                 for _r in render_manifest.reels:
                     _check_last_subtitle_word(_r, _render_words)
+                    _check_first_subtitle_word(_r, _render_words)
             _render_source: "Path | None" = None
             if getattr(render_cfg, "speech_map", False):
                 _smap_path = _transcripts_dir_r / f"{stem}.speechmap.json"
@@ -5291,6 +5322,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _r.subtitles = [w for w in _r.subtitles if w.t0 in _incl_t0s]
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
+        _check_first_subtitle_word(_r, _tx_words)
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.

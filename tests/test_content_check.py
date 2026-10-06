@@ -129,3 +129,54 @@ def test_explicit_e_overlapping_timestamps_excluded():
     # actual_last = «Понятно?» with t0=378.143 < «душе.» t1=378.883 (within eps=0.05) → raises.
     with pytest.raises(ValueError, match=r"\[CONTENT\]"):
         m._check_last_subtitle_word(r_dirty, all_words)
+
+
+# ---------------------------------------------------------------------------
+# _check_first_subtitle_word
+# ---------------------------------------------------------------------------
+
+def _reel_first(subtitles: list[Word]) -> Reel:
+    r = Reel(id="r01", start=subtitles[0].t0 if subtitles else 0.0, end=10.0,
+             score=80, hook="h", title="t", description="d", reason="r", topic="x")
+    return r.model_copy(update={"subtitles": subtitles})
+
+
+_TX_FIRST = [
+    _w(0.5, 1.0, "предыдущая."),   # sentence end
+    _w(1.0, 1.5, "Когда"),          # sentence start (uppercase, follows sentence end)
+    _w(1.6, 2.0, "у"),              # mid-sentence (lowercase, follows non-sentence-end)
+    _w(2.1, 2.5, "вас"),
+]
+
+
+def test_first_word_at_sentence_start_ok():
+    """First subtitle starts at sentence start — no error."""
+    r = _reel_first([_TX_FIRST[1]])   # «Когда»
+    m._check_first_subtitle_word(r, _TX_FIRST)  # must not raise
+
+
+def test_first_word_mid_sentence_lowercase_raises():
+    """First subtitle is mid-sentence and starts lowercase → [ERROR] starts mid-sentence.
+
+    r04 regression: old manifest started with «у вас не стимул» after «Когда» was skipped.
+    """
+    r = _reel_first([_TX_FIRST[2]])   # «у» follows «Когда» (non-sentence-end)
+    with pytest.raises(ValueError, match=r"\[ERROR\].*starts mid-sentence"):
+        m._check_first_subtitle_word(r, _TX_FIRST)
+
+
+def test_first_word_uppercase_after_non_sentence_end_ok():
+    """Uppercase first word after a non-sentence-end predecessor is allowed.
+
+    Could be a proper noun mid-sentence or snap picking it deliberately.
+    """
+    tx = [_w(0.5, 1.0, "слово"), _w(1.0, 1.5, "Алексей")]  # comma-separated, not sentence end
+    r = _reel_first([tx[1]])
+    m._check_first_subtitle_word(r, tx)  # uppercase → no raise
+
+
+def test_first_word_no_predecessor_ok():
+    """First word of the transcript has no predecessor — no error."""
+    tx = [_w(0.0, 0.5, "когда")]   # lowercase, but no preceding word
+    r = _reel_first([tx[0]])
+    m._check_first_subtitle_word(r, tx)  # must not raise
