@@ -3929,6 +3929,14 @@ def cmd_render(
                     _smap_path, _render_source, manifest.source_sha256,
                     _render_words or [], render_cfg,
                 )
+            # Re-apply two_shot_auto so beat-reel shot assignments always match the current
+            # beat_clip_shots_only_at_seams rule, even when the manifest was written by an
+            # older run that did not yet know the rule.
+            if _render_words is not None and getattr(render_cfg, "two_shot_auto", False):
+                _stage_two_shot_auto(
+                    list(render_manifest.reels), _render_words,
+                    render_cfg=render_cfg, smap=_render_smap,
+                )
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,

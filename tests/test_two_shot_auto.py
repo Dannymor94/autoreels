@@ -686,6 +686,31 @@ def test_beat_shots_only_at_seams_r01():
         assert not s.close_intervals, f"no ci inside beats; got ci={s.close_intervals}"
 
 
+def test_beat_shots_only_at_seams_r01_stale_manifest():
+    """Stale manifest shots must not survive into the render.
+
+    Mirrors the real r01 manifest: seg1 has shot=close (an adjacent-seam stale assignment)
+    and seg2 has wide+ci (wrong pre-snap ci).  After _apply_two_shot_auto_reel the result
+    must be [wide, close, wide] with no ci — identical to the fresh-segments case.
+    """
+    segs = [
+        _seg(66.10, 69.02, "wide"),           # beat block 1, seg0 (stale: wide, fine)
+        _seg(69.04, 72.15, "close"),           # beat block 1, seg1 — STALE: close at adjacent seam
+        _seg(81.56, 89.88, "wide", [[0.060, 8.320]]),  # beat block 2, STALE ci
+        _seg(72.74, 78.22, "close"),           # beat block 3, seg0 (stale: close)
+        _seg(78.24, 81.54, "close"),           # beat block 3, seg1 (stale: close)
+    ]
+    reel = _apply_beat(segs)
+    result = reel.effective_segments()
+    assert len(result) == 3, f"expected 3 after pre-merge; got {len(result)}"
+    shots = [s.shot for s in result]
+    assert shots == ["wide", "close", "wide"], (
+        f"stale manifest shots must be overwritten; got {shots}"
+    )
+    for s in result:
+        assert not s.close_intervals, f"no ci inside beats; got ci={s.close_intervals}"
+
+
 def test_beat_shots_only_at_seams_r06():
     """beat_clip_shots_only_at_seams=True: r06 has only jump seams → all seams toggle.
 
