@@ -1916,7 +1916,14 @@ def _snap_close_intervals(segs: list[Segment], fps: float) -> list[Segment]:
             # segment ends on the other shot.  Snap to 0 so the overlay covers the full segment.
             if snapped[0][0] * fps < 10:
                 snapped[0][0] = 0.0
-            result.append(seg.model_copy(update={"close_intervals": snapped}))
+            # Adjacent ci intervals with a gap < 2 frames produce a visible wide flash.
+            merged = [snapped[0]]
+            for nxt in snapped[1:]:
+                if nxt[0] - merged[-1][1] < 2.0 / fps:
+                    merged[-1][1] = nxt[1]
+                else:
+                    merged.append(nxt)
+            result.append(seg.model_copy(update={"close_intervals": merged}))
     return result
 
 

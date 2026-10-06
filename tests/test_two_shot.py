@@ -404,6 +404,31 @@ def test_snap_close_intervals_short_pre_window_snapped_to_zero():
     assert result2[0].close_intervals[0][0] > 0.0, "12-frame pre-ci window must be kept"
 
 
+def test_snap_close_intervals_merges_tiny_gap():
+    """Adjacent ci intervals with gap < 2 frames must be merged (r02 case: 13ms gap)."""
+    from autoreels.local.render import _snap_close_intervals
+
+    # r02 seg1: ci touching at 14.54, after snap both share 14.533 → 0-frame gap → merge
+    segs = [_seg(0.0, 20.28, close_intervals=[[12.0, 14.54], [14.54, 20.28]])]
+    result = _snap_close_intervals(segs, fps=30.0)
+    ci = result[0].close_intervals
+    assert len(ci) == 1, f"touching intervals must merge into one, got {ci}"
+    assert ci[0][0] == 12.0
+    assert abs(ci[0][1] - round(20.28 * 30) / 30) < 1e-9
+
+    # Gap of exactly 1 frame (< 2) → merge
+    segs2 = [_seg(0.0, 10.0, close_intervals=[[1.0, 4.0], [4.0 + 1 / 30, 9.0]])]
+    result2 = _snap_close_intervals(segs2, fps=30.0)
+    ci2 = result2[0].close_intervals
+    assert len(ci2) == 1, f"1-frame gap must also merge, got {ci2}"
+
+    # Gap of 3 frames (≥ 2) → keep separate
+    segs3 = [_seg(0.0, 10.0, close_intervals=[[1.0, 4.0], [4.0 + 3 / 30, 9.0]])]
+    result3 = _snap_close_intervals(segs3, fps=30.0)
+    ci3 = result3[0].close_intervals
+    assert len(ci3) == 2, f"3-frame gap must stay separate, got {ci3}"
+
+
 def test_beat_reel_no_visual_dissolve_at_same_shot_seam():
     """Beat reels get hard cuts at all seams; visual dissolve must not apply even for same-shot seams.
 
