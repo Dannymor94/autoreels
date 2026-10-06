@@ -296,15 +296,17 @@ def check_clip(entry: dict, project: Path) -> list[str]:
     if not clip_path.exists():
         return ["clip_missing"]
 
-    # Use render_end from sidecar JSON when present (actual audio cut point after
-    # map-based shortening), else fall back to the golden reel_end.
+    # Read source_start / source_end from the renderer's sidecar (required; no fallback).
     render_json_path = clip_dir / f"{clip_id}.render.json"
-    tail_end = reel_end
+    source_start = None
+    source_end = None
     if render_json_path.exists():
         try:
             rd = json.loads(render_json_path.read_text(encoding="utf-8"))
-            if "render_end" in rd:
-                tail_end = float(rd["render_end"])
+            if "source_end" in rd:
+                source_end = float(rd["source_end"])
+            if "source_start" in rd:
+                source_start = float(rd["source_start"])
         except (json.JSONDecodeError, ValueError, KeyError):
             pass
 
@@ -315,7 +317,10 @@ def check_clip(entry: dict, project: Path) -> list[str]:
 
     fails.extend(_check_words(clip_dir, clip_id, entry))
     fails.extend(_check_audio_start(clip_path))
-    fails.extend(_check_tail_silence(speechmap, tail_end))
+    if source_end is None:
+        fails.append("render_end_missing")
+    else:
+        fails.extend(_check_tail_silence(speechmap, source_end))
 
     duration = _probe_duration(clip_path)
     if duration is not None:

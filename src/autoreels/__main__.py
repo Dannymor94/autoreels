@@ -3630,8 +3630,13 @@ def _read_render_fingerprint(out_dir: Path, reel_id: str) -> str | None:
 
 def _write_render_fingerprint(out_dir: Path, reel_id: str, fingerprint: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)   # render_crop makes it too; be robust if it did not
-    _render_fp_path(out_dir, reel_id).write_text(
-        json.dumps({"fingerprint": fingerprint}), encoding="utf-8")
+    p = _render_fp_path(out_dir, reel_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (json.JSONDecodeError, ValueError):
+        data = {}
+    data["fingerprint"] = fingerprint
+    p.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _missing_reels(manifest: Manifest, out_dir: Path, fingerprint=None) -> list:

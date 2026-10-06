@@ -2131,6 +2131,20 @@ def _render_segments(
                 segs = _snap_windows_to_frames(segs, _fps())
                 clip_dur = sum(s.end - s.start for s in segs)
 
+            # --- Start fix: never clip the first subtitle word's acoustic onset ---
+            # When Whisper overlapping timestamps cause snap to pick a duplicate word
+            # whose t0 is later than its acoustic onset (audible_start per smap), the clip
+            # would start mid-word.  Pull segs[0].start back to the word's audible_start.
+            _first_sub_as: float | None = None
+            if smap is not None and reel.subtitles:
+                _fsub_lk = _smap_word_lookup(smap)
+                _fse = _fsub_lk.get(round(reel.subtitles[0].t0 * 1000))
+                if _fse is not None:
+                    _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
+                    if segs and segs[0].start > _first_sub_as + 1e-4:
+                        segs = [segs[0].model_copy(update={"start": _first_sub_as})] + list(segs[1:])
+                        clip_dur = sum(s.end - s.start for s in segs)
+
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
             _ts_on = getattr(render_cfg, "two_shot", False) and vf and manifest.setup is not None
             _ts_seg_vfs: list[str] | None = None
@@ -2462,6 +2476,15 @@ def _render_segments(
                 )
                 _clip_errors.extend(_check_silence_at_clip_end(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
+            # First-word-cut invariant: source_start must not exceed the first subtitle word's
+            # acoustic onset (audible_start per smap).  The start-fix above prevents this; the
+            # check here catches any remaining violations (e.g., smap lookup mismatch).
+            if _first_sub_as is not None and segs and segs[0].start > _first_sub_as + 1e-4:
+                _clip_errors.append(
+                    f"  [ERROR] {reel.id}: first word cut — "
+                    f"source_start={segs[0].start:.3f}s > audible_start={_first_sub_as:.3f}s "
+                    f"('{reel.subtitles[0].word}' t0={reel.subtitles[0].t0:.3f})"
+                )
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
@@ -2770,6 +2793,18 @@ def _render_segments(
             else:
                 out.with_name(f"{out.stem}.ERROR.mp4").unlink(missing_ok=True)
                 outputs.append(out)
+                import json as _json
+                (out_dir / f"{reel.id}.render.json").write_text(
+                    _json.dumps({
+                        "source_start": segs[0].start,
+                        "source_end": segs[-1].end,
+                        "synthetic_tail_sec": (
+                            _synth_params_dict["tail_sec"]
+                            if _synth_active and _synth_params_dict else 0.0
+                        ),
+                    }),
+                    encoding="utf-8",
+                )
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
         _unlock_dir(_lock_fd)

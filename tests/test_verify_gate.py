@@ -255,6 +255,10 @@ def test_main_all_pass(tmp_path):
         "один два три четыре пять шесть семь восемь\n", encoding="utf-8"
     )
     _speechmap(tx_dir / "s.speechmap.json", [[0.0, 2.0]])
+    (clip_dir / "r01.render.json").write_text(
+        json.dumps({"source_start": 0.0, "source_end": 3.0, "synthetic_tail_sec": 0.0}),
+        encoding="utf-8",
+    )
 
     data = {"clips": [_yaml_entry(
         "r01",
@@ -406,6 +410,59 @@ def test_tail_silence_render_end_cutoff(tmp_path):
     }), encoding="utf-8")
     fails = vg._check_tail_silence(sm_path, reel_end=2748.33)
     assert not fails, f"interval after render_end must not trigger speech_in_tail: {fails}"
+
+
+# ── render_end_missing — source_end required from render.json ─────────────────
+
+def test_render_end_missing_no_json(tmp_path):
+    """check_clip fails with render_end_missing when no render.json exists."""
+    clip_dir = tmp_path / "gate"
+    clip_dir.mkdir()
+    mp4 = clip_dir / "r01.mp4"
+    _make_mp4_with_audio(mp4)
+    _speechmap(tmp_path / "s.speechmap.json", [])
+    entry = _yaml_entry("r01", str(mp4.relative_to(tmp_path)), "s", 3.0, "a b", "a b")
+    fails = vg.check_clip(entry, tmp_path)
+    assert "render_end_missing" in fails, f"expected render_end_missing: {fails}"
+
+
+def test_render_end_missing_no_source_end_field(tmp_path):
+    """check_clip fails with render_end_missing when render.json lacks source_end."""
+    clip_dir = tmp_path / "gate"
+    clip_dir.mkdir()
+    mp4 = clip_dir / "r01.mp4"
+    _make_mp4_with_audio(mp4)
+    _speechmap(tmp_path / "s.speechmap.json", [])
+    (clip_dir / "r01.render.json").write_text(
+        json.dumps({"fingerprint": "abc"}), encoding="utf-8"
+    )
+    entry = _yaml_entry("r01", str(mp4.relative_to(tmp_path)), "s", 3.0, "a b", "a b")
+    fails = vg.check_clip(entry, tmp_path)
+    assert "render_end_missing" in fails, f"expected render_end_missing: {fails}"
+
+
+def test_render_end_source_end_gates_tail_check(tmp_path):
+    """source_end from render.json gates tail check; interval after source_end=3.0 → PASS."""
+    clip_dir = tmp_path / "gate"
+    clip_dir.mkdir()
+    mp4 = clip_dir / "r01.mp4"
+    _make_mp4_with_audio(mp4)
+    sm = tmp_path / "s.speechmap.json"
+    sm.write_text(json.dumps({
+        "version": 6,
+        "intervals": [[3.5, 3.7]],
+        "words": [{"idx": 0, "t0": 2.0, "t1": 2.8, "audible_end": 2.5}],
+        "boundaries": [],
+    }), encoding="utf-8")
+    (clip_dir / "r01.render.json").write_text(
+        json.dumps({"source_start": 0.0, "source_end": 3.0, "synthetic_tail_sec": 0.0}),
+        encoding="utf-8",
+    )
+    entry = _yaml_entry("r01", str(mp4.relative_to(tmp_path)), "s", 5.0, "a b", "a b")
+    fails = vg.check_clip(entry, tmp_path)
+    assert "render_end_missing" not in fails, f"source_end present, must not fire: {fails}"
+    assert not any("speech_in_tail" in f for f in fails), \
+        f"interval [3.5,3.7] after source_end=3.0 must not trigger speech_in_tail: {fails}"
 
 
 def test_main_fail_returns_1(tmp_path):
