@@ -3196,3 +3196,42 @@ def test_start_fix_lookup_r04_numbers():
         f"start-fix must fire when seg_start={seg_start} > audible_start={as_}"
     # After fix, seg_start would equal audible_start
     assert as_ < seg_start, f"audible_start={as_} must be before t0={seg_start}"
+
+
+def test_start_fix_shifts_close_intervals_r02():
+    """r02: start fix moves seg0.start earlier; close_intervals must shift forward so
+    they still cover the same source content and don't leave a brief wide flash."""
+    from autoreels.local.render import _snap_close_intervals, _snap_windows_to_frames
+    from autoreels.core.models import Segment
+
+    fps = 30.0
+    # r02 seg0 before fix: start=131.240, end=151.520, ci ends at 20.28 = seg duration
+    old_start = round(131.240 * fps) / fps
+    seg_end = round(151.520 * fps) / fps
+    old_dur = seg_end - old_start                        # ≈ 20.267s
+
+    # close_intervals as stored in manifest (relative to old_start), snapped
+    ci_before = [[round(12.0 * fps) / fps, round(old_dur * fps) / fps]]
+
+    # Simulate start fix: audible_start = 131.190
+    audible_start = 131.190
+    new_start = round(audible_start * fps) / fps
+    assert new_start < old_start, "start fix must move start earlier"
+
+    delta = old_start - new_start
+    new_dur = seg_end - new_start
+
+    # Apply close_interval shift (same logic as render.py fix)
+    ci_shifted = [[t0 + delta, t1 + delta] for t0, t1 in ci_before]
+
+    # Build a dummy segment to run through _snap_close_intervals
+    seg = Segment(start=new_start, end=seg_end, close_intervals=ci_shifted)
+    snapped_segs = _snap_close_intervals([seg], fps)
+    ci_final = snapped_segs[0].close_intervals
+
+    assert ci_final, "close_intervals must not be empty after shift"
+    # After shift + snap, ci must extend to (approximately) the segment end
+    assert abs(ci_final[-1][1] - new_dur) < 2.0 / fps, (
+        f"ci must cover to seg end after shift: ci end={ci_final[-1][1]:.4f}, "
+        f"seg_dur={new_dur:.4f}, allowed gap < {2/fps:.4f}s"
+    )

@@ -2142,8 +2142,19 @@ def _render_segments(
                 if _fse is not None:
                     _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
                     if segs and segs[0].start > _first_sub_as + 1e-4:
+                        _old_s0_start = segs[0].start
                         segs = [segs[0].model_copy(update={"start": _first_sub_as})] + list(segs[1:])
                         segs = _snap_windows_to_frames(segs, _fps())
+                        # close_intervals are segment-relative; the segment is now longer by delta
+                        # at the start, so each interval needs to shift forward by that delta so
+                        # it still covers the same source content.  Without this the close_interval
+                        # ends before the segment ends → brief wide frames → flash.
+                        _ci_delta = _old_s0_start - segs[0].start
+                        _ci0 = getattr(segs[0], "close_intervals", [])
+                        if _ci0 and _ci_delta > 1e-6:
+                            _ci_shifted = [[t0 + _ci_delta, t1 + _ci_delta] for t0, t1 in _ci0]
+                            segs = [segs[0].model_copy(update={"close_intervals": _ci_shifted})] + list(segs[1:])
+                            segs = _snap_close_intervals(segs, _fps())
                         clip_dur = sum(s.end - s.start for s in segs)
 
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
