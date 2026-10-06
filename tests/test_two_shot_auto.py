@@ -132,10 +132,11 @@ def test_no_pause_reported_when_no_boundary():
     assert not reel.effective_segments()[0].close_intervals
 
 
-# ── Test 8: final min-shot check — no span < min_shot (incl. filler-as-wide) ─
+# ── Test 8: Case B skipped when wide tail < min_middle (avoids A-B-A [ERROR]) ─
 
 def test_no_short_spans_after_max_wide_with_filler():
-    # 12s wide, then 0.7s filler, then close: ci must adjust to leave wide_tail+filler >= min_shot
+    # 12s close span, 0.7s filler, close: Case B would create 3.0s tail < min_middle=4.0s,
+    # so it is skipped. No A-B-A [ERROR] in Pass 4 output. Filler gap is a source artifact.
     words = [
         Word(word="а", t0=0.0, t1=2.0),
         Word(word="б.", t0=2.5, t1=4.0),
@@ -144,10 +145,15 @@ def test_no_short_spans_after_max_wide_with_filler():
         Word(word="д", t0=9.5, t1=12.0),
     ]
     segs = [_seg(0.0, 12.0), _seg(12.7, 20.0, shot="close")]
-    out = _apply(segs, words, two_shot_max_shot_sec=9.0, two_shot_min_sec=2.5)
-    from autoreels.__main__ import _shot_spans_merged
-    for stype, dur in _shot_spans_merged(out):
-        assert dur >= 2.5, f"short {stype} span: {dur:.2f}s < 2.5s"
+    reel = _reel(segs)
+    from autoreels.__main__ import _stage_two_shot_auto, _shot_spans_output
+    _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_max_shot_sec=9.0, two_shot_min_sec=2.5))
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert not errors, f"expected no [ERROR]; got: {errors}"
+    result = reel.effective_segments()
+    for stype, sa, se in _shot_spans_output(result):
+        assert se - sa >= 2.5, f"short {stype} output span: {se-sa:.2f}s < 2.5s"
 
 
 # ── Test 9: human-path stage list includes _stage_two_shot_auto ───────────────

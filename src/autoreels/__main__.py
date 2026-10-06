@@ -1979,8 +1979,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     continue
                 rel = sw - s.start
                 seg_dur = s.end - s.start
-                if seg_dur - rel < min_middle and ji in _manual_segs:
-                    continue  # manual seg: wide tail < min_middle, A-B-A merge won't fix → skip
+                if seg_dur - rel < min_middle:
+                    continue  # wide tail < min_middle → A-B-A; skip, leave long close span
                 result[ji] = s.model_copy(update={"shot": "wide", "close_intervals": [[0.0, rel]]})
                 _pass3_segs.add(ji)
                 for k in range(ji + 1, len(result)):
