@@ -5027,11 +5027,21 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # pipeline never drops or reorders, so position i survives as final reel i+1.
     _tx_words = getattr(transcript, "words", [])
     # M1.8 Stage B: load smap before the reel-build loop so x:/beat seam refinement can use it.
+    # Always load from cache if present; only build/fetch when speech_map=True.
     _blk_smap: "dict | None" = None
+    _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
     if getattr(render_cfg, "speech_map", False):
-        _blk_smap_path = root / "transcripts" / f"{source_file.stem}.speechmap.json"
         _blk_source = source_file if source_file.is_file() else None
         _blk_smap = _ensure_smap(_blk_smap_path, _blk_source, manifest.source_sha256, _tx_words, render_cfg)
+    elif _blk_smap_path.is_file():
+        try:
+            import json as _jj
+            from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV
+            _d = _jj.loads(_blk_smap_path.read_text(encoding="utf-8"))
+            if _d.get("version") == _SMV and _d.get("source_sha256") == manifest.source_sha256:
+                _blk_smap = _d
+        except Exception:
+            pass
     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
     conflicts: list[str] = []
