@@ -371,7 +371,7 @@ def _snap_start(start: float, end: float, words: list[Word], *, window_sec: floa
     # Start-repair: if the target word starts before its predecessor ends (Whisper overlap
     # artifact), back up to the nearest phrase start that precedes it.
     _ri = next((i for i, w in enumerate(words) if abs(w.t0 - target) < 1e-6), None)
-    if _ri is not None and _ri > 0 and target < words[_ri - 1].t1:
+    if _ri is not None and _ri > 0 and target < words[_ri - 1].t1 and _ri not in start_idx:
         _prec = [i for i in start_idx if i < _ri]
         if _prec:
             target = words[max(_prec)].t0

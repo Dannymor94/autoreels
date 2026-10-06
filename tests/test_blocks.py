@@ -1212,8 +1212,10 @@ def test_apply_compact_answer_bare_scores(tmp_path, monkeypatch, capsys):
     )
     (tmp_path / "manifests" / "v.json").write_text(m.model_dump_json())
 
-    # Transcript with enough words to form blocks
-    words = [Word(word=f"слово{i}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(60)]
+    # Transcript with enough words to form blocks.
+    # слово4 ends with "." so that слово5 (block b1 start at t0=10.0) is a sentence-initial word,
+    # satisfying _check_first_subtitle_word (no mid-sentence start error).
+    words = [Word(word=f"слово{i}{'.' if i == 4 else ''}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(60)]
     tx = Transcript(language="ru", words=words)
     ahash = "txhash"
     (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
@@ -1280,7 +1282,7 @@ def test_apply_compact_answer_ignores_prose(tmp_path, monkeypatch, capsys):
     )
     (tmp_path / "manifests" / "w.json").write_text(m.model_dump_json())
 
-    words = [Word(word=f"word{i}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(30)]
+    words = [Word(word=f"word{i}{'.' if i == 4 else ''}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(30)]
     tx = Transcript(language="ru", words=words)
     ahash = "txhash2"
     (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())

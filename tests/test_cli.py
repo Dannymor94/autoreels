@@ -6671,7 +6671,7 @@ def test_review_apply_accepts_compact_format_file(tmp_path, monkeypatch):
     )
     (tmp_path / "manifests" / "y.json").write_text(m.model_dump_json())
 
-    words = [Word(word=f"w{i}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(40)]
+    words = [Word(word=f"w{i}{'.' if i == 1 else ''}", t0=float(i * 2), t1=float(i * 2 + 1)) for i in range(40)]
     tx = Transcript(language="ru", words=words)
     ahash = "txh4"
     (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())

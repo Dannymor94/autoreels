@@ -855,6 +855,12 @@ def _repair_end_to_complete_sentence(reel, tx_words, *, r0_cfg, explicit_e: bool
     from autoreels.cloud.edit import split_sentences, words_in_span
     from autoreels.cloud.snap import is_complete_sentence, _clean
 
+    # Beat reels: human explicitly ordered sentences; snap may extend reel.end past the next
+    # source sentence's start, creating a spurious stump. Skip repair — _apply_tail_air caps
+    # the tail at _beat_tail_cap (just before the next source sentence).
+    if reel.beat_gap_sec is not None:
+        return
+
     # When deflation already backed off the end, use subtitle_gate as the content boundary so
     # repair doesn't see the stump word that sits between subtitle_gate and reel.end.
     _deflate_cap = getattr(reel, "_deflate_end_cap", None)
@@ -2142,6 +2148,36 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         if _changed:
             result[_ji] = _s.model_copy(update={"close_intervals": _nc})
 
+    # Manual CI min-shot snap: if a human c: annotation creates a wide prefix or suffix < min_shot,
+    # extend the CI to the segment boundary. Preserves the close annotation while eliminating
+    # render-breaking short spans that A-B-A cannot merge (because _manual_segs protects them).
+    for _ji_mc, _s_mc in enumerate(result):
+        if not _is_human_reel or _ji_mc not in _manual_segs or _ji_mc in _premerge_segs:
+            continue  # only genuine human c: annotations
+        _ci_mc = list(getattr(_s_mc, "close_intervals", []))
+        if not _ci_mc:
+            continue
+        _dur_mc = _s_mc.end - _s_mc.start
+        _nc_mc, _chg_mc = [list(iv) for iv in _ci_mc], False
+        if _nc_mc[0][0] > 1e-6 and _nc_mc[0][0] < min_shot:
+            _nc_mc[0][0] = 0.0
+            _chg_mc = True
+        if _dur_mc - _nc_mc[-1][1] > 1e-6 and _dur_mc - _nc_mc[-1][1] < min_shot:
+            _nc_mc[-1][1] = _dur_mc
+            _chg_mc = True
+        if not _chg_mc:
+            continue
+        _mg_mc: list = [_nc_mc[0]]
+        for _iv in _nc_mc[1:]:
+            if abs(_mg_mc[-1][1] - _iv[0]) < 1e-6:
+                _mg_mc[-1][1] = _iv[1]
+            else:
+                _mg_mc.append(_iv)
+        if len(_mg_mc) == 1 and _mg_mc[0][0] < 1e-6 and abs(_mg_mc[0][1] - _dur_mc) < 1e-6:
+            result[_ji_mc] = _s_mc.model_copy(update={"shot": "close", "close_intervals": []})
+        else:
+            result[_ji_mc] = _s_mc.model_copy(update={"close_intervals": [[a, b] for a, b in _mg_mc]})
+
     # Option 2: absorb short wide tail of a segment into close when next segment starts close.
     # "Short tail" = < min_shot in output time. Also absorbs ci-tails < min_middle (A-B-A guard).
     # Jump-seam seams (forced shot changes) excepted. Pass3 splits (_pass3_segs) are preserved.
@@ -2404,7 +2440,13 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         # _tail_from_smap_full finds the next speech onset (transcribed or untranscribed) and
         # sets end = N - onset_margin. This fires when the own-tail filter absorbed only the
         # acoustic decay and left subsequent audible speech in the tail.
-        if smap is not None and smap_lookup is not None:
+        # Beat reels: _beat_tail_cap already enforces the source sentence boundary — skip the smap
+        # cap so it cannot fire below _beat_tail_cap and prevent _deflate_cap_applied from being set.
+        # Explicit-e reels: the explicit_e path below enforces _next_speech_t0 - 0.02; the smap
+        # cap uses a larger margin (0.06) and would over-shorten the tail, breaking two_shot_auto.
+        _is_beat = getattr(r, "beat_gap_sec", None) is not None
+        _is_explicit_e = getattr(r, "has_explicit_e", False)
+        if smap is not None and smap_lookup is not None and not _is_beat and not _is_explicit_e:
             _subs = getattr(r, "subtitles", None) or []
             if _subs:
                 from autoreels.local.render import _tail_from_smap_full
@@ -2414,6 +2456,12 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
                 )
                 if _stail is not None and _stail.end < desired:
                     desired = _stail.end
+                    # Smap cap constrained the tail: if it cuts below lw_end + tail_pad,
+                    # mark as deflate-capped so _check_tail_air uses min(floor, cap) instead
+                    # of the hard lw_end + tail_pad floor (analogous to beat_tail_cap).
+                    if desired < lw_end + tail_pad_sec:
+                        r._deflate_cap_applied = True
+                        r._deflate_end_cap = desired
         # Beat reel: clamp tail to before the next source sentence to prevent Whisper-overlap
         # contamination (another beat's sentence would otherwise be audible in the tail).
         _beat_tail_cap = getattr(r, "_beat_tail_cap", None)
@@ -5018,6 +5066,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         reel._keyword_spec = getattr(_ae, "k", ()) if _ae else ()
         # Full original block sentences (used to map k:N original-block numbers → subtitle positions).
         reel._blk_sents_full = split_sentences(words_in_span(_tx_words, block.start, block.end))
+        reel._blk_block_end = block.end  # saved so start-repair below can rebuild from snap-adjusted start
         # Part 5 — cold open: resolve the hook sentence (h:N) over the same block-span numbering the
         # export showed; stash its window, apply the cap after segmentation below.
         reel._hook_window = None
@@ -5266,6 +5315,19 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         min_duration=r0_cfg.min_clip_duration,
         repair_only=True, max_start_fraction=1.0 / 3.0,
     )
+    # Start-repair: snap (via smap) or filter_dangling_start may pull reel.start before
+    # block.start. Rebuild _blk_sents_full from the final reel.start so the e:N filter's
+    # _incl_t0s includes words that were added to the front of the clip.
+    # Runs AFTER filter_dangling_start — that stage can move start further back than snap.
+    from autoreels.cloud.snap import _dedup_overlapping_words as _ddup
+    for _r in reels:
+        _bfull = getattr(_r, "_blk_sents_full", None)
+        _bend = getattr(_r, "_blk_block_end", None)
+        if _bfull is None or _bend is None:
+            continue
+        _borig_start = _bfull[0][0].t0 if _bfull and _bfull[0] else None
+        if _borig_start is not None and _r.start < _borig_start - 1e-4:
+            _r._blk_sents_full = split_sentences(_ddup(words_in_span(_tx_words, _r.start, _bend)))
     # Tail deflate: remove stump fragments and whole-filler trailing sentences before repair.
     _blk_smap_lookup = None
     if _blk_smap is not None:
@@ -5282,7 +5344,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _r, tx_words, r0_cfg=r0_cfg, explicit_e=getattr(_r, "_has_explicit_e", False),
             smap=_blk_smap,
         )
-        if _r.subtitle_gate is None:
+        if _r.subtitle_gate is None and _r.beat_gap_sec is None:
             _r.subtitle_gate = _r.end  # pre-padding sentence gate for _stage_subtitles
     reels = renumber_reels(reels)
     reels = _stage_min_end_gap(reels, transcript, r0_cfg=r0_cfg)

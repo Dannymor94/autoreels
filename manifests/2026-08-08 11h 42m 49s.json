@@ -36,12 +36,6 @@
       "segments": [
         {
           "start": 66.10000000000001,
-          "end": 69.02000000000001,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 69.04,
           "end": 72.15,
           "shot": "close",
           "close_intervals": []
@@ -50,21 +44,10 @@
           "start": 81.56,
           "end": 89.88000000000001,
           "shot": "wide",
-          "close_intervals": [
-            [
-              0.060000000000002274,
-              8.320000000000007
-            ]
-          ]
-        },
-        {
-          "start": 72.74,
-          "end": 78.22,
-          "shot": "close",
           "close_intervals": []
         },
         {
-          "start": 78.24,
+          "start": 72.74,
           "end": 81.54,
           "shot": "close",
           "close_intervals": []
@@ -413,19 +396,18 @@
         }
       ],
       "end_drift_sec": 0.37999999999999545,
-      "end_snap_reason": "repaired_to_sentence",
+      "end_snap_reason": "sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": false,
-      "subtitle_gate": 81.51,
+      "subtitle_gate": 81.54,
       "speed": 1.0,
       "tail_last_word_end": 80.67,
       "tail_next_word_start": 81.56,
       "warnings": [
-        "last subtitle word 'поломаны.' (t0=80.620s) != last transcript word before r0_end 'никогда' (t0=81.580s, r0_end=82.150s) — word was excluded by audible_end",
         "[CONTENT] r01: last word 'поломаны.' cut by clip end (continuous speech into next phrase, ae=81.590 > clip=81.540)"
       ],
       "subtitle_emph_words": [],
@@ -443,25 +425,26 @@
           "shot": "wide",
           "close_intervals": [
             [
-              12.0,
-              14.539999999999992
-            ],
-            [
-              14.539999999999992,
-              20.28
+              0.0,
+              12.0
             ]
           ]
         },
         {
           "start": 154.36,
           "end": 158.75,
-          "shot": "close",
-          "close_intervals": []
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              2.539999999999992
+            ]
+          ]
         },
         {
           "start": 159.4,
           "end": 169.49,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         },
         {
@@ -470,8 +453,8 @@
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              5.939999999999998
+              9.2,
+              16.25999999999999
             ]
           ]
         }
@@ -1136,8 +1119,8 @@
           "shot": "wide",
           "close_intervals": [
             [
-              13.640000000000015,
-              17.600000000000023
+              0.0,
+              13.640000000000015
             ]
           ]
         },
@@ -1542,27 +1525,21 @@
           "shot": "wide",
           "close_intervals": [
             [
-              13.019950000000051,
-              21.620000000000005
+              0.0,
+              13.019950000000051
             ]
           ]
         },
         {
           "start": 364.7032,
           "end": 368.90317,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 369.38318,
-          "end": 373.32318,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 373.38318,
+          "start": 369.38318,
           "end": 379.14318000000003,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         }
       ],
@@ -1583,6 +1560,12 @@
       "start_justification": "",
       "rank": null,
       "subtitles": [
+        {
+          "word": "Когда",
+          "t0": 340.5832,
+          "t1": 341.16318,
+          "emph": false
+        },
         {
           "word": "у",
           "t0": 341.16318,
@@ -2105,13 +2088,13 @@
         {
           "start": 388.30316,
           "end": 391.76318,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         },
         {
           "start": 393.60315,
           "end": 398.60315,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
@@ -2121,6 +2104,10 @@
           "close_intervals": [
             [
               0.0,
+              6.52002
+            ],
+            [
+              6.52002,
               10.560000000000002
             ]
           ]
@@ -2613,19 +2600,19 @@
         {
           "start": 467.52635,
           "end": 469.27634,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         },
         {
           "start": 452.78635,
           "end": 461.04635,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
           "start": 469.68634,
           "end": 473.22635,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         }
       ],
@@ -2853,7 +2840,7 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": false,
-      "subtitle_gate": 472.02635000000004,
+      "subtitle_gate": 471.72635,
       "speed": 1.0,
       "tail_last_word_end": 471.72635,
       "tail_next_word_start": null,
