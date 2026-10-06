@@ -77,6 +77,54 @@ def test_seam_gap_under_two_frames_cut_in_middle():
     assert result[0].end == result[1].start  # both at midpoint
 
 
+def test_seam_push_past_cutword_audible_start_below_threshold():
+    """Cut-zone word with audible_start below ae_la-seam_pad was skipped by old threshold.
+
+    Pattern seen in r06/r07-seam3/r08 of IMG_6848: the first_cut word has t0 == a but
+    its audible_start < ae_la - seam_pad, so the old condition `_as_ >= ae_la - seam_pad`
+    missed it.  new_a must be pushed past the word's audible_end.
+    """
+    # last kept word ends at ae=1.00; seam_pad=0.04 → new_a=1.04
+    # cut word: t0=1.04 (= a), as=0.98 (< ae_la-seam_pad = 1.00-0.04 = 0.96 → actually >= 0.96!
+    # Let's use ae_la=1.10 so threshold = 1.06 and as=0.98 < 1.06.
+    smap_words = [
+        {"t0": 0.50, "audible_start": 0.50, "audible_end": 1.10},  # last_a
+        {"t0": 1.10, "audible_start": 0.98, "audible_end": 1.80},  # first_cut: t0=a, as < ae_la-pad
+    ]
+    # Words: last_a at t0=0.50, first_cut at t0=1.10 (=a)
+    words = [_word("kept", 0.50, 1.10), _word("cut", 1.10, 2.00)]
+    # Seam: A-side ends at 1.10, B-side starts at 2.00
+    segs = [Segment(start=0.0, end=1.10), Segment(start=2.0, end=3.0)]
+    result = _refine_seams(segs, words, smap_words, seam_pad=0.04)
+    new_a = result[0].end
+    # new_a must be past audible_end of cut word (1.80)
+    assert new_a >= 1.80, f"new_a={new_a:.3f} not past cut word's ae=1.80"
+    assert not (0.98 < new_a < 1.80), f"new_a={new_a:.3f} inside cut word span [0.98, 1.80]"
+
+
+def test_seam_zero_gap_collapsed_not_checked():
+    """_check_seam_inside_word must not report an error for a collapsed (zero-gap) seam.
+
+    When _refine_seams cannot find a valid seam placement it sets segs[i].end == segs[i+1].start
+    (midpoint collapse).  That represents 'no cut' and should not trigger the seam-inside-word
+    error — there is no actual seam to check.
+    """
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent / "src"))
+    from autoreels.__main__ import _check_seam_inside_word
+    from autoreels.core.models import Reel, Segment
+
+    # Reel with two segments that share the same boundary (collapsed seam)
+    reel = Reel(id="r01", start=0.0, end=5.0, score=80, hook="", title="", description="")
+    reel.segments = [Segment(start=0.0, end=2.5), Segment(start=2.5, end=5.0)]
+
+    # smap has a word whose span covers the collapsed point 2.5
+    smap = {"words": [{"t0": 2.3, "audible_start": 2.2, "audible_end": 2.8}]}
+
+    msgs = _check_seam_inside_word(reel, smap)
+    assert msgs == [], f"Expected no error for collapsed seam, got: {msgs}"
+
+
 def test_seam_push_past_merged_interval_overlapping_smap():
     """Bug: smap dedup dropped word B's interval; new_a landed inside B's merged span.
 

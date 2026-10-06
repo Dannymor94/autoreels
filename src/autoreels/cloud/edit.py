@@ -77,15 +77,46 @@ def default_end_sentence(sentences: list[list], wind_down_phrases, filler_words)
     return j
 
 
+def merge_group_sentences(group_blocks, tx_words: list) -> list[list]:
+    """Sentence list for a group of blocks that will be merged into one reel.
+
+    When block[i]'s last sentence is incomplete (no terminal punctuation), it is joined
+    with block[i+1]'s first sentence into one sentence — matching the reviewer's manual
+    count: the export shows …→ on a sentence and the reviewer merges it with the next
+    block's first sentence to get one numbered sentence at the junction.
+
+    For a single-block group returns the plain split. For multi-block groups the junction
+    sentence correctly spans the overlap boundary without re-splitting the whole merged
+    span (which would consume the next block's first sentence via Whisper overlap words).
+    """
+    result: list[list] = []
+    for b in group_blocks:
+        b_sents = split_sentences(words_in_span(tx_words, b.start, b.end))
+        if not b_sents:
+            continue
+        if result and not _ends_terminal(result[-1][-1]):
+            # Incomplete last sentence of the previous block → merge with first of this one.
+            result[-1] = result[-1] + b_sents[0]
+            result.extend(b_sents[1:])
+        else:
+            result.extend(b_sents)
+    return result
+
+
 def sentence_bounds(words: list, start: float, end: float, *, s: int | None = None,
-                    e: int | None = None, wind_down_phrases=(), filler_words=()) -> tuple[float, float, bool, str]:
+                    e: int | None = None, wind_down_phrases=(), filler_words=(),
+                    sents: list | None = None) -> tuple[float, float, bool, str]:
     """Resolve [start, end] to sentence edges. Returns (new_start, new_end, explicit_start, note).
 
     Explicit s/e (a human choice) win and bypass the defaults for that edge; out-of-range values
     are clamped and noted. Defaults: start is left unchanged (the dangling-start repair owns the
     default start); end drops trailing pure wind-down sentences (default tight ending).
+
+    sents: pre-computed sentence list (from merge_group_sentences for a merged group); when None
+    the sentences are computed from words_in_span(words, start, end).
     """
-    sents = split_sentences(words_in_span(words, start, end))
+    if sents is None:
+        sents = split_sentences(words_in_span(words, start, end))
     if not sents:
         return start, end, s is not None, ""
     new_start, new_end = start, end
@@ -356,12 +387,17 @@ def _refine_seams(
             as_fb = _as(first_b) if first_b else b
             if ae_lc <= as_fb + 1e-4:
                 new_b = max(new_b, ae_lc)
-        # Push new_a past any smap word in the cut zone (audible_start >= ae_la - seam_pad)
-        # whose span still contains new_a.  This handles deduped-away first_cut words
-        # whose audible span extends past ae_la + seam_pad.
+        # Push new_a past any smap word in the cut zone whose audible span still contains new_a.
+        # Condition: t0 >= a (word is in or near the cut zone) OR audible_start >= ae_la-seam_pad
+        # (the original threshold for deduped-away words).  OR ensures both cases are covered:
+        # — deduped words with as ≥ ae_la-seam_pad (original case, kept for compatibility)
+        # — cut-zone words whose as falls slightly below ae_la-seam_pad due to Whisper chunk
+        #   overlap (their t0 = a exactly but as < threshold; the old check skipped them, leaving
+        #   new_a inside the word's audible span).
         for _sw in smap_words:
             _as_, _ae_ = _sw.get("audible_start", 0), _sw.get("audible_end", 0)
-            if _ae_ > _as_ and _as_ >= ae_la - seam_pad and _as_ < new_a < _ae_:
+            if (_ae_ > _as_ and (_as_ >= ae_la - seam_pad or _sw.get("t0", 0) >= a - 1e-4)
+                    and _as_ < new_a < _ae_):
                 new_a = _ae_ + seam_pad
         # Pull new_b before any smap word in the cut zone (audible_end <= ae_lc + seam_pad).
         ae_lc2 = ae_lc if last_cut else b

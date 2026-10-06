@@ -1099,6 +1099,10 @@ def _check_seam_inside_word(reel, smap: "dict | None") -> list[str]:
             intervals.append((as_, ae_))
     violations: list[str] = []
     for i in range(len(segs) - 1):
+        if segs[i].end >= segs[i + 1].start - 1e-4:
+            # Zero-gap (collapsed) seam: _refine_seams chose no-cut because no valid placement
+            # existed in this zone (e.g. Whisper chunk overlap).  Nothing to check.
+            continue
         for t in (segs[i].end, segs[i + 1].start):
             for as_, ae_ in intervals:
                 if as_ < t < ae_:
@@ -4818,7 +4822,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         candidate_blocks, filter_blocks, score_block,
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
-    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences, _refine_seams
+    from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences, _refine_seams, merge_group_sentences
     from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
@@ -5075,6 +5079,11 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 file=sys.stderr,
             )
         block = merge_blocks([active[s] for s in g])
+        # Sentence list for this group — uses block-by-block splits with junction merging so
+        # the numbering matches the reviewer's manual count from the per-block export view.
+        # (Re-splitting the merged span can consume the next block's first sentence via Whisper
+        # overlap words, producing one fewer sentence than the reviewer counted.)
+        _gsents = merge_group_sentences([active[s] for s in g], _tx_words)
         is_merged = len(g) > 1
         if is_merged:
             block.heuristic_score, block.score_breakdown = score_block(block, bs_cfg)
@@ -5091,8 +5100,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             reason="human review",
         )
         # Part 2 — sentence bounds. Explicit s:/e: (the reviewer's choice) win; otherwise start is
-        # left to the dangling-start repair and end drops trailing pure wind-down. Numbering runs
-        # over the whole (merged) span, matching the numbered export.
+        # left to the dangling-start repair and end drops trailing pure wind-down. Numbering uses
+        # _gsents (block-by-block with junction merging) so indices match the reviewer's manual count.
         _ae = seq_to_entry.get(_anchor_seq)
         _fr_cfg = getattr(r0_cfg, "filler_removal", None)
         nb_start, nb_end, _expl_start, _bnote = sentence_bounds(
@@ -5100,6 +5109,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             s=(getattr(_ae, "s", None) if _ae else None), e=(getattr(_ae, "e", None) if _ae else None),
             wind_down_phrases=getattr(r0_cfg, "wind_down_phrases", []),
             filler_words=(_fr_cfg.filler_words if _fr_cfg else []),
+            sents=_gsents,
         )
         reel.start, reel.end = nb_start, nb_end
         _has_explicit_e = (getattr(_ae, "e", None) if _ae else None) is not None
@@ -5118,19 +5128,18 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         # M1.7 step 2 — stash k: keyword spec for resolution after _stage_subtitles.
         reel._keyword_spec = getattr(_ae, "k", ()) if _ae else ()
         # Full original block sentences (used to map k:N original-block numbers → subtitle positions).
-        reel._blk_sents_full = split_sentences(words_in_span(_tx_words, block.start, block.end))
+        reel._blk_sents_full = _gsents
         reel._blk_block_end = block.end  # saved so start-repair below can rebuild from snap-adjusted start
         # Part 5 — cold open: resolve the hook sentence (h:N) over the same block-span numbering the
         # export showed; stash its window, apply the cap after segmentation below.
         reel._hook_window = None
         _hook = getattr(_ae, "hook", None) if _ae else None
         if _hook:
-            _sents = split_sentences(words_in_span(_tx_words, block.start, block.end))
-            if 1 <= _hook <= len(_sents):
-                _hs = _sents[_hook - 1]
+            if 1 <= _hook <= len(_gsents):
+                _hs = _gsents[_hook - 1]
                 reel._hook_window = (_hook, _hs[0].t0, _hs[-1].t1)
             else:
-                print(f"  warning: h:{_hook} out of range (1-{len(_sents)}) — cold open skipped",
+                print(f"  warning: h:{_hook} out of range (1-{len(_gsents)}) — cold open skipped",
                       file=sys.stderr)
         # M1.7 step 1: c: close-shot sentence indices — stash source-time ranges on the reel.
         # assign_close_shots (called after the cold_open loop) converts these to Segment.close_intervals.
@@ -5139,10 +5148,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _c = (getattr(_ae, "c", ()) if _ae else ()) or ()
         _kw_spec_for_c = (getattr(_ae, "k", ()) if _ae else ()) or ()
         if _c:
-            _blk_sents_for_c = split_sentences(words_in_span(_tx_words, block.start, block.end))
             for _ci in _c:
-                if 1 <= _ci <= len(_blk_sents_for_c):
-                    _cs = _blk_sents_for_c[_ci - 1]
+                if 1 <= _ci <= len(_gsents):
+                    _cs = _gsents[_ci - 1]
                     _range_start = _cs[0].t0  # default: sentence boundary
                     # If any k: spec targets the same sentence, start shot at that word's t0.
                     for _ki, _kws in _kw_spec_for_c:
@@ -5161,23 +5169,22 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                             break
                     reel._c_close_ranges.append((_range_start, _cs[-1].t1))
                 else:
-                    print(f"  warning: c:{_ci} out of range (1-{len(_blk_sents_for_c)}) — skipped",
+                    print(f"  warning: c:{_ci} out of range (1-{len(_gsents)}) — skipped",
                           file=sys.stderr)
         # z:N — zoom gesture on sentence N; stash source-time t0 (resolved same as c:).
         # Rule: z: and c: on the same sentence → close shot overrides zoom (c: takes precedence).
         reel._zoom_source_t0 = None
         _z = getattr(_ae, "z", None) if _ae else None
         if _z is not None:
-            _blk_sents_for_z = split_sentences(words_in_span(_tx_words, block.start, block.end))
-            if 1 <= _z <= len(_blk_sents_for_z):
+            if 1 <= _z <= len(_gsents):
                 if _z in _c:
                     print(f"  warning ({reel.id}): z:{_z} and c:{_z} on same sentence — "
                           "close shot overrides zoom (z: dropped)", file=sys.stderr)
                 else:
-                    _zs = _blk_sents_for_z[_z - 1]
+                    _zs = _gsents[_z - 1]
                     reel._zoom_source_t0 = _zs[0].t0
             else:
-                print(f"  warning ({reel.id}): z:{_z} out of range (1-{len(_blk_sents_for_z)}) — "
+                print(f"  warning ({reel.id}): z:{_z} out of range (1-{len(_gsents)}) — "
                       "zoom skipped", file=sys.stderr)
         if _bnote:
             print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
@@ -5185,9 +5192,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _x = (_ae.x if _ae else ()) or ()
         _x_refuse = False
         if _x:
-            _blk_sents = split_sentences(words_in_span(_tx_words, block.start, block.end))
             _xsegs, _x_start, _x_end, _x_applied, _x_out, _x_note = exclude_sentences(
-                _tx_words, reel.start, reel.end, _x, _blk_sents
+                _tx_words, reel.start, reel.end, _x, _gsents
             )
             _grp = '+'.join(str(s) for s in g)
             if _x_out:
