@@ -1086,8 +1086,19 @@ def _check_seam_inside_word(reel, smap: "dict | None") -> None:
     smap_words = smap.get("words", [])
     if not smap_words:
         return
-    intervals = [(w["audible_start"], w["audible_end"]) for w in smap_words
-                 if w.get("audible_end", 0) > w.get("audible_start", 0)]
+    # Merge overlapping audible spans so the check matches _refine_seams semantics:
+    # after _refine_seams pushes seams past any containing word, the result should
+    # not fall inside any merged interval.
+    raw = sorted(
+        [(w["audible_start"], w["audible_end"]) for w in smap_words
+         if w.get("audible_end", 0) > w.get("audible_start", 0)],
+    )
+    intervals: list[tuple[float, float]] = []
+    for as_, ae_ in raw:
+        if intervals and as_ < intervals[-1][1] - 1e-4:
+            intervals[-1] = (intervals[-1][0], max(intervals[-1][1], ae_))
+        else:
+            intervals.append((as_, ae_))
     for i in range(len(segs) - 1):
         for t in (segs[i].end, segs[i + 1].start):
             for as_, ae_ in intervals:

@@ -332,6 +332,18 @@ def _refine_seams(
         e = smap_lk.get(round(w.t0 * 1000))
         return e["audible_start"] if e else w.t0
 
+    # Deduplicated smap intervals (drop earlier artifact, keep precise entry)
+    # used for boundary-push check so we use the same dedup as _dedup_overlapping_words.
+    _smap_deduped: list[dict] = []
+    for _sw in sorted(smap_words, key=lambda x: x.get("t0", 0)):
+        if (_smap_deduped
+                and _sw.get("t0", 0) < _smap_deduped[-1].get("t1", 0) - 1e-4
+                and (_sw.get("text", "").strip(".,!?…;:").lower() ==
+                     _smap_deduped[-1].get("text", "").strip(".,!?…;:").lower())):
+            _smap_deduped[-1] = _sw  # replace artifact with precise
+        else:
+            _smap_deduped.append(_sw)
+
     ws = _dedup_overlapping_words(list(words)) if words else []
     result = list(segs)
     for i in range(len(result) - 1):
@@ -341,12 +353,33 @@ def _refine_seams(
         first_cut = next((w for w in ws if w.t0 >= a - 1e-4), None)
         last_cut  = next((w for w in reversed(ws) if w.t0 < b - 1e-4), None)
         first_b   = next((w for w in ws if w.t0 >= b - 1e-4), None)
-        new_a = (_ae(last_a) + seam_pad) if last_a else a
+        ae_la = _ae(last_a) if last_a else a
+        new_a = (ae_la + seam_pad) if last_a else a
         if first_cut:
-            new_a = min(new_a, _as(first_cut))
+            # Cap only when the cut word genuinely starts after the kept word ends;
+            # skip the cap when they overlap (Whisper artifact) to avoid pulling
+            # the seam back inside the kept word's audible span.
+            cap_a = _as(first_cut)
+            if cap_a >= ae_la - 1e-4:
+                new_a = min(new_a, cap_a)
+        ae_lc = _ae(last_cut) if last_cut else b
         new_b = (_as(first_b) - seam_pad) if first_b else b
         if last_cut:
-            new_b = max(new_b, _ae(last_cut))
+            as_fb = _as(first_b) if first_b else b
+            if ae_lc <= as_fb + 1e-4:
+                new_b = max(new_b, ae_lc)
+        # Push new_a past any deduped smap word whose audible span still contains it
+        # (handles the case where the artifact word's audible_end is narrower than
+        # the precise word's audible_end, so new_a ends up inside the precise word).
+        for _sw in _smap_deduped:
+            _as_, _ae_ = _sw.get("audible_start", 0), _sw.get("audible_end", 0)
+            if _ae_ > _as_ and _as_ < new_a < _ae_:
+                new_a = _ae_ + seam_pad
+        # Pull new_b before any deduped smap word whose audible span contains it
+        for _sw in reversed(_smap_deduped):
+            _as_, _ae_ = _sw.get("audible_start", 0), _sw.get("audible_end", 0)
+            if _ae_ > _as_ and _as_ < new_b < _ae_:
+                new_b = _as_ - seam_pad
         if new_a > new_b:
             new_a = new_b = (new_a + new_b) / 2
         elif new_b - new_a < 2 * frame_sec:
