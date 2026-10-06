@@ -39,6 +39,7 @@ packages = ["src/autoreels"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+norecursedirs = [".git", ".venv", "build", "dist", "*.egg-info"]
 # integration-тесты (реальные модели/сеть) пропускаются по умолчанию; гонять явно:
 #   pytest -m integration   (только на системнике, где есть смысл реального прогона)
 addopts = "-m 'not integration'"

@@ -7,6 +7,11 @@ from pathlib import Path
 
 import pytest
 
+
+def pytest_ignore_collect(collection_path, config):
+    if collection_path.name == ".DS_Store":
+        return True
+
 # Тесты гоняются от корня репо; пакет лежит в src/ (layout из PROJECT_STRUCTURE).
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "src"))
