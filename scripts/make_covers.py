@@ -199,9 +199,50 @@ def sharpness(img_bgr) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
-# Module-level cascade cache (load once)
+# ── cascade availability ───────────────────────────────────────────────────────
+
+
+class CascadeUnavailableError(RuntimeError):
+    """Raised when the Haar face cascade cannot be loaded (cv2 missing or too new)."""
+
+
+def require_cascade() -> None:
+    """Check that face detection is operational; raise CascadeUnavailableError if not.
+
+    Call once at start-up before processing any clips.  The error message tells
+    the user exactly how to fix the situation.
+    """
+    if not _CV2_OK:
+        raise CascadeUnavailableError(
+            "face detection unavailable: cv2 not installed — "
+            "run: pip install 'autoreels[publish]'"
+        )
+    if not getattr(cv2, "CascadeClassifier", None):
+        raise CascadeUnavailableError(
+            "face detection unavailable: CascadeClassifier removed in cv2 "
+            f"{cv2.__version__} (cv2 5.x) — "
+            "run: pip install 'autoreels[publish]'  "
+            "(pins opencv-python-headless>=4.9,<5)"
+        )
+    xml = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    if not Path(xml).exists():
+        raise CascadeUnavailableError(
+            "face detection unavailable: haarcascade XML not found — "
+            "run: pip install 'autoreels[publish]'"
+        )
+    cc = cv2.CascadeClassifier(xml)
+    if cc.empty():
+        raise CascadeUnavailableError(
+            "face detection unavailable: cascade file loaded empty — "
+            "run: pip install 'autoreels[publish]'"
+        )
+
+
+# Cascade caches (loaded once on first use after require_cascade() is called)
 _cascade_obj = None
 _cascade_loaded = False
+_eye_cascade_obj = None
+_eye_cascade_loaded = False
 
 
 def _load_cascade():
@@ -209,25 +250,53 @@ def _load_cascade():
     if _cascade_loaded:
         return _cascade_obj
     _cascade_loaded = True
-    if not _CV2_OK:
-        return None
-    cc_cls = getattr(cv2, "CascadeClassifier", None)
-    if cc_cls is None:
-        # cv2 5.x dropped CascadeClassifier from Python bindings
+    if not _CV2_OK or not getattr(cv2, "CascadeClassifier", None):
         return None
     xml = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    if not Path(xml).exists():
-        return None
-    try:
-        cc = cc_cls(xml)
+    if Path(xml).exists():
+        cc = cv2.CascadeClassifier(xml)
         _cascade_obj = None if cc.empty() else cc
-    except Exception:
-        _cascade_obj = None
     return _cascade_obj
 
 
+def _load_eye_cascade():
+    global _eye_cascade_obj, _eye_cascade_loaded
+    if _eye_cascade_loaded:
+        return _eye_cascade_obj
+    _eye_cascade_loaded = True
+    if not _CV2_OK or not getattr(cv2, "CascadeClassifier", None):
+        return None
+    xml = cv2.data.haarcascades + "haarcascade_eye.xml"
+    if Path(xml).exists():
+        cc = cv2.CascadeClassifier(xml)
+        _eye_cascade_obj = None if cc.empty() else cc
+    return _eye_cascade_obj
+
+
+def _detect_faces(gray, *, cascade) -> list:
+    """Return list of (x, y, w, h) tuples for each detected face."""
+    try:
+        result = cascade.detectMultiScale(gray, 1.05, 3, minSize=(30, 30))
+    except Exception:
+        return []
+    return list(result) if hasattr(result, "__len__") and len(result) else []
+
+
+def _eyes_in_face(gray, face_bbox, *, eye_cascade) -> int:
+    """Count eyes (0..2) found inside the face ROI."""
+    if eye_cascade is None:
+        return 0
+    x, y, w, h = face_bbox
+    roi = gray[y : y + h, x : x + w]
+    try:
+        eyes = eye_cascade.detectMultiScale(roi, 1.05, 1, minSize=(10, 10))
+    except Exception:
+        return 0
+    return min(2, len(eyes) if hasattr(eyes, "__len__") else 0)
+
+
 def face_area_fraction(img_bgr, *, cascade=None) -> float:
-    """Face area as fraction of image area (0..1).  cascade=None → module-level."""
+    """Largest face area as fraction of image area (0..1).  cascade=None → module-level."""
     if not (_CV2_OK and _NP_OK):
         return 0.0
     if cascade is None:
@@ -235,19 +304,44 @@ def face_area_fraction(img_bgr, *, cascade=None) -> float:
     if cascade is None:
         return 0.0
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    try:
-        faces = cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 60))
-    except Exception:
-        return 0.0
-    if not len(faces):
+    faces = _detect_faces(gray, cascade=cascade)
+    if not faces:
         return 0.0
     h, w = img_bgr.shape[:2]
     return max(fw * fh / (w * h) for _, _, fw, fh in faces)
 
 
-def score_frame(img_bgr, *, cascade=None) -> float:
-    """Composite score: sharpness (normalised) + face area (2× weight)."""
-    return sharpness(img_bgr) / 500.0 + face_area_fraction(img_bgr, cascade=cascade) * 2.0
+def score_frame(img_bgr, *, cascade=None, eye_cascade=None) -> float:
+    """Composite score: sharpness + face area (2×) + eye bonus (+1 if two eyes visible)."""
+    if not (_CV2_OK and _NP_OK):
+        return sharpness(img_bgr) / 500.0
+
+    if cascade is None:
+        cascade = _load_cascade()
+    if eye_cascade is None:
+        eye_cascade = _load_eye_cascade()
+
+    sharp = sharpness(img_bgr)
+    if cascade is None:
+        return sharp / 500.0
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    faces = _detect_faces(gray, cascade=cascade)
+
+    if not faces:
+        return sharp / 500.0
+
+    h, w = img_bgr.shape[:2]
+    face_score = max(fw * fh / (w * h) for _, _, fw, fh in faces)
+
+    # Eye bonus: +1.0 if any detected face has two visible eyes
+    eye_bonus = 0.0
+    for face_bbox in faces:
+        if _eyes_in_face(gray, face_bbox, eye_cascade=eye_cascade) >= 2:
+            eye_bonus = 1.0
+            break
+
+    return sharp / 500.0 + face_score * 2.0 + eye_bonus
 
 
 def pick_top_frames(
@@ -392,6 +486,13 @@ def main(argv=None) -> int:
     ap.add_argument("clip", type=Path, help="Path to the rendered clip (.mp4)")
     ap.add_argument("--out", type=Path, default=None, help="Output directory (auto-detected if omitted)")
     args = ap.parse_args(argv)
+
+    # Face detection is required — fail early with a clear install instruction.
+    try:
+        require_cascade()
+    except CascadeUnavailableError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
 
     clip: Path = args.clip.resolve()
     if not clip.exists():

@@ -29,6 +29,11 @@ faster-whisper = [
 url = [
     "yt-dlp>=2024.1",
 ]
+# Cover generation: face detection via Haar cascade (removed in cv2 5.x).
+# opencv 4.x ships CascadeClassifier + haarcascade XML files.
+publish = [
+    "opencv-python-headless>=4.9,<5",
+]
 
 [project.scripts]
 autoreels = "autoreels.__main__:main"

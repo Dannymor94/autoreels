@@ -216,3 +216,75 @@ def test_resolve_final_context():
     assert reel_id == "r01"
     assert video_stem == "VID_01"
     assert gate_label == "final"
+
+
+# ── real cascade tests ─────────────────────────────────────────────────────────
+#
+# test_face.png — programmatically generated grayscale portrait
+# (skin-tone gradient oval, dark eye sockets, eyebrows, nose shadow, upper-lip shadow).
+# Created by the project; dedicated to the public domain (CC0).
+# Verified with opencv haarcascade_frontalface_default at scaleFactor=1.05, minNeighbors=3.
+
+_CV4_OK = _NUMPY_OK and getattr(__import__("cv2"), "CascadeClassifier", None) is not None
+
+
+@pytest.mark.skipif(not _CV4_OK, reason="requires opencv 4.x with CascadeClassifier")
+def test_real_cascade_detects_face_in_fixture():
+    """Haar cascade (real, not mocked) finds a face in the committed test image."""
+    import cv2
+    fixture = Path(__file__).parent / "fixtures" / "test_face.png"
+    assert fixture.exists(), f"test fixture missing: {fixture}"
+
+    cc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    img = cv2.imread(str(fixture), cv2.IMREAD_GRAYSCALE)
+    assert img is not None, "could not read test_face.png"
+
+    faces = cc.detectMultiScale(img, 1.05, 3, minSize=(30, 30))
+    assert len(faces) >= 1, (
+        f"cascade found no faces in test_face.png (cv2 {cv2.__version__}); "
+        "image may need to be regenerated with make_test_face.py"
+    )
+
+
+@pytest.mark.skipif(not _CV4_OK, reason="requires opencv 4.x with CascadeClassifier")
+def test_eye_bonus_increases_score():
+    """Eye bonus (+1) applies when two eyes are found inside the face ROI."""
+    import cv2, numpy as np
+
+    fixture = Path(__file__).parent / "fixtures" / "test_face.png"
+    img_gray = cv2.imread(str(fixture), cv2.IMREAD_GRAYSCALE)
+    img_bgr = cv2.cvtColor(img_gray, cv2.COLOR_GRAY2BGR)
+
+    # Face cascade detects at least one face
+    face_cc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+
+    # Eye cascade that always reports two eyes (forces the bonus code path)
+    class _TwoEyesMock:
+        def detectMultiScale(self, roi, *a, **kw):
+            h, w = roi.shape[:2]
+            return [(0, 0, w // 4, h // 4), (w // 2, 0, w // 4, h // 4)]
+
+    class _NoEyesMock:
+        def detectMultiScale(self, roi, *a, **kw):
+            return []
+
+    score_with_eyes = make_covers.score_frame(img_bgr, cascade=face_cc, eye_cascade=_TwoEyesMock())
+    score_no_eyes = make_covers.score_frame(img_bgr, cascade=face_cc, eye_cascade=_NoEyesMock())
+    assert score_with_eyes > score_no_eyes, "eye bonus should increase score"
+
+
+@pytest.mark.skipif(not _NUMPY_OK, reason="numpy/cv2 required")
+def test_require_cascade_raises_when_unavailable(monkeypatch):
+    """require_cascade() raises CascadeUnavailableError when CascadeClassifier is absent."""
+    import cv2 as cv2_mod
+
+    # Simulate cv2 5.x: remove CascadeClassifier from the module
+    had_it = hasattr(cv2_mod, "CascadeClassifier")
+    monkeypatch.delattr(cv2_mod, "CascadeClassifier", raising=False)
+    # Reset the cascade cache so require_cascade() re-evaluates
+    monkeypatch.setattr(make_covers, "_cascade_loaded", False)
+    monkeypatch.setattr(make_covers, "_cascade_obj", None)
+
+    with pytest.raises(make_covers.CascadeUnavailableError, match="face detection unavailable"):
+        make_covers.require_cascade()
+    # monkeypatch restores CascadeClassifier automatically after the test
