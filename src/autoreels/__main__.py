@@ -2232,7 +2232,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 _gj = result[_kj + 1].start - _sj.end
                 if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
                     _jb_out.add(round(_op, 6))
-    for _stype, _sa, _se in _shot_spans_output(result):
+    _p4_spans = _shot_spans_output(result)
+    for _stype, _sa, _se in _p4_spans:
         _dsp = _se - _sa
         if _dsp >= min_shot:
             continue
@@ -2240,6 +2241,17 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             if _dsp >= _JUMP_SEAM_MIN:
                 continue  # forced jump-seam span, >= 1.0 s minimum → allowed
         warnings.append(f"[ERROR] short {_stype} span {_dsp:.3f}s at output {_sa:.2f}-{_se:.2f}")
+    # A-B-A middle check: min_middle threshold.
+    for _i4 in range(len(_p4_spans) - 2):
+        _sa4, _, _ = _p4_spans[_i4]
+        _sb4, _b0_4, _be4 = _p4_spans[_i4 + 1]
+        _sc4, _, _ = _p4_spans[_i4 + 2]
+        _bd = _be4 - _b0_4
+        if _sa4 == _sc4 and _sa4 != _sb4 and _bd < min_middle:
+            warnings.append(
+                f"[ERROR] A-B-A middle {_sb4}({_bd:.2f}s) at output {_b0_4:.2f}-{_be4:.2f}"
+                f" < min_middle({min_middle:.1f}s)"
+            )
 
     if result != _orig_segs:
         reel.segments = result
