@@ -147,6 +147,9 @@ def _snap(t: float) -> float:
 def check_reel(reel: dict, mp4: Path, src: Path, wide_vf: str, close_vf: str) -> tuple:
     """Returns (all_labels, flashes)."""
     segs = reel.get("segments", [])
+    co = reel.get("cold_open")
+    if co:
+        segs = [co] + segs  # cold_open is prepended in playback_windows()
     all_labels: list[str] = []
     out_t = 0.0
     for seg in segs:
