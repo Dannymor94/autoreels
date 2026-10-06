@@ -36,28 +36,28 @@
       "segments": [
         {
           "start": 639.9828439999999,
-          "end": 643.292844,
+          "end": 643.3828439999999,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 643.772844,
-          "end": 650.752844,
-          "shot": "close",
+          "start": 643.8328439999999,
+          "end": 650.8428439999999,
+          "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 654.7128439999999,
+          "start": 655.62,
           "end": 679.392844,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              8.940000000000055
+              1.432844,
+              5.432844
             ],
             [
-              16.56000000000006,
-              24.65000000000009
+              15.65284399999996,
+              23.74284399999999
             ]
           ]
         }
@@ -503,26 +503,24 @@
     {
       "id": "r02",
       "start": 974.433164,
-      "end": 1022.713174,
+      "end": 1021.26,
       "segments": [
         {
           "start": 974.433164,
-          "end": 974.953164,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 975.8531639999999,
-          "end": 1022.713174,
+          "end": 1021.26,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              12.160000000000082
+              13.579999999999927,
+              24.380019999999945
             ],
             [
-              22.9600200000001,
-              36.92001000000005
+              38.34000999999989,
+              41.799999999999955
+            ],
+            [
+              41.799999999999955,
+              47.25
             ]
           ]
         }
@@ -1042,8 +1040,10 @@
       "subtitle_gate": 1021.5131739999999,
       "speed": 1.0,
       "tail_last_word_end": 1021.213174,
-      "tail_next_word_start": 1021.733164,
-      "warnings": [],
+      "tail_next_word_start": null,
+      "warnings": [
+        "[CONTENT] r02: clip too short for tail fade after last word 'войти.' (clip_end=1021.260, ae=1021.200, gap=0.060s < min_fade=0.25s)"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null
@@ -1055,21 +1055,31 @@
       "segments": [
         {
           "start": 1132.1433140000001,
-          "end": 1146.643344,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 1148.883314,
-          "end": 1159.623304,
+          "end": 1146.57,
           "shot": "close",
           "close_intervals": []
         },
         {
-          "start": 1173.223274,
+          "start": 1148.8700000000001,
+          "end": 1159.8332939999998,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              5.473243999999795,
+              10.963293999999678
+            ]
+          ]
+        },
+        {
+          "start": 1172.9433139999999,
           "end": 1196.623344,
           "shot": "wide",
-          "close_intervals": []
+          "close_intervals": [
+            [
+              0.0,
+              10.219970000000103
+            ]
+          ]
         }
       ],
       "cold_open": null,
@@ -1920,37 +1930,38 @@
     {
       "id": "r04",
       "start": 1473.987638,
-      "end": 1539.21,
+      "end": 1538.96,
       "segments": [
         {
           "start": 1473.987638,
-          "end": 1488.287638,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 1493.867638,
-          "end": 1517.801868,
+          "end": 1487.75,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              7.654230000000098
-            ],
-            [
-              19.874230000000125,
-              23.93423000000007
+              9.4,
+              13.76236199999994
             ]
           ]
         },
         {
-          "start": 1520.221838,
-          "end": 1539.21,
+          "start": 1494.01,
+          "end": 1517.56,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              9.160020000000031
+              7.5118680000000495
+            ]
+          ]
+        },
+        {
+          "start": 1521.3600000000001,
+          "end": 1538.96,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              8.021858,
+              16.301838
             ]
           ]
         }
@@ -2765,31 +2776,36 @@
       "segments": [
         {
           "start": 1689.756108,
-          "end": 1703.586108,
+          "end": 1703.48,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 1705.436118,
-          "end": 1711.9160980000001,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 1714.2760779999999,
-          "end": 1730.476088,
+          "start": 1705.27,
+          "end": 1710.7,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              7.860059999999976
+              2.046118,
+              5.430000000000064
             ]
           ]
         },
         {
-          "start": 1742.256138,
+          "start": 1714.0700000000002,
+          "end": 1729.7,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              8.066137999999683
+            ]
+          ]
+        },
+        {
+          "start": 1741.63,
           "end": 1747.076138,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         }
       ],
@@ -3266,39 +3282,34 @@
       "segments": [
         {
           "start": 1893.3303125,
-          "end": 1912.3503125,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              7.099999999999909,
-              19.019999999999982
-            ]
-          ]
-        },
-        {
-          "start": 1920.4103125,
-          "end": 1944.8003125,
+          "end": 1912.4,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              12.900000000000091
+              7.099999999999909
             ]
           ]
         },
         {
-          "start": 1945.8303125,
-          "end": 1961.3424325,
+          "start": 1920.39,
+          "end": 1944.63,
+          "shot": "wide",
+          "close_intervals": []
+        },
+        {
+          "start": 1945.8000000000002,
+          "end": 1961.13,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              6.582110000000057
+              12.312422,
+              15.329999999999927
             ]
           ]
         },
         {
-          "start": 1962.0124325,
+          "start": 1962.01,
           "end": 1975.2324225,
           "shot": "close",
           "close_intervals": []
@@ -3315,8 +3326,7 @@
       "r0_start": 1893.3,
       "r0_end": 1975.0324225,
       "flags": [
-        "human_merged",
-        "start_repaired"
+        "human_merged"
       ],
       "self_contained_start": null,
       "start_justification": "",
@@ -4280,8 +4290,8 @@
       "end_drift_sec": 0.2999999999999545,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
-      "start_snap_reason": "repaired_to_sentence",
-      "start_repair_sec": -0.4899875000000975,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
@@ -4300,28 +4310,29 @@
     {
       "id": "r07",
       "start": 2027.7924325,
-      "end": 2058.7324325,
+      "end": 2057.42,
       "segments": [
         {
           "start": 2027.7924325,
-          "end": 2046.7724225,
+          "end": 2046.09,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
               3.3200100000001385
-            ],
-            [
-              9.920000000000073,
-              18.619990000000143
             ]
           ]
         },
         {
-          "start": 2048.9124225,
-          "end": 2058.7324325,
-          "shot": "close",
-          "close_intervals": []
+          "start": 2049.14,
+          "end": 2057.42,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              7.632443,
+              8.092433
+            ]
+          ]
         }
       ],
       "cold_open": null,
@@ -4705,8 +4716,9 @@
       "subtitle_gate": 2057.5324325,
       "speed": 1.0,
       "tail_last_word_end": 2057.2324325,
-      "tail_next_word_start": 2057.7124425,
+      "tail_next_word_start": null,
       "warnings": [
+        "[CONTENT] r07: clip too short for tail fade after last word 'меняетесь.' (clip_end=2057.420, ae=2057.190, gap=0.230s < min_fade=0.25s)",
         "dangling start: opens on «То»"
       ],
       "subtitle_emph_words": [],
@@ -4720,24 +4732,29 @@
       "segments": [
         {
           "start": 2101.6345325,
-          "end": 2104.0445325,
-          "shot": "wide",
+          "end": 2104.01,
+          "shot": "close",
           "close_intervals": []
         },
         {
-          "start": 2105.1145425,
-          "end": 2121.2345425,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 2135.4345525,
-          "end": 2158.1745625,
+          "start": 2104.86,
+          "end": 2120.61,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              11.820009999999911
+              6.754542499999843
+            ]
+          ]
+        },
+        {
+          "start": 2135.4300000000003,
+          "end": 2158.1745625,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              22.484532,
+              22.764562499999556
             ]
           ]
         }
@@ -5707,56 +5724,57 @@
     {
       "id": "r09",
       "start": 2436.278719,
-      "end": 2517.4096990000003,
+      "end": 2515.9396990000005,
       "segments": [
         {
           "start": 2436.278719,
-          "end": 2444.108719,
+          "end": 2443.98,
           "shot": "close",
           "close_intervals": []
         },
         {
-          "start": 2444.738719,
-          "end": 2466.778719,
+          "start": 2444.71,
+          "end": 2466.36,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              3.680000000000291
-            ],
-            [
-              16.90000000000009,
-              22.039999999999964
+              3.708719000000201,
+              16.928719
             ]
           ]
         },
         {
-          "start": 2478.878719,
-          "end": 2496.618719,
+          "start": 2476.9587190000007,
+          "end": 2496.708719,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              6.400000000000091
+              8.319999999999254
             ]
           ]
         },
         {
-          "start": 2498.558719,
-          "end": 2513.238719,
+          "start": 2499.3987190000003,
+          "end": 2513.328719,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              11.0,
+              13.929999999999836
+            ]
+          ]
+        },
+        {
+          "start": 2513.8596990000005,
+          "end": 2515.9396990000005,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              10.819999999999709
+              1.31902
             ]
           ]
-        },
-        {
-          "start": 2513.799699,
-          "end": 2517.4096990000003,
-          "shot": "close",
-          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -6624,19 +6642,22 @@
           "emph": false
         }
       ],
-      "end_drift_sec": 0.3000000000001819,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": 12.020980000000236,
+      "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": "repaired_to_sentence",
       "start_repair_sec": -0.8099809999998797,
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 2515.478719,
+      "subtitle_gate": 2526.84,
       "speed": 1.0,
-      "tail_last_word_end": 2515.9096990000003,
-      "tail_next_word_start": 2516.1996990000002,
-      "warnings": [],
+      "tail_last_word_end": null,
+      "tail_next_word_start": 2526.899699,
+      "warnings": [
+        "last subtitle word 'делаю.' (t0=2513.800s) != last transcript word before r0_end 'заходит.' (t0=2524.840s, r0_end=2526.900s) — word was excluded by audible_end",
+        "ends on hanging phrase «делаю. Когда» (explicit e: — not moved)"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null
@@ -6648,30 +6669,30 @@
       "segments": [
         {
           "start": 2709.6006789999997,
-          "end": 2722.620679,
+          "end": 2722.7106790000003,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 2722.960679,
-          "end": 2728.220689,
+          "start": 2723.020679,
+          "end": 2728.830679,
           "shot": "close",
           "close_intervals": []
         },
         {
-          "start": 2729.840689,
-          "end": 2733.710679,
-          "shot": "wide",
+          "start": 2729.78,
+          "end": 2733.54,
+          "shot": "close",
           "close_intervals": []
         },
         {
-          "start": 2734.320669,
+          "start": 2734.23,
           "end": 2749.120679,
           "shot": "wide",
           "close_intervals": [
             [
               0.0,
-              10.220029999999952
+              13.390679
             ]
           ]
         }
