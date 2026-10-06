@@ -1978,6 +1978,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                         and not getattr(s, "close_intervals", [])):
                     continue
                 rel = sw - s.start
+                seg_dur = s.end - s.start
+                if seg_dur - rel < min_middle and ji in _manual_segs:
+                    continue  # manual seg: wide tail < min_middle, A-B-A merge won't fix → skip
                 result[ji] = s.model_copy(update={"shot": "wide", "close_intervals": [[0.0, rel]]})
                 _pass3_segs.add(ji)
                 for k in range(ji + 1, len(result)):
@@ -2111,19 +2114,22 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             result[_ji] = _s.model_copy(update={"close_intervals": _nc})
 
     # Option 2: absorb short wide tail of a segment into close when next segment starts close.
-    # "Short tail" = < min_shot in output time. Jump-seam seams (forced shot changes) excepted.
+    # "Short tail" = < min_shot in output time. Also absorbs ci-tails < min_middle (A-B-A guard).
+    # Jump-seam seams (forced shot changes) excepted. Pass3 splits (_pass3_segs) are preserved.
     for _i2 in range(len(result) - 1):
         if reel.cold_open is not None and _i2 == 0:
             continue  # cold_open → body jump seam: never absorb body[0]'s shot
         if _i2 + 1 in _js_set:
             continue
+        if _i2 in _pass3_segs:
+            continue  # Pass 3 ci is preserved (A-B-A merge handles or reports [ERROR])
         _s2 = result[_i2]
         _dur2 = _s2.end - _s2.start
         _ci2 = list(getattr(_s2, "close_intervals", []))
         if _s2.shot == "close" and not _ci2:
             continue
         _trail2 = (_dur2 - _ci2[-1][1]) if _ci2 else _dur2
-        if not (0.001 < _trail2 < min_shot):
+        if not (0.001 < _trail2 < min_shot) and not (min_shot <= _trail2 < min_middle and _ci2):
             continue
         _nxt2 = result[_i2 + 1]
         _nci2 = list(getattr(_nxt2, "close_intervals", []))
