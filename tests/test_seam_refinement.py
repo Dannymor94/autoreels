@@ -75,3 +75,35 @@ def test_seam_gap_under_two_frames_cut_in_middle():
     segs = [Segment(start=0.0, end=1.0), Segment(start=1.05, end=2.0)]
     result = _refine_seams(segs, words, smap, seam_pad=0.04)
     assert result[0].end == result[1].start  # both at midpoint
+
+
+def test_seam_push_past_merged_interval_overlapping_smap():
+    """Bug: smap dedup dropped word B's interval; new_a landed inside B's merged span.
+
+    Words A (t0=1471.2756, ae_narrow) and B (t0=1471.2356, ae_wide) are overlapping.
+    Merged interval = union of both. After push, new_a must be >= merged ae.
+    """
+    from autoreels.cloud.edit import _refine_seams
+    from autoreels.core.models import Segment, Word
+
+    # Two smap words overlapping (like the 1471s case in IMG_6848)
+    smap_words = [
+        {"idx": 0, "t0": 1471.2756, "t1": 1472.2156, "audible_start": 1471.2256, "audible_end": 1471.2856},
+        {"idx": 1, "t0": 1471.2356, "t1": 1472.4756, "audible_start": 1471.3356, "audible_end": 1472.5256},
+    ]
+    # last_a has ae=1471.3256 → new_a = 1471.3256 + 0.04 = 1471.3656 → inside [1471.3356, 1472.5256]
+    smap_last_a = {"idx": -1, "t0": 1471.2756, "t1": 1472.2156, "audible_start": 1471.2256, "audible_end": 1471.3256}
+    smap_words_full = [smap_last_a] + smap_words
+
+    # Transcript word before the seam (last_a via ws lookup)
+    w_last_a = Word(word="prev", t0=1471.2756, t1=1472.2156)
+    segs = [
+        Segment(start=1469.0, end=1471.366),   # original A-side end
+        Segment(start=1473.0, end=1480.0),     # B-side
+    ]
+    result = _refine_seams(segs, [w_last_a], smap_words_full, seam_pad=0.04)
+    new_a = result[0].end
+    # Must NOT be inside [1471.3356, 1472.5256]
+    assert not (1471.3356 < new_a < 1472.5256), (
+        f"new_a={new_a:.4f} still inside merged interval [1471.3356, 1472.5256]"
+    )

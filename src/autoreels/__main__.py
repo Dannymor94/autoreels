@@ -1078,17 +1078,15 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
-def _check_seam_inside_word(reel, smap: "dict | None") -> None:
-    """Raise ValueError if any internal seam cut falls inside a word's audible span per smap."""
+def _check_seam_inside_word(reel, smap: "dict | None") -> list[str]:
+    """Return list of violation messages (empty = clean) for internal seam cuts inside words."""
     segs = reel.segments
     if not segs or len(segs) < 2 or not smap:
-        return
+        return []
     smap_words = smap.get("words", [])
     if not smap_words:
-        return
-    # Merge overlapping audible spans so the check matches _refine_seams semantics:
-    # after _refine_seams pushes seams past any containing word, the result should
-    # not fall inside any merged interval.
+        return []
+    # Merge overlapping audible spans.
     raw = sorted(
         [(w["audible_start"], w["audible_end"]) for w in smap_words
          if w.get("audible_end", 0) > w.get("audible_start", 0)],
@@ -1099,14 +1097,17 @@ def _check_seam_inside_word(reel, smap: "dict | None") -> None:
             intervals[-1] = (intervals[-1][0], max(intervals[-1][1], ae_))
         else:
             intervals.append((as_, ae_))
+    violations: list[str] = []
     for i in range(len(segs) - 1):
         for t in (segs[i].end, segs[i + 1].start):
             for as_, ae_ in intervals:
                 if as_ < t < ae_:
-                    raise ValueError(
+                    violations.append(
                         f"[ERROR] {reel.id}: seam inside word — cut at {t:.3f}s "
                         f"is inside [{as_:.3f}, {ae_:.3f}]"
                     )
+                    break
+    return violations
 
 
 def _stage_snap(reels, transcript, *, r0_cfg, max_duration=None, smap=None):
@@ -4127,7 +4128,9 @@ def cmd_render(
                 )
             if _render_smap:
                 for _r in render_manifest.reels:
-                    _check_seam_inside_word(_r, _render_smap)
+                    for _msg in _check_seam_inside_word(_r, _render_smap):
+                        print(_msg, flush=True)
+                        _r.warnings.append(_msg)
             # Recompute shots so cold-open rule and beat-seam alternation are always current,
             # even when the manifest was written by an older run. assign_shots is idempotent.
             _stage_two_shot_auto(
@@ -5437,7 +5440,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
         _check_first_subtitle_word(_r, _tx_words)
-        _check_seam_inside_word(_r, _blk_smap)
+        for _smsg in _check_seam_inside_word(_r, _blk_smap):
+            print(_smsg, file=sys.stderr, flush=True)
+            _r.warnings.append(_smsg)
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.

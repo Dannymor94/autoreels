@@ -332,18 +332,6 @@ def _refine_seams(
         e = smap_lk.get(round(w.t0 * 1000))
         return e["audible_start"] if e else w.t0
 
-    # Deduplicated smap intervals (drop earlier artifact, keep precise entry)
-    # used for boundary-push check so we use the same dedup as _dedup_overlapping_words.
-    _smap_deduped: list[dict] = []
-    for _sw in sorted(smap_words, key=lambda x: x.get("t0", 0)):
-        if (_smap_deduped
-                and _sw.get("t0", 0) < _smap_deduped[-1].get("t1", 0) - 1e-4
-                and (_sw.get("text", "").strip(".,!?…;:").lower() ==
-                     _smap_deduped[-1].get("text", "").strip(".,!?…;:").lower())):
-            _smap_deduped[-1] = _sw  # replace artifact with precise
-        else:
-            _smap_deduped.append(_sw)
-
     ws = _dedup_overlapping_words(list(words)) if words else []
     result = list(segs)
     for i in range(len(result) - 1):
@@ -368,17 +356,18 @@ def _refine_seams(
             as_fb = _as(first_b) if first_b else b
             if ae_lc <= as_fb + 1e-4:
                 new_b = max(new_b, ae_lc)
-        # Push new_a past any deduped smap word whose audible span still contains it
-        # (handles the case where the artifact word's audible_end is narrower than
-        # the precise word's audible_end, so new_a ends up inside the precise word).
-        for _sw in _smap_deduped:
+        # Push new_a past any smap word in the cut zone (audible_start >= ae_la - seam_pad)
+        # whose span still contains new_a.  This handles deduped-away first_cut words
+        # whose audible span extends past ae_la + seam_pad.
+        for _sw in smap_words:
             _as_, _ae_ = _sw.get("audible_start", 0), _sw.get("audible_end", 0)
-            if _ae_ > _as_ and _as_ < new_a < _ae_:
+            if _ae_ > _as_ and _as_ >= ae_la - seam_pad and _as_ < new_a < _ae_:
                 new_a = _ae_ + seam_pad
-        # Pull new_b before any deduped smap word whose audible span contains it
-        for _sw in reversed(_smap_deduped):
+        # Pull new_b before any smap word in the cut zone (audible_end <= ae_lc + seam_pad).
+        ae_lc2 = ae_lc if last_cut else b
+        for _sw in reversed(smap_words):
             _as_, _ae_ = _sw.get("audible_start", 0), _sw.get("audible_end", 0)
-            if _ae_ > _as_ and _as_ < new_b < _ae_:
+            if _ae_ > _as_ and _ae_ <= ae_lc2 + seam_pad and _as_ < new_b < _ae_:
                 new_b = _as_ - seam_pad
         if new_a > new_b:
             new_a = new_b = (new_a + new_b) / 2
