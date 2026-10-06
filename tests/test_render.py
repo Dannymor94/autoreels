@@ -2604,6 +2604,31 @@ def test_clean_clip_not_renamed(tmp_path, render_cfg, fake_ffmpeg, capsys):
     assert "[ERROR]" not in captured.out
 
 
+def test_clean_clip_deletes_stale_error_file(tmp_path, render_cfg, fake_ffmpeg, capsys):
+    """Successful re-render of a clip must delete its stale <id>.ERROR.mp4 if present."""
+    from autoreels.core.models import Segment
+
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"clean-clip-after-error")
+
+    reel = _reel("r01", 5.0, 12.0)
+    reel.segments = [Segment(start=5.0, end=12.0)]
+    reel.subtitles = [Word(word="last", t0=10.0, t1=10.4)]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+
+    smap = _smap_for_tail(last_t0=10.0, last_t1=10.4, next_speech_t0=999.0)
+    render_cfg = render_cfg.model_copy(update={"speech_map": False})
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True)
+    stale = out_dir / "r01.ERROR.mp4"
+    stale.write_bytes(b"stale")
+
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg, smap=smap)
+
+    assert not stale.exists(), "stale ERROR file must be deleted on successful re-render"
+
+
 # --------------------------------------------------------- PART 1: atomic write + integrity + lock
 
 def test_render_ffmpeg_receives_tmp_path(tmp_path, render_cfg, monkeypatch):

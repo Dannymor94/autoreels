@@ -2765,6 +2765,7 @@ def _render_segments(
                 if out.exists():
                     out.rename(out.with_name(f"{out.stem}.ERROR.mp4"))
             else:
+                out.with_name(f"{out.stem}.ERROR.mp4").unlink(missing_ok=True)
                 outputs.append(out)
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
