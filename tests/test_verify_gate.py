@@ -378,6 +378,36 @@ def test_span_violations_aba_118fr_tolerance():
         f"118fr close A-B-A middle must pass with 2-frame tolerance: {fails}"
 
 
+# ── Bug 6: own-word via t1 extension — blip within Whisper t1 span must not fire ─
+
+def test_tail_silence_own_word_t1_extension(tmp_path):
+    """lec r02: last word t1=186.38 extends past ae=184.61; 0.02s blip at 186.09 is own-word."""
+    sm_path = tmp_path / "s.speechmap.json"
+    sm_path.write_text(json.dumps({
+        "version": 6,
+        "intervals": [[186.09, 186.11]],
+        "words": [{"idx": 5, "t0": 184.06, "t1": 186.38, "audible_end": 184.61}],
+        "boundaries": [],
+    }), encoding="utf-8")
+    fails = vg._check_tail_silence(sm_path, reel_end=186.24)
+    assert not fails, f"blip within last word t1 must not trigger speech_in_tail: {fails}"
+
+
+# ── Bug 7: render_end cutoff — interval after audio cut point is outside the clip ─
+
+def test_tail_silence_render_end_cutoff(tmp_path):
+    """PXL r10: render_end=2748.33; own-word [2747.40] exempt; [2748.40] > render_end → PASS."""
+    sm_path = tmp_path / "s.speechmap.json"
+    sm_path.write_text(json.dumps({
+        "version": 6,
+        "intervals": [[2747.40, 2747.68], [2748.40, 2748.66]],
+        "words": [{"idx": 99, "t0": 2747.081, "t1": 2747.621, "audible_end": 2747.21}],
+        "boundaries": [],
+    }), encoding="utf-8")
+    fails = vg._check_tail_silence(sm_path, reel_end=2748.33)
+    assert not fails, f"interval after render_end must not trigger speech_in_tail: {fails}"
+
+
 def test_main_fail_returns_1(tmp_path):
     """Missing clip → exit 1."""
     data = {"clips": [_yaml_entry(

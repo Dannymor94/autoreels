@@ -192,22 +192,21 @@ def _check_tail_silence(speechmap_path: Path, reel_end: float,
                         own_tail_window_sec: float = 0.05) -> list[str]:
     """Fail if speech starts after the clip's last word + a small grace window.
 
-    The old 0.5s window incorrectly flagged clips whose last word ends just
-    before reel_end.  Now we find the latest audible_end of any word that
-    starts before reel_end, add a small grace window, and check for a new
-    speech interval starting after that threshold.
+    Own-word rule: an interval whose start is before
+    max(last_audible_end, last_word_t1) + own_tail_window_sec belongs to the
+    last word (Whisper's declared t1 span) and is exempt.
     """
     if not speechmap_path.exists():
         return [f"speechmap_missing:{speechmap_path.name}"]
     with open(speechmap_path) as f:
         sm = json.load(f)
-    words = sm.get("words", [])
+    words_in_clip = [w for w in sm.get("words", []) if w.get("t0", 0.0) <= reel_end]
     last_audible_end = max(
-        (w.get("audible_end", w.get("t0", 0.0))
-         for w in words if w.get("t0", 0.0) <= reel_end),
+        (w.get("audible_end", w.get("t0", 0.0)) for w in words_in_clip),
         default=0.0,
     )
-    threshold = last_audible_end + own_tail_window_sec
+    last_word_t1 = words_in_clip[-1].get("t1", last_audible_end) if words_in_clip else 0.0
+    threshold = max(last_audible_end, last_word_t1) + own_tail_window_sec
     for ivl in sm.get("intervals", []):
         s, e = ivl[0], ivl[1]  # noqa: F841
         if threshold < s < reel_end:
@@ -297,6 +296,18 @@ def check_clip(entry: dict, project: Path) -> list[str]:
     if not clip_path.exists():
         return ["clip_missing"]
 
+    # Use render_end from sidecar JSON when present (actual audio cut point after
+    # map-based shortening), else fall back to the golden reel_end.
+    render_json_path = clip_dir / f"{clip_id}.render.json"
+    tail_end = reel_end
+    if render_json_path.exists():
+        try:
+            rd = json.loads(render_json_path.read_text(encoding="utf-8"))
+            if "render_end" in rd:
+                tail_end = float(rd["render_end"])
+        except (json.JSONDecodeError, ValueError, KeyError):
+            pass
+
     fails = []
 
     if (clip_dir / f"{clip_id}.ERROR.mp4").exists():
@@ -304,7 +315,7 @@ def check_clip(entry: dict, project: Path) -> list[str]:
 
     fails.extend(_check_words(clip_dir, clip_id, entry))
     fails.extend(_check_audio_start(clip_path))
-    fails.extend(_check_tail_silence(speechmap, reel_end))
+    fails.extend(_check_tail_silence(speechmap, tail_end))
 
     duration = _probe_duration(clip_path)
     if duration is not None:
