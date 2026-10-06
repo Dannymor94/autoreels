@@ -1,0 +1,22 @@
+{
+  "source_name": "IMG_6848.mov",
+  "source_sha256": "62adc3a57a98a821b7cd56edc4e96e76b7b9be1de472a7ee537b01d0ee8ef6fc",
+  "setup_label": "img6848",
+  "crop": {
+    "x": 657,
+    "y": 0,
+    "w": 608,
+    "h": 1080
+  },
+  "scale": [
+    1080,
+    1920
+  ],
+  "frame": [
+    1920,
+    1080
+  ],
+  "rotation_deg": 0.0,
+  "palette": null,
+  "rotation_applied": true
+}
