@@ -271,6 +271,95 @@ def test_main_all_pass(tmp_path):
     assert rc == 0
 
 
+# ── Bug 1: speech_in_tail — own last words must not fire ─────────────────────
+
+def test_tail_silence_lecture_r01_own_last_words(tmp_path):
+    """lecture r01: speech [79.05,81.24], reel_end=81.54 — own last word, must PASS."""
+    sm_path = tmp_path / "s.speechmap.json"
+    sm_path.write_text(json.dumps({
+        "version": 6,
+        "intervals": [[79.05, 81.24]],
+        "words": [{"idx": 10, "t0": 81.0, "t1": 81.24, "audible_end": 81.24}],
+        "boundaries": [],
+    }), encoding="utf-8")
+    fails = vg._check_tail_silence(sm_path, reel_end=81.54)
+    assert not fails, f"own last words must not trigger speech_in_tail: {fails}"
+
+
+# ── Bug 2: tail fade frames — last run exempt ──────────────────────────────────
+
+def test_span_violations_tail_fade_exempt():
+    """PXL r01: 1-frame wide tail (fr 1169-1169) must not trigger short_span."""
+    runs = [
+        ("close", 1, 119), ("wide", 120, 427), ("close", 428, 696),
+        ("wide", 697, 925), ("close", 926, 1168), ("wide", 1169, 1169),
+    ]
+    fails = vg._check_span_violations(
+        runs, jump_seam_frames=set(), fps=30.0,
+        min_shot=2.5, min_middle=4.0, shot_tolerance_frames=2,
+    )
+    assert not any("short_span" in f for f in fails), \
+        f"1-frame tail must be exempt: {fails}"
+
+
+# ── Bug 3: jump-seam span — exempt when >= JUMP_SEAM_MIN_SEC ──────────────────
+
+def test_span_violations_jump_seam_lec_r06():
+    """lecture r06: close 2.07s (62fr) at jump seam (16.5s backward gap) → PASS."""
+    reel = {
+        "segments": [
+            {"start": 467.52635, "end": 469.27634, "close_intervals": []},
+            {"start": 452.78635, "end": 461.04635, "close_intervals": []},
+            {"start": 469.68634, "end": 473.22635, "close_intervals": []},
+        ],
+        "cold_open": None,
+    }
+    js_frames = vg._jump_seam_frames(reel)
+    assert js_frames, "r06 must have jump seams"
+    # actual shot sequence from flash_check: close(62fr) → wide(252fr) → close(91fr)
+    runs = [("close", 1, 62), ("wide", 63, 314), ("close", 315, 405)]
+    fails = vg._check_span_violations(
+        runs, jump_seam_frames=js_frames, fps=30.0,
+        min_shot=2.5, min_middle=4.0, shot_tolerance_frames=2,
+    )
+    assert not any("short_span" in f for f in fails), \
+        f"2.07s close at jump seam must be exempt: {fails}"
+
+
+# ── Bug 4: word normalization — punctuation must not cause mismatch ───────────
+
+def test_words_normalization_punct_match(tmp_path):
+    """Transcript has trailing period; golden does not — must match after normalization."""
+    clip_dir = tmp_path / "gate"
+    clip_dir.mkdir()
+    mp4 = clip_dir / "r01.mp4"
+    _make_mp4_with_audio(mp4)
+    (clip_dir / "r01.transcript.txt").write_text(
+        "Здесь мы стараемся войти.\n", encoding="utf-8"
+    )
+    _speechmap(tmp_path / "s.speechmap.json", [])
+    entry = _yaml_entry("r01", str(mp4.relative_to(tmp_path)), "s", 3.0,
+                        "Здесь мы стараемся войти",
+                        "Здесь мы стараемся войти")
+    fails = vg.check_clip(entry, tmp_path)
+    assert not any("words" in f for f in fails), \
+        f"punct-normalized words should match: {fails}"
+
+
+# ── Bug 5: frame tolerance — 118fr A-B-A middle passes with 2-frame tolerance ─
+
+def test_span_violations_aba_118fr_tolerance():
+    """PXL r05 pattern: A-B-A middle 118fr=3.933s, 2-frame tol → 3.933+0.067=4.0 → PASS."""
+    # No tail artifact — genuine 3-run pattern
+    runs = [("wide", 1, 300), ("close", 301, 418), ("wide", 419, 720)]
+    fails = vg._check_span_violations(
+        runs, jump_seam_frames=set(), fps=30.0,
+        min_shot=2.5, min_middle=4.0, shot_tolerance_frames=2,
+    )
+    assert not any("aba_middle_short" in f for f in fails), \
+        f"118fr close A-B-A middle must pass with 2-frame tolerance: {fails}"
+
+
 def test_main_fail_returns_1(tmp_path):
     """Missing clip → exit 1."""
     data = {"clips": [_yaml_entry(

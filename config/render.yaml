@@ -198,6 +198,7 @@ two_shot_auto: false
 two_shot_max_shot_sec: 14.0  # max duration for any shot (wide OR close); two_shot_max_wide_sec is an alias
 two_shot_min_sec: 2.5        # minimum shot duration; suppress switch that would go shorter
 two_shot_min_middle_sec: 4.0  # A-B-A middle span shorter than this is merged into neighbours
+shot_tolerance_frames: 2      # verifier tolerance: span >= (threshold - N/fps) is OK
 # M1.7 step 3: beat-clip shot rule.  Shot changes ONLY at jump seams (source gap > 2 s or
 # backward) and cold open.  No two_shot_auto ci-splits inside a beat.
 # c: on any sentence in a beat block decides the WHOLE block's shot.

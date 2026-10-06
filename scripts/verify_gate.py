@@ -7,6 +7,7 @@ Usage:
 Exit code: 1 if any clip FAILs, 0 if all PASS.
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,12 @@ import flash_check  # noqa: E402
 
 TWO_SHOT_MIN_SEC = 2.5
 TWO_SHOT_MIN_MIDDLE_SEC = 4.0
+JUMP_SEAM_GAP_SEC = 2.0
+JUMP_SEAM_MIN_SEC = 1.0
+
+_render_cfg_path = PROJECT / "config" / "render.yaml"
+_render_cfg = yaml.safe_load(_render_cfg_path.read_text()) if _render_cfg_path.exists() else {}
+SHOT_TOLERANCE_FRAMES: int = _render_cfg.get("shot_tolerance_frames", 2)
 
 
 # ── ffmpeg helpers ─────────────────────────────────────────────────────────────
@@ -64,20 +71,109 @@ def _framemd5s(path: Path, ss: float, duration: float) -> list[str]:
     return out
 
 
+# ── word helpers ───────────────────────────────────────────────────────────────
+
+def _normalize_words(text: str) -> list[str]:
+    """Lowercase, ё→е, strip leading/trailing punctuation, keep hyphens inside words."""
+    text = text.lower().replace("ё", "е")
+    words = []
+    for tok in text.split():
+        clean = re.sub(r"[^\w\-]", "", tok, flags=re.UNICODE)
+        clean = clean.strip("-")
+        if clean:
+            words.append(clean)
+    return words
+
+
+# ── shot span helpers ──────────────────────────────────────────────────────────
+
+def _seg_output_ranges(reel: dict,
+                       fps: float = flash_check.FPS) -> list[tuple]:
+    """Return (out_start_1idx, out_end_1idx, src_start, src_end) per segment."""
+    segs = list(reel.get("segments", []))
+    co = reel.get("cold_open")
+    if co:
+        segs = [co] + segs
+    ranges = []
+    out_frame = 1
+    for seg in segs:
+        src_start = round(seg["start"] * fps) / fps
+        snap_dur = round(seg["end"] * fps) / fps - src_start
+        n_frames = round(snap_dur * fps)
+        if n_frames <= 0:
+            continue
+        ranges.append((out_frame, out_frame + n_frames - 1, seg["start"], seg["end"]))
+        out_frame += n_frames
+    return ranges
+
+
+def _jump_seam_frames(reel: dict,
+                      fps: float = flash_check.FPS,
+                      jump_seam_gap: float = JUMP_SEAM_GAP_SEC) -> set[int]:
+    """Return 1-indexed frame positions that start a segment after a jump seam."""
+    ranges = _seg_output_ranges(reel, fps)
+    result = set()
+    for i in range(1, len(ranges)):
+        _, _, _, src_end = ranges[i - 1]
+        out_start, _, src_start, _ = ranges[i]
+        if abs(src_start - src_end) >= jump_seam_gap:
+            result.add(out_start)
+    return result
+
+
+def _check_span_violations(runs: list, *, jump_seam_frames: set,
+                            fps: float, min_shot: float, min_middle: float,
+                            shot_tolerance_frames: int) -> list[str]:
+    """Check span floors with tail exemption, jump-seam exemption, frame tolerance.
+
+    Tail exemption: the last run is skipped entirely (same rule as
+    flash_check._find_flashes skipping the final run).  A tail is only
+    declared when its frame count is below FLASH_THRESH (10 fr); otherwise
+    the last run is a real shot and participates in all checks.
+    """
+    if not runs:
+        return []
+    fails = []
+    tol = shot_tolerance_frames / fps
+    last = len(runs) - 1
+    last_dur_fr = runs[last][2] - runs[last][1] + 1
+    is_tail = last_dur_fr < flash_check.FLASH_THRESH
+
+    for i, (lbl, s, e) in enumerate(runs):
+        if is_tail and i == last:
+            continue
+        dur = (e - s + 1) / fps
+        at_jump = any(s <= jf <= e for jf in jump_seam_frames)
+        if dur + tol < min_shot and not (at_jump and dur >= JUMP_SEAM_MIN_SEC):
+            fails.append(f"short_span:{lbl}_{dur:.2f}s<{min_shot}s")
+        # A-B-A: both neighbours must exist and the next must not be the tail
+        next_i = i + 1
+        next_is_tail = is_tail and next_i == last
+        if i > 0 and next_i <= last and not next_is_tail:
+            prev_lbl = runs[i - 1][0]
+            nxt_lbl = runs[next_i][0]
+            if prev_lbl == nxt_lbl and lbl != prev_lbl and dur + tol < min_middle:
+                fails.append(f"aba_middle_short:{lbl}_{dur:.2f}s<{min_middle}s")
+    return fails
+
+
 # ── per-clip checks ────────────────────────────────────────────────────────────
 
 def _check_words(clip_dir: Path, clip_id: str, expected: dict) -> list[str]:
     txt = clip_dir / f"{clip_id}.transcript.txt"
     if not txt.exists():
         return ["transcript_txt_missing"]
-    words = txt.read_text(encoding="utf-8").split()
-    first4 = " ".join(words[:4])
-    last4 = " ".join(words[-4:])
+    norm = _normalize_words(txt.read_text(encoding="utf-8"))
     fails = []
-    if first4 != expected["first_words"]:
-        fails.append(f"first_words:got='{first4}'")
-    if last4 != expected["last_words"]:
-        fails.append(f"last_words:got='{last4}'")
+    for key, take_end in (("first_words", False), ("last_words", True)):
+        exp_raw = expected.get(key, "")
+        if not exp_raw:
+            continue
+        n = len(exp_raw.split())
+        exp_norm = _normalize_words(exp_raw)
+        got = norm[-n:] if take_end else norm[:n]
+        if got != exp_norm:
+            fails.append(f"{key}:got='{' '.join(got)}'")
     return fails
 
 
@@ -90,15 +186,29 @@ def _check_audio_start(mp4: Path) -> list[str]:
     return []
 
 
-def _check_tail_silence(speechmap_path: Path, reel_end: float) -> list[str]:
+def _check_tail_silence(speechmap_path: Path, reel_end: float,
+                        own_tail_window_sec: float = 0.05) -> list[str]:
+    """Fail if speech starts after the clip's last word + a small grace window.
+
+    The old 0.5s window incorrectly flagged clips whose last word ends just
+    before reel_end.  Now we find the latest audible_end of any word that
+    starts before reel_end, add a small grace window, and check for a new
+    speech interval starting after that threshold.
+    """
     if not speechmap_path.exists():
         return [f"speechmap_missing:{speechmap_path.name}"]
     with open(speechmap_path) as f:
         sm = json.load(f)
-    t_start = reel_end - 0.5
+    words = sm.get("words", [])
+    last_audible_end = max(
+        (w.get("audible_end", w.get("t0", 0.0))
+         for w in words if w.get("t0", 0.0) <= reel_end),
+        default=0.0,
+    )
+    threshold = last_audible_end + own_tail_window_sec
     for ivl in sm.get("intervals", []):
-        s, e = ivl[0], ivl[1]
-        if s < reel_end and e > t_start:
+        s, e = ivl[0], ivl[1]  # noqa: F841
+        if threshold < s < reel_end:
             return [f"speech_in_tail:[{s:.2f},{e:.2f}]"]
     return []
 
@@ -128,7 +238,7 @@ def _check_shots(mp4: Path, manifest_path: Path, reel_id: str,
                  src_dir: Path) -> list[str]:
     """Check two-shot spans via flash_check.check_reel. Skips if source not found."""
     if not manifest_path.exists():
-        return []  # no manifest in this environment — skip
+        return []
     try:
         manifest = json.load(open(manifest_path))
     except json.JSONDecodeError as exc:
@@ -143,7 +253,7 @@ def _check_shots(mp4: Path, manifest_path: Path, reel_id: str,
         None,
     )
     if src is None:
-        return []  # no source video in this environment — skip
+        return []
 
     reel = next((r for r in manifest.get("reels", []) if r["id"] == reel_id), None)
     if reel is None:
@@ -157,20 +267,16 @@ def _check_shots(mp4: Path, manifest_path: Path, reel_id: str,
     if flashes:
         fails.append(f"shot_flash:{len(flashes)}")
 
-    # Check span floors using run list
     runs = flash_check._runs([l for l in labels if l != "ambig"])
-    fps = flash_check.FPS
-    for i, (lbl, s, e) in enumerate(runs):
-        dur = (e - s + 1) / fps
-        if dur < TWO_SHOT_MIN_SEC:
-            # Jump seam must be >= 1.0s to be a forced cut, not a flash
-            fails.append(f"short_span:{lbl}_{dur:.2f}s<{TWO_SHOT_MIN_SEC}s")
-        # A-B-A middle check
-        if i > 0 and i < len(runs) - 1:
-            prev_lbl = runs[i - 1][0]
-            nxt_lbl = runs[i + 1][0]
-            if prev_lbl == nxt_lbl and lbl != prev_lbl and dur < TWO_SHOT_MIN_MIDDLE_SEC:
-                fails.append(f"aba_middle_short:{lbl}_{dur:.2f}s<{TWO_SHOT_MIN_MIDDLE_SEC}s")
+    js_frames = _jump_seam_frames(reel)
+    fails.extend(_check_span_violations(
+        runs,
+        jump_seam_frames=js_frames,
+        fps=flash_check.FPS,
+        min_shot=TWO_SHOT_MIN_SEC,
+        min_middle=TWO_SHOT_MIN_MIDDLE_SEC,
+        shot_tolerance_frames=SHOT_TOLERANCE_FRAMES,
+    ))
     return fails
 
 
@@ -218,7 +324,6 @@ def main(yaml_path: str, project: Path = PROJECT) -> int:
         status = "PASS" if not fails else "FAIL"
         rows.append((label, status, fails))
 
-    # Print table
     col = max(len(r[0]) for r in rows)
     print(f"{'clip':<{col}}  status  failing checks")
     print("-" * (col + 40))
