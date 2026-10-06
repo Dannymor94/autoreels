@@ -368,6 +368,13 @@ def _snap_start(start: float, end: float, words: list[Word], *, window_sec: floa
         target = _nearest_in_window(start, [w.t0 for w in words], window_sec)
     if target is None:
         return None
+    # Start-repair: if the target word starts before its predecessor ends (Whisper overlap
+    # artifact), back up to the nearest phrase start that precedes it.
+    _ri = next((i for i, w in enumerate(words) if abs(w.t0 - target) < 1e-6), None)
+    if _ri is not None and _ri > 0 and target < words[_ri - 1].t1:
+        _prec = [i for i in start_idx if i < _ri]
+        if _prec:
+            target = words[max(_prec)].t0
     # Не начинать с висячего слова: сдвинуть вперёд, пока слово-начало не «висячее».
     idx = next((i for i, w in enumerate(words) if abs(w.t0 - target) < 1e-6), None)
     if idx is not None:
@@ -491,6 +498,7 @@ def snap_segments(reels: list[Reel], words: list[Word], *, tail_sec: float, wind
     """
     if not words:
         return
+    words = _dedup_overlapping_words(words)
     if smap is not None:
         words = _words_with_smap_pauses(words, smap)
     if hanging_start_words is None:

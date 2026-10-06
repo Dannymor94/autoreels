@@ -1251,3 +1251,45 @@ def test_apply_padding_dedup_removes_artifact_from_tail():
     # Without dedup la = artifact (t1=2515.179) → new_end = min(2515.179+1.5, 2515.81) = 2515.81
     # In both cases end = 2515.81, but with dedup la is clearly the correct word.
     assert abs(r.end - 2515.81) < 0.02
+
+
+def test_snap_start_repair_backs_up_on_overlap():
+    """r04 regression: R0 start lands on a word that overlaps its predecessor (Whisper artifact).
+
+    Words: «предыдущая.» ends at 339.583, then «Когда» 339.583–340.203, «у» 340.203–340.983,
+    «Когда» dup 340.583–341.163 (t0=340.583 < t1[«у»]=340.983 → overlap).
+    snap with start=340.583 falls back to nearest word → picks the dup at 340.583.
+    Start-repair detects overlap and walks back to the phrase start at 339.583.
+    """
+    words = [
+        _w(338.800, 339.583, "предыдущая."),  # sentence end → next is phrase start
+        _w(339.583, 340.203, "Когда"),          # phrase start (follows sentence end)
+        _w(340.203, 340.983, "у"),
+        _w(340.583, 341.163, "Когда"),          # overlap: t0 < prev.t1 → artifact position
+        _w(341.163, 341.283, "вас"),
+    ]
+    r = _reel(340.583, 378.9)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=60,
+                  min_pause_for_phrase_end=1.5, max_micro_pause=0.4, hanging_words=HANGING)
+    assert abs(r.start - 339.583) < 1e-4, f"expected 339.583, got {r.start}"
+
+
+def test_snap_dedup_before_snap_r09_end_unchanged():
+    """snap_segments deduplicates before snapping; r09 «делаю.» end is preserved.
+
+    With artifact в списке: phrase_end_times yields both 2515.179 and 2514.540; snap picks
+    the first sentence end at/after r0_end=2514.0, which is 2514.540 (precise comes first in
+    t1-sorted order). After dedup artifact is removed; same sentence end 2514.540 is picked.
+    End = 2514.540 + tail_sec 0.3 = 2514.84 in both cases.
+    """
+    words = [
+        _w(2512.979, 2513.239, "там"),
+        _w(2513.239, 2515.179, "делаю."),   # artifact — over-extended t1
+        _w(2513.800, 2514.540, "делаю."),   # precise entry
+        _w(2515.860, 2516.200, "Когда"),
+    ]
+    r = _reel(2436.0, 2514.0)
+    snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=100,
+                  min_pause_for_phrase_end=0.6, max_micro_pause=0.4, hanging_words=HANGING,
+                  max_end_search_sec=12.0)
+    assert abs(r.end - (2514.540 + 0.3)) < 1e-3, f"expected ~2514.84, got {r.end}"
