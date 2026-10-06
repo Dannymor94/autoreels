@@ -800,6 +800,39 @@ def test_check_silence_at_clip_end_silent_when_end_before_onset():
     assert errors == [], f"invariant must be silent (empty list); got: {errors}"
 
 
+def test_check_silence_at_clip_end_own_tail_absorbed_interval_not_flagged():
+    """Own-tail filter: first untr interval absorbed (t1 inside it) must NOT be flagged.
+
+    Mirrors PXL r05/r10: word t1=9.5 falls within first untr interval [9.3, 9.6],
+    so _tail_from_smap_full absorbs it (audible_end → 9.6).  Second interval starts at
+    10.4 which is beyond clip_end=10.1 → clean.
+    """
+    from autoreels.local.render import _smap_word_lookup, _check_silence_at_clip_end
+    from autoreels.core.models import Word
+
+    smap = {
+        "version": "4",
+        "words": [
+            {"idx": 0, "t0": 8.5, "t1": 9.5, "audible_start": 8.6, "audible_end": 9.1},
+        ],
+        "boundaries": [
+            {"pause": 0.15, "untranscribed_speech": [
+                [9.3, 9.6],   # t1=9.5 inside → own-tail absorbs → audible_end→9.6
+                [10.4, 10.8], # beyond clip_end=10.1 → no violation
+            ]},
+        ],
+        "intervals": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    last_word = Word(word="last.", t0=8.5, t1=9.5)
+
+    errors = _check_silence_at_clip_end("r01", last_word, 10.1, smap, lookup)
+    assert errors == [], (
+        "own-tail-absorbed interval must not fire; "
+        f"got: {errors}"
+    )
+
+
 # ── synthetic tail helpers ────────────────────────────────────────────────────
 
 def test_synth_tail_params_room_below_threshold_fires():

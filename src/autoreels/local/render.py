@@ -993,7 +993,14 @@ def _check_silence_at_clip_end(
     if key not in lookup:
         return []
     _, entry = lookup[key]
-    last_word_ae: float = entry["audible_end"]
+    raw_ae: float = entry["audible_end"]
+    # Own-tail filter: the acoustic decay of the last word may extend into the first
+    # untranscribed interval when t1 falls inside it.  _tail_from_smap_full applies this
+    # filter and returns the post-absorption audible_end (B).  Use B as the lower bound so
+    # we don't flag the absorbed interval as "speech after last word".
+    _last_t1 = getattr(last_word, "t1", None)
+    _full = _tail_from_smap_full(last_word.t0, clip_end, smap, lookup, last_t1=_last_t1)
+    last_word_ae: float = _full.audible_end if _full is not None else raw_ae
 
     words = smap["words"]
     boundaries = smap.get("boundaries", [])
