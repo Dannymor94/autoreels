@@ -50,6 +50,34 @@ def test_short_span_below_min_shot_produces_error():
     assert any("short" in e for e in errors), f"expected 'short' in [ERROR]; got {errors}"
 
 
+def test_c_annotation_short_span_produces_warning_not_error():
+    """c: annotation on a short sentence → [WARNING], not [ERROR].
+
+    When _c_close_ranges matches the ci source time, Pass 4 downgrades to [WARNING].
+    Without _c_close_ranges, the same ci still produces [ERROR] (auto-path stays strict).
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+
+    # Segment with ci=[0.0, 0.72] matching a c: range of (0.0, 0.72)
+    segs = [_seg(10.0, 20.72, "wide", [[0.0, 0.72]])]
+    reel = _reel(segs)
+    reel._c_close_ranges = [(10.0, 10.72)]  # source-time range matching the ci
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    warnings_only = [w for w in warns if "[WARNING]" in w and "short" in w]
+    assert not errors, f"c: short span must not produce [ERROR]; got {errors}"
+    assert warnings_only, f"expected [WARNING] for c: short span; got warns={warns}"
+
+    # Same span without _c_close_ranges → still [ERROR]
+    segs2 = [_seg(10.0, 20.72, "wide", [[0.0, 0.72]])]
+    reel2 = _reel(segs2)
+    _stage_two_shot_auto([reel2], [], render_cfg=_cfg())
+    warns2 = getattr(reel2, "_two_shot_warnings", [])
+    errors2 = [w for w in warns2 if "[ERROR]" in w and "short" in w]
+    assert errors2, f"auto-path short span must still produce [ERROR]; got {warns2}"
+
+
 # ── A-B-A middle below two_shot_min_middle_sec → [ERROR] ────────────────────
 
 def test_aba_middle_below_min_middle_produces_error():

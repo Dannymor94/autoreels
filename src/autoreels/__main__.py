@@ -2370,6 +2370,23 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
                     _jb_out.add(round(_op, 6))
     _p4_spans = _shot_spans_output(result)
+    # Collect output-time close intervals that come from explicit c: annotations.
+    # A short span from c: is a [WARNING] not [ERROR] (human intent; verified at review time).
+    _c_ranges_src = getattr(reel, "_c_close_ranges", [])
+    _c_ann_ivls: list[tuple[float, float]] = []
+    _p4_out_off = 0.0
+    for _p4s in result:
+        _p4dur = _p4s.end - _p4s.start
+        _p4ci = getattr(_p4s, "close_intervals", []) or []
+        if _p4s.shot == "close" and not _p4ci:
+            if any(abs(_p4s.start - _cr[0]) < 0.1 and abs(_p4s.end - _cr[1]) < 0.1
+                   for _cr in _c_ranges_src):
+                _c_ann_ivls.append((_p4_out_off, _p4_out_off + _p4dur))
+        for _ct0, _ct1 in _p4ci:
+            if any(abs(_p4s.start + _ct0 - _cr[0]) < 0.1 and abs(_p4s.start + _ct1 - _cr[1]) < 0.1
+                   for _cr in _c_ranges_src):
+                _c_ann_ivls.append((_p4_out_off + _ct0, _p4_out_off + _ct1))
+        _p4_out_off += _p4dur
     # cold_open is a structural header (always close, duration driven by h: sentence).
     # It is NOT part of the two-shot body and must not shift body-span positions in the
     # jump-seam check below (the cold_open→body transition is always a jump cut).
@@ -2380,7 +2397,10 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         if _jb_out and any(abs(_jb - _se) < 0.02 or abs(_jb - _sa) < 0.02 for _jb in _jb_out):
             if _dsp >= _JUMP_SEAM_MIN:
                 continue  # forced jump-seam span, >= 1.0 s minimum → allowed
-        warnings.append(f"[ERROR] short {_stype} span {_dsp:.3f}s at output {_sa:.2f}-{_se:.2f}")
+        if any(_sa >= _ca - 0.05 and _se <= _cb + 0.05 for _ca, _cb in _c_ann_ivls):
+            warnings.append(f"[WARNING] short {_stype} span {_dsp:.3f}s at output {_sa:.2f}-{_se:.2f} (c: too short)")
+        else:
+            warnings.append(f"[ERROR] short {_stype} span {_dsp:.3f}s at output {_sa:.2f}-{_se:.2f}")
     # A-B-A middle check: min_middle threshold.
     # cold_open (always close) is prepended so body[0] is checked as an A-B-A middle
     # (cold_open→body[0]→body[1]). cold_open is still excluded from the min-shot check above.
