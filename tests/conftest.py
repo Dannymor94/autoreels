@@ -40,6 +40,8 @@ _GUARD_STAT_DIRS = (          # снимок по (mtime, size) — неболь
     "calibrations", "config", "data/runs", "data/outputs", "data/blocks_dataset",
 )
 _GUARD_SET_DIRS = ("data/cache",)   # тысячи файлов, контент-адресные → следим за появлением/удалением
+# Exclude the calibrate-server thumbnail cache — written by `ar c`, never by test code.
+_GUARD_SET_EXCLUDE_PREFIXES = (os.path.join("data", "cache", "ui"),)
 # Тесту, которому НУЖЕН реальный корень, добавь маркер @pytest.mark.uses_real_repo и обоснуй —
 # молча исключать нельзя (см. docs). Пока таких нет.
 
@@ -72,6 +74,9 @@ def _guard_snapshot(root: Path) -> tuple[dict, set]:
         if not p.is_dir():
             continue
         for dirpath, _dirs, files in os.walk(p):
+            rel = os.path.relpath(dirpath, root)
+            if any(rel.startswith(exc) for exc in _GUARD_SET_EXCLUDE_PREFIXES):
+                continue
             for f in files:
                 name_set.add(os.path.join(dirpath, f))
     return stat_snap, name_set
