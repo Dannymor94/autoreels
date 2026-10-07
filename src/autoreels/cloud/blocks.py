@@ -618,7 +618,8 @@ _COMPACT_PROMPT = (
     "#   e:N   end at sentence N (numbering is continuous across a merge)\n"
     "#   x:N,M,N-M  exclude sentences by number: cut them out and join what remains.\n"
     "#              Example: s:3 e:12 | x:7,9-10  keeps sentences 3-12 minus 7, 9, 10.\n"
-    "#   h:N   cold open: play sentence N first, then the clip from its start\n"
+    "#   h:N   cold open: play sentence N first as a teaser; it is then REMOVED from the body\n"
+    "#              (plays once). Add '!' (h:N!) to also replay it in the body.\n"
     + _CK_FIELDS_DOC
     + "#   t: …  overlay this title on the first seconds of the clip  (second-to-last field)\n"
     "#   d: …  post caption: 1-2 sentences shown under the clip when posted  (LAST field)\n"
@@ -633,7 +634,8 @@ _COMPACT_PROMPT = (
     "#   8 90@1.15       this clip at 1.15x\n"
     "#   9 90 | s:2 e:9  start at sentence 2, end at sentence 9\n"
     "#   9 85 | s:7 | e:14 | x:9,10  keep sentences 7-14, drop 9 and 10 from the middle\n"
-    "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу\n"
+    "#   11 88 | h:3 | t: Ты не поломан — ты забыл свою силу   (sentence 3 opens, removed from body)\n"
+    "#   11 88 | h:3!         sentence 3 opens AND stays in the body (replay)\n"
     "#   12 85 | t: Страх — это не страх, а сигнал | d: Тело подаёт сигнал, а мы принимаем его за страх.\n"
     "#   5 90 | c:3          close shot on sentence 3 (the line that lands)\n"
     "#   8 87 | k:2=страх   stress the word 'страх' in sentence 2\n"
@@ -678,9 +680,15 @@ class _ReviewEntry(NamedTuple):
     z: int | None = None
     # > N lines after the score: play sentence N at that beat position (M1.7 step 1c).
     beats: tuple[int, ...] = ()
+    # h:N! — keep the cold-open hook sentence ALSO in the body (replay). Default (h:N) removes it
+    # from the body so it plays once. Kept last so positional construction is unaffected.
+    hook_keep: bool = False
 
 
-_FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e", "h")}
+_FIELD_NUM_RE = {name: re.compile(rf"(?:^|[|\s]){name}:\s*(\d+)") for name in ("s", "e")}
+# h:N — cold open from sentence N (removed from the body by default, played once in the open).
+# h:N! — also REPLAY sentence N in the body (the old default); the trailing '!' is the opt-in.
+_FIELD_H_RE = re.compile(r"(?:^|[|\s])h:\s*(\d+)(!?)")
 _FIELD_T_RE = re.compile(r"(?:^|[|\s])t:\s*(.*)$")
 _FIELD_D_RE = re.compile(r"(?:^|[|\s])d:\s*(.*)$")
 _FIELD_F_RE = re.compile(r"(?:^|[|\s])f:\s*([01])")
@@ -700,8 +708,9 @@ def _parse_fields(text: str):
     practice — captions seldom contain |). Example with both fields:
         11 88 | t: Ты не поломан — ты забыл свою силу | d: Тело подаёт сигнал, а мы принимаем его за страх.
 
-    Returns (s, e, hook, title, filler, description, x_list, c_list, k_list, errors);
+    Returns (s, e, hook, hook_keep, title, filler, description, x_list, c_list, k_list, z_val, errors);
     unrecognised/malformed fields are reported (never fatal). s/e/h are 1-based sentence indices;
+    hook_keep is True only when h:N! was given (replay the hook in the body; default removes it);
     f is a 0/1 filler toggle; x_list/c_list are lists of 1-based sentence indices;
     k_list is a list of lowercase emphasis words."""
     errors: list[str] = []
@@ -784,6 +793,13 @@ def _parse_fields(text: str):
         if m:
             vals[name] = int(m.group(1))
             text = text[:m.start()] + text[m.end():]   # consume so it is not flagged as stray
+    # h:N / h:N! — cold open; '!' = keep the replay in the body (default removes it).
+    hook_keep = False
+    mh = _FIELD_H_RE.search(text)
+    if mh:
+        vals["h"] = int(mh.group(1))
+        hook_keep = mh.group(2) == "!"
+        text = text[:mh.start()] + text[mh.end():]
     # z:N — zoom at sentence N; refuse more than one (two z: = unclear intent)
     z_val: int | None = None
     mz_all = list(_FIELD_Z_RE.finditer(text))
@@ -795,7 +811,7 @@ def _parse_fields(text: str):
         text = text[:m.start()] + text[m.end():]
     for m in _STRAY_FIELD_RE.finditer(text):
         errors.append(f"unrecognised or malformed field '{m.group(1)}:'")
-    return vals["s"], vals["e"], vals["h"], title, filler, description, x_list, c_list, k_list, z_val, errors
+    return vals["s"], vals["e"], vals["h"], hook_keep, title, filler, description, x_list, c_list, k_list, z_val, errors
 
 
 def _parse_score_markers(score_str: str) -> tuple[int | None, int, bool, float | None, str | None]:
@@ -941,10 +957,10 @@ def parse_review(
         if err:
             errors.append((lineno, err))
             continue
-        s, e, hook, title, filler, description, x_list, c_list, k_list, z_val, ferrs = _parse_fields(fields)
+        s, e, hook, hook_keep, title, filler, description, x_list, c_list, k_list, z_val, ferrs = _parse_fields(fields)
         for fe in ferrs:
             errors.append((lineno, fe))
-        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val))
+        entries.append(_ReviewEntry(seq, block_id, score, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val, hook_keep=hook_keep))
 
     if pending_beats and entries:
         entries[-1] = entries[-1]._replace(beats=tuple(pending_beats))
@@ -1064,10 +1080,10 @@ def parse_compact_answer(
             if err:
                 errors.append((lineno, err))
                 continue
-            s, e, hook, title, filler, description, x_list, c_list, k_list, z_val, ferrs = _parse_fields(m.group(3) or "")
+            s, e, hook, hook_keep, title, filler, description, x_list, c_list, k_list, z_val, ferrs = _parse_fields(m.group(3) or "")
             for fe in ferrs:
                 errors.append((lineno, fe))
-            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val))
+            entries.append(_ReviewEntry(seq, "", score_val, fwd, back, speed, s, e, hook, title, filler, description, tuple(x_list), tuple(c_list), tuple((idx, tuple(ws)) for idx, ws in k_list), z_val, hook_keep=hook_keep))
         else:
             ignored += 1
 
