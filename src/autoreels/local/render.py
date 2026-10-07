@@ -2377,10 +2377,17 @@ def _render_segments(
                                 _synth_room_start = _sr[0]
                                 # crop+scale vf for tail frames — last segment's active shot
                                 # (wide or close). Excludes subtitles and fades; includes palette.
-                                _ts_last_crop = (
-                                    (_ts_seg_vfs[-1] if _ts_seg_vfs and _ts_seg_vfs[-1] is not None else vf)
-                                    if _ts_on else (_effective_vf or vf)
-                                )
+                                # When _ts_seg_vfs[-1] is None the segment has close_intervals
+                                # (partial close via c:); use close crop if the segment ends close.
+                                if _ts_on:
+                                    if _ts_seg_vfs and _ts_seg_vfs[-1] is not None:
+                                        _ts_last_crop = _ts_seg_vfs[-1]
+                                    elif segs and _seg_ends_close(segs[-1]):
+                                        _ts_last_crop = _close_vf_str
+                                    else:
+                                        _ts_last_crop = vf
+                                else:
+                                    _ts_last_crop = _effective_vf or vf
                                 _synth_crop_vf_for_tail: str | None = (
                                     f"{_ts_last_crop},{palette_vf}" if (_ts_last_crop and palette_vf)
                                     else _ts_last_crop or None

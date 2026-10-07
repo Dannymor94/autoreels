@@ -447,6 +447,31 @@ def test_check_tail_air_deflate_capped_fails_when_end_below_cap():
     assert "deflate-capped" in err
 
 
+def test_seg_ends_close_with_close_intervals_at_end():
+    """_seg_ends_close returns True when close_intervals covers the segment end.
+
+    This is the guard for the synth-tail crop fix: when _ts_seg_vfs[-1] is None
+    (segment has close_intervals, not shot='close'), the tail crop must still be
+    close if the segment visually ends in close shot.
+    """
+    dur = 5.0
+    # Interval ending at segment boundary → ends close
+    seg_ends = Segment(start=10.0, end=10.0 + dur, close_intervals=[[2.0, dur]])
+    assert _seg_ends_close(seg_ends) is True
+
+    # Interval ending well before segment boundary → does not end close
+    seg_mid = Segment(start=10.0, end=10.0 + dur, close_intervals=[[2.0, 3.0]])
+    assert _seg_ends_close(seg_mid) is False
+
+    # shot='close', no close_intervals → ends close
+    seg_shot = Segment(start=10.0, end=15.0, shot="close")
+    assert _seg_ends_close(seg_shot) is True
+
+    # shot='wide', no close_intervals → does not end close
+    seg_wide = Segment(start=10.0, end=15.0)
+    assert _seg_ends_close(seg_wide) is False
+
+
 def test_dissolve_visual_duration_does_not_shorten_clip():
     """seam_xfade_visual_durations overrides duration= but not offset: clip length unchanged vs baseline."""
     segs = [Segment(start=0.0, end=5.0), Segment(start=10.0, end=15.0), Segment(start=20.0, end=30.0)]
