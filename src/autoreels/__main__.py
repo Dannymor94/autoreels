@@ -1419,14 +1419,26 @@ def _stage_subtitles(reels, transcript, *, smap=None):
         _lookup = None
         _ae_by_t0 = None
 
+    # smap audible_start lookup (used in beat-reel branch below).
+    _as_by_t0: dict[int, float] = {}
+    if smap is not None:
+        for _sw in smap.get("words", []):
+            _as_by_t0[round(_sw["t0"] * 1000)] = _sw.get("audible_start", _sw["t0"])
+
     for reel in reels:
         if reel.beat_gap_sec is not None and reel.segments:
             # Beat reel: segments are non-monotonic in source time — collect words
             # from each segment individually so remap_to_output gets all beats.
+            # Include words where t0 OR audible_start falls inside a segment window:
+            # a beat-reordered gap can place t0 just before a segment boundary while
+            # the word is acoustically inside that segment (audible_start within [start, end)).
             seen: set[tuple] = set()
             ws = []
             for seg in reel.segments:
-                for w in words_in_window(transcript.words, seg.start, seg.end):
+                for w in transcript.words:
+                    _as_w = _as_by_t0.get(round(w.t0 * 1000), w.t0)
+                    if not (seg.start <= w.t0 < seg.end or seg.start <= _as_w < seg.end):
+                        continue
                     key = (round(w.t0, 4), w.word)
                     if key not in seen:
                         seen.add(key)
@@ -2115,13 +2127,16 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # Called twice: before A-B-A (so A-B-A sees a sensible shot list) and after (to re-validate
     # any jump seams whose prev beat was changed by A-B-A).
     _JUMP_GAP_MAX = 2.0       # gap > 2s in source time → non-adjacent
+    _JUMP_SEAM_MIN = 1.0      # minimum span allowed at a single-sided jump seam
     _SNAP_THRESH = 0.15       # close_interval within this of window boundary → snap to boundary
     _js_set: set = set()      # indices where a jump seam STARTS (for Option 2 to skip)
     _js_forced: set = set()   # indices of beats that got forced starting-shot (for A-B-A guard)
+    _js_rule3: set = set()    # seam indices suppressed by Rule3 (assertion skipped)
 
     def _enforce_jump_seams() -> None:
         _js_forced.clear()
         _js_set.clear()
+        _js_rule3.clear()
         if reel.beat_gap_sec is None:
             return
         _hf = 1.0 / 60.0
@@ -2129,6 +2144,32 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             _pa, _pb = result[_ji - 1], result[_ji]
             if _pb.start >= _pa.end - 0.001 and _pb.start - _pa.end <= _JUMP_GAP_MAX:
                 continue  # adjacent seam
+            # Rule3 > Rule2: a segment shorter than JUMP_SEAM_MIN sandwiched between two jump
+            # seams cannot satisfy the minimum span even by alternating shots.  Give it the same
+            # shot as the previous segment's ending shot, record the right seam as Rule3-exempt
+            # (so the assertion does not flag it), and skip normal enforcement for this seam.
+            _dur_b_r3 = _pb.end - _pb.start
+            if _dur_b_r3 < _JUMP_SEAM_MIN and _ji + 1 < len(result):
+                _pc_r3 = result[_ji + 1]
+                _rg_r3 = _pc_r3.start - _pb.end
+                if _pc_r3.start < _pb.end - 0.001 or _rg_r3 > _JUMP_GAP_MAX:
+                    # right side is also a jump seam → Rule3 applies
+                    _dur_a_r3 = _pa.end - _pa.start
+                    _ci_a_r3 = list(getattr(_pa, "close_intervals", []) or [])
+                    _pec_r3 = (_pa.shot == "close" or
+                               (_ci_a_r3 and _ci_a_r3[-1][1] > _dur_a_r3 - _hf))
+                    _new_shot_r3 = "close" if _pec_r3 else "wide"
+                    result[_ji] = _pb.model_copy(update={"shot": _new_shot_r3, "close_intervals": []})
+                    _js_rule3.add(_ji + 1)  # right seam: skip enforcement and assertion
+                    warnings.append(
+                        f"[WARNING] Rule3>Rule2: {_dur_b_r3:.3f}s segment at double-jump "
+                        f"assigned {_new_shot_r3} (same as prev end) — too short to alternate")
+                    continue  # left seam not added to _js_set → assertion won't fire
+            if _ji in _js_rule3:
+                # Right side of a Rule3 segment: skip enforcement so we don't undo Rule3 fix.
+                # Still record as a jump seam for _jb_out computation but NOT for assertion.
+                _js_set.add(_ji)
+                continue
             _js_set.add(_ji)
             _dur_a = _pa.end - _pa.start
             _ci_a = list(getattr(_pa, "close_intervals", []) or [])
@@ -2343,11 +2384,12 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     _enforce_jump_seams()
 
     # Jump-seam final assertion: every jump seam must produce a shot change.
+    # Seams suppressed by Rule3 (_js_rule3) are exempt from this assertion.
     if reel.beat_gap_sec is not None:
         _hf_js = 1.0 / 60.0
         _out_t_js = 0.0
         for _kjs in range(len(result)):
-            if _kjs > 0 and _kjs in _js_set:
+            if _kjs > 0 and _kjs in _js_set and _kjs not in _js_rule3:
                 _sp_js = result[_kjs - 1]
                 _dur_sp_js = _sp_js.end - _sp_js.start
                 _ci_sp_js = list(getattr(_sp_js, "close_intervals", []) or [])
@@ -2366,7 +2408,6 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # Short-shot check (Pass 4): any output-time span < min_shot is [ERROR].
     # Exception: a span created by forced jump-seam enforcement may be >= 1.0 s (still a degraded
     # result but not a render-breaking flash). Compute jump-seam output-time boundary positions.
-    _JUMP_SEAM_MIN = 1.0
     _jb_out: set = set()
     if reel.beat_gap_sec is not None:
         _op = 0.0
@@ -5677,6 +5718,11 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     from autoreels.local.render import assign_close_shots as _assign_close_shots
     for reel in reels:
         _c_ranges = getattr(reel, "_c_close_ranges", [])
+        if _c_ranges:
+            # Rule3 > Rule4: skip c: ranges shorter than min_shot — they would create a span
+            # that flash_check fails after tail-fade eats into the visible close duration.
+            _min_c = getattr(render_cfg, "two_shot_min_sec", 2.5) if render_cfg else 2.5
+            _c_ranges = [r for r in _c_ranges if r[1] - r[0] >= _min_c]
         if _c_ranges:
             _body_segs = reel.effective_segments()
             reel.segments = _assign_close_shots(_body_segs, _c_ranges)

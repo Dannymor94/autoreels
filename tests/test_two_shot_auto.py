@@ -823,3 +823,83 @@ def test_assign_shots_lec_r01_beat_seams():
     )
     durs = [round(s.end - s.start, 2) for s in result]
     assert durs == [6.05, 8.32, 8.80], f"durations must be unchanged; got {durs}"
+
+
+# ── Rule3 priority tests ───────────────────────────────────────────────────────
+
+def test_rule3_double_jump_seam_no_short_span():
+    """Rule3 > Rule2: 0.76s segment at double-jump seam must not produce a short span.
+
+    pxl1129/r01 proxy: segs 0-3 close, seg4=wide(0.76s) between two jump seams,
+    segs 5-6 close.  After Rule3, seg4 should get the same shot as the previous
+    ending (close), merging into the large close spans → no span < 2.5s, no [ERROR].
+    """
+    from autoreels.__main__ import _stage_two_shot_auto, _shot_spans_output
+
+    segs = [
+        _seg(86.84, 97.27, "close"),
+        _seg(97.54, 100.42, "close"),
+        _seg(102.27, 103.93, "close"),
+        _seg(104.29, 104.82, "close"),
+        _seg(107.19, 107.95, "wide"),   # 0.760 s — double-jump: left=2.37s, right=29.28s
+        _seg(137.23, 149.96, "close"),
+        _seg(150.26, 152.39, "close"),
+        _seg(109.86, 113.56, "wide"),
+    ]
+    reel = _reel_beat(segs)
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    result = reel.effective_segments()
+
+    # no [ERROR] in warnings
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert not errors, f"unexpected [ERROR] warnings: {errors}"
+
+    # no output span < min_shot after merging
+    spans = _shot_spans_output(result)
+    short = [(stype, sa, se) for stype, sa, se in spans if se - sa < 2.5]
+    assert not short, f"short spans found: {short}"
+
+
+def test_rule3_c_annotation_short_range_filtered():
+    """Rule3 > Rule4: a c: annotation range shorter than min_shot must be filtered out.
+
+    lec0933/r03 / lec1059/r03 proxy: reel with _c_close_ranges where the range is
+    1.12s < 2.5s (min_shot).  After applying, no close_intervals should be created.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+    from autoreels.local.render import assign_close_shots
+
+    seg = _seg(0.0, 40.0)
+    reel = _reel([seg])
+    reel._c_close_ranges = [[38.5, 39.62]]  # 1.12 s — shorter than min_shot=2.5s
+
+    # Simulate the assign_close_shots call with Rule3 filter (as done in --apply flow).
+    _min_c = 2.5
+    c_ranges = [r for r in reel._c_close_ranges if r[1] - r[0] >= _min_c]
+    if c_ranges:
+        reel.segments = assign_close_shots(reel.effective_segments(), c_ranges)
+
+    # No close_intervals should be set (filtered before assign_close_shots).
+    for s in reel.effective_segments():
+        assert not getattr(s, "close_intervals", []), (
+            f"expected no close_intervals after Rule3 filter; got {s.close_intervals}"
+        )
+
+
+def test_rule3_c_annotation_adequate_range_passes():
+    """Sanity: a c: range ≥ min_shot is NOT filtered out."""
+    from autoreels.local.render import assign_close_shots
+
+    seg = _seg(0.0, 40.0)
+    reel = _reel([seg])
+    reel._c_close_ranges = [[34.0, 40.0]]  # 6.0 s — well above min_shot=2.5s
+
+    _min_c = 2.5
+    c_ranges = [r for r in reel._c_close_ranges if r[1] - r[0] >= _min_c]
+    if c_ranges:
+        reel.segments = assign_close_shots(reel.effective_segments(), c_ranges)
+
+    # close_intervals should be set (range is large enough).
+    has_ci = any(getattr(s, "close_intervals", []) for s in reel.effective_segments())
+    assert has_ci, "expected close_intervals for a ≥2.5s c: range"
