@@ -4,7 +4,7 @@ The reviewer sees sentence numbers from the export (which shows per-block senten
 junction merging).  The apply path must use the same numbering so s:/e:/x: resolve correctly.
 """
 from autoreels.core.models import Word
-from autoreels.cloud.edit import merge_group_sentences, split_sentences
+from autoreels.cloud.edit import merge_group_sentences, split_sentences, strip_credit_words
 
 
 def _w(text: str, t0: float, t1: float) -> Word:
@@ -131,3 +131,58 @@ def test_whisper_overlap_junction_sentence_count():
     assert result[2][0].word == "Мне"            # junction starts with Мне (only in b30)
     assert result[2][-1].word == "все."           # junction ends with b31[0]'s "все."
     assert result[3][0].word == "что"
+
+
+# ---------------------------------------------------------------------------
+# Test 5: splice with lowercase-start junction + credit hallucination
+# Verifies that strip_credit_words + merge_group_sentences produces the correct
+# sentence structure and that sentence indices are within valid range (0 differences).
+# ---------------------------------------------------------------------------
+
+def test_splice_junction_with_credit_hallucination():
+    """Splice with junction merging: credit-stripped tx_words produce the correct sentences,
+    and export-path sentences equal apply-path sentences (0 differences in the check).
+
+    Block 1 ends incomplete; block 2 starts with lowercase continuation.
+    A credit hallucination word ('Субтитры:') sits in the transcript — without stripping it
+    would create an extra terminal sentence, changing the sentence count.  Both paths in the
+    check use the same credit-stripped words, so they agree and differences = 0.
+    """
+    # tx_words: block1 span, credit word (in block2 span), block2 continuation
+    words_raw = [
+        _w("Он",        0.0, 0.3),
+        _w("сказал,",   0.3, 0.7),
+        # credit hallucination inside block 2 span (terminal punct, would split sentences):
+        _w("Субтитры:", 5.0, 5.2),
+        _w("что",       5.3, 5.6),
+        _w("всё",       5.6, 5.9),
+        _w("хорошо.",   5.9, 6.3),
+        _w("Правда?",   6.8, 7.2),
+    ]
+    credit_patterns = ["субтитры"]
+    words_stripped = strip_credit_words(words_raw, credit_patterns)
+
+    b1 = _Block(0.0, 1.0)
+    b2 = _Block(5.0, 7.5)
+
+    # Apply path: merge_group_sentences with credit-stripped words
+    apply_sents = merge_group_sentences([b1, b2], words_stripped)
+
+    # Without credit strip: "Субтитры:" would end a sentence → 3 per-block sentences after strip
+    # With credit strip: junction "Он сказал, что всё хорошо." + "Правда?" → 2 sentences
+    assert len(apply_sents) == 2, (
+        f"Expected 2 sentences after junction+credit strip, got {len(apply_sents)}: "
+        f"{[[w.word for w in s] for s in apply_sents]}"
+    )
+    # Sentence 1 is the junction (both blocks merged)
+    s1_words = [w.word for w in apply_sents[0]]
+    assert "Он" in s1_words
+    assert "хорошо." in s1_words
+    # Sentence 2 is the separate sentence
+    assert apply_sents[1][0].word == "Правда?"
+
+    # Export path uses the same function and same credit-stripped words → equal (0 differences)
+    export_sents = merge_group_sentences([b1, b2], words_stripped)
+    assert len(export_sents) == len(apply_sents), "numbers equal"
+    for es, as_ in zip(export_sents, apply_sents):
+        assert [w.word for w in es] == [w.word for w in as_], "texts equal"
