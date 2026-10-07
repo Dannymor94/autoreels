@@ -1,0 +1,14 @@
+export const L = {
+  appTitle: "Авто-Рилс",
+  sources: "Источники",
+  clips: "Клипы",
+  root: "Корень",
+  loading: "Загрузка…",
+  error: "Ошибка",
+  noSources: "Источников нет",
+  noClips: "Клипов нет",
+  clipCount: (n: number) => `${n} кл.`,
+  variant: "Вариант",
+  mainVariant: "основной",
+  back: "← Назад",
+};
