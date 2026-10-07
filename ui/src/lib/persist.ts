@@ -1,6 +1,7 @@
 /** Remember where the owner stopped. Local to this browser; failures are ignored on purpose. */
 
-const LAST_STEM = "arl.lastStem";
+const LAST_ROUTE = "arl.lastRoute";
+const VIEW = "arl.view";
 const posKey = (stem: string) => `arl.pos.${stem}`;
 
 export interface Position {
@@ -8,6 +9,8 @@ export interface Position {
   variant: string;
   t: number;
 }
+
+export type ViewMode = "grid" | "list";
 
 function read<T>(key: string): T | null {
   try {
@@ -28,8 +31,10 @@ function write(key: string, value: unknown): void {
 }
 
 export const persist = {
-  lastStem: () => read<string>(LAST_STEM),
-  setLastStem: (stem: string | null) => write(LAST_STEM, stem),
+  lastRoute: () => read<string>(LAST_ROUTE),
+  setLastRoute: (hash: string) => write(LAST_ROUTE, hash),
+  view: (): ViewMode => (read<ViewMode>(VIEW) === "list" ? "list" : "grid"),
+  setView: (v: ViewMode) => write(VIEW, v),
   position: (stem: string) => read<Position>(posKey(stem)),
   setPosition: (stem: string, pos: Position) => write(posKey(stem), pos),
 };

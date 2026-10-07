@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import pipeline_gateway
+from . import clipinfo, pipeline_gateway
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 
 app = FastAPI(title="Авто-Рилс UI", version="1")
@@ -38,9 +38,15 @@ class ClipItem(BaseModel):
     size_bytes: int
     has_render_json: bool
     fingerprint: str | None
+    duration_s: float | None
+    title: str | None
 
 
 # --- Helpers ---
+
+def _thumbs_dir() -> Path:
+    return _cfg.settings.root / "data" / "cache" / "ui" / "thumbs"
+
 
 def _reels_dir() -> Path:
     return _cfg.settings.root / "reels-out"
@@ -107,6 +113,8 @@ def _list_clips(stem: str) -> list[ClipItem]:
             size_bytes=mp4.stat().st_size,
             has_render_json=has_rj,
             fingerprint=fp,
+            duration_s=clipinfo.duration_s(mp4),
+            title=clipinfo.title(mp4),
         ))
     return items
 
@@ -137,3 +145,12 @@ def clips(stem: str):
 def media(stem: str, clip: str, variant: str = Query(default="")):
     path = resolve_media_path(_cfg.settings.root, stem, clip, variant)
     return media_response(path)
+
+
+@app.get("/api/thumb/{stem}/{clip}")
+def thumb(stem: str, clip: str, variant: str = Query(default="")):
+    path = resolve_media_path(_cfg.settings.root, stem, clip, variant)
+    jpg = clipinfo.poster(path, _thumbs_dir())
+    if jpg is None:
+        raise HTTPException(status_code=404, detail="poster unavailable")
+    return FileResponse(jpg, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})

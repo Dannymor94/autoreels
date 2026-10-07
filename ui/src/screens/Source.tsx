@@ -12,7 +12,10 @@ import { HelpOverlay } from "../components/HelpOverlay";
 
 interface Props {
   stem: string;
-  onBack: () => void;
+  initialClip: string;
+  initialVariant: string;
+  onBack: () => void; // to the overview (level 2)
+  onChange: (clip: string, variant: string) => void; // keep the address in sync
 }
 
 /** What to do once the new src has loaded: seek to t, then play or stay paused. */
@@ -21,7 +24,7 @@ interface Pending {
   play: boolean;
 }
 
-export function Source({ stem, onBack }: Props) {
+export function Source({ stem, initialClip, initialVariant, onBack, onChange }: Props) {
   const { data, isLoading, error } = useQuery({ queryKey: ["clips", stem], queryFn: () => api.clips(stem) });
   const groups = useMemo(() => groupClips(data ?? []), [data]);
 
@@ -32,17 +35,21 @@ export function Source({ stem, onBack }: Props) {
   const pending = useRef<Pending | null>(null);
   const lastSaved = useRef(0);
 
-  // Restore where the owner stopped in this source (once the clip list is known).
+  // Open the clip from the address; resume the saved second if it is the same clip and variant.
   useEffect(() => {
     if (!groups.length || clip !== null) return;
+    const g = groups.find((x) => x.clip === initialClip) ?? groups[0];
+    const v = pickVariant(g, initialVariant);
     const pos = persist.position(stem);
-    const g = groups.find((x) => x.clip === pos?.clip);
-    if (pos && g) {
-      pending.current = { t: pos.t, play: false };
-      setClip(g.clip);
-      setVariant(pickVariant(g, pos.variant));
-    }
-  }, [groups, clip, stem]);
+    const resume = pos && pos.clip === g.clip && pos.variant === v ? pos.t : 0;
+    pending.current = { t: resume, play: true };
+    setClip(g.clip);
+    setVariant(v);
+  }, [groups, clip, stem, initialClip, initialVariant]);
+
+  useEffect(() => {
+    if (clip !== null) onChange(clip, variant);
+  }, [clip, variant]); // onChange deliberately not a dependency: it changes on every render
 
   const group = groups.find((g) => g.clip === clip) ?? null;
 
@@ -89,7 +96,7 @@ export function Source({ stem, onBack }: Props) {
         }
         break;
       case "toggleHelp": setHelp((h) => !h); break;
-      case "closeHelp": setHelp(false); break;
+      case "escape": if (help) setHelp(false); else onBack(); break;
     }
   }
   useHotkeys(onAction);
@@ -128,7 +135,7 @@ export function Source({ stem, onBack }: Props) {
     <main style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 12 }}>
         <button onClick={onBack} style={{ cursor: "pointer", background: "none", border: "none", color: "var(--accent)" }}>
-          {L.back}
+          {L.backToOverview}
         </button>
         <h2>{stem}</h2>
         <span style={{ marginLeft: "auto", color: "var(--fg2)", fontSize: 13 }}>{L.helpHint}</span>

@@ -15,6 +15,8 @@ export const api = {
   health: () => get<HealthResponse>("/api/health"),
   sources: () => get<SourceItem[]>("/api/sources"),
   clips: (stem: string) => get<ClipItem[]>(`/api/sources/${encodeURIComponent(stem)}/clips`),
+  thumbUrl: (stem: string, clip: string, variant = "") =>
+    `/api/thumb/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}${variant ? `?variant=${encodeURIComponent(variant)}` : ""}`,
   mediaUrl: (stem: string, clip: string, variant = "") =>
     `/api/media/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}${variant ? `?variant=${encodeURIComponent(variant)}` : ""}`,
 };

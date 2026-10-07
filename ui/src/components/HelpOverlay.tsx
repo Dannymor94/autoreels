@@ -22,7 +22,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
         <h3 style={{ marginBottom: 12 }}>{L.help}</h3>
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
-            {KEYS.filter((k) => k.action !== "closeHelp").map((k) => (
+            {KEYS.map((k) => (
               <tr key={k.code}>
                 <td style={{ padding: "4px 16px 4px 0", fontFamily: "monospace", whiteSpace: "nowrap" }}>{k.label}</td>
                 <td style={{ padding: "4px 0", color: "var(--fg2)" }}>{k.help}</td>

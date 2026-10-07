@@ -11,7 +11,7 @@ export type Action =
   | "prevClip"
   | "nextVariant"
   | "toggleHelp"
-  | "closeHelp";
+  | "escape";
 
 export interface KeyBinding {
   code: string;
@@ -28,7 +28,7 @@ export const KEYS: KeyBinding[] = [
   { code: "KeyK", label: "K", action: "prevClip", help: "предыдущий клип" },
   { code: "KeyV", label: "V", action: "nextVariant", help: "следующий вариант на той же секунде" },
   { code: "Slash", label: "?", action: "toggleHelp", help: "показать / скрыть подсказку" },
-  { code: "Escape", label: "Esc", action: "closeHelp", help: "закрыть подсказку" },
+  { code: "Escape", label: "Esc", action: "escape", help: "закрыть подсказку / назад к обзору" },
 ];
 
 /** Returns the action for a key event, or null. Ignores typing in fields and Cmd/Ctrl/Alt combos. */
