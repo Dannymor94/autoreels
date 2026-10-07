@@ -28,6 +28,8 @@ export const L = {
   colTitle: "Заголовок",
   colDuration: "Длит.",
   colVariants: "Варианты",
+  sizeLabel: "Размер",
+  sizeNames: { s: "S", m: "M", l: "L" } as Record<"s" | "m" | "l", string>,
   rename: "Переименовать",
   renameHint: "Enter — сохранить, Esc — отмена, пусто — вернуть имя папки",
   folder: (stem: string) => `папка: ${stem}`,

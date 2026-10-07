@@ -5,11 +5,12 @@ import { L } from "../labels";
 
 interface Props {
   source: SourceItem;
+  thumbH: number; // thumbnail height in px; width follows 9:16
   onOpen: () => void;
 }
 
 /** One source: thumbnail, display name (editable), folder name, counts. */
-export function SourceRow({ source: s, onOpen }: Props) {
+export function SourceRow({ source: s, thumbH, onOpen }: Props) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -31,12 +32,12 @@ export function SourceRow({ source: s, onOpen }: Props) {
   return (
     <li
       style={{
-        display: "flex", alignItems: "center", gap: 14, padding: 8,
+        display: "flex", alignItems: "center", gap: 14, padding: thumbH > 60 ? 8 : "4px 8px",
         background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius)",
       }}
     >
       <button onClick={onOpen} aria-label={s.display_name ?? s.stem} style={{ border: "none", padding: 0, background: "none", cursor: "pointer" }}>
-        <div style={{ width: 54, height: 96, background: "#000", borderRadius: 6, overflow: "hidden" }}>
+        <div style={{ width: Math.round((thumbH * 9) / 16), height: thumbH, background: "#000", borderRadius: 4, overflow: "hidden" }}>
           {s.poster_clip && (
             <img
               src={api.thumbUrl(s.stem, s.poster_clip, s.poster_variant)}

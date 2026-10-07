@@ -6,6 +6,8 @@ import { formatDuration, groupClips } from "../lib/clips";
 import { persist, type ViewMode } from "../lib/persist";
 import { ClipCard } from "../components/ClipCard";
 import { ClipTable } from "../components/ClipTable";
+import { SizePicker } from "../components/SizePicker";
+import { SIZES, useSize } from "../lib/size";
 
 interface Props {
   stem: string;
@@ -24,6 +26,7 @@ export function Overview({ stem, onBack, onOpen }: Props) {
     persist.setView(v);
     setViewState(v);
   };
+  const [size, setSize] = useSize();
   const pos = persist.position(stem);
   const variantCount = groups.reduce((n, g) => n + g.variants.length - 1, 0);
 
@@ -42,7 +45,8 @@ export function Overview({ stem, onBack, onOpen }: Props) {
         <h2>{displayName ?? stem}</h2>
         {displayName && <span style={{ color: "var(--fg2)", fontSize: 12 }}>{L.folder(stem)}</span>}
         {groups.length > 0 && <span style={{ color: "var(--fg2)" }}>{L.overviewSummary(groups.length, variantCount)}</span>}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          {view === "grid" && <SizePicker value={size} onChange={setSize} />}
           <button style={btn(view === "grid")} onClick={() => setView("grid")}>{L.viewGrid}</button>
           <button style={btn(view === "list")} onClick={() => setView("list")}>{L.viewList}</button>
           {pos && groups.some((g) => g.clip === pos.clip) && (
@@ -66,7 +70,7 @@ export function Overview({ stem, onBack, onOpen }: Props) {
       {!isLoading && !error && groups.length === 0 && <p>{L.noClips}</p>}
 
       {view === "grid" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${SIZES[size].cardMin}px, 1fr))`, gap: 16 }}>
           {groups.map((g) => (
             <ClipCard key={g.clip} stem={stem} group={g} onOpen={() => onOpen(g.clip, g.variants[0])} />
           ))}
