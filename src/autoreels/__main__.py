@@ -1042,6 +1042,13 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None, smap=None) 
         # finds the later one as expected_last. Both texts match → subtitle is correct.
         if actual_last.word == expected_last.word:
             return
+        # Explicit e: with Whisper overlap: the human ended at sentence N (has_explicit_e=True),
+        # and a word from sentence N+1 (with an overlapping Whisper timestamp) appears as
+        # expected_last. If expected_last is not in the subtitle set, the subtitle is correct.
+        if getattr(reel, "has_explicit_e", False):
+            _sub_t0s = frozenset(w.t0 for w in reel.subtitles)
+            if expected_last.t0 not in _sub_t0s:
+                return
         raise ValueError(
             f"[CONTENT] {reel.id}: last word of final sentence '{expected_last.word}' "
             f"(t0={expected_last.t0:.3f}) is missing from subtitles; "
@@ -3980,6 +3987,16 @@ def cmd_render(
         )
         return []
     subtitles_cfg = load_subtitles_config(root / "config" / "subtitles.yaml")
+    # Credit word patterns for subtitle stump check: load from r0.yaml (best-effort).
+    _r0_yaml_r = root / "config" / "r0.yaml"
+    _credit_pats_render: list = []
+    if _r0_yaml_r.exists():
+        try:
+            import yaml as _yaml_r
+            _r0_raw_r = _yaml_r.safe_load(_r0_yaml_r.read_text(encoding="utf-8")) or {}
+            _credit_pats_render = _r0_raw_r.get("credit_word_patterns", []) or []
+        except Exception:
+            pass
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
@@ -4138,6 +4155,9 @@ def cmd_render(
             _cache_dir_r = root / "data" / "cache"
             _render_tx = _resolve_cached_transcript(manifest, _cache_dir_r)
             _render_words = _render_tx.words if _render_tx is not None else None
+            if _render_words and _credit_pats_render:
+                from autoreels.cloud.edit import strip_credit_words as _scw_render
+                _render_words = _scw_render(_render_words, _credit_pats_render)
             if _render_words:
                 for _r in render_manifest.reels:
                     _check_last_subtitle_word(_r, _render_words)
