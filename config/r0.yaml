@@ -159,6 +159,16 @@ filler_removal:
   max_removed_share: 0.25      # never remove more than this share of the span
 # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
 wind_down_phrases: ["наверное, как-то так", "вот", "да", "понятно", "как-то так", "ну вот"]
+
+# Word-level Whisper credit-hallucination patterns. Consecutive words matching any phrase
+# (case-insensitive, punctuation-stripped) are removed at transcript load time.
+credit_word_patterns:
+  - "Субтитры создавал"
+  - "Субтитры делал"
+  - "Редактор субтитров"
+  - "DimaTorzok"
+  - "Продолжение следует"
+
 # Cold open (Part 5): a hook sentence (h:N) longer than this is refused with a warning.
 hook_max_sec: 6.0
 

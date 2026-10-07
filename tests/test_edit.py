@@ -325,3 +325,32 @@ def test_x_mid_clip_still_two_windows_after_sync():
     assert len(reel.segments) == 2
     assert reel.segments[0].start == reel.start
     assert reel.segments[-1].end == reel.end
+
+
+# --- strip_credit_words -----------------------------------------------------------------------
+
+def test_strip_credit_words_removes_phrase_inside_sentence():
+    """Credit phrase mid-sentence is removed; surrounding words keep their timestamps."""
+    words = [
+        _w(0.0, 0.5, "Ну"),
+        _w(0.5, 0.8, "Субтитры"),
+        _w(0.8, 1.0, "создавал"),
+        _w(1.0, 1.2, "DimaTorzok"),
+        _w(1.2, 2.0, "понятно."),
+    ]
+    patterns = ["Субтитры создавал", "DimaTorzok"]
+    result = edit.strip_credit_words(words, patterns)
+    assert [w.word for w in result] == ["Ну", "понятно."]
+    assert result[0].t0 == 0.0
+    assert result[-1].t1 == 2.0
+
+
+def test_strip_credit_words_empty_patterns_returns_original():
+    words = [_w(0.0, 1.0, "Привет.")]
+    assert edit.strip_credit_words(words, []) is words
+
+
+def test_strip_credit_words_no_match_unchanged():
+    words = [_w(0.0, 1.0, "Слово"), _w(1.0, 2.0, "другое.")]
+    result = edit.strip_credit_words(words, ["DimaTorzok"])
+    assert result == words

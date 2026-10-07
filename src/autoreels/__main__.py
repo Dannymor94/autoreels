@@ -4953,6 +4953,15 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         print(f"error: transcript not found for {manifest_path.name}", file=sys.stderr)
         return 1
 
+    # Strip Whisper credit hallucinations (e.g. «Субтитры создавал DimaTorzok») at word level,
+    # once at load, so export, apply, subtitles, and speech-map all see the same clean word list.
+    _credit_pats = getattr(r0_cfg, "credit_word_patterns", [])
+    if _credit_pats:
+        from autoreels.cloud.edit import strip_credit_words as _scw
+        _clean_words = _scw(transcript.words, _credit_pats)
+        if len(_clean_words) != len(transcript.words):
+            transcript = transcript.model_copy(update={"words": _clean_words})
+
     # Stages 1-3: blocks → filter → score (heuristic scores needed for dataset)
     compressed = compress_transcript(
         transcript, pause_sec=r0_cfg.sentence_pause_sec, max_sentence_sec=r0_cfg.max_sentence_sec,
@@ -5896,6 +5905,13 @@ def cmd_blocks(
     if transcript is None:
         print(f"ошибка: транскрипт не найден для {target}", file=sys.stderr)
         return 1
+
+    _credit_pats = getattr(r0_cfg, "credit_word_patterns", [])
+    if _credit_pats:
+        from autoreels.cloud.edit import strip_credit_words as _scw
+        _clean_words = _scw(transcript.words, _credit_pats)
+        if len(_clean_words) != len(transcript.words):
+            transcript = transcript.model_copy(update={"words": _clean_words})
 
     compressed = compress_transcript(
         transcript,

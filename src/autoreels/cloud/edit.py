@@ -18,6 +18,32 @@ def _clean(word: str) -> str:
     return word.strip().strip(_STRIP).lower()
 
 
+def strip_credit_words(words: list, patterns: list[str]) -> list:
+    """Remove Whisper credit-hallucination words from a word list.
+
+    Scans left-to-right; any run of consecutive words whose normalised tokens match a pattern
+    phrase is dropped. Normalisation: lowercase + strip _STRIP punctuation. Sentence boundaries
+    are not affected — the surrounding words keep their timestamps.
+    """
+    if not patterns or not words:
+        return words
+    pat_tokens = [[_clean(t) for t in p.split()] for p in patterns]
+    result: list = []
+    i = 0
+    while i < len(words):
+        matched = False
+        for ptoks in pat_tokens:
+            n = len(ptoks)
+            if i + n <= len(words) and [_clean(words[j].word) for j in range(i, i + n)] == ptoks:
+                i += n
+                matched = True
+                break
+        if not matched:
+            result.append(words[i])
+            i += 1
+    return result
+
+
 def words_in_span(words, start: float, end: float) -> list:
     """Words whose start falls in [start, end) — same convention as subtitles.words_in_window."""
     return [w for w in words if start <= w.t0 < end]

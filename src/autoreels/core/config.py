@@ -281,6 +281,16 @@ class R0Config(BaseModel):
     wind_down_phrases: list[str] = Field(default_factory=lambda: [
         "наверное, как-то так", "вот", "да", "понятно", "как-то так", "ну вот",
     ])
+    # Whisper credit hallucination phrases to strip at word level (consecutive token match,
+    # case-insensitive, punctuation-stripped). Applied once at transcript load.
+    credit_word_patterns: list[str] = Field(default_factory=lambda: [
+        "Субтитры создавал",
+        "Субтитры делал",
+        "Редактор субтитров",
+        "DimaTorzok",
+        "Продолжение следует",
+    ])
+
     # Cold open (Part 5): a hook sentence (h:N) longer than this is refused with a warning.
     hook_max_sec: float = 6.0
 
