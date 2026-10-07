@@ -89,6 +89,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sources/{stem}/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Source Meta */
+        put: operations["set_source_meta_api_sources__stem__meta_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/thumb/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -119,6 +136,8 @@ export interface components {
         };
         /** ClipItem */
         ClipItem: {
+            /** Caption */
+            caption: string | null;
             /** Clip */
             clip: string;
             /** Duration S */
@@ -152,10 +171,28 @@ export interface components {
         SourceItem: {
             /** Clip Count */
             clip_count: number;
+            /** Display Name */
+            display_name: string | null;
+            /** Poster Clip */
+            poster_clip: string | null;
+            /** Poster Variant */
+            poster_variant: string;
             /** Stem */
             stem: string;
             /** Variant Names */
             variant_names: string[];
+        };
+        /** SourceMetaIn */
+        SourceMetaIn: {
+            /** Display Name */
+            display_name: string | null;
+        };
+        /** SourceMetaOut */
+        SourceMetaOut: {
+            /** Display Name */
+            display_name: string | null;
+            /** Stem */
+            stem: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -287,6 +324,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClipItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_source_meta_api_sources__stem__meta_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stem: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceMetaIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceMetaOut"];
                 };
             };
             /** @description Validation Error */

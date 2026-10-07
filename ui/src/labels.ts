@@ -28,4 +28,8 @@ export const L = {
   colTitle: "Заголовок",
   colDuration: "Длит.",
   colVariants: "Варианты",
+  rename: "Переименовать",
+  renameHint: "Enter — сохранить, Esc — отмена, пусто — вернуть имя папки",
+  folder: (stem: string) => `папка: ${stem}`,
+  variantsCount: (n: number) => (n > 0 ? ` · ${n} вар.` : ""),
 };

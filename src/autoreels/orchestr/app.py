@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import clipinfo, pipeline_gateway
+from . import clipinfo, manifests, pipeline_gateway, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 
 app = FastAPI(title="Авто-Рилс UI", version="1")
@@ -28,8 +28,20 @@ class CapabilitiesResponse(BaseModel):
 
 class SourceItem(BaseModel):
     stem: str
-    clip_count: int
+    display_name: str | None  # owner-given name; the folder keeps its stem
+    clip_count: int  # distinct clips across main and all variants
     variant_names: list[str]
+    poster_clip: str | None  # first clip — its poster is the source thumbnail
+    poster_variant: str
+
+
+class SourceMetaIn(BaseModel):
+    display_name: str | None
+
+
+class SourceMetaOut(BaseModel):
+    stem: str
+    display_name: str | None
 
 
 class ClipItem(BaseModel):
@@ -39,7 +51,8 @@ class ClipItem(BaseModel):
     has_render_json: bool
     fingerprint: str | None
     duration_s: float | None
-    title: str | None
+    title: str | None  # title plate (manifest title_overlay) or manifest reel title
+    caption: str | None  # first line of r05.txt — publish caption with hashtags
 
 
 # --- Helpers ---
@@ -88,17 +101,24 @@ def _list_sources() -> list[SourceItem]:
             continue
         found = _iter_clips(stem_dir.name)
         if found:
+            # poster: the first clip id, main render if it exists, else its first variant
+            first = min(found, key=lambda pv: (pv[0].stem, pv[1] != "", pv[1]))
             items.append(SourceItem(
                 stem=stem_dir.name,
-                clip_count=sum(1 for _, v in found if v == ""),
+                display_name=sourcemeta.display_name(_cfg.settings.root, stem_dir.name),
+                clip_count=len({p.stem for p, _ in found}),
                 variant_names=sorted({v for _, v in found if v}),
+                poster_clip=first[0].stem,
+                poster_variant=first[1],
             ))
     return items
 
 
 def _list_clips(stem: str) -> list[ClipItem]:
     items: list[ClipItem] = []
-    for mp4, variant in _iter_clips(stem):
+    found = _iter_clips(stem)  # validates the stem before anything else is read
+    titles = manifests.reel_titles(_cfg.settings.root, stem)
+    for mp4, variant in found:
         rj = mp4.with_suffix(".render.json")
         fp = None
         has_rj = rj.exists()
@@ -114,7 +134,8 @@ def _list_clips(stem: str) -> list[ClipItem]:
             has_render_json=has_rj,
             fingerprint=fp,
             duration_s=clipinfo.duration_s(mp4),
-            title=clipinfo.title(mp4),
+            title=titles.get(mp4.stem),
+            caption=clipinfo.caption(mp4),
         ))
     return items
 
@@ -154,3 +175,10 @@ def thumb(stem: str, clip: str, variant: str = Query(default="")):
     if jpg is None:
         raise HTTPException(status_code=404, detail="poster unavailable")
     return FileResponse(jpg, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
+
+
+@app.put("/api/sources/{stem}/meta", response_model=SourceMetaOut)
+def set_source_meta(stem: str, body: SourceMetaIn) -> SourceMetaOut:
+    _iter_clips(stem)  # 404 unless stem is a real source
+    stored = sourcemeta.set_display_name(_cfg.settings.root, stem, body.display_name)
+    return SourceMetaOut(stem=stem, display_name=stored)

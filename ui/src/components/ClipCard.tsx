@@ -63,7 +63,17 @@ export function ClipCard({ stem, group, onOpen }: Props) {
         {extra > 0 && <span style={{ ...badge, right: 6 }}>{L.variantsMore(extra)}</span>}
       </div>
       <strong style={{ fontWeight: 600 }}>{group.clip}</strong>
-      <span style={{ color: "var(--fg2)", fontSize: 12, lineHeight: 1.3 }}>{group.info.title ?? ""}</span>
+      {group.info.title && <span style={{ fontSize: 13, lineHeight: 1.3 }}>{group.info.title}</span>}
+      {group.info.caption && (
+        <span
+          style={{
+            color: "var(--fg2)", fontSize: 12, lineHeight: 1.3,
+            display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+          }}
+        >
+          {group.info.caption}
+        </span>
+      )}
     </button>
   );
 }

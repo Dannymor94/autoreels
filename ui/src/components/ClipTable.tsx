@@ -25,7 +25,10 @@ export function ClipTable({ groups, onOpen }: Props) {
         {groups.map((g) => (
           <tr key={g.clip} onClick={() => onOpen(g.clip)} style={{ cursor: "pointer" }}>
             <td style={td}><strong>{g.clip}</strong></td>
-            <td style={td}>{g.info.title ?? "—"}</td>
+            <td style={td}>
+              <div>{g.info.title ?? "—"}</div>
+              {g.info.caption && <div style={{ color: "var(--fg2)", fontSize: 12, marginTop: 2 }}>{g.info.caption}</div>}
+            </td>
             <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{formatDuration(g.info.duration_s)}</td>
             <td style={{ ...td, color: "var(--fg2)" }}>
               {g.variants.map((v) => variantShortName(v) ?? L.mainVariant).join(", ")}

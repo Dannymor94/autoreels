@@ -16,6 +16,8 @@ interface Props {
 /** Level 2: every reel of one source at once — grid or list. */
 export function Overview({ stem, onBack, onOpen }: Props) {
   const { data, isLoading, error } = useQuery({ queryKey: ["clips", stem], queryFn: () => api.clips(stem) });
+  const sources = useQuery({ queryKey: ["sources"], queryFn: api.sources });
+  const displayName = sources.data?.find((x) => x.stem === stem)?.display_name ?? null;
   const groups = useMemo(() => groupClips(data ?? []), [data]);
   const [view, setViewState] = useState<ViewMode>(() => persist.view());
   const setView = (v: ViewMode) => {
@@ -37,7 +39,8 @@ export function Overview({ stem, onBack, onOpen }: Props) {
         <button onClick={onBack} style={{ cursor: "pointer", background: "none", border: "none", color: "var(--accent)" }}>
           {L.backToSources}
         </button>
-        <h2>{stem}</h2>
+        <h2>{displayName ?? stem}</h2>
+        {displayName && <span style={{ color: "var(--fg2)", fontSize: 12 }}>{L.folder(stem)}</span>}
         {groups.length > 0 && <span style={{ color: "var(--fg2)" }}>{L.overviewSummary(groups.length, variantCount)}</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button style={btn(view === "grid")} onClick={() => setView("grid")}>{L.viewGrid}</button>

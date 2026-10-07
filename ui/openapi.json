@@ -24,6 +24,17 @@
       },
       "ClipItem": {
         "properties": {
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caption"
+          },
           "clip": {
             "title": "Clip",
             "type": "string"
@@ -81,7 +92,8 @@
           "has_render_json",
           "fingerprint",
           "duration_s",
-          "title"
+          "title",
+          "caption"
         ],
         "title": "ClipItem",
         "type": "object"
@@ -128,6 +140,32 @@
             "title": "Clip Count",
             "type": "integer"
           },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "poster_clip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Clip"
+          },
+          "poster_variant": {
+            "title": "Poster Variant",
+            "type": "string"
+          },
           "stem": {
             "title": "Stem",
             "type": "string"
@@ -142,10 +180,58 @@
         },
         "required": [
           "stem",
+          "display_name",
           "clip_count",
-          "variant_names"
+          "variant_names",
+          "poster_clip",
+          "poster_variant"
         ],
         "title": "SourceItem",
+        "type": "object"
+      },
+      "SourceMetaIn": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "SourceMetaIn",
+        "type": "object"
+      },
+      "SourceMetaOut": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "stem": {
+            "title": "Stem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stem",
+          "display_name"
+        ],
+        "title": "SourceMetaOut",
         "type": "object"
       },
       "ValidationError": {
@@ -344,6 +430,55 @@
           }
         },
         "summary": "Clips"
+      }
+    },
+    "/api/sources/{stem}/meta": {
+      "put": {
+        "operationId": "set_source_meta_api_sources__stem__meta_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stem",
+            "required": true,
+            "schema": {
+              "title": "Stem",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceMetaIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceMetaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Source Meta"
       }
     },
     "/api/thumb/{stem}/{clip}": {

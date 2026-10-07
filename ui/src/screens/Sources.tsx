@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { L } from "../labels";
+import { SourceRow } from "../components/SourceRow";
 
 interface Props {
   onSelect: (stem: string) => void;
@@ -18,26 +19,7 @@ export function Sources({ onSelect }: Props) {
       <h2 style={{ marginBottom: 12 }}>{L.sources}</h2>
       <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
         {data.map((s) => (
-          <li key={s.stem}>
-            <button
-              onClick={() => onSelect(s.stem)}
-              style={{
-                background: "var(--bg2)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius)",
-                padding: "10px 16px",
-                cursor: "pointer",
-                width: "100%",
-                textAlign: "left",
-                display: "flex",
-                justifyContent: "space-between",
-                color: "var(--fg)",
-              }}
-            >
-              <span>{s.stem}</span>
-              <span style={{ color: "var(--fg2)", fontSize: 13 }}>{L.clipCount(s.clip_count)}</span>
-            </button>
-          </li>
+          <SourceRow key={s.stem} source={s} onOpen={() => onSelect(s.stem)} />
         ))}
       </ul>
     </main>

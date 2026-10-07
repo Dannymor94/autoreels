@@ -43,8 +43,8 @@ def duration_s(path: Path) -> float | None:
     return value
 
 
-def title(path: Path) -> str | None:
-    """First non-empty line of r05.txt next to r05.mp4 (the publish caption file)."""
+def caption(path: Path) -> str | None:
+    """First non-empty line of r05.txt next to r05.mp4 — the publish caption (with hashtags)."""
     txt = path.with_suffix(".txt")
     if not txt.is_file():
         return None

@@ -40,12 +40,12 @@ def client(root):
     return TestClient(app)
 
 
-def test_title_first_nonempty_line(tmp_path):
+def test_caption_first_nonempty_line(tmp_path):
     mp4 = tmp_path / "r01.mp4"
     mp4.write_bytes(b"x")
-    assert clipinfo.title(mp4) is None
+    assert clipinfo.caption(mp4) is None
     (tmp_path / "r01.txt").write_text("\n  Почему мы ругаем себя  \nописание\n", encoding="utf-8")
-    assert clipinfo.title(mp4) == "Почему мы ругаем себя"
+    assert clipinfo.caption(mp4) == "Почему мы ругаем себя"
 
 
 def test_missing_ffmpeg_gives_none(tmp_path, monkeypatch):
@@ -58,12 +58,12 @@ def test_missing_ffmpeg_gives_none(tmp_path, monkeypatch):
 
 
 @needs_ffmpeg
-def test_clips_have_duration_and_title(client, root):
+def test_clips_have_duration_and_caption(client, root):
     mp4 = root / "reels-out" / "SRC" / "r01.mp4"
     _make_mp4(mp4, 3)
     (mp4.with_suffix(".txt")).write_text("Заголовок\n", encoding="utf-8")
     c = client.get("/api/sources/SRC/clips").json()[0]
-    assert c["title"] == "Заголовок"
+    assert c["caption"] == "Заголовок" and c["title"] is None
     assert 2.9 <= c["duration_s"] <= 3.1
 
 
