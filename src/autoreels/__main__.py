@@ -5775,9 +5775,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             return 0
         cmd_render(root=root, _manifest_paths=[installed_path], pull_first=False)
 
-    # Write dataset rows, deduplicating by (block_id, source).
-    # A re-apply updates rows rather than appending duplicates.
-    if dataset_rows:
+    # Write dataset rows only on --install (dry-run must not touch the dataset).
+    # Never overwrite a row the owner labeled: if an existing row has labeler="owner",
+    # the incoming assistant row is skipped with a warning.
+    if dataset_rows and install:
         ds_dir = root / "data" / "blocks_dataset"
         ds_dir.mkdir(parents=True, exist_ok=True)
         ds_path = ds_dir / f"{manifest_path.stem}.jsonl"
@@ -5792,16 +5793,21 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     existing[(row["block_id"], row["source"])] = row
                 except Exception:
                     pass
-        before = len(existing)
+        skipped_owner = 0
+        added = 0
         for row in dataset_rows:
-            existing[(row["block_id"], row["source"])] = row
-        collapsed = before - max(0, before - len(dataset_rows))
-        if collapsed:
-            print(f"dataset: {collapsed} duplicate rows collapsed")
+            key = (row["block_id"], row["source"])
+            if existing.get(key, {}).get("labeler") == "owner":
+                skipped_owner += 1
+                print(f"  dataset: skipped {row['block_id'][:8]}… — owner score protected", file=sys.stderr)
+                continue
+            existing[key] = row
+            added += 1
         with ds_path.open("w", encoding="utf-8") as f:
             for row in existing.values():
                 f.write(_json.dumps(row, ensure_ascii=False) + "\n")
-        print(f"dataset: {len(dataset_rows)} rows written → {ds_path} ({len(existing)} total)")
+        print(f"dataset: {added} rows written → {ds_path} ({len(existing)} total)"
+              + (f" ({skipped_owner} owner rows protected)" if skipped_owner else ""))
 
     return 0
 

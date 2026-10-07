@@ -6697,17 +6697,18 @@ def test_review_apply_accepts_compact_format_file(tmp_path, monkeypatch):
     monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [b1])
     monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([b1], []))
 
-    rc = cli._blocks_do_apply(str(answer_path), root=str(tmp_path))
+    rc = cli._blocks_do_apply(str(answer_path), root=str(tmp_path), install=True)
     assert rc == 0
-    out_manifest = tmp_path / "reviews" / "y.review.json"
+    out_manifest = tmp_path / "manifests" / "y.json"
     assert out_manifest.exists(), "manifest must be written after successful apply"
     from autoreels.core.models import Manifest as M
     result = M.model_validate_json(out_manifest.read_text())
     assert result.selection_source == "human"
     # Dataset row proves the compact entry was parsed and the block looked up by seq number.
+    # Dataset is only written on --install (not on dry-run apply).
     import json as _json
     ds_path = tmp_path / "data" / "blocks_dataset" / "y.jsonl"
-    assert ds_path.exists(), "dataset row must be written for the scored block"
+    assert ds_path.exists(), "dataset row must be written for the scored block on --install"
     rows = [_json.loads(ln) for ln in ds_path.read_text().splitlines() if ln.strip()]
     assert len(rows) == 1, "one dataset row for the one scored block"
 

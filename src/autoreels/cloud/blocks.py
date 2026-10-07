@@ -1162,4 +1162,5 @@ def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str) 
         "human_score": human_score,
         "heuristic_score": round(block.heuristic_score, 2),
         "features": dict(block.score_breakdown),
+        "labeler": "assistant",
     }

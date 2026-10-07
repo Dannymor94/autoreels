@@ -851,6 +851,104 @@ def test_dataset_row_records_both_scores():
     assert row["text"] == b.text
     assert row["source"] == "test_video"
     assert row["block_id"] == b.id
+    assert row["labeler"] == "assistant"
+
+
+def _setup_apply_env_scored(tmp_path, monkeypatch):
+    """Like _setup_apply_env but the review has one scored entry (score: 85).
+
+    The block id in the review matches the block returned by candidate_blocks,
+    so dataset_rows will be non-empty after the pipeline.
+    Returns (ds_path, manifest_path, review_path).
+    """
+    import autoreels.cloud.blocks as _b
+    import autoreels.cloud.compress as _c
+    from autoreels import __main__ as cli
+    from autoreels.core import state as _state
+    from autoreels.core.models import Crop, Manifest, SetupProfile, Transcript, Word
+
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "reviews").mkdir()
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+    (tmp_path / "data" / "blocks_dataset").mkdir(parents=True)
+
+    sha = "a" * 64
+    setup = SetupProfile(
+        setup_id="test", crop=Crop(x=0, y=0, w=720, h=1280),
+        scale=[720, 1280], frame=[1920, 1080],
+    )
+    auto = Manifest(
+        source="vid.mp4", source_sha256=sha, source_hash_scheme="sha256",
+        duration_preset="default", setup=setup, run_key="testkey", reels=[],
+    )
+    manifest_path = tmp_path / "manifests" / "vid.json"
+    manifest_path.write_text(auto.model_dump_json())
+
+    tx = Transcript(language="ru", words=[Word(word="Тест", t0=100.0, t1=100.5)])
+    ahash = "fakehash"
+    (tmp_path / "data" / "cache" / f"{ahash}.transcript.json").write_text(tx.model_dump_json())
+    (tmp_path / "data" / "cache" / f"{sha}.mp3").write_bytes(b"FAKE")
+
+    # Block whose id matches the review entry.
+    blk = _make_block("Текст блока достаточно длинный чтобы пройти фильтр минимальной длины.", start=100.0, end=130.0)
+    blk.id = "testblock00000001"
+    blk.heuristic_score = 60.0
+    blk.score_breakdown = {"duration": 15.0}
+    blk.has_internal_speaker_change = False
+
+    review_path = tmp_path / "reviews" / "vid.review.md"
+    review_path.write_text(
+        "# source: manifests/vid.json\n"
+        "# blocks: 1\n\n"
+        f"[ 1 ]  30.0s  id={blk.id}  score: 85\n"
+        "Текст блока.\n"
+    )
+
+    monkeypatch.setattr(cli, "load_r0_config", lambda p: _r0_cfg_full_stub())
+    monkeypatch.setattr(_state, "audio_hash", lambda p: ahash)
+    monkeypatch.setattr(_c, "compress_transcript", lambda *a, **k: "")
+    monkeypatch.setattr(_b, "candidate_blocks", lambda *a, **k: [blk])
+    monkeypatch.setattr(_b, "filter_blocks", lambda *a, **k: ([blk], []))
+
+    ds_path = tmp_path / "data" / "blocks_dataset" / "vid.jsonl"
+    return ds_path, manifest_path, review_path
+
+
+def test_dry_run_does_not_write_blocks_dataset(tmp_path, monkeypatch):
+    """apply without --install (dry-run) must not touch data/blocks_dataset/."""
+    from autoreels import __main__ as cli
+
+    ds_path, _, _ = _setup_apply_env_scored(tmp_path, monkeypatch)
+    assert not ds_path.exists(), "precondition: dataset file absent before apply"
+
+    rc = cli._blocks_do_apply("vid.review.md", root=str(tmp_path), install=False)
+    assert rc == 0
+    assert not ds_path.exists(), "dry-run must not create data/blocks_dataset/ file"
+
+
+def test_install_does_not_overwrite_owner_row(tmp_path, monkeypatch):
+    """--install must preserve an existing owner-labeled row's human_score."""
+    import json
+    from autoreels import __main__ as cli
+
+    ds_path, _, _ = _setup_apply_env_scored(tmp_path, monkeypatch)
+    # Pre-seed an owner row for the same block with score 95.
+    ds_path.write_text(json.dumps({
+        "source": "vid", "block_id": "testblock00000001",
+        "start": 100.0, "end": 130.0, "duration": 30.0,
+        "text": "owner text", "human_score": 95, "heuristic_score": 60.0,
+        "features": {}, "labeler": "owner",
+    }, ensure_ascii=False) + "\n")
+
+    rc = cli._blocks_do_apply("vid.review.md", root=str(tmp_path), install=True)
+    assert rc == 0
+
+    rows = [json.loads(l) for l in ds_path.read_text().splitlines() if l.strip()]
+    row = next(r for r in rows if r["block_id"] == "testblock00000001")
+    assert row["human_score"] == 95, (
+        f"owner score must not be overwritten; got {row['human_score']}"
+    )
+    assert row["labeler"] == "owner"
 
 
 # ---------------------------------------------------------------------------
