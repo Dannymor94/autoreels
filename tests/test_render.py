@@ -386,15 +386,15 @@ def test_real_render_config_defaults_are_social_optimal():
     cfg = load_render_config(RENDER_YAML, local_path=_NO_LOCAL)   # без машинного override
     assert cfg.encoder.pix_fmt == "yuv420p"
     assert cfg.encoder.faststart is True
-    assert cfg.audio.bitrate == "128k"               # aac 128k — достаточно для соцсетей
-    assert cfg.encoder.profile == "hevc"             # дефолт — компактный hevc
+    assert cfg.audio.bitrate == "192k"               # AAC-LC 192k — delivery-качество (web-safe)
+    assert cfg.encoder.profile == "h264"             # DELIVERY-дефолт — web-safe H.264 High
     # активный профиль резолвится в разумный битрейт 4–8 Мбит/с
     bv = cfg.encoder.video_bitrate
     assert bv.endswith("M") and 4 <= int(bv[:-1]) <= 8
     # базовые + hq + софтверный профили присутствуют
     assert {"h264", "hevc", "av1", "hevc_hq", "h264_hq", "hevc_sw"} <= set(cfg.encoder.profiles)
-    # дефолтный hevc несёт AMF quality-режим (против мыла на равном битрейте)
-    assert cfg.encoder.profiles["hevc"].quality == "quality"
+    # дефолтный h264 несёт AMF quality-режим (против мыла на равном битрейте)
+    assert cfg.encoder.profiles["h264"].quality == "quality"
     # обработка звука: нормализация -14 LUFS включена, шумоподавление и фейд — выключены
     ap = cfg.audio_processing
     assert ap.loudnorm_enabled is True and ap.target_lufs == -14.0
@@ -648,18 +648,19 @@ def test_render_cut_output_paths_are_pathlib_under_out_dir(tmp_path, render_cfg,
     assert out_dir.is_dir()                            # папка выдачи создана
 
 
-def test_render_cut_default_profile_applies_hevc_codec_and_bitrate(tmp_path, render_cfg, fake_ffmpeg):
-    # Дефолтный профиль конфига (hevc) → hevc_amf + 5M битрейт + hvc1 в команде.
+def test_render_cut_default_profile_applies_h264_codec_and_bitrate(tmp_path, render_cfg, fake_ffmpeg):
+    # DELIVERY-дефолт (h264) → h264_amf + 7M битрейт + High-профиль, без hvc1 (это не HEVC).
     inputs = tmp_path / "inputs"
-    sha = _make_source(inputs, "v.mp4", b"default-hevc-video")
+    sha = _make_source(inputs, "v.mp4", b"default-h264-video")
     m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
 
     render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
 
     cmd = fake_ffmpeg[0]
-    assert _val_after(cmd, "-c:v") == "hevc_amf"
-    assert _val_after(cmd, "-b:v") == "5M"
-    assert _val_after(cmd, "-tag:v") == "hvc1"
+    assert _val_after(cmd, "-c:v") == "h264_amf"
+    assert _val_after(cmd, "-b:v") == "7M"
+    assert _val_after(cmd, "-profile:v") == "high"
+    assert "-tag:v" not in cmd
 
 
 def test_render_cut_profile_arg_switches_codec_and_bitrate(tmp_path, render_cfg, fake_ffmpeg):
@@ -697,7 +698,7 @@ def test_render_cut_encoder_overrides_codec_keeps_profile_bitrate(tmp_path, rend
     m = _manifest("v.mp4", sha, [_reel("r01", 0.0, 30.0)])
 
     render_cut(m, inputs_dir=inputs, out_dir=tmp_path / "out",
-               render_cfg=render_cfg, encoder="libx265")
+               render_cfg=render_cfg, profile="hevc", encoder="libx265")
 
     cmd = fake_ffmpeg[0]
     assert _val_after(cmd, "-c:v") == "libx265"

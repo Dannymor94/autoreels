@@ -354,9 +354,9 @@ class CodecProfile(BaseModel):
 # Дефолтные профили: prod — системник Windows AMD (AMF-энкодеры).
 _DEFAULT_PROFILES: dict[str, dict] = {
     "h264":    {"codec": "h264_amf", "bitrate": "7M", "quality": "quality",
-                "label": "быстро, совместимый"},
+                "label": "быстро, совместимый (дефолт, web-safe)"},
     "hevc":    {"codec": "hevc_amf", "bitrate": "5M", "quality": "quality",
-                "label": "быстро, компактный (дефолт)"},
+                "label": "быстро, компактный (web-плееры перекодируют)"},
     "hevc_hq": {"codec": "hevc_amf", "bitrate": "12M", "quality": "quality",
                 "rate_control": "cqp", "qp": 18, "label": "быстро, лучше качество (крупнее файл)"},
     "h264_hq": {"codec": "h264_amf", "bitrate": "16M", "quality": "quality",
@@ -371,7 +371,7 @@ class Encoder(BaseModel):
     """Видеоэнкодер + rate-control под соцсети.
 
     Кодек выбирается ПРОФИЛЕМ (`profiles[profile]`): каждый профиль — связка кодек+битрейт.
-    h264 (безопасный, универсальный) / hevc (компактный, дефолт) / av1 (экспериментальный).
+    h264 (безопасный, универсальный, DELIVERY-дефолт) / hevc (компактный) / av1 (экспериментальный).
     Размер файла контролируется ЦЕЛЕВЫМ БИТРЕЙТОМ, а не CRF: битрейт предсказуемо задаёт
     размер (30с ≈ битрейт×30/8) одним проходом и, главное, работает на аппаратном AMF
     (который без rate-control раздувает файл в разы — отсюда прежняя нужда дожимать HandBrake).
@@ -380,7 +380,7 @@ class Encoder(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    profile: str = "hevc"                    # активный кодек-профиль (h264 | hevc | av1)
+    profile: str = "h264"                    # DELIVERY-дефолт H.264 High (web-совместимый); hevc — явно
     profiles: dict[str, CodecProfile] = Field(
         default_factory=lambda: {k: CodecProfile(**v) for k, v in _DEFAULT_PROFILES.items()}
     )

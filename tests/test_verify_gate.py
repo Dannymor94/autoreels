@@ -28,13 +28,16 @@ FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 # ── synthetic video helpers ────────────────────────────────────────────────────
 
 def _make_mp4_with_audio(path: Path, duration: float = 3.0) -> Path:
-    """3s video + pink noise audio — volumedetect will see activity."""
+    """3s video + pink noise audio — volumedetect will see activity.
+
+    Muxed web-safe (h264/aac/+faststart) so the web-safe check in check_clip passes."""
     subprocess.run([
         FFMPEG, "-y",
         "-f", "lavfi", "-i", f"color=black:size=64x112:rate=30:duration={duration}",
         "-f", "lavfi", "-i", f"anoisesrc=r=44100:color=pink:duration={duration}:amplitude=0.3",
         "-c:v", "libx264", "-preset", "ultrafast",
         "-c:a", "aac", "-b:a", "64k",
+        "-movflags", "+faststart",
         str(path),
     ], capture_output=True, check=True)
     return path

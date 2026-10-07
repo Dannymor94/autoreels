@@ -8410,15 +8410,15 @@ def _build_parser():
             "Идемпотентен: уже готовые клипы пропускаются; нет видео — предупреждение ⊘.\n"
             "Устаревший кроп (калибровка новее) авто-обновляется по калибровке (↻, без LLM);\n"
             "--no-auto-recrop — строго блокировать; --allow-stale — рендерить старый кроп.\n"
-            "Кодек — профилем: hevc (дефолт, компактный) | h264 (совместимый) | av1 (эксп.).\n"
+            "Кодек — профилем: h264 (дефолт, web-safe) | hevc (компактный, web-плееры перекодируют) | av1 (эксп.).\n"
             "Профили нацелены на AMF (системник Windows AMD) — достаточно --ffmpeg.\n\n"
-            "Пример: autoreels render --profile hevc\n"
+            "Пример: autoreels render --profile h264\n"
             "Windows: autoreels render --ffmpeg D:\\ffmpeg\\bin\\ffmpeg.exe"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     pd.add_argument("--profile", default=None,
-                    help="кодек-профиль: h264 (совместимый) | hevc (компактный, дефолт) | av1 (эксп.)")
+                    help="кодек-профиль: h264 (web-safe, дефолт) | hevc (компактный, web-плееры перекодируют) | av1 (эксп.)")
     pd.add_argument("--palette", default=None,
                     help="палитра цветокора: neutral (дефолт) | vivid | soft | sharp")
     pd.add_argument("--zoom", choices=["on", "off"], default=None,

@@ -8,6 +8,7 @@ Exit code: 1 if any clip FAILs, 0 if all PASS.
 """
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -189,6 +190,20 @@ def _check_audio_start(mp4: Path) -> list[str]:
     return []
 
 
+def _check_web_safe(mp4: Path) -> list[str]:
+    """Web-safe delivery check (Yandex Disk / social web players), reusing the renderer's
+    canonical check.  require_h264=False: a gate clip may legitimately be HEVC (hevc stays an
+    option); a non-H.264 video is a printed warning there, not a gate FAIL.  AAC audio, faststart,
+    start_time=0, a/v sync and opening audio are hard failures.  Returns verify-style tokens."""
+    try:
+        from autoreels.local.render import _check_web_safe as _ws
+    except ImportError:
+        return []  # autoreels not importable (standalone run outside venv) — skip gracefully
+    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+    errors = _ws(mp4, ffmpeg_bin, require_h264=False, fps=flash_check.FPS)
+    return [e.replace("[ERROR] web-safe: ", "web_unsafe:") for e in errors]
+
+
 def _check_tail_silence(speechmap_path: Path, reel_end: float,
                         own_tail_window_sec: float = 0.05) -> list[str]:
     """Fail if speech starts after the clip's last word + a small grace window.
@@ -320,6 +335,7 @@ def check_clip(entry: dict, project: Path) -> list[str]:
 
     fails.extend(_check_words(clip_dir, clip_id, entry))
     fails.extend(_check_audio_start(clip_path))
+    fails.extend(_check_web_safe(clip_path))
     if source_end is None:
         fails.append("render_end_missing")
     else:

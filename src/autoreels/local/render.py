@@ -346,6 +346,31 @@ def _is_amf(codec: str) -> bool:
     return codec.endswith("_amf")
 
 
+def _is_h264(codec: str) -> bool:
+    c = codec.lower()
+    return "264" in c
+
+
+def _web_safe_out_args(faststart: bool) -> list[str]:
+    """Container flags for web-safe delivery (go just before the output file).
+
+    - `-movflags +faststart`: moov atom at the front so streaming players can start
+      before the whole file arrives (social networks / Yandex Disk web player require it).
+
+    NB: `-avoid_negative_ts make_zero` is deliberately NOT added.  Measured on IMG_6848:
+    the AAC encoder emits one priming frame at t=-0.021333 s (normal, handled by a tiny edit
+    list); make_zero shifts the whole timeline by that amount to zero the audio minimum, which
+    pushes the VIDEO stream to start_time=+0.021 s and inflates audio duration.  That fights the
+    priming edit list (which the owner asked to leave alone) and breaks the "both streams start
+    at 0" goal.  faststart + the filter-graph PTS reset (setpts/asetpts) already give start=0 on
+    every path, as PART 1 confirmed across all six existing sources.
+    """
+    args: list[str] = []
+    if faststart:
+        args += ["-movflags", "+faststart"]
+    return args
+
+
 def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: str, *,
                         quality: str | None = None, rate_control: str | None = None,
                         qp: int | None = None) -> list[str]:
@@ -379,6 +404,10 @@ def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: st
     # HEVC в mp4 без тега hvc1 муксится как hev1 — Apple/Safari/часть соцсетей не проигрывают.
     if _is_hevc(codec):
         args += ["-tag:v", "hvc1"]
+    # H.264 High profile: универсально совместимый delivery-профиль (libx264 с yuv420p и так High,
+    # у videotoolbox/amf профиль по умолчанию Main — задаём High явно).
+    if _is_h264(codec):
+        args += ["-profile:v", "high"]
     return args
 
 
@@ -438,8 +467,8 @@ def build_cut_cmd(
             "-filter_complex", filter_complex,
             "-map", "[v]", "-map", "[a]",
             "-c:v", codec, *quality_args,
-            "-c:a", audio_codec, "-b:a", audio_bitrate,
-            *(["-movflags", "+faststart"] if faststart else []),
+            "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
+            *_web_safe_out_args(faststart),
             str(out),
         ]
     if filter_complex:
@@ -454,8 +483,8 @@ def build_cut_cmd(
             "-filter_complex", filter_complex,
             "-map", "[v]", "-map", "[a]",
             "-c:v", codec, *quality_args,
-            "-c:a", audio_codec, "-b:a", audio_bitrate,
-            *(["-movflags", "+faststart"] if faststart else []),
+            "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
+            *_web_safe_out_args(faststart),
             str(out),
         ]
     # Decoder warm-up: seek pre_roll seconds before start; after input-side seek, ffmpeg resets
@@ -482,7 +511,7 @@ def build_cut_cmd(
         *quality_args,
         "-c:a", audio_codec,
         "-b:a", audio_bitrate, "-ar", "48000",
-        *(["-movflags", "+faststart"] if faststart else []),
+        *_web_safe_out_args(faststart),
         str(out),
     ]
 
@@ -661,6 +690,162 @@ def _check_integrity(path: Path, ffmpeg_bin: str) -> str:
         capture_output=True, text=True, check=False,
     )
     return result.stderr.strip()
+
+
+def _moov_before_mdat(path: Path) -> bool | None:
+    """True if the top-level `moov` atom precedes `mdat` (faststart — streaming players can
+    start before the whole file arrives).  None if neither atom is found (unreadable)."""
+    import struct
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    i, n = 0, len(data)
+    moov_at = mdat_at = None
+    while i + 8 <= n:
+        sz = struct.unpack(">I", data[i:i + 4])[0]
+        typ = data[i + 4:i + 8]
+        hdr = 8
+        if sz == 1:
+            if i + 16 > n:
+                break
+            sz = struct.unpack(">Q", data[i + 8:i + 16])[0]
+        elif sz == 0:
+            sz = n - i
+        if typ == b"moov" and moov_at is None:
+            moov_at = i
+        elif typ == b"mdat" and mdat_at is None:
+            mdat_at = i
+        if moov_at is not None and mdat_at is not None:
+            break
+        if sz < hdr:
+            break
+        i += sz
+    if moov_at is None or mdat_at is None:
+        return None
+    return moov_at < mdat_at
+
+
+def _volumedetect_mean_db(path: Path, ffmpeg_bin: str, *, duration: float,
+                          ignore_editlist: bool = False) -> float | None:
+    """Mean volume (dB) over the first `duration` seconds, normal or edit-list-ignoring decode.
+    None if volumedetect produced no reading (e.g. no audio)."""
+    pre = ["-ignore_editlist", "1"] if ignore_editlist else []
+    result = subprocess.run(
+        [ffmpeg_bin, "-nostats", "-hide_banner", *pre, "-i", str(path),
+         "-t", f"{duration:.3f}", "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    for line in result.stderr.splitlines():
+        if "mean_volume" in line:
+            try:
+                return float(line.split(":")[1].strip().replace(" dB", ""))
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
+def _check_web_safe(path: Path, ffmpeg_bin: str, *, require_h264: bool,
+                    fps: float = 30.0) -> list[str]:
+    """Permanent web-safe delivery check for a rendered clip (Yandex Disk / social web players).
+
+    Targets the real risks that make a web player drop the opening seconds or refuse the file:
+      - delivery codec: video H.264 (when the delivery profile is h264) and audio AAC-LC;
+      - moov atom at the front (faststart) so the player can start streaming;
+      - both stream start_time == 0 (no delayed stream start);
+      - |audio − video duration| < 1 frame (streams stay in sync to the end);
+      - first 3 s audio not silent, and normal-decode vs -ignore_editlist decode agree within
+        3 dB (a player that ignores the edit list must still hear the same opening audio — this
+        is the exact mechanism behind the reported 3 s of missing sound).
+
+    `require_h264`: True for the default h264 delivery (non-H.264 video → [ERROR]); False when the
+    operator deliberately rendered a non-web-safe codec (hevc/av1) — then codec is a warning only.
+    Returns a list of "[ERROR] ..." strings (empty = web-safe).  Warnings are printed directly.
+    """
+    ffprobe = _sibling_ffprobe(ffmpeg_bin)
+    errors: list[str] = []
+
+    # Stream codecs + start_time + duration, one ffprobe call.
+    probe = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries",
+         "stream=codec_type,codec_name,profile,start_time,duration",
+         "-of", "json", str(path)],
+        capture_output=True, text=True, check=False,
+    )
+    import json as _json
+    try:
+        streams = _json.loads(probe.stdout).get("streams", [])
+    except _json.JSONDecodeError:
+        return ["[ERROR] web-safe: ffprobe could not read streams"]
+
+    v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    a = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if v is None:
+        errors.append("[ERROR] web-safe: no video stream")
+    if a is None:
+        errors.append("[ERROR] web-safe: no audio stream")
+
+    # Codec family.
+    if v is not None:
+        vcodec = (v.get("codec_name") or "").lower()
+        if vcodec != "h264":
+            msg = f"video codec is {vcodec or '?'}, not h264"
+            if require_h264:
+                errors.append(f"[ERROR] web-safe: {msg}")
+            else:
+                print(f"  warning: web-safe: {msg} — web players may transcode and drop audio",
+                      flush=True)
+    if a is not None:
+        acodec = (a.get("codec_name") or "").lower()
+        if acodec != "aac":
+            errors.append(f"[ERROR] web-safe: audio codec is {acodec or '?'}, not aac(-LC)")
+
+    # Stream start_time == 0 (both).
+    for s, label in ((v, "video"), (a, "audio")):
+        if s is None:
+            continue
+        try:
+            st = float(s.get("start_time", "0"))
+        except (ValueError, TypeError):
+            st = 0.0
+        if abs(st) > 1e-3:
+            errors.append(f"[ERROR] web-safe: {label} stream start_time={st:.3f}s (must be 0)")
+
+    # |audio − video duration| < 1 frame.
+    try:
+        vdur = float(v.get("duration")) if v and v.get("duration") else None
+        adur = float(a.get("duration")) if a and a.get("duration") else None
+    except (ValueError, TypeError):
+        vdur = adur = None
+    if vdur is not None and adur is not None:
+        frame = 1.0 / fps if fps > 0 else 1.0 / 30.0
+        if abs(adur - vdur) >= frame:
+            errors.append(
+                f"[ERROR] web-safe: audio/video duration differ by {abs(adur - vdur) * 1000:.0f} ms "
+                f"(a={adur:.3f}s v={vdur:.3f}s, >= 1 frame)"
+            )
+
+    # moov before mdat (faststart).
+    moov_ok = _moov_before_mdat(path)
+    if moov_ok is False:
+        errors.append("[ERROR] web-safe: moov atom after mdat (not faststart) — streaming players stall")
+
+    # First 3 s audio: not silent, and normal vs ignore-editlist within 3 dB.
+    if a is not None:
+        normal = _volumedetect_mean_db(path, ffmpeg_bin, duration=3.0)
+        ignore = _volumedetect_mean_db(path, ffmpeg_bin, duration=3.0, ignore_editlist=True)
+        if normal is None:
+            errors.append("[ERROR] web-safe: no audio in first 3 s (volumedetect read nothing)")
+        else:
+            if normal <= -45.0:
+                errors.append(f"[ERROR] web-safe: first 3 s silent ({normal:.1f} dB)")
+            if ignore is not None and abs(normal - ignore) > 3.0:
+                errors.append(
+                    f"[ERROR] web-safe: first 3 s audio differs with/without edit list "
+                    f"({normal:.1f} vs {ignore:.1f} dB, >3 dB) — web player would lose opening sound"
+                )
+    return errors
 
 
 def _snap_windows_to_frames(segments, fps: float):
@@ -926,7 +1111,7 @@ def build_concat_cmd(
         # Trim to expected duration: hardware encoders (hevc_videotoolbox, hevc_amf) add 1 extra
         # frame per xfade seam; for N windows that is N-1 frames over the 2.5-frame invariant limit.
         *(["-t", _ts_dur(duration_sec)] if duration_sec else []),
-        *(["-movflags", "+faststart"] if faststart else []),
+        *_web_safe_out_args(faststart),
         str(out),
     ]
     return cmd
@@ -1350,8 +1535,8 @@ def _build_synth_tail_cmd(
         "-filter_complex", fc,
         "-map", "[v]", "-map", "[a]",
         "-c:v", codec, *quality_args, "-bf", "0",
-        "-c:a", audio_codec, "-b:a", audio_bitrate,
-        *(["-movflags", "+faststart"] if faststart else []),
+        "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
+        *_web_safe_out_args(faststart),
         str(tmp_out),
     ]
 
@@ -1410,7 +1595,7 @@ def _build_synth_tail_clip(
         "-map", "[v]", "-map", "[a]",
         "-t", _ts_dur(tail_sec),
         "-c:v", codec, *quality_args, "-bf", "0",
-        "-c:a", audio_codec, "-b:a", audio_bitrate,
+        "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
         str(tmp_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1469,8 +1654,8 @@ def _append_synth_tail_to_rendered(
             "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]",
             "-map", "[v]", "-map", "[a]",
             "-c:v", codec, *quality_args, "-bf", "0",
-            "-c:a", audio_codec, "-b:a", audio_bitrate,
-            *(["-movflags", "+faststart"] if faststart else []),
+            "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
+            *_web_safe_out_args(faststart),
             str(tmp_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -2807,6 +2992,16 @@ def _render_segments(
                     _clip_errors.append(
                         f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)"
                     )
+            # Web-safe delivery check (Yandex Disk / social web players): codec, faststart,
+            # start_time=0, a/v sync, opening audio.  require_h264 only for the default h264
+            # delivery; a deliberate hevc/av1 render downgrades the codec line to a warning.
+            if out.exists():
+                for _ws in _check_web_safe(
+                    out, ffmpeg_bin,
+                    require_h264=_is_h264(codec),
+                    fps=_inv_fps if _inv_fps > 0 else 30.0,
+                ):
+                    _clip_errors.append(f"  {_ws.replace('[ERROR] ', f'[ERROR] {reel.id}: ', 1)}")
             if _clip_errors:
                 for _ce in _clip_errors:
                     print(_ce, flush=True)
