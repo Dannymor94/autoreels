@@ -1819,6 +1819,14 @@ def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
     if tail_fade is not None:
         st, d = tail_fade
         return [f"afade=t=out:st={_num(max(0.0, round(st, 3)))}:d={_num(round(d, 3))}"] if d > 0 else []
+    # Dynamic ending (Part 4): only a short declick at the very end; the last word stays fully
+    # audible (the fade is far shorter than the end_air_sec air after the word).  No long tail fade.
+    if getattr(ap, "dynamic_ending", False):
+        d = max(0.0, getattr(ap, "end_audio_fade_ms", 40) / 1000.0)
+        if d <= 0:
+            return []
+        out_st = max(0.0, round(out_duration - d, 3))
+        return [f"afade=t=out:st={_num(out_st)}:d={_num(round(d, 3))}"]
     tf = getattr(ap, "tail_fade_sec", 0.25)
     if tf <= 0:
         return []
@@ -2530,6 +2538,7 @@ def _render_segments(
                 _synth_cfg = getattr(render_cfg, "synthetic_tail_cfg", None)
                 if (
                     _synth_cfg is not None and _synth_cfg.enabled
+                    and not getattr(ap, "dynamic_ending", False)   # Part 4: dynamic ending = no freeze
                     and not music_path
                     and _reel_speed == 1.0
                 ):
@@ -2706,7 +2715,8 @@ def _render_segments(
             # Tail video fade: from fade_start to clip end, AFTER subtitle burn-in.
             # force=True in smap path: always fade to black regardless of tail_video_fade config.
             # Synthetic tail handles its own fade — skip tvfade to avoid double-fade on real content.
-            if not _synth_active:
+            if not _synth_active and not getattr(ap, "dynamic_ending", False):
+                # Part 4: dynamic ending = hard cut on the last frame, no fade to black.
                 tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
                                                  min_sec_floor=_smap_fade_floor,
                                                  force=_use_smap_tail)

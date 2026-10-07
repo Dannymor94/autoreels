@@ -5846,7 +5846,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,
     # multi-segment, cold open, explicit e:). Runs LAST so nothing downstream shortens it.
     _video_dur = tx_words[-1].t1 if tx_words else None
-    _tail_pad = getattr(r0_cfg, "tail_pad_sec", 0.7)
+    # Part 4 — dynamic ending: short air (end_air_sec, default 0.20s) after the last word instead
+    # of the long legacy tail_pad.  The next-speech onset cap inside _apply_tail_air still applies,
+    # so the clip never runs into the next phrase.
+    _ap_cfg = getattr(render_cfg, "audio_processing", None) if render_cfg else None
+    if _ap_cfg is not None and getattr(_ap_cfg, "dynamic_ending", False):
+        _tail_pad = getattr(_ap_cfg, "end_air_sec", 0.20)
+    else:
+        _tail_pad = getattr(r0_cfg, "tail_pad_sec", 0.7)
     _apply_tail_air(reels, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur,
                     smap_lookup=_blk_smap_lookup, smap=_blk_smap)
 

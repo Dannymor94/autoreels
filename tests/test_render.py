@@ -1120,21 +1120,27 @@ from autoreels.core.config import AudioProcessing
 from autoreels.local.render import _audio_filter_chain, _video_fade_filter
 
 
-def test_audio_chain_default_is_loudnorm_plus_tail_fade():
-    # дефолт: нормализация к -14 LUFS + clean-tail fade (0.35с, только звук).
+def test_audio_chain_default_is_loudnorm_plus_declick():
+    # дефолт (Part 4 — динамичный конец): нормализация к -14 LUFS + короткий declick 40 мс.
     af = _audio_filter_chain(AudioProcessing(), 30.0)
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.96:d=0.04"
+
+
+def test_audio_chain_legacy_loudnorm_plus_tail_fade():
+    # dynamic_ending=False → прежний clean-tail fade (0.35с).
+    af = _audio_filter_chain(AudioProcessing(dynamic_ending=False), 30.0)
     assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
 
 
 def test_audio_chain_empty_when_all_disabled():
-    # tail-фейд тоже выключен → цепочка пуста (команда без -af).
+    # tail-фейд тоже выключен → цепочка пуста (команда без -af). Динамичный declick выключен.
     ap = AudioProcessing(loudnorm_enabled=False, denoise_enabled=False, fade_enabled=False,
-                         tail_fade_sec=0.0)
+                         tail_fade_sec=0.0, dynamic_ending=False)
     assert _audio_filter_chain(ap, 30.0) == ""
 
 
 def test_audio_chain_denoise_before_loudnorm():
-    ap = AudioProcessing(denoise_enabled=True, denoise_strength=10)
+    ap = AudioProcessing(denoise_enabled=True, denoise_strength=10, dynamic_ending=False)
     af = _audio_filter_chain(ap, 30.0)
     assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
     assert af.index("afftdn") < af.index("loudnorm")
@@ -1142,14 +1148,15 @@ def test_audio_chain_denoise_before_loudnorm():
 
 def test_audio_chain_fade_last_and_out_start_from_duration():
     # symmetric fade isolated (tail fade off) — порядок loudnorm → afade in → afade out.
-    ap = AudioProcessing(fade_enabled=True, fade_duration=0.25, tail_fade_sec=0.0)
+    ap = AudioProcessing(fade_enabled=True, fade_duration=0.25, tail_fade_sec=0.0,
+                         dynamic_ending=False)
     af = _audio_filter_chain(ap, 30.0)
     assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.25,afade=t=out:st=29.75:d=0.25"
 
 
 def test_audio_tail_fade_always_on_and_uses_output_duration():
-    # clean-tail fade включён по умолчанию, стартует в (out_duration − 0.35s).
-    ap = AudioProcessing(loudnorm_enabled=False)   # isolate: only the tail fade
+    # legacy clean-tail fade стартует в (out_duration − 0.35s).
+    ap = AudioProcessing(loudnorm_enabled=False, dynamic_ending=False)   # isolate: only the tail fade
     assert _audio_filter_chain(ap, 30.0) == "afade=t=out:st=29.65:d=0.35"
     # sped-up clip: out_duration passed shorter → fade lands on the real (post-speed) end
     assert _audio_filter_chain(ap, 30.0, out_duration=20.0) == "afade=t=out:st=19.65:d=0.35"
@@ -1174,9 +1181,9 @@ from autoreels.local.render import _audio_tail_fade_parts
 
 
 def test_clean_tail_full_level_then_35ms_decay():
-    """Clean tail: clean-tail afade covers only last tail_fade_sec (0.35s default).
-    For a 30s clip, the last 0.35s decays."""
-    ap = AudioProcessing(loudnorm_enabled=False)
+    """Legacy clean tail (dynamic_ending=False): clean-tail afade covers only last tail_fade_sec
+    (0.35s default). For a 30s clip, the last 0.35s decays."""
+    ap = AudioProcessing(loudnorm_enabled=False, dynamic_ending=False)
     af = _audio_filter_chain(ap, 30.0)
     assert af == "afade=t=out:st=29.65:d=0.35"
 
@@ -1450,8 +1457,9 @@ def test_tail_video_fade_flag_off_identical_render_command(tmp_path, render_cfg,
 
 
 def test_tail_video_fade_appended_after_subtitles(tmp_path, render_cfg, fake_ffmpeg):
-    """tail_video_fade=True: fade=t=out appears in vf AFTER ass= filter."""
+    """tail_video_fade=True: fade=t=out appears in vf AFTER ass= filter (legacy, dynamic off)."""
     subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    render_cfg.audio_processing.dynamic_ending = False   # legacy path: tail video fade active
     render_cfg.audio_processing.tail_video_fade = True
     render_cfg.audio_processing.tail_fade_sec = 0.25
     inputs = tmp_path / "inputs"
