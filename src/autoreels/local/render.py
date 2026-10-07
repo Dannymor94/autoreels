@@ -2669,11 +2669,14 @@ def _render_segments(
                     _fade_sn = _num(_fade_s)
                     # One frame at cut point, held for tail_sec, then fade to black
                     _synth_vc = (
-                        f"trim=start=0:end={_num(1.0 / _fps())},"
+                        f"trim=start=0:end={_num(max(1.0 / _fps(), 0.2))},"
                         f"setpts=PTS-STARTPTS,"
                         f"loop=loop=-1:size=1,"
                         f"trim=end={_num(_tail_s)},setpts=PTS-STARTPTS,"
-                        f"settb=expr=1/90000,"
+                        # fps normalizes VFR synth input to CFR so [v_synth] matches
+                        # [v_real]'s frame rate; without this VFR sources produce
+                        # ~27 frames for 1s instead of fps frames, breaking the invariant.
+                        f"fps={_num(_fps())},settb=expr=1/90000,"
                         f"{_sc_part},"
                         f"fade=t=out:st={_fade_st}:d={_fade_sn}:color=black"
                     )
