@@ -108,3 +108,40 @@ def test_default_bind():
     s = Settings.from_env()
     assert s.root.is_absolute()
     assert s.port == 8765
+
+
+# --- added in U1-fix ---------------------------------------------------------
+
+def test_each_test_gets_its_own_root(tmp_path):
+    """Guard: the app must read settings at call time, not at import time."""
+    import autoreels.orchestr.settings as _s
+    from autoreels.orchestr.settings import Settings
+    from autoreels.orchestr.app import app
+
+    roots = [tmp_path / "a", tmp_path / "b"]
+    for r in roots:
+        (r / "reels-out").mkdir(parents=True)
+        _s.settings = Settings.from_env(root_override=str(r))
+        assert TestClient(app).get("/api/health").json()["root"] == str(r.resolve())
+
+
+def test_clips_listing_traversal_rejected(client, tmp_root):
+    (tmp_root / "r09.mp4").write_bytes(b"secret")   # one level above reels-out
+    for stem in ("%2E%2E", "..", "%2E%2E%2F%2E%2E"):
+        assert client.get(f"/api/sources/{stem}/clips").status_code == 404
+
+
+def test_error_files_not_listed(client, tmp_root):
+    (tmp_root / "reels-out" / "DEMO" / "r01.ERROR.mp4").write_bytes(b"x")
+    clips = [c["clip"] for c in client.get("/api/sources/DEMO/clips").json()]
+    assert "r01.ERROR" not in clips
+    src = client.get("/api/sources").json()[0]
+    assert src["clip_count"] == 2
+
+
+def test_symlink_outside_not_listed(client, tmp_root):
+    evil = tmp_root.parent / "evil2.mp4"
+    evil.write_bytes(b"\x00" * 50)
+    (tmp_root / "reels-out" / "DEMO" / "r98.mp4").symlink_to(evil)
+    clips = [c["clip"] for c in client.get("/api/sources/DEMO/clips").json()]
+    assert "r98" not in clips

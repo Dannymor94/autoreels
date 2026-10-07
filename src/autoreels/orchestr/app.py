@@ -8,7 +8,7 @@ from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
 from . import pipeline_gateway
-from .settings import settings
+from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 
 app = FastAPI(title="Авто-Рилс UI", version="1")
 
@@ -43,7 +43,33 @@ class ClipItem(BaseModel):
 # --- Helpers ---
 
 def _reels_dir() -> Path:
-    return settings.root / "reels-out"
+    return _cfg.settings.root / "reels-out"
+
+
+def _iter_clips(stem: str) -> list[tuple[Path, str]]:
+    """(resolved mp4, variant) for every valid clip of a stem.
+
+    Uses resolve_media_path for EVERY file, so listing obeys exactly the same rules as playback:
+    stem whitelist, clip-name regex (skips r01.ERROR.mp4), variant regex, symlink guard.
+    Raises HTTPException(404) if the stem itself is not a valid source.
+    """
+    reels = _reels_dir()
+    valid_stems = {d.name for d in reels.iterdir() if d.is_dir()} if reels.exists() else set()
+    if stem not in valid_stems:
+        raise HTTPException(status_code=404, detail="stem not found")
+    stem_dir = reels / stem
+    folders: list[tuple[Path, str]] = [(stem_dir, "")]
+    gate_dir = stem_dir / "_gate"
+    if gate_dir.is_dir():
+        folders += [(vd, f"_gate/{vd.name}") for vd in sorted(gate_dir.iterdir()) if vd.is_dir()]
+    out: list[tuple[Path, str]] = []
+    for folder, variant in folders:
+        for mp4 in sorted(folder.glob("r*.mp4")):
+            try:
+                out.append((resolve_media_path(_cfg.settings.root, stem, mp4.stem, variant), variant))
+            except HTTPException:
+                continue
+    return out
 
 
 def _list_sources() -> list[SourceItem]:
@@ -54,58 +80,34 @@ def _list_sources() -> list[SourceItem]:
     for stem_dir in sorted(reels.iterdir()):
         if not stem_dir.is_dir():
             continue
-        clips = list(stem_dir.glob("r*.mp4"))
-        variant_names: list[str] = []
-        gate_dir = stem_dir / "_gate"
-        if gate_dir.is_dir():
-            for vd in sorted(gate_dir.iterdir()):
-                if vd.is_dir() and list(vd.glob("r*.mp4")):
-                    variant_names.append(f"_gate/{vd.name}")
-                    clips.extend(vd.glob("r*.mp4"))
-        if clips:
+        found = _iter_clips(stem_dir.name)
+        if found:
             items.append(SourceItem(
                 stem=stem_dir.name,
-                clip_count=len(list(stem_dir.glob("r*.mp4"))),
-                variant_names=variant_names,
+                clip_count=sum(1 for _, v in found if v == ""),
+                variant_names=sorted({v for _, v in found if v}),
             ))
     return items
 
 
 def _list_clips(stem: str) -> list[ClipItem]:
-    reels = _reels_dir()
-    stem_dir = reels / stem
-    if not stem_dir.exists():
-        raise HTTPException(status_code=404, detail="stem not found")
-
     items: list[ClipItem] = []
-
-    def _clip_item(mp4: Path, variant: str) -> ClipItem:
+    for mp4, variant in _iter_clips(stem):
         rj = mp4.with_suffix(".render.json")
         fp = None
         has_rj = rj.exists()
         if has_rj:
             try:
-                fp = json.loads(rj.read_text()).get("fingerprint")
+                fp = json.loads(rj.read_text(encoding="utf-8")).get("fingerprint")
             except Exception:
                 pass
-        return ClipItem(
+        items.append(ClipItem(
             clip=mp4.stem,
             variant=variant,
             size_bytes=mp4.stat().st_size,
             has_render_json=has_rj,
             fingerprint=fp,
-        )
-
-    for mp4 in sorted(stem_dir.glob("r*.mp4")):
-        items.append(_clip_item(mp4, ""))
-
-    gate_dir = stem_dir / "_gate"
-    if gate_dir.is_dir():
-        for vd in sorted(gate_dir.iterdir()):
-            if vd.is_dir():
-                for mp4 in sorted(vd.glob("r*.mp4")):
-                    items.append(_clip_item(mp4, f"_gate/{vd.name}"))
-
+        ))
     return items
 
 
@@ -113,7 +115,7 @@ def _list_clips(stem: str) -> list[ClipItem]:
 
 @app.get("/api/health", response_model=HealthResponse)
 def health():
-    return HealthResponse(status="ok", root=str(settings.root), schema_version=1)
+    return HealthResponse(status="ok", root=str(_cfg.settings.root), schema_version=1)
 
 
 @app.get("/api/capabilities", response_model=CapabilitiesResponse)
@@ -133,5 +135,5 @@ def clips(stem: str):
 
 @app.get("/api/media/{stem}/{clip}")
 def media(stem: str, clip: str, variant: str = Query(default="")):
-    path = resolve_media_path(settings.root, stem, clip, variant)
+    path = resolve_media_path(_cfg.settings.root, stem, clip, variant)
     return media_response(path)
