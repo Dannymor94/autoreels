@@ -376,9 +376,15 @@ def _snap_start(start: float, end: float, words: list[Word], *, window_sec: floa
         if _prec:
             target = words[max(_prec)].t0
     # Не начинать с висячего слова: сдвинуть вперёд, пока слово-начало не «висячее».
+    # Исключение: слово с заглавной буквы на границе паузы (phrase start) открывает предложение;
+    # lowercase висячее — всегда сдвигаем, uppercase на границе паузы — оставляем
+    # (filter_dangling_start разберётся, если нужно).
     idx = next((i for i, w in enumerate(words) if abs(w.t0 - target) < 1e-6), None)
     if idx is not None:
         while idx < len(words) and words[idx].t0 < end and _is_hanging(words[idx].word, hanging_start_words):
+            w = words[idx]
+            if idx in start_idx and w.word and w.word[0].isupper():
+                break  # uppercase sentence opener at phrase boundary — leave it for filter_dangling
             idx += 1
         if idx < len(words):
             target = words[idx].t0

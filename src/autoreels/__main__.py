@@ -4953,15 +4953,6 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         print(f"error: transcript not found for {manifest_path.name}", file=sys.stderr)
         return 1
 
-    # Strip Whisper credit hallucinations (e.g. «Субтитры создавал DimaTorzok») at word level,
-    # once at load, so export, apply, subtitles, and speech-map all see the same clean word list.
-    _credit_pats = getattr(r0_cfg, "credit_word_patterns", [])
-    if _credit_pats:
-        from autoreels.cloud.edit import strip_credit_words as _scw
-        _clean_words = _scw(transcript.words, _credit_pats)
-        if len(_clean_words) != len(transcript.words):
-            transcript = transcript.model_copy(update={"words": _clean_words})
-
     # Stages 1-3: blocks → filter → score (heuristic scores needed for dataset)
     compressed = compress_transcript(
         transcript, pause_sec=r0_cfg.sentence_pause_sec, max_sentence_sec=r0_cfg.max_sentence_sec,
@@ -5058,6 +5049,13 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # build-order position (0-based) of the reel each scored seq becomes; the formatting-only
     # pipeline never drops or reorders, so position i survives as final reel i+1.
     _tx_words = getattr(transcript, "words", [])
+    # Strip Whisper credit hallucinations from _tx_words (sentence building only).
+    # transcript.words stays raw so compress_transcript / filter_blocks / snap see
+    # the real compressed structure and _scrub_artefact_lines sets block.start correctly.
+    _credit_pats = getattr(r0_cfg, "credit_word_patterns", [])
+    if _credit_pats:
+        from autoreels.cloud.edit import strip_credit_words as _scw
+        _tx_words = _scw(_tx_words, _credit_pats)
     # M1.8 Stage B: load smap before the reel-build loop so x:/beat seam refinement can use it.
     # Always load from cache if present; only build/fetch when speech_map=True.
     _blk_smap: "dict | None" = None
@@ -5237,7 +5235,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if _beats:
             from autoreels.cloud.select import _DEFAULT_DANGLING
             _beat_gap = getattr(r0_cfg, "beat_gap_sec", 0.25)
-            _all_sents = split_sentences(words_in_span(_tx_words, reel.start, reel.end))
+            # Use _gsents (merge_group_sentences output) so beat indices match the export:
+            # merge_group_sentences fuses the incomplete sentence at multi-block junctions into
+            # one, giving the same sentence count the reviewer saw and annotated with > X-Y beats.
+            # split_sentences(words_in_span(...)) would produce a different count (no junction merge)
+            # and shift all sentence numbers after the junction by +1.
+            _all_sents = _gsents
             _n = len(_all_sents)
             _grp = '+'.join(str(s) for s in g)
             # validate beat indices
@@ -5906,13 +5909,6 @@ def cmd_blocks(
         print(f"ошибка: транскрипт не найден для {target}", file=sys.stderr)
         return 1
 
-    _credit_pats = getattr(r0_cfg, "credit_word_patterns", [])
-    if _credit_pats:
-        from autoreels.cloud.edit import strip_credit_words as _scw
-        _clean_words = _scw(transcript.words, _credit_pats)
-        if len(_clean_words) != len(transcript.words):
-            transcript = transcript.model_copy(update={"words": _clean_words})
-
     compressed = compress_transcript(
         transcript,
         pause_sec=r0_cfg.sentence_pause_sec,
@@ -6033,17 +6029,24 @@ def cmd_blocks(
                     "перезапись сотрёт результаты ревью",
                     file=sys.stderr,
                 )
+        _credit_pats_exp = getattr(r0_cfg, "credit_word_patterns", [])
+        _export_words = transcript.words
+        if _credit_pats_exp:
+            from autoreels.cloud.edit import strip_credit_words as _scw_exp
+            _cw_exp = _scw_exp(_export_words, _credit_pats_exp)
+            if len(_cw_exp) != len(_export_words):
+                _export_words = _cw_exp
         if compact:
             review_content = export_compact_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
-                words=transcript.words,
+                words=_export_words,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
                 min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
             )
         else:
             review_content = export_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
-                words=transcript.words,
+                words=_export_words,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
                 min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
             )

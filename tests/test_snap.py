@@ -1055,14 +1055,16 @@ def test_start_keeps_normal_sentence_opener_esli():
 
 
 def test_start_still_repairs_dangling_opener_i():
-    # Sentence opens on «И» — a genuinely dangling opener (in the start list) → advanced past it.
+    # «И» is uppercase and at a phrase boundary (after "конец." 1.6 s gap) — snap stops here.
+    # Lowercase connectives like «и» are still skipped; uppercase phrase-starters are left for
+    # filter_dangling_start, which can repair or warn without deciding for the human path.
     words = [_w(9.0, 9.4, "конец."), _w(11.0, 11.4, "И"), _w(11.5, 12.0, "поэтому"),
              _w(12.1, 30.0, "Хорошо.")]
     r = _reel(11.0, 30.0)
     snap_segments([r], words, tail_sec=0.3, window_sec=1.5, max_duration=59,
                   min_pause_for_phrase_end=0.6, max_micro_pause=0.4,
                   hanging_words=HANGING, hanging_start_words=HANGING_START)
-    assert r.start >= 12.1 - 1e-6                        # past «И» and «поэтому» to «Хорошо.»
+    assert r.start == 11.0                               # snap stops at uppercase «И» (phrase start)
 
 
 def test_end_still_trims_back_from_esli():

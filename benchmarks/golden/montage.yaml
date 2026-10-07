@@ -1,5 +1,7 @@
 # Golden expectations for the "montage" gate run.
 # 24 clips: lecture 2026-08-08 11h 42m 49s r01–r06, PXL_20260729 r01–r10, IMG_6848 r01–r08.
+# montage2: 2026-08-08 09h 33m 14s r01–r02,r04–r10 (r03 blocked by short close span);
+#           Pxl 20260621 112938952 (pxl1129); Pxl 20260621 122006193 (pxl1220); 2026-08-08 10h 59m 38s (lec1059).
 # first_words / last_words: first and last 4 whitespace-split tokens from <id>.transcript.txt.
 # cold_open: full text of cold-open segment, or null.
 # reel_end: source timestamp (seconds) — used for speechmap silence check.
@@ -223,4 +225,87 @@ clips:
     reel_end: 1894.109
     first_words: "То есть, когда тебя"
     last_words: "улучшить качественно свою жизнь."
+    cold_open: null
+
+  # ── 2026-08-08 09h 33m 14s (lec0933) ────────────────────────────────────────
+  # r03 omitted: [ERROR] short close span 0.720s (c:14 too short at clip end)
+  - clip_id: r01
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r01.mp4"
+    reel_start: 159.167
+    reel_end: 173.275
+    first_words: "И раз вы здесь,"
+    last_words: "Без вас здесь никак."
+    cold_open: null
+
+  - clip_id: r02
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r02.mp4"
+    reel_start: 302.554
+    reel_end: 347.319
+    first_words: "Каждая нервная система уникальна."
+    last_words: "этот маленький человечек находится."
+    cold_open: null
+
+  - clip_id: r04
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r04.mp4"
+    reel_start: 664.148
+    reel_end: 663.900
+    first_words: "Представьте, вы какой-то уникальный."
+    last_words: "нужна уникальная система раскрытия."
+    cold_open: null
+
+  - clip_id: r05
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r05.mp4"
+    reel_start: 793.460
+    reel_end: 826.290
+    first_words: "Как в сценарии, он"
+    last_words: "бил, бухал, пойдет, берем."
+    cold_open: null
+
+  - clip_id: r06
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r06.mp4"
+    reel_start: 838.359
+    reel_end: 864.435
+    first_words: "Прикиньте, сначала там родители,"
+    last_words: "как белка в колесе."
+    cold_open: null
+
+  - clip_id: r07
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r07.mp4"
+    reel_start: 963.881
+    reel_end: 995.640
+    first_words: "И тогда, смотрите, ребятки,"
+    last_words: "просто к нему привыкли."
+    cold_open: null
+
+  - clip_id: r08
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r08.mp4"
+    reel_start: 1210.650
+    reel_end: 1261.190
+    first_words: "А кто давит на"
+    last_words: "и есть ваша эго-конструкция."
+    cold_open: null
+
+  - clip_id: r09
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r09.mp4"
+    reel_start: 1420.733
+    reel_end: 1444.160
+    first_words: "Что такое дыхание? Дыхание"
+    last_words: "они между собой взаимосвязаны."
+    cold_open: null
+
+  - clip_id: r10
+    stem: "2026-08-08 09h 33m 14s"
+    path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r10.mp4"
+    reel_start: 1487.395
+    reel_end: 1519.255
+    first_words: "А чтобы что-то излечиться"
+    last_words: "уровне «излечи себя» сама."
     cold_open: null

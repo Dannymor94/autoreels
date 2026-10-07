@@ -354,3 +354,34 @@ def test_strip_credit_words_no_match_unchanged():
     words = [_w(0.0, 1.0, "Слово"), _w(1.0, 2.0, "другое.")]
     result = edit.strip_credit_words(words, ["DimaTorzok"])
     assert result == words
+
+
+def test_merge_group_sentences_junction_fewer_than_flat_split():
+    """merge_group_sentences gives fewer sentences than split_sentences(merged span) when a
+    word with terminal punctuation falls in the gap between blocks.  Beat indices must use
+    _gsents (from merge_group_sentences), not a re-split of the merged span — otherwise
+    every sentence number after the junction is off by one."""
+    from autoreels.cloud.blocks import CandidateBlock
+    from autoreels.cloud.edit import merge_group_sentences, split_sentences, words_in_span
+
+    b1_ws = [_w(0.0, 1.0, "Первое."), _w(2.0, 3.0, "А"), _w(3.0, 4.5, "потому")]
+    gap_w = _w(5.0, 5.5, "Итак.")   # gap: block1.end=5.0, block2.start=5.5 → excluded from both
+    b2_ws = [_w(5.5, 6.5, "они"), _w(6.5, 7.0, "тут."), _w(8.0, 9.0, "Второе.")]
+    all_ws = b1_ws + [gap_w] + b2_ws
+
+    b1 = CandidateBlock(id="b1", start=0.0, end=5.0, duration=5.0, text="", boundary_reason="pause")
+    b2 = CandidateBlock(id="b2", start=5.5, end=9.5, duration=4.0, text="", boundary_reason="pause")
+
+    merged = merge_group_sentences([b1, b2], all_ws)
+    flat = split_sentences(words_in_span(all_ws, b1.start, b2.end))
+
+    # merge: [["Первое."], ["А потому они тут."], ["Второе."]] = 3 (junction merge absorbed gap_w)
+    assert len(merged) == 3
+    # flat split: gap_w "Итак." creates an extra sentence boundary
+    # [["Первое."], ["А потому Итак."], ["они тут."], ["Второе."]] = 4
+    assert len(flat) == 4
+
+    merged_s2 = " ".join(w.word for w in merged[1])
+    flat_s2 = " ".join(w.word for w in flat[1])
+    assert "они" in merged_s2   # junction merged correctly: "А потому они тут."
+    assert "они" not in flat_s2  # flat split: sentence 2 is "А потому Итак.", "они" is in sentence 3
