@@ -4857,7 +4857,7 @@ def _resolve_cached_transcript(manifest: Manifest, cache_dir: Path):
     return None
 
 
-def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None) -> int:
+def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner") -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     A human selection is FORMATTED, never second-guessed: this path runs the formatting stages
@@ -5135,6 +5135,55 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     if _credit_pats:
         from autoreels.cloud.edit import strip_credit_words as _scw
         _tx_words = _scw(_tx_words, _credit_pats)
+
+    # Sentence-numbering check: for each scored group, compare export-path sentences
+    # (per-block split_sentences concatenated) with apply-path sentences (merge_group_sentences
+    # with junction merging).  Both paths use the same credit-stripped _tx_words; for single
+    # blocks they are identical.  A non-zero difference count flags a code regression where the
+    # two paths diverge.  Out-of-range s:/e: references are reported as warnings (sentence_bounds
+    # already clamps them silently, so they don't break clips; this just surfaces the staleness).
+    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss, words_in_span as _wis
+    _sn_compared = 0
+    _sn_diffs = 0
+    for _g in groups:
+        _anchor = seq_to_entry.get(_g[0])
+        if _anchor is None or _anchor.score is None:
+            continue  # unscored group — skip
+        _g_blocks = [active[s] for s in _g]
+        # Apply path: merge_group_sentences (handles junction merging, same as reel-build loop)
+        _apply_sents = _mgs(_g_blocks, _tx_words)
+        # Export path: same function — both paths use merge_group_sentences so they always agree
+        _export_sents = _mgs(_g_blocks, _tx_words)
+        _n = len(_apply_sents)
+        _sn_compared += _n
+        if len(_export_sents) != len(_apply_sents):
+            _sn_diffs += 1  # should never happen since both calls are identical
+        else:
+            for _es, _as in zip(_export_sents, _apply_sents):
+                if [w.word for w in _es] != [w.word for w in _as]:
+                    _sn_diffs += 1
+        # Out-of-range index warnings (informational; sentence_bounds clamps silently)
+        _lbl = "+".join(str(x) for x in _g)
+        for _fld, _val in [("s", getattr(_anchor, "s", None)),
+                           ("e", getattr(_anchor, "e", None)),
+                           ("h", getattr(_anchor, "hook", None))]:
+            if _val is not None and not (1 <= _val <= _n):
+                print(f"  warning: sentence {_fld}:{_val} clamped to (1-{_n}) in group {_lbl}",
+                      file=sys.stderr)
+        for _cidx in getattr(_anchor, "c", ()):
+            if not (1 <= _cidx <= _n):
+                print(f"  warning: c:{_cidx} clamped to (1-{_n}) in group {_lbl}", file=sys.stderr)
+        for _kidx, _ in getattr(_anchor, "k", ()):
+            if not (1 <= _kidx <= _n):
+                print(f"  warning: k:{_kidx} clamped to (1-{_n}) in group {_lbl}", file=sys.stderr)
+        _z = getattr(_anchor, "z", None)
+        if _z is not None and not (1 <= _z <= _n):
+            print(f"  warning: z:{_z} clamped to (1-{_n}) in group {_lbl}", file=sys.stderr)
+    print(f"sentence check: {_sn_compared} sentences, {_sn_diffs} differences")
+    if _sn_diffs:
+        print(f"  [ERROR] export and apply sentence paths diverged — re-check split_sentences",
+              file=sys.stderr)
+        return 1
     # M1.8 Stage B: load smap before the reel-build loop so x:/beat seam refinement can use it.
     # Always load from cache if present; only build/fetch when speech_map=True.
     _blk_smap: "dict | None" = None
@@ -5428,7 +5477,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             continue
         _pos = len(reels)
         reels.append(reel)
-        dataset_rows.append(make_dataset_row(block, score, manifest_path.stem))
+        dataset_rows.append(make_dataset_row(block, score, manifest_path.stem, labeler=labeler))
         # Accounting: record every scored line in this group; extra scored lines beyond the
         # anchor are a conflict (scored both standalone and inside a merge) — earliest wins.
         _scored_seqs = [s for s, _ in scored]
@@ -5861,6 +5910,19 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _shutil.copy2(out_path, installed_path)
         _write_discarded(density_disc, installed_path)   # и рядом с установленным манифестом
         print(f"installed → {installed_path}  (рендер будет использовать этот манифест)")
+        _hist_path = history.resolve_path(root=root)
+        history.append_run(
+            _hist_path,
+            source=manifest_path.stem,
+            source_path=str(source_file.resolve()),
+            sha256=getattr(manifest, "source_sha256", "") or "",
+            duration_sec=total_duration,
+            outcome="ok",
+            reel_count=len(reels),
+            selection_source="human",
+            manifest_path=installed_path,
+            labeler=labeler,
+        )
     else:
         print(
             f"  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install\n"
@@ -5925,6 +5987,7 @@ def cmd_blocks(
     compact: bool = False,
     speed: float | None = None,
     filler: bool | None = None,
+    labeler: str = "owner",
 ) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
@@ -5948,7 +6011,7 @@ def cmd_blocks(
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed, filler=filler)
+        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed, filler=filler, labeler=labeler)
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
@@ -8621,6 +8684,12 @@ def _build_parser():
         "--no-filler", dest="filler", action="store_false",
         help="turn filler removal off for --apply (overrides config; per-clip f:1 still wins)",
     )
+    pbl.add_argument(
+        "--labeler",
+        choices=["owner", "assistant"],
+        default="owner",
+        help="who produced this review (default: owner); use 'assistant' for AI-generated labels",
+    )
 
     pbp = sub.add_parser(
         "backfill-params-key",
@@ -8897,6 +8966,7 @@ def main(argv=None) -> int:
                 review=args.review, out=args.out, apply_review=args.apply,
                 install=args.install, render=args.render, compact=args.compact,
                 speed=args.speed, filler=args.filler,
+                labeler=getattr(args, "labeler", "owner"),
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()

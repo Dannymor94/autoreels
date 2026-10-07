@@ -1146,7 +1146,7 @@ def resolve_merge_groups(
     return final, over
 
 
-def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str) -> dict:
+def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str, labeler: str = "owner") -> dict:
     """Build a dataset row for one reviewed block (both human and heuristic scores).
 
     The dataset lets stage 3 correlation be measured once enough labels accumulate.
@@ -1162,5 +1162,5 @@ def make_dataset_row(block: CandidateBlock, human_score: int, source_stem: str) 
         "human_score": human_score,
         "heuristic_score": round(block.heuristic_score, 2),
         "features": dict(block.score_breakdown),
-        "labeler": "assistant",
+        "labeler": labeler,
     }

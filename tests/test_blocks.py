@@ -843,7 +843,7 @@ def test_dataset_row_records_both_scores():
     b.id = "abc123def456789a"
     b.heuristic_score = 73.5
     b.score_breakdown = {"duration": 15.0, "ends_sentence": 10.0, "opens_sentence": 10.0}
-    row = make_dataset_row(b, human_score=85, source_stem="test_video")
+    row = make_dataset_row(b, human_score=85, source_stem="test_video", labeler="assistant")
     assert row["human_score"] == 85
     assert row["heuristic_score"] == pytest.approx(73.5)
     assert "features" in row

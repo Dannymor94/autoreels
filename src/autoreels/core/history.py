@@ -58,6 +58,7 @@ def append_run(
     reel_count: int,
     selection_source: str,
     manifest_path: str | Path,
+    labeler: str | None = None,
     cap: int | None = None,
     now: float | None = None,
 ) -> dict:
@@ -65,7 +66,7 @@ def append_run(
 
     Не роняет вызывающего: запись истории вспомогательна, ошибка ФС не должна валить прогон.
     """
-    rec = {
+    rec: dict = {
         "ts": _iso(now),
         "source": source,
         "source_path": str(source_path),
@@ -76,6 +77,8 @@ def append_run(
         "selection_source": selection_source or "auto",
         "manifest": str(manifest_path or ""),
     }
+    if labeler is not None:
+        rec["labeler"] = labeler
     try:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
