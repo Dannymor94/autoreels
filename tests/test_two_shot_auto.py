@@ -302,12 +302,16 @@ def test_property_no_short_spans_random_boundaries():
 # ── Part 2: c: annotation preserved; jump seams force shot change ─────────────────────────────
 
 def test_ci_annotation_not_cleared_by_pass1():
-    """wide+ci segments (c: annotations) must be treated as manual — Pass 1 must not clear ci."""
-    segs = [_seg(0, 5), _seg(6, 14, "wide", [[2.0, 8.0]])]
+    """wide+ci segments (c: annotations) with no short spans must not have ci cleared.
+
+    ci[0][0]=5.0 > min_shot=2.5 → no leading snap.
+    Trailing=0 → no tail snap. close=3s is the last span (not an A-B-A middle).
+    Pass 1 must leave the shot and ci intact.
+    """
+    segs = [_seg(0, 5), _seg(6, 14, "wide", [[5.0, 8.0]])]
     out = _apply(segs)
-    # c: annotation: ci must be preserved intact
     assert out[1].shot == "wide",             "shot must stay wide (as annotated)"
-    assert out[1].close_intervals == [[2.0, 8.0]], "ci must not be cleared by Pass 1"
+    assert out[1].close_intervals == [[5.0, 8.0]], "ci must not be cleared by Pass 1"
 
 
 def _reel_beat(segs, id="r01"):
@@ -419,23 +423,29 @@ def test_snap_ci_near_window_end():
 
 
 def test_snap_does_not_move_ci_outside_threshold():
-    """close_interval boundaries more than 0.15 s from window edge must not be moved."""
-    segs = [_seg(0, 10, "wide", [[0.20, 8.0]])]
+    """close_interval boundaries more than min_shot from window edge must not be moved.
+
+    ci[0][0]=3.0 > min_shot=2.5 → leading wide prefix not snapped.
+    dur-ci[-1][1]=3.0 > min_shot=2.5 → trailing wide suffix not snapped.
+    close span = 4.0 = min_middle (not < min_middle) → no A-B-A merge.
+    """
+    segs = [_seg(0, 10, "wide", [[3.0, 7.0]])]
     out = _apply(segs)
-    assert out[0].close_intervals[0][0] == pytest.approx(0.20), "ci > 0.15 from start must not snap"
-    assert out[0].close_intervals[0][1] == pytest.approx(8.0),  "ci > 0.15 from end must not snap"
+    assert out[0].close_intervals[0][0] == pytest.approx(3.0), "ci > min_shot from start must not snap"
+    assert out[0].close_intervals[0][1] == pytest.approx(7.0), "ci > min_shot from end must not snap"
 
 
-def test_flash_detection_flags_short_wide_gap():
-    """A wide gap < min_shot that is not snapped away (> 0.15 s from boundary) gets [ERROR] warning."""
-    # ci starts at 0.3 s → 0.3 s wide span before close, not snapped (> 0.15 threshold)
+def test_snap_fixes_short_wide_gap_below_min_shot():
+    """ci prefix of 0.3 s (< min_shot=2.5 s) is snapped away — no [ERROR] remains."""
+    # ci starts at 0.3 s → snap extends ci[0][0] to 0.0 (and tail 2.0 s → 10.0)
+    # → segment becomes fully close, no short wide span survives
     segs = [_seg(0, 10, "wide", [[0.3, 8.0]])]
     reel = _reel(segs)
     from autoreels.__main__ import _stage_two_shot_auto
     _stage_two_shot_auto([reel], [], render_cfg=_cfg())
     warns = getattr(reel, "_two_shot_warnings", [])
-    assert any("[ERROR]" in w and "short" in w for w in warns), (
-        f"expected [ERROR] short span warning for 0.3 s wide gap, got: {warns}"
+    assert not any("[ERROR]" in w and "short" in w for w in warns), (
+        f"snap must fix 0.3 s wide gap; got warns={warns}"
     )
 
 

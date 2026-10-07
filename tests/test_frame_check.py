@@ -35,13 +35,18 @@ def _apply(segs, **kw):
 # ── short span below two_shot_min_sec → [ERROR] ─────────────────────────────
 
 def test_short_span_below_min_shot_produces_error():
-    """A wide span of 0.3 s (< min_shot=2.5 s) not snappable → [ERROR]."""
-    # ci starting 0.3 s in — wide span before ci = 0.3 s
-    segs = [_seg(0.0, 10.0, "wide", [[0.3, 8.0]])]
+    """A close span of 0.3 s (< min_shot=2.5 s) not fixable by snap or A-B-A → [ERROR].
+
+    ci=[[0.0, 0.3]] creates close(0.3s) + wide(9.7s).
+    Snap only extends WIDE prefixes/suffixes, not close spans.
+    Only 2 spans — no A-B-A triplet context → A-B-A merge cannot fire.
+    Pass 4 short-span check fires for close(0.3s) < 2.5s.
+    """
+    segs = [_seg(0.0, 10.0, "wide", [[0.0, 0.3]])]
     reel = _apply(segs)
     warns = getattr(reel, "_two_shot_warnings", [])
     errors = [w for w in warns if "[ERROR]" in w]
-    assert errors, f"expected [ERROR] for 0.3 s wide span; got warns={warns}"
+    assert errors, f"expected [ERROR] for 0.3 s close span; got warns={warns}"
     assert any("short" in e for e in errors), f"expected 'short' in [ERROR]; got {errors}"
 
 
@@ -124,3 +129,61 @@ def test_p4_cold_open_aba_close_wide_close_error():
              any(float(t) > 4.0 for t in __import__("re").findall(r"\d+\.\d+", e)))
         for e in errors
     ), f"[ERROR] output times must be body-relative (≤4s, cold_open excluded); got {errors}"
+
+
+# ── IMG_6848 r07: x:-cut segments with short ci spans fixed by snap+A-B-A ────
+
+def test_img_r07_short_ci_spans_no_error():
+    """r07 layout: wide+ci prefix 2.436s and ci close 1.993s → snap+A-B-A merge leaves no [ERROR].
+
+    seg1(close 9.35s) → jump → seg2(wide ci=[[2.436,12.536],[20.176,26.517]] 26.517s)
+    → jump → seg3(close 10.15s) → seg4(wide ci=[[3.74,5.64]] 5.733s)
+
+    Snap: extends seg2 ci[0][0] from 2.436 to 0.0 (wide prefix < min_shot=2.5s).
+    Snap: extends seg4 ci[-1][1] from 5.64 to 5.733 (wide tail < min_shot=2.5s).
+    A-B-A merge: close→wide(3.74s)→close fires; seg4 becomes close (ci dropped + warn).
+    Result: close(21.886s), wide(7.64s), close(22.224s) — no short spans.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto, _shot_spans_output
+    segs = [
+        _seg(0.0,    9.35,  "close"),
+        _seg(12.784, 39.301, "wide", [[2.436, 12.536], [20.176, 26.517]]),
+        _seg(42.831, 52.981, "close"),
+        _seg(53.771, 59.504, "wide", [[3.74, 5.64]]),
+    ]
+    reel = _reel(segs)
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert not errors, f"expected no [ERROR] for r07 layout; got {errors}"
+    spans = _shot_spans_output(reel.effective_segments())
+    short = [(t, a, e) for t, a, e in spans if e - a < 2.5]
+    assert not short, f"expected no short spans after fix; got {short}"
+
+
+# ── IMG_6848 r08: trailing wide < min_shot fixed by CI snap ──────────────────
+
+def test_img_r08_trailing_ci_wide_no_error():
+    """r08 layout: two wide+ci segs; seg1 has 0.35s wide tail, seg2 has 0.575s wide tail.
+
+    seg1(wide ci=[[11.16,20.32],[20.32,21.94]] dur=22.29)
+    → jump(9.48s) → seg2(wide ci=[[0,5.715],[14.195,20.945]] dur=21.52)
+
+    Snap: extends seg1 ci[-1][1] from 21.94→22.29 (tail 0.35 < 2.5).
+    Snap: extends seg2 ci[-1][1] from 20.945→21.52 (tail 0.575 < 2.5).
+    Option-2: seg1 short tail absorbed into seg2's leading close.
+    Result: wide(11.16s), close(16.845s), wide(8.48s), close(7.325s) — no short spans.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto, _shot_spans_output
+    segs = [
+        _seg(1841.710, 1864.000, "wide", [[11.160, 20.32], [20.32, 21.94]]),
+        _seg(1873.480, 1895.000, "wide", [[0.0, 5.715], [14.195, 20.945]]),
+    ]
+    reel = _reel(segs)
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert not errors, f"expected no [ERROR] for r08 layout; got {errors}"
+    spans = _shot_spans_output(reel.effective_segments())
+    short = [(t, a, e) for t, a, e in spans if e - a < 2.5]
+    assert not short, f"expected no short spans after fix; got {short}"

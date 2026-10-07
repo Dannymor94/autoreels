@@ -2184,12 +2184,12 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         if _changed:
             result[_ji] = _s.model_copy(update={"close_intervals": _nc})
 
-    # Manual CI min-shot snap: if a human c: annotation creates a wide prefix or suffix < min_shot,
-    # extend the CI to the segment boundary. Preserves the close annotation while eliminating
-    # render-breaking short spans that A-B-A cannot merge (because _manual_segs protects them).
+    # CI min-shot snap: if a c: annotation creates a wide prefix or suffix < min_shot,
+    # extend the CI to the segment boundary. Eliminates render-breaking short spans that
+    # A-B-A cannot merge because _pass3_segs / _js_forced protect them.
     for _ji_mc, _s_mc in enumerate(result):
-        if not _is_human_reel or _ji_mc not in _manual_segs or _ji_mc in _premerge_segs:
-            continue  # only genuine human c: annotations
+        if _ji_mc not in _manual_segs or _ji_mc in _premerge_segs:
+            continue  # only c: annotation segments, not pre-merge-generated ci
         _ci_mc = list(getattr(_s_mc, "close_intervals", []))
         if not _ci_mc:
             continue
@@ -2247,6 +2247,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
 
     # A-B-A merge: remove short middle spans in shot alternation (e.g. close→wide(2s)→close).
     # Jump-seam forced segments (_js_forced) are protected — their shot was intentionally set.
+    # c: annotations that produce a short middle are dropped with a warning (never leave a short span).
     if min_middle > 0:
         _t0_aba, _spans_aba = 0.0, []
         for _k_aba, _s_aba in enumerate(result):
@@ -2279,8 +2280,6 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 _s_mid = result[_sb_seg]
                 if _sb_seg in _pass3_segs:
                     continue  # ci inserted by Pass 3 max-shot enforcement — preserve it
-                if _sb_seg in _manual_segs and _sb_seg not in _premerge_segs:
-                    continue  # genuine c: annotation — preserve it; pre-merge ci is not protected
                 result[_sb_seg] = _s_mid.model_copy(update={"shot": _sa_sh, "close_intervals": []})
                 warnings.append(
                     f"A-B-A merge: {_sb_sh}({_sb_e - _sb_t:.2f}s) at t={_sb_t:.2f} → {_sa_sh}")
@@ -2383,10 +2382,16 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                 continue  # forced jump-seam span, >= 1.0 s minimum → allowed
         warnings.append(f"[ERROR] short {_stype} span {_dsp:.3f}s at output {_sa:.2f}-{_se:.2f}")
     # A-B-A middle check: min_middle threshold.
-    for _i4 in range(len(_p4_spans) - 2):
-        _sa4, _, _ = _p4_spans[_i4]
-        _sb4, _b0_4, _be4 = _p4_spans[_i4 + 1]
-        _sc4, _, _ = _p4_spans[_i4 + 2]
+    # cold_open (always close) is prepended so body[0] is checked as an A-B-A middle
+    # (cold_open→body[0]→body[1]). cold_open is still excluded from the min-shot check above.
+    _p4_aba = _p4_spans
+    if reel.cold_open is not None and _p4_spans:
+        _co_dur = reel.cold_open.end - reel.cold_open.start
+        _p4_aba = [("close", -_co_dur, 0.0)] + list(_p4_spans)
+    for _i4 in range(len(_p4_aba) - 2):
+        _sa4, _, _ = _p4_aba[_i4]
+        _sb4, _b0_4, _be4 = _p4_aba[_i4 + 1]
+        _sc4, _, _ = _p4_aba[_i4 + 2]
         _bd = _be4 - _b0_4
         if _sa4 == _sc4 and _sa4 != _sb4 and _bd < min_middle:
             warnings.append(
