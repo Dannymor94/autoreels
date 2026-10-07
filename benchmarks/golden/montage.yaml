@@ -1,7 +1,8 @@
 # Golden expectations for the "montage" gate run.
-# 24 clips: lecture 2026-08-08 11h 42m 49s r01–r06, PXL_20260729 r01–r10, IMG_6848 r01–r08.
-# montage2: 2026-08-08 09h 33m 14s r01–r02,r04–r10 (r03 blocked by short close span);
-#           Pxl 20260621 112938952 (pxl1129); Pxl 20260621 122006193 (pxl1220); 2026-08-08 10h 59m 38s (lec1059).
+# 16 clips (montage): lec1142 r01–r06, pxl0729 r01–r10, img6848 r01–r08.
+# 33 clips (montage2): lec0933 r01–r02,r04–r10 (r03 blocked shot span 0.53s), img6848 r01–r08,
+#   pxl1129 r02–r09 (r01 blocked shot span), pxl1220 r01–r05,
+#   lec1059 r02,r04–r05 (r01 blocked smap/speech, r03 blocked shot span 1.70s). Total: 49.
 # first_words / last_words: first and last 4 whitespace-split tokens from <id>.transcript.txt.
 # cold_open: full text of cold-open segment, or null.
 # reel_end: source timestamp (seconds) — used for speechmap silence check.
@@ -308,4 +309,150 @@ clips:
     reel_end: 1519.255
     first_words: "А чтобы что-то излечиться"
     last_words: "уровне «излечи себя» сама."
+    cold_open: null
+  # ── Pxl 20260621 112938952 (montage2) ────────────────────────────────────
+  - clip_id: r02
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r02.mp4"
+    reel_start: 171.925
+    reel_end: 214.558
+    first_words: "Но на самом деле,"
+    last_words: "себя или еще что-то."
+    cold_open: null
+
+  - clip_id: r03
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r03.mp4"
+    reel_start: 286.908
+    reel_end: 297.467
+    first_words: "То есть зависимый человек,"
+    last_words: "сила. Они могут повести"
+    cold_open: null
+
+  - clip_id: r04
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r04.mp4"
+    reel_start: 430.675
+    reel_end: 473.56
+    first_words: "Контролер, да, допустим. Это"
+    last_words: "может вдохновлять других людей."
+    cold_open: null
+
+  - clip_id: r05
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r05.mp4"
+    reel_start: 739.025
+    reel_end: 789.175
+    first_words: "Мало того, что смотрите,"
+    last_words: "образом убегаете, подстраиваетесь, контролируете."
+    cold_open: null
+
+  - clip_id: r06
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r06.mp4"
+    reel_start: 1499.35
+    reel_end: 1522.55
+    first_words: "Стимул — это внешний"
+    last_words: "Просто разная нервная система."
+    cold_open: null
+
+  - clip_id: r07
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r07.mp4"
+    reel_start: 1932.492
+    reel_end: 2032.03
+    first_words: "Ребенок реагирует. Триггер —"
+    last_words: "или не по душе."
+    cold_open: null
+
+  - clip_id: r08
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r08.mp4"
+    reel_start: 2211.508
+    reel_end: 2247.067
+    first_words: "Уж на сковородке —"
+    last_words: "почему он так поступил."
+    cold_open: null
+
+  - clip_id: r09
+    stem: "Pxl 20260621 112938952"
+    path: "reels-out/Pxl 20260621 112938952/_gate/montage2/r09.mp4"
+    reel_start: 2503.608
+    reel_end: 2573.49
+    first_words: "И прикиньте, есть огромный"
+    last_words: "уже тут все сделал."
+    cold_open: null
+
+  # ── Pxl 20260621 122006193 (montage2) ────────────────────────────────────
+  - clip_id: r01
+    stem: "Pxl 20260621 122006193"
+    path: "reels-out/Pxl 20260621 122006193/_gate/montage2/r01.mp4"
+    reel_start: 228.528
+    reel_end: 267.601
+    first_words: "Ваши нервные системы уникальны."
+    last_words: "на себя реально давить."
+    cold_open: null
+
+  - clip_id: r02
+    stem: "Pxl 20260621 122006193"
+    path: "reels-out/Pxl 20260621 122006193/_gate/montage2/r02.mp4"
+    reel_start: 271.338
+    reel_end: 333.033
+    first_words: "Вот даже последнюю практику,"
+    last_words: "вас нервная система напряжена."
+    cold_open: null
+
+  - clip_id: r03
+    stem: "Pxl 20260621 122006193"
+    path: "reels-out/Pxl 20260621 122006193/_gate/montage2/r03.mp4"
+    reel_start: 415.749
+    reel_end: 468.635
+    first_words: "Вы наоборот идете в"
+    last_words: "Теплое, дружелюбное, любящее присутствие."
+    cold_open: null
+
+  - clip_id: r04
+    stem: "Pxl 20260621 122006193"
+    path: "reels-out/Pxl 20260621 122006193/_gate/montage2/r04.mp4"
+    reel_start: 582.849
+    reel_end: 635.368
+    first_words: "И этот взрослый, любящий,"
+    last_words: "которая боится, гневается, обижается."
+    cold_open: null
+
+  - clip_id: r05
+    stem: "Pxl 20260621 122006193"
+    path: "reels-out/Pxl 20260621 122006193/_gate/montage2/r05.mp4"
+    reel_start: 637.804
+    reel_end: 676.74
+    first_words: "И вы останавливаете эту"
+    last_words: "У взрослого есть выбор."
+    cold_open: null
+
+  # ── 2026-08-08 10h 59m 38s (montage2) ────────────────────────────────────
+  - clip_id: r02
+    stem: "2026-08-08 10h 59m 38s"
+    path: "reels-out/2026-08-08 10h 59m 38s/_gate/montage2/r02.mp4"
+    reel_start: 838.004
+    reel_end: 882.31
+    first_words: "Что такое випассана? Это"
+    last_words: "эмоции, ни свой ум."
+    cold_open: null
+
+  - clip_id: r04
+    stem: "2026-08-08 10h 59m 38s"
+    path: "reels-out/2026-08-08 10h 59m 38s/_gate/montage2/r04.mp4"
+    reel_start: 1245.055
+    reel_end: 1293.495
+    first_words: "И наш ум должен"
+    last_words: "по-настоящему вы. Где реальность."
+    cold_open: null
+
+  - clip_id: r05
+    stem: "2026-08-08 10h 59m 38s"
+    path: "reels-out/2026-08-08 10h 59m 38s/_gate/montage2/r05.mp4"
+    reel_start: 1473.569
+    reel_end: 1509.123
+    first_words: "Идеальный вариант, как говорил"
+    last_words: "наш ум с реальностью."
     cold_open: null
