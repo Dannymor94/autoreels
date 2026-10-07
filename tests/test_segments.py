@@ -22,6 +22,7 @@ from autoreels.local.render import (
     _concat_segments_graph,
     _seg_ends_close,
     _seg_starts_close,
+    _smap_word_lookup,
     _snap_windows_to_frames,
     _two_shot_seam_xfades,
     build_concat_cmd,
@@ -226,7 +227,7 @@ def test_frame_aligned_invariant_passes_on_whole_frames_and_fails_on_drift():
 
 
 # --- tail air: exactly tail_pad_sec after the last heard word, on every path ------------------
-from autoreels.__main__ import _apply_tail_air, _check_tail_air
+from autoreels.__main__ import _apply_tail_air, _check_fade_audible, _check_tail_air
 from autoreels.cloud.edit import remove_fillers
 
 _FR = dict(filler_words=["ну", "вот"], pause_shorten_sec=0.8, pause_residual_sec=0.25,
@@ -300,6 +301,54 @@ def test_apply_tail_air_clean_tail_records_no_intruder():
     r = _tail_reel(start=0.0, end=2.0)
     _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=20.0)
     assert r.tail_next_word_start is None              # nothing inside the 0.7s air → clean
+
+
+def test_apply_tail_air_nonmonotonic_whisper_picks_max_ae_not_max_t0():
+    """Whisper non-monotonic timestamps: 'свой'(t0=1.493) > 'ум.'(t0=1.293) even though 'ум.'
+    is the last subtitle word.  Deflate-cap < 'ум.'.t1 triggers the _kept branch.
+    tail_last_word_end must be max(ae) = 'ум.'.ae=2.160, not 'свой'.ae=1.783.
+
+    Reproduces lec1059 r02: 'свой' t0=881.493 > 'ум.' t0=881.293, but 'ум.' ends later acoustically.
+    """
+    from autoreels.__main__ import _check_fade_audible
+    from autoreels.local.render import _smap_word_lookup
+
+    # smap with two words; 'свой' starts later (t0) but ends earlier (ae) than 'ум.'
+    smap = {
+        "words": [
+            {"t0": 1.293, "t1": 2.513, "audible_end": 2.160, "audible_start": 1.293},
+            {"t0": 1.493, "t1": 1.733, "audible_end": 1.783, "audible_start": 1.493},
+            {"t0": 2.493, "t1": 3.073, "audible_end": 3.123, "audible_start": 2.493},
+        ],
+        "boundaries": [{}, {}, {}],
+    }
+    smap_lookup = _smap_word_lookup(smap)
+
+    # Transcript word order: 'ум.' indexed after 'свой' (Whisper non-monotonic ordering)
+    words = [
+        Word(word="свой", t0=1.493, t1=1.733),
+        Word(word="ум.", t0=1.293, t1=2.513),
+        Word(word="Потому", t0=2.493, t1=3.073),
+    ]
+
+    # explicit_e reel: _next_speech_t0=2.493, cap = 2.493-0.02 = 2.473
+    # lw_end = max(t1) = 'ум.'.t1 = 2.513; desired_cap = 2.473 < lw_end → else-branch fires
+    r = _tail_reel(start=0.0, end=2.473)
+    r.has_explicit_e = True
+    r._next_speech_t0 = 2.493
+
+    _apply_tail_air([r], words, tail_pad_sec=0.7, video_duration=10.0,
+                    smap_lookup=smap_lookup, smap=smap)
+
+    # tail_last_word_end must be 'ум.'.ae = 2.160, not 'свой'.ae = 1.783
+    assert abs(r.tail_last_word_end - 2.160) < 1e-3, (
+        f"expected tail_last_word_end≈2.160 (ум. ae); got {r.tail_last_word_end:.3f}"
+    )
+
+    # verify no [CONTENT] fade error: set up subtitle last word = 'ум.'
+    r.subtitles = [Word(word="ум.", t0=1.293, t1=2.513)]
+    errs, _ = _check_fade_audible([r], smap_lookup=smap_lookup)
+    assert not errs, f"expected no fade error after fix; got {errs}"
 
 
 

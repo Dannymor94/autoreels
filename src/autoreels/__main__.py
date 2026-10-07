@@ -2547,7 +2547,9 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
                 return w.t1
             _kept = [w for w in words if _seg_start <= w.t0 < desired and _ae(w) <= desired]
             if _kept:
-                best = max(_kept, key=lambda w: w.t0)
+                # Use max(ae) not max(t0): Whisper timestamps can be non-monotonic, so the
+                # word that ends latest acoustically may have a lower t0 than a later-listed word.
+                best = max(_kept, key=_ae)
                 r.tail_last_word_end = _ae(best)
             if r.tail_next_word_start is None:
                 _nxt = [w.t0 for w in words if w.t0 >= desired - 1e-6]
