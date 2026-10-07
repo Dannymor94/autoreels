@@ -11,4 +11,9 @@ export const L = {
   variant: "Вариант",
   mainVariant: "основной",
   back: "← Назад",
+  variantsMore: (n: number) => `+${n} вар.`,
+  help: "Клавиши",
+  helpHint: "? — клавиши",
+  close: "Закрыть",
+  pickClip: "Выберите клип слева или нажмите J",
 };

@@ -13,18 +13,26 @@ from pathlib import Path
 REPO = Path(__file__).parent.parent
 OUT = REPO / "demo" / "reels-out" / "DEMO"
 
+COUNT = "раз. два. три. четыре. пять. шесть."
 CLIPS = [
-    ("r01", "#1a1a2e", "Это демо клип номер один"),
-    ("r02", "#16213e", "Это демо клип номер два"),
-    ("r03", "#0f3460", "Это демо клип номер три"),
+    ("r01", "#1a1a2e", f"Клип один. {COUNT}"),
+    ("r02", "#16213e", f"Клип два. {COUNT}"),
+    ("r03", "#0f3460", f"Клип три. {COUNT}"),
 ]
-VARIANT_B = ("r01", "#e94560", "Это вариант Б клип один")
+# (clip, colour, text): variant_b exists for r01 and r02 but NOT r03 — the UI must handle both cases.
+VARIANTS_B = [
+    ("r01", "#e94560", f"Вариант бэ. Клип один. {COUNT}"),
+    ("r02", "#e9a345", f"Вариант бэ. Клип два. {COUNT}"),
+]
 
 
 def make_audio(text: str, dst: Path) -> None:
     with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as f:
         aiff = f.name
-    ok = subprocess.run(["say", "-v", "Milena", "-o", aiff, text], capture_output=True).returncode == 0
+    try:
+        ok = subprocess.run(["say", "-v", "Milena", "-o", aiff, text], capture_output=True).returncode == 0
+    except FileNotFoundError:  # not macOS: no `say`
+        ok = False
     if ok:
         subprocess.run(
             ["ffmpeg", "-y", "-i", aiff, "-c:a", "aac", "-b:a", "96k", str(dst)],
@@ -44,14 +52,17 @@ def make_clip(name: str, color: str, text: str, dst: Path, audio: Path) -> None:
     fc = (
         f"[0]drawbox=x=440:y=200:w=200:h=200:color=white:t=fill,"
         f"drawbox=x=480:y=400:w=120:h=300:color=white:t=fill,"
-        f"drawtext=text='{name}':fontsize=80:fontcolor=yellow:x=(w-tw)/2:y=h-150[v]"
+        f"drawtext=text='{name}':fontsize=80:fontcolor=yellow:x=(w-tw)/2:y=h-150,"
+        # running timer: makes it obvious whether the video plays, and shows sync between variants
+        r"drawtext=text='%{pts\:hms}':fontsize=96:fontcolor=white:x=(w-tw)/2:y=900[v];"
+        "[1]apad[a]"  # speech is padded with silence to the full 7 s
     )
     subprocess.run([
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", f"color=c={color}:size=1080x1920:rate=30",
         "-i", str(audio),
         "-filter_complex", fc,
-        "-map", "[v]", "-map", "1:a",
+        "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-crf", "30", "-preset", "veryfast",
         "-c:a", "aac", "-b:a", "96k",
         "-fflags", "+bitexact", "-map_metadata", "-1", "-movflags", "+faststart",
@@ -78,13 +89,13 @@ def main():
             write_sidecar(mp4, f"{name}:{color}")
             print(f"  {mp4.relative_to(REPO)}")
 
-        vb_name, vb_color, vb_text = VARIANT_B
-        vb_mp4 = OUT / "_gate" / "variant_b" / f"{vb_name}.mp4"
-        audio = Path(tmp) / "variant_b.aac"
-        make_audio(vb_text, audio)
-        make_clip(vb_name, vb_color, vb_text, vb_mp4, audio)
-        write_sidecar(vb_mp4, f"variant_b:{vb_color}")
-        print(f"  {vb_mp4.relative_to(REPO)}")
+        for vb_name, vb_color, vb_text in VARIANTS_B:
+            vb_mp4 = OUT / "_gate" / "variant_b" / f"{vb_name}.mp4"
+            audio = Path(tmp) / f"variant_b_{vb_name}.aac"
+            make_audio(vb_text, audio)
+            make_clip(vb_name, vb_color, vb_text, vb_mp4, audio)
+            write_sidecar(vb_mp4, f"variant_b:{vb_name}:{vb_color}")
+            print(f"  {vb_mp4.relative_to(REPO)}")
 
     total = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
     print(f"Total: {total / 1024 / 1024:.1f} MB  (say={'yes' if say_used else 'sine fallback'})")
