@@ -26,6 +26,7 @@ JUMP_SEAM_MIN_SEC = 1.0
 _render_cfg_path = PROJECT / "config" / "render.yaml"
 _render_cfg = yaml.safe_load(_render_cfg_path.read_text()) if _render_cfg_path.exists() else {}
 SHOT_TOLERANCE_FRAMES: int = _render_cfg.get("shot_tolerance_frames", 2)
+SPEECH_MIN_INTERVAL_SEC: float = _render_cfg.get("speech_min_interval_sec", 0.1)
 
 
 # ── ffmpeg helpers ─────────────────────────────────────────────────────────────
@@ -208,7 +209,9 @@ def _check_tail_silence(speechmap_path: Path, reel_end: float,
     last_word_t1 = words_in_clip[-1].get("t1", last_audible_end) if words_in_clip else 0.0
     threshold = max(last_audible_end, last_word_t1) + own_tail_window_sec
     for ivl in sm.get("intervals", []):
-        s, e = ivl[0], ivl[1]  # noqa: F841
+        s, e = ivl[0], ivl[1]
+        if e - s < SPEECH_MIN_INTERVAL_SEC:
+            continue
         if threshold < s < reel_end:
             return [f"speech_in_tail:[{s:.2f},{e:.2f}]"]
     return []

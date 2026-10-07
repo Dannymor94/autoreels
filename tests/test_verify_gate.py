@@ -216,6 +216,32 @@ def test_tail_silence_speechmap_missing(tmp_path):
     assert any("speechmap_missing" in f for f in fails)
 
 
+def test_tail_silence_short_interval_ignored(tmp_path):
+    """Intervals shorter than SPEECH_MIN_INTERVAL_SEC (0.1s) are noise — must not fire.
+
+    Reproduces lec0933 r05 [825.78,825.85] (0.07s) and r10 [1518.94,1518.97] (0.03s)."""
+    sm_path = tmp_path / "s.speechmap.json"
+    sm_path.write_text(json.dumps({
+        "version": 6,
+        "intervals": [[9.6, 9.67]],   # 0.07s — below SPEECH_MIN_INTERVAL_SEC=0.1s
+        "words": [{"idx": 0, "t0": 8.0, "t1": 9.0, "audible_end": 9.0}],
+        "boundaries": [],
+    }), encoding="utf-8")
+    fails = vg._check_tail_silence(sm_path, reel_end=10.0)
+    assert not fails, f"short interval (<0.1s) must not trigger speech_in_tail: {fails}"
+
+    # Interval clearly above threshold (0.15s) must fire
+    sm_path.write_text(json.dumps({
+        "version": 6,
+        "intervals": [[9.55, 9.7]],   # 0.15s — well above SPEECH_MIN_INTERVAL_SEC
+        "words": [{"idx": 0, "t0": 8.0, "t1": 9.0, "audible_end": 9.0}],
+        "boundaries": [],
+    }), encoding="utf-8")
+    fails = vg._check_tail_silence(sm_path, reel_end=10.0)
+    assert any("speech_in_tail" in f for f in fails), \
+        f"interval of 0.15s must trigger speech_in_tail: {fails}"
+
+
 # ── tail frames (framemd5) ────────────────────────────────────────────────────
 
 def test_tail_frames_natural_motion_passes(tmp_path):
