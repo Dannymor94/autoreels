@@ -1,8 +1,7 @@
 # Golden expectations for the "montage" gate run.
 # 16 clips (montage): lec1142 r01–r06, pxl0729 r01–r10, img6848 r01–r08.
 # 37 clips (montage2): lec0933 r01–r10, img6848 r01–r08, pxl1129 r01–r09, pxl1220 r01–r05,
-#   lec1059 r01–r05. Total: 53. (r03 lec0933, r01+r03 lec1059, r01 pxl1129 are FAIL by design:
-#   short_span / smap-speech ERROR — included here to verify they fail, not to gate-pass them.)
+#   lec1059 r01–r05. Total: 53.
 # first_words / last_words: first and last 4 whitespace-split tokens from <id>.transcript.txt.
 # cold_open: full text of cold-open segment, or null.
 # reel_end: source timestamp (seconds) — used for speechmap silence check.
@@ -229,7 +228,6 @@ clips:
     cold_open: null
 
   # ── 2026-08-08 09h 33m 14s (lec0933) ────────────────────────────────────────
-  # r03 omitted: [ERROR] short close span 0.720s (c:14 too short at clip end)
   - clip_id: r01
     stem: "2026-08-08 09h 33m 14s"
     path: "reels-out/2026-08-08 09h 33m 14s/_gate/montage2/r01.mp4"

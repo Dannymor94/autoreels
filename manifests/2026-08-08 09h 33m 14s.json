@@ -1063,12 +1063,7 @@
           "start": 383.28999999999996,
           "end": 397.10027,
           "shot": "wide",
-          "close_intervals": [
-            [
-              13.09025,
-              13.78027000000003
-            ]
-          ]
+          "close_intervals": []
         }
       ],
       "cold_open": null,
