@@ -61,7 +61,7 @@ def test_c_annotation_short_span_produces_warning_not_error():
     # Segment with ci=[0.0, 0.72] matching a c: range of (0.0, 0.72)
     segs = [_seg(10.0, 20.72, "wide", [[0.0, 0.72]])]
     reel = _reel(segs)
-    reel._c_close_ranges = [(10.0, 10.72)]  # source-time range matching the ci
+    reel.c_close_ranges = [[10.0, 10.72]]  # source-time range matching the ci (model field)
     _stage_two_shot_auto([reel], [], render_cfg=_cfg())
     warns = getattr(reel, "_two_shot_warnings", [])
     errors = [w for w in warns if "[ERROR]" in w]

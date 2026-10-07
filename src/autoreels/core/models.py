@@ -204,6 +204,10 @@ class Reel(BaseModel):
     # z:N zoom placement: source-time start of sentence N (resolved at --apply from block sentences).
     # None = hook scheme (zoom at clip start). Stored as source timestamp so render can remap it.
     zoom_source_t0: float | None = None
+    # c: annotation source-time ranges [[start, end], ...] persisted so render can identify
+    # c:-sourced close intervals (needed for [WARNING] vs [ERROR] in Pass 4 short-span check).
+    # Empty on auto path and old manifests.
+    c_close_ranges: list[list[float]] = Field(default_factory=list)
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

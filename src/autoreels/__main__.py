@@ -2372,19 +2372,17 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     _p4_spans = _shot_spans_output(result)
     # Collect output-time close intervals that come from explicit c: annotations.
     # A short span from c: is a [WARNING] not [ERROR] (human intent; verified at review time).
-    _c_ranges_src = getattr(reel, "_c_close_ranges", [])
+    _c_ranges_src = getattr(reel, "c_close_ranges", []) or getattr(reel, "_c_close_ranges", [])
     _c_ann_ivls: list[tuple[float, float]] = []
     _p4_out_off = 0.0
     for _p4s in result:
         _p4dur = _p4s.end - _p4s.start
         _p4ci = getattr(_p4s, "close_intervals", []) or []
         if _p4s.shot == "close" and not _p4ci:
-            if any(abs(_p4s.start - _cr[0]) < 0.1 and abs(_p4s.end - _cr[1]) < 0.1
-                   for _cr in _c_ranges_src):
+            if any(abs(_p4s.start - _cr[0]) < 0.1 for _cr in _c_ranges_src):
                 _c_ann_ivls.append((_p4_out_off, _p4_out_off + _p4dur))
         for _ct0, _ct1 in _p4ci:
-            if any(abs(_p4s.start + _ct0 - _cr[0]) < 0.1 and abs(_p4s.start + _ct1 - _cr[1]) < 0.1
-                   for _cr in _c_ranges_src):
+            if any(abs(_p4s.start + _ct0 - _cr[0]) < 0.1 for _cr in _c_ranges_src):
                 _c_ann_ivls.append((_p4_out_off + _ct0, _p4_out_off + _ct1))
         _p4_out_off += _p4dur
     # cold_open is a structural header (always close, duration driven by h: sentence).
@@ -5203,6 +5201,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 else:
                     print(f"  warning: c:{_ci} out of range (1-{len(_gsents)}) — skipped",
                           file=sys.stderr)
+        reel.c_close_ranges = [list(r) for r in reel._c_close_ranges]
         # z:N — zoom gesture on sentence N; stash source-time t0 (resolved same as c:).
         # Rule: z: and c: on the same sentence → close shot overrides zoom (c: takes precedence).
         reel._zoom_source_t0 = None
