@@ -68,6 +68,7 @@ from autoreels.core.config import (
     validate_profile,
 )
 from autoreels.core.seams import is_jump_seam
+from autoreels.core.plan import _is_x_seam_boundary as _is_x_seam_bdy
 from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import (
     CalibrateError, InputInvalid, cmd_calibrate, validate_input,
@@ -1945,9 +1946,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     # Beat seams always toggle (they are explicit reorder points, not auto-switches).
                     cur = "close" if cur == "wide" else "wide"
             elif _is_human_auto_off:
-                # Human: only toggle at jump seams (x:/filler cuts, not adjacent sentences).
-                if is_jump_seam(segs[i - 1], segs[i], words,
-                                jump_seam_gap_sec=jump_seam_gap_sec):
+                # Human: only toggle at x: seams (terminal word in gap or zero-gap leaked terminal).
+                if _is_x_seam_bdy(segs[i - 1], segs[i], words):
                     cur = "close" if cur == "wide" else "wide"
             elif prev_dur >= min_shot and cur_dur >= min_shot:
                 cur = "close" if cur == "wide" else "wide"

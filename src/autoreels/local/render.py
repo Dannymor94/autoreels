@@ -2097,6 +2097,43 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
 
 
 
+def _apply_plan_shots(segs: list, plan: "RenderPlan", smap_words: list) -> list:
+    """Override segment-level shots from RenderPlan for a human-path reel (REEL_SPEC §3).
+
+    Rebuilds x:-seam groups from segs using _is_x_seam_boundary, then assigns the base
+    shot from plan.body_windows[wi] to each group's segments.
+    """
+    from autoreels.core.plan import _is_x_seam_boundary, RenderPlan  # noqa: F401
+
+    offset = 1 if plan.cold_open_source is not None else 0
+    prefix = list(segs[:offset])
+    body = list(segs[offset:])
+
+    if not body or not plan.body_windows:
+        return segs
+
+    groups: list[list] = [[body[0]]]
+    for s in body[1:]:
+        if _is_x_seam_boundary(groups[-1][-1], s, smap_words):
+            groups.append([s])
+        else:
+            groups[-1].append(s)
+
+    result_body: list = []
+    for wi in range(len(groups)):
+        base_shot = "wide"
+        if wi < len(plan.body_windows):
+            bw = plan.body_windows[wi]
+            for ss in plan.shots:
+                if ss.reason != "c:" and any(idx in bw.sentence_indices for idx in ss.sentence_indices):
+                    base_shot = ss.shot
+                    break
+        for s in groups[wi]:
+            result_body.append(s.model_copy(update={"shot": base_shot}))
+
+    return prefix + result_body
+
+
 def _close_crop(setup: SetupProfile, scale: float = 1.25, anchor_y: float = 0.35) -> Crop:
     """Close-shot crop rectangle: tighter by `scale`, horizontally centred, vertically anchored.
 
@@ -2446,6 +2483,19 @@ def _render_segments(
                             segs = [segs[0].model_copy(update={"close_intervals": _ci_shifted})] + list(segs[1:])
                             segs = _snap_close_intervals(segs, _fps())
                         clip_dur = sum(s.end - s.start for s in segs)
+
+            # --- Human-path: override segment shots from RenderPlan (REEL_SPEC §3) ---
+            _rp_plan = None
+            if getattr(reel, "selection_source", "") == "human" and smap is not None:
+                try:
+                    from autoreels.core.plan import build_manual_plan as _bmp
+                    from types import SimpleNamespace as _SN
+                    _pw = [_SN(word=w["word"], t0=w["t0"], t1=w["t1"])
+                           for w in smap.get("words", [])]
+                    _rp_plan = _bmp(reel, _pw, smap, render_cfg)
+                    segs = _apply_plan_shots(segs, _rp_plan, _pw)
+                except Exception:
+                    pass
 
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
             _ts_on = getattr(render_cfg, "two_shot", False) and vf and manifest.setup is not None
@@ -3152,16 +3202,32 @@ def _render_segments(
                 out.with_name(f"{out.stem}.ERROR.mp4").unlink(missing_ok=True)
                 outputs.append(out)
                 import json as _json
+                _source_end_rj = segs[-1].end
+                _plan_rj: dict | None = None
+                if _rp_plan is not None:
+                    _source_end_rj = _rp_plan.clip_end
+                    _plan_rj = {
+                        "clip_end": _rp_plan.clip_end,
+                        "fade_start": _rp_plan.fade_start,
+                        "fade_sec": _rp_plan.fade_sec,
+                        "shots": [
+                            {"shot": ss.shot, "reason": ss.reason,
+                             "n_sentences": len(ss.sentence_indices)}
+                            for ss in _rp_plan.shots
+                        ],
+                    }
+                _rj: dict = {
+                    "source_start": segs[0].start,
+                    "source_end": _source_end_rj,
+                    "synthetic_tail_sec": (
+                        _synth_params_dict["tail_sec"]
+                        if _synth_active and _synth_params_dict else 0.0
+                    ),
+                }
+                if _plan_rj is not None:
+                    _rj["plan"] = _plan_rj
                 (out_dir / f"{reel.id}.render.json").write_text(
-                    _json.dumps({
-                        "source_start": segs[0].start,
-                        "source_end": segs[-1].end,
-                        "synthetic_tail_sec": (
-                            _synth_params_dict["tail_sec"]
-                            if _synth_active and _synth_params_dict else 0.0
-                        ),
-                    }),
-                    encoding="utf-8",
+                    _json.dumps(_rj), encoding="utf-8"
                 )
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
