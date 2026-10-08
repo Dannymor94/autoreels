@@ -1161,6 +1161,31 @@ def _smap_word_lookup(smap: dict) -> dict[int, tuple[int, dict]]:
     return {round(w["t0"] * 1000): (i, w) for i, w in enumerate(smap["words"])}
 
 
+def _check_foreign_tail_word_render(
+    reel_id: str,
+    last_sub,
+    clip_end: float,
+    smap: dict,
+) -> list[str]:
+    """[ERROR] when a transcribed smap word after the last subtitle starts before clip_end.
+
+    Mirrors _check_foreign_tail_word in __main__.py; runs at render time using the speechmap.
+    """
+    words = smap.get("words", [])
+    foreign = next(
+        (w for w in words if w.get("t0", 0.0) > last_sub.t0 + 0.01),
+        None,
+    )
+    if foreign is None:
+        return []
+    if foreign.get("t0", 0.0) < clip_end - 0.01:
+        return [
+            f"  [ERROR] {reel_id}: transcribed word after final subtitle '{last_sub.word}' "
+            f"(t0={foreign['t0']:.3f}s) starts before clip end {clip_end:.3f}s"
+        ]
+    return []
+
+
 def _check_end_air(
     reel_id: str,
     last_word,
@@ -2732,6 +2757,8 @@ def _render_segments(
                 )
                 _clip_errors.extend(_check_silence_at_clip_end(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
+                _clip_errors.extend(_check_foreign_tail_word_render(
+                    reel.id, reel.subtitles[-1], _real_content_end, smap))
             # First-word-cut invariant: source_start must not exceed the first subtitle word's
             # acoustic onset (audible_start per smap).  The start-fix above prevents this; the
             # check here catches any remaining violations (e.g., smap lookup mismatch).

@@ -246,6 +246,30 @@ def _check_web_safe(mp4: Path) -> list[str]:
     return [e.replace("[ERROR] web-safe: ", "web_unsafe:") for e in errors]
 
 
+def _check_foreign_tail_word_vg(speechmap_path: Path, reel: dict, source_end: float) -> list[str]:
+    """[ERROR] when a transcribed smap word after the last subtitle starts before source_end."""
+    subs = reel.get("subtitles", [])
+    if not subs:
+        return []
+    if not speechmap_path.exists():
+        return []
+    last_sub = subs[-1]
+    last_t0 = last_sub.get("t0", 0.0)
+    with open(speechmap_path) as f:
+        sm = json.load(f)
+    foreign = next(
+        (w for w in sm.get("words", []) if w.get("t0", 0.0) > last_t0 + 0.01),
+        None,
+    )
+    if foreign is None:
+        return []
+    if foreign.get("t0", 0.0) < source_end - 0.01:
+        return [
+            f"foreign_tail_word:t0={foreign['t0']:.3f}<end={source_end:.3f}"
+        ]
+    return []
+
+
 def _check_end_air_vg(speechmap_path: Path, reel: dict, source_end: float,
                       fps: float = 30.0) -> list[str]:
     """Permanent end-air check: source_end − last subtitle word audible_end ≤ end_air_sec + 1 frame.
@@ -419,6 +443,7 @@ def check_clip(entry: dict, project: Path) -> list[str]:
                 _reel = next((r for r in _mf.get("reels", []) if r["id"] == clip_id), None)
                 if _reel is not None:
                     fails.extend(_check_end_air_vg(speechmap, _reel, source_end))
+                    fails.extend(_check_foreign_tail_word_vg(speechmap, _reel, source_end))
             except (json.JSONDecodeError, KeyError):
                 pass
 

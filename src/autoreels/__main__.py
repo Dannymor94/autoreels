@@ -2743,6 +2743,36 @@ def _check_source_range_replayed(reels, tx_words=None) -> list[str]:
     return errs
 
 
+def _check_foreign_tail_word(reels, tx_words, *, smap_lookup: dict | None = None) -> list[str]:
+    """[ERROR] when a transcribed word immediately after the last subtitle word starts before reel.end.
+
+    The last subtitle marks the end of the final sentence.  Any next transcribed word belongs to the
+    following sentence — it must not be audible in the clip (t0 < reel.end means it started playing).
+    Only runs when smap_lookup is available: without smap we cannot verify audible timing precisely
+    enough to call it an error (transcript timestamps alone are insufficient at clip boundaries).
+    """
+    if not smap_lookup:
+        return []
+    errors: list[str] = []
+    for r in reels:
+        if not getattr(r, "subtitles", None):
+            continue
+        last_sub = r.subtitles[-1]
+        # First transcribed word whose t0 is strictly after the last subtitle word's t0
+        foreign = next(
+            (w for w in tx_words if w.t0 > last_sub.t0 + 0.01),
+            None,
+        )
+        if foreign is None:
+            continue
+        if foreign.t0 < r.end - 0.01:
+            errors.append(
+                f"[CONTENT] {r.id}: transcribed word '{foreign.word}' (t0={foreign.t0:.3f}s) "
+                f"after final subtitle '{last_sub.word}' starts before clip end {r.end:.3f}s"
+            )
+    return errors
+
+
 def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
                     tol: float = _TAIL_FRAME_TOL) -> str | None:
     """Invariant: every reel's end is no earlier than last_word_end + tail_pad_sec − one frame
@@ -5955,6 +5985,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     _tail_err = _check_tail_air(reels, tail_pad_sec=_tail_pad, video_duration=_video_dur)
     if _tail_err:
         print(f"  error: tail-air invariant: {_tail_err}", file=sys.stderr)
+        return 1
+
+    _foreign_errs = _check_foreign_tail_word(reels, tx_words, smap_lookup=_blk_smap_lookup)
+    for _err in _foreign_errs:
+        print(f"  error: {_err}", file=sys.stderr)
+    if _foreign_errs:
         return 1
 
     _fade_errs, _fade_warns = _check_fade_audible(reels, smap_lookup=_blk_smap_lookup)

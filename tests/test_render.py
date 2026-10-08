@@ -3314,7 +3314,38 @@ def test_check_end_air_r01_numbers():
 
     # GOOD: 0.30s of air — must pass
     good_end = ae + 0.30
-    errs2 = _check_end_air("r01", last_word, good_end, smap,
+    errs2 = _check_end_air("r01", last_word, good_end, smap,  # type: ignore[arg-type]
                            {round(194.5 * 1000): (0, {"t0": 194.5, "t1": 195.6, "audible_end": ae})},
                            end_air_sec, fps)
     assert not errs2, f"unexpected error for {good_end - ae:.3f}s air ≤ tolerance: {errs2}"
+
+
+# ── PART 3: foreign tail word check ───────────────────────────────────────────
+
+def test_check_foreign_tail_word_r07_numbers():
+    """r07: last subtitle 'правильно?' t0=1521.787; next smap word t0=1522.627 < reel.end=1522.720.
+    Foreign word within clip → [ERROR].
+    When clip_end <= 1522.627: no error.
+    """
+    from autoreels.local.render import _check_foreign_tail_word_render
+    from autoreels.core.models import Word
+
+    last_sub = Word(word="правильно?", t0=1521.787, t1=1522.627)
+    smap = {
+        "words": [
+            {"t0": 1521.787, "t1": 1522.627, "audible_start": 1521.74, "audible_end": 1522.11},
+            {"t0": 1522.627, "t1": 1522.847, "audible_start": 1522.74, "audible_end": 1522.897},
+        ],
+        "intervals": [],
+    }
+
+    # BAD: clip_end=1522.720 > foreign t0=1522.627 → [ERROR]
+    bad_end = 1522.720
+    errs = _check_foreign_tail_word_render("r07", last_sub, bad_end, smap)
+    assert errs, f"expected [ERROR] for foreign word at 1522.627 < clip_end {bad_end}"
+    assert "[ERROR]" in errs[0]
+
+    # GOOD: clip_end=1522.617 ≤ foreign t0=1522.627 → no error
+    good_end = 1522.617
+    errs2 = _check_foreign_tail_word_render("r07", last_sub, good_end, smap)
+    assert not errs2, f"unexpected error when clip_end {good_end} ≤ foreign t0 1522.627: {errs2}"
