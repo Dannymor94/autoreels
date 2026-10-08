@@ -3323,11 +3323,12 @@ def test_check_end_air_r01_numbers():
 # ── PART 3: foreign tail word check ───────────────────────────────────────────
 
 def test_check_foreign_tail_word_r07_numbers():
-    """r07: last subtitle 'правильно?' t0=1521.787; next smap word t0=1522.627 < reel.end=1522.720.
-    Foreign word within clip → [ERROR].
-    When clip_end <= 1522.627: no error.
+    """r07: last subtitle 'правильно?' t0=1521.787; next smap word audible_start=1522.74.
+
+    clip_end between t0(1522.627) and audible_start(1522.74): no error (was false positive).
+    clip_end > audible_start(1522.74): [ERROR] — genuine foreign word.
     """
-    from autoreels.local.render import _check_foreign_tail_word_render
+    from autoreels.local.render import _check_foreign_tail_word_render, _smap_word_lookup
     from autoreels.core.models import Word
 
     last_sub = Word(word="правильно?", t0=1521.787, t1=1522.627)
@@ -3338,14 +3339,83 @@ def test_check_foreign_tail_word_r07_numbers():
         ],
         "intervals": [],
     }
+    lookup = _smap_word_lookup(smap)
 
-    # BAD: clip_end=1522.720 > foreign t0=1522.627 → [ERROR]
-    bad_end = 1522.720
-    errs = _check_foreign_tail_word_render("r07", last_sub, bad_end, smap)
-    assert errs, f"expected [ERROR] for foreign word at 1522.627 < clip_end {bad_end}"
+    # False-positive zone: clip_end between t0(1522.627) and audible_start(1522.74) → no error
+    mid_end = 1522.720
+    errs_mid = _check_foreign_tail_word_render("r07", last_sub, mid_end, smap, lookup)
+    assert not errs_mid, f"expected no error in t0–audible_start gap at {mid_end}: {errs_mid}"
+
+    # BAD: clip_end > audible_start(1522.74) → [ERROR]
+    bad_end = 1522.800
+    errs = _check_foreign_tail_word_render("r07", last_sub, bad_end, smap, lookup)
+    assert errs, f"expected [ERROR] for onset 1522.74 < clip_end {bad_end}"
     assert "[ERROR]" in errs[0]
 
-    # GOOD: clip_end=1522.617 ≤ foreign t0=1522.627 → no error
+    # GOOD: clip_end < onset(1522.74) → no error
     good_end = 1522.617
-    errs2 = _check_foreign_tail_word_render("r07", last_sub, good_end, smap)
-    assert not errs2, f"unexpected error when clip_end {good_end} ≤ foreign t0 1522.627: {errs2}"
+    errs2 = _check_foreign_tail_word_render("r07", last_sub, good_end, smap, lookup)
+    assert not errs2, f"unexpected error when clip_end {good_end} < onset 1522.74: {errs2}"
+
+
+def test_check_foreign_tail_word_r01_false_positive():
+    """r01: clip_end=205.739 falls between next word t0=205.709 and audible_start=205.809.
+    Old check (t0-based) gave [ERROR]; new check (audible_start-based) is clean.
+    """
+    from autoreels.local.render import _check_foreign_tail_word_render, _smap_word_lookup
+    from autoreels.core.models import Word
+
+    last_sub = Word(word="жизнь.", t0=203.349, t1=205.709)
+    smap = {
+        "words": [
+            {"t0": 203.349, "t1": 205.709, "audible_start": 203.449, "audible_end": 205.759},
+            {"t0": 205.709, "t1": 205.789, "audible_start": 205.809, "audible_end": 205.839},
+        ],
+        "intervals": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    # clip_end 205.739 is between t0=205.709 and audible_start=205.809 → no error
+    errs = _check_foreign_tail_word_render("r01", last_sub, 205.739, smap, lookup)
+    assert not errs, f"false positive at clip_end 205.739 (onset 205.809): {errs}"
+
+
+def test_check_foreign_tail_word_r03_false_positive():
+    """r03: clip_end=901.551 falls between next word t0=901.520 and audible_start=901.620.
+    Old check gave [ERROR]; new check is clean.
+    """
+    from autoreels.local.render import _check_foreign_tail_word_render, _smap_word_lookup
+    from autoreels.core.models import Word
+
+    last_sub = Word(word="отдых.", t0=900.540, t1=901.340)
+    smap = {
+        "words": [
+            {"t0": 900.540, "t1": 901.340, "audible_start": 900.640, "audible_end": 901.570},
+            {"t0": 901.520, "t1": 901.640, "audible_start": 901.620, "audible_end": 901.690},
+        ],
+        "intervals": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    errs = _check_foreign_tail_word_render("r03", last_sub, 901.551, smap, lookup)
+    assert not errs, f"false positive at clip_end 901.551 (onset 901.620): {errs}"
+
+
+def test_check_foreign_tail_word_r05_dedup_absorbed():
+    """r05: next word t0=1242.124 is within last_sub.t1=1242.224 → absorbed by dedup.
+    Onset is words[2].audible_start=1242.304; clip_end=1242.241 < 1242.304 → no error.
+    """
+    from autoreels.local.render import _check_foreign_tail_word_render, _smap_word_lookup
+    from autoreels.core.models import Word
+
+    last_sub = Word(word="главное.", t0=1241.424, t1=1242.224)
+    smap = {
+        "words": [
+            {"t0": 1241.424, "t1": 1242.224, "audible_start": 1241.524, "audible_end": 1242.174},
+            {"t0": 1242.124, "t1": 1242.204, "audible_start": 1242.100, "audible_end": 1242.254},
+            {"t0": 1242.204, "t1": 1242.324, "audible_start": 1242.304, "audible_end": 1242.374},
+        ],
+        "intervals": [],
+    }
+    lookup = _smap_word_lookup(smap)
+    # words[1] absorbed by dedup (t0 ≤ last_t1 and as < ae+0.04); onset = words[2].as = 1242.304
+    errs = _check_foreign_tail_word_render("r05", last_sub, 1242.241, smap, lookup)
+    assert not errs, f"false positive after dedup absorption (onset 1242.304): {errs}"

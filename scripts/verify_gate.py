@@ -247,7 +247,7 @@ def _check_web_safe(mp4: Path) -> list[str]:
 
 
 def _check_foreign_tail_word_vg(speechmap_path: Path, reel: dict, source_end: float) -> list[str]:
-    """[ERROR] when a transcribed smap word after the last subtitle starts before source_end."""
+    """[ERROR] when next speech onset after the last subtitle word starts before source_end."""
     subs = reel.get("subtitles", [])
     if not subs:
         return []
@@ -255,17 +255,20 @@ def _check_foreign_tail_word_vg(speechmap_path: Path, reel: dict, source_end: fl
         return []
     last_sub = subs[-1]
     last_t0 = last_sub.get("t0", 0.0)
+    last_t1 = last_sub.get("t1")
     with open(speechmap_path) as f:
         sm = json.load(f)
-    foreign = next(
-        (w for w in sm.get("words", []) if w.get("t0", 0.0) > last_t0 + 0.01),
-        None,
-    )
-    if foreign is None:
+    try:
+        from autoreels.local.render import _next_speech_onset_after, _smap_word_lookup
+    except ImportError:
         return []
-    if foreign.get("t0", 0.0) < source_end - 0.01:
+    lk = _smap_word_lookup(sm)
+    _nso = _next_speech_onset_after(last_t0, sm, lk, last_t1=last_t1)
+    if _nso is None or _nso.onset is None:
+        return []
+    if _nso.onset < source_end - 0.01:
         return [
-            f"foreign_tail_word:t0={foreign['t0']:.3f}<end={source_end:.3f}"
+            f"foreign_tail_word:onset={_nso.onset:.3f}<end={source_end:.3f}"
         ]
     return []
 

@@ -1166,22 +1166,20 @@ def _check_foreign_tail_word_render(
     last_sub,
     clip_end: float,
     smap: dict,
+    lookup: dict,
 ) -> list[str]:
-    """[ERROR] when a transcribed smap word after the last subtitle starts before clip_end.
+    """[ERROR] when next speech onset after the last subtitle word starts before clip_end.
 
-    Mirrors _check_foreign_tail_word in __main__.py; runs at render time using the speechmap.
+    Uses audible_start (not Whisper t0) to avoid false positives when the clip end falls
+    between t0 and audible_start of the next word — a gap of 10–30 ms that is normal.
     """
-    words = smap.get("words", [])
-    foreign = next(
-        (w for w in words if w.get("t0", 0.0) > last_sub.t0 + 0.01),
-        None,
-    )
-    if foreign is None:
+    _nso = _next_speech_onset_after(last_sub.t0, smap, lookup, last_t1=getattr(last_sub, "t1", None))
+    if _nso is None or _nso.onset is None:
         return []
-    if foreign.get("t0", 0.0) < clip_end - 0.01:
+    if _nso.onset < clip_end - 0.01:
         return [
             f"  [ERROR] {reel_id}: transcribed word after final subtitle '{last_sub.word}' "
-            f"(t0={foreign['t0']:.3f}s) starts before clip end {clip_end:.3f}s"
+            f"(t0={last_sub.t0:.3f}s) starts before clip end {clip_end:.3f}s"
         ]
     return []
 
@@ -1279,6 +1277,74 @@ class _TailFull(NamedTuple):
     N: float | None      # raw next speech onset before onset_margin subtraction
 
 
+class _NextSpeechOnset(NamedTuple):
+    onset: float | None   # audible_start of next word (or untr onset), after own-tail filter
+    audible_end: float    # last-word audible_end after dedup and own-tail absorption
+
+
+def _next_speech_onset_after(
+    last_t0: float,
+    smap: dict,
+    lookup: dict,
+    *,
+    last_t1: float | None = None,
+    own_tail_short_sec: float = 0.25,
+    own_tail_gap_min_sec: float = 0.10,
+    own_tail_t1_margin_sec: float = 0.15,
+    own_tail_window_sec: float = 0.30,
+) -> "_NextSpeechOnset | None":
+    """Next speech audible onset after the last subtitle word.
+
+    Applies overlapping-duplicate removal and own-tail untranscribed-speech filtering —
+    the same logic used by _tail_from_smap_full.  Returns None when last_t0 is not in
+    the lookup; returns _NextSpeechOnset with onset=None when no speech follows.
+    """
+    key = round(last_t0 * 1000)
+    if key not in lookup:
+        return None
+
+    word_idx, word_entry = lookup[key]
+    audible_end: float = word_entry["audible_end"]
+    words = smap["words"]
+    boundaries = smap.get("boundaries", [])
+
+    if last_t1 is not None:
+        while word_idx + 1 < len(words):
+            nxt = words[word_idx + 1]
+            if not (nxt["t0"] <= last_t1 and nxt.get("audible_start", nxt["t0"]) < audible_end + 0.04):
+                break
+            word_idx += 1
+            audible_end = max(audible_end, words[word_idx]["audible_end"])
+
+    untr_offset = 0
+    if word_idx < len(boundaries):
+        untr_list = boundaries[word_idx].get("untranscribed_speech") or []
+        if untr_list:
+            iv_s, iv_e = untr_list[0][0], untr_list[0][1]
+            iv_dur = iv_e - iv_s
+            gap_after = float("inf")
+            if word_idx + 1 < len(words):
+                gap_after = words[word_idx + 1]["audible_start"] - iv_e
+            word_t1 = words[word_idx]["t1"]
+            duration_rule = iv_dur < own_tail_short_sec and gap_after >= own_tail_gap_min_sec
+            t1_hint = (iv_s <= word_t1 <= iv_e) or (iv_e <= word_t1 + own_tail_t1_margin_sec)
+            if iv_s - audible_end <= own_tail_window_sec and (duration_rule or t1_hint):
+                audible_end = iv_e
+                untr_offset = 1
+
+    onset: float | None = None
+    if word_idx < len(boundaries):
+        untr = (boundaries[word_idx].get("untranscribed_speech") or [])[untr_offset:]
+        if untr:
+            onset = untr[0][0]
+    if word_idx + 1 < len(words):
+        next_as = words[word_idx + 1]["audible_start"]
+        if onset is None or next_as < onset:
+            onset = next_as
+
+    return _NextSpeechOnset(onset=onset, audible_end=audible_end)
+
+
 def _tail_from_smap_full(
     last_t0: float,
     seg_end: float,
@@ -1306,51 +1372,21 @@ def _tail_from_smap_full(
     key = round(last_t0 * 1000)
     if key not in lookup:
         return None
+    _, word_entry = lookup[key]
 
-    word_idx, word_entry = lookup[key]
-    audible_end: float = word_entry["audible_end"]
-
-    words = smap["words"]
-    boundaries = smap["boundaries"]
-
-    if last_t1 is not None:
-        while word_idx + 1 < len(words):
-            nxt = words[word_idx + 1]
-            if not (nxt["t0"] <= last_t1 and nxt.get("audible_start", nxt["t0"]) < audible_end + 0.04):
-                break
-            word_idx += 1
-            audible_end = max(audible_end, words[word_idx]["audible_end"])
-
-    untr_offset = 0
-    if word_idx < len(boundaries):
-        untr_list = (boundaries[word_idx].get("untranscribed_speech") or [])
-        if untr_list:
-            iv_s, iv_e = untr_list[0][0], untr_list[0][1]
-            iv_dur = iv_e - iv_s
-            gap_after = float("inf")
-            if word_idx + 1 < len(words):
-                gap_after = words[word_idx + 1]["audible_start"] - iv_e
-            word_t1 = words[word_idx]["t1"]
-            duration_rule = (iv_dur < own_tail_short_sec and gap_after >= own_tail_gap_min_sec)
-            t1_hint = (iv_s <= word_t1 <= iv_e) or (iv_e <= word_t1 + own_tail_t1_margin_sec)
-            if iv_s - audible_end <= own_tail_window_sec and (duration_rule or t1_hint):
-                audible_end = iv_e
-                untr_offset = 1
-
-    next_speech_onset: float | None = None
-    if word_idx < len(boundaries):
-        bnd = boundaries[word_idx]
-        untr = (bnd.get("untranscribed_speech") or [])[untr_offset:]
-        if untr:
-            next_speech_onset = untr[0][0]
-    if word_idx + 1 < len(words):
-        next_as = words[word_idx + 1]["audible_start"]
-        if next_speech_onset is None or next_as < next_speech_onset:
-            next_speech_onset = next_as
+    _nso = _next_speech_onset_after(
+        last_t0, smap, lookup, last_t1=last_t1,
+        own_tail_short_sec=own_tail_short_sec,
+        own_tail_gap_min_sec=own_tail_gap_min_sec,
+        own_tail_t1_margin_sec=own_tail_t1_margin_sec,
+        own_tail_window_sec=own_tail_window_sec,
+    )
+    assert _nso is not None  # key is in lookup — guaranteed
+    audible_end = _nso.audible_end
 
     N: float | None = (
-        next_speech_onset
-        if next_speech_onset is not None and next_speech_onset - audible_end <= tail_pad_sec + 1e-9
+        _nso.onset
+        if _nso.onset is not None and _nso.onset - audible_end <= tail_pad_sec + 1e-9
         else None
     )
 
@@ -2758,7 +2794,7 @@ def _render_segments(
                 _clip_errors.extend(_check_silence_at_clip_end(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
                 _clip_errors.extend(_check_foreign_tail_word_render(
-                    reel.id, reel.subtitles[-1], _real_content_end, smap))
+                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
             # First-word-cut invariant: source_start must not exceed the first subtitle word's
             # acoustic onset (audible_start per smap).  The start-fix above prevents this; the
             # check here catches any remaining violations (e.g., smap lookup mismatch).

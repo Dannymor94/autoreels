@@ -2765,7 +2765,14 @@ def _check_foreign_tail_word(reels, tx_words, *, smap_lookup: dict | None = None
         )
         if foreign is None:
             continue
-        if foreign.t0 < r.end - 0.01:
+        # Use audible_start from smap_lookup: Whisper t0 can precede audible_start by 10–30 ms
+        # (the acoustic onset of the word).  Clip end may legitimately fall in that gap.
+        foreign_onset = foreign.t0
+        if smap_lookup:
+            _fk = round(foreign.t0 * 1000)
+            if _fk in smap_lookup:
+                foreign_onset = smap_lookup[_fk][1].get("audible_start", foreign.t0)
+        if foreign_onset < r.end - 0.01:
             errors.append(
                 f"[CONTENT] {r.id}: transcribed word '{foreign.word}' (t0={foreign.t0:.3f}s) "
                 f"after final subtitle '{last_sub.word}' starts before clip end {r.end:.3f}s"
