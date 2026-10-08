@@ -1044,8 +1044,14 @@
         },
         {
           "start": 857.4200000000001,
+          "end": 886.5926254999998,
+          "shot": "close",
+          "close_intervals": []
+        },
+        {
+          "start": 886.5926254999998,
           "end": 901.5003455,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         }
       ],
@@ -1664,19 +1670,14 @@
         {
           "start": 1030.9603455,
           "end": 1065.1230755,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
           "start": 1072.88,
           "end": 1097.6030954999999,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              16.523075,
-              25.923095499999818
-            ]
-          ]
+          "shot": "close",
+          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -2277,36 +2278,36 @@
     {
       "id": "r05",
       "start": 1201.384031,
-      "end": 1242.104031,
+      "end": 1242.0800000000002,
       "segments": [
         {
           "start": 1201.384031,
           "end": 1215.75,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
           "start": 1223.764031,
           "end": 1224.8940309999998,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
           "start": 1225.1240309999998,
           "end": 1232.59,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
           "start": 1233.8500000000001,
           "end": 1239.494031,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {
           "start": 1239.924031,
-          "end": 1242.104031,
-          "shot": "wide",
+          "end": 1242.0800000000002,
+          "shot": "close",
           "close_intervals": []
         }
       ],
@@ -2894,7 +2895,7 @@
       "tail_next_word_start": 1242.124031,
       "warnings": [
         "e: ends on incomplete sentence ('Ну и')",
-        "[CONTENT] r05: last word 'главное.' cut by clip end (continuous speech into next phrase, ae=1242.174 > clip=1242.104)"
+        "[CONTENT] r05: last word 'главное.' cut by clip end (continuous speech into next phrase, ae=1242.174 > clip=1242.080)"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
@@ -2909,7 +2910,7 @@
     {
       "id": "r06",
       "start": 1397.815591,
-      "end": 1441.895581,
+      "end": 1441.8300000000002,
       "segments": [
         {
           "start": 1397.815591,
@@ -2919,14 +2920,15 @@
         },
         {
           "start": 1405.435591,
-          "end": 1441.895581,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              33.85998999999997,
-              36.47999000000004
-            ]
-          ]
+          "end": 1423.350591,
+          "shot": "close",
+          "close_intervals": []
+        },
+        {
+          "start": 1423.350591,
+          "end": 1441.8300000000002,
+          "shot": "close",
+          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -3605,18 +3607,36 @@
       "segments": [
         {
           "start": 1463.215591,
+          "end": 1472.5506109999997,
+          "shot": "wide",
+          "close_intervals": []
+        },
+        {
+          "start": 1472.5506109999997,
           "end": 1472.5656109999998,
           "shot": "close",
           "close_intervals": []
         },
         {
           "start": 1476.0,
+          "end": 1488.120586,
+          "shot": "close",
+          "close_intervals": []
+        },
+        {
+          "start": 1488.120586,
           "end": 1502.5171309999998,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         },
         {
           "start": 1506.0471309999998,
+          "end": 1515.662131,
+          "shot": "wide",
+          "close_intervals": []
+        },
+        {
+          "start": 1515.662131,
           "end": 1516.197131,
           "shot": "close",
           "close_intervals": []
@@ -3624,7 +3644,7 @@
         {
           "start": 1516.9871309999999,
           "end": 1522.72,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         }
       ],
@@ -4635,7 +4655,7 @@
         {
           "start": 1841.7102499999999,
           "end": 1864.0002499999998,
-          "shot": "close",
+          "shot": "wide",
           "close_intervals": []
         },
         {

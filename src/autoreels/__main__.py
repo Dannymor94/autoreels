@@ -1879,7 +1879,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     for _s in segs[1:]:
         _p = _merged[-1]
         _gap = _s.start - _p.end
-        if 0.0 <= _gap < _MERGE_GAP_MAX:
+        if 0.0 < _gap < _MERGE_GAP_MAX:
             _pdur = _p.end - _p.start
             _pci  = _seg_eff_ci(_p)
             _sci  = _seg_eff_ci(_s)
@@ -2683,6 +2683,13 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
         elif _deflate_cap is None and getattr(r, "has_explicit_e", False):
             _nst0 = getattr(r, "_next_speech_t0", None)
             if _nst0 is not None:
+                # Prefer smap audible_start: Whisper t0 can lag the acoustic onset by 30-70 ms.
+                # _check_foreign_tail_word uses audible_start, so the cap must use the same value
+                # to avoid producing a clip that the check will reject.
+                if smap_lookup:
+                    _fk = round(_nst0 * 1000)
+                    if _fk in smap_lookup:
+                        _nst0 = min(_nst0, smap_lookup[_fk][1].get("audible_start", _nst0))
                 _e_cap = _nst0 - _DEFLATE_CAP_MARGIN
                 if desired > _e_cap:
                     desired = _e_cap
