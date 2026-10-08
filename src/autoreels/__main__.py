@@ -8417,6 +8417,53 @@ def cmd_models(*, root=None) -> int:
     return 0
 
 
+def cmd_plan(manifest_path: str, *, reels_filter: str | None = None, root=None) -> int:
+    """Print RenderPlan YAML for manual-path reels (REEL_SPEC §1–§4)."""
+    import json as _json
+    import yaml as _yaml
+    from autoreels.core.plan import build_manual_plan
+
+    root = Path(root) if root else _project_root()
+    manifest = Manifest.model_validate_json(Path(manifest_path).read_text(encoding="utf-8"))
+
+    transcript = _resolve_cached_transcript(manifest, root / "data" / "cache")
+    words = transcript.words if transcript else []
+
+    smap: dict | None = None
+    smap_path = root / "transcripts" / f"{Path(manifest_path).stem}.speechmap.json"
+    if smap_path.exists():
+        smap = _json.loads(smap_path.read_text(encoding="utf-8"))
+
+    render_cfg = load_render_config(root / "config" / "render.yaml")
+
+    reel_ids: set | None = set(reels_filter.split(",")) if reels_filter else None
+    out: list = []
+    for reel in manifest.reels:
+        if reel_ids and reel.id not in reel_ids:
+            continue
+        plan = build_manual_plan(reel, words, smap, render_cfg)
+        cold_open = None
+        if plan.cold_open_source is not None and plan.cold_open_sentence_idx is not None:
+            co_sent = plan.sentences[plan.cold_open_sentence_idx - 1]
+            cold_open = {
+                "sentence": plan.cold_open_sentence_idx,
+                "text": " ".join(w.word for w in co_sent),
+                "replayed_in_body": plan.replayed_in_body,
+            }
+        out.append({
+            "id": reel.id,
+            "body_windows": [list(bw.sentence_indices) for bw in plan.body_windows],
+            "shots": [
+                {"shot": s.shot, "reason": s.reason, "sentences": list(s.sentence_indices)}
+                for s in plan.shots
+            ],
+            "cold_open": cold_open,
+        })
+    print(_yaml.dump({"reels": out}, allow_unicode=True, default_flow_style=None, sort_keys=False),
+          end="")
+    return 0
+
+
 def _build_parser():
     import argparse
 
@@ -8972,6 +9019,16 @@ def _build_parser():
     pbss.add_argument("--force", action="store_true", default=False,
                       help="перезаписать source_sha256 даже если уже установлен")
 
+    ppl = sub.add_parser(
+        "plan",
+        help="вывести RenderPlan (окна/шоты §1–§4) для ручных клипов манифеста",
+        description="Печатает YAML-план окон и шотов для каждого selection_source=human рила.",
+    )
+    ppl.add_argument("manifest", help="путь к манифесту (.json)")
+    ppl.add_argument("--reels", default=None, metavar="r01,r03",
+                     help="фильтр по id риелов через запятую (по умолчанию: все ручные)")
+    ppl.add_argument("--root", default=None, help="корень проекта (по умолчанию: авто)")
+
     return p
 
 
@@ -9221,6 +9278,12 @@ def main(argv=None) -> int:
                 profile_path=_detect_shell_profile(),
                 dry_run=args.dry_run,
                 confirm=not args.yes,
+            )
+        elif args.cmd == "plan":
+            return cmd_plan(
+                args.manifest,
+                reels_filter=args.reels,
+                root=args.root if hasattr(args, "root") and args.root else None,
             )
     except _KNOWN_ERRORS as e:
         print(f"ошибка: {e}", file=sys.stderr)
