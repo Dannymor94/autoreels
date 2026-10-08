@@ -1074,9 +1074,9 @@ def test_human_with_c_exactly_one_switch():
 
 
 def test_human_r01_cold_open_body0_wide_body1_close_via_jump_seam():
-    """r01 proxy: cold_open → wide body[0] → x: seam (terminal in gap) → close body[1]; c: redundant.
+    """r01 proxy: cold_open → wide body[0] → 4.35s jump seam → close body[1]; c: redundant.
 
-    Stale shot=close on both body segs must be cleared; x: seam drives body[1]=close.
+    Stale shot=close on both body segs must be cleared; jump seam drives body[1]=close.
     """
     from autoreels.__main__ import _stage_two_shot_auto
     # segs match IMG_6848 r01 body segments; both have stale shot=close from prior auto run
@@ -1084,15 +1084,13 @@ def test_human_r01_cold_open_body0_wide_body1_close_via_jump_seam():
         _seg(164.349, 196.279, shot="close"),
         _seg(200.629, 205.689, shot="close"),
     ]
-    # Terminal word in the 4.35s gap (x: cut leaves a sentence-ending word in the gap)
-    words = [Word(word="нет.", t0=197.0, t1=197.4, emph=False)]
     reel = _reel(segs)
     reel.c_close_ranges = [[202.609, 205.709]]  # c:10 covers only end of body[1]
     reel.cold_open = _seg(201.409, 205.709, shot="close")
-    _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
     result = reel.effective_segments()
     assert result[0].shot == "wide", f"body[0] must be wide after cold_open flip; got {result[0].shot}"
-    assert result[1].shot == "close", f"body[1] must be close via x: seam (terminal in gap); got {result[1].shot}"
+    assert result[1].shot == "close", f"body[1] must be close via jump seam (gap=4.35s); got {result[1].shot}"
 
 
 def test_human_r02_no_cold_open_no_jump_seam_c_adds_ci():
@@ -1116,24 +1114,22 @@ def test_human_r02_no_cold_open_no_jump_seam_c_adds_ci():
 
 
 def test_human_r03_x7_jump_seam_makes_body1_close():
-    """r03 proxy: cold_open → wide body[0]; x:7 x: seam (4.05s gap, terminal word) → close body[1].
+    """r03 proxy: cold_open → wide body[0]; x:7 jump seam (4.05s) → close body[1]; c:14 redundant.
 
-    Both body segs previously wide (stale); x: seam flip drives body[1]=close.
+    Both body segs previously wide (stale); jump seam flip drives body[1]=close.
     """
     from autoreels.__main__ import _stage_two_shot_auto
     segs = [
         _seg(851.238, 853.37, shot="wide"),   # 2.13s — check it stays wide
-        _seg(857.42, 901.5, shot="wide"),     # 44s — x: seam flip to close
+        _seg(857.42, 901.5, shot="wide"),     # 44s — jump seam flip to close
     ]
-    # Terminal word in the 4.05s gap (x:7 cut)
-    words = [Word(word="всё.", t0=854.0, t1=854.4, emph=False)]
     reel = _reel(segs)
     reel.c_close_ranges = [[900.540, 901.340]]  # c:14 at end of body[1] (0.8s, partial)
     reel.cold_open = _seg(899.600, 901.340, shot="close")
-    _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
     result = reel.effective_segments()
     assert result[0].shot == "wide", f"body[0] must be wide after cold_open flip; got {result[0].shot}"
-    assert result[1].shot == "close", f"body[1] must be close via x:7 x: seam; got {result[1].shot}"
+    assert result[1].shot == "close", f"body[1] must be close via x:7 jump seam (4.05s); got {result[1].shot}"
 
 
 # ── r05 fix: c: span at jump seam satisfies flip, no separate short A-B-A span ──
