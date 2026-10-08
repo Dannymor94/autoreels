@@ -1023,3 +1023,46 @@ def test_is_jump_seam_cold_open_always_jump():
     assert is_jump_seam(prev_win, next_win, cold_open=True), (
         "cold open → body is always a structural jump seam"
     )
+
+
+# ── Part 2: shots only for emphasis and seams (human clips) ──────────────────
+
+def _apply_human(segs, words=None, **cfg_kw):
+    from autoreels.__main__ import _stage_two_shot_auto
+    reel = _reel(segs)
+    cfg_kw.setdefault("two_shot_auto_human", False)
+    _stage_two_shot_auto([reel], words or [], render_cfg=_cfg(**cfg_kw), selection_source="human")
+    return reel
+
+
+def test_human_no_c_no_seams_one_shot():
+    """Human clip with adjacent sentences and no c: → all segments same shot (no alternation)."""
+    # Adjacent sentences (no skipped words) — no jump seams, no c: annotations
+    words = [
+        Word(word="a", t0=0.5, t1=1.0, emph=False),
+        Word(word="b", t0=3.5, t1=4.0, emph=False),
+        Word(word="c", t0=6.5, t1=7.0, emph=False),
+    ]
+    segs = [_seg(0, 3), _seg(3, 6), _seg(6, 9)]
+    reel = _apply_human(segs, words)
+    shots = [s.shot for s in reel.effective_segments()]
+    # All same shot — no alternation occurred
+    assert len(set(shots)) == 1, f"expected one shot value, got {shots}"
+
+
+def test_human_with_c_exactly_one_switch():
+    """Human clip: c: annotation (shot=close) is preserved; no auto-alternation at adjacent seams."""
+    words = [
+        Word(word="a", t0=0.5, t1=1.0, emph=False),
+        Word(word="b", t0=4.5, t1=5.0, emph=False),
+        Word(word="c", t0=10.0, t1=10.5, emph=False),
+    ]
+    # Middle segment shot='close' (c: annotation via assign_close_shots fully-close path).
+    # Gap 0.5s > 0.1s → no pre-merge; 5s close ≥ min_middle=4s → A-B-A won't fire.
+    segs = [_seg(0, 3.5), _seg(4, 9, shot="close"), _seg(9.5, 13)]
+    reel = _apply_human(segs, words)
+    result = reel.effective_segments()
+    # c: annotation is preserved regardless of auto-shot state
+    assert result[1].shot == "close", f"c: annotation must be preserved, got {result[1].shot}"
+    # auto must not inject close_intervals into non-c: segments
+    assert not result[0].close_intervals, "auto must not add ci to non-c: seg"

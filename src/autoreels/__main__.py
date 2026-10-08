@@ -1760,13 +1760,15 @@ def _ensure_smap(
 
 
 def _stage_two_shot_auto(reels, words, *, render_cfg,
-                         smap: "dict | None" = None) -> list:
+                         smap: "dict | None" = None,
+                         selection_source: str = "") -> list:
     """Auto-alternate wide/close at segment seams; enforce max-shot for both wide and close.
 
     Formatting stage for both auto and human paths. Manual c: assignments (shot='close' or
     non-empty close_intervals) are preserved — auto only fills unassigned segments.
     Requires render_cfg.two_shot=True and render_cfg.two_shot_auto=True.
     smap: when provided, Level-1 candidates use map pauses (M1.8 Stage B consumer 3).
+    selection_source: "human" = manual-review reels; "" = automatic path.
     """
     if not (getattr(render_cfg, "two_shot", False) and getattr(render_cfg, "two_shot_auto", False)):
         return reels
@@ -1791,12 +1793,16 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
     _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
     _beat_seams_only = getattr(render_cfg, "beat_clip_shots_only_at_seams", True)
     _jump_gap = getattr(render_cfg, "jump_seam_gap_sec", 2.0)
+    _is_human = selection_source == "human"
+    _human_auto_off = _is_human and not getattr(render_cfg, "two_shot_auto_human", False)
     for reel in reels:
         _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
                                   min_middle=_min_middle,
                                   smap=smap, level1_min_pause=level1_min_pause,
                                   beat_shots_at_seams_only=_beat_seams_only,
-                                  jump_seam_gap_sec=_jump_gap)
+                                  jump_seam_gap_sec=_jump_gap,
+                                  human_auto_off=_human_auto_off,
+                                  selection_source=selection_source)
     # assign_shots (single-reel public API) delegates here; _stage_two_shot_auto is the batch wrapper.
 
     # Print switch table — essential for comparing smap-on vs smap-off.
@@ -1814,12 +1820,13 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
     return reels
 
 
-def assign_shots(reel, words, *, render_cfg, smap=None) -> None:
+def assign_shots(reel, words, *, render_cfg, smap=None, selection_source: str = "") -> None:
     """Assign wide/close shots to one reel — single source of truth for both apply and render.
 
     Runs all passes in fixed order: cold open=close → manual c: → jump seams (beat) /
     two_shot_auto (non-beat) → snap tiny gaps → A-B-A → min shot → assertions.
     Mutates reel.segments in place. No-op when two_shot/two_shot_auto is off.
+    selection_source: "human" = manual-review reel; "" = automatic path.
     """
     if not (getattr(render_cfg, "two_shot", False) and getattr(render_cfg, "two_shot_auto", False)):
         return
@@ -1831,11 +1838,14 @@ def assign_shots(reel, words, *, render_cfg, smap=None) -> None:
     _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
     _beat_seams_only = getattr(render_cfg, "beat_clip_shots_only_at_seams", True)
     _jump_gap = getattr(render_cfg, "jump_seam_gap_sec", 2.0)
+    _human_auto_off = selection_source == "human" and not getattr(render_cfg, "two_shot_auto_human", False)
     _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
                               min_middle=_min_middle, smap=smap,
                               level1_min_pause=level1_min_pause,
                               beat_shots_at_seams_only=_beat_seams_only,
-                              jump_seam_gap_sec=_jump_gap)
+                              jump_seam_gap_sec=_jump_gap,
+                              human_auto_off=_human_auto_off,
+                              selection_source=selection_source)
 
 
 def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
@@ -1843,7 +1853,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                                smap: "dict | None" = None,
                                level1_min_pause: float = 0.35,
                                beat_shots_at_seams_only: bool = True,
-                               jump_seam_gap_sec: float = 2.0) -> None:
+                               jump_seam_gap_sec: float = 2.0,
+                               human_auto_off: bool = False,
+                               selection_source: str = "") -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
     from autoreels.cloud.edit import split_sentences as _sp
     segs = reel.effective_segments()
@@ -1905,7 +1917,9 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # backward).  Auto-assigned shots from a prior run are NOT treated as manual — only human
     # c: annotations (selection_source='human') are preserved.
     _is_beat_shots_mode = beat_shots_at_seams_only and reel.beat_gap_sec is not None
-    _is_human_reel = getattr(reel, "selection_source", None) == "human"
+    _is_human_reel = selection_source == "human"
+    # human_auto_off: skip auto-alternation and max-shot splits for human reels.
+    _is_human_auto_off = human_auto_off
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
     # cold open = close; its jump seam forces body to start with the opposite shot
     cur = "wide" if reel.cold_open is not None else "close"
@@ -1926,6 +1940,11 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                         cur = "close" if cur == "wide" else "wide"
                 else:
                     # Beat seams always toggle (they are explicit reorder points, not auto-switches).
+                    cur = "close" if cur == "wide" else "wide"
+            elif _is_human_auto_off:
+                # Human: only toggle at jump seams (x:/filler cuts, not adjacent sentences).
+                if is_jump_seam(segs[i - 1], segs[i], words,
+                                jump_seam_gap_sec=jump_seam_gap_sec):
                     cur = "close" if cur == "wide" else "wide"
             elif prev_dur >= min_shot and cur_dur >= min_shot:
                 cur = "close" if cur == "wide" else "wide"
@@ -2089,7 +2108,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
 
     _warned_spans: set = set()
     for _iter in range(50):
-        if _is_beat_shots_mode:    # beat reels: no ci splits inside a beat
+        if _is_beat_shots_mode or _is_human_auto_off:    # no ci splits for beat or human-auto-off
             break
         spans = _shot_spans_with_times(result)
         over = [(st, sa, se) for st, sa, se in spans if se - sa > max_shot]
@@ -4284,6 +4303,7 @@ def cmd_render(
             _stage_two_shot_auto(
                 render_manifest.reels, _render_words or [],
                 render_cfg=render_cfg, smap=_render_smap,
+                selection_source=render_manifest.selection_source,
             )
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
@@ -5869,7 +5889,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
     # M1.7 step 1b: auto wide/close alternation at seams (formatting — runs on human and auto paths).
-    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_smap)
+    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_smap,
+                                 selection_source="human")
 
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,

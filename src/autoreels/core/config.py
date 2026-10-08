@@ -662,6 +662,8 @@ class RenderConfig(BaseModel):
     close_shot_anchor_y: float = 0.35  # anchor point: 35% of wide height stays at 35% of close height
     # M1.7 step 1b: automatic shot alternation at seams (requires two_shot: true).
     two_shot_auto: bool = False          # auto-alternate wide/close at x:/splice/filler seams
+    # Human clips (selection_source=human): allow auto-alternation. Default False = seams and c: only.
+    two_shot_auto_human: bool = False
     two_shot_max_shot_sec: float = 9.0   # force a switch if any shot (wide OR close) exceeds this
     two_shot_min_sec: float = 2.5        # suppress a switch that would create a shorter shot
     two_shot_min_middle_sec: float = 4.0  # A-B-A middle span shorter than this is merged away
