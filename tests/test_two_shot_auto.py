@@ -1051,18 +1051,82 @@ def test_human_no_c_no_seams_one_shot():
 
 
 def test_human_with_c_exactly_one_switch():
-    """Human clip: c: annotation (shot=close) is preserved; no auto-alternation at adjacent seams."""
+    """Human clip: c_close_ranges drives close; stale shot=close on segment is reset to wide."""
     words = [
         Word(word="a", t0=0.5, t1=1.0, emph=False),
         Word(word="b", t0=4.5, t1=5.0, emph=False),
         Word(word="c", t0=10.0, t1=10.5, emph=False),
     ]
-    # Middle segment shot='close' (c: annotation via assign_close_shots fully-close path).
-    # Gap 0.5s > 0.1s → no pre-merge; 5s close ≥ min_middle=4s → A-B-A won't fire.
+    # Middle segment has stale shot='close' from a prior auto run — must be reset.
+    # c_close_ranges covers segment 2 fully → close via c: range application, not stale shot.
+    # Adjacent gaps (0.5s) are not jump seams, so no alternation flip occurs.
+    from autoreels.__main__ import _stage_two_shot_auto
     segs = [_seg(0, 3.5), _seg(4, 9, shot="close"), _seg(9.5, 13)]
-    reel = _apply_human(segs, words)
+    reel = _reel(segs)
+    reel.c_close_ranges = [[4.0, 9.0]]
+    _stage_two_shot_auto([reel], words, render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
     result = reel.effective_segments()
-    # c: annotation is preserved regardless of auto-shot state
-    assert result[1].shot == "close", f"c: annotation must be preserved, got {result[1].shot}"
-    # auto must not inject close_intervals into non-c: segments
+    assert result[1].shot == "close", f"c: range must produce close, got {result[1].shot}"
     assert not result[0].close_intervals, "auto must not add ci to non-c: seg"
+
+
+# ── Part 1 fix: human shots reset from scratch using c_close_ranges and jump seams ────────────
+
+
+def test_human_r01_cold_open_body0_wide_body1_close_via_jump_seam():
+    """r01 proxy: cold_open → wide body[0] → 4.35s jump seam → close body[1]; c: redundant.
+
+    Stale shot=close on both body segs must be cleared; jump seam drives body[1]=close.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+    # segs match IMG_6848 r01 body segments; both have stale shot=close from prior auto run
+    segs = [
+        _seg(164.349, 196.279, shot="close"),
+        _seg(200.629, 205.689, shot="close"),
+    ]
+    reel = _reel(segs)
+    reel.c_close_ranges = [[202.609, 205.709]]  # c:10 covers only end of body[1]
+    reel.cold_open = _seg(201.409, 205.709, shot="close")
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
+    result = reel.effective_segments()
+    assert result[0].shot == "wide", f"body[0] must be wide after cold_open flip; got {result[0].shot}"
+    assert result[1].shot == "close", f"body[1] must be close via jump seam (gap=4.35s); got {result[1].shot}"
+
+
+def test_human_r02_no_cold_open_no_jump_seam_c_adds_ci():
+    """r02 proxy: no cold_open, no jump seam → base wide; c:7 adds close_intervals only.
+
+    Stale shot=close must be reset; partial c: range adds ci to wide segment.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+    segs = [_seg(642.355, 675.95, shot="close")]  # stale shot from prior auto run
+    reel = _reel(segs)
+    reel.c_close_ranges = [[673.015, 675.815]]  # partial coverage (last 2.8s of 33.6s segment)
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
+    result = reel.effective_segments()
+    assert result[0].shot == "wide", f"base must be wide (no jump seam); got {result[0].shot}"
+    ci = result[0].close_intervals or []
+    assert ci, "c: range must produce close_intervals on wide segment"
+    assert abs(ci[0][0] - (673.015 - 642.355)) < 0.1, f"ci start wrong: {ci[0][0]}"
+    # ci end snaps to segment end if within _SNAP_THRESH=0.15s of it
+    assert ci[0][1] <= 675.95 - 642.355 + 0.01, f"ci end must not exceed segment end: {ci[0][1]}"
+    assert ci[0][1] >= 675.815 - 642.355 - 0.2, f"ci end must be near c: range end: {ci[0][1]}"
+
+
+def test_human_r03_x7_jump_seam_makes_body1_close():
+    """r03 proxy: cold_open → wide body[0]; x:7 jump seam (4.05s) → close body[1]; c:14 redundant.
+
+    Both body segs previously wide (stale); jump seam flip drives body[1]=close.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+    segs = [
+        _seg(851.238, 853.37, shot="wide"),   # 2.13s — check it stays wide
+        _seg(857.42, 901.5, shot="wide"),     # 44s — jump seam flip to close
+    ]
+    reel = _reel(segs)
+    reel.c_close_ranges = [[900.540, 901.340]]  # c:14 at end of body[1] (0.8s, partial)
+    reel.cold_open = _seg(899.600, 901.340, shot="close")
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg(two_shot_auto_human=False), selection_source="human")
+    result = reel.effective_segments()
+    assert result[0].shot == "wide", f"body[0] must be wide after cold_open flip; got {result[0].shot}"
+    assert result[1].shot == "close", f"body[1] must be close via x:7 jump seam (4.05s); got {result[1].shot}"

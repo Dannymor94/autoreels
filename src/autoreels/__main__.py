@@ -1921,14 +1921,17 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # human_auto_off: skip auto-alternation and max-shot splits for human reels.
     _is_human_auto_off = human_auto_off
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
-    # cold open = close; its jump seam forces body to start with the opposite shot
-    cur = "wide" if reel.cold_open is not None else "close"
+    # cold open = close; its jump seam forces body to start with the opposite shot.
+    # Human auto-off: base shot is always wide (stale shots reset; jump seams and c: drive changes).
+    cur = "wide" if (reel.cold_open is not None or _is_human_auto_off) else "close"
     for i, seg in enumerate(segs):
         # In beat_shots_mode with an auto reel: prior auto-assigned shots are NOT manual;
         # only human c: annotations are preserved.
-        manual = (seg.shot == "close" or bool(getattr(seg, "close_intervals", []))) and (
-            _is_human_reel or not _is_beat_shots_mode
-        )
+        # Human auto-off: stale manifest shots are NEVER manual — only jump seams and c_close_ranges
+        # drive shot assignment, applied after Pass 1 below.
+        manual = (not _is_human_auto_off and
+                  (seg.shot == "close" or bool(getattr(seg, "close_intervals", []))) and
+                  (_is_human_reel or not _is_beat_shots_mode))
         if i > 0:
             prev_dur = segs[i - 1].end - segs[i - 1].start
             cur_dur = seg.end - seg.start
@@ -2009,6 +2012,31 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             new_segs.append(seg.model_copy(update={"shot": "close", "close_intervals": []}))
         else:
             new_segs.append(seg.model_copy(update={"shot": "wide", "close_intervals": []}))
+
+    # Human auto-off: apply c_close_ranges as close_intervals on remaining wide segments.
+    # Jump-seam-forced-close segments are already close; c: ranges add ci only where base is wide.
+    if _is_human_auto_off:
+        _c_reel = getattr(reel, "c_close_ranges", []) or []
+        if _c_reel:
+            _c_applied = []
+            for _s in new_segs:
+                if _s.shot != "wide":
+                    _c_applied.append(_s)
+                    continue
+                _ci = []
+                for _cr in _c_reel:
+                    _t0 = round(max(_s.start, _cr[0]) - _s.start, 6)
+                    _t1 = round(min(_s.end, _cr[1]) - _s.start, 6)
+                    if _t1 > _t0 + 0.01:
+                        _ci.append([_t0, _t1])
+                if not _ci:
+                    _c_applied.append(_s)
+                elif _ci[0][0] < 0.01 and _ci[-1][1] > _s.end - _s.start - 0.01:
+                    # Full coverage → shot=close (mirrors assign_close_shots logic)
+                    _c_applied.append(_s.model_copy(update={"shot": "close", "close_intervals": []}))
+                else:
+                    _c_applied.append(_s.model_copy(update={"close_intervals": _ci}))
+            new_segs = _c_applied
 
     # Pass 3: iterative max-shot enforcement — loop until no span exceeds max_shot or no
     # candidate remains. Candidates restricted to [span_start+min, span_end-min] so both
@@ -2404,13 +2432,21 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             _s_ext = result[_k_ext]
             _ci_ext = list(getattr(_s_ext, "close_intervals", []) or [])
             if _s_ext.shot == "close" and not _ci_ext:
-                if _k_ext in _manual_segs:
-                    warnings.append(
-                        f"cold-open A-B-A: c: at body[{_k_ext}] "
-                        f"({_s_ext.end - _s_ext.start:.2f}s) overridden wide "
-                        f"(initial wide {_co_wide:.2f}s < min_middle {min_middle:.1f}s)"
-                    )
-                result[_k_ext] = _s_ext.model_copy(update={"shot": "wide", "close_intervals": []})
+                # Skip extension when the narrow wide run is sandwiched between two jump seams
+                # and >= _JUMP_SEAM_MIN: same exemption as A-B-A merge for jump-seam-bounded spans.
+                _rjs_co = (_k_ext > 0 and
+                           is_jump_seam(result[_k_ext - 1], result[_k_ext], words,
+                                        jump_seam_gap_sec=jump_seam_gap_sec))
+                if _rjs_co and _co_wide >= _JUMP_SEAM_MIN:
+                    pass  # jump-seam-bounded narrow initial wide — allowed, skip extension
+                else:
+                    if _k_ext in _manual_segs:
+                        warnings.append(
+                            f"cold-open A-B-A: c: at body[{_k_ext}] "
+                            f"({_s_ext.end - _s_ext.start:.2f}s) overridden wide "
+                            f"(initial wide {_co_wide:.2f}s < min_middle {min_middle:.1f}s)"
+                        )
+                    result[_k_ext] = _s_ext.model_copy(update={"shot": "wide", "close_intervals": []})
 
     # Re-run jump-seam enforcement after A-B-A: A-B-A may have changed the ending shot of a
     # prev-beat segment, invalidating the first pass's decision for the next beat.
