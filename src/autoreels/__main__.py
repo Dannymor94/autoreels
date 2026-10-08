@@ -2679,7 +2679,7 @@ def _check_source_range_replayed(reels, tx_words=None) -> list[str]:
                 involves_cold_open = has_co and i == 0
                 if involves_cold_open and keep:
                     continue  # sanctioned h:N! cold-open replay
-                hint = (" — the cold-open hook replays in the body; use h:N (not h:N!) to remove it"
+                hint = (" — the cold-open hook replays in the body; use h:N- to force removal"
                         if involves_cold_open else " — two body windows cover the same source span")
                 errs.append(
                     f"  [ERROR] {reel.id}: {len(shared)} words in source range "
@@ -5391,14 +5391,23 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             print(f"  bounds {'+'.join(str(s) for s in g)}: {_bnote}")
         # x: manual sentence exclusions — cut listed sentences out of the span as gaps.
         _x = (_ae.x if _ae else ()) or ()
-        # Part 3 — cold open no longer replays in the body by default: h:N removes the hook sentence
-        # from the body (plays once, in the open) via the same x: path (word-aligned, seam-refined —
-        # "like x:" per the spec). h:N! opts back into the replay. The hook index is in the _gsents
-        # numbering; if s:/e: already trimmed it out, exclude_sentences reports it out-of-span.
+        # Part 3 — hook replay by position: keep the hook in the body only when its sentence starts
+        # in the second half of the body (hook_replay_min_pos fraction of body duration).
+        # h:N! forces replay; h:N- forces removal. The hook index is in the _gsents numbering;
+        # if s:/e: already trimmed it out, exclude_sentences reports it out-of-span.
         _hk = getattr(_ae, "hook", None) if _ae else None
-        _hk_keep = getattr(_ae, "hook_keep", False) if _ae else False
-        reel._hook_keep = bool(_hk and _hk_keep)   # sanctioned cold-open replay (h:N!)
-        if _hk and not _hk_keep and _hk not in _x:
+        _hk_keep = getattr(_ae, "hook_keep", False) if _ae else False   # h:N!
+        _hk_remove = getattr(_ae, "hook_remove", False) if _ae else False  # h:N-
+        _hook_min_pos = getattr(r0_cfg, "hook_replay_min_pos", 0.5)
+        if _hk and reel._hook_window is not None:
+            _body_dur = reel.end - reel.start
+            _hook_start = reel._hook_window[1]
+            _pos_ratio = (_hook_start - reel.start) / _body_dur if _body_dur > 0 else 0.0
+            _keep_in_body = _hk_keep or (not _hk_remove and _pos_ratio >= _hook_min_pos)
+        else:
+            _keep_in_body = False
+        reel._hook_keep = bool(_hk and _keep_in_body)   # sanctioned cold-open replay
+        if _hk and not _keep_in_body and _hk not in _x:
             _x = tuple(_x) + (_hk,)
         _x_refuse = False
         if _x:
@@ -5807,10 +5816,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     reel.start, reel.end = segs[0].start, segs[-1].end
                     filler_stats.append((reel, removed, count))
 
-    # Part 5 — cold open: prepend the hook sentence as a cold-open window.  Part 3: by default the
-    # hook is REMOVED from the body (excluded via the x: path above) so it plays once; h:N! keeps the
-    # replay.  Refuse a hook longer than the cap with a warning. Ensure the hook's words are in
-    # subtitles so the plate/subtitle shows during the cold open (the hook sits outside the body now).
+    # Part 5 — cold open: prepend the hook sentence as a cold-open window.  Part 3: hook replays in
+    # the body only when its sentence starts in the second half (position rule) or h:N! forces it;
+    # h:N- forces removal; removed hook is excluded via x: path above so it plays once.
+    # Refuse a hook longer than the cap with a warning. Ensure the hook's words are in subtitles.
     from autoreels.local.subtitles import words_in_window as _wiw
     _hook_max = getattr(r0_cfg, "hook_max_sec", 6.0)
     cold_open_stats: list[tuple] = []
@@ -5833,15 +5842,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         cold_open_stats.append((reel, seq_n, ht1 - ht0))
 
     # Part 3 — permanent check: no source time range may be played twice inside one clip.
-    # The cold open no longer replays in the body by default (h:N removes it); an overlap is a bug
-    # unless it is an explicit h:N! cold-open replay.  Any other overlap means two body windows
-    # cover the same source span (the owner's "repeat inside a clip").  → [ERROR], nothing installs.
+    # Hook replays are sanctioned by reel._hook_keep (position rule, h:N! or second-half placement).
+    # Any other overlap means two body windows cover the same source span.  → [ERROR], nothing installs.
     _replay_errs = _check_source_range_replayed(reels, _tx_words)
     for _re in _replay_errs:
         print(_re, file=sys.stderr, flush=True)
     if _replay_errs:
-        print("  [ERROR] source range played twice — refusing (use h:N! only for an intentional "
-              "cold-open replay)", file=sys.stderr)
+        print("  [ERROR] source range played twice — refusing (use h:N! or place hook in second half "
+              "for intentional cold-open replay)", file=sys.stderr)
         return 1
 
     # M1.7 step 1: assign close shot windows from c: sentence ranges stashed during block loop.

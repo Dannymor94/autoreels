@@ -293,6 +293,9 @@ class R0Config(BaseModel):
 
     # Cold open (Part 5): a hook sentence (h:N) longer than this is refused with a warning.
     hook_max_sec: float = 6.0
+    # Hook replay position rule: keep the hook in the body only if its sentence start lies at or
+    # after this fraction of the body duration (0.5 = second half). h:N! forces keep; h:N- forces remove.
+    hook_replay_min_pos: float = 0.5
 
     @property
     def min_duration(self) -> int:
