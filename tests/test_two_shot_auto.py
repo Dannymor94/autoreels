@@ -1130,3 +1130,42 @@ def test_human_r03_x7_jump_seam_makes_body1_close():
     result = reel.effective_segments()
     assert result[0].shot == "wide", f"body[0] must be wide after cold_open flip; got {result[0].shot}"
     assert result[1].shot == "close", f"body[1] must be close via x:7 jump seam (4.05s); got {result[1].shot}"
+
+
+# ── r05 fix: c: span at jump seam satisfies flip, no separate short A-B-A span ──
+
+def test_human_r05_c_at_jump_seam_no_aba_error():
+    """r05: c:3 ends 1.46s before seg0 end, then x:1,2 jump seam flips seg1→close.
+
+    Option 2 extends ci to seg0 end; combined ci+seg1 creates 2.70s A-B-A middle.
+    Fix: ci ends at jump-seam boundary → revert seg1 to wide; A-B-A merge drops ci.
+    Result: no [ERROR] A-B-A warning.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+    # seg0: 14.366s (last 1.46s covered by c:3)
+    # seg1: 1.130s — jump seam from seg0 (8s source gap > jump_seam_gap_sec=2.0)
+    # seg2-4: more segments (close/wide from manifest)
+    seg0 = _seg(1201.384, 1215.750, shot="close")  # stale shot from manifest
+    seg1 = _seg(1223.764, 1224.894, shot="close")  # stale; jump seam from seg0
+    seg2 = _seg(1225.124, 1232.590, shot="close")
+    seg3 = _seg(1233.850, 1239.494, shot="close")
+    seg4 = _seg(1239.924, 1242.104, shot="wide")
+    segs = [seg0, seg1, seg2, seg3, seg4]
+    reel = _reel(segs)
+    reel.c_close_ranges = [[1214.184, 1215.644]]  # 1.46s at end of seg0
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg(two_shot_auto_human=False,
+                                                     jump_seam_gap_sec=2.0),
+                         selection_source="human")
+    result = reel.effective_segments()
+    warnings = getattr(reel, "_two_shot_warnings", [])
+    # No [ERROR] in warnings
+    errors = [w for w in warnings if "[ERROR]" in w]
+    assert not errors, f"expected no [ERROR] warnings; got: {errors}"
+    # seg0 must be wide (ci absorbed then removed by A-B-A merge)
+    assert result[0].shot == "wide" and not result[0].close_intervals, (
+        f"seg0 should be wide (ci dropped by A-B-A merge); got shot={result[0].shot} ci={result[0].close_intervals}"
+    )
+    # seg1 must be wide (reverted from jump-seam flip by c:-at-seam rule)
+    assert result[1].shot == "wide", (
+        f"seg1 should be wide (c: at seam satisfies flip); got {result[1].shot}"
+    )

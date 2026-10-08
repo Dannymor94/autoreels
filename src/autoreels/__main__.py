@@ -2352,6 +2352,25 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             else:
                 result[_i2] = _s2.model_copy(update={"close_intervals": [[a, b] for a, b in _new2]})
 
+    # Human auto-off: a c: span whose ci ends at the jump-seam boundary already provides the
+    # close→wide transition; no separate close span on the next segment is needed.
+    if _is_human_auto_off:
+        _hf_cs = 1.0 / 60.0  # half-frame tolerance
+        for _i_cs in range(len(result) - 1):
+            _s_cs = result[_i_cs]
+            _sn_cs = result[_i_cs + 1]
+            _ci_cs = list(getattr(_s_cs, "close_intervals", []) or [])
+            if not _ci_cs:
+                continue
+            _dur_cs = _s_cs.end - _s_cs.start
+            if _ci_cs[-1][1] < _dur_cs - _hf_cs:
+                continue  # ci doesn't reach segment end
+            if _sn_cs.shot != "close" or getattr(_sn_cs, "close_intervals", []):
+                continue  # not a pure jump-seam-forced close
+            if not is_jump_seam(_s_cs, _sn_cs, words, jump_seam_gap_sec=jump_seam_gap_sec):
+                continue
+            result[_i_cs + 1] = _sn_cs.model_copy(update={"shot": "wide", "close_intervals": []})
+
     # A-B-A merge: remove short middle spans in shot alternation (e.g. close→wide(2s)→close).
     # Jump-seam forced segments (_js_forced) are protected — their shot was intentionally set.
     # c: annotations that produce a short middle are dropped with a warning (never leave a short span).
