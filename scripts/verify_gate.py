@@ -75,6 +75,36 @@ def _framemd5s(path: Path, ss: float, duration: float) -> list[str]:
     return out
 
 
+_DE_AP = _render_cfg.get("audio_processing", {})
+_DE_VIDEO_FADE = (_DE_AP.get("dynamic_ending", False)
+                  and _DE_AP.get("end_video_fade_sec", 0.0) > 0)
+
+
+def _last_frame_yavg(mp4: Path) -> float | None:
+    """Mean Y luma of the last frame via ffmpeg signalstats. None on failure."""
+    r = _run(["ffmpeg", "-sseof", "-0.05", "-i", str(mp4),
+              "-frames:v", "1", "-vf", "signalstats", "-f", "null", "-"])
+    for line in reversed(r.stderr.splitlines()):
+        if "YAVG:" in line:
+            for tok in line.split():
+                if tok.startswith("YAVG:"):
+                    try:
+                        return float(tok[5:])
+                    except ValueError:
+                        pass
+    return None
+
+
+def _check_last_frame_black(mp4: Path) -> list[str]:
+    """When dynamic_ending + video fade is on: verify last frame is black (YAVG < 5)."""
+    if not _DE_VIDEO_FADE:
+        return []
+    yavg = _last_frame_yavg(mp4)
+    if yavg is None:
+        return []  # signalstats unavailable — skip silently
+    return [] if yavg < 5.0 else [f"last_frame_not_black(YAVG={yavg:.1f})"]
+
+
 # ── word helpers ───────────────────────────────────────────────────────────────
 
 def _normalize_words(text: str) -> list[str]:
@@ -355,6 +385,7 @@ def check_clip(entry: dict, project: Path) -> list[str]:
         fails.extend(_check_tail_frames(clip_path, duration))
 
     fails.extend(_check_shots(clip_path, manifest_path, clip_id, src_dir))
+    fails.extend(_check_last_frame_black(clip_path))
 
     return fails
 

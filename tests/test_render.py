@@ -1120,10 +1120,10 @@ from autoreels.core.config import AudioProcessing
 from autoreels.local.render import _audio_filter_chain, _video_fade_filter
 
 
-def test_audio_chain_default_is_loudnorm_plus_declick():
-    # дефолт (Part 4 — динамичный конец): нормализация к -14 LUFS + короткий declick 40 мс.
+def test_audio_chain_default_is_loudnorm_plus_fade():
+    # дефолт (Part 3 — динамичный конец): нормализация к -14 LUFS + 0.25с аудио-фейд.
     af = _audio_filter_chain(AudioProcessing(), 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.96:d=0.04"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.75:d=0.25"
 
 
 def test_audio_chain_legacy_loudnorm_plus_tail_fade():
@@ -1446,8 +1446,9 @@ def test_tail_video_fade_intruded_uses_min_sec():
 
 
 def test_tail_video_fade_flag_off_identical_render_command(tmp_path, render_cfg, fake_ffmpeg):
-    """tail_video_fade=False → vf unchanged (no tail fade added)."""
+    """dynamic_ending=True, end_video_fade_sec=0 → no video fade added."""
     render_cfg.audio_processing.tail_video_fade = False
+    render_cfg.audio_processing.end_video_fade_sec = 0.0   # disable
     inputs = tmp_path / "inputs"
     sha = _make_source(inputs, "v.mp4", b"no-tvfade")
     m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)], setup=_crop_setup())

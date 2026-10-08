@@ -457,15 +457,16 @@ class AudioProcessing(BaseModel):
     # Фейд ПОСЛЕ субтитров — субтитры уходят вместе с картинкой. Не меняет длину.
     tail_video_fade: bool = False
     tail_video_fade_min_sec: float = 0.25
-    # Dynamic ending (Part 4 — owner's style decision): clips end fast, no film-style trailing
-    # freeze/fade.  When on (default): no synthetic frozen tail, no video fade to black; the clip
-    # ends `end_air_sec` after the last audible word (never later than the next speech onset minus
-    # onset_margin_sec); the video is a hard cut on the last frame; the only audio fade is a short
-    # `end_audio_fade_ms` declick (the last word stays fully audible — existing check).  Off =
-    # legacy behaviour (synthetic_tail_cfg / tail_video_fade / tail_fade_sec / r0 tail_pad_sec).
+    # Dynamic ending: clips end with a fast fade to black, no frozen frame.
+    # When on (default): no synthetic frozen tail; end = last audible word + end_air_sec (never
+    # later than next onset − onset_margin_sec); video fades to black over end_video_fade_sec;
+    # audio fades over end_audio_fade_sec; last frame is black.  Off = legacy behaviour
+    # (synthetic_tail_cfg / tail_video_fade / tail_fade_sec / r0 tail_pad_sec).
     dynamic_ending: bool = True
-    end_air_sec: float = 0.20            # air after the last audible word (replaces the long tail pad)
-    end_audio_fade_ms: int = 40          # audio-only declick at the very end (video is a hard cut)
+    end_air_sec: float = 0.30            # air after the last audible word (replaces the long tail pad)
+    end_audio_fade_ms: int = 40          # legacy declick; superseded by end_audio_fade_sec below
+    end_audio_fade_sec: float = 0.25     # audio fade-out at clip end (dynamic_ending)
+    end_video_fade_sec: float = 0.25     # video fade to black at clip end (dynamic_ending)
 
 
 class AudioExtract(BaseModel):

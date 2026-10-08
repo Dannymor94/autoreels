@@ -1819,10 +1819,10 @@ def _audio_tail_fade_parts(ap: AudioProcessing, out_duration: float,
     if tail_fade is not None:
         st, d = tail_fade
         return [f"afade=t=out:st={_num(max(0.0, round(st, 3)))}:d={_num(round(d, 3))}"] if d > 0 else []
-    # Dynamic ending (Part 4): only a short declick at the very end; the last word stays fully
-    # audible (the fade is far shorter than the end_air_sec air after the word).  No long tail fade.
+    # Dynamic ending: audio fades out over end_audio_fade_sec; last word stays fully audible.
     if getattr(ap, "dynamic_ending", False):
-        d = max(0.0, getattr(ap, "end_audio_fade_ms", 40) / 1000.0)
+        _afs = getattr(ap, "end_audio_fade_sec", None)
+        d = _afs if _afs is not None else max(0.0, getattr(ap, "end_audio_fade_ms", 40) / 1000.0)
         if d <= 0:
             return []
         out_st = max(0.0, round(out_duration - d, 3))
@@ -2715,11 +2715,14 @@ def _render_segments(
             # Tail video fade: from fade_start to clip end, AFTER subtitle burn-in.
             # force=True in smap path: always fade to black regardless of tail_video_fade config.
             # Synthetic tail handles its own fade — skip tvfade to avoid double-fade on real content.
-            if not _synth_active and not getattr(ap, "dynamic_ending", False):
-                # Part 4: dynamic ending = hard cut on the last frame, no fade to black.
-                tvfade = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
-                                                 min_sec_floor=_smap_fade_floor,
-                                                 force=_use_smap_tail)
+            if not _synth_active:
+                _de = getattr(ap, "dynamic_ending", False)
+                _evf = getattr(ap, "end_video_fade_sec", 0.0) if _de else 0.0
+                tvfade = _tail_video_fade_filter(
+                    ap, _out_dur, _word_end_out,
+                    min_sec_floor=_evf if _de else _smap_fade_floor,
+                    force=_use_smap_tail or (_de and _evf > 0),
+                )
                 if tvfade:
                     reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
@@ -2753,8 +2756,13 @@ def _render_segments(
                     _vfade1 = _video_fade_filter(ap, clip_duration)
                     if _vfade1:
                         _post_parts1.append(_vfade1)
-                    _tvfade1 = _tail_video_fade_filter(ap, _out_dur, _word_end_out,
-                                                        min_sec_floor=_smap_fade_floor)
+                    _de1 = getattr(ap, "dynamic_ending", False)
+                    _evf1 = getattr(ap, "end_video_fade_sec", 0.0) if _de1 else 0.0
+                    _tvfade1 = _tail_video_fade_filter(
+                        ap, _out_dur, _word_end_out,
+                        min_sec_floor=_evf1 if _de1 else _smap_fade_floor,
+                        force=_de1 and _evf1 > 0,
+                    )
                     if _tvfade1:
                         _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
