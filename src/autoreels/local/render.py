@@ -2762,7 +2762,7 @@ def _render_segments(
             # First-word-cut invariant: source_start must not exceed the first subtitle word's
             # acoustic onset (audible_start per smap).  The start-fix above prevents this; the
             # check here catches any remaining violations (e.g., smap lookup mismatch).
-            if _first_sub_as is not None and segs and segs[0].start > _first_sub_as + 1.5 / (_fps_holder[0] if _fps_holder else 30.0):
+            if _first_sub_as is not None and not _is_cold_open_first and segs and segs[0].start > _first_sub_as + 1.5 / (_fps_holder[0] if _fps_holder else 30.0):
                 _clip_errors.append(
                     f"  [ERROR] {reel.id}: first word cut — "
                     f"source_start={segs[0].start:.3f}s > audible_start={_first_sub_as:.3f}s "
