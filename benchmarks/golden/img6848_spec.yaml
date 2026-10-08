@@ -1,0 +1,49 @@
+# Gate gate YAML for IMG_6848 spec gate (Part 4: REEL_SPEC §1-§4 plan render).
+# Covers r01, r03, r05, r06, r07 — human-path reels with multiple segments.
+# first_words / last_words filled after initial render.
+
+clips:
+  - clip_id: r01
+    stem: IMG_6848
+    path: reels-out/IMG_6848/_gate/spec/r01.mp4
+    reel_start: 164.349
+    reel_end: 205.689
+    first_words: ""
+    last_words: ""
+    cold_open: null
+
+  - clip_id: r03
+    stem: IMG_6848
+    path: reels-out/IMG_6848/_gate/spec/r03.mp4
+    reel_start: 851.238
+    reel_end: 901.500
+    first_words: ""
+    last_words: ""
+    cold_open: null
+
+  - clip_id: r05
+    stem: IMG_6848
+    path: reels-out/IMG_6848/_gate/spec/r05.mp4
+    reel_start: 1201.384
+    reel_end: 1242.080
+    first_words: ""
+    last_words: ""
+    cold_open: null
+
+  - clip_id: r06
+    stem: IMG_6848
+    path: reels-out/IMG_6848/_gate/spec/r06.mp4
+    reel_start: 1397.816
+    reel_end: 1441.830
+    first_words: ""
+    last_words: ""
+    cold_open: null
+
+  - clip_id: r07
+    stem: IMG_6848
+    path: reels-out/IMG_6848/_gate/spec/r07.mp4
+    reel_start: 1463.216
+    reel_end: 1522.720
+    first_words: ""
+    last_words: ""
+    cold_open: null
