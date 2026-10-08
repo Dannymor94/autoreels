@@ -36,12 +36,6 @@
       "segments": [
         {
           "start": 164.34872,
-          "end": 182.65873,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 185.89000000000001,
           "end": 196.27872,
           "shot": "close",
           "close_intervals": []
@@ -54,8 +48,8 @@
         }
       ],
       "cold_open": {
-        "start": 183.16872,
-        "end": 186.06873,
+        "start": 201.40872,
+        "end": 205.70872,
         "shot": "close",
         "close_intervals": []
       },
@@ -560,17 +554,8 @@
         {
           "start": 642.3548754999999,
           "end": 675.95,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              11.420000000000073
-            ],
-            [
-              20.379999999999995,
-              33.59000000000003
-            ]
-          ]
+          "shot": "close",
+          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -1058,28 +1043,15 @@
           "close_intervals": []
         },
         {
-          "start": 860.2176155,
+          "start": 857.4200000000001,
           "end": 901.5003455,
           "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              6.839989999999943
-            ],
-            [
-              18.86000999999999,
-              24.260009999999966
-            ],
-            [
-              24.260009999999966,
-              32.16000000000008
-            ]
-          ]
+          "close_intervals": []
         }
       ],
       "cold_open": {
-        "start": 859.3776155,
-        "end": 861.6176055,
+        "start": 899.6003754999999,
+        "end": 901.3403555,
         "shot": "close",
         "close_intervals": []
       },
@@ -1687,31 +1659,22 @@
     {
       "id": "r04",
       "start": 1030.9603455,
-      "end": 1097.5030955,
+      "end": 1097.6030954999999,
       "segments": [
         {
           "start": 1030.9603455,
           "end": 1065.1230755,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              9.800030000000106
-            ],
-            [
-              21.420029999999997,
-              34.16273000000001
-            ]
-          ]
+          "shot": "close",
+          "close_intervals": []
         },
         {
           "start": 1072.88,
-          "end": 1097.5030955,
+          "end": 1097.6030954999999,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              13.083075499999723
+              16.523075,
+              25.923095499999818
             ]
           ]
         }
@@ -2299,7 +2262,6 @@
       "tail_last_word_end": 1097.3030955,
       "tail_next_word_start": null,
       "warnings": [
-        "[CONTENT] r04: clip too short for tail fade after last word 'человеком.' (clip_end=1097.503, ae=1097.260, gap=0.243s < min_fade=0.25s)",
         "internal pause 12.6s (≥3s)"
       ],
       "subtitle_emph_words": [],
@@ -2320,13 +2282,8 @@
         {
           "start": 1201.384031,
           "end": 1215.75,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              9.279999999999973
-            ]
-          ]
+          "shot": "close",
+          "close_intervals": []
         },
         {
           "start": 1223.764031,
@@ -2343,7 +2300,7 @@
         {
           "start": 1233.8500000000001,
           "end": 1239.494031,
-          "shot": "wide",
+          "shot": "close",
           "close_intervals": []
         },
         {
@@ -2966,8 +2923,8 @@
           "shot": "wide",
           "close_intervals": [
             [
-              10.560010000000148,
-              23.219990000000053
+              33.85998999999997,
+              36.47999000000004
             ]
           ]
         }
@@ -3656,16 +3613,7 @@
           "start": 1476.0,
           "end": 1502.5171309999998,
           "shot": "wide",
-          "close_intervals": [
-            [
-              2.4355709999999817,
-              12.535601000000042
-            ],
-            [
-              20.17559099999994,
-              26.517130999999836
-            ]
-          ]
+          "close_intervals": []
         },
         {
           "start": 1506.0471309999998,
@@ -4682,33 +4630,19 @@
     {
       "id": "r08",
       "start": 1841.7102499999999,
-      "end": 1893.7,
+      "end": 1893.8,
       "segments": [
         {
           "start": 1841.7102499999999,
           "end": 1864.0002499999998,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              11.160000000000082
-            ]
-          ]
+          "shot": "close",
+          "close_intervals": []
         },
         {
           "start": 1873.48,
-          "end": 1893.7,
+          "end": 1893.8,
           "shot": "wide",
-          "close_intervals": [
-            [
-              0.1502499999999145,
-              5.715189999999893
-            ],
-            [
-              14.195189999999911,
-              20.9451939999999
-            ]
-          ]
+          "close_intervals": []
         }
       ],
       "cold_open": null,
@@ -5402,7 +5336,6 @@
       "tail_last_word_end": 1893.5,
       "tail_next_word_start": null,
       "warnings": [
-        "[CONTENT] r08: clip too short for tail fade after last word 'жизнь.' (clip_end=1893.700, ae=1893.500, gap=0.200s < min_fade=0.25s)",
         "dangling start: opens on «То»"
       ],
       "subtitle_emph_words": [],
