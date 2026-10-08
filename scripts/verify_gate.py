@@ -17,15 +17,17 @@ import yaml
 
 PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT / "tools"))
+sys.path.insert(0, str(PROJECT / "src"))
 import flash_check  # noqa: E402
+from autoreels.core.seams import is_jump_seam  # noqa: E402
 
 TWO_SHOT_MIN_SEC = 2.5
 TWO_SHOT_MIN_MIDDLE_SEC = 4.0
-JUMP_SEAM_GAP_SEC = 2.0
 JUMP_SEAM_MIN_SEC = 1.0
 
 _render_cfg_path = PROJECT / "config" / "render.yaml"
 _render_cfg = yaml.safe_load(_render_cfg_path.read_text()) if _render_cfg_path.exists() else {}
+JUMP_SEAM_GAP_SEC: float = _render_cfg.get("jump_seam_gap_sec", 2.0)
 SHOT_TOLERANCE_FRAMES: int = _render_cfg.get("shot_tolerance_frames", 2)
 SPEECH_MIN_INTERVAL_SEC: float = _render_cfg.get("speech_min_interval_sec", 0.1)
 
@@ -113,12 +115,15 @@ def _jump_seam_frames(reel: dict,
                       fps: float = flash_check.FPS,
                       jump_seam_gap: float = JUMP_SEAM_GAP_SEC) -> set[int]:
     """Return 1-indexed frame positions that start a segment after a jump seam."""
+    import types
     ranges = _seg_output_ranges(reel, fps)
     result = set()
     for i in range(1, len(ranges)):
-        _, _, _, src_end = ranges[i - 1]
-        out_start, _, src_start, _ = ranges[i]
-        if abs(src_start - src_end) >= jump_seam_gap:
+        _, _, prev_src_start, prev_src_end = ranges[i - 1]
+        out_start, _, src_start, src_end = ranges[i]
+        prev_win = types.SimpleNamespace(start=prev_src_start, end=prev_src_end)
+        next_win = types.SimpleNamespace(start=src_start, end=src_end)
+        if is_jump_seam(prev_win, next_win, jump_seam_gap_sec=jump_seam_gap):
             result.add(out_start)
     return result
 

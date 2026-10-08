@@ -973,3 +973,53 @@ def test_double_jump_seam_0_8s_still_fails():
     # Rule3 fires: [WARNING] "too short to alternate" — not a silent pass
     rule3 = [w for w in warns if "Rule3" in w or "too short to alternate" in w]
     assert rule3, f"0.8s double-jump span must trigger Rule3 warning; got warns: {warns}"
+
+
+# ── is_jump_seam unit tests ────────────────────────────────────────────────────
+
+def test_is_jump_seam_x_cut_skipped_sentence():
+    """A word in the gap (x: exclusion) makes the boundary a jump seam."""
+    from types import SimpleNamespace
+    from autoreels.core.seams import is_jump_seam
+    from autoreels.core.models import Word
+
+    prev_win = SimpleNamespace(start=0.0, end=10.0)
+    next_win = SimpleNamespace(start=13.5, end=15.0)  # 1.5s sentence after gap
+    words = [
+        Word(word="last", t0=9.5, t1=10.0, emph=False),
+        Word(word="skip", t0=11.0, t1=11.5, emph=False),   # in the gap → skipped sentence
+        Word(word="first", t0=13.5, t1=14.0, emph=False),
+    ]
+    assert is_jump_seam(prev_win, next_win, words), (
+        "word in gap means a sentence was skipped → must be a jump seam"
+    )
+
+
+def test_is_jump_seam_adjacent_long_pause_not_a_jump():
+    """Adjacent sentences with a 2.5s pause (no skipped words) are NOT a jump seam."""
+    from types import SimpleNamespace
+    from autoreels.core.seams import is_jump_seam
+    from autoreels.core.models import Word
+
+    prev_win = SimpleNamespace(start=0.0, end=10.0)
+    next_win = SimpleNamespace(start=12.5, end=20.0)
+    words = [
+        Word(word="last", t0=9.5, t1=10.0, emph=False),   # end of prev window
+        Word(word="first", t0=12.5, t1=13.0, emph=False),  # start of next window
+    ]
+    # gap = 2.5s, but no word in (10.0, 12.5) → not a jump seam
+    assert not is_jump_seam(prev_win, next_win, words), (
+        "no word in the gap → consecutive sentences, just a pause → not a jump seam"
+    )
+
+
+def test_is_jump_seam_cold_open_always_jump():
+    """cold_open=True always returns True regardless of windows or sentences."""
+    from types import SimpleNamespace
+    from autoreels.core.seams import is_jump_seam
+
+    prev_win = SimpleNamespace(start=5.0, end=8.0)
+    next_win = SimpleNamespace(start=10.0, end=15.0)
+    assert is_jump_seam(prev_win, next_win, cold_open=True), (
+        "cold open → body is always a structural jump seam"
+    )

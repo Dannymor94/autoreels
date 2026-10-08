@@ -216,6 +216,9 @@ shot_tolerance_frames: 2      # verifier tolerance: span >= (threshold - N/fps) 
 # backward) and cold open.  No two_shot_auto ci-splits inside a beat.
 # c: on any sentence in a beat block decides the WHOLE block's shot.
 beat_clip_shots_only_at_seams: true
+# Gap threshold for sentence-based jump-seam detection fallback (no sentences available).
+# Used when transcript words are absent (legacy manifests). Never a literal in code.
+jump_seam_gap_sec: 2.0
 # M1.7 step 1d: transitions at ci shot-changes and same-shot seams. Off by default.
 shot_transition: cut         # "cut" only; punch (crop-animation) is a future task
 same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses video_xfade_sec fallback)

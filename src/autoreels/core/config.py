@@ -665,6 +665,8 @@ class RenderConfig(BaseModel):
     shot_tolerance_frames: int = 2        # verifier frame tolerance for span floor checks
     # M1.7 step 3: beat-clip shot rule. Shot changes ONLY at jump seams for beat reels.
     beat_clip_shots_only_at_seams: bool = True
+    # Fallback gap threshold for is_jump_seam when sentence words are not available.
+    jump_seam_gap_sec: float = 2.0
     # M1.7 step 1d: shot-change transitions inside close_intervals windows. Off by default.
     # Flag off → identical cmd. ("punch" crop-animation: future task, deferred.)
     shot_transition: str = "cut"         # "cut" only; punch deferred

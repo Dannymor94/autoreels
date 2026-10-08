@@ -67,6 +67,7 @@ from autoreels.core.config import (
     load_transcribe_config,
     validate_profile,
 )
+from autoreels.core.seams import is_jump_seam
 from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import (
     CalibrateError, InputInvalid, cmd_calibrate, validate_input,
@@ -1789,11 +1790,13 @@ def _stage_two_shot_auto(reels, words, *, render_cfg,
 
     _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
     _beat_seams_only = getattr(render_cfg, "beat_clip_shots_only_at_seams", True)
+    _jump_gap = getattr(render_cfg, "jump_seam_gap_sec", 2.0)
     for reel in reels:
         _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
                                   min_middle=_min_middle,
                                   smap=smap, level1_min_pause=level1_min_pause,
-                                  beat_shots_at_seams_only=_beat_seams_only)
+                                  beat_shots_at_seams_only=_beat_seams_only,
+                                  jump_seam_gap_sec=_jump_gap)
     # assign_shots (single-reel public API) delegates here; _stage_two_shot_auto is the batch wrapper.
 
     # Print switch table — essential for comparing smap-on vs smap-off.
@@ -1827,17 +1830,20 @@ def assign_shots(reel, words, *, render_cfg, smap=None) -> None:
     level1_min_pause = getattr(_smap_cfg, "cut_pause_min_sec", 0.35)
     _min_middle = getattr(render_cfg, "two_shot_min_middle_sec", 4.0)
     _beat_seams_only = getattr(render_cfg, "beat_clip_shots_only_at_seams", True)
+    _jump_gap = getattr(render_cfg, "jump_seam_gap_sec", 2.0)
     _apply_two_shot_auto_reel(reel, words, max_shot=max_shot, min_shot=min_shot,
                               min_middle=_min_middle, smap=smap,
                               level1_min_pause=level1_min_pause,
-                              beat_shots_at_seams_only=_beat_seams_only)
+                              beat_shots_at_seams_only=_beat_seams_only,
+                              jump_seam_gap_sec=_jump_gap)
 
 
 def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                                min_middle: float = 4.0,
                                smap: "dict | None" = None,
                                level1_min_pause: float = 0.35,
-                               beat_shots_at_seams_only: bool = True) -> None:
+                               beat_shots_at_seams_only: bool = True,
+                               jump_seam_gap_sec: float = 2.0) -> None:
     """Mutates reel.segments to add auto wide/close alternation (see _stage_two_shot_auto)."""
     from autoreels.cloud.edit import split_sentences as _sp
     segs = reel.effective_segments()
@@ -1898,7 +1904,6 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # beat_shots_at_seams_only: for beat reels, only toggle at jump seams (source gap > 2 s or
     # backward).  Auto-assigned shots from a prior run are NOT treated as manual — only human
     # c: annotations (selection_source='human') are preserved.
-    _JUMP_GAP_P1 = 2.0   # same threshold as _JUMP_GAP_MAX defined later for jump-seam enforcement
     _is_beat_shots_mode = beat_shots_at_seams_only and reel.beat_gap_sec is not None
     _is_human_reel = getattr(reel, "selection_source", None) == "human"
     shot_assign: list = []  # "wide" | "close" | None (None = manual, don't touch)
@@ -1916,8 +1921,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             if reel.beat_gap_sec is not None:
                 if _is_beat_shots_mode:
                     # Only toggle at jump seams (non-adjacent source positions).
-                    _gap_i = segs[i].start - segs[i - 1].end
-                    if _gap_i < 0 or _gap_i > _JUMP_GAP_P1:
+                    if is_jump_seam(segs[i - 1], segs[i], words,
+                                    jump_seam_gap_sec=jump_seam_gap_sec):
                         cur = "close" if cur == "wide" else "wide"
                 else:
                     # Beat seams always toggle (they are explicit reorder points, not auto-switches).
@@ -1944,8 +1949,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         _block: list[int] = [0]
         _blocks: list[list[int]] = []
         for _bi in range(1, len(segs)):
-            _gap = segs[_bi].start - segs[_bi - 1].end
-            if _gap < 0 or _gap > _JUMP_GAP_P1:
+            if is_jump_seam(segs[_bi - 1], segs[_bi], words,
+                            jump_seam_gap_sec=jump_seam_gap_sec):
                 _blocks.append(_block)
                 _block = [_bi]
             else:
@@ -2126,7 +2131,6 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     # If min_shot < min_middle: make entire next beat opposite to avoid creating a short A-B-A span.
     # Called twice: before A-B-A (so A-B-A sees a sensible shot list) and after (to re-validate
     # any jump seams whose prev beat was changed by A-B-A).
-    _JUMP_GAP_MAX = 2.0       # gap > 2s in source time → non-adjacent
     _JUMP_SEAM_MIN = 1.0      # minimum span allowed at a single-sided jump seam
     _SNAP_THRESH = 0.15       # close_interval within this of window boundary → snap to boundary
     _js_set: set = set()      # indices where a jump seam STARTS (for Option 2 to skip)
@@ -2139,8 +2143,8 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             return True
         if i <= 0 or i >= len(result):
             return False
-        pa, pb = result[i - 1], result[i]
-        return pb.start < pa.end - 0.001 or (pb.start - pa.end) > _JUMP_GAP_MAX
+        return is_jump_seam(result[i - 1], result[i], words,
+                            jump_seam_gap_sec=jump_seam_gap_sec)
 
     def _enforce_jump_seams() -> None:
         _js_forced.clear()
@@ -2151,7 +2155,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         _hf = 1.0 / 60.0
         for _ji in range(1, len(result)):
             _pa, _pb = result[_ji - 1], result[_ji]
-            if _pb.start >= _pa.end - 0.001 and _pb.start - _pa.end <= _JUMP_GAP_MAX:
+            if not is_jump_seam(_pa, _pb, words, jump_seam_gap_sec=jump_seam_gap_sec):
                 continue  # adjacent seam
             # Rule3 > Rule2: a segment shorter than JUMP_SEAM_MIN sandwiched between two jump
             # seams cannot satisfy the minimum span even by alternating shots.  Give it the same
@@ -2160,8 +2164,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             _dur_b_r3 = _pb.end - _pb.start
             if _dur_b_r3 < _JUMP_SEAM_MIN and _ji + 1 < len(result):
                 _pc_r3 = result[_ji + 1]
-                _rg_r3 = _pc_r3.start - _pb.end
-                if _pc_r3.start < _pb.end - 0.001 or _rg_r3 > _JUMP_GAP_MAX:
+                if is_jump_seam(_pb, _pc_r3, words, jump_seam_gap_sec=jump_seam_gap_sec):
                     # right side is also a jump seam → Rule3 applies
                     _dur_a_r3 = _pa.end - _pa.start
                     _ci_a_r3 = list(getattr(_pa, "close_intervals", []) or [])
@@ -2428,7 +2431,7 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         _op += _sj.end - _sj.start
         if _kj + 1 < len(result):
             _gj = result[_kj + 1].start - _sj.end
-            if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
+            if is_jump_seam(_sj, result[_kj + 1], words, jump_seam_gap_sec=jump_seam_gap_sec):
                 _jb_out.add(round(_op, 6))
     _p4_spans = _shot_spans_output(result)
     # Collect output-time close intervals that come from explicit c: annotations.
