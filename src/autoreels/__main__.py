@@ -2133,6 +2133,15 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
     _js_forced: set = set()   # indices of beats that got forced starting-shot (for A-B-A guard)
     _js_rule3: set = set()    # seam indices suppressed by Rule3 (assertion skipped)
 
+    def _is_jump_seam_before(i: int) -> bool:
+        """True when the boundary BEFORE result[i] is a jump seam (non-adjacent source)."""
+        if reel.cold_open is not None and i == 0:
+            return True
+        if i <= 0 or i >= len(result):
+            return False
+        pa, pb = result[i - 1], result[i]
+        return pb.start < pa.end - 0.001 or (pb.start - pa.end) > _JUMP_GAP_MAX
+
     def _enforce_jump_seams() -> None:
         _js_forced.clear()
         _js_set.clear()
@@ -2325,6 +2334,10 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
                     continue
                 if _sb_seg in _js_forced:
                     continue  # jump-seam forced shot — keep it
+                # span sandwiched between two jump seams: minimum is _JUMP_SEAM_MIN (1.0s), not min_middle
+                if (_is_jump_seam_before(_sb_seg) and _is_jump_seam_before(_sb_seg + 1)
+                        and (_sb_e - _sb_t) >= _JUMP_SEAM_MIN):
+                    continue
                 _s_mid = result[_sb_seg]
                 if _sb_seg in _pass3_segs:
                     continue  # ci inserted by Pass 3 max-shot enforcement — preserve it
@@ -2406,17 +2419,17 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
             _out_t_js += result[_kjs].end - result[_kjs].start
 
     # Short-shot check (Pass 4): any output-time span < min_shot is [ERROR].
-    # Exception: a span created by forced jump-seam enforcement may be >= 1.0 s (still a degraded
-    # result but not a render-breaking flash). Compute jump-seam output-time boundary positions.
+    # Exception: a span at a jump-seam boundary may be >= 1.0 s (_JUMP_SEAM_MIN).
+    # Compute jump-seam output-time boundary positions for ALL reels (not just beat reels),
+    # so non-beat reels with large source gaps (x: cuts, cold-open body seam) are also covered.
     _jb_out: set = set()
-    if reel.beat_gap_sec is not None:
-        _op = 0.0
-        for _kj, _sj in enumerate(result):
-            _op += _sj.end - _sj.start
-            if _kj + 1 < len(result):
-                _gj = result[_kj + 1].start - _sj.end
-                if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
-                    _jb_out.add(round(_op, 6))
+    _op = 0.0
+    for _kj, _sj in enumerate(result):
+        _op += _sj.end - _sj.start
+        if _kj + 1 < len(result):
+            _gj = result[_kj + 1].start - _sj.end
+            if result[_kj + 1].start < _sj.start or _gj > _JUMP_GAP_MAX:
+                _jb_out.add(round(_op, 6))
     _p4_spans = _shot_spans_output(result)
     # Collect output-time close intervals that come from explicit c: annotations.
     # A short span from c: is a [WARNING] not [ERROR] (human intent; verified at review time).
@@ -2460,10 +2473,15 @@ def _apply_two_shot_auto_reel(reel, words, *, max_shot: float, min_shot: float,
         _sc4, _, _ = _p4_aba[_i4 + 2]
         _bd = _be4 - _b0_4
         if _sa4 == _sc4 and _sa4 != _sb4 and _bd < min_middle:
-            warnings.append(
-                f"[ERROR] A-B-A middle {_sb4}({_bd:.2f}s) at output {_b0_4:.2f}-{_be4:.2f}"
-                f" < min_middle({min_middle:.1f}s)"
-            )
+            # span bounded by jump seams on both sides → relaxed minimum (_JUMP_SEAM_MIN)
+            _ljs4 = (round(_b0_4, 6) in _jb_out) or (reel.cold_open is not None and _b0_4 < 0.001)
+            _rjs4 = round(_be4, 6) in _jb_out
+            _eff4 = _JUMP_SEAM_MIN if (_ljs4 and _rjs4) else min_middle
+            if _bd < _eff4:
+                warnings.append(
+                    f"[ERROR] A-B-A middle {_sb4}({_bd:.2f}s) at output {_b0_4:.2f}-{_be4:.2f}"
+                    f" < min_middle({min_middle:.1f}s)"
+                )
 
     if result != _orig_segs:
         reel.segments = result

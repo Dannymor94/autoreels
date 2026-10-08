@@ -155,7 +155,11 @@ def _check_span_violations(runs: list, *, jump_seam_frames: set,
             prev_lbl = runs[i - 1][0]
             nxt_lbl = runs[next_i][0]
             if prev_lbl == nxt_lbl and lbl != prev_lbl and dur + tol < min_middle:
-                fails.append(f"aba_middle_short:{lbl}_{dur:.2f}s<{min_middle}s")
+                _ljs = s in jump_seam_frames
+                _rjs = (e + 1) in jump_seam_frames
+                _eff = JUMP_SEAM_MIN_SEC if (_ljs and _rjs) else min_middle
+                if dur + tol < _eff:
+                    fails.append(f"aba_middle_short:{lbl}_{dur:.2f}s<{_eff}s")
     return fails
 
 

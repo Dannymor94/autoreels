@@ -903,3 +903,73 @@ def test_rule3_c_annotation_adequate_range_passes():
     # close_intervals should be set (range is large enough).
     has_ci = any(getattr(s, "close_intervals", []) for s in reel.effective_segments())
     assert has_ci, "expected close_intervals for a ≥2.5s c: range"
+
+
+# ── jump-seam minimum for A-B-A middles (task: r03 fix) ──────────────────────
+
+def _reel_with_cold_open(segs, co_seg):
+    """Reel with cold_open set."""
+    r = _reel(segs)
+    r.cold_open = co_seg
+    return r
+
+
+def test_cold_open_seam_is_jump_seam_passes_2_13s():
+    """cold_open → body is a jump seam; body[0] of 2.13s (>= 1.0s) must NOT produce [ERROR].
+
+    IMG r03 proxy: cold_open close, then body[0] wide 2.13s, body[1] close with source gap.
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+
+    # body[0] at source 30-32.13 (2.13s); body[1] at source 40-50 (jump gap 7.87s > 2s)
+    segs = [
+        _seg(30.0, 32.13),        # body[0]: 2.13s, will be wide
+        _seg(40.0, 50.0, "close"),  # body[1]: 10s close
+    ]
+    reel = _reel_with_cold_open(segs, _seg(55.0, 60.0, "close"))  # cold_open far from body
+
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert not errors, f"2.13s between two jump seams must pass; got errors: {errors}"
+    result = reel.effective_segments()
+    assert result[0].shot == "wide", "body[0] must remain wide (jump-seam alternation)"
+
+
+def test_x_seam_is_jump_seam_passes_2_13s():
+    """Non-adjacent source sentences (x: cut gap > 2s) create a jump seam.
+
+    A 2.13s wide span between two such seams must NOT produce [ERROR].
+    """
+    from autoreels.__main__ import _stage_two_shot_auto
+
+    # seg0 close (10s), seg1 wide gap > 2s on both sides (2.13s), seg2 close (10s)
+    segs = [
+        _seg(0.0, 10.0, "close"),    # seg0: 10s close
+        _seg(15.0, 17.13),           # seg1: 2.13s; gap from seg0 is 5s > 2s (jump); gap to seg2 is 5s > 2s (jump)
+        _seg(22.13, 32.13, "close"), # seg2: 10s close
+    ]
+    reel = _reel(segs)
+    _stage_two_shot_auto([reel], [], render_cfg=_cfg())
+    warns = getattr(reel, "_two_shot_warnings", [])
+    errors = [w for w in warns if "[ERROR]" in w]
+    assert not errors, f"2.13s between two x:-seams must pass; got errors: {errors}"
+
+
+def test_double_jump_seam_0_8s_still_fails():
+    """A span < 1.0s between two jump seams fails via Rule3 (too short to alternate).
+
+    Rule3 fires for segments < _JUMP_SEAM_MIN (1.0s) at a double-jump seam: assigns same shot
+    as prev end with a [WARNING] rather than silently passing.
+    Requires beat_gap_sec so _enforce_jump_seams runs and creates the wide alternation.
+    """
+    segs = [
+        _seg(0.0, 10.0, "close"),   # seg0: close 10s
+        _seg(15.0, 15.8),           # seg1: 0.8s; gap 5s on each side → both jump seams
+        _seg(20.8, 30.8, "close"),  # seg2: close 10s
+    ]
+    reel = _apply_beat(segs)
+    warns = getattr(reel, "_two_shot_warnings", [])
+    # Rule3 fires: [WARNING] "too short to alternate" — not a silent pass
+    rule3 = [w for w in warns if "Rule3" in w or "too short to alternate" in w]
+    assert rule3, f"0.8s double-jump span must trigger Rule3 warning; got warns: {warns}"
