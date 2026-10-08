@@ -42,7 +42,10 @@ def _setup(tmp_path, words):
     (tmp_path / "reviews").mkdir(exist_ok=True)
     cfg = tmp_path / "config"
     cfg.mkdir(exist_ok=True)
-    shutil.copy(REPO_ROOT / "config" / "r0.yaml", cfg / "r0.yaml")
+    # These tests pin the LEGACY human-path stages (dangling repair, filler cuts …), which still
+    # run when manual_plan is off. The planned path (REEL_SPEC) is covered by test_manual_plan.py.
+    _r0 = (REPO_ROOT / "config" / "r0.yaml").read_text(encoding="utf-8")
+    (cfg / "r0.yaml").write_text(_r0.replace("manual_plan: true", "manual_plan: false"), encoding="utf-8")
     cache = tmp_path / "cache"
     cache.mkdir(exist_ok=True)
     sha = "e" * 64

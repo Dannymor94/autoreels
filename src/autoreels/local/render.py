@@ -1223,25 +1223,34 @@ def _check_silence_at_clip_end(
     clip_end: float,
     smap: dict,
     lookup: dict,
+    last_ae: float | None = None,
 ) -> list[str]:
     """Audio invariant: no speech starts between the last word's audible end and clip_end.
 
     'Speech' = any smap word whose audible_start falls in (last_word_ae, clip_end).
     Untranscribed_speech intervals in boundaries are also checked.
     Returns a list of [ERROR] strings (empty = clean).
+
+    last_ae: the last word's audible end as the caller's plan resolved it (planned reels:
+    reel.tail_last_word_end from cloud.plan — map spans with neighbour overlaps resolved by the
+    energy track). When given it is used as is, so a planned clip is checked against the same
+    word end it was cut by (and no tail recomputation runs).
     """
     key = round(last_word.t0 * 1000)
     if key not in lookup:
         return []
     _, entry = lookup[key]
     raw_ae: float = entry["audible_end"]
-    # Own-tail filter: the acoustic decay of the last word may extend into the first
-    # untranscribed interval when t1 falls inside it.  _tail_from_smap_full applies this
-    # filter and returns the post-absorption audible_end (B).  Use B as the lower bound so
-    # we don't flag the absorbed interval as "speech after last word".
-    _last_t1 = getattr(last_word, "t1", None)
-    _full = _tail_from_smap_full(last_word.t0, clip_end, smap, lookup, last_t1=_last_t1)
-    last_word_ae: float = _full.audible_end if _full is not None else raw_ae
+    if last_ae is not None:
+        last_word_ae: float = last_ae
+    else:
+        # Own-tail filter: the acoustic decay of the last word may extend into the first
+        # untranscribed interval when t1 falls inside it.  _tail_from_smap_full applies this
+        # filter and returns the post-absorption audible_end (B).  Use B as the lower bound so
+        # we don't flag the absorbed interval as "speech after last word".
+        _last_t1 = getattr(last_word, "t1", None)
+        _full = _tail_from_smap_full(last_word.t0, clip_end, smap, lookup, last_t1=_last_t1)
+        last_word_ae = _full.audible_end if _full is not None else raw_ae
 
     words = smap["words"]
     boundaries = smap.get("boundaries", [])
@@ -2396,6 +2405,15 @@ def _render_segments(
                 # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
                 segs = _snap_windows_to_frames(segs, _fps())
+                # Planned reels (REEL_SPEC §4.2): nearest-frame rounding must never cut the last
+                # word — round the final end UP to the next frame when it fell before the word's
+                # audible end (the plan keeps ≥ onset margin before the next speech).
+                _p_ae = getattr(reel, "tail_last_word_end", None) if getattr(reel, "planned", False) else None
+                if _p_ae is not None and segs[-1].end < _p_ae - 1e-6:
+                    _p_up = math.ceil(_p_ae * _fps() - 1e-6) / _fps()
+                    _p_next = getattr(reel, "tail_next_word_start", None)
+                    if _p_next is None or _p_up <= _p_next:
+                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _p_up})]
             # Snap close_intervals to the same frame grid so overlay enable= expressions land on
             # decoded frames. Done for both multi-window and single-window close paths.
             if any(getattr(s, "close_intervals", []) for s in segs):
@@ -2431,7 +2449,8 @@ def _render_segments(
                     # Skip when segs[0] is the cold-open hook: its start is in hook time,
                     # not body time; the first subtitle word lives in the body (segs[1]+).
                     _is_cold_open_first = reel.cold_open is not None and len(segs) > 1
-                    if segs and not _is_cold_open_first and segs[0].start > _first_sub_as + 1e-4:
+                    if (segs and not _is_cold_open_first and not getattr(reel, "planned", False)
+                            and segs[0].start > _first_sub_as + 1e-4):
                         _old_s0_start = segs[0].start
                         segs = [segs[0].model_copy(update={"start": _first_sub_as})] + list(segs[1:])
                         segs = _snap_windows_to_frames(segs, _fps())
@@ -2448,7 +2467,10 @@ def _render_segments(
                         clip_dur = sum(s.end - s.start for s in segs)
 
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
-            _ts_on = getattr(render_cfg, "two_shot", False) and vf and manifest.setup is not None
+            # Planned reels (REEL_SPEC §3) carry their shots in the plan — rendered whatever the
+            # two_shot flag says (the flag gates the automatic path's shot machinery only).
+            _ts_on = ((getattr(render_cfg, "two_shot", False) or bool(getattr(reel, "planned", False)))
+                      and vf and manifest.setup is not None)
             _ts_seg_vfs: list[str] | None = None
             _ts_seam_xfades: list[float] | None = None
             _ts_seg_overlays: "list[tuple[str, str, str] | None] | None" = None
@@ -2577,9 +2599,11 @@ def _render_segments(
             _word_end: float | None = None   # audio-detected last-word end (source time)
             _smap_fade_floor: float | None = None  # 2-frame min fade floor when smap path is tight
             _smap_fade_len: float | None = None    # fade_len from _tail_from_smap result
+            # Planned reels (REEL_SPEC) arrive with their final ending — executed as-is.
+            _planned = bool(getattr(reel, "planned", False))
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
-                              and reel.subtitles and segs)
+                              and reel.subtitles and segs and not _planned)
             _synth_active = False    # synthetic tail (room tone + slowed video) active for this reel
             _synth_params_dict: dict | None = None
             _synth_room_start: float | None = None
@@ -2716,7 +2740,7 @@ def _render_segments(
                                     f"but no room tone found (nearest silence too short), skipping",
                                     flush=True,
                                 )
-            else:
+            elif not _planned:
                 _nw_start = getattr(reel, "tail_next_word_start", None)
                 if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
                     # Intruded tail: next phrase starts before segment end.
@@ -2792,7 +2816,8 @@ def _render_segments(
                     else segs[-1].end
                 )
                 _clip_errors.extend(_check_silence_at_clip_end(
-                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
+                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup,
+                    last_ae=(getattr(reel, "tail_last_word_end", None) if _planned else None)))
                 _clip_errors.extend(_check_foreign_tail_word_render(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
             # First-word-cut invariant: source_start must not exceed the first subtitle word's
@@ -2809,7 +2834,7 @@ def _render_segments(
             # tail already trimmed segs[-1].end to ae + end_air_sec; any larger gap is an error.
             # Guard requires _use_smap_tail so we only check when the smap path was active —
             # without smap, segs[-1].end is reel.end from the manifest (no trimming happened here).
-            if (_use_smap_tail
+            if ((_use_smap_tail or (_planned and smap is not None and reel.subtitles))
                     and getattr(ap, "dynamic_ending", False)):
                 _ea_fps = _fps_holder[0] if _fps_holder else 30.0
                 _ea_sec = getattr(ap, "end_air_sec", 0.30)
@@ -2830,6 +2855,18 @@ def _render_segments(
                                                         seam_xfades=_ts_seam_xfades)
             # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
+            if _planned and getattr(ap, "dynamic_ending", False):
+                # REEL_SPEC §4: audio fades over end_audio_fade_sec, but never into the last word —
+                # shortened to the air after it (min 40 ms declick). Video: fixed fade (below).
+                _ae_last = getattr(reel, "tail_last_word_end", None)
+                _afs = getattr(ap, "end_audio_fade_sec", None) or 0.25
+                _room = (segs[-1].end - _ae_last) if _ae_last is not None else _afs
+                _afd = min(_afs, max(0.04, _room)) / (_reel_speed or 1.0)
+                _tail_fade = (max(0.0, round(_out_dur - _afd, 3)), round(_afd, 3))
+                if _ae_last is not None and segs[-1].end < _ae_last - 1.0 / _fps():
+                    _clip_errors.append(
+                        f"  [ERROR] {reel.id}: last word cut — clip end {segs[-1].end:.3f}s < "
+                        f"audible end {_ae_last:.3f}s")
             # Synthetic tail duration is added at command-build time (single-seg) or post-render
             # (multi-seg two-pass), not here, to keep _out_dur correct for the main render.
             vfade = _video_fade_filter(ap, clip_duration)

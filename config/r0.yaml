@@ -175,6 +175,11 @@ hook_max_sec: 6.0
 # in the body (replays). Default 0.5 = second half. h:N! forces keep; h:N- forces remove.
 hook_replay_min_pos: 0.5
 
+# docs/REEL_SPEC.md — manual (human) clips are planned in one place (src/autoreels/cloud/plan.py):
+# windows cut in the silence between the boundary words (speech map), shots by the spec rule,
+# ending = last word + end_air_sec. The snap/padding/repair/filler/tail stages are skipped for them.
+manual_plan: true
+
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
 # A filter that removes a good block is worse than one that lets junk through (stage 3 can rank it down).

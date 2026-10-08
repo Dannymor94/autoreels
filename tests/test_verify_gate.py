@@ -503,3 +503,21 @@ def test_main_fail_returns_1(tmp_path):
     yaml_path.write_text(yaml.dump(data, allow_unicode=True), encoding="utf-8")
     rc = vg.main(str(yaml_path))
     assert rc == 1
+
+
+# ── planned reels (REEL_SPEC §7.2): frame-by-frame shot check against the plan ─────────────
+
+def test_planned_expected_follows_shot_and_close_intervals():
+    labels = vg._planned_expected({"shot": "wide", "close_intervals": [[1.0, 2.0]]}, 90, 30.0)
+    assert labels[:30] == ["wide"] * 30
+    assert labels[30:60] == ["close"] * 30
+    assert labels[60:] == ["wide"] * 30
+    assert vg._planned_expected({"shot": "close", "close_intervals": []}, 5, 30.0) == ["close"] * 5
+
+
+def test_planned_reel_without_source_is_a_failure_not_a_skip(tmp_path):
+    reel = {"id": "r01", "planned": True, "segments": [{"start": 1.0, "end": 3.0, "shot": "wide"}]}
+    mf = tmp_path / "m.json"
+    mf.write_text(json.dumps({"source": "nowhere.mov", "setup": {}, "reels": [reel]}))
+    fails = vg._check_shots(tmp_path / "r01.mp4", mf, "r01", tmp_path / "inputs-archive")
+    assert fails == ["plan_shots_unchecked:source_not_found"]

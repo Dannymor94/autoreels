@@ -208,6 +208,9 @@ class Reel(BaseModel):
     # c:-sourced close intervals (needed for [WARNING] vs [ERROR] in Pass 4 short-span check).
     # Empty on auto path and old manifests.
     c_close_ranges: list[list[float]] = Field(default_factory=list)
+    # docs/REEL_SPEC.md: True when windows/shots/ending/subtitles come from cloud/plan.py. The
+    # renderer then executes them as-is (no start fix, no tail re-placement, no shot passes).
+    planned: bool = False
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

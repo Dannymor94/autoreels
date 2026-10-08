@@ -967,6 +967,23 @@ def _check_last_subtitle_word(reel, tx_words, *, hanging_words=None, smap=None) 
     """
     if not reel.subtitles:
         return
+    if getattr(reel, "planned", False):
+        # REEL_SPEC: subtitles are exactly the played sentences (checked against the plan at apply
+        # by _check_planned_reels). Here — also at render, where the plan object is gone — the
+        # contract is: the last subtitle ends a sentence and every subtitle lies in a played window.
+        # Whisper-time span membership is NOT used: at a no-room ending the next word's Whisper t0
+        # can precede the clip end although it is not heard (the plan cut by audible times).
+        from autoreels.cloud.snap import _is_sentence_end as _ise_p
+        _last = reel.subtitles[-1]
+        if not _ise_p(_last.word):
+            raise ValueError(f"[CONTENT] {reel.id}: planned clip's last subtitle '{_last.word}' "
+                             f"(t0={_last.t0:.3f}) does not end a sentence")
+        _wins = reel.playback_windows()
+        for _sw in reel.subtitles:
+            if not any(_s.start - 1e-6 <= _sw.t0 < _s.end for _s in _wins):
+                raise ValueError(f"[CONTENT] {reel.id}: subtitle '{_sw.word}' (t0={_sw.t0:.3f}) "
+                                 f"is outside every played window")
+        return
     _gate = reel.subtitle_gate
     if _gate is None:
         return
@@ -1086,8 +1103,25 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
-def _check_seam_inside_word(reel, smap: "dict | None") -> list[str]:
-    """Return list of violation messages (empty = clean) for internal seam cuts inside words."""
+def _check_seam_inside_word(reel, smap: "dict | None", words=None) -> list[str]:
+    """Return list of violation messages (empty = clean) for internal seam cuts inside words.
+
+    Planned reels (REEL_SPEC) are checked with the plan's own word spans (cloud.plan.SpeechTimes:
+    map spans, neighbour overlaps resolved by the energy track) at EVERY cut of every playback
+    window: a cut between two adjacent words is fine, a cut strictly inside one word is not.
+    """
+    if getattr(reel, "planned", False) and smap and words:
+        from autoreels.cloud.plan import SpeechTimes
+        _times = SpeechTimes(words, smap)
+        _out: list[str] = []
+        for _wi, _win in enumerate(reel.playback_windows()):
+            for _t in (_win.start, _win.end):
+                _hit = _times.word_cut_by(_t)
+                if _hit is not None:
+                    _a, _b = _times.span(_hit)
+                    _out.append(f"[ERROR] {reel.id}: seam inside word — cut at {_t:.3f}s splits "
+                                f"'{_hit.word}' [{_a:.3f}, {_b:.3f}] (window {_wi + 1})")
+        return _out
     segs = reel.segments
     if not segs or len(segs) < 2 or not smap:
         return []
@@ -2791,6 +2825,13 @@ def _check_foreign_tail_word(reels, tx_words, *, smap_lookup: dict | None = None
             _fk = round(foreign.t0 * 1000)
             if _fk in smap_lookup:
                 foreign_onset = smap_lookup[_fk][1].get("audible_start", foreign.t0)
+        _ptimes = getattr(getattr(r, "_plan", None), "_times", None)
+        if getattr(r, "planned", False) and _ptimes is not None:
+            # Same word spans as the plan: when the map stretches the last word over the next one,
+            # the energy gap between them decides where the next word really starts.
+            _prev = _ptimes.prev(foreign)
+            if _prev is not None:
+                foreign_onset = _ptimes.pair(_prev, foreign)[1]
         if foreign_onset < r.end - 0.01:
             errors.append(
                 f"[CONTENT] {r.id}: transcribed word '{foreign.word}' (t0={foreign.t0:.3f}s) "
@@ -2831,6 +2872,35 @@ def _check_tail_air(reels, *, tail_pad_sec: float, video_duration: float | None,
 
 
 _TAIL_VIDEO_FADE_MIN_SEC = 0.25   # must match ap.tail_video_fade_min_sec default in render.py
+
+
+def _check_planned_reels(reels, *, end_air_sec: float) -> list[str]:
+    """REEL_SPEC §1/§4 invariants for planned reels, checked at apply (before anything is written).
+
+    - every subtitle word lies inside a played window (screen = sound);
+    - the last subtitle word is the plan's last word;
+    - 0 <= end − last word audible end <= end_air_sec (+1 ms); exactly 0 only when the plan
+      recorded that the next speech leaves no room.
+    """
+    errors: list[str] = []
+    for r in reels:
+        wins = r.playback_windows()
+        for w in r.subtitles:
+            if not any(s.start - 1e-6 <= w.t0 < s.end for s in wins):
+                errors.append(f"{r.id}: subtitle word '{w.word}' t0={w.t0:.3f} outside every window")
+                break
+        plan = getattr(r, "_plan", None)
+        if plan is not None and r.subtitles:
+            if r.subtitles[-1].word != plan.last_word.word:
+                errors.append(f"{r.id}: last subtitle '{r.subtitles[-1].word}' != planned last word "
+                              f"'{plan.last_word.word}'")
+        ae = getattr(r, "tail_last_word_end", None)
+        if ae is not None:
+            air = r.end - ae
+            if air < -1e-3 or air > end_air_sec + 1e-3:
+                errors.append(f"{r.id}: end air {air:.3f}s outside 0…{end_air_sec:.2f}s "
+                              f"(end={r.end:.3f}, last word audible end={ae:.3f})")
+    return errors
 
 
 def _check_fade_audible(reels, *, smap_lookup: dict | None) -> tuple[list[str], list[str]]:
@@ -2925,6 +2995,11 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
         # whether the body opens mid-thought, so it reads the body start, not the hook.
         body = r.effective_segments()
         body_words = words_in_window(words, body[0].start, body[0].end) if body else cw
+        if getattr(r, "planned", False):
+            # Planned reels: the words heard are exactly the plan's subtitles (whole sentences);
+            # time-window membership by Whisper t0 would report a neighbour word instead.
+            cw = list(r.subtitles)
+            body_words = [w for w in cw if body[0].start <= w.t0 < body[0].end] if body else cw
         if body_words:
             fw = body_words[0].word.strip()
             fw_clean = fw.strip(".,!?;:—–-«»\"'()").lower()
@@ -3969,6 +4044,12 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
         "subtitle_keywords": subtitle_keywords,
         "tail": [getattr(reel, "tail_last_word_end", None), getattr(reel, "tail_next_word_start", None)],
     }
+    if getattr(reel, "planned", False):
+        # Planned reels (REEL_SPEC): shots are part of the plan, so a shot change re-renders.
+        # Added only for planned reels so existing fingerprints stay byte-identical.
+        payload["planned"] = True
+        payload["shots"] = [[w.shot, [[round(a, 4), round(b, 4)] for a, b in w.close_intervals]]
+                            for w in reel.playback_windows()]
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
@@ -4387,16 +4468,17 @@ def cmd_render(
                 )
             if _render_smap:
                 for _r in render_manifest.reels:
-                    for _msg in _check_seam_inside_word(_r, _render_smap):
+                    for _msg in _check_seam_inside_word(_r, _render_smap, _render_words):
                         print(_msg, flush=True)
                         _r.warnings.append(_msg)
             # Recompute shots so cold-open rule and beat-seam alternation are always current,
             # even when the manifest was written by an older run. assign_shots is idempotent.
             _stage_two_shot_auto(
-                render_manifest.reels, _render_words or [],
+                [r for r in render_manifest.reels if not getattr(r, "planned", False)],
+                _render_words or [],
                 render_cfg=render_cfg, smap=_render_smap,
                 selection_source=render_manifest.selection_source,
-            )
+            )   # planned reels (REEL_SPEC) carry their shots from apply — never recomputed here
             outputs = render_crop(
                 render_manifest, inputs_dir=inputs_dir, out_dir=out_dir_final,
                 render_cfg=render_cfg, ffmpeg=effective_ffmpeg,
@@ -5029,6 +5111,98 @@ def _resolve_cached_transcript(manifest: Manifest, cache_dir: Path):
     return None
 
 
+def _manual_plan_params(r0_cfg, render_cfg):
+    """ManualPlanParams from config — one place, so apply and tests read the same numbers."""
+    from autoreels.cloud.plan import ManualPlanParams
+    _ap = getattr(render_cfg, "audio_processing", None) if render_cfg else None
+    _sm = getattr(render_cfg, "speech_map_cfg", None) if render_cfg else None
+    return ManualPlanParams(
+        seam_pad_sec=getattr(r0_cfg, "seam_pad_sec", 0.04),
+        end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
+        onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
+        hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
+    )
+
+
+def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
+    """Body sentence numbers in play order for a review line: beats, else s..e minus x.
+
+    Default e (no e:) = last COMPLETE sentence that is not a pure wind-down; default s = 1.
+    """
+    from autoreels.cloud.edit import default_end_sentence, _ends_terminal as _et
+    n = len(sents)
+    if getattr(entry, "beats", ()):
+        return [b for b in entry.beats if 1 <= b <= n]
+    s = entry.s if entry.s else 1
+    if entry.e:
+        e = entry.e
+    else:
+        _fr = getattr(r0_cfg, "filler_removal", None)
+        e = default_end_sentence(sents, getattr(r0_cfg, "wind_down_phrases", []),
+                                 _fr.filler_words if _fr else []) + 1
+        while e > s and not _et(sents[e - 1][-1]):
+            e -= 1
+    s, e = max(1, min(s, n)), max(1, min(e, n))
+    xs = set(getattr(entry, "x", ()) or ())
+    return [k for k in range(s, e + 1) if k not in xs]
+
+
+def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str) -> list[str]:
+    """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
+
+    Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
+    Returns the printable plan lines.
+    """
+    from autoreels.cloud.plan import build_manual_plan
+    play = _manual_play_order(entry, sents, r0_cfg)
+    hook = getattr(entry, "hook", None)
+    if hook is not None:
+        _hs = sents[hook - 1] if 1 <= hook <= len(sents) else None
+        _hook_max = getattr(r0_cfg, "hook_max_sec", 6.0)
+        if _hs is None:
+            reel.warnings.append(f"h:{hook} out of range — cold open skipped")
+            hook = None
+        elif _hs[-1].t1 - _hs[0].t0 > _hook_max:
+            reel.warnings.append(f"cold open: hook sentence {hook} is "
+                                 f"{_hs[-1].t1 - _hs[0].t0:.1f}s > cap {_hook_max:.0f}s — refused")
+            hook = None
+    mode = "!" if getattr(entry, "hook_keep", False) else ("-" if getattr(entry, "hook_remove", False) else None)
+    onset_fn = None
+    if smap is not None:
+        from autoreels.local.render import _next_speech_onset_after, _smap_word_lookup
+        _lk = _smap_word_lookup(smap)
+
+        def onset_fn(w):  # same definition the render-time checks use
+            r = _next_speech_onset_after(w.t0, smap, _lk, last_t1=w.t1)
+            return None if r is None else r.onset
+    plan = build_manual_plan(
+        sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg),
+        hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
+        source_duration=(tx_words[-1].t1 if tx_words else None),
+    )
+    body = [w.segment() for w in plan.body]
+    reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []
+    if not reel.segments:
+        reel.segments = body
+    reel.start, reel.end = plan.start, plan.end
+    reel.cold_open = plan.cold_open.segment() if plan.cold_open else None
+    reel.subtitles = plan.subtitles
+    reel.beat_gap_sec = None
+    reel.planned = True
+    reel.tail_last_word_end = plan.last_audible_end
+    reel.tail_next_word_start = plan.next_onset
+    reel.subtitle_gate = plan.end
+    reel._hook_keep = bool(plan.hook_replayed)
+    reel._hook_window = None
+    reel._c_close_ranges = []
+    reel._plan = plan
+    for _w in plan.warnings:
+        reel.warnings.append(_w)
+    lines = [f"  plan {label}:"] + [f"    {ln}" for ln in plan.describe(sents)]
+    lines += [f"    ! {w}" for w in plan.warnings]
+    return lines
+
+
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner") -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
@@ -5627,6 +5801,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 # Stored so k: resolution can accept original sentence numbers for beat reels.
                 reel._beat_orig_sents = _valid_beats  # [8, 9, 12, 10, 11] → positions 1-5
                 print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
+        if getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse:
+            try:
+                for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
+                                              render_cfg, '+'.join(str(s) for s in g)):
+                    print(_pl)
+            except ValueError as _pe:
+                print(f"  error {'+'.join(str(s) for s in g)}: plan: {_pe}", file=sys.stderr)
+                return 1
         reel.r0_start = reel.start
         reel.r0_end = reel.end
         if is_merged:
@@ -5699,6 +5881,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # NOT reached here; collect_human_warnings reports what a bypassed drop-half would have flagged.
     density_disc: list[dict] = []
     tx_words = _tx_words  # alias used by filler removal and post-loop stages
+    # REEL_SPEC: planned reels already carry their final windows/ending/subtitles. The boundary
+    # stages below never drop or reorder human reels, so the plan is restored by position after them.
+    _planned_snap = {i: (r.model_copy(deep=True), bool(getattr(r, "_hook_keep", False)),
+                         getattr(r, "_plan", None))
+                     for i, r in enumerate(reels) if getattr(r, "planned", False)}
+    _n_before_stages = len(reels)
     reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max, smap=_blk_smap)
     # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
     # cannot repair within bounds stays, and collect_human_warnings reports it.
@@ -5766,8 +5954,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     for _r in reels:
         _e_val = getattr(_r, "_explicit_e_val", None)
         _blk_full = getattr(_r, "_blk_sents_full", None)
-        if _e_val is None or not _blk_full:
-            continue
+        if _e_val is None or not _blk_full or getattr(_r, "planned", False):
+            continue   # planned reels: subtitles = exactly the played sentences (restored below)
         _incl_t0s: frozenset[float] = frozenset(w.t0 for s in _blk_full[:_e_val] for w in s)
         _excl = [w for w in _r.subtitles if w.t0 not in _incl_t0s]
         if _excl:
@@ -5779,18 +5967,41 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     file=sys.stderr,
                 )
             _r.subtitles = [w for w in _r.subtitles if w.t0 in _incl_t0s]
+    _planned_seam_err = False
+    if _planned_snap:
+        if len(reels) != _n_before_stages:   # the human path must never drop or reorder
+            print(f"  [ERROR] human stages changed the reel count {_n_before_stages}→{len(reels)} — "
+                  f"cannot restore planned reels by position", file=sys.stderr)
+            return 1
+        _restore = ("start", "end", "segments", "cold_open", "subtitles", "beat_gap_sec", "planned",
+                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings")
+        for _i, (_snap, _hk_keep_snap, _plan_snap) in _planned_snap.items():
+            for _f in _restore:
+                setattr(reels[_i], _f, getattr(_snap, _f))
+            reels[_i].r0_start, reels[_i].r0_end = _snap.start, _snap.end
+            reels[_i]._hook_keep = _hk_keep_snap
+            reels[_i]._plan = _plan_snap
+            reels[_i]._hook_window = None
+            reels[_i]._c_close_ranges = []
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
         _check_first_subtitle_word(_r, _tx_words)
-        for _smsg in _check_seam_inside_word(_r, _blk_smap):
+        for _smsg in _check_seam_inside_word(_r, _blk_smap, _tx_words):
             print(_smsg, file=sys.stderr, flush=True)
             _r.warnings.append(_smsg)
+            if getattr(_r, "planned", False):
+                _planned_seam_err = True
+
+    if _planned_seam_err:
+        print("  [ERROR] planned clip cuts inside a word — refusing", file=sys.stderr)
+        return 1
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.
+    # Planned reels: _check_planned_reels checks the last word against the plan instead.
     if _blk_smap is not None:
         for _reel in reels:
-            if not _reel.subtitles:
+            if not _reel.subtitles or getattr(_reel, "planned", False):
                 continue
             if _reel.segments:
                 _r0 = _reel.segments[-1].end
@@ -5883,6 +6094,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     filler_stats: list[tuple] = []   # (reel, removed_sec, cut_count)
     if _fr is not None:
         for reel in reels:
+            if getattr(reel, "planned", False):
+                continue   # REEL_SPEC v1: no filler cuts inside planned clips
             _ov = getattr(reel, "_filler_override", None)
             _on = _ov if _ov is not None else (filler if filler is not None else _fr.enabled)
             if not _on:
@@ -5968,6 +6181,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # assign_close_shots marks Segment.shot='close' or sets Segment.close_intervals (relative times).
     from autoreels.local.render import assign_close_shots as _assign_close_shots
     for reel in reels:
+        if getattr(reel, "planned", False):
+            continue   # shots come from the plan
         _c_ranges = getattr(reel, "_c_close_ranges", [])
         if _c_ranges:
             # Rule3 > Rule4: skip c: ranges shorter than min_shot — they would create a span
@@ -5981,8 +6196,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 reel.segments = []  # collapse back to legacy single-span if only one seg unchanged
 
     # M1.7 step 1b: auto wide/close alternation at seams (formatting — runs on human and auto paths).
-    reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_blk_smap,
-                                 selection_source="human")
+    _stage_two_shot_auto([r for r in reels if not getattr(r, "planned", False)], tx_words,
+                         render_cfg=render_cfg, smap=_blk_smap, selection_source="human")
 
     # Tail air (Part: abrupt-ending fix). Padding/filler/snap each erode the air after the last word;
     # re-pin every reel's end to exactly tail_pad_sec after the last heard word (all paths: single,
@@ -5996,7 +6211,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _tail_pad = getattr(_ap_cfg, "end_air_sec", 0.20)
     else:
         _tail_pad = getattr(r0_cfg, "tail_pad_sec", 0.7)
-    _apply_tail_air(reels, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur,
+    _unplanned = [r for r in reels if not getattr(r, "planned", False)]
+    _apply_tail_air(_unplanned, tx_words, tail_pad_sec=_tail_pad, video_duration=_video_dur,
                     smap_lookup=_blk_smap_lookup, smap=_blk_smap)
 
     # Fail fast if any reel's segments desynced from its final bounds (never emit such a manifest).
@@ -6008,7 +6224,13 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             return 1
 
     # Invariant: audio ends no earlier than last_word_end + tail_pad_sec − one frame.
-    _tail_err = _check_tail_air(reels, tail_pad_sec=_tail_pad, video_duration=_video_dur)
+    _tail_err = _check_tail_air(_unplanned, tail_pad_sec=_tail_pad, video_duration=_video_dur)
+    _plan_errs = _check_planned_reels([r for r in reels if getattr(r, "planned", False)],
+                                      end_air_sec=_tail_pad)
+    for _err in _plan_errs:
+        print(f"  error: {_err}", file=sys.stderr)
+    if _plan_errs:
+        return 1
     if _tail_err:
         print(f"  error: tail-air invariant: {_tail_err}", file=sys.stderr)
         return 1
@@ -6019,7 +6241,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     if _foreign_errs:
         return 1
 
-    _fade_errs, _fade_warns = _check_fade_audible(reels, smap_lookup=_blk_smap_lookup)
+    _fade_errs, _fade_warns = _check_fade_audible(_unplanned, smap_lookup=_blk_smap_lookup)
     for _w in _fade_warns:
         print(f"  warning: {_w}")
     for _err in _fade_errs:

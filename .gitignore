@@ -13,6 +13,8 @@ reels-out/
 transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
 # review files (working material, not shared)
 reviews/
+# handoff: patches / task files from the assistant for the agent (local only)
+handoff/
 # аудио-треки фоновой музыки (бинарь, не в git; кладутся на машину рендера)
 music/
 # room-tone WAV clips extracted for synthetic tail (runtime, local)

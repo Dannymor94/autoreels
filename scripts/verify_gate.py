@@ -353,15 +353,102 @@ def _check_tail_frames(mp4: Path, clip_duration: float) -> list[str]:
     return []
 
 
+PLAN_SHOT_TOL_FRAMES = 3   # frames around a planned shot change / window start not judged
+
+
+def _find_source(manifest: dict, src_dirs: list) -> "Path | None":
+    """Source video for a manifest: recorded source_path, else the source file name in src_dirs."""
+    rec = manifest.get("source_path") or ""
+    if rec and Path(rec).is_file():
+        return Path(rec)
+    name = Path(manifest.get("source", "")).name
+    for d in src_dirs:
+        if name and (Path(d) / name).is_file():
+            return Path(d) / name
+    return None
+
+
+def _planned_expected(seg: dict, n_frames: int, fps: float) -> list[str]:
+    """Expected shot per output frame of one planned window (shot + window-relative close_intervals)."""
+    base = seg.get("shot") or "wide"
+    ci = seg.get("close_intervals") or []
+    out = []
+    for k in range(n_frames):
+        t = (k + 0.5) / fps
+        out.append("close" if base == "close" or any(a <= t < b for a, b in ci) else "wide")
+    return out
+
+
+def _check_planned_shots(mp4: Path, manifest: dict, reel: dict, src: Path,
+                         fps: float = flash_check.FPS) -> list[str]:
+    """REEL_SPEC §7.2 for planned reels: every judged frame shows the shot the plan says.
+
+    Frames are classified against the source (flash_check), window by window; ambiguous frames and
+    frames within PLAN_SHOT_TOL_FRAMES of a window start or a planned shot change are not judged.
+    Span floors of the automatic path (2.5 s / 4 s) do not apply: REEL_SPEC §3.5.
+    """
+    setup = manifest.get("setup", {})
+    wide_vf = flash_check._wide_vf(setup)
+    close_vf = flash_check._close_vf(setup)
+    segs = ([reel["cold_open"]] if reel.get("cold_open") else []) + list(reel.get("segments", []))
+    durs = [flash_check._snap(sg["end"]) - flash_check._snap(sg["start"]) for sg in segs]
+    file_dur = _probe_duration(mp4)
+    # Seam transitions overlap neighbouring windows in the output: spread the measured shortfall
+    # evenly over the seams so each window is read at its real output position.
+    n_seams = max(0, len([d for d in durs if d > 0]) - 1)
+    overlap = ((sum(d for d in durs if d > 0) - file_dur) / n_seams
+               if (file_dur is not None and n_seams) else 0.0)
+    overlap = max(0.0, overlap)
+    # The closing fade to black is not a shot: frames in it are not judged.
+    fade = float(_DE_AP2.get("end_video_fade_sec", 0.25)) if _DYNAMIC_ENDING else 0.0
+    judge_until = (file_dur - fade - PLAN_SHOT_TOL_FRAMES / fps) if file_dur is not None else None
+    fails = []
+    out_t = 0.0
+    judged = 0
+    for i, (seg, dur) in enumerate(zip(segs, durs), 1):
+        src_start = flash_check._snap(seg["start"])
+        if dur <= 0:
+            continue
+        # Both sides resampled to the checker's fps, so a 25/60 fps clip is compared frame-to-frame.
+        rendered = flash_check._frames(mp4, out_t, dur, "null", force_fps=True)
+        sw = flash_check._frames(src, src_start, dur, wide_vf, force_fps=True)
+        sc = flash_check._frames(src, src_start, dur, close_vf, force_fps=True)
+        got = flash_check._classify(rendered, sw, sc)
+        judged += sum(1 for g in got if g != "ambig")
+        exp = _planned_expected(seg, len(got), fps)
+        changes = {0, len(exp)} | {k for k in range(1, len(exp)) if exp[k] != exp[k - 1]}
+        bad = [k for k, (g, e) in enumerate(zip(got, exp))
+               if g != "ambig" and g != e
+               and all(abs(k - c) > PLAN_SHOT_TOL_FRAMES for c in changes)
+               and (judge_until is None or out_t + k / fps < judge_until)]
+        if bad:
+            fails.append(f"plan_shot_mismatch:window{i}:{len(bad)}fr(first@{out_t + bad[0] / fps:.2f}s)")
+        out_t += dur - overlap
+    if judged == 0:
+        # Nothing could be told apart (no frames read, or every frame ambiguous): not a pass.
+        fails.append("plan_shots_unjudged:0fr")
+    return fails
+
+
 def _check_shots(mp4: Path, manifest_path: Path, reel_id: str,
                  src_dir: Path) -> list[str]:
-    """Check two-shot spans via flash_check.check_reel. Skips if source not found."""
+    """Check two-shot spans via flash_check.check_reel. Skips if source not found.
+
+    Planned reels (REEL_SPEC) are checked frame by frame against their plan instead.
+    """
     if not manifest_path.exists():
         return []
     try:
         manifest = json.load(open(manifest_path))
     except json.JSONDecodeError as exc:
         return [f"manifest_corrupt:{exc}"]
+
+    _reel_p = next((r for r in manifest.get("reels", []) if r["id"] == reel_id), None)
+    if _reel_p is not None and _reel_p.get("planned"):
+        src_p = _find_source(manifest, [src_dir, src_dir.parent / "inputs"])
+        if src_p is None:
+            return ["plan_shots_unchecked:source_not_found"]
+        return _check_planned_shots(mp4, manifest, _reel_p, src_p)
 
     setup = manifest.get("setup", {})
     stem = setup.get("setup_id", "")
@@ -445,6 +532,11 @@ def check_clip(entry: dict, project: Path) -> list[str]:
                 _mf = json.loads(manifest_path.read_text(encoding="utf-8"))
                 _reel = next((r for r in _mf.get("reels", []) if r["id"] == clip_id), None)
                 if _reel is not None:
+                    # REEL_SPEC §4.2 lower bound (planned reels): the file never ends before the
+                    # last word's audible end as the plan resolved it.
+                    _ae_p = _reel.get("tail_last_word_end") if _reel.get("planned") else None
+                    if _ae_p is not None and source_end < float(_ae_p) - 0.002:
+                        fails.append(f"last_word_cut:end={source_end:.3f}<ae={float(_ae_p):.3f}")
                     fails.extend(_check_end_air_vg(speechmap, _reel, source_end))
                     fails.extend(_check_foreign_tail_word_vg(speechmap, _reel, source_end))
             except (json.JSONDecodeError, KeyError):

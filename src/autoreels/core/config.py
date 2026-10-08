@@ -296,6 +296,10 @@ class R0Config(BaseModel):
     # Hook replay position rule: keep the hook in the body only if its sentence start lies at or
     # after this fraction of the body duration (0.5 = second half). h:N! forces keep; h:N- forces remove.
     hook_replay_min_pos: float = 0.5
+    # docs/REEL_SPEC.md: human-path clips are built by ONE pure plan (cloud/plan.py) — windows,
+    # shots, ending and subtitles from the review line — instead of the boundary-moving stages.
+    # Off = the previous output (invariant 8).
+    manual_plan: bool = False
 
     @property
     def min_duration(self) -> int:
