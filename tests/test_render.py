@@ -3182,6 +3182,43 @@ def test_synth_tail_single_frozen_frame(tmp_path):
     )
 
 
+# ── start fix: cold_open guard (r01 numbers) ──────────────────────────────────
+
+def test_start_fix_skipped_when_cold_open_is_first():
+    """r01: cold_open starts at 201.409, first subtitle word is at 164.349 in the body.
+    Without the guard the start-fix would pull cold_open.start back to 164.297,
+    making it 41.4 s long (2× the expected clip).  Guard must block the fix."""
+    from autoreels.core.models import Segment, Reel
+
+    cold_open = Segment(start=201.409, end=205.709, shot="close")
+    seg0 = Segment(start=164.349, end=196.279, shot="wide")
+    seg1 = Segment(start=200.629, end=205.689, shot="wide")
+    reel = Reel(id="r01", start=164.349, end=205.689, segments=[seg0, seg1],
+                cold_open=cold_open, score=9.0, hook="h", title="t", description="d")
+
+    segs = reel.playback_windows()  # [cold_open, seg0, seg1]
+    assert segs[0].start == pytest.approx(201.409, abs=1e-3), "segs[0] must be cold_open"
+
+    audible_start = 164.297  # first subtitle word's audible_start (body)
+    _is_cold_open_first = reel.cold_open is not None and len(segs) > 1
+    assert _is_cold_open_first, "guard must be True for hook reel"
+
+    # With the guard, start-fix does NOT run — cold_open.start stays at 201.409
+    if not _is_cold_open_first and segs[0].start > audible_start + 1e-4:
+        fixed_start = audible_start
+    else:
+        fixed_start = segs[0].start
+
+    assert fixed_start == pytest.approx(201.409, abs=1e-3), (
+        f"cold_open.start must NOT be pulled back to {audible_start}; got {fixed_start}"
+    )
+    # Playback duration must be cold_open + body = 4.3 + 36.99 ≈ 41.29 s, not ~78 s
+    expected_dur = sum(s.end - s.start for s in segs)
+    assert expected_dur == pytest.approx(41.29, abs=0.1), (
+        f"playback duration must be ~41.29 s, not ~78 s; got {expected_dur:.3f} s"
+    )
+
+
 # ── PART 3: start fix — audible_start lookup (r04 numbers) ────────────────────
 
 def test_start_fix_lookup_r04_numbers():
@@ -3245,3 +3282,39 @@ def test_start_fix_shifts_close_intervals_r02():
         f"ci must cover to seg end after shift: ci end={ci_final[-1][1]:.4f}, "
         f"seg_dur={new_dur:.4f}, allowed gap < {2/fps:.4f}s"
     )
+
+
+# ── PART 2: end-air upper-bound check ─────────────────────────────────────────
+
+def test_check_end_air_r01_numbers():
+    """r01 numbers: last word ae=195.40, end_air_sec=0.30, fps=30.
+    When clip_end = 195.40 + 2.29 = 197.69 (old broken render): [ERROR].
+    When clip_end = 195.40 + 0.30 = 195.70 (correct):           no error.
+    Tolerance = 0.30 + 1/30 ≈ 0.333s.
+    """
+    from autoreels.local.render import _check_end_air
+    from autoreels.core.models import Word
+
+    fps = 30.0
+    ae = 195.40
+    end_air_sec = 0.30
+    tolerance = end_air_sec + 1.0 / fps  # ≈ 0.333s
+
+    # Minimal smap with one entry for the last subtitle word
+    last_word = Word(word="последнее", t0=194.5, t1=195.6)
+    smap = {"words": [{"t0": 194.5, "t1": 195.6, "audible_end": ae}], "intervals": []}
+
+    # BAD: 2.29s of air — must fire [ERROR]
+    bad_end = ae + 2.29
+    errs = _check_end_air("r01", last_word, bad_end, smap,
+                          {round(194.5 * 1000): (0, {"t0": 194.5, "t1": 195.6, "audible_end": ae})},
+                          end_air_sec, fps)
+    assert errs, f"expected [ERROR] for {bad_end - ae:.3f}s air > tolerance {tolerance:.3f}s"
+    assert "[ERROR]" in errs[0]
+
+    # GOOD: 0.30s of air — must pass
+    good_end = ae + 0.30
+    errs2 = _check_end_air("r01", last_word, good_end, smap,
+                           {round(194.5 * 1000): (0, {"t0": 194.5, "t1": 195.6, "audible_end": ae})},
+                           end_air_sec, fps)
+    assert not errs2, f"unexpected error for {good_end - ae:.3f}s air ≤ tolerance: {errs2}"

@@ -30,6 +30,9 @@ _render_cfg = yaml.safe_load(_render_cfg_path.read_text()) if _render_cfg_path.e
 JUMP_SEAM_GAP_SEC: float = _render_cfg.get("jump_seam_gap_sec", 2.0)
 SHOT_TOLERANCE_FRAMES: int = _render_cfg.get("shot_tolerance_frames", 2)
 SPEECH_MIN_INTERVAL_SEC: float = _render_cfg.get("speech_min_interval_sec", 0.1)
+_DE_AP2 = _render_cfg.get("audio_processing", {})
+_DYNAMIC_ENDING: bool = bool(_DE_AP2.get("dynamic_ending", False))
+_END_AIR_SEC: float = float(_DE_AP2.get("end_air_sec", 0.30))
 
 
 # ── ffmpeg helpers ─────────────────────────────────────────────────────────────
@@ -243,6 +246,37 @@ def _check_web_safe(mp4: Path) -> list[str]:
     return [e.replace("[ERROR] web-safe: ", "web_unsafe:") for e in errors]
 
 
+def _check_end_air_vg(speechmap_path: Path, reel: dict, source_end: float,
+                      fps: float = 30.0) -> list[str]:
+    """Permanent end-air check: source_end − last subtitle word audible_end ≤ end_air_sec + 1 frame.
+
+    Only runs when dynamic_ending is on in render.yaml.
+    """
+    if not _DYNAMIC_ENDING:
+        return []
+    if not speechmap_path.exists():
+        return []
+    subs = reel.get("subtitles", [])
+    if not subs:
+        return []
+    last_sub = subs[-1]
+    with open(speechmap_path) as f:
+        sm = json.load(f)
+    last_t0 = last_sub.get("t0", 0.0)
+    key = round(last_t0 * 1000)
+    word = next((w for w in sm.get("words", []) if round(w.get("t0", 0.0) * 1000) == key), None)
+    if word is None:
+        return []
+    ae = word.get("audible_end", last_t0)
+    if ae < last_t0:
+        return []
+    tolerance = _END_AIR_SEC + 1.0 / fps
+    air = source_end - ae
+    if air > tolerance + 1e-4:
+        return [f"end_air:{air:.3f}s>{tolerance:.3f}s(ae={ae:.3f},end={source_end:.3f})"]
+    return []
+
+
 def _check_tail_silence(speechmap_path: Path, reel_end: float,
                         own_tail_window_sec: float = 0.05) -> list[str]:
     """Fail if speech starts after the clip's last word + a small grace window.
@@ -379,6 +413,14 @@ def check_clip(entry: dict, project: Path) -> list[str]:
         fails.append("render_end_missing")
     else:
         fails.extend(_check_tail_silence(speechmap, source_end))
+        if manifest_path.exists():
+            try:
+                _mf = json.loads(manifest_path.read_text(encoding="utf-8"))
+                _reel = next((r for r in _mf.get("reels", []) if r["id"] == clip_id), None)
+                if _reel is not None:
+                    fails.extend(_check_end_air_vg(speechmap, _reel, source_end))
+            except (json.JSONDecodeError, KeyError):
+                pass
 
     duration = _probe_duration(clip_path)
     if duration is not None:

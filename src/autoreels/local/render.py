@@ -1161,6 +1161,39 @@ def _smap_word_lookup(smap: dict) -> dict[int, tuple[int, dict]]:
     return {round(w["t0"] * 1000): (i, w) for i, w in enumerate(smap["words"])}
 
 
+def _check_end_air(
+    reel_id: str,
+    last_word,
+    clip_end: float,
+    smap: dict,
+    lookup: dict,
+    end_air_sec: float,
+    fps: float,
+) -> list[str]:
+    """Invariant: clip_end − last subtitle word audible_end ≤ end_air_sec + 1 frame.
+
+    Fires as [ERROR] when the gap is wider than allowed: the clip ends much later than
+    the last audible word, meaning too much air crept in (e.g. the start-fix bug that
+    stretched cold_open.start back into body time).
+    Only runs when dynamic_ending is on (end_air_sec in config).
+    """
+    key = round(last_word.t0 * 1000)
+    if key not in lookup:
+        return []
+    _, entry = lookup[key]
+    ae: float = entry.get("audible_end", last_word.t0)
+    if ae < last_word.t0:
+        return []
+    tolerance = end_air_sec + 1.0 / fps
+    air = clip_end - ae
+    if air > tolerance + 1e-4:
+        return [
+            f"  [ERROR] {reel_id}: end air {air:.3f}s > allowed {tolerance:.3f}s "
+            f"(end={clip_end:.3f}, ae={ae:.3f}, end_air_sec={end_air_sec:.2f})"
+        ]
+    return []
+
+
 def _check_silence_at_clip_end(
     reel_id: str,
     last_word,
@@ -2334,7 +2367,10 @@ def _render_segments(
                 _fse = _fsub_lk.get(round(reel.subtitles[0].t0 * 1000))
                 if _fse is not None:
                     _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
-                    if segs and segs[0].start > _first_sub_as + 1e-4:
+                    # Skip when segs[0] is the cold-open hook: its start is in hook time,
+                    # not body time; the first subtitle word lives in the body (segs[1]+).
+                    _is_cold_open_first = reel.cold_open is not None and len(segs) > 1
+                    if segs and not _is_cold_open_first and segs[0].start > _first_sub_as + 1e-4:
                         _old_s0_start = segs[0].start
                         segs = [segs[0].model_copy(update={"start": _first_sub_as})] + list(segs[1:])
                         segs = _snap_windows_to_frames(segs, _fps())
@@ -2494,10 +2530,17 @@ def _render_segments(
                 _last = reel.subtitles[-1]
                 _smap_cfg = getattr(render_cfg, "speech_map_cfg", None)
                 _smap_lookup = _smap_word_lookup(smap)
+                # When dynamic_ending is on, use end_air_sec as the tail budget (not the
+                # speech_map tail_pad_sec=1.50): both branches must agree on how much air to add.
+                _smap_tail_pad = (
+                    getattr(ap, "end_air_sec", 0.30)
+                    if getattr(ap, "dynamic_ending", False)
+                    else (_smap_cfg.tail_pad_sec if _smap_cfg else 1.50)
+                )
                 _smap_result = _tail_from_smap(
                     last_t0=_last.t0, seg_end=segs[-1].end, smap=smap,
                     lookup=_smap_lookup, last_t1=_last.t1,
-                    tail_pad_sec=_smap_cfg.tail_pad_sec if _smap_cfg else 1.50,
+                    tail_pad_sec=_smap_tail_pad,
                     onset_margin_sec=_smap_cfg.onset_margin_sec if _smap_cfg else 0.06,
                     fade_keep_sec=_smap_cfg.fade_keep_sec if _smap_cfg else 0.20,
                     own_tail_window_sec=_smap_cfg.own_tail_window_sec if _smap_cfg else 0.30,
@@ -2699,6 +2742,23 @@ def _render_segments(
                     f"('{reel.subtitles[0].word}' t0={reel.subtitles[0].t0:.3f})"
                 )
             _assert_end_covers_last_word(reel, segs, _fps_holder[0] if _fps_holder else 30.0)
+            # End-air upper-bound: when dynamic_ending + speech_map are both on, the smap
+            # tail already trimmed segs[-1].end to ae + end_air_sec; any larger gap is an error.
+            # Guard requires _use_smap_tail so we only check when the smap path was active —
+            # without smap, segs[-1].end is reel.end from the manifest (no trimming happened here).
+            if (_use_smap_tail
+                    and getattr(ap, "dynamic_ending", False)):
+                _ea_fps = _fps_holder[0] if _fps_holder else 30.0
+                _ea_sec = getattr(ap, "end_air_sec", 0.30)
+                # _inv_lookup is always set when smap is not None and reel.subtitles
+                _ea_real_end = (
+                    _synth_params_dict["cut_point"]
+                    if _synth_active and _synth_params_dict
+                    else segs[-1].end
+                )
+                _clip_errors.extend(_check_end_air(
+                    reel.id, reel.subtitles[-1], _ea_real_end,
+                    smap, _inv_lookup, _ea_sec, _ea_fps))
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
             # the final post-snap `segs` by the same helper the invariant checks against, so the
