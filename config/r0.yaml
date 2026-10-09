@@ -185,6 +185,10 @@ require_alignment: true
 # Close shot after a seam (REEL_SPEC §3): first sentence(s), at least / at most this many seconds.
 accent_min_sec: 3.0
 accent_max_sec: 8.0
+# M2.2: the clip should end where the VOICE ends (arl prosody <stem> → transcripts/<stem>.prosody.json).
+# --apply reports an ending whose voice stays up (sounds unfinished) and names finished sentence ends
+# nearby; the review export marks such sentences with ↗. Thresholds: src/autoreels/local/prosody.py.
+intonation_check: true
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.

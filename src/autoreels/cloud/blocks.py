@@ -874,6 +874,10 @@ def _block_fingerprint(blocks: list) -> str:
     return hashlib.sha1(data).hexdigest()[:16]
 
 
+_TONE_LEGEND = ("# ↗ after a sentence: the voice stays UP at its end — the speaker goes on, it sounds "
+               "unfinished.\n#   A weak e: target: end on a sentence without ↗ (measured from the audio, arl prosody).")
+
+
 def export_review(
     blocks: list[CandidateBlock],
     *,
@@ -882,6 +886,7 @@ def export_review(
     words=None,
     pause_show_sec: float = 0.3,
     min_pause_for_phrase_end: float = 0.0,
+    tone=None,
 ) -> str:
     """Render a human-editable review file for kept candidate blocks.
 
@@ -906,7 +911,7 @@ def export_review(
         "# Never end a clip (e:) on a sentence marked …→.",
         "# Put the strongest complete sentence LAST (use > lines if needed).",
         "#",
-    ] + _CK_FIELDS_DOC.rstrip("\n").splitlines() + [
+    ] + (_TONE_LEGEND.splitlines() if tone is not None else []) + _CK_FIELDS_DOC.rstrip("\n").splitlines() + [
         "#",
         "",
     ]
@@ -914,7 +919,7 @@ def export_review(
         lines.append(f"[ {i} ]  {b.duration:.1f}s  id={b.id}  score: __")
         lines.append(_numbered_sentences(b, words,
                                          pause_show_sec=pause_show_sec,
-                                         pause_strong_sec=min_pause_for_phrase_end))
+                                         pause_strong_sec=min_pause_for_phrase_end, tone=tone))
         lines.append("")
     return "\n".join(lines)
 
@@ -977,7 +982,8 @@ def parse_review(
 
 def _numbered_sentences(block: CandidateBlock, words, *,
                         pause_show_sec: float = 0.0,
-                        pause_strong_sec: float = 0.0) -> str:
+                        pause_strong_sec: float = 0.0,
+                        tone=None) -> str:
     """Block text with each sentence prefixed [1] [2]… so a review can name them with s:/e:.
 
     Sentences are split from the transcript words in the block's span by the same rule apply uses
@@ -989,6 +995,9 @@ def _numbered_sentences(block: CandidateBlock, words, *,
 
     Incomplete sentences (no terminal punctuation or hanging phrase) get the prefix [k]…→ so the
     reviewer knows e:k would leave the clip on an open thought.
+
+    `tone` (local/prosody.tone_lookup): a complete sentence whose voice stays up at its end gets
+    ↗ after its text — the speaker goes on there, a weak e: target.
     """
     if not words:
         return " ".join(block.text.split())
@@ -1000,6 +1009,10 @@ def _numbered_sentences(block: CandidateBlock, words, *,
     parts = []
     for k, s in enumerate(sents, 1):
         text = " ".join(w.word for w in s)
+        if tone is not None and is_complete_sentence(s):
+            _t = tone(s[-1])
+            if _t is not None and _t[0] == "open":
+                text += " ↗"
         if pause_show_sec > 0 and k < len(sents):
             gap = sents[k][0].t0 - s[-1].t1   # sents[k] is next sentence (k is 1-based)
             if gap >= pause_show_sec:
@@ -1018,6 +1031,7 @@ def export_compact_review(
     words=None,
     pause_show_sec: float = 0.3,
     min_pause_for_phrase_end: float = 0.0,
+    tone=None,
 ) -> str:
     """Render a compact one-line-per-block review file for pasting into a chat.
 
@@ -1037,10 +1051,11 @@ def export_compact_review(
         "#",
         _COMPACT_PROMPT,
         "#",
+    ] + (_TONE_LEGEND.splitlines() + ["#"] if tone is not None else []) + [
         "",
     ]
     for i, b in enumerate(blocks, 1):
-        lines.append(f"{i} | {b.duration:.1f}s | {_numbered_sentences(b, words, pause_show_sec=pause_show_sec, pause_strong_sec=min_pause_for_phrase_end)}")
+        lines.append(f"{i} | {b.duration:.1f}s | {_numbered_sentences(b, words, pause_show_sec=pause_show_sec, pause_strong_sec=min_pause_for_phrase_end, tone=tone)}")
     return "\n".join(lines) + "\n"
 
 

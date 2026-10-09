@@ -306,6 +306,10 @@ class R0Config(BaseModel):
     # Shot rule (REEL_SPEC §3): a close shot after a seam lasts accent_min..accent_max seconds.
     accent_min_sec: float = 3.0
     accent_max_sec: float = 8.0
+    # M2.2: sentence-end intonation (arl prosody → transcripts/<stem>.prosody.json): the plan reports
+    # an ending whose voice does not finish; the review export marks such sentences with ↗.
+    # Off (or no prosody file) = the previous output (invariant 8).
+    intonation_check: bool = False
 
     @property
     def min_duration(self) -> int:

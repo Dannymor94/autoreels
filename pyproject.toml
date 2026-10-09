@@ -23,6 +23,7 @@ dev = [
 align = [
     "torch==2.8.0",
     "torchaudio==2.8.0",
+    "praat-parselmouth==0.4.7",
 ]
 # Необязательный CPU-fallback транскрипции (offline). НЕ дефолт: prod на AMD-GPU без CUDA,
 # CTranslate2 идёт только на CPU. Дефолт везде — Groq Whisper API. См. cloud/transcribe.py.

@@ -477,9 +477,12 @@ def build_manual_plan(
     next_onset: Callable[[Word], float | None] | None = None,
     source_duration: float | None = None,
     align: dict | None = None,
+    tone: Callable[[Word], tuple[str, str] | None] | None = None,
 ) -> ManualPlan:
     """Plan one manual clip. `sentences` is the review numbering (merge_group_sentences output);
     `play` the body sentence numbers in play order (s:..e: minus x:, or the beat order).
+    `tone`: word → ("final" | "open" | "unsure", description) from local/prosody.py; when given,
+    an ending whose voice does not finish is reported (the reviewer's e: is never moved).
     """
     n_sent = len(sentences)
     play = [int(n) for n in play]
@@ -560,6 +563,8 @@ def build_manual_plan(
     if source_duration is not None:
         end = min(end, source_duration)
     body[-1].end = max(end, body[-1].start + _EPS)
+    if tone is not None:
+        warnings.extend(_ending_tone_warnings(sentences, play[-1], tone))
 
     windows: list[PlannedWindow] = []
     if hook is not None:
@@ -623,6 +628,23 @@ def build_manual_plan(
     plan._sent_bounds = sent_bounds
     plan._times = times
     return plan
+
+
+def _ending_tone_warnings(sentences: Sequence[Sequence[Word]], last: int,
+                          tone: Callable[[Word], tuple[str, str] | None]) -> list[str]:
+    """REEL_SPEC §4.3: the clip should end where the VOICE ends, not only the text. An open or
+    unclear final tone is reported with the nearest sentences (same numbering) that end finished."""
+    r = tone(sentences[last - 1][-1])
+    if r is None or r[0] == "final":
+        return []
+    kind, desc = r
+    fin = [n for n in range(1, len(sentences) + 1)
+           if n != last and (tone(sentences[n - 1][-1]) or ("",))[0] == "final"]
+    near = sorted(fin, key=lambda n: (abs(n - last), n))[:3]
+    alt = ", ".join(f"s{n} «{sentences[n - 1][-1].word}»" for n in sorted(near)) or "none in this block"
+    what = "sounds unfinished — the speaker goes on" if kind == "open" else "intonation unclear"
+    return [f"ending intonation {desc}: «{sentences[last - 1][-1].word}» {what}; "
+            f"finished sentence ends nearby: {alt}"]
 
 
 def load_alignment(path, source_sha256: str | None = None) -> dict | None:

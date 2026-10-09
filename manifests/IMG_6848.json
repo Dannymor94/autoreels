@@ -918,7 +918,8 @@
       "tail_last_word_end": 251.582,
       "tail_next_word_start": 251.63,
       "warnings": [
-        "no room after last word «психолог.» (next speech at 251.630) — clip ends at its audible end"
+        "no room after last word «психолог.» (next speech at 251.630) — clip ends at its audible end",
+        "ending intonation open (end pitch 82/100 in the speaker's range): «психолог.» sounds unfinished — the speaker goes on; finished sentence ends nearby: s15 «психолога.», s16 «помочь.», s19 «людей.»"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,

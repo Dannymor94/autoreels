@@ -5152,7 +5152,8 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
     return [k for k in range(s, e + 1) if k not in xs]
 
 
-def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None) -> list[str]:
+def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
+                       tone=None) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5183,7 +5184,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
-        source_duration=(tx_words[-1].t1 if tx_words else None), align=align,
+        source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone,
     )
     body = [w.segment() for w in plan.body]
     reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []
@@ -5580,6 +5581,19 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     print(f"  [ERROR] {_al_msg}", file=sys.stderr)
                     return 1
                 print(f"  warning: {_al_msg}", file=sys.stderr)
+    # M2.2: sentence-end intonation (arl prosody) — an ending whose voice does not finish is reported.
+    _blk_tone = None
+    if getattr(r0_cfg, "manual_plan", False) and getattr(r0_cfg, "intonation_check", False) and _blk_align:
+        from autoreels.local.prosody import load_prosody as _load_pros, tone_lookup as _tone_lookup
+        _blk_pros = _load_pros(root / "transcripts" / f"{source_file.stem}.prosody.json",
+                               manifest.source_sha256, _blk_align)
+        if _blk_pros is None:
+            print(f"  warning: нет интонации transcripts/{source_file.stem}.prosody.json "
+                  f"(или она от другого выравнивания) — концовки по голосу не проверены; "
+                  f"arl prosody {source_file.stem}", file=sys.stderr)
+        else:
+            _blk_tone = _tone_lookup(_blk_pros)
+            print(f"  интонация: {len(_blk_pros.get('words', []))} слов")
     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
     conflicts: list[str] = []
@@ -5838,7 +5852,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse:
             try:
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
-                                              render_cfg, '+'.join(str(s) for s in g), align=_blk_align):
+                                              render_cfg, '+'.join(str(s) for s in g), align=_blk_align,
+                                              tone=_blk_tone):
                     print(_pl)
             except ValueError as _pe:
                 print(f"  error {'+'.join(str(s) for s in g)}: plan: {_pe}", file=sys.stderr)
@@ -6656,17 +6671,25 @@ def cmd_blocks(
             _cw_exp = _scw_exp(_export_words, _credit_pats_exp)
             if len(_cw_exp) != len(_export_words):
                 _export_words = _cw_exp
+        _exp_tone = None
+        if manifest is not None and getattr(r0_cfg, "intonation_check", False):
+            from autoreels.cloud.plan import load_alignment as _la_exp
+            from autoreels.local.prosody import load_prosody as _lp_exp, tone_lookup as _tl_exp
+            _stem_exp = manifest_path.stem if manifest_path else target_path.stem
+            _al_exp = _la_exp(root / "transcripts" / f"{_stem_exp}.align.json", manifest.source_sha256)
+            _exp_tone = _tl_exp(_lp_exp(root / "transcripts" / f"{_stem_exp}.prosody.json",
+                                        manifest.source_sha256, _al_exp) if _al_exp else None)
         if compact:
             review_content = export_compact_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
-                words=_export_words,
+                words=_export_words, tone=_exp_tone,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
                 min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
             )
         else:
             review_content = export_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
-                words=_export_words,
+                words=_export_words, tone=_exp_tone,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
                 min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
             )
@@ -7082,6 +7105,73 @@ def cmd_align(
             print(f"    {fc['start']:.1f}–{fc['end']:.1f}s ({fc['words']} слов): {fc['error']}")
         print(f"→ {out_path}")
         return 1
+    print(f"→ {out_path}")
+    return 0
+
+
+def cmd_prosody(
+    manifest_path: str,
+    *,
+    root=None,
+    inputs_dir: str | None = None,
+    transcripts_dir: str | None = None,
+    force: bool = False,
+) -> int:
+    """M2.2: sentence-end intonation → transcripts/<stem>.prosody.json (needs the alignment).
+
+    Per aligned word: voiced pitch frames and where its final pitch sits in the speaker's range.
+    The plan reports clip endings whose voice does not finish. Analysis machine (praat-parselmouth).
+    """
+    import time as _time
+    from autoreels.cloud.plan import load_alignment
+    from autoreels.local.align import ffmpeg_reader
+    from autoreels.local.prosody import compute_prosody, load_prosody, pitch_track, write_prosody
+
+    _root = Path(root) if root else _project_root()
+    _inputs = Path(inputs_dir) if inputs_dir else _root / "inputs"
+    _tdir = Path(transcripts_dir) if transcripts_dir else _root / "transcripts"
+    mpath = Path(manifest_path)
+    if not mpath.exists():
+        mpath = _root / "manifests" / manifest_path
+    if not mpath.exists() and not mpath.suffix:
+        mpath = mpath.with_suffix(".json")
+    if not mpath.exists():
+        print(f"ошибка: манифест не найден: {manifest_path}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem = mpath.stem
+    align = load_alignment(_tdir / f"{stem}.align.json", manifest.source_sha256)
+    if align is None:
+        print(f"ошибка: нет выравнивания {_tdir / (stem + '.align.json')} — сначала: arl align {stem}",
+              file=sys.stderr)
+        return 1
+    out_path = _tdir / f"{stem}.prosody.json"
+    if not force and load_prosody(out_path, manifest.source_sha256, align) is not None:
+        print(f"✓ уже есть: {out_path} (пересчитать: --force)")
+        return 0
+    try:
+        source = resolve_source(manifest, _inputs)
+    except Exception as e:
+        print(f"ошибка: исходник не найден: {e}", file=sys.stderr)
+        return 1
+    import json as _json
+    smap_path = _tdir / f"{stem}.speechmap.json"
+    total = 0.0
+    if smap_path.is_file():
+        total = float(_json.loads(smap_path.read_text(encoding="utf-8")).get("duration_sec") or 0.0)
+    if total <= 0:
+        total = max((w["end"] for w in align.get("words", []) if w.get("end") is not None), default=0.0) + 2.0
+    render_cfg = load_render_config(_root / "config" / "render.yaml")
+    ff = resolve_ffmpeg(None, render_cfg=render_cfg)
+    print(f"source: {source}\nout:    {out_path}", flush=True)
+    t_start = _time.time()
+    t, f0 = pitch_track(ffmpeg_reader(source, ff), total,
+                        progress=lambda s: print(f"  высота голоса {s:6.0f}/{total:.0f} с", flush=True))
+    payload = compute_prosody(align, t, f0)
+    write_prosody(out_path, payload, manifest.source_sha256)
+    ws = payload["words"]
+    print(f"\nготово за {_time.time() - t_start:.0f} с: {len(ws)} слов, средняя высота голоса "
+          f"{payload['ref_f0']:.0f} Гц")
     print(f"→ {out_path}")
     return 0
 
@@ -9308,6 +9398,18 @@ def _build_parser():
     pal.add_argument("--cache-dir", default=None, dest="cache_dir")
     pal.add_argument("--force", action="store_true", default=False, help="пересчитать")
 
+    ppr = sub.add_parser(
+        "prosody",
+        help="интонация концов фраз (закончил говорить или продолжает) — M2.2",
+        description="Pitch track (Praat) over the aligned words → transcripts/<stem>.prosody.json. "
+                    "Needs the alignment (arl align) and praat-parselmouth.",
+    )
+    ppr.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    ppr.add_argument("--root", default=None, help="корень проекта")
+    ppr.add_argument("--inputs-dir", default=None, dest="inputs_dir")
+    ppr.add_argument("--transcripts-dir", default=None, dest="transcripts_dir")
+    ppr.add_argument("--force", action="store_true", default=False, help="пересчитать")
+
     pbss = sub.add_parser(
         "backfill-source-sha",
         help="stamp source_sha256 on legacy transcripts that lack it (one-off repair)",
@@ -9573,6 +9675,14 @@ def main(argv=None) -> int:
                 inputs_dir=getattr(args, "inputs_dir", None),
                 transcripts_dir=getattr(args, "transcripts_dir", None),
                 cache_dir=getattr(args, "cache_dir", None),
+                force=getattr(args, "force", False),
+            )
+        elif args.cmd == "prosody":
+            return cmd_prosody(
+                args.manifest,
+                root=args.root if hasattr(args, "root") else None,
+                inputs_dir=getattr(args, "inputs_dir", None),
+                transcripts_dir=getattr(args, "transcripts_dir", None),
                 force=getattr(args, "force", False),
             )
         elif args.cmd == "backfill-source-sha":
