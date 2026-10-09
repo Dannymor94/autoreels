@@ -1103,7 +1103,7 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
-def _check_seam_inside_word(reel, smap: "dict | None", words=None) -> list[str]:
+def _check_seam_inside_word(reel, smap: "dict | None", words=None, align=None) -> list[str]:
     """Return list of violation messages (empty = clean) for internal seam cuts inside words.
 
     Planned reels (REEL_SPEC) are checked with the plan's own word spans (cloud.plan.SpeechTimes:
@@ -1112,7 +1112,7 @@ def _check_seam_inside_word(reel, smap: "dict | None", words=None) -> list[str]:
     """
     if getattr(reel, "planned", False) and smap and words:
         from autoreels.cloud.plan import SpeechTimes
-        _times = SpeechTimes(words, smap)
+        _times = SpeechTimes(words, smap, align)
         _out: list[str] = []
         for _wi, _win in enumerate(reel.playback_windows()):
             for _t in (_win.start, _win.end):
@@ -4467,8 +4467,11 @@ def cmd_render(
                     _render_words or [], render_cfg,
                 )
             if _render_smap:
+                from autoreels.cloud.plan import load_alignment as _load_align_r
+                _render_align = _load_align_r(_transcripts_dir_r / f"{stem}.align.json",
+                                              manifest.source_sha256)
                 for _r in render_manifest.reels:
-                    for _msg in _check_seam_inside_word(_r, _render_smap, _render_words):
+                    for _msg in _check_seam_inside_word(_r, _render_smap, _render_words, _render_align):
                         print(_msg, flush=True)
                         _r.warnings.append(_msg)
             # Recompute shots so cold-open rule and beat-seam alternation are always current,
@@ -5121,6 +5124,8 @@ def _manual_plan_params(r0_cfg, render_cfg):
         end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
         onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
+        accent_min_sec=getattr(r0_cfg, "accent_min_sec", 3.0),
+        accent_max_sec=getattr(r0_cfg, "accent_max_sec", 8.0),
     )
 
 
@@ -5147,7 +5152,7 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
     return [k for k in range(s, e + 1) if k not in xs]
 
 
-def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str) -> list[str]:
+def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5178,7 +5183,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
-        source_duration=(tx_words[-1].t1 if tx_words else None),
+        source_duration=(tx_words[-1].t1 if tx_words else None), align=align,
     )
     body = [w.segment() for w in plan.body]
     reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []
@@ -5546,6 +5551,35 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 _blk_smap = _d
         except Exception:
             pass
+    # M2.1: forced alignment (arl align) — exact word times + untranscribed speech for the plan.
+    from autoreels.cloud.plan import load_alignment as _load_align
+    _blk_align = _load_align(root / "transcripts" / f"{source_file.stem}.align.json", manifest.source_sha256)
+    # A source with a speech map is a real, analysed source: the alignment can and must exist.
+    # (No speech map = no audio analysis at all — e.g. a text-only transcript — warn only.)
+    if getattr(r0_cfg, "manual_plan", False) and _blk_smap is not None:
+        if _blk_align is None:
+            _al_msg = (f"нет выравнивания по звуку transcripts/{source_file.stem}.align.json — "
+                       f"сначала: arl align {source_file.stem}")
+            if getattr(r0_cfg, "require_alignment", False):
+                print(f"  [ERROR] {_al_msg}", file=sys.stderr)
+                return 1
+            print(f"  warning: {_al_msg}; границы по карте речи", file=sys.stderr)
+        else:
+            # Words are matched by Whisper t0: an alignment of another transcript matches nothing
+            # and would silently fall back to map times — refuse instead.
+            _al_keys = {round(w["t0"] * 1000) for w in _blk_align.get("words", []) if w.get("start") is not None}
+            _need = [w for w in _tx_words if any(c.isalpha() for c in w.word) and not any(c.isdigit() for c in w.word)]
+            _hit = sum(1 for w in _need if round(w.t0 * 1000) in _al_keys)
+            _ratio = _hit / max(1, len(_need))
+            print(f"  выравнивание по звуку: {_hit}/{len(_need)} слов ({_ratio:.0%}), "
+                  f"{len(_blk_align.get('untranscribed', []))} мест речи без текста")
+            if _ratio < 0.9:
+                _al_msg = (f"выравнивание не соответствует транскрипту ({_ratio:.0%} слов) — "
+                           f"arl align {source_file.stem} --force")
+                if getattr(r0_cfg, "require_alignment", False):
+                    print(f"  [ERROR] {_al_msg}", file=sys.stderr)
+                    return 1
+                print(f"  warning: {_al_msg}", file=sys.stderr)
     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
     conflicts: list[str] = []
@@ -5804,7 +5838,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         if getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse:
             try:
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
-                                              render_cfg, '+'.join(str(s) for s in g)):
+                                              render_cfg, '+'.join(str(s) for s in g), align=_blk_align):
                     print(_pl)
             except ValueError as _pe:
                 print(f"  error {'+'.join(str(s) for s in g)}: plan: {_pe}", file=sys.stderr)
@@ -5986,7 +6020,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
         _check_first_subtitle_word(_r, _tx_words)
-        for _smsg in _check_seam_inside_word(_r, _blk_smap, _tx_words):
+        for _smsg in _check_seam_inside_word(_r, _blk_smap, _tx_words, _blk_align):
             print(_smsg, file=sys.stderr, flush=True)
             _r.warnings.append(_smsg)
             if getattr(_r, "planned", False):
@@ -6954,6 +6988,102 @@ def cmd_backfill_source_sha(
         print(f"  ✓ {tpath.name}: source_sha256={found_sha[:16]}…")
 
     return 0 if errors == 0 else 1
+
+
+def cmd_align(
+    manifest_path: str,
+    *,
+    root=None,
+    inputs_dir: str | None = None,
+    transcripts_dir: str | None = None,
+    cache_dir: str | None = None,
+    force: bool = False,
+) -> int:
+    """M2.1: forced alignment of the transcript to the audio → transcripts/<stem>.align.json.
+
+    Exact word start/end from the audio (torchaudio MMS_FA) + untranscribed speech (fillers).
+    Needs the speech map (arl speech-map) for energy intervals. Analysis machine only (torch).
+    """
+    import time as _time
+    from autoreels.cloud.edit import strip_credit_words
+    from autoreels.cloud.plan import load_alignment
+    from autoreels.local.align import MMSBackend, align_transcript, ffmpeg_reader, write_alignment
+
+    _root = Path(root) if root else _project_root()
+    _inputs = Path(inputs_dir) if inputs_dir else _root / "inputs"
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    _tdir = Path(transcripts_dir) if transcripts_dir else _root / "transcripts"
+    mpath = Path(manifest_path)
+    if not mpath.exists():
+        mpath = _root / "manifests" / manifest_path
+    if not mpath.exists() and not mpath.suffix:
+        mpath = mpath.with_suffix(".json")
+    if not mpath.exists():
+        print(f"ошибка: манифест не найден: {manifest_path}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem = mpath.stem
+    out_path = _tdir / f"{stem}.align.json"
+    from autoreels.local.align import transcript_identity
+    smap_path = _tdir / f"{stem}.speechmap.json"
+    if not smap_path.is_file():
+        print(f"ошибка: нет карты речи {smap_path} — сначала: arl speech-map {stem}", file=sys.stderr)
+        return 1
+    import json as _json
+    smap = _json.loads(smap_path.read_text(encoding="utf-8"))
+    tx = _resolve_cached_transcript(manifest, _cache)
+    if tx is None:
+        print(f"ошибка: транскрипт для {manifest.source_sha256[:16]}… не найден в {_cache}", file=sys.stderr)
+        return 1
+    words = tx.words
+    _old = load_alignment(out_path, manifest.source_sha256) if out_path.exists() else None
+    if _old is not None and not force and _old.get("transcript") == transcript_identity(words):
+        print(f"✓ уже есть: {out_path} (пересчитать: --force)")
+        return 0
+    try:
+        source = resolve_source(manifest, _inputs)
+    except Exception as e:
+        print(f"ошибка: исходник не найден: {e}", file=sys.stderr)
+        return 1
+    pats = []
+    _r0p = _root / "config" / "r0.yaml"
+    if _r0p.exists():
+        try:
+            import yaml as _y
+            pats = (_y.safe_load(_r0p.read_text(encoding="utf-8")) or {}).get("credit_word_patterns", []) or []
+        except Exception:
+            pats = []
+    kept = {round(w.t0 * 1000) for w in strip_credit_words(words, pats)} if pats else {round(w.t0 * 1000) for w in words}
+    use = [round(w.t0 * 1000) in kept for w in words]
+    render_cfg = load_render_config(_root / "config" / "render.yaml")
+    ff = resolve_ffmpeg(None, render_cfg=render_cfg)
+    print(f"source: {source}\nwords:  {len(words)} (align {sum(use)})\nout:    {out_path}")
+    print("модель: torchaudio MMS_FA (первый запуск скачивает ~1.2 ГБ)…", flush=True)
+    t_start = _time.time()
+    backend = MMSBackend()
+
+    def _prog(i, n):
+        if i % 10 == 0:
+            print(f"  кусок {i + 1}/{n}…", flush=True)
+
+    payload = align_transcript(words, use, ffmpeg_reader(source, ff), smap.get("intervals") or [], backend,
+                               total_sec=float(smap.get("duration_sec") or 0) or None, progress=_prog)
+    write_alignment(out_path, payload, manifest.source_sha256)
+    ws = payload["words"]
+    ok = [w for w in ws if w.get("start") is not None]
+    far = sum(1 for w in ws if w.get("far"))
+    low = sum(1 for w in ok if w.get("score", 0) < 0.3)
+    untr = payload["untranscribed"]
+    print(f"\nготово за {_time.time() - t_start:.0f} с: выровнено {len(ok)} слов, далеко от Whisper (не взято) {far}, "
+          f"низкая уверенность {low}; речь без текста: {len(untr)} мест, {sum(b - a for a, b in untr):.1f} с")
+    if payload.get("failed_chunks"):
+        print(f"  [ERROR] не выровнено кусков: {len(payload['failed_chunks'])} — слова в них идут по карте речи:")
+        for fc in payload["failed_chunks"][:5]:
+            print(f"    {fc['start']:.1f}–{fc['end']:.1f}s ({fc['words']} слов): {fc['error']}")
+        print(f"→ {out_path}")
+        return 1
+    print(f"→ {out_path}")
+    return 0
 
 
 def cmd_speech_map(
@@ -9165,6 +9295,19 @@ def _build_parser():
     psm.add_argument("--force", action="store_true", default=False,
                      help="сбросить кэш и пересчитать")
 
+    pal = sub.add_parser(
+        "align",
+        help="выравнивание текста по звуку (точные границы слов, речь без текста) — M2.1",
+        description="Forced alignment (torchaudio MMS_FA) of the cached transcript to the audio. "
+                    "Writes transcripts/<stem>.align.json. Needs the speech map and torch/torchaudio.",
+    )
+    pal.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pal.add_argument("--root", default=None, help="корень проекта")
+    pal.add_argument("--inputs-dir", default=None, dest="inputs_dir")
+    pal.add_argument("--transcripts-dir", default=None, dest="transcripts_dir")
+    pal.add_argument("--cache-dir", default=None, dest="cache_dir")
+    pal.add_argument("--force", action="store_true", default=False, help="пересчитать")
+
     pbss = sub.add_parser(
         "backfill-source-sha",
         help="stamp source_sha256 on legacy transcripts that lack it (one-off repair)",
@@ -9416,6 +9559,15 @@ def main(argv=None) -> int:
             )
         elif args.cmd == "speech-map":
             return cmd_speech_map(
+                args.manifest,
+                root=args.root if hasattr(args, "root") else None,
+                inputs_dir=getattr(args, "inputs_dir", None),
+                transcripts_dir=getattr(args, "transcripts_dir", None),
+                cache_dir=getattr(args, "cache_dir", None),
+                force=getattr(args, "force", False),
+            )
+        elif args.cmd == "align":
+            return cmd_align(
                 args.manifest,
                 root=args.root if hasattr(args, "root") else None,
                 inputs_dir=getattr(args, "inputs_dir", None),

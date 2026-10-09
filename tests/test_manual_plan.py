@@ -287,3 +287,77 @@ def test_overlap_resolved_by_silence_near_the_overlap_zone():
     smap["intervals"] = [[162.34, 164.70], [164.80, 166.02]]
     far = build_manual_plan(sents, [2], words=words, smap=smap, params=P)
     assert far.body[0].start == pytest.approx(164.299)
+
+
+# ---------------------------------------------------------------- M2.1: alignment-driven cuts
+
+def _align(words_times, untr=()):
+    return {"version": 1, "words": [{"t0": t0, "start": a, "end": b, "score": 0.9} for t0, a, b in words_times],
+            "untranscribed": [list(u) for u in untr]}
+
+
+def test_aligned_times_override_whisper_and_map():
+    # Whisper stretches «жизнь.» over the hesitation after it (IMG_6848 r01).
+    spec = [[("свою", 1.0, 1.3, 1.1, 1.35), ("жизнь.", 1.3, 3.6, 1.4, 3.65)],
+            [("Для", 3.6, 3.7, 3.7, 3.73), ("этого.", 3.7, 4.0, 3.78, 4.0)]]
+    sents, words, smap = _sentences_and_map(spec)
+    smap["intervals"] = [[1.0, 1.62], [1.8, 3.6], [3.62, 4.1]]          # 1.8–3.6 = «а… ммм»
+    al = _align([(1.0, 1.05, 1.3), (1.3, 1.35, 1.6), (3.6, 3.62, 3.72), (3.7, 3.78, 4.0)],
+                untr=[(1.8, 3.6)])
+    plan = build_manual_plan(sents, [1], words=words, smap=smap, params=P, align=al)
+    assert plan.last_audible_end == pytest.approx(1.62)    # aligned 1.60 + its sound to 1.62
+    assert plan.next_onset == pytest.approx(1.8)            # the hesitation is speech
+    assert plan.end == pytest.approx(1.74)                  # 1.8 − onset margin, never into «ммм»
+    old = build_manual_plan(sents, [1], words=words, smap=smap, params=P)
+    assert old.end > 3.6                                    # without alignment: the whole «ммм»
+
+
+def test_window_start_skips_untranscribed_filler_before_first_word():
+    # IMG_6848 r06: «людям.» … «э» … «Чтобы» — the clip must not open on the filler.
+    spec = [[("людям.", 0.0, 1.0, 0.1, 1.0)], [("Чтобы", 1.0, 1.6, 1.0, 1.6), ("выжить.", 1.6, 2.2, 1.6, 2.2)]]
+    sents, words, smap = _sentences_and_map(spec)
+    smap["intervals"] = [[0.1, 0.57], [0.65, 0.76], [0.81, 2.2]]
+    al = _align([(0.0, 0.29, 0.57), (1.0, 0.94, 1.18), (1.6, 1.26, 1.6)], untr=[(0.65, 0.76), (0.81, 0.94)])
+    plan = build_manual_plan(sents, [2], words=words, smap=smap, params=P, align=al)
+    # the filler 0.81–0.94 ends exactly at the CTC onset: 40 ms go back to the word (CTC onsets are
+    # a frame or two late), the cut lies midway → 20 ms before the onset, not at 0.79 (before the filler)
+    assert plan.body[0].start == pytest.approx(0.92)
+
+
+def test_final_stop_release_burst_belongs_to_the_word():
+    # «есть.»: aligned end in the т-closure; the release burst follows after a short silence.
+    spec = [[("я", 0.0, 0.2, 0.0, 0.2), ("есть.", 0.2, 0.9, 0.2, 0.9)], [("А", 1.5, 1.6, 1.5, 1.6)]]
+    sents, words, smap = _sentences_and_map(spec)
+    smap["intervals"] = [[0.0, 0.44], [0.54, 0.64], [1.5, 1.7]]
+    al = _align([(0.0, 0.0, 0.2), (0.2, 0.24, 0.50), (1.5, 1.5, 1.6)])
+    plan = build_manual_plan(sents, [1], words=words, smap=smap, params=P, align=al)
+    assert plan.last_audible_end == pytest.approx(0.64)     # burst 0.54–0.64 kept
+    assert plan.end == pytest.approx(0.94)                  # + 0.30 air
+
+
+def test_seam_accent_close_lasts_first_sentences_then_wide():
+    # 12 one-second sentences; play 1, 3-12: seam before 3 → close accent until ≥ 3 s played (3-6), then wide.
+    spec = [[(f"с{i}.", float(i), i + 1.0, i + 0.05, i + 0.95)] for i in range(12)]
+    sents, words, smap = _sentences_and_map(spec)
+    play = [1] + list(range(3, 13))
+    plan = build_manual_plan(sents, play, words=words, smap=smap, params=P)
+    assert plan.shot_sequence() == [("wide", [1]), ("close", [3, 4, 5, 6]), ("wide", list(range(7, 13)))]
+    w2 = plan.body[1]
+    assert w2.shot == "wide" and len(w2.close_intervals) == 1
+    assert 3.0 <= w2.close_intervals[0][1] <= 8.0
+
+
+def test_short_sound_after_dip_is_the_word_end_not_new_speech():
+    # IMG_6848 r05 «главное.»: aligned end 1.877, dip 1.83–1.91, sound 1.91–2.04, silence, then «Ну».
+    spec = [[("самое", 1.0, 1.3, 1.0, 1.3), ("главное.", 1.3, 2.2, 1.5, 2.17)],
+            [("Ну", 2.1, 2.2, 2.11, 2.19), ("и.", 2.2, 2.3, 2.25, 2.27)]]
+    sents, words, smap = _sentences_and_map(spec)
+    smap["intervals"] = [[1.0, 1.83], [1.91, 2.04], [2.10, 3.0]]
+    al = _align([(1.0, 1.0, 1.3), (1.3, 1.5, 1.877), (2.1, 2.11, 2.19), (2.2, 2.25, 2.27)], untr=[(1.91, 2.04)])
+    plan = build_manual_plan(sents, [1], words=words, smap=smap, params=P, align=al)
+    assert plan.last_audible_end == pytest.approx(2.04)
+    # but a second blob after a long tail is not absorbed (total tail ≤ 0.30 s)
+    smap["intervals"] = [[1.0, 2.0], [2.07, 2.2], [2.3, 3.0]]
+    al2 = _align([(1.0, 1.0, 1.3), (1.3, 1.5, 1.8), (2.1, 2.31, 2.4)], untr=[(2.07, 2.2)])
+    plan2 = build_manual_plan(sents, [1], words=words, smap=smap, params=P, align=al2)
+    assert plan2.last_audible_end == pytest.approx(2.0)

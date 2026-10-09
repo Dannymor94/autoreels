@@ -521,3 +521,18 @@ def test_planned_reel_without_source_is_a_failure_not_a_skip(tmp_path):
     mf.write_text(json.dumps({"source": "nowhere.mov", "setup": {}, "reels": [reel]}))
     fails = vg._check_shots(tmp_path / "r01.mp4", mf, "r01", tmp_path / "inputs-archive")
     assert fails == ["plan_shots_unchecked:source_not_found"]
+
+
+def test_end_aligned_catches_hesitation_and_next_word(tmp_path):
+    al = {"version": 1, "words": [{"t0": 1.0, "start": 1.05, "end": 1.6}, {"t0": 3.6, "start": 3.7, "end": 3.9}],
+          "untranscribed": [[1.8, 2.4], [2.5, 3.6]]}
+    p = tmp_path / "x.align.json"
+    p.write_text(json.dumps(al))
+    reel = {"planned": True, "subtitles": [{"word": "жизнь.", "t0": 1.0, "t1": 3.6}]}
+    assert vg._check_end_aligned(p, reel, 1.75) == []                     # ends before «ммм»
+    bad = vg._check_end_aligned(p, reel, 3.8)                             # Whisper-time end
+    assert any(f.startswith("next_word_in_clip") for f in bad)
+    assert any(f.startswith("untranscribed_speech_in_tail") for f in bad)
+    assert vg._check_end_aligned(p, reel, 1.5)[0].startswith("last_word_cut_aligned")
+    assert vg._check_end_aligned(p, {"planned": True, "subtitles": [{"word": "x", "t0": 9.0}]}, 9.5) == \
+        ["alignment_mismatch:0/1"]

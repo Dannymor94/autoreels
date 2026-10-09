@@ -300,6 +300,12 @@ class R0Config(BaseModel):
     # shots, ending and subtitles from the review line — instead of the boundary-moving stages.
     # Off = the previous output (invariant 8).
     manual_plan: bool = False
+    # M2.1: planned clips need the forced alignment (arl align → transcripts/<stem>.align.json);
+    # True = --apply refuses without it. False = falls back to speech-map times with a warning.
+    require_alignment: bool = False
+    # Shot rule (REEL_SPEC §3): a close shot after a seam lasts accent_min..accent_max seconds.
+    accent_min_sec: float = 3.0
+    accent_max_sec: float = 8.0
 
     @property
     def min_duration(self) -> int:

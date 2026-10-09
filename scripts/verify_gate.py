@@ -430,6 +430,48 @@ def _check_planned_shots(mp4: Path, manifest: dict, reel: dict, src: Path,
     return fails
 
 
+ALIGN_TAIL_MAX_SEC = 0.30   # sound right after the aligned end may still be the word (plan.py _TAIL_MAX)
+
+
+def _check_end_aligned(align_path: Path, reel: dict, source_end: float) -> list[str]:
+    """Planned reels with transcripts/<stem>.align.json: judge the clip end by the AUDIO alignment
+    (independent of Whisper times and of the plan code):
+      - the last word is heard to its aligned end;
+      - no next transcribed word starts before the clip end;
+      - no untranscribed speech («ммм», «ну») starts between aligned end + 0.30 s and the clip end.
+    """
+    if not reel.get("planned") or not align_path.exists():
+        return []
+    try:
+        al = json.loads(align_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ["align_unreadable"]
+    subs = reel.get("subtitles", [])
+    if not subs:
+        return []
+    words = {round(w["t0"] * 1000): w for w in al.get("words", []) if w.get("start") is not None}
+    hit = sum(1 for w in subs if round(w["t0"] * 1000) in words)
+    if hit < 0.9 * len(subs):
+        return [f"alignment_mismatch:{hit}/{len(subs)}"]
+    last = words.get(round(subs[-1]["t0"] * 1000))
+    if last is None:
+        return ["last_word_not_aligned"]
+    fails = []
+    ae = float(last["end"])
+    if source_end < ae - 0.02:
+        fails.append(f"last_word_cut_aligned:end={source_end:.3f}<ae={ae:.3f}")
+    nxt = [w for w in words.values() if w["start"] > ae + 1e-3]
+    if nxt:
+        ns = min(float(w["start"]) for w in nxt)
+        if ns < source_end - 0.03:
+            fails.append(f"next_word_in_clip:{ns:.3f}<end={source_end:.3f}")
+    for a, b in al.get("untranscribed", []):
+        if ae + ALIGN_TAIL_MAX_SEC <= a < source_end - 0.03:
+            fails.append(f"untranscribed_speech_in_tail:{a:.3f}<end={source_end:.3f}")
+            break
+    return fails
+
+
 def _check_shots(mp4: Path, manifest_path: Path, reel_id: str,
                  src_dir: Path) -> list[str]:
     """Check two-shot spans via flash_check.check_reel. Skips if source not found.
@@ -538,6 +580,8 @@ def check_clip(entry: dict, project: Path) -> list[str]:
                     if _ae_p is not None and source_end < float(_ae_p) - 0.002:
                         fails.append(f"last_word_cut:end={source_end:.3f}<ae={float(_ae_p):.3f}")
                     fails.extend(_check_end_air_vg(speechmap, _reel, source_end))
+                    fails.extend(_check_end_aligned(project / "transcripts" / f"{stem}.align.json",
+                                                    _reel, source_end))
                     fails.extend(_check_foreign_tail_word_vg(speechmap, _reel, source_end))
             except (json.JSONDecodeError, KeyError):
                 pass

@@ -179,6 +179,12 @@ hook_replay_min_pos: 0.5
 # windows cut in the silence between the boundary words (speech map), shots by the spec rule,
 # ending = last word + end_air_sec. The snap/padding/repair/filler/tail stages are skipped for them.
 manual_plan: true
+# M2.1: planned clips are cut by the forced alignment (arl align <stem> → transcripts/<stem>.align.json):
+# exact word times from the audio + untranscribed speech (fillers). --apply refuses without it.
+require_alignment: true
+# Close shot after a seam (REEL_SPEC §3): first sentence(s), at least / at most this many seconds.
+accent_min_sec: 3.0
+accent_max_sec: 8.0
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.

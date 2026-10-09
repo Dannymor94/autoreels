@@ -1,30 +1,31 @@
-# Gate expectations for IMG_6848 under REEL_SPEC v1.1 (planned clips r01, r03, r05, r06, r07).
+# Gate expectations for IMG_6848 under REEL_SPEC v1.2 (planned clips r01, r03, r05, r06, r07).
 # Render: arl render --manifest IMG_6848 --reels r01,r03,r05,r06,r07 --gate spec
 # first_words / last_words: first and last 4 tokens of the played body (<id>.transcript.txt) —
-# taken from the plan's subtitles = exactly the labelled sentences (img6848_plan.yaml).
-# reel_end: plan end (source seconds). Shots: verify_gate checks every frame against the plan.
+# the plan's subtitles = exactly the labelled sentences (img6848_plan.yaml; r05 from s:3).
+# reel_end: plan end (source seconds, with transcripts/IMG_6848.align.json).
+# Shots: verify_gate checks every frame against the plan.
 
 source: IMG_6848
 clips:
 - clip_id: r01
   stem: IMG_6848
   path: reels-out/IMG_6848/_gate/spec/r01.mp4
-  reel_end: 205.759
+  reel_end: 203.77
   first_words: У меня был такой
   last_words: полностью изменить свою жизнь.
   cold_open: Мне пришлось полностью изменить свою жизнь.
 - clip_id: r03
   stem: IMG_6848
   path: reels-out/IMG_6848/_gate/spec/r03.mp4
-  reel_end: 901.57
+  reel_end: 900.89
   first_words: Как ты отдыхаешь? А
   last_words: это самый лучший отдых.
   cold_open: Для меня это самый лучший отдых.
 - clip_id: r05
   stem: IMG_6848
   path: reels-out/IMG_6848/_gate/spec/r05.mp4
-  reel_end: 1242.04
-  first_words: Ты всегда стараешься, я
+  reel_end: 1242.05
+  first_words: Раз я здесь в
   last_words: вещи ценности, самое главное.
   cold_open: null
 - clip_id: r06

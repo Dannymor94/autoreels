@@ -36,6 +36,8 @@ class ManualPlanParams:
     end_air_sec: float = 0.30         # air after the last word (REEL_SPEC §4)
     onset_margin_sec: float = 0.06    # never closer than this to the next speech onset
     hook_replay_min_pos: float = 0.5  # hook replays in the body only from this body fraction on
+    accent_min_sec: float = 3.0       # a close shot after a seam lasts at least this long …
+    accent_max_sec: float = 8.0       # … and at most this long, then the window goes back to wide
 
 
 @dataclass
@@ -133,20 +135,41 @@ def _txt(words: Sequence[Word]) -> str:
 
 
 def _window_shot_runs(w: PlannedWindow, bounds: dict) -> list[tuple[str, list[int]]]:
-    """Split a window's sentences into runs of equal shot (for shot_sequence)."""
+    """Split a window's sentences into runs of equal shot (for shot_sequence). A sentence that a
+    shot change splits (≥ 1 s or 30 % on each side) is listed in both runs, in time order."""
     runs: list[tuple[str, list[int]]] = []
-    for n in w.sentences:
-        if w.shot == "close" or not bounds:
-            shot = w.shot
-        else:
-            rs, re_ = bounds[n]
-            mid = (rs + re_) / 2
-            shot = "close" if any(a - _EPS <= mid <= b + _EPS for a, b in w.close_intervals) else "wide"
+
+    def put(shot, n):
         if runs and runs[-1][0] == shot:
-            runs[-1][1].append(n)
+            if runs[-1][1][-1] != n:
+                runs[-1][1].append(n)
         else:
             runs.append((shot, [n]))
+
+    for n in w.sentences:
+        if w.shot == "close" or not bounds:
+            put(w.shot, n)
+            continue
+        rs, re_ = bounds[n]
+        ln = max(re_ - rs, 1e-6)
+        cov = [(max(a, rs), min(b, re_)) for a, b in w.close_intervals if min(b, re_) > max(a, rs)]
+        c_len = sum(b - a for a, b in cov)
+        thr = min(1.0, 0.3 * ln)
+        if c_len >= thr and ln - c_len >= thr:
+            first_close = cov[0][0] <= rs + _EPS
+            for shot in (("close", "wide") if first_close else ("wide", "close")):
+                put(shot, n)
+        else:
+            put("close" if c_len > ln / 2 else "wide", n)
     return runs
+
+
+_STOPS = set("тдкгпбцч")
+
+
+def _ends_with_stop(word: str) -> bool:
+    letters = [c for c in word.lower() if c.isalpha() and c not in "ьъ"]
+    return bool(letters) and letters[-1] in _STOPS
 
 
 class SpeechTimes:
@@ -161,8 +184,13 @@ class SpeechTimes:
     """
 
     _NEAR = 0.10     # an energy silence at most this far from the overlap zone resolves it
+    _TAIL_TOUCH = 0.01   # energy interval may start this close after the aligned word end
+    _TAIL_MAX = 0.30     # a word's sound running on at most this long past its aligned end is its tail
+    _CLOSURE_MAX = 0.12  # silence before a final stop's release burst …
+    _BURST_MAX = 0.15    # … and the burst itself
+    _ONSET_BACK = 0.04   # untranscribed speech glued to a word onset gives this much back to the word
 
-    def __init__(self, words: Sequence[Word], smap: dict | None):
+    def __init__(self, words: Sequence[Word], smap: dict | None, align: dict | None = None):
         self._words = list(words)
         self._pos = {round(w.t0 * 1000): i for i, w in enumerate(self._words)}
         self._smap = {}
@@ -173,14 +201,95 @@ class SpeechTimes:
             iv = sorted(smap.get("intervals") or [])
             self._gaps = [(iv[i][1], iv[i + 1][0]) for i in range(len(iv) - 1) if iv[i + 1][0] > iv[i][1]]
         self._gap_starts = [g[0] for g in self._gaps]
+        self._iv = (smap or {}).get("intervals") or []
+        # Forced alignment (local/align.py, transcripts/<stem>.align.json): word times from the
+        # AUDIO plus untranscribed speech (fillers, «ммм», «ну») — preferred over the map when present.
+        self._al: dict[int, tuple[float, float]] = {}
+        self._untr: list[tuple[float, float]] = []
+        if align:
+            for e in align.get("words", []):
+                if e.get("start") is not None and e.get("end") is not None and e["end"] > e["start"]:
+                    self._al[round(e["t0"] * 1000)] = (float(e["start"]), float(e["end"]))
+            self._untr = sorted((float(a), float(b)) for a, b in align.get("untranscribed", []) if b > a)
+            self._absorb_word_tails()
+            self._trim_untranscribed_before_onsets()
+        self._untr_starts = [u[0] for u in self._untr]
+
+    @property
+    def aligned(self) -> bool:
+        return bool(self._al)
+
+    def _absorb_word_tails(self) -> None:
+        """CTC alignment closes a word a little early (its last frames go to "blank"): the word
+        really lasts until its sound stops. The aligned end is extended
+          1. to the end of the energy interval it falls in, and then
+          2. over one short sound after a short silence (a final stop's release burst, the
+             «-ое» of «главное» after a dip),
+        as long as the whole tail stays within _TAIL_MAX of the aligned end and before the next
+        aligned word. Untranscribed speech the extension covers is dropped."""
+        iv = sorted(tuple(x) for x in self._iv)
+        starts = [a for a, _ in iv]
+        keys = [round(w.t0 * 1000) for w in self._words]
+        for n, k in enumerate(keys):
+            if k not in self._al:
+                continue
+            s0, e0 = self._al[k]
+            nxt = next((self._al[kk][0] for kk in keys[n + 1:n + 4] if kk in self._al), None)
+            cap = e0 + self._TAIL_MAX if nxt is None else min(e0 + self._TAIL_MAX, nxt)
+            j = bisect.bisect_right(starts, e0 + self._TAIL_TOUCH) - 1
+            new_end, nj = e0, j + 1
+            if j >= 0 and iv[j][1] > e0:                 # the aligned end lies inside a sound
+                if iv[j][1] - e0 > self._TAIL_MAX:         # it runs on into the next speech
+                    continue
+                new_end = iv[j][1] if nxt is None else min(iv[j][1], nxt)
+            if 0 <= nj < len(iv):                          # one short sound after a short silence
+                ga, gb = iv[nj]
+                if ga - new_end <= self._CLOSURE_MAX and gb - ga <= self._BURST_MAX and gb <= cap:
+                    new_end = gb
+            if new_end > e0:
+                self._al[k] = (s0, new_end)
+                self._untr = [(ua, ub) for ua, ub in self._untr if not (ua >= e0 - 1e-6 and ub <= new_end + 1e-6)]
+                self._untr = [((new_end if ua < new_end <= ub and ua >= e0 - 1e-6 else ua), ub)
+                              for ua, ub in self._untr]
+
+    def _trim_untranscribed_before_onsets(self) -> None:
+        """CTC places a word onset a frame or two late; untranscribed speech glued to an onset
+        gives those frames back to the word, so a window start keeps the word's first sound."""
+        if not self._untr:
+            return
+        onsets = sorted(a for a, _ in self._al.values())
+        out = []
+        for a, b in self._untr:
+            i = bisect.bisect_left(onsets, b - 0.01)
+            if i < len(onsets) and abs(onsets[i] - b) <= 0.01:
+                b = b - self._ONSET_BACK
+            if b - a >= 0.05:
+                out.append((a, b))
+        self._untr = out
 
     def audible(self, w: Word) -> tuple[float, float]:
-        e = self._smap.get(round(w.t0 * 1000))
+        k = round(w.t0 * 1000)
+        if k in self._al:
+            return self._al[k]
+        e = self._smap.get(k)
         if e is not None:
             a, b = e.get("audible_start", w.t0), e.get("audible_end", w.t1)
             if b > a:
                 return a, b
         return w.t0, max(w.t1, w.t0)
+
+    def untranscribed_between(self, t0: float, t1: float) -> list[tuple[float, float]]:
+        """Untranscribed speech spans overlapping (t0, t1)."""
+        if not self._untr or t1 <= t0:
+            return []
+        i = bisect.bisect_left(self._untr_starts, t0) - 1
+        out = []
+        for a, b in self._untr[max(0, i):]:
+            if a >= t1:
+                break
+            if b > t0:
+                out.append((a, b))
+        return out
 
     def prev(self, w: Word) -> Word | None:
         i = self._pos.get(round(w.t0 * 1000))
@@ -203,6 +312,8 @@ class SpeechTimes:
         as_r, ae_r = self.audible(right)
         if as_r >= ae_l or not self._gaps:
             return ae_l, as_r
+        if round(left.t0 * 1000) in self._al and round(right.t0 * 1000) in self._al:
+            return ae_l, as_r                     # aligned to the audio: no guessing from energy
         lo = bisect.bisect_right(self._gap_starts, as_l)
         best, best_d = None, None
         for gs, ge in self._gaps[lo:]:
@@ -260,22 +371,87 @@ def _boundary(times: SpeechTimes, left: Word, right: Word) -> float:
     return (ae_l + as_r) / 2 if as_r > ae_l else as_r
 
 
-def _window_start(times: SpeechTimes, first: Word, pad: float) -> float:
+def _cut_between(left_end: float, right_start: float) -> float:
+    return (left_end + right_start) / 2 if right_start > left_end else right_start
+
+
+def _speech_before(times: SpeechTimes, first: Word) -> tuple[float | None, float]:
+    """(end of the speech heard right before `first`, onset of `first`). Speech = the previous
+    word or any untranscribed speech (fillers) between them."""
     prev = times.prev(first)
-    as_f = times.pair(prev, first)[1] if prev is not None else times.audible(first)[0]
-    start = as_f - pad
     if prev is not None:
-        start = max(start, _boundary(times, prev, first))
+        left, as_f = times.pair(prev, first)
+    else:
+        left, as_f = None, times.audible(first)[0]
+    lo = left if left is not None else as_f - 5.0
+    for a, b in times.untranscribed_between(lo, as_f):
+        left = min(b, as_f) if left is None else max(left, min(b, as_f))
+    return left, as_f
+
+
+def _speech_after(times: SpeechTimes, last: Word) -> tuple[float, float | None]:
+    """(end of `last`, onset of the next speech: next word or untranscribed speech)."""
+    nxt = times.next(last)
+    if nxt is not None:
+        ae_l, right = times.pair(last, nxt)
+    else:
+        ae_l, right = times.audible(last)[1], None
+    hi = right if right is not None else ae_l + 5.0
+    for a, b in times.untranscribed_between(ae_l, hi):
+        a = max(a, ae_l)
+        right = a if right is None else min(right, a)
+    return ae_l, right
+
+
+def _window_start(times: SpeechTimes, first: Word, pad: float) -> float:
+    left, as_f = _speech_before(times, first)
+    start = as_f - pad
+    if left is not None:
+        start = max(start, _cut_between(left, as_f))
     return min(start, as_f)
 
 
 def _window_end(times: SpeechTimes, last: Word, pad: float) -> float:
-    nxt = times.next(last)
-    if nxt is None:
-        return times.audible(last)[1] + pad
-    ae_l, as_n = times.pair(last, nxt)
-    end = min(ae_l + pad, (ae_l + as_n) / 2 if as_n > ae_l else ae_l)
+    ae_l, right = _speech_after(times, last)
+    end = ae_l + pad
+    if right is not None:
+        end = min(end, _cut_between(ae_l, right))
     return max(end, ae_l)
+
+
+def _merge_intervals(iv: list[list[float]]) -> list[list[float]]:
+    out: list[list[float]] = []
+    for a, b in sorted(iv):
+        if out and a <= out[-1][1] + _EPS:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def _accent_end(times: SpeechTimes, sentences, w: "PlannedWindow", bounds: dict,
+                params: "ManualPlanParams") -> float:
+    """Window-relative end of the seam accent (close shot): the end of the first sentence(s) once
+    at least accent_min_sec has played; a first sentence longer than accent_max_sec is cut at a
+    word boundary inside it (after a comma when there is one)."""
+    lo, hi = params.accent_min_sec, params.accent_max_sec
+    for n in w.sentences:
+        end_n = bounds[n][1]
+        if end_n < lo:
+            continue
+        if end_n <= hi:
+            return end_n
+        s_words = sentences[n - 1]
+        cands = []
+        for a, b in zip(s_words, s_words[1:]):
+            t = _boundary(times, a, b) - w.start
+            if lo <= t <= hi:
+                cands.append((a.word.rstrip().endswith((",", ";", ":", "—")), t))
+        if cands:
+            commas = [t for c, t in cands if c]
+            return commas[-1] if commas else cands[-1][1]
+        return hi
+    return min(hi, w.end - w.start)
 
 
 def _group_windows(play: Sequence[int]) -> list[list[int]]:
@@ -300,6 +476,7 @@ def build_manual_plan(
     close: Iterable[int] = (),
     next_onset: Callable[[Word], float | None] | None = None,
     source_duration: float | None = None,
+    align: dict | None = None,
 ) -> ManualPlan:
     """Plan one manual clip. `sentences` is the review numbering (merge_group_sentences output);
     `play` the body sentence numbers in play order (s:..e: minus x:, or the beat order).
@@ -312,7 +489,7 @@ def build_manual_plan(
             raise ValueError(f"sentence {n} out of range 1-{n_sent}")
     if not play:
         raise ValueError("nothing to play")
-    times = SpeechTimes(words, smap)
+    times = SpeechTimes(words, smap, align)
     pad = params.seam_pad_sec
 
     def body_windows(order: list[int], note: bool = False) -> list[PlannedWindow]:
@@ -368,11 +545,7 @@ def build_manual_plan(
 
     # §4 ending: last word audible end + air, never into the next speech.
     last_word = sentences[play[-1] - 1][-1]
-    nxt = times.next(last_word)
-    if nxt is not None:
-        ae_last, onset = times.pair(last_word, nxt)
-    else:
-        ae_last, onset = times.audible(last_word)[1], None
+    ae_last, onset = _speech_after(times, last_word)
     if next_onset is not None:            # e.g. untranscribed speech the transcript does not have
         o2 = next_onset(last_word)
         if o2 is not None:
@@ -410,21 +583,17 @@ def build_manual_plan(
             bounds[n] = (max(0.0, rs), min(dur, re_))
         sent_bounds[id(w)] = bounds
         if not w.cold_open:
-            w.shot = "wide" if prev_shot in (None, "close") else "close"
-            if prev_shot is None:
-                w.shot = "wide"
-            if w.shot == "wide":
-                ci: list[list[float]] = []
-                for n in w.sentences:
-                    if n in close_set:
-                        a, b = bounds[n]
-                        if ci and abs(ci[-1][1] - a) < _EPS:
-                            ci[-1][1] = b
-                        else:
-                            ci.append([a, b])
-                if len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > dur - _EPS:
-                    w.shot, ci = "close", []
-                w.close_intervals = ci
+            flip = "wide" if prev_shot in (None, "close") else "close"
+            ci: list[list[float]] = [list(bounds[n]) for n in w.sentences if n in close_set]
+            if flip == "close":
+                # Seam accent: the close shot masks the seam, then the window goes back to wide.
+                t = dur if dur <= params.accent_max_sec else _accent_end(times, sentences, w, bounds, params)
+                ci.append([0.0, t])
+            ci = _merge_intervals(ci)
+            if len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > dur - _EPS:
+                w.shot, w.close_intervals = "close", []
+            else:
+                w.shot, w.close_intervals = "wide", ci
         prev_shot = w.last_shot
 
     # §1/§6 subtitles: exactly the words of the played sentences, times kept inside their window.
@@ -454,3 +623,21 @@ def build_manual_plan(
     plan._sent_bounds = sent_bounds
     plan._times = times
     return plan
+
+
+def load_alignment(path, source_sha256: str | None = None) -> dict | None:
+    """transcripts/<stem>.align.json (local/align.py) or None when missing / for another source."""
+    import json
+    from pathlib import Path
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if data.get("version") != 1:
+        return None
+    if source_sha256 and data.get("source_sha256") and data["source_sha256"] != source_sha256:
+        return None
+    return data

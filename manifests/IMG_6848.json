@@ -31,25 +31,25 @@
   "reels": [
     {
       "id": "r01",
-      "start": 164.52,
-      "end": 205.75872,
+      "start": 164.673,
+      "end": 203.77,
       "segments": [
         {
-          "start": 164.52,
-          "end": 196.26372,
+          "start": 164.673,
+          "end": 196.048,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 201.37,
-          "end": 205.75872,
+          "start": 201.361,
+          "end": 203.77,
           "shot": "close",
           "close_intervals": []
         }
       ],
       "cold_open": {
-        "start": 201.37,
-        "end": 205.78372000000002,
+        "start": 201.361,
+        "end": 203.78,
         "shot": "close",
         "close_intervals": []
       },
@@ -60,8 +60,8 @@
       "description": "Как полная смена жизни привела в психологию. #психология #история",
       "reason": "human review",
       "topic": "",
-      "r0_start": 164.52,
-      "r0_end": 205.75872,
+      "r0_start": 164.673,
+      "r0_end": 203.77,
       "flags": [
         "human_merged"
       ],
@@ -71,7 +71,7 @@
       "subtitles": [
         {
           "word": "У",
-          "t0": 164.57000000000002,
+          "t0": 164.723,
           "t1": 164.72873,
           "emph": false
         },
@@ -420,12 +420,12 @@
         {
           "word": "психологию.",
           "t0": 195.00873,
-          "t1": 196.18872,
+          "t1": 196.048,
           "emph": false
         },
         {
           "word": "Мне",
-          "t0": 201.42000000000002,
+          "t0": 201.411,
           "t1": 201.50873,
           "emph": false
         },
@@ -456,11 +456,11 @@
         {
           "word": "жизнь.",
           "t0": 203.34872,
-          "t1": 205.70872,
+          "t1": 203.78,
           "emph": false
         }
       ],
-      "end_drift_sec": 2.3100000000000023,
+      "end_drift_sec": 2.2387200000000007,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
@@ -468,13 +468,11 @@
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 205.75872,
+      "subtitle_gate": 203.77,
       "speed": 1.0,
-      "tail_last_word_end": 205.75872,
-      "tail_next_word_start": 205.80872000000002,
-      "warnings": [
-        "no room after last word «жизнь.» (next speech at 205.809) — clip ends at its audible end"
-      ],
+      "tail_last_word_end": 203.74,
+      "tail_next_word_start": 203.83,
+      "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
@@ -488,17 +486,17 @@
     },
     {
       "id": "r02",
-      "start": 642.37,
-      "end": 675.9100000000001,
+      "start": 642.4060000000001,
+      "end": 675.45,
       "segments": [
         {
-          "start": 642.37,
-          "end": 675.9100000000001,
+          "start": 642.4060000000001,
+          "end": 675.45,
           "shot": "wide",
           "close_intervals": [
             [
-              30.625,
-              33.54000000000008
+              30.84450000000004,
+              33.04399999999998
             ]
           ]
         }
@@ -511,8 +509,8 @@
       "description": "Задача психолога — подсветить ситуацию так, чтобы человек сам понял, что ему нужно. #психология #терапия",
       "reason": "human review",
       "topic": "",
-      "r0_start": 642.37,
-      "r0_end": 675.9100000000001,
+      "r0_start": 642.4060000000001,
+      "r0_end": 675.45,
       "flags": [],
       "self_contained_start": null,
       "start_justification": "",
@@ -520,7 +518,7 @@
       "subtitles": [
         {
           "word": "Но",
-          "t0": 642.42,
+          "t0": 642.456,
           "t1": 642.5348755,
           "emph": false
         },
@@ -947,11 +945,11 @@
         {
           "word": "нужно.",
           "t0": 675.0348755,
-          "t1": 675.8148755,
+          "t1": 675.45,
           "emph": false
         }
       ],
-      "end_drift_sec": 2.7248754999998255,
+      "end_drift_sec": 0.66487549999988,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
@@ -959,10 +957,10 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 675.9100000000001,
+      "subtitle_gate": 675.45,
       "speed": 1.0,
-      "tail_last_word_end": 675.6800000000001,
-      "tail_next_word_start": 675.97,
+      "tail_last_word_end": 675.38,
+      "tail_next_word_start": 675.51,
       "warnings": [
         "dangling start: opens on «Но»"
       ],
@@ -979,25 +977,34 @@
     },
     {
       "id": "r03",
-      "start": 851.325,
-      "end": 901.5703454999999,
+      "start": 851.987,
+      "end": 900.8900000000001,
       "segments": [
         {
-          "start": 851.325,
+          "start": 851.987,
           "end": 853.37,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 857.4200000000001,
-          "end": 901.5703454999999,
-          "shot": "close",
-          "close_intervals": []
+          "start": 859.433,
+          "end": 900.8900000000001,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              7.607499999999959
+            ],
+            [
+              40.095500000000015,
+              41.45700000000011
+            ]
+          ]
         }
       ],
       "cold_open": {
-        "start": 899.6753754999999,
-        "end": 901.5953454999999,
+        "start": 899.547,
+        "end": 900.908,
         "shot": "close",
         "close_intervals": []
       },
@@ -1008,8 +1015,8 @@
       "description": "Если работа по душе и людям становится легче — это и есть отдых. #психология #призвание",
       "reason": "human review",
       "topic": "",
-      "r0_start": 851.325,
-      "r0_end": 901.5703454999999,
+      "r0_start": 851.987,
+      "r0_end": 900.8900000000001,
       "flags": [
         "human_merged"
       ],
@@ -1019,7 +1026,7 @@
       "subtitles": [
         {
           "word": "Как",
-          "t0": 851.375,
+          "t0": 852.0369999999999,
           "t1": 852.0776155,
           "emph": false
         },
@@ -1037,13 +1044,13 @@
         },
         {
           "word": "А",
-          "t0": 859.3776155,
-          "t1": 859.3976054999999,
+          "t0": 859.483,
+          "t1": 859.483,
           "emph": false
         },
         {
           "word": "я",
-          "t0": 859.3976054999999,
+          "t0": 859.483,
           "t1": 859.9376155,
           "emph": false
         },
@@ -1523,13 +1530,13 @@
         },
         {
           "word": "Для",
-          "t0": 899.7253754999998,
-          "t1": 899.7253754999998,
+          "t0": 899.6003754999999,
+          "t1": 899.6803454999999,
           "emph": false
         },
         {
           "word": "меня",
-          "t0": 899.7253754999998,
+          "t0": 899.6803454999999,
           "t1": 899.8603455,
           "emph": false
         },
@@ -1554,25 +1561,23 @@
         {
           "word": "отдых.",
           "t0": 900.5403755,
-          "t1": 901.3403555,
+          "t1": 900.908,
           "emph": true
         }
       ],
-      "end_drift_sec": 6.95001000000002,
+      "end_drift_sec": 0.7503554999998414,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
-      "open_thought": false,
+      "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 901.5703454999999,
+      "subtitle_gate": 900.8900000000001,
       "speed": 1.0,
-      "tail_last_word_end": 901.5703454999999,
-      "tail_next_word_start": 901.6203454999999,
-      "warnings": [
-        "no room after last word «отдых.» (next speech at 901.620) — clip ends at its audible end"
-      ],
+      "tail_last_word_end": 900.868,
+      "tail_next_word_start": 900.95,
+      "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
@@ -1586,20 +1591,29 @@
     },
     {
       "id": "r04",
-      "start": 1031.0353455,
-      "end": 1097.56,
+      "start": 1031.055,
+      "end": 1097.61,
       "segments": [
         {
-          "start": 1031.0353455,
-          "end": 1053.9203754999999,
+          "start": 1031.055,
+          "end": 1051.8899999999999,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 1072.88,
-          "end": 1097.56,
-          "shot": "close",
-          "close_intervals": []
+          "start": 1073.631,
+          "end": 1097.61,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              5.142999999999802
+            ],
+            [
+              12.198499999999967,
+              23.978999999999814
+            ]
+          ]
         }
       ],
       "cold_open": null,
@@ -1610,8 +1624,8 @@
       "description": "Методы и алгоритмы важны, но исцеляет человек рядом. #психология #эмпатия",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1031.0353455,
-      "r0_end": 1097.56,
+      "r0_start": 1031.055,
+      "r0_end": 1097.61,
       "flags": [
         "human_merged"
       ],
@@ -1621,7 +1635,7 @@
       "subtitles": [
         {
           "word": "Когда",
-          "t0": 1031.0853455,
+          "t0": 1031.105,
           "t1": 1031.1803455,
           "emph": false
         },
@@ -1880,12 +1894,12 @@
         {
           "word": "нужно.",
           "t0": 1051.3203755,
-          "t1": 1052.3803755,
+          "t1": 1051.8899999999999,
           "emph": false
         },
         {
           "word": "Алгоритм",
-          "t0": 1073.6630755,
+          "t0": 1073.681,
           "t1": 1074.1630755,
           "emph": false
         },
@@ -2142,7 +2156,7 @@
           "emph": false
         }
       ],
-      "end_drift_sec": 3.4430755000000772,
+      "end_drift_sec": 3.3930755000001227,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
@@ -2150,9 +2164,9 @@
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 1097.56,
+      "subtitle_gate": 1097.61,
       "speed": 1.0,
-      "tail_last_word_end": 1097.26,
+      "tail_last_word_end": 1097.31,
       "tail_next_word_start": 1098.05,
       "warnings": [],
       "subtitle_emph_words": [],
@@ -2168,23 +2182,18 @@
     },
     {
       "id": "r05",
-      "start": 1201.3500000000001,
-      "end": 1242.04,
+      "start": 1211.0330000000001,
+      "end": 1242.058,
       "segments": [
         {
-          "start": 1201.3500000000001,
-          "end": 1215.75,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              8.874999999999773,
-              14.399999999999864
-            ]
-          ]
+          "start": 1211.0330000000001,
+          "end": 1215.246,
+          "shot": "close",
+          "close_intervals": []
         },
         {
-          "start": 1224.1000000000001,
-          "end": 1242.04,
+          "start": 1224.403,
+          "end": 1242.058,
           "shot": "wide",
           "close_intervals": []
         }
@@ -2197,8 +2206,8 @@
       "description": "Сначала уважение к себе, потом к другим. И не делай другим того, чего не хочешь себе. #ценности #психология",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1201.3500000000001,
-      "r0_end": 1242.04,
+      "r0_start": 1211.0330000000001,
+      "r0_end": 1242.058,
       "flags": [
         "human_merged"
       ],
@@ -2207,86 +2216,14 @@
       "rank": null,
       "subtitles": [
         {
-          "word": "Ты",
-          "t0": 1201.4,
-          "t1": 1201.644031,
-          "emph": false
-        },
-        {
-          "word": "всегда",
-          "t0": 1201.644031,
-          "t1": 1202.0640309999999,
-          "emph": false
-        },
-        {
-          "word": "стараешься,",
-          "t0": 1202.0640309999999,
-          "t1": 1202.864031,
-          "emph": false
-        },
-        {
-          "word": "я",
-          "t0": 1202.864031,
-          "t1": 1202.964031,
-          "emph": false
-        },
-        {
-          "word": "стараюсь",
-          "t0": 1202.964031,
-          "t1": 1203.804031,
-          "emph": false
-        },
-        {
-          "word": "как-то",
-          "t0": 1203.804031,
-          "t1": 1204.3240309999999,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 1204.3240309999999,
-          "t1": 1204.684031,
-          "emph": false
-        },
-        {
-          "word": "последнее",
-          "t0": 1204.684031,
-          "t1": 1205.204031,
-          "emph": false
-        },
-        {
-          "word": "время",
-          "t0": 1205.204031,
-          "t1": 1206.024031,
-          "emph": false
-        },
-        {
-          "word": "опираться",
-          "t0": 1206.024031,
-          "t1": 1208.404031,
-          "emph": false
-        },
-        {
-          "word": "на",
-          "t0": 1208.404031,
-          "t1": 1208.5840309999999,
-          "emph": false
-        },
-        {
-          "word": "себя.",
-          "t0": 1208.5840309999999,
-          "t1": 1210.664031,
-          "emph": false
-        },
-        {
           "word": "Раз",
-          "t0": 1210.664031,
-          "t1": 1210.684031,
+          "t0": 1211.083,
+          "t1": 1211.083,
           "emph": false
         },
         {
           "word": "я",
-          "t0": 1210.684031,
+          "t0": 1211.083,
           "t1": 1211.304031,
           "emph": false
         },
@@ -2365,12 +2302,12 @@
         {
           "word": "есть.",
           "t0": 1214.964031,
-          "t1": 1215.644031,
+          "t1": 1215.246,
           "emph": false
         },
         {
           "word": "То",
-          "t0": 1224.15,
+          "t0": 1224.453,
           "t1": 1224.524031,
           "emph": false
         },
@@ -2611,11 +2548,11 @@
         {
           "word": "главное.",
           "t0": 1241.424031,
-          "t1": 1242.04,
+          "t1": 1242.058,
           "emph": false
         }
       ],
-      "end_drift_sec": 0.484030999999959,
+      "end_drift_sec": 0.4660309999999299,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
@@ -2623,10 +2560,10 @@
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 1242.04,
+      "subtitle_gate": 1242.058,
       "speed": 1.0,
       "tail_last_word_end": 1242.04,
-      "tail_next_word_start": 1242.1,
+      "tail_next_word_start": 1242.118,
       "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
@@ -2641,29 +2578,38 @@
     },
     {
       "id": "r06",
-      "start": 1397.7849999999999,
+      "start": 1397.921,
       "end": 1441.33,
       "segments": [
         {
-          "start": 1397.7849999999999,
-          "end": 1402.1105909999997,
+          "start": 1397.921,
+          "end": 1402.004,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 1405.4505909999998,
-          "end": 1423.005,
-          "shot": "close",
-          "close_intervals": []
+          "start": 1405.6870000000001,
+          "end": 1422.991,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              7.925999999999931
+            ]
+          ]
         },
         {
-          "start": 1423.350591,
+          "start": 1423.622,
           "end": 1441.33,
           "shot": "wide",
           "close_intervals": [
             [
-              9.71440900000016,
-              17.979409000000032
+              0.0,
+              5.2439999999999145
+            ],
+            [
+              9.757499999999936,
+              17.707999999999856
             ]
           ]
         }
@@ -2676,7 +2622,7 @@
       "description": "Ребёнок надевает маску, чтобы выжить. Взрослый понимает, что врёт себе и другим. #психология #маски",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1397.7849999999999,
+      "r0_start": 1397.921,
       "r0_end": 1441.33,
       "flags": [],
       "self_contained_start": null,
@@ -2685,7 +2631,7 @@
       "subtitles": [
         {
           "word": "Чтобы",
-          "t0": 1397.8349999999998,
+          "t0": 1397.971,
           "t1": 1398.135581,
           "emph": false
         },
@@ -2740,12 +2686,12 @@
         {
           "word": "маски.",
           "t0": 1401.675591,
-          "t1": 1402.1105909999997,
+          "t1": 1402.004,
           "emph": true
         },
         {
           "word": "Но",
-          "t0": 1405.5005909999998,
+          "t0": 1405.737,
           "t1": 1405.815591,
           "emph": false
         },
@@ -3039,7 +2985,7 @@
         },
         {
           "word": "И",
-          "t0": 1423.4005909999998,
+          "t0": 1423.672,
           "t1": 1423.775591,
           "emph": false
         },
@@ -3286,30 +3232,51 @@
     },
     {
       "id": "r07",
-      "start": 1463.43,
-      "end": 1522.41,
+      "start": 1463.5130000000001,
+      "end": 1522.4099999999999,
       "segments": [
         {
-          "start": 1463.43,
-          "end": 1471.310591,
+          "start": 1463.5130000000001,
+          "end": 1471.975,
           "shot": "wide",
           "close_intervals": []
         },
         {
-          "start": 1476.0,
-          "end": 1502.5021309999997,
-          "shot": "close",
-          "close_intervals": []
+          "start": 1476.085,
+          "end": 1488.114,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              5.004500000000007
+            ]
+          ]
         },
         {
-          "start": 1506.0621309999997,
+          "start": 1488.284,
+          "end": 1502.522,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              5.073999999999842
+            ]
+          ]
+        },
+        {
+          "start": 1505.973,
           "end": 1515.62,
           "shot": "wide",
-          "close_intervals": []
+          "close_intervals": [
+            [
+              0.0,
+              6.430499999999938
+            ]
+          ]
         },
         {
-          "start": 1517.0021309999997,
-          "end": 1522.41,
+          "start": 1516.951,
+          "end": 1522.4099999999999,
           "shot": "close",
           "close_intervals": []
         }
@@ -3322,8 +3289,8 @@
       "description": "Иногда правда ранит сильнее. Взрослый смотрит, по душе ли ему, и не сделает ли он больно другому. #психология #взросление",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1463.43,
-      "r0_end": 1522.41,
+      "r0_start": 1463.5130000000001,
+      "r0_end": 1522.4099999999999,
       "flags": [
         "human_merged"
       ],
@@ -3333,7 +3300,7 @@
       "subtitles": [
         {
           "word": "Но",
-          "t0": 1463.5155909999999,
+          "t0": 1463.563,
           "t1": 1463.815571,
           "emph": false
         },
@@ -3489,13 +3456,13 @@
         },
         {
           "word": "правду.",
-          "t0": 1471.260591,
-          "t1": 1471.310591,
+          "t0": 1471.275591,
+          "t1": 1471.975,
           "emph": false
         },
         {
           "word": "У",
-          "t0": 1476.115591,
+          "t0": 1476.135,
           "t1": 1476.175591,
           "emph": false
         },
@@ -3664,12 +3631,12 @@
         {
           "word": "все.",
           "t0": 1487.835591,
-          "t1": 1488.535601,
+          "t1": 1488.114,
           "emph": false
         },
         {
           "word": "врач",
-          "t0": 1488.255581,
+          "t0": 1488.334,
           "t1": 1488.4756109999998,
           "emph": false
         },
@@ -3891,13 +3858,13 @@
         },
         {
           "word": "Я",
-          "t0": 1506.1121309999996,
-          "t1": 1506.1121309999996,
+          "t0": 1506.023,
+          "t1": 1506.107131,
           "emph": false
         },
         {
           "word": "ему",
-          "t0": 1506.1121309999996,
+          "t0": 1506.107131,
           "t1": 1506.227131,
           "emph": false
         },
@@ -4023,7 +3990,7 @@
         },
         {
           "word": "Разве",
-          "t0": 1517.0521309999997,
+          "t0": 1517.001,
           "t1": 1517.127131,
           "emph": false
         },
@@ -4138,11 +4105,11 @@
         {
           "word": "правильно?",
           "t0": 1521.787131,
-          "t1": 1522.41,
+          "t1": 1522.4099999999999,
           "emph": false
         }
       ],
-      "end_drift_sec": 0.5171309999998357,
+      "end_drift_sec": 0.5171310000000631,
       "end_snap_reason": "sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
@@ -4150,12 +4117,11 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 1522.41,
+      "subtitle_gate": 1522.4099999999999,
       "speed": 1.0,
-      "tail_last_word_end": 1522.1100000000001,
+      "tail_last_word_end": 1522.11,
       "tail_next_word_start": 1522.74,
       "warnings": [
-        "x:11 overlaps its neighbours in time (Whisper duplicate) — no silence to cut, played through",
         "dangling start: opens on «Но»"
       ],
       "subtitle_emph_words": [],
@@ -4171,22 +4137,22 @@
     },
     {
       "id": "r08",
-      "start": 1841.67,
+      "start": 1841.6685000000002,
       "end": 1893.8,
       "segments": [
         {
-          "start": 1841.67,
+          "start": 1841.6685000000002,
           "end": 1863.4,
           "shot": "wide",
           "close_intervals": [
             [
-              19.935249999999996,
-              21.730000000000018
+              19.85449999999969,
+              21.73149999999987
             ]
           ]
         },
         {
-          "start": 1873.48,
+          "start": 1873.771,
           "end": 1893.8,
           "shot": "wide",
           "close_intervals": []
@@ -4200,7 +4166,7 @@
       "description": "Не нужно жить с учебником психологии в руках. Сначала понимание себя, потом инструменты. #психология #принятие",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1841.67,
+      "r0_start": 1841.6685000000002,
       "r0_end": 1893.8,
       "flags": [
         "human_merged"
@@ -4211,7 +4177,7 @@
       "subtitles": [
         {
           "word": "То",
-          "t0": 1841.72,
+          "t0": 1841.7185000000002,
           "t1": 1841.85025,
           "emph": false
         },
@@ -4517,7 +4483,7 @@
         },
         {
           "word": "Это",
-          "t0": 1873.77025,
+          "t0": 1873.821,
           "t1": 1873.91025,
           "emph": false
         },
