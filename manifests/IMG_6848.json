@@ -32,27 +32,21 @@
     {
       "id": "r01",
       "start": 164.673,
-      "end": 203.77,
+      "end": 193.436,
       "segments": [
         {
           "start": 164.673,
-          "end": 196.048,
+          "end": 193.436,
           "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 201.361,
-          "end": 203.77,
-          "shot": "close",
-          "close_intervals": []
+          "close_intervals": [
+            [
+              27.1995,
+              28.763000000000005
+            ]
+          ]
         }
       ],
-      "cold_open": {
-        "start": 201.361,
-        "end": 203.78,
-        "shot": "close",
-        "close_intervals": []
-      },
+      "cold_open": null,
       "title_overlay": "Я всё бросил и уехал в Москву",
       "score": 85,
       "hook": "Вопрос в том, что все эти факторы, которые мы видим, Сначала я был инженером-строителем, у меня первое техническое образование было",
@@ -61,7 +55,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 164.673,
-      "r0_end": 203.77,
+      "r0_end": 193.436,
       "flags": [
         "human_merged"
       ],
@@ -396,71 +390,11 @@
         {
           "word": "йоге.",
           "t0": 193.14871,
-          "t1": 193.86871,
-          "emph": false
-        },
-        {
-          "word": "Я",
-          "t0": 193.86871,
-          "t1": 194.22873,
-          "emph": false
-        },
-        {
-          "word": "больше",
-          "t0": 194.22873,
-          "t1": 194.52872,
-          "emph": false
-        },
-        {
-          "word": "изучал",
-          "t0": 194.52872,
-          "t1": 195.00873,
-          "emph": false
-        },
-        {
-          "word": "психологию.",
-          "t0": 195.00873,
-          "t1": 196.048,
-          "emph": false
-        },
-        {
-          "word": "Мне",
-          "t0": 201.411,
-          "t1": 201.50873,
-          "emph": false
-        },
-        {
-          "word": "пришлось",
-          "t0": 201.50873,
-          "t1": 202.00873,
-          "emph": false
-        },
-        {
-          "word": "полностью",
-          "t0": 202.00873,
-          "t1": 202.60872,
-          "emph": false
-        },
-        {
-          "word": "изменить",
-          "t0": 202.60872,
-          "t1": 203.04872,
+          "t1": 193.436,
           "emph": true
-        },
-        {
-          "word": "свою",
-          "t0": 203.04872,
-          "t1": 203.34872,
-          "emph": false
-        },
-        {
-          "word": "жизнь.",
-          "t0": 203.34872,
-          "t1": 203.78,
-          "emph": false
         }
       ],
-      "end_drift_sec": 2.2387200000000007,
+      "end_drift_sec": 0.7327099999999973,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
@@ -468,18 +402,20 @@
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 203.77,
+      "subtitle_gate": 193.436,
       "speed": 1.0,
-      "tail_last_word_end": 203.74,
-      "tail_next_word_start": 203.83,
-      "warnings": [],
+      "tail_last_word_end": 193.436,
+      "tail_next_word_start": 193.436,
+      "warnings": [
+        "no room after last word «йоге.» (next speech at 193.436) — clip ends at its audible end"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          202.60872,
-          205.70872
+          193.14871,
+          193.86871
         ]
       ],
       "planned": true
@@ -977,24 +913,14 @@
     },
     {
       "id": "r03",
-      "start": 851.987,
+      "start": 859.433,
       "end": 900.8900000000001,
       "segments": [
-        {
-          "start": 851.987,
-          "end": 853.37,
-          "shot": "wide",
-          "close_intervals": []
-        },
         {
           "start": 859.433,
           "end": 900.8900000000001,
           "shot": "wide",
           "close_intervals": [
-            [
-              0.0,
-              7.607499999999959
-            ],
             [
               40.095500000000015,
               41.45700000000011
@@ -1002,12 +928,7 @@
           ]
         }
       ],
-      "cold_open": {
-        "start": 899.547,
-        "end": 900.908,
-        "shot": "close",
-        "close_intervals": []
-      },
+      "cold_open": null,
       "title_overlay": "Как я отдыхаю? Я не работаю",
       "score": 90,
       "hook": "Каждый из них влияет на результат по-своему",
@@ -1015,7 +936,7 @@
       "description": "Если работа по душе и людям становится легче — это и есть отдых. #психология #призвание",
       "reason": "human review",
       "topic": "",
-      "r0_start": 851.987,
+      "r0_start": 859.433,
       "r0_end": 900.8900000000001,
       "flags": [
         "human_merged"
@@ -1024,24 +945,6 @@
       "start_justification": "",
       "rank": null,
       "subtitles": [
-        {
-          "word": "Как",
-          "t0": 852.0369999999999,
-          "t1": 852.0776155,
-          "emph": false
-        },
-        {
-          "word": "ты",
-          "t0": 852.0776155,
-          "t1": 852.3376054999999,
-          "emph": false
-        },
-        {
-          "word": "отдыхаешь?",
-          "t0": 852.3376054999999,
-          "t1": 853.37,
-          "emph": false
-        },
         {
           "word": "А",
           "t0": 859.483,
@@ -1561,7 +1464,7 @@
         {
           "word": "отдых.",
           "t0": 900.5403755,
-          "t1": 900.908,
+          "t1": 900.8900000000001,
           "emph": true
         }
       ],
@@ -1577,7 +1480,9 @@
       "speed": 1.0,
       "tail_last_word_end": 900.868,
       "tail_next_word_start": 900.95,
-      "warnings": [],
+      "warnings": [
+        "dangling start: opens on «А»"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
@@ -2578,25 +2483,14 @@
     },
     {
       "id": "r06",
-      "start": 1397.921,
+      "start": 1405.6870000000001,
       "end": 1441.33,
       "segments": [
-        {
-          "start": 1397.921,
-          "end": 1402.004,
-          "shot": "wide",
-          "close_intervals": []
-        },
         {
           "start": 1405.6870000000001,
           "end": 1422.991,
           "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              7.925999999999931
-            ]
-          ]
+          "close_intervals": []
         },
         {
           "start": 1423.622,
@@ -2614,7 +2508,12 @@
           ]
         }
       ],
-      "cold_open": null,
+      "cold_open": {
+        "start": 1429.026,
+        "end": 1432.889,
+        "shot": "close",
+        "close_intervals": []
+      },
       "title_overlay": "Маски, чтобы выжить",
       "score": 80,
       "hook": "Чтобы выжить в семье, в обществе, нам приходится надевать маски",
@@ -2622,73 +2521,13 @@
       "description": "Ребёнок надевает маску, чтобы выжить. Взрослый понимает, что врёт себе и другим. #психология #маски",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1397.921,
+      "r0_start": 1405.6870000000001,
       "r0_end": 1441.33,
       "flags": [],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
       "subtitles": [
-        {
-          "word": "Чтобы",
-          "t0": 1397.971,
-          "t1": 1398.135581,
-          "emph": false
-        },
-        {
-          "word": "выжить",
-          "t0": 1398.135581,
-          "t1": 1398.815591,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 1398.815591,
-          "t1": 1399.595591,
-          "emph": false
-        },
-        {
-          "word": "семье,",
-          "t0": 1399.595591,
-          "t1": 1400.155581,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 1400.155581,
-          "t1": 1400.2355909999999,
-          "emph": false
-        },
-        {
-          "word": "обществе,",
-          "t0": 1400.2355909999999,
-          "t1": 1400.675591,
-          "emph": false
-        },
-        {
-          "word": "нам",
-          "t0": 1400.675591,
-          "t1": 1400.835591,
-          "emph": false
-        },
-        {
-          "word": "приходится",
-          "t0": 1400.835591,
-          "t1": 1401.2955809999999,
-          "emph": false
-        },
-        {
-          "word": "надевать",
-          "t0": 1401.2955809999999,
-          "t1": 1401.675591,
-          "emph": false
-        },
-        {
-          "word": "маски.",
-          "t0": 1401.675591,
-          "t1": 1402.004,
-          "emph": true
-        },
         {
           "word": "Но",
           "t0": 1405.737,
@@ -3045,7 +2884,7 @@
         },
         {
           "word": "Это",
-          "t0": 1428.695581,
+          "t0": 1429.076,
           "t1": 1429.115591,
           "emph": false
         },
@@ -3089,7 +2928,7 @@
           "word": "маску,",
           "t0": 1430.915581,
           "t1": 1431.7955809999999,
-          "emph": false
+          "emph": true
         },
         {
           "word": "неосознанно",
@@ -3100,7 +2939,7 @@
         {
           "word": "врет.",
           "t0": 1432.435581,
-          "t1": 1433.7355909999999,
+          "t1": 1432.889,
           "emph": false
         },
         {
@@ -3218,7 +3057,9 @@
       "speed": 1.0,
       "tail_last_word_end": 1441.03,
       "tail_next_word_start": 1441.62,
-      "warnings": [],
+      "warnings": [
+        "dangling start: opens on «Но»"
+      ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
