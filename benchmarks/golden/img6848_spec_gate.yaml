@@ -1,7 +1,8 @@
-# Gate expectations for IMG_6848 under REEL_SPEC v1.2 (labels v4: r01/r03/r06 relabelled 2026-10-09) (planned clips r01, r03, r05, r06, r07).
-# Render: arl render --manifest IMG_6848 --reels r01,r03,r05,r06,r07 --gate spec
-# first_words / last_words: first and last 4 tokens of the played body (<id>.transcript.txt) —
-# the plan's subtitles = exactly the labelled sentences (img6848_plan.yaml; r05 from s:3).
+# Gate expectations for IMG_6848 under REEL_SPEC v1.2 — all 8 planned clips (labels v5, 2026-10-09:
+# r01 runs on to «…успешно реализовался.», r02 starts at s3).
+# Render: arl render --manifest IMG_6848 --reels r01,r02,r04,r08 --gate spec  (r03, r05, r06, r07 from M23)
+# first_words / last_words: first and last tokens of the played body (<id>.transcript.txt) —
+# the plan's subtitles = exactly the labelled sentences (img6848_plan.yaml).
 # reel_end: plan end (source seconds, with transcripts/IMG_6848.align.json).
 # Shots: verify_gate checks every frame against the plan.
 
@@ -10,9 +11,16 @@ clips:
 - clip_id: r01
   stem: IMG_6848
   path: reels-out/IMG_6848/_gate/spec/r01.mp4
-  reel_end: 193.436
+  reel_end: 230.585
   first_words: У меня был такой
-  last_words: стал тренером по йоге.
+  last_words: я думаю, успешно реализовался.
+  cold_open: null
+- clip_id: r02
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/spec/r02.mp4
+  reel_end: 675.45
+  first_words: Я не стараюсь забегать,
+  last_words: вот же как нужно.
   cold_open: null
 - clip_id: r03
   stem: IMG_6848
@@ -20,6 +28,13 @@ clips:
   reel_end: 900.89
   first_words: А я и не
   last_words: это самый лучший отдых.
+  cold_open: null
+- clip_id: r04
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/spec/r04.mp4
+  reel_end: 1097.61
+  first_words: Когда человек приходит, иногда
+  last_words: вещи с другим человеком.
   cold_open: null
 - clip_id: r05
   stem: IMG_6848
@@ -41,4 +56,11 @@ clips:
   reel_end: 1522.41
   first_words: Но взрослый что он
   last_words: взрослый его сын, правильно?
+  cold_open: null
+- clip_id: r08
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/spec/r08.mp4
+  reel_end: 1893.8
+  first_words: То есть, когда тебя
+  last_words: улучшить качественно свою жизнь.
   cold_open: null

@@ -536,3 +536,17 @@ def test_end_aligned_catches_hesitation_and_next_word(tmp_path):
     assert vg._check_end_aligned(p, reel, 1.5)[0].startswith("last_word_cut_aligned")
     assert vg._check_end_aligned(p, {"planned": True, "subtitles": [{"word": "x", "t0": 9.0}]}, 9.5) == \
         ["alignment_mismatch:0/1"]
+
+
+def test_end_air_planned_measured_from_plan_word_end(tmp_path, monkeypatch):
+    """IMG_6848 r04: «человеком.» map ae 1097.260, plan (aligned) 1097.310, clip end 1097.600 —
+    0.29 s of air by the plan; from the map it read 0.34 > 0.333 (false FAIL)."""
+    monkeypatch.setattr(vg, "_DYNAMIC_ENDING", True)
+    monkeypatch.setattr(vg, "_END_AIR_SEC", 0.30)
+    sm = tmp_path / "x.speechmap.json"
+    sm.write_text(json.dumps({"words": [{"t0": 1096.7, "t1": 1097.3, "audible_end": 1097.26}]}))
+    sub = [{"word": "человеком.", "t0": 1096.7, "t1": 1097.3}]
+    assert vg._check_end_air_vg(sm, {"subtitles": sub}, 1097.6)          # not planned: map end
+    planned = {"planned": True, "tail_last_word_end": 1097.31, "subtitles": sub}
+    assert vg._check_end_air_vg(sm, planned, 1097.6) == []
+    assert vg._check_end_air_vg(sm, planned, 1097.7)[0].startswith("end_air:")

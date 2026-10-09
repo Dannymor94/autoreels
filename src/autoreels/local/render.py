@@ -1192,6 +1192,7 @@ def _check_end_air(
     lookup: dict,
     end_air_sec: float,
     fps: float,
+    last_ae: float | None = None,
 ) -> list[str]:
     """Invariant: clip_end − last subtitle word audible_end ≤ end_air_sec + 1 frame.
 
@@ -1199,14 +1200,22 @@ def _check_end_air(
     the last audible word, meaning too much air crept in (e.g. the start-fix bug that
     stretched cold_open.start back into body time).
     Only runs when dynamic_ending is on (end_air_sec in config).
+
+    last_ae: the last word's audible end as the plan resolved it (planned reels:
+    reel.tail_last_word_end — the aligned end, tail absorbed). A planned clip is cut at
+    last_ae + end_air_sec, so it is checked against that same end, not the speech map's
+    (which can be earlier: IMG_6848 r04 «человеком.» map 1097.260, aligned 1097.310).
     """
-    key = round(last_word.t0 * 1000)
-    if key not in lookup:
-        return []
-    _, entry = lookup[key]
-    ae: float = entry.get("audible_end", last_word.t0)
-    if ae < last_word.t0:
-        return []
+    if last_ae is not None:
+        ae: float = last_ae
+    else:
+        key = round(last_word.t0 * 1000)
+        if key not in lookup:
+            return []
+        _, entry = lookup[key]
+        ae = entry.get("audible_end", last_word.t0)
+        if ae < last_word.t0:
+            return []
     tolerance = end_air_sec + 1.0 / fps
     air = clip_end - ae
     if air > tolerance + 1e-4:
@@ -2846,7 +2855,8 @@ def _render_segments(
                 )
                 _clip_errors.extend(_check_end_air(
                     reel.id, reel.subtitles[-1], _ea_real_end,
-                    smap, _inv_lookup, _ea_sec, _ea_fps))
+                    smap, _inv_lookup, _ea_sec, _ea_fps,
+                    last_ae=(getattr(reel, "tail_last_word_end", None) if _planned else None)))
             # clip_duration = video output length, accounting for xfade overlap at each seam.
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
             # the final post-snap `segs` by the same helper the invariant checks against, so the

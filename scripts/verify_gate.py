@@ -278,13 +278,22 @@ def _check_end_air_vg(speechmap_path: Path, reel: dict, source_end: float,
     """Permanent end-air check: source_end − last subtitle word audible_end ≤ end_air_sec + 1 frame.
 
     Only runs when dynamic_ending is on in render.yaml.
+    Planned reels are cut at the plan's word end (tail_last_word_end: aligned, tail absorbed) +
+    air, so the air is measured from that end — the speech map's can be earlier (IMG_6848 r04).
     """
     if not _DYNAMIC_ENDING:
         return []
-    if not speechmap_path.exists():
-        return []
     subs = reel.get("subtitles", [])
     if not subs:
+        return []
+    tolerance = _END_AIR_SEC + 1.0 / fps
+    if reel.get("planned") and reel.get("tail_last_word_end") is not None:
+        ae = float(reel["tail_last_word_end"])
+        air = source_end - ae
+        if air > tolerance + 1e-4:
+            return [f"end_air:{air:.3f}s>{tolerance:.3f}s(ae={ae:.3f},end={source_end:.3f})"]
+        return []
+    if not speechmap_path.exists():
         return []
     last_sub = subs[-1]
     with open(speechmap_path) as f:
@@ -297,7 +306,6 @@ def _check_end_air_vg(speechmap_path: Path, reel: dict, source_end: float,
     ae = word.get("audible_end", last_t0)
     if ae < last_t0:
         return []
-    tolerance = _END_AIR_SEC + 1.0 / fps
     air = source_end - ae
     if air > tolerance + 1e-4:
         return [f"end_air:{air:.3f}s>{tolerance:.3f}s(ae={ae:.3f},end={source_end:.3f})"]

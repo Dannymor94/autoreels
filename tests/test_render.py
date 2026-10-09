@@ -3320,6 +3320,26 @@ def test_check_end_air_r01_numbers():
     assert not errs2, f"unexpected error for {good_end - ae:.3f}s air ≤ tolerance: {errs2}"
 
 
+
+def test_check_end_air_planned_uses_plan_word_end():
+    """Planned reel: the clip is cut at the plan's (aligned) word end + air, so the check uses
+    that end. IMG_6848 r04: «человеком.» map ae 1097.260, aligned 1097.310, clip end 1097.600
+    (air 0.29 by the plan) — measured from the map it was 0.34 > 0.333 → false [ERROR]."""
+    from autoreels.local.render import _check_end_air
+    from autoreels.core.models import Word
+
+    last_word = Word(word="человеком.", t0=1096.70, t1=1097.30)
+    entry = {"t0": 1096.70, "t1": 1097.30, "audible_end": 1097.260}
+    lookup = {round(1096.70 * 1000): (0, entry)}
+    smap = {"words": [entry], "intervals": []}
+    # without the plan's end: map-based, fires
+    assert _check_end_air("r04", last_word, 1097.600, smap, lookup, 0.30, 30.0)
+    # with the plan's end: within air + 1 frame
+    assert not _check_end_air("r04", last_word, 1097.600, smap, lookup, 0.30, 30.0, last_ae=1097.310)
+    # the plan's end still bounds the air: too much air after the aligned end fires
+    errs = _check_end_air("r04", last_word, 1097.700, smap, lookup, 0.30, 30.0, last_ae=1097.310)
+    assert errs and "[ERROR]" in errs[0]
+
 # ── PART 3: foreign tail word check ───────────────────────────────────────────
 
 def test_check_foreign_tail_word_r07_numbers():
