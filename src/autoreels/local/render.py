@@ -746,6 +746,29 @@ def _volumedetect_mean_db(path: Path, ffmpeg_bin: str, *, duration: float,
     return None
 
 
+def _audio_packet_irregularities(path: Path, ffprobe: str) -> tuple[int, float] | None:
+    """(number of audio packets whose duration is not the codec frame, longest packet in s).
+
+    The frame duration is the most common packet duration; the first packet (encoder priming,
+    negative pts) and the last packet (stream tail) are exempt. None if ffprobe gives nothing."""
+    r = subprocess.run([ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
+                        "packet=duration_time", "-of", "csv=p=0", str(path)],
+                       capture_output=True, text=True, check=False)
+    durs = []
+    for line in r.stdout.split():
+        try:
+            durs.append(float(line.strip(",")))
+        except ValueError:
+            continue
+    if len(durs) < 3:
+        return None
+    from collections import Counter
+    frame = Counter(round(d, 6) for d in durs).most_common(1)[0][0]
+    body = durs[1:-1]
+    bad = [d for d in body if abs(d - frame) > 1e-4]
+    return len(bad), max(durs[1:-1] or [0.0])
+
+
 def _check_web_safe(path: Path, ffmpeg_bin: str, *, require_h264: bool,
                     fps: float = 30.0) -> list[str]:
     """Permanent web-safe delivery check for a rendered clip (Yandex Disk / social web players).
@@ -758,6 +781,9 @@ def _check_web_safe(path: Path, ffmpeg_bin: str, *, require_h264: bool,
       - first 3 s audio not silent, and normal-decode vs -ignore_editlist decode agree within
         3 dB (a player that ignores the edit list must still hear the same opening audio — this
         is the exact mechanism behind the reported 3 s of missing sound).
+      - every audio packet lasts one codec frame (except priming and the last packet): irregular
+        packet durations are broken timestamps — players that follow them drift the sound against
+        the picture, Yandex Disk garbles the opening (M27).
 
     `require_h264`: True for the default h264 delivery (non-H.264 video → [ERROR]); False when the
     operator deliberately rendered a non-web-safe codec (hevc/av1) — then codec is a warning only.
@@ -824,6 +850,17 @@ def _check_web_safe(path: Path, ffmpeg_bin: str, *, require_h264: bool,
             errors.append(
                 f"[ERROR] web-safe: audio/video duration differ by {abs(adur - vdur) * 1000:.0f} ms "
                 f"(a={adur:.3f}s v={vdur:.3f}s, >= 1 frame)"
+            )
+
+    # Audio timeline: every AAC packet lasts one frame (1024 samples) except the priming packet
+    # and the last one. Irregular durations = broken timestamps (M27: 1-sample packets + one
+    # 2.36 s packet) → A/V drift in players that follow timestamps, garbled start on web players.
+    if a is not None:
+        irr = _audio_packet_irregularities(path, ffprobe)
+        if irr is not None and irr[0] > 0:
+            errors.append(
+                f"[ERROR] web-safe: audio timestamps irregular — {irr[0]} packet(s) with a non-frame "
+                f"duration, longest {irr[1]:.3f}s (audio drifts against video; web players garble the start)"
             )
 
     # moov before mdat (faststart).
@@ -1129,8 +1166,19 @@ def _rotate_vf(rotation_deg: float) -> str:
 
 
 def _loudnorm_str(ap: AudioProcessing) -> str:
-    """Строка loudnorm по конфигу (нормализация к target_lufs)."""
-    return f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)}"
+    """Строка loudnorm по конфигу (нормализация к target_lufs) + новая шкала времени звука.
+
+    loudnorm (однопроходный, динамический) выдаёт кадры с испорченными метками времени, когда на
+    вход приходят кадры разного размера (склейка окон concat'ом, atrim): в начале клипа метки
+    отстают от числа сэмплов (в MP4 — пакеты длиной 1 сэмпл), потом прыгают вперёд (один пакет
+    длиной 113498 сэмплов = 2.36 с). Плеер, который верит меткам, играет звук до 2.3 с раньше
+    картинки («видео отстаёт от звука»); веб-перекодировщик (Яндекс Диск) теряет и «прожёвывает»
+    первые секунды. Замер M27: так были испорчены все многооконные клипы IMG_6848; пересборка
+    меток по числу сэмплов (asetpts=N/SR/TB) на Яндекс Диске дала чистый старт.
+    Звук после склейки непрерывен по построению, поэтому его время = номер сэмпла / частота.
+    """
+    return (f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)},"
+            f"aresample=48000,asetpts=N/SR/TB")
 
 
 def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:

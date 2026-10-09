@@ -1,6 +1,6 @@
-# Gate expectations for IMG_6848 under REEL_SPEC v1.2 — all 8 planned clips (labels v6, 2026-10-09:
-# r01 = blocks 3+4+5 ending «Вот так родился я как психолог.», r02 = blocks 12+13 opening «…представь, что у тебя есть друг…»).
-# Render: arl render --manifest IMG_6848 --reels r01,r02 --gate spec  (others from M23/M24)
+# Gate expectations for IMG_6848 under REEL_SPEC v1.3 — all 8 planned clips (labels v7, 2026-10-09:
+# r01 = blocks 3+4+5 ending «…лучше понимаешь себя. Как-то так.», r02 = blocks 12+13 opening «…представь, что у тебя есть друг…»).
+# Render: arl render --manifest IMG_6848 --reels r01 --gate spec  (others from M23/M24/M25)
 # first_words / last_words: first and last tokens of the played body (<id>.transcript.txt) —
 # the plan's subtitles = exactly the labelled sentences (img6848_plan.yaml).
 # reel_end: plan end (source seconds, with transcripts/IMG_6848.align.json).
@@ -11,9 +11,9 @@ clips:
 - clip_id: r01
   stem: IMG_6848
   path: reels-out/IMG_6848/_gate/spec/r01.mp4
-  reel_end: 251.582
+  reel_end: 271.06
   first_words: У меня был такой
-  last_words: родился я как психолог.
+  last_words: понимаешь себя. Как-то так.
   cold_open: null
 - clip_id: r02
   stem: IMG_6848

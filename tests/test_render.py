@@ -1123,13 +1123,13 @@ from autoreels.local.render import _audio_filter_chain, _video_fade_filter
 def test_audio_chain_default_is_loudnorm_plus_fade():
     # дефолт (Part 3 — динамичный конец): нормализация к -14 LUFS + 0.25с аудио-фейд.
     af = _audio_filter_chain(AudioProcessing(), 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.75:d=0.25"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=N/SR/TB,afade=t=out:st=29.75:d=0.25"
 
 
 def test_audio_chain_legacy_loudnorm_plus_tail_fade():
     # dynamic_ending=False → прежний clean-tail fade (0.35с).
     af = _audio_filter_chain(AudioProcessing(dynamic_ending=False), 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=N/SR/TB,afade=t=out:st=29.65:d=0.35"
 
 
 def test_audio_chain_empty_when_all_disabled():
@@ -1142,7 +1142,7 @@ def test_audio_chain_empty_when_all_disabled():
 def test_audio_chain_denoise_before_loudnorm():
     ap = AudioProcessing(denoise_enabled=True, denoise_strength=10, dynamic_ending=False)
     af = _audio_filter_chain(ap, 30.0)
-    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=out:st=29.65:d=0.35"
+    assert af == "afftdn=nr=10,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=N/SR/TB,afade=t=out:st=29.65:d=0.35"
     assert af.index("afftdn") < af.index("loudnorm")
 
 
@@ -1151,7 +1151,7 @@ def test_audio_chain_fade_last_and_out_start_from_duration():
     ap = AudioProcessing(fade_enabled=True, fade_duration=0.25, tail_fade_sec=0.0,
                          dynamic_ending=False)
     af = _audio_filter_chain(ap, 30.0)
-    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:st=0:d=0.25,afade=t=out:st=29.75:d=0.25"
+    assert af == "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=N/SR/TB,afade=t=in:st=0:d=0.25,afade=t=out:st=29.75:d=0.25"
 
 
 def test_audio_tail_fade_always_on_and_uses_output_duration():
@@ -3105,7 +3105,7 @@ def test_inline_synth_loudnorm_no_start_silence(tmp_path):
         "[1:a]atrim=start=2,asetpts=PTS-STARTPTS[a1];"
         "[2:a]atrim=start=2,asetpts=PTS-STARTPTS[a2];"
         "[a0][a1][a2]concat=n=3:v=0:a=1[aseg];"
-        "[aseg]loudnorm=I=-14:TP=-1.5:LRA=11,asetpts=PTS-STARTPTS[aout]",
+        "[aseg]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000,asetpts=N/SR/TB,asetpts=PTS-STARTPTS[aout]",
         "-map", "[aout]", "-vn", str(out),
     ], capture_output=True, text=True)
     assert r.returncode == 0, f"ffmpeg failed: {r.stderr[:400]}"
