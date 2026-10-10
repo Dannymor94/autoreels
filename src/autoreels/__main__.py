@@ -7155,8 +7155,14 @@ def cmd_label(
     out: str | None = None,
     force: bool = False,
     provider=None,
+    check: bool = False,
+    retry: bool = False,
 ) -> int:
     """Draft the review lines of a source with the LLM → reviews/<stem>_auto.txt (cloud/label.py).
+
+    --check: re-check an existing draft with the current rules (no LLM); a broken line becomes '#!'.
+    --retry: ask again only for the windows the draft marks '# blocks a–b: no answer'.
+    Both rewrite the draft in place and keep the previous version as <draft>.bak.
 
     The LLM proposes clips per window of blocks; code maps them to the review numbering, checks the
     owner's rules (REEL_SPEC §1.7, §4.5, length) and asks once for a repair. Nothing is installed:
@@ -7180,7 +7186,10 @@ def cmd_label(
     r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
     lc = r0_cfg.label
     out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto.txt"
-    if out_path.exists() and not force:
+    if (check or retry) and not out_path.exists():
+        print(f"ошибка: черновика {out_path} нет — сначала: arl label {stem}", file=sys.stderr)
+        return 1
+    if out_path.exists() and not force and not (check or retry):
         print(f"ошибка: {out_path} уже есть — там может быть ваша правка. Перезаписать: --force",
               file=sys.stderr)
         return 1
@@ -7209,15 +7218,45 @@ def cmd_label(
               f"не проверяются. Сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
     system = (_root / lc.system).read_text(encoding="utf-8")
     fewshot = json.loads((_root / lc.fewshot).read_text(encoding="utf-8")).get("messages", [])
-    if provider is None:
-        provider = build_pool(r0_cfg)
-        provider.preflight()
     p = LabelParams(window_blocks=lc.window_blocks, min_sec=lc.min_sec, max_sec=lc.max_sec,
                     max_clip_blocks=lc.max_clip_blocks, title_max_chars=lc.title_max_chars,
                     repair_rounds=lc.repair_rounds,
                     pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
                     pause_strong_sec=r0_cfg.min_pause_for_phrase_end)
     wblocks = build_wblocks(kept, words, tone)
+    if check or retry:
+        import re as _re_lbl
+        from autoreels.cloud.label import check_draft, retry_draft
+        from autoreels.cloud.blocks import _block_fingerprint as _fp
+        old_text = out_path.read_text(encoding="utf-8")
+        _m = _re_lbl.search(r"^#\s*fingerprint:\s*([0-9a-f]+)", old_text, _re_lbl.MULTILINE)
+        if _m and _m.group(1) != _fp(kept):
+            print(f"ошибка: черновик {out_path.name} сделан для другого набора блоков "
+                  f"(fingerprint {_m.group(1)} ≠ {_fp(kept)})", file=sys.stderr)
+            return 1
+        new_text = old_text
+        if retry:
+            if provider is None:
+                provider = build_pool(r0_cfg)
+                provider.preflight()
+            new_text, done, still = retry_draft(new_text, wblocks, words, provider, system=system,
+                                                fewshot=fewshot, p=p, log=lambda m: print(m, flush=True))
+            print(f"повтор окон без ответа: получен ответ {done}, по-прежнему без ответа {still}")
+        new_text, flagged = check_draft(new_text, wblocks, words, p)
+        for seq, why in flagged:
+            print(f"  #! строка {seq}: " + "; ".join(why))
+        print(f"проверка: строк с нарушениями {len(flagged)}")
+        if new_text != old_text:
+            bak = out_path.with_name(out_path.name + ".bak")
+            bak.write_text(old_text, encoding="utf-8")
+            out_path.write_text(new_text, encoding="utf-8")
+            print(f"→ {out_path}  (прежняя версия: {bak.name})")
+        else:
+            print(f"→ {out_path} без изменений")
+        return 0
+    if provider is None:
+        provider = build_pool(r0_cfg)
+        provider.preflight()
     from autoreels.cloud.label import windows as _label_windows
     n_win = len(_label_windows(wblocks, p.window_blocks, p.max_clip_blocks))
     print(f"разметка {stem}: {len(kept)} блоков, {n_win} окон по {p.window_blocks} блока "
@@ -9617,6 +9656,10 @@ def _build_parser():
     plb.add_argument("--cache-dir", default=None, dest="cache_dir")
     plb.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto.txt)")
     plb.add_argument("--force", action="store_true", default=False, help="перезаписать черновик")
+    plb.add_argument("--check", action="store_true", default=False,
+                     help="перепроверить готовый черновик по текущим правилам (без LLM)")
+    plb.add_argument("--retry", action="store_true", default=False,
+                     help="повторить только окна, оставшиеся без ответа")
 
     ppr = sub.add_parser(
         "prosody",
@@ -9912,6 +9955,8 @@ def main(argv=None) -> int:
                 cache_dir=getattr(args, "cache_dir", None),
                 out=getattr(args, "out", None),
                 force=getattr(args, "force", False),
+                check=getattr(args, "check", False),
+                retry=getattr(args, "retry", False),
             )
         elif args.cmd == "prosody":
             return cmd_prosody(

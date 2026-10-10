@@ -35,7 +35,8 @@ The first line may show the sentence just before the first block (context only).
    that carries the meaning, copied exactly as written in that sentence.
 8. "title": Russian, at most 45 characters, a hook built from what the speaker actually says.
    No promises the clip does not keep.
-9. "caption": 1–2 Russian sentences with the point + 2 hashtags (#психология and one topic tag).
+9. "caption": 1–2 Russian sentences with the point + 2 hashtags: the field of the talk
+   (#психология, #медитация, #йога…) and the topic of this clip.
 10. "score": 75–95, how strong the clip is.
 
 # CHECKS

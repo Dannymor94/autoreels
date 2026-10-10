@@ -331,3 +331,112 @@ def test_cmd_label_writes_a_draft_apply_can_read(tmp_path, capsys):
     assert cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(out), provider=Empty()) == 1
     assert cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(out), provider=Empty(),
                          force=True) == 0
+
+
+def test_start_after_an_out_of_order_hallucination_is_mid_sentence():
+    """IMG_6848 r10 (M35): Whisper put a hallucinated sentence out of time order before a block;
+    the block's sentence 2 starts «себя, и вот…» while the real previous word is «любит».
+    --apply refused it (_check_first_subtitle_word); the labeller must flag it first."""
+    raw = [("Он", 0.0, 0.3), ("любит", 0.4, 1.0),                         # real speech, cut by a block border
+           ("Возможно,", 1.1, 1.12), ("вы", 1.12, 1.14), ("решений.", 1.14, 1.16),  # hallucination
+           ("себя,", 1.05, 1.5), ("и", 1.6, 1.7), ("вот", 1.8, 2.0), ("если", 2.1, 2.3), ("слово.", 2.4, 2.8),
+           ("Потом", 3.0, 3.3), ("всё", 3.4, 3.6), ("хорошо.", 3.7, 4.0)]
+    w = [Word(word=a, t0=b, t1=c) for a, b, c in raw]
+    blk = SimpleNamespace(start=1.05, end=5.0)
+    wb = build_wblocks([blk], w, None)
+    assert [s.text.split()[0] for s in wb[0].sents] == ["Возможно,", "себя,", "Потом"]
+    ch = check_clip({"blocks": [1], "start": "1.2", "end": "1.3", "title": "Т", "caption": "П"},
+                    wb, w, LabelParams(min_sec=0.5, max_sec=60))
+    assert any("starts mid-sentence" in p and "любит себя," in p for p in ch.problems), ch.problems
+    ok = check_clip({"blocks": [1], "start": "1.3", "end": "1.3", "title": "Т", "caption": "П"},
+                    wb, w, LabelParams(min_sec=0.1, max_sec=60))
+    assert not any("mid-sentence" in p for p in ok.problems), ok.problems
+
+
+# ── an existing draft: --check and --retry ───────────────────────────────────────────────────
+
+def test_check_draft_comments_out_broken_lines_and_keeps_the_rest():
+    w, wb = _two_blocks(open_words=("два.",))
+    good = "1 85 | s:1 | e:3 | c:3 | k:3=три | t: Т | d: П"
+    bad = "2 80 | s:1 | e:3"                      # block 2 sentence 1 follows «три.» — fine; end ok
+    voice_up = "1 80 | s:1 | e:2"                 # ends on «два.» ↗
+    text = "# head\n" + good + "\n#   note\n" + voice_up + "\n"
+    from autoreels.cloud.label import check_draft
+    new, flagged = check_draft(text, wb, w, P)
+    lines = new.splitlines()
+    assert lines[0] == "# head" and lines[1] == good and lines[2] == "#   note"
+    assert lines[3].startswith("#! 1 80 | s:1 | e:2  ← ") and "voice stays up" in lines[3]
+    assert flagged == [(1, [lines[3].split("← ")[1]])]
+    again, flagged2 = check_draft(new, wb, w, P)        # idempotent
+    assert again == new and flagged2 == []
+    ok, _ = check_draft(bad + "\n", wb, w, P)
+    assert ok == bad + "\n"
+
+
+def test_check_draft_allows_owner_lines_without_title():
+    w, wb = _two_blocks()
+    from autoreels.cloud.label import check_draft
+    new, flagged = check_draft("1 85 | s:1 | e:3\n", wb, w, P)
+    assert flagged == [] and new == "1 85 | s:1 | e:3\n"
+
+
+def test_owner_accepted_spec_passes_the_draft_check():
+    """Every accepted IMG_6848 line, read back from review numbering, passes --check."""
+    from autoreels.cloud.label import check_draft
+    for g in _img_groups():
+        words = [Word(word=a, t0=b, t1=c) for a, b, c in g["words"]]
+        opens = {round(t, 3) for t in g["open_t0"]}
+        tone = lambda w: ("open", "") if round(w.t0, 3) in opens else ("final", "")  # noqa: E731
+        wb = build_wblocks([SimpleNamespace(start=a, end=b) for a, b in g["blocks"]], words, tone, seqs=g["seqs"])
+        new, flagged = check_draft(g["line"] + "\n", wb, words, LabelParams())
+        assert flagged == [], (g["line"], flagged)
+
+
+def test_retry_fills_unanswered_windows_without_overlapping_the_draft():
+    from autoreels.cloud.label import retry_draft, unanswered_windows, used_blocks
+    w, wb = _blocks(6)
+    p = LabelParams(min_sec=1.0, max_sec=99.0, window_blocks=4)
+    text = ("# head\n2 80+ | s:1 | e:6 | t: Т | d: П\n"
+            "# blocks 3–6: no answer (ProviderError: бюджет ожидания 600с исчерпан)\n")
+    assert unanswered_windows(text) == [(3, 6)] and used_blocks(text) == {2, 3}
+    prov = Scripted([{"clips": [_c([3], "3.1", "3.3"), _c([5], "5.1", "5.3")]}])
+    new, done, still = retry_draft(text, wb, w, prov, system="S", p=p, log=lambda m: None)
+    assert (done, still) == (1, 0)
+    body = [l for l in new.splitlines() if l and not l.startswith("#")]
+    assert body == ["2 80+ | s:1 | e:6 | t: Т | d: П", "5 80 | s:1 | e:3 | t: Т | d: П"]
+    assert "no answer" not in new
+    prov2 = Scripted([RuntimeError("429")])
+    same, done2, still2 = retry_draft(text, wb, w, prov2, system="S", p=p, log=lambda m: None)
+    assert (done2, still2) == (0, 1) and "no answer" in same
+
+
+def test_cmd_label_check_rewrites_draft_with_backup(tmp_path):
+    mpath, cache = _source(tmp_path)
+    out = tmp_path / "v_auto.txt"
+
+    class Empty:
+        name = "empty"
+
+        def complete(self, messages, temperature=0.0):
+            return '{"clips": []}'
+
+    assert cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(out), provider=Empty()) == 0
+    text = out.read_text(encoding="utf-8") + "1 80 | s:1 | e:99\n"
+    out.write_text(text, encoding="utf-8")
+    assert cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(out), check=True) == 0
+    assert "#! 1 80 | s:1 | e:99  ← " in out.read_text(encoding="utf-8")
+    assert (tmp_path / "v_auto.txt.bak").read_text(encoding="utf-8") == text
+    missing = tmp_path / "none.txt"
+    assert cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(missing), check=True) == 1
+
+
+def test_exhausted_providers_stop_the_run_and_mark_the_rest_for_retry():
+    w, wb = _blocks(10)
+    p = LabelParams(min_sec=1.0, max_sec=99.0, window_blocks=4)
+    prov = Scripted([{"clips": []}, RuntimeError("budget"), RuntimeError("budget")])
+    res = label_source(wb, w, prov, system="S", p=p, log=lambda m: None)
+    assert len(prov.calls) == 3                       # windows 1–4, 3–6, 5–8; 7–10 not asked
+    assert res.windows_failed == 3
+    assert res.lines[-1] == "# blocks 7–10: no answer (stopped: providers exhausted — arl label --retry later)"
+    from autoreels.cloud.label import unanswered_windows
+    assert unanswered_windows("\n".join(res.lines)) == [(3, 6), (5, 8), (7, 10)]

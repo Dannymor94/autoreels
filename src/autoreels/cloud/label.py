@@ -33,6 +33,7 @@ class LabelParams:
     max_clip_blocks: int = 3      # a review line merges at most 3 blocks ('++')
     title_max_chars: int = 60
     repair_rounds: int = 1
+    stop_after_failed_windows: int = 2   # consecutive provider failures → stop, mark the rest for --retry
     pause_show_sec: float = 0.3
     pause_strong_sec: float = 1.5
 
@@ -180,9 +181,30 @@ def _clean_text(s, limit: int | None = None) -> str:
     return s[:limit].rstrip() if limit else s
 
 
+def word_before(words: list, first):
+    """The word --apply treats as spoken before `first` (_check_first_subtitle_word): the last word
+    in transcript order whose start is earlier. Whisper sometimes inserts a hallucinated sentence
+    out of time order (IMG_6848 1653 s: «Возможно, вы не понимаете…» with 20 ms words): in the
+    review it looks like a finished sentence before a block, while the real previous word is the
+    middle of a sentence («…любит себя,»)."""
+    prev = None
+    for w in words:
+        if w.t0 < first.t0 - 1e-4:
+            prev = w
+    return prev
+
+
+def _continues(first, prev) -> bool:
+    """Same rule as --apply: a lowercase first word after a word that ends no sentence."""
+    from autoreels.cloud.snap import _is_sentence_end
+    text = first.word.strip(".,!?…;: ")
+    return bool(prev is not None and text and not text[0].isupper() and not _is_sentence_end(prev.word))
+
+
 def check_clip(clip: dict, win: Sequence[WBlock], words: list,
-               p: LabelParams = LabelParams()) -> Checked:
-    """Map one proposed clip to a review line and list what breaks the owner's rules."""
+               p: LabelParams = LabelParams(), *, require_text: bool = True) -> Checked:
+    """Map one proposed clip to a review line and list what breaks the owner's rules.
+    require_text=False (checking an edited draft): a missing title/caption is the owner's choice."""
     probs: list[str] = []
     by_seq = {wb.seq: wb for wb in win}
     try:
@@ -238,9 +260,13 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
     if end.open_tone:
         probs.append(f"end {end.sid}: the voice stays up (↗) — the thought goes on there")
     before = order[a - 1] if a > 0 else group[0].prev
+    spoken_before = word_before(words, start.words[0])
     if a == 0 and before is not None and not before.complete:
         probs.append(f"start {start.sid} continues an unfinished sentence before it (…→) — "
                      "the clip starts mid-sentence")
+    elif _continues(start.words[0], spoken_before):
+        probs.append(f"start {start.sid} continues the sentence «…{spoken_before.word} "
+                     f"{start.words[0].word}» — the clip starts mid-sentence")
     elif before is not None and before.open_tone:
         probs.append(f"start {start.sid} comes right after a sentence ending with the voice up (↗) — "
                      "the clip joins mid-thought")
@@ -274,11 +300,12 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
                 keys.append((num[c], wn))
     title = _clean_text(clip.get("title"))
     if not title:
-        probs.append("title is missing")
+        if require_text:
+            probs.append("title is missing")
     elif len(title) > p.title_max_chars:
         probs.append(f"title is {len(title)} characters — at most {p.title_max_chars}")
     caption = _clean_text(clip.get("caption"))
-    if not caption:
+    if not caption and require_text:
         probs.append("caption is missing")
     try:
         score = int(clip.get("score", 80))
@@ -346,7 +373,7 @@ def _repair_message(checked: list[Checked]) -> str:
 
 def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: str,
                  fewshot: Sequence[dict] = (), p: LabelParams = LabelParams(),
-                 log: Callable[[str], None] = print) -> LabelResult:
+                 log: Callable[[str], None] = print, occupied: set[int] | None = None) -> LabelResult:
     """Draft review lines for every block, window by window (windows overlap).
 
     A clip that touches the last block of its window and could still grow is DEFERRED: the next
@@ -361,14 +388,25 @@ def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: st
     failed: list[str] = []
     pending: list[Checked] = []
 
-    def taken(ch: Checked) -> bool:
-        return any(set(ch.blocks) & set(a.blocks) for a in accepted)
+    occupied = set(occupied or ())          # blocks already used by lines of an existing draft
 
+    def taken(ch: Checked) -> bool:
+        return bool(set(ch.blocks) & occupied) or any(set(ch.blocks) & set(a.blocks) for a in accepted)
+
+    provider_fails = 0                      # consecutive windows lost to the providers
     for wi, win in enumerate(wins):
         label = f"{win[0].seq}–{win[-1].seq}" if len(win) > 1 else f"{win[0].seq}"
+        if provider_fails >= p.stop_after_failed_windows:
+            # Free tiers run out for hours (Groq hourly/daily quota, OpenRouter 50 requests a day):
+            # every further window would wait out the whole budget and fail. Stop asking; the
+            # owner runs `arl label … --retry` later for exactly these windows.
+            failed.append(f"# blocks {label}: no answer (stopped: providers exhausted — arl label --retry later)")
+            res.windows_failed += 1
+            continue
         msgs = base + [{"role": "user", "content": render_window(win, p)}]
         ans, raw, err = _ask(provider, msgs)
         res.requests += 1
+        provider_fails = provider_fails + 1 if err is not None else 0
         if ans is None and err is None:
             msgs = msgs + [{"role": "assistant", "content": raw},
                            {"role": "user", "content": 'Answer with ONLY the JSON object {"clips": [...]}.'}]
@@ -416,8 +454,10 @@ def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: st
                 accepted.append(ch)
                 n_ok += 1
         pending = new_pending
-        log(f"  блоки {label}: клипов {n_ok}" + (f", с замечаниями {n_bad}" if n_bad else "")
-            + (f", отложено до следующего окна {len(pending)}" if pending else ""))
+        if ans is not None or n_ok:
+            log(f"  блоки {label}: клипов {n_ok}" + (f", с замечаниями {n_bad}" if n_bad else "")
+                + (f", отложено до следующего окна {len(pending)}" if pending else "")
+                + (" (взяты отложенные из прошлого окна)" if ans is None else ""))
     for ch in pending:
         if not taken(ch):
             accepted.append(ch)
@@ -458,3 +498,121 @@ def render_file(result: LabelResult, *, source_ref: str, n_blocks: int, filter_r
         "",
     ]
     return "\n".join(head + result.lines) + "\n"
+
+
+# ── an existing draft: re-check it with the current code, or retry its unanswered windows ─────
+
+_NO_ANSWER_RE = re.compile(r"^# blocks (\d+)(?:–(\d+))?: no answer")
+
+
+def entry_to_clip(entry, wblocks: Sequence[WBlock], words: list) -> tuple[dict | None, list[WBlock], str]:
+    """A parsed review line → (labeller JSON, its block group, why it cannot be checked)."""
+    by_seq = {wb.seq: wb for wb in wblocks}
+    if entry.merge_back:
+        return None, [], "joins the previous block ('-') — not checked"
+    if entry.beats:
+        return None, [], "beat lines ('>') — not checked"
+    group = [by_seq.get(entry.seq + i) for i in range(entry.merge_fwd + 1)]
+    if any(g is None for g in group):
+        return None, [], "block number outside the review"
+    merged = merge_group_sentences([g.block for g in group], words)
+    pos: dict[int, int] = {}
+    for k, ms in enumerate(merged, 1):
+        for w in ms:
+            pos.setdefault(id(w), k)
+    ids: dict[int, list[str]] = {}
+    for g in group:
+        for s in g.sents:
+            ids.setdefault(pos.get(id(s.words[0]), 0), []).append(s.sid)
+    n = len(merged)
+    s_num = entry.s or 1
+    e_num = entry.e or n
+    if s_num not in ids or e_num not in ids:
+        return None, group, f"s:{s_num}/e:{e_num} outside 1–{n}"
+    keys: dict[str, list[str]] = {}
+    for num, ws in entry.k:
+        if num in ids:
+            keys.setdefault(ids[num][-1], []).extend(w.rstrip("*") for w in ws)
+    clip = {"blocks": [g.seq for g in group], "start": ids[s_num][0], "end": ids[e_num][-1],
+            "cut": [ids[x][0] for x in entry.x if x in ids], "close": [ids[c][-1] for c in entry.c if c in ids],
+            "keys": keys, "title": entry.title or "", "caption": entry.description or "",
+            "score": entry.score if entry.score is not None else 80}
+    return clip, group, ""
+
+
+def check_draft(text: str, wblocks: Sequence[WBlock], words: list, p: LabelParams = LabelParams()
+                ) -> tuple[str, list[tuple[int, list[str]]]]:
+    """Re-check every review line of a draft (a draft written by an older version, or edited by the
+    owner). A line that breaks a rule is commented out as '#! <line>  ← reasons'; everything else
+    is kept byte for byte. Returns (new text, [(block, reasons)])."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    out, flagged = [], []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or not line[0].isdigit():
+            out.append(raw)
+            continue
+        _, entries, errors, _ = parse_compact_answer(line + "\n")
+        if errors or not entries:
+            reasons = [m for _, m in errors] or ["not a review line"]
+        else:
+            clip, group, why = entry_to_clip(entries[0], wblocks, words)
+            if clip is None and why.endswith("not checked"):
+                out.append(raw)            # '-' joins and beat orders: left to the owner as written
+                continue
+            reasons = [why] if clip is None else check_clip(clip, group, words, p, require_text=False).problems
+        if reasons:
+            out.append(f"#! {line}  ← " + "; ".join(reasons))
+            flagged.append((entries[0].seq if entries else 0, reasons))
+        else:
+            out.append(raw)
+    return "\n".join(out) + ("\n" if text.endswith("\n") else ""), flagged
+
+
+def unanswered_windows(text: str) -> list[tuple[int, int]]:
+    """(first, last) block of every '# blocks a–b: no answer' line of a draft."""
+    out = []
+    for line in text.splitlines():
+        m = _NO_ANSWER_RE.match(line.strip())
+        if m:
+            a = int(m.group(1))
+            out.append((a, int(m.group(2) or a)))
+    return out
+
+
+def used_blocks(text: str) -> set[int]:
+    """Blocks taken by the review lines of a draft (a line N with '+'/'++' takes N..N+2)."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    _, entries, _, _ = parse_compact_answer(text)
+    used: set[int] = set()
+    for e in entries:
+        lo = e.seq - (1 if e.merge_back else 0)
+        used.update(range(lo, e.seq + e.merge_fwd + 1))
+    return used
+
+
+def retry_draft(text: str, wblocks: Sequence[WBlock], words: list, provider, *, system: str,
+                fewshot: Sequence[dict] = (), p: LabelParams = LabelParams(),
+                log: Callable[[str], None] = print) -> tuple[str, int, int]:
+    """Ask again for the windows a draft marks '# blocks a–b: no answer'; new clips never overlap
+    the draft's lines. Returns (new text, windows answered now, windows still unanswered)."""
+    by_seq = {wb.seq: wb for wb in wblocks}
+    lines = text.splitlines()
+    done = still = 0
+    for a, z in unanswered_windows(text):
+        win = [by_seq[i] for i in range(a, z + 1) if i in by_seq]
+        if not win:
+            continue
+        sub = label_source(win, words, provider, system=system, fewshot=fewshot,
+                           p=LabelParams(**{**p.__dict__, "window_blocks": len(win)}),
+                           log=log, occupied=used_blocks("\n".join(lines)))
+        label = f"{a}–{z}" if z != a else f"{a}"
+        if sub.windows_failed:
+            still += 1
+            continue
+        done += 1
+        new = sub.lines or [f"# blocks {label}: no clip (retry)"]
+        idx = next(i for i, l in enumerate(lines) if _NO_ANSWER_RE.match(l.strip())
+                   and l.strip().startswith(f"# blocks {label}:"))
+        lines[idx:idx + 1] = new
+    return "\n".join(lines) + "\n", done, still
