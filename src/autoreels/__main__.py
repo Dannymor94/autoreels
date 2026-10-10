@@ -6050,7 +6050,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                          getattr(r, "_plan", None))
                      for i, r in enumerate(reels) if getattr(r, "planned", False)}
     _n_before_stages = len(reels)
-    reels = _stage_snap(reels, transcript, r0_cfg=r0_cfg, max_duration=_manual_max, smap=_blk_smap)
+    # Planned reels keep their plan (restored below): the boundary-moving snap is not run on them.
+    # It moved a plan's end to a pause further on and printed a false «[ERROR] last word overlaps
+    # next speech» for a clip whose real end had air (M35, IMG_6848 8+9: plan end 486.3, snap 495.2),
+    # and left snap diagnostics (end_snap_reason, open_thought) that described a cut never made.
+    _stage_snap([r for r in reels if not getattr(r, "planned", False)], transcript, r0_cfg=r0_cfg,
+                max_duration=_manual_max, smap=_blk_smap)
     # Repair halves of the two split stages (formatting): move boundaries, never drop. What they
     # cannot repair within bounds stays, and collect_human_warnings reports it.
     host_turns = detect_host_turns(tx_words, min_pause=r0_cfg.host_turn_min_pause) if _source_kind == "interview" else []
@@ -7341,6 +7346,54 @@ def cmd_label(
     return 0
 
 
+def cmd_prepare(
+    targets: list[str],
+    *,
+    root=None,
+    inputs_dir: str | None = None,
+    cache_dir: str | None = None,
+) -> int:
+    """M36: transcript → speech map → alignment → intonation → motion → labelling draft → dry plan,
+    for one or several sources (src/autoreels/prepare.py). Finished stages are skipped; a failed
+    source stops with its reason and the batch goes on. Nothing is installed or rendered."""
+    from autoreels.prepare import run_source, summary
+
+    _root = Path(root) if root else _project_root()
+    results = []
+    for target in targets:
+        mpath = Path(target)
+        if not mpath.exists():
+            mpath = _root / "manifests" / target
+        if not mpath.exists() and not mpath.suffix:
+            mpath = mpath.with_suffix(".json")
+        stem = mpath.stem
+        if not mpath.exists():
+            from autoreels.prepare import SourceResult
+            results.append(SourceResult(stem, failed_stage="manifest",
+                                        reason=f"манифест не найден: {target}"))
+            continue
+        draft = _root / "reviews" / f"{stem}_auto.txt"
+        m = str(mpath)
+        stages = {
+            "speech-map": lambda m=m: cmd_speech_map(m, root=_root, inputs_dir=inputs_dir, cache_dir=cache_dir),
+            "align": lambda m=m: cmd_align(m, root=_root, inputs_dir=inputs_dir, cache_dir=cache_dir),
+            "prosody": lambda m=m: cmd_prosody(m, root=_root, inputs_dir=inputs_dir),
+            "motion": lambda m=m: cmd_motion(m, root=_root, inputs_dir=inputs_dir),
+        }
+
+        def label(mode, m=m):
+            return cmd_label(m, root=_root, cache_dir=cache_dir,
+                             retry=(mode == "retry"), check=(mode == "check"))
+
+        def plan(d=draft, m=m):
+            return _blocks_do_apply(str(d), root=_root, cache_dir=cache_dir, source=m, labeler="auto")
+
+        results.append(run_source(stem, stages=stages, draft_path=draft, label=label, plan=plan,
+                                  log=lambda s: print(s, flush=True)))
+    print(summary(results), flush=True)
+    return 0 if all(not r.failed_stage for r in results) else 1
+
+
 def cmd_prosody(
     manifest_path: str,
     *,
@@ -7525,17 +7578,31 @@ def cmd_speech_map(
     transcript = Transcript.model_validate_json(tr_path.read_text(encoding="utf-8"))
     words = transcript.words
 
-    # Locate source file
-    try:
-        source = resolve_source(manifest, _inputs)
-    except Exception as e:
-        print(f"ошибка: исходник не найден: {e}", file=sys.stderr)
-        return 1
-
     stem = mpath.stem  # e.g. "2026-08-08 11h 42m 49s"
     out_path = _transcripts_dir / f"{stem}.speechmap.json"
     if force and out_path.exists():
         out_path.unlink()
+
+    # Locate source file — not needed when the map in git is current (arl prepare on a machine
+    # where the video is not at hand, M36).
+    try:
+        source = resolve_source(manifest, _inputs)
+    except Exception as e:
+        from autoreels.cloud.speechmap import SPEECHMAP_VERSION, _params_hash
+        _ph = _params_hash(frame_sec=_smap_cfg.frame_sec, noise_percentile=_smap_cfg.noise_percentile,
+                           headroom_db=_smap_cfg.headroom_db, min_silence_sec=_smap_cfg.min_silence_sec,
+                           pause_min_sec=_smap_cfg.pause_min_sec, min_edge_dist=_smap_cfg.min_edge_dist,
+                           untranscribed_min_sec=_smap_cfg.untranscribed_min_sec)
+        try:
+            _cached = json.loads(out_path.read_text(encoding="utf-8")) if out_path.is_file() else {}
+        except ValueError:
+            _cached = {}
+        if (_cached.get("source_sha256") == sha and _cached.get("params_hash") == _ph
+                and _cached.get("version") == SPEECHMAP_VERSION):
+            print(f"✓ уже есть: {out_path} (исходник не нужен)")
+            return 0
+        print(f"ошибка: исходник не найден: {e}", file=sys.stderr)
+        return 1
 
     print(f"source:   {source.name}")
     print(f"sha256:   {sha[:16]}…")
@@ -9698,6 +9765,19 @@ def _build_parser():
     pmo.add_argument("--inputs-dir", default=None, dest="inputs_dir")
     pmo.add_argument("--force", action="store_true", default=False, help="пересчитать")
 
+    ppp = sub.add_parser(
+        "prepare",
+        help="источник → карта речи, выравнивание, интонация, движение, черновик разметки, пробный план",
+        description="M36: runs every analysis stage for one or several sources; finished stages are "
+                    "skipped, a failed source stops with its reason. Ends with a table. Nothing is "
+                    "installed or rendered.",
+    )
+    ppp.add_argument("manifests", metavar="манифест", nargs="+",
+                     help="пути к манифестам или имена (в manifests/)")
+    ppp.add_argument("--root", default=None, help="корень проекта")
+    ppp.add_argument("--inputs-dir", default=None, dest="inputs_dir")
+    ppp.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     plb = sub.add_parser(
         "label",
         help="черновик разметки блоков от LLM, проверенный кодом → reviews/<stem>_auto.txt",
@@ -10001,6 +10081,13 @@ def main(argv=None) -> int:
                 root=args.root if hasattr(args, "root") else None,
                 inputs_dir=getattr(args, "inputs_dir", None),
                 force=getattr(args, "force", False),
+            )
+        elif args.cmd == "prepare":
+            return cmd_prepare(
+                args.manifests,
+                root=args.root if hasattr(args, "root") else None,
+                inputs_dir=getattr(args, "inputs_dir", None),
+                cache_dir=getattr(args, "cache_dir", None),
             )
         elif args.cmd == "label":
             return cmd_label(

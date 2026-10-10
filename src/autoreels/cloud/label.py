@@ -201,6 +201,24 @@ def _continues(first, prev) -> bool:
     return bool(prev is not None and text and not text[0].isupper() and not _is_sentence_end(prev.word))
 
 
+_QUESTION_WORDS = frozenset("что как почему зачем где когда кто какой какая какое какие каким куда откуда "
+                            "сколько чем чего кого кому отчего".split())
+_LEAD = frozenset("а и но ну так вот да".split())
+
+
+def is_open_question(words) -> bool:
+    """A sentence asking something the clip would have to answer: ends with «?» and starts with a
+    question word («Что это такое?», «А как же быть?»). A tag question closing a thought
+    («…его сын, правильно?», accepted by the owner in IMG_6848) is not one (10h59 r05, M36)."""
+    if not words or not words[-1].word.rstrip("»\"')").endswith("?"):
+        return False
+    toks = [norm_word(w.word) for w in words]
+    toks = [t for t in toks if t]
+    while toks and toks[0] in _LEAD:
+        toks = toks[1:]
+    return bool(toks) and toks[0] in _QUESTION_WORDS
+
+
 def check_clip(clip: dict, win: Sequence[WBlock], words: list,
                p: LabelParams = LabelParams(), *, require_text: bool = True) -> Checked:
     """Map one proposed clip to a review line and list what breaks the owner's rules.
@@ -259,6 +277,8 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
         probs.append(f"end {end.sid} is unfinished in the text (…→)")
     if end.open_tone:
         probs.append(f"end {end.sid}: the voice stays up (↗) — the thought goes on there")
+    if is_open_question(end.words):
+        probs.append(f"end {end.sid} is an open question («{end.text[-60:]}») — the answer is not in the clip")
     before = order[a - 1] if a > 0 else group[0].prev
     spoken_before = word_before(words, start.words[0])
     if a == 0 and before is not None and not before.complete:

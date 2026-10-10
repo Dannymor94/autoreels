@@ -455,3 +455,15 @@ def test_block_start_reclaims_the_word_rounding_left_out():
     # a word inside the previous block is never taken
     b2 = [SimpleNamespace(start=0.0, end=10.04, duration=10.04), SimpleNamespace(start=10.05, end=20.0, duration=9.95)]
     assert cli._reclaim_block_first_words(b2, [Word(word="x", t0=10.02, t1=10.04)]) == 0
+
+
+def test_clip_ending_on_an_open_question_is_flagged():
+    """10h59 r05 ended on «Что это такое?» — the answer comes after the clip (M36). A tag question
+    closing the thought («…правильно?», owner-accepted IMG_6848 r07) stays fine."""
+    from autoreels.cloud.label import is_open_question
+    ws = lambda t: [Word(word=x, t0=i, t1=i + 0.5) for i, x in enumerate(t.split())]  # noqa: E731
+    assert is_open_question(ws("Что это такое?"))
+    assert is_open_question(ws("А как же быть?"))
+    assert not is_open_question(ws("Я поступил как взрослый его сын, правильно?"))
+    assert not is_open_question(ws("Разве я мог сказать?"))
+    assert not is_open_question(ws("Что это такое."))

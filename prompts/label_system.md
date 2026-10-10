@@ -24,7 +24,8 @@ The first line may show the sentence just before the first block (context only).
    (that thought continues into the start). "А…", "Но…", "То есть…" are fine starts when
    the sentence stands on its own.
 3. END where the voice ends: the last sentence has no …→ and no ↗. Prefer one followed by ⏸⏸.
-   End on the strongest line, fast: no wind-down after the payoff.
+   End on the strongest line, fast: no wind-down after the payoff. Never end on a question the
+   clip does not answer («Что это такое?»).
 4. LENGTH: 25–75 s of speech (sum of the played sentences' seconds). A thought may run over
    2–3 consecutive blocks — list them all in "blocks"; start and end may be in different blocks.
 5. "cut": sentences inside the clip that break the flow — a digression, a repeat, a false
