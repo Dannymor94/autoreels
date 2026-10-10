@@ -5114,7 +5114,7 @@ def _resolve_cached_transcript(manifest: Manifest, cache_dir: Path):
     return None
 
 
-def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None):
+def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, filler_profile: str | None = None):
     """ManualPlanParams from config — one place, so apply and tests read the same numbers.
     `filler_cut`: per-clip decision (f:1/f:0 > --filler/--no-filler > config manual_filler_cut)."""
     from autoreels.cloud.plan import ManualPlanParams
@@ -5128,7 +5128,23 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None):
         accent_min_sec=getattr(r0_cfg, "accent_min_sec", 3.0),
         accent_max_sec=getattr(r0_cfg, "accent_max_sec", 8.0),
         filler_cut=bool(getattr(r0_cfg, "manual_filler_cut", False) if filler_cut is None else filler_cut),
+        **_filler_profile_values(r0_cfg, filler_profile),
     )
+
+
+def _filler_profile_values(r0_cfg, name: str | None) -> dict:
+    """Filler-cut balance preset (r0.yaml manual_filler_profiles): jump_max, min_cut_spacing_sec,
+    jump_mask. `name` (--filler-profile) > config manual_filler_profile. Unknown name → ValueError."""
+    profiles = getattr(r0_cfg, "manual_filler_profiles", None) or {}
+    name = name or getattr(r0_cfg, "manual_filler_profile", None)
+    if not name:
+        return {}
+    if name not in profiles:
+        raise ValueError(f"unknown filler profile {name!r} (r0.yaml manual_filler_profiles: "
+                         f"{', '.join(sorted(profiles)) or 'none'})")
+    allowed = {"jump_max", "min_cut_spacing_sec", "jump_mask", "min_cut_sec", "keep_word_sec",
+               "keep_sentence_sec", "pause_max_sec", "filler_min_sec", "max_removed_share"}
+    return {k: v for k, v in profiles[name].items() if k in allowed}
 
 
 def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
@@ -5155,7 +5171,7 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 
 
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
-                       tone=None, filler=None, jump=None) -> list[str]:
+                       tone=None, filler=None, jump=None, filler_profile=None) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5186,7 +5202,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     _f = getattr(entry, "filler", None)
     _f = _f if _f is not None else filler
     plan = build_manual_plan(
-        sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f),
+        sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f, filler_profile),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
         source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
     )
@@ -5213,7 +5229,8 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     return lines
 
 
-def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner") -> int:
+def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner",
+                     filler_profile: str | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     A human selection is FORMATTED, never second-guessed: this path runs the formatting stages
@@ -5872,7 +5889,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             try:
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
                                               render_cfg, '+'.join(str(s) for s in g), align=_blk_align,
-                                              tone=_blk_tone, filler=filler, jump=_blk_jump):
+                                              tone=_blk_tone, filler=filler, jump=_blk_jump,
+                                              filler_profile=filler_profile):
                     print(_pl)
             except ValueError as _pe:
                 print(f"  error {'+'.join(str(s) for s in g)}: plan: {_pe}", file=sys.stderr)
@@ -6494,6 +6512,7 @@ def cmd_blocks(
     speed: float | None = None,
     filler: bool | None = None,
     labeler: str = "owner",
+    filler_profile: str | None = None,
 ) -> int:
     """Print candidate blocks with stage-2 filter verdicts (M1.6 stage 1+2).
 
@@ -6517,7 +6536,7 @@ def cmd_blocks(
 
     root = Path(root) if root is not None else _project_root()
     if apply_review:
-        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed, filler=filler, labeler=labeler)
+        return _blocks_do_apply(apply_review, root=root, cache_dir=cache_dir, source=target, install=install, render=render, speed=speed, filler=filler, labeler=labeler, filler_profile=filler_profile)
 
     if target is None:
         print("error: target required (or use --apply <review.md>)", file=sys.stderr)
@@ -9410,6 +9429,11 @@ def _build_parser():
         help="force filler removal on for --apply (overrides config; per-clip f:0 still wins)",
     )
     pbl.add_argument(
+        "--filler-profile", dest="filler_profile", default=None, metavar="ИМЯ",
+        help="баланс чистки планового клипа: профиль из r0.yaml manual_filler_profiles "
+             "(careful / balance / dynamic)",
+    )
+    pbl.add_argument(
         "--no-filler", dest="filler", action="store_false",
         help="turn filler removal off for --apply (overrides config; per-clip f:1 still wins)",
     )
@@ -9731,6 +9755,7 @@ def main(argv=None) -> int:
                 install=args.install, render=args.render, compact=args.compact,
                 speed=args.speed, filler=args.filler,
                 labeler=getattr(args, "labeler", "owner"),
+                filler_profile=getattr(args, "filler_profile", None),
             )
         elif args.cmd == "migrate-calibrations":
             return cmd_migrate_calibrations()

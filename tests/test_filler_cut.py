@@ -177,3 +177,45 @@ def test_plan_leaves_in_cuts_with_a_visible_jump():
     w = plan.body[0]
     assert len(w.cuts) == 1 and w.cuts[0][0] > 3.0 and w.cuts_skipped == 1
     assert any("1 left in (visible jump)" in ln for ln in plan.describe(sents))
+
+
+# ── balance: spacing between cuts and punch-in masking ──────────────────────────────────────
+
+def test_cuts_keep_a_minimum_spacing_largest_first():
+    sents, words, smap, align = _setup(SPEC, [[1.0, 1.6]])
+    spaced = ManualPlanParams(filler_cut=True, min_cut_spacing_sec=3.0)
+    cuts = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=spaced, align=align).body[0].cuts
+    assert len(cuts) == 1 and cuts[0][0] > 3.0          # centres 1.3 s and 3.8 s apart < 3 s: larger wins
+
+
+def test_visible_jump_masked_by_shot_switch():
+    sents, words, smap, align = _setup(SPEC, [[1.0, 1.6]])
+    big = lambda a, b: 5.0 if a < 2.0 else 0.5
+    masked = ManualPlanParams(filler_cut=True, jump_mask=True)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=masked, align=align, jump=big)
+    w = plan.body[0]
+    assert len(w.cuts) == 2 and w.cut_flips == [w.cuts[0]] and w.cuts_skipped == 0
+    segs = w.segments()
+    shots = [s.shot for s in segs]
+    assert shots[0] != shots[1] and shots[1] == shots[2]   # switch only at the masked cut
+    assert any("1 masked by a shot switch" in ln for ln in plan.describe(sents))
+
+
+def test_shot_switch_inverts_partial_close_spans():
+    w = PlannedWindow(sentences=[1], start=0.0, end=10.0, shot="wide", close_intervals=[[6.0, 8.0]],
+                      cuts=[[3.0, 4.0]], cut_flips=[[3.0, 4.0]])
+    a, b = w.segments()
+    assert a.shot == "wide" and a.close_intervals == []
+    assert b.shot == "wide" and b.close_intervals == [[0.0, 2.0], [4.0, 6.0]]   # complement of 2–4
+
+
+def test_filler_profile_values_from_config():
+    from types import SimpleNamespace
+    from autoreels.__main__ import _filler_profile_values
+    cfg = SimpleNamespace(manual_filler_profile="balance",
+                          manual_filler_profiles={"balance": {"jump_max": 5.0, "min_cut_spacing_sec": 3.0},
+                                                  "dynamic": {"jump_max": 3.5, "jump_mask": True, "bogus": 1}})
+    assert _filler_profile_values(cfg, None) == {"jump_max": 5.0, "min_cut_spacing_sec": 3.0}
+    assert _filler_profile_values(cfg, "dynamic") == {"jump_max": 3.5, "jump_mask": True}
+    with pytest.raises(ValueError):
+        _filler_profile_values(cfg, "nope")

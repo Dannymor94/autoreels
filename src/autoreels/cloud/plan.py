@@ -49,7 +49,9 @@ class ManualPlanParams:
     min_cut_sec: float = 0.30         # shorter removals are not worth a jump cut
     edge_min_sec: float = 0.05        # a cut never starts/ends closer than this to a word
     max_removed_share: float = 0.40   # never remove more than this share of a window
-    jump_max: float = 2.0             # skip a cut whose picture jump exceeds this × typical motion
+    jump_max: float = 2.0             # a cut whose picture jump exceeds this × typical motion …
+    jump_mask: bool = False           # … is masked by switching wide↔close (punch-in) instead of left in
+    min_cut_spacing_sec: float = 0.0  # cuts at least this far apart (largest removals win)
 
 
 @dataclass
@@ -62,6 +64,7 @@ class PlannedWindow:
     cold_open: bool = False
     cuts: list[list[float]] = field(default_factory=list)  # source-time stretches removed (§1.4)
     cuts_skipped: int = 0             # candidate cuts left in: the face would visibly jump
+    cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
 
     @property
     def last_shot(self) -> str:
@@ -90,18 +93,27 @@ class PlannedWindow:
         if not self.cuts:
             return [self.segment()]
         out = []
-        for a, b in self.pieces():
+        flipped = False
+        flips = {(round(c0, 3), round(c1, 3)) for c0, c1 in self.cut_flips}
+        cuts = sorted(self.cuts)
+        for k, (a, b) in enumerate(self.pieces()):
+            if k > 0 and (round(cuts[k - 1][0], 3), round(cuts[k - 1][1], 3)) in flips:
+                flipped = not flipped          # punch-in: the jump is masked by the shot switch
             if self.shot == "close":
-                shot, ci = "close", []
+                spans = [[0.0, b - a]]
             else:
-                ci = []
+                spans = []
                 for c0, c1 in self.close_intervals:
                     s0, s1 = max(c0 + self.start, a), min(c1 + self.start, b)
                     if s1 - s0 > _EPS:
-                        ci.append([round(s0 - a, 6), round(s1 - a, 6)])
-                shot = "wide"
-                if len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > (b - a) - _EPS:
-                    shot, ci = "close", []
+                        spans.append([round(s0 - a, 6), round(s1 - a, 6)])
+            if flipped:
+                spans = _complement(spans, b - a)
+            shot, ci = "wide", spans
+            if not spans:
+                ci = []
+            elif len(spans) == 1 and spans[0][0] < _EPS and spans[0][1] > (b - a) - _EPS:
+                shot, ci = "close", []
             out.append(make_segment(a, b).model_copy(update={"shot": shot, "close_intervals": ci,
                                                              "window_cut": bool(out)}))
         return out
@@ -169,13 +181,27 @@ class ManualPlan:
             lines.append(f"hook      s{self.hook} replayed in body: {'yes' if self.hook_replayed else 'no'}")
         cuts = [c for w in self.windows for c in w.cuts]
         skipped = sum(w.cuts_skipped for w in self.windows)
+        masked = sum(len(w.cut_flips) for w in self.windows)
         if cuts or skipped:
             removed = sum(c1 - c0 for c0, c1 in cuts)
             total = sum(w.end - w.start for w in self.windows)
             lines.append(f"cuts      {len(cuts)} fillers/pauses removed, {removed:.1f}s "
                          f"(clip {total:.1f}s → {total - removed:.1f}s)"
+                         + (f"; {masked} masked by a shot switch" if masked else "")
                          + (f"; {skipped} left in (visible jump)" if skipped else ""))
         return lines
+
+
+def _complement(spans: list[list[float]], dur: float) -> list[list[float]]:
+    """[0, dur] minus the (sorted, disjoint) spans."""
+    out, t0 = [], 0.0
+    for a, b in sorted(spans):
+        if a - t0 > _EPS:
+            out.append([round(t0, 6), round(a, 6)])
+        t0 = max(t0, b)
+    if dur - t0 > _EPS:
+        out.append([round(t0, 6), round(dur, 6)])
+    return out
 
 
 def _fmt_nums(nums: Sequence[int]) -> str:
@@ -513,6 +539,7 @@ def _accent_end(times: SpeechTimes, sentences, w: "PlannedWindow", bounds: dict,
 
 def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "ManualPlanParams",
                  jump: Callable[[float, float], float] | None = None) -> list[list[float]]:
+    """Cuts of the window (sorted); masked ones are also recorded in w.cut_flips."""
     """REEL_SPEC §1.4: stretches to remove inside a window — fillers and over-long pauses.
 
     Between every two consecutive played words of the window: the gap (aligned end of the left
@@ -523,12 +550,14 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
     least edge_min_sec off a word. Removals shorter than min_cut_sec are skipped; the total is
     capped at max_removed_share of the window (largest gaps first). With `jump` (local/motion.py),
     a cut whose picture jump exceeds jump_max × typical motion is left in (the face would visibly
-    jump); the count is kept on the window."""
+    jump) — or, with jump_mask, kept and masked by switching wide↔close at it (punch-in). Cuts are
+    at least min_cut_spacing_sec apart (centre to centre; the larger removal wins)."""
     ws: list[tuple[Word, bool]] = []
     for n in w.sentences:
         s = sentences[n - 1]
         ws.extend((x, i == len(s) - 1) for i, x in enumerate(s))
     cands: list[list[float]] = []
+    flip_c: set[tuple[float, float]] = set()
     for (w1, end_of_sentence), (w2, _) in zip(ws, ws[1:]):
         ae, as_ = times.pair(w1, w2)
         gap = as_ - ae
@@ -546,16 +575,24 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         b = as_ - max(params.edge_min_sec, min(half, sil_r))
         if b - a >= params.min_cut_sec:
             if jump is not None and jump(a, b) > params.jump_max:
-                w.cuts_skipped += 1
-                continue
+                if not params.jump_mask:
+                    w.cuts_skipped += 1
+                    continue
+                flip_c.add((round(a, 3), round(b, 3)))
             cands.append([a, b])
     budget = params.max_removed_share * (w.end - w.start)
     keep: list[list[float]] = []
     for c in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
-        if c[1] - c[0] <= budget:
-            keep.append([round(c[0], 3), round(c[1], 3)])
-            budget -= c[1] - c[0]
-    return sorted(keep)
+        mid = (c[0] + c[1]) / 2
+        if c[1] - c[0] > budget:
+            continue
+        if any(abs(mid - (k0 + k1) / 2) < params.min_cut_spacing_sec for k0, k1 in keep):
+            continue
+        keep.append([round(c[0], 3), round(c[1], 3)])
+        budget -= c[1] - c[0]
+    keep.sort()
+    w.cut_flips = [c for c in keep if (c[0], c[1]) in flip_c]
+    return keep
 
 
 def _group_windows(play: Sequence[int]) -> list[list[int]]:

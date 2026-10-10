@@ -1,0 +1,26 @@
+# IMG_6848 filler-cut balance test, profile «careful» (r0.yaml manual_filler_profiles, M31):
+# r01, r03, r05 planned with --filler --filler-profile careful, rendered with --gate careful.
+
+source: IMG_6848
+clips:
+- clip_id: r01
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/careful/r01.mp4
+  reel_end: 271.06
+  first_words: У меня был такой
+  last_words: понимаешь себя. Как-то так.
+  cold_open: null
+- clip_id: r03
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/careful/r03.mp4
+  reel_end: 900.89
+  first_words: А я и не
+  last_words: это самый лучший отдых.
+  cold_open: null
+- clip_id: r05
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/careful/r05.mp4
+  reel_end: 1242.05
+  first_words: Раз я здесь в
+  last_words: вещи ценности, самое главное.
+  cold_open: null

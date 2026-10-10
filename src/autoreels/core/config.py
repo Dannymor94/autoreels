@@ -314,6 +314,9 @@ class R0Config(BaseModel):
     # (aligned word times + untranscribed speech). Per clip f:1/f:0 > --filler/--no-filler > this.
     # Thresholds: ManualPlanParams in cloud/plan.py. Off = the previous output (invariant 8).
     manual_filler_cut: bool = False
+    # Balance presets for the filler cut (jump_max, min_cut_spacing_sec, jump_mask, …) and the default.
+    manual_filler_profile: str | None = None
+    manual_filler_profiles: dict[str, dict[str, float | bool]] = Field(default_factory=dict)
 
     @property
     def min_duration(self) -> int:
