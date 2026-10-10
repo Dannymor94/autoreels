@@ -559,6 +559,10 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         s = sentences[n - 1]
         ws.extend((x, i == len(s) - 1) for i, x in enumerate(s))
     cands: list[tuple[float, float, bool, float]] = []     # (a, b, visible jump, filler sound length)
+    # Forced alignment can place a word out of order (IMG_6848 1870 s: «эта» aligned after «будет»):
+    # the "gap" between two neighbours then holds other words. A stretch where any word of the
+    # window is heard is never cut (M35: seam inside «будет»).
+    spans = [times.span(x) for x, _ in ws]
     for (w1, end_of_sentence), (w2, _) in zip(ws, ws[1:]):
         ae, as_ = times.pair(w1, w2)
         gap = as_ - ae
@@ -574,8 +578,11 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         sil_r = as_ - untr[-1][1] if untr else gap
         a = ae + max(params.edge_min_sec, min(half, sil_l))
         b = as_ - max(params.edge_min_sec, min(half, sil_r))
-        if b - a >= params.min_cut_sec:
-            cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, u_len))
+        if b - a < params.min_cut_sec:
+            continue
+        if any(min(b, y1) - max(a, y0) > _EPS for y0, y1 in spans):
+            continue
+        cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, u_len))
     # shot changes already in the window (its start is a seam; close spans switch in and out)
     changes = [w.start] + [w.start + x for ci in w.close_intervals for x in ci]
     budget = params.max_removed_share * (w.end - w.start)

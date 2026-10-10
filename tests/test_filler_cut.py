@@ -57,6 +57,20 @@ def test_cut_edges_stay_off_words_and_subtitles_in_played_pieces():
         assert any(a <= s.t0 < b for a, b in pieces)
 
 
+def test_no_cut_over_a_word_aligned_out_of_order():
+    """IMG_6848 1870 s (M35): forced alignment put «эта» after «будет»; the gap «то» → «эта» then
+    held «книжка» and «будет», and the cut split «будет» (--apply: seam inside word)."""
+    spec = [[("то", 1.0, 1.2), ("эта", 3.3, 3.5), ("книжка", 1.6, 2.0), ("будет", 3.0, 3.2),
+             ("помогать.", 3.6, 4.0)],
+            [("Тебе", 4.3, 5.0), ("в", 5.1, 5.3), ("понимании", 5.4, 7.0), ("себя.", 7.1, 9.0)]]
+    sents, words, smap, align = _setup(spec, [[1.2, 1.6], [2.0, 3.0]])
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=P, align=align)
+    for c0, c1 in plan.body[0].cuts:
+        for w in words:
+            a, b = (w.t0, w.t1)
+            assert min(c1, b) <= max(c0, a) + 1e-6, (c0, c1, w.word)
+
+
 def test_off_by_default_and_short_or_capped():
     sents, words, smap, align = _setup(SPEC, [[1.0, 1.6]])
     assert build_manual_plan(sents, [1, 2], words=words, smap=smap, align=align).body[0].cuts == []
