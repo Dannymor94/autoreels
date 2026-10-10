@@ -5240,6 +5240,28 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     return lines
 
 
+def _emph_in_own_words(subtitles, sentence, kw: str) -> bool:
+    """Mark keyword `kw` (trailing * = prefix) on the subtitle words that ARE the words of
+    `sentence` (same Whisper t0), wherever the subtitle sentence split put them. True if marked.
+
+    The t0 anchor of k: resolution maps a review sentence to ONE subtitle sentence; overlapping
+    Whisper times can sort a word of it into the previous subtitle sentence (IMG_6848 «Вот,
+    наверное, две вещи.» — «Вот,» before the end of the sentence before), and the keyword is then
+    looked up in the wrong one (M35: k:9=две, k:17=понимание, 10h59 k:3=випассана skipped)."""
+    own = {round(w.t0 * 1000) for w in sentence}
+    is_prefix = kw.endswith("*")
+    pat = kw[:-1] if is_prefix else kw
+    hit = False
+    for w in subtitles:
+        if round(w.t0 * 1000) not in own:
+            continue
+        n = w.word.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
+        if (is_prefix and n.startswith(pat)) or (not is_prefix and n == pat):
+            w.emph = True
+            hit = True
+    return hit
+
+
 def _review_block_set(transcript, r0_cfg, source_kind):
     """Stages 1-2 of the review path: candidate blocks and the deterministic pre-filter.
 
@@ -5277,7 +5299,32 @@ def _review_block_set(transcript, r0_cfg, source_kind):
         min_sec=r0_cfg.min_meaningful_sec,
         max_sec=r0_cfg.max_duration,
     )
+    _reclaim_block_first_words(all_blocks, transcript.words)
     return all_blocks, kept, dropped
+
+
+def _reclaim_block_first_words(blocks, words, step: float = 0.05) -> int:
+    """Give each block back the first word its rounded start time left out.
+
+    Block times come from the compressed transcript, rounded to 0.1 s: a block starting with a word
+    at 681.295 s gets start 681.3, and words_in_span (t0 >= start) then puts that word in NO block —
+    it vanishes from the review text, the clip text and the subtitles (IMG_6848: «Когда», «Чтобы»,
+    «Как»…; 10h59: 19 seams — «Вы», «И», «Смотрите,»…). A word within the rounding step before a
+    block's start that is not inside the previous block belongs to this block. Ids (from the text)
+    and the review fingerprint are unchanged. Returns how many blocks were moved."""
+    moved = 0
+    prev_end = None
+    ts = sorted(w.t0 for w in words)
+    import bisect as _bisect
+    for b in blocks:
+        lo = _bisect.bisect_left(ts, b.start - step - 1e-9)
+        cand = [t for t in ts[lo:_bisect.bisect_left(ts, b.start)] if prev_end is None or t >= prev_end]
+        if cand:
+            b.start = cand[0]
+            b.duration = b.end - b.start
+            moved += 1
+        prev_end = b.end
+    return moved
 
 
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner",
@@ -6151,6 +6198,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             for _sw in _ss:
                 _t0_to_sub_idx.setdefault(round(_sw.t0 * 1000), _si)
         for sent_idx, kwords in _kw_spec:
+            _orig_s = None
             # Beat reel: sent_idx is the original block sentence number; map to beat display position.
             if _beat_orig is not None:
                 try:
@@ -6194,6 +6242,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                     if (is_prefix and w_norm.startswith(kw_pat)) or (not is_prefix and w_norm == kw_pat):
                         w.emph = True
                         matched = True
+                if not matched and _orig_s is not None:
+                    # Overlapping Whisper times can put a word of the sentence into the previous
+                    # subtitle sentence (IMG_6848 «Вот, наверное, две вещи.»: «Вот,» sorted before the
+                    # end of the sentence before, so the t0 anchor picked the wrong one). Match the
+                    # keyword among the subtitle words of THIS sentence directly, by t0.
+                    matched = _emph_in_own_words(reel.subtitles, _orig_s, kw)
                 if not matched:
                     print(f"  warning ({reel.id}): k:{sent_idx} word '{kw}' not found in sentence — skipped",
                           file=sys.stderr)

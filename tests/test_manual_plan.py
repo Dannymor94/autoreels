@@ -361,3 +361,15 @@ def test_short_sound_after_dip_is_the_word_end_not_new_speech():
     al2 = _align([(1.0, 1.0, 1.3), (1.3, 1.5, 1.8), (2.1, 2.31, 2.4)], untr=[(2.07, 2.2)])
     plan2 = build_manual_plan(sents, [1], words=words, smap=smap, params=P, align=al2)
     assert plan2.last_audible_end == pytest.approx(2.0)
+
+
+def test_subtitles_keep_text_order_when_whisper_times_go_back():
+    """10h59 r03 / IMG_6848 r04 (M35): Whisper stitched «лучше всего работает. То есть» with «То»
+    starting before «работает.»; sorting by time showed «лучше всего То работает. есть»."""
+    spec = [[("лучше", 0.0, 0.4, 0.05, 0.4), ("всего", 0.5, 0.9, 0.55, 0.9), ("работает.", 1.2, 1.8, 1.25, 1.8)],
+            [("То", 1.0, 1.1, 1.9, 2.0), ("есть", 2.1, 2.4, 2.15, 2.4), ("алгоритм.", 2.5, 3.2, 2.55, 3.2)]]
+    sents, words, smap = _sentences_and_map(spec)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap)
+    assert [w.word for w in plan.subtitles] == ["лучше", "всего", "работает.", "То", "есть", "алгоритм."]
+    ts = [w.t0 for w in plan.subtitles]
+    assert ts == sorted(ts)

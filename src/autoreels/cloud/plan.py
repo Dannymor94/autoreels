@@ -786,14 +786,21 @@ def build_manual_plan(
 
     # §1/§6 subtitles: exactly the words of the played sentences, times kept inside their window
     # (with cuts: inside the played piece that holds the word's audible start).
+    # Whisper stitches chunks with overlapping times: a word can start before the word it follows
+    # (10h59 r03 «…зарабатывали денег, как бы…» shown as «зарабатывали как денег, бы»). Within a
+    # window the subtitle keeps the TEXT order: a start never goes back before the previous word's.
     subs: dict[int, Word] = {}
     for w in windows:
         pieces = w.pieces()
+        prev_t0 = None
         for n in w.sentences:
             for word in sentences[n - 1]:
                 key = round(word.t0 * 1000)
                 if key in subs:
                     continue
+                if prev_t0 is not None and word.t0 < prev_t0:
+                    word = word.model_copy(update={"t0": prev_t0, "t1": max(word.t1, prev_t0)})
+                prev_t0 = word.t0
                 pa, pb = w.start, w.end
                 if w.cuts:
                     w_on = times.audible(word)[0]

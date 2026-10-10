@@ -440,3 +440,18 @@ def test_exhausted_providers_stop_the_run_and_mark_the_rest_for_retry():
     assert res.lines[-1] == "# blocks 7–10: no answer (stopped: providers exhausted — arl label --retry later)"
     from autoreels.cloud.label import unanswered_windows
     assert unanswered_windows("\n".join(res.lines)) == [(3, 6), (5, 8), (7, 10)]
+
+
+def test_block_start_reclaims_the_word_rounding_left_out():
+    """IMG_6848 «Когда» (681.295 s, block start 681.3) / 10h59 19 seams (M35): the rounded block start
+    left the block's first word in no block — gone from review text, clip text and subtitles."""
+    blocks = [SimpleNamespace(start=600.0, end=678.3, duration=78.3),
+              SimpleNamespace(start=681.3, end=700.0, duration=18.7)]
+    words = [Word(word="что...", t0=678.0, t1=678.3), Word(word="Когда", t0=681.295, t1=681.375),
+             Word(word="инсайт", t0=681.375, t1=682.0)]
+    assert cli._reclaim_block_first_words(blocks, words) == 1
+    assert blocks[1].start == 681.295 and blocks[1].duration == pytest.approx(700.0 - 681.295)
+    assert blocks[0].start == 600.0                      # nothing within the step before it
+    # a word inside the previous block is never taken
+    b2 = [SimpleNamespace(start=0.0, end=10.04, duration=10.04), SimpleNamespace(start=10.05, end=20.0, duration=9.95)]
+    assert cli._reclaim_block_first_words(b2, [Word(word="x", t0=10.02, t1=10.04)]) == 0

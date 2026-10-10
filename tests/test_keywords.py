@@ -360,3 +360,21 @@ def test_beat_range_verbose():
     _, entries2, errors2, _ = parse_compact_answer(content2)
     assert not errors2
     assert entries2[0].beats == (3, 4, 6)
+
+
+def test_keyword_found_in_own_words_when_subtitle_split_differs():
+    """M35: «Вот,» of «Вот, наверное, две вещи.» sorts into the previous subtitle sentence; the
+    t0 anchor then points at the wrong one. The keyword is still marked on the sentence's own words."""
+    from autoreels.__main__ import _emph_in_own_words
+    prev_end = Word(word="сказал.", t0=10.0, t1=10.6)
+    vot = Word(word="Вот,", t0=9.9, t1=10.2)                 # overlaps the end of the sentence before
+    nav = Word(word="наверное,", t0=10.7, t1=11.1)
+    dve = Word(word="две", t0=11.2, t1=11.4)
+    veshi = Word(word="вещи.", t0=11.5, t1=11.9)
+    other_dve = Word(word="две", t0=3.0, t1=3.2)              # same word in another sentence
+    subtitles = [other_dve, vot, prev_end, nav, dve, veshi]
+    sentence = [Word(word=w.word, t0=w.t0, t1=w.t1) for w in (vot, nav, dve, veshi)]
+    assert _emph_in_own_words(subtitles, sentence, "две") is True
+    assert dve.emph is True and other_dve.emph is False
+    assert _emph_in_own_words(subtitles, sentence, "нет") is False
+    assert _emph_in_own_words(subtitles, sentence, "ве*") is True and veshi.emph is True
