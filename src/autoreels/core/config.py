@@ -170,6 +170,21 @@ class FillerRemovalConfig(BaseModel):
     max_removed_share: float = 0.25   # never remove more than this share of the span
 
 
+class LabelConfig(BaseModel):
+    """`arl label` (cloud/label.py): LLM draft of the review lines, checked by code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    system: str = "prompts/label_system.md"
+    fewshot: str = "prompts/label_fewshot.json"
+    window_blocks: int = Field(4, ge=1, le=8)      # blocks per request; windows overlap (label.windows)
+    min_sec: float = 20.0                          # played speech of a proposed clip
+    max_sec: float = 90.0
+    max_clip_blocks: int = Field(3, ge=1, le=3)    # a review line merges at most 3 blocks ('++')
+    title_max_chars: int = 60
+    repair_rounds: int = Field(1, ge=0, le=3)
+
+
 class R0Config(BaseModel):
     """Типизированный config/r0.yaml. Пресет резолвится в числа через свойства ниже."""
 
@@ -317,6 +332,8 @@ class R0Config(BaseModel):
     # Balance presets for the filler cut (jump_max, min_cut_spacing_sec, jump_mask, …) and the default.
     manual_filler_profile: str | None = None
     manual_filler_profiles: dict[str, dict[str, float | bool]] = Field(default_factory=dict)
+    # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
+    label: LabelConfig = Field(default_factory=LabelConfig)
 
     @property
     def min_duration(self) -> int:

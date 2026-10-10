@@ -5240,6 +5240,46 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     return lines
 
 
+def _review_block_set(transcript, r0_cfg, source_kind):
+    """Stages 1-2 of the review path: candidate blocks and the deterministic pre-filter.
+
+    One definition for the review export, --apply and arl label: the review numbering and the
+    fingerprint `--apply` checks are computed from exactly this list. Returns
+    (all_blocks, kept, dropped) where dropped is [(block, reason)].
+    """
+    from autoreels.cloud.blocks import candidate_blocks, filter_blocks
+    from autoreels.cloud.compress import compress_transcript
+    compressed = compress_transcript(
+        transcript, pause_sec=r0_cfg.sentence_pause_sec, max_sentence_sec=r0_cfg.max_sentence_sec,
+    )
+    all_blocks = candidate_blocks(
+        compressed,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
+        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+        block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
+    )
+    total_duration = all_blocks[-1].end if all_blocks else 0.0
+    bf = r0_cfg.blocks_filter
+    # SC detection (host affirmations + dash signal) only makes sense for interview material.
+    sc_affirmations = r0_cfg.host_affirmations if source_kind == "interview" else []
+    kept, dropped = filter_blocks(
+        all_blocks,
+        total_duration=total_duration,
+        head_skip_sec=bf.head_skip_sec,
+        tail_skip_sec=bf.tail_skip_sec,
+        speech_density_min=bf.speech_density_min,
+        repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
+        artefact_markers=bf.artefact_markers,
+        promo_keywords=bf.promo_keywords,
+        signoff_phrases=bf.signoff_phrases,
+        host_affirmations=sc_affirmations,
+        min_sec=r0_cfg.min_meaningful_sec,
+        max_sec=r0_cfg.max_duration,
+    )
+    return all_blocks, kept, dropped
+
+
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner",
                      filler_profile: str | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
@@ -5417,34 +5457,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         return 1
 
     # Stages 1-3: blocks → filter → score (heuristic scores needed for dataset)
-    compressed = compress_transcript(
-        transcript, pause_sec=r0_cfg.sentence_pause_sec, max_sentence_sec=r0_cfg.max_sentence_sec,
-    )
-    all_blocks = candidate_blocks(
-        compressed,
-        min_sec=r0_cfg.min_meaningful_sec,
-        max_sec=r0_cfg.max_duration,
-        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
-        block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
-    )
-    total_duration = all_blocks[-1].end if all_blocks else 0.0
-    bf = r0_cfg.blocks_filter
     _source_kind = manifest.source_kind or r0_cfg.source_kind
-    sc_affirmations = r0_cfg.host_affirmations if _source_kind == "interview" else []
-    kept, dropped_blks = filter_blocks(
-        all_blocks,
-        total_duration=total_duration,
-        head_skip_sec=bf.head_skip_sec,
-        tail_skip_sec=bf.tail_skip_sec,
-        speech_density_min=bf.speech_density_min,
-        repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
-        artefact_markers=bf.artefact_markers,
-        promo_keywords=bf.promo_keywords,
-        signoff_phrases=bf.signoff_phrases,
-        host_affirmations=sc_affirmations,
-        min_sec=r0_cfg.min_meaningful_sec,
-        max_sec=r0_cfg.max_duration,
-    )
+    all_blocks, kept, dropped_blks = _review_block_set(transcript, r0_cfg, _source_kind)
+    total_duration = all_blocks[-1].end if all_blocks else 0.0
     bs_cfg = r0_cfg.block_scoring
     seq_to_block = {}
     for i, b in enumerate(kept, 1):
@@ -6597,39 +6612,9 @@ def cmd_blocks(
         print(f"ошибка: транскрипт не найден для {target}", file=sys.stderr)
         return 1
 
-    compressed = compress_transcript(
-        transcript,
-        pause_sec=r0_cfg.sentence_pause_sec,
-        max_sentence_sec=r0_cfg.max_sentence_sec,
-    )
-    all_blocks = candidate_blocks(
-        compressed,
-        min_sec=r0_cfg.min_meaningful_sec,
-        max_sec=r0_cfg.max_duration,
-        min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
-        block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
-    )
-
-    total_duration = all_blocks[-1].end if all_blocks else 0.0
-    bf = r0_cfg.blocks_filter
-    # SC detection (host affirmations + dash signal) only makes sense for interview material.
     # Prefer manifest.source_kind (per-video) over r0_cfg.source_kind (config default).
-    _source_kind = manifest.source_kind if manifest is not None else r0_cfg.source_kind
-    sc_affirmations = r0_cfg.host_affirmations if _source_kind == "interview" else []
-    kept, dropped = filter_blocks(
-        all_blocks,
-        total_duration=total_duration,
-        head_skip_sec=bf.head_skip_sec,
-        tail_skip_sec=bf.tail_skip_sec,
-        speech_density_min=bf.speech_density_min,
-        repetition_unique_ratio_min=bf.repetition_unique_ratio_min,
-        artefact_markers=bf.artefact_markers,
-        promo_keywords=bf.promo_keywords,
-        signoff_phrases=bf.signoff_phrases,
-        host_affirmations=sc_affirmations,
-        min_sec=r0_cfg.min_meaningful_sec,
-        max_sec=r0_cfg.max_duration,
-    )
+    all_blocks, kept, dropped = _review_block_set(
+        transcript, r0_cfg, manifest.source_kind if manifest is not None else r0_cfg.source_kind)
 
     # Build verdict map for output (all_blocks order preserved)
     drop_map: dict[str, str] = {b.id: r for b, r in dropped}
@@ -7159,6 +7144,107 @@ def cmd_align(
         print(f"→ {out_path}")
         return 1
     print(f"→ {out_path}")
+    return 0
+
+
+def cmd_label(
+    manifest_path: str,
+    *,
+    root=None,
+    cache_dir=None,
+    out: str | None = None,
+    force: bool = False,
+    provider=None,
+) -> int:
+    """Draft the review lines of a source with the LLM → reviews/<stem>_auto.txt (cloud/label.py).
+
+    The LLM proposes clips per window of blocks; code maps them to the review numbering, checks the
+    owner's rules (REEL_SPEC §1.7, §4.5, length) and asks once for a repair. Nothing is installed:
+    the draft is applied by the owner (arl blocks --apply … --labeler auto).
+    """
+    import datetime as _dt
+    from autoreels.cloud.blocks import _block_fingerprint
+    from autoreels.cloud.label import LabelParams, build_wblocks, label_source, render_file
+
+    _root = Path(root) if root else _project_root()
+    mpath = Path(manifest_path)
+    if not mpath.exists():
+        mpath = _root / "manifests" / manifest_path
+    if not mpath.exists() and not mpath.suffix:
+        mpath = mpath.with_suffix(".json")
+    if not mpath.exists():
+        print(f"ошибка: манифест не найден: {manifest_path}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem = mpath.stem
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    lc = r0_cfg.label
+    out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto.txt"
+    if out_path.exists() and not force:
+        print(f"ошибка: {out_path} уже есть — там может быть ваша правка. Перезаписать: --force",
+              file=sys.stderr)
+        return 1
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    transcript = _resolve_cached_transcript(manifest, _cache)
+    if transcript is None:
+        print(f"ошибка: транскрипт не найден для {stem} в {_cache}", file=sys.stderr)
+        return 1
+    _all, kept, dropped = _review_block_set(transcript, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+    if not kept:
+        print(f"ошибка: у {stem} нет блоков для разметки", file=sys.stderr)
+        return 1
+    words = transcript.words
+    if getattr(r0_cfg, "credit_word_patterns", None):
+        from autoreels.cloud.edit import strip_credit_words
+        words = strip_credit_words(words, r0_cfg.credit_word_patterns)
+    tone = None
+    if getattr(r0_cfg, "intonation_check", False):
+        from autoreels.cloud.plan import load_alignment
+        from autoreels.local.prosody import load_prosody, tone_lookup
+        _al = load_alignment(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+        tone = tone_lookup(load_prosody(_root / "transcripts" / f"{stem}.prosody.json",
+                                        manifest.source_sha256, _al) if _al else None)
+    if tone is None:
+        print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы и начала по голосу (↗) "
+              f"не проверяются. Сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
+    system = (_root / lc.system).read_text(encoding="utf-8")
+    fewshot = json.loads((_root / lc.fewshot).read_text(encoding="utf-8")).get("messages", [])
+    if provider is None:
+        provider = build_pool(r0_cfg)
+        provider.preflight()
+    p = LabelParams(window_blocks=lc.window_blocks, min_sec=lc.min_sec, max_sec=lc.max_sec,
+                    max_clip_blocks=lc.max_clip_blocks, title_max_chars=lc.title_max_chars,
+                    repair_rounds=lc.repair_rounds,
+                    pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
+                    pause_strong_sec=r0_cfg.min_pause_for_phrase_end)
+    wblocks = build_wblocks(kept, words, tone)
+    from autoreels.cloud.label import windows as _label_windows
+    n_win = len(_label_windows(wblocks, p.window_blocks, p.max_clip_blocks))
+    print(f"разметка {stem}: {len(kept)} блоков, {n_win} окон по {p.window_blocks} блока "
+          f"(окна перекрываются)", flush=True)
+    res = label_source(wblocks, words, provider, system=system, fewshot=fewshot, p=p,
+                       log=lambda m: print(m, flush=True))
+    try:
+        source_ref = str(mpath.resolve().relative_to(_root.resolve()))
+    except ValueError:
+        source_ref = str(mpath)
+    model = getattr(provider, "name", None) or type(provider).__name__
+    try:
+        _out_ref = str(out_path.resolve().relative_to(_root.resolve()))
+    except ValueError:
+        _out_ref = str(out_path)
+    text = render_file(res, source_ref=source_ref, n_blocks=len(kept), filter_removed=len(dropped),
+                       fingerprint=_block_fingerprint(kept), model=str(model),
+                       date=_dt.date.today().isoformat(), review_ref=_out_ref)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(text, encoding="utf-8")
+    print(f"готово: клипов {res.clips_ok}, с замечаниями (#!) {res.clips_flagged}, "
+          f"без ответа {res.windows_failed} из {n_win} окон; запросов {res.requests}")
+    _q = f'"{_out_ref}"' if " " in _out_ref else _out_ref
+    print(f"→ {out_path}\n  проверить план: arl blocks --apply {_q} --labeler auto")
+    if res.windows_failed == n_win:
+        print("ошибка: ни одно окно не получило ответа", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -9454,9 +9540,10 @@ def _build_parser():
     )
     pbl.add_argument(
         "--labeler",
-        choices=["owner", "assistant"],
+        choices=["owner", "assistant", "auto"],
         default="owner",
-        help="who produced this review (default: owner); use 'assistant' for AI-generated labels",
+        help="who produced this review (default: owner); 'assistant' for labels made in a chat, "
+             "'auto' for an arl label draft",
     )
 
     pbp = sub.add_parser(
@@ -9517,6 +9604,19 @@ def _build_parser():
     pmo.add_argument("--root", default=None, help="корень проекта")
     pmo.add_argument("--inputs-dir", default=None, dest="inputs_dir")
     pmo.add_argument("--force", action="store_true", default=False, help="пересчитать")
+
+    plb = sub.add_parser(
+        "label",
+        help="черновик разметки блоков от LLM, проверенный кодом → reviews/<stem>_auto.txt",
+        description="The LLM drafts review lines (s:/e:/x:/c:/k:/t:/d:) per window of blocks; code maps "
+                    "them to the review numbering and checks REEL_SPEC. Nothing is installed: edit the "
+                    "draft, then arl blocks --apply reviews/<stem>_auto.txt --labeler auto.",
+    )
+    plb.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    plb.add_argument("--root", default=None, help="корень проекта")
+    plb.add_argument("--cache-dir", default=None, dest="cache_dir")
+    plb.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto.txt)")
+    plb.add_argument("--force", action="store_true", default=False, help="перезаписать черновик")
 
     ppr = sub.add_parser(
         "prosody",
@@ -9803,6 +9903,14 @@ def main(argv=None) -> int:
                 args.manifest,
                 root=args.root if hasattr(args, "root") else None,
                 inputs_dir=getattr(args, "inputs_dir", None),
+                force=getattr(args, "force", False),
+            )
+        elif args.cmd == "label":
+            return cmd_label(
+                args.manifest,
+                root=args.root if hasattr(args, "root") else None,
+                cache_dir=getattr(args, "cache_dir", None),
+                out=getattr(args, "out", None),
                 force=getattr(args, "force", False),
             )
         elif args.cmd == "prosody":
