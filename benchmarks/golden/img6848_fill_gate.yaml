@@ -1,0 +1,63 @@
+# Gate expectations for the IMG_6848 filler-cut test render (REEL_SPEC §1.4, M30): same clips and
+# labels as img6848_spec_gate.yaml (v7), planned with --filler, rendered with --gate fill.
+# Words, ending and shots are checked exactly as for the spec render (shots: frame by frame against
+# the plan's pieces).
+
+source: IMG_6848
+clips:
+- clip_id: r01
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r01.mp4
+  reel_end: 271.06
+  first_words: У меня был такой
+  last_words: понимаешь себя. Как-то так.
+  cold_open: null
+- clip_id: r02
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r02.mp4
+  reel_end: 675.45
+  first_words: Знаешь, как даже иногда
+  last_words: вот же как нужно.
+  cold_open: null
+- clip_id: r03
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r03.mp4
+  reel_end: 900.89
+  first_words: А я и не
+  last_words: это самый лучший отдых.
+  cold_open: null
+- clip_id: r04
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r04.mp4
+  reel_end: 1097.61
+  first_words: Когда человек приходит, иногда
+  last_words: вещи с другим человеком.
+  cold_open: null
+- clip_id: r05
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r05.mp4
+  reel_end: 1242.05
+  first_words: Раз я здесь в
+  last_words: вещи ценности, самое главное.
+  cold_open: null
+- clip_id: r06
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r06.mp4
+  reel_end: 1441.33
+  first_words: Но это вранье, оно
+  last_words: себе и врет другим.
+  cold_open: Это абсолютно нормально, что он надевает какую-то маску, неосознанно врет.
+- clip_id: r07
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r07.mp4
+  reel_end: 1522.41
+  first_words: Но взрослый что он
+  last_words: взрослый его сын, правильно?
+  cold_open: null
+- clip_id: r08
+  stem: IMG_6848
+  path: reels-out/IMG_6848/_gate/fill/r08.mp4
+  reel_end: 1893.8
+  first_words: То есть, когда тебя
+  last_words: улучшить качественно свою жизнь.
+  cold_open: null

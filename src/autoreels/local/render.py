@@ -973,6 +973,55 @@ def _assert_windows_frame_aligned(windows, fps: float) -> None:
             )
 
 
+def _input_groups(segments, seam_xfades=None, video_xfade_sec: float = 0.0) -> list[list[int]]:
+    """Segment indices that share one ffmpeg input: a run of filler-cut pieces of one planned window
+    (Segment.window_cut, REEL_SPEC §1.4) joined by hard cuts. Every other segment is its own input
+    (the pre-§1.4 graph, unchanged)."""
+    groups: list[list[int]] = []
+    for i, s in enumerate(segments):
+        hard = (seam_xfades[i - 1] <= 0) if (seam_xfades is not None and i > 0) else video_xfade_sec <= 0
+        if (i > 0 and getattr(s, "window_cut", False) and hard
+                and s.start >= segments[i - 1].end - 1e-6):
+            groups[-1].append(i)
+        else:
+            groups.append([i])
+    return groups
+
+
+def _group_shot_filter(idx: list[int], segments, segment_vfs, segment_overlays, offsets) -> tuple | None:
+    """(kind, a, b): how one shared input is framed after its cut stretches are dropped —
+    ("vf", vf, None) for one framing throughout, ("overlay", (wide_vf, close_vf), enable) when the
+    close shot is on for parts of it (enable in the run's output time). None = cannot tell."""
+    wide = close = None
+    spans: list[tuple[float, float]] = []
+    vfs = set()
+    for j, i in enumerate(idx):
+        s = segments[i]
+        ovl = segment_overlays[i] if segment_overlays else None
+        svf = segment_vfs[i] if segment_vfs else None
+        dur = s.end - s.start
+        if ovl:
+            wide, close = ovl[0], ovl[1]
+            for c0, c1 in s.close_intervals:
+                spans.append((offsets[j] + c0, offsets[j] + c1))
+            vfs.add(None)
+        else:
+            vfs.add(svf)
+            if s.shot == "close":
+                close = svf if close is None else close
+                spans.append((offsets[j], offsets[j] + dur))
+            else:
+                wide = svf if wide is None else wide
+    if not spans:
+        return ("vf", next(iter(vfs)), None) if len(vfs) == 1 else None
+    if wide is None or close is None:
+        if len(vfs) == 1 and None not in vfs and all(segments[i].shot == "close" for i in idx):
+            return ("vf", next(iter(vfs)), None)
+        return None
+    enable = "+".join(f"between(t,{_num(a)},{_num(b)})" for a, b in spans)
+    return ("overlay", (wide, close), enable)
+
+
 def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            video_xfade_sec: float = 0.0,
                            pre_roll: float = 0.0,
@@ -1006,6 +1055,11 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     n = len(segments)
     f = edge_fade_sec
     parts: list[str] = []
+    groups = _input_groups(segments, seam_xfades, video_xfade_sec)
+    if len(groups) < n:
+        return _concat_grouped_graph(segments, groups, f, pre_roll=pre_roll, segment_vfs=segment_vfs,
+                                     segment_overlays=segment_overlays, seam_xfades=seam_xfades,
+                                     seam_xfade_visual_durations=seam_xfade_visual_durations)
     for i, s in enumerate(segments):
         pr = min(pre_roll, s.start) if pre_roll > 0 else 0.0
         svf = segment_vfs[i] if segment_vfs else None
@@ -1079,6 +1133,103 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
             prev = label
     else:
         parts.append("".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0[vseg]")
+    parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
+    return ";".join(parts), "[vseg]", "[aseg]"
+
+
+def _concat_grouped_graph(segments, groups, edge_fade_sec: float, *, pre_roll: float, segment_vfs,
+                          segment_overlays, seam_xfades, seam_xfade_visual_durations):
+    """_concat_segments_graph for runs of filler-cut pieces (REEL_SPEC §1.4): input g = one run.
+
+    Video: the run is decoded once; `select` keeps the frames of its pieces (frame-grid windows,
+    tolerance) and `setpts` shifts later frames back by each cut gap (source frame times kept —
+    variable frame rate safe); the shot is applied on
+    the run's output time. Audio: the run's audio is split per piece (audio only — cheap to
+    buffer) and each piece trimmed exactly and edge-faded like any window. Seams between runs keep
+    their per-seam xfade/hard cut. Output order and every piece's duration equal the plain graph,
+    so subtitles, fades and the duration invariant read the same segment list."""
+    f = edge_fade_sec
+    parts: list[str] = []
+    for g, idx in enumerate(groups):
+        g0 = segments[idx[0]]
+        pr = min(pre_roll, g0.start) if pre_roll > 0 else 0.0
+        vtrim = f"trim=start={_num(pr)},setpts=PTS-STARTPTS" if pr > 0 else "setpts=PTS-STARTPTS"
+        atrim = f"[{g}:a]atrim=start={_num(pr)},asetpts=PTS-STARTPTS" if pr > 0 else f"[{g}:a]asetpts=PTS-STARTPTS"
+        offsets, acc = [], 0.0
+        for i in idx:
+            offsets.append(acc)
+            acc += segments[i].end - segments[i].start
+        if len(idx) == 1:
+            i = idx[0]
+            svf = segment_vfs[i] if segment_vfs else None
+            ovl = segment_overlays[i] if segment_overlays else None
+            shot = ("overlay", (ovl[0], ovl[1]), ovl[2]) if ovl else ("vf", svf, None)
+            vsel = vtrim
+        else:
+            shot = _group_shot_filter(idx, segments, segment_vfs, segment_overlays, offsets)
+            if shot is None:
+                raise ValueError("filler-cut run with mixed framing the graph cannot express")
+            eps = 0.001
+            keep = "+".join(
+                f"between(t,{_num(segments[i].start - g0.start - eps)},{_num(segments[i].end - g0.start - eps * 2)})"
+                for i in idx)
+            # Close each cut gap by shifting the later frames back by the gap — source frame times
+            # (variable frame rate, dropped frames) are kept, so every piece lasts exactly its source
+            # span, as the plan, subtitles and the duration invariant assume.
+            shift = "+".join(
+                f"gte(T,{_num(segments[i].start - g0.start - eps)})*{_num(segments[i].start - segments[idx[k - 1]].end)}"
+                for k, i in enumerate(idx) if k > 0)
+            vsel = f"{vtrim},select='{keep}',setpts='PTS-({shift})/TB'"
+        if shot[0] == "overlay":
+            wide_vf, close_vf = shot[1]
+            parts.append(f"[{g}:v]{vsel}[raw{g}]")
+            parts.append(f"[raw{g}]split=2[wi{g}][ci{g}]")
+            parts.append(f"[wi{g}]{wide_vf}[wo{g}]")
+            parts.append(f"[ci{g}]{close_vf}[co{g}]")
+            parts.append(f"[wo{g}][co{g}]overlay=enable='{shot[2]}',settb=expr=1/90000[v{g}]")
+        else:
+            parts.append(f"[{g}:v]{vsel}" + (f",{shot[1]}" if shot[1] else "") + f",settb=expr=1/90000[v{g}]")
+        # audio per piece
+        if len(idx) == 1:
+            achains = [(idx[0], atrim)]
+        else:
+            labels = "".join(f"[s{g}_{j}]" for j in range(len(idx)))
+            parts.append(f"{atrim},asplit={len(idx)}{labels}")
+            achains = []
+            for j, i in enumerate(idx):
+                a0 = segments[i].start - g0.start
+                a1 = segments[i].end - g0.start
+                achains.append((i, f"[s{g}_{j}]atrim=start={_num(a0)}:end={_num(a1)},asetpts=PTS-STARTPTS"))
+        for i, ach in achains:
+            if f > 0:
+                out_st = max(0.0, (segments[i].end - segments[i].start) - f)
+                ach += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
+            parts.append(f"{ach}[a{i}]")
+    ng = len(groups)
+    gdur = [sum(segments[i].end - segments[i].start for i in idx) for idx in groups]
+    if ng == 1:
+        parts.append("[v0]null[vseg]")
+    elif seam_xfades is not None:
+        out_len = gdur[0]
+        prev = "v0"
+        for k in range(ng - 1):
+            last = groups[k][-1]
+            xf = seam_xfades[last]
+            xf_vis = seam_xfade_visual_durations[last] if seam_xfade_visual_durations is not None else xf
+            right = f"v{k + 1}"
+            label = "vseg" if k == ng - 2 else f"t{k}"
+            if xf > 0:
+                xf_offset = round(out_len - xf, 9)
+                parts.append(f"[{prev}][{right}]xfade=transition=fade:duration={_num(xf_vis)}"
+                             f":offset={_num(xf_offset)}[{label}]")
+                out_len = xf_offset + gdur[k + 1]
+            else:
+                parts.append(f"[{prev}][{right}]concat=n=2:v=1:a=0,settb=expr=1/90000[{label}]")
+                out_len += gdur[k + 1]
+            prev = label
+    else:
+        parts.append("".join(f"[v{g}]" for g in range(ng)) + f"concat=n={ng}:v=1:a=0[vseg]")
+    n = len(segments)
     parts.append("".join(f"[a{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1[aseg]")
     return ";".join(parts), "[vseg]", "[aseg]"
 
@@ -2574,6 +2725,14 @@ def _render_segments(
             if reel.beat_gap_sec is not None and len(segs) > 1:
                 _ts_seam_xfades = [0.0] * (len(segs) - 1)
                 _ts_seam_visual = None  # dissolve would blend dissimilar close crops across jumps
+            # REEL_SPEC §1.4: a filler cut inside a planned window is a hard jump cut (no dissolve):
+            # the pieces of one window then share one decoded input (_input_groups).
+            if _ts_seam_xfades is not None and any(getattr(s, "window_cut", False) for s in segs[1:]):
+                _ts_seam_xfades = [0.0 if getattr(segs[k + 1], "window_cut", False) else x
+                                   for k, x in enumerate(_ts_seam_xfades)]
+                if _ts_seam_visual is not None:
+                    _ts_seam_visual = [0.0 if getattr(segs[k + 1], "window_cut", False) else x
+                                       for k, x in enumerate(_ts_seam_visual)]
 
             # Zoom vf: always built per-reel so zoompan runs at probed source fps (prevents A/V
             # drift). Also positions the gesture at z: sentence offset when set.
@@ -3065,7 +3224,9 @@ def _render_segments(
                                                              seam_xfades=_ts_seam_xfades,
                                                              seam_xfade_visual_durations=_ts_seam_visual,
                                                              segment_overlays=_ts_seg_overlays)
-                windows = [(w.start, w.end - w.start) for w in segs]
+                # One input per run of filler-cut pieces (REEL_SPEC §1.4), else one per window.
+                windows = [(segs[g[0]].start, segs[g[-1]].end - segs[g[0]].start)
+                           for g in _input_groups(segs, _ts_seam_xfades, _xfade_actual)]
                 # Synth inline/post-append: cut_point may not be frame-aligned.
                 if not _synth_post_append and not _synth_inline:
                     _assert_windows_frame_aligned(windows, _fps())   # per-segment A/V sync (no lip drift)
@@ -3073,14 +3234,14 @@ def _render_segments(
                 if music_path:
                     music_fc = _music_filter_complex(reel_vf or "", ap, music, clip_duration,
                                                      speed=_reel_speed, vin=vseg, ain=aseg,
-                                                     music_in=f"[{len(segs)}:a]", tail_fade=_tail_fade,
+                                                     music_in=f"[{len(windows)}:a]", tail_fade=_tail_fade,
                                                      word_end_out=_word_end_out)
                     fc = f"{prefix};{music_fc}"
                 elif _synth_inline:
                     _sp = _synth_params_dict
                     _tail_s = _sp["tail_sec"]
                     _fade_s = _synth_cfg.fade_sec
-                    _n = len(segs)  # bridge input index; room_tone index = _n + 1
+                    _n = len(windows)  # bridge input index; room_tone index = _n + 1
                     _sc_part = (
                         _synth_crop_vf_for_tail
                         if _synth_crop_vf_for_tail

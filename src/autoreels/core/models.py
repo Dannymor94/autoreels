@@ -125,6 +125,10 @@ class Segment(BaseModel):
     # is [t_start, t_end] in seconds from this segment's own t=0 (post-PTS-reset). Empty = no
     # within-window switch (shot field governs the whole window).
     close_intervals: list[list[float]] = Field(default_factory=list)
+    # REEL_SPEC §1.4: True = this window continues the previous one after a filler cut (same
+    # planned window, same source run). Render decodes such a run once and drops the cut stretches
+    # (one input per run, not per piece — 30 inputs of a 1080p source exhaust memory).
+    window_cut: bool = False
 
 
 class Reel(BaseModel):

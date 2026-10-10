@@ -38,6 +38,18 @@ class ManualPlanParams:
     hook_replay_min_pos: float = 0.5  # hook replays in the body only from this body fraction on
     accent_min_sec: float = 3.0       # a close shot after a seam lasts at least this long …
     accent_max_sec: float = 8.0       # … and at most this long, then the window goes back to wide
+    # REEL_SPEC §1.4 filler cut (off = previous output): inside a window, the stretch between two
+    # played words that holds untranscribed speech («э», «ммм») or a long silence is cut out,
+    # leaving a short pause. Cut edges stay in the gap between the words — never inside a word.
+    filler_cut: bool = False
+    filler_min_sec: float = 0.15      # untranscribed speech in a gap ≥ this = a filler to remove …
+    pause_max_sec: float = 0.40       # … or a gap longer than this = a pause to shorten
+    keep_word_sec: float = 0.10       # pause kept between two words of one sentence
+    keep_sentence_sec: float = 0.25   # pause kept between two sentences
+    min_cut_sec: float = 0.30         # shorter removals are not worth a jump cut
+    edge_min_sec: float = 0.05        # a cut never starts/ends closer than this to a word
+    max_removed_share: float = 0.40   # never remove more than this share of a window
+    jump_max: float = 2.0             # skip a cut whose picture jump exceeds this × typical motion
 
 
 @dataclass
@@ -48,6 +60,8 @@ class PlannedWindow:
     shot: str                         # base shot of the window: "wide" | "close"
     close_intervals: list[list[float]] = field(default_factory=list)  # window-relative
     cold_open: bool = False
+    cuts: list[list[float]] = field(default_factory=list)  # source-time stretches removed (§1.4)
+    cuts_skipped: int = 0             # candidate cuts left in: the face would visibly jump
 
     @property
     def last_shot(self) -> str:
@@ -60,6 +74,41 @@ class PlannedWindow:
     def segment(self) -> Segment:
         return make_segment(self.start, self.end).model_copy(update={
             "shot": self.shot, "close_intervals": [list(ci) for ci in self.close_intervals]})
+
+    def pieces(self) -> list[tuple[float, float]]:
+        """Played stretches of the window (source time): the window minus its cuts."""
+        out, a = [], self.start
+        for c0, c1 in sorted(self.cuts):
+            out.append((a, c0))
+            a = c1
+        out.append((a, self.end))
+        return out
+
+    def segments(self) -> list[Segment]:
+        """One segment per played piece; the window's close shot spans are carried over, re-based
+        to each piece (a piece fully inside a close span becomes a close piece)."""
+        if not self.cuts:
+            return [self.segment()]
+        out = []
+        for a, b in self.pieces():
+            if self.shot == "close":
+                shot, ci = "close", []
+            else:
+                ci = []
+                for c0, c1 in self.close_intervals:
+                    s0, s1 = max(c0 + self.start, a), min(c1 + self.start, b)
+                    if s1 - s0 > _EPS:
+                        ci.append([round(s0 - a, 6), round(s1 - a, 6)])
+                shot = "wide"
+                if len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > (b - a) - _EPS:
+                    shot, ci = "close", []
+            out.append(make_segment(a, b).model_copy(update={"shot": shot, "close_intervals": ci,
+                                                             "window_cut": bool(out)}))
+        return out
+
+    @property
+    def played(self) -> float:
+        return self.end - self.start - sum(c1 - c0 for c0, c1 in self.cuts)
 
 
 @dataclass
@@ -118,6 +167,14 @@ class ManualPlan:
                      + (f"  next speech {self.next_onset:.3f}" if self.next_onset is not None else ""))
         if self.hook is not None:
             lines.append(f"hook      s{self.hook} replayed in body: {'yes' if self.hook_replayed else 'no'}")
+        cuts = [c for w in self.windows for c in w.cuts]
+        skipped = sum(w.cuts_skipped for w in self.windows)
+        if cuts or skipped:
+            removed = sum(c1 - c0 for c0, c1 in cuts)
+            total = sum(w.end - w.start for w in self.windows)
+            lines.append(f"cuts      {len(cuts)} fillers/pauses removed, {removed:.1f}s "
+                         f"(clip {total:.1f}s → {total - removed:.1f}s)"
+                         + (f"; {skipped} left in (visible jump)" if skipped else ""))
         return lines
 
 
@@ -454,6 +511,53 @@ def _accent_end(times: SpeechTimes, sentences, w: "PlannedWindow", bounds: dict,
     return min(hi, w.end - w.start)
 
 
+def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "ManualPlanParams",
+                 jump: Callable[[float, float], float] | None = None) -> list[list[float]]:
+    """REEL_SPEC §1.4: stretches to remove inside a window — fillers and over-long pauses.
+
+    Between every two consecutive played words of the window: the gap (aligned end of the left
+    word … aligned start of the right one) is cut when it holds untranscribed speech of at least
+    filler_min_sec («э», «ммм», a false start Whisper skipped) or is longer than pause_max_sec.
+    A short pause is kept — keep_word_sec inside a sentence, keep_sentence_sec between sentences —
+    taken from the real silence next to each word, never from the filler; a cut edge stays at
+    least edge_min_sec off a word. Removals shorter than min_cut_sec are skipped; the total is
+    capped at max_removed_share of the window (largest gaps first). With `jump` (local/motion.py),
+    a cut whose picture jump exceeds jump_max × typical motion is left in (the face would visibly
+    jump); the count is kept on the window."""
+    ws: list[tuple[Word, bool]] = []
+    for n in w.sentences:
+        s = sentences[n - 1]
+        ws.extend((x, i == len(s) - 1) for i, x in enumerate(s))
+    cands: list[list[float]] = []
+    for (w1, end_of_sentence), (w2, _) in zip(ws, ws[1:]):
+        ae, as_ = times.pair(w1, w2)
+        gap = as_ - ae
+        if gap <= 0:
+            continue
+        untr = [(max(a, ae), min(b, as_)) for a, b in times.untranscribed_between(ae, as_)]
+        untr = [(a, b) for a, b in untr if b - a > _EPS]
+        u_len = sum(b - a for a, b in untr)
+        if u_len < params.filler_min_sec and gap <= params.pause_max_sec:
+            continue
+        half = (params.keep_sentence_sec if end_of_sentence else params.keep_word_sec) / 2
+        sil_l = untr[0][0] - ae if untr else gap
+        sil_r = as_ - untr[-1][1] if untr else gap
+        a = ae + max(params.edge_min_sec, min(half, sil_l))
+        b = as_ - max(params.edge_min_sec, min(half, sil_r))
+        if b - a >= params.min_cut_sec:
+            if jump is not None and jump(a, b) > params.jump_max:
+                w.cuts_skipped += 1
+                continue
+            cands.append([a, b])
+    budget = params.max_removed_share * (w.end - w.start)
+    keep: list[list[float]] = []
+    for c in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
+        if c[1] - c[0] <= budget:
+            keep.append([round(c[0], 3), round(c[1], 3)])
+            budget -= c[1] - c[0]
+    return sorted(keep)
+
+
 def _group_windows(play: Sequence[int]) -> list[list[int]]:
     wins: list[list[int]] = []
     for n in play:
@@ -478,6 +582,7 @@ def build_manual_plan(
     source_duration: float | None = None,
     align: dict | None = None,
     tone: Callable[[Word], tuple[str, str] | None] | None = None,
+    jump: Callable[[float, float], float] | None = None,
 ) -> ManualPlan:
     """Plan one manual clip. `sentences` is the review numbering (merge_group_sentences output);
     `play` the body sentence numbers in play order (s:..e: minus x:, or the beat order).
@@ -601,19 +706,31 @@ def build_manual_plan(
                 w.shot, w.close_intervals = "wide", ci
         prev_shot = w.last_shot
 
-    # §1/§6 subtitles: exactly the words of the played sentences, times kept inside their window.
+    # §1.4 filler cut: after the shots (accents are measured on the window as spoken).
+    if params.filler_cut:
+        for w in windows:
+            if not w.cold_open:           # the hook is one short sentence played as one piece
+                w.cuts = _filler_cuts(times, sentences, w, params, jump)
+
+    # §1/§6 subtitles: exactly the words of the played sentences, times kept inside their window
+    # (with cuts: inside the played piece that holds the word's audible start).
     subs: dict[int, Word] = {}
     for w in windows:
+        pieces = w.pieces()
         for n in w.sentences:
             for word in sentences[n - 1]:
                 key = round(word.t0 * 1000)
                 if key in subs:
                     continue
+                pa, pb = w.start, w.end
+                if w.cuts:
+                    w_on = times.audible(word)[0]
+                    pa, pb = next(((a, b) for a, b in pieces if a - _EPS <= w_on < b), pieces[-1])
                 # Keep every word start at least _SUB_MARGIN inside its window: render snaps window
                 # edges to the frame grid (up to half a frame) and drops words that start outside.
-                m = min(_SUB_MARGIN, (w.end - w.start) / 2)
-                t0 = min(max(word.t0, w.start + m), w.end - m)
-                t1 = min(max(word.t1, t0), w.end)
+                m = min(_SUB_MARGIN, (pb - pa) / 2)
+                t0 = min(max(word.t0, pa + m), pb - m)
+                t1 = min(max(word.t1, t0), pb)
                 subs[key] = word if (t0 == word.t0 and t1 == word.t1) else \
                     word.model_copy(update={"t0": t0, "t1": t1})
     subtitles = sorted(subs.values(), key=lambda x: x.t0)

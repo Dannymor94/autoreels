@@ -310,6 +310,10 @@ class R0Config(BaseModel):
     # an ending whose voice does not finish; the review export marks such sentences with ↗.
     # Off (or no prosody file) = the previous output (invariant 8).
     intonation_check: bool = False
+    # REEL_SPEC §1.4: planned clips cut fillers («э», «ммм») and over-long pauses inside a window
+    # (aligned word times + untranscribed speech). Per clip f:1/f:0 > --filler/--no-filler > this.
+    # Thresholds: ManualPlanParams in cloud/plan.py. Off = the previous output (invariant 8).
+    manual_filler_cut: bool = False
 
     @property
     def min_duration(self) -> int:

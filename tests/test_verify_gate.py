@@ -550,3 +550,17 @@ def test_end_air_planned_measured_from_plan_word_end(tmp_path, monkeypatch):
     planned = {"planned": True, "tail_last_word_end": 1097.31, "subtitles": sub}
     assert vg._check_end_air_vg(sm, planned, 1097.6) == []
     assert vg._check_end_air_vg(sm, planned, 1097.7)[0].startswith("end_air:")
+
+
+def test_end_aligned_finds_words_moved_out_of_a_filler_cut(tmp_path):
+    # REEL_SPEC §1.4: a subtitle start inside a cut stretch is moved to the next played piece
+    al = {"version": 1, "words": [{"t0": 1.0, "start": 1.05, "end": 1.6}, {"t0": 2.0, "start": 2.9, "end": 3.4}],
+          "untranscribed": [[1.7, 2.8]]}
+    p = tmp_path / "x.align.json"
+    p.write_text(json.dumps(al))
+    subs = [{"word": "раз", "t0": 1.0, "t1": 1.6}, {"word": "два.", "t0": 2.88, "t1": 3.4}]   # t0 moved 2.0 → 2.88
+    cut = {"planned": True, "subtitles": subs,
+           "segments": [{"start": 0.9, "end": 1.7}, {"start": 2.83, "end": 3.7, "window_cut": True}]}
+    assert vg._check_end_aligned(p, cut, 3.7) == []
+    plain = {"planned": True, "subtitles": subs, "segments": [{"start": 0.9, "end": 3.7}]}
+    assert vg._check_end_aligned(p, plain, 3.7) == ["alignment_mismatch:1/2"]

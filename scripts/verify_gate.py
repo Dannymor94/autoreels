@@ -458,10 +458,26 @@ def _check_end_aligned(align_path: Path, reel: dict, source_end: float) -> list[
     if not subs:
         return []
     words = {round(w["t0"] * 1000): w for w in al.get("words", []) if w.get("start") is not None}
-    hit = sum(1 for w in subs if round(w["t0"] * 1000) in words)
+    # Filler cuts (REEL_SPEC §1.4) move a subtitle start out of a cut stretch into the next played
+    # piece: such a word is found among the aligned words starting at most one cut earlier.
+    segs = reel.get("segments") or []
+    tol = max([segs[i]["start"] - segs[i - 1]["end"] for i in range(1, len(segs))
+               if segs[i].get("window_cut")] or [0.0])
+    tol = tol + 0.06 if tol > 0 else 0.0
+    keys = sorted(words)
+
+    def find(t0: float):
+        k = round(t0 * 1000)
+        if k in words or tol <= 0:
+            return words.get(k)
+        import bisect as _b
+        i = _b.bisect_right(keys, k) - 1
+        return words[keys[i]] if i >= 0 and k - keys[i] <= tol * 1000 else None
+
+    hit = sum(1 for w in subs if find(w["t0"]) is not None)
     if hit < 0.9 * len(subs):
         return [f"alignment_mismatch:{hit}/{len(subs)}"]
-    last = words.get(round(subs[-1]["t0"] * 1000))
+    last = find(subs[-1]["t0"])
     if last is None:
         return ["last_word_not_aligned"]
     fails = []

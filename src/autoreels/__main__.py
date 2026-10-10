@@ -5114,8 +5114,9 @@ def _resolve_cached_transcript(manifest: Manifest, cache_dir: Path):
     return None
 
 
-def _manual_plan_params(r0_cfg, render_cfg):
-    """ManualPlanParams from config — one place, so apply and tests read the same numbers."""
+def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None):
+    """ManualPlanParams from config — one place, so apply and tests read the same numbers.
+    `filler_cut`: per-clip decision (f:1/f:0 > --filler/--no-filler > config manual_filler_cut)."""
     from autoreels.cloud.plan import ManualPlanParams
     _ap = getattr(render_cfg, "audio_processing", None) if render_cfg else None
     _sm = getattr(render_cfg, "speech_map_cfg", None) if render_cfg else None
@@ -5126,6 +5127,7 @@ def _manual_plan_params(r0_cfg, render_cfg):
         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
         accent_min_sec=getattr(r0_cfg, "accent_min_sec", 3.0),
         accent_max_sec=getattr(r0_cfg, "accent_max_sec", 8.0),
+        filler_cut=bool(getattr(r0_cfg, "manual_filler_cut", False) if filler_cut is None else filler_cut),
     )
 
 
@@ -5153,7 +5155,7 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 
 
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
-                       tone=None) -> list[str]:
+                       tone=None, filler=None, jump=None) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5181,12 +5183,14 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         def onset_fn(w):  # same definition the render-time checks use
             r = _next_speech_onset_after(w.t0, smap, _lk, last_t1=w.t1)
             return None if r is None else r.onset
+    _f = getattr(entry, "filler", None)
+    _f = _f if _f is not None else filler
     plan = build_manual_plan(
-        sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg),
+        sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
-        source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone,
+        source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
     )
-    body = [w.segment() for w in plan.body]
+    body = [s for w in plan.body for s in w.segments()]
     reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []
     if not reel.segments:
         reel.segments = body
@@ -5594,6 +5598,21 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         else:
             _blk_tone = _tone_lookup(_blk_pros)
             print(f"  интонация: {len(_blk_pros.get('words', []))} слов")
+    # REEL_SPEC §1.4: filler cuts are checked for a visible picture jump (arl motion → local cache).
+    _blk_jump = None
+    _fill_any = filler is True or getattr(r0_cfg, "manual_filler_cut", False) or \
+        any(getattr(e, "filler", None) for e in entries)
+    if getattr(r0_cfg, "manual_plan", False) and _fill_any:
+        from autoreels.local.motion import jump_lookup as _jl, load as _ml
+        _c = manifest.setup.crop
+        _mframes = _ml(root / "data" / "cache" / f"{source_file.stem}.motion.npz", manifest.source_sha256,
+                       [_c.w, _c.h, _c.x, _c.y])
+        if _mframes is None:
+            print(f"  warning: нет дорожки движения data/cache/{source_file.stem}.motion.npz — склейки чистки "
+                  f"не проверены на заметность; arl motion {source_file.stem}", file=sys.stderr)
+        else:
+            _blk_jump = _jl(_mframes)
+            print(f"  движение: {len(_mframes)} кадров")
     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
     conflicts: list[str] = []
@@ -5853,7 +5872,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             try:
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
                                               render_cfg, '+'.join(str(s) for s in g), align=_blk_align,
-                                              tone=_blk_tone):
+                                              tone=_blk_tone, filler=filler, jump=_blk_jump):
                     print(_pl)
             except ValueError as _pe:
                 print(f"  error {'+'.join(str(s) for s in g)}: plan: {_pe}", file=sys.stderr)
@@ -7172,6 +7191,58 @@ def cmd_prosody(
     ws = payload["words"]
     print(f"\nготово за {_time.time() - t_start:.0f} с: {len(ws)} слов, средняя высота голоса "
           f"{payload['ref_f0']:.0f} Гц")
+    print(f"→ {out_path}")
+    return 0
+
+
+def cmd_motion(
+    manifest_path: str,
+    *,
+    root=None,
+    inputs_dir: str | None = None,
+    force: bool = False,
+) -> int:
+    """M30b: picture-motion track of the clip framing → data/cache/<stem>.motion.npz (local).
+
+    Grey thumbnails of the setup crop, 10 per second, for the whole source. --apply uses it to leave
+    in filler cuts whose jump cut would be visible (REEL_SPEC §1.4). Rebuilt from the video; not in git.
+    """
+    import time as _time
+    from autoreels.local.motion import FPS, load, save, thumb_track
+    from autoreels.local.render import _rotate_vf
+
+    _root = Path(root) if root else _project_root()
+    _inputs = Path(inputs_dir) if inputs_dir else _root / "inputs"
+    mpath = Path(manifest_path)
+    if not mpath.exists():
+        mpath = _root / "manifests" / manifest_path
+    if not mpath.exists() and not mpath.suffix:
+        mpath = mpath.with_suffix(".json")
+    if not mpath.exists():
+        print(f"ошибка: манифест не найден: {manifest_path}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem = mpath.stem
+    c = manifest.setup.crop
+    crop = [c.w, c.h, c.x, c.y]
+    out_path = _root / "data" / "cache" / f"{stem}.motion.npz"
+    if not force and load(out_path, manifest.source_sha256, crop) is not None:
+        print(f"✓ уже есть: {out_path} (пересчитать: --force)")
+        return 0
+    try:
+        source = resolve_source(manifest, _inputs)
+    except Exception as e:
+        print(f"ошибка: исходник не найден: {e}", file=sys.stderr)
+        return 1
+    render_cfg = load_render_config(_root / "config" / "render.yaml")
+    ff = resolve_ffmpeg(None, render_cfg=render_cfg)
+    print(f"source: {source}\nout:    {out_path}", flush=True)
+    t0 = _time.time()
+    frames = thumb_track(source, tuple(crop), ffmpeg=ff,
+                         rotate_vf=_rotate_vf(getattr(manifest.setup, "rotation_deg", 0.0) or 0.0))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    save(out_path, frames, manifest.source_sha256, crop)
+    print(f"\nготово за {_time.time() - t0:.0f} с: {len(frames)} кадров ({len(frames) / FPS:.0f} с)")
     print(f"→ {out_path}")
     return 0
 
@@ -9398,6 +9469,16 @@ def _build_parser():
     pal.add_argument("--cache-dir", default=None, dest="cache_dir")
     pal.add_argument("--force", action="store_true", default=False, help="пересчитать")
 
+    pmo = sub.add_parser(
+        "motion",
+        help="дорожка движения кадра (заметность склеек чистки) — M30b",
+        description="Grey thumbnails of the clip framing, 10/s → data/cache/<stem>.motion.npz (local).",
+    )
+    pmo.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pmo.add_argument("--root", default=None, help="корень проекта")
+    pmo.add_argument("--inputs-dir", default=None, dest="inputs_dir")
+    pmo.add_argument("--force", action="store_true", default=False, help="пересчитать")
+
     ppr = sub.add_parser(
         "prosody",
         help="интонация концов фраз (закончил говорить или продолжает) — M2.2",
@@ -9675,6 +9756,13 @@ def main(argv=None) -> int:
                 inputs_dir=getattr(args, "inputs_dir", None),
                 transcripts_dir=getattr(args, "transcripts_dir", None),
                 cache_dir=getattr(args, "cache_dir", None),
+                force=getattr(args, "force", False),
+            )
+        elif args.cmd == "motion":
+            return cmd_motion(
+                args.manifest,
+                root=args.root if hasattr(args, "root") else None,
+                inputs_dir=getattr(args, "inputs_dir", None),
                 force=getattr(args, "force", False),
             )
         elif args.cmd == "prosody":
