@@ -636,3 +636,271 @@ def retry_draft(text: str, wblocks: Sequence[WBlock], words: list, provider, *, 
                    and l.strip().startswith(f"# blocks {label}:"))
         lines[idx:idx + 1] = new
     return "\n".join(lines) + "\n", done, still
+
+
+# ── the owner's review of rendered clips (review sheet → decisions → draft) ──────────────────
+#
+# arl review-sheet shows every rendered clip next to its review line; the owner marks each clip
+# ok / drop / fix + a note and downloads a decisions file:
+#     # stem: <stem>
+#     # review: reviews/<stem>_auto.txt
+#     r01 | line 3 | ok
+#     r02 | line 5 | fix | конец раньше, на «…»
+# arl review-apply writes the verdicts into the draft (drop → the line commented out, fix → a «✎»
+# note above the line); with --redo the LLM reworks each «✎» line under the same checks as a new
+# draft. Code places every verdict on the line by its block number; nothing is lost silently.
+
+_DECISION_RE = re.compile(r"^\s*(r\d+)\s*\|\s*line\s+(\d+)\s*\|\s*(ok|drop|fix)\s*(?:\|\s*(.*))?$", re.IGNORECASE)
+_FIX_RE = re.compile(r"^# ✎ владелец \((r\d+)([^)]*)\):\s*(.*)$")
+
+
+@dataclass
+class Decision:
+    reel: str
+    seq: int
+    verdict: str          # ok | drop | fix
+    note: str = ""
+
+
+def parse_decisions(text: str) -> tuple[dict[str, str], list[Decision], list[str]]:
+    """(header fields, decisions, errors) of a decisions file. A 'fix' without a note is an error:
+    there is nothing to rework by."""
+    head: dict[str, str] = {}
+    out: list[Decision] = []
+    errors: list[str] = []
+    seen: dict[int, str] = {}
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            m = re.match(r"#\s*(\w+):\s*(.*)$", line)
+            if m:
+                head[m.group(1).lower()] = m.group(2).strip()
+            continue
+        m = _DECISION_RE.match(line)
+        if not m:
+            errors.append(f"строка {n}: не понял «{line[:60]}»")
+            continue
+        d = Decision(m.group(1).lower(), int(m.group(2)), m.group(3).lower(), (m.group(4) or "").strip())
+        if d.verdict == "fix" and not d.note:
+            errors.append(f"строка {n}: {d.reel} — «fix» без замечания")
+            continue
+        if d.seq in seen:
+            errors.append(f"строка {n}: строка черновика {d.seq} уже решена ({seen[d.seq]})")
+            continue
+        seen[d.seq] = d.reel
+        out.append(d)
+    return head, out, errors
+
+
+@dataclass
+class ClipLine:
+    seq: int                      # the anchor review line (earliest scored line of the group)
+    raw: str
+    blocks: tuple[int, ...]
+    t0: float                     # source span of the group's blocks
+    t1: float
+    preview: str = ""             # the draft's '#   NN s: text' line under it
+    marks: tuple[str, ...] = ()   # the owner's marks of earlier rounds above it
+
+
+def clip_lines(review_text: str, wblocks: Sequence[WBlock]) -> list[ClipLine]:
+    """The review lines that become clips, in clip order, with the source span of their block group
+    — the same groups --apply builds (blocks.resolve_merge_groups; the anchor is the earliest scored
+    line of a group)."""
+    from autoreels.cloud.blocks import parse_compact_answer, resolve_merge_groups
+    text_lines = review_text.splitlines()
+    raw_by_seq: dict[int, str] = {}
+    prev_by_seq: dict[int, str] = {}
+    marks_by_seq: dict[int, tuple[str, ...]] = {}
+    for i, raw in enumerate(text_lines):
+        s = raw.strip()
+        if s[:1].isdigit() and int(s.split()[0]) not in raw_by_seq:
+            q = int(s.split()[0])
+            raw_by_seq[q] = s
+            nxt = text_lines[i + 1] if i + 1 < len(text_lines) else ""
+            if nxt.startswith("#   "):
+                prev_by_seq[q] = nxt[4:].strip()
+            marks_by_seq[q] = tuple(reversed(_marks_above(text_lines, i)))
+    _, entries, _, _ = parse_compact_answer(review_text)
+    by_seq = {wb.seq: wb for wb in wblocks}
+    groups, _ = resolve_merge_groups(list(entries), {q: wb.block for q, wb in by_seq.items()}, float("inf"))
+    scored = {e.seq for e in entries if e.score is not None}
+    out: list[ClipLine] = []
+    for g in groups:
+        anchor = next((q for q in g if q in scored), None)
+        if anchor is None:
+            continue
+        out.append(ClipLine(anchor, raw_by_seq.get(anchor, ""), tuple(g),
+                            by_seq[g[0]].block.start, by_seq[g[-1]].block.end,
+                            prev_by_seq.get(anchor, ""), marks_by_seq.get(anchor, ())))
+    return out
+
+
+def match_reels(reel_windows: Sequence[tuple[str, list[tuple[float, float]]]],
+                lines: Sequence[ClipLine], *, min_share: float = 0.5) -> dict[str, ClipLine | None]:
+    """Reel id → its review line, by where the reel plays in the source: the line whose block span
+    covers the largest part of the reel (at least min_share of it), each line used once. A reel
+    with no such line (the draft changed after the render) maps to None."""
+    out: dict[str, ClipLine | None] = {}
+    used: set[int] = set()
+    for rid, wins in reel_windows:
+        total = sum(max(0.0, b - a) for a, b in wins) or 1e-9
+        best, best_ov = None, 0.0
+        for ln in lines:
+            if ln.seq in used:
+                continue
+            ov = sum(max(0.0, min(b, ln.t1) - max(a, ln.t0)) for a, b in wins)
+            if ov > best_ov:
+                best, best_ov = ln, ov
+        if best is not None and best_ov / total >= min_share:
+            used.add(best.seq)
+            out[rid] = best
+        else:
+            out[rid] = None
+    return out
+
+
+def _line_index(lines: list[str], seq: int) -> int | None:
+    for i, l in enumerate(lines):
+        s = l.strip()
+        if s[:1].isdigit() and s.split()[0] == str(seq):
+            return i
+    return None
+
+
+def _marks_above(lines: list[str], i: int) -> list[str]:
+    """The comment lines directly above line i (the owner's marks of earlier rounds)."""
+    out = []
+    j = i - 1
+    while j >= 0 and lines[j].strip().startswith("# ") and ("владел" in lines[j]):
+        out.append(lines[j].strip())
+        j -= 1
+    return out
+
+
+def apply_decisions(review_text: str, decisions: list[Decision], *, date: str = "") -> tuple[str, list[str]]:
+    """Write the owner's verdicts into the draft: drop → the line is commented out with the note;
+    fix → the note goes above the line (for --redo or a manual edit); ok → a mark above the line.
+    Applying the same decisions twice changes nothing. Returns (new text, messages)."""
+    lines = review_text.splitlines()
+    msgs: list[str] = []
+    tag = f" {date}" if date else ""
+    for d in decisions:
+        i = _line_index(lines, d.seq)
+        if i is None:
+            msgs.append(f"{d.reel}: строки {d.seq} в черновике нет (уже убрана?) — пропущено")
+            continue
+        if d.verdict == "drop":
+            note = f": {d.note}" if d.note else ""
+            lines[i] = f"#- {lines[i].strip()}  ← убрано владельцем ({d.reel}{tag}){note}"
+            msgs.append(f"{d.reel}: строка {d.seq} убрана")
+            continue
+        if d.verdict == "fix":
+            mark = f"# ✎ владелец ({d.reel}{tag}): {d.note}"
+            done = f"# ✔ переделано по замечанию владельца ({d.reel}{tag}): {d.note}"
+        else:
+            mark = f"# ✓ владелец ({d.reel}{tag})" + (f": {d.note}" if d.note else "")
+            done = mark
+        above = _marks_above(lines, i)
+        if mark in above or done in above:
+            continue
+        lines.insert(i, mark)
+        msgs.append(f"{d.reel}: строка {d.seq} — " + ("замечание записано" if d.verdict == "fix" else "ок"))
+    return "\n".join(lines) + ("\n" if review_text.endswith("\n") else ""), msgs
+
+
+def redo_line(raw_line: str, note: str, wblocks: Sequence[WBlock], words: list, provider, *,
+              system: str, fewshot: Sequence[dict] = (), p: LabelParams = LabelParams(),
+              occupied: set[int] | None = None) -> tuple[Checked | None, list[str]]:
+    """Ask the LLM to rework ONE clip by the owner's note; the same checks as a new draft, one
+    repair round. The window is the clip's blocks ± one; blocks of other lines (occupied) are off
+    limits. Returns (the checked clip or None, problems)."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    _, entries, errors, _ = parse_compact_answer(raw_line + "\n")
+    if errors or not entries:
+        return None, ["the line does not parse"]
+    clip, group, why = entry_to_clip(entries[0], wblocks, words)
+    if clip is None:
+        return None, [why]
+    occupied = set(occupied or ()) - {g.seq for g in group}
+    by_seq = {wb.seq: wb for wb in wblocks}
+    lo, hi = group[0].seq, group[-1].seq
+    win = [by_seq[q] for q in range(lo - 1, hi + 2) if q in by_seq and q not in occupied]
+    ask = (render_window(win, p) + "\nCurrent clip, reviewed by the owner after watching it:\n"
+           + json.dumps({"clips": [clip]}, ensure_ascii=False)
+           + f"\nOwner's note: {note}\n"
+           "Rework this clip following the note and all the rules. "
+           'Return {"clips": [ ... ]} with exactly one clip.')
+    msgs = [{"role": "system", "content": system}] + list(fewshot) + [{"role": "user", "content": ask}]
+
+    def judge(ans) -> Checked:
+        ch = check_clip(ans["clips"][0], win, words, p)
+        if set(ch.blocks) & occupied:
+            ch.problems.append("overlaps another clip of the draft (blocks "
+                               + ",".join(str(b) for b in sorted(set(ch.blocks) & occupied)) + ")")
+        return ch
+
+    ans, raw, err = _ask(provider, msgs)
+    if ans is None or not ans.get("clips"):
+        return None, [err or "no valid answer"]
+    ch = judge(ans)
+    if ch.problems and p.repair_rounds:
+        msgs += [{"role": "assistant", "content": raw}, {"role": "user", "content": _repair_message([ch])}]
+        ans2, _raw2, _err2 = _ask(provider, msgs)
+        if ans2 is not None and ans2.get("clips"):
+            ch = judge(ans2)
+    if ch.line is None or ch.problems:
+        return None, ch.problems or ["the clip could not be written"]
+    return ch, []
+
+
+def redo_fixes(review_text: str, wblocks: Sequence[WBlock], words: list, provider, *, system: str,
+               fewshot: Sequence[dict] = (), p: LabelParams = LabelParams(),
+               log: Callable[[str], None] = print) -> tuple[str, int, int]:
+    """Rework every line with a pending owner's «✎» note above it.
+    Success: the line is replaced, its preview refreshed, the old line kept as '#~ было: …', the
+    note becomes '# ✔ переделано …'. Failure: the note stays (a later --redo tries again) and a
+    '#! правка …' line says why. Returns (text, reworked, failed)."""
+    lines = review_text.splitlines()
+    done = failed = 0
+    i = 0
+    while i < len(lines):
+        m = _FIX_RE.match(lines[i].strip())
+        if not m:
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and lines[j].strip().startswith("# ") and "владел" in lines[j]:
+            j += 1                                   # other marks of the same line
+        if j >= len(lines) or not lines[j].strip()[:1].isdigit():
+            i += 1
+            continue
+        rid, rest, note = m.group(1), m.group(2), m.group(3)
+        old = lines[j].strip()
+        # what follows the line: its preview, an earlier failure of this very note
+        k = j + 1
+        tail_keep: list[str] = []
+        while k < len(lines) and lines[k].startswith("#") and not lines[k].strip()[:1].isdigit() \
+                and (lines[k].startswith("#   ") or lines[k].startswith("#~ ") or lines[k].startswith("#! правка")):
+            if not (lines[k].startswith("#   ") or lines[k].startswith(f"#! правка {rid}{rest}:")):
+                tail_keep.append(lines[k])
+            k += 1
+        occupied = used_blocks("\n".join(lines[:j] + lines[j + 1:]))
+        ch, probs = redo_line(old, note, wblocks, words, provider, system=system, fewshot=fewshot,
+                              p=p, occupied=occupied)
+        if ch is not None:
+            new = [f"# ✔ переделано по замечанию владельца ({rid}{rest}): {note}", ch.line,
+                   f"#   {ch.played_sec:.0f} s: {ch.preview}", f"#~ было: {old}"] + tail_keep
+            done += 1
+            log(f"  {rid}: переделано по замечанию")
+        else:
+            prev = [l for l in lines[j + 1:k] if l.startswith("#   ")]
+            new = [lines[i], *lines[i + 1:j], lines[j], *prev,
+                   f"#! правка {rid}{rest}: не прошла проверку — " + "; ".join(probs)] + tail_keep
+            failed += 1
+            log(f"  {rid}: правка не прошла проверку — " + "; ".join(probs))
+        lines[i:k] = new
+        i += len(new)
+    return "\n".join(lines) + ("\n" if review_text.endswith("\n") else ""), done, failed

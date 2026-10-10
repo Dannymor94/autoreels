@@ -7206,6 +7206,45 @@ def cmd_align(
     return 0
 
 
+def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None, quiet: bool = False):
+    """Everything the labeller works on for one source: review blocks, words, intonation, prompt,
+    parameters (arl label, arl review-apply --redo). Returns (namespace, None) or (None, error)."""
+    from types import SimpleNamespace
+    from autoreels.cloud.label import LabelParams, build_wblocks
+    stem = mpath.stem
+    lc = r0_cfg.label
+    _cache = Path(cache_dir) if cache_dir else root / "data" / "cache"
+    transcript = _resolve_cached_transcript(manifest, _cache)
+    if transcript is None:
+        return None, f"транскрипт не найден для {stem} в {_cache}"
+    _all, kept, dropped = _review_block_set(transcript, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+    if not kept:
+        return None, f"у {stem} нет блоков для разметки"
+    words = transcript.words
+    if getattr(r0_cfg, "credit_word_patterns", None):
+        from autoreels.cloud.edit import strip_credit_words
+        words = strip_credit_words(words, r0_cfg.credit_word_patterns)
+    tone = None
+    if getattr(r0_cfg, "intonation_check", False):
+        from autoreels.cloud.plan import load_alignment
+        from autoreels.local.prosody import load_prosody, tone_lookup
+        _al = load_alignment(root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+        tone = tone_lookup(load_prosody(root / "transcripts" / f"{stem}.prosody.json",
+                                        manifest.source_sha256, _al) if _al else None)
+    if tone is None and not quiet:
+        print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы и начала по голосу (↗) "
+              f"не проверяются. Сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
+    system = (root / lc.system).read_text(encoding="utf-8")
+    fewshot = json.loads((root / lc.fewshot).read_text(encoding="utf-8")).get("messages", [])
+    p = LabelParams(window_blocks=lc.window_blocks, min_sec=lc.min_sec, max_sec=lc.max_sec,
+                    max_clip_blocks=lc.max_clip_blocks, title_max_chars=lc.title_max_chars,
+                    repair_rounds=lc.repair_rounds,
+                    pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
+                    pause_strong_sec=r0_cfg.min_pause_for_phrase_end)
+    return SimpleNamespace(kept=kept, dropped=dropped, words=words, tone=tone, system=system,
+                           fewshot=fewshot, p=p, wblocks=build_wblocks(kept, words, tone)), None
+
+
 def cmd_label(
     manifest_path: str,
     *,
@@ -7252,37 +7291,12 @@ def cmd_label(
         print(f"ошибка: {out_path} уже есть — там может быть ваша правка. Перезаписать: --force",
               file=sys.stderr)
         return 1
-    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
-    transcript = _resolve_cached_transcript(manifest, _cache)
-    if transcript is None:
-        print(f"ошибка: транскрипт не найден для {stem} в {_cache}", file=sys.stderr)
+    ctx, err = _label_context(mpath, manifest, r0_cfg, root=_root, cache_dir=cache_dir)
+    if ctx is None:
+        print(f"ошибка: {err}", file=sys.stderr)
         return 1
-    _all, kept, dropped = _review_block_set(transcript, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
-    if not kept:
-        print(f"ошибка: у {stem} нет блоков для разметки", file=sys.stderr)
-        return 1
-    words = transcript.words
-    if getattr(r0_cfg, "credit_word_patterns", None):
-        from autoreels.cloud.edit import strip_credit_words
-        words = strip_credit_words(words, r0_cfg.credit_word_patterns)
-    tone = None
-    if getattr(r0_cfg, "intonation_check", False):
-        from autoreels.cloud.plan import load_alignment
-        from autoreels.local.prosody import load_prosody, tone_lookup
-        _al = load_alignment(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
-        tone = tone_lookup(load_prosody(_root / "transcripts" / f"{stem}.prosody.json",
-                                        manifest.source_sha256, _al) if _al else None)
-    if tone is None:
-        print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы и начала по голосу (↗) "
-              f"не проверяются. Сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
-    system = (_root / lc.system).read_text(encoding="utf-8")
-    fewshot = json.loads((_root / lc.fewshot).read_text(encoding="utf-8")).get("messages", [])
-    p = LabelParams(window_blocks=lc.window_blocks, min_sec=lc.min_sec, max_sec=lc.max_sec,
-                    max_clip_blocks=lc.max_clip_blocks, title_max_chars=lc.title_max_chars,
-                    repair_rounds=lc.repair_rounds,
-                    pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
-                    pause_strong_sec=r0_cfg.min_pause_for_phrase_end)
-    wblocks = build_wblocks(kept, words, tone)
+    kept, dropped, words, wblocks = ctx.kept, ctx.dropped, ctx.words, ctx.wblocks
+    system, fewshot, p = ctx.system, ctx.fewshot, ctx.p
     if check or retry:
         import re as _re_lbl
         from autoreels.cloud.label import check_draft, retry_draft
@@ -7344,6 +7358,199 @@ def cmd_label(
         print("ошибка: ни одно окно не получило ответа", file=sys.stderr)
         return 1
     return 0
+
+
+def _resolve_manifest_arg(target: str, root: Path) -> Path | None:
+    """A manifest path or a name in manifests/ (with or without .json) → existing path or None."""
+    mpath = Path(target)
+    if not mpath.exists():
+        mpath = root / "manifests" / target
+    if not mpath.exists() and not mpath.suffix:
+        mpath = mpath.with_suffix(".json")
+    return mpath if mpath.exists() else None
+
+
+def _rel_ref(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def cmd_review_sheet(
+    target: str,
+    *,
+    root=None,
+    cache_dir=None,
+    review: str | None = None,
+    manifest_file: str | None = None,
+    gate: str | None = None,
+    out_dir: str | None = None,
+) -> int:
+    """M37: one HTML page to watch the rendered clips of a source and decide on each one
+    (оставить / убрать / переделать + замечание) → reels-out/<stem>/[_gate/<name>/]_review.html.
+
+    Each clip is matched to its review line by where it plays in the source (label.match_reels):
+    a clip whose line is gone (the draft changed after the render) is shown without controls.
+    The page downloads <stem>_decisions.txt for arl review-apply. Nothing else is written."""
+    import hashlib
+    from autoreels.cloud.label import clip_lines, match_reels
+    from autoreels.local.review_sheet import Card, build_sheet
+
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    stem = mpath.stem
+    show_path = Path(manifest_file) if manifest_file else mpath
+    if not show_path.is_absolute() and not show_path.exists():
+        show_path = _root / show_path
+    if not show_path.exists():
+        print(f"ошибка: манифест клипов не найден: {manifest_file}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    shown = Manifest.model_validate_json(show_path.read_text(encoding="utf-8"))
+    review_path = Path(review) if review else _root / "reviews" / f"{stem}_auto.txt"
+    if not review_path.is_absolute() and not review_path.exists():
+        review_path = _root / review_path
+    if not review_path.exists():
+        print(f"ошибка: черновика {review_path} нет (другой файл разметки: --review)", file=sys.stderr)
+        return 1
+    review_text = review_path.read_text(encoding="utf-8")
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    ctx, err = _label_context(mpath, manifest, r0_cfg, root=_root, cache_dir=cache_dir, quiet=True)
+    if ctx is None:
+        print(f"ошибка: {err}", file=sys.stderr)
+        return 1
+    lines = clip_lines(review_text, ctx.wblocks)
+    reels = list(shown.reels)
+    match = match_reels([(r.id, [(w.start, w.end) for w in r.playback_windows()]) for r in reels], lines)
+    base = Path(out_dir) if out_dir else _root / "reels-out"
+    vdir = base / Path(shown.source).stem
+    if gate:
+        vdir = vdir / "_gate" / gate
+    cards: list = []
+    for r in reels:
+        ln = match.get(r.id)
+        vid = f"{r.id}.mp4" if (vdir / f"{r.id}.mp4").is_file() else None
+        cards.append(Card(
+            rid=r.id, video=vid, duration=r.playback_duration() / (r.speed or 1.0),
+            title=r.title_overlay, caption=r.description,
+            text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
+            seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
+            marks=list(ln.marks) if ln else [],
+        ))
+    notes = []
+    n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
+    if n_unused > 0:
+        notes.append(f"В черновике {n_unused} строк(и) без клипа в этом манифесте "
+                     f"(добавлены после рендера или клип не собрался).")
+    if not any(c.video for c in cards):
+        notes.append(f"Ни одного клипа нет в {vdir} — сначала рендер (или укажите --gate).")
+    html_text = build_sheet(stem, cards, review_ref=_rel_ref(review_path, _root),
+                            manifest_ref=_rel_ref(show_path, _root),
+                            key=hashlib.sha1(review_text.encode("utf-8")).hexdigest()[:12], notes=notes)
+    vdir.mkdir(parents=True, exist_ok=True)
+    out = vdir / "_review.html"
+    out.write_text(html_text, encoding="utf-8")
+    n_vid = sum(1 for c in cards if c.video)
+    n_line = sum(1 for c in cards if c.seq is not None)
+    print(f"лист ревью {stem}: клипов {len(cards)}, с видео {n_vid}, со строкой черновика {n_line}")
+    for c in cards:
+        if c.seq is None:
+            print(f"  {c.rid}: строка черновика не найдена (черновик менялся после рендера)")
+    print(f"→ {out}\n  открыть: open \"{out}\"")
+    return 0
+
+
+def cmd_review_apply(
+    decisions_path: str,
+    *,
+    root=None,
+    cache_dir=None,
+    review: str | None = None,
+    redo: bool = False,
+    provider=None,
+) -> int:
+    """M37: write the owner's decisions (from the review sheet) into the draft.
+
+    drop → the line becomes '#- … ← убрано владельцем'; fix → a '# ✎ владелец' note above it;
+    ok → a '# ✓ владелец' mark. With --redo the LLM reworks every line with a pending ✎ note under
+    the same checks as arl label (one repair round); a failed rework stays as '#! правка …'.
+    The previous draft is kept as <draft>.bak. Nothing is installed or rendered."""
+    import datetime as _dt
+    from autoreels.cloud.label import apply_decisions, parse_decisions, redo_fixes
+
+    _root = Path(root) if root else _project_root()
+    dpath = Path(decisions_path).expanduser()
+    if not dpath.exists():
+        print(f"ошибка: файла решений нет: {decisions_path}", file=sys.stderr)
+        return 1
+    head, decisions, errors = parse_decisions(dpath.read_text(encoding="utf-8"))
+    for e in errors:
+        print(f"  ошибка в решениях: {e}", file=sys.stderr)
+    if errors:
+        print("ошибка: файл решений не применён — исправьте строки выше", file=sys.stderr)
+        return 1
+    ref = review or head.get("review")
+    if not ref:
+        print("ошибка: в файле решений нет строки «# review:» — укажите --review", file=sys.stderr)
+        return 1
+    review_path = Path(ref)
+    if not review_path.is_absolute():
+        review_path = _root / review_path
+    if not review_path.exists():
+        print(f"ошибка: черновика {review_path} нет", file=sys.stderr)
+        return 1
+    old_text = review_path.read_text(encoding="utf-8")
+    new_text, msgs = apply_decisions(old_text, decisions, date=_dt.date.today().isoformat())
+    for m in msgs:
+        print(f"  {m}")
+    n = {v: sum(1 for d in decisions if d.verdict == v) for v in ("ok", "drop", "fix")}
+    print(f"решения: оставить {n['ok']}, убрать {n['drop']}, переделать {n['fix']}")
+    rc = 0
+    if redo:
+        stem = head.get("stem") or review_path.name.removesuffix("_auto.txt")
+        mpath = _resolve_manifest_arg(stem, _root)
+        if mpath is None:
+            print(f"ошибка: манифест {stem} не найден — переделка не запущена", file=sys.stderr)
+            rc = 1
+        else:
+            manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+            r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+            ctx, err = _label_context(mpath, manifest, r0_cfg, root=_root, cache_dir=cache_dir)
+            if ctx is None:
+                print(f"ошибка: {err} — переделка не запущена", file=sys.stderr)
+                rc = 1
+            else:
+                import re as _re_ra
+                from autoreels.cloud.blocks import _block_fingerprint as _fp
+                _m = _re_ra.search(r"^#\s*fingerprint:\s*([0-9a-f]+)", new_text, _re_ra.MULTILINE)
+                if _m and _m.group(1) != _fp(ctx.kept):
+                    print(f"ошибка: черновик сделан для другого набора блоков "
+                          f"(fingerprint {_m.group(1)} ≠ {_fp(ctx.kept)}) — переделка не запущена",
+                          file=sys.stderr)
+                    rc = 1
+                else:
+                    if provider is None:
+                        provider = build_pool(r0_cfg)
+                        provider.preflight()
+                    new_text, done, failed = redo_fixes(new_text, ctx.wblocks, ctx.words, provider,
+                                                        system=ctx.system, fewshot=ctx.fewshot, p=ctx.p,
+                                                        log=lambda s: print(s, flush=True))
+                    print(f"переделка: готово {done}, не прошло проверку {failed}")
+    if new_text != old_text:
+        bak = review_path.with_name(review_path.name + ".bak")
+        bak.write_text(old_text, encoding="utf-8")
+        review_path.write_text(new_text, encoding="utf-8")
+        print(f"→ {review_path}  (прежняя версия: {bak.name})")
+    else:
+        print(f"→ {review_path} без изменений")
+    _q = _rel_ref(review_path, _root)
+    _q = f'"{_q}"' if " " in _q else _q
+    print(f"  проверить план: arl blocks --apply {_q} --labeler auto")
+    return rc
 
 
 def cmd_prepare(
@@ -9778,6 +9985,34 @@ def _build_parser():
     ppp.add_argument("--inputs-dir", default=None, dest="inputs_dir")
     ppp.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    prs = sub.add_parser(
+        "review-sheet",
+        help="лист ревью: все клипы источника с видео и выбором «оставить / убрать / переделать»",
+        description="M37: writes reels-out/<stem>/_review.html next to the rendered clips. Open it, "
+                    "decide on every clip, download <stem>_decisions.txt, then arl review-apply.",
+    )
+    prs.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    prs.add_argument("--root", default=None, help="корень проекта")
+    prs.add_argument("--cache-dir", default=None, dest="cache_dir")
+    prs.add_argument("--review", default=None, help="файл разметки (по умолчанию reviews/<stem>_auto.txt)")
+    prs.add_argument("--manifest-file", default=None, dest="manifest_file",
+                     help="манифест отрендеренных клипов (по умолчанию тот же)")
+    prs.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
+    prs.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+
+    pra = sub.add_parser(
+        "review-apply",
+        help="записать решения листа ревью в черновик разметки (--redo: переделать по замечаниям)",
+        description="M37: drop → the line commented out, fix → the owner's note above it, ok → a mark. "
+                    "--redo asks the LLM to rework every noted line under the arl label checks.",
+    )
+    pra.add_argument("decisions", metavar="решения", help="файл <stem>_decisions.txt из листа ревью")
+    pra.add_argument("--root", default=None, help="корень проекта")
+    pra.add_argument("--cache-dir", default=None, dest="cache_dir")
+    pra.add_argument("--review", default=None, help="черновик (по умолчанию из строки «# review:»)")
+    pra.add_argument("--redo", action="store_true", default=False,
+                     help="переделать строки с замечаниями (LLM, те же проверки, что у arl label)")
+
     plb = sub.add_parser(
         "label",
         help="черновик разметки блоков от LLM, проверенный кодом → reviews/<stem>_auto.txt",
@@ -10088,6 +10323,24 @@ def main(argv=None) -> int:
                 root=args.root if hasattr(args, "root") else None,
                 inputs_dir=getattr(args, "inputs_dir", None),
                 cache_dir=getattr(args, "cache_dir", None),
+            )
+        elif args.cmd == "review-sheet":
+            return cmd_review_sheet(
+                args.manifest,
+                root=args.root if hasattr(args, "root") else None,
+                cache_dir=getattr(args, "cache_dir", None),
+                review=getattr(args, "review", None),
+                manifest_file=getattr(args, "manifest_file", None),
+                gate=getattr(args, "gate", None),
+                out_dir=getattr(args, "out_dir", None),
+            )
+        elif args.cmd == "review-apply":
+            return cmd_review_apply(
+                args.decisions,
+                root=args.root if hasattr(args, "root") else None,
+                cache_dir=getattr(args, "cache_dir", None),
+                review=getattr(args, "review", None),
+                redo=getattr(args, "redo", False),
             )
         elif args.cmd == "label":
             return cmd_label(
