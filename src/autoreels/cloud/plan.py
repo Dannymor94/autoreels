@@ -422,6 +422,24 @@ class SpeechTimes:
             b = self.pair(w, n)[0]
         return a, b
 
+    def heard_between(self, a: float, b: float, tol: float = _EPS) -> Word | None:
+        """A word of the transcript whose audible span reaches into (a, b), or None.
+
+        All words, not only a window's: a word can sit in a "gap" between two neighbours when the
+        alignment put it out of order, or when it is not in the sentence lists at all (a Whisper
+        duplicate dropped from the text, a hallucinated line) while its sound is real (M35)."""
+        if not hasattr(self, "_all_spans"):
+            self._all_spans = sorted((self.span(w) + (w,) for w in self._words), key=lambda x: x[0])
+            self._all_starts = [x[0] for x in self._all_spans]
+            self._max_len = max((y1 - y0 for y0, y1, _ in self._all_spans), default=0.0)
+        lo = bisect.bisect_left(self._all_starts, a - self._max_len)
+        for y0, y1, w in self._all_spans[lo:]:
+            if y0 >= b:
+                break
+            if min(b, y1) - max(a, y0) > tol:
+                return w
+        return None
+
     def word_cut_by(self, t: float, tol: float = _EPS) -> Word | None:
         """The word a cut at source time `t` would split, or None.
 
@@ -559,10 +577,10 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         s = sentences[n - 1]
         ws.extend((x, i == len(s) - 1) for i, x in enumerate(s))
     cands: list[tuple[float, float, bool, float]] = []     # (a, b, visible jump, filler sound length)
-    # Forced alignment can place a word out of order (IMG_6848 1870 s: «эта» aligned after «будет»):
+    # Forced alignment can place a word out of order (IMG_6848 1870 s: «эта» aligned after «будет»),
+    # and a word may be missing from the sentence lists while its sound is real (10h59 373 s, 514 s):
     # the "gap" between two neighbours then holds other words. A stretch where any word of the
-    # window is heard is never cut (M35: seam inside «будет»).
-    spans = [times.span(x) for x, _ in ws]
+    # transcript is heard is never cut (M35: seams inside «будет», «Смотрите,», «Даже»).
     for (w1, end_of_sentence), (w2, _) in zip(ws, ws[1:]):
         ae, as_ = times.pair(w1, w2)
         gap = as_ - ae
@@ -580,7 +598,7 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         b = as_ - max(params.edge_min_sec, min(half, sil_r))
         if b - a < params.min_cut_sec:
             continue
-        if any(min(b, y1) - max(a, y0) > _EPS for y0, y1 in spans):
+        if times.heard_between(a, b) is not None:
             continue
         cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, u_len))
     # shot changes already in the window (its start is a seam; close spans switch in and out)

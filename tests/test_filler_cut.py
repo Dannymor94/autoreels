@@ -71,6 +71,21 @@ def test_no_cut_over_a_word_aligned_out_of_order():
             assert min(c1, b) <= max(c0, a) + 1e-6, (c0, c1, w.word)
 
 
+def test_no_cut_over_a_word_missing_from_the_sentences():
+    """10h59 373 s / 514 s (M35): a word is in the transcript and heard, but not in the window's
+    sentence lists (a Whisper duplicate dropped from the text); the gap around it was cut."""
+    spec = [[("Раз", 0.0, 0.8), ("два", 2.6, 3.0), ("три.", 3.1, 3.6)],
+            [("Четыре", 3.9, 4.6), ("пять.", 4.7, 6.0)]]
+    sents, words, smap, align = _setup(spec, [[0.8, 1.2]])
+    extra = Word(word="Смотрите,", t0=1.5, t1=2.2)              # heard, but in no sentence
+    words = sorted(words + [extra], key=lambda w: w.t0)
+    align["words"].append({"t0": 1.5, "start": 1.5, "end": 2.2, "score": 0.9})
+    smap["words"].append({"t0": 1.5, "t1": 2.2, "audible_start": 1.5, "audible_end": 2.2})
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=P, align=align)
+    for c0, c1 in plan.body[0].cuts:
+        assert min(c1, 2.2) <= max(c0, 1.5) + 1e-6, (c0, c1)
+
+
 def test_off_by_default_and_short_or_capped():
     sents, words, smap, align = _setup(SPEC, [[1.0, 1.6]])
     assert build_manual_plan(sents, [1, 2], words=words, smap=smap, align=align).body[0].cuts == []
