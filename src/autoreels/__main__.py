@@ -5143,7 +5143,8 @@ def _filler_profile_values(r0_cfg, name: str | None) -> dict:
         raise ValueError(f"unknown filler profile {name!r} (r0.yaml manual_filler_profiles: "
                          f"{', '.join(sorted(profiles)) or 'none'})")
     allowed = {"jump_max", "min_cut_spacing_sec", "jump_mask", "min_cut_sec", "keep_word_sec",
-               "keep_sentence_sec", "pause_max_sec", "filler_min_sec", "max_removed_share"}
+               "keep_sentence_sec", "pause_max_sec", "filler_min_sec", "max_removed_share",
+               "mask_min_gap_sec", "mask_filler_only"}
     return {k: v for k, v in profiles[name].items() if k in allowed}
 
 
@@ -5171,7 +5172,8 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 
 
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
-                       tone=None, filler=None, jump=None, filler_profile=None) -> list[str]:
+                       tone=None, filler=None, jump=None, filler_profile=None,
+                       filler_allowed: bool = True) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5201,6 +5203,8 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
             return None if r is None else r.onset
     _f = getattr(entry, "filler", None)
     _f = _f if _f is not None else filler
+    if not filler_allowed:
+        _f = False                     # no motion track: a cut could not be checked for a face jump
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f, filler_profile),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
@@ -5617,7 +5621,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             print(f"  интонация: {len(_blk_pros.get('words', []))} слов")
     # REEL_SPEC §1.4: filler cuts are checked for a visible picture jump (arl motion → local cache).
     _blk_jump = None
-    _fill_any = filler is True or getattr(r0_cfg, "manual_filler_cut", False) or \
+    _blk_filler_ok = True
+    _fill_any = filler is True or (filler is None and getattr(r0_cfg, "manual_filler_cut", False)) or \
         any(getattr(e, "filler", None) for e in entries)
     if getattr(r0_cfg, "manual_plan", False) and _fill_any:
         from autoreels.local.motion import jump_lookup as _jl, load as _ml
@@ -5625,8 +5630,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _mframes = _ml(root / "data" / "cache" / f"{source_file.stem}.motion.npz", manifest.source_sha256,
                        [_c.w, _c.h, _c.x, _c.y])
         if _mframes is None:
-            print(f"  warning: нет дорожки движения data/cache/{source_file.stem}.motion.npz — склейки чистки "
-                  f"не проверены на заметность; arl motion {source_file.stem}", file=sys.stderr)
+            _blk_filler_ok = False
+            print(f"  warning: нет дорожки движения data/cache/{source_file.stem}.motion.npz — чистка «э/ммм» "
+                  f"выключена (склейки нельзя проверить на скачок лица); сначала: arl motion {source_file.stem}",
+                  file=sys.stderr)
         else:
             _blk_jump = _jl(_mframes)
             print(f"  движение: {len(_mframes)} кадров")
@@ -5890,7 +5897,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
                                               render_cfg, '+'.join(str(s) for s in g), align=_blk_align,
                                               tone=_blk_tone, filler=filler, jump=_blk_jump,
-                                              filler_profile=filler_profile):
+                                              filler_profile=filler_profile,
+                                              filler_allowed=_blk_filler_ok):
                     print(_pl)
             except ValueError as _pe:
                 print(f"  error {'+'.join(str(s) for s in g)}: plan: {_pe}", file=sys.stderr)

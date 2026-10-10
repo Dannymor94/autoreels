@@ -219,3 +219,14 @@ def test_filler_profile_values_from_config():
     assert _filler_profile_values(cfg, "dynamic") == {"jump_max": 3.5, "jump_mask": True}
     with pytest.raises(ValueError):
         _filler_profile_values(cfg, "nope")
+
+
+def test_mask_kept_away_from_other_shot_changes_and_only_for_sounds():
+    sents, words, smap, align = _setup(SPEC, [[1.0, 1.6]])
+    every = lambda a, b: 9.0                         # every cut would jump
+    near = ManualPlanParams(filler_cut=True, jump_mask=True, mask_min_gap_sec=4.0)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=near, align=align, jump=every).body[0]
+    assert w.cut_flips == [] and w.cuts == [] and w.cuts_skipped == 2   # both within 4 s of the window start
+    sound = ManualPlanParams(filler_cut=True, jump_mask=True, mask_filler_only=True)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=sound, align=align, jump=every).body[0]
+    assert len(w.cut_flips) == 1 and w.cut_flips[0][1] < 2.0           # the «э» cut; the bare pause left in

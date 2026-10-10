@@ -52,6 +52,8 @@ class ManualPlanParams:
     jump_max: float = 2.0             # a cut whose picture jump exceeds this × typical motion …
     jump_mask: bool = False           # … is masked by switching wide↔close (punch-in) instead of left in
     min_cut_spacing_sec: float = 0.0  # cuts at least this far apart (largest removals win)
+    mask_min_gap_sec: float = 0.0     # a masking shot switch at least this far from any other shot change
+    mask_filler_only: bool = False    # mask only cuts that remove a sound («мм», «аа»), not a bare pause
 
 
 @dataclass
@@ -556,8 +558,7 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
     for n in w.sentences:
         s = sentences[n - 1]
         ws.extend((x, i == len(s) - 1) for i, x in enumerate(s))
-    cands: list[list[float]] = []
-    flip_c: set[tuple[float, float]] = set()
+    cands: list[tuple[float, float, bool, float]] = []     # (a, b, visible jump, filler sound length)
     for (w1, end_of_sentence), (w2, _) in zip(ws, ws[1:]):
         ae, as_ = times.pair(w1, w2)
         gap = as_ - ae
@@ -574,24 +575,31 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         a = ae + max(params.edge_min_sec, min(half, sil_l))
         b = as_ - max(params.edge_min_sec, min(half, sil_r))
         if b - a >= params.min_cut_sec:
-            if jump is not None and jump(a, b) > params.jump_max:
-                if not params.jump_mask:
-                    w.cuts_skipped += 1
-                    continue
-                flip_c.add((round(a, 3), round(b, 3)))
-            cands.append([a, b])
+            cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, u_len))
+    # shot changes already in the window (its start is a seam; close spans switch in and out)
+    changes = [w.start] + [w.start + x for ci in w.close_intervals for x in ci]
     budget = params.max_removed_share * (w.end - w.start)
     keep: list[list[float]] = []
-    for c in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
-        mid = (c[0] + c[1]) / 2
-        if c[1] - c[0] > budget:
+    flips: list[list[float]] = []
+    for a, b, visible, u_len in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
+        mid = (a + b) / 2
+        if b - a > budget:
             continue
         if any(abs(mid - (k0 + k1) / 2) < params.min_cut_spacing_sec for k0, k1 in keep):
             continue
-        keep.append([round(c[0], 3), round(c[1], 3)])
-        budget -= c[1] - c[0]
+        if visible:
+            ok = (params.jump_mask
+                  and (not params.mask_filler_only or u_len >= params.filler_min_sec)
+                  and all(abs(mid - ch) >= params.mask_min_gap_sec for ch in changes))
+            if not ok:
+                w.cuts_skipped += 1
+                continue
+            flips.append([round(a, 3), round(b, 3)])
+            changes.append(mid)
+        keep.append([round(a, 3), round(b, 3)])
+        budget -= b - a
     keep.sort()
-    w.cut_flips = [c for c in keep if (c[0], c[1]) in flip_c]
+    w.cut_flips = sorted(flips)
     return keep
 
 

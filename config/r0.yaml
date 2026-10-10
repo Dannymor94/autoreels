@@ -192,7 +192,9 @@ intonation_check: true
 # REEL_SPEC §1.4: inside a planned clip, cut fillers («э», «ммм» — untranscribed speech from arl align)
 # and over-long pauses between words, keeping a short pause; cut edges never inside a word.
 # Per clip: review marker f:1 / f:0 > arl blocks --apply … --filler / --no-filler > this default.
-manual_filler_cut: false
+# On by default since M32 (owner: «звук стал лучше»); needs the motion track (arl motion <stem>) —
+# without it the cut is switched off with a warning.
+manual_filler_cut: true
 # Balance between a tighter clip and a calm picture (owner M30/M30b: a cut every ~2 s → «лицо дёргается»,
 # every cut checked for a jump → almost nothing cut). jump_max: a cut whose face jump exceeds this × the
 # typical motion is left in (or, with jump_mask, kept and masked by a wide↔close switch);
@@ -202,6 +204,9 @@ manual_filler_profiles:
   careful: {jump_max: 3.5, min_cut_spacing_sec: 4.0, jump_mask: false}
   balance: {jump_max: 5.0, min_cut_spacing_sec: 3.0, jump_mask: false}
   dynamic: {jump_max: 3.5, min_cut_spacing_sec: 2.5, jump_mask: true}
+  # balance + a visible jump that removes a sound («мм», «аа») is masked by a wide↔close switch, but
+  # only ≥ 4 s from any other shot change (owner M31: dynamic — «где-то резкая смена, где-то хорошо»).
+  balance_plus: {jump_max: 5.0, min_cut_spacing_sec: 3.0, jump_mask: true, mask_min_gap_sec: 4.0, mask_filler_only: true}
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
