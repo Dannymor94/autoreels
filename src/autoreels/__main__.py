@@ -5132,6 +5132,12 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
     )
 
 
+def _weak_start_words(r0_cfg) -> frozenset:
+    """First words that make a clip start mid-thought (connectors, pronouns pointing back)."""
+    from autoreels.cloud.select import _DEFAULT_DANGLING
+    return frozenset(_DEFAULT_DANGLING | set(getattr(r0_cfg, "dangling_words", None) or []))
+
+
 def _filler_profile_values(r0_cfg, name: str | None) -> dict:
     """Filler-cut balance preset (r0.yaml manual_filler_profiles): jump_max, min_cut_spacing_sec,
     jump_mask. `name` (--filler-profile) > config manual_filler_profile. Unknown name → ValueError."""
@@ -5209,6 +5215,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f, filler_profile),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
         source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
+        weak_start_words=_weak_start_words(r0_cfg),
     )
     body = [s for w in plan.body for s in w.segments()]
     reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []

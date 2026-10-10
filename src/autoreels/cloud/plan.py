@@ -628,6 +628,7 @@ def build_manual_plan(
     align: dict | None = None,
     tone: Callable[[Word], tuple[str, str] | None] | None = None,
     jump: Callable[[float, float], float] | None = None,
+    weak_start_words: Iterable[str] = (),
 ) -> ManualPlan:
     """Plan one manual clip. `sentences` is the review numbering (merge_group_sentences output);
     `play` the body sentence numbers in play order (s:..e: minus x:, or the beat order).
@@ -715,6 +716,7 @@ def build_manual_plan(
     body[-1].end = max(end, body[-1].start + _EPS)
     if tone is not None:
         warnings.extend(_ending_tone_warnings(sentences, play[-1], tone))
+        warnings.extend(_start_warnings(times, sentences, play[0], tone, frozenset(weak_start_words)))
 
     windows: list[PlannedWindow] = []
     if hook is not None:
@@ -807,6 +809,38 @@ def _ending_tone_warnings(sentences: Sequence[Sequence[Word]], last: int,
     what = "sounds unfinished — the speaker goes on" if kind == "open" else "intonation unclear"
     return [f"ending intonation {desc}: «{sentences[last - 1][-1].word}» {what}; "
             f"finished sentence ends nearby: {alt}"]
+
+
+def _clean_word(w: str) -> str:
+    return w.strip(".,!?;:—–-«»\"'()…").lower()
+
+
+def _start_warnings(times: SpeechTimes, sentences: Sequence[Sequence[Word]], first: int,
+                    tone: Callable[[Word], tuple[str, str] | None], weak: frozenset) -> list[str]:
+    """REEL_SPEC §1.7: the clip should start where a thought starts. A start is weak when the voice
+    of the sentence before it stays up (↗): the speaker is mid-thought and the clip joins in the
+    middle. Reported with the nearest strong starts of the block — after a finished sentence, not
+    on a connector, at least 4 words. (A connector alone is not reported here: the owner accepted
+    «А я и не работаю.», «Но взрослый что он делает?», «То есть, когда тебя накрыло…» as starts;
+    the plain dangling-start note stays in collect_human_warnings.)"""
+    def before(n: int):
+        p = times.prev(sentences[n - 1][0])
+        return None if p is None else tone(p)
+
+    def on_connector(n: int) -> bool:
+        w0 = sentences[n - 1][0].word.strip()
+        return bool(w0) and (w0[0].islower() or _clean_word(w0) in weak)
+
+    t_prev = before(first)
+    if t_prev is None or t_prev[0] != "open":
+        return []
+    strong = [n for n in range(1, len(sentences) + 1)
+              if n != first and len(sentences[n - 1]) >= 4 and not on_connector(n)
+              and (before(n) or ("",))[0] == "final"]
+    near = sorted(sorted(strong, key=lambda n: (abs(n - first), n))[:3])
+    alt = ", ".join(f"s{n} «{' '.join(w.word for w in sentences[n - 1][:4])}…»" for n in near) or "none in this block"
+    return [f"weak start s{first}: the sentence before it ends with the voice up ({t_prev[1]}) — the clip "
+            f"joins mid-thought; strong starts nearby: {alt}"]
 
 
 def load_alignment(path, source_sha256: str | None = None) -> dict | None:

@@ -170,3 +170,29 @@ def test_pitch_track_on_synthetic_voice_sees_fall_and_rise():
     fall_a, rise_a = 2.25, 2.25 + 0.6 + 0.25
     (fall, rise), _ = word_tones(t, f0, [(fall_a, fall_a + 0.6), (rise_a, rise_a + 0.6)])
     assert classify(fall) == "final" and classify(rise) == "open"
+
+
+# ── REEL_SPEC §1.7: a start right after a sentence whose voice stays up joins mid-thought ─────
+
+def test_plan_reports_start_after_open_sentence_with_strong_starts():
+    sents, words, smap = [], [], {"words": [], "boundaries": []}
+    texts = [["Раз", "два", "три", "четыре."], ["Пять", "шесть", "семь", "восемь."], ["Девять", "десять."],
+             ["Одиннадцать", "двенадцать", "тринадцать", "четырнадцать."]]
+    t = 0.0
+    for s in texts:
+        cur = []
+        for x in s:
+            w = Word(word=x, t0=t, t1=t + 0.4)
+            cur.append(w)
+            words.append(w)
+            smap["words"].append({"t0": w.t0, "t1": w.t1, "audible_start": w.t0, "audible_end": w.t1})
+            t += 0.5
+        sents.append(cur)
+        t += 0.5
+    tone = _stub({"четыре.": "final", "восемь.": "open", "десять.": "final", "четырнадцать.": "final"})
+    plan = build_manual_plan(sents, [3, 4], words=words, smap=smap, tone=tone)
+    msg = [w for w in plan.warnings if w.startswith("weak start")]
+    assert len(msg) == 1 and "s3" in msg[0]
+    assert "s2 «Пять шесть семь восемь.…»" in msg[0] and "s4 «Одиннадцать" in msg[0]   # s3 is too short
+    ok = build_manual_plan(sents, [2, 3], words=words, smap=smap, tone=tone)      # after «четыре.» (final)
+    assert not any(w.startswith("weak start") for w in ok.warnings)
