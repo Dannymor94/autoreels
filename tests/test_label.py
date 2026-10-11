@@ -641,3 +641,22 @@ def test_ranking_needs_every_clip_or_leaves_the_draft():
     assert rank_draft(draft, wb, w, down, system="S", log=lambda m: None) == (draft, False)
     single = "1 80 | t: A\n"
     assert rank_draft(single, wb, w, Scripted([]), system="S", log=lambda m: None) == (single, False)
+
+
+def test_compare_draft_with_the_owners_labelling():
+    """M40 yardstick: which of the owner's clips a draft found (IMG_6848: the M35 cloud draft
+    found 6 of 8, measured with this function)."""
+    from autoreels.cloud.label import compare_drafts
+    w, wb = _blocks(6)
+    ref = "1 85 | s:1 | e:3 | t: A\n3 85+ | s:1 | e:6 | t: B\n6 80 | t: C\n"
+    draft = "1 80 | s:2 | e:3 | t: a\n4 80 | s:1 | e:3 | t: b\n5 80 | t: extra\n"
+    rows, s = compare_drafts(draft, ref, wb, w)
+    assert s == {"found": 2, "total": 3, "draft_clips": 3, "extra": 1}
+    assert rows[0]["draft"] == 1 and rows[0]["start_diff"] > 0 and rows[0]["end_diff"] == 0
+    assert rows[1]["draft"] == 4 and rows[1]["overlap"] == 1.0          # draft inside the owner's 3+4
+    assert rows[2]["draft"] is None
+    assert compare_drafts(ref, ref, wb, w)[1] == {"found": 3, "total": 3, "draft_clips": 3, "extra": 0}
+    a = cli._build_parser().parse_args(["label-compare", "IMG_6848", "d.txt"])
+    assert (a.cmd, a.draft, a.reference) == ("label-compare", "d.txt", None)
+    b = cli._build_parser().parse_args(["label", "IMG_6848", "--llm", "local"])
+    assert b.llm == "local"

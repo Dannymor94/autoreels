@@ -7281,6 +7281,9 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
                            wblocks=build_wblocks(kept, words, tone, speech=speech)), None
 
 
+_LOCAL_MODE = {"auto": "first", "local": "only", "cloud": "off"}
+
+
 def cmd_label(
     manifest_path: str,
     *,
@@ -7292,6 +7295,7 @@ def cmd_label(
     check: bool = False,
     retry: bool = False,
     rank: bool | None = None,
+    llm: str = "auto",
 ) -> int:
     """Draft the review lines of a source with the LLM → reviews/<stem>_auto.txt (cloud/label.py).
 
@@ -7302,6 +7306,9 @@ def cmd_label(
     --check: re-check an existing draft with the current rules (no LLM); a broken line becomes '#!'.
     --retry: ask again only for the windows the draft marks '# blocks a–b: no answer'.
     Both rewrite the draft in place and keep the previous version as <draft>.bak.
+
+    llm: auto (the local model from LOCAL_LLM_URL first when it answers, then the cloud) |
+    local (only the local model) | cloud (Groq/OpenRouter only).
 
     The LLM proposes clips per window of blocks; code maps them to the review numbering, checks the
     owner's rules (REEL_SPEC §1.7, §4.5, length) and asks once for a repair. Nothing is installed:
@@ -7360,7 +7367,7 @@ def cmd_label(
         bak = out_path.with_name(out_path.name + ".bak")
         if retry:
             if provider is None:
-                provider = build_pool(r0_cfg)
+                provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
                 provider.preflight()
             bak.write_text(old_text, encoding="utf-8")   # before the first checkpoint touches the draft
             new_text, done, still = retry_draft(new_text, wblocks, words, provider, system=system,
@@ -7375,7 +7382,7 @@ def cmd_label(
             from autoreels.cloud.label import is_ranked as _is_ranked
             if not _is_ranked(new_text):
                 if provider is None:
-                    provider = build_pool(r0_cfg)
+                    provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
                     provider.preflight()
                 new_text, _ = rank_draft(new_text, wblocks, words, provider, system=_rank_system(),
                                          date=_dt.date.today().isoformat(), log=lambda m: print(m, flush=True))
@@ -7389,7 +7396,7 @@ def cmd_label(
             print(f"→ {out_path} без изменений")
         return 0
     if provider is None:
-        provider = build_pool(r0_cfg)
+        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
         provider.preflight()
     from autoreels.cloud.label import windows as _label_windows
     n_win = len(_label_windows(wblocks, p.window_blocks, p.max_clip_blocks))
@@ -7449,6 +7456,43 @@ def _rel_ref(path: Path, root: Path) -> str:
         return str(path.resolve().relative_to(root.resolve()))
     except ValueError:
         return str(path)
+
+
+def cmd_label_compare(target: str, draft: str, *, root=None, cache_dir=None,
+                      reference: str | None = None) -> int:
+    """M40: how close a labelling draft is to the owner's labelling of the same source — which of
+    the owner's clips it found (overlap ≥ 50 %), how far its starts/ends are, how many extra clips.
+    The yardstick for comparing models and settings (local vs cloud, window size, prompts)."""
+    from autoreels.cloud.label import compare_drafts
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    ref_path = Path(reference) if reference else _root / "reviews" / f"{mpath.stem}_spec.txt"
+    draft_path = Path(draft)
+    for pth in (ref_path, draft_path):
+        if not pth.exists():
+            print(f"ошибка: файла нет: {pth}", file=sys.stderr)
+            return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    ctx, err = _label_context(mpath, manifest, r0_cfg, root=_root, cache_dir=cache_dir, quiet=True)
+    if ctx is None:
+        print(f"ошибка: {err}", file=sys.stderr)
+        return 1
+    rows, s = compare_drafts(draft_path.read_text(encoding="utf-8"), ref_path.read_text(encoding="utf-8"),
+                             ctx.wblocks, ctx.words)
+    print(f"сравнение {draft_path.name} с разметкой {ref_path.name}:")
+    for r in rows:
+        if r["draft"] is None:
+            print(f"  строка {r['ref']:>3} «{r['title'][:40]}»: не найдена")
+        else:
+            print(f"  строка {r['ref']:>3} «{r['title'][:40]}» ↔ строка {r['draft']} черновика: "
+                  f"совпадение {r['overlap']:.0%}, начало {r['start_diff']:+.1f} с, конец {r['end_diff']:+.1f} с")
+    print(f"итог: найдено {s['found']} из {s['total']}; клипов в черновике {s['draft_clips']}, "
+          f"из них не совпали с вашими {s['extra']}")
+    return 0
 
 
 def cmd_review_sheet(
@@ -7608,7 +7652,7 @@ def cmd_review_apply(
                     rc = 1
                 else:
                     if provider is None:
-                        provider = build_pool(r0_cfg)
+                        provider = build_pool(r0_cfg, local="first")
                         provider.preflight()
                     new_text, done, failed = redo_fixes(new_text, ctx.wblocks, ctx.words, provider,
                                                         system=ctx.system, fewshot=ctx.fewshot, p=ctx.p,
@@ -10060,6 +10104,17 @@ def _build_parser():
     ppp.add_argument("--inputs-dir", default=None, dest="inputs_dir")
     ppp.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    plc = sub.add_parser(
+        "label-compare",
+        help="сравнить черновик разметки с вашей разметкой источника (сколько ваших клипов найдено)",
+        description="M40: the yardstick for models and settings — which of the owner's clips a draft found.",
+    )
+    plc.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    plc.add_argument("draft", metavar="черновик", help="файл черновика разметки")
+    plc.add_argument("--reference", default=None, help="ваша разметка (по умолчанию reviews/<stem>_spec.txt)")
+    plc.add_argument("--root", default=None, help="корень проекта")
+    plc.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     prs = sub.add_parser(
         "review-sheet",
         help="лист ревью: все клипы источника с видео и выбором «оставить / убрать / переделать»",
@@ -10104,6 +10159,9 @@ def _build_parser():
                      help="перепроверить готовый черновик по текущим правилам (без LLM)")
     plb.add_argument("--retry", action="store_true", default=False,
                      help="повторить только окна, оставшиеся без ответа")
+    plb.add_argument("--llm", choices=["auto", "local", "cloud"], default="auto",
+                     help="модель: auto — локальная (LOCAL_LLM_URL) первой, затем облако; "
+                          "local — только локальная; cloud — только Groq/OpenRouter")
     plb.add_argument("--rank", action="store_true", default=None,
                      help="ранжировать клипы готового черновика (1 запрос; оценка = место)")
 
@@ -10401,6 +10459,13 @@ def main(argv=None) -> int:
                 inputs_dir=getattr(args, "inputs_dir", None),
                 cache_dir=getattr(args, "cache_dir", None),
             )
+        elif args.cmd == "label-compare":
+            return cmd_label_compare(
+                args.manifest, args.draft,
+                root=args.root if hasattr(args, "root") else None,
+                cache_dir=getattr(args, "cache_dir", None),
+                reference=getattr(args, "reference", None),
+            )
         elif args.cmd == "review-sheet":
             return cmd_review_sheet(
                 args.manifest,
@@ -10429,6 +10494,7 @@ def main(argv=None) -> int:
                 check=getattr(args, "check", False),
                 retry=getattr(args, "retry", False),
                 rank=getattr(args, "rank", None),
+                llm=getattr(args, "llm", "auto") or "auto",
             )
         elif args.cmd == "prosody":
             return cmd_prosody(

@@ -778,6 +778,68 @@ class OpenRouterLLM:
         ) from last_exc
 
 
+class LocalLLM:
+    """M40: a local OpenAI-compatible server (llama.cpp `llama-server` on the Ubuntu machine).
+
+    No quota, no rate limits — but slow: one window takes minutes on an RX 580, so the read
+    timeout is long. A connection failure (machine off/asleep) is a connect error: the pool moves
+    on to the cloud providers."""
+
+    name = "Local"
+
+    def __init__(self, *, url: str, model: str = "local", timeout_sec: float = 540.0,
+                 max_output_tokens: int = 1500, no_think: bool = True,
+                 post_fn: Callable | None = None):
+        self._url = url.rstrip("/")
+        self._model = model
+        self._timeout = timeout_sec
+        self._max_tokens = max_output_tokens
+        self._no_think = no_think
+        self._post = post_fn or httpx.post
+
+    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+        msgs = [dict(m) for m in messages]
+        if self._no_think and msgs and msgs[-1].get("role") == "user":
+            msgs[-1]["content"] = str(msgs[-1].get("content", "")) + " /no_think"
+        payload = {"model": self._model, "messages": msgs, "temperature": temperature,
+                   "max_tokens": self._max_tokens, "response_format": {"type": "json_object"}}
+        if self._no_think:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+        try:
+            resp = self._post(f"{self._url}/chat/completions", json=payload,
+                              timeout=httpx.Timeout(self._timeout, connect=5.0))
+        except httpx.ConnectError as e:
+            raise ProviderTimeout(f"локальная модель недоступна ({self._url}): {e}",
+                                  provider=self.name, is_connect_error=True) from e
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            raise ProviderTimeout(f"локальная модель не ответила за {self._timeout:.0f} с: {e}",
+                                  provider=self.name) from e
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            raise ProviderError(f"локальная модель: {e}") from e
+        return _extract_content(resp.json(), self.name)
+
+    def available_models(self) -> set[str] | None:
+        return None   # llama-server lists its file name, not our label; reachability is probed at build
+
+
+def local_llm_from_env(r0_cfg, *, probe: bool = True) -> "LocalLLM | None":
+    """LocalLLM when LOCAL_LLM_URL is set (and the server answers GET /models when probe)."""
+    url = os.environ.get("LOCAL_LLM_URL", "").strip()
+    if not url:
+        return None
+    lc = getattr(r0_cfg, "local_llm", None)
+    llm = LocalLLM(url=url, model=getattr(lc, "model", "local"),
+                   timeout_sec=getattr(lc, "timeout_sec", 540.0),
+                   max_output_tokens=getattr(lc, "max_output_tokens", 1500),
+                   no_think=getattr(lc, "no_think", True))
+    if probe and probe_provider(f"{llm._url}/models", api_key=None, timeout=5.0) != 200:
+        print(f"\n  ⚠ локальная модель {url} не отвечает — работаю через облачных провайдеров", flush=True)
+        return None
+    return llm
+
+
 class _PoolMember:
     """Провайдер + его состояние внутри пула.
 
@@ -1138,7 +1200,7 @@ def _openrouter_shared_pool_blocked(model: str, api_key: str) -> str | None:
     return None
 
 
-def build_pool(r0_cfg, *, strategy: str | None = None) -> ProviderPool:
+def build_pool(r0_cfg, *, strategy: str | None = None, local: str = "off") -> ProviderPool:
     """Собрать ProviderPool из конфига и ключей окружения.
 
     Groq — всегда (основной, модель сильнее → предпочтителен по качеству). OpenRouter
@@ -1148,7 +1210,14 @@ def build_pool(r0_cfg, *, strategy: str | None = None) -> ProviderPool:
     """
     strat = strategy or getattr(r0_cfg, "provider_strategy", "adaptive")
     max_out = getattr(r0_cfg, "max_output_tokens", 900)
-    providers: list[LLMProvider] = [
+    # M40 local: "off" (R0 path, unchanged) | "first" (local, then the cloud) | "only" (local alone)
+    loc = local_llm_from_env(r0_cfg) if local in ("first", "only") else None
+    if local == "only":
+        if loc is None:
+            raise ProviderError("локальная модель не задана или не отвечает: LOCAL_LLM_URL в .env "
+                                "(например http://192.168.1.50:8080/v1)")
+        return ProviderPool([loc], strategy=strat)
+    providers: list[LLMProvider] = ([loc] if loc is not None else []) + [
         GroqLLM(model=r0_cfg.model, defer_throttle=True, max_output_tokens=max_out)
     ]
     or_key = os.environ.get("OPENROUTER_API_KEY")

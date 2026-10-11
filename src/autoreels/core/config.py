@@ -190,6 +190,18 @@ class LabelConfig(BaseModel):
     rank: bool = False                             # one request per finished draft: clips ranked → score
 
 
+class LocalLLMConfig(BaseModel):
+    """M40: a local OpenAI-compatible server (llama.cpp `llama-server`) for the labeller.
+    The address is machine-local: LOCAL_LLM_URL in .env (e.g. http://192.168.1.50:8080/v1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = "local"                           # llama-server serves one model; the name is a label
+    timeout_sec: float = Field(540.0, ge=10, le=590)  # a window on an RX 580 takes minutes; < pool budget 600 s
+    max_output_tokens: int = Field(1500, ge=100)
+    no_think: bool = True                          # Qwen3: answer without a reasoning block
+
+
 class R0Config(BaseModel):
     """Типизированный config/r0.yaml. Пресет резолвится в числа через свойства ниже."""
 
@@ -339,6 +351,7 @@ class R0Config(BaseModel):
     manual_filler_profiles: dict[str, dict[str, float | bool]] = Field(default_factory=dict)
     # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
     label: LabelConfig = Field(default_factory=LabelConfig)
+    local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
 
     @property
     def min_duration(self) -> int:

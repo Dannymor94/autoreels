@@ -1113,3 +1113,49 @@ def rank_draft(review_text: str, wblocks: Sequence[WBlock], words: list, provide
     out.insert(at, tag)
     log(f"  ранжирование: {n} клипов, лучший — строка {items[order[0] - 1][1].seq}")
     return "\n".join(out) + ("\n" if review_text.endswith("\n") else ""), True
+
+
+# ── comparing a draft with the owner's labelling (M40: is a model/setting better or worse?) ────
+
+def line_spans(review_text: str, wblocks: Sequence[WBlock], words: list) -> list[tuple[int, float, float, str]]:
+    """(line number, start, end, title) of every clip line: start of sentence s, end of sentence e."""
+    by_seq = {wb.seq: wb for wb in wblocks}
+    out = []
+    for _, e in _rankable(review_text):
+        lo = e.seq - (1 if e.merge_back else 0)
+        group = [by_seq[q] for q in range(lo, e.seq + e.merge_fwd + 1) if q in by_seq]
+        if not group:
+            continue
+        merged = merge_group_sentences([g.block for g in group], words)
+        s, z = (e.s or 1), min(e.e or len(merged), len(merged))
+        if not (1 <= s <= z):
+            continue
+        out.append((e.seq, merged[s - 1][0].t0, merged[z - 1][-1].t1, e.title or ""))
+    return out
+
+
+def compare_drafts(draft_text: str, ref_text: str, wblocks: Sequence[WBlock], words: list,
+                   *, min_overlap: float = 0.5) -> tuple[list[dict], dict]:
+    """Which of the reference (owner's) clips the draft found: a draft clip overlapping a reference
+    clip by at least min_overlap of the shorter one. Each draft clip matches at most one."""
+    ref = line_spans(ref_text, wblocks, words)
+    dr = line_spans(draft_text, wblocks, words)
+    used: set[int] = set()
+    rows = []
+    for seq, a, b, title in ref:
+        best, best_ov = None, 0.0
+        for k, (dseq, da, db, dt) in enumerate(dr):
+            if k in used:
+                continue
+            ov = max(0.0, min(b, db) - max(a, da)) / max(1e-6, min(b - a, db - da))
+            if ov > best_ov:
+                best, best_ov = k, ov
+        if best is not None and best_ov >= min_overlap:
+            used.add(best)
+            dseq, da, db, _ = dr[best]
+            rows.append({"ref": seq, "title": title, "draft": dseq, "overlap": best_ov,
+                         "start_diff": da - a, "end_diff": db - b})
+        else:
+            rows.append({"ref": seq, "title": title, "draft": None, "overlap": best_ov})
+    found = sum(1 for r in rows if r["draft"] is not None)
+    return rows, {"found": found, "total": len(ref), "draft_clips": len(dr), "extra": len(dr) - found}

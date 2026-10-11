@@ -1607,3 +1607,76 @@ def test_pool_fails_at_once_when_nobody_frees_up_within_the_budget():
     assert clock.t == 0.0
     assert "дольше бюджета" in str(e.value) and "Groq через ~23 мин" in str(e.value)
     assert "OpenRouter через ~300 мин" in str(e.value)
+
+
+# ----------------------------------------------------------------- M40: local model
+
+class _Resp:
+    def __init__(self, status=200, body=None):
+        self.status_code = status
+        self._body = body or {"choices": [{"message": {"content": '{"clips": []}'}}]}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+            raise httpx.HTTPStatusError("err", request=httpx.Request("POST", "http://x"), response=self)
+
+    def json(self):
+        return self._body
+
+
+def test_local_llm_request_shape_and_no_think():
+    from autoreels.cloud.providers import LocalLLM
+    sent = {}
+
+    def post(url, *, json, timeout):
+        sent.update(url=url, json=json, timeout=timeout)
+        return _Resp()
+
+    llm = LocalLLM(url="http://192.168.1.50:8080/v1/", timeout_sec=300, max_output_tokens=1200, post_fn=post)
+    msgs = [{"role": "system", "content": "S"}, {"role": "user", "content": "U"}]
+    assert llm.complete(msgs) == '{"clips": []}'
+    assert sent["url"] == "http://192.168.1.50:8080/v1/chat/completions"
+    j = sent["json"]
+    assert j["messages"][-1]["content"] == "U /no_think" and msgs[-1]["content"] == "U"   # caller's list untouched
+    assert j["chat_template_kwargs"] == {"enable_thinking": False} and j["max_tokens"] == 1200
+    assert j["response_format"] == {"type": "json_object"} and sent["timeout"].read == 300
+    j2 = {}
+    LocalLLM(url="http://x/v1", no_think=False, post_fn=lambda url, *, json, timeout: j2.update(json) or _Resp()).complete(msgs)
+    assert "chat_template_kwargs" not in j2 and j2["messages"][-1]["content"] == "U"
+
+
+def test_local_llm_unreachable_is_a_connect_error_the_pool_skips():
+    import httpx
+    from autoreels.cloud.providers import LocalLLM, ProviderTimeout
+
+    def down(url, *, json, timeout):
+        raise httpx.ConnectError("refused")
+
+    local = LocalLLM(url="http://x/v1", post_fn=down)
+    with pytest.raises(ProviderTimeout) as e:
+        local.complete([{"role": "user", "content": "U"}])
+    assert e.value.is_connect_error
+    cloud = _ScriptedProvider("Groq", ["from-groq"])
+    pool, _ = _pool(local, cloud)
+    assert pool.complete([{"role": "user", "content": "U"}]) == "from-groq"
+
+
+def test_build_pool_local_modes(monkeypatch):
+    import autoreels.cloud.providers as P
+    from types import SimpleNamespace
+    cfg = SimpleNamespace(model="m", openrouter_model="o", provider_strategy="adaptive", max_output_tokens=900,
+                          local_llm=SimpleNamespace(model="local", timeout_sec=300, max_output_tokens=1500,
+                                                    no_think=True))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("LOCAL_LLM_URL", raising=False)
+    assert [m.name for m in P.build_pool(cfg, local="first")._members] == ["Groq"]       # no URL: as before
+    with pytest.raises(ProviderError):
+        P.build_pool(cfg, local="only")
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://192.168.1.50:8080/v1")
+    monkeypatch.setattr(P, "probe_provider", lambda url, **kw: 200)
+    assert [m.name for m in P.build_pool(cfg)._members] == ["Groq"]                      # R0 path: never local
+    assert [m.name for m in P.build_pool(cfg, local="first")._members] == ["Local", "Groq"]
+    assert [m.name for m in P.build_pool(cfg, local="only")._members] == ["Local"]
+    monkeypatch.setattr(P, "probe_provider", lambda url, **kw: None)                       # machine off
+    assert [m.name for m in P.build_pool(cfg, local="first")._members] == ["Groq"]
