@@ -251,9 +251,18 @@ def test_owner_accepted_img6848_lines_round_trip(g):
 
 
 def test_fewshot_is_real_and_consistent():
+    """Both formats: the M35 file (IMG_6848 messages) and the M41 one (arl fewshot-build: the
+    owner's approved clips of every source, each with its source and line)."""
     data = json.loads((REPO_ROOT / "prompts" / "label_fewshot.json").read_text(encoding="utf-8"))
-    assert "IMG_6848" in data["provenance"]
-    msgs = data["messages"]
+    if "examples" in data:
+        assert "approved" in data["provenance"] and data["examples"]
+        for e in data["examples"]:
+            assert e["source"] and e["kind"] and e["file"] and isinstance(e["line"], int)
+        msgs = [m for e in data["examples"] for m in ({"role": "user", "content": e["user"]},
+                                                    {"role": "assistant", "content": e["assistant"]})]
+    else:
+        assert "IMG_6848" in data["provenance"]
+        msgs = data["messages"]
     assert [m["role"] for m in msgs] == ["user", "assistant"] * (len(msgs) // 2)
     for u, a in zip(msgs[::2], msgs[1::2]):
         ans = parse_answer(a["content"])
@@ -660,3 +669,62 @@ def test_compare_draft_with_the_owners_labelling():
     assert (a.cmd, a.draft, a.reference) == ("label-compare", "d.txt", None)
     b = cli._build_parser().parse_args(["label", "IMG_6848", "--llm", "local"])
     assert b.llm == "local"
+
+
+# ── M41: rhetorical-question and call-to-action endings; examples from approved clips; stats ────
+
+def test_rhetorical_question_and_call_to_action_endings():
+    from autoreels.cloud.label import is_call_to_action, is_open_question
+    ws = lambda t: [Word(word=x, t0=i, t1=i + 0.5) for i, x in enumerate(t.split())]  # noqa: E731
+    assert is_open_question(ws("Если среда поменялась, значит вы в какой среде находитесь?"))   # 11h42 r05
+    assert not is_open_question(ws("Я поступил как взрослый его сын, правильно?"))           # owner-accepted
+    assert not is_open_question(ws("Это и есть свобода, да?"))
+    assert not is_open_question(ws("Разве я мог сказать?"))
+    assert is_call_to_action(ws("Пришлите номер телефончика, и я вам скину эту книжечку."))  # 11h42 r06
+    assert is_call_to_action(ws("Подписывайтесь, ссылка в описании."))
+    assert not is_call_to_action(ws("В принципе, книга про психологическое взросление."))
+    w = _words(_sentence(4, "один.") + _sentence(4, "два.") + [("Пришлите", 0.4), ("номер.", 0.4)])
+    wb = build_wblocks([SimpleNamespace(start=w[0].t0, end=w[-1].t1 + 1)], w, None)
+    ch = check_clip(_c([1], "1.1", "1.3"), wb, w, LabelParams(min_sec=1.0, max_sec=99.0))
+    assert any("call to action" in x for x in ch.problems)
+
+
+def test_approved_entries_owner_file_and_review_marks():
+    from autoreels.cloud.label import approved_entries
+    spec = "# head\n3 85+ | s:1 | t: A\n#! 5 80 | t: broken\n7 80 | t: B\n"
+    assert [e.seq for e in approved_entries(spec, owner_file=True)] == [3, 7]
+    draft = ("# ✓ владелец (r01 2026-10-11)\n1 80 | t: A\n"
+             "# ✔ переделано по замечанию владельца (r02 2026-10-11): короче\n3 80 | t: B\n#~ было: 3 80\n"
+             "# ✎ владелец (r03 2026-10-11): конец раньше\n5 80 | t: C\n"
+             "6 80 | t: D\n#- 7 80 | t: E  ← убрано владельцем (r05 2026-10-11): скучно\n")
+    assert [e.seq for e in approved_entries(draft, owner_file=False)] == [1, 3]
+    from autoreels.cloud.label import review_stats
+    s = review_stats(draft)
+    assert (s["clips"], s["ok"], s["reworked"], s["pending"], s["dropped"], s["reviewed"]) == (5, 1, 1, 1, 1, 4)
+    assert s["accept"] == 0.25
+    assert review_stats("1 80 | t: A\n")["accept"] is None
+
+
+def test_example_from_an_approved_line_and_selection_without_self_leak():
+    from autoreels.cloud.label import build_example, select_fewshot
+    w, wb = _blocks(6)
+    p = LabelParams(min_sec=1.0, max_sec=99.0)
+    from autoreels.cloud.blocks import parse_compact_answer
+    e = parse_compact_answer("3 85+ | s:1 | e:6 | t: Т | d: П\n")[1][0]
+    ex, why = build_example(e, wb, w, p)
+    assert why == "" and ex["blocks"] == [2, 3, 4]              # the block before + the clip's two
+    assert "BLOCK 2 ·" in ex["user"] and json.loads(ex["assistant"])["clips"][0]["start"] == "3.1"
+    bad = parse_compact_answer("3 85 | s:1 | e:99\n")[1][0]
+    assert build_example(bad, wb, w, p)[0] is None
+    exs = [{"source": "A", "kind": "lecture", "user": "u" * 50, "assistant": "a", "line": 1},
+           {"source": "A", "kind": "lecture", "user": "u" * 10, "assistant": "a", "line": 2},
+           {"source": "B", "kind": "lecture", "user": "u" * 30, "assistant": "a", "line": 1},
+           {"source": "C", "kind": "interview", "user": "u", "assistant": "a", "line": 1},
+           {"source": "X", "kind": "lecture", "user": "u", "assistant": "a", "line": 1}]
+    m = select_fewshot(exs, kind="lecture", exclude_source="X", n=2)
+    assert [x["content"] for x in m[::2]] == ["u" * 10, "u" * 30]      # A's shortest, then B; never X
+    assert [x["content"] for x in select_fewshot(exs, kind="interview", exclude_source="X", n=3)[::2]] == ["u"]
+    assert select_fewshot(exs, kind="meditation", exclude_source="X", n=1)[0]["content"] == "u" * 10
+    assert select_fewshot([exs[4]], kind="lecture", exclude_source="X", n=2) == []
+    a = cli._build_parser().parse_args(["fewshot-build"])
+    assert a.cmd == "fewshot-build" and cli._build_parser().parse_args(["label-stats"]).cmd == "label-stats"

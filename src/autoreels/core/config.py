@@ -188,6 +188,7 @@ class LabelConfig(BaseModel):
     min_speech_share: float = Field(0.0, ge=0.0, le=1.0)
     interview: str = ""                            # extra system rules for source_kind interview
     rank: bool = False                             # one request per finished draft: clips ranked → score
+    fewshot_examples: int = Field(2, ge=0, le=6)   # M41: owner-approved examples per request (other sources)
 
 
 class LocalLLMConfig(BaseModel):

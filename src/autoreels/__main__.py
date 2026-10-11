@@ -7254,7 +7254,16 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
     interview = (manifest.source_kind or r0_cfg.source_kind) == "interview"
     if interview and getattr(lc, "interview", None):
         system += "\n" + (root / lc.interview).read_text(encoding="utf-8")
-    fewshot = json.loads((root / lc.fewshot).read_text(encoding="utf-8")).get("messages", [])
+    _fs = json.loads((root / lc.fewshot).read_text(encoding="utf-8"))
+    if "examples" in _fs:       # M41: the owner's approved clips of other sources, same kind first
+        from autoreels.cloud.label import select_fewshot
+        fewshot = select_fewshot(_fs["examples"], kind=(manifest.source_kind or r0_cfg.source_kind),
+                                 exclude_source=stem, n=getattr(lc, "fewshot_examples", 2))
+        if not fewshot and not quiet:
+            print(f"  warning: нет одобренных клипов других источников для примеров — разметка без "
+                  f"примеров (arl fewshot-build после ревью)", file=sys.stderr)
+    else:
+        fewshot = _fs.get("messages", [])
     # M39: the speech map tells how much of a clip's time is speech (guided practice is mostly silence)
     speech = None
     _smp = root / "transcripts" / f"{stem}.speechmap.json"
@@ -7492,6 +7501,88 @@ def cmd_label_compare(target: str, draft: str, *, root=None, cache_dir=None,
                   f"совпадение {r['overlap']:.0%}, начало {r['start_diff']:+.1f} с, конец {r['end_diff']:+.1f} с")
     print(f"итог: найдено {s['found']} из {s['total']}; клипов в черновике {s['draft_clips']}, "
           f"из них не совпали с вашими {s['extra']}")
+    return 0
+
+
+def cmd_fewshot_build(*, root=None, cache_dir=None, out: str | None = None) -> int:
+    """M41: rebuild the labeller's examples from every clip the owner approved, in every source:
+    his labelling files (reviews/<stem>_spec.txt, *_answer.txt) and the draft lines he kept or had
+    reworked on the review sheet. Each example must pass the checks of a new clip; a file made for
+    another block set (fingerprint) is skipped with the reason. → prompts/label_fewshot.json."""
+    import datetime as _dt
+    import re as _re_fs
+    from autoreels.cloud.blocks import _block_fingerprint as _fp
+    from autoreels.cloud.label import approved_entries, build_example
+    _root = Path(root) if root else _project_root()
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    examples: list[dict] = []
+    for mpath in _glob_manifests(_root / "manifests"):
+        stem = mpath.stem
+        files = [(_root / "reviews" / f"{stem}{suf}", owner) for suf, owner in
+                 (("_spec.txt", True), ("_answer.txt", True), ("_auto.txt", False))]
+        files = [(f, o) for f, o in files if f.is_file()]
+        if not files:
+            continue
+        manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+        ctx, err = _label_context(mpath, manifest, r0_cfg, root=_root, cache_dir=cache_dir, quiet=True)
+        if ctx is None:
+            print(f"  {stem}: пропущен — {err}")
+            continue
+        kind = manifest.source_kind or r0_cfg.source_kind
+        seen: set[str] = set()
+        for f, owner in files:
+            text = f.read_text(encoding="utf-8")
+            _m = _re_fs.search(r"^#\s*fingerprint:\s*([0-9a-f]+)", text, _re_fs.MULTILINE)
+            if _m and _m.group(1) != _fp(ctx.kept):
+                print(f"  {f.name}: пропущен — сделан для другого набора блоков")
+                continue
+            entries = approved_entries(text, owner_file=owner)
+            n_ok = 0
+            for e in entries:
+                ex, why = build_example(e, ctx.wblocks, ctx.words, ctx.p)
+                if ex is None:
+                    print(f"  {f.name} строка {e.seq}: не пример — {why}")
+                    continue
+                if ex["user"] in seen:
+                    continue
+                seen.add(ex["user"])
+                examples.append({"source": stem, "kind": kind, "file": f.name, "line": e.seq, **ex})
+                n_ok += 1
+            print(f"  {f.name}: одобренных строк {len(entries)}, примеров {n_ok}")
+    if not examples:
+        print("ошибка: ни одного одобренного клипа — примеры не изменены", file=sys.stderr)
+        return 1
+    out_path = Path(out) if out else _root / r0_cfg.label.fewshot
+    data = {"provenance": (f"The owner's approved clips (labelling files and review-sheet verdicts), "
+                           f"built by arl fewshot-build on {_dt.date.today().isoformat()}; "
+                           f"each example passes the arl label checks."),
+            "examples": examples}
+    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    kinds: dict[str, set] = {}
+    for e in examples:
+        kinds.setdefault(e["kind"], set()).add(e["source"])
+    print(f"примеров {len(examples)} из {len({e['source'] for e in examples})} источников: "
+          + ", ".join(f"{k} — {', '.join(sorted(v))}" for k, v in sorted(kinds.items())))
+    print(f"→ {out_path}")
+    return 0
+
+
+def cmd_label_stats(*, root=None) -> int:
+    """M41: the owner's verdicts per source (review sheet → drafts): kept / reworked / dropped,
+    and the share kept as is — the number that should grow as the labeller learns."""
+    from autoreels.cloud.label import review_stats
+    _root = Path(root) if root else _project_root()
+    rows = []
+    for f in sorted((_root / "reviews").glob("*_auto.txt")):
+        s = review_stats(f.read_text(encoding="utf-8"))
+        rows.append((f.name.removesuffix("_auto.txt"), s))
+    tot = {k: sum(s[k] for _, s in rows) for k in ("clips", "ok", "reworked", "pending", "dropped", "reviewed")}
+    tot["accept"] = (tot["ok"] / tot["reviewed"]) if tot["reviewed"] else None
+    print(f"{'источник':<36} клипов  просм.  оставл.  передел.  к правке  убрано  доля оставл.")
+    for name, s in rows + [("ВСЕГО", tot)]:
+        acc = f"{s['accept']:.0%}" if s["accept"] is not None else "—"
+        print(f"{name[:36]:<36} {s['clips']:>6} {s['reviewed']:>7} {s['ok']:>8} {s['reworked']:>9} "
+              f"{s['pending']:>9} {s['dropped']:>7}  {acc:>11}")
     return 0
 
 
@@ -10104,6 +10195,22 @@ def _build_parser():
     ppp.add_argument("--inputs-dir", default=None, dest="inputs_dir")
     ppp.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    pfb = sub.add_parser(
+        "fewshot-build",
+        help="собрать примеры для разметки из ваших одобренных клипов всех источников",
+        description="M41: prompts/label_fewshot.json from the owner's labelling files and review-sheet verdicts.",
+    )
+    pfb.add_argument("--root", default=None, help="корень проекта")
+    pfb.add_argument("--cache-dir", default=None, dest="cache_dir")
+    pfb.add_argument("--out", default=None, help="файл примеров (по умолчанию label.fewshot из config/r0.yaml)")
+
+    pls = sub.add_parser(
+        "label-stats",
+        help="ваши решения по черновикам: сколько клипов оставлено, переделано, убрано",
+        description="M41: per source, the owner's verdicts from the review sheet.",
+    )
+    pls.add_argument("--root", default=None, help="корень проекта")
+
     plc = sub.add_parser(
         "label-compare",
         help="сравнить черновик разметки с вашей разметкой источника (сколько ваших клипов найдено)",
@@ -10459,6 +10566,12 @@ def main(argv=None) -> int:
                 inputs_dir=getattr(args, "inputs_dir", None),
                 cache_dir=getattr(args, "cache_dir", None),
             )
+        elif args.cmd == "fewshot-build":
+            return cmd_fewshot_build(root=args.root if hasattr(args, "root") else None,
+                                     cache_dir=getattr(args, "cache_dir", None),
+                                     out=getattr(args, "out", None))
+        elif args.cmd == "label-stats":
+            return cmd_label_stats(root=args.root if hasattr(args, "root") else None)
         elif args.cmd == "label-compare":
             return cmd_label_compare(
                 args.manifest, args.draft,

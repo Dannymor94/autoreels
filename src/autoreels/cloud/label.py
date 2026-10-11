@@ -262,7 +262,24 @@ def is_open_question(words) -> bool:
     toks = [t for t in toks if t]
     while toks and toks[0] in _LEAD:
         toks = toks[1:]
-    return bool(toks) and toks[0] in _QUESTION_WORDS
+    if not toks:
+        return False
+    if toks[0] in _QUESTION_WORDS:
+        return True
+    # M41: a question word further in — «…значит, вы в какой среде находитесь?» (11h42 r05) — is an
+    # open question too, unless the sentence ends on a tag («…, правильно?», «…, да?»).
+    return toks[-1] not in _TAG_WORDS and any(w in _QUESTION_WORDS for w in toks[1:])
+
+
+_TAG_WORDS = frozenset("правильно да так верно согласны понимаете понятно ведь нет ага хорошо".split())
+_CTA_RE = re.compile(r"телефон|номер(?:ок|ом|а)?\b|скин(?:у|ем)\b|напишите|пишите мне|подпиш|ссылк|"
+                     r"в комментари|в директ|в личк|запишитесь|ставьте лайк|лайк", re.IGNORECASE)
+
+
+def is_call_to_action(words) -> bool:
+    """The sentence asks the viewer to do something outside the talk — a plug, not a payoff
+    (11h42 r06: «…номер телефончика, и я вам скину эту книжечку», M41)."""
+    return bool(_CTA_RE.search(" ".join(w.word for w in words)))
 
 
 def check_clip(clip: dict, win: Sequence[WBlock], words: list,
@@ -326,6 +343,9 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
         probs.append(f"end {end.sid}: the voice stays up (↗) — the thought goes on there")
     if is_open_question(end.words):
         probs.append(f"end {end.sid} is an open question («{end.text[-60:]}») — the answer is not in the clip")
+    if is_call_to_action(end.words):
+        probs.append(f"end {end.sid} is a call to action («{end.text[-60:]}») — a plug, not a payoff; "
+                     "end on the thought before it")
     before = order[a - 1] if a > 0 else group[0].prev
     spoken_before = word_before(words, start.words[0])
     if a == 0 and before is not None and not before.complete:
@@ -1159,3 +1179,84 @@ def compare_drafts(draft_text: str, ref_text: str, wblocks: Sequence[WBlock], wo
             rows.append({"ref": seq, "title": title, "draft": None, "overlap": best_ov})
     found = sum(1 for r in rows if r["draft"] is not None)
     return rows, {"found": found, "total": len(ref), "draft_clips": len(dr), "extra": len(dr) - found}
+
+
+# ── few-shot from the owner's approved clips, across sources (M41) ──────────────────────────────
+#
+# The examples the labeller sees are the owner's own clips: lines of his labelling files
+# (reviews/<stem>_spec.txt, *_answer.txt) and draft lines he kept or had reworked on the review sheet
+# (« ✓ владелец», « ✔ переделано»). Each example is rendered exactly like a request window (the
+# clip's blocks plus the block before it — a block left unlabelled) with the clip as the answer, and
+# must pass the same checks as a new clip (invariant 11: real data with its provenance). A source
+# never sees its own examples (no answer leaks into its draft or into label-compare).
+
+def approved_entries(review_text: str, *, owner_file: bool) -> list:
+    """Clip lines the owner approved: every clip line of his labelling file; in a draft, the lines
+    with his «✓» or «✔ переделано» mark above them."""
+    lines = review_text.splitlines()
+    out = []
+    for i, e in _rankable(review_text):
+        if owner_file:
+            out.append(e)
+            continue
+        marks = _marks_above(lines, i)
+        if any(m.startswith("# ✓ владелец") or m.startswith("# ✔ переделано") for m in marks):
+            out.append(e)
+    return out
+
+
+def build_example(entry, wblocks: Sequence[WBlock], words: list, p: LabelParams = LabelParams()
+                  ) -> tuple[dict | None, str]:
+    """(example {user, assistant, blocks} or None, why not)."""
+    clip, group, why = entry_to_clip(entry, wblocks, words)
+    if clip is None:
+        return None, why
+    by_seq = {wb.seq: wb for wb in wblocks}
+    lo = group[0].seq
+    win = ([by_seq[lo - 1]] if lo - 1 in by_seq else []) + list(group)
+    ch = check_clip(clip, win, words, p)
+    if ch.problems:
+        return None, "; ".join(ch.problems)
+    return {"user": render_window(win, p),
+            "assistant": json.dumps({"clips": [clip]}, ensure_ascii=False),
+            "blocks": [wb.seq for wb in win]}, ""
+
+
+def select_fewshot(examples: Sequence[dict], *, kind: str, exclude_source: str, n: int) -> list[dict]:
+    """Up to n examples as chat messages: same kind of source first, never the source being
+    labelled, one source after another (diversity), the shortest first within a source (the
+    examples ride in every request of the free token budget)."""
+    pool = [e for e in examples if e.get("source") != exclude_source]
+    same = [e for e in pool if e.get("kind") == kind]
+    pick_from = same if same else pool
+    by_src: dict[str, list[dict]] = {}
+    for e in sorted(pick_from, key=lambda e: (len(e["user"]) + len(e["assistant"]), e.get("line", 0))):
+        by_src.setdefault(e["source"], []).append(e)
+    chosen: list[dict] = []
+    while len(chosen) < n and any(by_src.values()):
+        for src in sorted(by_src):
+            if by_src[src] and len(chosen) < n:
+                chosen.append(by_src[src].pop(0))
+    msgs: list[dict] = []
+    for e in chosen:
+        msgs += [{"role": "user", "content": e["user"]}, {"role": "assistant", "content": e["assistant"]}]
+    return msgs
+
+
+def review_stats(review_text: str) -> dict:
+    """The owner's verdicts in a draft: clips, kept (✓), reworked (✔), to rework (✎), dropped (#-)."""
+    lines = review_text.splitlines()
+    ok = reworked = pending = 0
+    for i, _ in _rankable(review_text):
+        marks = _marks_above(lines, i)
+        if any(m.startswith("# ✔ переделано") for m in marks):
+            reworked += 1
+        elif any(m.startswith("# ✎ владелец") for m in marks):
+            pending += 1
+        elif any(m.startswith("# ✓ владелец") for m in marks):
+            ok += 1
+    dropped = sum(1 for l in lines if l.startswith("#- ") and "убрано владельцем" in l)
+    clips = len(_rankable(review_text)) + dropped
+    reviewed = ok + reworked + pending + dropped
+    return {"clips": clips, "ok": ok, "reworked": reworked, "pending": pending, "dropped": dropped,
+            "reviewed": reviewed, "accept": (ok / reviewed) if reviewed else None}
