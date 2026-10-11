@@ -36,6 +36,8 @@ class LabelParams:
     stop_after_failed_windows: int = 2   # consecutive provider failures → stop, mark the rest for --retry
     pause_show_sec: float = 0.3
     pause_strong_sec: float = 1.5
+    min_speech_share: float = 0.0  # a clip whose time is less speech than this is not a reel (0 = off)
+    interview: bool = False       # source_kind interview: a clip never ends on a question (the host's)
 
 
 @dataclass
@@ -45,6 +47,8 @@ class Sent:
     complete: bool
     open_tone: bool
     pause_after: float | None     # gap to the next word of the transcript
+    span: float | None = None     # first word → next sentence's first word (source seconds)
+    speech: float | None = None   # seconds of that span the speech map hears as speech
 
     @property
     def dur(self) -> float:
@@ -68,10 +72,31 @@ def norm_word(w: str) -> str:
     return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]…")
 
 
+def speech_seconds(intervals: Sequence[Sequence[float]]) -> Callable[[float, float], float]:
+    """speech(a, b): seconds of [a, b) covered by the speech map's speech intervals."""
+    import bisect
+    iv = sorted((float(x), float(y)) for x, y in intervals if y > x)
+    starts = [x for x, _ in iv]
+
+    def speech(a: float, b: float) -> float:
+        if b <= a:
+            return 0.0
+        i = max(0, bisect.bisect_right(starts, a) - 1)
+        tot = 0.0
+        while i < len(iv) and iv[i][0] < b:
+            tot += max(0.0, min(b, iv[i][1]) - max(a, iv[i][0]))
+            i += 1
+        return tot
+    return speech
+
+
 def build_wblocks(kept: Sequence, words: list, tone: Callable | None = None,
-                  seqs: Sequence[int] | None = None) -> list[WBlock]:
+                  seqs: Sequence[int] | None = None,
+                  speech: Callable[[float, float], float] | None = None) -> list[WBlock]:
     """Review sentences of every kept block, split exactly like the review export.
-    `seqs`: review numbers of `kept` (default 1..N — the whole kept list)."""
+    `seqs`: review numbers of `kept` (default 1..N — the whole kept list).
+    `speech(a, b)`: seconds of [a, b) the speech map hears as speech (speech_seconds) — gives each
+    sentence its span and speech, so a clip that is mostly silence is recognised (M39)."""
     index = {id(w): i for i, w in enumerate(words)}
     out: list[WBlock] = []
     for seq, b in zip(seqs or range(1, len(kept) + 1), kept):
@@ -82,7 +107,12 @@ def build_wblocks(kept: Sequence, words: list, tone: Callable | None = None,
             t = tone(s[-1]) if (tone is not None and complete) else None
             i = index.get(id(s[-1]))
             gap = (words[i + 1].t0 - s[-1].t1) if (i is not None and i + 1 < len(words)) else None
-            items.append(Sent(f"{seq}.{k}", s, complete, bool(t and t[0] == "open"), gap))
+            span = sp = None
+            if speech is not None:
+                ta = s[0].t0
+                tb = max(s[-1].t1, words[i + 1].t0) if (i is not None and i + 1 < len(words)) else s[-1].t1
+                span, sp = max(0.0, tb - ta), speech(ta, tb)
+            items.append(Sent(f"{seq}.{k}", s, complete, bool(t and t[0] == "open"), gap, span, sp))
         out.append(WBlock(seq, b, items, _prev_sentence(words, index, items[0].words[0], tone)
                           if items else None))
     return out
@@ -119,6 +149,18 @@ def windows(wblocks: Sequence[WBlock], size: int, max_clip_blocks: int = 3) -> l
     return out
 
 
+def speech_share(sents: Sequence[Sent]) -> float | None:
+    """Share of the sentences' time that is speech (None without a speech map). The last
+    sentence counts up to its last word: the silence after a clip's end is not in the clip."""
+    if not sents or any(s.span is None or s.speech is None for s in sents):
+        return None
+    last = sents[-1]
+    tail = max(0.0, last.span - last.dur)          # the silence after the last word
+    span = sum(s.span for s in sents) - tail
+    speech = sum(s.speech for s in sents) - min(tail, max(0.0, last.speech - last.dur))
+    return speech / span if span > 0 else None
+
+
 def render_window(win: Sequence[WBlock], p: LabelParams = LabelParams()) -> str:
     """The user message: one sentence per line, id first, then the export's markers."""
     lines: list[str] = []
@@ -128,7 +170,10 @@ def render_window(win: Sequence[WBlock], p: LabelParams = LabelParams()) -> str:
         mark = " …→" if not prev.complete else (" ↗" if prev.open_tone else "")
         lines.append(f"(sentence before block {win[0].seq}: «…{tail}»{mark})")
     for wb in win:
-        lines.append(f"BLOCK {wb.seq} · {wb.block.end - wb.block.start:.1f} s")
+        share = speech_share(wb.sents)
+        quiet = (f" · long silences: speech {share:.0%} of the time (guided practice?)"
+                 if p.min_speech_share and share is not None and share < p.min_speech_share + 0.1 else "")
+        lines.append(f"BLOCK {wb.seq} · {wb.block.end - wb.block.start:.1f} s{quiet}")
         for s in wb.sents:
             mark = "" if s.complete else " …→"
             tail = " ↗" if s.open_tone else ""
@@ -295,6 +340,13 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
     played_sec = sum(s.dur for s in played)
     if not (p.min_sec <= played_sec <= p.max_sec):
         probs.append(f"length {played_sec:.0f} s of speech — keep it within {p.min_sec:.0f}–{p.max_sec:.0f} s")
+    share = speech_share(played) if p.min_speech_share else None
+    if share is not None and share < p.min_speech_share:
+        probs.append(f"only {share:.0%} of the clip's time is speech — long silences (guided practice, "
+                     f"meditation) do not make a reel; a clip needs at least {p.min_speech_share:.0%}")
+    if p.interview and end.words[-1].word.rstrip("»\"')").endswith("?"):
+        probs.append(f"end {end.sid} is a question — in an interview that is the host asking; "
+                     "end after the guest's answer")
 
     played_ids = {s.sid for s in played}
     close: list[int] = []
@@ -940,3 +992,124 @@ def redo_fixes(review_text: str, wblocks: Sequence[WBlock], words: list, provide
         lines[i:k] = new
         i += len(new)
     return "\n".join(lines) + ("\n" if review_text.endswith("\n") else ""), done, failed
+
+
+# ── ranking: one request per finished draft orders its clips; the score is the place (M39) ────
+#
+# Scores the labeller writes per window (82–88 for nearly everything) cannot order clips. A
+# finished draft is ranked in ONE extra request that sees all its clips side by side; code turns
+# the order into scores (best 95 … worst 65, linear). Every clip must be ranked exactly once — an
+# incomplete answer is asked again once, then the draft is left as it was (invariant 11).
+
+RANK_TOP, RANK_BOTTOM = 95, 65
+_RANKED_RE = re.compile(r"^# ranked: ([0-9a-f]{12})\b")
+_SCORE_RE = re.compile(r"^(\s*\d+\s+-?)(\d+)")
+
+
+def _rankable(review_text: str) -> list[tuple[int, object]]:
+    """(line index, parsed entry) of the review lines that are clips."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    out = []
+    for i, raw in enumerate(review_text.splitlines()):
+        s = raw.strip()
+        if not s[:1].isdigit():
+            continue
+        _, entries, errors, _ = parse_compact_answer(s + "\n")
+        if errors or not entries or entries[0].score is None or entries[0].beats:
+            continue
+        out.append((i, entries[0]))
+    return out
+
+
+def ranking_signature(review_text: str) -> str:
+    """Hash of the clip lines without their scores: ranking again is needed only when clips change."""
+    import hashlib
+    lines = review_text.splitlines()
+    body = "\n".join(_SCORE_RE.sub(lambda m: m.group(1) + "#", lines[i].strip())
+                     for i, _ in _rankable(review_text))
+    return hashlib.sha1(body.encode("utf-8")).hexdigest()[:12]
+
+
+def is_ranked(review_text: str) -> bool:
+    sig = ranking_signature(review_text)
+    return any((m := _RANKED_RE.match(l.strip())) and m.group(1) == sig for l in review_text.splitlines())
+
+
+def clip_text(entry, wblocks: Sequence[WBlock], words: list) -> str:
+    """The played text of a review line: sentences s..e of its merged group, cuts left out."""
+    by_seq = {wb.seq: wb for wb in wblocks}
+    lo = entry.seq - (1 if entry.merge_back else 0)
+    group = [by_seq[q] for q in range(lo, entry.seq + entry.merge_fwd + 1) if q in by_seq]
+    if not group:
+        return ""
+    merged = merge_group_sentences([g.block for g in group], words)
+    s, e = entry.s or 1, entry.e or len(merged)
+    return " ".join(w.word for k in range(s, min(e, len(merged)) + 1) if k not in set(entry.x)
+                    for w in merged[k - 1])
+
+
+def _parse_order(text: str, n: int) -> list[int] | None:
+    t = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
+    m = re.search(r"\{.*\}", t, flags=re.DOTALL)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+    except ValueError:
+        return None
+    order = obj.get("order") if isinstance(obj, dict) else None
+    if not isinstance(order, list):
+        return None
+    try:
+        idx = [int(str(x).strip().upper().lstrip("C")) for x in order]
+    except ValueError:
+        return None
+    return idx if sorted(idx) == list(range(1, n + 1)) else None
+
+
+def rank_draft(review_text: str, wblocks: Sequence[WBlock], words: list, provider, *, system: str,
+               date: str = "", log: Callable[[str], None] = print) -> tuple[str, bool]:
+    """Rank the clips of a finished draft in one request; scores become the place.
+    Returns (text, ranked). Unchanged text when already ranked, fewer than 2 clips, or no valid
+    answer after one retry."""
+    items = _rankable(review_text)
+    if len(items) < 2 or is_ranked(review_text):
+        return review_text, False
+    lines = review_text.splitlines()
+    rows = []
+    for k, (i, e) in enumerate(items, 1):
+        title = e.title or ""
+        rows.append(f"C{k} | {title} | {clip_text(e, wblocks, words)[:700]}")
+    ask = ("Clips of one talk:\n" + "\n".join(rows) +
+           f'\nRank all {len(items)} clips from strongest to weakest. '
+           'Return ONLY {"order": ["C..", ...]} with every id exactly once.')
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": ask}]
+    order = None
+    for attempt in range(2):
+        ans, raw, err = None, "", None
+        try:
+            raw = provider.complete(msgs, temperature=0.0)
+        except Exception as exc:  # noqa: BLE001 — a provider failure leaves the draft as it is
+            log(f"  ранжирование: нет ответа ({type(exc).__name__}: {exc})")
+            return review_text, False
+        order = _parse_order(raw, len(items))
+        if order is not None:
+            break
+        msgs = msgs + [{"role": "assistant", "content": raw},
+                       {"role": "user", "content": f"Every id C1…C{len(items)} exactly once, nothing else: "
+                                                   '{"order": [...]}'}]
+    if order is None:
+        log("  ранжирование: ответ без всех клипов — оценки оставлены как были")
+        return review_text, False
+    n = len(items)
+    for place, k in enumerate(order):
+        score = round(RANK_TOP - (RANK_TOP - RANK_BOTTOM) * place / (n - 1))
+        i = items[k - 1][0]
+        lines[i] = _SCORE_RE.sub(lambda m: f"{m.group(1)}{score}", lines[i], count=1)
+    text = "\n".join(l for l in lines if not _RANKED_RE.match(l.strip()))
+    tag = f"# ranked: {ranking_signature(text)}{' ' + date if date else ''} — score = place among the {n} clips ({RANK_TOP} best … {RANK_BOTTOM})"
+    out = text.splitlines()
+    at = next((j + 1 for j, l in enumerate(out) if l.startswith("# fingerprint:")), 0)
+    out.insert(at, tag)
+    log(f"  ранжирование: {n} клипов, лучший — строка {items[order[0] - 1][1].seq}")
+    return "\n".join(out) + ("\n" if review_text.endswith("\n") else ""), True

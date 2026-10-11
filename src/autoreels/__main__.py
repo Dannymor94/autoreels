@@ -7251,14 +7251,34 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
         print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы и начала по голосу (↗) "
               f"не проверяются. Сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
     system = (root / lc.system).read_text(encoding="utf-8")
+    interview = (manifest.source_kind or r0_cfg.source_kind) == "interview"
+    if interview and getattr(lc, "interview", None):
+        system += "\n" + (root / lc.interview).read_text(encoding="utf-8")
     fewshot = json.loads((root / lc.fewshot).read_text(encoding="utf-8")).get("messages", [])
+    # M39: the speech map tells how much of a clip's time is speech (guided practice is mostly silence)
+    speech = None
+    _smp = root / "transcripts" / f"{stem}.speechmap.json"
+    if _smp.is_file():
+        try:
+            _sm = json.loads(_smp.read_text(encoding="utf-8"))
+            if not _sm.get("source_sha256") or _sm["source_sha256"] == manifest.source_sha256:
+                from autoreels.cloud.label import speech_seconds
+                speech = speech_seconds(_sm.get("intervals") or [])
+        except (OSError, ValueError):
+            speech = None
+    if speech is None and not quiet:
+        print(f"  warning: нет карты речи transcripts/{stem}.speechmap.json — клипы из одной тишины "
+              f"(практика, медитация) не распознаются. Сначала: arl speech-map {stem}", file=sys.stderr)
     p = LabelParams(window_blocks=lc.window_blocks, min_sec=lc.min_sec, max_sec=lc.max_sec,
                     max_clip_blocks=lc.max_clip_blocks, title_max_chars=lc.title_max_chars,
                     repair_rounds=lc.repair_rounds,
                     pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
-                    pause_strong_sec=r0_cfg.min_pause_for_phrase_end)
+                    pause_strong_sec=r0_cfg.min_pause_for_phrase_end,
+                    min_speech_share=getattr(lc, "min_speech_share", 0.0) if speech is not None else 0.0,
+                    interview=interview)
     return SimpleNamespace(kept=kept, dropped=dropped, words=words, tone=tone, system=system,
-                           fewshot=fewshot, p=p, wblocks=build_wblocks(kept, words, tone)), None
+                           fewshot=fewshot, p=p,
+                           wblocks=build_wblocks(kept, words, tone, speech=speech)), None
 
 
 def cmd_label(
@@ -7271,8 +7291,13 @@ def cmd_label(
     provider=None,
     check: bool = False,
     retry: bool = False,
+    rank: bool | None = None,
 ) -> int:
     """Draft the review lines of a source with the LLM → reviews/<stem>_auto.txt (cloud/label.py).
+
+    rank: a finished draft (no unanswered windows) gets its clips ranked in one request; the score
+    becomes the place (label.rank_draft). Default: on for a new run and --retry, off for --check;
+    `label: rank: false` in config/r0.yaml turns it off everywhere. Ranked once per set of clips.
 
     --check: re-check an existing draft with the current rules (no LLM); a broken line becomes '#!'.
     --retry: ask again only for the windows the draft marks '# blocks a–b: no answer'.
@@ -7300,6 +7325,8 @@ def cmd_label(
     r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
     lc = r0_cfg.label
     out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto.txt"
+    if rank and not (check or retry or force) and out_path.exists():
+        check = True          # `arl label X --rank` on an existing draft: check it, then rank it
     if (check or retry) and not out_path.exists():
         print(f"ошибка: черновика {out_path} нет — сначала: arl label {stem}", file=sys.stderr)
         return 1
@@ -7313,6 +7340,12 @@ def cmd_label(
         return 1
     kept, dropped, words, wblocks = ctx.kept, ctx.dropped, ctx.words, ctx.wblocks
     system, fewshot, p = ctx.system, ctx.fewshot, ctx.p
+    from autoreels.cloud.label import rank_draft, unanswered_windows
+    _want_rank = bool(getattr(lc, "rank", False)) and (rank if rank is not None else not check)
+
+    def _rank_system() -> str:
+        return (_root / "prompts" / "label_rank.md").read_text(encoding="utf-8")
+
     if check or retry:
         import re as _re_lbl
         from autoreels.cloud.label import check_draft, retry_draft
@@ -7338,6 +7371,14 @@ def cmd_label(
         for seq, why in flagged:
             print(f"  #! строка {seq}: " + "; ".join(why))
         print(f"проверка: строк с нарушениями {len(flagged)}")
+        if _want_rank and not unanswered_windows(new_text):
+            from autoreels.cloud.label import is_ranked as _is_ranked
+            if not _is_ranked(new_text):
+                if provider is None:
+                    provider = build_pool(r0_cfg)
+                    provider.preflight()
+                new_text, _ = rank_draft(new_text, wblocks, words, provider, system=_rank_system(),
+                                         date=_dt.date.today().isoformat(), log=lambda m: print(m, flush=True))
         if new_text != old_text:
             bak.write_text(old_text, encoding="utf-8")
             _write_atomic(out_path, new_text)
@@ -7377,6 +7418,12 @@ def cmd_label(
                        log=lambda m: print(m, flush=True),
                        checkpoint=lambda lines: _write_atomic(out_path, _render(lines)))
     _write_atomic(out_path, _render(res))
+    if _want_rank and res.windows_failed == 0:
+        _ranked_text, _ok = rank_draft(out_path.read_text(encoding="utf-8"), wblocks, words, provider,
+                                       system=_rank_system(), date=_dt.date.today().isoformat(),
+                                       log=lambda m: print(m, flush=True))
+        if _ok:
+            _write_atomic(out_path, _ranked_text)
     print(f"готово: клипов {res.clips_ok}, с замечаниями (#!) {res.clips_flagged}, "
           f"без ответа {res.windows_failed} из {n_win} окон; запросов {res.requests}")
     _q = f'"{_out_ref}"' if " " in _out_ref else _out_ref
@@ -7466,7 +7513,7 @@ def cmd_review_sheet(
             title=r.title_overlay, caption=r.description,
             text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
             seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
-            marks=list(ln.marks) if ln else [],
+            marks=list(ln.marks) if ln else [], score=r.score,
         ))
     notes = []
     n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
@@ -7616,8 +7663,9 @@ def cmd_prepare(
         }
 
         def label(mode, m=m):
+            # a finished draft is ranked once (label: rank in config/r0.yaml), whatever the mode
             return cmd_label(m, root=_root, cache_dir=cache_dir,
-                             retry=(mode == "retry"), check=(mode == "check"))
+                             retry=(mode == "retry"), check=(mode == "check"), rank=True)
 
         def plan(d=draft, m=m):
             return _blocks_do_apply(str(d), root=_root, cache_dir=cache_dir, source=m, labeler="auto")
@@ -10056,6 +10104,8 @@ def _build_parser():
                      help="перепроверить готовый черновик по текущим правилам (без LLM)")
     plb.add_argument("--retry", action="store_true", default=False,
                      help="повторить только окна, оставшиеся без ответа")
+    plb.add_argument("--rank", action="store_true", default=None,
+                     help="ранжировать клипы готового черновика (1 запрос; оценка = место)")
 
     ppr = sub.add_parser(
         "prosody",
@@ -10378,6 +10428,7 @@ def main(argv=None) -> int:
                 force=getattr(args, "force", False),
                 check=getattr(args, "check", False),
                 retry=getattr(args, "retry", False),
+                rank=getattr(args, "rank", None),
             )
         elif args.cmd == "prosody":
             return cmd_prosody(

@@ -28,6 +28,7 @@ class Card:
     line: str = ""
     preview: str = ""
     marks: list[str] = field(default_factory=list)   # the owner's marks of earlier rounds
+    score: int | None = None      # the draft's score (after ranking: the place, 95 best … 65)
 
 
 _CSS = """
@@ -158,7 +159,8 @@ def _card_html(c: Card) -> str:
            else '<div class="novideo">клип не отрендерен</div>')
     warns = "".join(f"<li>{_e(w)}</li>" for w in c.warnings)
     parts = [f'<div class="media">{vid}</div><div class="info">',
-             f'<div><span class="rid">{_e(c.rid)}</span><span class="dur">{c.duration:.0f} с</span></div>']
+             f'<div><span class="rid">{_e(c.rid)}</span><span class="dur">{c.duration:.0f} с</span>'
+             + (f'<span class="dur">· оценка {c.score}</span>' if c.score is not None else "") + '</div>']
     if c.title:
         parts.append(f'<div class="title">{_e(c.title)}</div>')
     if c.caption:

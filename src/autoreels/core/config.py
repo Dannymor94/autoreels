@@ -183,6 +183,11 @@ class LabelConfig(BaseModel):
     max_clip_blocks: int = Field(3, ge=1, le=3)    # a review line merges at most 3 blocks ('++')
     title_max_chars: int = 60
     repair_rounds: int = Field(1, ge=0, le=3)
+    # M39: a clip whose time is less speech than this (speech map) is not a reel — guided practice,
+    # meditation instructions with long silences. 0 = off.
+    min_speech_share: float = Field(0.0, ge=0.0, le=1.0)
+    interview: str = ""                            # extra system rules for source_kind interview
+    rank: bool = False                             # one request per finished draft: clips ranked → score
 
 
 class R0Config(BaseModel):

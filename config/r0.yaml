@@ -214,13 +214,18 @@ manual_filler_profiles:
 label:
   system: prompts/label_system.md
   fewshot: prompts/label_fewshot.json   # real accepted IMG_6848 lines (scripts/make_label_fewshot.py)
-  window_blocks: 4        # blocks per request (~4k tokens with the prompt; Groq free: 6000/min);
+  window_blocks: 6        # blocks per request (~5k tokens with the prompt; Groq free: 8000/min);
                           # windows overlap by max_clip_blocks-1 so a 3-block thought is seen whole
+                          # (M39: 6 → every block is sent 1.5×, was 2× with 4)
   min_sec: 20             # played speech of a proposed clip
   max_sec: 90
   max_clip_blocks: 3      # one review line merges at most 3 blocks ('++')
   title_max_chars: 60
   repair_rounds: 1        # broken clips are sent back once with the reasons; still broken → '#!' line
+  min_speech_share: 0.6   # M39: speech under 60% of a clip's time = guided practice / silences, not a reel
+                          # (owner's clips IMG_6848: 0.8–0.9; 10h59 meditation blocks: 0.3–0.55)
+  interview: prompts/label_interview.md   # added to the system prompt for source_kind interview
+  rank: true              # finished draft → one request ranks its clips; score = place (95 … 65)
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.

@@ -544,3 +544,100 @@ def test_cmd_label_keeps_the_draft_of_a_killed_run(tmp_path):
                                                  '{"clips": []}'})()) == 0
     assert "not asked yet" not in out.read_text(encoding="utf-8")
     assert not (tmp_path / "v_auto.txt.tmp").exists()
+
+
+# ── M39: silences (guided practice), interviews, wider windows, ranking ─────────────────────────
+
+def _blocks_with_speech(share_by_block):
+    """6 blocks; block b's sentences are speech for share_by_block[b] of their time."""
+    from autoreels.cloud.label import speech_seconds
+    w, _ = _blocks(len(share_by_block))
+    iv = []
+    blocks = []
+    for b, share in enumerate(share_by_block):
+        ws = w[12 * b:12 * (b + 1)]
+        a, z = ws[0].t0, (w[12 * (b + 1)].t0 if b + 1 < len(share_by_block) else ws[-1].t1 + 1)
+        iv.append((a, a + (z - a) * share))
+        blocks.append(SimpleNamespace(start=a, end=z))
+    return w, build_wblocks(blocks, w, None, speech=speech_seconds(iv))
+
+
+def test_clip_that_is_mostly_silence_is_flagged():
+    """10h59 meditation (M39): speech 29–48% of the clip's time, pauses cut 36–50 s per clip.
+    Owner-accepted IMG_6848 clips: 80–91%. Threshold 60% (config/r0.yaml label.min_speech_share)."""
+    w, wb = _blocks_with_speech([0.9, 0.4, 0.9])
+    p = LabelParams(min_sec=1.0, max_sec=99.0, min_speech_share=0.6)
+    ok = check_clip(_c([1], "1.1", "1.3"), wb, w, p)
+    quiet = check_clip(_c([2], "2.1", "2.3"), wb, w, p)
+    assert not any("speech" in x for x in ok.problems)
+    assert any("41% of the clip's time is speech" in x for x in quiet.problems)   # last word → end
+    # off by default, and without a speech map
+    assert not any("speech" in x for x in check_clip(_c([2], "2.1", "2.3"), wb, w,
+                                                     LabelParams(min_sec=1.0, max_sec=99.0)).problems)
+    w2, wb2 = _blocks(3)
+    assert not any("speech" in x for x in check_clip(_c([2], "2.1", "2.3"), wb2, w2, p).problems)
+    # the LLM is told which blocks are mostly silence
+    txt = render_window(wb, p)
+    assert "BLOCK 2 · " in txt and "long silences: speech 41%" in txt
+    assert "BLOCK 1 · " in txt and txt.split("BLOCK 1")[1].split("\n")[0].find("silences") == -1
+
+
+def test_interview_clip_never_ends_on_a_question():
+    w = _words(_sentence(4, "один.") + _sentence(4, "два.") + _sentence(4, "вопрос?"))
+    wb = build_wblocks([SimpleNamespace(start=w[0].t0, end=w[-1].t1 + 1)], w, None)
+    clip = _c([1], "1.1", "1.3")
+    p = LabelParams(min_sec=1.0, max_sec=99.0)
+    assert not any("host asking" in x for x in check_clip(clip, wb, w, p).problems)
+    p_i = LabelParams(min_sec=1.0, max_sec=99.0, interview=True)
+    assert any("host asking" in x for x in check_clip(clip, wb, w, p_i).problems)
+
+
+def test_wider_windows_still_see_every_three_block_thought():
+    wb = [SimpleNamespace(seq=i) for i in range(1, 30)]
+    wins = windows(wb, 6, 3)
+    seqs = [[x.seq for x in win] for win in wins]
+    assert seqs[0] == [1, 2, 3, 4, 5, 6] and seqs[1] == [5, 6, 7, 8, 9, 10]
+    for a in range(1, 30):
+        run = set(range(a, min(a + 3, 30)))
+        assert any(run <= set(s) for s in seqs)
+    sent = sum(len(s) for s in seqs)
+    assert sent / 29 < 1.6 < sum(len(s) for s in [[x.seq for x in v] for v in windows(wb, 4, 3)]) / 29
+
+
+def test_ranking_turns_the_order_into_scores_once():
+    from autoreels.cloud.label import is_ranked, rank_draft
+    w, wb = _blocks(6)
+    draft = ("# head\n# fingerprint: abc\n"
+             "1 80 | s:1 | e:3 | t: Первый | d: П\n#   5 s: …\n"
+             "3 82+ | s:1 | e:6 | t: Второй | d: П\n"
+             "6 88 | s:1 | e:3 | t: Третий | d: П\n")
+    prov = Scripted(['{"order": ["C2", "C3", "C1"]}'])
+    new, ok = rank_draft(draft, wb, w, prov, system="S", date="2026-10-11", log=lambda m: None)
+    assert ok and len(prov.calls) == 1
+    ask = prov.calls[0][-1]["content"]
+    assert "C1 | Первый | слово0" in ask and "C2 | Второй |" in ask and "б4с3." in ask   # whole merged text
+    body = [l for l in new.splitlines() if l[:1].isdigit()]
+    assert body == ["1 65 | s:1 | e:3 | t: Первый | d: П", "3 95+ | s:1 | e:6 | t: Второй | d: П",
+                    "6 80 | s:1 | e:3 | t: Третий | d: П"]
+    assert new.splitlines()[2].startswith("# ranked: ") and is_ranked(new)
+    same, ok2 = rank_draft(new, wb, w, Scripted([]), system="S", log=lambda m: None)
+    assert same == new and not ok2
+    # a changed clip set is ranked again
+    assert not is_ranked(new.replace("6 80 | s:1 | e:3", "6 80 | s:1 | e:2"))
+
+
+def test_ranking_needs_every_clip_or_leaves_the_draft():
+    from autoreels.cloud.label import rank_draft
+    w, wb = _blocks(6)
+    draft = "1 80 | t: A\n3 80 | t: B\n"
+    prov = Scripted(['{"order": ["C1"]}', '{"order": ["C2", "C1"]}'])
+    new, ok = rank_draft(draft, wb, w, prov, system="S", log=lambda m: None)
+    assert ok and len(prov.calls) == 2 and new.startswith("# ranked: ")   # no header: on top
+    assert [l for l in new.splitlines() if l[:1].isdigit()] == ["1 65 | t: A", "3 95 | t: B"]
+    bad = Scripted(['{"order": ["C1", "C1"]}', "no json"])
+    same, ok2 = rank_draft(draft, wb, w, bad, system="S", log=lambda m: None)
+    assert same == draft and not ok2
+    down = Scripted([RuntimeError("429")])
+    assert rank_draft(draft, wb, w, down, system="S", log=lambda m: None) == (draft, False)
+    single = "1 80 | t: A\n"
+    assert rank_draft(single, wb, w, Scripted([]), system="S", log=lambda m: None) == (single, False)
