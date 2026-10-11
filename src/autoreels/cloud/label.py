@@ -170,6 +170,7 @@ class Checked:
     blocks: tuple[int, ...] = ()
     played_sec: float = 0.0
     preview: str = ""
+    outside: bool = False         # proposed blocks outside the request (never written to the draft)
 
 
 def _sid(x) -> str:
@@ -232,7 +233,8 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
     if not blocks:
         return Checked(None, ["'blocks' is empty"])
     if any(b not in by_seq for b in blocks):
-        return Checked(None, [f"blocks {blocks}: only blocks {sorted(by_seq)} are in this request"])
+        return Checked(None, [f"blocks {blocks}: only blocks {sorted(by_seq)} are in this request"],
+                       outside=True)
     if blocks != list(range(blocks[0], blocks[0] + len(blocks))):
         return Checked(None, [f"blocks {blocks} are not consecutive"])
     if len(blocks) > p.max_clip_blocks:
@@ -393,12 +395,18 @@ def _repair_message(checked: list[Checked]) -> str:
 
 def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: str,
                  fewshot: Sequence[dict] = (), p: LabelParams = LabelParams(),
-                 log: Callable[[str], None] = print, occupied: set[int] | None = None) -> LabelResult:
+                 log: Callable[[str], None] = print, occupied: set[int] | None = None,
+                 checkpoint: Callable[[list[str]], None] | None = None) -> LabelResult:
     """Draft review lines for every block, window by window (windows overlap).
 
     A clip that touches the last block of its window and could still grow is DEFERRED: the next
     window sees those blocks with more context after them. If the next window proposes nothing
     over those blocks, the deferred clip is taken. A clip overlapping an accepted one is dropped.
+
+    checkpoint(lines): called after every window with the draft so far — the windows not asked
+    yet are written as '# blocks a–b: no answer (not asked yet …)', so a run killed midway (Ctrl+C,
+    the Mac asleep) leaves a draft that `--retry` continues (M38).
+    A proposal over blocks outside its window is not a clip: it is counted in the log, not written.
     """
     res = LabelResult([])
     base = [{"role": "system", "content": system}] + list(fewshot)
@@ -413,9 +421,38 @@ def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: st
     def taken(ch: Checked) -> bool:
         return bool(set(ch.blocks) & occupied) or any(set(ch.blocks) & set(a.blocks) for a in accepted)
 
+    def _label(win) -> str:
+        return f"{win[0].seq}–{win[-1].seq}" if len(win) > 1 else f"{win[0].seq}"
+
+    def compose(done_upto: int) -> list[str]:
+        """The draft lines: accepted + deferred clips, flagged lines, unanswered windows; the
+        windows after done_upto marked as not asked yet (a checkpoint of an unfinished run)."""
+        acc = list(accepted) + [ch for ch in pending if not taken(ch)]
+        fl = [f for f in flagged if not (f.blocks and (set(f.blocks) & occupied
+                                                       or any(set(f.blocks) & set(a.blocks) for a in acc)))]
+        rest = [f"# blocks {_label(w)}: no answer (not asked yet — the run was interrupted; "
+                f"arl label --retry)" for w in wins[done_upto + 1:]]
+        rows: list[tuple[int, int, list[str]]] = []
+        for ch in acc:
+            rows.append((ch.blocks[0], 0, [ch.line, f"#   {ch.played_sec:.0f} s: {ch.preview}"]))
+        for ch in fl:
+            rows.append((ch.blocks[0] if ch.blocks else 10**9, 1,
+                         [f"#! {ch.line or '(clip not written)'}  ← " + "; ".join(ch.problems)]))
+        for line in failed + rest:
+            m = re.match(r"# blocks (\d+)", line)
+            rows.append((int(m.group(1)) if m else 10**9, 2, [line]))
+        out: list[str] = []
+        seen: set[str] = set()
+        for _, _, lines in sorted(rows, key=lambda r: (r[0], r[1])):
+            if lines[0] in seen:
+                continue
+            seen.add(lines[0])
+            out.extend(lines)
+        return out
+
     provider_fails = 0                      # consecutive windows lost to the providers
     for wi, win in enumerate(wins):
-        label = f"{win[0].seq}–{win[-1].seq}" if len(win) > 1 else f"{win[0].seq}"
+        label = _label(win)
         if provider_fails >= p.stop_after_failed_windows:
             # Free tiers run out for hours (Groq hourly/daily quota, OpenRouter 50 requests a day):
             # every further window would wait out the whole budget and fail. Stop asking; the
@@ -441,7 +478,9 @@ def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: st
         else:
             checked = _check_all(ans["clips"], win, words, p)
             rounds = 0
-            while any(ch.problems for ch in checked) and rounds < p.repair_rounds:
+            # proposals outside the window are not repaired: the LLM echoing an earlier window is
+            # not worth a request of the free budget
+            while any(ch.problems and not ch.outside for ch in checked) and rounds < p.repair_rounds:
                 rounds += 1
                 msgs = msgs + [{"role": "assistant", "content": raw},
                                {"role": "user", "content": _repair_message(checked)}]
@@ -454,8 +493,11 @@ def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: st
         nxt = wins[wi + 1] if wi + 1 < len(wins) else None
         nxt_first = nxt[0].seq if nxt else None
         new_pending: list[Checked] = []
-        n_ok = n_bad = 0
+        n_ok = n_bad = n_out = 0
         for ch in checked:
+            if ch.outside:
+                n_out += 1
+                continue
             if ch.problems or ch.line is None:
                 if ch.blocks and taken(ch):
                     continue
@@ -477,26 +519,16 @@ def label_source(wblocks: Sequence[WBlock], words: list, provider, *, system: st
         if ans is not None or n_ok:
             log(f"  блоки {label}: клипов {n_ok}" + (f", с замечаниями {n_bad}" if n_bad else "")
                 + (f", отложено до следующего окна {len(pending)}" if pending else "")
+                + (f", вне окна (не записано) {n_out}" if n_out else "")
                 + (" (взяты отложенные из прошлого окна)" if ans is None else ""))
+        if checkpoint is not None and wi + 1 < len(wins):
+            checkpoint(compose(wi))
     for ch in pending:
         if not taken(ch):
             accepted.append(ch)
+    pending = []
     flagged = [f for f in flagged if not (f.blocks and taken(f))]
-    rows: list[tuple[int, int, list[str]]] = []
-    for ch in accepted:
-        rows.append((ch.blocks[0], 0, [ch.line, f"#   {ch.played_sec:.0f} s: {ch.preview}"]))
-    for ch in flagged:
-        rows.append((ch.blocks[0] if ch.blocks else 10**9, 1,
-                     [f"#! {ch.line or '(clip not written)'}  ← " + "; ".join(ch.problems)]))
-    for k, line in enumerate(failed):
-        m = re.match(r"# blocks (\d+)", line)
-        rows.append((int(m.group(1)) if m else 10**9, 2, [line]))
-    seen: set[str] = set()
-    for _, _, lines in sorted(rows, key=lambda r: (r[0], r[1])):
-        if lines[0] in seen:
-            continue
-        seen.add(lines[0])
-        res.lines.extend(lines)
+    res.lines.extend(compose(len(wins)))
     res.clips_ok = len(accepted)
     res.clips_flagged = len({f.line or id(f) for f in flagged})
     return res
@@ -613,9 +645,11 @@ def used_blocks(text: str) -> set[int]:
 
 def retry_draft(text: str, wblocks: Sequence[WBlock], words: list, provider, *, system: str,
                 fewshot: Sequence[dict] = (), p: LabelParams = LabelParams(),
-                log: Callable[[str], None] = print) -> tuple[str, int, int]:
+                log: Callable[[str], None] = print,
+                checkpoint: Callable[[str], None] | None = None) -> tuple[str, int, int]:
     """Ask again for the windows a draft marks '# blocks a–b: no answer'; new clips never overlap
-    the draft's lines. Returns (new text, windows answered now, windows still unanswered)."""
+    the draft's lines. checkpoint(text) gets the draft after every window answered (M38).
+    Returns (new text, windows answered now, windows still unanswered)."""
     by_seq = {wb.seq: wb for wb in wblocks}
     lines = text.splitlines()
     done = still = 0
@@ -635,6 +669,8 @@ def retry_draft(text: str, wblocks: Sequence[WBlock], words: list, provider, *, 
         idx = next(i for i, l in enumerate(lines) if _NO_ANSWER_RE.match(l.strip())
                    and l.strip().startswith(f"# blocks {label}:"))
         lines[idx:idx + 1] = new
+        if checkpoint is not None:
+            checkpoint("\n".join(lines) + "\n")
     return "\n".join(lines) + "\n", done, still
 
 

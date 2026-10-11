@@ -467,3 +467,80 @@ def test_clip_ending_on_an_open_question_is_flagged():
     assert not is_open_question(ws("Я поступил как взрослый его сын, правильно?"))
     assert not is_open_question(ws("Разве я мог сказать?"))
     assert not is_open_question(ws("Что это такое."))
+
+
+# ── M38: the draft survives a killed run; proposals outside the window are not written ─────────
+
+def test_checkpoint_after_every_window_and_retry_continues():
+    from autoreels.cloud.label import retry_draft, unanswered_windows
+    w, wb = _blocks(6)
+    p = LabelParams(min_sec=1.0, max_sec=99.0, window_blocks=4)
+    seen = []
+
+    class Killed(Scripted):
+        def complete(self, messages, temperature=0.0):
+            if len(self.calls) == 1:
+                raise KeyboardInterrupt          # Ctrl+C / the Mac asleep during window 2
+            return super().complete(messages, temperature)
+
+    with pytest.raises(KeyboardInterrupt):
+        label_source(wb, w, Killed([{"clips": [_c([2], "2.1", "2.3")]}]), system="S", p=p,
+                     log=lambda m: None, checkpoint=seen.append)
+    assert len(seen) == 1
+    draft = "\n".join(seen[0]) + "\n"
+    assert draft.startswith("2 80 | s:1 | e:3 | t: Т | d: П\n")
+    assert unanswered_windows(draft) == [(3, 6)] and "not asked yet" in draft
+    new, done, still = retry_draft(draft, wb, w, Scripted([{"clips": [_c([5], "5.1", "5.3")]}]),
+                                   system="S", p=p, log=lambda m: None)
+    assert (done, still) == (1, 0)
+    assert [l for l in new.splitlines() if l[:1].isdigit()] == ["2 80 | s:1 | e:3 | t: Т | d: П",
+                                                                "5 80 | s:1 | e:3 | t: Т | d: П"]
+    # a finished run gives the same draft with or without checkpoints
+    a = label_source(wb, w, Scripted([{"clips": [_c([2], "2.1", "2.3")]}, {"clips": []}]), system="S",
+                     p=p, log=lambda m: None)
+    b = label_source(wb, w, Scripted([{"clips": [_c([2], "2.1", "2.3")]}, {"clips": []}]), system="S",
+                     p=p, log=lambda m: None, checkpoint=lambda lines: None)
+    assert a.lines == b.lines and not any("not asked" in l for l in a.lines)
+
+
+def test_proposal_outside_the_window_is_logged_not_written():
+    """09h33 draft: «#! (clip not written) ← blocks [17, 18]: only blocks [37, 38, 39, 40] are in
+    this request» ×4 — the LLM echoing blocks of an earlier window. Not a clip, not a draft line."""
+    w, wb = _blocks(6)
+    p = LabelParams(min_sec=1.0, max_sec=99.0, window_blocks=4)
+    logs = []
+    out = {"clips": [_c([9], "9.1", "9.3")]}
+    prov = Scripted([out, {"clips": []}])
+    res = label_source(wb, w, prov, system="S", p=p, log=logs.append)
+    assert len(prov.calls) == 2                      # no repair request spent on it
+    assert not any("clip not written" in l for l in res.lines) and res.clips_flagged == 0
+    assert any("вне окна (не записано) 1" in l for l in logs)
+
+
+def test_cmd_label_keeps_the_draft_of_a_killed_run(tmp_path):
+    mpath, cache = _source(tmp_path)
+    out = tmp_path / "v_auto.txt"
+
+    class DiesSecond:
+        name = "dies"
+
+        def __init__(self):
+            self.n = 0
+
+        def complete(self, messages, temperature=0.0):
+            self.n += 1
+            if self.n == 2:
+                raise KeyboardInterrupt
+            return '{"clips": []}'
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(out), provider=DiesSecond())
+    text = out.read_text(encoding="utf-8")
+    assert "# fingerprint: " in text and "not asked yet" in text
+    from autoreels.prepare import draft_stats
+    assert draft_stats(text)[2] >= 1                       # arl prepare will choose --retry
+    assert cli.cmd_label(str(mpath), root=REPO_ROOT, cache_dir=str(cache), out=str(out), retry=True,
+                         provider=type("E", (), {"name": "e", "complete": lambda s, m, temperature=0.0:
+                                                 '{"clips": []}'})()) == 0
+    assert "not asked yet" not in out.read_text(encoding="utf-8")
+    assert not (tmp_path / "v_auto.txt.tmp").exists()

@@ -1558,3 +1558,52 @@ def test_token_scale_cwd_independent(tmp_path, monkeypatch):
     assert factor == pytest.approx(1.37)
     assert scale_file.exists()
     assert not (other_dir / "data" / "token_scale.json").exists()  # not written to cwd
+
+
+# ----------------------------------------------------------------- M38: known resets, fail fast
+
+def test_openrouter_daily_quota_reset_epoch_is_exhausted_not_throttled(monkeypatch):
+    """OpenRouter free quota: 429 without retry-after, «x-ratelimit-remaining=0,
+    x-ratelimit-reset=<epoch ms>». It was retried every 8 s for hours (M36 night run)."""
+    import time as _t
+    import autoreels.cloud.providers as P
+    from autoreels.cloud.providers import ProviderExhausted
+    calls = []
+    reset_ms = str(int((_t.time() + 5 * 3600) * 1000))
+
+    def fake_post(url, *, headers, json, timeout):
+        calls.append(1)
+        return _FakeResp(429, headers={"x-ratelimit-limit": "50", "x-ratelimit-remaining": "0",
+                                       "x-ratelimit-reset": reset_ms})
+
+    monkeypatch.setattr(P, "_httpx_post", fake_post)
+    with pytest.raises(ProviderExhausted) as e:
+        P._chat_request("u", headers={}, payload={}, provider_name="OpenRouter", defer_throttle=True)
+    assert len(calls) == 1 and 5 * 3600 - 60 < e.value.retry_after <= 5 * 3600
+
+
+def test_openrouter_per_minute_reset_stays_a_short_throttle(monkeypatch):
+    import time as _t
+    import autoreels.cloud.providers as P
+    reset_ms = str(int((_t.time() + 20) * 1000))
+    monkeypatch.setattr(P, "_httpx_post", lambda url, *, headers, json, timeout: _FakeResp(
+        429, headers={"x-ratelimit-limit": "20", "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset_ms}))
+    with pytest.raises(ProviderThrottled) as e:
+        P._chat_request("u", headers={}, payload={}, provider_name="OpenRouter", defer_throttle=True)
+    assert 15 < e.value.retry_after <= 20
+    assert P._parse_epoch_reset("29.5") is None and P._parse_epoch_reset(None) is None
+
+
+def test_pool_fails_at_once_when_nobody_frees_up_within_the_budget():
+    """Groq: retry-after 1400 s, OpenRouter: quota until 03:00 — the old pool slept the whole 600 s
+    budget per window and then failed anyway (M36: 10 min × every window). Now it fails at once
+    with when each provider comes back; the labeller then stops after two windows in seconds."""
+    from autoreels.cloud.providers import ProviderExhausted
+    groq = _ScriptedProvider("Groq", [ProviderExhausted("daily", retry_after=1400)])
+    openr = _ScriptedProvider("OpenRouter", [ProviderExhausted("daily", retry_after=5 * 3600)])
+    pool, clock = _pool(groq, openr)
+    with pytest.raises(ProviderError) as e:
+        pool.complete([])
+    assert clock.t == 0.0
+    assert "дольше бюджета" in str(e.value) and "Groq через ~23 мин" in str(e.value)
+    assert "OpenRouter через ~300 мин" in str(e.value)

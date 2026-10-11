@@ -257,6 +257,41 @@ def _ends_with_stop(word: str) -> bool:
     return bool(letters) and letters[-1] in _STOPS
 
 
+ALIGN_MIN_SCORE = 0.05     # below this the aligner guessed (09h33 «Первый»: 0.004)
+_ALIGN_ORDER_EPS = 0.02
+
+
+def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
+    """Aligned words usable as times, in transcript order, and the Whisper t0 of those dropped.
+
+    The aligner works in overlapping chunks; at a chunk seam it sometimes places a word it barely
+    recognised far from its place, before the words that precede it (09h33 533.8 s: «Первый»,
+    score 0.004, put 1.5 s early inside «Понятно,» — the plan started the clip there and cut the
+    previous word). A word that lands before the end of the previous aligned word (out of order)
+    AND has an almost-zero score is dropped — its time then comes from the speech map. An
+    out-of-order pair where both are confident is kept as before (Whisper's own text order can
+    disagree with time; the filler-cut guards handle it)."""
+    kept: list[dict] = []
+    rejected: list[float] = []
+    for e in entries:
+        if e.get("start") is None or e.get("end") is None or not e["end"] > e["start"]:
+            continue
+        cur: dict | None = e
+        while cur is not None and kept and cur["start"] < kept[-1]["end"] - _ALIGN_ORDER_EPS:
+            prev = kept[-1]
+            sc_cur, sc_prev = float(cur.get("score", 1.0)), float(prev.get("score", 1.0))
+            if sc_cur < ALIGN_MIN_SCORE and sc_cur <= sc_prev:
+                rejected.append(float(cur["t0"]))
+                cur = None
+            elif sc_prev < ALIGN_MIN_SCORE:
+                rejected.append(float(kept.pop()["t0"]))
+            else:
+                break
+        if cur is not None:
+            kept.append(cur)
+    return kept, rejected
+
+
 class SpeechTimes:
     """Audible word times from the speech map, keyed like the rest of the code (round(t0*1000)).
 
@@ -291,10 +326,11 @@ class SpeechTimes:
         # AUDIO plus untranscribed speech (fillers, «ммм», «ну») — preferred over the map when present.
         self._al: dict[int, tuple[float, float]] = {}
         self._untr: list[tuple[float, float]] = []
+        self.rejected_alignment: list[float] = []      # Whisper t0 of aligned words not used
         if align:
-            for e in align.get("words", []):
-                if e.get("start") is not None and e.get("end") is not None and e["end"] > e["start"]:
-                    self._al[round(e["t0"] * 1000)] = (float(e["start"]), float(e["end"]))
+            kept, self.rejected_alignment = clean_alignment(align.get("words", []))
+            for e in kept:
+                self._al[round(e["t0"] * 1000)] = (float(e["start"]), float(e["end"]))
             self._untr = sorted((float(a), float(b)) for a, b in align.get("untranscribed", []) if b > a)
             self._absorb_word_tails()
             self._trim_untranscribed_before_onsets()

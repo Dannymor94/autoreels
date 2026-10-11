@@ -149,6 +149,18 @@ def _parse_groq_reset(s: str) -> float | None:
         return None
 
 
+def _parse_epoch_reset(value) -> float | None:
+    """x-ratelimit-reset as an absolute time (OpenRouter: epoch milliseconds) → epoch seconds.
+    None for a missing/relative/garbled value."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v > 1e12:          # milliseconds
+        v /= 1000.0
+    return v if v > 1e9 else None   # a small number is a relative reset, not an epoch
+
+
 def _httpx_post(url, *, headers, json, timeout):
     """Тонкая обёртка над httpx.post — вынесена на модульный уровень для monkeypatch в тестах."""
     return httpx.post(url, headers=headers, json=json, timeout=timeout)
@@ -359,6 +371,13 @@ def _chat_request(
                     max_tokens_sent=_max_tok,
                 )
             wait = float(resp.headers.get("retry-after", _THROTTLE_PAUSE_SEC))
+            if not _has_retry_after:
+                # OpenRouter's free-tier quota answers without retry-after, with the reset as an
+                # epoch in ms: «x-ratelimit-remaining=0, x-ratelimit-reset=1791676800000» (03:00
+                # MSK). Polling it every 8 s for hours burnt each window's whole 600 s budget (M38).
+                _reset_at = _parse_epoch_reset(resp.headers.get("x-ratelimit-reset"))
+                if resp.headers.get("x-ratelimit-remaining") == "0" and _reset_at is not None:
+                    wait = max(wait, _reset_at - time.time())
             if wait >= _EXHAUSTED_THRESHOLD_SEC:
                 raise ProviderExhausted(
                     f"{provider_name} суточный лимит исчерпан (retry-after={wait:.0f}с)",
@@ -867,6 +886,15 @@ class ProviderPool:
             order = [i for i in self._candidate_order() if not self._members[i].disabled]
             available = [i for i in order if self._members[i].available_at <= now]
             if not available:
+                # Nobody frees up within this call's budget (quota until 03:00, retry-after
+                # 1400 s): waiting only to fail at the budget's end wasted 10 min per window (M38).
+                earliest = min(self._members[i].available_at for i in order)
+                if earliest > _budget_start + _POOL_BUDGET_SEC:
+                    details = ", ".join(
+                        f"{m.name} через ~{max(0.0, m.available_at - now) / 60:.0f} мин"
+                        for m in self._members if not m.disabled)
+                    raise ProviderError(f"все провайдеры в лимите дольше бюджета ожидания "
+                                        f"{_POOL_BUDGET_SEC:.0f}с ({details})")
                 self._wait_for_earliest()
                 continue
             for idx in available:

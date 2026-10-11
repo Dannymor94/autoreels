@@ -373,3 +373,34 @@ def test_subtitles_keep_text_order_when_whisper_times_go_back():
     assert [w.word for w in plan.subtitles] == ["лучше", "всего", "работает.", "То", "есть", "алгоритм."]
     ts = [w.t0 for w in plan.subtitles]
     assert ts == sorted(ts)
+
+
+def test_near_zero_score_word_aligned_out_of_order_is_not_used():
+    """09h33 533.8 s (M38): the aligner put «Первый» (Whisper 535.23 s, score 0.004) 1.5 s early,
+    inside «Понятно,». The plan started the clip there and the seam check refused it (a cut inside
+    «Понятно,»). Such a word is dropped and its time comes from the speech map; confident words
+    out of order are kept as before. Values are the real align.json entries."""
+    from autoreels.cloud.plan import SpeechTimes, clean_alignment
+    al = {"words": [
+        {"t0": 533.0504, "start": 533.629, "end": 533.949, "score": 0.921},   # «Понятно,»
+        {"t0": 533.9704, "start": 533.989, "end": 534.069, "score": 0.963},
+        {"t0": 535.2304, "start": 533.77, "end": 533.951, "score": 0.004},    # «Первый»
+        {"t0": 535.9304, "start": 535.772, "end": 535.912, "score": 0.984},
+    ], "untranscribed": []}
+    kept, rejected = clean_alignment(al["words"])
+    assert rejected == [535.2304] and len(kept) == 3
+    words = [_w("Понятно,", 533.0504, 533.9704), _w("и", 533.9704, 534.0904),
+             _w("Первый", 535.2304, 535.9104), _w("—", 535.9304, 535.9504)]
+    smap = {"words": [{"t0": 535.2304, "t1": 535.9104, "audible_start": 535.28, "audible_end": 535.96}],
+            "intervals": []}
+    t = SpeechTimes(words, smap, al)
+    assert t.audible(words[2]) == (535.28, 535.96) and t.rejected_alignment == [535.2304]
+    assert t.audible(words[0]) == (533.629, 533.949)
+    # both confident, out of order: kept (Whisper's text order may disagree with time)
+    k2, r2 = clean_alignment([{"t0": 1.0, "start": 2.0, "end": 2.5, "score": 0.9},
+                              {"t0": 1.5, "start": 1.0, "end": 1.4, "score": 0.8}])
+    assert r2 == [] and len(k2) == 2
+    # the earlier word is the guess: it goes, the confident later one stays
+    k3, r3 = clean_alignment([{"t0": 1.0, "start": 2.0, "end": 2.5, "score": 0.01},
+                              {"t0": 1.5, "start": 1.0, "end": 1.4, "score": 0.8}])
+    assert r3 == [1.0] and [e["t0"] for e in k3] == [1.5]

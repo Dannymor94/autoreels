@@ -180,3 +180,15 @@ def test_first_word_no_predecessor_ok():
     tx = [_w(0.0, 0.5, "когда")]   # lowercase, but no preceding word
     r = _reel_first([tx[0]])
     m._check_first_subtitle_word(r, tx)  # must not raise
+
+
+def test_dialogue_dash_tokens_are_not_words():
+    """PXL_20260729 449.4 s (interview): Whisper writes the dialogue dash as its own token —
+    «… сказал. — — Я бы не сказал …». The first WORD of the clip («Я») decides, and the dash before
+    it is not «the word before» (M38). A real mid-sentence start behind a dash still fails."""
+    tx = [_w(447.0, 447.5, "сказал."), _w(448.9, 449.0, "—"), _w(449.42, 449.5, "—"),
+          _w(449.6, 449.8, "Я"), _w(449.9, 450.1, "бы")]
+    m._check_first_subtitle_word(_reel_first(tx[2:]), tx)          # starts on «—», then «Я»
+    tx2 = [_w(447.0, 447.5, "говорил"), _w(448.9, 449.0, "—"), _w(449.6, 449.8, "что")]
+    with pytest.raises(ValueError, match=r"starts mid-sentence — 'что'.*'говорил'"):
+        m._check_first_subtitle_word(_reel_first(tx2[1:]), tx2)

@@ -1081,17 +1081,23 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
     (b) the preceding transcript word does not end with sentence-final punctuation (.!?…).
     Both conditions required to avoid false positives from proper nouns.
     """
-    if not reel.subtitles:
+    # Punctuation-only tokens (an interview's dialogue dash «—» is a separate "word" in Whisper
+    # output, PXL_20260729 449.4 s) are not words: the first WORD of the clip and the WORD before it
+    # decide.
+    def _is_word(w) -> bool:
+        return any(c.isalnum() for c in w.word)
+
+    first = next((w for w in reel.subtitles if _is_word(w)), None)
+    if first is None:
         return
-    first = reel.subtitles[0]
-    text = first.word.strip(".,!?…;: ")
+    text = first.word.strip(".,!?…;:—–-«»\"' ")
     if not text or text[0].isupper():
         return  # uppercase start → not a mid-sentence continuation
     from autoreels.cloud.snap import _is_sentence_end as _ise
     # Find the transcript word immediately before first.t0
     preceding = None
     for w in tx_words:
-        if w.t0 < first.t0 - 1e-4:
+        if w.t0 < first.t0 - 1e-4 and _is_word(w):
             preceding = w
     if preceding is None:
         return  # first word in transcript — OK
@@ -5666,8 +5672,11 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _need = [w for w in _tx_words if any(c.isalpha() for c in w.word) and not any(c.isdigit() for c in w.word)]
             _hit = sum(1 for w in _need if round(w.t0 * 1000) in _al_keys)
             _ratio = _hit / max(1, len(_need))
+            from autoreels.cloud.plan import clean_alignment as _clean_al
+            _al_rej = _clean_al(_blk_align.get("words", []))[1]
             print(f"  выравнивание по звуку: {_hit}/{len(_need)} слов ({_ratio:.0%}), "
-                  f"{len(_blk_align.get('untranscribed', []))} мест речи без текста")
+                  f"{len(_blk_align.get('untranscribed', []))} мест речи без текста"
+                  + (f"; не по порядку и без уверенности — по карте речи: {len(_al_rej)}" if _al_rej else ""))
             if _ratio < 0.9:
                 _al_msg = (f"выравнивание не соответствует транскрипту ({_ratio:.0%} слов) — "
                            f"arl align {source_file.stem} --force")
@@ -7206,6 +7215,13 @@ def cmd_align(
     return 0
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write via a temporary file and rename: a kill mid-write never leaves half a draft."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None, quiet: bool = False):
     """Everything the labeller works on for one source: review blocks, words, intonation, prompt,
     parameters (arl label, arl review-apply --redo). Returns (namespace, None) or (None, error)."""
@@ -7308,23 +7324,27 @@ def cmd_label(
                   f"(fingerprint {_m.group(1)} ≠ {_fp(kept)})", file=sys.stderr)
             return 1
         new_text = old_text
+        bak = out_path.with_name(out_path.name + ".bak")
         if retry:
             if provider is None:
                 provider = build_pool(r0_cfg)
                 provider.preflight()
+            bak.write_text(old_text, encoding="utf-8")   # before the first checkpoint touches the draft
             new_text, done, still = retry_draft(new_text, wblocks, words, provider, system=system,
-                                                fewshot=fewshot, p=p, log=lambda m: print(m, flush=True))
+                                                fewshot=fewshot, p=p, log=lambda m: print(m, flush=True),
+                                                checkpoint=lambda s: _write_atomic(out_path, s))
             print(f"повтор окон без ответа: получен ответ {done}, по-прежнему без ответа {still}")
         new_text, flagged = check_draft(new_text, wblocks, words, p)
         for seq, why in flagged:
             print(f"  #! строка {seq}: " + "; ".join(why))
         print(f"проверка: строк с нарушениями {len(flagged)}")
         if new_text != old_text:
-            bak = out_path.with_name(out_path.name + ".bak")
             bak.write_text(old_text, encoding="utf-8")
-            out_path.write_text(new_text, encoding="utf-8")
+            _write_atomic(out_path, new_text)
             print(f"→ {out_path}  (прежняя версия: {bak.name})")
         else:
+            if out_path.read_text(encoding="utf-8") != old_text:   # a checkpoint wrote, the end did not
+                _write_atomic(out_path, old_text)
             print(f"→ {out_path} без изменений")
         return 0
     if provider is None:
@@ -7334,8 +7354,6 @@ def cmd_label(
     n_win = len(_label_windows(wblocks, p.window_blocks, p.max_clip_blocks))
     print(f"разметка {stem}: {len(kept)} блоков, {n_win} окон по {p.window_blocks} блока "
           f"(окна перекрываются)", flush=True)
-    res = label_source(wblocks, words, provider, system=system, fewshot=fewshot, p=p,
-                       log=lambda m: print(m, flush=True))
     try:
         source_ref = str(mpath.resolve().relative_to(_root.resolve()))
     except ValueError:
@@ -7345,11 +7363,20 @@ def cmd_label(
         _out_ref = str(out_path.resolve().relative_to(_root.resolve()))
     except ValueError:
         _out_ref = str(out_path)
-    text = render_file(res, source_ref=source_ref, n_blocks=len(kept), filter_removed=len(dropped),
-                       fingerprint=_block_fingerprint(kept), model=str(model),
-                       date=_dt.date.today().isoformat(), review_ref=_out_ref)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(text, encoding="utf-8")
+    from autoreels.cloud.label import LabelResult as _LR
+
+    def _render(lines):
+        return render_file(_LR(lines) if isinstance(lines, list) else lines, source_ref=source_ref,
+                           n_blocks=len(kept), filter_removed=len(dropped),
+                           fingerprint=_block_fingerprint(kept), model=str(model),
+                           date=_dt.date.today().isoformat(), review_ref=_out_ref)
+
+    # The draft is on disk after every window: a run killed midway keeps what it got (M38).
+    res = label_source(wblocks, words, provider, system=system, fewshot=fewshot, p=p,
+                       log=lambda m: print(m, flush=True),
+                       checkpoint=lambda lines: _write_atomic(out_path, _render(lines)))
+    _write_atomic(out_path, _render(res))
     print(f"готово: клипов {res.clips_ok}, с замечаниями (#!) {res.clips_flagged}, "
           f"без ответа {res.windows_failed} из {n_win} окон; запросов {res.requests}")
     _q = f'"{_out_ref}"' if " " in _out_ref else _out_ref
