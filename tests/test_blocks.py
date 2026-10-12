@@ -1652,3 +1652,18 @@ def test_beats_grammar_exported_in_compact_prompt():
     """_COMPACT_PROMPT documents the > syntax."""
     from autoreels.cloud.blocks import _COMPACT_PROMPT
     assert ">" in _COMPACT_PROMPT
+
+
+def test_short_piece_that_cannot_merge_is_reported_not_lost():
+    """M42: _merge_short dropped a short piece silently when merging it would exceed max_sec — its
+    speech was in no block and nowhere in the review. It is now handed back through dropped_out
+    (the review path lists it as dropped with the reason; the numbering and fingerprint stay)."""
+    from autoreels.cloud.blocks import _Line, _merge_short
+    long_ = [_Line(t0=0.0, t1=80.0, text="длинный блок.")]
+    short = [_Line(t0=81.0, t1=86.0, text="коротко.")]
+    nxt = [_Line(t0=87.0, t1=175.0, text="следующий длинный.")]   # merged with it: 94 s > 90
+    lost: list = []
+    out = _merge_short([(long_, "pause"), (short, "pause"), (nxt, "pause")], 18.0, 90.0, dropped_out=lost)
+    assert [g[0][0].text for g in out] == ["длинный блок.", "следующий длинный."]
+    assert lost and lost[0][0][0].text == "коротко."
+    assert _merge_short([(long_, "pause"), (short, "pause"), (nxt, "pause")], 18.0, 90.0) == out

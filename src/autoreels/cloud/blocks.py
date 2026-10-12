@@ -180,7 +180,8 @@ def _split_recursive(
 
 
 def _merge_short(
-    groups: list[tuple[list[_Line], str]], min_sec: float, max_sec: float
+    groups: list[tuple[list[_Line], str]], min_sec: float, max_sec: float,
+    dropped_out: list | None = None,
 ) -> list[tuple[list[_Line], str]]:
     """Merge forward any block shorter than min_sec.
 
@@ -204,7 +205,10 @@ def _merge_short(
             if combined_dur <= max_sec:
                 remaining[0] = (combined, reason)   # re-evaluate combined next turn
                 continue
-        # No next block or would exceed max_sec → drop
+        # No next block or would exceed max_sec → drop (reported through dropped_out: M42 — its
+        # speech is in no block, so the reviewer never sees it; the plan cuts it at the seam)
+        if dropped_out is not None:
+            dropped_out.append((lines, reason))
     return result
 
 
@@ -423,8 +427,12 @@ def candidate_blocks(
     max_sec: float,
     min_pause_for_phrase_end: float,
     block_target_sec: float = 40.0,
+    dropped_out: list | None = None,
 ) -> list[CandidateBlock]:
     """Segment compressed transcript into candidate blocks ready for LLM scoring.
+
+    dropped_out: receives the CandidateBlocks of the short pieces that could not be merged (too
+    short alone, too long merged) — they are not blocks, but their speech is reported (M42).
 
     Args:
         compressed: output of compress_transcript()
@@ -449,7 +457,10 @@ def candidate_blocks(
     expanded: list[tuple[list[_Line], str]] = []
     for lns, reason in raw:
         expanded.extend(_split_recursive(lns, reason, max_sec))
-    sized = _merge_short(expanded, min_sec, max_sec)
+    lost: list = []
+    sized = _merge_short(expanded, min_sec, max_sec, dropped_out=lost)
+    if dropped_out is not None:
+        dropped_out.extend(_make_block(lns, reason) for lns, reason in lost)
     return [_make_block(lns, reason) for lns, reason in sized]
 
 

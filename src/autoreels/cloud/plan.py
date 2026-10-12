@@ -38,6 +38,16 @@ class ManualPlanParams:
     hook_replay_min_pos: float = 0.5  # hook replays in the body only from this body fraction on
     accent_min_sec: float = 3.0       # a close shot after a seam lasts at least this long …
     accent_max_sec: float = 8.0       # … and at most this long, then the window goes back to wide
+    # M42: speech between two consecutive played sentences that is in no sentence of the clip (a
+    # short block the block builder dropped, a filtered block between two merged ones) was never
+    # shown to the reviewer: from this much of it on, the window is split there (a seam) instead
+    # of playing it without subtitles.
+    unseen_split_sec: float = 0.3
+    # A played sentence whose words share this much of their sound with words that are in no
+    # sentence of the clip: Whisper put two texts on one stretch of audio (IMG_6848 «Возможно, вы не
+    # понимаете…» with 20 ms word times, aligned over «…который любит себя»). The sentence cannot be
+    # played with its own subtitles — the plan reports an error (manual choice is not revised).
+    shared_sound_sec: float = 0.3
     # REEL_SPEC §1.4 filler cut (off = previous output): inside a window, the stretch between two
     # played words that holds untranscribed speech («э», «ммм») or a long silence is cut out,
     # leaving a short pause. Cut edges stay in the gap between the words — never inside a word.
@@ -135,6 +145,7 @@ class ManualPlan:
     hook: int | None
     hook_replayed: bool | None
     warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)   # the clip must not be built (M42)
 
     @property
     def cold_open(self) -> PlannedWindow | None:
@@ -706,10 +717,50 @@ def build_manual_plan(
         raise ValueError("nothing to play")
     times = SpeechTimes(words, smap, align)
     pad = params.seam_pad_sec
+    seen_keys = {round(w.t0 * 1000) for s in sentences for w in s}
+    by_t0 = sorted(words, key=lambda w: w.t0)
+    t0s = [w.t0 for w in by_t0]
+    unseen_notes: dict[tuple[int, int], str] = {}
+
+    def unseen_between(i: int) -> tuple[float, list[Word]]:
+        """Seconds of speech between sentence i and i+1 that belongs to no sentence of the clip."""
+        last, first = sentences[i - 1][-1], sentences[i][0]
+        a, b = times.audible(last)[1], times.audible(first)[0]
+        if b - a <= params.unseen_split_sec:
+            return 0.0, []
+        lo = bisect.bisect_left(t0s, min(last.t0, a) - 5.0)
+        hi = bisect.bisect_right(t0s, max(first.t0, b) + 5.0)
+        tot, found = 0.0, []
+        for w in by_t0[lo:hi]:
+            if round(w.t0 * 1000) in seen_keys or not any(c.isalnum() for c in w.word):
+                continue
+            ws, we = times.audible(w)
+            ov = min(b, we) - max(a, ws)
+            if ov > _EPS:
+                tot += ov
+                found.append(w)
+        return tot, found
+
+    def split_unseen(runs: list[list[int]]) -> list[list[int]]:
+        out: list[list[int]] = []
+        for run in runs:
+            cur = [run[0]]
+            for n in run[1:]:
+                sec, ws = unseen_between(n - 1)
+                if sec >= params.unseen_split_sec:
+                    out.append(cur)
+                    cur = [n]
+                    unseen_notes[(n - 1, n)] = (f"{sec:.1f}s of speech between s{n - 1} and s{n} is not in the "
+                                                f"review text («{' '.join(w.word for w in ws)[:60]}») — "
+                                                f"cut at a seam instead of playing it without subtitles")
+                else:
+                    cur.append(n)
+            out.append(cur)
+        return out
 
     def body_windows(order: list[int], note: bool = False) -> list[PlannedWindow]:
         out: list[PlannedWindow] = []
-        for run in _group_windows(order):
+        for run in split_unseen(_group_windows(order)):
             first = sentences[run[0] - 1][0]
             last = sentences[run[-1] - 1][-1]
             w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad),
@@ -757,6 +808,38 @@ def build_manual_plan(
                 raise ValueError("hook removal leaves nothing to play")
 
     body = body_windows(play, note=True)
+    warnings.extend(unseen_notes.values())
+
+    # A played sentence must own its sound: words of no sentence of the clip on the same audio mean
+    # the subtitles would show one text over another's speech (invariant 10: screen = sound).
+    unseen_spans = sorted(
+        ((times.span(w), w) for w in words
+         if round(w.t0 * 1000) not in seen_keys and any(c.isalnum() for c in w.word)),
+        key=lambda x: x[0])
+    u_starts = [sp[0] for sp, _ in unseen_spans]
+    u_max = max((sp[1] - sp[0] for sp, _ in unseen_spans), default=0.0)
+    errors: list[str] = []
+    for n in sorted(set(play) | ({hook} if hook is not None else set())):
+        shared, others = 0.0, []
+        for word in sentences[n - 1]:
+            if not any(c.isalnum() for c in word.word):
+                continue
+            a, b = times.span(word)
+            i = bisect.bisect_left(u_starts, a - u_max)
+            for (ua, ub), u in unseen_spans[i:]:
+                if ua >= b:
+                    break
+                ov = min(b, ub) - max(a, ua)
+                if ov > _EPS:
+                    shared += ov
+                    if u not in others:
+                        others.append(u)
+        if shared >= params.shared_sound_sec:
+            others.sort(key=lambda u: times.span(u)[0])
+            errors.append(f"s{n} «{_txt(sentences[n - 1])[:40]}» shares {shared:.1f}s of its sound with speech "
+                          f"that is not in the review text («{' '.join(u.word for u in others)[:60]}»): "
+                          f"Whisper put two texts on one stretch of audio — the sentence cannot be played "
+                          f"with its own subtitles; label the clip without it")
 
     # §4 ending: last word audible end + air, never into the next speech.
     last_word = sentences[play[-1] - 1][-1]
@@ -856,7 +939,7 @@ def build_manual_plan(
 
     plan = ManualPlan(windows=windows, subtitles=subtitles, last_word=last_word,
                       last_audible_end=ae_last, next_onset=onset, hook=hook,
-                      hook_replayed=hook_replayed, warnings=warnings)
+                      hook_replayed=hook_replayed, warnings=warnings, errors=errors)
     plan._sent_bounds = sent_bounds
     plan._times = times
     return plan

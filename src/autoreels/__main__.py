@@ -5243,6 +5243,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         reel.warnings.append(_w)
     lines = [f"  plan {label}:"] + [f"    {ln}" for ln in plan.describe(sents)]
     lines += [f"    ! {w}" for w in plan.warnings]
+    lines += [f"    [ERROR] {e}" for e in plan.errors]
     return lines
 
 
@@ -5280,12 +5281,14 @@ def _review_block_set(transcript, r0_cfg, source_kind):
     compressed = compress_transcript(
         transcript, pause_sec=r0_cfg.sentence_pause_sec, max_sentence_sec=r0_cfg.max_sentence_sec,
     )
+    unmerged: list = []
     all_blocks = candidate_blocks(
         compressed,
         min_sec=r0_cfg.min_meaningful_sec,
         max_sec=r0_cfg.max_duration,
         min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
         block_target_sec=getattr(r0_cfg, "block_target_sec", 40.0),
+        dropped_out=unmerged,
     )
     total_duration = all_blocks[-1].end if all_blocks else 0.0
     bf = r0_cfg.blocks_filter
@@ -5306,6 +5309,10 @@ def _review_block_set(transcript, r0_cfg, source_kind):
         max_sec=r0_cfg.max_duration,
     )
     _reclaim_block_first_words(all_blocks, transcript.words)
+    # M42: a short piece the block builder could not merge is in no block — its speech was dropped
+    # silently. It stays out of the numbering (fingerprint unchanged) but is reported as dropped.
+    dropped = list(dropped) + [(b, f"too_short_unmergeable ({b.duration:.1f}s, between blocks)")
+                               for b in unmerged]
     return all_blocks, kept, dropped
 
 
@@ -6160,6 +6167,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             reels[_i]._plan = _plan_snap
             reels[_i]._hook_window = None
             reels[_i]._c_close_ranges = []
+    _plan_errs = [(_r.id, _e) for _r in reels for _e in getattr(getattr(_r, "_plan", None), "errors", None) or []]
+    for _rid, _e in _plan_errs:
+        print(f"  [ERROR] {_rid}: {_e}", file=sys.stderr, flush=True)
+    if _plan_errs:
+        print("  [ERROR] planned clip plays a sentence over another text's sound — refusing", file=sys.stderr)
+        return 1
     for _r in reels:
         _check_last_subtitle_word(_r, _tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_blk_smap)
         _check_first_subtitle_word(_r, _tx_words)

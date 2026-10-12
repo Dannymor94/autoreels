@@ -404,3 +404,51 @@ def test_near_zero_score_word_aligned_out_of_order_is_not_used():
     k3, r3 = clean_alignment([{"t0": 1.0, "start": 2.0, "end": 2.5, "score": 0.01},
                               {"t0": 1.5, "start": 1.0, "end": 1.4, "score": 0.8}])
     assert r3 == [1.0] and [e["t0"] for e in k3] == [1.5]
+
+
+def test_speech_in_no_sentence_between_two_played_ones_is_cut_at_a_seam():
+    """M42: speech that is in no sentence of the clip (10h59 blocks 45+46: «Мышцы губ, подбородок…»,
+    a short block the block builder dropped; IMG_6848 2+3: «Сначала я был инженером-строителем…»,
+    which Whisper wrote after «Вопрос в том…» in the text) was never shown to the reviewer, yet the
+    merged window played it without subtitles. Now the window splits there and the plan says why.
+    Without such speech the window stays whole."""
+    spec = [[("а.", 0.0, 1.0, 0.1, 0.9)], [("б.", 3.0, 4.0, 3.1, 3.9)], [("в.", 4.0, 5.0, 4.1, 4.9)]]
+    sents, words, smap = _sentences_and_map(spec)
+    lost = _w("инженером-строителем,", 1.2, 2.6)
+    smap["words"].append({"idx": 3, "t0": 1.2, "t1": 2.6, "audible_start": 1.2, "audible_end": 2.6})
+    all_words = sorted(words + [lost], key=lambda w: w.t0)
+    plan = build_manual_plan(sents, [1, 2, 3], words=all_words, smap=smap, params=P)
+    assert [w.sentences for w in plan.body] == [[1], [2, 3]]
+    assert plan.body[0].end <= 1.2 and plan.body[1].start >= 2.6       # the lost speech is not played
+    assert any("not in the review text" in x and "инженером-строителем" in x for x in plan.warnings)
+    assert [w.word for w in plan.subtitles] == ["а.", "б.", "в."]
+    whole = build_manual_plan(sents, [1, 2, 3], words=words, smap=smap, params=P)
+    assert [w.sentences for w in whole.body] == [[1, 2, 3]]
+    tiny = ManualPlanParams(seam_pad_sec=0.04, unseen_split_sec=5.0)       # below the threshold: kept
+    assert [w.sentences for w in build_manual_plan(sents, [1, 2, 3], words=all_words, smap=smap,
+                                                   params=tiny).body] == [[1, 2, 3]]
+
+
+def test_sentence_sharing_its_sound_with_speech_of_no_sentence_is_an_error():
+    """M42: IMG_6848 «Возможно, вы не понимаете, что такое психология принятия решений.» has 20 ms
+    Whisper word times; the aligner put it at 1652.1–1653.9 s, over «…который любит себя» — speech
+    in no sentence of the clip. Played, its subtitles would run over another text's sound
+    (invariant 10). The plan reports an error naming both texts; the manual choice is not revised.
+    Speech of no sentence that only sits NEXT to a played sentence is not an error."""
+    spec = [[("а.", 0.0, 1.0, 0.1, 0.9)], [("б", 3.0, 3.02, 3.0, 3.5), ("в.", 3.02, 3.04, 3.5, 3.9)]]
+    sents, words, smap = _sentences_and_map(spec)
+    other = [_w("который", 2.9, 3.6), _w("любит", 3.6, 4.2)]
+    smap["words"] += [{"idx": 9, "t0": 2.9, "t1": 3.6, "audible_start": 2.9, "audible_end": 3.6},
+                      {"idx": 10, "t0": 3.6, "t1": 4.2, "audible_start": 3.6, "audible_end": 4.2}]
+    all_words = sorted(words + other, key=lambda w: w.t0)
+    plan = build_manual_plan(sents, [1, 2], words=all_words, smap=smap, params=P)
+    assert len(plan.errors) == 1
+    assert plan.errors[0].startswith("s2 «б в.» shares 0.9s of its sound") and "«который любит»" in plan.errors[0]
+    # only sentence 1 played: its sound is its own
+    assert build_manual_plan(sents, [1], words=all_words, smap=smap, params=P).errors == []
+    # neighbours, no overlap: no error
+    apart = [_w("который", 1.2, 2.0)]
+    smap2 = dict(smap, words=[e for e in smap["words"] if e.get("idx") not in (9, 10)]
+                 + [{"idx": 9, "t0": 1.2, "t1": 2.0, "audible_start": 1.2, "audible_end": 2.0}])
+    ok = build_manual_plan(sents, [1, 2], words=sorted(words + apart, key=lambda w: w.t0), smap=smap2, params=P)
+    assert ok.errors == []
