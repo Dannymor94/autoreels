@@ -675,6 +675,68 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
     return keep
 
 
+class ForeignSound:
+    """Sound a sentence shares with words outside a given set of sentences (M42, M46).
+
+    Whisper sometimes writes a sentence with 20 ms word times that forced alignment then lays over
+    another stretch of speech (IMG_6848 «Возможно, вы не понимаете…» over «…который любит себя»):
+    the sentence has no sound of its own. `shared(sentence, seen_keys)` → (seconds of the sentence's
+    word spans that overlap spans of words NOT in seen_keys, those words in time order). The plan
+    refuses to play such a sentence; the labeller cuts it from a draft line (x:) before the plan
+    sees it. One definition for both: word spans are SpeechTimes.span, words without a letter or
+    digit are ignored, keys are round(t0 * 1000) like everywhere else.
+
+    Who owns a contested stretch: the overlap is symmetric — the real «…который любит себя» shares
+    exactly as much sound with the phantom as the phantom with it. A word is DISPLACED when Whisper
+    gave it no time (shorter than _NO_TIME — the 20 ms signature) or its Whisper interval (± _NEAR)
+    does not touch its audible span; a sentence is displaced when at least half its words are. A
+    sentence that is NOT displaced keeps its sound against displaced words: only the impostor loses
+    it. Two placed texts on one stretch (a Whisper duplicate) still share it both ways."""
+
+    _NO_TIME = 0.05   # a Whisper word shorter than this got no time of its own
+    _NEAR = 0.3       # Whisper and the audio may disagree by this much and still mean the same place
+
+    def __init__(self, times: "SpeechTimes", words: Sequence[Word], min_sec: float = 0.3):
+        self.times = times
+        self.min_sec = min_sec            # from this much shared sound on, the sentence is not its own
+        self._spans = sorted(((times.span(w), round(w.t0 * 1000), w) for w in words
+                              if any(c.isalnum() for c in w.word)), key=lambda x: x[0])
+        self._starts = [sp[0] for sp, _, _ in self._spans]
+        self._max = max((sp[1] - sp[0] for sp, _, _ in self._spans), default=0.0)
+        self._displaced = {key for sp, key, w in self._spans if self._is_displaced(w, sp)}
+
+    @classmethod
+    def _is_displaced(cls, w: Word, span: tuple[float, float]) -> bool:
+        if w.t1 - w.t0 < cls._NO_TIME:
+            return True
+        return w.t1 + cls._NEAR <= span[0] or w.t0 - cls._NEAR >= span[1]
+
+    def displaced(self, sentence: Sequence[Word]) -> bool:
+        keys = [round(w.t0 * 1000) for w in sentence if any(c.isalnum() for c in w.word)]
+        return bool(keys) and 2 * sum(k in self._displaced for k in keys) >= len(keys)
+
+    def shared(self, sentence: Sequence[Word], seen_keys: set[int]) -> tuple[float, list[Word]]:
+        total, others = 0.0, []
+        placed = not self.displaced(sentence)
+        for word in sentence:
+            if not any(c.isalnum() for c in word.word):
+                continue
+            a, b = self.times.span(word)
+            i = bisect.bisect_left(self._starts, a - self._max)
+            for (ua, ub), key, u in self._spans[i:]:
+                if ua >= b:
+                    break
+                if key in seen_keys or (placed and key in self._displaced):
+                    continue
+                ov = min(b, ub) - max(a, ua)
+                if ov > _EPS:
+                    total += ov
+                    if u not in others:
+                        others.append(u)
+        others.sort(key=lambda u: self.times.span(u)[0])
+        return total, others
+
+
 def _group_windows(play: Sequence[int]) -> list[list[int]]:
     wins: list[list[int]] = []
     for n in play:
@@ -812,34 +874,16 @@ def build_manual_plan(
 
     # A played sentence must own its sound: words of no sentence of the clip on the same audio mean
     # the subtitles would show one text over another's speech (invariant 10: screen = sound).
-    unseen_spans = sorted(
-        ((times.span(w), w) for w in words
-         if round(w.t0 * 1000) not in seen_keys and any(c.isalnum() for c in w.word)),
-        key=lambda x: x[0])
-    u_starts = [sp[0] for sp, _ in unseen_spans]
-    u_max = max((sp[1] - sp[0] for sp, _ in unseen_spans), default=0.0)
+    foreign = ForeignSound(times, words)
     errors: list[str] = []
     for n in sorted(set(play) | ({hook} if hook is not None else set())):
-        shared, others = 0.0, []
-        for word in sentences[n - 1]:
-            if not any(c.isalnum() for c in word.word):
-                continue
-            a, b = times.span(word)
-            i = bisect.bisect_left(u_starts, a - u_max)
-            for (ua, ub), u in unseen_spans[i:]:
-                if ua >= b:
-                    break
-                ov = min(b, ub) - max(a, ua)
-                if ov > _EPS:
-                    shared += ov
-                    if u not in others:
-                        others.append(u)
+        shared, others = foreign.shared(sentences[n - 1], seen_keys)
         if shared >= params.shared_sound_sec:
-            others.sort(key=lambda u: times.span(u)[0])
             errors.append(f"s{n} «{_txt(sentences[n - 1])[:40]}» shares {shared:.1f}s of its sound with speech "
                           f"that is not in the review text («{' '.join(u.word for u in others)[:60]}»): "
                           f"Whisper put two texts on one stretch of audio — the sentence cannot be played "
-                          f"with its own subtitles; label the clip without it")
+                          f"with its own subtitles; label the clip without it (a draft line of arl label: "
+                          f"`arl label <stem> --check` cuts such a sentence by itself, M46)")
 
     # §4 ending: last word audible end + air, never into the next speech.
     last_word = sentences[play[-1] - 1][-1]

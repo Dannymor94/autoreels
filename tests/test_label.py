@@ -728,3 +728,97 @@ def test_example_from_an_approved_line_and_selection_without_self_leak():
     assert select_fewshot([exs[4]], kind="lecture", exclude_source="X", n=2) == []
     a = cli._build_parser().parse_args(["fewshot-build"])
     assert a.cmd == "fewshot-build" and cli._build_parser().parse_args(["label-stats"]).cmd == "label-stats"
+
+
+# ── M46: a sentence with no sound of its own is cut by code ──────────────────────────────────
+
+def _phantom_source():
+    """IMG_6848 1653 s / 10h59 lines 5+6, 45+46 (M42b): Whisper wrote a sentence with 20 ms words
+    that the aligner laid over other speech. Block 1 ends with «Он очень любит.» (7–9.5 s); block 2
+    holds «Начало мысли здесь.», the phantom «Возможно, вы решений.» (Whisper 12.10–12.16 s, its
+    sound at 7.2–9.4 s — over «очень любит» of block 1) and «Потом всё хорошо.»."""
+    from autoreels.cloud.plan import ForeignSound, SpeechTimes
+    raw = [("Раз", 0.0, 1.0, 0.0, 1.0), ("два", 1.0, 2.0, 1.0, 2.0), ("три.", 2.0, 3.0, 2.0, 3.0),
+           ("Он", 7.0, 7.5, 7.0, 7.5), ("очень", 7.5, 8.5, 7.5, 8.5), ("любит.", 8.5, 9.5, 8.5, 9.5),
+           ("Начало", 10.0, 10.7, 10.0, 10.7), ("мысли", 10.7, 11.3, 10.7, 11.3), ("здесь.", 11.3, 12.0, 11.3, 12.0),
+           ("Возможно,", 12.10, 12.12, 7.2, 7.9), ("вы", 12.12, 12.14, 7.9, 8.5), ("решений.", 12.14, 12.16, 8.5, 9.4),
+           ("Потом", 13.0, 13.7, 13.0, 13.7), ("всё", 13.7, 14.3, 13.7, 14.3), ("хорошо.", 14.3, 15.0, 14.3, 15.0)]
+    w = [Word(word=a, t0=b, t1=c) for a, b, c, _, _ in raw]
+    smap = {"words": [{"idx": i, "t0": b, "t1": c, "audible_start": x, "audible_end": y}
+                      for i, (_, b, c, x, y) in enumerate(raw)], "boundaries": []}
+    blocks = [SimpleNamespace(start=0.0, end=10.0), SimpleNamespace(start=10.0, end=15.5)]
+    sound = ForeignSound(SpeechTimes(w, smap, None), w, min_sec=0.3)
+    return w, smap, blocks, sound
+
+
+def test_sentence_with_no_sound_of_its_own_is_cut_by_code():
+    """M46: inside a clip such a sentence goes to x: by code (the plan would refuse to play it) and
+    the preview says so; as the first or last sentence it is a rule break sent back to the model;
+    the model sees it marked ∅. Over words of the clip's own blocks it is not foreign (the plan
+    agrees: those words are in the clip). Without the speech map / alignment nothing changes."""
+    w, smap, blocks, sound = _phantom_source()
+    wb = build_wblocks(blocks, w, None, sound=sound)
+    assert [s.no_sound for s in wb[1].sents] == [False, True, False]
+    assert not any(s.no_sound for s in wb[0].sents)
+    assert "2.2 ∅ (" in render_window(wb[1:], P) and "∅" not in render_window(wb[:1], P)
+    p = LabelParams(min_sec=0.5, max_sec=60.0)
+    clip = {"blocks": [2], "start": "2.1", "end": "2.3", "title": "Т", "caption": "П", "score": 80}
+    ch = check_clip(clip, wb, w, p)
+    assert ch.problems == [] and ch.auto_cut == (2,)
+    assert ch.line == "2 80 | s:1 | e:3 | x:2 | t: Т | d: П"
+    assert "x:2 by code: no sound of its own" in ch.preview
+    start = check_clip(dict(clip, start="2.2"), wb, w, p)
+    assert any(x.startswith("start 2.2 «Возможно, вы решений.» has no sound of its own") and "очень любит" in x
+               for x in start.problems), start.problems
+    end = check_clip(dict(clip, end="2.2"), wb, w, p)
+    assert any(x.startswith("end 2.2 «Возможно, вы решений.» has no sound") for x in end.problems), end.problems
+    both = check_clip(dict(clip, blocks=[1, 2], start="1.1"), wb, w, p)
+    assert both.auto_cut == () and "x:" not in both.line
+    plain = build_wblocks(blocks, w, None)                       # no speech map, no alignment
+    assert check_clip(clip, plain, w, p).line == "2 80 | s:1 | e:3 | t: Т | d: П"
+    assert "∅" not in render_window(plain, P)
+
+
+def test_plan_accepts_the_line_the_labeller_cut():
+    """The labeller and the plan use one test (plan.ForeignSound): the line as drafted plays clean;
+    the same line without the cut is the plan's M42 error."""
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.cloud.plan import ManualPlanParams, build_manual_plan
+    w, smap, blocks, sound = _phantom_source()
+    sents = merge_group_sentences([blocks[1]], w)
+    assert [len(s) for s in sents] == [3, 3, 3]
+    prm = ManualPlanParams(seam_pad_sec=0.04)
+    assert build_manual_plan(sents, [1, 3], words=w, smap=smap, params=prm).errors == []
+    err = build_manual_plan(sents, [1, 2, 3], words=w, smap=smap, params=prm).errors
+    assert len(err) == 1 and err[0].startswith("s2 «Возможно, вы решений.» shares") and "arl label" in err[0]
+    # The real «Он очень любит.» shares the same stretch with the phantom, but its Whisper times are
+    # where its sound is: it keeps the sound (before M46 the plan refused this clip too).
+    real = merge_group_sentences([blocks[0]], w)
+    assert build_manual_plan(real, [1, 2], words=w, smap=smap, params=prm).errors == []
+
+
+def test_check_draft_cuts_a_sentence_with_no_sound_keeping_the_owners_fields():
+    """--check on an existing draft (arl prepare runs it too): x: gets the sentence, every other field
+    of the line stays as written, the preview line carries the note, a second run changes nothing."""
+    from autoreels.cloud.label import _add_cuts, check_draft
+    w, smap, blocks, sound = _phantom_source()
+    wb = build_wblocks(blocks, w, None, sound=sound)
+    p = LabelParams(min_sec=0.5, max_sec=60.0)
+    text = "# head\n2 85 | s:1 | e:3 | c:3 | k:3=хорошо | t: Т | f:0\n#   4 s: «Начало … хорошо.»\n"
+    logged: list[str] = []
+    new, flagged = check_draft(text, wb, w, p, log=logged.append)
+    lines = new.splitlines()
+    assert flagged == []
+    assert lines[1] == "2 85 | s:1 | e:3 | x:2 | c:3 | k:3=хорошо | t: Т | f:0"
+    assert lines[2].startswith("#   4 s: «Начало … хорошо.» · x:2 by code")
+    assert len(logged) == 1 and "x:2" in logged[0]
+    again, _ = check_draft(new, wb, w, p, log=logged.append)
+    assert again == new and len(logged) == 1
+    bare, _ = check_draft("2 85 | s:1 | e:3\n", wb, w, p)
+    assert bare.splitlines() == ["2 85 | s:1 | e:3 | x:2", "#   x:2 by code: no sound of its own "
+                                 "(Whisper text over other speech)"]
+    assert _add_cuts("5 80 | s:1 | e:9 | x:3 | t: T", [6]) == "5 80 | s:1 | e:9 | x:3,6 | t: T"
+    assert _add_cuts("5 80 | s:2 | t: T", [6]) == "5 80 | s:2 | x:6 | t: T"
+    assert _add_cuts("5 80", [6, 7]) == "5 80 | x:6,7"
+    _, entries, errors, _ = parse_compact_answer("5 80 | s:1 | e:9 | x:3,6 | t: T\n")
+    assert errors == [] and entries[0].x == (3, 6)

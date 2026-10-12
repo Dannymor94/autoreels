@@ -7,6 +7,8 @@ One sentence per line: "<id> (<seconds>s) <text>" with markers:
   B.S        sentence S of block B (use these ids verbatim)
   …→         after the id: the sentence is UNFINISHED in the text
   ↗          after the text: the voice stays UP at its end — the speaker is mid-thought
+  ∅          after the id: the sentence has NO SOUND of its own (the transcript put its text over
+             other speech) — never start or end on it; inside a clip it is cut automatically
   ⏸N.N       pause after the sentence (seconds); ⏸⏸N.N = long stop, a natural end
 The first line may show the sentence just before the first block (context only).
 

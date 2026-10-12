@@ -49,6 +49,7 @@ class Sent:
     pause_after: float | None     # gap to the next word of the transcript
     span: float | None = None     # first word → next sentence's first word (source seconds)
     speech: float | None = None   # seconds of that span the speech map hears as speech
+    no_sound: bool = False        # M46: its words lie over other speech (Whisper text with no sound of its own)
 
     @property
     def dur(self) -> float:
@@ -65,6 +66,7 @@ class WBlock:
     block: object                 # CandidateBlock
     sents: list[Sent]
     prev: Sent | None = None      # the transcript sentence just before the block (may be unfinished)
+    sound: object = None          # M46: plan.ForeignSound of the source (None: no speech map / alignment)
 
 
 def norm_word(w: str) -> str:
@@ -92,15 +94,20 @@ def speech_seconds(intervals: Sequence[Sequence[float]]) -> Callable[[float, flo
 
 def build_wblocks(kept: Sequence, words: list, tone: Callable | None = None,
                   seqs: Sequence[int] | None = None,
-                  speech: Callable[[float, float], float] | None = None) -> list[WBlock]:
+                  speech: Callable[[float, float], float] | None = None,
+                  sound=None) -> list[WBlock]:
     """Review sentences of every kept block, split exactly like the review export.
     `seqs`: review numbers of `kept` (default 1..N — the whole kept list).
     `speech(a, b)`: seconds of [a, b) the speech map hears as speech (speech_seconds) — gives each
-    sentence its span and speech, so a clip that is mostly silence is recognised (M39)."""
+    sentence its span and speech, so a clip that is mostly silence is recognised (M39).
+    `sound`: plan.ForeignSound of the source (M46) — a sentence sharing at least sound.min_sec of
+    its sound with words outside its block is marked no_sound (shown as ∅ to the model); the exact
+    check of a clip (against the words of its own block group, as the plan does) is in check_clip."""
     index = {id(w): i for i, w in enumerate(words)}
     out: list[WBlock] = []
     for seq, b in zip(seqs or range(1, len(kept) + 1), kept):
         sents = split_sentences(words_in_span(words, b.start, b.end))
+        own = {round(w.t0 * 1000) for s in sents for w in s}
         items: list[Sent] = []
         for k, s in enumerate(sents, 1):
             complete = is_complete_sentence(s)
@@ -112,9 +119,11 @@ def build_wblocks(kept: Sequence, words: list, tone: Callable | None = None,
                 ta = s[0].t0
                 tb = max(s[-1].t1, words[i + 1].t0) if (i is not None and i + 1 < len(words)) else s[-1].t1
                 span, sp = max(0.0, tb - ta), speech(ta, tb)
-            items.append(Sent(f"{seq}.{k}", s, complete, bool(t and t[0] == "open"), gap, span, sp))
+            mute = sound is not None and sound.shared(s, own)[0] >= sound.min_sec
+            items.append(Sent(f"{seq}.{k}", s, complete, bool(t and t[0] == "open"), gap, span, sp,
+                              no_sound=mute))
         out.append(WBlock(seq, b, items, _prev_sentence(words, index, items[0].words[0], tone)
-                          if items else None))
+                          if items else None, sound))
     return out
 
 
@@ -175,7 +184,7 @@ def render_window(win: Sequence[WBlock], p: LabelParams = LabelParams()) -> str:
                  if p.min_speech_share and share is not None and share < p.min_speech_share + 0.1 else "")
         lines.append(f"BLOCK {wb.seq} · {wb.block.end - wb.block.start:.1f} s{quiet}")
         for s in wb.sents:
-            mark = "" if s.complete else " …→"
+            mark = ("" if s.complete else " …→") + (" ∅" if s.no_sound else "")
             tail = " ↗" if s.open_tone else ""
             if s.pause_after is not None and s.pause_after >= p.pause_show_sec:
                 tail += f" {'⏸⏸' if s.pause_after >= p.pause_strong_sec else '⏸'}{s.pause_after:.1f}"
@@ -216,6 +225,7 @@ class Checked:
     played_sec: float = 0.0
     preview: str = ""
     outside: bool = False         # proposed blocks outside the request (never written to the draft)
+    auto_cut: tuple[int, ...] = ()  # M46: review numbers cut by code — sentences with no sound of their own
 
 
 def _sid(x) -> str:
@@ -334,6 +344,32 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
             probs.append(f"cut {c} is joined with the start/end sentence across the block border")
             continue
         cut_nums.add(num[c])
+    # M46: a sentence with no sound of its own (Whisper text laid over other speech — the plan
+    # refuses to play it, REEL_SPEC M42) is cut from the line by code when it is inside the clip; as
+    # the first or last sentence it is a rule break (the clip has to start or end elsewhere). Same
+    # test as the plan: shared sound with words that are in no sentence of the block group.
+    auto_cut: list[int] = []
+    sound = group[0].sound
+    if sound is not None:
+        seen = {round(w.t0 * 1000) for ms in merged for w in ms}
+        first_sid = {}
+        for s in order[a:z + 1]:
+            first_sid.setdefault(num[s.sid], s.sid)
+        for n, sid in first_sid.items():
+            if n in cut_nums:
+                continue
+            sec, others = sound.shared(merged[n - 1], seen)
+            if sec < sound.min_sec:
+                continue
+            what = (f"{sid} «{' '.join(w.word for w in merged[n - 1])[:40]}» has no sound of its own "
+                    f"({sec:.1f}s over «{' '.join(u.word for u in others)[:40]}», Whisper)")
+            if n == num[sid_start]:
+                probs.append(f"start {what} — start on a sentence after it")
+            elif n == num[sid_end]:
+                probs.append(f"end {what} — end on a sentence before it")
+            else:
+                cut_nums.add(n)
+                auto_cut.append(n)
     played = [s for s in order[a:z + 1] if num[s.sid] not in cut_nums]
     kept_nums = {num[s.sid] for s in played}
     end, start = order[z], order[a]
@@ -426,7 +462,29 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
         parts.append(f"d: {caption}")
     first = " ".join(w.word for w in played[0].words[:6])
     last = " ".join(w.word for w in played[-1].words[-6:])
-    return Checked(" | ".join(parts), probs, tuple(blocks), played_sec, f"«{first} … {last}»")
+    preview = f"«{first} … {last}»"
+    if auto_cut:
+        preview += f" · {_auto_cut_note(auto_cut)}"
+    return Checked(" | ".join(parts), probs, tuple(blocks), played_sec, preview, auto_cut=tuple(auto_cut))
+
+
+def _auto_cut_note(nums: Sequence[int]) -> str:
+    return f"x:{','.join(map(str, nums))} by code: no sound of its own (Whisper text over other speech)"
+
+
+def _add_cuts(line: str, nums: Sequence[int]) -> str:
+    """The review line with the review sentences `nums` added to its x: field (one is created after
+    e:, else after s:, else after the head when the line has none). Other fields stay as written."""
+    parts = line.split(" | ")
+    add = ",".join(map(str, nums))
+    for i, part in enumerate(parts):
+        if part.startswith("x:"):
+            parts[i] = f"{part.rstrip(',')},{add}"
+            return " | ".join(parts)
+    at = next((i + 1 for i, part in enumerate(parts) if part.startswith("e:")),
+              next((i + 1 for i, part in enumerate(parts) if part.startswith("s:")), 1))
+    parts.insert(at, f"x:{add}")
+    return " | ".join(parts)
 
 
 @dataclass
@@ -664,18 +722,21 @@ def entry_to_clip(entry, wblocks: Sequence[WBlock], words: list) -> tuple[dict |
     return clip, group, ""
 
 
-def check_draft(text: str, wblocks: Sequence[WBlock], words: list, p: LabelParams = LabelParams()
-                ) -> tuple[str, list[tuple[int, list[str]]]]:
+def check_draft(text: str, wblocks: Sequence[WBlock], words: list, p: LabelParams = LabelParams(),
+                log: Callable[[str], None] | None = None) -> tuple[str, list[tuple[int, list[str]]]]:
     """Re-check every review line of a draft (a draft written by an older version, or edited by the
-    owner). A line that breaks a rule is commented out as '#! <line>  ← reasons'; everything else
-    is kept byte for byte. Returns (new text, [(block, reasons)])."""
+    owner). A line that breaks a rule is commented out as '#! <line>  ← reasons'; a line playing a
+    sentence with no sound of its own gets it in x: (M46, the note goes on its '#   ' preview line and
+    to `log`); everything else is kept byte for byte. Returns (new text, [(block, reasons)])."""
     from autoreels.cloud.blocks import parse_compact_answer
     out, flagged = [], []
+    noted: list[tuple[int, str]] = []     # (index in out, note) of lines that got an x: by code
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or not line[0].isdigit():
             out.append(raw)
             continue
+        ch = None
         _, entries, errors, _ = parse_compact_answer(line + "\n")
         if errors or not entries:
             reasons = [m for _, m in errors] or ["not a review line"]
@@ -684,12 +745,25 @@ def check_draft(text: str, wblocks: Sequence[WBlock], words: list, p: LabelParam
             if clip is None and why.endswith("not checked"):
                 out.append(raw)            # '-' joins and beat orders: left to the owner as written
                 continue
-            reasons = [why] if clip is None else check_clip(clip, group, words, p, require_text=False).problems
+            ch = None if clip is None else check_clip(clip, group, words, p, require_text=False)
+            reasons = [why] if ch is None else ch.problems
         if reasons:
             out.append(f"#! {line}  ← " + "; ".join(reasons))
             flagged.append((entries[0].seq if entries else 0, reasons))
+        elif ch is not None and ch.auto_cut:
+            note = _auto_cut_note(ch.auto_cut)
+            out.append(_add_cuts(line, ch.auto_cut))
+            noted.append((len(out) - 1, note))
+            if log is not None:
+                log(f"  строка {entries[0].seq}: x:{','.join(map(str, ch.auto_cut))} добавлено — "
+                    f"у фразы нет своего звука (текст Whisper поверх другой речи)")
         else:
             out.append(raw)
+    for i, note in reversed(noted):
+        if i + 1 < len(out) and out[i + 1].startswith("#   "):
+            out[i + 1] = f"{out[i + 1]} · {note}"
+        else:
+            out.insert(i + 1, f"#   {note}")
     return "\n".join(out) + ("\n" if text.endswith("\n") else ""), flagged
 
 

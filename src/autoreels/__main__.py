@@ -7291,6 +7291,28 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
     if speech is None and not quiet:
         print(f"  warning: нет карты речи transcripts/{stem}.speechmap.json — клипы из одной тишины "
               f"(практика, медитация) не распознаются. Сначала: arl speech-map {stem}", file=sys.stderr)
+    # M46: which sentences have no sound of their own (Whisper text laid over other speech) — the
+    # same word spans the plan uses (speech map + forced alignment), so a draft line never plays a
+    # sentence the plan would refuse (REEL_SPEC M42).
+    sound = None
+    _smap_d = None
+    if _smp.is_file():
+        try:
+            from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV_l
+            _d = json.loads(_smp.read_text(encoding="utf-8"))
+            if _d.get("version") == _SMV_l and _d.get("source_sha256") == manifest.source_sha256:
+                _smap_d = _d
+        except (OSError, ValueError):
+            _smap_d = None
+    from autoreels.cloud.plan import load_alignment as _load_al_l
+    _al_l = _load_al_l(root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+    if _smap_d is not None or _al_l is not None:
+        from autoreels.cloud.plan import ForeignSound, ManualPlanParams, SpeechTimes
+        sound = ForeignSound(SpeechTimes(words, _smap_d, _al_l), words,
+                             min_sec=ManualPlanParams().shared_sound_sec)
+    elif not quiet:
+        print(f"  warning: нет карты речи и выравнивания {stem} — фразы без своего звука (текст Whisper "
+              f"поверх другой речи) не распознаются; --apply откажет на них", file=sys.stderr)
     p = LabelParams(window_blocks=lc.window_blocks, min_sec=lc.min_sec, max_sec=lc.max_sec,
                     max_clip_blocks=lc.max_clip_blocks, title_max_chars=lc.title_max_chars,
                     repair_rounds=lc.repair_rounds,
@@ -7300,7 +7322,7 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
                     interview=interview)
     return SimpleNamespace(kept=kept, dropped=dropped, words=words, tone=tone, system=system,
                            fewshot=fewshot, p=p,
-                           wblocks=build_wblocks(kept, words, tone, speech=speech)), None
+                           wblocks=build_wblocks(kept, words, tone, speech=speech, sound=sound)), None
 
 
 _LOCAL_MODE = {"auto": "first", "local": "only", "cloud": "off"}
@@ -7396,7 +7418,7 @@ def cmd_label(
                                                 fewshot=fewshot, p=p, log=lambda m: print(m, flush=True),
                                                 checkpoint=lambda s: _write_atomic(out_path, s))
             print(f"повтор окон без ответа: получен ответ {done}, по-прежнему без ответа {still}")
-        new_text, flagged = check_draft(new_text, wblocks, words, p)
+        new_text, flagged = check_draft(new_text, wblocks, words, p, log=lambda m: print(m, flush=True))
         for seq, why in flagged:
             print(f"  #! строка {seq}: " + "; ".join(why))
         print(f"проверка: строк с нарушениями {len(flagged)}")
