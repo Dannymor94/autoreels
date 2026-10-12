@@ -31,54 +31,75 @@
   "reels": [
     {
       "id": "r01",
-      "start": 159.19012,
-      "end": 173.05013,
+      "start": 159.198,
+      "end": 192.34,
       "segments": [
         {
-          "start": 159.19012,
-          "end": 168.20014,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 168.49013000000002,
-          "end": 168.86013,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 173.07013,
-          "end": 192.26013,
+          "start": 159.198,
+          "end": 160.49,
           "shot": "wide",
-          "close_intervals": []
+          "close_intervals": [],
+          "window_cut": false
         },
         {
-          "start": 169.81013,
-          "end": 173.05013,
+          "start": 161.569,
+          "end": 166.22,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 167.494,
+          "end": 177.483,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 178.004,
+          "end": 182.92,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 183.387,
+          "end": 188.53,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              2.5175,
+              5.143
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 189.032,
+          "end": 192.34,
           "shot": "close",
-          "close_intervals": []
+          "close_intervals": [],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Без вас здесь никак",
-      "score": 85,
+      "title_overlay": "Ваши блоки — часть судьбы",
+      "score": 92,
       "hook": "Из миллиардов только одна такая",
       "title": "",
-      "description": "Вы родились с такой судьбой не просто так. А то, что вы в себе не принимаете, когда-то не приняли в вас мама с папой. #психология #принятие",
+      "description": "То, что вы не принимаете в себе, часто не приняли в вас родители. #психология #саморазвитие",
       "reason": "human review",
       "topic": "",
-      "r0_start": 159.19012,
-      "r0_end": 173.05013,
-      "flags": [
-        "start_repaired"
-      ],
+      "r0_start": 159.198,
+      "r0_end": 192.34,
+      "flags": [],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
       "subtitles": [
         {
           "word": "И",
-          "t0": 159.19012,
+          "t0": 159.24800000000002,
           "t1": 159.29013,
           "emph": false
         },
@@ -102,7 +123,7 @@
         },
         {
           "word": "раз",
-          "t0": 160.37013,
+          "t0": 161.619,
           "t1": 161.73013,
           "emph": false
         },
@@ -162,7 +183,7 @@
         },
         {
           "word": "вы",
-          "t0": 166.13013,
+          "t0": 167.544,
           "t1": 167.69012,
           "emph": false
         },
@@ -188,6 +209,48 @@
           "word": "Это",
           "t0": 168.77013,
           "t1": 168.91013,
+          "emph": false
+        },
+        {
+          "word": "понятно",
+          "t0": 168.91013,
+          "t1": 169.33012,
+          "emph": false
+        },
+        {
+          "word": "или",
+          "t0": 169.33012,
+          "t1": 169.53012,
+          "emph": false
+        },
+        {
+          "word": "нет?",
+          "t0": 169.53012,
+          "t1": 169.75012,
+          "emph": false
+        },
+        {
+          "word": "Без",
+          "t0": 169.81013,
+          "t1": 170.45013,
+          "emph": false
+        },
+        {
+          "word": "вас",
+          "t0": 170.45013,
+          "t1": 170.79013,
+          "emph": false
+        },
+        {
+          "word": "здесь",
+          "t0": 170.79013,
+          "t1": 171.21013,
+          "emph": false
+        },
+        {
+          "word": "никак.",
+          "t0": 171.21013,
+          "t1": 173.07013,
           "emph": false
         },
         {
@@ -253,12 +316,12 @@
         {
           "word": "такая,",
           "t0": 176.81013,
-          "t1": 178.05013,
+          "t1": 177.483,
           "emph": false
         },
         {
           "word": "я",
-          "t0": 178.05013,
+          "t0": 178.054,
           "t1": 178.15013,
           "emph": false
         },
@@ -313,7 +376,7 @@
         {
           "word": "судьбы,",
           "t0": 182.41013,
-          "t1": 183.51013,
+          "t1": 182.92,
           "emph": false
         },
         {
@@ -402,7 +465,7 @@
         },
         {
           "word": "не",
-          "t0": 188.33012,
+          "t0": 189.08200000000002,
           "t1": 189.17014,
           "emph": false
         },
@@ -410,7 +473,7 @@
           "word": "приняли",
           "t0": 189.17014,
           "t1": 189.81013,
-          "emph": false
+          "emph": true
         },
         {
           "word": "внутри",
@@ -441,286 +504,140 @@
           "t0": 191.67014,
           "t1": 192.01013,
           "emph": false
-        },
-        {
-          "word": "Потому",
-          "t0": 192.01013,
-          "t1": 192.81013,
-          "emph": false
-        },
-        {
-          "word": "Без",
-          "t0": 169.81013,
-          "t1": 170.45013,
-          "emph": false
-        },
-        {
-          "word": "вас",
-          "t0": 170.45013,
-          "t1": 170.79013,
-          "emph": false
-        },
-        {
-          "word": "здесь",
-          "t0": 170.79013,
-          "t1": 171.21013,
-          "emph": false
-        },
-        {
-          "word": "никак.",
-          "t0": 171.21013,
-          "t1": 173.07013,
-          "emph": true
         }
       ],
-      "end_drift_sec": 0.3200000000000216,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": null,
+      "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
-      "start_snap_reason": "repaired_to_sentence",
-      "start_repair_sec": 0.0,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
       "ends_on_host_turn": false,
-      "open_thought": false,
-      "has_explicit_e": false,
-      "subtitle_gate": null,
+      "open_thought": true,
+      "has_explicit_e": true,
+      "subtitle_gate": 192.34,
       "speed": 1.0,
-      "tail_last_word_end": 171.18,
-      "tail_next_word_start": 173.07013,
+      "tail_last_word_end": 192.04,
+      "tail_next_word_start": 192.624,
       "warnings": [
-        "beat reorder: first beat 2 dangling start «И»",
-        "[CONTENT] r01: last word 'никак.' cut by clip end (continuous speech into next phrase, ae=173.070 > clip=173.050)",
         "dangling start: opens on «И»"
       ],
       "subtitle_emph_words": [],
-      "beat_gap_sec": 0.25,
+      "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          171.21013,
-          173.07013
+          189.17014,
+          192.01013
         ]
-      ]
+      ],
+      "planned": true
     },
     {
       "id": "r02",
-      "start": 302.62027,
-      "end": 346.77027,
+      "start": 320.93699999999995,
+      "end": 390.15000000000003,
       "segments": [
         {
-          "start": 302.62027,
-          "end": 311.67,
-          "shot": "close",
-          "close_intervals": []
+          "start": 320.93699999999995,
+          "end": 322.1,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
         },
         {
-          "start": 314.65,
-          "end": 336.26000000000005,
+          "start": 322.809,
+          "end": 328.265,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 328.735,
+          "end": 332.553,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 333.004,
+          "end": 340.67,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 342.536,
+          "end": 350.654,
           "shot": "wide",
           "close_intervals": [
             [
-              6.2702600000000075,
-              18.290250000000015
+              0.0,
+              4.623
             ]
-          ]
+          ],
+          "window_cut": false
         },
         {
-          "start": 337.03,
-          "end": 340.67,
-          "shot": "close",
-          "close_intervals": []
+          "start": 352.315,
+          "end": 355.39,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
         },
         {
-          "start": 341.8,
-          "end": 346.77027,
+          "start": 357.799,
+          "end": 372.925,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 373.377,
+          "end": 379.031,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 379.362,
+          "end": 384.62,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              4.428,
+              5.258
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 385.601,
+          "end": 390.15000000000003,
           "shot": "close",
-          "close_intervals": []
+          "close_intervals": [],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Каждая нервная система уникальна",
-      "score": 85,
+      "title_overlay": "Как среда формирует нашу нервную систему",
+      "score": 88,
       "hook": "Каждая нервная система уникальна",
       "title": "",
-      "description": "Почему уникальная нервная система ребёнка сжимается или растягивается под давлением среды. #психология #детство",
+      "description": "Среда формирует нашу нервную систему. Защитные маски становятся автоматическими. #психология #среда",
       "reason": "human review",
       "topic": "",
-      "r0_start": 302.6,
-      "r0_end": 347.18027,
-      "flags": [],
+      "r0_start": 320.93699999999995,
+      "r0_end": 390.15000000000003,
+      "flags": [
+        "human_merged"
+      ],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
       "subtitles": [
         {
-          "word": "Каждая",
-          "t0": 302.62027,
-          "t1": 303.24026,
-          "emph": false
-        },
-        {
-          "word": "нервная",
-          "t0": 303.24026,
-          "t1": 303.56027,
-          "emph": false
-        },
-        {
-          "word": "система",
-          "t0": 303.56027,
-          "t1": 304.00024,
-          "emph": false
-        },
-        {
-          "word": "уникальна.",
-          "t0": 304.00024,
-          "t1": 304.90027,
-          "emph": true
-        },
-        {
           "word": "И",
-          "t0": 305.44025,
-          "t1": 305.48026,
-          "emph": false
-        },
-        {
-          "word": "вот",
-          "t0": 305.48026,
-          "t1": 305.62027,
-          "emph": false
-        },
-        {
-          "word": "каким-то",
-          "t0": 305.62027,
-          "t1": 306.02026,
-          "emph": false
-        },
-        {
-          "word": "образом",
-          "t0": 306.02026,
-          "t1": 306.50024,
-          "emph": false
-        },
-        {
-          "word": "эту",
-          "t0": 306.50024,
-          "t1": 307.04025,
-          "emph": false
-        },
-        {
-          "word": "нервную",
-          "t0": 307.04025,
-          "t1": 307.54025,
-          "emph": false
-        },
-        {
-          "word": "систему",
-          "t0": 307.54025,
-          "t1": 309.60025,
-          "emph": false
-        },
-        {
-          "word": "начинают",
-          "t0": 309.60025,
-          "t1": 310.70026,
-          "emph": false
-        },
-        {
-          "word": "как",
-          "t0": 310.70026,
-          "t1": 311.18027,
-          "emph": false
-        },
-        {
-          "word": "будто",
-          "t0": 311.18027,
-          "t1": 311.50024,
-          "emph": false
-        },
-        {
-          "word": "изменять.",
-          "t0": 311.50024,
-          "t1": 313.26025,
-          "emph": false
-        },
-        {
-          "word": "Почему?",
-          "t0": 314.66025,
-          "t1": 315.12027,
-          "emph": false
-        },
-        {
-          "word": "Потому",
-          "t0": 315.12027,
-          "t1": 315.38025,
-          "emph": false
-        },
-        {
-          "word": "что",
-          "t0": 315.38025,
-          "t1": 315.62027,
-          "emph": false
-        },
-        {
-          "word": "она",
-          "t0": 315.62027,
-          "t1": 315.86026,
-          "emph": false
-        },
-        {
-          "word": "родилась",
-          "t0": 315.86026,
-          "t1": 316.24026,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 316.24026,
-          "t1": 316.40027,
-          "emph": false
-        },
-        {
-          "word": "какой-то",
-          "t0": 316.40027,
-          "t1": 316.78027,
-          "emph": false
-        },
-        {
-          "word": "среде,",
-          "t0": 316.78027,
-          "t1": 317.44025,
-          "emph": false
-        },
-        {
-          "word": "верно?",
-          "t0": 317.44025,
-          "t1": 318.14026,
-          "emph": false
-        },
-        {
-          "word": "Мама,",
-          "t0": 318.38025,
-          "t1": 318.70026,
-          "emph": false
-        },
-        {
-          "word": "папа,",
-          "t0": 318.70026,
-          "t1": 319.02026,
-          "emph": false
-        },
-        {
-          "word": "учителя,",
-          "t0": 319.02026,
-          "t1": 319.86026,
-          "emph": false
-        },
-        {
-          "word": "воспитатели.",
-          "t0": 319.86026,
-          "t1": 320.92026,
-          "emph": false
-        },
-        {
-          "word": "И",
-          "t0": 320.44025,
+          "t0": 320.98699999999997,
           "t1": 321.04025,
           "emph": false
         },
@@ -734,11 +651,11 @@
           "word": "среда",
           "t0": 321.58026,
           "t1": 322.04025,
-          "emph": false
+          "emph": true
         },
         {
           "word": "не",
-          "t0": 322.04025,
+          "t0": 322.85900000000004,
           "t1": 322.94025,
           "emph": false
         },
@@ -835,7 +752,7 @@
         {
           "word": "лет.",
           "t0": 332.14026,
-          "t1": 332.94025,
+          "t1": 332.553,
           "emph": false
         },
         {
@@ -908,7 +825,7 @@
           "word": "сжимается.",
           "t0": 338.12027,
           "t1": 339.40027,
-          "emph": true
+          "emph": false
         },
         {
           "word": "Или",
@@ -929,20 +846,8 @@
           "emph": false
         },
         {
-          "word": "Понятно,",
-          "t0": 341.86026,
-          "t1": 342.22028,
-          "emph": false
-        },
-        {
-          "word": "да?",
-          "t0": 342.22028,
-          "t1": 342.30026,
-          "emph": false
-        },
-        {
           "word": "Под",
-          "t0": 342.30026,
+          "t0": 342.586,
           "t1": 342.68027,
           "emph": false
         },
@@ -1005,84 +910,25 @@
           "t0": 346.60025,
           "t1": 347.18027,
           "emph": false
-        }
-      ],
-      "end_drift_sec": 0.30000000000001137,
-      "end_snap_reason": "sentence",
-      "start_drift_sec": null,
-      "start_snap_reason": null,
-      "start_repair_sec": null,
-      "ends_on_host_turn": false,
-      "open_thought": false,
-      "has_explicit_e": true,
-      "subtitle_gate": 347.48027,
-      "speed": 1.0,
-      "tail_last_word_end": 346.56,
-      "tail_next_word_start": 348.12027,
-      "warnings": [
-        "last subtitle word 'находится.' (t0=346.600s) != last transcript word before r0_end 'происходит.' (t0=347.460s, r0_end=348.070s) — word was excluded by audible_end",
-        "[CONTENT] r02: last word 'находится.' cut by clip end (continuous speech into next phrase, ae=346.970 > clip=346.770)"
-      ],
-      "subtitle_emph_words": [],
-      "beat_gap_sec": null,
-      "zoom_source_t0": null,
-      "c_close_ranges": [
-        [
-          338.12027,
-          339.40027
-        ],
-        [
-          339.40027,
-          340.50024
-        ]
-      ]
-    },
-    {
-      "id": "r03",
-      "start": 348.12027,
-      "end": 397.10027,
-      "segments": [
-        {
-          "start": 348.12027,
-          "end": 371.04,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              7.119989999999973
-            ]
-          ]
         },
         {
-          "start": 373.45,
-          "end": 382.42,
-          "shot": "wide",
-          "close_intervals": []
+          "word": "Так",
+          "t0": 346.84027,
+          "t1": 347.30026,
+          "emph": false
         },
         {
-          "start": 383.28999999999996,
-          "end": 397.10027,
-          "shot": "wide",
-          "close_intervals": []
-        }
-      ],
-      "cold_open": null,
-      "title_overlay": "Как маска становится автоматической реакцией",
-      "score": 80,
-      "hook": "Так ведь происходит",
-      "title": "",
-      "description": "Ребёнок надевает маску, чтобы защититься. Потом она превращается в автоматическую реакцию. #психология #защитныемеханизмы",
-      "reason": "human review",
-      "topic": "",
-      "r0_start": 348.12027,
-      "r0_end": 397.60025,
-      "flags": [
-        "human_merged"
-      ],
-      "self_contained_start": null,
-      "start_justification": "",
-      "rank": null,
-      "subtitles": [
+          "word": "ведь",
+          "t0": 347.30026,
+          "t1": 347.46027,
+          "emph": false
+        },
+        {
+          "word": "происходит.",
+          "t0": 347.46027,
+          "t1": 348.60025,
+          "emph": false
+        },
         {
           "word": "Сначала",
           "t0": 348.12027,
@@ -1098,12 +944,12 @@
         {
           "word": "родители,",
           "t0": 350.12027,
-          "t1": 352.10025,
+          "t1": 350.654,
           "emph": false
         },
         {
           "word": "воспитатели",
-          "t0": 352.10025,
+          "t0": 352.365,
           "t1": 353.04025,
           "emph": false
         },
@@ -1145,7 +991,7 @@
         },
         {
           "word": "ребеночек,",
-          "t0": 355.26025,
+          "t0": 357.849,
           "t1": 358.36026,
           "emph": false
         },
@@ -1201,7 +1047,7 @@
           "word": "маски,",
           "t0": 363.94025,
           "t1": 364.70026,
-          "emph": true
+          "emph": false
         },
         {
           "word": "он",
@@ -1302,7 +1148,7 @@
         {
           "word": "что?",
           "t0": 372.56024,
-          "t1": 373.50024,
+          "t1": 372.925,
           "emph": false
         },
         {
@@ -1392,7 +1238,7 @@
         {
           "word": "хорошей.",
           "t0": 378.12027,
-          "t1": 379.04025,
+          "t1": 379.031,
           "emph": false
         },
         {
@@ -1404,7 +1250,7 @@
         {
           "word": "ведь?",
           "t0": 378.78027,
-          "t1": 379.52026,
+          "t1": 379.031,
           "emph": false
         },
         {
@@ -1451,7 +1297,7 @@
         },
         {
           "word": "эта",
-          "t0": 384.46027,
+          "t0": 385.651,
           "t1": 385.76025,
           "emph": false
         },
@@ -1494,182 +1340,1052 @@
         {
           "word": "пластичная.",
           "t0": 389.12027,
-          "t1": 390.28027,
-          "emph": false
-        },
-        {
-          "word": "второй",
-          "t0": 390.62027,
-          "t1": 390.94025,
-          "emph": false
-        },
-        {
-          "word": "раз",
-          "t0": 390.94025,
-          "t1": 391.16025,
-          "emph": false
-        },
-        {
-          "word": "этот",
-          "t0": 391.16025,
-          "t1": 391.32025,
-          "emph": false
-        },
-        {
-          "word": "защитный",
-          "t0": 391.32025,
-          "t1": 391.78027,
-          "emph": false
-        },
-        {
-          "word": "механизм.",
-          "t0": 391.78027,
-          "t1": 392.80026,
-          "emph": false
-        },
-        {
-          "word": "И",
-          "t0": 392.30026,
-          "t1": 392.50024,
-          "emph": false
-        },
-        {
-          "word": "он",
-          "t0": 392.50024,
-          "t1": 392.56024,
-          "emph": false
-        },
-        {
-          "word": "превращается",
-          "t0": 392.56024,
-          "t1": 393.20026,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 393.20026,
-          "t1": 393.46027,
-          "emph": false
-        },
-        {
-          "word": "какую-то",
-          "t0": 393.46027,
-          "t1": 394.02026,
-          "emph": false
-        },
-        {
-          "word": "автоматическую",
-          "t0": 394.02026,
-          "t1": 395.10025,
-          "emph": false
-        },
-        {
-          "word": "что?",
-          "t0": 395.10025,
-          "t1": 396.38025,
-          "emph": false
-        },
-        {
-          "word": "Реакцию",
-          "t0": 396.38025,
-          "t1": 396.66025,
+          "t1": 390.15000000000003,
           "emph": true
-        },
-        {
-          "word": "на",
-          "t0": 396.66025,
-          "t1": 396.84027,
-          "emph": false
-        },
-        {
-          "word": "что-то.",
-          "t0": 396.84027,
-          "t1": 397.60025,
-          "emph": false
         }
       ],
-      "end_drift_sec": 0.30000000000001137,
-      "end_snap_reason": "repaired_to_sentence",
+      "end_drift_sec": null,
+      "end_snap_reason": null,
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
-      "open_thought": true,
+      "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 397.1,
+      "subtitle_gate": 390.15000000000003,
       "speed": 1.0,
-      "tail_last_word_end": 396.86,
-      "tail_next_word_start": 397.12027,
+      "tail_last_word_end": 389.85,
+      "tail_next_word_start": 390.435,
       "warnings": [
-        "e: ends on incomplete sentence ('Допустим,')",
-        "[CONTENT] r03: last word 'что-то.' cut by clip end (continuous speech into next phrase, ae=397.170 > clip=397.100)"
+        "dangling start: opens on «И»"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          396.38025,
-          397.60025
+          389.12027,
+          390.28027
         ]
-      ]
+      ],
+      "planned": true
     },
     {
-      "id": "r04",
-      "start": 664.2004999999999,
-      "end": 664.1804999999999,
+      "id": "r03",
+      "start": 535.24,
+      "end": 563.254,
       "segments": [
         {
-          "start": 664.2004999999999,
-          "end": 673.0799999999999,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 673.8900000000001,
-          "end": 679.5699999999999,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 681.0604999999999,
-          "end": 687.64,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 687.88,
-          "end": 692.9499999999999,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 694.07,
-          "end": 702.0105,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 655.3805,
-          "end": 664.1804999999999,
+          "start": 535.24,
+          "end": 542.91,
           "shot": "wide",
-          "close_intervals": []
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 543.748,
+          "end": 548.48,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 549.952,
+          "end": 555.9,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              3.5355,
+              5.948
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 556.717,
+          "end": 563.254,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Круглый, квадратный, зелёный",
-      "score": 90,
-      "hook": "Вы говорите так, но скажите тогда, почему, когда ребенок попадает в школу, это получается сколько детей, столько нервных систем, правильно же? Почему тогда, когда ребенок",
+      "title_overlay": "Первый — она обязательна, чтобы все было по-его.",
+      "score": 95,
+      "hook": "Она у него такая доминирующая, взрывная, она изнутри наружу",
       "title": "",
-      "description": "Сначала вас делают круглым, потом квадратным, потом зелёным. А уникальной системе нужно уникальное раскрытие. #психология #воспитание",
+      "description": "Есть два типа нервной системы: доминирующая и адаптивная. Последняя проявляется в мягкости и способности подстраиваться. #психология #типнервнойсистемы",
       "reason": "human review",
       "topic": "",
-      "r0_start": 664.2004999999999,
-      "r0_end": 663.7204999999999,
-      "flags": [
-        "human_merged",
-        "too_short"
+      "r0_start": 535.24,
+      "r0_end": 563.254,
+      "flags": [],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "Первый",
+          "t0": 535.29,
+          "t1": 535.9104,
+          "emph": false
+        },
+        {
+          "word": "—",
+          "t0": 535.9104,
+          "t1": 535.9304,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 535.9304,
+          "t1": 535.9504,
+          "emph": false
+        },
+        {
+          "word": "обязательна,",
+          "t0": 535.9504,
+          "t1": 536.4704,
+          "emph": true
+        },
+        {
+          "word": "чтобы",
+          "t0": 536.4704,
+          "t1": 536.5504,
+          "emph": false
+        },
+        {
+          "word": "все",
+          "t0": 536.5504,
+          "t1": 536.7304,
+          "emph": false
+        },
+        {
+          "word": "было",
+          "t0": 536.7304,
+          "t1": 536.9704,
+          "emph": false
+        },
+        {
+          "word": "по-его.",
+          "t0": 536.9704,
+          "t1": 537.4304,
+          "emph": false
+        },
+        {
+          "word": "Он",
+          "t0": 537.4304,
+          "t1": 537.8904,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 537.8904,
+          "t1": 538.0104,
+          "emph": false
+        },
+        {
+          "word": "подстраивается,",
+          "t0": 538.0104,
+          "t1": 538.8304,
+          "emph": false
+        },
+        {
+          "word": "наоборот,",
+          "t0": 538.8304,
+          "t1": 539.25037,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 539.25037,
+          "t1": 539.3904,
+          "emph": false
+        },
+        {
+          "word": "мир",
+          "t0": 539.3904,
+          "t1": 539.5504,
+          "emph": false
+        },
+        {
+          "word": "подстраивался",
+          "t0": 539.5504,
+          "t1": 540.1104,
+          "emph": false
+        },
+        {
+          "word": "под",
+          "t0": 540.1104,
+          "t1": 540.3304,
+          "emph": false
+        },
+        {
+          "word": "него.",
+          "t0": 540.3304,
+          "t1": 540.9704,
+          "emph": false
+        },
+        {
+          "word": "Вот",
+          "t0": 540.9704,
+          "t1": 540.99036,
+          "emph": false
+        },
+        {
+          "word": "такая",
+          "t0": 540.99036,
+          "t1": 541.2304,
+          "emph": false
+        },
+        {
+          "word": "нервная",
+          "t0": 541.2304,
+          "t1": 541.5504,
+          "emph": false
+        },
+        {
+          "word": "система.",
+          "t0": 541.5504,
+          "t1": 542.4304,
+          "emph": false
+        },
+        {
+          "word": "И",
+          "t0": 542.4304,
+          "t1": 542.4504,
+          "emph": false
+        },
+        {
+          "word": "второй",
+          "t0": 542.4504,
+          "t1": 542.7904,
+          "emph": false
+        },
+        {
+          "word": "—",
+          "t0": 542.7904,
+          "t1": 542.91,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 543.798,
+          "t1": 543.8504,
+          "emph": false
+        },
+        {
+          "word": "нас",
+          "t0": 543.8504,
+          "t1": 543.9704,
+          "emph": false
+        },
+        {
+          "word": "там",
+          "t0": 543.9704,
+          "t1": 544.1504,
+          "emph": false
+        },
+        {
+          "word": "администратор",
+          "t0": 544.1504,
+          "t1": 544.6704,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 544.6704,
+          "t1": 544.81036,
+          "emph": false
+        },
+        {
+          "word": "моем",
+          "t0": 544.81036,
+          "t1": 544.99036,
+          "emph": false
+        },
+        {
+          "word": "центре,",
+          "t0": 544.99036,
+          "t1": 546.9304,
+          "emph": false
+        },
+        {
+          "word": "практик-мастерская,",
+          "t0": 546.9304,
+          "t1": 548.48,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 548.4300000000001,
+          "t1": 548.48,
+          "emph": false
+        },
+        {
+          "word": "там",
+          "t0": 550.002,
+          "t1": 550.1504,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 550.1504,
+          "t1": 550.25037,
+          "emph": false
+        },
+        {
+          "word": "нас",
+          "t0": 550.25037,
+          "t1": 550.4304,
+          "emph": false
+        },
+        {
+          "word": "Аня,",
+          "t0": 550.4304,
+          "t1": 550.7704,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 550.7704,
+          "t1": 550.9704,
+          "emph": false
+        },
+        {
+          "word": "родила",
+          "t0": 550.9704,
+          "t1": 551.3904,
+          "emph": false
+        },
+        {
+          "word": "классную",
+          "t0": 551.3904,
+          "t1": 552.2104,
+          "emph": false
+        },
+        {
+          "word": "девочку",
+          "t0": 552.2104,
+          "t1": 552.5904,
+          "emph": false
+        },
+        {
+          "word": "Василиса.",
+          "t0": 552.5904,
+          "t1": 553.25037,
+          "emph": false
+        },
+        {
+          "word": "Она",
+          "t0": 553.25037,
+          "t1": 553.7704,
+          "emph": false
+        },
+        {
+          "word": "приходит,",
+          "t0": 553.7704,
+          "t1": 554.5104,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 554.5104,
+          "t1": 554.6504,
+          "emph": false
+        },
+        {
+          "word": "такая",
+          "t0": 554.6504,
+          "t1": 554.8904,
+          "emph": false
+        },
+        {
+          "word": "тихая,",
+          "t0": 554.8904,
+          "t1": 555.9,
+          "emph": true
+        },
+        {
+          "word": "она",
+          "t0": 556.8304,
+          "t1": 556.9304,
+          "emph": false
+        },
+        {
+          "word": "за",
+          "t0": 556.9304,
+          "t1": 557.3904,
+          "emph": false
+        },
+        {
+          "word": "дядю",
+          "t0": 557.3904,
+          "t1": 557.6104,
+          "emph": false
+        },
+        {
+          "word": "Сашу",
+          "t0": 557.6104,
+          "t1": 557.9704,
+          "emph": false
+        },
+        {
+          "word": "там",
+          "t0": 557.9704,
+          "t1": 558.2704,
+          "emph": false
+        },
+        {
+          "word": "зайдет,",
+          "t0": 558.2704,
+          "t1": 558.75037,
+          "emph": false
+        },
+        {
+          "word": "как-то",
+          "t0": 558.75037,
+          "t1": 559.5104,
+          "emph": false
+        },
+        {
+          "word": "вот",
+          "t0": 559.5104,
+          "t1": 559.6704,
+          "emph": false
+        },
+        {
+          "word": "постоит,",
+          "t0": 559.6704,
+          "t1": 560.2904,
+          "emph": false
+        },
+        {
+          "word": "абсолютно",
+          "t0": 560.2904,
+          "t1": 560.8504,
+          "emph": false
+        },
+        {
+          "word": "тишайший",
+          "t0": 560.8504,
+          "t1": 561.8904,
+          "emph": false
+        },
+        {
+          "word": "такой",
+          "t0": 561.8904,
+          "t1": 562.25037,
+          "emph": false
+        },
+        {
+          "word": "человечек.",
+          "t0": 562.25037,
+          "t1": 563.254,
+          "emph": false
+        }
       ],
+      "end_drift_sec": null,
+      "end_snap_reason": null,
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 563.254,
+      "speed": 1.0,
+      "tail_last_word_end": 563.254,
+      "tail_next_word_start": 563.294,
+      "warnings": [
+        "no room after last word «человечек.» (next speech at 563.294) — clip ends at its audible end"
+      ],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [
+        [
+          554.8904,
+          563.2904
+        ]
+      ],
+      "planned": true
+    },
+    {
+      "id": "r04",
+      "start": 622.091,
+      "end": 664.05,
+      "segments": [
+        {
+          "start": 622.091,
+          "end": 633.5899999999999,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 635.8430000000001,
+          "end": 641.838,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 642.238,
+          "end": 643.1999999999999,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 644.8,
+          "end": 652.625,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 653.826,
+          "end": 660.774,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              4.0585,
+              6.948
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 661.654,
+          "end": 664.05,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "Почему нужна уникальная система раскрытия?",
+      "score": 85,
+      "hook": "Вы говорите так, но скажите тогда, почему, когда ребенок попадает в школу, это получается сколько детей, столько нервных систем, правильно же? Почему тогда, когда ребенок",
+      "title": "",
+      "description": "Школа относится ко всем одинаково, но для раскрытия уникальной нервной системы нужна индивидуальная система. Индивидуальный подход помогает ребёнку проявить свои сильные стороны. #психология #уникальныйподход",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 622.091,
+      "r0_end": 664.05,
+      "flags": [],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "Вы",
+          "t0": 622.141,
+          "t1": 622.141,
+          "emph": false
+        },
+        {
+          "word": "говорите",
+          "t0": 622.141,
+          "t1": 622.6605,
+          "emph": false
+        },
+        {
+          "word": "так,",
+          "t0": 622.6605,
+          "t1": 623.4404999999999,
+          "emph": false
+        },
+        {
+          "word": "но",
+          "t0": 623.4404999999999,
+          "t1": 623.5604999999999,
+          "emph": false
+        },
+        {
+          "word": "скажите",
+          "t0": 623.5604999999999,
+          "t1": 623.8605,
+          "emph": false
+        },
+        {
+          "word": "тогда,",
+          "t0": 623.8605,
+          "t1": 624.2405,
+          "emph": false
+        },
+        {
+          "word": "почему,",
+          "t0": 624.2405,
+          "t1": 624.7205,
+          "emph": false
+        },
+        {
+          "word": "когда",
+          "t0": 624.7205,
+          "t1": 625.5804999999999,
+          "emph": false
+        },
+        {
+          "word": "ребенок",
+          "t0": 625.5804999999999,
+          "t1": 626.2004999999999,
+          "emph": false
+        },
+        {
+          "word": "попадает",
+          "t0": 626.2004999999999,
+          "t1": 626.8204999999999,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 626.8204999999999,
+          "t1": 627.0005,
+          "emph": false
+        },
+        {
+          "word": "школу,",
+          "t0": 627.0005,
+          "t1": 629.4005,
+          "emph": false
+        },
+        {
+          "word": "это",
+          "t0": 629.4005,
+          "t1": 629.4805,
+          "emph": false
+        },
+        {
+          "word": "получается",
+          "t0": 629.4805,
+          "t1": 630.1205,
+          "emph": false
+        },
+        {
+          "word": "сколько",
+          "t0": 630.1205,
+          "t1": 630.4205,
+          "emph": false
+        },
+        {
+          "word": "детей,",
+          "t0": 630.4205,
+          "t1": 631.3004999999999,
+          "emph": false
+        },
+        {
+          "word": "столько",
+          "t0": 631.3004999999999,
+          "t1": 631.5205,
+          "emph": false
+        },
+        {
+          "word": "нервных",
+          "t0": 631.5205,
+          "t1": 632.0005,
+          "emph": false
+        },
+        {
+          "word": "систем,",
+          "t0": 632.0005,
+          "t1": 632.5405,
+          "emph": false
+        },
+        {
+          "word": "правильно",
+          "t0": 632.5405,
+          "t1": 633.0405,
+          "emph": false
+        },
+        {
+          "word": "же?",
+          "t0": 633.0405,
+          "t1": 633.2805,
+          "emph": false
+        },
+        {
+          "word": "Почему",
+          "t0": 635.893,
+          "t1": 636.1405,
+          "emph": false
+        },
+        {
+          "word": "ты",
+          "t0": 636.1405,
+          "t1": 636.2605,
+          "emph": false
+        },
+        {
+          "word": "улыбаешься?",
+          "t0": 636.2605,
+          "t1": 637.5205,
+          "emph": false
+        },
+        {
+          "word": "Ты",
+          "t0": 637.5205,
+          "t1": 637.5804999999999,
+          "emph": false
+        },
+        {
+          "word": "понимаешь",
+          "t0": 637.5804999999999,
+          "t1": 638.0604999999999,
+          "emph": false
+        },
+        {
+          "word": "вопрос,",
+          "t0": 638.0604999999999,
+          "t1": 638.4805,
+          "emph": false
+        },
+        {
+          "word": "да?",
+          "t0": 638.4805,
+          "t1": 639.4805,
+          "emph": false
+        },
+        {
+          "word": "Нет",
+          "t0": 639.4805,
+          "t1": 639.6205,
+          "emph": false
+        },
+        {
+          "word": "еще?",
+          "t0": 639.6205,
+          "t1": 640.3405,
+          "emph": false
+        },
+        {
+          "word": "Почему",
+          "t0": 640.3405,
+          "t1": 640.6605,
+          "emph": false
+        },
+        {
+          "word": "тогда",
+          "t0": 640.6605,
+          "t1": 641.1405,
+          "emph": false
+        },
+        {
+          "word": "миллиард",
+          "t0": 641.1405,
+          "t1": 641.7805,
+          "emph": false
+        },
+        {
+          "word": "детей,",
+          "t0": 642.288,
+          "t1": 642.8004999999999,
+          "emph": false
+        },
+        {
+          "word": "да?",
+          "t0": 642.8004999999999,
+          "t1": 643.1999999999999,
+          "emph": false
+        },
+        {
+          "word": "Ну",
+          "t0": 644.8499999999999,
+          "t1": 644.9005,
+          "emph": false
+        },
+        {
+          "word": "давайте",
+          "t0": 644.9005,
+          "t1": 645.1205,
+          "emph": false
+        },
+        {
+          "word": "нашу",
+          "t0": 645.1205,
+          "t1": 645.4205,
+          "emph": false
+        },
+        {
+          "word": "российскую",
+          "t0": 645.4205,
+          "t1": 645.8004999999999,
+          "emph": false
+        },
+        {
+          "word": "школу",
+          "t0": 645.8004999999999,
+          "t1": 646.1405,
+          "emph": false
+        },
+        {
+          "word": "возьмем.",
+          "t0": 646.1405,
+          "t1": 646.8204999999999,
+          "emph": false
+        },
+        {
+          "word": "Почему",
+          "t0": 646.8204999999999,
+          "t1": 647.0005,
+          "emph": false
+        },
+        {
+          "word": "тогда",
+          "t0": 647.0005,
+          "t1": 647.3204999999999,
+          "emph": false
+        },
+        {
+          "word": "есть",
+          "t0": 647.3204999999999,
+          "t1": 647.6205,
+          "emph": false
+        },
+        {
+          "word": "ЕГЭ?",
+          "t0": 647.6205,
+          "t1": 648.4005,
+          "emph": false
+        },
+        {
+          "word": "Почему",
+          "t0": 648.4005,
+          "t1": 648.7004999999999,
+          "emph": false
+        },
+        {
+          "word": "есть",
+          "t0": 648.7004999999999,
+          "t1": 649.0205,
+          "emph": false
+        },
+        {
+          "word": "одинаковые",
+          "t0": 649.0205,
+          "t1": 649.8605,
+          "emph": false
+        },
+        {
+          "word": "экзамены?",
+          "t0": 649.8605,
+          "t1": 651.1405,
+          "emph": false
+        },
+        {
+          "word": "Почему",
+          "t0": 651.1405,
+          "t1": 651.3605,
+          "emph": false
+        },
+        {
+          "word": "их",
+          "t0": 651.3605,
+          "t1": 651.6005,
+          "emph": false
+        },
+        {
+          "word": "причесывают",
+          "t0": 651.6005,
+          "t1": 652.5405,
+          "emph": false
+        },
+        {
+          "word": "под",
+          "t0": 653.876,
+          "t1": 653.9805,
+          "emph": false
+        },
+        {
+          "word": "одну",
+          "t0": 653.9805,
+          "t1": 654.2805,
+          "emph": false
+        },
+        {
+          "word": "систему,",
+          "t0": 654.2805,
+          "t1": 655.0005,
+          "emph": false
+        },
+        {
+          "word": "понимаете?",
+          "t0": 655.0005,
+          "t1": 655.5005,
+          "emph": false
+        },
+        {
+          "word": "В",
+          "t0": 655.3805,
+          "t1": 655.4005,
+          "emph": false
+        },
+        {
+          "word": "первую",
+          "t0": 655.4005,
+          "t1": 655.4205,
+          "emph": false
+        },
+        {
+          "word": "очередь,",
+          "t0": 655.4205,
+          "t1": 656.1804999999999,
+          "emph": false
+        },
+        {
+          "word": "уникальная",
+          "t0": 656.1804999999999,
+          "t1": 656.6205,
+          "emph": true
+        },
+        {
+          "word": "нервная",
+          "t0": 656.6205,
+          "t1": 656.9805,
+          "emph": false
+        },
+        {
+          "word": "система.",
+          "t0": 656.9805,
+          "t1": 657.2405,
+          "emph": false
+        },
+        {
+          "word": "Чтобы",
+          "t0": 657.2405,
+          "t1": 658.1405,
+          "emph": false
+        },
+        {
+          "word": "ее",
+          "t0": 658.1405,
+          "t1": 658.7405,
+          "emph": false
+        },
+        {
+          "word": "раскрыть",
+          "t0": 658.7405,
+          "t1": 658.9404999999999,
+          "emph": false
+        },
+        {
+          "word": "уникально,",
+          "t0": 658.9404999999999,
+          "t1": 660.0604999999999,
+          "emph": false
+        },
+        {
+          "word": "для",
+          "t0": 660.0604999999999,
+          "t1": 660.1804999999999,
+          "emph": false
+        },
+        {
+          "word": "нее",
+          "t0": 660.1804999999999,
+          "t1": 660.4005,
+          "emph": false
+        },
+        {
+          "word": "нужна",
+          "t0": 660.4005,
+          "t1": 660.7605,
+          "emph": false
+        },
+        {
+          "word": "уникальная",
+          "t0": 661.704,
+          "t1": 662.3204999999999,
+          "emph": false
+        },
+        {
+          "word": "система",
+          "t0": 662.3204999999999,
+          "t1": 662.9205,
+          "emph": false
+        },
+        {
+          "word": "раскрытия.",
+          "t0": 662.9205,
+          "t1": 663.7204999999999,
+          "emph": true
+        }
+      ],
+      "end_drift_sec": null,
+      "end_snap_reason": null,
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 664.05,
+      "speed": 1.0,
+      "tail_last_word_end": 663.75,
+      "tail_next_word_start": 664.146,
+      "warnings": [],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [
+        [
+          662.9205,
+          663.7204999999999
+        ]
+      ],
+      "planned": true
+    },
+    {
+      "id": "r05",
+      "start": 664.106,
+      "end": 702.12,
+      "segments": [
+        {
+          "start": 664.106,
+          "end": 671.51,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 671.822,
+          "end": 687.09,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 688.116,
+          "end": 694.281,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              5.2095,
+              6.165
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 695.401,
+          "end": 702.12,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "Уникальный: круг, квадрат, треугольник",
+      "score": 90,
+      "hook": "Представьте, вы какой-то уникальный",
+      "title": "",
+      "description": "Мы начинаем уникальными, но общество последовательно формирует нас под свои стандарты — круг, квадрат, треугольник. Это метафора давления конформизма. #психология #конформизм",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 664.106,
+      "r0_end": 702.12,
+      "flags": [],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
@@ -1766,7 +2482,7 @@
         },
         {
           "word": "пропускают",
-          "t0": 671.4404999999999,
+          "t0": 671.872,
           "t1": 672.4205,
           "emph": false
         },
@@ -1879,6 +2595,42 @@
           "emph": false
         },
         {
+          "word": "Ваши",
+          "t0": 679.8405,
+          "t1": 680.1405,
+          "emph": false
+        },
+        {
+          "word": "факторы",
+          "t0": 680.1405,
+          "t1": 680.1605,
+          "emph": false
+        },
+        {
+          "word": "еще",
+          "t0": 680.1605,
+          "t1": 680.1804999999999,
+          "emph": false
+        },
+        {
+          "word": "пропускают",
+          "t0": 680.1804999999999,
+          "t1": 680.8004999999999,
+          "emph": false
+        },
+        {
+          "word": "через",
+          "t0": 680.8004999999999,
+          "t1": 681.0005,
+          "emph": false
+        },
+        {
+          "word": "квадрат.",
+          "t0": 681.0005,
+          "t1": 681.6405,
+          "emph": false
+        },
+        {
           "word": "Вы",
           "t0": 681.6405,
           "t1": 681.7605,
@@ -1935,12 +2687,12 @@
         {
           "word": "становитесь.",
           "t0": 686.4604999999999,
-          "t1": 687.4805,
+          "t1": 687.09,
           "emph": false
         },
         {
           "word": "Потом",
-          "t0": 688.1005,
+          "t0": 688.1659999999999,
           "t1": 688.4005,
           "emph": false
         },
@@ -2007,12 +2759,12 @@
         {
           "word": "И",
           "t0": 694.1005,
-          "t1": 694.7805,
+          "t1": 694.281,
           "emph": false
         },
         {
           "word": "на",
-          "t0": 694.7805,
+          "t0": 695.4509999999999,
           "t1": 695.5005,
           "emph": false
         },
@@ -2062,7 +2814,7 @@
           "word": "зеленой",
           "t0": 699.1405,
           "t1": 699.7004999999999,
-          "emph": false
+          "emph": true
         },
         {
           "word": "краской,",
@@ -2105,820 +2857,84 @@
           "t0": 701.1005,
           "t1": 701.7605,
           "emph": false
-        },
-        {
-          "word": "В",
-          "t0": 655.3805,
-          "t1": 655.4005,
-          "emph": false
-        },
-        {
-          "word": "первую",
-          "t0": 655.4005,
-          "t1": 655.4205,
-          "emph": false
-        },
-        {
-          "word": "очередь,",
-          "t0": 655.4205,
-          "t1": 656.1804999999999,
-          "emph": false
-        },
-        {
-          "word": "уникальная",
-          "t0": 656.1804999999999,
-          "t1": 656.6205,
-          "emph": false
-        },
-        {
-          "word": "нервная",
-          "t0": 656.6205,
-          "t1": 656.9805,
-          "emph": false
-        },
-        {
-          "word": "система.",
-          "t0": 656.9805,
-          "t1": 657.2405,
-          "emph": false
-        },
-        {
-          "word": "Чтобы",
-          "t0": 657.2405,
-          "t1": 658.1405,
-          "emph": false
-        },
-        {
-          "word": "ее",
-          "t0": 658.1405,
-          "t1": 658.7405,
-          "emph": false
-        },
-        {
-          "word": "раскрыть",
-          "t0": 658.7405,
-          "t1": 658.9404999999999,
-          "emph": false
-        },
-        {
-          "word": "уникально,",
-          "t0": 658.9404999999999,
-          "t1": 660.0604999999999,
-          "emph": false
-        },
-        {
-          "word": "для",
-          "t0": 660.0604999999999,
-          "t1": 660.1804999999999,
-          "emph": false
-        },
-        {
-          "word": "нее",
-          "t0": 660.1804999999999,
-          "t1": 660.4005,
-          "emph": false
-        },
-        {
-          "word": "нужна",
-          "t0": 660.4005,
-          "t1": 660.7605,
-          "emph": false
-        },
-        {
-          "word": "уникальная",
-          "t0": 660.7605,
-          "t1": 662.3204999999999,
-          "emph": false
-        },
-        {
-          "word": "система",
-          "t0": 662.3204999999999,
-          "t1": 662.9205,
-          "emph": false
-        },
-        {
-          "word": "раскрытия.",
-          "t0": 662.9205,
-          "t1": 663.7204999999999,
-          "emph": true
         }
       ],
-      "end_drift_sec": 0.2999999999999545,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": null,
+      "end_snap_reason": null,
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
-      "has_explicit_e": false,
-      "subtitle_gate": null,
+      "has_explicit_e": true,
+      "subtitle_gate": 702.12,
       "speed": 1.0,
-      "tail_last_word_end": 663.75,
-      "tail_next_word_start": null,
+      "tail_last_word_end": 701.82,
+      "tail_next_word_start": 703.538,
       "warnings": [],
       "subtitle_emph_words": [],
-      "beat_gap_sec": 0.25,
+      "beat_gap_sec": null,
       "zoom_source_t0": null,
-      "c_close_ranges": []
-    },
-    {
-      "id": "r05",
-      "start": 793.5106,
-      "end": 826.3706,
-      "segments": [
-        {
-          "start": 793.5106,
-          "end": 796.63,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 797.25,
-          "end": 799.89,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 800.4300000000001,
-          "end": 805.43,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 805.73,
-          "end": 809.39,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 810.0,
-          "end": 815.1899999999999,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 815.62,
-          "end": 820.3299999999999,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 826.3100000000001,
-          "end": 838.4405999999999,
-          "shot": "wide",
-          "close_intervals": []
-        },
-        {
-          "start": 820.7706099999999,
-          "end": 826.3706,
-          "shot": "close",
-          "close_intervals": []
-        }
+      "c_close_ranges": [
+        [
+          699.1405,
+          701.7605
+        ]
       ],
-      "cold_open": null,
-      "title_overlay": "Почему мы выбираем партнёра как маму с папой",
-      "score": 85,
-      "hook": "И потом же ребенок что делает? Как в сценарии, он ищет подтверждение этого сценария",
-      "title": "",
-      "description": "Нервная система привыкла к напряжению и ищет его снова — даже в партнёре. #психология #отношения",
-      "reason": "human review",
-      "topic": "",
-      "r0_start": 793.5106,
-      "r0_end": 825.5305999999999,
-      "flags": [],
-      "self_contained_start": null,
-      "start_justification": "",
-      "rank": null,
-      "subtitles": [
-        {
-          "word": "Как",
-          "t0": 793.5106,
-          "t1": 793.5305999999999,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 793.5305999999999,
-          "t1": 793.6705999999999,
-          "emph": false
-        },
-        {
-          "word": "сценарии,",
-          "t0": 793.6705999999999,
-          "t1": 794.2306,
-          "emph": false
-        },
-        {
-          "word": "он",
-          "t0": 794.2306,
-          "t1": 794.33061,
-          "emph": false
-        },
-        {
-          "word": "ищет",
-          "t0": 794.33061,
-          "t1": 794.6705999999999,
-          "emph": false
-        },
-        {
-          "word": "подтверждение",
-          "t0": 794.6705999999999,
-          "t1": 795.6505999999999,
-          "emph": false
-        },
-        {
-          "word": "этого",
-          "t0": 795.6505999999999,
-          "t1": 795.9305999999999,
-          "emph": false
-        },
-        {
-          "word": "сценария.",
-          "t0": 795.9305999999999,
-          "t1": 796.5706,
-          "emph": false
-        },
-        {
-          "word": "Потом,",
-          "t0": 797.3106,
-          "t1": 797.6306,
-          "emph": false
-        },
-        {
-          "word": "допустим,",
-          "t0": 797.6306,
-          "t1": 798.1505999999999,
-          "emph": false
-        },
-        {
-          "word": "там",
-          "t0": 798.1505999999999,
-          "t1": 798.3706,
-          "emph": false
-        },
-        {
-          "word": "первая",
-          "t0": 798.3706,
-          "t1": 798.5706,
-          "emph": false
-        },
-        {
-          "word": "любовь,",
-          "t0": 798.5706,
-          "t1": 799.2905999999999,
-          "emph": false
-        },
-        {
-          "word": "но",
-          "t0": 799.2905999999999,
-          "t1": 799.3706,
-          "emph": false
-        },
-        {
-          "word": "он",
-          "t0": 799.3706,
-          "t1": 799.49061,
-          "emph": false
-        },
-        {
-          "word": "что?",
-          "t0": 799.49061,
-          "t1": 800.5106,
-          "emph": false
-        },
-        {
-          "word": "Он",
-          "t0": 800.5106,
-          "t1": 800.61061,
-          "emph": false
-        },
-        {
-          "word": "смотрит,",
-          "t0": 800.61061,
-          "t1": 801.0906,
-          "emph": false
-        },
-        {
-          "word": "а",
-          "t0": 801.0906,
-          "t1": 801.21061,
-          "emph": false
-        },
-        {
-          "word": "как",
-          "t0": 801.21061,
-          "t1": 801.3906,
-          "emph": false
-        },
-        {
-          "word": "мама",
-          "t0": 801.3906,
-          "t1": 801.71061,
-          "emph": false
-        },
-        {
-          "word": "с",
-          "t0": 801.71061,
-          "t1": 801.8506,
-          "emph": false
-        },
-        {
-          "word": "папой",
-          "t0": 801.8506,
-          "t1": 802.0706,
-          "emph": false
-        },
-        {
-          "word": "себя",
-          "t0": 802.0706,
-          "t1": 802.3706,
-          "emph": false
-        },
-        {
-          "word": "вели,",
-          "t0": 802.3706,
-          "t1": 802.8106,
-          "emph": false
-        },
-        {
-          "word": "а",
-          "t0": 802.8106,
-          "t1": 802.8706,
-          "emph": false
-        },
-        {
-          "word": "как",
-          "t0": 802.8706,
-          "t1": 803.05061,
-          "emph": false
-        },
-        {
-          "word": "там",
-          "t0": 803.05061,
-          "t1": 803.2506099999999,
-          "emph": false
-        },
-        {
-          "word": "нажимали",
-          "t0": 803.2506099999999,
-          "t1": 804.05061,
-          "emph": false
-        },
-        {
-          "word": "на",
-          "t0": 804.05061,
-          "t1": 804.47061,
-          "emph": false
-        },
-        {
-          "word": "меня",
-          "t0": 804.47061,
-          "t1": 804.71061,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 804.71061,
-          "t1": 804.8706,
-          "emph": false
-        },
-        {
-          "word": "детстве,",
-          "t0": 804.8706,
-          "t1": 805.21061,
-          "emph": false
-        },
-        {
-          "word": "понятно?",
-          "t0": 805.21061,
-          "t1": 805.3906,
-          "emph": false
-        },
-        {
-          "word": "И",
-          "t0": 805.7706099999999,
-          "t1": 805.8506,
-          "emph": false
-        },
-        {
-          "word": "он",
-          "t0": 805.8506,
-          "t1": 805.9505999999999,
-          "emph": false
-        },
-        {
-          "word": "ищет",
-          "t0": 805.9505999999999,
-          "t1": 806.33061,
-          "emph": false
-        },
-        {
-          "word": "того",
-          "t0": 806.33061,
-          "t1": 806.6306,
-          "emph": false
-        },
-        {
-          "word": "партнера,",
-          "t0": 806.6306,
-          "t1": 808.11061,
-          "emph": false
-        },
-        {
-          "word": "который",
-          "t0": 808.11061,
-          "t1": 808.49061,
-          "emph": false
-        },
-        {
-          "word": "что?",
-          "t0": 808.49061,
-          "t1": 809.9505999999999,
-          "emph": false
-        },
-        {
-          "word": "мама",
-          "t0": 810.1905999999999,
-          "t1": 810.4505999999999,
-          "emph": false
-        },
-        {
-          "word": "с",
-          "t0": 810.4505999999999,
-          "t1": 810.61061,
-          "emph": false
-        },
-        {
-          "word": "папой",
-          "t0": 810.61061,
-          "t1": 810.97061,
-          "emph": false
-        },
-        {
-          "word": "тогда,",
-          "t0": 810.97061,
-          "t1": 812.1506199999999,
-          "emph": false
-        },
-        {
-          "word": "потому",
-          "t0": 812.1506199999999,
-          "t1": 812.3506,
-          "emph": false
-        },
-        {
-          "word": "что",
-          "t0": 812.3506,
-          "t1": 812.5706,
-          "emph": false
-        },
-        {
-          "word": "нервная",
-          "t0": 812.5706,
-          "t1": 812.8706,
-          "emph": false
-        },
-        {
-          "word": "система",
-          "t0": 812.8706,
-          "t1": 813.21061,
-          "emph": false
-        },
-        {
-          "word": "привыкла",
-          "t0": 813.21061,
-          "t1": 813.7506099999999,
-          "emph": false
-        },
-        {
-          "word": "быть",
-          "t0": 813.7506099999999,
-          "t1": 813.93062,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 813.93062,
-          "t1": 814.05061,
-          "emph": false
-        },
-        {
-          "word": "таком",
-          "t0": 814.05061,
-          "t1": 814.2905999999999,
-          "emph": false
-        },
-        {
-          "word": "напряжении,",
-          "t0": 814.2905999999999,
-          "t1": 815.43062,
-          "emph": false
-        },
-        {
-          "word": "И",
-          "t0": 815.1306,
-          "t1": 816.7706099999999,
-          "emph": false
-        },
-        {
-          "word": "нервная",
-          "t0": 816.7706099999999,
-          "t1": 817.05061,
-          "emph": false
-        },
-        {
-          "word": "система",
-          "t0": 817.05061,
-          "t1": 817.4105999999999,
-          "emph": false
-        },
-        {
-          "word": "просто",
-          "t0": 817.4105999999999,
-          "t1": 817.71061,
-          "emph": false
-        },
-        {
-          "word": "другого",
-          "t0": 817.71061,
-          "t1": 818.0906,
-          "emph": false
-        },
-        {
-          "word": "не",
-          "t0": 818.0906,
-          "t1": 818.2306,
-          "emph": false
-        },
-        {
-          "word": "знает,",
-          "t0": 818.2306,
-          "t1": 818.5706,
-          "emph": false
-        },
-        {
-          "word": "и",
-          "t0": 818.5706,
-          "t1": 818.6905999999999,
-          "emph": false
-        },
-        {
-          "word": "она",
-          "t0": 818.6905999999999,
-          "t1": 818.7905999999999,
-          "emph": false
-        },
-        {
-          "word": "выбирает",
-          "t0": 818.7905999999999,
-          "t1": 819.3106,
-          "emph": false
-        },
-        {
-          "word": "какого",
-          "t0": 819.3106,
-          "t1": 819.7306,
-          "emph": false
-        },
-        {
-          "word": "партнера.",
-          "t0": 819.7306,
-          "t1": 820.2306,
-          "emph": false
-        },
-        {
-          "word": "И",
-          "t0": 826.3906,
-          "t1": 826.5305999999999,
-          "emph": false
-        },
-        {
-          "word": "это",
-          "t0": 826.5305999999999,
-          "t1": 826.6705999999999,
-          "emph": false
-        },
-        {
-          "word": "идет",
-          "t0": 826.6705999999999,
-          "t1": 827.2306,
-          "emph": false
-        },
-        {
-          "word": "на",
-          "t0": 827.2306,
-          "t1": 827.7306,
-          "emph": false
-        },
-        {
-          "word": "уровне",
-          "t0": 827.7306,
-          "t1": 828.2506099999999,
-          "emph": false
-        },
-        {
-          "word": "нервной",
-          "t0": 828.2506099999999,
-          "t1": 828.6705999999999,
-          "emph": false
-        },
-        {
-          "word": "системы,",
-          "t0": 828.6705999999999,
-          "t1": 829.2905999999999,
-          "emph": false
-        },
-        {
-          "word": "это",
-          "t0": 829.2905999999999,
-          "t1": 829.5305999999999,
-          "emph": false
-        },
-        {
-          "word": "идет",
-          "t0": 829.5305999999999,
-          "t1": 830.0906,
-          "emph": false
-        },
-        {
-          "word": "на",
-          "t0": 830.0906,
-          "t1": 830.2506099999999,
-          "emph": false
-        },
-        {
-          "word": "уровне",
-          "t0": 830.2506099999999,
-          "t1": 830.6905999999999,
-          "emph": false
-        },
-        {
-          "word": "подсознательных",
-          "t0": 830.6905999999999,
-          "t1": 832.05061,
-          "emph": false
-        },
-        {
-          "word": "инстинктов,",
-          "t0": 832.05061,
-          "t1": 833.8706,
-          "emph": false
-        },
-        {
-          "word": "а",
-          "t0": 833.8706,
-          "t1": 833.8906,
-          "emph": false
-        },
-        {
-          "word": "программ,",
-          "t0": 833.8906,
-          "t1": 835.6705999999999,
-          "emph": false
-        },
-        {
-          "word": "родительских",
-          "t0": 835.6705999999999,
-          "t1": 836.1905999999999,
-          "emph": false
-        },
-        {
-          "word": "вот",
-          "t0": 836.1905999999999,
-          "t1": 836.33061,
-          "emph": false
-        },
-        {
-          "word": "этих",
-          "t0": 836.33061,
-          "t1": 836.47061,
-          "emph": false
-        },
-        {
-          "word": "программ,",
-          "t0": 836.47061,
-          "t1": 836.8906,
-          "emph": false
-        },
-        {
-          "word": "которые",
-          "t0": 836.8906,
-          "t1": 837.2506099999999,
-          "emph": false
-        },
-        {
-          "word": "у",
-          "t0": 837.2506099999999,
-          "t1": 837.3706,
-          "emph": false
-        },
-        {
-          "word": "нас",
-          "t0": 837.3706,
-          "t1": 837.55061,
-          "emph": false
-        },
-        {
-          "word": "получились.",
-          "t0": 837.55061,
-          "t1": 838.1905999999999,
-          "emph": false
-        },
-        {
-          "word": "Если",
-          "t0": 820.7706099999999,
-          "t1": 821.0906,
-          "emph": false
-        },
-        {
-          "word": "папа",
-          "t0": 821.0906,
-          "t1": 821.5106,
-          "emph": false
-        },
-        {
-          "word": "маму",
-          "t0": 821.5106,
-          "t1": 821.8106,
-          "emph": false
-        },
-        {
-          "word": "бил,",
-          "t0": 821.8106,
-          "t1": 822.2706099999999,
-          "emph": false
-        },
-        {
-          "word": "бухал,",
-          "t0": 822.2706099999999,
-          "t1": 824.47061,
-          "emph": false
-        },
-        {
-          "word": "пойдет,",
-          "t0": 824.47061,
-          "t1": 825.1506199999999,
-          "emph": false
-        },
-        {
-          "word": "берем.",
-          "t0": 825.1506199999999,
-          "t1": 825.5305999999999,
-          "emph": false
-        }
-      ],
-      "end_drift_sec": 0.2999999999999545,
-      "end_snap_reason": "sentence",
-      "start_drift_sec": null,
-      "start_snap_reason": null,
-      "start_repair_sec": null,
-      "ends_on_host_turn": false,
-      "open_thought": false,
-      "has_explicit_e": false,
-      "subtitle_gate": null,
-      "speed": 1.0,
-      "tail_last_word_end": 825.62,
-      "tail_next_word_start": null,
-      "warnings": [],
-      "subtitle_emph_words": [],
-      "beat_gap_sec": 0.25,
-      "zoom_source_t0": null,
-      "c_close_ranges": []
+      "planned": true
     },
     {
       "id": "r06",
-      "start": 838.3706,
-      "end": 862.7806,
+      "start": 838.5590000000001,
+      "end": 867.921,
       "segments": [
         {
-          "start": 838.3706,
-          "end": 853.64,
+          "start": 838.5590000000001,
+          "end": 843.31,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 844.093,
+          "end": 853.725,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 854.687,
+          "end": 863.505,
           "shot": "wide",
           "close_intervals": [
             [
-              9.28002,
-              15.269400000000019
+              8.232,
+              8.818
             ]
-          ]
+          ],
+          "window_cut": true
         },
         {
-          "start": 854.74,
-          "end": 862.7806,
-          "shot": "close",
-          "close_intervals": []
+          "start": 864.894,
+          "end": 867.921,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Вы нажимаете сами на себя",
-      "score": 85,
+      "title_overlay": "Нервная система просит: нажми на меня",
+      "score": 65,
       "hook": "Прикиньте, сначала там родители, школа, институт нажали, а потом, прикиньте, никто на вас не нажимает, вы нажимаете сами на себя",
       "title": "",
-      "description": "Сначала давили родители и школа. Потом никто не давит — а вы продолжаете сами. #психология #стресс",
+      "description": "Мы внутренне копируем внешнее давление, и нервная система привыкает сама себя давить. Это становится привычкой, как белка в колесе. #психология #самодавление",
       "reason": "human review",
       "topic": "",
-      "r0_start": 838.7,
-      "r0_end": 862.8506,
-      "flags": [],
+      "r0_start": 838.5590000000001,
+      "r0_end": 867.921,
+      "flags": [
+        "human_merged"
+      ],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
@@ -2963,7 +2979,7 @@
           "word": "нажали,",
           "t0": 841.93062,
           "t1": 842.6705999999999,
-          "emph": false
+          "emph": true
         },
         {
           "word": "а",
@@ -2974,7 +2990,7 @@
         {
           "word": "потом,",
           "t0": 842.71061,
-          "t1": 844.2306,
+          "t1": 843.31,
           "emph": false
         },
         {
@@ -3029,7 +3045,7 @@
           "word": "сами",
           "t0": 847.0305999999999,
           "t1": 847.3106,
-          "emph": true
+          "emph": false
         },
         {
           "word": "на",
@@ -3221,7 +3237,7 @@
           "word": "привычку,",
           "t0": 859.3106,
           "t1": 860.3706,
-          "emph": false
+          "emph": true
         },
         {
           "word": "уже",
@@ -3275,332 +3291,590 @@
           "word": "колесе.",
           "t0": 862.53062,
           "t1": 862.8506,
+          "emph": false
+        },
+        {
+          "word": "Понятно?",
+          "t0": 862.8506,
+          "t1": 863.2906,
           "emph": true
+        },
+        {
+          "word": "Ясно?",
+          "t0": 864.9706199999999,
+          "t1": 865.3106,
+          "emph": false
+        },
+        {
+          "word": "Давайте",
+          "t0": 866.4906,
+          "t1": 866.7706,
+          "emph": false
+        },
+        {
+          "word": "другой",
+          "t0": 866.7706,
+          "t1": 867.0506,
+          "emph": false
+        },
+        {
+          "word": "вариант",
+          "t0": 867.0506,
+          "t1": 867.3906,
+          "emph": false
+        },
+        {
+          "word": "посмотрим.",
+          "t0": 867.3906,
+          "t1": 867.8306,
+          "emph": false
         }
       ],
-      "end_drift_sec": 0.2999999999999545,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": null,
+      "end_snap_reason": null,
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 863.1505999999999,
+      "subtitle_gate": 867.921,
       "speed": 1.0,
-      "tail_last_word_end": 862.58062,
-      "tail_next_word_start": 864.9706199999999,
+      "tail_last_word_end": 867.921,
+      "tail_next_word_start": 867.961,
       "warnings": [
-        "ends_on_filler: 'Понятно?'",
-        "[CONTENT] r06: last word 'колесе.' cut by clip end (continuous speech into next phrase, ae=862.900 > clip=862.781)"
+        "no room after last word «посмотрим.» (next speech at 867.961) — clip ends at its audible end"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          847.6506199999999,
-          853.55061
+          862.8506,
+          863.2906
         ]
-      ]
+      ],
+      "planned": true
     },
     {
       "id": "r07",
-      "start": 963.8806999999999,
-      "end": 995.7,
+      "start": 928.6600000000001,
+      "end": 955.48,
       "segments": [
         {
-          "start": 963.8806999999999,
-          "end": 995.7,
+          "start": 928.6600000000001,
+          "end": 941.436,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 943.443,
+          "end": 948.766,
           "shot": "wide",
           "close_intervals": [
             [
-              0.0,
-              13.400000000000091
-            ],
-            [
-              26.220019999999977,
-              31.700000000000045
+              2.9795,
+              5.323
             ]
-          ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 949.107,
+          "end": 955.48,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Напряжение есть — вы просто к нему привыкли",
-      "score": 85,
-      "hook": "Вот такое творчество, такое",
+      "title_overlay": "Раскрыть нервную систему и быть свободным",
+      "score": 82,
+      "hook": "Ну-ка, я сейчас раскручу",
       "title": "",
-      "description": "Закройте глаза и почувствуйте: напряжение в теле есть, вы просто его не замечаете. #психология #тело",
+      "description": "Когда нервная система раскрывается, человек становится свободным и легким в общении. Это достигается через специальные практики дыхания и осознанности. #психология #нервнаясистема",
       "reason": "human review",
       "topic": "",
-      "r0_start": 964.1806999999999,
-      "r0_end": 994.0807,
+      "r0_start": 928.6600000000001,
+      "r0_end": 955.48,
       "flags": [],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
       "subtitles": [
         {
-          "word": "И",
-          "t0": 964.1806999999999,
-          "t1": 964.22072,
+          "word": "Я",
+          "t0": 928.7407,
+          "t1": 928.7807,
           "emph": false
         },
         {
-          "word": "тогда,",
-          "t0": 964.22072,
-          "t1": 964.6206999999999,
+          "word": "подвожу",
+          "t0": 928.7807,
+          "t1": 929.22072,
           "emph": false
         },
         {
-          "word": "смотрите,",
-          "t0": 964.6206999999999,
-          "t1": 965.20073,
-          "emph": false
-        },
-        {
-          "word": "ребятки,",
-          "t0": 965.20073,
-          "t1": 965.76072,
-          "emph": false
-        },
-        {
-          "word": "сначала",
-          "t0": 965.76072,
-          "t1": 966.1206999999999,
-          "emph": false
-        },
-        {
-          "word": "они",
-          "t0": 966.1206999999999,
-          "t1": 966.5607,
-          "emph": false
-        },
-        {
-          "word": "нажимали,",
-          "t0": 966.5607,
-          "t1": 967.3007,
-          "emph": false
-        },
-        {
-          "word": "не",
-          "t0": 967.3007,
-          "t1": 967.4206999999999,
-          "emph": false
-        },
-        {
-          "word": "обязательно",
-          "t0": 967.4206999999999,
-          "t1": 967.76072,
-          "emph": false
-        },
-        {
-          "word": "социум",
-          "t0": 967.76072,
-          "t1": 968.3607,
-          "emph": false
-        },
-        {
-          "word": "нажимал,",
-          "t0": 968.3607,
-          "t1": 969.14073,
-          "emph": false
-        },
-        {
-          "word": "понятно,",
-          "t0": 969.14073,
-          "t1": 969.4807,
-          "emph": false
-        },
-        {
-          "word": "да?",
-          "t0": 969.4807,
-          "t1": 969.6007199999999,
-          "emph": false
-        },
-        {
-          "word": "А",
-          "t0": 969.6007199999999,
-          "t1": 970.14073,
-          "emph": false
-        },
-        {
-          "word": "потом",
-          "t0": 970.14073,
-          "t1": 970.4607,
-          "emph": false
-        },
-        {
-          "word": "что",
-          "t0": 970.4607,
-          "t1": 970.6007199999999,
-          "emph": false
-        },
-        {
-          "word": "происходит?",
-          "t0": 970.6007199999999,
-          "t1": 971.1806999999999,
-          "emph": false
-        },
-        {
-          "word": "Вы",
-          "t0": 971.1806999999999,
-          "t1": 971.2807,
-          "emph": false
-        },
-        {
-          "word": "выходите",
-          "t0": 971.2807,
-          "t1": 971.8007,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 971.8007,
-          "t1": 972.3207199999999,
-          "emph": false
-        },
-        {
-          "word": "большой",
-          "t0": 972.3207199999999,
-          "t1": 972.66072,
-          "emph": false
-        },
-        {
-          "word": "мир",
-          "t0": 972.66072,
-          "t1": 972.9006999999999,
-          "emph": false
-        },
-        {
-          "word": "там",
-          "t0": 972.9006999999999,
-          "t1": 973.14073,
-          "emph": false
-        },
-        {
-          "word": "после",
-          "t0": 973.14073,
-          "t1": 973.5807,
-          "emph": false
-        },
-        {
-          "word": "института,",
-          "t0": 973.5807,
-          "t1": 974.4607,
-          "emph": false
-        },
-        {
-          "word": "на",
-          "t0": 974.4607,
-          "t1": 974.5006999999999,
+          "word": "к",
+          "t0": 929.22072,
+          "t1": 929.4006999999999,
           "emph": false
         },
         {
           "word": "вас",
-          "t0": 974.5006999999999,
-          "t1": 974.66072,
+          "t0": 929.4006999999999,
+          "t1": 929.6007199999999,
           "emph": false
         },
         {
-          "word": "уже",
-          "t0": 974.66072,
-          "t1": 974.8607,
+          "word": "в",
+          "t0": 929.6007199999999,
+          "t1": 929.9006999999999,
           "emph": false
         },
         {
-          "word": "никто",
-          "t0": 974.8607,
-          "t1": 975.0607,
+          "word": "нервной",
+          "t0": 929.9006999999999,
+          "t1": 930.20073,
           "emph": false
         },
         {
-          "word": "не",
-          "t0": 975.0607,
-          "t1": 975.1806999999999,
+          "word": "вашей",
+          "t0": 930.20073,
+          "t1": 930.4407199999999,
           "emph": false
         },
         {
-          "word": "нажимает,",
-          "t0": 975.1806999999999,
-          "t1": 976.0207,
+          "word": "системе,",
+          "t0": 930.4407199999999,
+          "t1": 931.04072,
           "emph": false
         },
         {
-          "word": "но",
-          "t0": 976.0207,
-          "t1": 976.1206999999999,
+          "word": "которая",
+          "t0": 931.04072,
+          "t1": 931.6206999999999,
           "emph": false
         },
         {
-          "word": "вы",
-          "t0": 976.1206999999999,
-          "t1": 976.2807,
+          "word": "сейчас",
+          "t0": 931.6206999999999,
+          "t1": 932.0006999999999,
           "emph": false
         },
         {
-          "word": "что",
-          "t0": 976.2807,
-          "t1": 976.4206999999999,
+          "word": "напряжена,",
+          "t0": 932.0006999999999,
+          "t1": 932.6206999999999,
           "emph": false
         },
         {
-          "word": "делаете,",
-          "t0": 976.4206999999999,
-          "t1": 976.9807,
+          "word": "и",
+          "t0": 932.6206999999999,
+          "t1": 932.7407,
           "emph": false
         },
         {
-          "word": "ребятки?",
-          "t0": 976.9807,
-          "t1": 977.2807,
+          "word": "мы",
+          "t0": 932.7407,
+          "t1": 932.8407,
           "emph": false
         },
         {
-          "word": "Вы",
-          "t0": 977.2807,
-          "t1": 977.7407,
+          "word": "будем",
+          "t0": 932.8407,
+          "t1": 933.0807,
           "emph": false
         },
         {
-          "word": "сами",
-          "t0": 977.7407,
-          "t1": 978.26072,
+          "word": "с",
+          "t0": 933.0807,
+          "t1": 933.22072,
           "emph": false
         },
         {
-          "word": "на",
-          "t0": 978.26072,
-          "t1": 978.8207199999999,
+          "word": "вами",
+          "t0": 933.22072,
+          "t1": 933.3407,
           "emph": false
         },
         {
-          "word": "себя",
-          "t0": 978.8207199999999,
-          "t1": 979.2807,
+          "word": "практику",
+          "t0": 933.3407,
+          "t1": 933.8207199999999,
           "emph": false
         },
         {
-          "word": "что",
-          "t0": 979.2807,
-          "t1": 979.5807,
+          "word": "делать,",
+          "t0": 933.8207199999999,
+          "t1": 934.4807,
           "emph": false
         },
         {
-          "word": "делаете?",
-          "t0": 979.5807,
-          "t1": 980.1206999999999,
+          "word": "которая",
+          "t0": 934.4807,
+          "t1": 934.66072,
           "emph": false
         },
         {
-          "word": "Жмете.",
-          "t0": 980.1206999999999,
-          "t1": 981.20073,
+          "word": "должна",
+          "t0": 934.66072,
+          "t1": 934.9407199999999,
+          "emph": false
+        },
+        {
+          "word": "раскрыть",
+          "t0": 934.9407199999999,
+          "t1": 935.3807199999999,
           "emph": true
         },
         {
+          "word": "вашу",
+          "t0": 935.3807199999999,
+          "t1": 935.64073,
+          "emph": false
+        },
+        {
+          "word": "нервную",
+          "t0": 935.64073,
+          "t1": 935.9607,
+          "emph": false
+        },
+        {
+          "word": "систему.",
+          "t0": 935.9607,
+          "t1": 936.4607,
+          "emph": false
+        },
+        {
+          "word": "Понятно?",
+          "t0": 936.9407199999999,
+          "t1": 937.4607,
+          "emph": false
+        },
+        {
+          "word": "Трансовую",
+          "t0": 937.4607,
+          "t1": 938.04072,
+          "emph": false
+        },
+        {
+          "word": "технику",
+          "t0": 938.04072,
+          "t1": 938.4607,
+          "emph": false
+        },
+        {
+          "word": "будем",
+          "t0": 938.4607,
+          "t1": 938.66072,
+          "emph": false
+        },
+        {
+          "word": "делать,",
+          "t0": 938.66072,
+          "t1": 938.9807,
+          "emph": false
+        },
+        {
+          "word": "дыхание,",
+          "t0": 938.9807,
+          "t1": 939.5207,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 939.5207,
+          "t1": 939.6806999999999,
+          "emph": false
+        },
+        {
+          "word": "эта",
+          "t0": 939.6806999999999,
+          "t1": 939.8607,
+          "emph": false
+        },
+        {
+          "word": "штука",
+          "t0": 939.8607,
+          "t1": 940.1007199999999,
+          "emph": false
+        },
+        {
+          "word": "хорошенько",
+          "t0": 940.1007199999999,
+          "t1": 940.6007199999999,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 940.6007199999999,
+          "t1": 940.72072,
+          "emph": false
+        },
+        {
+          "word": "вас",
+          "t0": 940.72072,
+          "t1": 940.8207199999999,
+          "emph": false
+        },
+        {
+          "word": "раскрылась.",
+          "t0": 940.8207199999999,
+          "t1": 941.3007,
+          "emph": false
+        },
+        {
           "word": "Если",
-          "t0": 981.54072,
+          "t0": 943.4929999999999,
+          "t1": 943.54072,
+          "emph": false
+        },
+        {
+          "word": "ребенка",
+          "t0": 943.54072,
+          "t1": 944.14073,
+          "emph": false
+        },
+        {
+          "word": "раскрыли",
+          "t0": 944.14073,
+          "t1": 944.54072,
+          "emph": false
+        },
+        {
+          "word": "изначально,",
+          "t0": 944.54072,
+          "t1": 945.6007199999999,
+          "emph": false
+        },
+        {
+          "word": "то",
+          "t0": 945.6007199999999,
+          "t1": 945.72072,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 945.72072,
+          "t1": 945.8407,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 945.8407,
+          "t1": 946.0607,
+          "emph": false
+        },
+        {
+          "word": "него?",
+          "t0": 946.0607,
+          "t1": 946.3807199999999,
+          "emph": false
+        },
+        {
+          "word": "него",
+          "t0": 946.5807,
+          "t1": 946.72072,
+          "emph": false
+        },
+        {
+          "word": "просто",
+          "t0": 946.72072,
+          "t1": 947.0006999999999,
+          "emph": false
+        },
+        {
+          "word": "нервная",
+          "t0": 947.0006999999999,
+          "t1": 947.3207199999999,
+          "emph": false
+        },
+        {
+          "word": "система",
+          "t0": 947.3207199999999,
+          "t1": 947.66072,
+          "emph": false
+        },
+        {
+          "word": "раскрылась,",
+          "t0": 947.66072,
+          "t1": 948.5006999999999,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 948.5006999999999,
+          "t1": 948.6206999999999,
+          "emph": false
+        },
+        {
+          "word": "он",
+          "t0": 948.6206999999999,
+          "t1": 948.72072,
+          "emph": false
+        },
+        {
+          "word": "свободный,",
+          "t0": 949.1569999999999,
+          "t1": 949.8007,
+          "emph": false
+        },
+        {
+          "word": "легкий,",
+          "t0": 949.8007,
+          "t1": 951.72072,
+          "emph": false
+        },
+        {
+          "word": "свободно",
+          "t0": 951.72072,
+          "t1": 951.9807,
+          "emph": false
+        },
+        {
+          "word": "выражается,",
+          "t0": 951.9807,
+          "t1": 952.76072,
+          "emph": false
+        },
+        {
+          "word": "идет",
+          "t0": 952.76072,
+          "t1": 952.9206999999999,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 952.9206999999999,
+          "t1": 953.0207,
+          "emph": false
+        },
+        {
+          "word": "отношения,",
+          "t0": 953.0207,
+          "t1": 954.14073,
+          "emph": false
+        },
+        {
+          "word": "бизнес.",
+          "t0": 954.14073,
+          "t1": 955.48,
+          "emph": false
+        }
+      ],
+      "end_drift_sec": null,
+      "end_snap_reason": null,
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 955.48,
+      "speed": 1.0,
+      "tail_last_word_end": 955.2,
+      "tail_next_word_start": 955.54,
+      "warnings": [],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [
+        [
+          948.72072,
+          955.5207
+        ]
+      ],
+      "planned": true
+    },
+    {
+      "id": "r08",
+      "start": 981.505,
+      "end": 1015.75,
+      "segments": [
+        {
+          "start": 981.505,
+          "end": 983.94,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 984.277,
+          "end": 989.235,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 989.986,
+          "end": 994.24,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 997.138,
+          "end": 998.882,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1000.448,
+          "end": 1004.38,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              3.255
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 1004.794,
+          "end": 1008.53,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1009.977,
+          "end": 1012.15,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1012.619,
+          "end": 1015.75,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "Закройте глаза и почувствуйте напряжение",
+      "score": 80,
+      "hook": "Вот такое творчество, такое",
+      "title": "",
+      "description": "Закройте глаза — почувствуйте напряжение, к которому вы привыкли, и расслабьте тело. #психология #расслабление",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 981.505,
+      "r0_end": 1015.75,
+      "flags": [
+        "human_merged"
+      ],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "Если",
+          "t0": 981.555,
           "t1": 981.6007199999999,
           "emph": false
         },
@@ -3642,7 +3916,7 @@
         },
         {
           "word": "вы",
-          "t0": 983.8407,
+          "t0": 984.327,
           "t1": 984.3807199999999,
           "emph": false
         },
@@ -3703,7 +3977,7 @@
         {
           "word": "есть.",
           "t0": 988.5807,
-          "t1": 990.1007199999999,
+          "t1": 989.235,
           "emph": false
         },
         {
@@ -3777,821 +4051,336 @@
           "t0": 993.20073,
           "t1": 994.0807,
           "emph": true
-        }
-      ],
-      "end_drift_sec": 0.2999999999999545,
-      "end_snap_reason": "sentence",
-      "start_drift_sec": null,
-      "start_snap_reason": null,
-      "start_repair_sec": null,
-      "ends_on_host_turn": false,
-      "open_thought": false,
-      "has_explicit_e": true,
-      "subtitle_gate": 994.3806999999999,
-      "speed": 1.0,
-      "tail_last_word_end": 994.2,
-      "tail_next_word_start": null,
-      "warnings": [
-        "dangling start: opens on «И»"
-      ],
-      "subtitle_emph_words": [],
-      "beat_gap_sec": null,
-      "zoom_source_t0": null,
-      "c_close_ranges": [
-        [
-          993.20073,
-          994.0807
-        ]
-      ]
-    },
-    {
-      "id": "r08",
-      "start": 1210.6409375,
-      "end": 1261.31,
-      "segments": [
-        {
-          "start": 1210.6409375,
-          "end": 1243.5,
-          "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              2.880000000000109
-            ],
-            [
-              14.6400000000001,
-              17.940000000000055
-            ],
-            [
-              26.319999999999936,
-              31.1400000000001
-            ]
-          ]
         },
         {
-          "start": 1244.2809375000002,
-          "end": 1252.5709375000001,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 1253.3100000000002,
-          "end": 1261.31,
-          "shot": "close",
-          "close_intervals": []
-        }
-      ],
-      "cold_open": null,
-      "title_overlay": "Вся жизнь — компенсация",
-      "score": 80,
-      "hook": "Мамы с папой, у меня папы уже давно нет, папа не давит, а папа давил",
-      "title": "",
-      "description": "Убегать, контролировать, подстраиваться, терпеть — это маски. Вместе они и есть ваша эго-конструкция. #психология #маски",
-      "reason": "human review",
-      "topic": "",
-      "r0_start": 1210.6409375,
-      "r0_end": 1261.3609375,
-      "flags": [
-        "human_merged"
-      ],
-      "self_contained_start": null,
-      "start_justification": "",
-      "rank": null,
-      "subtitles": [
-        {
-          "word": "А",
-          "t0": 1210.6409375,
-          "t1": 1210.7209375000002,
+          "word": "Просто",
+          "t0": 997.188,
+          "t1": 997.4006999999999,
           "emph": false
         },
         {
-          "word": "кто",
-          "t0": 1210.7209375000002,
-          "t1": 1210.9009375,
+          "word": "закройте",
+          "t0": 997.4006999999999,
+          "t1": 997.8607,
           "emph": false
         },
         {
-          "word": "давит",
-          "t0": 1210.9009375,
-          "t1": 1211.2809375000002,
+          "word": "глаза",
+          "t0": 997.8607,
+          "t1": 998.20073,
           "emph": false
         },
         {
-          "word": "на",
-          "t0": 1211.2809375000002,
-          "t1": 1211.4209375,
+          "word": "сейчас.",
+          "t0": 998.20073,
+          "t1": 998.6007199999999,
           "emph": false
         },
         {
-          "word": "меня?",
-          "t0": 1211.4209375,
-          "t1": 1213.5209375000002,
+          "word": "Поверьте",
+          "t0": 1000.54072,
+          "t1": 1000.9807,
           "emph": false
         },
         {
-          "word": "Я",
-          "t0": 1213.5209375000002,
-          "t1": 1213.6809375,
+          "word": "мне,",
+          "t0": 1000.9807,
+          "t1": 1001.9206999999999,
           "emph": false
         },
         {
-          "word": "сам",
-          "t0": 1213.6809375,
-          "t1": 1213.9609375,
+          "word": "каким-то",
+          "t0": 1001.9206999999999,
+          "t1": 1002.4006999999999,
           "emph": false
         },
         {
-          "word": "давлю.",
-          "t0": 1213.9609375,
-          "t1": 1214.3009375000001,
-          "emph": true
-        },
-        {
-          "word": "То",
-          "t0": 1214.3009375000001,
-          "t1": 1216.2009375,
+          "word": "образом",
+          "t0": 1002.4006999999999,
+          "t1": 1002.8207199999999,
           "emph": false
         },
         {
-          "word": "есть",
-          "t0": 1216.2009375,
-          "t1": 1216.2609375000002,
-          "emph": false
-        },
-        {
-          "word": "я",
-          "t0": 1216.2609375000002,
-          "t1": 1216.4209375,
-          "emph": false
-        },
-        {
-          "word": "где-то",
-          "t0": 1216.4209375,
-          "t1": 1216.7009375,
-          "emph": false
-        },
-        {
-          "word": "убегаю,",
-          "t0": 1216.7009375,
-          "t1": 1217.8809375,
-          "emph": false
-        },
-        {
-          "word": "вместо",
-          "t0": 1217.8809375,
-          "t1": 1217.9409375,
-          "emph": false
-        },
-        {
-          "word": "того,",
-          "t0": 1217.9409375,
-          "t1": 1218.3009375000001,
-          "emph": false
-        },
-        {
-          "word": "чтобы",
-          "t0": 1218.3009375000001,
-          "t1": 1218.4009375,
-          "emph": false
-        },
-        {
-          "word": "подождать,",
-          "t0": 1218.4009375,
-          "t1": 1219.0609375000001,
-          "emph": false
-        },
-        {
-          "word": "допустим,",
-          "t0": 1219.0609375000001,
-          "t1": 1219.5009375000002,
-          "emph": false
-        },
-        {
-          "word": "а",
-          "t0": 1219.5009375000002,
-          "t1": 1220.2209375000002,
-          "emph": false
-        },
-        {
-          "word": "вдруг",
-          "t0": 1220.2209375000002,
-          "t1": 1220.5009375000002,
-          "emph": false
-        },
-        {
-          "word": "там",
-          "t0": 1220.5009375000002,
-          "t1": 1221.0009375000002,
-          "emph": false
-        },
-        {
-          "word": "что-то",
-          "t0": 1221.0009375000002,
-          "t1": 1221.2009375,
-          "emph": false
-        },
-        {
-          "word": "вкусное",
-          "t0": 1221.2009375,
-          "t1": 1221.7409375000002,
-          "emph": false
-        },
-        {
-          "word": "и",
-          "t0": 1221.7409375000002,
-          "t1": 1222.0609375000001,
-          "emph": false
-        },
-        {
-          "word": "прикольное.",
-          "t0": 1222.0609375000001,
-          "t1": 1222.6409375,
-          "emph": false
-        },
-        {
-          "word": "Я",
-          "t0": 1222.6409375,
-          "t1": 1223.2409375000002,
-          "emph": false
-        },
-        {
-          "word": "что-то",
-          "t0": 1223.2409375000002,
-          "t1": 1223.5009375000002,
-          "emph": false
-        },
-        {
-          "word": "контролирую,",
-          "t0": 1223.5009375000002,
-          "t1": 1224.3009375000001,
-          "emph": false
-        },
-        {
-          "word": "понятно,",
-          "t0": 1224.3009375000001,
-          "t1": 1224.7609375000002,
-          "emph": false
-        },
-        {
-          "word": "да?",
-          "t0": 1224.7609375000002,
-          "t1": 1225.2809375000002,
-          "emph": false
-        },
-        {
-          "word": "Вместо",
-          "t0": 1225.2809375000002,
-          "t1": 1225.4409375,
-          "emph": false
-        },
-        {
-          "word": "того,",
-          "t0": 1225.4409375,
-          "t1": 1225.8409375,
-          "emph": false
-        },
-        {
-          "word": "чтобы",
-          "t0": 1225.8409375,
-          "t1": 1225.9809375000002,
-          "emph": false
-        },
-        {
-          "word": "что-то",
-          "t0": 1225.9809375000002,
-          "t1": 1226.3009375000001,
-          "emph": false
-        },
-        {
-          "word": "делегировать.",
-          "t0": 1226.3009375000001,
-          "t1": 1228.5809375000001,
-          "emph": false
-        },
-        {
-          "word": "Я",
-          "t0": 1228.5809375000001,
-          "t1": 1228.6809375,
-          "emph": false
-        },
-        {
-          "word": "что-то",
-          "t0": 1228.6809375,
-          "t1": 1229.0609375000001,
-          "emph": false
-        },
-        {
-          "word": "там",
-          "t0": 1229.0609375000001,
-          "t1": 1229.9209375,
-          "emph": false
-        },
-        {
-          "word": "под",
-          "t0": 1229.9209375,
-          "t1": 1230.3809375,
-          "emph": false
-        },
-        {
-          "word": "кого-то",
-          "t0": 1230.3809375,
-          "t1": 1230.6609375,
-          "emph": false
-        },
-        {
-          "word": "подстраиваюсь,",
-          "t0": 1230.6609375,
-          "t1": 1231.3409375,
-          "emph": false
-        },
-        {
-          "word": "хотя",
-          "t0": 1231.3409375,
-          "t1": 1231.5609375000001,
-          "emph": false
-        },
-        {
-          "word": "бы",
-          "t0": 1231.5609375000001,
-          "t1": 1231.7209375000002,
-          "emph": false
-        },
-        {
-          "word": "меня",
-          "t0": 1231.7209375000002,
-          "t1": 1231.9609375,
-          "emph": false
-        },
-        {
-          "word": "где-то",
-          "t0": 1231.9609375,
-          "t1": 1232.8809375,
-          "emph": false
-        },
-        {
-          "word": "там",
-          "t0": 1232.8809375,
-          "t1": 1233.2809375000002,
-          "emph": false
-        },
-        {
-          "word": "или",
-          "t0": 1233.2809375000002,
-          "t1": 1233.6009375,
+          "word": "мама",
+          "t0": 1002.8207199999999,
+          "t1": 1003.1206999999999,
           "emph": false
         },
         {
           "word": "с",
-          "t0": 1233.6009375,
-          "t1": 1233.7609375000002,
+          "t0": 1003.1206999999999,
+          "t1": 1003.2807,
           "emph": false
         },
         {
-          "word": "вами,",
-          "t0": 1233.7609375000002,
-          "t1": 1234.0809375000001,
+          "word": "папой,",
+          "t0": 1003.2807,
+          "t1": 1003.6806999999999,
           "emph": false
         },
         {
-          "word": "что",
-          "t0": 1234.0809375000001,
-          "t1": 1234.7209375000002,
+          "word": "учителя",
+          "t0": 1003.6806999999999,
+          "t1": 1004.26072,
           "emph": false
         },
         {
-          "word": "просто",
-          "t0": 1234.7209375000002,
-          "t1": 1235.2409375000002,
+          "word": "обязательно",
+          "t0": 1004.8439999999999,
+          "t1": 1005.3407,
           "emph": false
         },
         {
-          "word": "плохо",
-          "t0": 1235.2409375000002,
-          "t1": 1235.6609375,
+          "word": "где-то,",
+          "t0": 1005.3407,
+          "t1": 1005.7807,
           "emph": false
         },
         {
-          "word": "относится.",
-          "t0": 1235.6609375,
-          "t1": 1236.9609375,
+          "word": "скорее",
+          "t0": 1005.7807,
+          "t1": 1006.04072,
           "emph": false
         },
         {
-          "word": "Вас",
-          "t0": 1236.9609375,
-          "t1": 1237.1209375,
+          "word": "всего,",
+          "t0": 1006.04072,
+          "t1": 1006.3007,
           "emph": false
         },
         {
-          "word": "вытирают",
-          "t0": 1237.1209375,
-          "t1": 1237.6009375,
-          "emph": false
-        },
-        {
-          "word": "ноги",
-          "t0": 1237.6009375,
-          "t1": 1237.8609375,
-          "emph": false
-        },
-        {
-          "word": "просто,",
-          "t0": 1237.8609375,
-          "t1": 1238.2409375000002,
-          "emph": false
-        },
-        {
-          "word": "а",
-          "t0": 1238.2409375000002,
-          "t1": 1238.3009375000001,
-          "emph": false
-        },
-        {
-          "word": "вы",
-          "t0": 1238.3009375000001,
-          "t1": 1238.3809375,
-          "emph": false
-        },
-        {
-          "word": "терпите,",
-          "t0": 1238.3809375,
-          "t1": 1239.2009375,
-          "emph": false
-        },
-        {
-          "word": "потому",
-          "t0": 1239.2009375,
-          "t1": 1239.3809375,
-          "emph": false
-        },
-        {
-          "word": "что",
-          "t0": 1239.3809375,
-          "t1": 1239.5409375000002,
-          "emph": false
-        },
-        {
-          "word": "вы",
-          "t0": 1239.5409375000002,
-          "t1": 1239.6809375,
-          "emph": false
-        },
-        {
-          "word": "боитесь",
-          "t0": 1239.6809375,
-          "t1": 1240.1009375,
-          "emph": false
-        },
-        {
-          "word": "расстаться",
-          "t0": 1240.1009375,
-          "t1": 1241.2809375000002,
-          "emph": false
-        },
-        {
-          "word": "с",
-          "t0": 1241.2809375000002,
-          "t1": 1241.5609375000001,
-          "emph": false
-        },
-        {
-          "word": "этим",
-          "t0": 1241.5609375000001,
-          "t1": 1241.7209375000002,
-          "emph": false
-        },
-        {
-          "word": "партнером,",
-          "t0": 1241.7209375000002,
-          "t1": 1242.3009375000001,
-          "emph": false
-        },
-        {
-          "word": "с",
-          "t0": 1242.3009375000001,
-          "t1": 1242.3609375,
-          "emph": false
-        },
-        {
-          "word": "этой",
-          "t0": 1242.3609375,
-          "t1": 1242.4809375000002,
-          "emph": false
-        },
-        {
-          "word": "работой",
-          "t0": 1242.4809375000002,
-          "t1": 1242.9409375,
-          "emph": false
-        },
-        {
-          "word": "и",
-          "t0": 1242.9409375,
-          "t1": 1243.1409375,
-          "emph": false
-        },
-        {
-          "word": "так",
-          "t0": 1243.1409375,
-          "t1": 1243.2209375000002,
-          "emph": false
-        },
-        {
-          "word": "далее.",
-          "t0": 1243.2209375000002,
-          "t1": 1243.8209375000001,
-          "emph": false
-        },
-        {
-          "word": "Понятно,",
-          "t0": 1243.7609375000002,
-          "t1": 1244.0809375000001,
-          "emph": false
-        },
-        {
-          "word": "как",
-          "t0": 1244.0809375000001,
-          "t1": 1244.2209375000002,
-          "emph": false
-        },
-        {
-          "word": "это",
-          "t0": 1244.2209375000002,
-          "t1": 1244.4809375000002,
-          "emph": false
-        },
-        {
-          "word": "у",
-          "t0": 1244.4809375000002,
-          "t1": 1244.5409375000002,
-          "emph": false
-        },
-        {
-          "word": "нас",
-          "t0": 1244.5409375000002,
-          "t1": 1244.6209375,
-          "emph": false
-        },
-        {
-          "word": "происходит?",
-          "t0": 1244.6209375,
-          "t1": 1245.4009375,
-          "emph": false
-        },
-        {
-          "word": "У",
-          "t0": 1245.4009375,
-          "t1": 1245.4209375,
-          "emph": false
-        },
-        {
-          "word": "каждого",
-          "t0": 1245.4209375,
-          "t1": 1245.8409375,
-          "emph": false
-        },
-        {
-          "word": "какой-то",
-          "t0": 1245.8409375,
-          "t1": 1246.5009375000002,
-          "emph": false
-        },
-        {
-          "word": "защитный",
-          "t0": 1246.5009375000002,
-          "t1": 1246.9609375,
-          "emph": false
-        },
-        {
-          "word": "механизм",
-          "t0": 1246.9609375,
-          "t1": 1247.5409375000002,
-          "emph": false
-        },
-        {
-          "word": "свой.",
-          "t0": 1247.5409375000002,
-          "t1": 1249.6409375,
-          "emph": false
-        },
-        {
-          "word": "И",
-          "t0": 1249.6409375,
-          "t1": 1249.7209375000002,
-          "emph": false
-        },
-        {
-          "word": "тогда",
-          "t0": 1249.7209375000002,
-          "t1": 1250.0809375000001,
-          "emph": false
-        },
-        {
-          "word": "вся",
-          "t0": 1250.0809375000001,
-          "t1": 1250.5409375000002,
-          "emph": false
-        },
-        {
-          "word": "жизнь",
-          "t0": 1250.5409375000002,
-          "t1": 1250.7609375000002,
-          "emph": false
-        },
-        {
-          "word": "превращается",
-          "t0": 1250.7609375000002,
-          "t1": 1251.3409375,
-          "emph": false
-        },
-        {
-          "word": "в",
-          "t0": 1251.3409375,
-          "t1": 1251.5209375000002,
-          "emph": false
-        },
-        {
-          "word": "компенсацию.",
-          "t0": 1251.5209375000002,
-          "t1": 1252.4809375000002,
-          "emph": true
-        },
-        {
-          "word": "Понятно?",
-          "t0": 1252.4809375000002,
-          "t1": 1253.3809375,
+          "word": "нажали.",
+          "t0": 1006.3007,
+          "t1": 1007.0207,
           "emph": false
         },
         {
           "word": "Но",
-          "t0": 1253.3809375,
-          "t1": 1253.5809375000001,
+          "t0": 1007.0207,
+          "t1": 1007.16072,
           "emph": false
         },
         {
-          "word": "вы",
-          "t0": 1253.5809375000001,
-          "t1": 1253.7609375000002,
+          "word": "так",
+          "t0": 1007.16072,
+          "t1": 1007.3207199999999,
           "emph": false
         },
         {
-          "word": "это",
-          "t0": 1253.7609375000002,
-          "t1": 1253.9609375,
+          "word": "устроен",
+          "t0": 1007.3207199999999,
+          "t1": 1007.8207199999999,
           "emph": false
         },
         {
-          "word": "четко",
-          "t0": 1253.9609375,
-          "t1": 1254.3409375,
+          "word": "внешний",
+          "t0": 1007.8207199999999,
+          "t1": 1008.2407,
           "emph": false
         },
         {
-          "word": "можете",
-          "t0": 1254.3409375,
-          "t1": 1254.7209375000002,
+          "word": "мир.",
+          "t0": 1008.2407,
+          "t1": 1008.5006999999999,
           "emph": false
         },
         {
-          "word": "отследить.",
-          "t0": 1254.7209375000002,
-          "t1": 1255.5409375000002,
+          "word": "И",
+          "t0": 1010.0269999999999,
+          "t1": 1010.0607,
           "emph": false
         },
         {
-          "word": "Это",
-          "t0": 1255.5409375000002,
-          "t1": 1255.7409375000002,
+          "word": "прям",
+          "t0": 1010.0607,
+          "t1": 1010.22072,
           "emph": false
         },
         {
-          "word": "и",
-          "t0": 1255.7409375000002,
-          "t1": 1256.0009375000002,
-          "emph": false
-        },
-        {
-          "word": "есть",
-          "t0": 1256.0009375000002,
-          "t1": 1256.2409375000002,
-          "emph": false
-        },
-        {
-          "word": "ваши",
-          "t0": 1256.2409375000002,
-          "t1": 1257.5609375000001,
-          "emph": false
-        },
-        {
-          "word": "маски",
-          "t0": 1257.5609375000001,
-          "t1": 1258.0209375000002,
-          "emph": false
-        },
-        {
-          "word": "все",
-          "t0": 1258.0209375000002,
-          "t1": 1258.4209375,
-          "emph": false
-        },
-        {
-          "word": "вместе.",
-          "t0": 1258.4209375,
-          "t1": 1259.3609375,
-          "emph": false
-        },
-        {
-          "word": "Это",
-          "t0": 1259.3609375,
-          "t1": 1259.5609375000001,
+          "word": "почувствуйте",
+          "t0": 1010.22072,
+          "t1": 1010.8807199999999,
           "emph": false
         },
         {
           "word": "и",
-          "t0": 1259.5609375000001,
-          "t1": 1259.6809375,
+          "t0": 1010.8807199999999,
+          "t1": 1011.0207,
           "emph": false
         },
         {
-          "word": "есть",
-          "t0": 1259.6809375,
-          "t1": 1259.7809375000002,
+          "word": "расслабьте",
+          "t0": 1011.0207,
+          "t1": 1011.4407199999999,
+          "emph": true
+        },
+        {
+          "word": "свои",
+          "t0": 1011.4407199999999,
+          "t1": 1011.70073,
           "emph": false
         },
         {
-          "word": "ваша",
-          "t0": 1259.7809375000002,
-          "t1": 1260.0809375000001,
+          "word": "ноги,",
+          "t0": 1011.70073,
+          "t1": 1012.1007199999999,
           "emph": false
         },
         {
-          "word": "эго-конструкция.",
-          "t0": 1260.0809375000001,
-          "t1": 1261.3609375,
+          "word": "расслабьте",
+          "t0": 1012.669,
+          "t1": 1013.0607,
+          "emph": true
+        },
+        {
+          "word": "свои",
+          "t0": 1013.0607,
+          "t1": 1013.3607,
+          "emph": false
+        },
+        {
+          "word": "руки,",
+          "t0": 1013.3607,
+          "t1": 1014.20073,
+          "emph": false
+        },
+        {
+          "word": "расслабьте",
+          "t0": 1014.20073,
+          "t1": 1014.4807,
+          "emph": true
+        },
+        {
+          "word": "свое",
+          "t0": 1014.4807,
+          "t1": 1014.7407,
+          "emph": false
+        },
+        {
+          "word": "туловище.",
+          "t0": 1014.7407,
+          "t1": 1015.4006999999999,
           "emph": false
         }
       ],
-      "end_drift_sec": 0.2999999999999545,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": null,
+      "end_snap_reason": null,
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 1261.6609375,
+      "subtitle_gate": 1015.75,
       "speed": 1.0,
-      "tail_last_word_end": 1261.04,
-      "tail_next_word_start": 1261.3609375,
-      "warnings": [
-        "ends_on_filler: 'Понятно?'",
-        "last subtitle word 'эго-конструкция.' (t0=1260.081s) != last transcript word before r0_end 'Понятно?' (t0=1261.361s, r0_end=1263.561s) — word was excluded by audible_end",
-        "dangling start: opens on «А»"
-      ],
+      "tail_last_word_end": 1015.45,
+      "tail_next_word_start": 1016.02,
+      "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          1251.5209375000002,
-          1252.4809375000002
+          1011.0207,
+          1015.4006999999999
         ]
-      ]
+      ],
+      "planned": true
     },
     {
       "id": "r09",
-      "start": 1420.7598175,
-      "end": 1444.29,
+      "start": 1133.236,
+      "end": 1196.358,
       "segments": [
         {
-          "start": 1420.7598175,
-          "end": 1421.2498175,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 1422.0,
-          "end": 1427.5898075,
-          "shot": "close",
-          "close_intervals": []
-        },
-        {
-          "start": 1428.5898175000002,
-          "end": 1444.29,
+          "start": 1133.236,
+          "end": 1137.185,
           "shot": "wide",
-          "close_intervals": []
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1138.074,
+          "end": 1143.97,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1145.785,
+          "end": 1155.083,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              6.9
+            ]
+          ],
+          "window_cut": false
+        },
+        {
+          "start": 1155.404,
+          "end": 1157.78,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1172.976,
+          "end": 1174.135,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1175.283,
+          "end": 1180.67,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              4.479
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 1181.643,
+          "end": 1186.175,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1186.99,
+          "end": 1190.521,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1191.231,
+          "end": 1196.358,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              3.878,
+              5.127
+            ]
+          ],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Дыхание связано с телом, эмоциями и умом",
-      "score": 80,
-      "hook": "Ну, понятно, что вы совсем другие",
+      "title_overlay": "Вы должны быть сильным",
+      "score": 68,
+      "hook": "Вызываете, ну не дай бог, вызываете скорую помощь",
       "title": "",
-      "description": "Меняется эмоция — меняется дыхание. Меняется дыхание — меняется всё остальное. #дыхание #психология",
+      "description": "Ваш ресурс не безграничен — научитесь восполнять его, чтобы не сгореть на работе. #психология #восстановление",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1420.7598175,
-      "r0_end": 1445.5598075,
+      "r0_start": 1133.236,
+      "r0_end": 1196.358,
       "flags": [
         "human_merged"
       ],
@@ -4599,6 +4388,1317 @@
       "start_justification": "",
       "rank": null,
       "subtitles": [
+        {
+          "word": "Когда",
+          "t0": 1133.286,
+          "t1": 1133.5108500000001,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 1133.5108500000001,
+          "t1": 1133.75084,
+          "emph": false
+        },
+        {
+          "word": "вас",
+          "t0": 1133.75084,
+          "t1": 1133.9108,
+          "emph": false
+        },
+        {
+          "word": "уже",
+          "t0": 1133.9108,
+          "t1": 1134.2908,
+          "emph": false
+        },
+        {
+          "word": "вдруг",
+          "t0": 1134.2908,
+          "t1": 1135.1308399999998,
+          "emph": false
+        },
+        {
+          "word": "болит",
+          "t0": 1135.1308399999998,
+          "t1": 1135.5508,
+          "emph": false
+        },
+        {
+          "word": "спина,",
+          "t0": 1135.5508,
+          "t1": 1136.7107999999998,
+          "emph": false
+        },
+        {
+          "word": "понятно?",
+          "t0": 1136.7107999999998,
+          "t1": 1137.185,
+          "emph": false
+        },
+        {
+          "word": "Это",
+          "t0": 1138.1707999999999,
+          "t1": 1138.2908,
+          "emph": false
+        },
+        {
+          "word": "когда",
+          "t0": 1138.2908,
+          "t1": 1138.69084,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 1138.69084,
+          "t1": 1139.69084,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1139.69084,
+          "t1": 1140.1508,
+          "emph": false
+        },
+        {
+          "word": "можете",
+          "t0": 1140.1508,
+          "t1": 1140.4308,
+          "emph": false
+        },
+        {
+          "word": "понять,",
+          "t0": 1140.4308,
+          "t1": 1141.0308,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 1141.0308,
+          "t1": 1141.1707999999999,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1141.1707999999999,
+          "t1": 1141.2307999999998,
+          "emph": false
+        },
+        {
+          "word": "выдерживаете",
+          "t0": 1141.2307999999998,
+          "t1": 1142.3508,
+          "emph": false
+        },
+        {
+          "word": "отношения",
+          "t0": 1142.3508,
+          "t1": 1142.8708299999998,
+          "emph": false
+        },
+        {
+          "word": "с",
+          "t0": 1142.8708299999998,
+          "t1": 1142.9708,
+          "emph": false
+        },
+        {
+          "word": "другим",
+          "t0": 1142.9708,
+          "t1": 1143.2107999999998,
+          "emph": false
+        },
+        {
+          "word": "человеком.",
+          "t0": 1143.2107999999998,
+          "t1": 1143.9108,
+          "emph": false
+        },
+        {
+          "word": "Когда",
+          "t0": 1145.8508,
+          "t1": 1145.9708,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 1145.9708,
+          "t1": 1146.2107999999998,
+          "emph": false
+        },
+        {
+          "word": "ходите",
+          "t0": 1146.2107999999998,
+          "t1": 1146.5308,
+          "emph": false
+        },
+        {
+          "word": "на",
+          "t0": 1146.5308,
+          "t1": 1146.6508,
+          "emph": false
+        },
+        {
+          "word": "работу,",
+          "t0": 1146.6508,
+          "t1": 1147.4708,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 1147.4708,
+          "t1": 1149.69084,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1149.69084,
+          "t1": 1149.81083,
+          "emph": false
+        },
+        {
+          "word": "выдерживаете",
+          "t0": 1149.81083,
+          "t1": 1150.8308,
+          "emph": false
+        },
+        {
+          "word": "какое-то",
+          "t0": 1150.8308,
+          "t1": 1151.19084,
+          "emph": false
+        },
+        {
+          "word": "нервное",
+          "t0": 1151.19084,
+          "t1": 1151.5708399999999,
+          "emph": false
+        },
+        {
+          "word": "напряжение,",
+          "t0": 1151.5708399999999,
+          "t1": 1152.75084,
+          "emph": false
+        },
+        {
+          "word": "вам",
+          "t0": 1152.75084,
+          "t1": 1152.8708299999998,
+          "emph": false
+        },
+        {
+          "word": "хочется",
+          "t0": 1152.8708299999998,
+          "t1": 1153.4308,
+          "emph": false
+        },
+        {
+          "word": "просто",
+          "t0": 1153.4308,
+          "t1": 1153.9508,
+          "emph": false
+        },
+        {
+          "word": "оттуда",
+          "t0": 1153.9508,
+          "t1": 1154.4508,
+          "emph": false
+        },
+        {
+          "word": "сбежать,",
+          "t0": 1154.4508,
+          "t1": 1155.083,
+          "emph": true
+        },
+        {
+          "word": "вам",
+          "t0": 1155.4708,
+          "t1": 1155.5708399999999,
+          "emph": false
+        },
+        {
+          "word": "хочется",
+          "t0": 1155.5708399999999,
+          "t1": 1156.0508,
+          "emph": false
+        },
+        {
+          "word": "встать",
+          "t0": 1156.0508,
+          "t1": 1156.89085,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1156.89085,
+          "t1": 1157.2307999999998,
+          "emph": false
+        },
+        {
+          "word": "уйти.",
+          "t0": 1157.2307999999998,
+          "t1": 1157.5508,
+          "emph": false
+        },
+        {
+          "word": "У",
+          "t0": 1173.026,
+          "t1": 1173.0508,
+          "emph": false
+        },
+        {
+          "word": "каждого",
+          "t0": 1173.0508,
+          "t1": 1173.31083,
+          "emph": false
+        },
+        {
+          "word": "что-то",
+          "t0": 1173.31083,
+          "t1": 1173.5908,
+          "emph": false
+        },
+        {
+          "word": "свое.",
+          "t0": 1173.5908,
+          "t1": 1173.9108,
+          "emph": false
+        },
+        {
+          "word": "Вы",
+          "t0": 1175.3508,
+          "t1": 1175.4908,
+          "emph": false
+        },
+        {
+          "word": "должны",
+          "t0": 1175.4908,
+          "t1": 1175.5108500000001,
+          "emph": false
+        },
+        {
+          "word": "быть",
+          "t0": 1175.5108500000001,
+          "t1": 1175.5308,
+          "emph": false
+        },
+        {
+          "word": "сильным,",
+          "t0": 1175.5308,
+          "t1": 1177.7908,
+          "emph": true
+        },
+        {
+          "word": "ваша",
+          "t0": 1177.7908,
+          "t1": 1178.81083,
+          "emph": false
+        },
+        {
+          "word": "нервная",
+          "t0": 1178.81083,
+          "t1": 1179.1308399999998,
+          "emph": false
+        },
+        {
+          "word": "система,",
+          "t0": 1179.1308399999998,
+          "t1": 1179.75084,
+          "emph": false
+        },
+        {
+          "word": "ваше",
+          "t0": 1179.75084,
+          "t1": 1179.9708,
+          "emph": false
+        },
+        {
+          "word": "тело,",
+          "t0": 1179.9708,
+          "t1": 1180.67,
+          "emph": false
+        },
+        {
+          "word": "ваша",
+          "t0": 1181.693,
+          "t1": 1182.2107999999998,
+          "emph": false
+        },
+        {
+          "word": "эмоциональная",
+          "t0": 1182.2107999999998,
+          "t1": 1183.1108,
+          "emph": false
+        },
+        {
+          "word": "сфера",
+          "t0": 1183.1108,
+          "t1": 1183.9308,
+          "emph": false
+        },
+        {
+          "word": "имеет",
+          "t0": 1183.9308,
+          "t1": 1184.3708299999998,
+          "emph": false
+        },
+        {
+          "word": "какой-то",
+          "t0": 1184.3708299999998,
+          "t1": 1184.8308,
+          "emph": false
+        },
+        {
+          "word": "ресурс.",
+          "t0": 1184.8308,
+          "t1": 1185.4108,
+          "emph": false
+        },
+        {
+          "word": "Это",
+          "t0": 1185.19084,
+          "t1": 1185.5108500000001,
+          "emph": false
+        },
+        {
+          "word": "понятно?",
+          "t0": 1185.5108500000001,
+          "t1": 1186.175,
+          "emph": false
+        },
+        {
+          "word": "И",
+          "t0": 1187.0508,
+          "t1": 1187.2107999999998,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 1187.2107999999998,
+          "t1": 1187.3308,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1187.3308,
+          "t1": 1187.5108500000001,
+          "emph": false
+        },
+        {
+          "word": "безгранична,",
+          "t0": 1187.5108500000001,
+          "t1": 1188.3708299999998,
+          "emph": false
+        },
+        {
+          "word": "друзья",
+          "t0": 1188.3708299999998,
+          "t1": 1188.5308,
+          "emph": false
+        },
+        {
+          "word": "мои.",
+          "t0": 1188.5308,
+          "t1": 1188.9508,
+          "emph": false
+        },
+        {
+          "word": "Ни",
+          "t0": 1188.7307999999998,
+          "t1": 1189.1508,
+          "emph": false
+        },
+        {
+          "word": "хрена",
+          "t0": 1189.1508,
+          "t1": 1189.4508,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1189.4508,
+          "t1": 1189.6308399999998,
+          "emph": false
+        },
+        {
+          "word": "безгранична.",
+          "t0": 1189.6308399999998,
+          "t1": 1190.4508,
+          "emph": true
+        },
+        {
+          "word": "И",
+          "t0": 1191.281,
+          "t1": 1191.4708,
+          "emph": false
+        },
+        {
+          "word": "нужно",
+          "t0": 1191.4708,
+          "t1": 1191.6707999999999,
+          "emph": false
+        },
+        {
+          "word": "научиться",
+          "t0": 1191.6707999999999,
+          "t1": 1192.39085,
+          "emph": false
+        },
+        {
+          "word": "что?",
+          "t0": 1192.39085,
+          "t1": 1192.89085,
+          "emph": false
+        },
+        {
+          "word": "Этот",
+          "t0": 1193.1108,
+          "t1": 1193.69084,
+          "emph": false
+        },
+        {
+          "word": "ресурс",
+          "t0": 1193.69084,
+          "t1": 1194.3508,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1194.3508,
+          "t1": 1194.5308,
+          "emph": false
+        },
+        {
+          "word": "делать?",
+          "t0": 1194.5308,
+          "t1": 1195.0908,
+          "emph": false
+        },
+        {
+          "word": "Восполнять.",
+          "t0": 1195.3508,
+          "t1": 1196.358,
+          "emph": true
+        }
+      ],
+      "end_drift_sec": null,
+      "end_snap_reason": "repaired_to_sentence",
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": true,
+      "has_explicit_e": true,
+      "subtitle_gate": 1196.358,
+      "speed": 1.0,
+      "tail_last_word_end": 1196.058,
+      "tail_next_word_start": 1196.81,
+      "warnings": [],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [
+        [
+          1195.3508,
+          1196.5308
+        ]
+      ],
+      "planned": true
+    },
+    {
+      "id": "r10",
+      "start": 1344.318,
+      "end": 1385.771,
+      "segments": [
+        {
+          "start": 1344.318,
+          "end": 1345.545,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1346.295,
+          "end": 1351.045,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1353.001,
+          "end": 1360.48,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1360.782,
+          "end": 1364.345,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1364.89,
+          "end": 1369.02,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1369.808,
+          "end": 1374.71,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1375.034,
+          "end": 1379.065,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1380.202,
+          "end": 1385.771,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              2.037,
+              5.569
+            ]
+          ],
+          "window_cut": true
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "найти в теле эту психосоматику",
+      "score": 78,
+      "hook": "Субтитры делал DimaTorzok Холотропное дыхание, ребёфинг, холоребёфинг под живой звук",
+      "title": "",
+      "description": "Техника дыхания помогает найти психосоматику в теле, проводя к трансу, где эго-конструкция отходит на второй план. Но она всё равно попадает в одни и те же ловушки. #психология #техника",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 1344.318,
+      "r0_end": 1385.771,
+      "flags": [
+        "human_merged"
+      ],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "Про",
+          "t0": 1344.368,
+          "t1": 1344.4809375,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1344.4809375,
+          "t1": 1344.6009375,
+          "emph": false
+        },
+        {
+          "word": "эта",
+          "t0": 1344.6009375,
+          "t1": 1344.8209375000001,
+          "emph": false
+        },
+        {
+          "word": "техника?",
+          "t0": 1344.8209375000001,
+          "t1": 1345.545,
+          "emph": false
+        },
+        {
+          "word": "Это",
+          "t0": 1346.345,
+          "t1": 1346.5409375000002,
+          "emph": false
+        },
+        {
+          "word": "техника",
+          "t0": 1346.5409375000002,
+          "t1": 1347.1809375,
+          "emph": false
+        },
+        {
+          "word": "про",
+          "t0": 1347.1809375,
+          "t1": 1347.5409375000002,
+          "emph": false
+        },
+        {
+          "word": "то,",
+          "t0": 1347.5409375000002,
+          "t1": 1348.2009375000002,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 1348.2009375000002,
+          "t1": 1348.5009375000002,
+          "emph": false
+        },
+        {
+          "word": "найти",
+          "t0": 1348.5009375000002,
+          "t1": 1349.0409375000002,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1349.0409375000002,
+          "t1": 1349.2809375000002,
+          "emph": false
+        },
+        {
+          "word": "теле",
+          "t0": 1349.2809375000002,
+          "t1": 1349.6809375,
+          "emph": false
+        },
+        {
+          "word": "эту",
+          "t0": 1349.6998275,
+          "t1": 1350.0798175,
+          "emph": false
+        },
+        {
+          "word": "психосоматику.",
+          "t0": 1350.0798175,
+          "t1": 1350.8798175000002,
+          "emph": true
+        },
+        {
+          "word": "Вы",
+          "t0": 1353.0598275000002,
+          "t1": 1353.1998275,
+          "emph": false
+        },
+        {
+          "word": "когда",
+          "t0": 1353.1998275,
+          "t1": 1353.4598175,
+          "emph": false
+        },
+        {
+          "word": "будете",
+          "t0": 1353.4598175,
+          "t1": 1353.7598175,
+          "emph": false
+        },
+        {
+          "word": "дышать",
+          "t0": 1353.7598175,
+          "t1": 1354.5598275000002,
+          "emph": false
+        },
+        {
+          "word": "глубоко",
+          "t0": 1354.5598275000002,
+          "t1": 1354.9998075,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1354.9998075,
+          "t1": 1355.1398275000001,
+          "emph": false
+        },
+        {
+          "word": "быстро,",
+          "t0": 1355.1398275000001,
+          "t1": 1355.9398175000001,
+          "emph": false
+        },
+        {
+          "word": "ваша",
+          "t0": 1355.9398175000001,
+          "t1": 1356.2398175,
+          "emph": false
+        },
+        {
+          "word": "эго-конструкция,",
+          "t0": 1356.2398175,
+          "t1": 1357.0798175,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 1357.0798175,
+          "t1": 1357.1998275,
+          "emph": false
+        },
+        {
+          "word": "войдете",
+          "t0": 1357.1998275,
+          "t1": 1357.5198175,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1357.5198175,
+          "t1": 1357.7398175,
+          "emph": false
+        },
+        {
+          "word": "транс.",
+          "t0": 1357.7398175,
+          "t1": 1357.9798275,
+          "emph": true
+        },
+        {
+          "word": "Что",
+          "t0": 1358.0798175,
+          "t1": 1358.2198175,
+          "emph": false
+        },
+        {
+          "word": "значит",
+          "t0": 1358.2198175,
+          "t1": 1358.4798275,
+          "emph": false
+        },
+        {
+          "word": "транс?",
+          "t0": 1358.4798275,
+          "t1": 1358.8398275000002,
+          "emph": false
+        },
+        {
+          "word": "Это",
+          "t0": 1359.6398275000001,
+          "t1": 1359.7998175,
+          "emph": false
+        },
+        {
+          "word": "когда",
+          "t0": 1359.7998175,
+          "t1": 1360.2598175,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 1360.8319999999999,
+          "t1": 1360.9198275,
+          "emph": false
+        },
+        {
+          "word": "вас",
+          "t0": 1360.9198275,
+          "t1": 1361.1798175000001,
+          "emph": false
+        },
+        {
+          "word": "расширенное",
+          "t0": 1361.1798175000001,
+          "t1": 1362.0198175,
+          "emph": false
+        },
+        {
+          "word": "состояние",
+          "t0": 1362.0198175,
+          "t1": 1363.1198175000002,
+          "emph": false
+        },
+        {
+          "word": "сознания,",
+          "t0": 1363.1198175000002,
+          "t1": 1363.7598175,
+          "emph": false
+        },
+        {
+          "word": "понятно?",
+          "t0": 1363.7598175,
+          "t1": 1364.345,
+          "emph": false
+        },
+        {
+          "word": "А",
+          "t0": 1364.9798275,
+          "t1": 1365.0798175,
+          "emph": false
+        },
+        {
+          "word": "ваша",
+          "t0": 1365.0798175,
+          "t1": 1365.3798175000002,
+          "emph": false
+        },
+        {
+          "word": "эго-конструкция",
+          "t0": 1365.3798175000002,
+          "t1": 1366.3598275000002,
+          "emph": false
+        },
+        {
+          "word": "уходит",
+          "t0": 1366.3598275000002,
+          "t1": 1366.7798075,
+          "emph": false
+        },
+        {
+          "word": "на",
+          "t0": 1366.7798075,
+          "t1": 1366.9198275,
+          "emph": false
+        },
+        {
+          "word": "второй",
+          "t0": 1366.9198275,
+          "t1": 1367.1998275,
+          "emph": false
+        },
+        {
+          "word": "план.",
+          "t0": 1367.1998275,
+          "t1": 1367.9998075,
+          "emph": false
+        },
+        {
+          "word": "Ваши",
+          "t0": 1367.8198175000002,
+          "t1": 1367.9998075,
+          "emph": false
+        },
+        {
+          "word": "мысли",
+          "t0": 1367.9998075,
+          "t1": 1368.3198175000002,
+          "emph": false
+        },
+        {
+          "word": "о",
+          "t0": 1368.3198175000002,
+          "t1": 1368.4598175,
+          "emph": false
+        },
+        {
+          "word": "себе,",
+          "t0": 1368.4598175,
+          "t1": 1369.02,
+          "emph": false
+        },
+        {
+          "word": "поддержание",
+          "t0": 1369.858,
+          "t1": 1370.4398175000001,
+          "emph": false
+        },
+        {
+          "word": "себя",
+          "t0": 1370.4398175000001,
+          "t1": 1370.7998175,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1370.7998175,
+          "t1": 1370.9798275,
+          "emph": false
+        },
+        {
+          "word": "своих",
+          "t0": 1370.9798275,
+          "t1": 1371.2198175,
+          "emph": false
+        },
+        {
+          "word": "сценариях,",
+          "t0": 1371.2198175,
+          "t1": 1371.8598275000002,
+          "emph": false
+        },
+        {
+          "word": "понятно?",
+          "t0": 1371.8598275000002,
+          "t1": 1372.6198175000002,
+          "emph": false
+        },
+        {
+          "word": "Саша",
+          "t0": 1374.0598275000002,
+          "t1": 1374.2798075,
+          "emph": false
+        },
+        {
+          "word": "—",
+          "t0": 1374.2798075,
+          "t1": 1374.4598175,
+          "emph": false
+        },
+        {
+          "word": "это",
+          "t0": 1374.4598175,
+          "t1": 1374.4798275,
+          "emph": false
+        },
+        {
+          "word": "тот",
+          "t0": 1374.4798275,
+          "t1": 1374.5398175,
+          "emph": false
+        },
+        {
+          "word": "человек,",
+          "t0": 1375.084,
+          "t1": 1375.6798175000001,
+          "emph": false
+        },
+        {
+          "word": "личность,",
+          "t0": 1375.6798175000001,
+          "t1": 1376.4398175000001,
+          "emph": false
+        },
+        {
+          "word": "эго-конструкция,",
+          "t0": 1376.4398175000001,
+          "t1": 1377.1398275000001,
+          "emph": false
+        },
+        {
+          "word": "которая",
+          "t0": 1377.1398275000001,
+          "t1": 1377.4398175000001,
+          "emph": false
+        },
+        {
+          "word": "думает",
+          "t0": 1377.4398175000001,
+          "t1": 1377.9598175,
+          "emph": false
+        },
+        {
+          "word": "определенным",
+          "t0": 1377.9598175,
+          "t1": 1378.4398175000001,
+          "emph": false
+        },
+        {
+          "word": "образом.",
+          "t0": 1378.4398175000001,
+          "t1": 1378.8198175000002,
+          "emph": false
+        },
+        {
+          "word": "И",
+          "t0": 1380.2798075,
+          "t1": 1380.3598275000002,
+          "emph": false
+        },
+        {
+          "word": "определенным",
+          "t0": 1380.3598275000002,
+          "t1": 1381.0398175,
+          "emph": false
+        },
+        {
+          "word": "образом",
+          "t0": 1381.0398175,
+          "t1": 1381.5398175,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1381.5398175,
+          "t1": 1381.6798175000001,
+          "emph": false
+        },
+        {
+          "word": "делает?",
+          "t0": 1381.6798175000001,
+          "t1": 1382.0798175,
+          "emph": false
+        },
+        {
+          "word": "Благополучно",
+          "t0": 1382.0798175,
+          "t1": 1383.0598275000002,
+          "emph": false
+        },
+        {
+          "word": "попадает",
+          "t0": 1383.0598275000002,
+          "t1": 1383.8798175000002,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1383.8798175000002,
+          "t1": 1384.2598175,
+          "emph": false
+        },
+        {
+          "word": "одну",
+          "t0": 1384.2598175,
+          "t1": 1384.4798275,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1384.4798275,
+          "t1": 1384.7998175,
+          "emph": false
+        },
+        {
+          "word": "ту",
+          "t0": 1384.7998175,
+          "t1": 1384.9798275,
+          "emph": false
+        },
+        {
+          "word": "же",
+          "t0": 1384.9798275,
+          "t1": 1385.2598175,
+          "emph": false
+        },
+        {
+          "word": "жопу.",
+          "t0": 1385.2598175,
+          "t1": 1385.771,
+          "emph": true
+        }
+      ],
+      "end_drift_sec": null,
+      "end_snap_reason": null,
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 1385.771,
+      "speed": 1.0,
+      "tail_last_word_end": 1385.77,
+      "tail_next_word_start": 1385.831,
+      "warnings": [],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [
+        [
+          1385.2598175,
+          1385.7798075
+        ]
+      ],
+      "planned": true
+    },
+    {
+      "id": "r11",
+      "start": 1407.189,
+      "end": 1437.5130000000001,
+      "segments": [
+        {
+          "start": 1407.189,
+          "end": 1409.0,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1413.674,
+          "end": 1417.7,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              3.102
+            ]
+          ],
+          "window_cut": false
+        },
+        {
+          "start": 1418.047,
+          "end": 1425.07,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1425.714,
+          "end": 1431.62,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              3.193,
+              5.906
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 1433.34,
+          "end": 1435.7,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1436.622,
+          "end": 1437.5130000000001,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "Как эмоция меняет дыхание",
+      "score": 75,
+      "hook": "Ну, понятно, что вы совсем другие",
+      "title": "",
+      "description": "Эмоция и дыхание тесно связаны. Меняя одно, меняем другое. #психология #дыхание",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 1407.189,
+      "r0_end": 1437.5130000000001,
+      "flags": [],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "Счастье",
+          "t0": 1407.2398175,
+          "t1": 1407.5798175,
+          "emph": false
+        },
+        {
+          "word": "у",
+          "t0": 1407.5798175,
+          "t1": 1407.6798175000001,
+          "emph": false
+        },
+        {
+          "word": "вас",
+          "t0": 1407.6798175000001,
+          "t1": 1407.7598175,
+          "emph": false
+        },
+        {
+          "word": "через",
+          "t0": 1407.7598175,
+          "t1": 1408.0398175,
+          "emph": false
+        },
+        {
+          "word": "край",
+          "t0": 1408.0398175,
+          "t1": 1408.2598175,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1408.2598175,
+          "t1": 1408.4398175000001,
+          "emph": false
+        },
+        {
+          "word": "так",
+          "t0": 1408.4398175000001,
+          "t1": 1408.5798175,
+          "emph": false
+        },
+        {
+          "word": "далее.",
+          "t0": 1408.5798175,
+          "t1": 1409.0,
+          "emph": false
+        },
+        {
+          "word": "Про",
+          "t0": 1413.724,
+          "t1": 1413.8398075,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1413.8398075,
+          "t1": 1414.1798175000001,
+          "emph": false
+        },
+        {
+          "word": "наша",
+          "t0": 1414.1798175000001,
+          "t1": 1414.8198175000002,
+          "emph": false
+        },
+        {
+          "word": "прекрасная",
+          "t0": 1414.8198175000002,
+          "t1": 1415.4798275,
+          "emph": false
+        },
+        {
+          "word": "техника,",
+          "t0": 1415.4798275,
+          "t1": 1416.0798275000002,
+          "emph": false
+        },
+        {
+          "word": "друзья",
+          "t0": 1416.0798275000002,
+          "t1": 1416.3998175000002,
+          "emph": false
+        },
+        {
+          "word": "мои?",
+          "t0": 1416.3998175000002,
+          "t1": 1416.6798175000001,
+          "emph": false
+        },
+        {
+          "word": "Оказывается,",
+          "t0": 1416.6798175000001,
+          "t1": 1417.7,
+          "emph": false
+        },
+        {
+          "word": "это",
+          "t0": 1418.0998175000002,
+          "t1": 1418.2598175,
+          "emph": false
+        },
+        {
+          "word": "техника",
+          "t0": 1418.2598175,
+          "t1": 1418.7198175,
+          "emph": false
+        },
+        {
+          "word": "по",
+          "t0": 1418.7198175,
+          "t1": 1418.9398175000001,
+          "emph": false
+        },
+        {
+          "word": "большей",
+          "t0": 1418.9398175000001,
+          "t1": 1419.2798075,
+          "emph": false
+        },
+        {
+          "word": "части",
+          "t0": 1419.2798075,
+          "t1": 1419.5998175000002,
+          "emph": false
+        },
+        {
+          "word": "про",
+          "t0": 1419.5998175000002,
+          "t1": 1419.7798075,
+          "emph": false
+        },
+        {
+          "word": "дыхание.",
+          "t0": 1419.7798075,
+          "t1": 1420.7598175,
+          "emph": false
+        },
         {
           "word": "Что",
           "t0": 1420.7598175,
@@ -4621,7 +5721,7 @@
           "word": "Дыхание",
           "t0": 1422.0798275000002,
           "t1": 1422.6198175000002,
-          "emph": false
+          "emph": true
         },
         {
           "word": "тесно",
@@ -4650,7 +5750,7 @@
         {
           "word": "телом,",
           "t0": 1424.5998175000002,
-          "t1": 1425.7798075,
+          "t1": 1425.07,
           "emph": false
         },
         {
@@ -4747,7 +5847,7 @@
           "word": "эмоция,",
           "t0": 1429.9798275,
           "t1": 1431.1198175000002,
-          "emph": false
+          "emph": true
         },
         {
           "word": "мысль",
@@ -4757,7 +5857,7 @@
         },
         {
           "word": "или",
-          "t0": 1431.5598075,
+          "t0": 1433.3899999999999,
           "t1": 1433.6598175000001,
           "emph": false
         },
@@ -4776,7 +5876,7 @@
         {
           "word": "теле,",
           "t0": 1435.3398075,
-          "t1": 1436.7198175,
+          "t1": 1435.7,
           "emph": false
         },
         {
@@ -4789,164 +5889,390 @@
           "word": "дыхание.",
           "t0": 1436.9798275,
           "t1": 1437.4998075,
-          "emph": true
-        },
-        {
-          "word": "И",
-          "t0": 1437.4998075,
-          "t1": 1437.6398275000001,
-          "emph": false
-        },
-        {
-          "word": "наоборот,",
-          "t0": 1437.6398275000001,
-          "t1": 1438.0398175,
-          "emph": false
-        },
-        {
-          "word": "меняется",
-          "t0": 1438.0398175,
-          "t1": 1438.2998375000002,
-          "emph": false
-        },
-        {
-          "word": "дыхание,",
-          "t0": 1438.2998375000002,
-          "t1": 1438.8398075,
-          "emph": false
-        },
-        {
-          "word": "что",
-          "t0": 1438.8398075,
-          "t1": 1438.9198275,
-          "emph": false
-        },
-        {
-          "word": "происходит?",
-          "t0": 1438.9198275,
-          "t1": 1440.1798175000001,
-          "emph": false
-        },
-        {
-          "word": "Меняется",
-          "t0": 1440.1798175000001,
-          "t1": 1440.5998175000002,
-          "emph": false
-        },
-        {
-          "word": "конструкция",
-          "t0": 1440.5998175000002,
-          "t1": 1441.3798175000002,
-          "emph": false
-        },
-        {
-          "word": "тела,",
-          "t0": 1441.3798175000002,
-          "t1": 1441.9398175000001,
-          "emph": false
-        },
-        {
-          "word": "ум,",
-          "t0": 1441.9398175000001,
-          "t1": 1442.5598075,
-          "emph": false
-        },
-        {
-          "word": "эмоции.",
-          "t0": 1442.5598075,
-          "t1": 1443.0798275000002,
-          "emph": true
-        },
-        {
-          "word": "И",
-          "t0": 1443.0798275000002,
-          "t1": 1443.1398275000001,
-          "emph": false
-        },
-        {
-          "word": "они",
-          "t0": 1443.1398275000001,
-          "t1": 1443.2798075,
-          "emph": false
-        },
-        {
-          "word": "между",
-          "t0": 1443.2798075,
-          "t1": 1443.4798275,
-          "emph": false
-        },
-        {
-          "word": "собой",
-          "t0": 1443.4798275,
-          "t1": 1443.7798075,
-          "emph": false
-        },
-        {
-          "word": "взаимосвязаны.",
-          "t0": 1443.7798075,
-          "t1": 1445.5598075,
           "emph": false
         }
       ],
-      "end_drift_sec": 0.2999999999999545,
+      "end_drift_sec": null,
       "end_snap_reason": "repaired_to_sentence",
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
-      "open_thought": false,
+      "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 1444.31,
+      "subtitle_gate": 1437.5130000000001,
       "speed": 1.0,
-      "tail_last_word_end": 1444.01,
-      "tail_next_word_start": 1445.1198175000002,
+      "tail_last_word_end": 1437.513,
+      "tail_next_word_start": 1437.573,
       "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          1436.9798275,
+          1429.9798275,
           1437.4998075
         ]
-      ]
+      ],
+      "planned": true
     },
     {
-      "id": "r10",
-      "start": 1487.4398175000001,
-      "end": 1519.27,
+      "id": "r12",
+      "start": 1470.422,
+      "end": 1534.13,
       "segments": [
         {
-          "start": 1487.4398175000001,
-          "end": 1519.27,
+          "start": 1470.422,
+          "end": 1479.03,
           "shot": "wide",
-          "close_intervals": [
-            [
-              0.0,
-              10.960019999999986
-            ],
-            [
-              20.258879999999863,
-              31.808880000000045
-            ]
-          ]
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1480.439,
+          "end": 1484.525,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1484.927,
+          "end": 1501.67,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1502.037,
+          "end": 1505.52,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1506.44,
+          "end": 1508.841,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1509.682,
+          "end": 1513.7,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1514.225,
+          "end": 1517.09,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1518.15,
+          "end": 1524.77,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1525.64,
+          "end": 1528.32,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1528.978,
+          "end": 1534.13,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
         }
       ],
       "cold_open": null,
-      "title_overlay": "Психика умеет излечить себя сама",
-      "score": 80,
-      "hook": "В боль какую-то, чтобы не пойти в ту травму",
+      "title_overlay": "злость была не выражена",
+      "score": 72,
+      "hook": "И наоборот, меняется дыхание, что происходит? Меняется конструкция тела, ум, эмоции",
       "title": "",
-      "description": "Когда эго уходит на второй план, на первый выходит телесный и эмоциональный интеллект. #психология #ребёфинг",
+      "description": "В трансовом дыхании эго-ослабевает, и тогда всплывают подавленные эмоции, которые мы не смогли выразить. #психология #эмоции",
       "reason": "human review",
       "topic": "",
-      "r0_start": 1487.4398175000001,
-      "r0_end": 1518.7986975000001,
-      "flags": [],
+      "r0_start": 1470.422,
+      "r0_end": 1534.13,
+      "flags": [
+        "human_merged"
+      ],
       "self_contained_start": null,
       "start_justification": "",
       "rank": null,
       "subtitles": [
+        {
+          "word": "В",
+          "t0": 1470.5198375,
+          "t1": 1470.5398175,
+          "emph": false
+        },
+        {
+          "word": "дыхании,",
+          "t0": 1470.5398175,
+          "t1": 1471.0998175,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1471.0998175,
+          "t1": 1471.1998375,
+          "emph": false
+        },
+        {
+          "word": "трансовом,",
+          "t0": 1471.1998375,
+          "t1": 1471.9998075,
+          "emph": false
+        },
+        {
+          "word": "эго-конструкция",
+          "t0": 1471.9998075,
+          "t1": 1472.7798075,
+          "emph": true
+        },
+        {
+          "word": "ваша",
+          "t0": 1472.7798075,
+          "t1": 1473.0798375000002,
+          "emph": false
+        },
+        {
+          "word": "уходит",
+          "t0": 1473.0798375000002,
+          "t1": 1473.4198375,
+          "emph": false
+        },
+        {
+          "word": "на",
+          "t0": 1473.4198375,
+          "t1": 1473.6198075000002,
+          "emph": false
+        },
+        {
+          "word": "второй",
+          "t0": 1473.6198075000002,
+          "t1": 1473.7997975,
+          "emph": false
+        },
+        {
+          "word": "план,",
+          "t0": 1473.7997975,
+          "t1": 1474.1198075000002,
+          "emph": false
+        },
+        {
+          "word": "вот",
+          "t0": 1474.1198075000002,
+          "t1": 1474.2198175,
+          "emph": false
+        },
+        {
+          "word": "эти",
+          "t0": 1474.2198175,
+          "t1": 1474.3198175000002,
+          "emph": false
+        },
+        {
+          "word": "защитные",
+          "t0": 1474.3198175000002,
+          "t1": 1474.7798375000002,
+          "emph": false
+        },
+        {
+          "word": "механизмы.",
+          "t0": 1474.7798375000002,
+          "t1": 1475.4198375,
+          "emph": false
+        },
+        {
+          "word": "Потому",
+          "t0": 1475.4198375,
+          "t1": 1476.0198375,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1476.0198375,
+          "t1": 1476.2798375000002,
+          "emph": false
+        },
+        {
+          "word": "эго-конструкция",
+          "t0": 1476.2798375000002,
+          "t1": 1477.1598175000001,
+          "emph": false
+        },
+        {
+          "word": "—",
+          "t0": 1477.1598175000001,
+          "t1": 1477.5398175,
+          "emph": false
+        },
+        {
+          "word": "это",
+          "t0": 1477.5398175,
+          "t1": 1477.5598075,
+          "emph": false
+        },
+        {
+          "word": "те",
+          "t0": 1477.5598075,
+          "t1": 1477.8398375000002,
+          "emph": false
+        },
+        {
+          "word": "самые",
+          "t0": 1477.8398375000002,
+          "t1": 1478.3798175000002,
+          "emph": false
+        },
+        {
+          "word": "пробки,",
+          "t0": 1478.3798175000002,
+          "t1": 1479.03,
+          "emph": false
+        },
+        {
+          "word": "это",
+          "t0": 1480.489,
+          "t1": 1480.6198075000002,
+          "emph": false
+        },
+        {
+          "word": "тот",
+          "t0": 1480.6198075000002,
+          "t1": 1480.7798375000002,
+          "emph": false
+        },
+        {
+          "word": "самый",
+          "t0": 1480.7798375000002,
+          "t1": 1481.0398175,
+          "emph": false
+        },
+        {
+          "word": "защитный",
+          "t0": 1481.0398175,
+          "t1": 1481.4598375,
+          "emph": false
+        },
+        {
+          "word": "механизм,",
+          "t0": 1481.4598375,
+          "t1": 1482.3198175000002,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 1482.3198175000002,
+          "t1": 1482.5598075,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1482.5598075,
+          "t1": 1482.7397975000001,
+          "emph": false
+        },
+        {
+          "word": "было",
+          "t0": 1482.7397975000001,
+          "t1": 1482.9198375,
+          "emph": false
+        },
+        {
+          "word": "больно,",
+          "t0": 1482.9198375,
+          "t1": 1483.3398375000002,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 1483.3398375000002,
+          "t1": 1483.4998075,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1483.4998075,
+          "t1": 1483.6398375,
+          "emph": false
+        },
+        {
+          "word": "пойти",
+          "t0": 1483.6398375,
+          "t1": 1483.9798375,
+          "emph": false
+        },
+        {
+          "word": "куда?",
+          "t0": 1483.9798375,
+          "t1": 1484.525,
+          "emph": false
+        },
+        {
+          "word": "В",
+          "t0": 1484.9798375,
+          "t1": 1485.0798375000002,
+          "emph": false
+        },
+        {
+          "word": "боль",
+          "t0": 1485.0798375000002,
+          "t1": 1485.3198175000002,
+          "emph": false
+        },
+        {
+          "word": "какую-то,",
+          "t0": 1485.3198175000002,
+          "t1": 1486.0798375000002,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 1486.0798375000002,
+          "t1": 1486.2997975,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1486.2997975,
+          "t1": 1486.4598375,
+          "emph": false
+        },
+        {
+          "word": "пойти",
+          "t0": 1486.4598375,
+          "t1": 1486.7598175,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1486.7598175,
+          "t1": 1486.9198375,
+          "emph": false
+        },
+        {
+          "word": "ту",
+          "t0": 1486.9198375,
+          "t1": 1486.9998075,
+          "emph": false
+        },
+        {
+          "word": "травму.",
+          "t0": 1486.9998075,
+          "t1": 1487.4398175000001,
+          "emph": false
+        },
         {
           "word": "А",
           "t0": 1487.4398175000001,
@@ -5153,7 +6479,7 @@
         },
         {
           "word": "на",
-          "t0": 1501.5386875000002,
+          "t0": 1502.087,
           "t1": 1502.1586875,
           "emph": false
         },
@@ -5195,9 +6521,9 @@
         },
         {
           "word": "интеллект.",
-          "t0": 1505.4186975000002,
+          "t0": 1506.49,
           "t1": 1507.6986975,
-          "emph": true
+          "emph": false
         },
         {
           "word": "Выходит",
@@ -5208,12 +6534,12 @@
         {
           "word": "ваша",
           "t0": 1508.0386875000002,
-          "t1": 1508.8586975,
+          "t1": 1508.841,
           "emph": false
         },
         {
           "word": "настоящая",
-          "t0": 1508.8586975,
+          "t0": 1509.732,
           "t1": 1510.3786875,
           "emph": false
         },
@@ -5243,7 +6569,7 @@
         },
         {
           "word": "находится",
-          "t0": 1513.5786975,
+          "t0": 1514.2749999999999,
           "t1": 1514.6986975,
           "emph": false
         },
@@ -5263,12 +6589,12 @@
           "word": "«излечи",
           "t0": 1515.6787075000002,
           "t1": 1516.3987075,
-          "emph": true
+          "emph": false
         },
         {
           "word": "себя»",
           "t0": 1516.3987075,
-          "t1": 1518.2986975000001,
+          "t1": 1517.09,
           "emph": false
         },
         {
@@ -5276,32 +6602,918 @@
           "t0": 1518.2986975000001,
           "t1": 1518.7986975000001,
           "emph": false
+        },
+        {
+          "word": "И",
+          "t0": 1519.2986975000001,
+          "t1": 1519.4186975000002,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 1519.4186975000002,
+          "t1": 1519.5386875000002,
+          "emph": false
+        },
+        {
+          "word": "находит",
+          "t0": 1519.5386875000002,
+          "t1": 1519.9387175000002,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1519.9387175000002,
+          "t1": 1520.0986875,
+          "emph": false
+        },
+        {
+          "word": "теле",
+          "t0": 1520.0986875,
+          "t1": 1520.4186975000002,
+          "emph": false
+        },
+        {
+          "word": "телесные",
+          "t0": 1520.4186975000002,
+          "t1": 1520.9186975000002,
+          "emph": false
+        },
+        {
+          "word": "зажимы,",
+          "t0": 1520.9186975000002,
+          "t1": 1521.4786975000002,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 1521.4786975000002,
+          "t1": 1521.8987075,
+          "emph": false
+        },
+        {
+          "word": "находит",
+          "t0": 1521.8987075,
+          "t1": 1522.3786875,
+          "emph": false
+        },
+        {
+          "word": "непроработанные",
+          "t0": 1522.3786875,
+          "t1": 1523.4186975000002,
+          "emph": false
+        },
+        {
+          "word": "эмоциональные…",
+          "t0": 1523.4186975000002,
+          "t1": 1524.6586875,
+          "emph": false
+        },
+        {
+          "word": "Что-то",
+          "t0": 1525.69,
+          "t1": 1526.0186975000001,
+          "emph": false
+        },
+        {
+          "word": "было",
+          "t0": 1526.0186975000001,
+          "t1": 1526.6187075,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1526.6187075,
+          "t1": 1527.0587075,
+          "emph": false
+        },
+        {
+          "word": "переварено",
+          "t0": 1527.0587075,
+          "t1": 1527.6586875,
+          "emph": false
+        },
+        {
+          "word": "где-то,",
+          "t0": 1527.6586875,
+          "t1": 1528.32,
+          "emph": false
+        },
+        {
+          "word": "что-то",
+          "t0": 1529.028,
+          "t1": 1529.2986975000001,
+          "emph": false
+        },
+        {
+          "word": "было",
+          "t0": 1529.2986975000001,
+          "t1": 1529.5587075,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1529.5587075,
+          "t1": 1530.1386975,
+          "emph": false
+        },
+        {
+          "word": "высказано,",
+          "t0": 1530.1386975,
+          "t1": 1531.1386975,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1531.1386975,
+          "t1": 1531.1986975,
+          "emph": false
+        },
+        {
+          "word": "выплакано,",
+          "t0": 1531.1986975,
+          "t1": 1532.7986975000001,
+          "emph": false
+        },
+        {
+          "word": "злость",
+          "t0": 1532.7986975000001,
+          "t1": 1533.1187075,
+          "emph": false
+        },
+        {
+          "word": "была",
+          "t0": 1533.1187075,
+          "t1": 1533.3186875000001,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1533.3186875000001,
+          "t1": 1533.4987175,
+          "emph": false
+        },
+        {
+          "word": "выражена.",
+          "t0": 1533.4987175,
+          "t1": 1533.8586975,
+          "emph": true
         }
       ],
-      "end_drift_sec": 0.2999999999999545,
-      "end_snap_reason": "sentence",
+      "end_drift_sec": null,
+      "end_snap_reason": null,
       "start_drift_sec": null,
       "start_snap_reason": null,
       "start_repair_sec": null,
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 1519.0986975,
+      "subtitle_gate": 1534.13,
       "speed": 1.0,
-      "tail_last_word_end": 1518.7986975000001,
-      "tail_next_word_start": null,
+      "tail_last_word_end": 1534.13,
+      "tail_next_word_start": 1534.19,
+      "warnings": [],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [
+        [
+          1533.4987175,
+          1533.8586975
+        ]
+      ],
+      "planned": true
+    },
+    {
+      "id": "r13",
+      "start": 1539.195,
+      "end": 1595.44,
+      "segments": [
+        {
+          "start": 1539.195,
+          "end": 1548.314,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1548.654,
+          "end": 1551.93,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1552.657,
+          "end": 1556.42,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1556.74,
+          "end": 1557.951,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1565.976,
+          "end": 1568.33,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 1568.771,
+          "end": 1573.59,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              2.8315
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 1574.355,
+          "end": 1580.11,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1580.519,
+          "end": 1584.165,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1584.63,
+          "end": 1587.0,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.923,
+              2.37
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 1591.447,
+          "end": 1593.59,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 1594.151,
+          "end": 1595.44,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": true
+        }
+      ],
+      "cold_open": null,
+      "title_overlay": "Спуститься чем глубже к корневой проблеме",
+      "score": 70,
+      "hook": "Что-то было не реализовано когда-то, и оно, ребятки, застряло",
+      "title": "",
+      "description": "Глубокое дыхание позволяет психике самой находить и освобождать напряжение, ведущее к корневой проблеме. #психология #медитация",
+      "reason": "human review",
+      "topic": "",
+      "r0_start": 1539.195,
+      "r0_end": 1595.44,
+      "flags": [
+        "human_merged"
+      ],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "И",
+          "t0": 1539.245,
+          "t1": 1539.2787075,
+          "emph": false
+        },
+        {
+          "word": "когда",
+          "t0": 1539.2787075,
+          "t1": 1539.4186975000002,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 1539.4186975000002,
+          "t1": 1539.5386875000002,
+          "emph": false
+        },
+        {
+          "word": "начинаете",
+          "t0": 1539.5386875000002,
+          "t1": 1540.0186975000001,
+          "emph": false
+        },
+        {
+          "word": "дышать",
+          "t0": 1540.0186975000001,
+          "t1": 1540.3987075,
+          "emph": false
+        },
+        {
+          "word": "глубоко",
+          "t0": 1540.3987075,
+          "t1": 1540.7986975000001,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1540.7986975000001,
+          "t1": 1540.9387175000002,
+          "emph": false
+        },
+        {
+          "word": "быстро,",
+          "t0": 1540.9387175000002,
+          "t1": 1541.1986975,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1541.1986975,
+          "t1": 1541.3787175000002,
+          "emph": false
+        },
+        {
+          "word": "с",
+          "t0": 1541.3787175000002,
+          "t1": 1541.5386875000002,
+          "emph": false
+        },
+        {
+          "word": "вами",
+          "t0": 1541.5386875000002,
+          "t1": 1541.6586875,
+          "emph": false
+        },
+        {
+          "word": "происходит?",
+          "t0": 1541.6586875,
+          "t1": 1542.3987075,
+          "emph": false
+        },
+        {
+          "word": "С",
+          "t0": 1542.4186975000002,
+          "t1": 1542.6787075000002,
+          "emph": false
+        },
+        {
+          "word": "вами",
+          "t0": 1542.6787075000002,
+          "t1": 1542.8387075,
+          "emph": false
+        },
+        {
+          "word": "происходит",
+          "t0": 1542.8387075,
+          "t1": 1543.3787175000002,
+          "emph": false
+        },
+        {
+          "word": "волшебная",
+          "t0": 1543.3787175000002,
+          "t1": 1544.1586875,
+          "emph": false
+        },
+        {
+          "word": "штука,",
+          "t0": 1544.1586875,
+          "t1": 1544.9587075000002,
+          "emph": false
+        },
+        {
+          "word": "происходит",
+          "t0": 1544.9587075000002,
+          "t1": 1545.3387075,
+          "emph": false
+        },
+        {
+          "word": "такая",
+          "t0": 1545.3387075,
+          "t1": 1545.6787075000002,
+          "emph": false
+        },
+        {
+          "word": "штука,",
+          "t0": 1545.6787075000002,
+          "t1": 1546.4587075000002,
+          "emph": false
+        },
+        {
+          "word": "как",
+          "t0": 1546.4587075000002,
+          "t1": 1546.6386975,
+          "emph": false
+        },
+        {
+          "word": "психика",
+          "t0": 1546.6386975,
+          "t1": 1547.2586975000002,
+          "emph": false
+        },
+        {
+          "word": "сама",
+          "t0": 1547.2586975000002,
+          "t1": 1547.6386975,
+          "emph": false
+        },
+        {
+          "word": "находит,",
+          "t0": 1547.6386975,
+          "t1": 1548.314,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1548.704,
+          "t1": 1548.7787075,
+          "emph": false
+        },
+        {
+          "word": "сама",
+          "t0": 1548.7787075,
+          "t1": 1549.0386875000002,
+          "emph": false
+        },
+        {
+          "word": "находит",
+          "t0": 1549.0386875000002,
+          "t1": 1549.6586875,
+          "emph": false
+        },
+        {
+          "word": "что-то,",
+          "t0": 1549.6586875,
+          "t1": 1550.2186875000002,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 1550.2186875000002,
+          "t1": 1550.4786975000002,
+          "emph": false
+        },
+        {
+          "word": "сама",
+          "t0": 1550.4786975000002,
+          "t1": 1550.8586975,
+          "emph": false
+        },
+        {
+          "word": "разряжает",
+          "t0": 1550.8586975,
+          "t1": 1551.93,
+          "emph": true
+        },
+        {
+          "word": "тем",
+          "t0": 1552.7069999999999,
+          "t1": 1552.8987075,
+          "emph": false
+        },
+        {
+          "word": "самым",
+          "t0": 1552.8987075,
+          "t1": 1553.3186875000001,
+          "emph": false
+        },
+        {
+          "word": "методом,",
+          "t0": 1553.3186875000001,
+          "t1": 1553.9387175000002,
+          "emph": false
+        },
+        {
+          "word": "через",
+          "t0": 1553.9387175000002,
+          "t1": 1554.1787075000002,
+          "emph": false
+        },
+        {
+          "word": "тело,",
+          "t0": 1554.1787075000002,
+          "t1": 1554.6386975,
+          "emph": false
+        },
+        {
+          "word": "через",
+          "t0": 1554.6386975,
+          "t1": 1554.8186875000001,
+          "emph": false
+        },
+        {
+          "word": "эмоции,",
+          "t0": 1554.8186875000001,
+          "t1": 1555.3586975,
+          "emph": false
+        },
+        {
+          "word": "через",
+          "t0": 1555.3586975,
+          "t1": 1555.5186975000001,
+          "emph": false
+        },
+        {
+          "word": "ощущения,",
+          "t0": 1555.5186975000001,
+          "t1": 1556.42,
+          "emph": false
+        },
+        {
+          "word": "так",
+          "t0": 1556.7986975000001,
+          "t1": 1556.9987175,
+          "emph": false
+        },
+        {
+          "word": "она",
+          "t0": 1556.9987175,
+          "t1": 1557.1787075000002,
+          "emph": false
+        },
+        {
+          "word": "разряжает.",
+          "t0": 1557.1787075000002,
+          "t1": 1557.8787175000002,
+          "emph": true
+        },
+        {
+          "word": "Чтобы",
+          "t0": 1566.026,
+          "t1": 1566.2186875000002,
+          "emph": false
+        },
+        {
+          "word": "эта",
+          "t0": 1566.2186875000002,
+          "t1": 1566.6187075,
+          "emph": false
+        },
+        {
+          "word": "штука",
+          "t0": 1566.6187075,
+          "t1": 1567.0186975000001,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1567.0186975000001,
+          "t1": 1567.2787075,
+          "emph": false
+        },
+        {
+          "word": "была",
+          "t0": 1567.2787075,
+          "t1": 1567.4186975000002,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1567.4186975000002,
+          "t1": 1567.6787075000002,
+          "emph": false
+        },
+        {
+          "word": "теле,",
+          "t0": 1567.6787075000002,
+          "t1": 1568.0386875000002,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1568.821,
+          "t1": 1568.9186975000002,
+          "emph": false
+        },
+        {
+          "word": "была",
+          "t0": 1568.9186975000002,
+          "t1": 1569.1187075,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1569.1187075,
+          "t1": 1569.3586975,
+          "emph": false
+        },
+        {
+          "word": "эмоциях,",
+          "t0": 1569.3586975,
+          "t1": 1569.8787175000002,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1569.8787175000002,
+          "t1": 1570.4186975000002,
+          "emph": false
+        },
+        {
+          "word": "была",
+          "t0": 1570.4186975000002,
+          "t1": 1570.6787075000002,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1570.6787075000002,
+          "t1": 1570.8586975,
+          "emph": false
+        },
+        {
+          "word": "психике.",
+          "t0": 1570.8586975,
+          "t1": 1571.3787175000002,
+          "emph": false
+        },
+        {
+          "word": "Она",
+          "t0": 1571.8387075,
+          "t1": 1571.9587075000002,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1571.9587075000002,
+          "t1": 1572.1787075000002,
+          "emph": false
+        },
+        {
+          "word": "хочет,",
+          "t0": 1572.1787075000002,
+          "t1": 1573.1386975,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 1573.1386975,
+          "t1": 1573.4786975000002,
+          "emph": false
+        },
+        {
+          "word": "этого",
+          "t0": 1574.405,
+          "t1": 1574.6986975,
+          "emph": false
+        },
+        {
+          "word": "внутри.",
+          "t0": 1574.6986975,
+          "t1": 1575.1787075000002,
+          "emph": false
+        },
+        {
+          "word": "А",
+          "t0": 1576.1386975,
+          "t1": 1576.1986975,
+          "emph": false
+        },
+        {
+          "word": "ваша",
+          "t0": 1576.1986975,
+          "t1": 1576.5186975000001,
+          "emph": false
+        },
+        {
+          "word": "эго-конструкция,",
+          "t0": 1576.5186975000001,
+          "t1": 1577.7387075000001,
+          "emph": false
+        },
+        {
+          "word": "ваш",
+          "t0": 1577.7387075000001,
+          "t1": 1577.8787175000002,
+          "emph": false
+        },
+        {
+          "word": "защитный",
+          "t0": 1577.8787175000002,
+          "t1": 1578.3586975,
+          "emph": false
+        },
+        {
+          "word": "механизм,",
+          "t0": 1578.3586975,
+          "t1": 1578.8586975,
+          "emph": false
+        },
+        {
+          "word": "Саша,",
+          "t0": 1578.8586975,
+          "t1": 1579.4987175,
+          "emph": false
+        },
+        {
+          "word": "то",
+          "t0": 1579.4987175,
+          "t1": 1579.5186975000001,
+          "emph": false
+        },
+        {
+          "word": "есть,",
+          "t0": 1579.5186975000001,
+          "t1": 1579.6986975,
+          "emph": false
+        },
+        {
+          "word": "понятно,",
+          "t0": 1579.6986975,
+          "t1": 1580.11,
+          "emph": false
+        },
+        {
+          "word": "я",
+          "t0": 1580.569,
+          "t1": 1580.6787075000002,
+          "emph": false
+        },
+        {
+          "word": "про",
+          "t0": 1580.6787075000002,
+          "t1": 1580.9387175000002,
+          "emph": false
+        },
+        {
+          "word": "себя",
+          "t0": 1580.9387175000002,
+          "t1": 1581.1187075,
+          "emph": false
+        },
+        {
+          "word": "рассказываю,",
+          "t0": 1581.1187075,
+          "t1": 1581.6787075000002,
+          "emph": false
+        },
+        {
+          "word": "он",
+          "t0": 1582.0587075,
+          "t1": 1582.1986975,
+          "emph": false
+        },
+        {
+          "word": "не",
+          "t0": 1582.1986975,
+          "t1": 1582.3586975,
+          "emph": false
+        },
+        {
+          "word": "хочет",
+          "t0": 1582.3586975,
+          "t1": 1582.6187075,
+          "emph": false
+        },
+        {
+          "word": "идти",
+          "t0": 1582.6187075,
+          "t1": 1582.8387075,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 1582.8387075,
+          "t1": 1582.9987175,
+          "emph": false
+        },
+        {
+          "word": "ту",
+          "t0": 1582.9987175,
+          "t1": 1583.1386975,
+          "emph": false
+        },
+        {
+          "word": "боль",
+          "t0": 1583.1386975,
+          "t1": 1583.2787075,
+          "emph": false
+        },
+        {
+          "word": "просто-напросто.",
+          "t0": 1583.2787075,
+          "t1": 1583.9186975000002,
+          "emph": false
+        },
+        {
+          "word": "А",
+          "t0": 1584.7186875000002,
+          "t1": 1584.7986975000001,
+          "emph": false
+        },
+        {
+          "word": "нам",
+          "t0": 1584.7986975000001,
+          "t1": 1584.9587075000002,
+          "emph": false
+        },
+        {
+          "word": "нужно",
+          "t0": 1584.9587075000002,
+          "t1": 1585.2787075,
+          "emph": false
+        },
+        {
+          "word": "что?",
+          "t0": 1585.2787075,
+          "t1": 1585.4987175,
+          "emph": false
+        },
+        {
+          "word": "Спуститься",
+          "t0": 1585.4987175,
+          "t1": 1586.1386975,
+          "emph": false
+        },
+        {
+          "word": "чем",
+          "t0": 1586.1386975,
+          "t1": 1586.8987075,
+          "emph": false
+        },
+        {
+          "word": "глубже,",
+          "t0": 1586.8987075,
+          "t1": 1587.0,
+          "emph": true
+        },
+        {
+          "word": "тем",
+          "t0": 1591.5786975,
+          "t1": 1591.7586975000002,
+          "emph": false
+        },
+        {
+          "word": "ближе",
+          "t0": 1591.7586975000002,
+          "t1": 1592.6386975,
+          "emph": false
+        },
+        {
+          "word": "к",
+          "t0": 1592.6386975,
+          "t1": 1592.8586975,
+          "emph": false
+        },
+        {
+          "word": "корневой",
+          "t0": 1592.8586975,
+          "t1": 1593.4987175,
+          "emph": false
+        },
+        {
+          "word": "проблемной",
+          "t0": 1594.201,
+          "t1": 1594.7986975000001,
+          "emph": false
+        },
+        {
+          "word": "штуке.",
+          "t0": 1594.7986975000001,
+          "t1": 1595.1787075000002,
+          "emph": false
+        }
+      ],
+      "end_drift_sec": null,
+      "end_snap_reason": null,
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 1595.44,
+      "speed": 1.0,
+      "tail_last_word_end": 1595.42,
+      "tail_next_word_start": 1595.5,
       "warnings": [
-        "dangling start: opens on «А»"
+        "dangling start: opens on «И»"
       ],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
       "zoom_source_t0": null,
       "c_close_ranges": [
         [
-          1515.6787075000002,
-          1518.7986975000001
+          1586.8987075,
+          1595.1787075000002
         ]
-      ]
+      ],
+      "planned": true
     }
   ]
 }
