@@ -73,3 +73,40 @@ def meter(read_audio: Callable[[float, float], np.ndarray], *, ref_f0: float | N
             return Voice(None, None)
         return measure(x, ref_f0=ref_f0, threshold_db=threshold_db)
     return at
+
+
+def pitch_stats(x: np.ndarray, ref_f0: float | None, sr: int = SR) -> tuple[float | None, float | None]:
+    """(median pitch in semitones vs ref_f0, pitch range p90 − p10 in semitones) of a stretch.
+    The range is how expressive the voice is there; None when there is too little voiced sound."""
+    try:
+        import parselmouth
+    except ImportError:  # pragma: no cover
+        return None, None
+    if len(x) < sr // 2:
+        return None, None
+    p = parselmouth.Sound(np.asarray(x, dtype=np.float64), sampling_frequency=sr).to_pitch(
+        time_step=FRAME, pitch_floor=60.0, pitch_ceiling=400.0)
+    f0 = p.selected_array["frequency"]
+    f0 = f0[f0 > 0]
+    if len(f0) < 10:
+        return None, None
+    ref = ref_f0 or float(np.median(f0))
+    st = 12.0 * np.log2(f0 / ref)
+    return round(float(np.median(st)), 1), round(float(np.percentile(st, 90) - np.percentile(st, 10)), 1)
+
+
+def profile(read_audio: Callable[[float, float], np.ndarray], *, ref_f0: float | None,
+            threshold_db: float | None) -> Callable[[float, float], dict]:
+    """M54: (a, b) → {"level_db", "pitch_st", "range_st"} of that stretch (None values when unknown)."""
+    def at(a: float, b: float) -> dict:
+        out = {"level_db": None, "pitch_st": None, "range_st": None}
+        if b - a < 0.5:
+            return out
+        try:
+            x = read_audio(a, b - a)
+        except Exception:   # noqa: BLE001
+            return out
+        out["level_db"] = level_db(x, SR, threshold_db)
+        out["pitch_st"], out["range_st"] = pitch_stats(x, ref_f0)
+        return out
+    return at

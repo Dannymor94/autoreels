@@ -212,6 +212,21 @@ class MontageConfig(BaseModel):
     filler_cut: bool = False                               # M53b: cut «э»/pauses inside montage clips (f:1 / --filler win)
 
 
+class MapConfig(BaseModel):
+    """M54: arl map — the map of a whole source (cloud/thoughtmap.py). Numbers: config/r0.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    system: str = "prompts/map_system.md"
+    unit_min_sec: float = Field(8.0, gt=0)
+    unit_max_sec: float = Field(30.0, gt=0)
+    unit_max_sents: int = Field(4, ge=1)
+    pause_split_sec: float = Field(1.0, ge=0)
+    window_units: int = Field(20, ge=1)
+    similar_min: float = Field(0.30, ge=0, le=1)
+    similar_far_sec: float = Field(60.0, ge=0)
+
+
 class LocalLLMConfig(BaseModel):
     """M40: a local OpenAI-compatible server (llama.cpp `llama-server`) for the labeller.
     The address is machine-local: LOCAL_LLM_URL in .env (e.g. http://192.168.1.50:8080/v1)."""
@@ -375,6 +390,7 @@ class R0Config(BaseModel):
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
     montage: MontageConfig = Field(default_factory=MontageConfig)
+    map: MapConfig = Field(default_factory=MapConfig)
 
     @property
     def min_duration(self) -> int:

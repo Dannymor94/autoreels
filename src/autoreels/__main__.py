@@ -7632,6 +7632,111 @@ def _resolve_manifest_arg(target: str, root: Path) -> Path | None:
     return mpath if mpath.exists() else None
 
 
+def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force: bool = False,
+            provider=None, out_dir: str | None = None) -> int:
+    """M54: the map of a whole source — thoughts, voice energy, role / strength / references / topic,
+    similar thoughts far apart → transcripts/<stem>.map.json and reels-out/<stem>/_map.html.
+    llm: auto | local | cloud (as arl label) | none (no passports and topics). An existing map is
+    kept (only the page is rebuilt) unless --force."""
+    import json as _json
+    from autoreels.cloud.edit import _ends_terminal, merge_group_sentences, strip_credit_words
+    from autoreels.cloud.plan import SpeechTimes, load_alignment
+    from autoreels.cloud.thoughtmap import (
+        MapParams, Sentence, build_map, describe_units, similar_units, split_units, topic_units, voice_scores,
+    )
+    from autoreels.local.map_page import build_map_page, write_map_json
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem = mpath.stem
+    out_json = _root / "transcripts" / f"{stem}.map.json"
+    vdir = (Path(out_dir) if out_dir else _root / "reels-out") / Path(manifest.source).stem
+    if out_json.is_file() and not force:
+        m = _json.loads(out_json.read_text(encoding="utf-8"))
+        vdir.mkdir(parents=True, exist_ok=True)
+        (vdir / "_map.html").write_text(build_map_page(m), encoding="utf-8")
+        print(f"✓ карта уже есть: {out_json} (пересчитать: --force); страница → {vdir / '_map.html'}")
+        return 0
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    mc = r0_cfg.map
+    prm = MapParams(unit_min_sec=mc.unit_min_sec, unit_max_sec=mc.unit_max_sec, unit_max_sents=mc.unit_max_sents,
+                    pause_split_sec=mc.pause_split_sec, window_units=mc.window_units,
+                    similar_min=mc.similar_min, similar_far_sec=mc.similar_far_sec)
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    tx = _resolve_cached_transcript(manifest, _cache)
+    if tx is None:
+        print(f"ошибка: транскрипт не найден для {stem}", file=sys.stderr)
+        return 1
+    all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+    words = tx.words
+    if getattr(r0_cfg, "credit_word_patterns", None):
+        words = strip_credit_words(words, r0_cfg.credit_word_patterns)
+    smap = None
+    _smp = _root / "transcripts" / f"{stem}.speechmap.json"
+    if _smp.is_file():
+        try:
+            from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV
+            _d = _json.loads(_smp.read_text(encoding="utf-8"))
+            if _d.get("version") == _SMV and _d.get("source_sha256") == manifest.source_sha256:
+                smap = _d
+        except (OSError, ValueError):
+            smap = None
+    align = load_alignment(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+    times = SpeechTimes(words, smap, align) if (smap or align) else None
+    kept_no = {id(b): i for i, b in enumerate(kept, 1)}
+    why = {id(b): r.split(" ")[0] for b, r in dropped}
+    sents: list = []
+    for b in all_blocks:
+        for k, st in enumerate(merge_group_sentences([b], words), 1):
+            a, z = (times.audible(st[0])[0], times.audible(st[-1])[1]) if times else (st[0].t0, st[-1].t1)
+            no = kept_no.get(id(b))
+            sents.append(Sentence(words=st, a=a, b=z, ref=f"{no}.{k}" if no else None,
+                                  complete=_ends_terminal(st[-1]), block_note="" if no else why.get(id(b), "filtered")))
+    units = split_units(sents, prm)
+    print(f"карта {stem}: предложений {len(sents)}, мыслей {len(units)}")
+    measure = None
+    try:
+        source = resolve_source(manifest, _root / "inputs")
+        from autoreels.local.align import ffmpeg_reader
+        from autoreels.local.prosody import load_prosody
+        from autoreels.local.voice import profile
+        try:
+            ff = resolve_ffmpeg(None, render_cfg=load_render_config(_root / "config" / "render.yaml"))
+        except Exception:  # noqa: BLE001
+            ff = "ffmpeg"
+        pros = load_prosody(_root / "transcripts" / f"{stem}.prosody.json", manifest.source_sha256)
+        measure = profile(ffmpeg_reader(source, ff), ref_f0=(pros or {}).get("ref_f0"),
+                          threshold_db=(smap or {}).get("threshold_db"))
+    except Exception as e:  # noqa: BLE001
+        print(f"  warning: голос не измерен — исходник не найден: {e}", file=sys.stderr)
+    voice_scores(units, measure)
+    print(f"  голос: {'измерен' if measure else 'не измерен'}")
+    topics: list = []
+    model = ""
+    if llm != "none":
+        if provider is None:
+            provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+            provider.preflight()
+        model = getattr(provider, "name", None) or type(provider).__name__
+        system = (_root / mc.system).read_text(encoding="utf-8")
+        done, missing = describe_units(units, provider, system=system, p=prm, log=lambda x: print(x, flush=True))
+        print(f"  паспорта: {done} мыслей, без ответа {missing}")
+        topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True))
+    similar_units(units, prm)
+    m = build_map(units, stem=stem, source_sha256=manifest.source_sha256, topics=topics, model=model)
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(write_map_json(m), encoding="utf-8")
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "_map.html").write_text(build_map_page(m), encoding="utf-8")
+    n_strong = sum(1 for u in m["units"] if (u.get("punch") or 0) >= 4)
+    n_sim = sum(1 for u in m["units"] if u.get("similar"))
+    print(f"→ {out_json}\n→ {vdir / '_map.html'}\n  сильных (★4–5): {n_strong}, с похожими далеко: {n_sim}")
+    return 0
+
+
 def cmd_blocks_text(target: str, *, root=None, cache_dir=None, blocks: str | None = None,
                     find: list[str] | None = None) -> int:
     """M53: the review numbering as text — every block's sentences as `B.k text`, for writing
@@ -10549,6 +10654,17 @@ def _build_parser():
     plc.add_argument("--root", default=None, help="корень проекта")
     plc.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    pmp = sub.add_parser(
+        "map",
+        help="M54: карта всего источника — мысли, роли, сила, сноски, темы, энергия голоса, похожие места",
+    )
+    pmp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pmp.add_argument("--root", default=None)
+    pmp.add_argument("--cache-dir", default=None, dest="cache_dir")
+    pmp.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default="auto",
+                     help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
+    pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
+
     pbt = sub.add_parser(
         "blocks-text",
         help="M53: нумерация разметки текстом — предложения блоков как B.k (для строк сборки M …)",
@@ -10920,6 +11036,9 @@ def main(argv=None) -> int:
                 cache_dir=getattr(args, "cache_dir", None),
                 reference=getattr(args, "reference", None),
             )
+        elif args.cmd == "map":
+            return cmd_map(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
+                           llm=args.llm, force=args.force)
         elif args.cmd == "blocks-text":
             return cmd_blocks_text(args.manifest, root=getattr(args, "root", None),
                                    cache_dir=getattr(args, "cache_dir", None), blocks=args.blocks,

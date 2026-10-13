@@ -262,6 +262,18 @@ montage:
   # pauses; its picture already changes with every shot switch. Per line f:1, or --filler, turns the cut back on.
   filler_cut: false
 
+# M54: arl map <stem> — the map of a whole source (transcripts/<stem>.map.json + reels-out/<stem>/_map.html):
+# thoughts (1–4 sentences), voice energy, role / strength / references / topic (LLM), similar thoughts far apart.
+map:
+  system: prompts/map_system.md
+  unit_min_sec: 8         # a thought shorter than this takes the next sentence too …
+  unit_max_sec: 30        # … but never grows past this
+  unit_max_sents: 4
+  pause_split_sec: 1.0    # a pause this long after a finished sentence ends a thought
+  window_units: 20        # thoughts per LLM request
+  similar_min: 0.30       # character-n-gram cosine from which two thoughts count as similar
+  similar_far_sec: 60     # similar thoughts are listed only when at least this far apart
+
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
 # A filter that removes a good block is worse than one that lets junk through (stage 3 can rank it down).
