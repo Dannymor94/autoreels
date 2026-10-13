@@ -209,6 +209,7 @@ class MontageConfig(BaseModel):
     max_static_sec: float | None = Field(6.0, gt=0.0)      # M53: no shot of a montage clip lasts longer (None = off)
     min_shot_sec: float = Field(3.0, gt=0.0)               # … and every shot stays at least this long
     keywords: bool = True                                  # M53: k: words highlighted in a montage clip's subtitles
+    filler_cut: bool = False                               # M53b: cut «э»/pauses inside montage clips (f:1 / --filler win)
 
 
 class LocalLLMConfig(BaseModel):

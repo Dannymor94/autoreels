@@ -192,3 +192,26 @@ def test_seam_marks_are_written_for_the_sheet_in_russian():
     assert m["text"].startswith("стык 1 (1.1-3→2.1-3): пропущено 94 с, пауза") and "громкость -7.0 дБ" in m["text"]
     assert any("тише на 7.0 дБ" in w for w in m["warn"]) and any("выше на 4.5 полутона" in w for w in m["warn"])
     assert any("голосом вверх" in w for w in m["warn"])
+
+
+def test_montage_keeps_pauses_unless_the_line_asks_for_the_cut(tmp_path, monkeypatch):
+    """M53b: owner — «сильно дёргается» (the pause/filler cuts) — a montage clip is planned without the
+    filler cut; f:1 on the line (or --filler) turns it back on."""
+    import numpy as np
+    from autoreels.cloud import plan as plan_mod
+    from autoreels.local import motion
+    from tests.test_montage import _apply
+    seen = []
+    real = plan_mod.build_manual_plan
+
+    def spy(*a, **kw):
+        seen.append(kw["params"].filler_cut)
+        return real(*a, **kw)
+    monkeypatch.setattr(plan_mod, "build_manual_plan", spy)
+    (tmp_path / "data" / "cache").mkdir(parents=True)
+    motion.save(tmp_path / "data" / "cache" / "v.motion.npz", np.zeros((4000, 8, 8), dtype=np.uint8) + 1,
+                "f" * 64, [960, 1700, 0, 0])
+    rc, man, _, _ = _apply(tmp_path, "2 80\nM 85 | 2.1-3 5.1-3\nM2 84 | 3.1-3 6.1-3 | f:1\n")
+    assert rc == 0 and len(man.reels) == 3
+    # the review line keeps the config's filler cut (on); M1 off by default; M2 asked f:1
+    assert seen == [True, False, True]

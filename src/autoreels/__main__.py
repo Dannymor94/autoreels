@@ -5414,7 +5414,8 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
                                 s=None, e=None, x=())
         try:
             for _pl in _apply_manual_plan(reel, entry, mb.sentences, tx_words, smap, r0_cfg, render_cfg,
-                                          me.label, align=align, tone=tone, filler=filler, jump=jump,
+                                          me.label, align=align, tone=tone,
+                                          filler=(filler if filler is not None else mc.filler_cut), jump=jump,
                                           filler_profile=filler_profile, filler_allowed=filler_allowed,
                                           breaks=mb.breaks, max_static=mc.max_static_sec,
                                           min_shot=mc.min_shot_sec, keys=mb.keys):
