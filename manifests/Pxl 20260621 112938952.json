@@ -937,7 +937,8 @@
           170.1272
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r02",
@@ -1739,7 +1740,8 @@
           230.20718
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r03",
@@ -2235,7 +2237,8 @@
           344.39438
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r04",
@@ -2793,7 +2796,8 @@
           473.82156
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r05",
@@ -3121,7 +3125,8 @@
           600.22156
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r06",
@@ -3566,7 +3571,8 @@
           691.30875
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r07",
@@ -3902,7 +3908,8 @@
           735.32875
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r08",
@@ -4305,7 +4312,8 @@
           917.15221
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r09",
@@ -4837,7 +4845,8 @@
           1047.37221
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r10",
@@ -5245,7 +5254,8 @@
           1398.7534575
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r11",
@@ -5983,7 +5993,8 @@
           1492.9534375
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r12",
@@ -6614,7 +6625,8 @@
           1543.8334375
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r13",
@@ -7053,7 +7065,8 @@
           1768.6535375
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r14",
@@ -7403,7 +7416,8 @@
           1961.47237
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r15",
@@ -8315,7 +8329,8 @@
           2208.3112499999997
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r16",
@@ -8724,7 +8739,8 @@
           2245.89124
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r17",
@@ -9564,7 +9580,8 @@
           2573.244959
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
     },
     {
       "id": "r18",
@@ -10019,7 +10036,641 @@
           2691.1209690000005
         ]
       ],
-      "planned": true
+      "planned": true,
+      "montage": null
+    },
+    {
+      "id": "r19",
+      "start": 86.931,
+      "end": 893.764,
+      "segments": [
+        {
+          "start": 86.931,
+          "end": 104.905,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 107.163,
+          "end": 108.18,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 174.971,
+          "end": 177.063,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 177.563,
+          "end": 182.895,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              2.402
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 183.332,
+          "end": 187.995,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        },
+        {
+          "start": 885.758,
+          "end": 887.865,
+          "shot": "close",
+          "close_intervals": [],
+          "window_cut": false
+        },
+        {
+          "start": 888.852,
+          "end": 892.14,
+          "shot": "wide",
+          "close_intervals": [
+            [
+              0.0,
+              1.831
+            ]
+          ],
+          "window_cut": true
+        },
+        {
+          "start": 892.594,
+          "end": 893.764,
+          "shot": "wide",
+          "close_intervals": [],
+          "window_cut": true
+        }
+      ],
+      "cold_open": {
+        "start": 890.683,
+        "end": 893.764,
+        "shot": "close",
+        "close_intervals": [],
+        "window_cut": false
+      },
+      "title_overlay": "Беглец: побудьте в контакте 5 секунд",
+      "score": 88,
+      "hook": "Просто вспомните себя, особенно в стрессовых ситуациях, вы себя, скорее всего, как-то ведете однотипно.",
+      "title": "",
+      "description": "Убегать — привычная реакция на стресс. За ней прячется дар.",
+      "reason": "human montage M1",
+      "topic": "",
+      "r0_start": 86.931,
+      "r0_end": 893.764,
+      "flags": [
+        "montage"
+      ],
+      "self_contained_start": null,
+      "start_justification": "",
+      "rank": null,
+      "subtitles": [
+        {
+          "word": "Просто",
+          "t0": 86.981,
+          "t1": 86.981,
+          "emph": false
+        },
+        {
+          "word": "вспомните",
+          "t0": 86.981,
+          "t1": 87.68,
+          "emph": false
+        },
+        {
+          "word": "себя,",
+          "t0": 87.68,
+          "t1": 88.02,
+          "emph": false
+        },
+        {
+          "word": "особенно",
+          "t0": 88.02,
+          "t1": 88.5,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 88.5,
+          "t1": 88.68,
+          "emph": false
+        },
+        {
+          "word": "стрессовых",
+          "t0": 88.68,
+          "t1": 89.08,
+          "emph": false
+        },
+        {
+          "word": "ситуациях,",
+          "t0": 89.08,
+          "t1": 89.66,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 89.66,
+          "t1": 89.76,
+          "emph": false
+        },
+        {
+          "word": "себя,",
+          "t0": 89.76,
+          "t1": 90.06,
+          "emph": false
+        },
+        {
+          "word": "скорее",
+          "t0": 90.06,
+          "t1": 90.34,
+          "emph": false
+        },
+        {
+          "word": "всего,",
+          "t0": 90.34,
+          "t1": 90.62,
+          "emph": false
+        },
+        {
+          "word": "как-то",
+          "t0": 90.62,
+          "t1": 90.9,
+          "emph": false
+        },
+        {
+          "word": "ведете",
+          "t0": 90.9,
+          "t1": 91.24,
+          "emph": false
+        },
+        {
+          "word": "однотипно.",
+          "t0": 91.24,
+          "t1": 92.4,
+          "emph": false
+        },
+        {
+          "word": "К",
+          "t0": 91.92,
+          "t1": 92.42,
+          "emph": false
+        },
+        {
+          "word": "примеру,",
+          "t0": 92.42,
+          "t1": 93.34,
+          "emph": false
+        },
+        {
+          "word": "что-то",
+          "t0": 93.34,
+          "t1": 93.54,
+          "emph": false
+        },
+        {
+          "word": "происходит,",
+          "t0": 93.54,
+          "t1": 94.28,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 94.28,
+          "t1": 94.3,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 94.3,
+          "t1": 94.38,
+          "emph": false
+        },
+        {
+          "word": "что?",
+          "t0": 94.38,
+          "t1": 94.74,
+          "emph": false
+        },
+        {
+          "word": "Вместо",
+          "t0": 94.74,
+          "t1": 94.96,
+          "emph": false
+        },
+        {
+          "word": "того,",
+          "t0": 94.96,
+          "t1": 95.26,
+          "emph": false
+        },
+        {
+          "word": "чтобы",
+          "t0": 95.26,
+          "t1": 95.36,
+          "emph": false
+        },
+        {
+          "word": "оставаться",
+          "t0": 95.36,
+          "t1": 95.82,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 95.82,
+          "t1": 95.94,
+          "emph": false
+        },
+        {
+          "word": "контакте,",
+          "t0": 95.94,
+          "t1": 96.54,
+          "emph": false
+        },
+        {
+          "word": "вы",
+          "t0": 96.54,
+          "t1": 96.64,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 96.64,
+          "t1": 96.74,
+          "emph": false
+        },
+        {
+          "word": "делаете?",
+          "t0": 96.74,
+          "t1": 97.6,
+          "emph": false
+        },
+        {
+          "word": "Убегаете.",
+          "t0": 97.6,
+          "t1": 99.36,
+          "emph": false
+        },
+        {
+          "word": "Вы",
+          "t0": 99.36,
+          "t1": 99.46,
+          "emph": false
+        },
+        {
+          "word": "уходите.",
+          "t0": 99.46,
+          "t1": 102.36,
+          "emph": false
+        },
+        {
+          "word": "Вам",
+          "t0": 102.36,
+          "t1": 102.6,
+          "emph": false
+        },
+        {
+          "word": "легче",
+          "t0": 102.6,
+          "t1": 102.94,
+          "emph": false
+        },
+        {
+          "word": "всего",
+          "t0": 102.94,
+          "t1": 103.28,
+          "emph": false
+        },
+        {
+          "word": "что",
+          "t0": 103.28,
+          "t1": 103.46,
+          "emph": false
+        },
+        {
+          "word": "сделать?",
+          "t0": 103.46,
+          "t1": 104.34,
+          "emph": false
+        },
+        {
+          "word": "Уйти.",
+          "t0": 104.34,
+          "t1": 104.905,
+          "emph": false
+        },
+        {
+          "word": "Уйти",
+          "t0": 107.213,
+          "t1": 107.52,
+          "emph": false
+        },
+        {
+          "word": "и",
+          "t0": 107.52,
+          "t1": 107.72,
+          "emph": false
+        },
+        {
+          "word": "все.",
+          "t0": 107.72,
+          "t1": 107.84,
+          "emph": false
+        },
+        {
+          "word": "За",
+          "t0": 175.02100000000002,
+          "t1": 175.0472,
+          "emph": false
+        },
+        {
+          "word": "вот",
+          "t0": 175.0472,
+          "t1": 175.1872,
+          "emph": false
+        },
+        {
+          "word": "этой",
+          "t0": 175.1872,
+          "t1": 175.4072,
+          "emph": false
+        },
+        {
+          "word": "болью,",
+          "t0": 175.4072,
+          "t1": 176.30719,
+          "emph": false
+        },
+        {
+          "word": "травмой",
+          "t0": 176.30719,
+          "t1": 177.063,
+          "emph": false
+        },
+        {
+          "word": "нашей",
+          "t0": 177.613,
+          "t1": 177.9072,
+          "emph": false
+        },
+        {
+          "word": "сидит",
+          "t0": 177.9072,
+          "t1": 178.58719,
+          "emph": false
+        },
+        {
+          "word": "некое",
+          "t0": 178.58719,
+          "t1": 178.92719,
+          "emph": false
+        },
+        {
+          "word": "предназначение.",
+          "t0": 178.92719,
+          "t1": 179.98718,
+          "emph": false
+        },
+        {
+          "word": "Там",
+          "t0": 179.98718,
+          "t1": 180.1072,
+          "emph": false
+        },
+        {
+          "word": "сидит",
+          "t0": 180.1072,
+          "t1": 180.4672,
+          "emph": false
+        },
+        {
+          "word": "определенная",
+          "t0": 180.4672,
+          "t1": 181.0672,
+          "emph": false
+        },
+        {
+          "word": "же",
+          "t0": 181.0672,
+          "t1": 181.20718,
+          "emph": false
+        },
+        {
+          "word": "нервная",
+          "t0": 181.20718,
+          "t1": 181.5472,
+          "emph": false
+        },
+        {
+          "word": "система,",
+          "t0": 181.5472,
+          "t1": 182.6272,
+          "emph": false
+        },
+        {
+          "word": "ребята.",
+          "t0": 182.6272,
+          "t1": 182.895,
+          "emph": false
+        },
+        {
+          "word": "Там",
+          "t0": 183.44719,
+          "t1": 183.5672,
+          "emph": false
+        },
+        {
+          "word": "сидит",
+          "t0": 183.5672,
+          "t1": 183.9072,
+          "emph": false
+        },
+        {
+          "word": "ваш",
+          "t0": 183.9072,
+          "t1": 184.14719,
+          "emph": false
+        },
+        {
+          "word": "дар,",
+          "t0": 184.14719,
+          "t1": 184.6072,
+          "emph": false
+        },
+        {
+          "word": "там",
+          "t0": 184.6072,
+          "t1": 184.7472,
+          "emph": false
+        },
+        {
+          "word": "сидит",
+          "t0": 184.7472,
+          "t1": 185.08719,
+          "emph": false
+        },
+        {
+          "word": "убеглеца,",
+          "t0": 185.08719,
+          "t1": 186.3272,
+          "emph": false
+        },
+        {
+          "word": "сидит",
+          "t0": 186.3272,
+          "t1": 186.6272,
+          "emph": false
+        },
+        {
+          "word": "дар",
+          "t0": 186.6272,
+          "t1": 186.98718,
+          "emph": false
+        },
+        {
+          "word": "сердечности.",
+          "t0": 186.98718,
+          "t1": 187.92719,
+          "emph": false
+        },
+        {
+          "word": "Что",
+          "t0": 885.808,
+          "t1": 885.88048,
+          "emph": false
+        },
+        {
+          "word": "для",
+          "t0": 885.88048,
+          "t1": 886.0604700000001,
+          "emph": false
+        },
+        {
+          "word": "беглеца",
+          "t0": 886.0604700000001,
+          "t1": 886.6004800000001,
+          "emph": false
+        },
+        {
+          "word": "будет",
+          "t0": 886.6004800000001,
+          "t1": 887.1004800000001,
+          "emph": false
+        },
+        {
+          "word": "хорошо?",
+          "t0": 887.1004800000001,
+          "t1": 887.68047,
+          "emph": false
+        },
+        {
+          "word": "Несколько",
+          "t0": 888.9019999999999,
+          "t1": 889.2204800000001,
+          "emph": false
+        },
+        {
+          "word": "секунд",
+          "t0": 889.2204800000001,
+          "t1": 889.68047,
+          "emph": false
+        },
+        {
+          "word": "побыть",
+          "t0": 889.68047,
+          "t1": 890.0205000000001,
+          "emph": false
+        },
+        {
+          "word": "в",
+          "t0": 890.0205000000001,
+          "t1": 890.14049,
+          "emph": false
+        },
+        {
+          "word": "контакте.",
+          "t0": 890.14049,
+          "t1": 890.66048,
+          "emph": false
+        },
+        {
+          "word": "Не",
+          "t0": 890.733,
+          "t1": 890.78047,
+          "emph": false
+        },
+        {
+          "word": "убегать",
+          "t0": 890.78047,
+          "t1": 891.2004900000001,
+          "emph": false
+        },
+        {
+          "word": "сразу,",
+          "t0": 891.2004900000001,
+          "t1": 891.7004900000001,
+          "emph": false
+        },
+        {
+          "word": "а",
+          "t0": 891.7004900000001,
+          "t1": 892.64049,
+          "emph": false
+        },
+        {
+          "word": "побыть",
+          "t0": 892.64049,
+          "t1": 893.0604700000001,
+          "emph": false
+        },
+        {
+          "word": "5",
+          "t0": 893.0604700000001,
+          "t1": 893.3204800000001,
+          "emph": false
+        },
+        {
+          "word": "секунд.",
+          "t0": 893.3204800000001,
+          "t1": 893.764,
+          "emph": true
+        }
+      ],
+      "end_drift_sec": null,
+      "end_snap_reason": null,
+      "start_drift_sec": null,
+      "start_snap_reason": null,
+      "start_repair_sec": null,
+      "ends_on_host_turn": false,
+      "open_thought": false,
+      "has_explicit_e": true,
+      "subtitle_gate": 893.764,
+      "speed": 1.0,
+      "tail_last_word_end": 893.764,
+      "tail_next_word_start": 893.764,
+      "warnings": [
+        "no room after last word «секунд.» (next speech at 893.764) — clip ends at its audible end",
+        "montage: 2 seams in 38s — more than 3 per minute: the clip may feel like constant jumping",
+        "montage: seam 1 (2.1-8→4.3-5): picture jump 15.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it",
+        "montage: seam 1 (2.1-8→4.3-5): the voice gets louder by 7.5 dB (> 4) — the jump is heard",
+        "montage: seam 2 (4.3-5→21.4-6): picture jump 28.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it",
+        "montage: seam 2 (4.3-5→21.4-6): the voice sits higher by 5.7 semitones (> 3) — a different mood on each side"
+      ],
+      "subtitle_emph_words": [],
+      "beat_gap_sec": null,
+      "zoom_source_t0": null,
+      "c_close_ranges": [],
+      "planned": true,
+      "montage": "M1 88 | 2.1-8 4.3-5 21.4-6 | h:21.6 | k:21.6=секунд | t: Беглец: побудьте в контакте 5 секунд | d: Убегать — привычная реакция на стресс. За ней прячется дар."
     }
   ]
 }
