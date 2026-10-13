@@ -64,6 +64,10 @@ class ManualPlanParams:
     min_cut_spacing_sec: float = 0.0  # cuts at least this far apart (largest removals win)
     mask_min_gap_sec: float = 0.0     # a masking shot switch at least this far from any other shot change
     mask_filler_only: bool = False    # mask only cuts that remove a sound («мм», «аа»), not a bare pause
+    # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
+    # apart), inside the silence around the boundary words — a natural pause instead of a jump.
+    # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
+    break_pad_sec: float = 0.20
 
 
 @dataclass
@@ -746,10 +750,11 @@ class ForeignSound:
         return total, others
 
 
-def _group_windows(play: Sequence[int]) -> list[list[int]]:
+def _group_windows(play: Sequence[int], breaks: frozenset = frozenset()) -> list[list[int]]:
+    """Runs of consecutive sentence numbers; a sentence in `breaks` always starts a new run."""
     wins: list[list[int]] = []
     for n in play:
-        if wins and n == wins[-1][-1] + 1:
+        if wins and n == wins[-1][-1] + 1 and n not in breaks:
             wins[-1].append(n)
         else:
             wins.append([n])
@@ -772,11 +777,15 @@ def build_manual_plan(
     tone: Callable[[Word], tuple[str, str] | None] | None = None,
     jump: Callable[[float, float], float] | None = None,
     weak_start_words: Iterable[str] = (),
+    breaks: Iterable[int] = (),
 ) -> ManualPlan:
     """Plan one manual clip. `sentences` is the review numbering (merge_group_sentences output);
     `play` the body sentence numbers in play order (s:..e: minus x:, or the beat order).
     `tone`: word → ("final" | "open" | "unsure", description) from local/prosody.py; when given,
     an ending whose voice does not finish is reported (the reviewer's e: is never moved).
+    `breaks` (M50 montage): sentences that start a new PIECE — a window always starts there, even
+    after the sentence before it in the numbering, and both sides of that seam keep
+    params.break_pad_sec of air instead of seam_pad_sec.
     """
     n_sent = len(sentences)
     play = [int(n) for n in play]
@@ -788,6 +797,7 @@ def build_manual_plan(
         raise ValueError("nothing to play")
     times = SpeechTimes(words, smap, align)
     pad = params.seam_pad_sec
+    brk = {int(n) for n in breaks}
     seen_keys = {round(w.t0 * 1000) for s in sentences for w in s}
     by_t0 = sorted(words, key=lambda w: w.t0)
     t0s = [w.t0 for w in by_t0]
@@ -831,11 +841,14 @@ def build_manual_plan(
 
     def body_windows(order: list[int], note: bool = False) -> list[PlannedWindow]:
         out: list[PlannedWindow] = []
-        for run in split_unseen(_group_windows(order)):
+        runs = split_unseen(_group_windows(order, frozenset(brk)))
+        for k, run in enumerate(runs):
             first = sentences[run[0] - 1][0]
             last = sentences[run[-1] - 1][-1]
-            w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad),
-                              end=_window_end(times, last, pad), shot="wide")
+            pad_a = params.break_pad_sec if run[0] in brk else pad
+            pad_b = params.break_pad_sec if k + 1 < len(runs) and runs[k + 1][0] in brk else pad
+            w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad_a),
+                              end=_window_end(times, last, pad_b), shot="wide")
             prev = out[-1] if out else None
             # A forward seam whose next window starts before the previous one ends has no silence
             # to cut in: the skipped sentence is a Whisper duplicate overlapping its neighbours.
@@ -874,6 +887,8 @@ def build_manual_plan(
                 acc += w.end - w.start
             hook_replayed = total > 0 and pos / total >= params.hook_replay_min_pos
         if not hook_replayed and hook in play:
+            if hook in brk and hook + 1 in play:
+                brk.add(hook + 1)          # the piece now starts at the sentence after the hook
             play = [n for n in play if n != hook]
             if not play:
                 raise ValueError("hook removal leaves nothing to play")

@@ -191,6 +191,23 @@ class LabelConfig(BaseModel):
     fewshot_examples: int = Field(2, ge=0, le=6)   # M41: owner-approved examples per request (other sources)
 
 
+class MontageConfig(BaseModel):
+    """M50: a montage line (M …) builds ONE clip from pieces of different blocks of a source.
+    Off = M lines are reported and ignored (invariant 8). Numbers: see config/r0.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    seam_pad_sec: float = Field(0.20, ge=0.0, le=1.0)      # air on each side of a seam between pieces
+    piece_min_sec: float = Field(6.0, ge=0.0)              # a shorter piece is reported
+    seams_per_min_max: float = Field(3.0, gt=0.0)          # more seams per minute of clip is reported
+    pace_ratio_max: float = Field(1.35, ge=1.0)            # speech rate of two joined pieces differs more → reported
+    seam_jump_warn: float = Field(3.0, gt=0.0)             # picture jump at a seam above this × typical motion → reported
+    loudness_diff_db: float = Field(4.0, gt=0.0)           # speech level on the two sides of a seam differs more → reported
+    pitch_diff_st: float = Field(3.0, gt=0.0)              # median pitch on the two sides differs more (semitones) → reported
+    side_sec: float = Field(4.0, gt=0.0)                   # loudness/pitch measured on this much played speech per side
+
+
 class LocalLLMConfig(BaseModel):
     """M40: a local OpenAI-compatible server (llama.cpp `llama-server`) for the labeller.
     The address is machine-local: LOCAL_LLM_URL in .env (e.g. http://192.168.1.50:8080/v1)."""
@@ -353,6 +370,7 @@ class R0Config(BaseModel):
     # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
+    montage: MontageConfig = Field(default_factory=MontageConfig)
 
     @property
     def min_duration(self) -> int:

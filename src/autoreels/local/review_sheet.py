@@ -29,6 +29,7 @@ class Card:
     preview: str = ""
     marks: list[str] = field(default_factory=list)   # the owner's marks of earlier rounds
     score: int | None = None      # the draft's score (after ranking: the place, 95 best … 65)
+    montage: str = ""             # M50: the montage line (M …) the clip was built from
 
 
 _CSS = """
@@ -169,6 +170,12 @@ def _card_html(c: Card) -> str:
         parts.append(f'<details><summary>текст клипа</summary><div class="subs">{_e(c.text)}</div></details>')
     if warns:
         parts.append(f'<ul class="warns">{warns}</ul>')
+    if c.montage:
+        parts.append(f'<details open><summary>сборка из кусков разных блоков</summary>'
+                     f'<div class="line">{_e(c.montage)}</div></details>'
+                     '<p class="noline">Сборка (M50, этап 1): оцените плавность стыков глазами; решение и '
+                     'замечание по ней — владельцу в чат, в файл решений она не попадает.</p></div>')
+        return f'<section class="card" data-rid="{_e(c.rid)}">' + "".join(parts) + "</section>"
     if c.seq is None:
         parts.append('<p class="noline">Строка черновика для этого клипа не найдена: черновик менялся '
                      'после рендера. Решение по нему здесь не принимается.</p></div>')
@@ -193,7 +200,7 @@ def build_sheet(stem: str, cards: list[Card], *, review_ref: str, manifest_ref: 
     """The whole page. key: a short hash of the draft — choices saved in the browser belong to it."""
     meta = json.dumps({"stem": stem, "review": review_ref, "manifest": manifest_ref, "key": key},
                       ensure_ascii=False).replace("</", "<\\/")
-    unmatched = [c.rid for c in cards if c.seq is None]
+    unmatched = [c.rid for c in cards if c.seq is None and not c.montage]
     top = [f'<p class="note-top">Черновик: {_e(review_ref)} · манифест: {_e(manifest_ref)}. '
            f'Отметьте каждый клип, нажмите «Скачать решения», затем: '
            f'<code>arl review-apply ~/Downloads/{_e(stem)}_decisions.txt</code></p>']

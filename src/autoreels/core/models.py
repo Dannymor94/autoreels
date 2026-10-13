@@ -215,6 +215,8 @@ class Reel(BaseModel):
     # docs/REEL_SPEC.md: True when windows/shots/ending/subtitles come from cloud/plan.py. The
     # renderer then executes them as-is (no start fix, no tail re-placement, no shot passes).
     planned: bool = False
+    # M50: the montage line this clip was built from (M …: pieces of different blocks), else None.
+    montage: str | None = None
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

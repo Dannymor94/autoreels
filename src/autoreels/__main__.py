@@ -5134,6 +5134,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
         accent_min_sec=getattr(r0_cfg, "accent_min_sec", 3.0),
         accent_max_sec=getattr(r0_cfg, "accent_max_sec", 8.0),
         filler_cut=bool(getattr(r0_cfg, "manual_filler_cut", False) if filler_cut is None else filler_cut),
+        break_pad_sec=getattr(getattr(r0_cfg, "montage", None), "seam_pad_sec", 0.20),
         **_filler_profile_values(r0_cfg, filler_profile),
     )
 
@@ -5185,7 +5186,7 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
                        tone=None, filler=None, jump=None, filler_profile=None,
-                       filler_allowed: bool = True) -> list[str]:
+                       filler_allowed: bool = True, breaks=()) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5221,7 +5222,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f, filler_profile),
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
         source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
-        weak_start_words=_weak_start_words(r0_cfg),
+        weak_start_words=_weak_start_words(r0_cfg), breaks=breaks,
     )
     body = [s for w in plan.body for s in w.segments()]
     reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []
@@ -5340,6 +5341,104 @@ def _reclaim_block_first_words(blocks, words, step: float = 0.05) -> int:
     return moved
 
 
+def _montage_voice(manifest, root: Path, stem: str, smap, render_cfg):
+    """M50: (a, b) → loudness and pitch of that stretch of the source (local/voice.py), for the seam
+    report. None (printed) when the source file cannot be found — the seams are then not measured."""
+    from autoreels.local.align import ffmpeg_reader
+    from autoreels.local.prosody import load_prosody
+    from autoreels.local.voice import meter
+    try:
+        source = resolve_source(manifest, root / "inputs")
+    except Exception as e:  # noqa: BLE001
+        print(f"  warning: громкость и высота голоса на стыках не измерены — исходник не найден: {e}",
+              file=sys.stderr)
+        return None
+    try:
+        ff = resolve_ffmpeg(None, render_cfg=render_cfg)
+    except Exception:  # noqa: BLE001
+        ff = "ffmpeg"
+    pros = load_prosody(root / "transcripts" / f"{stem}.prosody.json", manifest.source_sha256)
+    ref = (pros or {}).get("ref_f0")
+    if not ref:
+        print(f"  warning: нет transcripts/{stem}.prosody.json — высота голоса на стыках не измерена "
+              f"(arl prosody {stem})", file=sys.stderr)
+    return meter(ffmpeg_reader(source, ff), ref_f0=ref, threshold_db=(smap or {}).get("threshold_db"))
+
+
+def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *, align=None, tone=None,
+                         jump=None, filler=None, filler_profile=None, filler_allowed=True, speed=None,
+                         manual_max: float = 180.0, voice=None) -> tuple[list, int]:
+    """M50: one planned reel per montage line (cloud/montage.py), appended after the review lines'
+    reels so their numbers do not move. Returns (reels, rc); rc 1 = a line cannot be built (printed).
+
+    The reel goes through the same plan as a review line (_apply_manual_plan with the pieces' play
+    order and `breaks`) and through every post-loop check of planned reels. No dataset row: a
+    montage is not a block score."""
+    from types import SimpleNamespace
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.cloud.montage import SeamParams, build_montage, seam_report
+    from autoreels.core.models import Reel
+    mc = r0_cfg.montage
+    out: list = []
+    for me in entries:
+        mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words))
+        for _e in mb.errors:
+            print(f"  [ERROR] {me.label} (review:{me.lineno}): {_e}", file=sys.stderr)
+        if mb.errors:
+            return [], 1
+        first = mb.sentences[mb.play[0] - 1]
+        last = mb.sentences[mb.play[-1] - 1]
+        reel = Reel(id=f"montage-{me.label}", start=first[0].t0, end=last[-1].t1, score=me.score,
+                    hook=" ".join(w.word for w in first)[:300], title="", description="",
+                    reason=f"human montage {me.label}")
+        reel.montage = me.raw
+        reel.flags.append("montage")
+        reel.title_overlay = me.title or ""
+        reel.description = me.description or ""
+        reel._keyword_spec = tuple(mb.keys)
+        reel._blk_sents_full = mb.sentences
+        reel._hook_window = None
+        reel._c_close_ranges = []
+        reel._zoom_source_t0 = None
+        reel._filler_override = me.filler
+        reel._explicit_start = reel._explicit_end = True
+        reel._has_explicit_e = reel.has_explicit_e = True
+        reel._explicit_e_val = None
+        entry = SimpleNamespace(beats=tuple(mb.play), hook=mb.hook, hook_keep=me.hook_keep,
+                                hook_remove=me.hook_remove, c=tuple(mb.close), filler=me.filler,
+                                s=None, e=None, x=())
+        try:
+            for _pl in _apply_manual_plan(reel, entry, mb.sentences, tx_words, smap, r0_cfg, render_cfg,
+                                          me.label, align=align, tone=tone, filler=filler, jump=jump,
+                                          filler_profile=filler_profile, filler_allowed=filler_allowed,
+                                          breaks=mb.breaks):
+                print(_pl)
+        except ValueError as _pe:
+            print(f"  error {me.label}: plan: {_pe}", file=sys.stderr)
+            return [], 1
+        _lines, _warns = seam_report(
+            reel._plan, mb, me, SeamParams(mc.piece_min_sec, mc.seams_per_min_max, mc.pace_ratio_max,
+                                           mc.seam_jump_warn, mc.loudness_diff_db, mc.pitch_diff_st,
+                                           mc.side_sec),
+            tone=tone, jump=jump, weak_start_words=_weak_start_words(r0_cfg), voice=voice)
+        for _ln in _lines:
+            print(f"    {_ln}")
+        for _w in _warns:
+            print(f"    ! {_w}")
+            reel.warnings.append(f"montage: {_w}")
+        reel.r0_start, reel.r0_end = reel.start, reel.end
+        _clip_speed = me.speed if me.speed is not None else (speed if speed is not None else
+                                                             getattr(r0_cfg, "speed", 1.0))
+        _played = reel.playback_duration()
+        if _played / _clip_speed > manual_max:
+            print(f"  [ERROR] {me.label}: {_played:.1f}s at {_clip_speed:.2f}x is over the manual ceiling "
+                  f"{manual_max:.0f}s — shorten the pieces", file=sys.stderr)
+            return [], 1
+        reel._clip_speed = _clip_speed
+        out.append(reel)
+    return out, 0
+
+
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner",
                      filler_profile: str | None = None) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
@@ -5414,6 +5513,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
 
     for lineno, msg in errors:
         print(f"  review:{lineno}: {msg}", file=sys.stderr)
+    # M50: montage lines (M …) — one clip from pieces of different blocks (cloud/montage.py).
+    from autoreels.cloud.montage import parse_montage as _parse_montage
+    _mont_entries, _mont_errors = _parse_montage(review_content)
+    _mont_n = len(_mont_entries) + len(_mont_errors)
+    if _is_compact and _mont_n:
+        ignored_count = max(0, ignored_count - _mont_n)
     if ignored_count:
         print(f"  ({ignored_count} lines skipped — not score lines)")
 
@@ -5459,6 +5564,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         from types import SimpleNamespace as _NS
         render_cfg = _NS(two_shot=False, two_shot_auto=False, role="both")
     cache_dir = Path(cache_dir) if cache_dir else root / "data" / "cache"
+    if _mont_n and not (r0_cfg.montage.enabled and getattr(r0_cfg, "manual_plan", False)):
+        print(f"  warning: {_mont_n} montage line(s) (M …) ignored — montage.enabled and manual_plan "
+              f"must be on in config/r0.yaml", file=sys.stderr)
+        _mont_entries, _mont_errors = [], []
+    for _ml, _mm in _mont_errors:
+        print(f"  [ERROR] review:{_ml}: montage {_mm}", file=sys.stderr)
+    if _mont_errors:
+        return 1
 
     # Load manifest + transcript.
     # Source can be a manifest (.json) or a cached transcript (.transcript.json).
@@ -5708,7 +5821,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     _blk_jump = None
     _blk_filler_ok = True
     _fill_any = filler is True or (filler is None and getattr(r0_cfg, "manual_filler_cut", False)) or \
-        any(getattr(e, "filler", None) for e in entries)
+        any(getattr(e, "filler", None) for e in entries) or bool(_mont_entries)
     if getattr(r0_cfg, "manual_plan", False) and _fill_any:
         from autoreels.local.motion import jump_lookup as _jl, load as _ml
         _c = manifest.setup.crop
@@ -6042,6 +6155,16 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 f"{'+'.join(str(x) for x in g)} with line {_anchor_seq}; "
                 f"earliest ({_anchor_seq}) anchors, the rest fold into it"
             )
+
+    if _mont_entries:
+        _mreels, _mrc = _build_montage_reels(
+            _mont_entries, active, _tx_words, _blk_smap, r0_cfg, render_cfg, align=_blk_align,
+            tone=_blk_tone, jump=_blk_jump, filler=filler, filler_profile=filler_profile,
+            filler_allowed=_blk_filler_ok, speed=speed, manual_max=_manual_max,
+            voice=_montage_voice(manifest, root, source_file.stem, _blk_smap, render_cfg))
+        if _mrc:
+            return _mrc
+        reels.extend(_mreels)
 
     if _is_compact and compact_lookup_errors > 0 and len(reels) == 0:
         print(
@@ -6504,6 +6627,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             print(f"  line {e.seq} (score {e.score}) → NOT PLACED: block filtered / id mismatch (see above)")
     for c in conflicts:
         print(f"  conflict: {c}")
+    for _i, _r in enumerate(reels, 1):
+        if getattr(_r, "montage", None):
+            print(f"  montage {_r.reason.split()[-1]} (score {_r.score}) → reel {_i}")
 
     # Warnings: what a bypassed deciding stage would have flagged. Human decides; nothing removed.
     _final_num = {id(r): i for i, r in enumerate(reels, 1)}
@@ -7671,7 +7797,9 @@ def cmd_review_sheet(
         return 1
     lines = clip_lines(review_text, ctx.wblocks)
     reels = list(shown.reels)
-    match = match_reels([(r.id, [(w.start, w.end) for w in r.playback_windows()]) for r in reels], lines)
+    # M50: a montage clip has no review line — it must not take the line of a clip it borrows from
+    match = match_reels([(r.id, [(w.start, w.end) for w in r.playback_windows()]) for r in reels
+                         if not r.montage], lines)
     base = Path(out_dir) if out_dir else _root / "reels-out"
     vdir = base / Path(shown.source).stem
     if gate:
@@ -7685,7 +7813,7 @@ def cmd_review_sheet(
             title=r.title_overlay, caption=r.description,
             text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
             seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
-            marks=list(ln.marks) if ln else [], score=r.score,
+            marks=list(ln.marks) if ln else [], score=r.score, montage=r.montage or "",
         ))
     notes = []
     n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
@@ -7704,7 +7832,9 @@ def cmd_review_sheet(
     n_line = sum(1 for c in cards if c.seq is not None)
     print(f"лист ревью {stem}: клипов {len(cards)}, с видео {n_vid}, со строкой черновика {n_line}")
     for c in cards:
-        if c.seq is None:
+        if c.montage:
+            print(f"  {c.rid}: сборка «{c.montage[:60]}» — без кнопок решения (M50, этап 1)")
+        elif c.seq is None:
             print(f"  {c.rid}: строка черновика не найдена (черновик менялся после рендера)")
     print(f"→ {out}\n  открыть: open \"{out}\"")
     return 0

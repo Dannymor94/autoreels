@@ -239,6 +239,20 @@ local_llm:
   max_output_tokens: 1500
   no_think: true          # Qwen3: no reasoning block (faster, same JSON)
 
+# M50: montage — one clip from pieces of different blocks of a source (docs/REEL_SPEC.md §8).
+# A draft line «M 85 | 13.2-6 41.1-4 | h:41.3 | t: …» plays block 13 sentences 2–6, then block 41
+# sentences 1–4 (pieces in source order). Every seam between pieces: a shot change + a natural pause.
+montage:
+  enabled: true
+  seam_pad_sec: 0.20      # air on each side of a seam between pieces (inside the silence; ≤ 0.4 s pause heard)
+  piece_min_sec: 6.0      # a shorter piece is reported (the viewer has no time to settle)
+  seams_per_min_max: 3.0  # more seams per minute of clip is reported (feels like constant jumping)
+  pace_ratio_max: 1.35    # two joined pieces whose speech rate differs more are reported
+  seam_jump_warn: 3.0     # picture jump at a seam (arl motion) above this × typical motion is reported
+  loudness_diff_db: 4.0   # speech level (dB) on the two sides of a seam differs more → reported (heard as a jump)
+  pitch_diff_st: 3.0      # median voice pitch on the two sides differs more (semitones) → reported (another mood)
+  side_sec: 4.0           # loudness and pitch are measured on this much played speech on each side of a seam
+
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
 # A filter that removes a good block is worse than one that lets junk through (stage 3 can rank it down).
