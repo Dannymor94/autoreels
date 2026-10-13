@@ -427,6 +427,15 @@ class SpeechTimes:
         i = self._pos.get(round(w.t0 * 1000))
         return self._words[i - 1] if i is not None and i > 0 else None
 
+    def is_aligned(self, w: Word) -> bool:
+        """The word has a forced-alignment span (not rejected by clean_alignment)."""
+        return round(w.t0 * 1000) in self._al
+
+    def map_onset(self, w: Word) -> float | None:
+        """The speech map's audible start of the word (None when the map does not have it)."""
+        e = self._smap.get(round(w.t0 * 1000))
+        return None if e is None else e.get("audible_start")
+
     def next(self, w: Word) -> Word | None:
         i = self._pos.get(round(w.t0 * 1000))
         return self._words[i + 1] if i is not None and i + 1 < len(self._words) else None
@@ -890,6 +899,19 @@ def build_manual_plan(
     ae_last, onset = _speech_after(times, last_word)
     if next_onset is not None:            # e.g. untranscribed speech the transcript does not have
         o2 = next_onset(last_word)
+        # M49: the map's onset may be the NEXT WORD at its Whisper place, while forced alignment
+        # puts that word later. Whisper stretches a short word over the pause before it (10h59 r03:
+        # «И» 591.205–591.985, aligned at 591.91; Pxl 1129 r10: «И» 1398.753–1399.593, aligned at
+        # 1399.54), and the map gives it the first sound after its Whisper start — the tail of the
+        # last word. Then the next speech "began" inside the last word: the plan ended on the word
+        # with no air and render flagged speech after the last subtitle. Time comes from the sound
+        # (invariant 9): an aligned next word is where alignment says. Untranscribed speech the map
+        # reports still counts.
+        nxt_w = times.next(last_word)
+        if (o2 is not None and nxt_w is not None and times.is_aligned(nxt_w)
+                and times.map_onset(nxt_w) is not None and abs(o2 - times.map_onset(nxt_w)) < _EPS
+                and times.audible(nxt_w)[0] > o2 + 0.05):
+            o2 = None
         if o2 is not None:
             onset = o2 if onset is None else min(onset, o2)
     end = ae_last + params.end_air_sec

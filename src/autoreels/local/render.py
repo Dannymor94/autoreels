@@ -1434,18 +1434,39 @@ def _smap_word_lookup(smap: dict) -> dict[int, tuple[int, dict]]:
     return {round(w["t0"] * 1000): (i, w) for i, w in enumerate(smap["words"])}
 
 
+_NO_PLAN = object()
+
+
 def _check_foreign_tail_word_render(
     reel_id: str,
     last_sub,
     clip_end: float,
     smap: dict,
     lookup: dict,
+    *,
+    plan_onset=_NO_PLAN,
 ) -> list[str]:
     """[ERROR] when next speech onset after the last subtitle word starts before clip_end.
 
     Uses audible_start (not Whisper t0) to avoid false positives when the clip end falls
     between t0 and audible_start of the next word — a gap of 10–30 ms that is normal.
+
+    plan_onset (M49, planned reels): the next speech onset the plan cut the clip by
+    (reel.tail_next_word_start: forced alignment + speech map, the last word's ORIGINAL Whisper
+    times; None = no speech follows). The clip is checked against it, as the end-air and silence
+    checks use the plan's last-word end. Recomputing it here from the subtitle word went wrong:
+    the plan keeps subtitle times inside their window (t1 clamped to the window end), and with the
+    shorter t1 a Whisper duplicate of the last word counted as "next speech" (10h59 r03, r08;
+    Pxl 1129 r10: «transcribed word after final subtitle» on clips that end in silence).
     """
+    if plan_onset is not _NO_PLAN:
+        if plan_onset is not None and plan_onset < clip_end - 0.01:
+            return [
+                f"  [ERROR] {reel_id}: transcribed word after final subtitle '{last_sub.word}' "
+                f"(t0={last_sub.t0:.3f}s): next speech at {plan_onset:.3f}s starts before clip end "
+                f"{clip_end:.3f}s"
+            ]
+        return []
     _nso = _next_speech_onset_after(last_sub.t0, smap, lookup, last_t1=getattr(last_sub, "t1", None))
     if _nso is None or _nso.onset is None:
         return []
@@ -3115,7 +3136,8 @@ def _render_segments(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup,
                     last_ae=(getattr(reel, "tail_last_word_end", None) if _planned else None)))
                 _clip_errors.extend(_check_foreign_tail_word_render(
-                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup))
+                    reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup,
+                    plan_onset=(getattr(reel, "tail_next_word_start", None) if _planned else _NO_PLAN)))
             # First-word-cut invariant: source_start must not exceed the first subtitle word's
             # acoustic onset (audible_start per smap).  The start-fix above prevents this; the
             # check here catches any remaining violations (e.g., smap lookup mismatch).

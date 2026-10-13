@@ -452,3 +452,38 @@ def test_sentence_sharing_its_sound_with_speech_of_no_sentence_is_an_error():
                  + [{"idx": 9, "t0": 1.2, "t1": 2.0, "audible_start": 1.2, "audible_end": 2.0}])
     ok = build_manual_plan(sents, [1, 2], words=sorted(words + apart, key=lambda w: w.t0), smap=smap2, params=P)
     assert ok.errors == []
+
+
+def test_next_word_at_its_aligned_place_not_at_its_whisper_place():
+    """M49, 10h59 r03: Whisper stretched «И» over the pause (591.205–591.985); the speech map gave it
+    the first sound after that — the tail of «пробуйте.» (591.305). Forced alignment puts «И» at
+    591.91, right before «главная». The plan used the map's onset: the next speech «began» inside
+    the last word, the clip ended on the word with no air, and render flagged speech after the last
+    subtitle. An aligned next word counts where alignment puts it; the map's untranscribed speech
+    still counts."""
+    ws = [_w("Вы", 590.2, 590.6), _w("пробуйте.", 590.905, 591.425), _w("И", 591.205, 591.985),
+          _w("главная", 591.985, 592.325), _w("причина.", 592.325, 592.845)]
+    smap = {"words": [
+        {"t0": 590.2, "t1": 590.6, "audible_start": 590.25, "audible_end": 590.6},
+        {"t0": 590.905, "t1": 591.425, "audible_start": 591.005, "audible_end": 591.255},
+        {"t0": 591.205, "t1": 591.985, "audible_start": 591.305, "audible_end": 591.620},
+        {"t0": 591.985, "t1": 592.325, "audible_start": 591.890, "audible_end": 592.375},
+        {"t0": 592.325, "t1": 592.845, "audible_start": 592.425, "audible_end": 592.895}],
+        "boundaries": [], "intervals": [[590.25, 590.6], [590.95, 591.62], [591.89, 592.9]]}
+    align = {"words": [
+        {"t0": 590.2, "start": 590.25, "end": 590.6, "score": 0.98},
+        {"t0": 590.905, "start": 590.949, "end": 591.35, "score": 0.979},
+        {"t0": 591.205, "start": 591.91, "end": 591.93, "score": 0.995},
+        {"t0": 591.985, "start": 591.97, "end": 592.35, "score": 0.972},
+        {"t0": 592.325, "start": 592.39, "end": 592.81, "score": 0.967}], "untranscribed": []}
+    sents = [ws[:2], ws[2:]]
+    prm = ManualPlanParams(seam_pad_sec=0.04, end_air_sec=0.30, onset_margin_sec=0.06)
+    map_onset = lambda w: 591.305                                  # noqa: E731 — what render's smap lookup gives
+    plan = build_manual_plan(sents, [1], words=ws, smap=smap, align=align, params=prm, next_onset=map_onset)
+    assert plan.last_audible_end == pytest.approx(591.62)          # the word's tail, absorbed from the energy
+    assert plan.next_onset == pytest.approx(591.91)                # «И» where alignment puts it
+    assert plan.end == pytest.approx(591.85) and not any("no room" in w for w in plan.warnings)
+    # untranscribed speech the map reports (not the next word's map onset) still cuts the clip
+    untr = build_manual_plan(sents, [1], words=ws, smap=smap, align=align, params=prm,
+                             next_onset=lambda w: 591.70)
+    assert untr.next_onset == pytest.approx(591.70) and untr.end == pytest.approx(591.64)

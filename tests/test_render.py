@@ -3535,3 +3535,23 @@ def test_multi_window_reel_gets_cfr_chain_only_for_variable_rate_source(tmp_path
         cmd = next(c for c in fake_ffmpeg if "-filter_complex" in c)
         durs = [float(cmd[i + 1]) - 2.0 for i, a in enumerate(cmd) if a == "-t" and cmd[i + 2] == "-i"][:2]
         assert len(frames) == 2 and frames == [round(d * 30) for d in durs]
+
+
+def test_planned_tail_word_check_uses_the_plans_next_onset():
+    """M49, 10h59 r03 («…пробуйте.»): the plan keeps subtitle times inside their window, so the last
+    subtitle's t1 is clamped. Recomputed from that shorter t1, a Whisper duplicate of the last word
+    counted as next speech → «transcribed word after final subtitle» on a clip ending in silence.
+    A planned reel is checked against the onset the plan cut it by (reel.tail_next_word_start)."""
+    from autoreels.local.render import _check_foreign_tail_word_render, _smap_word_lookup
+    smap = {"words": [
+        {"t0": 590.905, "t1": 591.600, "audible_start": 590.950, "audible_end": 591.330},
+        {"t0": 591.200, "t1": 591.500, "audible_start": 591.300, "audible_end": 591.450},   # duplicate
+        {"t0": 592.500, "t1": 592.900, "audible_start": 592.400, "audible_end": 592.850},   # next speech
+    ], "boundaries": [{"pause": 0.0}, {"pause": 1.0}, {"pause": 0.0}]}
+    lookup = _smap_word_lookup(smap)
+    clamped = Word(word="пробуйте.", t0=590.905, t1=591.0)          # as the plan's subtitles carry it
+    assert _check_foreign_tail_word_render("r03", clamped, 591.631, smap, lookup)       # the old false error
+    assert _check_foreign_tail_word_render("r03", clamped, 591.631, smap, lookup, plan_onset=592.4) == []
+    assert _check_foreign_tail_word_render("r03", clamped, 591.631, smap, lookup, plan_onset=None) == []
+    errs = _check_foreign_tail_word_render("r03", clamped, 591.631, smap, lookup, plan_onset=591.5)
+    assert errs and "next speech at 591.500s" in errs[0]
