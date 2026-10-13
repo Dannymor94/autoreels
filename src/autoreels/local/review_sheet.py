@@ -7,6 +7,15 @@ is static: it is opened from disk next to the clips (reels-out/<stem>/), no serv
 anywhere; the choices survive a reload in the browser's local storage.
 
 Pure: build_sheet() turns prepared cards into HTML; the CLI collects the cards.
+
+M52 — the clip as text (like text-based video editors): under the video, every sentence of the
+clip's block group in the review numbering. A click turns a sentence on or off (or, in hook mode,
+makes it the cold open); «▶ правка» plays the new version from a small preview file next to the
+page (_preview/<rid>-<a>-<b>.m4a, or .mp4 with the picture — arl review-sheet --preview), jumping
+over the sentences that are off. An edited clip gets the verdict «edit» with its new s:/e:/x:/h:;
+arl review-apply writes them into the line. Data contract (for any other UI of the sheet): the
+script #clips holds {rid: {seq, sentences: [{n, text, a, b, complete, open, played}], hook,
+media, offset}}; a and b are source seconds, media time = source time − offset.
 """
 from __future__ import annotations
 
@@ -30,6 +39,7 @@ class Card:
     marks: list[str] = field(default_factory=list)   # the owner's marks of earlier rounds
     score: int | None = None      # the draft's score (after ranking: the place, 95 best … 65)
     montage: str = ""             # M50: the montage line (M …) the clip was built from
+    edit: dict | None = None      # M52: label.edit_model + "media", "offset" (None: not editable here)
 
 
 _CSS = """
@@ -76,29 +86,182 @@ overflow-wrap:anywhere}
 textarea{width:100%;min-height:54px;font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;
 background:var(--bg);color:var(--ink)}
 .noline{color:var(--drop)}
+.card[data-v="edit"]{border-color:var(--accent)}
+.choice label:has(input[value="edit"]:checked){background:var(--accent);border-color:var(--accent);color:#fff}
+.ed{margin:8px 0;border-top:1px solid var(--line);padding-top:8px}
+.ed .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}
+.ed .bar button{padding:5px 10px}.ed .bar button[aria-pressed="true"]{background:var(--ink);color:var(--card)}
+.ed .txt{line-height:1.7}
+.ed .s{cursor:pointer;border-radius:4px;padding:1px 2px;-webkit-tap-highlight-color:transparent}
+.ed .s.off{color:var(--mute);text-decoration:line-through;opacity:.7}
+.ed .s.hook{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.ed .s.now{outline:2px solid var(--accent)}
+.ed .n{font-family:var(--mono);font-size:11px;color:var(--mute);margin-right:2px}
+.ed .flag{font-size:12px;color:var(--fix)}
+.ed .out{font-family:var(--mono);font-size:12.5px;margin-top:8px}
+.ed .warn{color:var(--fix);font-size:13px}
+.ed video.pv{width:100%;max-width:300px;aspect-ratio:16/9;margin:6px 0}
 @media (max-width:700px){.card{grid-template-columns:1fr}video,.novideo{max-height:70vh;width:auto;margin:0 auto}}
 """
 
 _JS = r"""
 (function(){
   const meta = JSON.parse(document.getElementById('meta').textContent);
+  const CLIPS = JSON.parse(document.getElementById('clips').textContent || '{}');
   const key = 'arl-review:' + meta.stem + ':' + meta.key;
   const cards = Array.from(document.querySelectorAll('.card[data-seq]'));
+  const ED = {};                       // rid → {played:Set, hook, orig:{played, hook}}
   function load(){ try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch(e){ return {}; } }
   function save(st){ try { localStorage.setItem(key, JSON.stringify(st)); } catch(e){} }
+  function verdict(c){ return (c.querySelector('input[type=radio]:checked') || {}).value || ''; }
+
+  // ── M52: the clip as text ──────────────────────────────────────────────────────────────
+  function ranges(ns){
+    const out = []; let a = null, b = null;
+    ns.forEach(n => { if (a === null) { a = b = n; } else if (n === b + 1) { b = n; } else { out.push([a, b]); a = b = n; } });
+    if (a !== null) out.push([a, b]);
+    return out;
+  }
+  function fields(rid){
+    const e = ED[rid]; const p = Array.from(e.played).sort((x, y) => x - y);
+    if (!p.length) return '';
+    const s = p[0], en = p[p.length - 1], x = [];
+    for (let k = s; k <= en; k++) if (!e.played.has(k)) x.push(k);
+    let f = 's:' + s + ' e:' + en;
+    if (x.length) f += ' x:' + ranges(x).map(r => r[0] === r[1] ? '' + r[0] : r[0] + '-' + r[1]).join(',');
+    if (e.hook) f += ' h:' + e.hook;
+    return f;
+  }
+  function changed(rid){
+    const e = ED[rid];
+    if ((e.hook || null) !== (e.orig.hook || null)) return true;
+    if (e.played.size !== e.orig.played.size) return true;
+    for (const n of e.played) if (!e.orig.played.has(n)) return true;
+    return false;
+  }
+  function segments(rid, version){
+    const d = CLIPS[rid], e = ED[rid];
+    const played = version === 'orig' ? e.orig.played : e.played;
+    const hook = version === 'orig' ? e.orig.hook : e.hook;
+    const by = {}; d.sentences.forEach(x => by[x.n] = x);
+    const segs = [];
+    if (hook && by[hook]) segs.push([by[hook].a - 0.1, by[hook].b + 0.25, [hook]]);
+    ranges(Array.from(played).sort((x, y) => x - y)).forEach(r => {
+      const ns = []; for (let k = r[0]; k <= r[1]; k++) ns.push(k);
+      segs.push([by[r[0]].a - 0.12, by[r[1]].b + 0.25, ns]);
+    });
+    return segs.map(sg => [Math.max(0, sg[0] - d.offset), sg[1] - d.offset, sg[2]]);
+  }
+  let playing = null;
+  function stop(){
+    if (!playing) return;
+    playing.el.pause(); playing.card.querySelectorAll('.s.now').forEach(x => x.classList.remove('now'));
+    playing = null;
+  }
+  function play(card, rid, version){
+    stop();
+    const el = card.querySelector('.pv'); if (!el) return;
+    const segs = segments(rid, version); if (!segs.length) return;
+    playing = {el: el, card: card, segs: segs, i: 0};
+    const mark = () => {
+      card.querySelectorAll('.s.now').forEach(x => x.classList.remove('now'));
+      const t = el.currentTime + CLIPS[rid].offset;
+      const ns = playing.segs[playing.i][2];
+      CLIPS[rid].sentences.forEach(x => { if (ns.indexOf(x.n) >= 0 && t >= x.a && t < x.b) {
+        const sp = card.querySelector('.s[data-n="' + x.n + '"]'); if (sp) sp.classList.add('now'); } });
+    };
+    const go = () => { el.currentTime = playing.segs[playing.i][0]; el.play(); };
+    const tick = () => {
+      if (!playing || playing.el !== el) return;
+      if (el.currentTime >= playing.segs[playing.i][1]) {
+        playing.i++;
+        if (playing.i >= playing.segs.length) { stop(); return; }
+        el.currentTime = playing.segs[playing.i][0];
+      }
+      mark(); requestAnimationFrame(tick);
+    };
+    go(); requestAnimationFrame(tick);
+  }
+  function drawEditor(card){
+    const rid = card.dataset.rid, d = CLIPS[rid], e = ED[rid];
+    const box = card.querySelector('.ed'); if (!box) return;
+    const txt = box.querySelector('.txt');
+    txt.innerHTML = '';
+    d.sentences.forEach(x => {
+      const sp = document.createElement('span');
+      sp.className = 's' + (e.played.has(x.n) ? '' : ' off') + (e.hook === x.n ? ' hook' : '');
+      sp.dataset.n = x.n;
+      sp.innerHTML = '<span class="n">[' + x.n + ']</span>';
+      sp.appendChild(document.createTextNode(x.text));
+      if (!x.complete) sp.insertAdjacentHTML('beforeend', ' <span class="flag">…→</span>');
+      if (x.open) sp.insertAdjacentHTML('beforeend', ' <span class="flag">↗</span>');
+      txt.appendChild(sp); txt.appendChild(document.createTextNode(' '));
+    });
+    const p = Array.from(e.played).sort((a, b) => a - b);
+    const segs = segments(rid, 'new');
+    const sec = segs.reduce((t, sg) => t + (sg[1] - sg[0]), 0);
+    box.querySelector('.out').textContent = changed(rid)
+      ? 'правка: ' + (fields(rid) || '—') + ' · ≈' + Math.round(sec) + ' с'
+      : 'как в черновике · ≈' + Math.round(sec) + ' с';
+    const w = [];
+    if (!p.length) w.push('ни одной фразы — клип пустой');
+    else {
+      const last = d.sentences.find(x => x.n === p[p.length - 1]), first = d.sentences.find(x => x.n === p[0]);
+      if (!last.complete) w.push('конец на незаконченной фразе (…→)');
+      if (last.open) w.push('конец с голосом вверх (↗) — звучит как «продолжение следует»');
+      if (first.text && first.text[0] === first.text[0].toLowerCase()) w.push('начало посреди фразы');
+      if (sec < 15) w.push('короче 15 с');
+    }
+    box.querySelector('.warn').textContent = w.join(' · ');
+  }
+  function setVerdictFromEdit(card){
+    const rid = card.dataset.rid;
+    const r = card.querySelector('input[value="edit"]'); if (!r) return;
+    if (changed(rid)) r.checked = true;
+    else if (r.checked) r.checked = false;
+  }
+  cards.forEach(card => {
+    const rid = card.dataset.rid, d = CLIPS[rid];
+    if (!d) return;
+    const orig = {played: new Set(d.sentences.filter(x => x.played).map(x => x.n)), hook: d.hook || null};
+    ED[rid] = {played: new Set(orig.played), hook: orig.hook, orig: orig, mode: 'cut'};
+    const box = card.querySelector('.ed'); if (!box) return;
+    box.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+      ED[rid].mode = b.dataset.mode;
+      box.querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+    }));
+    box.querySelector('.txt').addEventListener('click', ev => {
+      const sp = ev.target.closest('.s'); if (!sp) return;
+      const n = +sp.dataset.n, e = ED[rid];
+      if (e.mode === 'hook') e.hook = (e.hook === n ? null : n);
+      else if (e.played.has(n)) e.played.delete(n); else e.played.add(n);
+      drawEditor(card); setVerdictFromEdit(card); refresh();
+    });
+    box.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => {
+      const a = b.dataset.act, e = ED[rid];
+      if (a === 'play') play(card, rid, 'new');
+      else if (a === 'orig') play(card, rid, 'orig');
+      else if (a === 'stop') stop();
+      else if (a === 'reset') { e.played = new Set(e.orig.played); e.hook = e.orig.hook; drawEditor(card);
+                                setVerdictFromEdit(card); refresh(); }
+    }));
+  });
+
+  // ── verdicts ───────────────────────────────────────────────────────────────────────────
   function state(){
     const st = {};
     cards.forEach(c => {
-      const v = (c.querySelector('input[type=radio]:checked') || {}).value || '';
+      const v = verdict(c), rid = c.dataset.rid;
       const n = c.querySelector('textarea').value.trim();
-      if (v || n) st[c.dataset.rid] = {v: v, n: n};
+      const ed = ED[rid] && changed(rid) ? {p: Array.from(ED[rid].played), h: ED[rid].hook} : null;
+      if (v || n || ed) st[rid] = {v: v, n: n, ed: ed};
     });
     return st;
   }
   function refresh(){
     let done = 0;
     cards.forEach(c => {
-      const v = (c.querySelector('input[type=radio]:checked') || {}).value || '';
+      const v = verdict(c);
       c.dataset.v = v;
       c.classList.toggle('missing-note', v === 'fix' && !c.querySelector('textarea').value.trim());
       if (v) done++;
@@ -108,11 +271,13 @@ _JS = r"""
   }
   const st = load();
   cards.forEach(c => {
-    const s = st[c.dataset.rid];
+    const s = st[c.dataset.rid], rid = c.dataset.rid;
     if (s) {
+      if (s.ed && ED[rid]) { ED[rid].played = new Set(s.ed.p); ED[rid].hook = s.ed.h || null; }
       const r = c.querySelector('input[value="' + s.v + '"]'); if (r) r.checked = true;
       c.querySelector('textarea').value = s.n || '';
     }
+    if (ED[rid]) drawEditor(c);
     c.addEventListener('change', refresh);
     c.querySelector('textarea').addEventListener('input', refresh);
   });
@@ -120,10 +285,15 @@ _JS = r"""
     const out = ['# stem: ' + meta.stem, '# review: ' + meta.review, '# manifest: ' + meta.manifest,
                  '# decided: ' + new Date().toISOString().slice(0, 10)];
     cards.forEach(c => {
-      const v = (c.querySelector('input[type=radio]:checked') || {}).value || '';
+      const v = verdict(c), rid = c.dataset.rid;
       const n = c.querySelector('textarea').value.trim().replace(/\s*\n\s*/g, ' ');
-      const head = c.dataset.rid + ' | line ' + c.dataset.seq;
+      const head = rid + ' | line ' + c.dataset.seq;
       if (!v) out.push('# ' + head + ' | не решено' + (n ? ' | ' + n : ''));
+      else if (v === 'edit') {
+        const f = ED[rid] ? fields(rid) : '';
+        if (f && changed(rid)) out.push(head + ' | edit | ' + f + (n ? ' | ' + n : ''));
+        else out.push('# ' + head + ' | правка без изменений' + (n ? ' | ' + n : ''));
+      }
       else out.push(head + ' | ' + v + (n ? ' | ' + n : ''));
     });
     return out.join('\n') + '\n';
@@ -184,10 +354,15 @@ def _card_html(c: Card) -> str:
                  + (f'<div class="marks">{_e(c.preview)}</div>' if c.preview else "") + "</details>")
     if c.marks:
         parts.append('<div class="marks">' + "<br>".join(_e(m) for m in c.marks) + "</div>")
+    if c.edit:
+        parts.append(_editor_html(c))
     name = f"v-{_e(c.rid)}"
+    choices = (("ok", "Оставить"), ("drop", "Убрать"), ("fix", "Переделать"))
+    if c.edit:
+        choices += (("edit", "Правка"),)
     radios = "".join(
         f'<label><input type="radio" name="{name}" value="{v}"><span>{t}</span></label>'
-        for v, t in (("ok", "Оставить"), ("drop", "Убрать"), ("fix", "Переделать")))
+        for v, t in choices)
     parts.append(f'<div class="choice">{radios}</div>'
                  f'<textarea placeholder="Замечание (для «Переделать» обязательно): что не так, '
                  f'где начать или закончить…" aria-label="Замечание к {_e(c.rid)}"></textarea></div>')
@@ -195,11 +370,32 @@ def _card_html(c: Card) -> str:
             + "</section>")
 
 
+def _editor_html(c: Card) -> str:
+    """The clip as text (M52). The sentences are filled in by the script from #clips."""
+    media = c.edit.get("media") or ""
+    player = ""
+    if media.endswith(".mp4"):
+        player = f'<video class="pv" src="{_e(media)}" preload="metadata" playsinline></video>'
+    elif media:
+        player = f'<audio class="pv" src="{_e(media)}" preload="metadata"></audio>'
+    play = ('<button type="button" data-act="play">▶ правка</button>'
+            '<button type="button" data-act="orig">▶ было</button>'
+            '<button type="button" data-act="stop">■</button>') if media else \
+        '<span class="warn">нет файла предпросмотра (arl review-sheet … --preview audio)</span>'
+    return (f'<details class="ed" open><summary>правка по тексту</summary>{player}'
+            '<div class="bar"><button type="button" data-mode="cut" aria-pressed="true">вкл/выкл фразу</button>'
+            '<button type="button" data-mode="hook" aria-pressed="false">★ крючок</button>'
+            f'{play}<button type="button" data-act="reset">↺ как было</button></div>'
+            '<div class="txt"></div><div class="out"></div><div class="warn"></div></details>')
+
+
 def build_sheet(stem: str, cards: list[Card], *, review_ref: str, manifest_ref: str, key: str,
                 notes: list[str] = ()) -> str:
     """The whole page. key: a short hash of the draft — choices saved in the browser belong to it."""
     meta = json.dumps({"stem": stem, "review": review_ref, "manifest": manifest_ref, "key": key},
                       ensure_ascii=False).replace("</", "<\\/")
+    clips = json.dumps({c.rid: c.edit for c in cards if c.edit and c.seq is not None},
+                       ensure_ascii=False).replace("</", "<\\/")
     unmatched = [c.rid for c in cards if c.seq is None and not c.montage]
     top = [f'<p class="note-top">Черновик: {_e(review_ref)} · манифест: {_e(manifest_ref)}. '
            f'Отметьте каждый клип, нажмите «Скачать решения», затем: '
@@ -215,6 +411,36 @@ def build_sheet(stem: str, cards: list[Card], *, review_ref: str, manifest_ref: 
         "<button id=\"copy\" type=\"button\">Копировать</button>"
         "<button id=\"save\" class=\"primary\" type=\"button\">Скачать решения</button></header>"
         "<main>" + "".join(top) + "".join(_card_html(c) for c in cards) + "</main>"
-        f"<script id=\"meta\" type=\"application/json\">{meta}</script><script>{_JS}</script>"
+        f"<script id=\"meta\" type=\"application/json\">{meta}</script>"
+        f"<script id=\"clips\" type=\"application/json\">{clips}</script><script>{_JS}</script>"
         "</body></html>\n"
     )
+
+
+PREVIEW_PAD = 1.0     # seconds of source kept before the first and after the last sentence
+
+
+def preview_span(model: dict) -> tuple[float, float]:
+    ss = model["sentences"]
+    return max(0.0, round(ss[0]["a"] - PREVIEW_PAD, 2)), round(ss[-1]["b"] + PREVIEW_PAD, 2)
+
+
+def preview_name(rid: str, span: tuple[float, float], kind: str) -> str:
+    """_preview/<rid>-<a>-<b>.m4a|.mp4 — the span in the name: a changed clip gets a new file."""
+    return f"_preview/{rid}-{span[0]:.2f}-{span[1]:.2f}." + ("mp4" if kind == "video" else "m4a")
+
+
+def preview_cmd(ffmpeg: str, source, span: tuple[float, float], out, kind: str,
+                vcodec: str = "libx264") -> list[str]:
+    """Small preview of a stretch of the source for the text editor: mono AAC (audio) or, with the
+    picture, the whole frame scaled to 480 px wide at 15 fps (video). Not the reel crop: the
+    preview is for hearing the seams and seeing the speaker, not for judging the frame."""
+    a, b = span
+    cmd = [ffmpeg, "-v", "error", "-y", "-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", str(source)]
+    if kind == "video":
+        vq = ["-crf", "32", "-preset", "veryfast"] if vcodec == "libx264" else ["-b:v", "500k"]
+        cmd += ["-vf", "scale=480:-2", "-r", "15", "-c:v", vcodec, *vq, "-pix_fmt", "yuv420p"]
+    else:
+        cmd += ["-vn"]
+    cmd += ["-ac", "1", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(out)]
+    return cmd

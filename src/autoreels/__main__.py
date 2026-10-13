@@ -7758,6 +7758,7 @@ def cmd_review_sheet(
     manifest_file: str | None = None,
     gate: str | None = None,
     out_dir: str | None = None,
+    preview: str = "audio",
 ) -> int:
     """M37: one HTML page to watch the rendered clips of a source and decide on each one
     (оставить / убрать / переделать + замечание) → reels-out/<stem>/[_gate/<name>/]_review.html.
@@ -7766,7 +7767,7 @@ def cmd_review_sheet(
     a clip whose line is gone (the draft changed after the render) is shown without controls.
     The page downloads <stem>_decisions.txt for arl review-apply. Nothing else is written."""
     import hashlib
-    from autoreels.cloud.label import clip_lines, match_reels
+    from autoreels.cloud.label import clip_lines, edit_model, match_reels
     from autoreels.local.review_sheet import Card, build_sheet
 
     _root = Path(root) if root else _project_root()
@@ -7805,6 +7806,15 @@ def cmd_review_sheet(
     if gate:
         vdir = vdir / "_gate" / gate
     cards: list = []
+    edits = {}
+    from autoreels.cloud.blocks import parse_compact_answer as _pca
+    _beat_seqs = {e.seq for e in _pca(review_text)[1] if e.beats}   # a beat order is not s..e: not editable here
+    for r in reels:                     # M52: the clip as text, for the editor under the video
+        ln = match.get(r.id)
+        m = edit_model(ln, ctx.wblocks, ctx.words) if ln is not None and ln.seq not in _beat_seqs else None
+        if m is not None:
+            edits[r.id] = m
+    _make_previews(edits, manifest, _root, vdir, preview)
     for r in reels:
         ln = match.get(r.id)
         vid = f"{r.id}.mp4" if (vdir / f"{r.id}.mp4").is_file() else None
@@ -7814,6 +7824,7 @@ def cmd_review_sheet(
             text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
             seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
             marks=list(ln.marks) if ln else [], score=r.score, montage=r.montage or "",
+            edit=edits.get(r.id),
         ))
     notes = []
     n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
@@ -7838,6 +7849,84 @@ def cmd_review_sheet(
             print(f"  {c.rid}: строка черновика не найдена (черновик менялся после рендера)")
     print(f"→ {out}\n  открыть: open \"{out}\"")
     return 0
+
+
+def _check_owner_edits(text: str, edits: list, head: dict, review_path: Path, root: Path, cache_dir) -> None:
+    """M52: an owner's edit is his choice — written as is; what the draft check would say about it is
+    only printed (invariant 5: a manual choice is not revised by code)."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    from autoreels.cloud.label import _line_index, check_clip, entry_to_clip
+    stem = head.get("stem") or review_path.name.removesuffix("_auto.txt")
+    mpath = _resolve_manifest_arg(stem, root)
+    if mpath is None:
+        return
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    ctx, _err = _label_context(mpath, manifest, load_r0_config(root / "config" / "r0.yaml"), root=root,
+                               cache_dir=cache_dir, quiet=True)
+    if ctx is None:
+        return
+    lines = text.splitlines()
+    for d in edits:
+        i = _line_index(lines, d.seq)
+        if i is None:
+            continue
+        _, entries, errors, _ = parse_compact_answer(lines[i] + "\n")
+        if errors or not entries:
+            print(f"  ! {d.reel}: строка {d.seq} после правки не читается: {errors}", file=sys.stderr)
+            continue
+        clip, group, why = entry_to_clip(entries[0], ctx.wblocks, ctx.words)
+        probs = [why] if clip is None else check_clip(clip, group, ctx.words, ctx.p, require_text=False).problems
+        for pr in probs:
+            print(f"  ! {d.reel}: строка {d.seq} (правка владельца, не меняется): {pr}")
+
+
+def _make_previews(edits: dict, manifest, root: Path, vdir: Path, kind: str) -> None:
+    """M52: _preview/<rid>-<a>-<b>.m4a|.mp4 next to the sheet for every editable clip (kept when the
+    file is there; a clip whose span changed gets a new one, the old files of that clip are removed).
+    kind none: no files, the editor works without playback. Sets model["media"], model["offset"]."""
+    import subprocess
+    from autoreels.local.review_sheet import preview_cmd, preview_name, preview_span
+    if kind == "none" or not edits:
+        for m in edits.values():
+            m["media"], m["offset"] = "", preview_span(m)[0]
+        return
+    try:
+        source = resolve_source(manifest, root / "inputs")
+    except Exception as e:  # noqa: BLE001
+        print(f"  предпросмотр не сделан — исходник не найден: {e}", file=sys.stderr)
+        for m in edits.values():
+            m["media"], m["offset"] = "", preview_span(m)[0]
+        return
+    try:
+        ff = resolve_ffmpeg(None, render_cfg=load_render_config(root / "config" / "render.yaml"))
+    except Exception:  # noqa: BLE001
+        ff = "ffmpeg"
+    (vdir / "_preview").mkdir(parents=True, exist_ok=True)
+    made = 0
+    for rid, m in edits.items():
+        span = preview_span(m)
+        name = preview_name(rid, span, kind)
+        m["media"], m["offset"] = name, span[0]
+        out = vdir / name
+        if out.is_file() and out.stat().st_size > 0:
+            continue
+        for old in (vdir / "_preview").glob(f"{rid}-*"):
+            old.unlink(missing_ok=True)
+        tmp = out.with_name("tmp-" + out.name)
+        ok = False
+        for vc in (("libx264", "h264_videotoolbox") if kind == "video" else ("libx264",)):
+            r = subprocess.run(preview_cmd(ff, source, span, tmp, kind, vcodec=vc), capture_output=True, text=True)
+            if r.returncode == 0 and tmp.is_file():
+                ok = True
+                break
+        if ok:
+            tmp.rename(out)
+            made += 1
+        else:
+            tmp.unlink(missing_ok=True)
+            m["media"] = ""
+            print(f"  {rid}: предпросмотр не сделан — ffmpeg: {(r.stderr or '').strip()[-200:]}", file=sys.stderr)
+    print(f"  предпросмотр ({kind}): новых файлов {made}, всего клипов с правкой по тексту {len(edits)}")
 
 
 def cmd_review_apply(
@@ -7883,8 +7972,11 @@ def cmd_review_apply(
     new_text, msgs = apply_decisions(old_text, decisions, date=_dt.date.today().isoformat())
     for m in msgs:
         print(f"  {m}")
-    n = {v: sum(1 for d in decisions if d.verdict == v) for v in ("ok", "drop", "fix")}
-    print(f"решения: оставить {n['ok']}, убрать {n['drop']}, переделать {n['fix']}")
+    n = {v: sum(1 for d in decisions if d.verdict == v) for v in ("ok", "drop", "fix", "edit")}
+    print(f"решения: оставить {n['ok']}, убрать {n['drop']}, переделать {n['fix']}, правка {n['edit']}")
+    if n["edit"]:
+        _check_owner_edits(new_text, [d for d in decisions if d.verdict == "edit"], head, review_path,
+                           _root, cache_dir)
     rc = 0
     if redo:
         stem = head.get("stem") or review_path.name.removesuffix("_auto.txt")
@@ -10403,6 +10495,9 @@ def _build_parser():
                      help="манифест отрендеренных клипов (по умолчанию тот же)")
     prs.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
     prs.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    prs.add_argument("--preview", choices=("audio", "video", "none"), default="audio",
+                     help="M52: файл предпросмотра для правки по тексту — звук (по умолчанию), "
+                          "видео 480 px со звуком или без файла")
 
     pra = sub.add_parser(
         "review-apply",
@@ -10755,6 +10850,7 @@ def main(argv=None) -> int:
                 manifest_file=getattr(args, "manifest_file", None),
                 gate=getattr(args, "gate", None),
                 out_dir=getattr(args, "out_dir", None),
+                preview=getattr(args, "preview", "audio"),
             )
         elif args.cmd == "review-apply":
             return cmd_review_apply(

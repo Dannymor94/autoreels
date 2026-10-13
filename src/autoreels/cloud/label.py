@@ -840,7 +840,9 @@ def retry_draft(text: str, wblocks: Sequence[WBlock], words: list, provider, *, 
 # note above the line); with --redo the LLM reworks each «✎» line under the same checks as a new
 # draft. Code places every verdict on the line by its block number; nothing is lost silently.
 
-_DECISION_RE = re.compile(r"^\s*(r\d+)\s*\|\s*line\s+(\d+)\s*\|\s*(ok|drop|fix)\s*(?:\|\s*(.*))?$", re.IGNORECASE)
+#     r03 | line 9 | edit | s:2 e:7 x:4 h:6 | note   (M52: the owner's own edit on the sheet's text)
+_DECISION_RE = re.compile(r"^\s*(r\d+)\s*\|\s*line\s+(\d+)\s*\|\s*(ok|drop|fix|edit)\s*(?:\|\s*(.*))?$", re.IGNORECASE)
+_EDIT_FIELDS_RE = re.compile(r"^(?:\s*(?:s|e|h):\d+|\s*x:\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)+\s*$")
 _FIX_RE = re.compile(r"^# ✎ владелец \((r\d+)([^)]*)\):\s*(.*)$")
 
 
@@ -848,8 +850,9 @@ _FIX_RE = re.compile(r"^# ✎ владелец \((r\d+)([^)]*)\):\s*(.*)$")
 class Decision:
     reel: str
     seq: int
-    verdict: str          # ok | drop | fix
+    verdict: str          # ok | drop | fix | edit
     note: str = ""
+    fields: str = ""      # edit: the new s:/e:/x:/h: of the line ("s:2 e:7 x:4 h:6")
 
 
 def parse_decisions(text: str) -> tuple[dict[str, str], list[Decision], list[str]]:
@@ -873,6 +876,12 @@ def parse_decisions(text: str) -> tuple[dict[str, str], list[Decision], list[str
             errors.append(f"строка {n}: не понял «{line[:60]}»")
             continue
         d = Decision(m.group(1).lower(), int(m.group(2)), m.group(3).lower(), (m.group(4) or "").strip())
+        if d.verdict == "edit":
+            fields, _, note = d.note.partition("|")
+            d.fields, d.note = fields.strip(), note.strip()
+            if not d.fields or not _EDIT_FIELDS_RE.match(d.fields) or not re.search(r"(?:^|\s)s:\d", d.fields):
+                errors.append(f"строка {n}: {d.reel} — «edit» без полей s:/e:/x:/h: («{d.fields[:40]}»)")
+                continue
         if d.verdict == "fix" and not d.note:
             errors.append(f"строка {n}: {d.reel} — «fix» без замечания")
             continue
@@ -970,6 +979,72 @@ def _marks_above(lines: list[str], i: int) -> list[str]:
     return out
 
 
+_EDITED = re.compile(r"(?:^|(?<=[|\s]))(?:[seh]:\s*\d+[!-]?|x:\s*[\d,\-\s]*\d)")
+
+
+def edit_line(raw: str, fields: str) -> str:
+    """A review line with its s:/e:/x:/h: replaced by `fields` (M52: the owner's edit on the review
+    sheet). Everything else stays as written — score and merge markers, c:, k:, f:, z:, t:, d:. A hook
+    on the same sentence keeps its ! / - marker."""
+    head, tail = raw, ""
+    cut = [m.start() for m in (re.search(r"(?:^|[|\s])t:\s", raw), re.search(r"(?:^|[|\s])d:\s", raw)) if m]
+    if cut:
+        head, tail = raw[:min(cut)], raw[min(cut):]
+    old_h = re.search(r"(?:^|[|\s])h:\s*(\d+)([!-]?)", head)
+    first, _, rest = head.partition("|")
+    if not _ and " " in first.strip():                    # "12 85 s:2 …" without separators
+        first, rest = " ".join(first.split()[:2]), " ".join(first.split()[2:])
+    kept = [p.strip() for p in _EDITED.sub(" ", rest).split("|")]
+    kept = [" ".join(p.split()) for p in kept if p.strip()]
+    new = fields.split()
+    if old_h:
+        new = [f + old_h.group(2) if f == f"h:{old_h.group(1)}" else f for f in new]
+    parts = [first.strip()] + [" ".join(new)] + kept
+    out = " | ".join(p for p in parts if p)
+    tail = tail.strip().lstrip("|").strip()
+    return out + (f" | {tail}" if tail else "")
+
+
+def edit_model(line: "ClipLine", wblocks: Sequence[WBlock], words: list) -> dict | None:
+    """M52: the text model of one clip for the review sheet's editor — every sentence of the clip's
+    block group in the review numbering, with its audible span (speech map + forced alignment when
+    the source has them, else Whisper times), whether it is complete / ends with the voice up, and the
+    line's current choice (played sentences, hook). None for a line that cannot be edited this way
+    (a '-' join or a beat order)."""
+    from autoreels.cloud.blocks import parse_compact_answer
+    _, entries, errors, _ = parse_compact_answer(line.raw + "\n")
+    if errors or not entries:
+        return None
+    e = entries[0]
+    if e.merge_back or e.beats:
+        return None
+    by_seq = {wb.seq: wb for wb in wblocks}
+    group = [by_seq.get(q) for q in line.blocks]
+    if any(g is None for g in group):
+        return None
+    merged = merge_group_sentences([g.block for g in group], words)
+    if not merged:
+        return None
+    times = next((g.sound.times for g in group if g.sound is not None), None)
+    flags: dict[int, Sent] = {}
+    for g in group:
+        for st in g.sents:
+            flags[id(st.words[-1])] = st
+    n = len(merged)
+    s_n = min(max(e.s or 1, 1), n)
+    e_n = min(max(e.e or n, 1), n)
+    xs = set(e.x or ())
+    out = []
+    for k, sent in enumerate(merged, 1):
+        a, b = (times.audible(sent[0])[0], times.audible(sent[-1])[1]) if times else (sent[0].t0, sent[-1].t1)
+        st = flags.get(id(sent[-1]))
+        out.append({"n": k, "text": " ".join(w.word for w in sent), "a": round(a, 3), "b": round(b, 3),
+                    "complete": bool(st.complete) if st else _ends_terminal(sent[-1]),
+                    "open": bool(st.open_tone) if st else False,
+                    "played": s_n <= k <= e_n and k not in xs})
+    return {"seq": line.seq, "sentences": out, "hook": e.hook if e.hook and 1 <= e.hook <= n else None}
+
+
 def apply_decisions(review_text: str, decisions: list[Decision], *, date: str = "") -> tuple[str, list[str]]:
     """Write the owner's verdicts into the draft: drop → the line is commented out with the note;
     fix → the note goes above the line (for --redo or a manual edit); ok → a mark above the line.
@@ -986,6 +1061,16 @@ def apply_decisions(review_text: str, decisions: list[Decision], *, date: str = 
             note = f": {d.note}" if d.note else ""
             lines[i] = f"#- {lines[i].strip()}  ← убрано владельцем ({d.reel}{tag}){note}"
             msgs.append(f"{d.reel}: строка {d.seq} убрана")
+            continue
+        if d.verdict == "edit":
+            new_line = edit_line(lines[i].strip(), d.fields)
+            mark = (f"# ✔ переделано владельцем на листе ({d.reel}{tag}): {d.fields}"
+                    + (f" — {d.note}" if d.note else ""))
+            if new_line == lines[i].strip() and mark in _marks_above(lines, i):
+                continue
+            lines[i] = new_line
+            lines.insert(i, mark)
+            msgs.append(f"{d.reel}: строка {d.seq} — правка владельца: {d.fields}")
             continue
         if d.verdict == "fix":
             mark = f"# ✎ владелец ({d.reel}{tag}): {d.note}"
