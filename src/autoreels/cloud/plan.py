@@ -68,6 +68,11 @@ class ManualPlanParams:
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
     break_pad_sec: float = 0.20
+    # M53: no shot (wide or close) lasts longer than this inside a window — a switch is added at a
+    # keyword (k:, a punch-in on the word), else a sentence boundary, else a word boundary; every
+    # shot stays at least min_shot_sec. None = off (the previous plan).
+    max_static_sec: float | None = None
+    min_shot_sec: float = 3.0
 
 
 @dataclass
@@ -617,6 +622,66 @@ def _accent_end(times: SpeechTimes, sentences, w: "PlannedWindow", bounds: dict,
     return min(hi, w.end - w.start)
 
 
+def _norm_kw(text: str) -> str:
+    return text.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]…")
+
+
+def _is_key(word: Word, kws: Sequence[str]) -> bool:
+    n = _norm_kw(word.word)
+    return any(n.startswith(k[:-1]) if k.endswith("*") else n == k for k in kws)
+
+
+def _limit_static(times: SpeechTimes, sentences, w: "PlannedWindow", ci: list[list[float]],
+                  params: "ManualPlanParams", keys: dict[int, Sequence[str]]) -> list[list[float]]:
+    """M53: split every shot of the window longer than max_static_sec by switching wide↔close.
+
+    Window-relative close intervals in, close intervals out. A switch goes, in this order of
+    preference, before a keyword of the sentence (k: — the close shot lands on the word), at a
+    sentence boundary, at a word boundary; the latest such point that leaves both shots at least
+    min_shot_sec. A stretch with no such point stays as it is."""
+    L, m = params.max_static_sec, params.min_shot_sec
+    dur = w.end - w.start
+    if not L or dur <= L:
+        return ci
+    words = [(n, x) for n in w.sentences for x in sentences[n - 1]]
+    cands: list[tuple[float, int]] = []
+    for (n0, a), (n1, b) in zip(words, words[1:]):
+        t = _boundary(times, a, b) - w.start
+        pri = 0 if _is_key(b, keys.get(n1, ())) else (1 if n1 != n0 else 2)
+        cands.append((t, pri))
+    edges = sorted({0.0, dur, *[x for c in ci for x in c]})
+    new: list[float] = []
+    for a, b in zip(edges, edges[1:]):
+        cur = a
+        while b - cur > L + _EPS:
+            ok = [(t, pr) for t, pr in cands if cur + m <= t <= cur + L and b - t >= m]
+            if not ok:
+                break
+            best = min(pr for _, pr in ok)
+            cur = max(t for t, pr in ok if pr == best)
+            new.append(cur)
+    if not new:
+        return ci
+
+    def close_at(t: float) -> bool:
+        return w.shot == "close" if not ci else any(c0 - _EPS <= t < c1 - _EPS for c0, c1 in ci)
+
+    pts = sorted(set(edges) | set(new))
+    out: list[list[float]] = []
+    flipped = False
+    for a, b in zip(pts, pts[1:]):
+        if a in edges:
+            flipped = False                    # a change of the plan's own resets the toggling
+        if a in new:
+            flipped = not flipped
+        if close_at((a + b) / 2) != flipped:
+            if out and abs(out[-1][1] - a) < _EPS:
+                out[-1][1] = round(b, 6)
+            else:
+                out.append([round(a, 6), round(b, 6)])
+    return out
+
+
 def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "ManualPlanParams",
                  jump: Callable[[float, float], float] | None = None) -> list[list[float]]:
     """Cuts of the window (sorted); masked ones are also recorded in w.cut_flips."""
@@ -778,6 +843,7 @@ def build_manual_plan(
     jump: Callable[[float, float], float] | None = None,
     weak_start_words: Iterable[str] = (),
     breaks: Iterable[int] = (),
+    keys: Iterable[tuple[int, Sequence[str]]] = (),
 ) -> ManualPlan:
     """Plan one manual clip. `sentences` is the review numbering (merge_group_sentences output);
     `play` the body sentence numbers in play order (s:..e: minus x:, or the beat order).
@@ -953,6 +1019,10 @@ def build_manual_plan(
 
     # §3 shots: cold open close; body starts wide; every seam flips; c: close; nothing else.
     close_set = set(close)
+    key_map: dict[int, list[str]] = {}
+    for n, kws in keys:
+        key_map.setdefault(int(n), []).extend(_norm_kw(k) if not k.endswith("*") else _norm_kw(k[:-1]) + "*"
+                                              for k in kws)
     sent_bounds: dict = {}
     prev_shot: str | None = "close" if hook is not None else None
     for w in windows:
@@ -972,6 +1042,9 @@ def build_manual_plan(
                 t = dur if dur <= params.accent_max_sec else _accent_end(times, sentences, w, bounds, params)
                 ci.append([0.0, t])
             ci = _merge_intervals(ci)
+            if params.max_static_sec:
+                w.shot = "wide"
+                ci = _limit_static(times, sentences, w, ci, params, key_map)
             if len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > dur - _EPS:
                 w.shot, w.close_intervals = "close", []
             else:

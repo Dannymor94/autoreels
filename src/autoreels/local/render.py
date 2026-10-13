@@ -2908,7 +2908,8 @@ def _render_segments(
                                             xfade_sec=_xfade_actual)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
-                _kw_on = getattr(render_cfg, "subtitle_keywords", False)
+                # M53: a montage clip highlights its k: words even with subtitle_keywords off
+                _kw_on = getattr(render_cfg, "subtitle_keywords", False) or bool(getattr(reel, "montage", None))
                 if not _kw_on and any(getattr(w, "emph", False) for w in reel.subtitles):
                     import sys as _sys
                     print(f"  warning ({reel.id}): has k: keywords but subtitle_keywords=False"

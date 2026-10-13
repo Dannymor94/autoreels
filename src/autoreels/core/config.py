@@ -206,6 +206,9 @@ class MontageConfig(BaseModel):
     loudness_diff_db: float = Field(4.0, gt=0.0)           # speech level on the two sides of a seam differs more → reported
     pitch_diff_st: float = Field(3.0, gt=0.0)              # median pitch on the two sides differs more (semitones) → reported
     side_sec: float = Field(4.0, gt=0.0)                   # loudness/pitch measured on this much played speech per side
+    max_static_sec: float | None = Field(6.0, gt=0.0)      # M53: no shot of a montage clip lasts longer (None = off)
+    min_shot_sec: float = Field(3.0, gt=0.0)               # … and every shot stays at least this long
+    keywords: bool = True                                  # M53: k: words highlighted in a montage clip's subtitles
 
 
 class LocalLLMConfig(BaseModel):

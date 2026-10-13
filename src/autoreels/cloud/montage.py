@@ -244,7 +244,8 @@ def _alnum(word) -> bool:
 
 def seam_report(plan, build: MontageBuild, entry: MontageEntry, params: SeamParams = SeamParams(), *,
                 tone: Callable | None = None, jump: Callable[[float, float], float] | None = None,
-                weak_start_words=frozenset(), voice: Callable | None = None) -> tuple[list[str], list[str]]:
+                weak_start_words=frozenset(), voice: Callable | None = None,
+                marks: list | None = None) -> tuple[list[str], list[str]]:
     """(plan lines, warnings) about the seams between pieces — what makes a montage feel smooth or
     jumpy: piece length, seams per minute, the pause heard at a seam, the picture jump (arl motion),
     the speech rate on both sides, a piece that ends with the voice up (↗: the seam sounds like an
@@ -299,16 +300,23 @@ def seam_report(plan, build: MontageBuild, entry: MontageEntry, params: SeamPara
         heard = (left.end - times.audible(last)[1]) + (times.audible(first)[0] - right.start)
         parts = [f"skips {right.start - left.end:.1f}s", f"pause {heard:.2f}s"]
         name = f"seam {k} ({pa}→{pb})"
+        gap = right.start - left.end
+        ru = [f"пропущено {gap:.0f} с" if gap >= 0 else f"назад на {-gap:.0f} с", f"пауза {heard:.2f} с"]
+        ru_w: list[str] = []
         if jump is not None:
             j = jump(left.end, right.start)
             parts.append(f"picture jump {j:.1f}×")
+            ru.append(f"скачок картинки {j:.1f}×")
             if j > params.seam_jump_warn:
+                ru_w.append(f"картинка скачет: {j:.1f}× обычного движения — поза или свет другие")
                 warns.append(f"{name}: picture jump {j:.1f}× typical motion (> {params.seam_jump_warn:g}) — "
                              f"pose or light differs; the shot change only partly hides it")
         p0, p1 = paces[k - 1], paces[k]
         if p0 and p1:
             parts.append(f"pace {p0:.1f}→{p1:.1f} w/s")
+            ru.append(f"темп {p0:.1f}→{p1:.1f} сл/с")
             if max(p0, p1) / min(p0, p1) > params.pace_ratio_max:
+                ru_w.append(f"темп речи меняется: {p0:.1f} → {p1:.1f} слов/с")
                 warns.append(f"{name}: speech rate {p0:.1f} → {p1:.1f} words/s — the voice changes tempo at the seam")
         if voice is not None:
             va = voice(max(left.start, left.end - params.side_sec), left.end)
@@ -316,24 +324,34 @@ def seam_report(plan, build: MontageBuild, entry: MontageEntry, params: SeamPara
             if va.level_db is not None and vb.level_db is not None:
                 d = vb.level_db - va.level_db
                 parts.append(f"loudness {va.level_db:.0f}→{vb.level_db:.0f} dB")
+                ru.append(f"громкость {d:+.1f} дБ")
                 if abs(d) > params.loudness_diff_db:
+                    ru_w.append(f"голос {'громче' if d > 0 else 'тише'} на {abs(d):.1f} дБ — слышно")
                     warns.append(f"{name}: the voice gets {'louder' if d > 0 else 'quieter'} by {abs(d):.1f} dB "
                                  f"(> {params.loudness_diff_db:g}) — the jump is heard")
             if va.pitch_st is not None and vb.pitch_st is not None:
                 d = vb.pitch_st - va.pitch_st
                 parts.append(f"pitch {va.pitch_st:+.1f}→{vb.pitch_st:+.1f} st")
+                ru.append(f"высота голоса {d:+.1f} пт")
                 if abs(d) > params.pitch_diff_st:
+                    ru_w.append(f"голос {'выше' if d > 0 else 'ниже'} на {abs(d):.1f} полутона — другое настроение")
                     warns.append(f"{name}: the voice sits {'higher' if d > 0 else 'lower'} by {abs(d):.1f} semitones "
                                  f"(> {params.pitch_diff_st:g}) — a different mood on each side")
         t = tone(last) if tone is not None else None
         if t is not None:
             parts.append(f"end {t[0]}")
+            ru.append({"final": "фраза закончена", "open": "голос вверх ↗", "unsure": "интонация неясна"}.get(t[0], t[0]))
         lines.append(f"seam {k}  {pa}→{pb}  " + ", ".join(parts))
         if tone is not None:
             if t is not None and t[0] == "open":
                 warns.append(f"{name}: piece {pa} ends with the voice up ({t[1]}) on «{last.word}» — "
                              f"the seam sounds like the speaker was cut off")
+                ru_w.append(f"кусок кончается с голосом вверх на «{last.word}» — звучит как перебили")
         w0 = first.word.strip()
         if w0 and (w0[0].islower() or w0.strip(".,!?;:—–-«»\"'()…").lower() in weak):
             warns.append(f"{name}: piece {pb} starts on «{w0}» — it points back to what was skipped")
+            ru_w.append(f"кусок начинается на «{w0}» — отсылает к пропущенному")
+        if marks is not None:     # M53: for the review sheet — where in the clip to look, and why
+            marks.append({"t": round(right.start, 3), "kind": "seam",
+                          "text": f"стык {k} ({pa}→{pb}): " + ", ".join(ru), "warn": ru_w})
     return lines, warns

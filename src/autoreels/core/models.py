@@ -217,6 +217,9 @@ class Reel(BaseModel):
     planned: bool = False
     # M50: the montage line this clip was built from (M …: pieces of different blocks), else None.
     montage: str | None = None
+    # M53: places the review sheet points at — [{"t": source seconds, "kind": "seam", "text": …,
+    # "warn": [...]}]; the sheet maps t onto the clip's own time. Not part of the rendered picture.
+    marks: list[dict] = Field(default_factory=list)
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

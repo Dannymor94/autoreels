@@ -40,6 +40,7 @@ class Card:
     score: int | None = None      # the draft's score (after ranking: the place, 95 best … 65)
     montage: str = ""             # M50: the montage line (M …) the clip was built from
     edit: dict | None = None      # M52: label.edit_model + "media", "offset" (None: not editable here)
+    attention: list[dict] = field(default_factory=list)   # M53: attention_marks(reel) — clip time
 
 
 _CSS = """
@@ -101,6 +102,17 @@ background:var(--bg);color:var(--ink)}
 .ed .out{font-family:var(--mono);font-size:12.5px;margin-top:8px}
 .ed .warn{color:var(--fix);font-size:13px}
 .ed video.pv{width:100%;max-width:300px;aspect-ratio:16/9;margin:6px 0}
+.att{margin-top:8px}
+.tl{position:relative;height:18px;background:var(--bg);border:1px solid var(--line);border-radius:4px}
+.tl .tk{position:absolute;top:2px;bottom:2px;width:3px;margin-left:-1px;padding:0;border:0;border-radius:2px;
+background:var(--mute);cursor:pointer}
+.tl .tk.seam{background:var(--accent)}.tl .tk.cut{background:var(--line);width:2px}
+.tl .tk.shot{background:var(--ok);opacity:.6;width:2px}.tl .tk.hook{background:var(--ink)}
+.tl .tk{z-index:1}.tl .tk.static,.tl .tk.static.bad{z-index:0;background:color-mix(in srgb,var(--fix) 28%,transparent);
+margin-left:0;border-radius:0}
+.tl .tk.bad{background:var(--fix);width:4px}
+.al{list-style:none;padding:0;margin:6px 0;font-size:13px}.al li{margin:4px 0}.al li.bad{color:var(--fix)}
+.al ul{margin:2px 0 0 18px;padding:0}.al .tt{padding:1px 6px;font-family:var(--mono);font-size:12px}
 @media (max-width:700px){.card{grid-template-columns:1fr}video,.novideo{max-height:70vh;width:auto;margin:0 auto}}
 """
 
@@ -247,6 +259,14 @@ _JS = r"""
     }));
   });
 
+  // ── M53: marks — click jumps the clip to that moment ───────────────────────────────────
+  document.querySelectorAll('.card').forEach(card => {
+    const v = card.querySelector('.media video'); if (!v) return;
+    card.querySelectorAll('.att [data-t]').forEach(b => b.addEventListener('click', () => {
+      v.currentTime = Math.max(0, +b.dataset.t - 1.5); v.play();
+    }));
+  });
+
   // ── verdicts ───────────────────────────────────────────────────────────────────────────
   function state(){
     const st = {};
@@ -329,7 +349,7 @@ def _card_html(c: Card) -> str:
     vid = (f'<video src="{_e(c.video)}" controls preload="metadata" playsinline></video>' if c.video
            else '<div class="novideo">клип не отрендерен</div>')
     warns = "".join(f"<li>{_e(w)}</li>" for w in c.warnings)
-    parts = [f'<div class="media">{vid}</div><div class="info">',
+    parts = [f'<div class="media">{vid}{_attention_html(c)}</div><div class="info">',
              f'<div><span class="rid">{_e(c.rid)}</span><span class="dur">{c.duration:.0f} с</span>'
              + (f'<span class="dur">· оценка {c.score}</span>' if c.score is not None else "") + '</div>']
     if c.title:
@@ -368,6 +388,90 @@ def _card_html(c: Card) -> str:
                  f'где начать или закончить…" aria-label="Замечание к {_e(c.rid)}"></textarea></div>')
     return (f'<section class="card" data-rid="{_e(c.rid)}" data-seq="{c.seq}">' + "".join(parts)
             + "</section>")
+
+
+STATIC_SEC = 8.0      # longer than this with no change of picture: the viewer's attention drops
+
+_KIND_RU = {"seam": "стык", "cut": "вырезана пауза", "shot": "смена плана", "hook": "конец крючка",
+            "static": "без смены картинки"}
+
+
+def attention_marks(reel, static_sec: float = STATIC_SEC) -> list[dict]:
+    """M53: where in the rendered clip to look, in the clip's own seconds (speed applied):
+    seams between windows, filler/pause cuts, shot changes, the end of the cold open, stretches
+    longer than static_sec with none of these (attention drops), and the montage seam notes the
+    plan wrote into reel.marks (pause, loudness, pitch, picture jump, warnings). Approximate by the
+    xfade (a few frames) — for pointing, not for measuring."""
+    speed = float(getattr(reel, "speed", 1.0) or 1.0)
+    wins = reel.playback_windows()
+    has_co = getattr(reel, "cold_open", None) is not None
+    events: list[dict] = []
+    starts: list[float] = []
+    acc = 0.0
+    for i, w in enumerate(wins):
+        starts.append(acc)
+        dur = (w.end - w.start) / speed
+        if i > 0:
+            kind = "hook" if (has_co and i == 1) else ("cut" if getattr(w, "window_cut", False) else "seam")
+            events.append({"t": round(acc, 2), "kind": kind})
+        for c0, c1 in (getattr(w, "close_intervals", None) or []):
+            for x in (c0, c1):
+                if 0.05 < x / speed < dur - 0.05:
+                    events.append({"t": round(acc + x / speed, 2), "kind": "shot"})
+        acc += dur
+    total = acc
+    body0 = 1 if has_co else 0
+    for m in getattr(reel, "marks", None) or []:
+        t_src = float(m.get("t", 0.0))
+        k = next((i for i in range(body0, len(wins)) if abs(wins[i].start - t_src) < 0.02), None)
+        if k is None:
+            k = next((i for i in range(body0, len(wins)) if wins[i].start <= t_src < wins[i].end), None)
+        if k is None:
+            continue
+        t = round(starts[k] + (t_src - wins[k].start) / speed, 2)
+        ev = next((e for e in events if abs(e["t"] - t) < 0.05 and e["kind"] in ("seam", "cut")), None)
+        if ev is None:
+            ev = {"t": t, "kind": m.get("kind", "seam")}
+            events.append(ev)
+        ev["kind"] = m.get("kind", ev["kind"])
+        ev["text"] = m.get("text", "")
+        ev["warn"] = list(m.get("warn", []))
+    changes = sorted({0.0, total, *[e["t"] for e in events if e["kind"] != "static"]})
+    for a, b in zip(changes, changes[1:]):
+        if b - a > static_sec:
+            events.append({"t": round(a, 2), "kind": "static", "len": round(b - a, 1),
+                           "warn": [f"{b - a:.0f} с без смены картинки — внимание падает"]})
+    events.sort(key=lambda e: (e["t"], e["kind"]))
+    return events
+
+
+def _fmt_t(t: float) -> str:
+    return f"{int(t // 60)}:{t % 60:04.1f}"
+
+
+def _attention_html(c: Card) -> str:
+    if not c.attention or not c.duration:
+        return ""
+    total = max(c.duration, 0.1)
+    ticks = "".join(
+        f'<button type="button" class="tk {e["kind"]}{" bad" if e.get("warn") else ""}" data-t="{e["t"]}" '
+        f'style="left:{min(100.0, 100.0 * e["t"] / total):.2f}%'
+        + (f';width:{100.0 * e.get("len", 0) / total:.2f}%' if e["kind"] == "static" else "")
+        + f'" title="{_e(_fmt_t(e["t"]) + " " + _KIND_RU.get(e["kind"], e["kind"]))}"></button>'
+        for e in c.attention)
+    items = []
+    for e in c.attention:
+        if not (e.get("warn") or e.get("text")):
+            continue
+        what = e.get("text") or _KIND_RU.get(e["kind"], e["kind"])
+        warn = "".join(f"<li>{_e(w)}</li>" for w in e.get("warn", []))
+        items.append(f'<li class="{"bad" if e.get("warn") else ""}"><button type="button" class="tt" data-t="{e["t"]}">'
+                     f'{_fmt_t(e["t"])}</button> {_e(what)}' + (f"<ul>{warn}</ul>" if warn else "") + "</li>")
+    n_bad = sum(1 for e in c.attention if e.get("warn"))
+    head = f"на что смотреть: {n_bad}" if n_bad else "на что смотреть"
+    return (f'<div class="att"><div class="tl" aria-label="метки клипа">{ticks}</div>'
+            + (f'<details {"open" if n_bad else ""}><summary>{head}</summary><ul class="al">{"".join(items)}</ul></details>'
+               if items else "") + "</div>")
 
 
 def _editor_html(c: Card) -> str:

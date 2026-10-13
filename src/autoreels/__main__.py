@@ -4047,7 +4047,7 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
         "music": Path(music_path).name if music_path else None,
         "subtitles": [[round(w.t0, 3), round(w.t1, 3), w.word,
                        bool(getattr(w, "emph", False))] for w in reel.subtitles],
-        "subtitle_keywords": subtitle_keywords,
+        "subtitle_keywords": bool(subtitle_keywords or getattr(reel, "montage", None)),
         "tail": [getattr(reel, "tail_last_word_end", None), getattr(reel, "tail_next_word_start", None)],
     }
     if getattr(reel, "planned", False):
@@ -5186,7 +5186,8 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
                        tone=None, filler=None, jump=None, filler_profile=None,
-                       filler_allowed: bool = True, breaks=()) -> list[str]:
+                       filler_allowed: bool = True, breaks=(), max_static: float | None = None,
+                       min_shot: float = 3.0, keys=()) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5218,11 +5219,15 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     _f = _f if _f is not None else filler
     if not filler_allowed:
         _f = False                     # no motion track: a cut could not be checked for a face jump
+    _params = _manual_plan_params(r0_cfg, render_cfg, _f, filler_profile)
+    if max_static:
+        from dataclasses import replace as _dc_replace
+        _params = _dc_replace(_params, max_static_sec=max_static, min_shot_sec=min_shot)
     plan = build_manual_plan(
-        sents, play, words=tx_words, smap=smap, params=_manual_plan_params(r0_cfg, render_cfg, _f, filler_profile),
+        sents, play, words=tx_words, smap=smap, params=_params,
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
         source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
-        weak_start_words=_weak_start_words(r0_cfg), breaks=breaks,
+        weak_start_words=_weak_start_words(r0_cfg), breaks=breaks, keys=keys,
     )
     body = [s for w in plan.body for s in w.segments()]
     reel.segments = body if len(body) > 1 or body[0].shot != "wide" or body[0].close_intervals else []
@@ -5411,7 +5416,8 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
             for _pl in _apply_manual_plan(reel, entry, mb.sentences, tx_words, smap, r0_cfg, render_cfg,
                                           me.label, align=align, tone=tone, filler=filler, jump=jump,
                                           filler_profile=filler_profile, filler_allowed=filler_allowed,
-                                          breaks=mb.breaks):
+                                          breaks=mb.breaks, max_static=mc.max_static_sec,
+                                          min_shot=mc.min_shot_sec, keys=mb.keys):
                 print(_pl)
         except ValueError as _pe:
             print(f"  error {me.label}: plan: {_pe}", file=sys.stderr)
@@ -5420,7 +5426,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
             reel._plan, mb, me, SeamParams(mc.piece_min_sec, mc.seams_per_min_max, mc.pace_ratio_max,
                                            mc.seam_jump_warn, mc.loudness_diff_db, mc.pitch_diff_st,
                                            mc.side_sec),
-            tone=tone, jump=jump, weak_start_words=_weak_start_words(r0_cfg), voice=voice)
+            tone=tone, jump=jump, weak_start_words=_weak_start_words(r0_cfg), voice=voice, marks=reel.marks)
         for _ln in _lines:
             print(f"    {_ln}")
         for _w in _warns:
@@ -5435,6 +5441,8 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
                   f"{manual_max:.0f}s — shorten the pieces", file=sys.stderr)
             return [], 1
         reel._clip_speed = _clip_speed
+        if not mc.keywords:
+            reel._keyword_spec = ()
         out.append(reel)
     return out, 0
 
@@ -7623,6 +7631,65 @@ def _resolve_manifest_arg(target: str, root: Path) -> Path | None:
     return mpath if mpath.exists() else None
 
 
+def cmd_blocks_text(target: str, *, root=None, cache_dir=None, blocks: str | None = None,
+                    find: list[str] | None = None) -> int:
+    """M53: the review numbering as text — every block's sentences as `B.k text`, for writing
+    montage lines (M … | B.S-E …). --blocks 2,5-7 limits the blocks; --find "text" lists the
+    sentences that contain the text (case and ё ignored), one line per hit. Reads only."""
+    from autoreels.cloud.edit import merge_group_sentences, strip_credit_words, _ends_terminal
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    tx = _resolve_cached_transcript(manifest, _cache)
+    if tx is None:
+        print(f"ошибка: транскрипт не найден для {mpath.stem}", file=sys.stderr)
+        return 1
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    _all, kept, _dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+    words = tx.words
+    if getattr(r0_cfg, "credit_word_patterns", None):
+        words = strip_credit_words(words, r0_cfg.credit_word_patterns)
+    want: set[int] | None = None
+    if blocks:
+        want = set()
+        for tok in blocks.split(","):
+            a, _, b = tok.strip().partition("-")
+            if a.isdigit():
+                want.update(range(int(a), int(b or a) + 1))
+
+    def norm(t: str) -> str:
+        return " ".join(t.lower().replace("ё", "е").split())
+
+    needles = [norm(f) for f in (find or []) if f.strip()]
+    hits = {n: 0 for n in needles}
+    print(f"# {mpath.stem}: блоков {len(kept)} (нумерация разметки)")
+    for i, b in enumerate(kept, 1):
+        if want is not None and i not in want:
+            continue
+        sents = merge_group_sentences([b], words)
+        if not needles:
+            print(f"\n[{i}] {b.start:.1f}–{b.end:.1f} с")
+        for k, st in enumerate(sents, 1):
+            text = " ".join(w.word for w in st)
+            mark = "" if _ends_terminal(st[-1]) else " …→"
+            line = f"{i}.{k}  {st[0].t0:7.1f}  {text}{mark}"
+            if needles:
+                for n in needles:
+                    if n in norm(text):
+                        hits[n] += 1
+                        print(f"«{n[:40]}» → {line}")
+            else:
+                print(line)
+    for n, c in hits.items():
+        if not c:
+            print(f"«{n[:40]}» → не найдено")
+    return 0
+
+
 def _rel_ref(path: Path, root: Path) -> str:
     try:
         return str(path.resolve().relative_to(root.resolve()))
@@ -7768,7 +7835,7 @@ def cmd_review_sheet(
     The page downloads <stem>_decisions.txt for arl review-apply. Nothing else is written."""
     import hashlib
     from autoreels.cloud.label import clip_lines, edit_model, match_reels
-    from autoreels.local.review_sheet import Card, build_sheet
+    from autoreels.local.review_sheet import Card, attention_marks, build_sheet
 
     _root = Path(root) if root else _project_root()
     mpath = _resolve_manifest_arg(target, _root)
@@ -7824,7 +7891,7 @@ def cmd_review_sheet(
             text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
             seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
             marks=list(ln.marks) if ln else [], score=r.score, montage=r.montage or "",
-            edit=edits.get(r.id),
+            edit=edits.get(r.id), attention=attention_marks(r),
         ))
     notes = []
     n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
@@ -10481,6 +10548,17 @@ def _build_parser():
     plc.add_argument("--root", default=None, help="корень проекта")
     plc.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    pbt = sub.add_parser(
+        "blocks-text",
+        help="M53: нумерация разметки текстом — предложения блоков как B.k (для строк сборки M …)",
+    )
+    pbt.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pbt.add_argument("--root", default=None)
+    pbt.add_argument("--cache-dir", default=None, dest="cache_dir")
+    pbt.add_argument("--blocks", default=None, help="только эти блоки: 2,5-7")
+    pbt.add_argument("--find", action="append", default=None,
+                     help="найти предложения с этим текстом (можно несколько раз)")
+
     prs = sub.add_parser(
         "review-sheet",
         help="лист ревью: все клипы источника с видео и выбором «оставить / убрать / переделать»",
@@ -10841,6 +10919,10 @@ def main(argv=None) -> int:
                 cache_dir=getattr(args, "cache_dir", None),
                 reference=getattr(args, "reference", None),
             )
+        elif args.cmd == "blocks-text":
+            return cmd_blocks_text(args.manifest, root=getattr(args, "root", None),
+                                   cache_dir=getattr(args, "cache_dir", None), blocks=args.blocks,
+                                   find=args.find)
         elif args.cmd == "review-sheet":
             return cmd_review_sheet(
                 args.manifest,
