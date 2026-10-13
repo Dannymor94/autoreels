@@ -2259,12 +2259,54 @@ def test_probe_source_fps_avg_zero_falls_back_to_r(tmp_path, capsys):
     from autoreels.local.render import _probe_source_fps
     # Write a fake ffprobe that outputs avg=0/0 and r=25/1
     fake = tmp_path / "ffprobe"
-    fake.write_text("#!/bin/sh\necho '0/0,25/1'\n")
+    fake.write_text("#!/bin/sh\nprintf 'r_frame_rate=25/1\\navg_frame_rate=0/0\\n'\n")
     fake.chmod(0o755)
     source = tmp_path / "v.mp4"
     source.write_text("")
     fps = _probe_source_fps(source, str(fake))
     assert fps == pytest.approx(25.0)
+
+
+def _fake_ffprobe(tmp_path, fields: str, pts: list[float]):
+    """ffprobe that answers the stream query with `fields` (key=value lines, in ffprobe's own
+    order: r_frame_rate first) and the packet query with `pts` (one timestamp per line)."""
+    (tmp_path / "pts.txt").write_text("\n".join(f"{x:.6f}" for x in pts) + "\n")
+    (tmp_path / "fields.txt").write_text(fields)
+    fake = tmp_path / "ffprobe"
+    fake.write_text("#!/bin/sh\ncase \"$*\" in *packet=pts_time*) cat '%s';; *) cat '%s';; esac\n"
+                    % (tmp_path / "pts.txt", tmp_path / "fields.txt"))
+    fake.chmod(0o755)
+    source = tmp_path / "v.mp4"
+    source.write_text("")
+    return source, str(fake)
+
+
+def test_probe_source_fps_reads_fields_by_key_constant_rate_unchanged(tmp_path):
+    """M47: ffprobe prints r_frame_rate first whatever -show_entries says; a constant-rate file
+    (avg within 5 % of r) keeps r_frame_rate exactly as before (IMG_6848-like 30/1 vs 29.98)."""
+    from autoreels.local.render import _probe_source_fps
+    src, fake = _fake_ffprobe(tmp_path, "r_frame_rate=30/1\navg_frame_rate=89940/3000\n", [])
+    assert _probe_source_fps(src, fake) == pytest.approx(30.0)
+    src, fake = _fake_ffprobe(tmp_path, "r_frame_rate=30000/1001\navg_frame_rate=30000/1001\n", [])
+    assert _probe_source_fps(src, fake) == pytest.approx(29.97, abs=0.01)
+
+
+def test_probe_source_fps_variable_rate_phone_file_is_its_cadence(tmp_path):
+    """M47, Pxl 20260621 112938952: r_frame_rate=120/1, avg≈27.05 — a Pixel VFR file with 33 ms
+    frames and runs of 37 ms ones. Rendered at 120 fps, every frame tolerance was 4× too tight
+    (a/v check failed on all clips, the duration invariant on r07). The rate is the median frame
+    interval, snapped to the standard 30."""
+    from autoreels.local.render import _probe_source_fps
+    pts, t = [], 0.0
+    for i in range(1800):                       # ~1 minute: 8 frames of 37 ms, then 33/37 mixed
+        pts.append(t)
+        t += 0.037 if (i < 8 or i % 5 == 0) else 0.0333
+    src, fake = _fake_ffprobe(tmp_path, "r_frame_rate=120/1\navg_frame_rate=1669024873/61704217\n",
+                              pts[::-1][:1] + pts[:-1])    # decode order is not pts order
+    assert _probe_source_fps(src, fake) == pytest.approx(30.0)
+    # no packets readable → the old choice (r) rather than a guess
+    src, fake = _fake_ffprobe(tmp_path, "r_frame_rate=120/1\navg_frame_rate=27/1\n", [])
+    assert _probe_source_fps(src, fake) == pytest.approx(120.0)
 
 
 def test_probe_source_fps_unparseable_uses_fallback(tmp_path, capsys):
@@ -3439,3 +3481,31 @@ def test_check_foreign_tail_word_r05_dedup_absorbed():
     # words[1] absorbed by dedup (t0 ≤ last_t1 and as < ae+0.04); onset = words[2].as = 1242.304
     errs = _check_foreign_tail_word_render("r05", last_sub, 1242.241, smap, lookup)
     assert not errs, f"false positive after dedup absorption (onset 1242.304): {errs}"
+
+
+def test_duration_invariant_marks_the_clip_not_the_source(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
+    """M47: a clip whose file is longer/shorter than its windows is that clip's error (.ERROR.mp4)
+    — it used to raise and abort the source: Pxl 1129 never got past r07 (r08–r18 not rendered)."""
+    real_popen = render.subprocess.Popen
+
+    class _Writes(real_popen):            # the fake ffmpeg, plus an output file on disk
+        def __init__(self, cmd, **kw):
+            super().__init__(cmd, **kw)
+            last = str(cmd[-1])
+            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
+                Path(last).parent.mkdir(parents=True, exist_ok=True)
+                Path(last).write_bytes(b"x")
+    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
+    monkeypatch.setattr(render, "_check_integrity", lambda *a, **k: "")
+    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
+    monkeypatch.setattr(render, "_probe_duration_sec",
+                        lambda path, *a, **k: 99.0 if Path(path).stem.startswith("r01") else None)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"duration-invariant")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
+    out_dir = tmp_path / "out"
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+    assert [p.name for p in outputs] == ["r02.mp4"]
+    assert (out_dir / "r01.ERROR.mp4").exists() and not (out_dir / "r01.mp4").exists()

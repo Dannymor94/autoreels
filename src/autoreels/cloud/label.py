@@ -226,6 +226,7 @@ class Checked:
     preview: str = ""
     outside: bool = False         # proposed blocks outside the request (never written to the draft)
     auto_cut: tuple[int, ...] = ()  # M46: review numbers cut by code — sentences with no sound of their own
+    dropped: tuple[str, ...] = ()   # M47: decorations (cut/close/key) the code dropped instead of failing the clip
 
 
 def _sid(x) -> str:
@@ -334,14 +335,18 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
 
     # A block's unfinished last sentence and the next block's first are ONE review sentence:
     # cutting either part cuts both.
+    # M47: a wrong cut, close shot or key word is DROPPED with a note, not a failed clip: they decorate
+    # a clip whose start and end are fine. Local models lost most clips to these alone (M40c: 9 of
+    # Qwen3-8B's 9 '#!' were «key is not a word»). Dropping a cut outside the clip plays nothing new.
+    dropped: list[str] = []
     cut_nums: set[int] = set()
     for c in clip.get("cut") or []:
         c = _sid(c)
         if c not in pos or not (a < pos[c] < z):
-            probs.append(f"cut {c} is not strictly inside {sid_start}…{sid_end}")
+            dropped.append(f"cut {c} (not strictly inside {sid_start}…{sid_end})")
             continue
         if num[c] in (num[sid_start], num[sid_end]):
-            probs.append(f"cut {c} is joined with the start/end sentence across the block border")
+            dropped.append(f"cut {c} (joined with the start/end sentence across the block border)")
             continue
         cut_nums.add(num[c])
     # M46: a sentence with no sound of its own (Whisper text laid over other speech — the plan
@@ -409,7 +414,7 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
     for c in clip.get("close") or []:
         c = _sid(c)
         if c not in played_ids:
-            probs.append(f"close {c} is not a played sentence")
+            dropped.append(f"close {c} (not a played sentence)")
         elif num[c] not in close:
             close.append(num[c])
     keys: list[tuple[int, str]] = []
@@ -421,11 +426,11 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
             for wd in ws:
                 wn = norm_word(str(wd))
                 if c not in played_ids:
-                    probs.append(f"key «{wd}» on {c}: not a played sentence")
+                    dropped.append(f"key «{wd}» on {c} (not a played sentence)")
                     continue
                 sent = next(s for s in played if s.sid == c)
                 if not wn or wn not in {norm_word(w.word) for w in sent.words}:
-                    probs.append(f"key «{wd}» is not a word of {c}")
+                    dropped.append(f"key «{wd}» (not a word of {c})")
                     continue
                 keys.append((num[c], wn))
     title = _clean_text(clip.get("title"))
@@ -465,7 +470,10 @@ def check_clip(clip: dict, win: Sequence[WBlock], words: list,
     preview = f"«{first} … {last}»"
     if auto_cut:
         preview += f" · {_auto_cut_note(auto_cut)}"
-    return Checked(" | ".join(parts), probs, tuple(blocks), played_sec, preview, auto_cut=tuple(auto_cut))
+    if dropped:
+        preview += " · dropped by code: " + "; ".join(dropped)
+    return Checked(" | ".join(parts), probs, tuple(blocks), played_sec, preview, auto_cut=tuple(auto_cut),
+                   dropped=tuple(dropped))
 
 
 def _auto_cut_note(nums: Sequence[int]) -> str:

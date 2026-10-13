@@ -535,29 +535,44 @@ def _parse_fps_token(token: str) -> float:
     return fps if 0 < fps <= _FPS_MAX_PLAUSIBLE else 0.0
 
 
+_STANDARD_FPS = (23.976, 24.0, 25.0, 29.97, 30.0, 48.0, 50.0, 59.94, 60.0, 90.0, 120.0)
+_VFR_GAP = 0.05          # avg_frame_rate this far (share) from r_frame_rate = a variable-rate file
+_VFR_SNAP = 0.03         # a cadence this close to a standard rate is that rate
+_VFR_PROBE_SEC = 60      # how much of the file the cadence is read from
+
+
 def _probe_source_fps(source, ffprobe: str) -> float:
     """Source video frame rate (frames/sec) via ffprobe.
 
-    Reads avg_frame_rate first (correct for VFR sources); falls back to r_frame_rate when
-    avg is 0/0.  Rejects implausible values (e.g. container timebase 90000/1).  On failure
-    warns and returns _FPS_FALLBACK so a probe quirk never aborts a render.
+    The fields are read BY KEY: ffprobe prints r_frame_rate before avg_frame_rate whatever order
+    -show_entries names them, and a positional csv read took the first one (M47).
+      * constant rate (avg within _VFR_GAP of r): r_frame_rate, as before — no change for such
+        sources; avg when r is missing;
+      * variable rate (they differ more): neither is a rate anyone recorded at. A Pixel phone file
+        says r=120/1, avg≈27.05 (33 ms frames with runs of 37 ms ones); rendering it at 120 fps made
+        every frame-based tolerance 4× too tight (Pxl 1129: all clips failed the a/v check, r07 the
+        duration invariant). The rate is the median frame interval of the first _VFR_PROBE_SEC s,
+        snapped to a standard rate within _VFR_SNAP (→ 30).
+    Implausible values (container timebase 90000/1) are rejected; on failure a warning and
+    _FPS_FALLBACK, so a probe quirk never aborts a render.
     """
     out = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=avg_frame_rate,r_frame_rate",
-         "-of", "csv=p=0", str(source)],
+         "-of", "default=noprint_wrappers=1", str(source)],
         capture_output=True, text=True, check=False,
     ).stdout.strip()
-
-    # csv=p=0 with two fields → "avg/den,r/den" on one line; newlines possible if stream
-    # selection returns more than one row.  Split on both separators.
-    import re as _re2
-    tokens = [t for t in _re2.split(r"[,\n]", out) if t.strip()]
-    fps = 0.0
-    for tok in tokens:
-        fps = _parse_fps_token(tok)
-        if fps > 0:
-            break
+    vals: dict[str, float] = {}
+    for line in out.splitlines():
+        key, sep, val = line.partition("=")
+        if sep:
+            vals[key.strip()] = _parse_fps_token(val)
+    avg, r = vals.get("avg_frame_rate", 0.0), vals.get("r_frame_rate", 0.0)
+    fps = r or avg
+    if avg > 0 and r > 0 and abs(r - avg) > _VFR_GAP * max(r, avg):
+        cadence = _vfr_cadence_fps(source, ffprobe)
+        if cadence > 0:
+            fps = cadence
 
     if not fps > 0:
         import sys as _sys
@@ -568,6 +583,32 @@ def _probe_source_fps(source, ffprobe: str) -> float:
         )
         return _FPS_FALLBACK
     return fps
+
+
+def _vfr_cadence_fps(source, ffprobe: str) -> float:
+    """Frame rate of a variable-rate file from its real frame intervals (median of the first
+    _VFR_PROBE_SEC s of packet timestamps, sorted — B-frames come out of order), snapped to a
+    standard rate within _VFR_SNAP. 0.0 when it cannot be read."""
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0", "-read_intervals", f"%+{_VFR_PROBE_SEC}",
+         "-show_entries", "packet=pts_time", "-of", "csv=p=0", str(source)],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    pts = []
+    for tok in out.split():
+        try:
+            pts.append(float(tok.strip(",")))
+        except ValueError:
+            continue
+    pts.sort()
+    deltas = sorted(b - a for a, b in zip(pts, pts[1:]) if b - a > 1e-4)
+    if len(deltas) < 10:
+        return 0.0
+    fps = 1.0 / deltas[len(deltas) // 2]
+    best = min(_STANDARD_FPS, key=lambda f: abs(f - fps))
+    if abs(best - fps) <= _VFR_SNAP * best:
+        fps = best
+    return fps if 0 < fps <= _FPS_MAX_PLAUSIBLE else 0.0
 
 
 def _probe_duration_sec(path, ffprobe: str) -> float | None:
@@ -3373,8 +3414,11 @@ def _render_segments(
             _actual = _probe_duration_sec(out, _ffprobe) if out.exists() else None
             _inv_fps = _probe_source_fps(out, _ffprobe) if out.exists() else 30.0
             if _actual is not None and _inv_fps > 0 and not _duration_within_tolerance(_actual, _out_dur, _inv_fps):
-                raise RenderError(
-                    f"{reel.id}: rendered {_actual:.3f}s but windows imply {_out_dur:.3f}s "
+                # M47: an error of THIS clip (.ERROR.mp4, like every other check) — it used to raise
+                # and abort the whole source, so the clips after it were never rendered and the ones
+                # before it lost their fingerprints (Pxl 1129: r08–r18 skipped on every run).
+                _clip_errors.append(
+                    f"  [ERROR] {reel.id}: rendered {_actual:.3f}s but windows imply {_out_dur:.3f}s "
                     f"(Δ{_actual - _out_dur:+.3f}s > 2.5 frames) — a render stage changed the "
                     f"duration the windows do not describe"
                 )

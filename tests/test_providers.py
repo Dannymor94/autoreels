@@ -1678,5 +1678,25 @@ def test_build_pool_local_modes(monkeypatch):
     assert [m.name for m in P.build_pool(cfg)._members] == ["Groq"]                      # R0 path: never local
     assert [m.name for m in P.build_pool(cfg, local="first")._members] == ["Local", "Groq"]
     assert [m.name for m in P.build_pool(cfg, local="only")._members] == ["Local"]
+    last = P.build_pool(cfg, local="last")._members                                        # M47: auto
+    assert [(m.name, m.reserve) for m in last] == [("Groq", False), ("Local", True)]
     monkeypatch.setattr(P, "probe_provider", lambda url, **kw: None)                       # machine off
     assert [m.name for m in P.build_pool(cfg, local="first")._members] == ["Groq"]
+    assert [m.name for m in P.build_pool(cfg, local="last")._members] == ["Groq"]
+
+
+def test_reserve_provider_only_when_the_cloud_is_out_for_long():
+    """M47: the local model (reserve) is not used for a per-minute throttle of the cloud — the
+    pool waits it out on the cloud; it steps in when the cloud is out longer than
+    _RESERVE_AFTER_SEC (a quota for hours)."""
+    from autoreels.cloud.providers import _RESERVE_AFTER_SEC
+    groq = _ScriptedProvider("Groq", [ProviderThrottled("tpm", retry_after=30), "from-groq"])
+    local = _ScriptedProvider("Local", ["from-local"])
+    clock = _Clock()
+    pool = ProviderPool([groq], reserve=[local], clock=clock, sleep=_sleeper(clock))
+    assert pool.complete([]) == "from-groq" and local.calls == 0
+    groq2 = _ScriptedProvider("Groq", [ProviderThrottled("day", retry_after=_RESERVE_AFTER_SEC + 3000)])
+    local2 = _ScriptedProvider("Local", ["from-local"])
+    clock2 = _Clock()
+    pool2 = ProviderPool([groq2], reserve=[local2], clock=clock2, sleep=_sleeper(clock2))
+    assert pool2.complete([]) == "from-local" and pool2.last_provider == "Local"

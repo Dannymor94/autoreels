@@ -35,7 +35,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Protocol, Sequence
 
 import httpx
 
@@ -81,6 +81,7 @@ _MAX_CONNECT_ERRORS = 2        # Groq + OpenRouter оба упали с ConnectE
 # ponytail: flat constants, move to config if per-preset tuning needed
 _POOL_MAX_CONSEC_FAILURES = 5    # после N подряд throttled/exhausted — экспоненциальный бэкофф
 _POOL_BUDGET_SEC = 600.0         # суммарный бюджет ожидания на один complete() — 10 мин
+_RESERVE_AFTER_SEC = 180.0       # M47: a reserve provider steps in when the others are out longer
 _POOL_BACKOFF_BASE_SEC = 60.0    # база экспоненциального бэкоффа (×2^n, cap 3600с)
 
 # Groq free-tier: conservative fallback when x-ratelimit-* headers absent.
@@ -849,8 +850,9 @@ class _PoolMember:
     кулдауна (временный), disabled не возвращается — модель в конфиге надо чинить.
     """
 
-    def __init__(self, provider: LLMProvider):
+    def __init__(self, provider: LLMProvider, reserve: bool = False):
         self.provider = provider
+        self.reserve = reserve    # M47: used only when every other provider is out for long
         self.available_at = 0.0
         self.reason = ""
         self.disabled = False
@@ -884,14 +886,18 @@ class ProviderPool:
         strategy: str = "adaptive",
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], None] | None = None,
+        reserve: Sequence[LLMProvider] = (),
     ):
-        if not providers:
+        """reserve (M47): providers asked only when every regular one is unavailable for longer
+        than _RESERVE_AFTER_SEC (a quota for hours) — a short per-minute throttle is waited out
+        on the regular providers instead (the local model is slower and weaker than the cloud)."""
+        if not providers and not reserve:
             raise ValueError("ProviderPool требует хотя бы одного провайдера")
         if strategy not in POOL_STRATEGIES:
             raise ValueError(
                 f"неизвестная strategy '{strategy}'; допустимо: {', '.join(POOL_STRATEGIES)}"
             )
-        self._members = [_PoolMember(p) for p in providers]
+        self._members = [_PoolMember(p) for p in providers] + [_PoolMember(p, reserve=True) for p in reserve]
         self._strategy = strategy
         self._clock = clock or time.monotonic
         self._sleep = sleep or time.sleep
@@ -946,7 +952,16 @@ class ProviderPool:
                 )
             now = self._clock()
             order = [i for i in self._candidate_order() if not self._members[i].disabled]
-            available = [i for i in order if self._members[i].available_at <= now]
+            regular = [i for i in order if not self._members[i].reserve]
+            available = [i for i in regular if self._members[i].available_at <= now]
+            if not available:
+                # M47: the reserve (local model) only when the regular ones are out for long
+                wait = min((self._members[i].available_at for i in regular), default=float("inf")) - now
+                if wait > _RESERVE_AFTER_SEC:
+                    available = [i for i in order if self._members[i].reserve
+                                 and self._members[i].available_at <= now]
+                if not available and regular and wait <= _RESERVE_AFTER_SEC:
+                    order = regular                   # wait for the cloud, not for the reserve
             if not available:
                 # Nobody frees up within this call's budget (quota until 03:00, retry-after
                 # 1400 s): waiting only to fail at the budget's end wasted 10 min per window (M38).
@@ -957,7 +972,7 @@ class ProviderPool:
                         for m in self._members if not m.disabled)
                     raise ProviderError(f"все провайдеры в лимите дольше бюджета ожидания "
                                         f"{_POOL_BUDGET_SEC:.0f}с ({details})")
-                self._wait_for_earliest()
+                self._wait_for_earliest([self._members[i] for i in order])
                 continue
             for idx in available:
                 m = self._members[idx]
@@ -1051,7 +1066,7 @@ class ProviderPool:
         member.available_at = now + cooldown
         member.reason = "exhausted" if isinstance(exc, ProviderExhausted) else "throttled"
 
-    def _wait_for_earliest(self) -> None:
+    def _wait_for_earliest(self, members: list | None = None) -> None:
         """Все АКТИВНЫЕ провайдеры в лимите → ЖИВАЯ пауза до ближайшего освобождения.
 
         Обновляемая строка (\\r) с обратным отсчётом и спиннером, тик ≈1с. Как только
@@ -1060,7 +1075,7 @@ class ProviderPool:
         показываем новую оценку, не молчим. Non-TTY печатает реже (print_provider_wait).
         """
         from autoreels.core.progress import is_tty, print_provider_ready, print_provider_wait
-        active = [m for m in self._members if not m.disabled]
+        active = [m for m in (members if members is not None else self._members) if not m.disabled]
         if not active:
             return
         if is_tty():
@@ -1211,13 +1226,14 @@ def build_pool(r0_cfg, *, strategy: str | None = None, local: str = "off") -> Pr
     strat = strategy or getattr(r0_cfg, "provider_strategy", "adaptive")
     max_out = getattr(r0_cfg, "max_output_tokens", 900)
     # M40 local: "off" (R0 path, unchanged) | "first" (local, then the cloud) | "only" (local alone)
-    loc = local_llm_from_env(r0_cfg) if local in ("first", "only") else None
+    # M47: "last" — the cloud first; the local model only when the cloud is out for long (a reserve)
+    loc = local_llm_from_env(r0_cfg) if local in ("first", "only", "last") else None
     if local == "only":
         if loc is None:
             raise ProviderError("локальная модель не задана или не отвечает: LOCAL_LLM_URL в .env "
                                 "(например http://192.168.1.50:8080/v1)")
         return ProviderPool([loc], strategy=strat)
-    providers: list[LLMProvider] = ([loc] if loc is not None else []) + [
+    providers: list[LLMProvider] = ([loc] if loc is not None and local == "first" else []) + [
         GroqLLM(model=r0_cfg.model, defer_throttle=True, max_output_tokens=max_out)
     ]
     or_key = os.environ.get("OPENROUTER_API_KEY")
@@ -1234,4 +1250,5 @@ def build_pool(r0_cfg, *, strategy: str | None = None, local: str = "off") -> Pr
                     defer_throttle=True,
                 )
             )
-    return ProviderPool(providers, strategy=strat)
+    reserve = [loc] if loc is not None and local == "last" else []
+    return ProviderPool(providers, strategy=strat, reserve=reserve)

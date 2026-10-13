@@ -92,9 +92,6 @@ def test_line_round_trips_through_review_parser():
 @pytest.mark.parametrize("kw, needle", [
     ({"end": "1.2"}, "voice stays up"),
     ({"start": "1.3"}, "right after a sentence ending with the voice up"),
-    ({"cut": ["1.1"]}, "not strictly inside"),
-    ({"keys": {"1.3": "нет"}}, "is not a word of 1.3"),
-    ({"close": ["2.1"]}, "not a played sentence"),
     ({"title": "x" * 80}, "at most"),
     ({"caption": ""}, "caption is missing"),
 ])
@@ -102,6 +99,21 @@ def test_check_clip_reports_rule_breaks(kw, needle):
     w, wb = _two_blocks(open_words=("два.",))
     ch = check_clip(_clip(**kw), wb, w, P)
     assert any(needle in p for p in ch.problems), ch.problems
+
+
+@pytest.mark.parametrize("kw, needle", [
+    ({"cut": ["1.1"]}, "cut 1.1 (not strictly inside"),
+    ({"keys": {"1.3": "нет"}}, "key «нет» (not a word of 1.3)"),
+    ({"close": ["2.1"]}, "close 2.1 (not a played sentence)"),
+])
+def test_wrong_decoration_is_dropped_not_a_failed_clip(kw, needle):
+    """M47: a wrong cut / close shot / key word is dropped with a note in the preview; the clip
+    stays (M40c: all 9 of Qwen3-8B's '#!' were «key is not a word»)."""
+    w, wb = _two_blocks()
+    ch = check_clip(_clip(**kw), wb, w, P)
+    assert ch.problems == [] and ch.line is not None
+    assert any(needle in d for d in ch.dropped), ch.dropped
+    assert "dropped by code: " in ch.preview and needle in ch.preview
 
 
 @pytest.mark.parametrize("kw, needle", [

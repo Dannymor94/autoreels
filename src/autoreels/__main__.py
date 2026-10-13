@@ -7325,7 +7325,9 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
                            wblocks=build_wblocks(kept, words, tone, speech=speech, sound=sound)), None
 
 
-_LOCAL_MODE = {"auto": "first", "local": "only", "cloud": "off"}
+# M47: auto = the cloud first, the local model as a reserve when the cloud is out for long
+# (M40b/M40c: Qwen3-8B found 3 of 8 owner clips, 30B-A3B 1, the cloud 6).
+_LOCAL_MODE = {"auto": "last", "local": "only", "cloud": "off"}
 
 
 def cmd_label(
@@ -7778,7 +7780,7 @@ def cmd_review_apply(
                     rc = 1
                 else:
                     if provider is None:
-                        provider = build_pool(r0_cfg, local="first")
+                        provider = build_pool(r0_cfg, local="last")
                         provider.preflight()
                     new_text, done, failed = redo_fixes(new_text, ctx.wblocks, ctx.words, provider,
                                                         system=ctx.system, fewshot=ctx.fewshot, p=ctx.p,
