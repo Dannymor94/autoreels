@@ -259,3 +259,51 @@ def test_mask_kept_away_from_other_shot_changes_and_only_for_sounds():
     sound = ManualPlanParams(filler_cut=True, jump_mask=True, mask_filler_only=True)
     w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=sound, align=align, jump=every).body[0]
     assert len(w.cut_flips) == 1 and w.cut_flips[0][1] < 2.0           # the «э» cut; the bare pause left in
+
+
+def test_cfr_chain_per_input_for_variable_rate_sources():
+    """M48: with cfr=(fps, frames) every input — a plain window or a filler-cut run — is re-timed to
+    the constant rate and cut to exactly its frames; without it the graph is unchanged."""
+    segs = [_seg(10.0, 12.0), _seg(13.0, 16.0, True), _seg(30.0, 31.0)]
+    plain, _, _ = _concat_segments_graph(segs, 0.01, pre_roll=0.0, segment_vfs=[None] * 3, seam_xfades=[0.0, 0.0])
+    assert "tpad" not in plain and "fps=" not in plain
+    fc, _, _ = _concat_segments_graph(segs, 0.01, pre_roll=0.0, segment_vfs=[None] * 3, seam_xfades=[0.0, 0.0],
+                                      cfr=(30.0, [150, 30]))
+    assert "setpts='PTS-(gte(T,2.999)*1)/TB',fps=30,tpad=stop_mode=clone:stop=3,trim=end_frame=150,setpts=PTS-STARTPTS" in fc
+    assert "[1:v]setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop=3,trim=end_frame=30,setpts=PTS-STARTPTS" in fc
+    two = [_seg(10.0, 12.0), _seg(30.0, 31.0)]
+    fc2, _, _ = _concat_segments_graph(two, 0.01, pre_roll=2.0, cfr=(30.0, [60, 30]))
+    assert "[0:v]trim=start=2,setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop=3,trim=end_frame=60," in fc2
+
+
+@pytest.mark.skipif(not (ffmpeg and ffprobe), reason="ffmpeg/ffprobe not installed")
+def test_variable_rate_source_renders_whole_frames_per_window(tmp_path):
+    """M48, Pxl 1129: a phone file with uneven frame intervals (here 33 and 42 ms, avg ≈27 fps). With
+    the cfr chain every window is exactly its frames at 30 fps: the clip's video lasts the sum of
+    its windows, within one frame of the audio."""
+    from autoreels.local.render import _probe_source_fps, _probe_source_vfr
+    src = tmp_path / "vfr.mp4"
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30",
+                    "-f", "lavfi", "-i", "sine=f=440:sample_rate=48000", "-t", "40",
+                    "-vf", "setpts='(N*4+floor(N*0.4))/120/TB'", "-fps_mode", "vfr",
+                    "-video_track_timescale", "90000", "-c:v", "libx264", "-g", "30", "-c:a", "aac",
+                    "-t", "30", str(src)], check=True)
+    assert _probe_source_vfr(src, ffprobe) and _probe_source_fps(src, ffprobe) == pytest.approx(30.0)
+    fps = 30.0
+    segs = [_seg(round(a * fps) / fps, round(b * fps) / fps) for a, b in ((2.0, 5.0), (9.0, 12.4), (15.1, 19.0))]
+    frames = [round((s.end - s.start) * fps) for s in segs]
+    fc, v, a = _concat_segments_graph(segs, 0.01, pre_roll=2.0, cfr=(fps, frames))
+    out = tmp_path / "o.mp4"
+    cmd = build_concat_cmd(ffmpeg, src, out, windows=[(s.start, s.end - s.start) for s in segs],
+                           filter_complex=f"{fc};{v}null[v];{a}anull[a]", codec="libx264", preset="ultrafast",
+                           audio_codec="aac", audio_bitrate="128k", pre_roll=2.0)
+    subprocess.run(cmd, check=True, capture_output=True)
+    info = subprocess.run([ffprobe, "-v", "error", "-count_frames", "-show_entries",
+                           "stream=codec_type,duration,nb_read_frames", "-of", "csv=p=0", str(out)],
+                          capture_output=True, text=True).stdout.split()
+    vrow = next(r for r in info if r.startswith("video"))
+    arow = next(r for r in info if r.startswith("audio"))
+    vdur, vframes = float(vrow.split(",")[1]), int(vrow.split(",")[2])
+    adur = float(arow.split(",")[1])
+    assert vframes == sum(frames)
+    assert abs(vdur - sum(frames) / fps) < 1e-3 and abs(adur - vdur) < 1 / fps

@@ -556,20 +556,9 @@ def _probe_source_fps(source, ffprobe: str) -> float:
     Implausible values (container timebase 90000/1) are rejected; on failure a warning and
     _FPS_FALLBACK, so a probe quirk never aborts a render.
     """
-    out = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", "v:0",
-         "-show_entries", "stream=avg_frame_rate,r_frame_rate",
-         "-of", "default=noprint_wrappers=1", str(source)],
-        capture_output=True, text=True, check=False,
-    ).stdout.strip()
-    vals: dict[str, float] = {}
-    for line in out.splitlines():
-        key, sep, val = line.partition("=")
-        if sep:
-            vals[key.strip()] = _parse_fps_token(val)
-    avg, r = vals.get("avg_frame_rate", 0.0), vals.get("r_frame_rate", 0.0)
+    r, avg, out = _probe_rate_fields(source, ffprobe)
     fps = r or avg
-    if avg > 0 and r > 0 and abs(r - avg) > _VFR_GAP * max(r, avg):
+    if _is_vfr(r, avg):
         cadence = _vfr_cadence_fps(source, ffprobe)
         if cadence > 0:
             fps = cadence
@@ -583,6 +572,43 @@ def _probe_source_fps(source, ffprobe: str) -> float:
         )
         return _FPS_FALLBACK
     return fps
+
+
+def _probe_rate_fields(source, ffprobe: str) -> tuple[float, float, str]:
+    """(r_frame_rate, avg_frame_rate, raw ffprobe output) of the first video stream, read by key;
+    an unparseable or implausible field is 0.0."""
+    out = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=avg_frame_rate,r_frame_rate",
+         "-of", "default=noprint_wrappers=1", str(source)],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    vals: dict[str, float] = {}
+    for line in out.splitlines():
+        key, sep, val = line.partition("=")
+        if sep:
+            vals[key.strip()] = _parse_fps_token(val)
+    return vals.get("r_frame_rate", 0.0), vals.get("avg_frame_rate", 0.0), out
+
+
+def _is_vfr(r: float, avg: float) -> bool:
+    return avg > 0 and r > 0 and abs(r - avg) > _VFR_GAP * max(r, avg)
+
+
+def _probe_source_vfr(source, ffprobe: str) -> bool:
+    """True for a variable-frame-rate source (avg_frame_rate more than _VFR_GAP off r_frame_rate)."""
+    r, avg, _ = _probe_rate_fields(source, ffprobe)
+    return _is_vfr(r, avg)
+
+
+def _cfr_chain(fps: float, frames: int) -> str:
+    """Video filters that make one input of a variable-rate source exactly `frames` frames at `fps`
+    (M48): `fps` re-times to a constant rate, `tpad` clones the last frame so there are enough,
+    `trim` cuts to the count. Without it a window of a phone file (33/37 ms frames) came out up to a
+    frame short; over a clip's windows the video ran 41–66 ms shorter than the audio (Pxl 1129:
+    web-safe a/v check failed on 16 of 18 clips) and lip sync drifted window by window."""
+    return (f",fps={_num(fps)},tpad=stop_mode=clone:stop=3,trim=end_frame={int(frames)},"
+            f"setpts=PTS-STARTPTS")
 
 
 def _vfr_cadence_fps(source, ffprobe: str) -> float:
@@ -1070,6 +1096,7 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            seam_xfades: list[float] | None = None,
                            seam_xfade_visual_durations: list[float] | None = None,
                            segment_overlays: "list[tuple[str, str, str] | None] | None" = None,
+                           cfr: "tuple[float, list[int]] | None" = None,
                            ) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
@@ -1091,6 +1118,8 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     Audio is joined with plain concat (no crossfade) after micro edge fades (`edge_fade_sec`, default
     10 ms). Unlike a crossfade, edge fades do not overlap the sides → audio length = video sum (not
     the shorter xfade-adjusted length); -shortest in build_concat_cmd trims it to the video.
+    `cfr` (M48, variable-frame-rate sources only): (fps, frames of each input) — every input is made
+    exactly that many frames at that rate (_cfr_chain). None = the graph as before.
     Returns (prefix, [vseg], [aseg]).
     """
     n = len(segments)
@@ -1100,7 +1129,7 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     if len(groups) < n:
         return _concat_grouped_graph(segments, groups, f, pre_roll=pre_roll, segment_vfs=segment_vfs,
                                      segment_overlays=segment_overlays, seam_xfades=seam_xfades,
-                                     seam_xfade_visual_durations=seam_xfade_visual_durations)
+                                     seam_xfade_visual_durations=seam_xfade_visual_durations, cfr=cfr)
     for i, s in enumerate(segments):
         pr = min(pre_roll, s.start) if pre_roll > 0 else 0.0
         svf = segment_vfs[i] if segment_vfs else None
@@ -1112,6 +1141,8 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
         else:
             vtrim = "setpts=PTS-STARTPTS"
             achain = f"[{i}:a]asetpts=PTS-STARTPTS"
+        if cfr is not None:
+            vtrim += _cfr_chain(cfr[0], cfr[1][i])
         if ovl:
             # Overlay: split → wide+close branches → overlay with enable expression.
             wide_vf_o, close_vf_o, enable_o = ovl
@@ -1179,7 +1210,7 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
 
 
 def _concat_grouped_graph(segments, groups, edge_fade_sec: float, *, pre_roll: float, segment_vfs,
-                          segment_overlays, seam_xfades, seam_xfade_visual_durations):
+                          segment_overlays, seam_xfades, seam_xfade_visual_durations, cfr=None):
     """_concat_segments_graph for runs of filler-cut pieces (REEL_SPEC §1.4): input g = one run.
 
     Video: the run is decoded once; `select` keeps the frames of its pieces (frame-grid windows,
@@ -1221,6 +1252,8 @@ def _concat_grouped_graph(segments, groups, edge_fade_sec: float, *, pre_roll: f
                 f"gte(T,{_num(segments[i].start - g0.start - eps)})*{_num(segments[i].start - segments[idx[k - 1]].end)}"
                 for k, i in enumerate(idx) if k > 0)
             vsel = f"{vtrim},select='{keep}',setpts='PTS-({shift})/TB'"
+        if cfr is not None:
+            vsel += _cfr_chain(cfr[0], cfr[1][g])
         if shot[0] == "overlay":
             wide_vf, close_vf = shot[1]
             parts.append(f"[{g}:v]{vsel}[raw{g}]")
@@ -2632,6 +2665,12 @@ def _render_segments(
             _fps_holder.append(_probe_source_fps(source, _sibling_ffprobe(ffmpeg_bin)))
         return _fps_holder[0]
 
+    _vfr_holder: list[bool] = []    # M48: variable-frame-rate source → windows made constant-rate
+    def _vfr() -> bool:
+        if not _vfr_holder:
+            _vfr_holder.append(_probe_source_vfr(source, _sibling_ffprobe(ffmpeg_bin)))
+        return _vfr_holder[0]
+
 
     with tempfile.TemporaryDirectory(prefix="autoreels_ass_") as _tmp_ass:
         tmp_ass_dir = Path(_tmp_ass)
@@ -3258,13 +3297,26 @@ def _render_segments(
                 # window is its OWN input with input-side seek (build_concat_cmd), so decodes are
                 # independent — a cold-open hook later in the source than the body no longer buffers
                 # every frame in between (was an OOM). Input i supplies [i:v]/[i:a]; music is [n:a].
+                _cfr = None
+                if not _synth_post_append and not _synth_inline and _vfr():
+                    # M48: each input of a variable-rate source made exactly its frames at _fps():
+                    # the played length of its pieces, plus the one frame build_concat_cmd adds to
+                    # every input but the last when the clip has xfade seams.
+                    _xf_on = _xfade_actual > 0 or bool(_ts_seam_xfades and any(x > 0 for x in _ts_seam_xfades))
+                    _grp = _input_groups(segs, _ts_seam_xfades, _xfade_actual)
+                    _cfr = (_fps(), [
+                        round((sum(segs[i].end - segs[i].start for i in g)
+                               + (1.0 / _fps() if _xf_on and len(_grp) > 1 and k < len(_grp) - 1 else 0.0))
+                              * _fps())
+                        for k, g in enumerate(_grp)])
                 prefix, vseg, aseg = _concat_segments_graph(segs, ap.audio_edge_fade_sec,
                                                              video_xfade_sec=_xfade_actual,
                                                              pre_roll=_PRE_ROLL_SEC,
                                                              segment_vfs=_ts_seg_vfs,
                                                              seam_xfades=_ts_seam_xfades,
                                                              seam_xfade_visual_durations=_ts_seam_visual,
-                                                             segment_overlays=_ts_seg_overlays)
+                                                             segment_overlays=_ts_seg_overlays,
+                                                             cfr=_cfr)
                 # One input per run of filler-cut pieces (REEL_SPEC §1.4), else one per window.
                 windows = [(segs[g[0]].start, segs[g[-1]].end - segs[g[0]].start)
                            for g in _input_groups(segs, _ts_seam_xfades, _xfade_actual)]

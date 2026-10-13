@@ -3509,3 +3509,29 @@ def test_duration_invariant_marks_the_clip_not_the_source(tmp_path, render_cfg, 
     outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
     assert [p.name for p in outputs] == ["r02.mp4"]
     assert (out_dir / "r01.ERROR.mp4").exists() and not (out_dir / "r01.mp4").exists()
+
+
+@pytest.mark.parametrize("vfr", [False, True])
+def test_multi_window_reel_gets_cfr_chain_only_for_variable_rate_source(tmp_path, render_cfg, fake_ffmpeg,
+                                                                        monkeypatch, vfr):
+    """M48: render_crop passes the constant-rate chain to the concat graph only for a variable-rate
+    source (r_frame_rate ≠ avg_frame_rate); a constant-rate source keeps its filtergraph as before."""
+    from autoreels.core.models import Segment
+    monkeypatch.setattr(render, "_probe_source_fps", lambda *_: 30.0)
+    monkeypatch.setattr(render, "_probe_source_vfr", lambda *_: vfr)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"vfr-wiring")
+    reel = _reel("r01", 10.0, 30.0)
+    reel.segments = [Segment(start=10.0, end=15.0, shot="wide"), Segment(start=20.0, end=30.0, shot="wide")]
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "out", render_cfg=render_cfg)
+    fc = next(_val_after(c, "-filter_complex") for c in fake_ffmpeg if "-filter_complex" in c)
+    assert ("tpad=stop_mode=clone" in fc) is vfr
+    if vfr:
+        # one chain per window input; the frames = that input's window at 30 fps (the -t after -ss,
+        # minus the 2 s pre-roll the graph trims)
+        import re as _re
+        frames = [int(x) for x in _re.findall(r"trim=end_frame=(\d+)", fc)]
+        cmd = next(c for c in fake_ffmpeg if "-filter_complex" in c)
+        durs = [float(cmd[i + 1]) - 2.0 for i, a in enumerate(cmd) if a == "-t" and cmd[i + 2] == "-i"][:2]
+        assert len(frames) == 2 and frames == [round(d * 30) for d in durs]
