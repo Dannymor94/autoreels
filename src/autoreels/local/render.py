@@ -1527,8 +1527,17 @@ def _check_silence_at_clip_end(
     smap: dict,
     lookup: dict,
     last_ae: float | None = None,
+    *,
+    plan_onset=None,
+    planned: bool = False,
 ) -> list[str]:
     """Audio invariant: no speech starts between the last word's audible end and clip_end.
+
+    planned (M49c): a planned clip's next speech is the plan's (reel.tail_next_word_start —
+    alignment for an aligned next word, the map for untranscribed speech), checked here against
+    the clip end instead of every map word: the map can put an aligned next word tens of ms
+    earlier than the alignment does (Pxl 1129 r15: «…по-другому.», next word at 2208.320 by the
+    map, after the clip end by the alignment the plan cut by).
 
     'Speech' = any smap word whose audible_start falls in (last_word_ae, clip_end).
     Untranscribed_speech intervals in boundaries are also checked.
@@ -1539,6 +1548,12 @@ def _check_silence_at_clip_end(
     energy track). When given it is used as is, so a planned clip is checked against the same
     word end it was cut by (and no tail recomputation runs).
     """
+    if planned:
+        if plan_onset is not None and last_ae is not None and last_ae < plan_onset < clip_end - 0.01:
+            return [f"  [ERROR] {reel_id}: speech between last-word ae={last_ae:.3f}s and "
+                    f"clip_end={clip_end:.3f}s (last='{last_word.word}' t0={last_word.t0:.3f}): "
+                    f"next speech at {plan_onset:.3f}s by the plan"]
+        return []
     key = round(last_word.t0 * 1000)
     if key not in lookup:
         return []
@@ -3134,7 +3149,8 @@ def _render_segments(
                 )
                 _clip_errors.extend(_check_silence_at_clip_end(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup,
-                    last_ae=(getattr(reel, "tail_last_word_end", None) if _planned else None)))
+                    last_ae=(getattr(reel, "tail_last_word_end", None) if _planned else None),
+                    plan_onset=getattr(reel, "tail_next_word_start", None), planned=_planned))
                 _clip_errors.extend(_check_foreign_tail_word_render(
                     reel.id, reel.subtitles[-1], _real_content_end, smap, _inv_lookup,
                     plan_onset=(getattr(reel, "tail_next_word_start", None) if _planned else _NO_PLAN)))

@@ -3555,3 +3555,22 @@ def test_planned_tail_word_check_uses_the_plans_next_onset():
     assert _check_foreign_tail_word_render("r03", clamped, 591.631, smap, lookup, plan_onset=None) == []
     errs = _check_foreign_tail_word_render("r03", clamped, 591.631, smap, lookup, plan_onset=591.5)
     assert errs and "next speech at 591.500s" in errs[0]
+
+
+def test_planned_silence_check_uses_the_plans_next_onset():
+    """M49c, Pxl 1129 r15 («…по-другому.»): the map puts the next word at 2208.320, 13 ms before the
+    clip end; forced alignment (which the plan cut by) puts it after. A planned clip is checked
+    against the plan's next onset; an unplanned one against every map word, as before."""
+    from autoreels.local.render import _check_silence_at_clip_end, _smap_word_lookup
+    smap = {"words": [
+        {"t0": 2207.191, "t1": 2208.2, "audible_start": 2207.25, "audible_end": 2208.23},
+        {"t0": 2208.371, "t1": 2208.8, "audible_start": 2208.320, "audible_end": 2208.75}],
+        "boundaries": [{"pause": 0.1}, {"pause": 0.0}]}
+    lookup = _smap_word_lookup(smap)
+    last = Word(word="по-другому.", t0=2207.191, t1=2208.2)
+    assert _check_silence_at_clip_end("r15", last, 2208.333, smap, lookup, last_ae=2208.23)     # by the map
+    assert _check_silence_at_clip_end("r15", last, 2208.333, smap, lookup, last_ae=2208.23,
+                                      plan_onset=2208.40, planned=True) == []
+    errs = _check_silence_at_clip_end("r15", last, 2208.333, smap, lookup, last_ae=2208.23,
+                                      plan_onset=2208.30, planned=True)
+    assert errs and "next speech at 2208.300s by the plan" in errs[0]
