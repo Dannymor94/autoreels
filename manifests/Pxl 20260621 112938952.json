@@ -4842,7 +4842,7 @@
     {
       "id": "r10",
       "start": 1347.175,
-      "end": 1398.88,
+      "end": 1399.18,
       "segments": [
         {
           "start": 1347.175,
@@ -4867,7 +4867,7 @@
         },
         {
           "start": 1397.728,
-          "end": 1398.88,
+          "end": 1399.18,
           "shot": "close",
           "close_intervals": [],
           "window_cut": true
@@ -4882,7 +4882,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 1347.175,
-      "r0_end": 1398.88,
+      "r0_end": 1399.18,
       "flags": [
         "human_merged"
       ],
@@ -5229,12 +5229,11 @@
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 1398.88,
+      "subtitle_gate": 1399.18,
       "speed": 1.0,
       "tail_last_word_end": 1398.88,
-      "tail_next_word_start": 1398.8534574999999,
+      "tail_next_word_start": 1399.3,
       "warnings": [
-        "no room after last word «да.» (next speech at 1398.853) — clip ends at its audible end",
         "ending intonation unsure (end pitch 34/100 in the speaker's range): «да.» intonation unclear; finished sentence ends nearby: s15 «случае.», s16 «такое.», s17 «это.»"
       ],
       "subtitle_emph_words": [],
@@ -7409,7 +7408,7 @@
     {
       "id": "r15",
       "start": 2134.313,
-      "end": 2208.26,
+      "end": 2208.332,
       "segments": [
         {
           "start": 2134.313,
@@ -7497,12 +7496,12 @@
         },
         {
           "start": 2196.932,
-          "end": 2208.26,
+          "end": 2208.332,
           "shot": "wide",
           "close_intervals": [
             [
               1.995115,
-              11.328
+              11.4
             ]
           ],
           "window_cut": true
@@ -7517,7 +7516,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 2134.313,
-      "r0_end": 2208.26,
+      "r0_end": 2208.332,
       "flags": [
         "human_merged"
       ],
@@ -8290,7 +8289,7 @@
         {
           "word": "по-другому.",
           "t0": 2207.19126,
-          "t1": 2208.26,
+          "t1": 2208.3112499999997,
           "emph": false
         }
       ],
@@ -8302,10 +8301,10 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 2208.26,
+      "subtitle_gate": 2208.332,
       "speed": 1.0,
       "tail_last_word_end": 2208.23,
-      "tail_next_word_start": 2208.32,
+      "tail_next_word_start": 2208.392,
       "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,

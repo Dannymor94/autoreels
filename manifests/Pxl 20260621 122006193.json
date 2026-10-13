@@ -432,7 +432,7 @@
     {
       "id": "r02",
       "start": 584.669,
-      "end": 635.57,
+      "end": 635.7700000000001,
       "segments": [
         {
           "start": 584.669,
@@ -457,7 +457,7 @@
         },
         {
           "start": 633.679,
-          "end": 635.57,
+          "end": 635.7700000000001,
           "shot": "close",
           "close_intervals": [],
           "window_cut": true
@@ -472,7 +472,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 584.669,
-      "r0_end": 635.57,
+      "r0_end": 635.7700000000001,
       "flags": [],
       "self_contained_start": null,
       "start_justification": "",
@@ -781,12 +781,11 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 635.57,
+      "subtitle_gate": 635.7700000000001,
       "speed": 1.0,
       "tail_last_word_end": 635.57,
-      "tail_next_word_start": 635.4378,
+      "tail_next_word_start": 635.83,
       "warnings": [
-        "no room after last word «обижается.» (next speech at 635.438) — clip ends at its audible end",
         "dangling start: opens on «И»"
       ],
       "subtitle_emph_words": [],

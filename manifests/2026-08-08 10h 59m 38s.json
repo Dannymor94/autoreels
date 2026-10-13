@@ -1986,7 +1986,7 @@
     {
       "id": "r03",
       "start": 538.713,
-      "end": 591.62,
+      "end": 591.85,
       "segments": [
         {
           "start": 538.713,
@@ -2051,7 +2051,7 @@
         },
         {
           "start": 589.639,
-          "end": 591.62,
+          "end": 591.85,
           "shot": "close",
           "close_intervals": [],
           "window_cut": true
@@ -2066,7 +2066,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 538.713,
-      "r0_end": 591.62,
+      "r0_end": 591.85,
       "flags": [
         "human_merged"
       ],
@@ -2701,12 +2701,11 @@
       "ends_on_host_turn": false,
       "open_thought": true,
       "has_explicit_e": true,
-      "subtitle_gate": 591.62,
+      "subtitle_gate": 591.85,
       "speed": 1.0,
       "tail_last_word_end": 591.62,
-      "tail_next_word_start": 591.3051999999999,
+      "tail_next_word_start": 591.91,
       "warnings": [
-        "no room after last word «пробуйте.» (next speech at 591.305) — clip ends at its audible end",
         "dangling start: opens on «Но»"
       ],
       "subtitle_emph_words": [],
@@ -4216,7 +4215,7 @@
     {
       "id": "r07",
       "start": 1298.076,
-      "end": 1331.15,
+      "end": 1331.222,
       "segments": [
         {
           "start": 1298.076,
@@ -4274,7 +4273,7 @@
         },
         {
           "start": 1330.512,
-          "end": 1331.15,
+          "end": 1331.222,
           "shot": "close",
           "close_intervals": [],
           "window_cut": true
@@ -4289,7 +4288,7 @@
       "reason": "human review",
       "topic": "",
       "r0_start": 1298.076,
-      "r0_end": 1331.15,
+      "r0_end": 1331.222,
       "flags": [],
       "self_contained_start": null,
       "start_justification": "",
@@ -4700,10 +4699,10 @@
       "ends_on_host_turn": false,
       "open_thought": false,
       "has_explicit_e": true,
-      "subtitle_gate": 1331.15,
+      "subtitle_gate": 1331.222,
       "speed": 1.0,
       "tail_last_word_end": 1331.122,
-      "tail_next_word_start": 1331.21,
+      "tail_next_word_start": 1331.282,
       "warnings": [],
       "subtitle_emph_words": [],
       "beat_gap_sec": null,
