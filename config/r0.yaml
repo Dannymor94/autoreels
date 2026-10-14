@@ -282,6 +282,21 @@ montage:
     callout_gap_sec: 8.0    # no two callouts closer than this
     callout_sec: 2.0
 
+# M56: arl autocut <stem> — montage lines proposed from the map (transcripts/<stem>.map.json) → reviews/<stem>_auto_m56.txt.
+# A clip grows around a strong thought (punch ≥ seed_punch), takes what it leans on and thoughts of the same topic
+# (and its «similar» elsewhere), a question opens it, a payoff ends it; t:/d: are the map's summaries.
+autocut:
+  clips: 5
+  min_sec: 30             # shorter clips are not proposed
+  target_sec: 60          # a clip stops growing here …
+  max_sec: 90             # … and never goes past this
+  max_pieces: 4           # at most this many pieces (adjacent thoughts join without a seam)
+  min_punch: 3            # weaker thoughts are never used
+  seed_punch: 4           # a clip grows only around a thought at least this strong
+  hook_min_words: 4       # the cold open h: — a finished sentence of at least 4 words, ≤ hook_max_sec
+  overlap_max: 0.5        # a clip sharing more than half its thoughts with a better one is dropped
+  use_filtered: false     # thoughts of filtered blocks (head, tail, promo) are not used
+
 # M57: arl tx-check — Whisper inventions and holes in a transcript (G5a: on IMG_6848 Groq wrote «Субтитры создавал
 # DimaTorzok» and one phrase five times where the speaker said something else). Pointers for the ear; nothing is changed.
 tx_check:

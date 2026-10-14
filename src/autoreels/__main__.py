@@ -7742,6 +7742,93 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
     return rc
 
 
+def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
+                out: str | None = None) -> int:
+    """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
+    (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
+    Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
+    import json as _json
+    from autoreels.cloud.autocut import AutoParams, propose
+    from autoreels.cloud.blocks import _block_fingerprint
+    from autoreels.cloud.edit import _ends_terminal, merge_group_sentences, strip_credit_words
+    from autoreels.cloud.montage import montage_blocks
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    stem = mpath.stem
+    mjson = _root / "transcripts" / f"{stem}.map.json"
+    if not mjson.is_file():
+        print(f"ошибка: нет карты {mjson} — сначала arl map {stem}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    the_map = _json.loads(mjson.read_text(encoding="utf-8"))
+    if the_map.get("source_sha256") not in (None, manifest.source_sha256):
+        print(f"ошибка: карта {mjson.name} построена для другого исходника — arl map {stem} --force", file=sys.stderr)
+        return 1
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    tx = _resolve_cached_transcript(manifest, _cache)
+    if tx is None:
+        print(f"ошибка: транскрипт не найден для {stem}", file=sys.stderr)
+        return 1
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    ac = r0_cfg.autocut
+    prm = AutoParams(clips=clips or ac.clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
+                     max_pieces=ac.max_pieces, min_punch=ac.min_punch, seed_punch=ac.seed_punch,
+                     hook_max_sec=getattr(r0_cfg, "hook_max_sec", 6.0), hook_min_words=ac.hook_min_words,
+                     overlap_max=ac.overlap_max, use_filtered=ac.use_filtered)
+    all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+    words = tx.words
+    if getattr(r0_cfg, "credit_word_patterns", None):
+        words = strip_credit_words(words, r0_cfg.credit_word_patterns)
+    sent_by_ref: dict[str, list] = {}
+    for key, b in montage_blocks(all_blocks, kept).items():
+        for k, st in enumerate(merge_group_sentences([b], words), 1):
+            sent_by_ref[f"{key}.{k}"] = st
+
+    def sentences(refs: str):
+        out_s = []
+        for piece in refs.split():
+            blk, _, rng = piece.partition(".")
+            a, _, z = rng.partition("-")
+            for k in range(int(a), int(z or a) + 1):
+                st = sent_by_ref.get(f"{blk}.{k}")
+                if st:
+                    out_s.append((f"{blk}.{k}", st[-1].t1 - st[0].t0, sum(1 for w in st if any(c.isalnum() for c in w.word)),
+                                  _ends_terminal(st[-1])))
+        return out_s
+
+    props = propose(the_map.get("units") or [], prm, sentences)
+    out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto_m56.txt"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    ref = _rel_ref(out_path, _root)
+    ref_q = f'"{ref}"' if " " in ref else ref
+    head = [
+        "# AutoReels block review — DRAFT by arl autocut (M56: montage lines from the map)",
+        f"# source: {_rel_ref(mpath, _root)}",
+        f"# blocks: {len(kept)}  |  filter_removed: {len(dropped)}",
+        f"# fingerprint: {_block_fingerprint(kept)}",
+        "# format: compact",
+        f"# map: {_rel_ref(mjson, _root)} ({len(the_map.get('units') or [])} thoughts). Every line is a proposal.",
+        f"#   plan only:  arl blocks --apply {ref_q} --labeler auto",
+        "",
+    ]
+    body: list[str] = []
+    for i, pr in enumerate(props, 1):
+        body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}")
+        body += [f"#   {n}" for n in pr.notes]
+        body.append(pr.line(str(i)))
+        body.append("")
+    out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
+    print(f"autocut {stem}: предложено сборок {len(props)} из {len(the_map.get('units') or [])} мыслей → {out_path}")
+    for i, pr in enumerate(props, 1):
+        print(f"  {pr.line(str(i))}")
+    if not props:
+        print("  (ни одной: нет сильных мыслей с паспортом — проверьте карту)")
+    return 0
+
+
 def _mmss_long(t: float) -> str:
     t = int(round(t))
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
@@ -10791,6 +10878,16 @@ def _build_parser():
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
+    pac = sub.add_parser(
+        "autocut",
+        help="M56: сборки (строки M) по карте источника — черновик reviews/<stem>_auto_m56.txt",
+    )
+    pac.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pac.add_argument("--clips", type=int, default=None, help="сколько сборок предложить (по умолчанию из r0.yaml)")
+    pac.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto_m56.txt)")
+    pac.add_argument("--root", default=None)
+    pac.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     ptc = sub.add_parser(
         "tx-check",
         help="M57: выдумки и дыры расшифровки (известные фразы Whisper, дословные повторы, звук без слов)",
@@ -11174,6 +11271,9 @@ def main(argv=None) -> int:
         elif args.cmd == "map":
             return cmd_map(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                            llm=args.llm, force=args.force)
+        elif args.cmd == "autocut":
+            return cmd_autocut(args.manifest, root=getattr(args, "root", None),
+                               cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

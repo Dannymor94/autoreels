@@ -250,6 +250,23 @@ class MontageFx(BaseModel):
         return out
 
 
+class AutocutConfig(BaseModel):
+    """M56: arl autocut — montage lines proposed from the map (cloud/autocut.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    clips: int = Field(5, ge=1)
+    min_sec: float = Field(30.0, gt=0)
+    target_sec: float = Field(60.0, gt=0)
+    max_sec: float = Field(90.0, gt=0)
+    max_pieces: int = Field(4, ge=1)
+    min_punch: int = Field(3, ge=1, le=5)
+    seed_punch: int = Field(4, ge=1, le=5)
+    hook_min_words: int = Field(4, ge=1)
+    overlap_max: float = Field(0.5, ge=0, le=1)
+    use_filtered: bool = False
+
+
 class TxCheckConfig(BaseModel):
     """M57: arl tx-check and clip warnings — Whisper inventions and holes (cloud/txcheck.py).
     Off = no warnings at --apply (invariant 8); the command works either way."""
@@ -445,6 +462,7 @@ class R0Config(BaseModel):
     montage: MontageConfig = Field(default_factory=MontageConfig)
     map: MapConfig = Field(default_factory=MapConfig)
     tx_check: TxCheckConfig = Field(default_factory=TxCheckConfig)
+    autocut: AutocutConfig = Field(default_factory=AutocutConfig)
 
     @property
     def min_duration(self) -> int:
