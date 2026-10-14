@@ -3222,6 +3222,14 @@ def _render_segments(
                                                         seam_xfades=_ts_seam_xfades)
             # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
+            # M55e: a sped-up clip is made an exact whole number of frames at the output rate (the
+            # setpts timeline has 1.05× the frame rate; the muxer re-timed it to the source rate and
+            # the video came out up to 2 frames off the atempo'd audio — Pxl 1129: video 52 ms longer).
+            # The audio (-t) is cut to the same length.
+            _speed_frames: int | None = None
+            if _reel_speed and _reel_speed != 1.0:
+                _speed_frames = max(1, round(_out_dur * _fps()))
+                _out_dur = _speed_frames / _fps()
             if _planned and getattr(ap, "dynamic_ending", False):
                 # REEL_SPEC §4: audio fades over end_audio_fade_sec, but never into the last word —
                 # shortened to the air after it (min 40 ms declick). Video: fixed fade (below).
@@ -3252,6 +3260,10 @@ def _render_segments(
                 )
                 if tvfade:
                     reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
+            if _speed_frames is not None:
+                _sf = (f"fps={_num(_fps())},tpad=stop_mode=clone:stop=3,"
+                       f"trim=end_frame={_speed_frames},setpts=PTS-STARTPTS")
+                reel_vf = f"{reel_vf},{_sf}" if reel_vf else _sf
             # Музыка: filter_complex со вторым входом (микс речи+музыки). Без музыки — обычный -af.
             reel_fc = None
             reel_af = None

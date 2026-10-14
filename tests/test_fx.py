@@ -284,3 +284,18 @@ def test_render_wires_push_before_the_subtitles(tmp_path, render_cfg, fake_ffmpe
     assert "between(t\\,0.000\\,9.933)" in cmd and "between(t\\,9.933\\,24.933)" in cmd
     assert cmd.index("eval=frame") < cmd.index("ass=r01.ass")
     assert re.sub(r"scale=w='[^ ]*?\(ih-1920\)/2,", "", cmd) == plain    # nothing else changes
+
+
+def test_sped_up_clip_is_a_whole_number_of_frames(tmp_path, render_cfg, fake_ffmpeg):
+    """M55e (Pxl 1129 @1.05: video 52 ms longer than the audio): the sped-up video is re-timed to the
+    output rate and cut to round(length × fps) frames; the output length (-t) is the same."""
+    (cmd,) = _render_argv(tmp_path, render_cfg, fake_ffmpeg, _two_window_reel(speed=1.05))
+    import re
+    n = int(re.search(r"trim=end_frame=(\d+),setpts=PTS-STARTPTS\[v\]", cmd).group(1))
+    assert "fps=30,tpad=stop_mode=clone:stop=3" in cmd
+    total = 24.933 / 1.05                                     # two windows minus the seam dissolve
+    assert n == round(total * 30)
+    assert f"-t {n / 30:.3f}" in cmd
+    fake_ffmpeg.clear()
+    (plain,) = _render_argv(tmp_path, render_cfg, fake_ffmpeg, _two_window_reel())
+    assert "end_frame=" not in plain.split("[v]")[0].split(";")[-1]           # 1× clips unchanged
