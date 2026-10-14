@@ -6,7 +6,7 @@
  "topics": [
   {
    "id": 1,
-   "name": "Столкновение с собой и эго",
+   "name": "Суть практики и встреча с собой",
    "units": [
     1,
     2,
@@ -18,30 +18,24 @@
   },
   {
    "id": 2,
-   "name": "Уникальность нервной системы",
+   "name": "Уникальность и родительские ограничения",
    "units": [
     7,
     8,
-    15,
-    16,
-    28,
-    29,
-    30,
-    31,
-    32,
-    33
-   ]
-  },
-  {
-   "id": 3,
-   "name": "Влияние родителей и среды",
-   "units": [
     9,
     10,
     11,
     12,
     13,
-    14,
+    14
+   ]
+  },
+  {
+   "id": 3,
+   "name": "Формирование защитных масок",
+   "units": [
+    15,
+    16,
     17,
     18,
     19,
@@ -51,13 +45,25 @@
     23,
     24,
     25,
-    26,
-    27
+    26
    ]
   },
   {
    "id": 4,
-   "name": "Унификация в образовании",
+   "name": "Примеры типов нервной системы",
+   "units": [
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33
+   ]
+  },
+  {
+   "id": 5,
+   "name": "Влияние школы и стандартов",
    "units": [
     34,
     35,
@@ -69,8 +75,8 @@
    ]
   },
   {
-   "id": 5,
-   "name": "Механизмы защиты и маски",
+   "id": 6,
+   "name": "Повторение сценариев и выбор партнера",
    "units": [
     41,
     42,
@@ -80,24 +86,29 @@
     46,
     47,
     48,
-    49,
+    49
+   ]
+  },
+  {
+   "id": 7,
+   "name": "Роль родителей в раскрытии",
+   "units": [
     50,
     51,
     52,
     53,
-    54,
-    55,
-    57,
-    58,
-    59,
-    73,
-    74
+    54
    ]
   },
   {
-   "id": 6,
-   "name": "Психосоматика и телесные зажимы",
+   "id": 8,
+   "name": "Внутреннее напряжение и ресурс",
    "units": [
+    55,
+    56,
+    57,
+    58,
+    59,
     60,
     61,
     62,
@@ -107,21 +118,17 @@
     66,
     67,
     68,
-    69
-   ]
-  },
-  {
-   "id": 7,
-   "name": "Самодавление и контроль",
-   "units": [
+    69,
     70,
     71,
-    72
+    72,
+    73,
+    74
    ]
   },
   {
-   "id": 8,
-   "name": "Дыхание и транс",
+   "id": 9,
+   "name": "Дыхание и обход эго",
    "units": [
     75,
     76,
@@ -144,10 +151,9 @@
    ]
   },
   {
-   "id": 0,
-   "name": "прочее",
+   "id": 10,
+   "name": "Подготовка к практике",
    "units": [
-    56,
     93,
     94,
     95,
@@ -156,7 +162,13 @@
     98,
     99,
     100,
-    101,
+    101
+   ]
+  },
+  {
+   "id": 0,
+   "name": "прочее",
+   "units": [
     102,
     103,
     104,
@@ -245,7 +257,12 @@
    "refers": 2,
    "summary": "Встреча с собой, блоками и непрожитыми эмоциями.",
    "topic": 1,
-   "similar": []
+   "similar": [
+    [
+     7,
+     0.3
+    ]
+   ]
   },
   {
    "id": 4,
@@ -309,7 +326,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 5,
-   "summary": "Столкновение с настоящим неизбежно, оттягивать бесполезно.",
+   "summary": "Встреча с настоящим неизбежна, оттягивать бесполезно.",
    "topic": 1,
    "similar": []
   },
@@ -333,7 +350,12 @@
    "refers": 6,
    "summary": "Внутри записаны телесные и эмоциональные состояния.",
    "topic": 2,
-   "similar": []
+   "similar": [
+    [
+     3,
+     0.3
+    ]
+   ]
   },
   {
    "id": 8,
@@ -349,11 +371,11 @@
     "rate": 1.88,
     "energy": 42
    },
-   "role": "thesis",
-   "punch": 4,
+   "role": "conclusion",
+   "punch": 5,
    "standalone": true,
    "refers": null,
-   "summary": "Каждый человек уникален и необходим в этом мире.",
+   "summary": "Вы уникальны и необходимы в этом мире.",
    "topic": 2,
    "similar": []
   },
@@ -372,11 +394,11 @@
     "energy": 19
    },
    "role": "explanation",
-   "punch": 3,
+   "punch": 4,
    "standalone": false,
    "refers": 8,
-   "summary": "Блоки часто являются следствием родительского непринятия.",
-   "topic": 3,
+   "summary": "Блоки и зажимы — непринятая часть судьбы, отвергнутая родителями.",
+   "topic": 2,
    "similar": []
   },
   {
@@ -394,11 +416,11 @@
     "energy": 28
    },
    "role": "explanation",
-   "punch": 2,
+   "punch": 3,
    "standalone": false,
    "refers": 9,
-   "summary": "Родители сами подвергались давлению и ожиданиям.",
-   "topic": 3,
+   "summary": "Родители сами были ограничены требованиями быть хорошими и правильными.",
+   "topic": 2,
    "similar": []
   },
   {
@@ -415,12 +437,12 @@
     "rate": 2.14,
     "energy": 45
    },
-   "role": "example",
-   "punch": 3,
+   "role": "metaphor",
+   "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Уникальный человек рождается и попадает к родителям.",
-   "topic": 3,
+   "summary": "Уникальный человек с особенной судьбой рождается и попадает к родителям.",
+   "topic": 2,
    "similar": []
   },
   {
@@ -441,12 +463,12 @@
    "punch": 3,
    "standalone": false,
    "refers": 11,
-   "summary": "Родители могут не раскрыть уникальность нервной системы.",
-   "topic": 3,
+   "summary": "Вместо раскрытия уникальности родители делают что-то другое.",
+   "topic": 2,
    "similar": [
     [
      37,
-     0.37
+     0.43
     ]
    ]
   },
@@ -464,12 +486,12 @@
     "rate": 1.72,
     "energy": 69
    },
-   "role": "explanation",
+   "role": "thesis",
    "punch": 3,
    "standalone": false,
    "refers": 12,
-   "summary": "Зажимы возникают не из-за плохих родителей.",
-   "topic": 3,
+   "summary": "Родители зажимают ребенка не из-за своей плохости, а по другой причине.",
+   "topic": 2,
    "similar": []
   },
   {
@@ -490,8 +512,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 13,
-   "summary": "Взрослые действуют по привычке, так как их воспитали так же.",
-   "topic": 3,
+   "summary": "Родители повторяют сценарий, потому что с ними так же обращались.",
+   "topic": 2,
    "similar": []
   },
   {
@@ -508,16 +530,16 @@
     "rate": 1.41,
     "energy": 13
    },
-   "role": "thesis",
+   "role": "explanation",
    "punch": 3,
    "standalone": false,
-   "refers": 12,
-   "summary": "Уникальной нервной системе нужно время для глубокого раскрытия.",
-   "topic": 2,
+   "refers": 14,
+   "summary": "Уникальной нервной системе нужно время для глубокого прорыва и защиты.",
+   "topic": 3,
    "similar": [
     [
      33,
-     0.32
+     0.31
     ]
    ]
   },
@@ -537,10 +559,10 @@
    },
    "role": "example",
    "punch": 4,
-   "standalone": true,
-   "refers": null,
-   "summary": "Мягкая нервная система обволакивает партнера, обеспечивая комфорт.",
-   "topic": 2,
+   "standalone": false,
+   "refers": 15,
+   "summary": "Мягкая нервная система обволакивает другого, обеспечивая комфорт и понимание.",
+   "topic": 3,
    "similar": []
   },
   {
@@ -558,10 +580,10 @@
     "energy": 14
    },
    "role": "explanation",
-   "punch": 2,
+   "punch": 3,
    "standalone": false,
-   "refers": 15,
-   "summary": "Среда неизбежно начинает изменять уникальную нервную систему.",
+   "refers": 16,
+   "summary": "Среда рождения начинает изменять уникальную нервную систему.",
    "topic": 3,
    "similar": []
   },
@@ -580,10 +602,10 @@
     "energy": 44
    },
    "role": "explanation",
-   "punch": 2,
+   "punch": 3,
    "standalone": false,
    "refers": 17,
-   "summary": "Воспитание в раннем возрасте трансформирует природные особенности ребенка.",
+   "summary": "Воспитание неизбежно трансформирует природные особенности нервной системы.",
    "topic": 3,
    "similar": []
   },
@@ -602,7 +624,7 @@
     "energy": 60
    },
    "role": "metaphor",
-   "punch": 3,
+   "punch": 4,
    "standalone": false,
    "refers": 18,
    "summary": "Нервная система сжимается или растягивается под давлением среды.",
@@ -623,7 +645,7 @@
     "rate": 1.34,
     "energy": 8
    },
-   "role": "thesis",
+   "role": "example",
    "punch": 4,
    "standalone": false,
    "refers": 19,
@@ -649,7 +671,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 20,
-   "summary": "Дети защищаются от требований родителей и учителей.",
+   "summary": "Защита нужна от требований родителей и ожиданий быть хорошим.",
    "topic": 3,
    "similar": []
   },
@@ -671,7 +693,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 21,
-   "summary": "Защитная маска сначала пластична, но затем застывает.",
+   "summary": "Сначала надевается пластичная маска, которая еще легко снимается.",
    "topic": 3,
    "similar": []
   },
@@ -693,9 +715,14 @@
    "punch": 3,
    "standalone": false,
    "refers": 22,
-   "summary": "Повторение превращает защиту в автоматическую реакцию.",
+   "summary": "Повторение превращает защитный механизм в автоматическую реакцию.",
    "topic": 3,
-   "similar": []
+   "similar": [
+    [
+     73,
+     0.32
+    ]
+   ]
   },
   {
    "id": 24,
@@ -715,7 +742,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 23,
-   "summary": "Вспыльчивый ребенок учится убегать или топать ногой.",
+   "summary": "Тонкий ребенок учится убегать, вспыльчивый — топает ногой.",
    "topic": 3,
    "similar": []
   },
@@ -737,7 +764,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 24,
-   "summary": "Взрывная нервная система сталкивается с запретом доминировать.",
+   "summary": "Взрывная нервная система сталкивается с запретом на доминирование.",
    "topic": 3,
    "similar": [
     [
@@ -764,7 +791,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 25,
-   "summary": "Общество «причесывает» уникальную нервную систему ребенка.",
+   "summary": "Общество «причесывает» природную лидерскую натуру ребенка.",
    "topic": 3,
    "similar": []
   },
@@ -786,8 +813,8 @@
    "punch": 1,
    "standalone": false,
    "refers": 26,
-   "summary": "Спикер вспоминает своих друзей для примера.",
-   "topic": 3,
+   "summary": "Спикер начинает вспоминать своих друзей.",
+   "topic": 4,
    "similar": []
   },
   {
@@ -804,12 +831,12 @@
     "rate": 0.34,
     "energy": 4
    },
-   "role": "thesis",
-   "punch": 3,
+   "role": "explanation",
+   "punch": 2,
    "standalone": false,
    "refers": 27,
-   "summary": "Каждый человек влияет на результат по-своему.",
-   "topic": 2,
+   "summary": "Каждый друг влияет на результат по-своему.",
+   "topic": 4,
    "similar": []
   },
   {
@@ -831,7 +858,7 @@
    "standalone": false,
    "refers": 28,
    "summary": "Пример ребенка с активной, «взрывной» нервной системой.",
-   "topic": 2,
+   "topic": 4,
    "similar": []
   },
   {
@@ -853,7 +880,7 @@
    "standalone": false,
    "refers": 29,
    "summary": "Вопрос аудитории о том, какая нервная система лучше.",
-   "topic": 2,
+   "topic": 4,
    "similar": [
     [
      25,
@@ -879,8 +906,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 30,
-   "summary": "Описание доминирующей нервной системы и знакомство с Аней.",
-   "topic": 2,
+   "summary": "Описание доминирующего типа и знакомство с тихой девочкой.",
+   "topic": 4,
    "similar": []
   },
   {
@@ -901,8 +928,8 @@
    "punch": 4,
    "standalone": false,
    "refers": 31,
-   "summary": "Пример тихой, подстраивающейся нервной системы девочки Василисы.",
-   "topic": 2,
+   "summary": "Контраст с мягкой, подстраивающейся нервной системой ребенка.",
+   "topic": 4,
    "similar": []
   },
   {
@@ -919,16 +946,16 @@
     "rate": 1.59,
     "energy": 46
    },
-   "role": "example",
+   "role": "explanation",
    "punch": 3,
-   "standalone": true,
-   "refers": null,
-   "summary": "Сравнение взрывной и мягкой подстраивающейся нервной систем.",
-   "topic": 2,
+   "standalone": false,
+   "refers": 32,
+   "summary": "Сравнение взрывной и мягкой подстраивающейся нервной системы.",
+   "topic": 4,
    "similar": [
     [
      15,
-     0.32
+     0.31
     ]
    ]
   },
@@ -947,11 +974,11 @@
     "energy": 16
    },
    "role": "question",
-   "punch": 3,
+   "punch": 4,
    "standalone": false,
    "refers": 33,
-   "summary": "Почему в школе с уникальными детьми существуют единые стандарты?",
-   "topic": 4,
+   "summary": "Почему в школе с разными системами нужен единый стандарт?",
+   "topic": 5,
    "similar": [
     [
      40,
@@ -973,12 +1000,12 @@
     "rate": 2.28,
     "energy": 48
    },
-   "role": "question",
-   "punch": 2,
+   "role": "aside",
+   "punch": 1,
    "standalone": false,
    "refers": 34,
-   "summary": "Почему миллиарды детей проходят через одинаковую систему образования?",
-   "topic": 4,
+   "summary": "Уточнение вопроса про миллиард детей и российскую школу.",
+   "topic": 5,
    "similar": []
   },
   {
@@ -995,12 +1022,12 @@
     "rate": 1.92,
     "energy": 22
    },
-   "role": "thesis",
+   "role": "explanation",
    "punch": 4,
    "standalone": false,
-   "refers": 35,
-   "summary": "ЕГЭ и единые экзамены унифицируют уникальные системы под один стандарт.",
-   "topic": 4,
+   "refers": 34,
+   "summary": "ЕГЭ унифицирует уникальные системы под один стандарт.",
+   "topic": 5,
    "similar": []
   },
   {
@@ -1021,12 +1048,12 @@
    "punch": 5,
    "standalone": true,
    "refers": null,
-   "summary": "Родители прогоняют уникального ребенка через круг, меняя его форму.",
-   "topic": 4,
+   "summary": "Уникальность требует уникального раскрытия, а не прокручивания через круг.",
+   "topic": 5,
    "similar": [
     [
      12,
-     0.37
+     0.43
     ]
    ]
   },
@@ -1044,13 +1071,12 @@
     "rate": 2.52,
     "energy": 68
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 4,
+   "role": "metaphor",
+   "punch": 4,
+   "standalone": false,
+   "refers": 37,
+   "summary": "Детский сад превращает уникального ребенка в квадрат.",
+   "topic": 5,
    "similar": []
   },
   {
@@ -1067,13 +1093,12 @@
     "rate": 1.94,
     "energy": 88
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 4,
+   "role": "metaphor",
+   "punch": 4,
+   "standalone": false,
+   "refers": 38,
+   "summary": "Школа делает из квадрата зеленого треугольника.",
+   "topic": 5,
    "similar": []
   },
   {
@@ -1090,13 +1115,12 @@
     "rate": 1.7,
     "energy": 17
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 4,
+   "role": "question",
+   "punch": 3,
+   "standalone": false,
+   "refers": 39,
+   "summary": "Почему система прессует уникальность и что делает с ребенком?",
+   "topic": 5,
    "similar": [
     [
      34,
@@ -1123,7 +1147,7 @@
    "standalone": false,
    "refers": 40,
    "summary": "Ребенок воспитывается с защитными стратегиями поведения.",
-   "topic": 5,
+   "topic": 6,
    "similar": []
   },
   {
@@ -1141,11 +1165,11 @@
     "energy": 80
    },
    "role": "explanation",
-   "punch": 3,
+   "punch": 4,
    "standalone": false,
    "refers": 41,
    "summary": "Нервная система в напряжении, защита через удар, бег или замирание.",
-   "topic": 5,
+   "topic": 6,
    "similar": []
   },
   {
@@ -1166,8 +1190,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 42,
-   "summary": "Стремление быть идеальным для принятия в стаю.",
-   "topic": 5,
+   "summary": "Стремление быть хорошим и идеальным для принятия в стаю.",
+   "topic": 6,
    "similar": []
   },
   {
@@ -1188,8 +1212,8 @@
    "punch": 4,
    "standalone": false,
    "refers": 43,
-   "summary": "Угодничество рождает маску, которая остается после сепарации.",
-   "topic": 5,
+   "summary": "Угодничество ради любви рождает защитную маску и сепарацию.",
+   "topic": 6,
    "similar": []
   },
   {
@@ -1211,7 +1235,7 @@
    "standalone": false,
    "refers": 44,
    "summary": "Нервная система привыкает к нажиму и ищет подтверждение сценария.",
-   "topic": 5,
+   "topic": 6,
    "similar": []
   },
   {
@@ -1232,8 +1256,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 45,
-   "summary": "Поиск партнера, повторяющего модель давления родителей.",
-   "topic": 5,
+   "summary": "Поиск партнера, который давит так же, как родители.",
+   "topic": 6,
    "similar": []
   },
   {
@@ -1255,7 +1279,7 @@
    "standalone": false,
    "refers": 46,
    "summary": "Выбор партнера на уровне подсознательных инстинктов и родительских программ.",
-   "topic": 5,
+   "topic": 6,
    "similar": []
   },
   {
@@ -1272,12 +1296,12 @@
     "rate": 2.27,
     "energy": 37
    },
-   "role": "metaphor",
+   "role": "conclusion",
    "punch": 5,
    "standalone": false,
    "refers": 47,
-   "summary": "Самонажим: нервная система просит давления, так как не умеет иначе.",
-   "topic": 5,
+   "summary": "Нервная система сама просит нажима, так как не умеет иначе.",
+   "topic": 6,
    "similar": []
   },
   {
@@ -1294,12 +1318,12 @@
     "rate": 3.03,
     "energy": 43
    },
-   "role": "conclusion",
+   "role": "metaphor",
    "punch": 4,
    "standalone": false,
    "refers": 48,
-   "summary": "Привычка к сценарию, сравнение с белкой в колесе.",
-   "topic": 5,
+   "summary": "Привычка к сценарию подобна бегу белки в колесе.",
+   "topic": 6,
    "similar": []
   },
   {
@@ -1316,12 +1340,12 @@
     "rate": 2.23,
     "energy": 87
    },
-   "role": "question",
+   "role": "address",
    "punch": 2,
    "standalone": false,
    "refers": 49,
-   "summary": "Рассмотрение варианта, когда родители понимают особенности нервной системы.",
-   "topic": 5,
+   "summary": "Родители осознают особенности нервной системы своего ребенка.",
+   "topic": 7,
    "similar": []
   },
   {
@@ -1342,8 +1366,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 50,
-   "summary": "Родители не заставляют, повторяя свои ошибки.",
-   "topic": 5,
+   "summary": "Родители не заставляют ребенка повторять их ошибки.",
+   "topic": 7,
    "similar": []
   },
   {
@@ -1361,11 +1385,11 @@
     "energy": 99
    },
    "role": "metaphor",
-   "punch": 4,
+   "punch": 5,
    "standalone": false,
    "refers": 51,
    "summary": "Ребенок раскрывается как цветок, если его не давят.",
-   "topic": 5,
+   "topic": 7,
    "similar": []
   },
   {
@@ -1382,13 +1406,12 @@
     "rate": 1.48,
     "energy": 62
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 5,
+   "role": "example",
+   "punch": 3,
+   "standalone": false,
+   "refers": 52,
+   "summary": "Демонстрация быстрого и грубого раскрытия цветка.",
+   "topic": 7,
    "similar": []
   },
   {
@@ -1405,13 +1428,12 @@
     "rate": 2.55,
     "energy": 65
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "example",
+   "punch": 3,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 5,
+   "summary": "Принуждение ребенка к музыке, если он не музыкален.",
+   "topic": 7,
    "similar": []
   },
   {
@@ -1428,13 +1450,12 @@
     "rate": 3.11,
     "energy": 55
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 5,
+   "role": "address",
+   "punch": 3,
+   "standalone": false,
+   "refers": 54,
+   "summary": "Подготовка аудитории к практике раскрытия нервной системы.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1451,13 +1472,12 @@
     "rate": 2.03,
     "energy": 64
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "conclusion",
+   "punch": 4,
+   "standalone": false,
+   "refers": 55,
+   "summary": "Раскрытая нервная система дает свободу и легкость.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1474,13 +1494,12 @@
     "rate": 2.11,
     "energy": 38
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 5,
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 56,
+   "summary": "Родители либо поддерживали, либо напрягали нервную систему.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1497,12 +1516,12 @@
     "rate": 2.42,
     "energy": 27
    },
-   "role": "explanation",
+   "role": "address",
    "punch": 4,
    "standalone": false,
    "refers": 57,
-   "summary": "Во взрослом возрасте человек сам поддерживает внутреннее напряжение.",
-   "topic": 5,
+   "summary": "Вы сами нажимаете на себя, почувствуйте напряжение.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1519,12 +1538,12 @@
     "rate": 2.33,
     "energy": 49
    },
-   "role": "conclusion",
+   "role": "thesis",
    "punch": 4,
    "standalone": false,
    "refers": 58,
-   "summary": "Мы привыкли к напряжению и перестали его чувствовать.",
-   "topic": 5,
+   "summary": "Вы привыкли к внутреннему напряжению и не чувствуете его.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1545,8 +1564,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 59,
-   "summary": "Закройте глаза, чтобы ощутить последствия внешнего давления.",
-   "topic": 6,
+   "summary": "Закройте глаза, внешние факторы уже нажали на вас.",
+   "topic": 8,
    "similar": [
     [
      115,
@@ -1572,12 +1591,12 @@
    "punch": 4,
    "standalone": false,
    "refers": 60,
-   "summary": "Расслабьте тело и найдите зону хронического напряжения.",
-   "topic": 6,
+   "summary": "Расслабьте тело, напряжение от долгого режима выживания.",
+   "topic": 8,
    "similar": [
     [
      115,
-     0.4
+     0.39
     ]
    ]
   },
@@ -1599,8 +1618,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 61,
-   "summary": "Эмоциональное напряжение нервной системы скапливается в теле.",
-   "topic": 6,
+   "summary": "Эмоциональное и ментальное напряжение должно быть где-то.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1621,8 +1640,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 62,
-   "summary": "Отсутствие границ ведет к накоплению внутреннего напряжения.",
-   "topic": 6,
+   "summary": "Напряжение накапливается внутри, даже без внешних границ.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1639,18 +1658,13 @@
     "rate": 2.08,
     "energy": 28
    },
-   "role": "explanation",
-   "punch": 3,
+   "role": "conclusion",
+   "punch": 4,
    "standalone": false,
    "refers": 63,
-   "summary": "Опыт запечатлевается в теле как психосоматика.",
-   "topic": 6,
-   "similar": [
-    [
-     76,
-     0.31
-    ]
-   ]
+   "summary": "Опыт запечатлевается в теле, переходим к трансу.",
+   "topic": 8,
+   "similar": []
   },
   {
    "id": 65,
@@ -1670,8 +1684,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 64,
-   "summary": "Боль в спине как сигнал неспособности выдержать отношения.",
-   "topic": 6,
+   "summary": "Спина болит, когда не выдерживаете отношения с другим.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1692,8 +1706,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 65,
-   "summary": "Желание сбежать с работы из-за нервного напряжения.",
-   "topic": 6,
+   "summary": "На работе хочется сбежать от нервного напряжения.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1711,11 +1725,11 @@
     "energy": 38
    },
    "role": "explanation",
-   "punch": 3,
+   "punch": 2,
    "standalone": false,
    "refers": 66,
-   "summary": "Привычка держать марку и соответствовать ожиданиям родителей.",
-   "topic": 6,
+   "summary": "Внутренняя привычка держать марку мешает отдыху.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1732,12 +1746,12 @@
     "rate": 1.7,
     "energy": 9
    },
-   "role": "explanation",
+   "role": "thesis",
    "punch": 3,
-   "standalone": false,
-   "refers": 67,
-   "summary": "У каждого свой сценарий, требующий ресурсов нервной системы.",
-   "topic": 6,
+   "standalone": true,
+   "refers": null,
+   "summary": "Ресурс нервной системы и тела у каждого свой.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1758,8 +1772,8 @@
    "punch": 4,
    "standalone": false,
    "refers": 68,
-   "summary": "Ресурс тела не безграничен, его нужно восполнять.",
-   "topic": 6,
+   "summary": "Ресурс не безграничен, его нужно восполнять.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1777,11 +1791,11 @@
     "energy": 98
    },
    "role": "example",
-   "punch": 3,
+   "punch": 2,
    "standalone": false,
    "refers": 69,
-   "summary": "Переход от внешнего давления родителей к внутреннему самодавлению.",
-   "topic": 7,
+   "summary": "Раньше давили родители, теперь давление сменилось.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1802,8 +1816,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 70,
-   "summary": "Самодавление проявляется в контроле и избегании ожиданий.",
-   "topic": 7,
+   "summary": "Мы сами давим на себя, контролируя и убегая.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1824,8 +1838,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 71,
-   "summary": "Подстраивание и терпение из страха потерять отношения или работу.",
-   "topic": 7,
+   "summary": "Терпим из страха расстаться, хотя нас используют.",
+   "topic": 8,
    "similar": []
   },
   {
@@ -1843,12 +1857,17 @@
     "energy": 26
    },
    "role": "thesis",
-   "punch": 4,
-   "standalone": true,
-   "refers": null,
+   "punch": 3,
+   "standalone": false,
+   "refers": 72,
    "summary": "Защитные механизмы превращают жизнь в бесконечную компенсацию.",
-   "topic": 5,
-   "similar": []
+   "topic": 8,
+   "similar": [
+    [
+     23,
+     0.32
+    ]
+   ]
   },
   {
    "id": 74,
@@ -1869,7 +1888,7 @@
    "standalone": false,
    "refers": 73,
    "summary": "Совокупность масок и механизмов составляет эго-конструкцию.",
-   "topic": 5,
+   "topic": 8,
    "similar": []
   },
   {
@@ -1890,8 +1909,8 @@
    "punch": 2,
    "standalone": true,
    "refers": null,
-   "summary": "Введение в тему телесной дыхательной техники.",
-   "topic": 8,
+   "summary": "Введение в тему телесных дыхательных техник.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -1913,13 +1932,8 @@
    "standalone": true,
    "refers": null,
    "summary": "Ребёфинг помогает найти психосоматику в теле.",
-   "topic": 8,
-   "similar": [
-    [
-     64,
-     0.31
-    ]
-   ]
+   "topic": 9,
+   "similar": []
   },
   {
    "id": 77,
@@ -1940,15 +1954,19 @@
    "standalone": false,
    "refers": 76,
    "summary": "Быстрое дыхание вводит в транс, отодвигая эго.",
-   "topic": 8,
+   "topic": 9,
    "similar": [
     [
      103,
-     0.32
+     0.36
+    ],
+    [
+     102,
+     0.31
     ],
     [
      87,
-     0.32
+     0.31
     ]
    ]
   },
@@ -1967,11 +1985,11 @@
     "energy": 12
    },
    "role": "explanation",
-   "punch": 3,
+   "punch": 2,
    "standalone": false,
    "refers": 77,
    "summary": "Эго-конструкция поддерживает привычные сценарии личности.",
-   "topic": 8,
+   "topic": 9,
    "similar": []
   },
   {
@@ -1993,7 +2011,7 @@
    "standalone": false,
    "refers": 78,
    "summary": "Эго приводит к повторению одних и тех же ошибок.",
-   "topic": 8,
+   "topic": 9,
    "similar": []
   },
   {
@@ -2011,11 +2029,11 @@
     "energy": 31
    },
    "role": "aside",
-   "punch": 2,
+   "punch": 1,
    "standalone": false,
    "refers": 79,
-   "summary": "Ироничная ремарка о просветленности аудитории.",
-   "topic": 8,
+   "summary": "Ироничное обращение к аудитории о их святости.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2033,11 +2051,11 @@
     "energy": 100
    },
    "role": "aside",
-   "punch": 1,
+   "punch": 2,
    "standalone": false,
    "refers": 80,
-   "summary": "Ироничное замечание о том, что тема не касается просветленных слушателей.",
-   "topic": 8,
+   "summary": "Ироничное уточнение, что тема не касается просветленных слушателей.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2055,11 +2073,11 @@
     "energy": 40
    },
    "role": "thesis",
-   "punch": 3,
+   "punch": 4,
    "standalone": true,
    "refers": null,
    "summary": "Техника основана на дыхании, связывающем тело, эмоции и ум.",
-   "topic": 8,
+   "topic": 9,
    "similar": []
   },
   {
@@ -2080,14 +2098,9 @@
    "punch": 3,
    "standalone": false,
    "refers": 82,
-   "summary": "Изменение дыхания влияет на эмоции, мысли и телесные ощущения.",
-   "topic": 8,
-   "similar": [
-    [
-     121,
-     0.33
-    ]
-   ]
+   "summary": "Изменение эмоций или тела мгновенно меняет дыхание и наоборот.",
+   "topic": 9,
+   "similar": []
   },
   {
    "id": 84,
@@ -2107,8 +2120,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 83,
-   "summary": "Духовные техники и психология тесно связаны с дыханием.",
-   "topic": 8,
+   "summary": "Дыхание взаимосвязано с телом и умом, основа многих техник.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2125,18 +2138,13 @@
     "rate": 2.47,
     "energy": 51
    },
-   "role": "explanation",
+   "role": "example",
    "punch": 4,
    "standalone": false,
    "refers": 84,
-   "summary": "Дыхание помогает обойти эго и защитные механизмы, уходя в бессознательное.",
-   "topic": 8,
-   "similar": [
-    [
-     91,
-     0.3
-    ]
-   ]
+   "summary": "Психологи используют дыхание для доступа к бессознательному и обхода эго.",
+   "topic": 9,
+   "similar": []
   },
   {
    "id": 86,
@@ -2156,8 +2164,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 85,
-   "summary": "Для исцеления нужно вернуться к травмирующему событию.",
-   "topic": 8,
+   "summary": "Для исцеления нужно вернуться к травме, минуя защитные механизмы.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2175,15 +2183,15 @@
     "energy": 33
    },
    "role": "explanation",
-   "punch": 3,
+   "punch": 4,
    "standalone": false,
    "refers": 86,
-   "summary": "В трансе на первый план выходит телесный и эмоциональный интеллект.",
-   "topic": 8,
+   "summary": "В трансе эго отступает, проявляясь телесный и эмоциональный интеллект.",
+   "topic": 9,
    "similar": [
     [
      77,
-     0.32
+     0.31
     ]
    ]
   },
@@ -2205,8 +2213,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 87,
-   "summary": "Психика сама находит телесные зажимы и непроработанные эмоции.",
-   "topic": 8,
+   "summary": "Психика сама находит зажимы и непрожитые эмоции для исцеления.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2223,12 +2231,12 @@
     "rate": 1.79,
     "energy": 52
    },
-   "role": "example",
+   "role": "explanation",
    "punch": 3,
    "standalone": false,
    "refers": 88,
-   "summary": "Примеры застрявших эмоций: невыраженная злость, невыплаканные слезы.",
-   "topic": 8,
+   "summary": "Невыраженные эмоции и злость остаются внутри тела.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2248,9 +2256,9 @@
    "role": "explanation",
    "punch": 4,
    "standalone": false,
-   "refers": 89,
-   "summary": "Глубокое дыхание позволяет психике самостоятельно разрядить застрявшие эмоции через тело.",
-   "topic": 8,
+   "refers": 88,
+   "summary": "Глубокое дыхание помогает психике самостоятельно разрядить застрявшие эмоции.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2271,14 +2279,9 @@
    "punch": 3,
    "standalone": false,
    "refers": 90,
-   "summary": "Защитный механизм эго избегает боли, мешая исцелению.",
-   "topic": 8,
-   "similar": [
-    [
-     85,
-     0.3
-    ]
-   ]
+   "summary": "Защитные механизмы избегают боли, но её нужно проработать.",
+   "topic": 9,
+   "similar": []
   },
   {
    "id": 92,
@@ -2298,8 +2301,8 @@
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Глубина погружения приближает к корневой проблеме.",
-   "topic": 8,
+   "summary": "Цель — спуститься глубже к корневой проблеме.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2316,13 +2319,12 @@
     "rate": 3.0,
     "energy": 91
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "address",
+   "punch": 2,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "summary": "Инструкция: лечь и расслабиться перед практикой.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2339,13 +2341,12 @@
     "rate": 2.14,
     "energy": 82
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "address",
+   "punch": 2,
+   "standalone": false,
+   "refers": 93,
+   "summary": "Чувствовать тело и слушать инструменты релаксации.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2362,17 +2363,16 @@
     "rate": 2.54,
     "energy": 83
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 94,
+   "summary": "Расслабление позволяет заметить напряжённые части тела.",
+   "topic": 10,
    "similar": [
     [
      100,
-     0.49
+     0.5
     ]
    ]
   },
@@ -2390,13 +2390,12 @@
     "rate": 2.27,
     "energy": 39
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 95,
+   "summary": "Смена позы помогает выходу психосоматики из тела.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2413,13 +2412,12 @@
     "rate": 2.49,
     "energy": 81
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "thesis",
+   "punch": 3,
+   "standalone": false,
+   "refers": 96,
+   "summary": "Ищем ощущения, воздействуя на травму через тело.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2436,13 +2434,12 @@
     "rate": 2.33,
     "energy": 23
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "explanation",
+   "punch": 4,
+   "standalone": false,
+   "refers": 97,
+   "summary": "Психика сама раскопает травму при глубоком дыхании.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2459,13 +2456,12 @@
     "rate": 2.78,
     "energy": 71
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "address",
+   "punch": 2,
+   "standalone": false,
+   "refers": 98,
+   "summary": "Если нет чувствительности, просто будьте в теле.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2482,17 +2478,16 @@
     "rate": 3.02,
     "energy": 96
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 99,
+   "summary": "Следите за ощущениями в расслабленном теле.",
+   "topic": 10,
    "similar": [
     [
      95,
-     0.49
+     0.5
     ]
    ]
   },
@@ -2514,9 +2509,14 @@
    "punch": 3,
    "standalone": false,
    "refers": 100,
-   "summary": "Ощущения плавают по телу, наблюдение следует за ними.",
-   "topic": 0,
-   "similar": []
+   "summary": "Наблюдайте за перемещением ощущений по телу.",
+   "topic": 10,
+   "similar": [
+    [
+     121,
+     0.31
+    ]
+   ]
   },
   {
    "id": 102,
@@ -2532,13 +2532,18 @@
     "rate": 2.33,
     "energy": 95
    },
-   "role": "thesis",
-   "punch": 4,
+   "role": "address",
+   "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Второй ключевой момент — глубокое и быстрое дыхание.",
+   "summary": "Дышите глубоко и быстро.",
    "topic": 0,
-   "similar": []
+   "similar": [
+    [
+     77,
+     0.31
+    ]
+   ]
   },
   {
    "id": 103,
@@ -2558,16 +2563,16 @@
    "punch": 4,
    "standalone": false,
    "refers": 102,
-   "summary": "Глубина и скорость дыхания ускоряют вход в транс.",
+   "summary": "Быстрое глубокое дыхание ускоряет вход в транс.",
    "topic": 0,
    "similar": [
     [
      114,
-     0.49
+     0.5
     ],
     [
      77,
-     0.32
+     0.36
     ]
    ]
   },
@@ -2589,7 +2594,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 103,
-   "summary": "Принимайте дыхание и любые возникающие состояния без оценки.",
+   "summary": "Принимайте все ощущения и состояния без сопротивления.",
    "topic": 0,
    "similar": []
   },
@@ -2611,7 +2616,7 @@
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Противопоказания: эпилепсия и психотические заболевания.",
+   "summary": "Перечисление противопоказаний: эпилепсия и психотические заболевания.",
    "topic": 0,
    "similar": []
   },
@@ -2631,9 +2636,9 @@
    },
    "role": "explanation",
    "punch": 3,
-   "standalone": false,
-   "refers": 105,
-   "summary": "Также нельзя при гипертонии, сердечных болезнях и беременности.",
+   "standalone": true,
+   "refers": null,
+   "summary": "Противопоказания: сердечно-сосудистые болезни, гипертония, беременность.",
    "topic": 0,
    "similar": []
   },
@@ -2652,10 +2657,10 @@
     "energy": 79
    },
    "role": "explanation",
-   "punch": 2,
-   "standalone": false,
-   "refers": 106,
-   "summary": "Острые респираторные заболевания тоже являются противопоказанием.",
+   "punch": 3,
+   "standalone": true,
+   "refers": null,
+   "summary": "ОРВИ как противопоказание, сравнение с фитнесом и йогой.",
    "topic": 0,
    "similar": []
   },
@@ -2674,10 +2679,10 @@
     "energy": 66
    },
    "role": "address",
-   "punch": 3,
+   "punch": 2,
    "standalone": true,
    "refers": null,
-   "summary": "Поднимите руку, если плохо, я подойду и помогу.",
+   "summary": "Инструкция поднять руку при недомогании, помощь ведущего.",
    "topic": 0,
    "similar": []
   },
@@ -2696,10 +2701,10 @@
     "energy": 86
    },
    "role": "address",
-   "punch": 3,
+   "punch": 2,
    "standalone": true,
    "refers": null,
-   "summary": "Я покажу, как дышать, вы просто наблюдайте.",
+   "summary": "Призыв расслабиться и наблюдать за дыханием ведущего.",
    "topic": 0,
    "similar": []
   },
@@ -2721,7 +2726,7 @@
    "punch": 2,
    "standalone": true,
    "refers": null,
-   "summary": "Дышите носом или ртом, как удобно, без правил.",
+   "summary": "Свобода выбора способа дыхания, приглашение попробовать.",
    "topic": 0,
    "similar": []
   },
@@ -2740,10 +2745,10 @@
     "energy": 88
    },
    "role": "address",
-   "punch": 3,
+   "punch": 2,
    "standalone": true,
    "refers": null,
-   "summary": "Начинаем дышать глубоко, глаза обязательно закрыты.",
+   "summary": "Начало практики: глубокие вдохи, закрытые глаза.",
    "topic": 0,
    "similar": []
   },
@@ -2762,10 +2767,10 @@
     "energy": 72
    },
    "role": "address",
-   "punch": 3,
-   "standalone": false,
-   "refers": 111,
-   "summary": "Чувствуйте тело и ощущения, дышите глубже минуту.",
+   "punch": 2,
+   "standalone": true,
+   "refers": null,
+   "summary": "Наблюдение за телом, продолжение дыхательной практики.",
    "topic": 0,
    "similar": []
   },
@@ -2814,7 +2819,7 @@
    "similar": [
     [
      103,
-     0.49
+     0.5
     ]
    ]
   },
@@ -2840,12 +2845,12 @@
    "topic": 0,
    "similar": [
     [
-     61,
+     60,
      0.4
     ],
     [
-     60,
-     0.4
+     61,
+     0.39
     ]
    ]
   },
@@ -2981,8 +2986,8 @@
    "topic": 0,
    "similar": [
     [
-     83,
-     0.33
+     101,
+     0.31
     ]
    ]
   }

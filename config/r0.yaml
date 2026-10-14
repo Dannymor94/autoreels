@@ -287,7 +287,7 @@ map:
   unit_max_sec: 30        # … but never grows past this
   unit_max_sents: 4
   pause_split_sec: 1.0    # a pause this long after a finished sentence ends a thought
-  window_units: 20        # thoughts per LLM request
+  window_units: 8         # thoughts per LLM request (M54b: 20 overflowed max_output_tokens 900 — passports cut off)
   similar_min: 0.30       # character-n-gram cosine from which two thoughts count as similar
   similar_far_sec: 60     # similar thoughts are listed only when at least this far apart
 

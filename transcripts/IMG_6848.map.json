@@ -9,17 +9,18 @@
    "name": "Организационные моменты",
    "units": [
     1,
-    2
+    2,
+    5,
+    6,
+    100
    ]
   },
   {
    "id": 2,
-   "name": "Личный путь и становление",
+   "name": "Путь в профессию",
    "units": [
     3,
     4,
-    5,
-    6,
     7,
     8,
     9,
@@ -36,7 +37,7 @@
   },
   {
    "id": 3,
-   "name": "Интегральный метод и система",
+   "name": "Методология и инструменты",
    "units": [
     19,
     20,
@@ -50,7 +51,7 @@
   },
   {
    "id": 4,
-   "name": "Процесс терапевтической сессии",
+   "name": "Процесс терапии",
    "units": [
     27,
     28,
@@ -73,7 +74,7 @@
   },
   {
    "id": 5,
-   "name": "Восстановление и эмпатия",
+   "name": "Выгорание и границы",
    "units": [
     44,
     45,
@@ -93,7 +94,7 @@
   },
   {
    "id": 6,
-   "name": "Ценности и взросление",
+   "name": "Ценности и честность",
    "units": [
     58,
     59,
@@ -108,7 +109,7 @@
   },
   {
    "id": 7,
-   "name": "Маски и честность",
+   "name": "Маски и вранье",
    "units": [
     67,
     68,
@@ -134,7 +135,7 @@
   },
   {
    "id": 8,
-   "name": "Возрастные состояния и приемы",
+   "name": "Психологический возраст",
    "units": [
     87,
     88,
@@ -143,8 +144,8 @@
    ]
   },
   {
-   "id": 0,
-   "name": "прочее",
+   "id": 9,
+   "name": "Принятие и взросление",
    "units": [
     91,
     92,
@@ -153,9 +154,14 @@
     95,
     96,
     97,
-    98,
+    98
+   ]
+  },
+  {
+   "id": 10,
+   "name": "Отношение к прошлому",
+   "units": [
     99,
-    100,
     101,
     102,
     103,
@@ -207,7 +213,7 @@
    "punch": 1,
    "standalone": false,
    "refers": 1,
-   "summary": "Подтверждение готовности к записи.",
+   "summary": "Уточнение о процессе съемки.",
    "topic": 1,
    "similar": []
   },
@@ -278,12 +284,12 @@
     "rate": 2.32,
     "energy": 8
    },
-   "role": "aside",
+   "role": "explanation",
    "punch": 2,
    "standalone": false,
    "refers": 4,
-   "summary": "Рекомендация рассказать интересную историю жизни.",
-   "topic": 2,
+   "summary": "Рекомендация рассказать интересную историю из жизни.",
+   "topic": 1,
    "similar": []
   },
   {
@@ -304,8 +310,8 @@
    "punch": 1,
    "standalone": false,
    "refers": 5,
-   "summary": "Указание на свободу формата ответа.",
-   "topic": 2,
+   "summary": "Уточнение формата ответа и монтажа.",
+   "topic": 1,
    "similar": []
   },
   {
@@ -326,9 +332,14 @@
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Вопрос о переходе к психологии и методу.",
+   "summary": "Вопрос о жизни до психологии и методе.",
    "topic": 2,
-   "similar": []
+   "similar": [
+    [
+     20,
+     0.39
+    ]
+   ]
   },
   {
    "id": 8,
@@ -348,7 +359,7 @@
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Вопрос о недостаточности существующих методов.",
+   "summary": "Вопрос о работе и недостатках существующих методов.",
    "topic": 2,
    "similar": []
   },
@@ -368,9 +379,9 @@
    },
    "role": "explanation",
    "punch": 3,
-   "standalone": true,
-   "refers": null,
-   "summary": "Описание пути по пирамиде Маслоу.",
+   "standalone": false,
+   "refers": 7,
+   "summary": "Путь в психологию через закрытие базовых потребностей по пирамиде Маслоу.",
    "topic": 2,
    "similar": []
   },
@@ -392,7 +403,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 9,
-   "summary": "Решение уехать в Москву и сменить сферу.",
+   "summary": "Решение бросить всё в Ростове и переехать в Москву для смены сферы.",
    "topic": 2,
    "similar": []
   },
@@ -414,7 +425,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 10,
-   "summary": "Смена работы на тренера по йоге.",
+   "summary": "Полный разрыв с прошлым: новые друзья, работа тренером по йоге.",
    "topic": 2,
    "similar": []
   },
@@ -433,10 +444,10 @@
     "energy": 22
    },
    "role": "explanation",
-   "punch": 3,
+   "punch": 2,
    "standalone": false,
    "refers": 11,
-   "summary": "Полное изменение жизни и круга общения.",
+   "summary": "Необходимость полностью изменить жизнь и переехать для нового этапа.",
    "topic": 2,
    "similar": []
   },
@@ -458,7 +469,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 12,
-   "summary": "Переход на новый уровень самопознания в Москве.",
+   "summary": "Переход на новый уровень самопознания и реализации в Москве.",
    "topic": 2,
    "similar": []
   },
@@ -480,7 +491,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 13,
-   "summary": "Открытие центра практик и интерес к дальнейшей работе.",
+   "summary": "Открытие собственного центра практик и интерес к дальнейшей работе с людьми.",
    "topic": 2,
    "similar": []
   },
@@ -498,11 +509,11 @@
     "rate": 2.08,
     "energy": 25
    },
-   "role": "explanation",
-   "punch": 3,
+   "role": "conclusion",
+   "punch": 4,
    "standalone": false,
    "refers": 14,
-   "summary": "Обучение психологии и поиск методов помощи себе и другим.",
+   "summary": "Рождение как психолога через обучение и поиск новых методов помощи.",
    "topic": 2,
    "similar": []
   },
@@ -524,12 +535,12 @@
    "punch": 3,
    "standalone": false,
    "refers": 15,
-   "summary": "Изучение методов для понимания других и себя.",
+   "summary": "Постоянное изучение методов для лучшего понимания других и себя.",
    "topic": 2,
    "similar": [
     [
      98,
-     0.34
+     0.37
     ]
    ]
   },
@@ -547,11 +558,11 @@
     "rate": 1.77,
     "energy": 27
    },
-   "role": "example",
+   "role": "explanation",
    "punch": 3,
    "standalone": false,
    "refers": 16,
-   "summary": "Создание методички для участников туров на основе накопленного опыта.",
+   "summary": "Создание методички для туристов после накопления информации.",
    "topic": 2,
    "similar": []
   },
@@ -569,7 +580,7 @@
     "rate": 1.73,
     "energy": 17
    },
-   "role": "conclusion",
+   "role": "thesis",
    "punch": 3,
    "standalone": false,
    "refers": 17,
@@ -595,7 +606,7 @@
    "punch": 2,
    "standalone": false,
    "refers": 18,
-   "summary": "Вопрос о влиянии психологии и мастерства на жизнь.",
+   "summary": "Вопрос о пользе психологии в личной истории.",
    "topic": 3,
    "similar": [
     [
@@ -622,9 +633,13 @@
    "punch": 2,
    "standalone": false,
    "refers": 19,
-   "summary": "Уточняющий вопрос об опыте и методах работы.",
+   "summary": "Уточнение о методах работы в психологии.",
    "topic": 3,
    "similar": [
+    [
+     7,
+     0.39
+    ],
     [
      4,
      0.33
@@ -646,10 +661,10 @@
     "energy": 69
    },
    "role": "question",
-   "punch": 2,
+   "punch": 1,
    "standalone": false,
    "refers": 20,
-   "summary": "Вопрос о том, как специалист работал с методами.",
+   "summary": "Уточнение о работе по конкретному методу.",
    "topic": 3,
    "similar": []
   },
@@ -671,7 +686,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 21,
-   "summary": "Метод подсвечивает лишь отдельные грани человеческой психики.",
+   "summary": "Метод подсвечивает грани психики, а не заменяет их.",
    "topic": 3,
    "similar": []
   },
@@ -693,7 +708,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 22,
-   "summary": "Поиск недостающих элементов через гипноз, провокацию и гештальт.",
+   "summary": "Примеры методов: гипноз, провокативная психология, гештальт.",
    "topic": 3,
    "similar": []
   },
@@ -715,7 +730,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 23,
-   "summary": "Синтез всех методов в единый интегральный подход.",
+   "summary": "Итоговый метод объединяет все подходы в одну книгу.",
    "topic": 3,
    "similar": []
   },
@@ -737,7 +752,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 24,
-   "summary": "Книга об инстинктах помогла выстроить личную систему.",
+   "summary": "Книга об инстинктах вдохновила на создание системы.",
    "topic": 3,
    "similar": []
   },
@@ -759,7 +774,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 25,
-   "summary": "Анализ практики привел к созданию системы «древо жизни».",
+   "summary": "Анализ работы привел к созданию метода «древо жизни».",
    "topic": 3,
    "similar": []
   },
@@ -781,7 +796,7 @@
    "punch": 2,
    "standalone": true,
    "refers": null,
-   "summary": "Вопрос о том, как проходит рабочая сессия.",
+   "summary": "Вопрос о процессе работы с клиентом.",
    "topic": 4,
    "similar": []
   },
@@ -803,7 +818,7 @@
    "punch": 2,
    "standalone": false,
    "refers": 27,
-   "summary": "Уточнение о первой встрече и общей структуре работы.",
+   "summary": "Уточнение о первой встрече и общей структуре.",
    "topic": 4,
    "similar": []
   },
@@ -825,7 +840,7 @@
    "punch": 1,
    "standalone": false,
    "refers": 28,
-   "summary": "Фрагментарное замечание о процессе обучения.",
+   "summary": "Фрагментарная реплика о процессе обучения.",
    "topic": 4,
    "similar": []
   },
@@ -843,10 +858,10 @@
     "rate": 0.78,
     "energy": 12
    },
-   "role": "explanation",
+   "role": "thesis",
    "punch": 3,
-   "standalone": false,
-   "refers": 28,
+   "standalone": true,
+   "refers": null,
    "summary": "Необходимость доверия и контакта для начала работы.",
    "topic": 4,
    "similar": []
@@ -869,7 +884,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 30,
-   "summary": "Создание атмосферы доверия, как в общении с другом.",
+   "summary": "Создание атмосферы доверия через неформальное общение.",
    "topic": 4,
    "similar": []
   },
@@ -891,7 +906,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 31,
-   "summary": "Безопасное пространство, где можно рассказать все без последствий.",
+   "summary": "Позиция психолога как безопасного пространства для раскрытия.",
    "topic": 4,
    "similar": []
   },
@@ -909,11 +924,11 @@
     "rate": 2.01,
     "energy": 23
    },
-   "role": "thesis",
-   "punch": 4,
-   "standalone": true,
-   "refers": null,
-   "summary": "Работа в темпе клиента без навязывания советов.",
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 32,
+   "summary": "Скорость работы подбирается индивидуально, без навязывания советов.",
    "topic": 4,
    "similar": []
   },
@@ -931,11 +946,11 @@
     "rate": 2.52,
     "energy": 55
    },
-   "role": "explanation",
+   "role": "thesis",
    "punch": 4,
-   "standalone": false,
-   "refers": 33,
-   "summary": "Задача психолога — вызвать инсайт у клиента.",
+   "standalone": true,
+   "refers": null,
+   "summary": "Задача терапевта — вызвать инсайт, а не давать ответы.",
    "topic": 4,
    "similar": []
   },
@@ -954,10 +969,10 @@
     "energy": 43
    },
    "role": "example",
-   "punch": 3,
+   "punch": 2,
    "standalone": false,
    "refers": 34,
-   "summary": "Личное удовлетворение от момента инсайта клиента.",
+   "summary": "Ощущение завершения работы при возникновении инсайта у клиента.",
    "topic": 4,
    "similar": []
   },
@@ -979,7 +994,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 35,
-   "summary": "Ощущение собственной значимости и внутренней похвалы.",
+   "summary": "Внутренняя похвала за выполненную работу, а не эгоизм.",
    "topic": 4,
    "similar": []
   },
@@ -1001,7 +1016,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 36,
-   "summary": "Уверенность в том, что находишься на своем месте.",
+   "summary": "Чувство собственного места как подтверждение правильности пути.",
    "topic": 4,
    "similar": []
   },
@@ -1019,12 +1034,11 @@
     "rate": 1.12,
     "energy": 4
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
+   "role": "question",
+   "punch": 3,
+   "standalone": false,
+   "refers": 37,
+   "summary": "Вопрос о балансе контакта и границы слияния.",
    "topic": 4,
    "similar": []
   },
@@ -1042,12 +1056,11 @@
     "rate": 2.32,
     "energy": 44
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 38,
+   "summary": "Отсутствие слияния: терапевт не становится другом клиента.",
    "topic": 4,
    "similar": []
   },
@@ -1065,12 +1078,11 @@
     "rate": 1.69,
     "energy": 45
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "conclusion",
+   "punch": 5,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
+   "summary": "Цель терапии — опора на себя, а не на терапевта.",
    "topic": 4,
    "similar": []
   },
@@ -1114,7 +1126,7 @@
    "punch": 2,
    "standalone": false,
    "refers": 41,
-   "summary": "Клиент расслабляется в комфортной атмосфере.",
+   "summary": "Клиент расслабляется в комфортной обстановке.",
    "topic": 4,
    "similar": []
   },
@@ -1136,7 +1148,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 42,
-   "summary": "Важно чувствовать себя, рассказывая о клиенте.",
+   "summary": "Важно чувствовать себя во время рассказа.",
    "topic": 4,
    "similar": []
   },
@@ -1180,7 +1192,7 @@
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Работа по душе не выжигает, а дает отклик.",
+   "summary": "Работа по душе не приводит к выгоранию.",
    "topic": 5,
    "similar": []
   },
@@ -1202,7 +1214,7 @@
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Благодарность клиента — лучший отдых для психолога.",
+   "summary": "Благодарность клиентов является лучшим отдыхом.",
    "topic": 5,
    "similar": []
   },
@@ -1224,7 +1236,7 @@
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Иногда психолог понимает, что клиент не его.",
+   "summary": "Иногда психолог отказывает в работе клиенту.",
    "topic": 5,
    "similar": []
   },
@@ -1242,11 +1254,11 @@
     "rate": 2.11,
     "energy": 46
    },
-   "role": "explanation",
+   "role": "thesis",
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Мы притягиваем своих людей, а не чужих.",
+   "summary": "Специалисты притягивают подходящих им людей.",
    "topic": 5,
    "similar": []
   },
@@ -1265,10 +1277,10 @@
     "energy": 42
    },
    "role": "thesis",
-   "punch": 4,
+   "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Повышение профессионализма приводит к личной самотерапии.",
+   "summary": "Повышение профессионализма психолога приводит к личной самотерапии.",
    "topic": 5,
    "similar": []
   },
@@ -1290,7 +1302,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 49,
-   "summary": "Эмпатия заставляет прорабатывать собственные травмы.",
+   "summary": "Эмпатичный психолог невольно прорабатывает собственные травмы.",
    "topic": 5,
    "similar": []
   },
@@ -1308,11 +1320,11 @@
     "rate": 1.95,
     "energy": 42
    },
-   "role": "aside",
+   "role": "explanation",
    "punch": 2,
    "standalone": false,
    "refers": 50,
-   "summary": "Признание невозможности полностью отделить себя от клиента.",
+   "summary": "Самотерапия происходит вопреки правилам, запрещенным психологам.",
    "topic": 5,
    "similar": []
   },
@@ -1331,10 +1343,10 @@
     "energy": 36
    },
    "role": "conclusion",
-   "punch": 3,
+   "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Самотерапия через работу полезна, но перенос опасен.",
+   "summary": "Нельзя переносить чужие боли на себя, это вредно.",
    "topic": 5,
    "similar": []
   },
@@ -1354,9 +1366,9 @@
    },
    "role": "example",
    "punch": 3,
-   "standalone": true,
-   "refers": null,
-   "summary": "Нервная система психолога автоматически отключается от боли.",
+   "standalone": false,
+   "refers": 52,
+   "summary": "Нервная система психолога автоматически отключается от чужих проблем.",
    "topic": 5,
    "similar": []
   },
@@ -1374,12 +1386,11 @@
     "rate": 2.02,
     "energy": 64
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
+   "role": "example",
+   "punch": 2,
+   "standalone": false,
+   "refers": 53,
+   "summary": "У психолога выработался рефлекс на возвращающихся клиентов.",
    "topic": 5,
    "similar": []
   },
@@ -1397,12 +1408,11 @@
     "rate": 2.62,
     "energy": 97
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
+   "role": "example",
+   "punch": 3,
+   "standalone": false,
+   "refers": 54,
+   "summary": "Нейронные связи позволяют вспомнить детали без записей.",
    "topic": 5,
    "similar": []
   },
@@ -1420,19 +1430,13 @@
     "rate": 1.43,
     "energy": 28
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "conclusion",
+   "punch": 4,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
+   "summary": "Эмпатия и поддержка эффективнее любого алгоритма работы.",
    "topic": 5,
-   "similar": [
-    [
-     90,
-     0.3
-    ]
-   ]
+   "similar": []
   },
   {
    "id": 57,
@@ -1448,12 +1452,11 @@
     "rate": 1.79,
     "energy": 16
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
+   "role": "thesis",
+   "punch": 4,
+   "standalone": false,
+   "refers": 56,
+   "summary": "Эмпатия важнее алгоритма для исцеления.",
    "topic": 5,
    "similar": []
   },
@@ -1471,12 +1474,11 @@
     "rate": 1.76,
     "energy": 21
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "question",
+   "punch": 3,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
+   "summary": "Вопрос о жизненных ценностях собеседника.",
    "topic": 6,
    "similar": []
   },
@@ -1498,7 +1500,7 @@
    "punch": 2,
    "standalone": false,
    "refers": 58,
-   "summary": "Ценности формируются постепенно в процессе жизни.",
+   "summary": "Ценности формируются постепенно с возрастом.",
    "topic": 6,
    "similar": []
   },
@@ -1520,9 +1522,14 @@
    "punch": 2,
    "standalone": false,
    "refers": 59,
-   "summary": "Психологическое взросление включает прохождение всех стадий развития.",
+   "summary": "Психологическое взросление и прохождение стадий.",
    "topic": 6,
-   "similar": []
+   "similar": [
+    [
+     87,
+     0.32
+    ]
+   ]
   },
   {
    "id": 61,
@@ -1539,10 +1546,10 @@
     "energy": 66
    },
    "role": "explanation",
-   "punch": 2,
+   "punch": 3,
    "standalone": false,
    "refers": 60,
-   "summary": "Ценности часто закладывают родители в детстве.",
+   "summary": "Базовые ценности прививают родители.",
    "topic": 6,
    "similar": []
   },
@@ -1562,9 +1569,9 @@
    },
    "role": "thesis",
    "punch": 4,
-   "standalone": true,
-   "refers": null,
-   "summary": "Взрослея, человек сам формирует самоуважение и уважение к судьбе.",
+   "standalone": false,
+   "refers": 61,
+   "summary": "Важность самоуважения и опоры на себя.",
    "topic": 6,
    "similar": []
   },
@@ -1586,7 +1593,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 62,
-   "summary": "Опора на личный опыт вместо чужого мнения.",
+   "summary": "Опора на личный жизненный опыт.",
    "topic": 6,
    "similar": []
   },
@@ -1604,11 +1611,11 @@
     "rate": 1.68,
     "energy": 29
    },
-   "role": "aside",
-   "punch": 1,
+   "role": "example",
+   "punch": 2,
    "standalone": false,
    "refers": 63,
-   "summary": "Стремление опираться на себя в последнее время.",
+   "summary": "Стремление опираться на себя.",
    "topic": 6,
    "similar": []
   },
@@ -1626,11 +1633,11 @@
     "rate": 2.42,
     "energy": 63
    },
-   "role": "conclusion",
+   "role": "thesis",
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Принятие себя и золотое правило к другим.",
+   "summary": "Самоуважение и принцип «не делай другому то, что не хочешь себе».",
    "topic": 6,
    "similar": []
   },
@@ -1648,11 +1655,11 @@
     "rate": 2.57,
     "energy": 77
    },
-   "role": "conclusion",
+   "role": "explanation",
    "punch": 3,
    "standalone": false,
    "refers": 65,
-   "summary": "Честность с собой и бережность к окружающим.",
+   "summary": "Честность к себе и другим как основа социального взаимодействия.",
    "topic": 6,
    "similar": []
   },
@@ -1672,9 +1679,9 @@
    },
    "role": "explanation",
    "punch": 3,
-   "standalone": true,
-   "refers": null,
-   "summary": "Необходимость экологично носить социальные маски.",
+   "standalone": false,
+   "refers": 66,
+   "summary": "Необходимость носить маски и врать экологично в социуме.",
    "topic": 7,
    "similar": []
   },
@@ -1693,10 +1700,10 @@
     "energy": 82
    },
    "role": "example",
-   "punch": 2,
-   "standalone": true,
-   "refers": null,
-   "summary": "Мы часто враньем защищаем себя и близких.",
+   "punch": 3,
+   "standalone": false,
+   "refers": 67,
+   "summary": "Мы враньем защищаем себя и даже детей, как психологи.",
    "topic": 7,
    "similar": []
   },
@@ -1715,15 +1722,15 @@
     "energy": 65
    },
    "role": "example",
-   "punch": 3,
+   "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Ребенок говорит правду в лоб, не врет.",
+   "summary": "Ребенок говорит правду без фильтров, например, про грязь.",
    "topic": 7,
    "similar": [
     [
      73,
-     0.45
+     0.4
     ]
    ]
   },
@@ -1741,11 +1748,11 @@
     "rate": 1.55,
     "energy": 90
    },
-   "role": "example",
+   "role": "aside",
    "punch": 2,
    "standalone": false,
    "refers": 69,
-   "summary": "Реакция на прямое замечание ребенка о грязи.",
+   "summary": "Внутренний монолог о том, кто живет в грязном месте.",
    "topic": 7,
    "similar": []
   },
@@ -1765,9 +1772,9 @@
    },
    "role": "explanation",
    "punch": 3,
-   "standalone": true,
-   "refers": null,
-   "summary": "Внутренний подросток не врет, как и ребенок.",
+   "standalone": false,
+   "refers": 69,
+   "summary": "Внутренний подросток не врет, в отличие от взрослого.",
    "topic": 7,
    "similar": []
   },
@@ -1785,11 +1792,11 @@
     "rate": 1.61,
     "energy": 52
    },
-   "role": "explanation",
-   "punch": 2,
+   "role": "conclusion",
+   "punch": 3,
    "standalone": false,
    "refers": 71,
-   "summary": "Взрослая часть понимает, что прямая правда не всегда уместна.",
+   "summary": "Психологическое взросление связано с умением врать и фильтровать.",
    "topic": 7,
    "similar": []
   },
@@ -1807,16 +1814,16 @@
     "rate": 3.46,
     "energy": 100
    },
-   "role": "example",
+   "role": "explanation",
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Ребенок говорит правду в лоб, что может обижать.",
+   "summary": "Внутренний ребенок говорит правду в лоб, что может обижать.",
    "topic": 7,
    "similar": [
     [
      69,
-     0.45
+     0.4
     ]
    ]
   },
@@ -1834,11 +1841,11 @@
     "rate": 3.19,
     "energy": 99
    },
-   "role": "explanation",
+   "role": "thesis",
    "punch": 3,
    "standalone": false,
    "refers": 73,
-   "summary": "Честность ребенка не является взрослой позицией, но ценна.",
+   "summary": "Честность без фильтров — не взрослая позиция, но ценна.",
    "topic": 7,
    "similar": []
   },
@@ -1856,11 +1863,11 @@
     "rate": 1.95,
     "energy": 51
    },
-   "role": "metaphor",
+   "role": "explanation",
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Подросток надевает маску для выживания в обществе.",
+   "summary": "Маска — способ выживания подростка в жесткой социальной системе.",
    "topic": 7,
    "similar": []
   },
@@ -1882,7 +1889,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 75,
-   "summary": "Вранье — способ выживания в сложных детских ситуациях.",
+   "summary": "Вранье — следствие детских травм и необходимости выживать.",
    "topic": 7,
    "similar": []
   },
@@ -1904,7 +1911,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 76,
-   "summary": "Неосознанное ношение маски подростком — нормальный процесс.",
+   "summary": "Неосознанное ношение масок подростком — абсолютно нормальный процесс.",
    "topic": 7,
    "similar": []
   },
@@ -1926,7 +1933,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 77,
-   "summary": "Взрослый понимает, что врет, но не может говорить правду.",
+   "summary": "Взрослый осознает вранье, но вынужден им пользоваться.",
    "topic": 7,
    "similar": []
   },
@@ -1970,7 +1977,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 79,
-   "summary": "Взрослый взвешивает, причинит ли правда боль другим.",
+   "summary": "Взрослый взвешивает свои чувства и возможный вред другим.",
    "topic": 7,
    "similar": []
   },
@@ -1992,7 +1999,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 80,
-   "summary": "История о тяжелом диагнозе отца и поездке из больницы.",
+   "summary": "Автор рассказывает о тяжелом диагнозе отца и собственном горе.",
    "topic": 7,
    "similar": []
   },
@@ -2036,7 +2043,7 @@
    "punch": 4,
    "standalone": false,
    "refers": 82,
-   "summary": "Спикер солгал отцу, сказав, что все в порядке.",
+   "summary": "Сын солгал отцу, сказав, что все в порядке.",
    "topic": 7,
    "similar": []
   },
@@ -2076,11 +2083,11 @@
     "rate": null,
     "energy": 48
    },
-   "role": "aside",
-   "punch": 1,
+   "role": "conclusion",
+   "punch": 2,
    "standalone": false,
    "refers": 84,
-   "summary": "Короткое замечание о сложности принятого решения.",
+   "summary": "Подчеркнута сложность принятого решения.",
    "topic": 7,
    "similar": []
   },
@@ -2101,8 +2108,8 @@
    "role": "explanation",
    "punch": 3,
    "standalone": false,
-   "refers": 83,
-   "summary": "Ложь была честностью с собой и заботой о другом.",
+   "refers": 85,
+   "summary": "Ложь ради блага другого — это честность с собой.",
    "topic": 7,
    "similar": []
   },
@@ -2126,7 +2133,12 @@
    "refers": null,
    "summary": "Вопрос о психологическом возрасте ребенка, подростка и взрослого.",
    "topic": 8,
-   "similar": []
+   "similar": [
+    [
+     60,
+     0.32
+    ]
+   ]
   },
   {
    "id": 88,
@@ -2146,7 +2158,7 @@
    "punch": 3,
    "standalone": true,
    "refers": null,
-   "summary": "Взрослые часто застревают в детских травмах, методы зависят от возраста.",
+   "summary": "Работа с клиентом зависит от его застрявшего психологического возраста.",
    "topic": 8,
    "similar": []
   },
@@ -2168,7 +2180,7 @@
    "punch": 3,
    "standalone": false,
    "refers": 88,
-   "summary": "Прием: спросить, что бы сделал взрослый друг в этой ситуации.",
+   "summary": "Техника работы с внутренним взрослым другом для принятия решений.",
    "topic": 8,
    "similar": []
   },
@@ -2192,12 +2204,7 @@
    "refers": 89,
    "summary": "Вопрос о действиях взрослого друга влияет на результат.",
    "topic": 8,
-   "similar": [
-    [
-     56,
-     0.3
-    ]
-   ]
+   "similar": []
   },
   {
    "id": 91,
@@ -2217,8 +2224,8 @@
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Что важнее: принять себя или изменить себя?",
-   "topic": 0,
+   "summary": "Что важнее: принять себя или изменить?",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2239,8 +2246,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 91,
-   "summary": "На автомате человек не знает, кто он такой.",
-   "topic": 0,
+   "summary": "Жизнь на автомате мешает понять, кто ты.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2260,9 +2267,9 @@
    "role": "explanation",
    "punch": 2,
    "standalone": false,
-   "refers": null,
-   "summary": "Ребенок действует на автомате и инстинктах.",
-   "topic": 0,
+   "refers": 92,
+   "summary": "Ребенок действует по инстинктам и социальным программам.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2283,8 +2290,8 @@
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Взросление — это понимание себя и своих чувств.",
-   "topic": 0,
+   "summary": "Взросление — это понимание себя и принятие.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2301,13 +2308,12 @@
     "rate": 2.6,
     "energy": 76
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "explanation",
+   "punch": 3,
+   "standalone": false,
+   "refers": 94,
+   "summary": "Принятие — это доверие к своим желаниям и эмоциям.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2324,13 +2330,12 @@
     "rate": 2.39,
     "energy": 58
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "conclusion",
+   "punch": 3,
+   "standalone": false,
+   "refers": 95,
+   "summary": "Разбор себя происходит в стрессовых ситуациях.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2347,13 +2352,12 @@
     "rate": 2.23,
     "energy": 78
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "conclusion",
+   "punch": 3,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "summary": "Не нужно постоянно анализировать, просто живите и радуйтесь жизни.",
+   "topic": 9,
    "similar": []
   },
   {
@@ -2370,17 +2374,16 @@
     "rate": 1.88,
     "energy": 70
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "thesis",
+   "punch": 4,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "summary": "Сначала понимание себя, потом инструменты для улучшения жизни.",
+   "topic": 9,
    "similar": [
     [
      16,
-     0.34
+     0.37
     ]
    ]
   },
@@ -2398,13 +2401,12 @@
     "rate": 0.8,
     "energy": 13
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
-   "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "role": "question",
+   "punch": 2,
+   "standalone": false,
+   "refers": 98,
+   "summary": "Вопрос о том, что бы вы пожелали себе в прошлом.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2421,13 +2423,12 @@
     "rate": 0.71,
     "energy": 25
    },
-   "role": null,
-   "punch": null,
-   "standalone": null,
+   "role": "aside",
+   "punch": 1,
+   "standalone": true,
    "refers": null,
-   "summary": "",
-   "missing": true,
-   "topic": 0,
+   "summary": "Обращение к собеседнику по имени, организационный момент.",
+   "topic": 1,
    "similar": []
   },
   {
@@ -2447,9 +2448,9 @@
    "role": "explanation",
    "punch": 3,
    "standalone": false,
-   "refers": 100,
-   "summary": "Человек понимает и применяет опыт в меру своих возможностей.",
-   "topic": 0,
+   "refers": 99,
+   "summary": "В прошлом человек понимал и делал только то, что мог тогда.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2466,12 +2467,12 @@
     "rate": 1.54,
     "energy": 47
    },
-   "role": "thesis",
+   "role": "metaphor",
    "punch": 4,
    "standalone": true,
    "refers": null,
-   "summary": "Принятие судьбы и запрет на спешку в развитии.",
-   "topic": 0,
+   "summary": "Принятие судьбы, нельзя спешить, как с раскрытием ребенка.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2492,8 +2493,8 @@
    "punch": 2,
    "standalone": false,
    "refers": 102,
-   "summary": "Пример давления родителей через кружки и форсирование.",
-   "topic": 0,
+   "summary": "Пример с родителями, которые торопят ребенка в кружки.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2510,12 +2511,12 @@
     "rate": 1.1,
     "energy": 15
    },
-   "role": "explanation",
+   "role": "example",
    "punch": 3,
    "standalone": false,
    "refers": 102,
-   "summary": "Создание бережного пространства с инструментами для самовыражения.",
-   "topic": 0,
+   "summary": "Создание бережного пространства для развития: мячик, книга, гитара.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2537,7 +2538,7 @@
    "standalone": true,
    "refers": null,
    "summary": "Настоящие друзья поддерживают, а не критикуют.",
-   "topic": 0,
+   "topic": 10,
    "similar": []
   },
   {
@@ -2555,11 +2556,11 @@
     "energy": 73
    },
    "role": "metaphor",
-   "punch": 5,
+   "punch": 4,
    "standalone": false,
-   "refers": 105,
-   "summary": "Терапия как поддержка для раскрытия внутреннего цветочка.",
-   "topic": 0,
+   "refers": 104,
+   "summary": "Терапия как поддержка для раскрытия цветочка.",
+   "topic": 10,
    "similar": []
   },
   {
@@ -2580,8 +2581,8 @@
    "punch": 3,
    "standalone": false,
    "refers": 106,
-   "summary": "Психолог дает ресурсы, чтобы человек прочувствовал свои потребности.",
-   "topic": 0,
+   "summary": "Психолог помогает понять потребности через вопросы.",
+   "topic": 10,
    "similar": []
   }
  ]
