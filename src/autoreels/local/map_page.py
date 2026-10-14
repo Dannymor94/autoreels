@@ -96,8 +96,10 @@ def build_map_page(m: dict) -> str:
         en = v.get("energy")
         punch = u.get("punch")
         bits = [f'<span class="id">#{u["id"]}</span>', f'<span>{_t(u["t0"])}–{_t(u["t1"])}</span>']
-        bits.append(f'<span class="refs">{_e(u["refs"])}</span>' if u.get("refs")
-                    else f'<span class="flag">вне разметки{(" (" + _e(u.get("filtered")) + ")") if u.get("filtered") else ""}</span>')
+        if u.get("refs"):
+            bits.append(f'<span class="refs">{_e(u["refs"])}</span>')
+        if u.get("filtered") or not u.get("refs"):     # M58: a filtered block still has its x-numbering
+            bits.append(f'<span class="flag">вне разметки{(" (" + _e(u.get("filtered")) + ")") if u.get("filtered") else ""}</span>')
         if u.get("role"):
             bits.append(f'<span class="role">{ROLE_RU.get(u["role"], u["role"])}</span>')
         if punch:

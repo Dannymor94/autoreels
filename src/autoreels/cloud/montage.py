@@ -28,13 +28,32 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 _LINE_RE = re.compile(r"^M(\d*)\s+(\S+)\s*(.*)$")
-_PIECE_RE = re.compile(r"^(\d+)\.(\d+)(?:-(\d+))?$")
-_REF_RE = re.compile(r"^(\d+)\.(\d+)$")
+_PIECE_RE = re.compile(r"^(x?\d+)\.(\d+)(?:-(\d+))?$")
+_REF_RE = re.compile(r"^(x?\d+)\.(\d+)$")
+
+
+def block_key(tok: str):
+    """A block number of a montage line: `13` → 13 (review numbering), `x2` → "x2" (M58: the second
+    block the pre-filter left out — head, tail, promo; `arl blocks-text` lists them)."""
+    return tok if tok.startswith("x") else int(tok)
+
+
+def montage_blocks(all_blocks, kept) -> dict:
+    """Every block a montage line may name: the review numbering 1..N of the kept blocks plus
+    x1..xM for the filtered ones, in source order (M58)."""
+    ids = {id(b) for b in kept}
+    out: dict = {i: b for i, b in enumerate(kept, 1)}
+    k = 0
+    for b in all_blocks:
+        if id(b) not in ids:
+            k += 1
+            out[f"x{k}"] = b
+    return out
 
 
 @dataclass(frozen=True)
 class Piece:
-    block: int
+    block: int | str
     s: int
     e: int
 
@@ -86,7 +105,7 @@ def is_montage_line(line: str) -> bool:
 
 def _ref(tok: str) -> tuple[int, int] | None:
     m = _REF_RE.match(tok.strip())
-    return (int(m.group(1)), int(m.group(2))) if m else None
+    return (block_key(m.group(1)), int(m.group(2))) if m else None
 
 
 def parse_montage(text: str) -> tuple[list[MontageEntry], list[tuple[int, str]]]:
@@ -137,7 +156,7 @@ def parse_montage(text: str) -> tuple[list[MontageEntry], list[tuple[int, str]]]
         for tok in rest.replace("|", " ").split():
             pm = _PIECE_RE.match(tok)
             if pm:
-                b, s0 = int(pm.group(1)), int(pm.group(2))
+                b, s0 = block_key(pm.group(1)), int(pm.group(2))
                 s1 = int(pm.group(3)) if pm.group(3) else s0
                 if s1 < s0:
                     bad.append(f"piece {tok}: end before start")
@@ -193,22 +212,35 @@ class MontageBuild:
     close: list[int] = field(default_factory=list)
     keys: list[tuple[int, tuple[str, ...]]] = field(default_factory=list)
     callouts: list[tuple[int, str | None, str]] = field(default_factory=list)   # (sentence no, word, text)
+    joined: list[str] = field(default_factory=list)     # M58: pieces that go straight on, played as one
     errors: list[str] = field(default_factory=list)
 
 
-def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[object], list]) -> MontageBuild:
+def _continues(sentences: list, a: int, gap_sec: float) -> bool:
+    """Sentence a (1-based) follows sentence a-1 straight on in the source: at most gap_sec between
+    them (a filtered block in between, or a skipped sentence, is far longer)."""
+    prev, cur = sentences[a - 2], sentences[a - 1]
+    return 0.0 <= cur[0].t0 - prev[-1].t1 <= gap_sec
+
+
+def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[object], list], *,
+                  join_gap_sec: float = 2.0) -> MontageBuild:
     """Map a montage line to one sentence numbering. `blocks`: review number → block (the blocks
     apply may use); `block_sentences(block)` → that block's sentences in the review numbering."""
     out = MontageBuild(sentences=[], play=[], breaks=[], pieces=[])
     used = {p.block for p in entry.pieces} | ({entry.hook[0]} if entry.hook else set())
-    missing = sorted(b for b in used if b not in blocks)
+    missing = sorted((b for b in used if b not in blocks), key=str)
     if missing:
+        n_rev = max((k for k in blocks if isinstance(k, int)), default=0)
+        n_x = sum(1 for k in blocks if isinstance(k, str))
         out.errors.append(f"block {', '.join(map(str, missing))} is not in the review numbering "
-                          f"(1-{max(blocks) if blocks else 0}, filtered blocks excluded)")
+                          f"(1-{n_rev}" + (f", filtered x1-x{n_x}" if n_x else "") + ")")
         return out
-    offset: dict[int, int] = {}
-    count: dict[int, int] = {}
-    for b in sorted(used):
+    offset: dict = {}
+    count: dict = {}
+    def _order(b):                     # one numbering in source order (x-blocks sit where they play)
+        return (getattr(blocks[b], "start", 0.0), b if isinstance(b, str) else f"{b:08d}")
+    for b in sorted(used, key=_order):
         offset[b] = len(out.sentences)
         sents = block_sentences(blocks[b])
         count[b] = len(sents)
@@ -231,6 +263,14 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
         rng = list(range(a, z + 1))
         if seen & set(rng):
             out.errors.append(f"piece {p} repeats a sentence of an earlier piece")
+            continue
+        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec):
+            # M58: the piece goes straight on from the previous one in the source (the next sentence of
+            # the block, or sentence 1 of the next block right after the last one) — no seam
+            out.joined.append(f"{out.pieces[-1][0]}-{out.pieces[-1][1]} + {p}")
+            seen.update(rng)
+            out.pieces[-1] = (out.pieces[-1][0], z)
+            out.play.extend(rng)
             continue
         if out.pieces:
             prev_last = out.sentences[out.pieces[-1][1] - 1]

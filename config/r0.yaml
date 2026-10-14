@@ -264,6 +264,9 @@ montage:
   # M53b (owner on the 5 montage reels: «сильно дёргается» — the pause/filler cuts): a montage clip keeps its
   # pauses; its picture already changes with every shot switch. Per line f:1, or --filler, turns the cut back on.
   filler_cut: false
+  # M58: a piece that goes straight on from the previous one in the source (next sentence, or sentence 1 of the
+  # next block right after the last one) is played as one piece — no seam. x1, x2… name the filtered blocks.
+  join_gap_sec: 2.0
   # M55 — owner: «давай пробовать все» (attention effects of montage clips; each switch off = as before):
   fx:
     push: true              # slow push-in on every shot of at least push_min_sec, push_pct % closer by its end

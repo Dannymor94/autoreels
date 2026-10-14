@@ -5405,11 +5405,14 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
     mc = r0_cfg.montage
     out: list = []
     for me in entries:
-        mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words))
+        mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words),
+                           join_gap_sec=mc.join_gap_sec)
         for _e in mb.errors:
             print(f"  [ERROR] {me.label} (review:{me.lineno}): {_e}", file=sys.stderr)
         if mb.errors:
             return [], 1
+        for _j in mb.joined:
+            print(f"    {me.label}: pieces {_j} go straight on in the source — played as one (no seam)")
         first = mb.sentences[mb.play[0] - 1]
         last = mb.sentences[mb.play[-1] - 1]
         reel = Reel(id=f"montage-{me.label}", start=first[0].t0, end=last[-1].t1, score=me.score,
@@ -6193,8 +6196,12 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             )
 
     if _mont_entries:
+        # M58: a montage line may also name the filtered blocks (x1…: head, tail, promo)
+        from autoreels.cloud.montage import montage_blocks as _mblocks
+        _mont_blocks = {k: v for k, v in _mblocks(all_blocks, kept).items() if isinstance(k, str)}
+        _mont_blocks.update(active)
         _mreels, _mrc = _build_montage_reels(
-            _mont_entries, active, _tx_words, _blk_smap, r0_cfg, render_cfg, align=_blk_align,
+            _mont_entries, _mont_blocks, _tx_words, _blk_smap, r0_cfg, render_cfg, align=_blk_align,
             tone=_blk_tone, jump=_blk_jump, filler=filler, filler_profile=filler_profile,
             filler_allowed=_blk_filler_ok, speed=speed, manual_max=_manual_max,
             voice=_montage_voice(manifest, root, source_file.stem, _blk_smap, render_cfg))
@@ -7790,7 +7797,8 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
             smap = None
     align = load_alignment(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
     times = SpeechTimes(words, smap, align) if (smap or align) else None
-    kept_no = {id(b): i for i, b in enumerate(kept, 1)}
+    from autoreels.cloud.montage import montage_blocks as _mblocks
+    kept_no = {id(b): i for i, b in _mblocks(all_blocks, kept).items()}     # M58: filtered blocks as x1…
     why = {id(b): r.split(" ")[0] for b, r in dropped}
     sents: list = []
     for b in all_blocks:
@@ -7798,7 +7806,8 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
             a, z = (times.audible(st[0])[0], times.audible(st[-1])[1]) if times else (st[0].t0, st[-1].t1)
             no = kept_no.get(id(b))
             sents.append(Sentence(words=st, a=a, b=z, ref=f"{no}.{k}" if no else None,
-                                  complete=_ends_terminal(st[-1]), block_note="" if no else why.get(id(b), "filtered")))
+                                  complete=_ends_terminal(st[-1]),
+                                  block_note="" if isinstance(no, int) else why.get(id(b), "filtered")))
     units = split_units(sents, prm)
     print(f"карта {stem}: предложений {len(sents)}, мыслей {len(units)}")
     measure = None
@@ -7863,26 +7872,35 @@ def cmd_blocks_text(target: str, *, root=None, cache_dir=None, blocks: str | Non
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
         words = strip_credit_words(words, r0_cfg.credit_word_patterns)
-    want: set[int] | None = None
+    want: set | None = None
     if blocks:
         want = set()
         for tok in blocks.split(","):
             a, _, b = tok.strip().partition("-")
             if a.isdigit():
                 want.update(range(int(a), int(b or a) + 1))
+            elif a.startswith("x") and a[1:].isdigit():          # M58: filtered blocks x1, x2-x4
+                z = b[1:] if b.startswith("x") else b
+                want.update(f"x{i}" for i in range(int(a[1:]), int(z or a[1:]) + 1))
+    from autoreels.cloud.montage import montage_blocks as _mblocks
+    _why = {id(b): r.split(" ")[0] for b, r in _dropped}
 
     def norm(t: str) -> str:
         return " ".join(t.lower().replace("ё", "е").split())
 
     needles = [norm(f) for f in (find or []) if f.strip()]
     hits = {n: 0 for n in needles}
-    print(f"# {mpath.stem}: блоков {len(kept)} (нумерация разметки)")
-    for i, b in enumerate(kept, 1):
+    _mb = _mblocks(_all, kept)
+    n_x = sum(1 for k in _mb if isinstance(k, str))
+    print(f"# {mpath.stem}: блоков {len(kept)} (нумерация разметки)"
+          + (f" + отсеянных x1–x{n_x} (можно брать в сборку)" if n_x else ""))
+    for i, b in _mb.items():
         if want is not None and i not in want:
             continue
         sents = merge_group_sentences([b], words)
         if not needles:
-            print(f"\n[{i}] {b.start:.1f}–{b.end:.1f} с")
+            note = f" — отсеян: {_why.get(id(b), 'filter')}" if isinstance(i, str) else ""
+            print(f"\n[{i}] {b.start:.1f}–{b.end:.1f} с{note}")
         for k, st in enumerate(sents, 1):
             text = " ".join(w.word for w in st)
             mark = "" if _ends_terminal(st[-1]) else " …→"

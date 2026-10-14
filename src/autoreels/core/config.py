@@ -212,6 +212,7 @@ class MontageConfig(BaseModel):
     emphasis: bool = True                                  # M53c: close shot on a k: keyword to the end of its sentence
     filler_cut: bool = False                               # M53b: cut «э»/pauses inside montage clips (f:1 / --filler win)
     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
+    join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
 
 
 class MontageFx(BaseModel):
