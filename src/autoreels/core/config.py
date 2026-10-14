@@ -206,9 +206,10 @@ class MontageConfig(BaseModel):
     loudness_diff_db: float = Field(4.0, gt=0.0)           # speech level on the two sides of a seam differs more → reported
     pitch_diff_st: float = Field(3.0, gt=0.0)              # median pitch on the two sides differs more (semitones) → reported
     side_sec: float = Field(4.0, gt=0.0)                   # loudness/pitch measured on this much played speech per side
-    max_static_sec: float | None = Field(6.0, gt=0.0)      # M53: no shot of a montage clip lasts longer (None = off)
+    max_static_sec: float | None = Field(None, gt=0.0)     # M53: no shot of a montage clip lasts longer (None = off, M53c)
     min_shot_sec: float = Field(3.0, gt=0.0)               # … and every shot stays at least this long
     keywords: bool = True                                  # M53: k: words highlighted in a montage clip's subtitles
+    emphasis: bool = True                                  # M53c: close shot on a k: keyword to the end of its sentence
     filler_cut: bool = False                               # M53b: cut «э»/pauses inside montage clips (f:1 / --filler win)
 
 

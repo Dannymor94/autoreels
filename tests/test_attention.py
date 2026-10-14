@@ -133,25 +133,31 @@ def test_keyword_highlight_is_on_for_montage_clips_in_the_render_fingerprint():
     assert fp(r.model_copy(update={"marks": [{"t": 1.0}]})) == plain     # marks are not in the picture
 
 
-def test_montage_apply_writes_seam_marks_and_limits_static_shots(tmp_path):
-    from tests.test_montage import _apply
-    rc, man, kept, tx = _apply(tmp_path, "M 85 | 2.1-6 5.1-5 | t: Сборка\n")
+def test_montage_apply_writes_seam_marks_and_puts_the_close_shot_on_the_keyword(tmp_path):
+    """M53c: no timed switches (owner: «каждые 6 с наплыв — часто»); the close shot comes on the k:
+    keyword and at the seam."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest as _M
+    from tests.test_montage import _apply, _source
+    (tmp_path / "probe").mkdir()
+    mpath = _source(tmp_path / "probe")
+    r0 = cli.load_r0_config(tmp_path / "probe" / "config" / "r0.yaml")
+    tx = cli._resolve_cached_transcript(_M.model_validate_json(mpath.read_text()), tmp_path / "probe" / "cache")
+    _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+    s3 = merge_group_sentences([kept[1]], tx.words)[2]
+    kw = s3[1]
+    word = kw.word.strip(".,!?").lower()
+    rc, man, kept, tx = _apply(tmp_path, f"M 85 | 2.1-6 5.1-5 | k:2.3={word} | t: Сборка\n")
     assert rc == 0
     (mont,) = man.reels
     assert mont.marks and mont.marks[0]["kind"] == "seam" and mont.marks[0]["text"].startswith("стык 1 (2.1-6→5.1-5)")
-    assert abs(mont.marks[0]["t"] - mont.effective_segments()[-1].start) < 0.5 or any(
-        abs(mont.marks[0]["t"] - s.start) < 1e-3 for s in mont.effective_segments())
-    # no shot of the clip longer than max_static_sec (6 s) where a sentence boundary allows a switch
-    longest = 0.0
-    for s in mont.effective_segments():
-        dur = s.end - s.start
-        pts = sorted({0.0, dur, *[x for c in s.close_intervals for x in c]}) if s.shot != "close" else [0.0, dur]
-        longest = max(longest, max(b - a for a, b in zip(pts, pts[1:])))
-    assert longest <= 6.0 + 0.6        # a 6 s limit, switches only between sentences
+    first = mont.effective_segments()[0]
+    spans = [[first.start + a, first.start + b] for a, b in first.close_intervals] if first.shot != "close" else [[first.start, first.end]]
+    assert any(abs(a - kw.t0) < 0.4 for a, _ in spans), (spans, kw.t0)       # close comes on the keyword
+    assert len(spans) == 1                                                   # and nowhere else in piece 1
     ev = attention_marks(mont)
     assert any(e.get("text", "").startswith("стык 1") for e in ev)
-    assert not any(e["kind"] == "static" for e in ev)
-
 
 def test_blocks_text_prints_the_review_numbering_and_finds_text(tmp_path, capsys):
     from autoreels import __main__ as cli
@@ -215,3 +221,22 @@ def test_montage_keeps_pauses_unless_the_line_asks_for_the_cut(tmp_path, monkeyp
     assert rc == 0 and len(man.reels) == 3
     # the review line keeps the config's filler cut (on); M1 off by default; M2 asked f:1
     assert seen == [True, False, True]
+
+
+def test_emphasis_close_shot_on_the_keyword_only():
+    sents, words, smap = _long_window()
+    prm = ManualPlanParams(seam_pad_sec=0.04, end_air_sec=0.30, onset_margin_sec=0.06,
+                           emphasis_keys=True, min_shot_sec=3.0)
+    plan = build_manual_plan(sents, list(range(1, 11)), words=words, smap=smap, params=prm,
+                             keys=[(4, ["дело3"]), (9, ["слово8"])])
+    (w,) = plan.body
+    shots = _shots(w)
+    closes = [(a + w.start, b + w.start) for a, b, sh in shots if sh == "close"]
+    assert len(closes) == 2
+    kw = sents[3][1]                                    # «дело3.» at 10.2
+    assert abs(closes[0][0] - (kw.t0 - 0.1)) < 0.15 and closes[0][1] - closes[0][0] >= 3.0 - 1e-6
+    assert abs(closes[1][0] - (sents[8][0].t0 - 0.3)) < 0.35          # first word of s9: from the sentence start
+    assert all(b - a >= 3.0 - 1e-6 for a, b, _ in shots)
+    off = build_manual_plan(sents, list(range(1, 11)), words=words, smap=smap, params=P,
+                            keys=[(4, ["дело3"])])
+    assert off.body[0].close_intervals == []                          # emphasis off: the previous plan

@@ -73,6 +73,10 @@ class ManualPlanParams:
     # shot stays at least min_shot_sec. None = off (the previous plan).
     max_static_sec: float | None = None
     min_shot_sec: float = 3.0
+    # M53c (owner: «каждые 6 с наплыв — часто; наплыв нужен на важном или на стыке»): the close
+    # shot lands on a keyword (k:) and lasts to the end of its sentence (at least min_shot_sec);
+    # no other switches besides the seam accents. False = off.
+    emphasis_keys: bool = False
 
 
 @dataclass
@@ -631,6 +635,45 @@ def _is_key(word: Word, kws: Sequence[str]) -> bool:
     return any(n.startswith(k[:-1]) if k.endswith("*") else n == k for k in kws)
 
 
+def _emphasis_close(times: SpeechTimes, sentences, w: "PlannedWindow", ci: list[list[float]], bounds: dict,
+                    params: "ManualPlanParams", keys: dict[int, Sequence[str]]) -> list[list[float]]:
+    """M53c: a close shot from the boundary before the first keyword of a sentence (k:) to the end of
+    that sentence — the picture comes closer on the word that matters. Every shot stays at least
+    min_shot_sec: a close span that would start or end closer than that to the window edge is
+    stretched to it, and a wide gap shorter than that between two close spans is closed."""
+    m = params.min_shot_sec
+    dur = w.end - w.start
+    out = [list(c) for c in ci]
+    for n in w.sentences:
+        kws = keys.get(n)
+        if not kws:
+            continue
+        sent = sentences[n - 1]
+        k = next((i for i, x in enumerate(sent) if _is_key(x, kws)), None)
+        if k is None:
+            continue
+        a = bounds[n][0] if k == 0 else _boundary(times, sent[k - 1], sent[k]) - w.start
+        b = bounds[n][1]
+        if b - a < m:
+            b = min(dur, a + m)
+        if a < m:
+            a = 0.0                                 # no wide flash at the window start
+        if dur - b < m:
+            b = dur                                 # … nor at its end
+        if b - a < m - _EPS:
+            continue
+        out.append([round(a, 6), round(b, 6)])
+    merged = _merge_intervals(out)
+    # a wide gap shorter than min_shot between two close spans would flash: join them
+    joined: list[list[float]] = []
+    for c in merged:
+        if joined and c[0] - joined[-1][1] < m:
+            joined[-1][1] = max(joined[-1][1], c[1])
+        else:
+            joined.append(list(c))
+    return joined
+
+
 def _limit_static(times: SpeechTimes, sentences, w: "PlannedWindow", ci: list[list[float]],
                   params: "ManualPlanParams", keys: dict[int, Sequence[str]]) -> list[list[float]]:
     """M53: split every shot of the window longer than max_static_sec by switching wide↔close.
@@ -1041,6 +1084,8 @@ def build_manual_plan(
                 # Seam accent: the close shot masks the seam, then the window goes back to wide.
                 t = dur if dur <= params.accent_max_sec else _accent_end(times, sentences, w, bounds, params)
                 ci.append([0.0, t])
+            if params.emphasis_keys and key_map:
+                ci = _emphasis_close(times, sentences, w, ci, bounds, params, key_map)
             ci = _merge_intervals(ci)
             if params.max_static_sec:
                 w.shot = "wide"

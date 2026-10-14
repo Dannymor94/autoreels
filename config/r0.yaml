@@ -255,9 +255,12 @@ montage:
   # M53 attention: the picture changes at least every max_static_sec (a wide↔close switch at a keyword k:,
   # else at a sentence or word boundary; no shot shorter than min_shot_sec); k: words are highlighted in the
   # subtitles of montage clips (render.yaml subtitle_keywords stays as it is for the other clips).
-  max_static_sec: 6.0
+  # M53c — owner: «каждые 6 с наплыв — часто; наплыв нужен на важном или на стыке». The timed switch is off;
+  # the close shot comes on a keyword k: (to the end of its sentence) and at the seams.
+  max_static_sec: null
   min_shot_sec: 3.0
   keywords: true
+  emphasis: true          # close shot on a k: keyword, to the end of its sentence (at least min_shot_sec)
   # M53b (owner on the 5 montage reels: «сильно дёргается» — the pause/filler cuts): a montage clip keeps its
   # pauses; its picture already changes with every shot switch. Per line f:1, or --filler, turns the cut back on.
   filler_cut: false

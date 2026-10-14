@@ -5187,7 +5187,7 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
                        tone=None, filler=None, jump=None, filler_profile=None,
                        filler_allowed: bool = True, breaks=(), max_static: float | None = None,
-                       min_shot: float = 3.0, keys=()) -> list[str]:
+                       min_shot: float = 3.0, keys=(), emphasis: bool = False) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5220,9 +5220,10 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     if not filler_allowed:
         _f = False                     # no motion track: a cut could not be checked for a face jump
     _params = _manual_plan_params(r0_cfg, render_cfg, _f, filler_profile)
-    if max_static:
+    if max_static or emphasis:
         from dataclasses import replace as _dc_replace
-        _params = _dc_replace(_params, max_static_sec=max_static, min_shot_sec=min_shot)
+        _params = _dc_replace(_params, max_static_sec=max_static or None, min_shot_sec=min_shot,
+                              emphasis_keys=bool(emphasis))
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_params,
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
@@ -5417,7 +5418,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
                                           me.label, align=align, tone=tone,
                                           filler=(filler if filler is not None else mc.filler_cut), jump=jump,
                                           filler_profile=filler_profile, filler_allowed=filler_allowed,
-                                          breaks=mb.breaks, max_static=mc.max_static_sec,
+                                          breaks=mb.breaks, max_static=mc.max_static_sec, emphasis=mc.emphasis,
                                           min_shot=mc.min_shot_sec, keys=mb.keys):
                 print(_pl)
         except ValueError as _pe:
