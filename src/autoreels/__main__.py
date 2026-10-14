@@ -2994,6 +2994,17 @@ def collect_human_warnings(reels, transcript, *, r0_cfg) -> list[tuple]:
         r.warnings.append(msg)
         out.append((r, msg))
 
+    # M57: a clip that plays a place the transcript check flags (known invention, verbatim repeat)
+    _tx_hits: list = []
+    if getattr(getattr(r0_cfg, "tx_check", None), "enabled", False) and words:
+        from autoreels.cloud.txcheck import check as _txc, hit_times as _txh
+        _tx_hits = _txh(_txc(words, None, _txcheck_params(r0_cfg)))
+    for r in reels:
+        _wins = list(r.playback_windows())
+        for _t, _note in _tx_hits:
+            if any(w.start - 0.05 <= _t <= w.end for w in _wins):
+                warn(r, f"расшифровка ({_t // 60:.0f}:{_t % 60:04.1f}): {_note} — проверить на слух")
+
     for r in reels:
         cw = words_in_window(words, r.start, r.end)
         # Dangling check inspects the word actually heard first: the start of the BODY (the first
@@ -7648,6 +7659,83 @@ def _resolve_manifest_arg(target: str, root: Path) -> Path | None:
     return mpath if mpath.exists() else None
 
 
+def _txcheck_params(r0_cfg):
+    from autoreels.cloud.txcheck import KNOWN, TxCheckParams
+    tc = r0_cfg.tx_check
+    return TxCheckParams(repeat_words=tc.repeat_words, repeat_far_sec=tc.repeat_far_sec,
+                         sparse_win_sec=tc.sparse_win_sec, sparse_min_speech_sec=tc.sparse_min_speech_sec,
+                         sparse_max_rate=tc.sparse_max_rate, known=tuple(KNOWN) + tuple(tc.known))
+
+
+def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
+                 show: int = 8) -> int:
+    """M57: Whisper inventions and holes in each source's transcript (cloud/txcheck.py) →
+    printed summary + transcripts/<stem>.txcheck.json. Changes nothing else. rc 1 = a source
+    could not be read; a suspicious transcript is not an error."""
+    import json as _json
+    from autoreels.cloud.txcheck import check
+    _root = Path(root) if root else _project_root()
+    paths = _auto_discover_manifests(_root) if all_sources else []
+    for t in targets:
+        p = _resolve_manifest_arg(t, _root)
+        if p is None:
+            print(f"ошибка: манифест не найден: {t}", file=sys.stderr)
+            return 1
+        paths.append(p)
+    if not paths:
+        print("ошибка: укажите манифест(ы) или --all", file=sys.stderr)
+        return 1
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    prm = _txcheck_params(r0_cfg)
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    rc, n_susp = 0, 0
+    for mpath in paths:
+        try:
+            manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001 — one unreadable file must not stop the rest
+            print(f"== {mpath.stem}: не прочитан ({type(exc).__name__})", file=sys.stderr)
+            rc = 1
+            continue
+        stem = mpath.stem
+        tx = _resolve_cached_transcript(manifest, _cache)
+        if tx is None:
+            print(f"== {stem}: транскрипт не найден", file=sys.stderr)
+            rc = 1
+            continue
+        intervals = None
+        _smp = _root / "transcripts" / f"{stem}.speechmap.json"
+        if _smp.is_file():
+            try:
+                _d = _json.loads(_smp.read_text(encoding="utf-8"))
+                if _d.get("source_sha256") == manifest.source_sha256:
+                    intervals = _d.get("intervals") or None
+            except (OSError, ValueError):
+                intervals = None
+        rep = check(tx.words, intervals, prm)
+        rep.update(stem=stem, source=manifest.source)
+        out = _root / "transcripts" / f"{stem}.txcheck.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
+        n_susp += rep["suspicious"]
+        sp_note = (f"звук без слов {rep['sparse_sec']:.0f} с в {len(rep['sparse'])} местах" if rep["speech_map"]
+                   else "звук без слов: нет карты речи")
+        print(f"== {stem}: слов {rep['words']} | известные выдумки {len(rep['known'])} | повторы {len(rep['repeat'])}"
+              f" | {sp_note} → {'ПОДОЗРИТЕЛЬНО' if rep['suspicious'] else 'ок'}")
+        for h in rep["known"][:show]:
+            print(f"   {_mmss_long(h['t'])} известная: «{h['text']}»")
+        for r in rep["repeat"][:show]:
+            print(f"   повтор ×{len(r['times'])}: «{r['text']}» — {', '.join(_mmss_long(t) for t in r['times'])}")
+        for z in sorted(rep["sparse"], key=lambda z: -(z["b"] - z["a"]))[:show]:
+            print(f"   звук без слов: {_mmss_long(z['a'])}–{_mmss_long(z['b'])} (речь {z['speech_sec']:.0f} с, слов {z['words']})")
+    print(f"итого: источников {len(paths)}, подозрительных {n_susp}; подробно — transcripts/<stem>.txcheck.json")
+    return rc
+
+
+def _mmss_long(t: float) -> str:
+    t = int(round(t))
+    return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
+
+
 def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force: bool = False,
             provider=None, out_dir: str | None = None) -> int:
     """M54: the map of a whole source — thoughts, voice energy, role / strength / references / topic,
@@ -10681,6 +10769,15 @@ def _build_parser():
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
+    ptc = sub.add_parser(
+        "tx-check",
+        help="M57: выдумки и дыры расшифровки (известные фразы Whisper, дословные повторы, звук без слов)",
+    )
+    ptc.add_argument("manifest", metavar="манифест", nargs="*", help="пути к манифестам или имена (в manifests/)")
+    ptc.add_argument("--all", action="store_true", dest="all_sources", help="все манифесты в manifests/")
+    ptc.add_argument("--root", default=None)
+    ptc.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     pbt = sub.add_parser(
         "blocks-text",
         help="M53: нумерация разметки текстом — предложения блоков как B.k (для строк сборки M …)",
@@ -11055,6 +11152,9 @@ def main(argv=None) -> int:
         elif args.cmd == "map":
             return cmd_map(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                            llm=args.llm, force=args.force)
+        elif args.cmd == "tx-check":
+            return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)
         elif args.cmd == "blocks-text":
             return cmd_blocks_text(args.manifest, root=getattr(args, "root", None),
                                    cache_dir=getattr(args, "cache_dir", None), blocks=args.blocks,

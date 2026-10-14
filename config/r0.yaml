@@ -279,6 +279,17 @@ montage:
     callout_gap_sec: 8.0    # no two callouts closer than this
     callout_sec: 2.0
 
+# M57: arl tx-check — Whisper inventions and holes in a transcript (G5a: on IMG_6848 Groq wrote «Субтитры создавал
+# DimaTorzok» and one phrase five times where the speaker said something else). Pointers for the ear; nothing is changed.
+tx_check:
+  enabled: true             # warn at --apply on a clip that plays a flagged place
+  repeat_words: 6           # the same 6+ words …
+  repeat_far_sec: 60        # … again at least 60 s away
+  sparse_win_sec: 10        # «sound without words»: a 10 s window …
+  sparse_min_speech_sec: 6  # … where the speech map hears at least 6 s of speech …
+  sparse_max_rate: 0.8      # … but the transcript has fewer than 0.8 words per second of it
+  known: []                 # extra known inventions (the built-in list is in cloud/txcheck.py)
+
 # M54: arl map <stem> — the map of a whole source (transcripts/<stem>.map.json + reels-out/<stem>/_map.html):
 # thoughts (1–4 sentences), voice energy, role / strength / references / topic (LLM), similar thoughts far apart.
 map:

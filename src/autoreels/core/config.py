@@ -249,6 +249,21 @@ class MontageFx(BaseModel):
         return out
 
 
+class TxCheckConfig(BaseModel):
+    """M57: arl tx-check and clip warnings — Whisper inventions and holes (cloud/txcheck.py).
+    Off = no warnings at --apply (invariant 8); the command works either way."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False                                  # warn at --apply on clips that play a flagged place
+    repeat_words: int = Field(6, ge=3)                     # a verbatim run this long …
+    repeat_far_sec: float = Field(60.0, ge=0.0)            # … heard again at least this far away
+    sparse_win_sec: float = Field(10.0, gt=0.0)            # window of the «sound without words» check
+    sparse_min_speech_sec: float = Field(6.0, gt=0.0)      # … with at least this much speech (speech map)
+    sparse_max_rate: float = Field(0.8, gt=0.0)            # … and fewer words per second of speech
+    known: list[str] = Field(default_factory=list)         # extra known inventions (added to the built-in list)
+
+
 class MapConfig(BaseModel):
     """M54: arl map — the map of a whole source (cloud/thoughtmap.py). Numbers: config/r0.yaml."""
 
@@ -428,6 +443,7 @@ class R0Config(BaseModel):
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
     montage: MontageConfig = Field(default_factory=MontageConfig)
     map: MapConfig = Field(default_factory=MapConfig)
+    tx_check: TxCheckConfig = Field(default_factory=TxCheckConfig)
 
     @property
     def min_duration(self) -> int:

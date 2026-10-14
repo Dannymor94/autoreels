@@ -1,0 +1,178 @@
+"""M57: a check of a transcript for Whisper inventions and holes (G5a: on IMG_6848 the Groq transcript
+had «Субтитры создавал DimaTorzok» and «каждый из них влияет на результат по-своему» five times where
+the speaker said something else, and ~1000 words fewer than a local Whisper).
+
+Three signs, each only a pointer for the owner's ear — the code changes nothing:
+
+* known  — phrases Whisper is known to invent from film subtitles («субтитры создавал», «продолжение
+           следует», «спасибо за просмотр» …; config r0.yaml tx_check.known);
+* repeat — the same run of `repeat_words`+ words in places at least `repeat_far_sec` apart (a speaker
+           rarely repeats six words verbatim minutes later; Whisper repeats its inventions);
+* sparse — sound without words: windows where the speech map hears at least `sparse_min_speech_sec`
+           of speech but the transcript has fewer than `sparse_max_rate` words per second of it.
+
+Pure: words (t0/t1/word) and the speech map's intervals in, a report dict out.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Sequence
+
+KNOWN = (
+    "субтитры создавал", "субтитры сделал", "субтитры делал", "субтитры подготовил", "редактор субтитров",
+    "корректор а.", "продолжение следует", "спасибо за просмотр", "спасибо за внимание друзья",
+    "подписывайтесь на канал", "ставьте лайки", "dimatorzok", "игорь негода",
+)
+
+
+@dataclass(frozen=True)
+class TxCheckParams:
+    repeat_words: int = 6
+    repeat_far_sec: float = 60.0
+    sparse_win_sec: float = 10.0
+    sparse_min_speech_sec: float = 6.0
+    sparse_max_rate: float = 0.8
+    known: tuple[str, ...] = field(default=KNOWN)
+
+
+def _norm(w: str) -> str:
+    return "".join(c for c in w.lower().replace("ё", "е") if c.isalnum() or c == ".")
+
+
+def _tokens(words) -> list[tuple[str, float]]:
+    out = []
+    for w in words:
+        n = _norm(w.word).strip(".")
+        if n:
+            out.append((n, float(w.t0)))
+    return out
+
+
+def known_phrases(words, patterns: Sequence[str]) -> list[dict]:
+    """Every place a known invention appears: {"t", "text"}."""
+    toks = _tokens(words)
+    text_tokens = [t for t, _ in toks]
+    hits = []
+    for pat in patterns:
+        p = [_norm(x).strip(".") for x in pat.split()]
+        p = [x for x in p if x]
+        if not p:
+            continue
+        n = len(p)
+        for i in range(len(text_tokens) - n + 1):
+            window = text_tokens[i:i + n]
+            if window[:-1] == p[:-1] and window[-1].startswith(p[-1]):
+                hits.append({"t": round(toks[i][1], 2), "text": " ".join(w.word for w in _slice(words, toks, i, n + 2))})
+    out: list[dict] = []
+    for h in sorted(hits, key=lambda h: h["t"]):
+        if not out or h["t"] - out[-1]["t"] > 3.0:              # one place, however many patterns match it
+            out.append(h)
+    return out
+
+
+def _slice(words, toks, i, n):
+    """The original words of token positions i..i+n (for display)."""
+    t0 = toks[i][1]
+    t1 = toks[min(i + n, len(toks)) - 1][1]
+    return [w for w in words if t0 <= w.t0 <= t1]
+
+
+def repeats(words, *, n: int = 6, far_sec: float = 60.0) -> list[dict]:
+    """Runs of n+ identical words heard at least far_sec apart: {"text", "times"} — the run grown to
+    its full length, every place it occurs (each place counted once)."""
+    toks = _tokens(words)
+    seq = [t for t, _ in toks]
+    pos: dict[tuple, list[int]] = {}
+    for i in range(len(seq) - n + 1):
+        pos.setdefault(tuple(seq[i:i + n]), []).append(i)
+    out: list[dict] = []
+    covered: set[int] = set()
+    for key, idx in pos.items():
+        if len(idx) < 2 or idx[0] in covered:
+            continue
+        far = [idx[0]]
+        for i in idx[1:]:
+            if toks[i][1] - toks[far[-1]][1] >= far_sec:
+                far.append(i)
+        if len(far) < 2:
+            continue
+        # grow the run while every occurrence continues the same way
+        ln = n
+        while all(j + ln < len(seq) for j in far) and len({seq[j + ln] for j in far}) == 1:
+            ln += 1
+        for j in far:
+            covered.update(range(j, j + ln))
+        out.append({"text": " ".join(seq[far[0]:far[0] + ln]), "words": ln,
+                    "times": [round(toks[j][1], 2) for j in far]})
+    return sorted(out, key=lambda r: (-len(r["times"]), -r["words"], r["times"][0]))
+
+
+def _speech_bins(intervals, end: float, bin_sec: float = 0.5) -> list[float]:
+    """Seconds of speech in each bin_sec bin of [0, end)."""
+    n = int(end / bin_sec) + 1
+    bins = [0.0] * n
+    for x, y in intervals:
+        x, y = max(0.0, float(x)), min(float(y), end)
+        k = int(x / bin_sec)
+        while x < y and k < n:
+            edge = min(y, (k + 1) * bin_sec)
+            bins[k] += edge - x
+            x = edge
+            k += 1
+    return bins
+
+
+def sparse(words, intervals: Sequence[Sequence[float]], *, win: float = 10.0, min_speech: float = 6.0,
+           max_rate: float = 0.8, end: float | None = None) -> list[dict]:
+    """Stretches where the speech map hears speech but the transcript has few words:
+    {"a", "b", "speech_sec", "words"} (overlapping windows merged)."""
+    import bisect
+    if not intervals:
+        return []
+    end = end if end is not None else max(float(b) for _, b in intervals)
+    bin_sec = 0.5
+    bins = _speech_bins(intervals, end, bin_sec)
+    acc = [0.0]
+    for v in bins:
+        acc.append(acc[-1] + v)
+
+    def speech(a, b):
+        return acc[min(len(bins), int(round(b / bin_sec)))] - acc[min(len(bins), int(round(a / bin_sec)))]
+    starts = sorted(float(w.t0) for w in words)
+
+    def nwords(a, b):
+        return bisect.bisect_left(starts, b) - bisect.bisect_left(starts, a)
+    hot: list[list[float]] = []
+    t, step = 0.0, win / 2
+    while t < end:
+        a, b = t, min(t + win, end)
+        sp = speech(a, b)
+        if sp >= min_speech and nwords(a, b) / sp < max_rate:
+            if hot and a <= hot[-1][1]:
+                hot[-1][1] = b
+            else:
+                hot.append([a, b])
+        t += step
+    return [{"a": round(a, 1), "b": round(b, 1), "speech_sec": round(speech(a, b), 1), "words": nwords(a, b)}
+            for a, b in hot]
+
+
+def check(words, intervals: Sequence[Sequence[float]] | None = None, p: TxCheckParams = TxCheckParams()) -> dict:
+    """The report of one transcript: known / repeat / sparse lists and their counts."""
+    rep = repeats(words, n=p.repeat_words, far_sec=p.repeat_far_sec)
+    kn = known_phrases(words, p.known)
+    sp = sparse(words, intervals or [], win=p.sparse_win_sec, min_speech=p.sparse_min_speech_sec,
+                max_rate=p.sparse_max_rate)
+    sparse_sec = round(sum(s["b"] - s["a"] for s in sp), 1)
+    return {"words": len(words), "known": kn, "repeat": rep, "sparse": sp, "sparse_sec": sparse_sec,
+            "speech_map": intervals is not None and len(intervals) > 0,
+            "suspicious": bool(kn or rep or sparse_sec >= 30.0)}
+
+
+def hit_times(report: dict) -> list[tuple[float, str]]:
+    """(source second, short note) for every known / repeat place — for clip warnings."""
+    out = [(h["t"], f"известная выдумка Whisper «{h['text']}»") for h in report.get("known", [])]
+    for r in report.get("repeat", []):
+        for t in r["times"]:
+            out.append((t, f"фраза повторяется в {len(r['times'])} местах «{r['text']}» — возможна выдумка Whisper"))
+    return sorted(out)
