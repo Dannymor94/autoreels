@@ -4056,6 +4056,13 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
         payload["planned"] = True
         payload["shots"] = [[w.shot, [[round(a, 4), round(b, 4)] for a, b in w.close_intervals]]
                             for w in reel.playback_windows()]
+    if getattr(reel, "fx", None):
+        # M55: attention effects change the picture/sound; added only when set (old prints stay).
+        payload["fx"] = reel.fx
+    if round(getattr(reel, "speed", 1.0), 6) != 1.0 and reel.subtitles:
+        # M55: a sped-up clip with subtitles used to keep the video at 1× (setpts dropped) —
+        # such clips render anew with the fix.
+        payload["speed_video"] = 2
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
@@ -5382,7 +5389,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
     montage is not a block score."""
     from types import SimpleNamespace
     from autoreels.cloud.edit import merge_group_sentences
-    from autoreels.cloud.montage import SeamParams, build_montage, seam_report
+    from autoreels.cloud.montage import SeamParams, build_montage, callout_times, seam_report
     from autoreels.core.models import Reel
     mc = r0_cfg.montage
     out: list = []
@@ -5445,6 +5452,14 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
         reel._clip_speed = _clip_speed
         if not mc.keywords:
             reel._keyword_spec = ()
+        # M55: attention effects; callouts in source seconds (render maps them onto the clip)
+        _co = callout_times(mb, reel.subtitles, numbers=mc.fx.callout_numbers,
+                            numbers_max=mc.fx.callout_numbers_max, gap_sec=mc.fx.callout_gap_sec) \
+            if mc.fx.callouts else []
+        reel.fx = mc.fx.reel_fx(_co)
+        if reel.fx:
+            print(f"    fx: {', '.join(k for k in ('push', 'karaoke', 'progress', 'whoosh', 'callouts') if reel.fx.get(k))}"
+                  + "".join(f" | {c['t']:.1f}s «{c['text']}»" for c in _co))
         out.append(reel)
     return out, 0
 

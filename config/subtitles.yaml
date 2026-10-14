@@ -46,3 +46,11 @@ title_fade_ms: 250            # фейд плашки в начале/конце
 # font_size не трогаем — изменение размера перетекает строку и двигает текст.
 keyword_color: "FFE000"       # RRGGBB; яркий жёлтый — виден на тёмном и светлом фоне
 keyword_bold: true
+
+# M55 — приёмы удержания (работают только в клипах с Reel.fx: сборки при montage.fx в r0.yaml).
+karaoke_color: "4CFF4C"       # произносимое слово в субтитрах по словам (karaoke)
+callout_color: "FFE000"       # фраза/цифра крупно (o: в строке сборки)
+callout_font_size: 0          # 0 → 1.5 × font_size
+callout_lift: 260             # px над строкой субтитров (MarginV = position_v + callout_lift)
+progress_color: "FFFFFF"      # полоса прогресса по нижнему краю
+progress_height: 8            # px

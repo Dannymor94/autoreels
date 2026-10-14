@@ -264,6 +264,20 @@ montage:
   # M53b (owner on the 5 montage reels: «сильно дёргается» — the pause/filler cuts): a montage clip keeps its
   # pauses; its picture already changes with every shot switch. Per line f:1, or --filler, turns the cut back on.
   filler_cut: false
+  # M55 — owner: «давай пробовать все» (attention effects of montage clips; each switch off = as before):
+  fx:
+    push: true              # slow push-in on every shot of at least push_min_sec, push_pct % closer by its end
+    push_pct: 4.0
+    push_min_sec: 6.0
+    karaoke: true           # subtitles light up word by word (subtitles.yaml karaoke_color)
+    progress: true          # thin bar along the bottom edge filling over the clip
+    whoosh: true            # soft whoosh under every seam between pieces
+    whoosh_volume: 0.25
+    callouts: true          # o:B.N=Текст on a montage line → the text in big letters for callout_sec
+    callout_numbers: true   # … plus the numbers said in the clip («3 года»), at most callout_numbers_max
+    callout_numbers_max: 3
+    callout_gap_sec: 8.0    # no two callouts closer than this
+    callout_sec: 2.0
 
 # M54: arl map <stem> — the map of a whole source (transcripts/<stem>.map.json + reels-out/<stem>/_map.html):
 # thoughts (1–4 sentences), voice energy, role / strength / references / topic (LLM), similar thoughts far apart.

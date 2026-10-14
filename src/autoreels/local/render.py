@@ -37,6 +37,8 @@ from autoreels.core.config import (
 from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
+from autoreels.local.fx import output_time as fx_output_time, push_vf, timeline as fx_timeline
+from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
 _MANIFEST_NAME = "manifest.json"
@@ -2297,7 +2299,8 @@ def _music_filter_complex(video_vf: str, ap: AudioProcessing, music: Music,
     mfade = ""
     if music.fade_seconds > 0:
         f = music.fade_seconds
-        out_st = max(0.0, round(clip_duration - f, 3))
+        # the music runs on the output (post-speed) timeline: its fade-out ends with the clip
+        out_st = max(0.0, round((clip_duration / speed if speed else clip_duration) - f, 3))
         mfade = f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
     music_chain = f"volume={_num(music.volume)}{mfade}"
 
@@ -2885,20 +2888,45 @@ def _render_segments(
             # Цветокор (палитра) — ПОСЛЕ crop/scale, ДО ass. Порядок: crop→scale→eq/unsharp→ass.
             # Two-shot: _effective_vf is None when per-segment crops go into the prefix — vtail
             # then only carries palette+ass+vfade (crops are already in segment_vfs).
-            base_vf = _effective_vf  # type: ignore[assignment]
-            if _effective_vf and palette_vf:
-                base_vf = f"{_effective_vf},{palette_vf}"
-            elif not _effective_vf and palette_vf:
-                base_vf = palette_vf
+            # M55: a slow push-in on every long shot (Reel.fx.push) — on the final frame, after the
+            # crops (and the close-shot overlays of the prefix), before palette and subtitles.
+            _fx = dict(getattr(reel, "fx", None) or {})
+
+            def _fx_xfades(_s):
+                # the dissolve at each boundary, as the concat graph applies it
+                return (_ts_seam_xfades if _ts_seam_xfades is not None
+                        else [_xfade_actual] * (len(_s) - 1))
+            _reel_speed = getattr(reel, "speed", 1.0)
+            _push_vf = ""
+            if _fx.get("push"):
+                _, _fx_changes, _fx_total = fx_timeline(segs, speed=_reel_speed, xfades=_fx_xfades(segs))
+                _push_vf = push_vf(_fx_changes, _fx_total, pct=float(_fx.get("push_pct", 4.0)),
+                                   min_sec=float(_fx.get("push_min_sec", 6.0)),
+                                   size=tuple(render_cfg.scale))
+            base_vf = ",".join(x for x in (_effective_vf, _push_vf, palette_vf) if x) or None  # type: ignore[assignment]
             reel_vf = base_vf
             # Speed-up via setpts (video) + atempo (audio); both applied before other filters.
-            _reel_speed = getattr(reel, "speed", 1.0)
             if _reel_speed != 1.0:
                 _pts = f"setpts=PTS/{_reel_speed:.4g}"
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
             ass_cwd: str | None = None
             _title = getattr(reel, "title_overlay", "") or ""
-            if subtitles_cfg is not None and (reel.subtitles or _title):
+            _fx_ass = None
+            if _fx and (_fx.get("karaoke") or _fx.get("progress") or _fx.get("callouts")):
+                _body0 = 1 if getattr(reel, "cold_open", None) is not None else 0
+                _fx_ass = {
+                    "karaoke": bool(_fx.get("karaoke")),
+                    "progress": bool(_fx.get("progress")),
+                    "progress_sec": round(_expected_output_duration(
+                        segs, xfade_sec=_xfade_actual, speed=_reel_speed or 1.0,
+                        seam_xfades=_ts_seam_xfades), 3),
+                    "callout_sec": float(_fx.get("callout_sec", 2.0)),
+                    "callouts": [
+                        {"t": _t, "text": c["text"]} for c in (_fx.get("callouts") or [])
+                        if (_t := fx_output_time(segs, float(c["t"]), speed=_reel_speed, body0=_body0)) is not None
+                    ],
+                }
+            if subtitles_cfg is not None and (reel.subtitles or _title or _fx_ass):
                 # Remap word times onto the concatenated, speed-adjusted output timeline (gap words
                 # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
                 # output is identical to the pre-segments renderer. A title plate (Part 4) is drawn
@@ -2916,14 +2944,17 @@ def _render_segments(
                           " — highlighting skipped", file=_sys.stderr)
                 ass_path.write_text(
                     build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0, title=_title,
-                              enable_keywords=_kw_on),
+                              enable_keywords=_kw_on, fx=_fx_ass),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.
                 # Абсолютный путь в ass= фильтре ломается на Windows: двоеточие (C:)
                 # и бэкслэши — синтаксис filtergraph; относительный путь безопасен.
                 ass_filter = f"ass={ass_filename}"
-                reel_vf = f"{base_vf},{ass_filter}" if base_vf else ass_filter
+                # After the speed setpts (reel_vf, not base_vf): the subtitles are remapped onto the
+                # sped-up timeline, and the video must be sped up too (M55: setpts was dropped here
+                # whenever a clip had subtitles — only the audio got faster).
+                reel_vf = f"{reel_vf},{ass_filter}" if reel_vf else ass_filter
                 ass_cwd = str(tmp_ass_dir)
             # Обработка звука + фейд. Видео-фейд — ПОСЛЕ субтитров (фейдит готовый кадр целиком).
             # Длина клипа = сумма сегментов (для многосегментного — без вырезанных пауз).
@@ -3245,6 +3276,8 @@ def _render_segments(
                                if _pr1 > 0 else "asetpts=PTS-STARTPTS")
                     # post-overlay chain: palette → ass → vfade (no crop — overlay outputs scaled video)
                     _post_parts1: list[str] = []
+                    if _push_vf:
+                        _post_parts1.append(_push_vf)
                     if palette_vf:
                         _post_parts1.append(palette_vf)
                     if ass_cwd:
@@ -3491,6 +3524,31 @@ def _render_segments(
                 if _synth_tmp.exists():
                     _synth_tmp.rename(out)
                 _out_dur += _sp2["tail_sec"]
+            # M55: a soft whoosh under every seam (Reel.fx.whoosh) — a finishing pass on the audio
+            # only (video stream copied, length unchanged); before the integrity/duration checks.
+            if _fx.get("whoosh") and out.exists():
+                _wseams = fx_timeline(segs, speed=_reel_speed, xfades=_fx_xfades(segs))[0]
+                if _wseams:
+                    _wwav = out.with_suffix(".whoosh.wav")
+                    _wout = out.with_suffix(".whoosh.mp4")
+                    _wdur = float(_fx.get("whoosh_sec", 0.5))
+                    try:
+                        subprocess.run(whoosh_wav_cmd(ffmpeg_bin, _wwav, volume=float(_fx.get("whoosh_volume", 0.25)),
+                                                      dur=_wdur), check=True, capture_output=True)
+                        _asec = subprocess.run(
+                            [_sibling_ffprobe(ffmpeg_bin), "-v", "error", "-select_streams", "a:0",
+                             "-show_entries", "stream=duration", "-of", "csv=p=0", str(out)],
+                            capture_output=True, text=True, check=False).stdout.strip()
+                        subprocess.run(whoosh_cmd(ffmpeg_bin, out, _wwav, _wseams, _wout, dur=_wdur,
+                                                  audio_bitrate=aud.bitrate or "192k",
+                                                  audio_sec=float(_asec) if _asec[:1].isdigit() else None),
+                                       check=True, capture_output=True)
+                        _wout.replace(out)
+                    except (subprocess.CalledProcessError, OSError) as _we:
+                        _clip_errors.append(f"  [ERROR] {reel.id}: whoosh pass failed — {str(_we)[:200]}")
+                    finally:
+                        _wwav.unlink(missing_ok=True)
+                        _wout.unlink(missing_ok=True)
             _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
             if _integrity_err:
                 print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)

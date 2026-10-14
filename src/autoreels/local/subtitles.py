@@ -201,7 +201,7 @@ def _title_style_line(cfg: SubtitlesConfig) -> str:
 
 def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
               play_res: tuple[int, int] = (1080, 1920), title: str = "",
-              enable_keywords: bool = False) -> str:
+              enable_keywords: bool = False, fx: dict | None = None) -> str:
     """Собрать .ass из слов сегмента: Style из конфига + Dialogue по группам поп-апом.
 
     Времена Dialogue — относительно начала клипа (clip_start вычитается). uppercase из конфига.
@@ -209,7 +209,17 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
     фейдом, над зоной субтитров (не пересекается). Пусто → плашки нет.
     `enable_keywords=True` активирует стиль Keyword для слов с `w.emph=True`. False → побайтово
     идентично pre-M1.7 (стиль Keyword не добавляется, теги не вставляются).
+    `fx` (M55, Reel.fx; None/{} → побайтово прежний вывод):
+      karaoke  — группа выводится по словам: на каждое слово своя строка, текущее слово цветом
+                 cfg.karaoke_color; fade только у первой (появление) и последней (уход) строки;
+      callouts — [{"t": секунды клипа, "text": …}]: фраза крупно (стиль Callout) над субтитрами
+                 на callout_sec с появлением через рост масштаба;
+      progress — тонкая полоса внизу, заполняется за `progress_sec` (длина клипа).
     """
+    fx = fx or {}
+    _karaoke = bool(fx.get("karaoke"))
+    _callouts = [c for c in (fx.get("callouts") or []) if str(c.get("text", "")).strip()]
+    _progress = float(fx.get("progress_sec") or 0.0) if fx.get("progress") else 0.0
     pw, ph = play_res
     groups = group_words(
         words, words_per_line=cfg.words_per_line, max_text_width_px=cfg.max_text_width_px,
@@ -222,6 +232,8 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         styles.append(_title_style_line(cfg))
     if _has_kw:
         styles.append(_keyword_style_line(cfg))
+    if _callouts:
+        styles.append(_callout_style_line(cfg))
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -246,7 +258,14 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         fi = fo = cfg.title_fade_ms
         ttext = f"{{\\fad({fi},{fo})}}" + ttext
         lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
+    if _progress > 0:
+        lines.append(_progress_line(cfg, _progress, pw, ph))
+    for c in _callouts:
+        lines.append(_callout_line(cfg, float(c["t"]), str(c["text"]), float(fx.get("callout_sec") or 2.0)))
     for g in groups:
+        if _karaoke:
+            lines.extend(_karaoke_lines(g, cfg, clip_start, _has_kw))
+            continue
         if _has_kw:
             parts: list[str] = []
             for i, w in enumerate(g):
@@ -272,3 +291,85 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
             text = f"{{\\fad({fade_in},{fade_out})}}" + text   # override-блок перед текстом группы
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
     return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------- M55: attention effects
+
+def _tag_color(rrggbb: str) -> str:
+    """RRGGBB → the colour form of an override tag (&HBBGGRR&)."""
+    return "&H" + ass_color(rrggbb)[4:] + "&"
+
+
+def _word_text(w: Word, cfg: SubtitlesConfig, kw: bool, hl: str | None) -> str:
+    """One word of a group: uppercase per config; a keyword keeps its Keyword style; the word being
+    spoken (hl = ASS colour) is painted over everything (punctuation outside both)."""
+    wtext = w.word.upper() if cfg.uppercase else w.word
+    body = wtext.rstrip(".,!?;:…—–")
+    trail = wtext[len(body):]
+    if hl:
+        return f"{{\\1c{hl}}}{body}{{\\r}}{trail}"
+    if kw and w.emph:
+        return f"{{\\rKeyword}}{body}{{\\r}}{trail}"
+    return wtext
+
+
+def _karaoke_lines(g: list[Word], cfg: SubtitlesConfig, clip_start: float, kw: bool) -> list[str]:
+    """The group as one Dialogue per word: the same line of text, the current word in
+    karaoke_color. Word starts are made monotonic inside [group start, group end] (Whisper times
+    may overlap); a word that gets no time of its own is merged into the previous one. The lines
+    abut exactly (same centisecond string), so the text never blinks between words."""
+    g0, g1 = g[0].t0, g[-1].t1
+    starts: list[float] = []
+    for i, w in enumerate(g):
+        t = g0 if i == 0 else min(max(w.t0, starts[-1]), g1)
+        starts.append(t)
+    marks = [_ass_time(t - clip_start) for t in starts] + [_ass_time(g1 - clip_start)]
+    color = _tag_color(cfg.karaoke_color)
+    spans = [(i, marks[i], marks[i + 1]) for i in range(len(g)) if marks[i] != marks[i + 1]]
+    if not spans:
+        spans = [(0, marks[0], marks[-1])]
+    fade_in, fade_out = _fade_ms(g1 - g0, cfg.fade_in_ms, cfg.fade_out_ms)
+    out: list[str] = []
+    for n, (i, a, b) in enumerate(spans):
+        text = " ".join(_word_text(w, cfg, kw, color if j == i else None) for j, w in enumerate(g))
+        fi = fade_in if n == 0 else 0
+        fo = fade_out if n == len(spans) - 1 else 0
+        if fi or fo:
+            text = f"{{\\fad({fi},{fo})}}" + text
+        out.append(f"Dialogue: 0,{a},{b},Default,,0,0,0,,{text}")
+    return out
+
+
+def _callout_style_line(cfg: SubtitlesConfig) -> str:
+    """Callout: big bold text in callout_color, bottom-centre, lifted above the subtitle line."""
+    size = cfg.callout_font_size or int(round(cfg.font_size * 1.5))
+    fields = [
+        "Callout", cfg.font, size, ass_color(cfg.callout_color), ass_color(cfg.callout_color),
+        ass_color(cfg.outline_color), ass_color("000000"),
+        -1, 0, 0, 0, 100, 100, 0, 0, 1, cfg.outline_width + 2, cfg.shadow,
+        2, 40, 40, cfg.position_v + cfg.callout_lift, 1,
+    ]
+    return "Style: " + ",".join(str(x) for x in fields)
+
+
+def _callout_line(cfg: SubtitlesConfig, t: float, text: str, dur: float) -> str:
+    """A callout at clip second t for dur seconds: fades in while growing 85 % → 100 %."""
+    size = cfg.callout_font_size or int(round(cfg.font_size * 1.5))
+    body = text.upper() if cfg.uppercase else text
+    body = _wrap_ass(body.strip(), max_px=cfg.max_text_width_px, font_size=size,
+                     char_width_ratio=cfg.char_width_ratio)
+    tag = "{\\fad(150,250)\\fscx85\\fscy85\\t(0,200,\\fscx100\\fscy100)}"
+    return f"Dialogue: 2,{_ass_time(t)},{_ass_time(t + dur)},Callout,,0,0,0,,{tag}{body}"
+
+
+def _progress_line(cfg: SubtitlesConfig, dur: float, pw: int, ph: int) -> str:
+    """A thin bar along the bottom edge that fills left → right over dur seconds (a vector shape
+    revealed by an animated clip rectangle)."""
+    h = cfg.progress_height
+    y = ph - h
+    ms = int(round(dur * 1000))
+    col = _tag_color(cfg.progress_color)
+    tag = (f"{{\\an7\\pos(0,{y})\\bord0\\shad0\\1c{col}\\alpha&H30&"
+           f"\\clip(0,{y},0,{ph})\\t(0,{ms},\\clip(0,{y},{pw},{ph}))\\p1}}")
+    return (f"Dialogue: 1,{_ass_time(0.0)},{_ass_time(dur)},Default,,0,0,0,,"
+            f"{tag}m 0 0 l {pw} 0 {pw} {h} 0 {h}{{\\p0}}")

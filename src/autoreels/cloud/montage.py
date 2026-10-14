@@ -4,14 +4,16 @@ A review line plays sentences of ONE block group. A montage line names pieces an
 source and the plan joins them, so a good reel can be built from a lecture that never says it in
 one stretch:
 
-    M 85 | 13.2-6 41.1-4 | h:41.3 | c:13.4 | k:41.2=слово | f:0 | t: Заголовок | d: Подпись
+    M 85 | 13.2-6 41.1-4 | h:41.3 | c:13.4 | k:41.2=слово | o:41.2@года=3 ГОДА | f:0 | t: Заголовок | d: Подпись
 
 * `M` (optionally with a label: `M2`) and a score (0–100, `@1.1` speed allowed, no merge markers);
 * pieces `B.S-E` / `B.S` — block B of the review numbering, its sentences S..E in that block's own
   numbering (the [k] the review shows). Pieces play in the order written, which must be the source
   order (stage 1); two pieces never share a sentence;
 * `h:B.N` (`!`/`-` as on a review line) — cold open from any block; `c:B.N,…` close shot;
-  `k:B.N=word,…;B.N=…` keywords; `f:0|1`; `t:` title; `d:` caption — as on a review line.
+  `k:B.N=word,…;B.N=…` keywords; `f:0|1`; `t:` title; `d:` caption — as on a review line;
+* `o:B.N=Текст; B.N@слово=Текст` (M55) — a callout: the text in big letters for a moment, from the
+  start of sentence B.N (or from the word `слово` in it). Ends at `|` or at the end of the line.
 
 The line starts with a letter, so every existing reader of review lines (apply, arl label --check,
 the review sheet) skips it. This module only parses and maps a line to the plan's terms: one
@@ -56,6 +58,25 @@ class MontageEntry:
     filler: bool | None = None
     title: str | None = None
     description: str | None = None
+    callouts: tuple[tuple[tuple[int, int], str | None, str], ...] = ()   # (B.N, word or None, text)
+
+
+def _parse_callouts(val: str) -> tuple[list[tuple[tuple[int, int], str | None, str]], list[str]]:
+    """`B.N=Текст; B.N@слово=Текст` → [((B, N), word|None, text)], errors."""
+    out, bad = [], []
+    for part in val.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        ref_s, eq, text = part.partition("=")
+        ref_s, _, word = ref_s.partition("@")
+        r = _ref(ref_s)
+        text = text.strip()
+        if r is None or not eq or not text:
+            bad.append(f"o:{part} — expected o:B.N=text or o:B.N@word=text")
+        else:
+            out.append((r, word.strip().lower() or None, text))
+    return out, bad
 
 
 def is_montage_line(line: str) -> bool:
@@ -107,6 +128,12 @@ def parse_montage(text: str) -> tuple[list[MontageEntry], list[tuple[int, str]]]
                          title=title, description=description)
         pieces: list[Piece] = []
         bad: list[str] = []
+        mo = re.search(r"(?:^|[|\s])o:\s*([^|]*)", rest)
+        if mo:
+            co, cbad = _parse_callouts(mo.group(1))
+            e.callouts = tuple(co)
+            bad.extend(cbad)
+            rest = rest[:mo.start()] + " " + rest[mo.end():]
         for tok in rest.replace("|", " ").split():
             pm = _PIECE_RE.match(tok)
             if pm:
@@ -165,6 +192,7 @@ class MontageBuild:
     hook: int | None = None
     close: list[int] = field(default_factory=list)
     keys: list[tuple[int, tuple[str, ...]]] = field(default_factory=list)
+    callouts: list[tuple[int, str | None, str]] = field(default_factory=list)   # (sentence no, word, text)
     errors: list[str] = field(default_factory=list)
 
 
@@ -224,7 +252,71 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
         g = glob(*r, "k:")
         if g is not None:
             out.keys.append((g, ws))
+    for r, word, text in entry.callouts:
+        g = glob(*r, "o:")
+        if g is None:
+            continue
+        if g not in out.play:
+            out.errors.append(f"o:{r[0]}.{r[1]} — the sentence is not played in this montage")
+        elif word and not any(_norm(w.word) == word for w in out.sentences[g - 1]):
+            out.errors.append(f"o:{r[0]}.{r[1]}@{word} — no such word in the sentence")
+        else:
+            out.callouts.append((g, word, text))
     return out
+
+
+def _norm(word: str) -> str:
+    return "".join(c for c in word.lower() if c.isalnum() or c in "%-")
+
+
+_NUM_RE = re.compile(r"\d")
+
+
+def callout_times(build: MontageBuild, subtitles: Sequence, *, numbers: bool = False,
+                  numbers_max: int = 3, gap_sec: float = 8.0) -> list[dict]:
+    """Callouts of a built montage as [{"t": source seconds, "text": …}], in time order.
+
+    Explicit `o:` callouts start at their sentence (or its word). Times come from the clip's own
+    subtitle words (the plan's aligned words) — the first one at/after the sentence start, or the
+    matching word — falling back to the transcript time. `numbers=True` adds a callout for every
+    played word with a digit (with the next word when it is a short word: «3 года», «80%»), at
+    most `numbers_max`, never within `gap_sec` of another callout."""
+    subs = sorted(subtitles, key=lambda w: w.t0)
+
+    def at(sent, word):
+        lo, hi = sent[0].t0 - 0.5, sent[-1].t1 + 0.5
+        cands = [w for w in subs if lo <= w.t0 <= hi]
+        if word:
+            for w in cands:
+                if _norm(w.word) == word:
+                    return w.t0
+            for w in sent:
+                if _norm(w.word) == word:
+                    return w.t0
+        for w in cands:
+            if w.t0 >= sent[0].t0 - 0.3:
+                return w.t0
+        return sent[0].t0
+
+    out = [{"t": round(at(build.sentences[g - 1], word), 3), "text": text} for g, word, text in build.callouts]
+    if numbers:
+        added = 0
+        played = [w for g in build.play for w in build.sentences[g - 1]]
+        for i, w in enumerate(played):
+            if added >= numbers_max:
+                break
+            if not _NUM_RE.search(w.word):
+                continue
+            t = at([w], _norm(w.word))
+            if any(abs(t - c["t"]) < gap_sec for c in out):
+                continue
+            text = w.word.strip(".,!?;:…—–")
+            nxt = played[i + 1].word.strip(".,!?;:…—–") if i + 1 < len(played) else ""
+            if nxt.isalpha() and len(nxt) <= 10 and not text.endswith("%"):
+                text = f"{text} {nxt}"
+            out.append({"t": round(t, 3), "text": text})
+            added += 1
+    return sorted(out, key=lambda c: c["t"])
 
 
 @dataclass(frozen=True)

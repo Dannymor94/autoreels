@@ -220,6 +220,10 @@ class Reel(BaseModel):
     # M53: places the review sheet points at — [{"t": source seconds, "kind": "seam", "text": …,
     # "warn": [...]}]; the sheet maps t onto the clip's own time. Not part of the rendered picture.
     marks: list[dict] = Field(default_factory=list)
+    # M55: attention effects of the rendered clip (local/fx.py) — {"push": bool, "push_pct": %,
+    # "push_min_sec": s, "karaoke": bool, "progress": bool, "whoosh": bool, "whoosh_volume": 0..1,
+    # "callouts": [{"t": source seconds, "text": …}], "callout_sec": s}. Empty → prior output.
+    fx: dict = Field(default_factory=dict)
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.

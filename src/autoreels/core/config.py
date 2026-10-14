@@ -211,6 +211,42 @@ class MontageConfig(BaseModel):
     keywords: bool = True                                  # M53: k: words highlighted in a montage clip's subtitles
     emphasis: bool = True                                  # M53c: close shot on a k: keyword to the end of its sentence
     filler_cut: bool = False                               # M53b: cut «э»/pauses inside montage clips (f:1 / --filler win)
+    fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
+
+
+class MontageFx(BaseModel):
+    """M55: attention effects of a montage clip (local/fx.py, written to Reel.fx at --apply).
+    Every switch off = the clip renders as before (invariant 8)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    push: bool = False                                     # slow push-in on every long shot
+    push_pct: float = Field(4.0, ge=0.0, le=15.0)          # … this much closer by the end of the shot
+    push_min_sec: float = Field(6.0, gt=0.0)               # … shots shorter than this stay still
+    karaoke: bool = False                                  # subtitles light up word by word
+    progress: bool = False                                 # thin bar at the bottom filling over the clip
+    whoosh: bool = False                                   # soft whoosh under every seam
+    whoosh_volume: float = Field(0.25, ge=0.0, le=1.0)
+    callouts: bool = False                                 # o: callouts (big phrase for a moment)
+    callout_numbers: bool = False                          # … plus every number said in the clip
+    callout_numbers_max: int = Field(3, ge=0)
+    callout_gap_sec: float = Field(8.0, ge=0.0)            # no two callouts closer than this
+    callout_sec: float = Field(2.0, gt=0.0)                # a callout stays this long
+
+    def reel_fx(self, callouts: list[dict]) -> dict:
+        """Reel.fx for one clip: only the switched-on effects ({} when all are off)."""
+        out: dict = {}
+        if self.push and self.push_pct > 0:
+            out.update(push=True, push_pct=self.push_pct, push_min_sec=self.push_min_sec)
+        if self.karaoke:
+            out["karaoke"] = True
+        if self.progress:
+            out["progress"] = True
+        if self.whoosh and self.whoosh_volume > 0:
+            out.update(whoosh=True, whoosh_volume=self.whoosh_volume)
+        if self.callouts and callouts:
+            out.update(callouts=callouts, callout_sec=self.callout_sec)
+        return out
 
 
 class MapConfig(BaseModel):
@@ -846,6 +882,13 @@ class SubtitlesConfig(BaseModel):
     # output is byte-identical. Font size unchanged (size change reflows the line).
     keyword_color: str = "FFE000"     # bright yellow — readable on dark and light backgrounds
     keyword_bold: bool = True
+    # M55 attention effects (used only when a reel carries fx; otherwise no effect on the output).
+    karaoke_color: str = "4CFF4C"     # the word being spoken (karaoke subtitles)
+    callout_color: str = "FFE000"     # big phrase / number (o: in a montage line)
+    callout_font_size: int = 0        # 0 → 1.5 × font_size
+    callout_lift: int = 260           # px above the subtitle line (MarginV = position_v + lift)
+    progress_color: str = "FFFFFF"    # progress bar along the bottom edge
+    progress_height: int = 8          # px
 
 
 # --------------------------------------------------------------------- Transcribe
