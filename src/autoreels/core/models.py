@@ -224,6 +224,9 @@ class Reel(BaseModel):
     # "push_min_sec": s, "karaoke": bool, "progress": bool, "whoosh": bool, "whoosh_volume": 0..1,
     # "callouts": [{"t": source seconds, "text": …}], "callout_sec": s}. Empty → prior output.
     fx: dict = Field(default_factory=dict)
+    # M59: the body plays pieces out of source order (a montage line written so) — segments are in
+    # play order; start/end are the first played start and the last played end (end may be < start).
+    reordered: bool = False
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.
@@ -268,7 +271,7 @@ class Reel(BaseModel):
         segs = self.segments
         if not segs:
             return
-        is_beat = self.beat_gap_sec is not None
+        is_beat = self.beat_gap_sec is not None or self.reordered
         if not is_beat:
             if abs(segs[0].start - self.start) > eps:
                 raise ValueError(f"reel {self.id}: segments[0].start {segs[0].start:.3f} != "

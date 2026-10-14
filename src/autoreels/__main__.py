@@ -5253,6 +5253,10 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     if not reel.segments:
         reel.segments = body
     reel.start, reel.end = plan.start, plan.end
+    _bs = [s.start for s in body]
+    # M59: pieces out of source order — start/end stay the first played start and the last played end
+    # (every clip-end check reads reel.end as where the clip stops); the segments are in play order
+    reel.reordered = any(b < a for a, b in zip(_bs, _bs[1:]))
     reel.cold_open = plan.cold_open.segment() if plan.cold_open else None
     reel.subtitles = plan.subtitles
     reel.beat_gap_sec = None

@@ -1131,6 +1131,16 @@ def build_manual_plan(
                 subs[key] = word if (t0 == word.t0 and t1 == word.t1) else \
                     word.model_copy(update={"t0": t0, "t1": t1})
     subtitles = sorted(subs.values(), key=lambda x: x.t0)
+    body_starts = [w.start for w in windows if not w.cold_open]
+    if any(b < a for a, b in zip(body_starts, body_starts[1:])):
+        # M59: pieces out of source order — the subtitles go in PLAY order (window by window), so
+        # the last subtitle is the last word heard; in source order they are sorted by time as before
+        order: dict[int, int] = {}
+        for i, w in sorted(enumerate(windows), key=lambda iw: iw[1].cold_open):   # body first, then the hook
+            for n in w.sentences:
+                for word in sentences[n - 1]:
+                    order.setdefault(round(word.t0 * 1000), -1 if w.cold_open else i)
+        subtitles = [v for _, v in sorted(subs.items(), key=lambda kv: (order.get(kv[0], 0), kv[1].t0))]
 
     for n in close_set:
         if not any(n in w.sentences for w in windows):

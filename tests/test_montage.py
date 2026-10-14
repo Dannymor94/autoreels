@@ -106,7 +106,6 @@ def test_pieces_map_to_one_numbering_in_source_order():
 
 
 @pytest.mark.parametrize("pieces, needle", [
-    (((3, 1, 2), (1, 1, 2)), "source order"),
     (((1, 1, 3), (1, 3, 4)), "repeats a sentence"),
     (((1, 1, 9),), "has sentences 1-5"),
     (((7, 1, 2),), "not in the review numbering"),
@@ -297,8 +296,9 @@ def test_apply_builds_the_montage_as_one_more_planned_reel(tmp_path, capsys):
 
 
 def test_apply_refuses_a_broken_montage_line(tmp_path, capsys):
-    rc, _, _, _ = _apply(tmp_path, "2 80\nM 85 | 5.1-3 2.2-4\n")
-    assert rc == 1 and "source order" in capsys.readouterr().err
+    # M59: pieces may come in any order now (5.1-3 before 2.2-4 plays); a repeated sentence is still refused
+    rc, _, _, _ = _apply(tmp_path, "2 80\nM 85 | 5.1-3 5.3-4\n")
+    assert rc == 1 and "repeats a sentence" in capsys.readouterr().err
 
 
 def test_montage_off_ignores_the_lines(tmp_path, capsys):

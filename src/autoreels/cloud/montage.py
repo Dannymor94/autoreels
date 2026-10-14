@@ -8,8 +8,8 @@ one stretch:
 
 * `M` (optionally with a label: `M2`) and a score (0–100, `@1.1` speed allowed, no merge markers);
 * pieces `B.S-E` / `B.S` — block B of the review numbering, its sentences S..E in that block's own
-  numbering (the [k] the review shows). Pieces play in the order written, which must be the source
-  order (stage 1); two pieces never share a sentence;
+  numbering (the [k] the review shows). Pieces play in the order written — any order (M59: a
+  question from the end of the lecture can open the clip); two pieces never share a sentence;
 * `h:B.N` (`!`/`-` as on a review line) — cold open from any block; `c:B.N,…` close shot;
   `k:B.N=word,…;B.N=…` keywords; `f:0|1`; `t:` title; `d:` caption — as on a review line;
 * `o:B.N=Текст; B.N@слово=Текст` (M55) — a callout: the text in big letters for a moment, from the
@@ -213,6 +213,7 @@ class MontageBuild:
     keys: list[tuple[int, tuple[str, ...]]] = field(default_factory=list)
     callouts: list[tuple[int, str | None, str]] = field(default_factory=list)   # (sentence no, word, text)
     joined: list[str] = field(default_factory=list)     # M58: pieces that go straight on, played as one
+    reordered: bool = False                             # M59: a piece plays before one written ahead of it
     errors: list[str] = field(default_factory=list)
 
 
@@ -275,9 +276,9 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
         if out.pieces:
             prev_last = out.sentences[out.pieces[-1][1] - 1]
             if out.sentences[a - 1][0].t0 <= prev_last[-1].t0:
-                out.errors.append(f"piece {p} plays before the piece written ahead of it in the source — "
-                                  f"pieces go in source order (the hook h: can come from anywhere)")
-                continue
+                # M59: a piece may come from earlier in the source (a question from the end asked
+                # first, an answer from before it) — the plan plays the pieces in the order written
+                out.reordered = True
             out.breaks.append(a)
         seen.update(rng)
         out.pieces.append((a, z))
@@ -430,7 +431,8 @@ def seam_report(plan, build: MontageBuild, entry: MontageEntry, params: SeamPara
         last = sents[left.sentences[-1] - 1][-1]
         first = sents[right.sentences[0] - 1][0]
         heard = (left.end - times.audible(last)[1]) + (times.audible(first)[0] - right.start)
-        parts = [f"skips {right.start - left.end:.1f}s", f"pause {heard:.2f}s"]
+        _g = right.start - left.end
+        parts = [f"skips {_g:.1f}s" if _g >= 0 else f"jumps back {-_g:.1f}s", f"pause {heard:.2f}s"]
         name = f"seam {k} ({pa}→{pb})"
         gap = right.start - left.end
         ru = [f"пропущено {gap:.0f} с" if gap >= 0 else f"назад на {-gap:.0f} с", f"пауза {heard:.2f} с"]

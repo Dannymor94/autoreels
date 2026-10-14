@@ -65,3 +65,43 @@ def test_apply_takes_a_piece_of_the_filtered_tail(tmp_path, capsys):
                                cache_dir=str(tmp_path / "cache"), blocks="x1") == 0
     txt = capsys.readouterr().out
     assert "+ отсеянных x1–x1" in txt and "[x1] " in txt and "отсеян: tail" in txt and "x1.1 " in txt
+
+
+# ------------------------------------------------------------------ M59: free order of pieces
+
+def test_pieces_may_come_in_any_order():
+    bl = _blocks()
+    (e,), _ = parse_montage("M 80 | 3.1-2 1.1-2\n")
+    mb = build_montage(e, bl, lambda b: b.sents)
+    assert mb.errors == [] and mb.reordered
+    assert mb.play == [4, 5, 1, 2] and mb.breaks == [1] and mb.pieces == [(4, 5), (1, 2)]
+    (e,), _ = parse_montage("M 80 | 1.1-2 3.1\n")
+    assert not build_montage(e, bl, lambda b: b.sents).reordered
+
+
+def test_plan_subtitles_in_play_order_when_reordered():
+    from autoreels.cloud.plan import build_manual_plan
+    from tests.test_montage import P as MP, _spec_sents
+    sents, words, smap = _spec_sents()
+    fwd = build_manual_plan(sents, [1, 2, 3, 4, 5, 6], words=words, smap=smap, params=MP, breaks=[4])
+    assert fwd.subtitles == sorted(fwd.subtitles, key=lambda w: w.t0)          # source order: as before
+    rev = build_manual_plan(sents, [4, 5, 6, 1, 2, 3], words=words, smap=smap, params=MP, breaks=[1])
+    assert rev.last_word.word == sents[2][-1].word
+    assert rev.subtitles[-1].word == sents[2][-1].word and rev.subtitles[0].word == sents[3][0].word
+    assert [w.start for w in rev.body][0] > [w.start for w in rev.body][1]
+
+
+def test_apply_reordered_montage_plays_in_written_order(tmp_path, capsys):
+    from tests.test_montage import _apply
+    rc, man, kept, tx = _apply(tmp_path, "M1 85 | 5.1-3 2.1-3\n")
+    out = capsys.readouterr()
+    assert rc == 0, out.err[-1500:]
+    (mont,) = man.reels
+    segs = mont.effective_segments()
+    assert mont.reordered and segs[0].start > segs[-1].start                 # block 5 first, then block 2
+    assert mont.start == segs[0].start and mont.end == segs[-1].end
+    mont.check_segments()                                                    # play order is valid
+    assert mont.subtitles[-1].t0 < segs[-1].end and mont.subtitles[-1].t0 > segs[-1].start
+    assert "jumps back" in out.out
+    with __import__("pytest").raises(ValueError):                            # a normal clip still must be in order
+        mont.model_copy(update={"reordered": False}).check_segments()
