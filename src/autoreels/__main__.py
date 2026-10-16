@@ -7829,7 +7829,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         if not check:
             accepted.append(pr)
             continue
-        err = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
+        tried = {pr.hook}
+        while err is None and pr.hook and "cold open skipped" in log:
+            nxt = next((h for h in pr.hooks if h not in tried), None)
+            pr.notes.append(f"крючок h:{pr.hook} без своего звука — " + (f"взят h:{nxt}" if nxt else "без крючка"))
+            pr.hook = nxt
+            tried.add(nxt)
+            err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         if err is None:
             accepted.append(pr)
         else:
@@ -7858,8 +7866,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     return 0
 
 
-def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> str | None:
-    """Apply one montage line in a scratch root; None = passed, else the first error line."""
+def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[str | None, str]:
+    """Apply one montage line in a scratch root → (None if passed else the first error line, the log)."""
     import contextlib
     import io
     import tempfile
@@ -7878,12 +7886,12 @@ def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> str | N
                                       cache_dir=str(cache_dir) if cache_dir else str(root / "data" / "cache"),
                                       labeler="auto")
             except Exception as exc:  # noqa: BLE001 — a crash is a failed check, not a failed command
-                return f"{type(exc).__name__}: {str(exc)[:160]}"
+                return f"{type(exc).__name__}: {str(exc)[:160]}", buf.getvalue()
         if rc == 0:
-            return None
+            return None, buf.getvalue()
         lines = [ln.strip() for ln in buf.getvalue().splitlines()]
         hit = next((ln for ln in lines if "[ERROR]" in ln or ln.startswith("error")), None)
-        return (hit or (lines[-1] if lines else f"rc={rc}"))[:200]
+        return (hit or (lines[-1] if lines else f"rc={rc}"))[:200], buf.getvalue()
 
 
 def _mmss_long(t: float) -> str:

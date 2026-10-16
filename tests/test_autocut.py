@@ -133,3 +133,46 @@ def test_cmd_autocut_replaces_a_proposal_that_fails_the_apply_checks(tmp_path, c
     assert "#! M " in text and "99.1-4" in text and "not in the review numbering" in text
     assert "не прошли проверку: 1" in out
     assert not (tmp_path / "reviews" / "v.review.json").exists()          # checks ran in a scratch root
+
+
+def test_no_two_proposals_share_their_payoff():
+    """M61: IMG_6848 M1 and M4 both ended on the same «Эмпатия важнее алгоритма» thought."""
+    units = [U(1, 0, 20, "thesis", 4, "1.1-3"), U(2, 25, 20, "example", 4, "1.4-6"),
+             U(3, 300, 15, "conclusion", 5, "5.1-2"),
+             U(4, 600, 20, "thesis", 5, "9.1-3"), U(5, 625, 20, "metaphor", 4, "9.4-6")]
+    props = propose(units, AutoParams(clips=5, target_sec=40, overlap_max=0.9))
+    lasts = [p.units[-1] for p in props]
+    assert len(lasts) == len(set(lasts)) and len(props) >= 2
+
+
+def test_cmd_autocut_falls_back_to_the_next_hook(tmp_path, capsys, monkeypatch):
+    """M61: when the plan skips the hook (no sound of its own), the next candidate is tried."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 30 ", "  min_sec: 10 ")
+                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
+                   encoding="utf-8")
+    r0 = cli.load_r0_config(cfg)
+    tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+    s2 = merge_group_sentences([kept[1]], tx.words)
+    unit = U(1, s2[0][0].t0, s2[4][-1].t1 - s2[0][0].t0, "conclusion", 5, "2.1-5", summary="вывод")
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [unit]}), encoding="utf-8")
+    seen = []
+
+    def fake_check(head, line, root, cache_dir):
+        seen.append(line)
+        return (None, "    ! h:2.1 … — cold open skipped") if len(seen) == 1 else (None, "")
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+    first = seen[0].split("h:")[1].split(" ")[0]
+    second = seen[1].split("h:")[1].split(" ")[0] if "h:" in seen[1] else None
+    assert len(seen) == 2 and second != first
+    assert f"крючок h:{first} без своего звука" in text

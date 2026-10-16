@@ -60,6 +60,7 @@ class Proposal:
     score: int
     seconds: float
     notes: list[str] = field(default_factory=list)
+    hooks: list[str] = field(default_factory=list)      # M61: all hook candidates, best first
 
     def line(self, label: str) -> str:
         parts = [f"M{label} {self.score}", self.pieces]
@@ -159,19 +160,23 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     return clip
 
 
-def _hook(clip: Sequence[dict], sentences: Callable[[str], list[tuple[str, float, int, bool]]],
-          p: AutoParams) -> str | None:
+def _hooks(clip: Sequence[dict], sentences: Callable[[str], list[tuple[str, float, int, bool]]],
+           p: AutoParams) -> list[str]:
+    """Hook candidates, best first: per strong payoff/question/metaphor unit, its finished sentences of
+    hook length, longest first (M61: the check falls back to the next one when the plan skips a hook)."""
     cands = sorted((u for u in clip if u.get("role") in HOOK_ROLES and int(u.get("punch") or 0) >= p.seed_punch),
                    key=lambda u: (-int(u.get("punch") or 0), HOOK_ROLES.index(u["role"]), -u["t0"]))
+    out: list[str] = []
     for u in cands:
-        best = None
-        for ref, sec, nwords, complete in sentences(u["refs"]):
-            if complete and nwords >= p.hook_min_words and sec <= p.hook_max_sec:
-                if best is None or sec > best[1]:
-                    best = (ref, sec)
-        if best:
-            return best[0]
-    return None
+        ok = [(ref, sec) for ref, sec, nwords, complete in sentences(u["refs"])
+              if complete and nwords >= p.hook_min_words and sec <= p.hook_max_sec]
+        out += [ref for ref, _ in sorted(ok, key=lambda x: -x[1])]
+    return out
+
+
+def _hook(clip, sentences, p) -> str | None:
+    h = _hooks(clip, sentences, p)
+    return h[0] if h else None
 
 
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
@@ -191,8 +196,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if clip is None:
             continue
         ids = [u["id"] for u in clip]
-        if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units)) for o in out):
-            continue
+        if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
+               or ids[-1] == o.units[-1] for o in out):
+            continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
         used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
         secs = sum(_dur(u) for u in clip)
         roles = [u.get("role") for u in clip]
@@ -208,6 +214,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         out.append(Proposal(
             units=ids, pieces=" ".join(u["refs"] for u in clip),
             hook=_hook(clip, sentences, p) if sentences else None,
+            hooks=_hooks(clip, sentences, p) if sentences else [],
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
