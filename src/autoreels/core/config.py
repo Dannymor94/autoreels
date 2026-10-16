@@ -266,6 +266,7 @@ class AutocutConfig(BaseModel):
     overlap_max: float = Field(0.5, ge=0, le=1)
     use_filtered: bool = False
     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
+    max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)

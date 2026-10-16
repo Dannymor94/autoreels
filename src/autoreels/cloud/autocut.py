@@ -73,6 +73,7 @@ class Proposal:
     hooks: list[str] = field(default_factory=list)      # M61: all hook candidates, best first
     speed: float | None = None                          # M65: @speed by the clip's speech rate
     hook_texts: dict = field(default_factory=dict)      # M65: hook ref → (text, feature score) for ranking
+    opener: int | None = None                           # M68: the thought that gives the title (t:)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
@@ -348,9 +349,25 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
+            opener=opener["id"],
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
     return out[:p.clips]
+
+
+def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 0) -> str | None:
+    """M68: a viewer sees two reels of one source side by side — no two may open on the same thought
+    (11h42 r01/r03: both «Вы не сломаны, просто не изучали себя») nor reuse more than max_shared
+    thoughts (Pxl 112938952 M3/M5 shared 33.7 34.1-3). Returns the reason, None = distinct enough."""
+    for i, o in enumerate(accepted, 1):
+        if pr.opener is not None and pr.opener == o.opener:
+            return f"то же начало, что у M{i} (#{pr.opener})"
+        if pr.title and pr.title == o.title:
+            return f"тот же заголовок, что у M{i}"
+        shared = sorted(set(pr.units) & set(o.units))
+        if len(shared) > max_shared:
+            return f"общие мысли с M{i}: " + ", ".join(f"#{u}" for u in shared)
+    return None
 
 
 def _clean(s) -> str:

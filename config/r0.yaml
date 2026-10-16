@@ -297,6 +297,8 @@ autocut:
   overlap_max: 0.5        # a clip sharing more than half its thoughts with a better one is dropped
   use_filtered: false     # thoughts of filtered blocks (head, tail, promo) are not used
   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
+  max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
+                          # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

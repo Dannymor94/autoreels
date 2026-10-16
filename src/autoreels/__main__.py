@@ -7857,10 +7857,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     # M60: every proposal goes through the real --apply checks (plan, seams, cold open, segments) on its
     # own, in a scratch root (reviews/ there; the rest linked to the project); a proposal that fails is
     # kept only as a commented line with the reason, and the next candidate takes its place.
-    accepted, rejected = [], []
+    from autoreels.cloud.autocut import too_close
+    accepted, rejected, close = [], [], []
     for pr in pool:
         if len(accepted) >= prm.clips:
             break
+        why_close = too_close(pr, accepted, ac.max_shared)          # M68: distinct reels, checked for free first
+        if why_close:
+            close.append((pr, why_close))
+            continue
         if not check:
             accepted.append(pr)
             continue
@@ -7889,9 +7894,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             body.append(f"#   причина: {err}")
             body.append(f"#! {pr.line('')}")
         body.append("")
+    if close:
+        body.append("# --- слишком похожи на принятые (M68: своё начало и свои мысли у каждой сборки):")
+        for pr, why in close:
+            body.append(f"#   {why}: {pr.pieces}")
+        body.append("")
     out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
     print(f"autocut {stem}: предложено сборок {len(accepted)} из {len(the_map.get('units') or [])} мыслей"
-          + (f" (не прошли проверку: {len(rejected)})" if rejected else "") + f" → {out_path}")
+          + (f" (не прошли проверку: {len(rejected)})" if rejected else "")
+          + (f" (похожи на принятые: {len(close)})" if close else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")
     for pr, err in rejected:
@@ -8181,6 +8192,9 @@ def _map_foreign(m: dict, manifest) -> str:
     """M67: the map was built on another transcript than the manifest names (10h59: a local-gp map left
     in place under a Groq manifest after two sessions switched the source at once). Maps from before
     M67 carry no key and pass."""
+    sha = m.get("source_sha256") or ""
+    if sha and manifest.source_sha256 and sha != manifest.source_sha256:     # M68: another video altogether
+        return f"карта построена для другого исходника ({sha[:12]}…, а манифест — {manifest.source_sha256[:12]}…)"
     key, want = m.get("transcript_key") or "", manifest.transcript_params_key or ""
     if key and want and key != want:
         return f"карта построена по расшифровке {key}, а манифест указывает на {want}"

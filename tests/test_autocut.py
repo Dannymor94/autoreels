@@ -259,3 +259,23 @@ def test_the_model_ranks_only_the_codes_candidates():
                    hooks=["1.1", "1.2"], hook_texts={})
     assert not rank_hooks(pr2, P(['{"best": 7}', 'нет']), log=lambda m: None)   # outside → retried → code's order
     assert pr2.hook == "1.1"
+
+
+def test_accepted_clips_never_share_an_opener_a_title_or_a_thought():
+    """M68: 11h42 — two of four reels opened on «Вы не сломаны, просто не изучали себя»; Pxl 112938952 —
+    M3 and M5 both carried 33.7 34.1-3. A viewer scrolling one source must not see a reel twice."""
+    from autoreels.cloud.autocut import Proposal, too_close
+    mk = lambda units, opener, title: Proposal(units=units, pieces="", hook=None, title=title, caption="",
+                                                score=70, seconds=40.0, opener=opener)
+    a = mk([1, 2, 3], 1, "Вы не сломаны")
+    assert too_close(mk([1, 7, 8], 1, "Другое"), [a]) == "то же начало, что у M1 (#1)"
+    assert too_close(mk([9, 7, 8], 9, "Вы не сломаны"), [a]) == "тот же заголовок, что у M1"
+    assert too_close(mk([9, 3, 8], 9, "Другое"), [a]) == "общие мысли с M1: #3"
+    assert too_close(mk([9, 3, 8], 9, "Другое"), [a], max_shared=1) is None
+    assert too_close(mk([9, 10, 8], 9, "Другое"), [a]) is None
+
+
+def test_propose_records_the_opener_thought():
+    from autoreels.cloud.autocut import AutoParams, propose
+    out = propose(_units(), AutoParams(min_sec=20, target_sec=40, max_sec=90, loop=False))
+    assert out and all(o.opener in o.units for o in out)

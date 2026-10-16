@@ -342,3 +342,18 @@ def test_pool_names_who_answers_and_the_reserve(capsys):
     assert ProviderPool([loc]).describe() == "модели: Local http://192.168.3.17:8081/v1"
     cli._pool_banner(pool)
     assert "запас: Local" in capsys.readouterr().out
+
+
+def test_map_of_another_video_is_refused(tmp_path, capsys):
+    """M68: PXL_0729 re-analysed from a re-saved copy — the old map (another sha, no transcript key) must not
+    pass as «карта уже есть»."""
+    mpath = _map_source(tmp_path)
+    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
+    assert cli.cmd_map(str(mpath), provider=_MapModel(), **kw) == 0
+    mp = tmp_path / "transcripts" / "v.map.json"
+    m = json.loads(mp.read_text())
+    m["source_sha256"], m["transcript_key"] = "e" * 64, ""
+    mp.write_text(json.dumps(m))
+    capsys.readouterr()
+    assert cli.cmd_map(str(mpath), provider=_MapModel(), **kw) == 1
+    assert "для другого исходника" in capsys.readouterr().err
