@@ -8625,6 +8625,127 @@ def cmd_prepare(
     return 0 if all(not r.failed_stage for r in results) else 1
 
 
+_VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".mts")
+
+
+def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
+    """M63: one draft = the label draft (its header and block lines) + the autocut montage lines
+    (their comments and M lines, without the autocut header). Returns the number of M lines."""
+    base = label_draft.read_text(encoding="utf-8").rstrip("\n") if label_draft.is_file() else ""
+    auto = auto_draft.read_text(encoding="utf-8") if auto_draft.is_file() else ""
+    body = auto.split("\n\n", 1)[1] if "\n\n" in auto else ""
+    if not base:                                   # no label draft: the autocut draft as it is
+        out.write_text(auto, encoding="utf-8")
+    else:
+        out.write_text(base + "\n\n# ===== M56 autocut: сборки по карте =====\n" + body, encoding="utf-8")
+    return sum(1 for ln in body.splitlines() if ln.startswith("M"))
+
+
+def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
+             llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
+             encoder: str | None = None, music: str | None = None) -> int:
+    """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+
+    0. a video file → arl run (transcript + manifest; the video stays where it is);
+    1. arl prepare: speech map → alignment → intonation → motion → label draft → dry plan;
+    2. arl tx-check (report → transcripts/<stem>.txcheck.json);
+    3. arl map (LLM; an existing map is kept);
+    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply);
+    5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
+       if it fails, the autocut draft alone (its lines passed the checks);
+    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music) and the review sheet.
+    Finished stages skip themselves; a failed stage stops that source with its reason, the next goes on."""
+    _root = Path(root) if root else _project_root()
+    results: list[tuple[str, str, str]] = []           # (stem, "ok" | failed stage, note)
+    for target in targets:
+        tp = Path(target)
+        mpath = None
+        if tp.is_file() and tp.suffix.lower() in _VIDEO_EXTS:
+            print(f"\n=== auto {tp.name}: расшифровка и манифест (arl run) ===", flush=True)
+            try:
+                mpath = Path(cmd_run(tp, root=_root, cache_dir=cache_dir, archive=False))
+            except Exception as exc:  # noqa: BLE001 — AlreadyProcessed and the like: look for the manifest
+                cand = _root / "manifests" / f"{tp.stem}.json"
+                if cand.is_file():
+                    mpath = cand
+                    print(f"  манифест уже есть: {cand.name} ({type(exc).__name__})", flush=True)
+                else:
+                    results.append((tp.stem, "run", f"{type(exc).__name__}: {str(exc)[:200]}"))
+                    continue
+        else:
+            mpath = _resolve_manifest_arg(target, _root)
+            if mpath is None:
+                results.append((target, "manifest", "манифест не найден"))
+                continue
+        stem = mpath.stem
+        m = str(mpath)
+        print(f"\n=== auto {stem} ===", flush=True)
+
+        def stage(name, fn):
+            print(f"--- {name}", flush=True)
+            try:
+                rc = fn()
+            except Exception as exc:  # noqa: BLE001
+                return f"{type(exc).__name__}: {str(exc)[:200]}"
+            return f"rc={rc}" if isinstance(rc, int) and not isinstance(rc, bool) and rc != 0 else None
+
+        err = stage("подготовка (карта речи, выравнивание, интонация, движение, разметка)",
+                    lambda: cmd_prepare([m], root=_root, inputs_dir=inputs_dir, cache_dir=cache_dir))
+        if err:
+            results.append((stem, "prepare", err))
+            continue
+        stage("проверка расшифровки", lambda: cmd_tx_check([m], root=_root, cache_dir=cache_dir))
+        err = stage("карта источника", lambda: cmd_map(m, root=_root, cache_dir=cache_dir, llm=llm))
+        if err:
+            results.append((stem, "map", err))
+            continue
+        err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips))
+        if err:
+            results.append((stem, "autocut", err))
+            continue
+        label_draft = _root / "reviews" / f"{stem}_auto.txt"
+        auto_draft = _root / "reviews" / f"{stem}_auto_m56.txt"
+        combined = _root / "reviews" / f"{stem}_auto_all.txt"
+        n_m = _merge_drafts(label_draft, auto_draft, combined)
+        print(f"--- черновик {combined.name}: строки разметки + сборок {n_m}", flush=True)
+        used = combined
+        err = stage("план (--apply без --install)",
+                    lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto"))
+        note = ""
+        if err:
+            note = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
+            print(f"  ⚠ {note}", flush=True)
+            used = auto_draft
+            err = stage("план по черновику сборок",
+                        lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto"))
+            if err:
+                results.append((stem, "apply", err))
+                continue
+        review_json = _root / "reviews" / f"{stem}.review.json"
+        if render:
+            try:
+                n = len(Manifest.model_validate_json(review_json.read_text(encoding="utf-8")).reels)
+            except Exception as exc:  # noqa: BLE001
+                results.append((stem, "apply", f"нет {review_json.name}: {type(exc).__name__}"))
+                continue
+            if n:
+                err = stage(f"рендер {n} клипов → _gate/{gate}",
+                            lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
+                                               gate_name=gate, encoder=encoder, music=music, _raise_on_failure=False))
+                if err:
+                    results.append((stem, "render", err))
+                    continue
+                stage("лист ревью", lambda: cmd_review_sheet(stem, root=_root, cache_dir=cache_dir, review=str(used),
+                                                             manifest_file=str(review_json), gate=gate,
+                                                             preview="none"))
+        results.append((stem, "ok", note or f"черновик {used.name}"))
+    print("\n=== auto: итог ===", flush=True)
+    for stem, st, note in results:
+        print(f"  {'✓' if st == 'ok' else '✗'} {stem}: " + ("готово" if st == "ok" else f"остановлен на «{st}»")
+              + (f" — {note}" if note else ""), flush=True)
+    return 0 if all(st == "ok" for _, st, _ in results) else 1
+
+
 def cmd_prosody(
     manifest_path: str,
     *,
@@ -11047,6 +11168,21 @@ def _build_parser():
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
+    pau = sub.add_parser(
+        "auto",
+        help="M63: источник целиком до листа ревью — подготовка, проверка расшифровки, карта, автосборщик, план, рендер",
+    )
+    pau.add_argument("targets", metavar="видео_или_манифест", nargs="+",
+                     help="видеофайл (сначала arl run) или манифест/имя в manifests/")
+    pau.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default="auto", help="модель карты")
+    pau.add_argument("--clips", type=int, default=None, help="сколько сборок предложить")
+    pau.add_argument("--no-render", action="store_false", dest="render", help="без рендера и листа")
+    pau.add_argument("--gate", default="auto", help="папка рендера reels-out/<stem>/_gate/<имя>/")
+    pau.add_argument("--encoder", default=None)
+    pau.add_argument("--music", default=None, help="фоновая музыка (файл в music/)")
+    pau.add_argument("--root", default=None)
+    pau.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     pxc = sub.add_parser(
         "tx-compare",
         help="M62: расшифровка заново на gamebox (whisper.cpp) и сравнение с Groq — ничего не заменяет",
@@ -11452,6 +11588,10 @@ def main(argv=None) -> int:
         elif args.cmd == "map":
             return cmd_map(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                            llm=args.llm, force=args.force)
+        elif args.cmd == "auto":
+            return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
+                            llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
+                            encoder=args.encoder, music=args.music)
         elif args.cmd == "tx-compare":
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
