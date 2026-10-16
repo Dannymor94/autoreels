@@ -152,3 +152,13 @@ def test_tx_use_switches_the_source_and_back(tmp_path, capsys):
     assert cli.cmd_tx_use("v", "groq", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
     assert "уже на этой расшифровке" in capsys.readouterr().out
     assert cli.cmd_tx_use("v", "local-x", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1
+
+
+def test_a_prompt_is_not_dropped_by_mc_zero():
+    """M64b: with -mc 0 whisper.cpp throws the prompt away — the «p1» variant came out word for word the
+    same as the plain one. A prompt runs with prompt_context instead."""
+    be = WhisperCppBackend(WhisperCppParams(prompt="Итак, начнём. Что это значит?"))
+    run = be.commands(Path("/c/a.mp3"), Path("/t/a.wav"), Path("/t/a.json"))[3][2]
+    assert "-mc 64" in run and "-mc 0" not in run and be.describe()["model"].endswith("+mc64")
+    plain = WhisperCppBackend(WhisperCppParams()).commands(Path("/c/a.mp3"), Path("/t/a.wav"), Path("/t/a.json"))[3][2]
+    assert "-mc 0" in plain

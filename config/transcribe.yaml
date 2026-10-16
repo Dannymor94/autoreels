@@ -38,3 +38,4 @@ whispercpp:
   extra_args: ""
   remote_dir: ~/autoreels_tx
   prompt: ""                # M64: подсказка стиля пунктуации (--prompt); "" = без неё. С VAD утечки реже, но проверяй tx-check
+  prompt_context: 64        # M64b: с подсказкой и max_context 0 берётся -mc 64 (при -mc 0 whisper.cpp подсказку выбрасывает)

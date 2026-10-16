@@ -337,6 +337,15 @@ class WhisperCppBackend:
         if r.returncode != 0:
             raise TranscriptionError(f"{argv[0]} rc={r.returncode}: {(r.stderr or r.stdout)[-400:]}")
 
+    def _mc(self) -> int:
+        """-mc: whisper.cpp keeps the initial prompt as text context, cut to max_context tokens — with
+        -mc 0 the prompt is dropped (M64: the «p1» prompt changed nothing). A prompt with max_context 0
+        runs with prompt_context instead."""
+        c = self._cfg
+        if c.prompt and int(c.max_context) == 0:
+            return int(c.prompt_context)
+        return int(c.max_context)
+
     def commands(self, audio_path: Path, wav: Path, out_json: Path) -> list[list[str]]:
         """The argv steps (pure): convert, [mkdir + copy], transcribe, [copy back + clean up]."""
         import shlex
@@ -345,7 +354,7 @@ class WhisperCppBackend:
         rdir = c.remote_dir.rstrip("/")
         remote_wav, remote_out = f"{rdir}/{name}.wav", f"{rdir}/{name}"
         cli = (f"{c.cli} -m {c.model} -f {{wav}} -l {c.language} -t {int(c.threads)} -ml 1 -sow -oj "
-               f"-mc {int(c.max_context)}" + (f" --vad -vm {c.vad_model}" if c.vad_model else "")
+               f"-mc {self._mc()}" + (f" --vad -vm {c.vad_model}" if c.vad_model else "")
                + (f" --prompt {shlex.quote(c.prompt)}" if c.prompt else "")
                + (f" {c.extra_args}" if c.extra_args else "") + " -of {out}")
         cli = cli.replace("{", "{{").replace("}", "}}").replace("{{wav}}", "{wav}").replace("{{out}}", "{out}")
@@ -378,7 +387,7 @@ class WhisperCppBackend:
 
     def describe(self) -> dict:
         c = self._cfg
-        model = Path(str(c.model)).name + ("+vad" if c.vad_model else "") + f"+mc{int(c.max_context)}"
+        model = Path(str(c.model)).name + ("+vad" if c.vad_model else "") + f"+mc{self._mc()}"
         ph = hashlib.sha256(c.prompt.encode("utf-8")).hexdigest()[:12] if c.prompt else ""
         return {"provider": "whispercpp", "model": model, "prompt_hash": ph}
 
