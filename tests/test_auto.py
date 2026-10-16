@@ -98,3 +98,18 @@ def test_auto_starts_from_a_video_with_arl_run(tmp_path, monkeypatch):
     assert cli.cmd_auto([str(video)], root=tmp_path, render=False) == 0
     assert seen and seen[0][1]["archive"] is False
     assert [c[0] for c in calls][:1] == ["prepare"] and "render" not in [c[0] for c in calls]
+
+
+def test_auto_tx_switch_sets_the_backend_for_a_new_video(tmp_path, monkeypatch):
+    import os
+    from autoreels import __main__ as cli
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"VIDEO")
+    seen = []
+    monkeypatch.setenv("TRANSCRIBE_BACKEND", "groq")     # teardown restores the original (cmd_auto sets it)
+    monkeypatch.setattr(cli, "cmd_run", lambda v, **k: seen.append(os.environ.get("TRANSCRIBE_BACKEND")) or mpath)
+    _stub(monkeypatch, tmp_path)
+    assert cli.cmd_auto([str(video)], root=tmp_path, render=False, tx="local") == 0
+    assert seen == ["whispercpp"]

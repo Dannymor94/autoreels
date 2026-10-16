@@ -109,3 +109,46 @@ def test_cmd_tx_compare_keeps_the_groq_transcript(tmp_path, capsys):
     assert sorted(p.name for p in (tmp_path / "cache").iterdir()) == before           # cache untouched
     assert cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()),
                                           tmp_path / "cache").words == groq.words
+
+
+def test_prompt_option_goes_to_whisper_and_into_the_key():
+    be = WhisperCppBackend(WhisperCppParams(prompt="Привет, мир. Как дела?"))
+    run = be.commands(Path("/c/a.mp3"), Path("/t/a.wav"), Path("/t/a.json"))[3][2]
+    assert "--prompt 'Привет, мир. Как дела?'" in run
+    assert be.describe()["prompt_hash"] and WhisperCppBackend(WhisperCppParams()).describe()["prompt_hash"] == ""
+
+
+def test_tx_use_switches_the_source_and_back(tmp_path, capsys):
+    """M64: one command switches a source between transcripts; what was built from the old one goes to
+    the archive and comes back on the way back; owner files are only warned about."""
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    td, rv = tmp_path / "transcripts", tmp_path / "reviews"
+    td.mkdir(exist_ok=True)
+    m0 = Manifest.model_validate_json(mpath.read_text())
+    groq = cli._resolve_cached_transcript(m0, tmp_path / "cache")
+    local = Transcript(language="ru", words=list(groq.words)[:50], provider="whispercpp", model="turbo+vad+mc0")
+    (td / "v.local.transcript.json").write_text(local.model_dump_json(), encoding="utf-8")
+    for n in ("v.speechmap.json", "v.align.json", "v.map.json"):
+        (td / n).write_text("{}", encoding="utf-8")
+    (rv / "v_auto.txt").write_text("draft", encoding="utf-8")
+    (rv / "v_spec.txt").write_text("owner", encoding="utf-8")
+    assert cli.cmd_tx_use("v", "local", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    out = capsys.readouterr().out
+    m1 = Manifest.model_validate_json(mpath.read_text())
+    assert m1.transcript_params_key and m1.transcript_params_key != m0.transcript_params_key
+    assert len(cli._resolve_cached_transcript(m1, tmp_path / "cache").words) == 50
+    assert not (td / "v.align.json").exists() and not (rv / "v_auto.txt").exists()
+    assert "v_spec.txt" in out and (rv / "v_spec.txt").exists()
+    (td / "v.align.json").write_text('{"new": 1}', encoding="utf-8")       # built on the local transcript
+    assert cli.cmd_tx_use("v", "groq", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    out = capsys.readouterr().out
+    m2 = Manifest.model_validate_json(mpath.read_text())
+    assert cli._resolve_cached_transcript(m2, tmp_path / "cache").words == groq.words
+    assert (td / "v.align.json").read_text() == "{}" and (rv / "v_auto.txt").read_text() == "draft"   # restored
+    assert "возвращено из архива" in out
+    assert cli.cmd_tx_use("v", "groq", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    assert "уже на этой расшифровке" in capsys.readouterr().out
+    assert cli.cmd_tx_use("v", "local-x", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1

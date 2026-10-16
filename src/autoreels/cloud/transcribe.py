@@ -346,7 +346,9 @@ class WhisperCppBackend:
         remote_wav, remote_out = f"{rdir}/{name}.wav", f"{rdir}/{name}"
         cli = (f"{c.cli} -m {c.model} -f {{wav}} -l {c.language} -t {int(c.threads)} -ml 1 -sow -oj "
                f"-mc {int(c.max_context)}" + (f" --vad -vm {c.vad_model}" if c.vad_model else "")
+               + (f" --prompt {shlex.quote(c.prompt)}" if c.prompt else "")
                + (f" {c.extra_args}" if c.extra_args else "") + " -of {out}")
+        cli = cli.replace("{", "{{").replace("}", "}}").replace("{{wav}}", "{wav}").replace("{{out}}", "{out}")
         env = f"source {c.env} >/dev/null 2>&1; " if c.env else ""
         steps = [[self._ffmpeg, "-v", "error", "-y", "-i", str(audio_path), "-ar", "16000", "-ac", "1",
                   "-c:a", "pcm_s16le", str(wav)]]
@@ -377,7 +379,8 @@ class WhisperCppBackend:
     def describe(self) -> dict:
         c = self._cfg
         model = Path(str(c.model)).name + ("+vad" if c.vad_model else "") + f"+mc{int(c.max_context)}"
-        return {"provider": "whispercpp", "model": model, "prompt_hash": ""}
+        ph = hashlib.sha256(c.prompt.encode("utf-8")).hexdigest()[:12] if c.prompt else ""
+        return {"provider": "whispercpp", "model": model, "prompt_hash": ph}
 
 
 def get_backend(config=None) -> TranscriptionBackend:

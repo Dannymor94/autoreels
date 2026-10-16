@@ -7678,7 +7678,8 @@ def _txcheck_params(r0_cfg, root=None):
     try:
         _tp = (Path(root) if root else _project_root()) / "config" / "transcribe.yaml"
         if _tp.is_file():
-            leak = tuple(prompt_patterns(load_transcribe_config(_tp).groq.initial_prompt))
+            _tc = load_transcribe_config(_tp)
+            leak = tuple(prompt_patterns(_tc.groq.initial_prompt) + prompt_patterns(_tc.whispercpp.prompt))
     except Exception:  # noqa: BLE001 — a broken transcribe.yaml must not stop the check
         leak = ()
     return TxCheckParams(repeat_words=tc.repeat_words, repeat_far_sec=tc.repeat_far_sec,
@@ -7903,7 +7904,7 @@ def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[s
 
 
 def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
-                   force: bool = False, backend=None) -> int:
+                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "") -> int:
     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
     Groq transcript), compared word by word with the Groq one, both run through tx-check →
@@ -7926,7 +7927,9 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
     tcfg = load_transcribe_config(_root / "config" / "transcribe.yaml")
     prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
-    be = backend or WhisperCppBackend(tcfg.whispercpp)
+    wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
+    be = backend or WhisperCppBackend(wcfg)
+    suffix = f".local-{tag}" if tag else ".local"            # M64: variants side by side
     rc = 0
     for mpath in paths:
         try:
@@ -7941,7 +7944,7 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
             print(f"== {stem}: транскрипт Groq не найден", file=sys.stderr)
             rc = 1
             continue
-        local_path = _root / "transcripts" / f"{stem}.local.transcript.json"
+        local_path = _root / "transcripts" / f"{stem}{suffix}.transcript.json"
         if local_path.is_file() and not force:
             local = Transcript.model_validate_json(local_path.read_text(encoding="utf-8"))
             took = "из файла"
@@ -7984,12 +7987,14 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
         rep = {"stem": stem, "compare": cmp_,
                "groq": {k: cg[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cg["known"]), "repeat": len(cg["repeat"])},
                "local": {k: cl[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cl["known"]), "repeat": len(cl["repeat"])}}
-        (_root / "transcripts" / f"{stem}.txcompare.json").write_text(_json.dumps(rep, ensure_ascii=False, indent=1),
+        (_root / "transcripts" / f"{stem}{suffix.replace('.local', '.txcompare')}.json").write_text(_json.dumps(rep, ensure_ascii=False, indent=1),
                                                                    encoding="utf-8")
         g, l_ = rep["groq"], rep["local"]
         print(f"== {stem} (локально: {took}): слов Groq {cmp_['ref_words']}, локально {cmp_['other_words']}, "
               f"совпало {cmp_['matched']}, различается {cmp_['differ']}%")
-        print(f"   конец предложения на 100 слов: Groq {cmp_['ref_sent_ends']}, локально {cmp_['other_sent_ends']}")
+        _avg = lambda e: f"{100 / e:.0f}" if e else "∞"
+        print(f"   конец предложения на 100 слов: Groq {cmp_['ref_sent_ends']}, локально {cmp_['other_sent_ends']}"
+              f" (слов в предложении: Groq {_avg(cmp_['ref_sent_ends'])}, локально {_avg(cmp_['other_sent_ends'])})")
         print(f"   выдумки на речи: Groq {g['serious']} (известных {g['known']}, повторов {g['repeat']}), "
               f"локально {l_['serious']} (известных {l_['known']}, повторов {l_['repeat']}); "
               f"звук без слов: Groq {g['sparse_sec']:.0f} с, локально {l_['sparse_sec']:.0f} с")
@@ -8625,6 +8630,89 @@ def cmd_prepare(
     return 0 if all(not r.failed_stage for r in results) else 1
 
 
+# M64: what is built from a transcript (rebuilt by arl prepare / arl map after a switch) and the drafts
+# made from it; owner files (*_spec.txt, *_answer.txt, gate copies) stay — their fingerprint refuses --apply.
+_TX_DERIVED = (".speechmap.json", ".align.json", ".prosody.json", ".map.json", ".txcheck.json")
+_TX_DRAFTS = ("_auto.txt", "_auto_m56.txt", "_auto_all.txt")
+
+
+def cmd_tx_use(target: str, which: str, *, root=None, cache_dir=None) -> int:
+    """M64: switch a source to another transcript — Groq or a whisper.cpp variant made by tx-compare.
+
+    The chosen transcript goes to the cache (stamped provider/model/source) and the manifest's
+    transcript_params_key points at it (the manifest is in git: other machines follow). What was built
+    from the old transcript — speech map, alignment, intonation, map, check, auto drafts — moves to
+    transcripts/_archive/<stem>/<old key>/ (drafts to reviews/_archive/…); switching back restores it.
+    Owner files are not touched; their fingerprint makes --apply refuse them (printed). Next: arl auto."""
+    import shutil
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem, sha = mpath.stem, manifest.source_sha256
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    current = _resolve_cached_transcript(manifest, _cache)
+    old_key = (transcript_identity(current) if current is not None else manifest.transcript_params_key) or "unstamped"
+    if which == "groq":
+        cands = []
+        for p in _cache.glob("*.transcript.json"):
+            try:
+                t = Transcript.model_validate_json(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if t.source_sha256 == sha and t.provider == "groq":
+                cands.append((p.stat().st_mtime, t))
+        if not cands:
+            print(f"ошибка: расшифровки Groq для {stem} в кэше нет", file=sys.stderr)
+            return 1
+        new = max(cands, key=lambda x: x[0])[1]
+    else:
+        src = _root / "transcripts" / f"{stem}.{which}.transcript.json"
+        if not src.is_file():
+            print(f"ошибка: нет {src.name} — сначала arl tx-compare {stem}"
+                  + (f" --tag {which[6:]}" if which.startswith("local-") else ""), file=sys.stderr)
+            return 1
+        new = Transcript.model_validate_json(src.read_text(encoding="utf-8"))
+        if not new.provider:
+            new = new.model_copy(update={"provider": "whispercpp", "model": which})
+        new = new.model_copy(update={"source_sha256": sha})
+    new_key = transcript_identity(new)
+    if new_key == old_key:
+        print(f"{stem}: уже на этой расшифровке ({which}, ключ {new_key})")
+        return 0
+    if which != "groq":
+        (_cache / f"{sha[:16]}.{new_key}.transcript.json").write_text(new.model_dump_json(), encoding="utf-8")
+    # derived files: archive the old ones, restore the new key's if it was used before
+    moved, restored = [], []
+    for kind, base, names in (("transcripts", _root / "transcripts", [stem + s for s in _TX_DERIVED]),
+                              ("reviews", _root / "reviews", [stem + s for s in _TX_DRAFTS])):
+        arch_old = base / "_archive" / stem / old_key
+        arch_new = base / "_archive" / stem / new_key
+        for n in names:
+            f = base / n
+            if f.is_file():
+                arch_old.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(f), str(arch_old / n))
+                moved.append(f"{kind}/{n}")
+            if (arch_new / n).is_file():
+                shutil.move(str(arch_new / n), str(f))
+                restored.append(f"{kind}/{n}")
+    mpath.write_text(manifest.model_copy(update={"transcript_params_key": new_key}).model_dump_json(indent=2),
+                     encoding="utf-8")
+    owner = sorted(p.name for p in (_root / "reviews").glob(f"{stem}_*.txt")
+                   if not any(p.name == stem + d for d in _TX_DRAFTS)) if (_root / "reviews").is_dir() else []
+    print(f"{stem}: расшифровка {old_key} → {which} ({new_key}), слов {len(new.words)}")
+    print(f"  в архив: {len(moved)}" + (f" ({', '.join(moved)})" if moved else ""))
+    if restored:
+        print(f"  возвращено из архива: {', '.join(restored)}")
+    if owner:
+        print(f"  ⚠ разметка на прежней расшифровке (--apply её не примет — другой отпечаток блоков): {', '.join(owner)}")
+    print(f"  манифест {mpath.name} обновлён (git) · дальше: arl auto {stem}")
+    return 0
+
+
 _VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".mts")
 
 
@@ -8643,7 +8731,7 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
 
 def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
-             encoder: str | None = None, music: str | None = None) -> int:
+             encoder: str | None = None, music: str | None = None, tx: str | None = None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
@@ -8656,6 +8744,8 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     6. render into reels-out/<stem>/_gate/<gate>/ (+ --music) and the review sheet.
     Finished stages skip themselves; a failed stage stops that source with its reason, the next goes on."""
     _root = Path(root) if root else _project_root()
+    if tx:                                             # M64: transcription backend of a new video's arl run
+        os.environ["TRANSCRIBE_BACKEND"] = {"local": "whispercpp"}.get(tx, tx)
     results: list[tuple[str, str, str]] = []           # (stem, "ok" | failed stage, note)
     for target in targets:
         tp = Path(target)
@@ -11168,6 +11258,15 @@ def _build_parser():
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
+    ptu = sub.add_parser(
+        "tx-use",
+        help="M64: перевести источник на другую расшифровку (groq | local | local-<tag>); прежние производные — в архив",
+    )
+    ptu.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    ptu.add_argument("which", help="groq | local | local-<tag> (файл transcripts/<stem>.<which>.transcript.json)")
+    ptu.add_argument("--root", default=None)
+    ptu.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     pau = sub.add_parser(
         "auto",
         help="M63: источник целиком до листа ревью — подготовка, проверка расшифровки, карта, автосборщик, план, рендер",
@@ -11180,6 +11279,7 @@ def _build_parser():
     pau.add_argument("--gate", default="auto", help="папка рендера reels-out/<stem>/_gate/<имя>/")
     pau.add_argument("--encoder", default=None)
     pau.add_argument("--music", default=None, help="фоновая музыка (файл в music/)")
+    pau.add_argument("--tx", default=None, help="M64: расшифровка нового видео: groq | local (whisper.cpp на gamebox)")
     pau.add_argument("--root", default=None)
     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -11190,6 +11290,8 @@ def _build_parser():
     pxc.add_argument("manifest", metavar="манифест", nargs="*", help="пути к манифестам или имена")
     pxc.add_argument("--all", action="store_true", dest="all_sources", help="все манифесты в manifests/")
     pxc.add_argument("--force", action="store_true", help="расшифровать заново, даже если файл уже есть")
+    pxc.add_argument("--prompt", default=None, help="M64: подсказка стиля пунктуации для whisper.cpp (иначе из конфига)")
+    pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
     pxc.add_argument("--root", default=None)
     pxc.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -11591,11 +11693,14 @@ def main(argv=None) -> int:
         elif args.cmd == "auto":
             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
-                            encoder=args.encoder, music=args.music)
+                            encoder=args.encoder, music=args.music, tx=args.tx)
         elif args.cmd == "tx-compare":
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
-                                  force=args.force)
+                                  force=args.force, prompt=args.prompt, tag=args.tag)
+        elif args.cmd == "tx-use":
+            return cmd_tx_use(args.manifest, args.which, root=getattr(args, "root", None),
+                              cache_dir=getattr(args, "cache_dir", None))
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,

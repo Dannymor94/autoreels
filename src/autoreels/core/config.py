@@ -975,6 +975,7 @@ class WhisperCppParams(BaseModel):
     max_context: int = 0                        # -mc: 0 = no prompting from the previous text
     extra_args: str = ""
     remote_dir: str = "~/autoreels_tx"
+    prompt: str = ""                            # M64: --prompt (punctuation style); "" = none
 
 
 class TranscribeConfig(BaseModel):
