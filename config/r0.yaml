@@ -335,6 +335,9 @@ map:
   window_units: 8         # thoughts per LLM request (M54b: 20 overflowed max_output_tokens 900 — passports cut off)
   similar_min: 0.30       # character-n-gram cosine from which two thoughts count as similar
   similar_far_sec: 60     # similar thoughts are listed only when at least this far apart
+  max_missing: 0.1        # M66: more than this share of thoughts without a passport (or no topics) → the map is
+                          # incomplete: arl map returns 3, auto stops on «map», autocut refuses; arl map again
+                          # asks only what is missing (10h59 local-gp: Groq out of tokens, 144 of 152 → 0 clips)
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.

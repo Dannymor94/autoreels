@@ -251,8 +251,9 @@ def _valid_passport(e: dict, ids: set[int], uid: int) -> dict | None:
 
 
 def describe_units(units: Sequence[Unit], provider, *, system: str, p: MapParams = MapParams(),
-                   log: Callable[[str], None] = print) -> tuple[int, int]:
+                   log: Callable[[str], None] = print, known: dict | None = None) -> tuple[int, int]:
     """Passports window by window; unanswered units asked once more, then marked missing.
+    `known` (M66): passports already described (a previous, incomplete map) — only the others are asked.
     Returns (described, missing)."""
     ids = {u.id for u in units}
     by_id = {u.id: u for u in units}
@@ -281,9 +282,10 @@ def describe_units(units: Sequence[Unit], provider, *, system: str, p: MapParams
                     got[uid] = v
         return got
 
-    done: dict[int, dict] = {}
-    for k in range(0, len(units), p.window_units):
-        batch = list(units[k:k + p.window_units])
+    done: dict[int, dict] = {uid: v for uid, v in (known or {}).items() if uid in ids}
+    todo = [u for u in units if u.id not in done]
+    for k in range(0, len(todo), p.window_units):
+        batch = list(todo[k:k + p.window_units])
         done.update(ask(batch))
         log(f"  мысли #{batch[0].id}–#{batch[-1].id}: описано {sum(1 for b in batch if b.id in done)} из {len(batch)}")
     missing = [u for u in units if u.id not in done]

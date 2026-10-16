@@ -7786,6 +7786,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         print(f"ошибка: транскрипт не найден для {stem}", file=sys.stderr)
         return 1
     r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
+    if gaps:
+        print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
+              f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
+        return 1
     ac = r0_cfg.autocut
     prm = AutoParams(clips=clips or ac.clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
                      max_pieces=ac.max_pieces, min_punch=ac.min_punch, seed_punch=ac.seed_punch,
@@ -8031,7 +8036,8 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     from autoreels.cloud.edit import _ends_terminal, merge_group_sentences, strip_credit_words
     from autoreels.cloud.plan import SpeechTimes, load_alignment
     from autoreels.cloud.thoughtmap import (
-        MapParams, Sentence, build_map, describe_units, similar_units, split_units, topic_units, voice_scores,
+        MapParams, Sentence, build_map, describe_units, similar_units, split_units, topic_units, unit_refs,
+        voice_scores,
     )
     from autoreels.local.map_page import build_map_page, write_map_json
     _root = Path(root) if root else _project_root()
@@ -8043,12 +8049,17 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     stem = mpath.stem
     out_json = _root / "transcripts" / f"{stem}.map.json"
     vdir = (Path(out_dir) if out_dir else _root / "reels-out") / Path(manifest.source).stem
+    old_map = None
     if out_json.is_file() and not force:
         m = _json.loads(out_json.read_text(encoding="utf-8"))
-        vdir.mkdir(parents=True, exist_ok=True)
-        (vdir / "_map.html").write_text(build_map_page(m), encoding="utf-8")
-        print(f"✓ карта уже есть: {out_json} (пересчитать: --force); страница → {vdir / '_map.html'}")
-        return 0
+        gaps = _map_gaps(m)
+        if not gaps or llm == "none" or m.get("source_sha256") != manifest.source_sha256:
+            vdir.mkdir(parents=True, exist_ok=True)
+            (vdir / "_map.html").write_text(build_map_page(m), encoding="utf-8")
+            print(f"✓ карта уже есть: {out_json} (пересчитать: --force); страница → {vdir / '_map.html'}")
+            return 0
+        old_map = m                                    # M66: incomplete — ask only what is missing
+        print(f"карта {stem} неполна ({'; '.join(gaps)}) — дозапрашиваю только недостающее (заново: --force)")
     r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
     mc = r0_cfg.map
     prm = MapParams(unit_min_sec=mc.unit_min_sec, unit_max_sec=mc.unit_max_sec, unit_max_sents=mc.unit_max_sents,
@@ -8113,7 +8124,17 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
             provider.preflight()
         model = getattr(provider, "name", None) or type(provider).__name__
         system = (_root / mc.system).read_text(encoding="utf-8")
-        done, missing = describe_units(units, provider, system=system, p=prm, log=lambda x: print(x, flush=True))
+        known: dict[int, dict] = {}
+        if old_map:
+            prev = {u.get("id"): u for u in old_map.get("units") or []}
+            for u in units:
+                o = prev.get(u.id)
+                if (o and not o.get("missing") and o.get("role") and o.get("refs") == unit_refs(u)
+                        and abs(float(o.get("t0") or 0) - u.t0) < 0.05):
+                    known[u.id] = {k: o.get(k) for k in ("role", "punch", "standalone", "refers", "summary")}
+            print(f"  из прежней карты: паспортов {len(known)} из {len(units)}")
+        done, missing = describe_units(units, provider, system=system, p=prm, log=lambda x: print(x, flush=True),
+                                       known=known)
         print(f"  паспорта: {done} мыслей, без ответа {missing}")
         topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True))
     similar_units(units, prm)
@@ -8125,7 +8146,25 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     n_strong = sum(1 for u in m["units"] if (u.get("punch") or 0) >= 4)
     n_sim = sum(1 for u in m["units"] if u.get("similar"))
     print(f"→ {out_json}\n→ {vdir / '_map.html'}\n  сильных (★4–5): {n_strong}, с похожими далеко: {n_sim}")
+    gaps = _map_gaps(m, mc.max_missing) if llm != "none" else []
+    if gaps:
+        print(f"✗ карта неполна: {'; '.join(gaps)} — модель не отвечала (лимит облака? локальный сервер?). "
+              f"Повтори arl map \"{stem}\": дозапросит только недостающее", flush=True)
+        return 3
     return 0
+
+
+def _map_gaps(m: dict, max_missing: float = 0.0, topics: bool = True) -> list[str]:
+    """M66: what is missing in a map — thoughts without a passport (more than max_missing of them) and
+    the topics (autocut works without them: every thought is then one topic). Empty = complete."""
+    units = m.get("units") or []
+    out = []
+    miss = sum(1 for u in units if u.get("missing") or not u.get("role"))
+    if units and miss > max_missing * len(units):
+        out.append(f"без паспорта {miss} из {len(units)} мыслей")
+    if topics and units and not any(t.get("id") for t in m.get("topics") or []):
+        out.append("темы не получены")
+    return out
 
 
 def cmd_blocks_text(target: str, *, root=None, cache_dir=None, blocks: str | None = None,

@@ -192,3 +192,70 @@ def test_voice_profile_measures_level_pitch_and_range():
     assert v["level_db"] == pytest.approx(-13.5, abs=1.0)
     assert v["pitch_st"] == pytest.approx(3.0, abs=0.6) and v["range_st"] == pytest.approx(4.8, abs=0.8)
     assert prof(0.0, 0.2) == {"level_db": None, "pitch_st": None, "range_st": None}
+
+
+def test_describe_units_asks_only_the_units_without_a_known_passport():
+    """M66: a resumed map — passports from the previous map are kept, only the rest is asked."""
+    units = _units(5)
+    prov = Scripted([{"units": [_pp(2), _pp(4)]}, {"units": [_pp(5)]}])
+    known = {1: _pp(1) | {"summary": "старое"}, 3: _pp(3)}
+    known = {k: {x: v[x] for x in ("role", "punch", "standalone", "refers", "summary")} for k, v in known.items()}
+    done, missing = describe_units(units, prov, system="S", p=MapParams(window_units=2), log=lambda m: None,
+                                   known=known)
+    assert (done, missing) == (5, 0) and len(prov.calls) == 2
+    asked = prov.calls[0][-1]["content"].split("Describe EVERY one of these units:")[1]
+    assert "#2 " in asked and "#4 " in asked and "#1 " not in asked and "#3 " not in asked
+    assert units[0].info["summary"] == "старое"
+
+
+def test_cmd_map_incomplete_returns_3_and_the_next_run_asks_only_what_is_missing(tmp_path, capsys):
+    """M66: 10h59 local-gp — Groq out of tokens after 8 of 152 thoughts, the map was written as if done and
+    autocut proposed 0 clips. Now: rc 3 + «карта неполна», autocut refuses, a rerun fills the gaps only."""
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts" / "map_system.md").write_text("S", encoding="utf-8")
+
+    class Model:
+        name = "scripted"
+
+        def __init__(self, budget):
+            self.budget, self.asked = budget, []
+
+        def complete(self, messages, temperature=0.0):
+            if self.budget <= 0:
+                raise RuntimeError("rate limit")
+            self.budget -= 1
+            q = messages[-1]["content"]
+            if q.startswith("TOPICS"):
+                ids = [int(x[1:]) for x in q.split() if x.startswith("#") and x[1:].isdigit()]
+                return json.dumps({"topics": [{"name": "Всё", "units": ids}]})
+            part = q.split("Describe EVERY one of these units:")[1]
+            ids = [int(x[1:]) for x in part.split() if x.startswith("#") and x[1:].isdigit()]
+            self.asked += ids
+            return json.dumps({"units": [_pp(i) for i in ids]})
+
+    import re
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", cfg.read_text(encoding="utf-8")),
+                   encoding="utf-8")
+    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
+    first = Model(budget=1)                                     # one window answered, then the limit
+    assert cli.cmd_map(str(mpath), provider=first, **kw) == 3
+    out = capsys.readouterr().out
+    assert "✗ карта неполна" in out and "без паспорта" in out and "темы не получены" in out
+    m = json.loads((tmp_path / "transcripts" / "v.map.json").read_text(encoding="utf-8"))
+    n, had = len(m["units"]), set(first.asked)
+    assert 0 < len(had) < n and sum(1 for u in m["units"] if u.get("missing")) == n - len(had)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1
+    assert "карта неполна" in capsys.readouterr().err
+    second = Model(budget=99)
+    assert cli.cmd_map(str(mpath), provider=second, **kw) == 0
+    out = capsys.readouterr().out
+    assert "неполна" in out and f"паспортов {len(had)} из {n}" in out
+    assert set(second.asked) == {u["id"] for u in m["units"]} - had          # nothing asked twice
+    m2 = json.loads((tmp_path / "transcripts" / "v.map.json").read_text(encoding="utf-8"))
+    assert not any(u.get("missing") for u in m2["units"]) and m2["topics"][0]["name"] == "Всё"
+    third = Model(budget=99)                                    # complete now: kept, no call
+    assert cli.cmd_map(str(mpath), provider=third, **kw) == 0 and third.asked == []
+    assert "карта уже есть" in capsys.readouterr().out
