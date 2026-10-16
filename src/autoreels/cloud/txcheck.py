@@ -33,6 +33,8 @@ class TxCheckParams:
     sparse_min_speech_sec: float = 6.0
     sparse_max_rate: float = 0.8
     known: tuple[str, ...] = field(default=KNOWN)
+    on_speech_sec: float = 2.0        # M60: speech heard around a flagged place → «на речи»
+    sparse_suspicious_sec: float = 60.0   # M60: this much «sound without words» makes a transcript suspicious
 
 
 def _norm(w: str) -> str:
@@ -164,9 +166,29 @@ def check(words, intervals: Sequence[Sequence[float]] | None = None, p: TxCheckP
     sp = sparse(words, intervals or [], win=p.sparse_win_sec, min_speech=p.sparse_min_speech_sec,
                 max_rate=p.sparse_max_rate)
     sparse_sec = round(sum(s["b"] - s["a"] for s in sp), 1)
+    has_map = intervals is not None and len(intervals) > 0
+    if has_map:
+        # M60: an invention in silence (Whisper fills pauses with «Продолжение следует…») only leaks into
+        # a clip that plays that pause; one ON speech hides what was said. Seconds of speech heard in
+        # [t − 1, t + 4] decide (≥ on_speech_sec → on speech).
+        end = max(float(b) for _, b in intervals)
+        bins = _speech_bins(intervals, end + 5.0)
+        acc = [0.0]
+        for v in bins:
+            acc.append(acc[-1] + v)
+
+        def heard(t):
+            i0 = min(len(bins), max(0, int((t - 1.0) / 0.5)))
+            i1 = min(len(bins), max(i0, int((t + 4.0) / 0.5)))
+            return acc[i1] - acc[i0]
+        for h in kn:
+            h["on_speech"] = heard(h["t"]) >= p.on_speech_sec
+        for r in rep:
+            r["on_speech"] = [heard(t) >= p.on_speech_sec for t in r["times"]]
+    serious = [h for h in kn if h.get("on_speech", True)] + [r for r in rep if any(r.get("on_speech", [True]))]
     return {"words": len(words), "known": kn, "repeat": rep, "sparse": sp, "sparse_sec": sparse_sec,
-            "speech_map": intervals is not None and len(intervals) > 0,
-            "suspicious": bool(kn or rep or sparse_sec >= 30.0)}
+            "speech_map": has_map, "serious": len(serious),
+            "suspicious": bool(serious or sparse_sec >= p.sparse_suspicious_sec)}
 
 
 def hit_times(report: dict) -> list[tuple[float, str]]:

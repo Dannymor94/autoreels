@@ -7675,7 +7675,8 @@ def _txcheck_params(r0_cfg):
     tc = r0_cfg.tx_check
     return TxCheckParams(repeat_words=tc.repeat_words, repeat_far_sec=tc.repeat_far_sec,
                          sparse_win_sec=tc.sparse_win_sec, sparse_min_speech_sec=tc.sparse_min_speech_sec,
-                         sparse_max_rate=tc.sparse_max_rate, known=tuple(KNOWN) + tuple(tc.known))
+                         sparse_max_rate=tc.sparse_max_rate, known=tuple(KNOWN) + tuple(tc.known),
+                         on_speech_sec=tc.on_speech_sec, sparse_suspicious_sec=tc.sparse_suspicious_sec)
 
 
 def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
@@ -7730,12 +7731,15 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
         n_susp += rep["suspicious"]
         sp_note = (f"звук без слов {rep['sparse_sec']:.0f} с в {len(rep['sparse'])} местах" if rep["speech_map"]
                    else "звук без слов: нет карты речи")
+        _on = lambda x: "" if x is None else (" (на речи)" if x else " (в тишине)")
         print(f"== {stem}: слов {rep['words']} | известные выдумки {len(rep['known'])} | повторы {len(rep['repeat'])}"
-              f" | {sp_note} → {'ПОДОЗРИТЕЛЬНО' if rep['suspicious'] else 'ок'}")
+              f" | на речи {rep['serious']} | {sp_note} → {'ПОДОЗРИТЕЛЬНО' if rep['suspicious'] else 'ок'}")
         for h in rep["known"][:show]:
-            print(f"   {_mmss_long(h['t'])} известная: «{h['text']}»")
+            print(f"   {_mmss_long(h['t'])} известная{_on(h.get('on_speech'))}: «{h['text']}»")
         for r in rep["repeat"][:show]:
-            print(f"   повтор ×{len(r['times'])}: «{r['text']}» — {', '.join(_mmss_long(t) for t in r['times'])}")
+            _os = r.get("on_speech") or [None] * len(r["times"])
+            print(f"   повтор ×{len(r['times'])}: «{r['text']}» — "
+                  + ", ".join(f"{_mmss_long(t)}{_on(o)}" for t, o in zip(r["times"], _os)))
         for z in sorted(rep["sparse"], key=lambda z: -(z["b"] - z["a"]))[:show]:
             print(f"   звук без слов: {_mmss_long(z['a'])}–{_mmss_long(z['b'])} (речь {z['speech_sec']:.0f} с, слов {z['words']})")
     print(f"итого: источников {len(paths)}, подозрительных {n_susp}; подробно — transcripts/<stem>.txcheck.json")
@@ -7743,7 +7747,7 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
 
 
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
-                out: str | None = None) -> int:
+                out: str | None = None, check: bool = True) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -7799,7 +7803,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                                   _ends_terminal(st[-1])))
         return out_s
 
-    props = propose(the_map.get("units") or [], prm, sentences)
+    from dataclasses import replace as _dc_replace
+    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences)
     out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto_m56.txt"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ref = _rel_ref(out_path, _root)
@@ -7814,19 +7819,71 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         f"#   plan only:  arl blocks --apply {ref_q} --labeler auto",
         "",
     ]
+    # M60: every proposal goes through the real --apply checks (plan, seams, cold open, segments) on its
+    # own, in a scratch root (reviews/ there; the rest linked to the project); a proposal that fails is
+    # kept only as a commented line with the reason, and the next candidate takes its place.
+    accepted, rejected = [], []
+    for pr in pool:
+        if len(accepted) >= prm.clips:
+            break
+        if not check:
+            accepted.append(pr)
+            continue
+        err = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        if err is None:
+            accepted.append(pr)
+        else:
+            rejected.append((pr, err))
     body: list[str] = []
-    for i, pr in enumerate(props, 1):
+    for i, pr in enumerate(accepted, 1):
         body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}")
         body += [f"#   {n}" for n in pr.notes]
         body.append(pr.line(str(i)))
         body.append("")
+    if rejected:
+        body.append("# --- не прошли проверку --apply (код их не правит; можно поправить руками и раскомментировать):")
+        for pr, err in rejected:
+            body.append(f"#   причина: {err}")
+            body.append(f"#! {pr.line('')}")
+        body.append("")
     out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
-    print(f"autocut {stem}: предложено сборок {len(props)} из {len(the_map.get('units') or [])} мыслей → {out_path}")
-    for i, pr in enumerate(props, 1):
+    print(f"autocut {stem}: предложено сборок {len(accepted)} из {len(the_map.get('units') or [])} мыслей"
+          + (f" (не прошли проверку: {len(rejected)})" if rejected else "") + f" → {out_path}")
+    for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")
-    if not props:
-        print("  (ни одной: нет сильных мыслей с паспортом — проверьте карту)")
+    for pr, err in rejected:
+        print(f"  ✗ {pr.pieces} — {err}")
+    if not accepted:
+        print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0
+
+
+def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> str | None:
+    """Apply one montage line in a scratch root; None = passed, else the first error line."""
+    import contextlib
+    import io
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="autocut_") as td:
+        troot = Path(td)
+        for name in ("config", "manifests", "transcripts", "data", "inputs", "inputs-archive", "music", "prompts"):
+            if (root / name).exists():
+                (troot / name).symlink_to((root / name).resolve(), target_is_directory=True)
+        (troot / "reviews").mkdir()
+        draft = troot / "reviews" / "autocut_check.txt"
+        draft.write_text("\n".join(head + [line]) + "\n", encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            try:
+                rc = _blocks_do_apply(str(draft), root=troot,
+                                      cache_dir=str(cache_dir) if cache_dir else str(root / "data" / "cache"),
+                                      labeler="auto")
+            except Exception as exc:  # noqa: BLE001 — a crash is a failed check, not a failed command
+                return f"{type(exc).__name__}: {str(exc)[:160]}"
+        if rc == 0:
+            return None
+        lines = [ln.strip() for ln in buf.getvalue().splitlines()]
+        hit = next((ln for ln in lines if "[ERROR]" in ln or ln.startswith("error")), None)
+        return (hit or (lines[-1] if lines else f"rc={rc}"))[:200]
 
 
 def _mmss_long(t: float) -> str:
@@ -10885,6 +10942,8 @@ def _build_parser():
     pac.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     pac.add_argument("--clips", type=int, default=None, help="сколько сборок предложить (по умолчанию из r0.yaml)")
     pac.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto_m56.txt)")
+    pac.add_argument("--no-check", action="store_false", dest="check",
+                     help="не прогонять каждое предложение через проверки --apply (M60)")
     pac.add_argument("--root", default=None)
     pac.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -11273,7 +11332,8 @@ def main(argv=None) -> int:
                            llm=args.llm, force=args.force)
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
-                               cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out)
+                               cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
+                               check=args.check)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

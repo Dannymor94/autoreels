@@ -265,6 +265,7 @@ class AutocutConfig(BaseModel):
     hook_min_words: int = Field(4, ge=1)
     overlap_max: float = Field(0.5, ge=0, le=1)
     use_filtered: bool = False
+    check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
 
 
 class TxCheckConfig(BaseModel):
@@ -280,6 +281,8 @@ class TxCheckConfig(BaseModel):
     sparse_min_speech_sec: float = Field(6.0, gt=0.0)      # … with at least this much speech (speech map)
     sparse_max_rate: float = Field(0.8, gt=0.0)            # … and fewer words per second of speech
     known: list[str] = Field(default_factory=list)         # extra known inventions (added to the built-in list)
+    on_speech_sec: float = Field(2.0, ge=0.0)              # M60: speech heard around a flagged place → «на речи»
+    sparse_suspicious_sec: float = Field(60.0, ge=0.0)     # M60: this much «sound without words» → suspicious
 
 
 class MapConfig(BaseModel):

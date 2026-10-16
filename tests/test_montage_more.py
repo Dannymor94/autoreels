@@ -105,3 +105,20 @@ def test_apply_reordered_montage_plays_in_written_order(tmp_path, capsys):
     assert "jumps back" in out.out
     with __import__("pytest").raises(ValueError):                            # a normal clip still must be in order
         mont.model_copy(update={"reordered": False}).check_segments()
+
+
+def test_a_hook_whose_sound_runs_backwards_is_skipped():
+    """M60 (IMG_6848 h:22.1: cold open [1065.925, 1065.700] refused the whole apply): the plan skips it."""
+    from autoreels.cloud.plan import build_manual_plan
+    from tests.test_montage import P as MP, _spec_sents
+    sents, words, smap = _spec_sents()
+    a = Word(word="Обратно", t0=50.0, t1=50.8)
+    b = Word(word="время.", t0=50.9, t1=51.6)
+    sents = sents + [[a, b]]
+    words = words + [a, b]
+    smap = {"words": smap["words"] + [
+        {"idx": 6, "t0": 50.0, "t1": 50.8, "audible_start": 51.2, "audible_end": 51.5},
+        {"idx": 7, "t0": 50.9, "t1": 51.6, "audible_start": 50.1, "audible_end": 50.3}], "boundaries": []}
+    plan = build_manual_plan(sents, [1, 2, 3], words=words, smap=smap, params=MP, hook=7)
+    assert plan.cold_open is None and plan.hook is None
+    assert any("h:7" in w and "cold open skipped" in w for w in plan.warnings)

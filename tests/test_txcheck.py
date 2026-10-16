@@ -94,3 +94,17 @@ def test_cmd_tx_check_writes_the_report(tmp_path, capsys):
     assert rep["words"] > 400 and rep["stem"] == mpath.stem
     assert cli.cmd_tx_check([], root=tmp_path) == 1
     assert cli._build_parser().parse_args(["tx-check", "--all"]).all_sources
+
+
+def test_inventions_in_silence_are_told_apart_from_those_on_speech():
+    """M60: on every source tx-check found 2–8 known inventions — Whisper fills pauses with them; only
+    one on speech hides what was said."""
+    words = _lecture()
+    speech = [[95.0, 110.0], [395.0, 410.0], [625.0, 640.0]]       # silence around 600 s (the DimaTorzok line)
+    rep = check(words, speech)
+    (k,) = rep["known"]
+    assert k["on_speech"] is False
+    assert rep["repeat"][0]["on_speech"] == [True, True, True]
+    assert rep["serious"] == 1 and rep["suspicious"]
+    quiet = check(_say(FILLER, 0) + _say("Субтитры создавал DimaTorzok", 600.0), [[0.0, 12.0]])
+    assert quiet["known"][0]["on_speech"] is False and quiet["serious"] == 0 and not quiet["suspicious"]

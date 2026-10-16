@@ -34,6 +34,7 @@ class ManualPlanParams:
 
     seam_pad_sec: float = 0.04        # air kept at an internal seam, inside the silence between words
     end_air_sec: float = 0.30         # air after the last word (REEL_SPEC §4)
+    hook_min_sec: float = 0.30        # M60: a cold open shorter than this (or reversed) is skipped
     onset_margin_sec: float = 0.06    # never closer than this to the next speech onset
     hook_replay_min_pos: float = 0.5  # hook replays in the body only from this body fraction on
     accent_min_sec: float = 3.0       # a close shot after a seam lasts at least this long …
@@ -973,6 +974,18 @@ def build_manual_plan(
                 continue
             out.append(w)
         return out
+
+    # A hook sentence whose sound runs backwards (alignment puts its first word after its last —
+    # IMG_6848 h:22.1: [1065.925, 1065.700]) or is shorter than a fraction of a second cannot be a
+    # cold open: it would be an empty window (check_segments refuses the whole apply). Skipped with
+    # a warning, as a hook over hook_max_sec is refused (the body is not touched).
+    if hook is not None:
+        _hs = sentences[hook - 1]
+        _ha, _hb = _window_start(times, _hs[0], pad), _window_end(times, _hs[-1], pad)
+        if _hb - _ha < params.hook_min_sec:
+            warnings.append(f"h:{hook} «{_txt(_hs)[:40]}» has no sound of its own ({_ha:.3f}–{_hb:.3f}: "
+                            f"the alignment runs backwards or the sentence is too short) — cold open skipped")
+            hook = None
 
     # §2 hook replay by position (in the body as it would play with the hook kept).
     hook_replayed: bool | None = None

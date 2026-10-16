@@ -104,3 +104,32 @@ def test_cmd_autocut_writes_a_draft_that_applies(tmp_path, capsys):
     (mont,) = man.reels
     assert mont.montage.startswith("M1 ") and mont.title_overlay == "тезис про маски"
     assert cli.cmd_autocut("nope", root=tmp_path) == 1
+
+
+def test_cmd_autocut_replaces_a_proposal_that_fails_the_apply_checks(tmp_path, capsys):
+    """M60: every proposal is run through --apply on its own; a failing one is commented with the reason
+    and the next candidate takes its place."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 30 ", "  min_sec: 10 ")
+                   .replace("  clips: 5\n", "  clips: 1\n"), encoding="utf-8")
+    r0 = cli.load_r0_config(cfg)
+    tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+    s2 = merge_group_sentences([kept[1]], tx.words)
+    good = U(1, s2[0][0].t0, s2[4][-1].t1 - s2[0][0].t0, "thesis", 4, "2.1-5", summary="годная")
+    bad = U(2, 3000.0, 40.0, "thesis", 5, "99.1-4", topic=2, summary="битая")     # no block 99
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [good, bad]}), encoding="utf-8")
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    out = capsys.readouterr().out
+    text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+    assert "M1 " in text and "| t: годная" in text
+    assert "#! M " in text and "99.1-4" in text and "not in the review numbering" in text
+    assert "не прошли проверку: 1" in out
+    assert not (tmp_path / "reviews" / "v.review.json").exists()          # checks ran in a scratch root

@@ -296,6 +296,7 @@ autocut:
   hook_min_words: 4       # the cold open h: — a finished sentence of at least 4 words, ≤ hook_max_sec
   overlap_max: 0.5        # a clip sharing more than half its thoughts with a better one is dropped
   use_filtered: false     # thoughts of filtered blocks (head, tail, promo) are not used
+  check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
 
 # M57: arl tx-check — Whisper inventions and holes in a transcript (G5a: on IMG_6848 Groq wrote «Субтитры создавал
 # DimaTorzok» and one phrase five times where the speaker said something else). Pointers for the ear; nothing is changed.
@@ -307,6 +308,9 @@ tx_check:
   sparse_min_speech_sec: 6  # … where the speech map hears at least 6 s of speech …
   sparse_max_rate: 0.8      # … but the transcript has fewer than 0.8 words per second of it
   known: []                 # extra known inventions (the built-in list is in cloud/txcheck.py)
+  on_speech_sec: 2.0        # M60: a flagged place with ≥ 2 s of speech in [t−1, t+4] is «на речи» (hides what was said);
+                            # one in silence is Whisper filling a pause — it only matters if a clip plays that pause
+  sparse_suspicious_sec: 60 # M60: a transcript is suspicious with an invention on speech or ≥ 60 s of «sound without words»
 
 # M54: arl map <stem> — the map of a whole source (transcripts/<stem>.map.json + reels-out/<stem>/_map.html):
 # thoughts (1–4 sentences), voice energy, role / strength / references / topic (LLM), similar thoughts far apart.
