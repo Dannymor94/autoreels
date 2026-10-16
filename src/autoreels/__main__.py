@@ -7756,7 +7756,7 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
 
 
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
-                out: str | None = None, check: bool = True) -> int:
+                out: str | None = None, check: bool = True, llm: str | None = None, provider=None) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -7790,7 +7790,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     prm = AutoParams(clips=clips or ac.clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
                      max_pieces=ac.max_pieces, min_punch=ac.min_punch, seed_punch=ac.seed_punch,
                      hook_max_sec=getattr(r0_cfg, "hook_max_sec", 6.0), hook_min_words=ac.hook_min_words,
-                     overlap_max=ac.overlap_max, use_filtered=ac.use_filtered)
+                     overlap_max=ac.overlap_max, use_filtered=ac.use_filtered, loop=ac.loop,
+                     loop_max_sec=ac.loop_max_sec, prune=ac.prune, prune_slack=ac.prune_slack,
+                     hook_min_sec=ac.hook_min_sec, speed_slow_rate=ac.speed_slow_rate, speed_slow=ac.speed_slow,
+                     speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -7809,11 +7812,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 st = sent_by_ref.get(f"{blk}.{k}")
                 if st:
                     out_s.append((f"{blk}.{k}", st[-1].t1 - st[0].t0, sum(1 for w in st if any(c.isalnum() for c in w.word)),
-                                  _ends_terminal(st[-1])))
+                                  _ends_terminal(st[-1]), " ".join(w.word for w in st)))
         return out_s
 
     from dataclasses import replace as _dc_replace
     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences)
+    # M65: the model ranks the code's hook candidates (only the first clips are worth a call)
+    mode = llm or ac.hook_llm
+    if mode != "none" and pool:
+        try:
+            from autoreels.cloud.autocut import rank_hooks
+            prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+            for pr in pool[:prm.clips + 2]:
+                rank_hooks(pr, prov, log=lambda x: print(x, flush=True))
+        except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
+            print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
     out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto_m56.txt"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ref = _rel_ref(out_path, _root)
@@ -8789,7 +8802,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         if err:
             results.append((stem, "map", err))
             continue
-        err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips))
+        err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
         if err:
             results.append((stem, "autocut", err))
             continue
@@ -11302,6 +11315,8 @@ def _build_parser():
     pac.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     pac.add_argument("--clips", type=int, default=None, help="сколько сборок предложить (по умолчанию из r0.yaml)")
     pac.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto_m56.txt)")
+    pac.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default=None,
+                     help="M65: модель выбирает крючок из кандидатов кода (по умолчанию autocut.hook_llm)")
     pac.add_argument("--no-check", action="store_false", dest="check",
                      help="не прогонять каждое предложение через проверки --apply (M60)")
     pac.add_argument("--root", default=None)
@@ -11704,7 +11719,7 @@ def main(argv=None) -> int:
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
-                               check=args.check)
+                               check=args.check, llm=args.llm)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

@@ -48,6 +48,16 @@ class AutoParams:
     hook_min_words: int = 4
     overlap_max: float = 0.5
     use_filtered: bool = False        # take units of filtered blocks (head/tail/promo, x-refs)
+    # M65: interesting, hooky reels
+    loop: bool = True                 # open on a question the clip answers (from anywhere in the source)
+    loop_max_sec: float = 20.0        # … a question unit at most this long
+    prune: bool = True                # drop the weakest middle thoughts down to target_sec (+ prune_slack)
+    prune_slack: float = 8.0
+    hook_min_sec: float = 1.5         # a hook shorter than this is a fragment
+    speed_slow_rate: float = 2.3      # words/s below this → @speed_slow
+    speed_slow: float = 1.08
+    speed_mid_rate: float = 2.6       # … below this → @speed_mid
+    speed_mid: float = 1.05
 
 
 @dataclass
@@ -61,9 +71,12 @@ class Proposal:
     seconds: float
     notes: list[str] = field(default_factory=list)
     hooks: list[str] = field(default_factory=list)      # M61: all hook candidates, best first
+    speed: float | None = None                          # M65: @speed by the clip's speech rate
+    hook_texts: dict = field(default_factory=dict)      # M65: hook ref → (text, feature score) for ranking
 
     def line(self, label: str) -> str:
-        parts = [f"M{label} {self.score}", self.pieces]
+        sp = f"@{self.speed:g}" if self.speed else ""
+        parts = [f"M{label} {self.score}{sp}", self.pieces]
         if self.hook:
             parts.append(f"h:{self.hook}")
         if self.title:
@@ -160,23 +173,126 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     return clip
 
 
-def _hooks(clip: Sequence[dict], sentences: Callable[[str], list[tuple[str, float, int, bool]]],
-           p: AutoParams) -> list[str]:
-    """Hook candidates, best first: per strong payoff/question/metaphor unit, its finished sentences of
-    hook length, longest first (M61: the check falls back to the next one when the plan skips a hook)."""
-    cands = sorted((u for u in clip if u.get("role") in HOOK_ROLES and int(u.get("punch") or 0) >= p.seed_punch),
-                   key=lambda u: (-int(u.get("punch") or 0), HOOK_ROLES.index(u["role"]), -u["t0"]))
-    out: list[str] = []
-    for u in cands:
-        ok = [(ref, sec) for ref, sec, nwords, complete in sentences(u["refs"])
-              if complete and nwords >= p.hook_min_words and sec <= p.hook_max_sec]
-        out += [ref for ref, _ in sorted(ok, key=lambda x: -x[1])]
-    return out
+_CONTRAST = ("на самом деле", "но ", "однако", "а вот", "парадокс", "наоборот", "вместо того", "не потому")
+_STRONG = ("никогда", "всегда", "главное", "главная", "секрет", "ошибк", "важно", "самое", "страх", "боль",
+           "любов", "счасть", "правд", "смерт", "деньг")
+_YOU = ("вы", "вам", "вас", "ваш", "ваша", "ваше", "ваши", "ты", "тебе", "тебя", "твой", "твоя", "твоё", "твои")
+_WEAK_START = ("и", "а", "это", "поэтому", "вот", "ну", "так", "то", "тоже", "потом", "тогда", "он", "она", "они")
+
+
+def hook_score(text: str, sec: float, unit: dict | None = None) -> float:
+    """M65: how likely a sentence makes a viewer stay (deterministic): a question, a contrast, a
+    number, «вы», strong words, the voice's energy and the thought's strength; a sentence that leans
+    back («И…», «Это…», «Поэтому…») or is a fragment scores low."""
+    t = " " + " ".join((text or "").lower().replace("ё", "е").split()) + " "
+    words = [w.strip(".,!?;:…—–«»\"'()") for w in t.split()]
+    s = 0.0
+    if t.rstrip().endswith("?"):
+        s += 3.0
+    if any(m in t for m in _CONTRAST):
+        s += 2.0
+    if any(ch.isdigit() for ch in t):
+        s += 1.5
+    if any(w in _YOU for w in words):
+        s += 1.0
+    if any(m in t for m in _STRONG):
+        s += 1.0
+    if words and words[0] in _WEAK_START and not t.rstrip().endswith("?"):
+        s -= 2.0                          # «А вы знаете…?» is a fine opening; «И это так.» is not
+    if 2.5 <= sec <= 6.0:
+        s += 1.0
+    elif sec < 1.5:
+        s -= 2.0
+    if unit:
+        s += float((unit.get("voice") or {}).get("energy") or 50.0) / 50.0 + 0.5 * int(unit.get("punch") or 0)
+    return round(s, 2)
+
+
+def _sent_rows(sentences, refs):
+    """sentences(refs) rows → (ref, sec, nwords, complete, text) (text optional in older callers)."""
+    for row in sentences(refs):
+        ref, sec, nwords, complete = row[:4]
+        yield ref, sec, nwords, complete, (row[4] if len(row) > 4 else "")
+
+
+def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[str, float, str]]:
+    """(ref, score, text) of every hook candidate, best first: finished sentences of hook length of the
+    clip's thoughts. When a question opens the clip (the loop), its own sentences are left out — the
+    cold open then teases the answer instead of repeating the question."""
+    skip = clip[0]["id"] if clip and clip[0].get("role") == "question" and len(clip) > 1 else None
+    out = []
+    for u in clip:
+        if u["id"] == skip or int(u.get("punch") or 0) < p.min_punch:
+            continue
+        for ref, sec, nwords, complete, text in _sent_rows(sentences, u["refs"]):
+            if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
+                bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
+                out.append((ref, hook_score(text, sec, u) + bonus, text))
+    return sorted(out, key=lambda x: -x[1])
+
+
+def _hooks(clip: Sequence[dict], sentences, p: AutoParams) -> list[str]:
+    """Hook candidates, best first (M61: the check falls back to the next one when the plan skips one)."""
+    return [r for r, _, _ in _hook_cands(clip, sentences, p)]
 
 
 def _hook(clip, sentences, p) -> str | None:
     h = _hooks(clip, sentences, p)
     return h[0] if h else None
+
+
+def _loop_question(clip: list[dict], units: Sequence[dict], by_id: dict, p: AutoParams,
+                   taken: set[int]) -> dict | None:
+    """M65: a question the clip answers — one a chosen thought leans on, else one of the clip's topic
+    (or «similar» to its seed); short, standalone enough, not used elsewhere."""
+    ids = {u["id"] for u in clip}
+    leaned = {i for u in clip for i in leans_on(u, by_id)}
+    topics = {u.get("topic") for u in clip}
+    sims = {i for u in clip for i, _ in (u.get("similar") or [])}
+    best, best_s = None, 0.0
+    for q in units:
+        if (q.get("role") != "question" or q["id"] in ids or q["id"] in taken or not eligible(q, p)
+                or _dur(q) > p.loop_max_sec):
+            continue
+        s = 3.0 * (q["id"] in leaned) + 1.5 * (q.get("topic") in topics) + 1.0 * (q["id"] in sims)
+        if s <= 0:
+            continue
+        s += 0.5 * int(q.get("punch") or 0)
+        if s > best_s:
+            best, best_s = q, s
+    return best
+
+
+def _prune(clip: list[dict], by_id: dict, p: AutoParams) -> tuple[list[dict], list[int]]:
+    """M65: drop the weakest middle thoughts (not the opener, not the payoff, nothing another chosen
+    thought leans on) while the clip is longer than target_sec + prune_slack and stays ≥ min_sec."""
+    dropped: list[int] = []
+    while sum(_dur(u) for u in clip) > p.target_sec + p.prune_slack and len(clip) > 2:
+        needed = {i for u in clip for i in leans_on(u, by_id)}
+        middle = [u for u in clip[1:-1] if u["id"] not in needed]
+        if not middle:
+            break
+        weak = min(middle, key=lambda u: (int(u.get("punch") or 0),
+                                          float((u.get("voice") or {}).get("energy") or 50.0)))
+        if sum(_dur(u) for u in clip) - _dur(weak) < p.min_sec:
+            break
+        clip = [u for u in clip if u is not weak]
+        dropped.append(weak["id"])
+    return clip, dropped
+
+
+def _speed(clip: Sequence[dict], p: AutoParams) -> float | None:
+    """M65: @speed by the clip's speech rate (map voice.rate, words/s, weighted by duration)."""
+    rated = [(float((u.get("voice") or {}).get("rate") or 0.0), _dur(u)) for u in clip]
+    tot = sum(d for r, d in rated if r > 0)
+    if tot <= 0:
+        return None
+    rate = sum(r * d for r, d in rated if r > 0) / tot
+    if rate < p.speed_slow_rate:
+        return p.speed_slow
+    if rate < p.speed_mid_rate:
+        return p.speed_mid
+    return None
 
 
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
@@ -195,6 +311,18 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         clip = build_clip(seed, units, by_id, p)
         if clip is None:
             continue
+        extra_notes: list[str] = []
+        if p.loop and clip[0].get("role") != "question":
+            taken = {i for o in out for i in o.units}
+            q = _loop_question(clip, units, by_id, p, taken)
+            if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
+                    and _pieces([q] + clip) <= p.max_pieces + 1:
+                clip = [q] + clip
+                extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
+        if p.prune:
+            clip, dropped = _prune(clip, by_id, p)
+            if dropped:
+                extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
         ids = [u["id"] for u in clip]
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
                or ids[-1] == o.units[-1] for o in out):
@@ -205,16 +333,20 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         punch = sum(int(u.get("punch") or 0) for u in clip) / len(clip)
         energy = sum(float((u.get("voice") or {}).get("energy") or 50.0) for u in clip) / len(clip)
         cover = 5 * bool(set(roles) & set(OPENERS)) + 5 * bool(set(roles) & set(MIDDLE)) + 5 * ("conclusion" in roles)
-        score = 15 * punch + 0.15 * energy + cover - 4 * (_pieces(clip) - 1)
+        loop = clip[0].get("role") == "question" and clip[-1].get("role") in PAYOFFS
+        over = max(0.0, secs - p.target_sec)
+        score = 15 * punch + 0.15 * energy + cover - 4 * (_pieces(clip) - 1) + 10 * loop - 0.2 * over
         opener = next((u for u in clip if u.get("role") in OPENERS), clip[0])
         payoff = next((u for u in reversed(clip) if u.get("role") in PAYOFFS), clip[-1])
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
+        notes += extra_notes
+        cands = _hook_cands(clip, sentences, p) if sentences else []
         if clip[0].get("role") == "question" and clip[0]["t0"] > min(u["t0"] for u in clip):
             notes.append("вопрос из более позднего места открывает клип (вопрос-петля)")
         out.append(Proposal(
             units=ids, pieces=" ".join(u["refs"] for u in clip),
-            hook=_hook(clip, sentences, p) if sentences else None,
-            hooks=_hooks(clip, sentences, p) if sentences else [],
+            hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
+            hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
@@ -223,3 +355,52 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
 
 def _clean(s) -> str:
     return " ".join(str(s or "").replace("|", " ").split())[:90]
+
+
+
+HOOK_SYSTEM = (
+    "You pick the opening line (the cold open) of a short vertical video (a reel, 30–60 s) cut from a "
+    "Russian talk. The first 2–3 seconds decide whether a viewer stays. Prefer a line that opens a "
+    "question in the viewer's head or promises a payoff: a surprising claim, a contrast, a concrete "
+    "number, a direct «вы», a strong feeling. Avoid lines that depend on what came before («Это…», "
+    "«Поэтому…»), greetings and fragments. Answer only with JSON: {\"best\": <number>, \"why\": \"<at most 12 "
+    "Russian words>\"}."
+)
+
+
+def rank_hooks(pr: "Proposal", provider, *, top: int = 6, log: Callable[[str], None] = print) -> bool:
+    """M65: the LLM picks the best of the top hook candidates (invariant 1: it only ranks the
+    deterministic candidates; an answer outside them is retried once, then the code's order stays).
+    Returns True when the order changed."""
+    import json as _json
+    import re as _re
+    cands = pr.hooks[:top]
+    if len(cands) < 2:
+        return False
+    rows = [f"{i + 1}. {pr.hook_texts.get(r, ('', 0))[0]}" for i, r in enumerate(cands)]
+    msg = (f"Reel: «{pr.title}». Thoughts: " + "; ".join(n.split(" — ", 1)[-1] for n in pr.notes[:6]) +
+           "\nCandidates:\n" + "\n".join(rows))
+    for _ in range(2):
+        try:
+            raw = provider.complete([{"role": "system", "content": HOOK_SYSTEM}, {"role": "user", "content": msg}],
+                                    temperature=0.0)
+        except Exception as exc:  # noqa: BLE001 — no model: the code's order stays
+            log(f"  крючок: модель не ответила ({type(exc).__name__})")
+            return False
+        m = _re.search(r"\{.*\}", raw or "", _re.S)
+        try:
+            obj = _json.loads(m.group(0)) if m else {}
+            best = int(obj.get("best"))
+        except (ValueError, TypeError):
+            continue
+        if 1 <= best <= len(cands):
+            chosen = cands[best - 1]
+            why = str(obj.get("why") or "").strip()[:80]
+            if chosen != pr.hooks[0]:
+                pr.hooks = [chosen] + [h for h in pr.hooks if h != chosen]
+                pr.hook = chosen
+                pr.notes.append(f"крючок выбран моделью: h:{chosen}" + (f" — {why}" if why else ""))
+                return True
+            return False
+    log("  крючок: ответ модели вне кандидатов — порядок кода")
+    return False

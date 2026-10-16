@@ -266,6 +266,17 @@ class AutocutConfig(BaseModel):
     overlap_max: float = Field(0.5, ge=0, le=1)
     use_filtered: bool = False
     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
+    # M65: interesting, hooky reels (cloud/autocut.py)
+    loop: bool = True
+    loop_max_sec: float = Field(20.0, gt=0)
+    prune: bool = True
+    prune_slack: float = Field(8.0, ge=0)
+    hook_min_sec: float = Field(1.5, ge=0)
+    hook_llm: str = "auto"                 # auto | cloud | local | none — the model ranks the hook candidates
+    speed_slow_rate: float = Field(2.3, gt=0)
+    speed_slow: float = Field(1.08, ge=1.0, le=1.2)
+    speed_mid_rate: float = Field(2.6, gt=0)
+    speed_mid: float = Field(1.05, ge=1.0, le=1.2)
 
 
 class TxCheckConfig(BaseModel):

@@ -287,9 +287,9 @@ montage:
 # (and its «similar» elsewhere), a question opens it, a payoff ends it; t:/d: are the map's summaries.
 autocut:
   clips: 5
-  min_sec: 30             # shorter clips are not proposed
-  target_sec: 60          # a clip stops growing here …
-  max_sec: 90             # … and never goes past this
+  min_sec: 25             # shorter clips are not proposed
+  target_sec: 45          # a clip stops growing here … (M65: 60 → 45 — reels that hold attention are short)
+  max_sec: 65             # … and never goes past this (M65: 90 → 65)
   max_pieces: 4           # at most this many pieces (adjacent thoughts join without a seam)
   min_punch: 3            # weaker thoughts are never used
   seed_punch: 4           # a clip grows only around a thought at least this strong
@@ -297,6 +297,18 @@ autocut:
   overlap_max: 0.5        # a clip sharing more than half its thoughts with a better one is dropped
   use_filtered: false     # thoughts of filtered blocks (head, tail, promo) are not used
   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
+  # M65 — owner: «наша цель — интересные, цепляющие ролики»:
+  loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
+  loop_max_sec: 20        # … a question thought at most this long
+  prune: true             # the weakest middle thoughts go while the clip is longer than target_sec + prune_slack
+  prune_slack: 8
+  hook_min_sec: 1.5       # hook candidates: finished sentences 1.5 s … hook_max_sec, scored (question, contrast, number,
+                          # «вы», strong words, voice energy, strength; leaning back «И…/Это…» scores low)
+  hook_llm: auto          # the model picks the best of the top 6 hook candidates (auto | cloud | local | none)
+  speed_slow_rate: 2.3    # speech slower than 2.3 words/s → @1.08
+  speed_slow: 1.08
+  speed_mid_rate: 2.6     # … slower than 2.6 → @1.05; faster — no speed-up
+  speed_mid: 1.05
 
 # M57: arl tx-check — Whisper inventions and holes in a transcript (G5a: on IMG_6848 Groq wrote «Субтитры создавал
 # DimaTorzok» and one phrase five times where the speaker said something else). Pointers for the ear; nothing is changed.
