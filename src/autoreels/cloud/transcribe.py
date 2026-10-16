@@ -59,6 +59,32 @@ def parse_faster_whisper(segments, language: str) -> Transcript:
     return Transcript(language=language, words=words)
 
 
+def parse_whispercpp_json(data: dict) -> Transcript:
+    """whisper.cpp `-oj -ml 1 -sow` output → Transcript word-level (M62).
+
+    Each `transcription` item is one word (offsets in ms, text with a leading space). An item without
+    the leading space continues the previous word (a split token, punctuation); bracketed non-speech
+    tags («[музыка]», «(смех)») and empty items are dropped."""
+    words: list[Word] = []
+    for it in data.get("transcription") or []:
+        text = str(it.get("text") or "")
+        off = it.get("offsets") or {}
+        try:
+            t0, t1 = float(off["from"]) / 1000.0, float(off["to"]) / 1000.0
+        except (KeyError, TypeError, ValueError):
+            continue
+        core = text.strip()
+        if not core or (core[0] in "[(" and core[-1] in "])"):
+            continue
+        if words and not text.startswith(" "):
+            last = words[-1]
+            words[-1] = last.model_copy(update={"word": last.word + core, "t1": max(last.t1, t1)})
+            continue
+        words.append(Word(word=core, t0=t0, t1=max(t1, t0)))
+    lang = str((data.get("result") or {}).get("language") or (data.get("params") or {}).get("language") or "")
+    return Transcript(language=lang, words=words)
+
+
 # ------------------------------------------------------ prompt-leak filter
 
 def _normalize(text: str) -> str:
@@ -285,6 +311,75 @@ class FasterWhisperBackend:
         return {"provider": "faster_whisper", "model": self._model_size, "prompt_hash": ""}
 
 
+class WhisperCppBackend:
+    """M62: whisper.cpp (`whisper-cli`) on a GPU box over ssh (gamebox) or on this machine.
+
+    The audio is converted to 16 kHz mono WAV here, copied over (scp), transcribed there with word
+    times (`-ml 1 -sow -oj`), no prompting from the previous text (`-mc 0` — Whisper's repeats) and,
+    when set, VAD (Whisper hears only speech — no inventions in pauses); the JSON comes back and the
+    remote files are removed. No initial_prompt (the Groq prompt leaked into the text: «Каждый из них
+    влияет на результат по-своему» in five places of IMG_6848). One file, no chunking.
+
+    `run` — injection point for tests: (argv) -> None, raises on failure.
+    """
+
+    no_chunking = True
+
+    def __init__(self, cfg, *, ffmpeg: str = "ffmpeg", run: Callable[[list[str]], None] | None = None):
+        self._cfg = cfg
+        self._ffmpeg = ffmpeg
+        self._run = run or self._default_run
+
+    @staticmethod
+    def _default_run(argv: list[str]) -> None:
+        import subprocess
+        r = subprocess.run(argv, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise TranscriptionError(f"{argv[0]} rc={r.returncode}: {(r.stderr or r.stdout)[-400:]}")
+
+    def commands(self, audio_path: Path, wav: Path, out_json: Path) -> list[list[str]]:
+        """The argv steps (pure): convert, [mkdir + copy], transcribe, [copy back + clean up]."""
+        import shlex
+        c = self._cfg
+        name = Path(audio_path).stem
+        rdir = c.remote_dir.rstrip("/")
+        remote_wav, remote_out = f"{rdir}/{name}.wav", f"{rdir}/{name}"
+        cli = (f"{c.cli} -m {c.model} -f {{wav}} -l {c.language} -t {int(c.threads)} -ml 1 -sow -oj "
+               f"-mc {int(c.max_context)}" + (f" --vad -vm {c.vad_model}" if c.vad_model else "")
+               + (f" {c.extra_args}" if c.extra_args else "") + " -of {out}")
+        env = f"source {c.env} >/dev/null 2>&1; " if c.env else ""
+        steps = [[self._ffmpeg, "-v", "error", "-y", "-i", str(audio_path), "-ar", "16000", "-ac", "1",
+                  "-c:a", "pcm_s16le", str(wav)]]
+        if c.host:
+            steps += [
+                ["ssh", c.host, f"mkdir -p {rdir}"],
+                ["scp", "-q", str(wav), f"{c.host}:{remote_wav}"],
+                ["ssh", c.host, env + cli.format(wav=remote_wav, out=remote_out)],
+                ["scp", "-q", f"{c.host}:{remote_out}.json", str(out_json)],
+                ["ssh", c.host, f"rm -f {remote_wav} {remote_out}.json"],
+            ]
+        else:
+            local = cli.format(wav=shlex.quote(str(wav)), out=shlex.quote(str(out_json.with_suffix(""))))
+            steps.append(["bash", "-c", env + local])
+        return steps
+
+    def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript:
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="whispercpp_") as td:
+            wav, out_json = Path(td) / f"{Path(audio_path).stem}.wav", Path(td) / f"{Path(audio_path).stem}.json"
+            for argv in self.commands(Path(audio_path), wav, out_json):
+                self._run(argv)
+            if not out_json.is_file():
+                raise TranscriptionError(f"whisper.cpp не вернул {out_json.name}")
+            return parse_whispercpp_json(json.loads(out_json.read_text(encoding="utf-8")))
+
+    def describe(self) -> dict:
+        c = self._cfg
+        model = Path(str(c.model)).name + ("+vad" if c.vad_model else "") + f"+mc{int(c.max_context)}"
+        return {"provider": "whispercpp", "model": model, "prompt_hash": ""}
+
+
 def get_backend(config=None) -> TranscriptionBackend:
     """Бэкенд транскрипции. Источник выбора: config (transcribe.yaml), env перебивает.
 
@@ -305,8 +400,12 @@ def get_backend(config=None) -> TranscriptionBackend:
                 model_size=fw.model_size, device=fw.device, compute_type=fw.compute_type
             )
         return FasterWhisperBackend()
+    if name == "whispercpp":
+        if config is None:
+            raise TranscriptionError("backend whispercpp требует config/transcribe.yaml (раздел whispercpp)")
+        return WhisperCppBackend(config.whispercpp)
     raise TranscriptionError(
-        f"неизвестный backend транскрипции: {name!r}; допустимо: groq | faster_whisper"
+        f"неизвестный backend транскрипции: {name!r}; допустимо: groq | faster_whisper | whispercpp"
     )
 
 
@@ -367,7 +466,7 @@ def transcribe(
         })
 
     # Чанкинг: если конфиг передан и аудио превышает порог
-    if chunking_cfg is not None and chunking_cfg.enabled:
+    if chunking_cfg is not None and chunking_cfg.enabled and not getattr(backend, "no_chunking", False):
         size     = audio_path.stat().st_size
         duration = _probe_duration(audio_path, ffmpeg)
         if should_chunk(size, duration, chunking_cfg):

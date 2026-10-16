@@ -959,6 +959,24 @@ class FasterWhisperParams(BaseModel):
     compute_type: str = "int8"
 
 
+class WhisperCppParams(BaseModel):
+    """M62: whisper.cpp over ssh (cloud/transcribe.WhisperCppBackend). Paths are the remote ones;
+    `$W` etc. come from `env` sourced first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = "gamebox"                       # ssh host; "" = run on this machine
+    env: str = "~/llama.env"                    # sourced before the command ("" = none)
+    cli: str = "~/whisper.cpp/build/bin/whisper-cli"
+    model: str = "$W/ggml-large-v3-turbo.bin"
+    vad_model: str = "$W/ggml-silero-v5.1.2.bin"   # "" = no VAD
+    language: str = "ru"
+    threads: int = 8
+    max_context: int = 0                        # -mc: 0 = no prompting from the previous text
+    extra_args: str = ""
+    remote_dir: str = "~/autoreels_tx"
+
+
 class TranscribeConfig(BaseModel):
     """Типизированный config/transcribe.yaml. backend отсюда, ключ — из env."""
 
@@ -968,6 +986,7 @@ class TranscribeConfig(BaseModel):
     language: str = "ru"
     groq: GroqWhisper = Field(default_factory=GroqWhisper)
     faster_whisper: FasterWhisperParams = Field(default_factory=FasterWhisperParams)
+    whispercpp: WhisperCppParams = Field(default_factory=WhisperCppParams)
 
 
 # ------------------------------------------------------------------------ readers

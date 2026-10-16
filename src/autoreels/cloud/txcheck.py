@@ -198,3 +198,56 @@ def hit_times(report: dict) -> list[tuple[float, str]]:
         for t in r["times"]:
             out.append((t, f"фраза повторяется в {len(r['times'])} местах «{r['text']}» — возможна выдумка Whisper"))
     return sorted(out)
+
+
+# ── M62: prompt leaks and a comparison of two transcripts ──────────────────────────────────────
+
+def prompt_patterns(prompt: str, n: int = 5) -> list[str]:
+    """Every run of n words of each prompt sentence (the whole sentence if shorter): Groq's
+    initial_prompt leaks into the text in pieces («результат по-своему», «каждый из них влияет …»)."""
+    import re as _re
+    out: list[str] = []
+    for sent in _re.split(r"(?<=[.!?])\s+", (prompt or "").strip()):
+        toks = [t for t in (_norm(x).strip(".") for x in sent.split()) if t]
+        if not toks:
+            continue
+        if len(toks) <= n:
+            out.append(" ".join(toks))
+        else:
+            out += [" ".join(toks[i:i + n]) for i in range(len(toks) - n + 1)]
+    return list(dict.fromkeys(out))
+
+
+def _sent_ends(words) -> float:
+    """Sentence-ending marks per 100 words (punctuation the sentence split relies on)."""
+    if not words:
+        return 0.0
+    ends = sum(1 for w in words if w.word.rstrip().endswith((".", "!", "?", "…")))
+    return round(100.0 * ends / len(words), 1)
+
+
+def compare_words(ref, other, *, show: int = 8) -> dict:
+    """Two transcripts of one audio, word by word (case, ё and punctuation folded): matched words,
+    words only in one of them, the share that differs (of the reference) and the longest
+    disagreements with their times."""
+    import difflib
+    a = [(_norm(w.word).strip("."), w) for w in ref]
+    b = [(_norm(w.word).strip("."), w) for w in other]
+    a = [x for x in a if x[0]]
+    b = [x for x in b if x[0]]
+    sm = difflib.SequenceMatcher(None, [x[0] for x in a], [x[0] for x in b], autojunk=False)
+    matched, only_a, only_b, spans = 0, 0, 0, []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            matched += i2 - i1
+            continue
+        only_a += i2 - i1
+        only_b += j2 - j1
+        t = a[i1][1].t0 if i1 < i2 else (b[j1][1].t0 if j1 < j2 else 0.0)
+        spans.append({"t": round(t, 1), "kind": tag, "size": max(i2 - i1, j2 - j1),
+                      "ref": " ".join(w.word for _, w in a[i1:i2])[:120],
+                      "other": " ".join(w.word for _, w in b[j1:j2])[:120]})
+    spans.sort(key=lambda s: -s["size"])
+    return {"ref_words": len(a), "other_words": len(b), "matched": matched, "only_ref": only_a,
+            "only_other": only_b, "differ": round(100.0 * (only_a + only_b) / max(1, len(a)), 1),
+            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other), "longest": spans[:show]}

@@ -7670,12 +7670,20 @@ def _resolve_manifest_arg(target: str, root: Path) -> Path | None:
     return mpath if mpath.exists() else None
 
 
-def _txcheck_params(r0_cfg):
-    from autoreels.cloud.txcheck import KNOWN, TxCheckParams
+def _txcheck_params(r0_cfg, root=None):
+    from autoreels.cloud.txcheck import KNOWN, TxCheckParams, prompt_patterns
     tc = r0_cfg.tx_check
+    # M62: pieces of Groq's initial_prompt are known inventions too (it leaks into the text)
+    leak: tuple = ()
+    try:
+        _tp = (Path(root) if root else _project_root()) / "config" / "transcribe.yaml"
+        if _tp.is_file():
+            leak = tuple(prompt_patterns(load_transcribe_config(_tp).groq.initial_prompt))
+    except Exception:  # noqa: BLE001 — a broken transcribe.yaml must not stop the check
+        leak = ()
     return TxCheckParams(repeat_words=tc.repeat_words, repeat_far_sec=tc.repeat_far_sec,
                          sparse_win_sec=tc.sparse_win_sec, sparse_min_speech_sec=tc.sparse_min_speech_sec,
-                         sparse_max_rate=tc.sparse_max_rate, known=tuple(KNOWN) + tuple(tc.known),
+                         sparse_max_rate=tc.sparse_max_rate, known=tuple(KNOWN) + tuple(tc.known) + leak,
                          on_speech_sec=tc.on_speech_sec, sparse_suspicious_sec=tc.sparse_suspicious_sec)
 
 
@@ -7698,7 +7706,7 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
         print("ошибка: укажите манифест(ы) или --all", file=sys.stderr)
         return 1
     r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
-    prm = _txcheck_params(r0_cfg)
+    prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     rc, n_susp = 0, 0
     for mpath in paths:
@@ -7892,6 +7900,102 @@ def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[s
         lines = [ln.strip() for ln in buf.getvalue().splitlines()]
         hit = next((ln for ln in lines if "[ERROR]" in ln or ln.startswith("error")), None)
         return (hit or (lines[-1] if lines else f"rc={rc}"))[:200], buf.getvalue()
+
+
+def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
+                   force: bool = False, backend=None) -> int:
+    """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
+    whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
+    Groq transcript), compared word by word with the Groq one, both run through tx-check →
+    transcripts/<stem>.txcompare.json + a printed summary. Changes nothing else."""
+    import json as _json
+    from autoreels.cloud.transcribe import WhisperCppBackend
+    from autoreels.cloud.txcheck import check, compare_words
+    _root = Path(root) if root else _project_root()
+    paths = _auto_discover_manifests(_root) if all_sources else []
+    for t in targets:
+        p = _resolve_manifest_arg(t, _root)
+        if p is None:
+            print(f"ошибка: манифест не найден: {t}", file=sys.stderr)
+            return 1
+        paths.append(p)
+    if not paths:
+        print("ошибка: укажите манифест(ы) или --all", file=sys.stderr)
+        return 1
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    tcfg = load_transcribe_config(_root / "config" / "transcribe.yaml")
+    prm = _txcheck_params(r0_cfg, _root)
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    be = backend or WhisperCppBackend(tcfg.whispercpp)
+    rc = 0
+    for mpath in paths:
+        try:
+            manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"== {mpath.stem}: не прочитан ({type(exc).__name__})", file=sys.stderr)
+            rc = 1
+            continue
+        stem = mpath.stem
+        groq = _resolve_cached_transcript(manifest, _cache)
+        if groq is None:
+            print(f"== {stem}: транскрипт Groq не найден", file=sys.stderr)
+            rc = 1
+            continue
+        local_path = _root / "transcripts" / f"{stem}.local.transcript.json"
+        if local_path.is_file() and not force:
+            local = Transcript.model_validate_json(local_path.read_text(encoding="utf-8"))
+            took = "из файла"
+        else:
+            audio = next((a for a in sorted(_cache.glob(f"{manifest.source_sha256}.*"))
+                          if a.suffix.lower() in (".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus")), None)
+            if audio is None:
+                try:
+                    src = resolve_source(manifest, _root / "inputs")
+                    audio = _stage_extract_audio(src, render_cfg=load_render_config(_root / "config" / "render.yaml"),
+                                                 cache_dir=_cache, ffmpeg="ffmpeg", source_sha=manifest.source_sha256)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"== {stem}: нет аудио ({type(exc).__name__}: {str(exc)[:120]})", file=sys.stderr)
+                    rc = 1
+                    continue
+            t0 = time.monotonic()
+            try:
+                local = be.transcribe(Path(audio), language=tcfg.whispercpp.language)
+            except Exception as exc:  # noqa: BLE001 — one source must not stop the rest
+                print(f"== {stem}: whisper.cpp не отработал ({type(exc).__name__}: {str(exc)[:200]})", file=sys.stderr)
+                rc = 1
+                continue
+            meta = be.describe()
+            local = local.model_copy(update={"provider": meta["provider"], "model": meta["model"],
+                                             "source_sha256": manifest.source_sha256})
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text(local.model_dump_json(), encoding="utf-8")
+            took = f"{time.monotonic() - t0:.0f} с"
+        intervals = None
+        _smp = _root / "transcripts" / f"{stem}.speechmap.json"
+        if _smp.is_file():
+            try:
+                _d = _json.loads(_smp.read_text(encoding="utf-8"))
+                if _d.get("source_sha256") == manifest.source_sha256:
+                    intervals = _d.get("intervals") or None
+            except (OSError, ValueError):
+                intervals = None
+        cmp_ = compare_words(groq.words, local.words)
+        cg, cl = check(groq.words, intervals, prm), check(local.words, intervals, prm)
+        rep = {"stem": stem, "compare": cmp_,
+               "groq": {k: cg[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cg["known"]), "repeat": len(cg["repeat"])},
+               "local": {k: cl[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cl["known"]), "repeat": len(cl["repeat"])}}
+        (_root / "transcripts" / f"{stem}.txcompare.json").write_text(_json.dumps(rep, ensure_ascii=False, indent=1),
+                                                                   encoding="utf-8")
+        g, l_ = rep["groq"], rep["local"]
+        print(f"== {stem} (локально: {took}): слов Groq {cmp_['ref_words']}, локально {cmp_['other_words']}, "
+              f"совпало {cmp_['matched']}, различается {cmp_['differ']}%")
+        print(f"   конец предложения на 100 слов: Groq {cmp_['ref_sent_ends']}, локально {cmp_['other_sent_ends']}")
+        print(f"   выдумки на речи: Groq {g['serious']} (известных {g['known']}, повторов {g['repeat']}), "
+              f"локально {l_['serious']} (известных {l_['known']}, повторов {l_['repeat']}); "
+              f"звук без слов: Groq {g['sparse_sec']:.0f} с, локально {l_['sparse_sec']:.0f} с")
+        for z in cmp_["longest"][:5]:
+            print(f"   {_mmss_long(z['t'])} Groq: «{z['ref'][:70]}» | локально: «{z['other'][:70]}»")
+    return rc
 
 
 def _mmss_long(t: float) -> str:
@@ -10943,6 +11047,16 @@ def _build_parser():
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
+    pxc = sub.add_parser(
+        "tx-compare",
+        help="M62: расшифровка заново на gamebox (whisper.cpp) и сравнение с Groq — ничего не заменяет",
+    )
+    pxc.add_argument("manifest", metavar="манифест", nargs="*", help="пути к манифестам или имена")
+    pxc.add_argument("--all", action="store_true", dest="all_sources", help="все манифесты в manifests/")
+    pxc.add_argument("--force", action="store_true", help="расшифровать заново, даже если файл уже есть")
+    pxc.add_argument("--root", default=None)
+    pxc.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     pac = sub.add_parser(
         "autocut",
         help="M56: сборки (строки M) по карте источника — черновик reviews/<stem>_auto_m56.txt",
@@ -11338,6 +11452,10 @@ def main(argv=None) -> int:
         elif args.cmd == "map":
             return cmd_map(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                            llm=args.llm, force=args.force)
+        elif args.cmd == "tx-compare":
+            return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
+                                  cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
+                                  force=args.force)
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,

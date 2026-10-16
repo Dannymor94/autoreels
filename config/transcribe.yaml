@@ -1,6 +1,6 @@
 # Транскрипция. backend выбирается отсюда; env TRANSCRIBE_BACKEND перебивает (ad-hoc).
 # API-ключ (GROQ_API_KEY) — ТОЛЬКО в окружении/.env, никогда не здесь.
-backend: groq                  # groq (дефолт, dev и prod) | faster_whisper
+backend: groq                  # groq (дефолт, dev и prod) | faster_whisper | whispercpp (M62: gamebox)
 language: ru                   # язык транскрипции
 
 groq:
@@ -22,3 +22,18 @@ faster_whisper:
   model_size: large-v3
   device: cpu
   compute_type: int8
+
+# M62: whisper.cpp на gamebox по ssh (backend: whispercpp или arl tx-compare). Пути — на gamebox;
+# $W задаёт env. VAD: Whisper слышит только речь — не выдумывает в паузах. -mc 0: без подсказки
+# прошлым текстом (повторы). Без initial_prompt: у Groq он протекал в текст (IMG_6848).
+whispercpp:
+  host: gamebox
+  env: ~/llama.env
+  cli: ~/whisper.cpp/build/bin/whisper-cli
+  model: $W/ggml-large-v3-turbo.bin
+  vad_model: $W/ggml-silero-v5.1.2.bin
+  language: ru
+  threads: 8
+  max_context: 0
+  extra_args: ""
+  remote_dir: ~/autoreels_tx
