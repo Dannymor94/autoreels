@@ -251,9 +251,12 @@ def _valid_passport(e: dict, ids: set[int], uid: int) -> dict | None:
 
 
 def describe_units(units: Sequence[Unit], provider, *, system: str, p: MapParams = MapParams(),
-                   log: Callable[[str], None] = print, known: dict | None = None) -> tuple[int, int]:
+                   log: Callable[[str], None] = print, known: dict | None = None,
+                   checkpoint: Callable[[dict], None] | None = None) -> tuple[int, int]:
     """Passports window by window; unanswered units asked once more, then marked missing.
     `known` (M66): passports already described (a previous, incomplete map) — only the others are asked.
+    `checkpoint(done)` (M67): called after every window with the passports so far — a kill or a timeout
+    then loses one window, not the whole map (Pxl 112938952: two 90-min timeouts, nothing kept).
     Returns (described, missing)."""
     ids = {u.id for u in units}
     by_id = {u.id: u for u in units}
@@ -288,16 +291,19 @@ def describe_units(units: Sequence[Unit], provider, *, system: str, p: MapParams
         batch = list(todo[k:k + p.window_units])
         done.update(ask(batch))
         log(f"  мысли #{batch[0].id}–#{batch[-1].id}: описано {sum(1 for b in batch if b.id in done)} из {len(batch)}")
+        if checkpoint:
+            checkpoint(dict(done))
     missing = [u for u in units if u.id not in done]
     for k in range(0, len(missing), p.window_units):
         done.update(ask(missing[k:k + p.window_units]))
+        if checkpoint:
+            checkpoint(dict(done))
     n_missing = 0
     for u in units:
         if u.id in done:
             u.info.update(done[u.id])
         else:
-            u.info.update({"role": None, "punch": None, "standalone": None, "refers": None, "summary": "",
-                           "missing": True})
+            u.info.update(MISSING_PASSPORT)
             n_missing += 1
     return len(units) - n_missing, n_missing
 
@@ -341,10 +347,14 @@ def topic_units(units: Sequence[Unit], provider, *, system: str,
     return topics
 
 
+MISSING_PASSPORT = {"role": None, "punch": None, "standalone": None, "refers": None, "summary": "", "missing": True}
+
+
 def build_map(units: Sequence[Unit], *, stem: str, source_sha256: str, topics: Sequence[dict] = (),
-              model: str = "") -> dict:
+              model: str = "", transcript_key: str = "") -> dict:
     return {
         "version": MAP_VERSION, "stem": stem, "source_sha256": source_sha256, "model": model,
+        "transcript_key": transcript_key,                  # M67: the transcript the map was built on
         "topics": list(topics),
         "units": [{"id": u.id, "t0": round(u.t0, 3), "t1": round(u.t1, 3), "refs": unit_refs(u),
                    "filtered": next((s.block_note for s in u.sents if s.block_note), ""),

@@ -259,3 +259,86 @@ def test_cmd_map_incomplete_returns_3_and_the_next_run_asks_only_what_is_missing
     third = Model(budget=99)                                    # complete now: kept, no call
     assert cli.cmd_map(str(mpath), provider=third, **kw) == 0 and third.asked == []
     assert "карта уже есть" in capsys.readouterr().out
+
+
+class _MapModel:
+    """Scripted model for cmd_map: answers windows and topics; `die_after` windows → KeyboardInterrupt
+    (a kill / timeout, not an exception the map can catch)."""
+    name = "scripted"
+
+    def __init__(self, die_after=None):
+        self.die_after, self.windows, self.asked = die_after, 0, []
+
+    def complete(self, messages, temperature=0.0):
+        q = messages[-1]["content"]
+        if q.startswith("TOPICS"):
+            ids = [int(x[1:]) for x in q.split() if x.startswith("#") and x[1:].isdigit()]
+            return json.dumps({"topics": [{"name": "Всё", "units": ids}]})
+        if self.die_after is not None and self.windows >= self.die_after:
+            raise KeyboardInterrupt
+        self.windows += 1
+        part = q.split("Describe EVERY one of these units:")[1]
+        ids = [int(x[1:]) for x in part.split() if x.startswith("#") and x[1:].isdigit()]
+        self.asked += ids
+        return json.dumps({"units": [_pp(i) for i in ids]})
+
+
+def _map_source(tmp_path, key="k-groq"):
+    import re
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    (tmp_path / "prompts").mkdir(exist_ok=True)
+    (tmp_path / "prompts" / "map_system.md").write_text("S", encoding="utf-8")
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", cfg.read_text(encoding="utf-8")),
+                   encoding="utf-8")
+    m = json.loads(mpath.read_text(encoding="utf-8"))
+    m["transcript_params_key"] = key
+    mpath.write_text(json.dumps(m), encoding="utf-8")
+    return mpath
+
+
+def test_cmd_map_keeps_every_window_when_killed_midway(tmp_path):
+    """M67: Pxl 112938952 — two 90-min timeouts and nothing kept. Now each window is written as it comes."""
+    mpath = _map_source(tmp_path)
+    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
+    with pytest.raises(KeyboardInterrupt):
+        cli.cmd_map(str(mpath), provider=_MapModel(die_after=2), **kw)
+    m = json.loads((tmp_path / "transcripts" / "v.map.json").read_text(encoding="utf-8"))
+    done = [u for u in m["units"] if not u.get("missing")]
+    assert len(done) == 8 and len(m["units"]) > 8 and m["transcript_key"] == "k-groq"
+    second = _MapModel()
+    assert cli.cmd_map(str(mpath), provider=second, **kw) == 0
+    assert set(second.asked) == {u["id"] for u in m["units"]} - {u["id"] for u in done}
+    assert not (tmp_path / "transcripts" / "v.map.json.tmp").exists()
+
+
+def test_map_of_another_transcript_is_refused_by_map_autocut_and_tx_use(tmp_path, capsys):
+    """M67: 10h59 — after two sessions switched the source at once, a local-gp map sat under a Groq manifest;
+    autocut ran on it and the rejected pieces read «block 28 has sentences 1-8»."""
+    mpath = _map_source(tmp_path, key="k-local-gp")
+    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
+    assert cli.cmd_map(str(mpath), provider=_MapModel(), **kw) == 0
+    m = json.loads(mpath.read_text(encoding="utf-8"))
+    m["transcript_params_key"] = "k-groq"                      # the manifest moved on, the files did not
+    mpath.write_text(json.dumps(m), encoding="utf-8")
+    capsys.readouterr()
+    assert cli.cmd_map(str(mpath), provider=_MapModel(), **kw) == 1
+    assert "построена по расшифровке k-local-gp, а манифест указывает на k-groq" in capsys.readouterr().err
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1
+    assert "k-local-gp" in capsys.readouterr().err
+    second = _MapModel()
+    assert cli.cmd_map(str(mpath), provider=second, force=True, **kw) == 0 and second.asked
+    assert json.loads((tmp_path / "transcripts" / "v.map.json").read_text())["transcript_key"] == "k-groq"
+
+
+def test_pool_names_who_answers_and_the_reserve(capsys):
+    from autoreels.cloud.providers import LocalLLM, ProviderPool
+    from tests.test_providers import _ScriptedProvider
+    loc = LocalLLM(url="http://192.168.3.17:8081/v1")
+    pool = ProviderPool([_ScriptedProvider("Groq", []), _ScriptedProvider("OpenRouter", [])], reserve=[loc])
+    assert pool.describe() == "модели: Groq → OpenRouter · запас: Local http://192.168.3.17:8081/v1"
+    assert ProviderPool([_ScriptedProvider("Groq", [])]).describe().endswith("запас: нет (LOCAL_LLM_URL не задан или не отвечает)")
+    assert ProviderPool([loc]).describe() == "модели: Local http://192.168.3.17:8081/v1"
+    cli._pool_banner(pool)
+    assert "запас: Local" in capsys.readouterr().out

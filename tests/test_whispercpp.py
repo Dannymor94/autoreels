@@ -194,3 +194,20 @@ def test_cmd_tx_punct_writes_a_variant_ready_for_tx_use(tmp_path, capsys):
     assert sum(w.word.endswith(".") for w in t.words) == sum(w.word.endswith(".") for w in groq.words)
     assert t.model == "turbo+groqpunct" and "добавлено" in out and "tx-use" in out
     assert cli.cmd_tx_use("v", "local-gp", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+
+
+def test_tx_use_refuses_when_the_map_is_from_another_transcript(tmp_path, capsys):
+    """M67: switching on top of mixed-up files would bury the mix-up in the archive."""
+    import json
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    groq = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    (tmp_path / "transcripts" / "v.local.transcript.json").write_text(
+        Transcript(language="ru", words=groq.words, provider="whispercpp", model="turbo").model_dump_json(), encoding="utf-8")
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps({"transcript_key": "someone-else", "units": []}))
+    assert cli.cmd_tx_use("v", "local", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1
+    assert "карта от расшифровки someone-else" in capsys.readouterr().err
+    assert (tmp_path / "transcripts" / "v.map.json").is_file()            # nothing moved

@@ -7588,6 +7588,7 @@ def cmd_label(
             if provider is None:
                 provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
                 provider.preflight()
+                _pool_banner(provider)
             bak.write_text(old_text, encoding="utf-8")   # before the first checkpoint touches the draft
             new_text, done, still = retry_draft(new_text, wblocks, words, provider, system=system,
                                                 fewshot=fewshot, p=p, log=lambda m: print(m, flush=True),
@@ -7603,6 +7604,7 @@ def cmd_label(
                 if provider is None:
                     provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
                     provider.preflight()
+                    _pool_banner(provider)
                 new_text, _ = rank_draft(new_text, wblocks, words, provider, system=_rank_system(),
                                          date=_dt.date.today().isoformat(), log=lambda m: print(m, flush=True))
         if new_text != old_text:
@@ -7617,6 +7619,7 @@ def cmd_label(
     if provider is None:
         provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
         provider.preflight()
+        _pool_banner(provider)
     from autoreels.cloud.label import windows as _label_windows
     n_win = len(_label_windows(wblocks, p.window_blocks, p.max_clip_blocks))
     print(f"разметка {stem}: {len(kept)} блоков, {n_win} окон по {p.window_blocks} блока "
@@ -7786,6 +7789,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         print(f"ошибка: транскрипт не найден для {stem}", file=sys.stderr)
         return 1
     r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    foreign = _map_foreign(the_map, manifest)
+    if foreign:
+        print(f"ошибка: {foreign} — сборки по ней разойдутся с блоками; arl map \"{stem}\" --force", file=sys.stderr)
+        return 1
     gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
     if gaps:
         print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
@@ -7828,6 +7835,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         try:
             from autoreels.cloud.autocut import rank_hooks
             prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+            _pool_banner(prov)
             for pr in pool[:prm.clips + 2]:
                 rank_hooks(pr, prov, log=lambda x: print(x, flush=True))
         except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
@@ -8036,8 +8044,8 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     from autoreels.cloud.edit import _ends_terminal, merge_group_sentences, strip_credit_words
     from autoreels.cloud.plan import SpeechTimes, load_alignment
     from autoreels.cloud.thoughtmap import (
-        MapParams, Sentence, build_map, describe_units, similar_units, split_units, topic_units, unit_refs,
-        voice_scores,
+        MISSING_PASSPORT, MapParams, Sentence, build_map, describe_units, similar_units, split_units, topic_units,
+        unit_refs, voice_scores,
     )
     from autoreels.local.map_page import build_map_page, write_map_json
     _root = Path(root) if root else _project_root()
@@ -8052,6 +8060,11 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     old_map = None
     if out_json.is_file() and not force:
         m = _json.loads(out_json.read_text(encoding="utf-8"))
+        foreign = _map_foreign(m, manifest)
+        if foreign:
+            print(f"ошибка: {foreign} — arl map \"{stem}\" --force (заново по текущей расшифровке) "
+                  f"или arl tx-use, чтобы вернуть ту расшифровку", file=sys.stderr)
+            return 1
         gaps = _map_gaps(m)
         if not gaps or llm == "none" or m.get("source_sha256") != manifest.source_sha256:
             vdir.mkdir(parents=True, exist_ok=True)
@@ -8118,12 +8131,21 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     print(f"  голос: {'измерен' if measure else 'не измерен'}")
     topics: list = []
     model = ""
+    tkey = manifest.transcript_params_key or ""
     if llm != "none":
         if provider is None:
             provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
             provider.preflight()
+            _pool_banner(provider)
         model = getattr(provider, "name", None) or type(provider).__name__
         system = (_root / mc.system).read_text(encoding="utf-8")
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+
+        def _checkpoint(done: dict) -> None:           # M67: a kill loses one window, not the map
+            cm = build_map(units, stem=stem, source_sha256=manifest.source_sha256, model=model, transcript_key=tkey)
+            for cu in cm["units"]:
+                cu.update(done.get(cu["id"]) or MISSING_PASSPORT)
+            _write_atomic(out_json, write_map_json(cm))
         known: dict[int, dict] = {}
         if old_map:
             prev = {u.get("id"): u for u in old_map.get("units") or []}
@@ -8134,13 +8156,14 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
                     known[u.id] = {k: o.get(k) for k in ("role", "punch", "standalone", "refers", "summary")}
             print(f"  из прежней карты: паспортов {len(known)} из {len(units)}")
         done, missing = describe_units(units, provider, system=system, p=prm, log=lambda x: print(x, flush=True),
-                                       known=known)
+                                       known=known, checkpoint=_checkpoint)
         print(f"  паспорта: {done} мыслей, без ответа {missing}")
         topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True))
     similar_units(units, prm)
-    m = build_map(units, stem=stem, source_sha256=manifest.source_sha256, topics=topics, model=model)
+    m = build_map(units, stem=stem, source_sha256=manifest.source_sha256, topics=topics, model=model,
+                  transcript_key=tkey)
     out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_json.write_text(write_map_json(m), encoding="utf-8")
+    _write_atomic(out_json, write_map_json(m))
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "_map.html").write_text(build_map_page(m), encoding="utf-8")
     n_strong = sum(1 for u in m["units"] if (u.get("punch") or 0) >= 4)
@@ -8152,6 +8175,23 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
               f"Повтори arl map \"{stem}\": дозапросит только недостающее", flush=True)
         return 3
     return 0
+
+
+def _map_foreign(m: dict, manifest) -> str:
+    """M67: the map was built on another transcript than the manifest names (10h59: a local-gp map left
+    in place under a Groq manifest after two sessions switched the source at once). Maps from before
+    M67 carry no key and pass."""
+    key, want = m.get("transcript_key") or "", manifest.transcript_params_key or ""
+    if key and want and key != want:
+        return f"карта построена по расшифровке {key}, а манифест указывает на {want}"
+    return ""
+
+
+def _pool_banner(provider) -> None:
+    """M67: the first line of a run that asks a model — who answers, and who steps in when the cloud is out."""
+    d = getattr(provider, "describe", None)
+    if callable(d):
+        print(f"  {d()}", flush=True)
 
 
 def _map_gaps(m: dict, max_missing: float = 0.0, topics: bool = True) -> list[str]:
@@ -8773,6 +8813,18 @@ def cmd_tx_use(target: str, which: str, *, root=None, cache_dir=None) -> int:
             new = new.model_copy(update={"provider": "whispercpp", "model": which})
         new = new.model_copy(update={"source_sha256": sha})
     new_key = transcript_identity(new)
+    _cur_map = _root / "transcripts" / f"{stem}.map.json"      # M67: files and manifest must agree first
+    if _cur_map.is_file():
+        try:
+            import json as _json
+            _mk = _json.loads(_cur_map.read_text(encoding="utf-8")).get("transcript_key") or ""
+        except (OSError, ValueError):
+            _mk = ""
+        if _mk and _mk != old_key:
+            print(f"ошибка: в transcripts/ карта от расшифровки {_mk}, а манифест на {old_key} — файлы и манифест "
+                  f"разошлись (две сессии переключали источник?). Переключение их перепутает окончательно: "
+                  f"сначала разберись (карта — arl map \"{stem}\" --force по текущей расшифровке)", file=sys.stderr)
+            return 1
     if new_key == old_key:
         print(f"{stem}: уже на этой расшифровке ({which}, ключ {new_key})")
         return 0

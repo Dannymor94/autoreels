@@ -908,6 +908,19 @@ class ProviderPool:
     def name(self) -> str:
         return "pool(" + ",".join(m.name for m in self._members) + ")"
 
+    def describe(self) -> str:
+        """M67: who answers, in order — printed first by map / label / autocut, so a run on the wrong
+        reserve (10h59: LOCAL_LLM_URL on the 8B, which could not do the topics) shows at the start."""
+        def lab(m):
+            url = getattr(m.provider, "_url", None)
+            return f"{m.name} {url}" if url else m.name
+        regular = [lab(m) for m in self._members if not m.reserve]
+        reserve = [lab(m) for m in self._members if m.reserve]
+        out = "модели: " + (" → ".join(regular) if regular else "—")
+        if any(not m.reserve for m in self._members if m.name != "Local"):
+            out += " · запас: " + (", ".join(reserve) if reserve else "нет (LOCAL_LLM_URL не задан или не отвечает)")
+        return out
+
     def _candidate_order(self) -> list[int]:
         """Порядок предпочтения индексов провайдеров по стратегии.
 
