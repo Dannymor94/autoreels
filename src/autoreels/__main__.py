@@ -8649,6 +8649,48 @@ _TX_DERIVED = (".speechmap.json", ".align.json", ".prosody.json", ".map.json", "
 _TX_DRAFTS = ("_auto.txt", "_auto_m56.txt", "_auto_all.txt")
 
 
+def cmd_tx_punct(target: str, *, src: str = "local", out_tag: str | None = None, root=None,
+                 cache_dir=None) -> int:
+    """M64c: a local transcript with Groq's sentence ends on the same words → transcripts/<stem>.<out>.
+    transcript.json (default <src>-gp), ready for `arl tx-use <stem> <out>`. Prints the sentence ends
+    per 100 words before / after. The cache and the manifest are not touched."""
+    from autoreels.cloud.txcheck import _sent_ends, transfer_punctuation
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    stem = mpath.stem
+    sp = _root / "transcripts" / f"{stem}.{src}.transcript.json"
+    if not sp.is_file():
+        print(f"ошибка: нет {sp.name} — сначала arl tx-compare {stem}", file=sys.stderr)
+        return 1
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    groq = None
+    for p in _cache.glob("*.transcript.json"):
+        try:
+            t = Transcript.model_validate_json(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if t.source_sha256 == manifest.source_sha256 and t.provider == "groq":
+            groq = t
+    if groq is None:
+        print(f"ошибка: расшифровки Groq для {stem} в кэше нет", file=sys.stderr)
+        return 1
+    local = Transcript.model_validate_json(sp.read_text(encoding="utf-8"))
+    words, added = transfer_punctuation(local.words, groq.words)
+    out = out_tag or f"{src}-gp"
+    res = local.model_copy(update={"words": words, "provider": local.provider or "whispercpp",
+                                   "model": (local.model or src) + "+groqpunct", "source_sha256": manifest.source_sha256})
+    op = _root / "transcripts" / f"{stem}.{out}.transcript.json"
+    op.write_text(res.model_dump_json(), encoding="utf-8")
+    print(f"{stem}: точки Groq → {src}: добавлено {added}; концы предложения на 100 слов: "
+          f"{src} {_sent_ends(local.words)} → {out} {_sent_ends(words)} (Groq {_sent_ends(groq.words)})")
+    print(f"  → {op.name} · перевести источник: arl tx-use \"{stem}\" {out}")
+    return 0
+
+
 def cmd_tx_use(target: str, which: str, *, root=None, cache_dir=None) -> int:
     """M64: switch a source to another transcript — Groq or a whisper.cpp variant made by tx-compare.
 
@@ -11271,6 +11313,16 @@ def _build_parser():
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
+    ptp = sub.add_parser(
+        "tx-punct",
+        help="M64c: локальная расшифровка с точками Groq на тех же словах → transcripts/<stem>.<src>-gp.transcript.json",
+    )
+    ptp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    ptp.add_argument("--src", default="local", help="какая локальная расшифровка: local | local-<tag>")
+    ptp.add_argument("--out-tag", default=None, dest="out_tag", help="имя результата (по умолчанию <src>-gp)")
+    ptp.add_argument("--root", default=None)
+    ptp.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     ptu = sub.add_parser(
         "tx-use",
         help="M64: перевести источник на другую расшифровку (groq | local | local-<tag>); прежние производные — в архив",
@@ -11713,6 +11765,9 @@ def main(argv=None) -> int:
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
                                   force=args.force, prompt=args.prompt, tag=args.tag)
+        elif args.cmd == "tx-punct":
+            return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None))
         elif args.cmd == "tx-use":
             return cmd_tx_use(args.manifest, args.which, root=getattr(args, "root", None),
                               cache_dir=getattr(args, "cache_dir", None))

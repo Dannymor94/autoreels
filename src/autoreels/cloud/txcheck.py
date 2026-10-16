@@ -251,3 +251,44 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
     return {"ref_words": len(a), "other_words": len(b), "matched": matched, "only_ref": only_a,
             "only_other": only_b, "differ": round(100.0 * (only_a + only_b) / max(1, len(a)), 1),
             "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other), "longest": spans[:show]}
+
+
+# ── M64c: Groq's punctuation onto the local words ──────────────────────────────────────────────
+
+_TERMINAL = (".", "!", "?", "…")
+
+
+def transfer_punctuation(target, ref) -> tuple[list, int]:
+    """Sentence ends of `ref` (Groq: 13 per 100 words) onto the same words of `target` (whisper.cpp:
+    9 per 100 — sentences too long to end a clip on). Words are matched in order (case, ё and
+    punctuation folded); where a matched ref word ends a sentence and the target word does not, the
+    target word gets the same mark and the next target word a capital letter. Words, times and
+    everything outside the matched runs stay as they are (an invented Groq stretch matches nothing).
+    Returns (words, marks added)."""
+    import difflib
+    a = [(_norm(w.word).strip("."), i) for i, w in enumerate(target)]
+    b = [(_norm(w.word).strip("."), j) for j, w in enumerate(ref)]
+    a = [x for x in a if x[0]]
+    b = [x for x in b if x[0]]
+    sm = difflib.SequenceMatcher(None, [x[0] for x in a], [x[0] for x in b], autojunk=False)
+    out = list(target)
+    added = 0
+    cap: set[int] = set()
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag != "equal":
+            continue
+        for k in range(i2 - i1):
+            ti, rj = a[i1 + k][1], b[j1 + k][1]
+            rw, tw = ref[rj].word.rstrip(), out[ti].word.rstrip()
+            mark = next((m for m in _TERMINAL if rw.endswith(m)), None)
+            if mark and not tw.endswith(_TERMINAL):
+                out[ti] = out[ti].model_copy(update={"word": tw.rstrip(",;:—–-") + mark})
+                added += 1
+                cap.add(ti + 1)
+    for ti in cap:
+        if ti < len(out):
+            w = out[ti].word
+            lead = len(w) - len(w.lstrip("«\"'("))
+            if lead < len(w) and w[lead].islower():
+                out[ti] = out[ti].model_copy(update={"word": w[:lead] + w[lead].upper() + w[lead + 1:]})
+    return out, added

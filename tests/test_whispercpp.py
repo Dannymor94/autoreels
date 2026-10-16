@@ -162,3 +162,35 @@ def test_a_prompt_is_not_dropped_by_mc_zero():
     assert "-mc 64" in run and "-mc 0" not in run and be.describe()["model"].endswith("+mc64")
     plain = WhisperCppBackend(WhisperCppParams()).commands(Path("/c/a.mp3"), Path("/t/a.wav"), Path("/t/a.json"))[3][2]
     assert "-mc 0" in plain
+
+
+def test_groq_sentence_ends_go_onto_the_same_local_words():
+    """M64c: local has more words and fewer inventions, Groq more sentence ends — take both."""
+    from autoreels.cloud.txcheck import transfer_punctuation
+    mk = lambda s, t0=0.0: [Word(word=w, t0=t0 + i, t1=t0 + i + 0.5) for i, w in enumerate(s.split())]
+    local = mk("мы говорили о детстве это важно потому что всё оттуда ты знаешь мне иногда напоминает")
+    groq = mk("Мы говорили о детстве. Это важно, потому что всё оттуда. Субтитры создавал DimaTorzok")
+    out, added = transfer_punctuation(local, groq)
+    assert added == 2
+    assert [w.word for w in out][:9] == ["мы", "говорили", "о", "детстве.", "Это", "важно", "потому", "что", "всё"]
+    assert out[9].word == "оттуда." and out[10].word == "Ты"                 # capital after the new end
+    assert [w.t0 for w in out] == [w.t0 for w in local]                       # times untouched
+    assert out[-1].word == "напоминает"                                       # the invented stretch matched nothing
+
+
+def test_cmd_tx_punct_writes_a_variant_ready_for_tx_use(tmp_path, capsys):
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    groq = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    bare = [w.model_copy(update={"word": w.word.rstrip(".").lower()}) for w in groq.words]
+    (tmp_path / "transcripts" / "v.local.transcript.json").write_text(
+        Transcript(language="ru", words=bare, provider="whispercpp", model="turbo").model_dump_json(), encoding="utf-8")
+    assert cli.cmd_tx_punct("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    out = capsys.readouterr().out
+    t = Transcript.model_validate_json((tmp_path / "transcripts" / "v.local-gp.transcript.json").read_text())
+    assert sum(w.word.endswith(".") for w in t.words) == sum(w.word.endswith(".") for w in groq.words)
+    assert t.model == "turbo+groqpunct" and "добавлено" in out and "tx-use" in out
+    assert cli.cmd_tx_use("v", "local-gp", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
