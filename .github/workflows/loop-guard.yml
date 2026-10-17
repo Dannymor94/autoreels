@@ -1,0 +1,27 @@
+name: loop-guard
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Страж существующих проверок
+        # Страж берётся из целевой ветки: PR не может ослабить проверку, поправив сам скрипт.
+        run: |
+          if git show "origin/${{ github.base_ref }}:scripts/loop_guard.py" > "$RUNNER_TEMP/loop_guard.py" 2>/dev/null; then
+            python3 "$RUNNER_TEMP/loop_guard.py"
+          else
+            echo "В целевой ветке стража ещё нет (PR подключения) — запускаю версию из PR."
+            python3 scripts/loop_guard.py
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -56,3 +56,7 @@ clips-review/
 clips_*.txt
 review-*.md
 reviews/
+
+# Петля агентов: служебные файлы исполнителя
+.loop-progress.json
+.loop-task.md
