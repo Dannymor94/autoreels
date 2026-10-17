@@ -217,7 +217,8 @@ def test_montage_apply_writes_reel_fx(tmp_path):
     rc, man, _, _ = _apply(tmp_path, "2 80\nM 85 | 2.1-6 5.1-5 | o:2.3=Крупно | t: Сборка\n")
     assert rc == 0
     plain, mont = man.reels
-    assert plain.fx == {}                                                   # ordinary clips unchanged
+    # M77: an ordinary clip of an auto draft gets the same effects (no callouts); off = unchanged
+    assert plain.fx["push"] and plain.fx["karaoke"] and "callouts" not in plain.fx
     assert mont.fx["push"] and mont.fx["karaoke"] and mont.fx["progress"] and mont.fx["whoosh"]
     (co,) = mont.fx["callouts"]
     assert co["text"] == "Крупно" and abs(co["t"] - s3[0].t0) < 0.6
@@ -344,3 +345,21 @@ def test_plate_after_hook_starts_with_the_body():
     t_line = next(ln for ln in late.splitlines() if ",Title," in ln)
     assert t_line.startswith("Dialogue: 0,0:00:04.00,") and f"0:00:0{4 + cfg.title_lead_sec:.2f}"[:9] in t_line
     assert MontageFx(plate_after_hook=True).reel_fx([]) == {"plate_after_hook": True}
+
+
+def test_fx_on_auto_clips_is_a_switch_and_never_touches_owner_clips(tmp_path):
+    """M77 (owner on PXL_20260729_copy: «не хватает динамики» — 11 of 16 reels were ordinary auto clips without fx)."""
+    from tests.test_montage import _apply, _source
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Manifest as _M
+    (tmp_path / "off").mkdir()
+    rc, man, _, _ = _apply(tmp_path / "off", "2 80\n", )
+    assert rc == 0 and man.reels[0].fx
+    cfg = tmp_path / "off" / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  fx_auto_clips: true", "  fx_auto_clips: false"), encoding="utf-8")
+    rpath = tmp_path / "off" / "reviews" / "v_auto.txt"
+    assert cli._blocks_do_apply(str(rpath), root=tmp_path / "off", cache_dir=str(tmp_path / "off" / "cache"), labeler="auto") == 0
+    assert _M.model_validate_json((tmp_path / "off" / "reviews" / "v.review.json").read_text()).reels[0].fx == {}
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  fx_auto_clips: false", "  fx_auto_clips: true"), encoding="utf-8")
+    assert cli._blocks_do_apply(str(rpath), root=tmp_path / "off", cache_dir=str(tmp_path / "off" / "cache"), labeler="owner") == 0
+    assert _M.model_validate_json((tmp_path / "off" / "reviews" / "v.review.json").read_text()).reels[0].fx == {}

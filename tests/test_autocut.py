@@ -610,3 +610,14 @@ def test_a_later_sentence_of_the_first_thought_can_open_the_clip():
                  "1.2": "А из чего это растёт?", "1.3": "Из страха остаться одной."})
     (pr2,) = propose(units, _P76, q)
     assert not pr2.pieces.startswith("1.3")                                     # an answer is not cut from its question
+
+
+
+def test_plates_of_one_source_mix_shapes():
+    """M77 (owner: «свобода — где-то текст, где-то вопрос»)."""
+    from autoreels.cloud.autocut import plate_score
+    core = "Мы боимся отказа с детства. Отказ — это не приговор."
+    q, st = "Почему мы боимся отказа", "Отказ: откуда страх"
+    q2 = "Почему мы боимся отказа?"
+    assert plate_score(st, core, ["statement", "statement"]) < plate_score(st, core)
+    assert plate_score(q2, core, ["statement", "statement"]) > plate_score(q2, core, ["question", "question"])

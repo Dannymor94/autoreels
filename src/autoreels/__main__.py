@@ -6176,6 +6176,15 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 return 1
         reel.r0_start = reel.start
         reel.r0_end = reel.end
+        _mc77 = getattr(r0_cfg, "montage", None)
+        if labeler == "auto" and _mc77 is not None and getattr(_mc77, "fx_auto_clips", False):
+            # M77 (owner on PXL_20260729_copy: «не хватает динамики» — 11 of its 16 reels were ordinary clips of the
+            # auto draft, without the montage effects): the same push / karaoke / progress / whoosh / pop / plate on
+            # them. Owner-labelled clips (labeler owner) stay as they are.
+            reel.fx = _mc77.fx.reel_fx([])
+            if reel.fx:
+                print(f"  fx {'+'.join(str(s) for s in g)}: "
+                      + ", ".join(k for k in ('push', 'karaoke', 'progress', 'whoosh', 'pop', 'plate_after_hook') if reel.fx.get(k)))
         if is_merged:
             reel.flags.append("human_merged")
             # First internal join of the merge: dangling-start repair may not move the start

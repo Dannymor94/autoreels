@@ -278,6 +278,8 @@ montage:
   # M74 — owner: «после крючка сильно резко идёт тело»: up to this much real silence after the cold open and before
   # the body's first word (never into speech) — the hook and the start of the clip are heard as two things. 0 = off.
   hook_air_sec: 0.5
+  # M77 — owner on PXL_20260729_copy: «не хватает динамики» (11 of 16 reels were ordinary clips without these effects):
+  fx_auto_clips: true     # the fx below (not callouts) also on ordinary clips of an auto draft; owner-labelled clips unchanged
   # M55 — owner: «давай пробовать все» (attention effects of montage clips; each switch off = as before):
   fx:
     push: true              # slow push-in on every shot of at least push_min_sec, push_pct % closer by its end
@@ -334,8 +336,8 @@ autocut:
   hook_pause_top: 3       # at least this much (montage.hook_air_sec), among its first hook_pause_top; else the first stays
   # M76 (M75 report: 11h42 4 → 2 clips, Pxl 5 → 3 — starts that could be repaired were dropped):
   context_back: 2         # the context may be the two thoughts right before (when the nearest leans back itself)
-  context_later: true     # else the clip starts at a later sentence of its first thought that stands (not an answer
-  context_later_min_sec: 8   # cut from its question), while at least this much of the thought is left
+  context_later: false    # M77 off (owner: «"перенос — вещь неблагодарная" — непонятно»: the dropped sentences carried
+  context_later_min_sec: 8   # the context) — else the clip would start at a later sentence of its first thought
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long
