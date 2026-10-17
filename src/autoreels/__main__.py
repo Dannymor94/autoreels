@@ -5201,7 +5201,7 @@ def _filler_profile_values(r0_cfg, name: str | None) -> dict:
                          f"{', '.join(sorted(profiles)) or 'none'})")
     allowed = {"jump_max", "min_cut_spacing_sec", "jump_mask", "min_cut_sec", "keep_word_sec",
                "keep_sentence_sec", "pause_max_sec", "filler_min_sec", "max_removed_share",
-               "mask_min_gap_sec", "mask_filler_only"}
+               "mask_min_gap_sec", "mask_filler_only", "change_gap_sec"}
     return {k: v for k, v in profiles[name].items() if k in allowed}
 
 

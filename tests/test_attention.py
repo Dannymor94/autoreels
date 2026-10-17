@@ -200,9 +200,10 @@ def test_seam_marks_are_written_for_the_sheet_in_russian():
     assert any("голосом вверх" in w for w in m["warn"])
 
 
-def test_montage_keeps_pauses_unless_the_line_asks_for_the_cut(tmp_path, monkeypatch):
-    """M53b: owner — «сильно дёргается» (the pause/filler cuts) — a montage clip is planned without the
-    filler cut; f:1 on the line (or --filler) turns it back on."""
+def test_montage_cuts_pauses_by_default_and_f0_keeps_them(tmp_path, monkeypatch):
+    """M53b: owner — «сильно дёргается» — montage clips were planned without the filler cut. M72: owner on
+    m70-tempo — «изредка — норм, много раз подряд — заметно, слушается норм»: on by default with the
+    montage_tempo profile (no bursts: change_gap_sec); f:0 on the line (or --no-filler) turns it off."""
     import numpy as np
     from autoreels.cloud import plan as plan_mod
     from autoreels.local import motion
@@ -217,10 +218,10 @@ def test_montage_keeps_pauses_unless_the_line_asks_for_the_cut(tmp_path, monkeyp
     (tmp_path / "data" / "cache").mkdir(parents=True)
     motion.save(tmp_path / "data" / "cache" / "v.motion.npz", np.zeros((4000, 8, 8), dtype=np.uint8) + 1,
                 "f" * 64, [960, 1700, 0, 0])
-    rc, man, _, _ = _apply(tmp_path, "2 80\nM 85 | 2.1-3 5.1-3\nM2 84 | 3.1-3 6.1-3 | f:1\n")
+    rc, man, _, _ = _apply(tmp_path, "2 80\nM 85 | 2.1-3 5.1-3\nM2 84 | 3.1-3 6.1-3 | f:0\n")
     assert rc == 0 and len(man.reels) == 3
-    # the review line keeps the config's filler cut (on); M1 off by default; M2 asked f:1
-    assert seen == [True, False, True]
+    # the review line keeps the config's filler cut (on); M1 on by default (M72); M2 asked f:0
+    assert seen == [True, True, False]
 
 
 def test_emphasis_close_shot_on_the_keyword_only():

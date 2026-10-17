@@ -65,6 +65,10 @@ class ManualPlanParams:
     min_cut_spacing_sec: float = 0.0  # cuts at least this far apart (largest removals win)
     mask_min_gap_sec: float = 0.0     # a masking shot switch at least this far from any other shot change
     mask_filler_only: bool = False    # mask only cuts that remove a sound («мм», «аа»), not a bare pause
+    # M72 (owner on m70-tempo: «когда дёргается изредка — норм, когда много раз подряд — сильно заметно»):
+    # every cut, masked or not, stays at least this far from any other picture change (a seam, a shot
+    # switch, another cut) — no bursts of jumps. 0 = off (the previous cuts).
+    change_gap_sec: float = 0.0
     # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
@@ -90,6 +94,7 @@ class PlannedWindow:
     cold_open: bool = False
     cuts: list[list[float]] = field(default_factory=list)  # source-time stretches removed (§1.4)
     cuts_skipped: int = 0             # candidate cuts left in: the face would visibly jump
+    cuts_spaced: int = 0              # M72: candidate cuts left in: too close to another picture change
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
 
     @property
@@ -208,14 +213,16 @@ class ManualPlan:
             lines.append(f"hook      s{self.hook} replayed in body: {'yes' if self.hook_replayed else 'no'}")
         cuts = [c for w in self.windows for c in w.cuts]
         skipped = sum(w.cuts_skipped for w in self.windows)
+        spaced = sum(w.cuts_spaced for w in self.windows)
         masked = sum(len(w.cut_flips) for w in self.windows)
-        if cuts or skipped:
+        if cuts or skipped or spaced:
             removed = sum(c1 - c0 for c0, c1 in cuts)
             total = sum(w.end - w.start for w in self.windows)
             lines.append(f"cuts      {len(cuts)} fillers/pauses removed, {removed:.1f}s "
                          f"(clip {total:.1f}s → {total - removed:.1f}s)"
                          + (f"; {masked} masked by a shot switch" if masked else "")
-                         + (f"; {skipped} left in (visible jump)" if skipped else ""))
+                         + (f"; {skipped} left in (visible jump)" if skipped else "")
+                         + (f"; {spaced} left in (too close to another change)" if spaced else ""))
         return lines
 
 
@@ -781,6 +788,9 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
             continue
         if any(abs(mid - (k0 + k1) / 2) < params.min_cut_spacing_sec for k0, k1 in keep):
             continue
+        if params.change_gap_sec and any(abs(mid - ch) < params.change_gap_sec for ch in changes):
+            w.cuts_spaced += 1            # M72: no burst of jumps — the pause stays
+            continue
         if visible:
             ok = (params.jump_mask
                   and (not params.mask_filler_only or u_len >= params.filler_min_sec)
@@ -790,6 +800,8 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
                 continue
             flips.append([round(a, 3), round(b, 3)])
             changes.append(mid)
+        elif params.change_gap_sec:
+            changes.append(mid)           # M72: a plain cut is a picture change too
         keep.append([round(a, 3), round(b, 3)])
         budget -= b - a
     keep.sort()

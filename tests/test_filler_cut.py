@@ -307,3 +307,26 @@ def test_variable_rate_source_renders_whole_frames_per_window(tmp_path):
     adur = float(arow.split(",")[1])
     assert vframes == sum(frames)
     assert abs(vdur - sum(frames) / fps) < 1e-3 and abs(adur - vdur) < 1 / fps
+
+
+def test_cuts_never_burst_change_gap_keeps_them_apart_from_every_picture_change():
+    """M72 (owner on m70-tempo: «изредка — норм, много раз подряд — сильно заметно»): with change_gap_sec
+    a cut stays that far from the window start (a seam) and from any other cut; the largest pauses win,
+    the rest stay in and are counted. 0 = the previous cuts."""
+    from dataclasses import replace
+    # five sentences, a 1.2 s pause after each (every pause is a cut candidate), ~2.5 s apart
+    spec, t = [], 0.0
+    for k in range(5):
+        spec.append([(f"Слово{k}", t, t + 0.8), (f"конец{k}.", t + 0.9, t + 1.3 + 0.1 * k)])
+        t += 1.3 + 0.1 * k + 1.2
+    sents, words, smap, align = _setup(spec, [])
+    base = build_manual_plan(sents, [1, 2, 3, 4, 5], words=words, smap=smap, params=P, align=align).body[0]
+    assert len(base.cuts) == 4                                             # every pause cut
+    gapped = build_manual_plan(sents, [1, 2, 3, 4, 5], words=words, smap=smap,
+                               params=replace(P, change_gap_sec=5.0), align=align).body[0]
+    mids = [base.start] + sorted((a + b) / 2 for a, b in gapped.cuts)
+    assert 1 <= len(gapped.cuts) < 4 and gapped.cuts_spaced == 4 - len(gapped.cuts)
+    assert all(b - a >= 5.0 - 1e-6 for a, b in zip(mids, mids[1:]))
+    plan = build_manual_plan(sents, [1, 2, 3, 4, 5], words=words, smap=smap,
+                             params=replace(P, change_gap_sec=5.0), align=align)
+    assert "left in (too close to another change)" in " ".join(plan.describe(sents))

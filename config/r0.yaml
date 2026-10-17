@@ -208,7 +208,9 @@ manual_filler_profiles:
   # only ≥ 4 s from any other shot change (owner M31: dynamic — «где-то резкая смена, где-то хорошо»).
   balance_plus: {jump_max: 5.0, min_cut_spacing_sec: 3.0, jump_mask: true, mask_min_gap_sec: 4.0, mask_filler_only: true}
   # M70: montage clips (montage.filler_profile) — tempo without a twitching face: long pauses and «э/мм» only, jumps masked
-  montage_tempo: {pause_max_sec: 0.6, keep_sentence_sec: 0.3, min_cut_spacing_sec: 3.0, jump_max: 5.0, jump_mask: true, mask_min_gap_sec: 3.0, max_removed_share: 0.3}
+  # M72 (owner on m70-tempo: «изредка — норм, много раз подряд — сильно заметно, слушается норм»): every cut at least
+  # change_gap_sec from any other picture change (seam, shot switch, cut) — tempo without bursts of jumps
+  montage_tempo: {pause_max_sec: 0.6, keep_sentence_sec: 0.3, min_cut_spacing_sec: 3.0, jump_max: 5.0, jump_mask: true, mask_min_gap_sec: 3.0, max_removed_share: 0.3, change_gap_sec: 6.0}
 
 # arl label <source>: the LLM drafts review lines (s:/e:/x:/c:/k:/t:/d:), code maps them to the review
 # numbering, checks REEL_SPEC (start/end by voice, unfinished text, length) and asks once for a repair.
@@ -265,7 +267,7 @@ montage:
   emphasis: true          # close shot on a k: keyword, to the end of its sentence (at least min_shot_sec)
   # M53b (owner on the 5 montage reels: «сильно дёргается» — the pause/filler cuts): a montage clip keeps its
   # pauses; its picture already changes with every shot switch. Per line f:1, or --filler, turns the cut back on.
-  filler_cut: false
+  filler_cut: true          # M72: on — with the montage_tempo profile below (owner: occasional jump fine, bursts not)
   # M70 tempo: when a montage clip's filler cut is on (f:1 / --filler), this profile is used (--filler-profile wins):
   # only pauses over 0.6 s and «э/мм» go; a cut with a visible face jump is masked by a wide↔close switch, at most one
   # change every 3 s, else left in. A/B: arl blocks --apply <draft> --filler vs without.
