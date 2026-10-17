@@ -305,12 +305,40 @@ def test_headline_is_used_only_when_it_stays_in_the_clip_words():
     mk = lambda: Proposal(units=[1], pieces="2.1-3", hook=None, title="маска защищает ребёнка", caption="",
                           score=70, seconds=40)
     pr = mk()
-    assert headline(pr, Scripted([{"title": "Почему мы прячемся за маской?"}]), text, log=lambda m: None)
-    assert pr.title == "Почему мы прячемся за маской?" and "заголовок-крючок модели" in pr.notes[-1]
-    pr = mk()                                   # invented twice → the summary stays
-    assert not headline(pr, Scripted([{"title": "Секрет богатства"}, {"title": "Тайна миллионеров"}]), text,
+    assert headline(pr, Scripted([{"titles": ["Почему мы прячемся за маской?"]}]), text, log=lambda m: None)
+    assert pr.title == "Почему мы прячемся за маской?" and "заголовок-крючок" in pr.notes[-1]
+    pr = mk()                                   # invented → the summary stays
+    assert not headline(pr, Scripted([{"titles": ["Секрет богатства", "Тайна миллионеров"]}]), text,
                         log=lambda m: None)
-    assert pr.title == "маска защищает ребёнка" and "не принят" in pr.notes[-1]
+    assert pr.title == "маска защищает ребёнка" and "отброшены" in pr.notes[-1]
+
+
+def test_one_algorithm_picks_the_headline_rules_then_the_attention_score():
+    """M71 (owner: «вкус — это вкус; нужен унифицированный алгоритм»): three proposals, hard rules drop the
+    speaker-centric, the lecture plan and the off-topic ones, then the same attention score as the cold open
+    picks; the current plate competes, so a weaker proposal never replaces it."""
+    from autoreels.cloud.autocut import Proposal, headline, title_problem, title_score
+    from tests.test_label import Scripted
+    text = ("Мой лучший отдых — благодарность людей. Работа по душе не приводит к выгоранию. Почему так? "
+            "Сначала понимание себя, потом инструменты. Вы выгораете, когда работаете не на себя.")
+    core = "Работа по душе не приводит к выгоранию."
+    assert title_problem("Мой лучший отдых — благодарность людей", text, core).startswith("про говорящего")
+    assert title_problem("Сначала понимание себя, потом инструменты", text, core).startswith("план лекции")
+    assert title_problem("Благодарность людей", text, core) == "не про начало и не про вывод ролика"
+    assert title_problem("Почему работа по душе не выжигает?", text, core) is None
+    assert title_score("Почему работа по душе не выжигает?") > title_score("Работа по душе не приводит к выгоранию.")
+    assert title_score("Почему " + "очень " * 9 + "долго?") < title_score("Почему работа не выжигает?")   # > 40 chars
+    pr = Proposal(units=[1], pieces="", hook=None, title="Работа по душе не приводит к выгоранию.", caption="",
+                  score=70, seconds=40)
+    ans = {"titles": ["Мой лучший отдых — благодарность людей", "Почему работа по душе не выжигает?",
+                      "Работа по душе против выгорания"]}
+    assert headline(pr, Scripted([ans]), text, core_text=core, log=lambda m: None)
+    assert pr.title == "Почему работа по душе не выжигает?"
+    assert "про говорящего" in pr.notes[-1]                                   # the dropped one is named
+    weak = Proposal(units=[1], pieces="", hook=None, title="Почему вы выгораете на работе?", caption="",
+                    score=70, seconds=40)
+    assert not headline(weak, Scripted([{"titles": ["Работа по душе"]}]), text, core_text=core, log=lambda m: None)
+    assert weak.title == "Почему вы выгораете на работе?" and "варианты слабее" in weak.notes[-1]
 
 
 def test_seams_are_judged_and_a_jarring_clip_is_marked():

@@ -459,43 +459,94 @@ def grounded_title(title: str, text: str, *, max_chars: int = 60, max_words: int
     return None
 
 
+_FIRST_PERSON = {"я", "мой", "моя", "мое", "мои", "мне", "меня", "мной", "моего", "моей", "моих"}
+
+
+def title_problem(title: str, clip_text: str, core_text: str = "") -> str | None:
+    """M71: hard rules every plate headline passes (one algorithm for every clip, not a taste):
+    grounded in the clip (grounded_title), about the clip's core — at least one content word shared with
+    its opener or payoff (core_text) — not about the speaker (no «я/мой…»), not a lecture plan
+    («сначала… потом…»). Returns why not, None = usable."""
+    why = grounded_title(title, clip_text)
+    if why:
+        return why
+    words = [_norm_word(w) for w in title.split()]
+    if any(w in _FIRST_PERSON for w in words):
+        return "про говорящего («я/мой»), а не про зрителя"
+    if "сначала" in words and "потом" in words:
+        return "план лекции («сначала… потом…»)"
+    if core_text:
+        core = {_norm_word(w)[:5] for w in core_text.split() if len(_norm_word(w)) >= 5}
+        if not any(len(w) >= 5 and w[:5] in core for w in words):
+            return "не про начало и не про вывод ролика"
+    return None
+
+
+def title_score(title: str) -> float:
+    """M71: one attention score for every short line the viewer reads first — the same features as the
+    cold open (hook_score: question, contrast, a number, «вы», strong words, no leaning-back start) plus
+    the plate's own: 3–7 words, at most 40 characters (two big lines on a phone)."""
+    t = " ".join((title or "").split())
+    n = len(t.split())
+    s = hook_score(t, 3.0)
+    s += 1.0 if 3 <= n <= 7 else 0.0
+    s -= 2.0 if len(t) > 40 else 0.0
+    return round(s, 2)
+
+
 TITLE_SYSTEM = (
     "You write the headline shown in big letters during the first 3 seconds of a short vertical video (a reel) "
-    "cut from a Russian talk. It must make a viewer stay: a question the clip answers, a tension or a surprising "
-    "claim. Use only what the clip says — its own words where possible; no new facts, names or numbers. At most "
-    "7 Russian words, no quotes, no emoji, no hashtags. Answer only with JSON: {\"title\": \"<headline>\"}."
+    "cut from a Russian talk. Its only job: make a viewer stay to get the answer the clip gives. Write THREE "
+    "different headlines: a question to the viewer, a claim addressed to «вы», a contrast of two things. Rules: "
+    "use only what the clip says (its own words where possible; no new facts, names or numbers); about the "
+    "clip's main point — what it opens with or concludes; about the viewer, never the speaker (no «я», «мой»); "
+    "no lecture plan («сначала… потом…»); at most 7 Russian words and 40 characters; no quotes, emoji or "
+    "hashtags. Answer only with JSON: {\"titles\": [\"<headline>\", \"<headline>\", \"<headline>\"]}."
 )
 
 
-def headline(pr: "Proposal", provider, clip_text: str, *, log: Callable[[str], None] = print) -> bool:
-    """M70: the model proposes a curiosity headline for the plate t: (the opener's summary until now);
-    the code keeps it only when grounded_title passes (one retry with the reason). Returns True when
-    the title changed."""
+def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
+             log: Callable[[str], None] = print) -> bool:
+    """M70/M71: the model proposes three headlines; the code drops those that break title_problem and
+    keeps the best by title_score — the current plate (the opener's summary) competes too, so a weaker
+    proposal never replaces it (invariant 1: the model proposes, the code picks). Returns True when the
+    title changed."""
     import json as _json
     import re as _re
-    msg = f"Clip text:\n{clip_text[:1800]}\n\nCurrent plate: «{pr.title}». Write a better one."
-    why = ""
-    for attempt in range(2):
-        user = msg if not why else msg + f"\nYour previous headline was rejected: {why}. Stay in the clip's words."
-        try:
-            raw = provider.complete([{"role": "system", "content": TITLE_SYSTEM}, {"role": "user", "content": user}],
-                                    temperature=0.0)
-        except Exception as exc:  # noqa: BLE001 — no model: the summary stays
-            log(f"  заголовок: модель не ответила ({type(exc).__name__})")
-            return False
-        m = _re.search(r"\{.*\}", raw or "", _re.S)
-        try:
-            title = " ".join(str((_json.loads(m.group(0)) if m else {}).get("title") or "").split()).strip(" «»\"'")
-        except ValueError:
-            title = ""
-        why = grounded_title(title, clip_text) or ""
-        if not why:
-            if title != pr.title:
-                pr.notes.append(f"заголовок-крючок модели: «{title}» (было: «{pr.title}»)")
-                pr.title = title
-                return True
-            return False
-    pr.notes.append(f"заголовок модели не принят ({why}) — остался «{pr.title}»")
+    msg = f"Clip text:\n{clip_text[:1800]}\n\nOpening and conclusion:\n{core_text[:600]}\n\nCurrent plate: «{pr.title}»."
+    try:
+        raw = provider.complete([{"role": "system", "content": TITLE_SYSTEM}, {"role": "user", "content": msg}],
+                                temperature=0.0)
+    except Exception as exc:  # noqa: BLE001 — no model: the summary stays
+        log(f"  заголовок: модель не ответила ({type(exc).__name__})")
+        return False
+    m = _re.search(r"\{.*\}", raw or "", _re.S)
+    try:
+        obj = _json.loads(m.group(0)) if m else {}
+    except ValueError:
+        obj = {}
+    props = obj.get("titles") or ([obj["title"]] if obj.get("title") else [])
+    cands: list[tuple[float, str]] = []
+    dropped: list[str] = []
+    for t in props:
+        t = " ".join(str(t or "").split()).strip(" «»\"'")
+        if not t:
+            continue
+        why = title_problem(t, clip_text, core_text)
+        if why:
+            dropped.append(f"«{t}» — {why}")
+        else:
+            cands.append((title_score(t), t))
+    base = title_score(pr.title) if pr.title else -99.0
+    best = max(cands, key=lambda c: c[0]) if cands else None
+    if best and best[0] > base:
+        pr.notes.append(f"заголовок-крючок: «{best[1]}» (балл {best[0]:g}; было «{pr.title}», {base:g})"
+                        + (f"; отброшены: {'; '.join(dropped)}" if dropped else ""))
+        pr.title = best[1]
+        return True
+    pr.notes.append(f"заголовок остался «{pr.title}» (балл {base:g})"
+                    + (f"; варианты слабее: {', '.join(f'«{t}» {sc:g}' for sc, t in cands)}" if cands else "")
+                    + (f"; отброшены: {'; '.join(dropped)}" if dropped else ""))
     return False
 
 

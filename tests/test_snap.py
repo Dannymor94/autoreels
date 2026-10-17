@@ -634,7 +634,11 @@ def test_end_drift_and_reason_written_for_every_reel():
 
 
 def test_corpus_max_drift_within_cap():
-    """Test 6: on the 3 lecture manifests, end never drifts > max_end_search_sec + tail past r0_end."""
+    """Test 6: on the corpus, end never drifts > max_end_search_sec + tail past r0_end — snap's own bound.
+    M71: a reel whose end was moved by the later min-end-gap stage (end_snap_reason «min_end_gap»: the
+    last word ran straight into the next speech, so the end goes on to the next sentence end that has a
+    pause) has that stage's own bound on top: end_gap_search_sec (r0.yaml, default 20 s). PXL_20260729_copy
+    r02/r09 (13.1 s, 14.5 s) are such reels; each stage stays inside its own limit."""
     import json as _json
     from pathlib import Path as _Path
     from autoreels.core.models import Manifest
@@ -645,6 +649,9 @@ def test_corpus_max_drift_within_cap():
         pytest.skip("no manifests/ to run corpus check against")
 
     max_allowed = 12.0 + 0.3  # max_end_search_sec + tail_sec
+    from autoreels import __main__ as _cli
+    _r0 = _cli.load_r0_config(_Path(__file__).resolve().parents[1] / "config" / "r0.yaml")
+    gap_search = float(getattr(_r0, "end_gap_search_sec", 20.0))
     violations = []
     for mf in manifests:
         m = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
@@ -652,9 +659,10 @@ def test_corpus_max_drift_within_cap():
         for r in m.reels:
             if r.r0_end is None:
                 continue
+            gap_moved = r.end_snap_reason == "min_end_gap"
             snap_segments([r], words, **_R0CFG)
             drift = r.end - r.r0_end
-            if drift > max_allowed + 1e-6:
+            if drift > max_allowed + (gap_search if gap_moved else 0.0) + 1e-6:
                 violations.append(f"{mf.name} reel {r.id}: drift={drift:.1f}s")
 
     assert not violations, "end drift > cap:\n" + "\n".join(violations)
