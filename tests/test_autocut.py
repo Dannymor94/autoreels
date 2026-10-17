@@ -579,3 +579,34 @@ def test_cmd_autocut_takes_a_top_hook_with_a_pause_after_it(tmp_path, capsys, mo
     assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
     text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
     assert f"| h:{seen[0]} " in text and "паузы после него нет" in text          # none has one → the first stays
+
+
+# ── M76: repair more starts before giving a clip up ───────────────────────────────────────────────
+
+_P76 = AutoParams(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False, context_start=True,
+                  context_min_words=4, context_back=2, context_later=True, context_later_min_sec=8.0)
+
+
+def test_two_thoughts_back_when_the_nearest_leans_too():
+    """M76 (M75 report: 11h42 «Вот там прям в книжке…» had no start — the thought before it leaned back too)."""
+    units = [U(1, 0, 6, "aside", 2, "1.1"), U(2, 6, 6, "aside", 2, "1.2"), U(3, 12, 30, "thesis", 5, "2.1-3"),
+             U(4, 42, 10, "conclusion", 4, "2.4")]
+    sent = _rows74({"2.1": "Вот там прям в книжке это описано подробно.", "1.2": "И мама так говорила всегда.",
+                    "1.1": "Детские правила мы берём из семьи."})
+    from dataclasses import replace
+    assert propose(units, replace(_P76, context_back=1, context_later=False), sent) == []      # M75: no start
+    (pr,) = propose(units, _P76, sent)
+    assert pr.units[:2] == [1, 2] and any("добавлены мысли #1, #2" in n for n in pr.notes)
+
+
+def test_a_later_sentence_of_the_first_thought_can_open_the_clip():
+    units = [U(1, 0, 30, "thesis", 5, "1.1-5"), U(2, 30, 10, "conclusion", 4, "1.6")]
+    sent = _rows74({"1.1": "Поэтому мама так говорила всегда и везде, где могла.",
+                    "1.2": "И это тоже было про неё.",
+                    "1.3": "Детские правила мы берём из семьи."})
+    (pr,) = propose(units, _P76, sent)
+    assert pr.pieces.startswith("1.3-5") and any("со фразы «Детские правила" in n and "убрано 2" in n for n in pr.notes)
+    q = _rows74({"1.1": "Поэтому мама так говорила всегда и везде, где могла.",
+                 "1.2": "А из чего это растёт?", "1.3": "Из страха остаться одной."})
+    (pr2,) = propose(units, _P76, q)
+    assert not pr2.pieces.startswith("1.3")                                     # an answer is not cut from its question

@@ -65,6 +65,10 @@ class AutoParams:
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
     context_min_words: int = 0        # a start shorter than this (not a question) is a fragment; 0 = off
+    # M76 (M75 report: 11h42 4 → 2 clips, Pxl 5 → 3 — starts that could be repaired were dropped):
+    context_back: int = 1             # up to this many thoughts right before may be added as context (M74/M75: 1)
+    context_later: bool = False       # the clip may start at a later sentence of its first thought that stands
+    context_later_min_sec: float = 8.0   # … when at least this much of that thought is left
 
 
 @dataclass
@@ -297,11 +301,14 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
     (a) a short leaning sentence (≤ context_drop_words) before one that stands is dropped — never a question
         (M75: its answer would be left as a fragment, Pxl «То есть, а из чего?» → «Из чувства вины…»);
     (b) the thought right before it in the source is added as context (≤ context_max_sec, standing itself;
-        not for a loop question — that one simply goes);
+        not for a loop question — that one simply goes); M76: up to context_back thoughts back, when the nearest
+        does not stand but the one before it does (together ≤ context_max_sec);
+    (b2) M76 (context_later): the clip starts at the first later sentence of that thought that stands — never an
+        answer cut from its question — while at least context_later_min_sec of the thought is left;
     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
     otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can."""
     notes: list[str] = []
-    for _ in range(4):
+    for _ in range(6):
         u = clip[0]
         rows = list(_sent_rows(sentences, u["refs"]))
         if not rows:
@@ -319,17 +326,44 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                 notes.append(f"начало: убрана фраза «{first[:60]}» ({why})")
                 continue
         ids = {c["id"] for c in clip}
-        prev = by_id.get(u["id"] - 1)
-        if (prev is not None and u["id"] != loop_id and prev["id"] not in ids and not prev.get("missing")
-                and prev.get("refs") and not (prev.get("filtered") and not p.use_filtered)
-                and float(u["t0"]) - float(prev["t1"]) <= 3.0
-                and _dur(prev) <= p.context_max_sec and sum(_dur(c) for c in clip) + _dur(prev) <= p.max_sec
-                and _pieces([prev] + clip) <= p.max_pieces + 1):
-            prow = list(_sent_rows(sentences, prev["refs"]))
-            if prow and stands_alone(prow[0][4], prow[1][4] if len(prow) > 1 else first, p, judge) is None:
-                notes.append(f"начало: добавлена мысль #{prev['id']} «{(prow[0][4] or '')[:50]}» перед "
-                             f"«{first[:50]}» ({why}) — контекст")
-                return [prev] + clip, notes, None
+        if u["id"] != loop_id:
+            ctx: list[dict] = []
+            for back in range(1, max(1, p.context_back) + 1):
+                prev = by_id.get(u["id"] - back)
+                nxt_u = ctx[0] if ctx else u
+                if (prev is None or prev["id"] in ids or prev.get("missing") or not prev.get("refs")
+                        or (prev.get("filtered") and not p.use_filtered)
+                        or float(nxt_u["t0"]) - float(prev["t1"]) > 3.0):
+                    break
+                ctx = [prev] + ctx
+                if (sum(_dur(c) for c in ctx) > p.context_max_sec
+                        or sum(_dur(c) for c in clip + ctx) > p.max_sec or _pieces(ctx + clip) > p.max_pieces + 1):
+                    break
+                prow = list(_sent_rows(sentences, prev["refs"]))
+                after = prow[1][4] if len(prow) > 1 else (list(_sent_rows(sentences, nxt_u["refs"])) or [("",) * 5])[0][4]
+                if prow and stands_alone(prow[0][4], after, p, judge) is None:
+                    notes.append(f"начало: добавлен{'а мысль' if len(ctx) == 1 else 'ы мысли'} "
+                                 + ", ".join(f"#{c['id']}" for c in ctx)
+                                 + f" «{(prow[0][4] or '')[:50]}» перед «{first[:50]}» ({why}) — контекст")
+                    return ctx + clip, notes, None
+        if p.context_later and len(rows) >= 2:
+            total = sum(float(r[1]) for r in rows)
+            for k in range(1, len(rows)):
+                if (rows[k - 1][4] or "").rstrip().endswith("?"):
+                    continue                      # an answer is not cut from its question
+                left = sum(float(r[1]) for r in rows[k:])
+                if left < p.context_later_min_sec or sum(_dur(c) for c in clip) - (total - left) < p.min_sec:
+                    break
+                if stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge) is None:
+                    refs = u["refs"]
+                    for _ in range(k):
+                        refs = _drop_first_ref(refs) or refs
+                    clip = [{**u, "refs": refs, "t0": float(u["t0"]) + (total - left)}] + clip[1:]
+                    notes.append(f"начало: со фразы «{(rows[k][4] or '')[:50]}» — до неё убрано {k} "
+                                 f"(«{first[:40]}…»: {why})")
+                    break
+            if clip[0] is not u:
+                continue
         needed = {i for c in clip for i in leans_on(c, by_id)}
         if (len(clip) > 1 and (u["id"] == loop_id or (u["id"] != seed_id and u["id"] not in needed))
                 and sum(_dur(c) for c in clip[1:]) >= p.min_sec):

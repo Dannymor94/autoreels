@@ -293,6 +293,10 @@ class AutocutConfig(BaseModel):
     context_judge: bool = False                  # the model says whether a first sentence stands on its own
     hook_pause_sec: float = Field(0.0, ge=0.0)   # no pause after the hook → the next of the top hooks that has one; 0 = off
     hook_pause_top: int = Field(3, ge=1)         # … looked for among the model's first this many hooks
+    # M76 (M75 report: 11h42 4 → 2 clips, Pxl 5 → 3 — repairable starts were dropped)
+    context_back: int = Field(1, ge=1, le=4)     # up to this many thoughts right before may be added as context
+    context_later: bool = False                  # the clip may start at a later sentence of its first thought that stands
+    context_later_min_sec: float = Field(8.0, gt=0)   # … when at least this much of that thought is left
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)
