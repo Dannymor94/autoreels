@@ -74,6 +74,8 @@ class Proposal:
     speed: float | None = None                          # M65: @speed by the clip's speech rate
     hook_texts: dict = field(default_factory=dict)      # M65: hook ref → (text, feature score) for ranking
     opener: int | None = None                           # M68: the thought that gives the title (t:)
+    variant_of: int | None = None                       # M70: a short version of accepted clip M<n>
+    bad_seams: int | None = None                        # M70: seams the model found jarring (None = not asked)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
@@ -421,3 +423,166 @@ def rank_hooks(pr: "Proposal", provider, *, top: int = 6, log: Callable[[str], N
             return False
     log("  крючок: ответ модели вне кандидатов — порядок кода")
     return False
+
+
+# ── M70: hook headline, seam coherence, short versions ─────────────────────────────────────────────
+
+def _norm_word(w: str) -> str:
+    return "".join(c for c in w.lower().replace("ё", "е") if c.isalnum())
+
+
+def grounded_title(title: str, text: str, *, max_chars: int = 60, max_words: int = 9) -> str | None:
+    """M70: the plate headline the model wrote is used only when it stays in the clip's words (invariant 2):
+    at most max_chars / max_words, no number the clip does not say, and at least 60 % of its content
+    words (5+ letters) share their first 5 letters with a word of the clip. Returns why not, None = ok."""
+    t = " ".join((title or "").split())
+    if not t:
+        return "пусто"
+    if len(t) > max_chars:
+        return f"длиннее {max_chars} знаков"
+    words = [_norm_word(w) for w in t.split()]
+    words = [w for w in words if w]
+    if not 2 <= len(words) <= max_words:
+        return f"слов {len(words)} (нужно 2–{max_words})"
+    src = {_norm_word(w) for w in (text or "").split()}
+    src.discard("")
+    nums = {w for w in src if w.isdigit()}
+    for w in words:
+        if w.isdigit() and w not in nums:
+            return f"число {w}, которого нет в ролике"
+    content = [w for w in words if len(w) >= 5 and not w.isdigit()]
+    if content:
+        stems = {w[:5] for w in src if len(w) >= 5}
+        hit = sum(1 for w in content if w[:5] in stems)
+        if hit < 0.6 * len(content):
+            return f"слова не из ролика ({hit} из {len(content)})"
+    return None
+
+
+TITLE_SYSTEM = (
+    "You write the headline shown in big letters during the first 3 seconds of a short vertical video (a reel) "
+    "cut from a Russian talk. It must make a viewer stay: a question the clip answers, a tension or a surprising "
+    "claim. Use only what the clip says — its own words where possible; no new facts, names or numbers. At most "
+    "7 Russian words, no quotes, no emoji, no hashtags. Answer only with JSON: {\"title\": \"<headline>\"}."
+)
+
+
+def headline(pr: "Proposal", provider, clip_text: str, *, log: Callable[[str], None] = print) -> bool:
+    """M70: the model proposes a curiosity headline for the plate t: (the opener's summary until now);
+    the code keeps it only when grounded_title passes (one retry with the reason). Returns True when
+    the title changed."""
+    import json as _json
+    import re as _re
+    msg = f"Clip text:\n{clip_text[:1800]}\n\nCurrent plate: «{pr.title}». Write a better one."
+    why = ""
+    for attempt in range(2):
+        user = msg if not why else msg + f"\nYour previous headline was rejected: {why}. Stay in the clip's words."
+        try:
+            raw = provider.complete([{"role": "system", "content": TITLE_SYSTEM}, {"role": "user", "content": user}],
+                                    temperature=0.0)
+        except Exception as exc:  # noqa: BLE001 — no model: the summary stays
+            log(f"  заголовок: модель не ответила ({type(exc).__name__})")
+            return False
+        m = _re.search(r"\{.*\}", raw or "", _re.S)
+        try:
+            title = " ".join(str((_json.loads(m.group(0)) if m else {}).get("title") or "").split()).strip(" «»\"'")
+        except ValueError:
+            title = ""
+        why = grounded_title(title, clip_text) or ""
+        if not why:
+            if title != pr.title:
+                pr.notes.append(f"заголовок-крючок модели: «{title}» (было: «{pr.title}»)")
+                pr.title = title
+                return True
+            return False
+    pr.notes.append(f"заголовок модели не принят ({why}) — остался «{pr.title}»")
+    return False
+
+
+def seam_pairs(pr: "Proposal", by_id: dict, sentences) -> list[tuple[str, str]]:
+    """(last sentence before, first sentence after) of every seam of the clip in play order — two
+    thoughts that are not neighbours in the source (neighbours are played as one piece, M58)."""
+    out = []
+    for a, b in zip(pr.units, pr.units[1:]):
+        if b == a + 1 or a not in by_id or b not in by_id:
+            continue
+        ra = list(_sent_rows(sentences, by_id[a]["refs"]))
+        rb = list(_sent_rows(sentences, by_id[b]["refs"]))
+        if ra and rb:
+            out.append((ra[-1][4] or ra[-1][0], rb[0][4] or rb[0][0]))
+    return out
+
+
+SEAM_SYSTEM = (
+    "A short video is cut from a Russian talk: pieces from different places are joined. For every seam you get "
+    "the last sentence before it (A) and the first sentence after it (B). Decide whether a listener hears B as a "
+    "natural continuation of A: no pronoun or «это/поэтому/так» pointing to something that was cut, no abrupt "
+    "jump to another subject. Answer only with JSON: {\"seams\": [{\"n\": <number>, \"ok\": true|false, "
+    "\"why\": \"<at most 10 Russian words>\"}]} with an entry for EVERY seam."
+)
+
+
+def check_seams(pr: "Proposal", pairs: Sequence[tuple[str, str]], provider, *,
+                log: Callable[[str], None] = print) -> int | None:
+    """M70: the model judges every seam (invariant 11: each seam must get an answer — one retry, then
+    the clip stays unjudged, never «fine»). Sets pr.bad_seams; the code only moves clips with a jarring
+    seam behind the clean ones (invariant 1). Returns the count, None = no full answer."""
+    import json as _json
+    import re as _re
+    if not pairs:
+        pr.bad_seams = 0
+        return 0
+    rows = "\n".join(f"{i}. A: «{a}»\n   B: «{b}»" for i, (a, b) in enumerate(pairs, 1))
+    for _ in range(2):
+        try:
+            raw = provider.complete([{"role": "system", "content": SEAM_SYSTEM},
+                                     {"role": "user", "content": f"Seams:\n{rows}"}], temperature=0.0)
+        except Exception as exc:  # noqa: BLE001
+            log(f"  стыки: модель не ответила ({type(exc).__name__})")
+            return None
+        m = _re.search(r"\{.*\}", raw or "", _re.S)
+        try:
+            items = (_json.loads(m.group(0)) if m else {}).get("seams") or []
+        except ValueError:
+            continue
+        got = {}
+        for it in items:
+            try:
+                n = int(it.get("n"))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if 1 <= n <= len(pairs) and isinstance(it.get("ok"), bool):
+                got[n] = (it["ok"], str(it.get("why") or "").strip()[:80])
+        if len(got) == len(pairs):
+            bad = [(n, w) for n, (ok, w) in sorted(got.items()) if not ok]
+            pr.bad_seams = len(bad)
+            for n, w in bad:
+                a, b = pairs[n - 1]
+                pr.notes.append(f"стык {n} рвётся (модель): «…{a[-50:]}» → «{b[:50]}…»" + (f" — {w}" if w else ""))
+            return len(bad)
+    log("  стыки: ответ модели неполный — сборка не оценена")
+    return None
+
+
+def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, short_sec: float = 25.0,
+                  short_min_sec: float = 15.0, label: int = 0) -> "Proposal | None":
+    """M70: a shorter cut of an accepted clip — the weakest middle thoughts dropped down to short_sec
+    (opener, payoff and what they lean on stay, as in _prune). None when it cannot get within
+    short_sec + 5 s or drops nothing."""
+    from dataclasses import replace as _replace
+    clip = [by_id[i] for i in pr.units if i in by_id]
+    if len(clip) != len(pr.units):
+        return None
+    short, dropped = _prune(clip, by_id, _replace(p, target_sec=short_sec, prune_slack=0.0, min_sec=short_min_sec))
+    secs = sum(_dur(u) for u in short)
+    if not dropped or secs > short_sec + 5.0 or secs < short_min_sec:
+        return None
+    cands = _hook_cands(short, sentences, p) if sentences else []
+    refs = [r for r, _, _ in cands]
+    hook = pr.hook if pr.hook in refs else (refs[0] if refs else None)
+    return Proposal(units=[u["id"] for u in short], pieces=" ".join(u["refs"] for u in short), hook=hook,
+                    title=pr.title, caption=pr.caption, score=pr.score, seconds=round(secs, 1),
+                    notes=[f"короткая версия M{label}: убраны " + ", ".join(f"#{i}" for i in dropped)],
+                    hooks=[hook] + [r for r in refs if r != hook] if hook else refs,
+                    hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(short, p),
+                    opener=pr.opener, variant_of=label)

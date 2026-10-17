@@ -299,3 +299,32 @@ def test_sped_up_clip_is_a_whole_number_of_frames(tmp_path, render_cfg, fake_ffm
     fake_ffmpeg.clear()
     (plain,) = _render_argv(tmp_path, render_cfg, fake_ffmpeg, _two_window_reel())
     assert "end_frame=" not in plain.split("[v]")[0].split(";")[-1]           # 1× clips unchanged
+
+
+def test_pop_opens_closer_and_settles_on_top_of_the_push():
+    """M70: a sharp start — the first frame pop_pct % closer, back to the frame over pop_sec; off = as before."""
+    from autoreels.local.fx import push_vf
+    base = push_vf([5.0], 12.0, pct=4, min_sec=6)
+    assert push_vf([5.0], 12.0, pct=4, min_sec=6, pop_pct=0.0) == base                     # invariant 8
+    vf = push_vf([5.0], 12.0, pct=4, min_sec=6, pop_pct=8, pop_sec=0.6)
+    assert "0.0800*pow(max(0\\,1-t/0.600)\\,2)" in vf and "between(t\\,5.000\\,12.000)" in vf
+    only = push_vf([], 3.0, pct=0, pop_pct=8, pop_sec=0.6)
+    assert only.startswith("scale=") and "between" not in only
+    assert push_vf([], 3.0, pct=0, pop_pct=0) == ""
+
+
+def test_montage_fx_writes_pop():
+    from autoreels.core.config import MontageFx
+    assert MontageFx(pop=True).reel_fx([]) == {"pop": True, "pop_pct": 8.0, "pop_sec": 0.6}
+    assert MontageFx().reel_fx([]) == {}
+
+
+def test_montage_tempo_profile_is_shipped_and_used_for_montage_clips():
+    """M70: montage clips cut only long pauses and «э/мм», jumps masked by a shot switch (not every 0.4 s)."""
+    from pathlib import Path
+    from autoreels import __main__ as cli
+    r0 = cli.load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml")
+    assert r0.montage.filler_profile == "montage_tempo" and r0.montage.filler_cut is False   # A/B via --filler
+    v = cli._filler_profile_values(r0, r0.montage.filler_profile)
+    assert v["pause_max_sec"] == 0.6 and v["jump_mask"] is True and v["mask_min_gap_sec"] == 3.0
+    assert r0.montage.fx.pop and r0.autocut.hook_title and r0.autocut.seam_check and r0.autocut.short_variant

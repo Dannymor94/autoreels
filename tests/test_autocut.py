@@ -78,9 +78,10 @@ def test_cmd_autocut_writes_a_draft_that_applies(tmp_path, capsys):
     from tests.test_montage import _source
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
-    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
+                   .replace("  short_variant: true ", "  short_variant: false "), encoding="utf-8")
     r0 = cli.load_r0_config(cfg)
-    assert r0.autocut.min_sec == 10
+    assert r0.autocut.min_sec == 10 and not r0.autocut.short_variant
     tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
     _, kept, _ = cli._review_block_set(tx, r0, "lecture")
 
@@ -279,3 +280,65 @@ def test_propose_records_the_opener_thought():
     from autoreels.cloud.autocut import AutoParams, propose
     out = propose(_units(), AutoParams(min_sec=20, target_sec=40, max_sec=90, loop=False))
     assert out and all(o.opener in o.units for o in out)
+
+
+
+def _rows70(refs):
+    out = []
+    for piece in refs.split():
+        b, _, r = piece.partition(".")
+        a, _, z = r.partition("-")
+        for k in range(int(a), int(z or a) + 1):
+            out.append((f"{b}.{k}", 3.0, 6, True, f"Фраза {b}.{k} про маски и детей."))
+    return out
+
+
+def test_headline_is_used_only_when_it_stays_in_the_clip_words():
+    """M70: the plate t: becomes a curiosity headline from the model — but never words the clip does not say."""
+    from autoreels.cloud.autocut import Proposal, grounded_title, headline
+    from tests.test_label import Scripted
+    text = "Маска защищает ребёнка. Почему мы прячемся за маской, когда страшно? Маску можно снять."
+    assert grounded_title("Почему мы прячемся за маской?", text) is None
+    assert grounded_title("Как заработать миллион на крипте", text).startswith("слова не из ролика")
+    assert grounded_title("3 причины прятаться", text) == "число 3, которого нет в ролике"
+    assert grounded_title("Маска " * 12, text).startswith("длиннее") or grounded_title("Маска " * 12, text).startswith("слов")
+    mk = lambda: Proposal(units=[1], pieces="2.1-3", hook=None, title="маска защищает ребёнка", caption="",
+                          score=70, seconds=40)
+    pr = mk()
+    assert headline(pr, Scripted([{"title": "Почему мы прячемся за маской?"}]), text, log=lambda m: None)
+    assert pr.title == "Почему мы прячемся за маской?" and "заголовок-крючок модели" in pr.notes[-1]
+    pr = mk()                                   # invented twice → the summary stays
+    assert not headline(pr, Scripted([{"title": "Секрет богатства"}, {"title": "Тайна миллионеров"}]), text,
+                        log=lambda m: None)
+    assert pr.title == "маска защищает ребёнка" and "не принят" in pr.notes[-1]
+
+
+def test_seams_are_judged_and_a_jarring_clip_is_marked():
+    """M70: pieces from far apart — the model says whether B follows A; every seam must get an answer."""
+    from autoreels.cloud.autocut import Proposal, check_seams, seam_pairs
+    from tests.test_label import Scripted
+    by = {u["id"]: u for u in _units()}
+    pr = Proposal(units=[6, 2, 3, 5], pieces="15.1 2.1-3 2.4-6 9.1-2", hook=None, title="t", caption="",
+                  score=70, seconds=60)
+    pairs = seam_pairs(pr, by, _rows70)
+    assert [(a[:9], b[:9]) for a, b in pairs] == [("Фраза 15.", "Фраза 2.1"), ("Фраза 2.6", "Фраза 9.1")]   # 2→3 adjacent
+    ans = {"seams": [{"n": 1, "ok": True, "why": ""}, {"n": 2, "ok": False, "why": "«это» без предмета"}]}
+    assert check_seams(pr, pairs, Scripted([ans]), log=lambda m: None) == 1
+    assert pr.bad_seams == 1 and "стык 2 рвётся" in pr.notes[-1] and "«это» без предмета" in pr.notes[-1]
+    pr2 = Proposal(units=[6, 2], pieces="", hook=None, title="t", caption="", score=70, seconds=30)
+    half = {"seams": [{"n": 1, "ok": True}, {"n": 2, "ok": True}]}
+    assert check_seams(pr2, pairs, Scripted([{"seams": [{"n": 1, "ok": True}]}, {"seams": []}]),
+                       log=lambda m: None) is None and pr2.bad_seams is None        # incomplete → not judged
+    assert check_seams(pr2, pairs, Scripted([half]), log=lambda m: None) == 0
+
+
+def test_short_variant_drops_the_weakest_middle_and_keeps_opener_and_payoff():
+    from autoreels.cloud.autocut import AutoParams, Proposal, short_variant
+    units = _units() + [U(10, 70, 14, "example", 3, "3.3-5"), U(11, 90, 14, "metaphor", 4, "4.1-3")]
+    by = {u["id"]: u for u in units}
+    pr = Proposal(units=[2, 3, 10, 11, 5], pieces="2.1-3 2.4-6 3.3-5 4.1-3 9.1-2", hook="2.2", title="t",
+                  caption="d", score=80, seconds=78, opener=2)
+    v = short_variant(pr, by, AutoParams(), _rows70, short_sec=50, short_min_sec=15, label=1)
+    assert v is not None and v.units[0] == 2 and v.units[-1] == 5 and v.seconds <= 55
+    assert v.variant_of == 1 and v.hook == "2.2" and "короткая версия M1" in v.notes[0]
+    assert short_variant(pr, by, AutoParams(), _rows70, short_sec=5, short_min_sec=4, label=1) is None

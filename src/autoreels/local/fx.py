@@ -59,16 +59,24 @@ def timeline(windows: Sequence, *, speed: float = 1.0,
 
 
 def push_vf(changes: Sequence[float], total: float, *, pct: float = 4.0, min_sec: float = 6.0,
-            size: tuple[int, int] = (1080, 1920)) -> str:
+            size: tuple[int, int] = (1080, 1920), pop_pct: float = 0.0, pop_sec: float = 0.6) -> str:
     """Filter for a slow push-in on every shot of at least min_sec ('' when none): the zoom grows
-    linearly from 1 to 1 + pct/100 over the shot and starts again at 1 on the next shot."""
+    linearly from 1 to 1 + pct/100 over the shot and starts again at 1 on the next shot.
+    M70 `pop_pct`: the clip opens that much closer and eases back to the frame over pop_sec (a sharp
+    start; added on top of the push)."""
     pts = [0.0, *sorted(c for c in changes if 0.0 < c < total), total]
-    shots = [(a, b) for a, b in zip(pts, pts[1:]) if b - a >= min_sec]
-    if not shots or pct <= 0:
+    shots = [(a, b) for a, b in zip(pts, pts[1:]) if b - a >= min_sec] if pct > 0 else []
+    parts = []
+    if shots:
+        k = pct / 100.0
+        terms = "+".join(f"between(t\\,{a:.3f}\\,{b:.3f})*(t-{a:.3f})/{b - a:.3f}" for a, b in shots)
+        parts.append(f"{k:.4f}*({terms})")
+    if pop_pct > 0 and pop_sec > 0:
+        # ease-out: (1 - t/pop_sec)^2 for t < pop_sec, 0 after
+        parts.append(f"{pop_pct / 100.0:.4f}*pow(max(0\\,1-t/{pop_sec:.3f})\\,2)")
+    if not parts:
         return ""
-    k = pct / 100.0
-    terms = "+".join(f"between(t\\,{a:.3f}\\,{b:.3f})*(t-{a:.3f})/{b - a:.3f}" for a, b in shots)
-    z = f"(1+{k:.4f}*({terms}))"
+    z = "(1+" + "+".join(parts) + ")"
     w, h = size
     return (f"scale=w='2*trunc({w}*{z}/2)':h='2*trunc({h}*{z}/2)':eval=frame:flags=bicubic,"
             f"crop={w}:{h}:(iw-{w})/2:(ih-{h})/2")

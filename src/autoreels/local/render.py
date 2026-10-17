@@ -2898,11 +2898,14 @@ def _render_segments(
                         else [_xfade_actual] * (len(_s) - 1))
             _reel_speed = getattr(reel, "speed", 1.0)
             _push_vf = ""
-            if _fx.get("push"):
+            if _fx.get("push") or _fx.get("pop"):
                 _, _fx_changes, _fx_total = fx_timeline(segs, speed=_reel_speed, xfades=_fx_xfades(segs))
-                _push_vf = push_vf(_fx_changes, _fx_total, pct=float(_fx.get("push_pct", 4.0)),
+                _push_vf = push_vf(_fx_changes, _fx_total,
+                                   pct=float(_fx.get("push_pct", 4.0)) if _fx.get("push") else 0.0,
                                    min_sec=float(_fx.get("push_min_sec", 6.0)),
-                                   size=tuple(render_cfg.scale))
+                                   size=tuple(render_cfg.scale),
+                                   pop_pct=float(_fx.get("pop_pct", 0.0)) if _fx.get("pop") else 0.0,
+                                   pop_sec=float(_fx.get("pop_sec", 0.6)))
             base_vf = ",".join(x for x in (_effective_vf, _push_vf, palette_vf) if x) or None  # type: ignore[assignment]
             reel_vf = base_vf
             # Speed-up via setpts (video) + atempo (audio); both applied before other filters.

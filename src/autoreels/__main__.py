@@ -5468,7 +5468,8 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
             for _pl in _apply_manual_plan(reel, entry, mb.sentences, tx_words, smap, r0_cfg, render_cfg,
                                           me.label, align=align, tone=tone,
                                           filler=(filler if filler is not None else mc.filler_cut), jump=jump,
-                                          filler_profile=filler_profile, filler_allowed=filler_allowed,
+                                          filler_profile=filler_profile or mc.filler_profile,
+                                          filler_allowed=filler_allowed,
                                           breaks=mb.breaks, max_static=mc.max_static_sec, emphasis=mc.emphasis,
                                           min_shot=mc.min_shot_sec, keys=mb.keys):
                 print(_pl)
@@ -7860,10 +7861,22 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     if mode != "none" and pool:
         try:
             from autoreels.cloud.autocut import rank_hooks
+            from autoreels.cloud.autocut import check_seams, headline, seam_pairs
             prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
             _pool_banner(prov)
+            _log = lambda x: print(x, flush=True)  # noqa: E731
             for pr in pool[:prm.clips + 2]:
-                rank_hooks(pr, prov, log=lambda x: print(x, flush=True))
+                rank_hooks(pr, prov, log=_log)
+                if ac.hook_title:                   # M70: a curiosity headline for the plate t:
+                    headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), log=_log)
+            if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
+                _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
+                for pr in pool[:prm.clips * 2]:
+                    check_seams(pr, seam_pairs(pr, _by_id, sentences), prov, log=_log)
+                _bad = sum(1 for pr in pool if pr.bad_seams)
+                pool.sort(key=lambda pr: bool(pr.bad_seams))
+                if _bad:
+                    print(f"  стыки: у {_bad} кандидатов модель нашла рваный стык — они после остальных", flush=True)
         except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
             print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
     out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto_m56.txt"
@@ -7908,9 +7921,28 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             accepted.append(pr)
         else:
             rejected.append((pr, err))
+    # M70: a short version of every accepted clip (weakest middle thoughts dropped), checked the same way
+    if ac.short_variant and accepted:
+        from autoreels.cloud.autocut import short_variant
+        _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
+        for i, pr in enumerate(list(accepted), 1):
+            if pr.variant_of is not None:
+                continue
+            v = short_variant(pr, _by_id, prm, sentences, short_sec=ac.short_sec, short_min_sec=ac.short_min_sec,
+                              label=i)
+            if v is None:
+                continue
+            err = None
+            if check:
+                err, _log2 = _autocut_check(head, v.line("1"), _root, cache_dir)
+            if err is None:
+                accepted.append(v)
+            else:
+                rejected.append((v, err))
     body: list[str] = []
     for i, pr in enumerate(accepted, 1):
-        body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}")
+        body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}"
+                    + (f" — короткая версия M{pr.variant_of}" if pr.variant_of else ""))
         body += [f"#   {n}" for n in pr.notes]
         body.append(pr.line(str(i)))
         body.append("")

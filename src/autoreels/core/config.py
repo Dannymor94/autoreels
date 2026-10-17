@@ -211,6 +211,7 @@ class MontageConfig(BaseModel):
     keywords: bool = True                                  # M53: k: words highlighted in a montage clip's subtitles
     emphasis: bool = True                                  # M53c: close shot on a k: keyword to the end of its sentence
     filler_cut: bool = False                               # M53b: cut «э»/pauses inside montage clips (f:1 / --filler win)
+    filler_profile: str | None = None                      # M70: manual_filler_profiles entry for montage clips (--filler-profile wins)
     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
     join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
 
@@ -233,6 +234,9 @@ class MontageFx(BaseModel):
     callout_numbers_max: int = Field(3, ge=0)
     callout_gap_sec: float = Field(8.0, ge=0.0)            # no two callouts closer than this
     callout_sec: float = Field(2.0, gt=0.0)                # a callout stays this long
+    pop: bool = False                                      # M70: the clip opens zoomed in and settles (a sharp start)
+    pop_pct: float = Field(8.0, ge=0.0, le=20.0)           # … this much closer on the first frame
+    pop_sec: float = Field(0.6, gt=0.0, le=3.0)            # … back to the normal frame over this long
 
     def reel_fx(self, callouts: list[dict]) -> dict:
         """Reel.fx for one clip: only the switched-on effects ({} when all are off)."""
@@ -247,6 +251,8 @@ class MontageFx(BaseModel):
             out.update(whoosh=True, whoosh_volume=self.whoosh_volume)
         if self.callouts and callouts:
             out.update(callouts=callouts, callout_sec=self.callout_sec)
+        if self.pop and self.pop_pct > 0:
+            out.update(pop=True, pop_pct=self.pop_pct, pop_sec=self.pop_sec)
         return out
 
 
@@ -267,6 +273,12 @@ class AutocutConfig(BaseModel):
     use_filtered: bool = False
     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
+    # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+    hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+    seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+    short_variant: bool = True             # each accepted clip also gets a short version (weakest middle dropped)
+    short_sec: float = Field(25.0, gt=0)
+    short_min_sec: float = Field(15.0, gt=0)
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)
