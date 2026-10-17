@@ -82,6 +82,10 @@ class ManualPlanParams:
     # shot lands on a keyword (k:) and lasts to the end of its sentence (at least min_shot_sec);
     # no other switches besides the seam accents. False = off.
     emphasis_keys: bool = False
+    # M74 (owner: «после крючка сильно резко идёт тело»): silence kept after the cold open and before the body's
+    # first word — only real silence (never into the next speech, onset_margin_sec away from it), so the hook and
+    # the start of the clip are heard as two things. 0 = off (the previous windows).
+    hook_air_sec: float = 0.0
 
 
 @dataclass
@@ -165,6 +169,7 @@ class ManualPlan:
     hook_replayed: bool | None
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)   # the clip must not be built (M42)
+    hook_air: tuple[float, float] | None = None       # M74: seconds of silence added after the hook, before the body
 
     @property
     def cold_open(self) -> PlannedWindow | None:
@@ -211,6 +216,9 @@ class ManualPlan:
                      + (f"  next speech {self.next_onset:.3f}" if self.next_onset is not None else ""))
         if self.hook is not None:
             lines.append(f"hook      s{self.hook} replayed in body: {'yes' if self.hook_replayed else 'no'}")
+        if self.hook_air is not None:
+            lines.append(f"hook air  +{self.hook_air[0]:.2f}s after the hook, +{self.hook_air[1]:.2f}s before the body "
+                         f"(silence only)")
         cuts = [c for w in self.windows for c in w.cuts]
         skipped = sum(w.cuts_skipped for w in self.windows)
         spaced = sum(w.cuts_spaced for w in self.windows)
@@ -1078,11 +1086,31 @@ def build_manual_plan(
         warnings.extend(_start_warnings(times, sentences, play[0], tone, frozenset(weak_start_words)))
 
     windows: list[PlannedWindow] = []
+    hook_air: tuple[float, float] | None = None
     if hook is not None:
         hs = sentences[hook - 1]
+        co_end = _window_end(times, hs[-1], pad)
+        if params.hook_air_sec > 0:
+            # M74: air between the hook and the body — the silence after the hook sentence and before the
+            # body's first word, never into speech (the next word, or untranscribed speech).
+            ae_h, right_h = _speech_after(times, hs[-1])
+            air_end = ae_h + params.hook_air_sec
+            if right_h is not None:
+                air_end = min(air_end, right_h - params.onset_margin_sec)
+            if source_duration is not None:
+                air_end = min(air_end, source_duration)
+            left_b, as_b = _speech_before(times, sentences[body[0].sentences[0] - 1][0])
+            air_start = as_b - params.hook_air_sec
+            if left_b is not None:
+                air_start = max(air_start, left_b + params.onset_margin_sec)
+            air_start = max(0.0, air_start)
+            add_a = max(0.0, air_end - co_end)
+            add_b = max(0.0, body[0].start - air_start)
+            co_end += add_a
+            body[0].start -= add_b
+            hook_air = (round(add_a, 3), round(add_b, 3))
         windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], pad),
-                                     end=_window_end(times, hs[-1], pad), shot="close",
-                                     cold_open=True))
+                                     end=co_end, shot="close", cold_open=True))
     windows.extend(body)
 
     # §3 shots: cold open close; body starts wide; every seam flips; c: close; nothing else.
@@ -1173,7 +1201,7 @@ def build_manual_plan(
 
     plan = ManualPlan(windows=windows, subtitles=subtitles, last_word=last_word,
                       last_audible_end=ae_last, next_onset=onset, hook=hook,
-                      hook_replayed=hook_replayed, warnings=warnings, errors=errors)
+                      hook_replayed=hook_replayed, warnings=warnings, errors=errors, hook_air=hook_air)
     plan._sent_bounds = sent_bounds
     plan._times = times
     return plan

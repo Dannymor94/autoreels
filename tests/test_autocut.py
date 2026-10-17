@@ -387,3 +387,89 @@ def test_headline_score_prefers_the_specific_over_the_generic_and_varies_within_
     assert title_score(q, core3) > title_score(st, core3)                       # alone: the question
     assert title_score(st, core3, ["question", "question"]) > title_score(q, core3, ["question", "question"])
     assert title_form(q) == "question" and title_form(st) == "statement"
+
+
+# ── M74: starts that give context ─────────────────────────────────────────────────────────────────
+
+def _rows74(text_by_ref):
+    def sentences(refs):
+        out = []
+        for piece in refs.split():
+            b, _, r = piece.partition(".")
+            a, _, z = r.partition("-")
+            for k in range(int(a), int(z or a) + 1):
+                ref = f"{b}.{k}"
+                text = text_by_ref.get(ref, f"Обычная законченная фраза номер {k} про жизнь.")
+                out.append((ref, 3.0, len(text.split()), True, text))
+        return out
+    return sentences
+
+
+_P74 = AutoParams(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False, context_start=True)
+
+
+def test_back_reference_finds_what_leans_on_the_cut():
+    """M74 (owner: «и второй момент, как я уже говорил, не делай другим то…» — мало контекста)."""
+    from autoreels.cloud.autocut import back_reference
+    assert back_reference("И второй момент, как я уже говорил, не делай другим то, чего не желаешь себе.")
+    assert back_reference("Во-вторых, дети это видят.") == "«во вторых»"
+    assert back_reference("Поэтому это важно.") == "«поэтому…»"
+    assert back_reference("Это нормально?") == "«это…»"
+    assert back_reference("Подожди, подожди, а что я сейчас чувствую?") is None
+    assert back_reference("А что я сейчас чувствую?") is None             # a question may open with «А…»
+    assert back_reference("Эмпатия лечит лучше любого алгоритма.") is None
+
+
+def test_a_short_leaning_first_sentence_is_dropped():
+    units = [U(1, 0, 30, "thesis", 5, "1.1-3"), U(2, 30, 10, "conclusion", 4, "1.4-5")]
+    sent = _rows74({"1.1": "И второй момент.", "1.2": "Дети копируют родителей во всём."})
+    (pr,) = propose(units, _P74, sent)
+    assert pr.pieces == "1.2-3 1.4-5" and pr.unit_refs == {1: "1.2-3"}
+    assert any("убрана фраза «И второй момент.»" in n for n in pr.notes)
+    assert any(n.startswith("начало: «Дети копируют") for n in pr.notes)
+    off = propose(units, AutoParams(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False), sent)
+    assert off[0].pieces == "1.1-3 1.4-5" and not any(n.startswith("начало") for n in off[0].notes)
+
+
+def test_the_thought_right_before_is_added_as_context():
+    units = [U(1, 0, 10, "aside", 2, "1.1-2"), U(2, 10, 25, "thesis", 5, "2.1-3"),
+             U(3, 35, 10, "conclusion", 4, "2.4")]
+    sent = _rows74({"2.1": "Как я уже говорил, не делай другим того, чего не желаешь себе.",
+                    "1.1": "Есть два правила этики."})
+    (pr,) = propose(units, _P74, sent)
+    assert pr.units == [1, 2, 3] and pr.pieces.startswith("1.1-2 2.1-3")
+    assert any("добавлена мысль #1" in n and "контекст" in n for n in pr.notes)
+
+
+def test_a_clip_with_no_standing_start_is_not_proposed():
+    units = [U(1, 0, 30, "thesis", 5, "1.1-3"), U(2, 30, 10, "conclusion", 4, "1.4")]
+    sent = _rows74({"1.1": "Поэтому дети копируют нас во всём, что мы делаем."})
+    no_start: list = []
+    assert propose(units, _P74, sent, no_start=no_start) == []
+    assert no_start and "ссылка назад «поэтому…»" in no_start[0][1]
+    assert len(propose(units, AutoParams(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False,
+                                         prune=False), sent)) == 1           # flag off = as before
+
+
+def test_a_cold_open_that_points_back_loses_to_one_that_stands():
+    units = [U(1, 0, 30, "thesis", 5, "1.1-3")]
+    sent = _rows74({"1.1": "Мы боимся отказа с детства.", "1.2": "Почему мы боимся отказа, как я уже говорил?"})
+    p = AutoParams(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False)
+    from dataclasses import replace
+    assert propose(units, p, sent)[0].hook == "1.2"                          # a question wins …
+    assert propose(units, replace(p, context_start=True), sent)[0].hook != "1.2"   # … unless it points back
+
+
+def test_context_plate_names_the_subject_instead_of_a_second_hook():
+    """M74: the hook pulls; the plate, shown when the body starts, says what the clip is about."""
+    from autoreels.cloud.autocut import Proposal, headline, plate_score
+    from tests.test_label import Scripted
+    core = "Мы боимся отказа с детства. Отказ — это не приговор."
+    assert plate_score("Почему мы боимся отказа", core) > plate_score("Вы готовы к этому?", core)
+    assert plate_score("Отказ: откуда страх", core) > plate_score("Страх", core)
+    text = core + " Почему так происходит? Вы готовы к этому?"
+    pr = Proposal(units=[1], pieces="", hook=None, title="мысль 1", caption="", score=70, seconds=40)
+    sc = Scripted([{"titles": ["Вы готовы к этому?", "Почему мы боимся отказа", "Отказ — не приговор"]}])
+    assert headline(pr, sc, text, core_text=core, log=lambda m: None, mode="context")
+    assert pr.title in {"Почему мы боимся отказа", "Отказ — не приговор"} and "плашка-контекст" in pr.notes[-1]
+    assert "what the clip is about" in sc.calls[0][0]["content"]

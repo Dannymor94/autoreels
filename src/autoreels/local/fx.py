@@ -58,6 +58,16 @@ def timeline(windows: Sequence, *, speed: float = 1.0,
     return [round(x, 3) for x in seams], sorted({round(c, 3) for c in changes}), round(acc, 3)
 
 
+def plate_start(windows: Sequence, *, speed: float = 1.0, xfades: Sequence[float] | None = None,
+                cold_open: bool = False) -> float:
+    """M74: output second the plate t: appears at — the start of the body (the first seam, right after the
+    cold open) when the clip has a cold open, else 0."""
+    if not cold_open or len(windows) < 2:
+        return 0.0
+    seams = timeline(windows, speed=speed, xfades=xfades)[0]
+    return seams[0] if seams else 0.0
+
+
 def push_vf(changes: Sequence[float], total: float, *, pct: float = 4.0, min_sec: float = 6.0,
             size: tuple[int, int] = (1080, 1920), pop_pct: float = 0.0, pop_sec: float = 0.6) -> str:
     """Filter for a slow push-in on every shot of at least min_sec ('' when none): the zoom grows

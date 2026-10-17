@@ -487,3 +487,20 @@ def test_next_word_at_its_aligned_place_not_at_its_whisper_place():
     untr = build_manual_plan(sents, [1], words=ws, smap=smap, align=align, params=prm,
                              next_onset=lambda w: 591.70)
     assert untr.next_onset == pytest.approx(591.70) and untr.end == pytest.approx(591.64)
+
+
+def test_hook_air_keeps_real_silence_between_the_hook_and_the_body():
+    """M74 (owner: «после крючка сильно резко идёт тело»): silence after the cold open and before the body,
+    never into speech; 0 = the previous windows."""
+    from dataclasses import replace
+    sents, words, smap = _sentences_and_map(_FIVE)
+    base = build_manual_plan(sents, [2, 4, 5], words=words, smap=smap, params=P, hook=3)
+    air = build_manual_plan(sents, [2, 4, 5], words=words, smap=smap, params=replace(P, hook_air_sec=0.5), hook=3)
+    assert base.hook_air is None and base.cold_open.end == pytest.approx(2.84) and base.body[0].start == pytest.approx(1.16)
+    assert air.cold_open.end == pytest.approx(3.14)          # next speech 3.2 − margin 0.06, not 2.8 + 0.5
+    assert air.body[0].start == pytest.approx(0.86)          # previous speech 0.8 + margin, not 1.2 − 0.5
+    assert air.hook_air == (0.3, 0.3)
+    assert [w.word for w in air.subtitles] == [w.word for w in base.subtitles]
+    assert any(ln.startswith("hook air  +0.30s") for ln in air.describe(sents))
+    no_hook = build_manual_plan(sents, [2, 4, 5], words=words, smap=smap, params=replace(P, hook_air_sec=0.5))
+    assert no_hook.hook_air is None and no_hook.body[0].start == pytest.approx(1.16)

@@ -328,3 +328,19 @@ def test_montage_tempo_profile_is_shipped_and_used_for_montage_clips():
     v = cli._filler_profile_values(r0, r0.montage.filler_profile)
     assert v["pause_max_sec"] == 0.6 and v["jump_mask"] is True and v["mask_min_gap_sec"] == 3.0
     assert r0.montage.fx.pop and r0.autocut.hook_title and r0.autocut.seam_check and r0.autocut.short_variant
+
+
+def test_plate_after_hook_starts_with_the_body():
+    """M74: the plate t: comes when the body starts (after the cold open); off = from 0 as before."""
+    wins = [Segment(start=100.0, end=104.0), Segment(start=10.0, end=20.0)]
+    assert fx.plate_start(wins, cold_open=True) == pytest.approx(4.0)
+    assert fx.plate_start(wins, speed=2.0, cold_open=True) == pytest.approx(2.0)
+    assert fx.plate_start(wins, cold_open=False) == 0.0
+    cfg = _subs_cfg()
+    ws = _words("один два три")
+    base = build_ass(ws, cfg=cfg, clip_start=0.0, title="Тема")
+    assert build_ass(ws, cfg=cfg, clip_start=0.0, title="Тема", title_start=0.0) == base
+    late = build_ass(ws, cfg=cfg, clip_start=0.0, title="Тема", title_start=4.0)
+    t_line = next(ln for ln in late.splitlines() if ",Title," in ln)
+    assert t_line.startswith("Dialogue: 0,0:00:04.00,") and f"0:00:0{4 + cfg.title_lead_sec:.2f}"[:9] in t_line
+    assert MontageFx(plate_after_hook=True).reel_fx([]) == {"plate_after_hook": True}

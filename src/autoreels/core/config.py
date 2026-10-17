@@ -214,6 +214,7 @@ class MontageConfig(BaseModel):
     filler_profile: str | None = None                      # M70: manual_filler_profiles entry for montage clips (--filler-profile wins)
     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
     join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
+    hook_air_sec: float = Field(0.0, ge=0.0, le=1.5)       # M74: silence kept after the cold open and before the body (0 = off)
 
 
 class MontageFx(BaseModel):
@@ -237,6 +238,7 @@ class MontageFx(BaseModel):
     pop: bool = False                                      # M70: the clip opens zoomed in and settles (a sharp start)
     pop_pct: float = Field(8.0, ge=0.0, le=20.0)           # … this much closer on the first frame
     pop_sec: float = Field(0.6, gt=0.0, le=3.0)            # … back to the normal frame over this long
+    plate_after_hook: bool = False                         # M74: the plate t: appears when the body starts, not over the hook
 
     def reel_fx(self, callouts: list[dict]) -> dict:
         """Reel.fx for one clip: only the switched-on effects ({} when all are off)."""
@@ -253,6 +255,8 @@ class MontageFx(BaseModel):
             out.update(callouts=callouts, callout_sec=self.callout_sec)
         if self.pop and self.pop_pct > 0:
             out.update(pop=True, pop_pct=self.pop_pct, pop_sec=self.pop_sec)
+        if self.plate_after_hook:
+            out["plate_after_hook"] = True
         return out
 
 
@@ -279,6 +283,11 @@ class AutocutConfig(BaseModel):
     short_variant: bool = True             # each accepted clip also gets a short version (weakest middle dropped)
     short_sec: float = Field(25.0, gt=0)
     short_min_sec: float = Field(15.0, gt=0)
+    # M74 (owner: «начала дают мало контекста; после крючка резко идёт тело»)
+    context_start: bool = False            # the first sentence after the hook must not lean on what was cut
+    context_max_sec: float = Field(15.0, gt=0)   # … the thought right before may be added as context, this long at most
+    context_drop_words: int = Field(5, ge=0)     # … a leaning first sentence this short may be dropped
+    plate: str = Field("hook", pattern="^(hook|context)$")   # the model's plate t:: a curiosity headline | what the clip is about
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)

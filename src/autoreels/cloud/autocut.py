@@ -58,6 +58,11 @@ class AutoParams:
     speed_slow: float = 1.08
     speed_mid_rate: float = 2.6       # … below this → @speed_mid
     speed_mid: float = 1.05
+    # M74 (owner: «начала дают мало контекста — "и второй момент, как я уже говорил…"»): the first sentence
+    # a viewer hears after the hook must not lean on what was cut. False = the previous proposals.
+    context_start: bool = False
+    context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
+    context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
 
 
 @dataclass
@@ -76,6 +81,7 @@ class Proposal:
     opener: int | None = None                           # M68: the thought that gives the title (t:)
     variant_of: int | None = None                       # M70: a short version of accepted clip M<n>
     bad_seams: int | None = None                        # M70: seams the model found jarring (None = not asked)
+    unit_refs: dict = field(default_factory=dict)       # M74: a thought played without its first sentence → its refs
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
@@ -211,6 +217,102 @@ def hook_score(text: str, sec: float, unit: dict | None = None) -> float:
     return round(s, 2)
 
 
+# ── M74: a start that does not lean on what was cut ────────────────────────────────────────────────
+# Phrases that point back to something the viewer did not hear (searched in the first 8 words) …
+_BACK_PHRASES = ("как я уже говорил", "как я говорил", "как я уже сказал", "как я сказал", "как уже говорил",
+                 "как уже было сказано", "как было сказано", "как мы говорили", "как мы уже", "о чем я говорил",
+                 "о чем мы говорили", "второй момент", "третий момент", "следующий момент", "другой момент",
+                 "во вторых", "в третьих", "кроме того", "к тому же", "помимо этого", "об этом", "про это",
+                 "в этом случае", "то же самое", "тем более")
+# … and first words that lean on the sentence before (connectors, pronouns, «второе»).
+_BACK_START = frozenset({"и", "а", "но", "также", "тоже", "поэтому", "потому", "вот", "так", "значит", "то",
+                         "это", "этот", "эта", "эти", "этого", "этим", "этом", "такой", "такая", "такое", "такие",
+                         "он", "она", "оно", "они", "его", "ее", "их", "им", "там", "тогда", "потом", "затем",
+                         "второе", "второй", "третье", "третий", "следующее", "причем", "ведь", "же", "который",
+                         "которая", "которые", "однако", "или", "либо"})
+_Q_OPEN_OK = frozenset({"и", "а", "но", "вот", "так", "ну"})   # «А что я сейчас чувствую?» opens fine
+
+
+def _plain_words(text: str) -> list[str]:
+    t = (text or "").lower().replace("ё", "е").replace("-", " ")
+    return [w for w in ("".join(c if c.isalnum() else " " for c in t)).split() if w]
+
+
+def back_reference(text: str) -> str | None:
+    """M74: what in a sentence leans on something said before it — «как я уже говорил», «второй момент»,
+    a first «И/Поэтому/Это…» — or None when it stands on its own. A question may open with «А/И/Вот…»."""
+    words = _plain_words(text)
+    if not words:
+        return None
+    head = " " + " ".join(words[:8]) + " "
+    for ph in _BACK_PHRASES:
+        if f" {ph} " in head:
+            return f"«{ph}»"
+    q = (text or "").rstrip().endswith("?")
+    if words[0] in _BACK_START and not (q and words[0] in _Q_OPEN_OK):
+        return f"«{words[0]}…»"
+    return None
+
+
+def _drop_first_ref(refs: str) -> str | None:
+    """«13.2-5 14.1» → «13.3-5 14.1»; «13.2 14.1» → «14.1»; None when nothing is left."""
+    pieces = refs.split()
+    if not pieces:
+        return None
+    b, _, r = pieces[0].partition(".")
+    a, _, z = r.partition("-")
+    a_i, z_i = int(a), int(z or a)
+    head = [f"{b}.{a_i + 1}" + (f"-{z_i}" if z_i > a_i + 1 else "")] if a_i < z_i else []
+    return " ".join(head + pieces[1:]) or None
+
+
+def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, seed_id: int | None = None,
+                  loop_id: int | None = None) -> tuple[list[dict] | None, list[str], str | None]:
+    """M74: one rule for every clip — the first sentence after the hook stands on its own. When it leans
+    back (back_reference), in this order:
+    (a) a short leaning sentence (≤ context_drop_words) before one that stands is dropped;
+    (b) the thought right before it in the source is added as context (≤ context_max_sec, standing itself;
+        not for a loop question — that one simply goes);
+    (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
+    otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can."""
+    notes: list[str] = []
+    for _ in range(4):
+        u = clip[0]
+        rows = list(_sent_rows(sentences, u["refs"]))
+        if not rows:
+            return clip, notes, None
+        first = rows[0][4] or rows[0][0]
+        why = back_reference(rows[0][4])
+        if not why:
+            return clip, notes, None
+        if len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not back_reference(rows[1][4]):
+            refs = _drop_first_ref(u["refs"])
+            if refs:
+                clip = [{**u, "refs": refs, "t0": float(u["t0"]) + float(rows[0][1])}] + clip[1:]
+                notes.append(f"начало: убрана фраза «{first[:60]}» (ссылка назад {why})")
+                continue
+        ids = {c["id"] for c in clip}
+        prev = by_id.get(u["id"] - 1)
+        if (prev is not None and u["id"] != loop_id and prev["id"] not in ids and not prev.get("missing")
+                and prev.get("refs") and not (prev.get("filtered") and not p.use_filtered)
+                and float(u["t0"]) - float(prev["t1"]) <= 3.0
+                and _dur(prev) <= p.context_max_sec and sum(_dur(c) for c in clip) + _dur(prev) <= p.max_sec
+                and _pieces([prev] + clip) <= p.max_pieces + 1):
+            prow = list(_sent_rows(sentences, prev["refs"]))
+            if prow and not back_reference(prow[0][4]):
+                notes.append(f"начало: добавлена мысль #{prev['id']} «{(prow[0][4] or '')[:50]}» перед "
+                             f"«{first[:50]}» (ссылка назад {why}) — контекст")
+                return [prev] + clip, notes, None
+        needed = {i for c in clip for i in leans_on(c, by_id)}
+        if (len(clip) > 1 and (u["id"] == loop_id or (u["id"] != seed_id and u["id"] not in needed))
+                and sum(_dur(c) for c in clip[1:]) >= p.min_sec):
+            clip = clip[1:]
+            notes.append(f"начало: мысль #{u['id']} «{first[:50]}» убрана (ссылка назад {why})")
+            continue
+        return None, notes, f"«{first[:70]}» — ссылка назад {why}"
+    return None, notes, "начало не найдено"
+
+
 def _sent_rows(sentences, refs):
     """sentences(refs) rows → (ref, sec, nwords, complete, text) (text optional in older callers)."""
     for row in sentences(refs):
@@ -230,6 +332,8 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[st
         for ref, sec, nwords, complete, text in _sent_rows(sentences, u["refs"]):
             if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
+                if p.context_start and back_reference(text):
+                    bonus -= 3.0          # M74: a cold open that points back («как я говорил») explains nothing
                 out.append((ref, hook_score(text, sec, u) + bonus, text))
     return sorted(out, key=lambda x: -x[1])
 
@@ -299,9 +403,11 @@ def _speed(clip: Sequence[dict], p: AutoParams) -> float | None:
 
 
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
-            sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None) -> list[Proposal]:
+            sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
+            no_start: list | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
-    references (for the hook); None = no hook."""
+    references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
+    no start standing on its own."""
     by_id = {u["id"]: u for u in units}
     seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in STORY
                     and int(u.get("punch") or 0) >= p.seed_punch),
@@ -315,17 +421,32 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if clip is None:
             continue
         extra_notes: list[str] = []
+        loop_id = None
         if p.loop and clip[0].get("role") != "question":
             taken = {i for o in out for i in o.units}
             q = _loop_question(clip, units, by_id, p, taken)
             if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
                     and _pieces([q] + clip) <= p.max_pieces + 1:
                 clip = [q] + clip
+                loop_id = q["id"]
                 extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
         if p.prune:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
+        unit_refs: dict = {}
+        if p.context_start and sentences:
+            clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
+            if clip2 is None:
+                if no_start is not None:
+                    no_start.append((" ".join(u["refs"] for u in clip), why))
+                continue
+            clip = clip2
+            extra_notes += cnotes
+            unit_refs = {u["id"]: u["refs"] for u in clip if u["refs"] != by_id[u["id"]]["refs"]}
+            _r0 = list(_sent_rows(sentences, clip[0]["refs"]))
+            if _r0:
+                extra_notes.append(f"начало: «{(_r0[0][4] or _r0[0][0])[:80]}»")
         ids = [u["id"] for u in clip]
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
                or ids[-1] == o.units[-1] for o in out):
@@ -351,7 +472,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
-            opener=opener["id"],
+            opener=opener["id"], unit_refs=unit_refs,
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
     return out[:p.clips]
@@ -541,17 +662,65 @@ TITLE_SYSTEM = (
 )
 
 
+_WH = frozenset({"как", "почему", "зачем", "что", "чем", "когда", "откуда", "где", "куда", "какой", "какая",
+                 "какие", "каким", "сколько", "кто", "чего", "чему"})
+
+
+def plate_score(title: str, core_text: str = "", used_forms: Sequence[str] = ()) -> float:
+    """M74 (owner: «начала дают мало контекста»): the plate appears when the body starts, right after the hook —
+    its job is to say WHAT the clip is about, the hook already pulled the viewer in. One score for every clip:
+    specific — content words shared with the clip's opening or conclusion (+1 each, at most 3), fewer than two
+    content words is no subject at all (−2); a question that names the subject («Почему мы боимся отказа»)
+    is fine, a yes/no or «вы»-question is a second hook (−1.5); addressing the viewer (−0.5); a weak start
+    «И…/Это…» (−2); 2–6 words (+1), more than 40 characters (−2)."""
+    t = " ".join((title or "").split())
+    words = [_norm_word(w) for w in t.split()]
+    words = [w for w in words if w]
+    content = [w for w in words if len(w) >= 5 and not w.isdigit()]
+    s = 0.0
+    if core_text:
+        core = {_norm_word(w)[:5] for w in core_text.split() if len(_norm_word(w)) >= 5}
+        s += min(3, sum(1 for w in content if w[:5] in core))
+    if len(content) < 2:
+        s -= 2.0
+    you = any(w in _YOU for w in words)
+    if t.rstrip().endswith("?") and (not words or words[0] not in _WH or you):
+        s -= 1.5
+    if you:
+        s -= 0.5
+    if words and words[0] in _WEAK_START:
+        s -= 2.0
+    s += 1.0 if 2 <= len(words) <= 6 else 0.0
+    s -= 2.0 if len(t) > 40 else 0.0
+    return round(s, 2)
+
+
+PLATE_SYSTEM = (
+    "A short vertical video (a reel) cut from a Russian talk opens with a hook line; right after it, when the clip "
+    "proper starts, a plate in big letters tells the viewer what the clip is about. Write THREE different plates: "
+    "the subject as a short phrase (a colon is fine: «Тревога: откуда она берётся»), the question the clip answers "
+    "starting with Как/Почему/Что/Зачем («Почему мы боимся отказа»), the clip's main point in a few words. Rules: "
+    "name the clip's own key words from its opening or conclusion (no new facts, names or numbers); about the "
+    "subject, not about the speaker (no «я», «мой») and not a question to the viewer («вы…?»); no lecture plan "
+    "(«сначала… потом…»); 2–6 Russian words, at most 40 characters; no quotes, emoji or hashtags. Answer only with "
+    "JSON: {\"titles\": [\"<plate>\", \"<plate>\", \"<plate>\"]}."
+)
+
+
 def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
-             used_forms: list | None = None, log: Callable[[str], None] = print) -> bool:
+             used_forms: list | None = None, log: Callable[[str], None] = print, mode: str = "hook") -> bool:
     """M70/M71: the model proposes three headlines; the code drops those that break title_problem and
     keeps the best by title_score — the current plate (the opener's summary) competes too, so a weaker
     proposal never replaces it (invariant 1: the model proposes, the code picks). Returns True when the
-    title changed."""
+    title changed. M74 mode «context»: the plate says what the clip is about (PLATE_SYSTEM, plate_score) —
+    it comes after the hook, which already does the pulling."""
     import json as _json
     import re as _re
+    ctx = mode == "context"
+    system, score = (PLATE_SYSTEM, plate_score) if ctx else (TITLE_SYSTEM, title_score)
     msg = f"Clip text:\n{clip_text[:1800]}\n\nOpening and conclusion:\n{core_text[:600]}\n\nCurrent plate: «{pr.title}»."
     try:
-        raw = provider.complete([{"role": "system", "content": TITLE_SYSTEM}, {"role": "user", "content": msg}],
+        raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": msg}],
                                 temperature=0.0)
     except Exception as exc:  # noqa: BLE001 — no model: the summary stays
         log(f"  заголовок: модель не ответила ({type(exc).__name__})")
@@ -572,18 +741,19 @@ def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
         if why:
             dropped.append(f"«{t}» — {why}")
         else:
-            cands.append((title_score(t, core_text, used_forms or ()), t))
-    base = title_score(pr.title, core_text, used_forms or ()) if pr.title else -99.0
+            cands.append((score(t, core_text, used_forms or ()), t))
+    base = score(pr.title, core_text, used_forms or ()) if pr.title else -99.0
     best = max(cands, key=lambda c: c[0]) if cands else None
     chosen = best[1] if best and best[0] > base else pr.title
     if used_forms is not None and chosen:
         used_forms.append(title_form(chosen))
     if best and best[0] > base:
-        pr.notes.append(f"заголовок-крючок: «{best[1]}» (балл {best[0]:g}; было «{pr.title}», {base:g})"
+        pr.notes.append(f"{'плашка-контекст' if ctx else 'заголовок-крючок'}: «{best[1]}» (балл {best[0]:g}; было «{pr.title}», {base:g})"
                         + (f"; отброшены: {'; '.join(dropped)}" if dropped else ""))
         pr.title = best[1]
         return True
-    pr.notes.append(f"заголовок остался «{pr.title}» (балл {base:g})"
+    pr.notes.append((f"плашка осталась «{pr.title}» (балл {base:g})" if ctx else
+                     f"заголовок остался «{pr.title}» (балл {base:g})")
                     + (f"; варианты слабее: {', '.join(f'«{t}» {sc:g}' for sc, t in cands)}" if cands else "")
                     + (f"; отброшены: {'; '.join(dropped)}" if dropped else ""))
     return False
@@ -596,8 +766,8 @@ def seam_pairs(pr: "Proposal", by_id: dict, sentences) -> list[tuple[str, str]]:
     for a, b in zip(pr.units, pr.units[1:]):
         if b == a + 1 or a not in by_id or b not in by_id:
             continue
-        ra = list(_sent_rows(sentences, by_id[a]["refs"]))
-        rb = list(_sent_rows(sentences, by_id[b]["refs"]))
+        ra = list(_sent_rows(sentences, pr.unit_refs.get(a) or by_id[a]["refs"]))
+        rb = list(_sent_rows(sentences, pr.unit_refs.get(b) or by_id[b]["refs"]))
         if ra and rb:
             out.append((ra[-1][4] or ra[-1][0], rb[0][4] or rb[0][0]))
     return out
@@ -660,7 +830,7 @@ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, shor
     (opener, payoff and what they lean on stay, as in _prune). None when it cannot get within
     short_sec + 5 s or drops nothing."""
     from dataclasses import replace as _replace
-    clip = [by_id[i] for i in pr.units if i in by_id]
+    clip = [({**by_id[i], "refs": pr.unit_refs[i]} if i in pr.unit_refs else by_id[i]) for i in pr.units if i in by_id]
     if len(clip) != len(pr.units):
         return None
     short, dropped = _prune(clip, by_id, _replace(p, target_sec=short_sec, prune_slack=0.0, min_sec=short_min_sec))
@@ -675,4 +845,5 @@ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, shor
                     notes=[f"короткая версия M{label}: убраны " + ", ".join(f"#{i}" for i in dropped)],
                     hooks=[hook] + [r for r in refs if r != hook] if hook else refs,
                     hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(short, p),
-                    opener=pr.opener, variant_of=label)
+                    opener=pr.opener, variant_of=label,
+                    unit_refs={i: r for i, r in pr.unit_refs.items() if i in {u["id"] for u in short}})

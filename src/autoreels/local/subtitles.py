@@ -201,12 +201,13 @@ def _title_style_line(cfg: SubtitlesConfig) -> str:
 
 def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
               play_res: tuple[int, int] = (1080, 1920), title: str = "",
-              enable_keywords: bool = False, fx: dict | None = None) -> str:
+              enable_keywords: bool = False, fx: dict | None = None, title_start: float = 0.0) -> str:
     """Собрать .ass из слов сегмента: Style из конфига + Dialogue по группам поп-апом.
 
     Времена Dialogue — относительно начала клипа (clip_start вычитается). uppercase из конфига.
     `title` (Part 4) непусто → плашка сверху (стиль Title) на первые cfg.title_lead_sec секунд с
-    фейдом, над зоной субтитров (не пересекается). Пусто → плашки нет.
+    фейдом, над зоной субтитров (не пересекается). Пусто → плашки нет. `title_start` (M74) — секунда клипа,
+    с которой плашка появляется (начало тела после крючка); 0 → побайтово прежний вывод.
     `enable_keywords=True` активирует стиль Keyword для слов с `w.emph=True`. False → побайтово
     идентично pre-M1.7 (стиль Keyword не добавляется, теги не вставляются).
     `fx` (M55, Reel.fx; None/{} → побайтово прежний вывод):
@@ -257,7 +258,8 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
                           char_width_ratio=cfg.char_width_ratio)   # wrap so a long title never clips
         fi = fo = cfg.title_fade_ms
         ttext = f"{{\\fad({fi},{fo})}}" + ttext
-        lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
+        _ts = max(0.0, float(title_start or 0.0))
+        lines.append(f"Dialogue: 0,{_ass_time(_ts)},{_ass_time(_ts + cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
     if _progress > 0:
         lines.append(_progress_line(cfg, _progress, pw, ph))
     for c in _callouts:

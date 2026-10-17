@@ -275,6 +275,9 @@ montage:
   # M58: a piece that goes straight on from the previous one in the source (next sentence, or sentence 1 of the
   # next block right after the last one) is played as one piece — no seam. x1, x2… name the filtered blocks.
   join_gap_sec: 2.0
+  # M74 — owner: «после крючка сильно резко идёт тело»: up to this much real silence after the cold open and before
+  # the body's first word (never into speech) — the hook and the start of the clip are heard as two things. 0 = off.
+  hook_air_sec: 0.5
   # M55 — owner: «давай пробовать все» (attention effects of montage clips; each switch off = as before):
   fx:
     push: true              # slow push-in on every shot of at least push_min_sec, push_pct % closer by its end
@@ -292,6 +295,7 @@ montage:
     pop: true               # M70: the clip opens pop_pct % closer and eases back to the frame over pop_sec (sharp start)
     pop_pct: 8.0
     pop_sec: 0.6
+    plate_after_hook: true  # M74: the plate t: appears when the body starts (after the cold open), not over the hook
 
 # M56: arl autocut <stem> — montage lines proposed from the map (transcripts/<stem>.map.json) → reviews/<stem>_auto_m56.txt.
 # A clip grows around a strong thought (punch ≥ seed_punch), takes what it leans on and thoughts of the same topic
@@ -317,6 +321,12 @@ autocut:
   short_variant: true     # every accepted clip also gets a short version: weakest middle thoughts dropped down to short_sec
   short_sec: 25
   short_min_sec: 15
+  # M74 — owner: «начала дают мало контекста ("и второй момент, как я уже говорил…")»:
+  context_start: true     # the first sentence after the hook stands on its own: a short leaning sentence is dropped,
+                          # else the thought right before is added as context, else that opening thought goes, else no clip
+  context_max_sec: 15     # … the added context thought at most this long
+  context_drop_words: 5   # … a leaning first sentence of at most this many words may be dropped
+  plate: context          # the plate t: says what the clip is about (the hook already pulls) — hook = M71/M73 headline
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

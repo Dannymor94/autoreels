@@ -37,7 +37,7 @@ from autoreels.core.config import (
 from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
-from autoreels.local.fx import output_time as fx_output_time, push_vf, timeline as fx_timeline
+from autoreels.local.fx import output_time as fx_output_time, plate_start, push_vf, timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
@@ -2945,9 +2945,13 @@ def _render_segments(
                     import sys as _sys
                     print(f"  warning ({reel.id}): has k: keywords but subtitle_keywords=False"
                           " — highlighting skipped", file=_sys.stderr)
+                # M74: the plate comes when the body starts (after the cold open), not over the hook
+                _title_t0 = (plate_start(segs, speed=_reel_speed, xfades=_fx_xfades(segs),
+                                         cold_open=getattr(reel, "cold_open", None) is not None)
+                             if _title and _fx.get("plate_after_hook") else 0.0)
                 ass_path.write_text(
                     build_ass(ass_words, cfg=subtitles_cfg, clip_start=0.0, title=_title,
-                              enable_keywords=_kw_on, fx=_fx_ass),
+                              enable_keywords=_kw_on, fx=_fx_ass, title_start=_title_t0),
                     encoding="utf-8",
                 )
                 # Передаём ffmpeg только имя файла (без пути) + cwd=tmp_ass_dir.

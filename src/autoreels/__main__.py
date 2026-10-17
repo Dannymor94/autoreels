@@ -5231,7 +5231,7 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
 def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
                        tone=None, filler=None, jump=None, filler_profile=None,
                        filler_allowed: bool = True, breaks=(), max_static: float | None = None,
-                       min_shot: float = 3.0, keys=(), emphasis: bool = False) -> list[str]:
+                       min_shot: float = 3.0, keys=(), emphasis: bool = False, hook_air: float = 0.0) -> list[str]:
     """REEL_SPEC: build the whole clip (windows, shots, ending, subtitles) from the review line.
 
     Mutates the reel and marks it planned; the post-loop boundary stages skip planned reels.
@@ -5268,6 +5268,9 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         from dataclasses import replace as _dc_replace
         _params = _dc_replace(_params, max_static_sec=max_static or None, min_shot_sec=min_shot,
                               emphasis_keys=bool(emphasis))
+    if hook_air:
+        from dataclasses import replace as _dc_replace
+        _params = _dc_replace(_params, hook_air_sec=float(hook_air))     # M74: montage clips only
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_params,
         hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
@@ -5471,7 +5474,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
                                           filler_profile=filler_profile or mc.filler_profile,
                                           filler_allowed=filler_allowed,
                                           breaks=mb.breaks, max_static=mc.max_static_sec, emphasis=mc.emphasis,
-                                          min_shot=mc.min_shot_sec, keys=mb.keys):
+                                          min_shot=mc.min_shot_sec, keys=mb.keys, hook_air=mc.hook_air_sec):
                 print(_pl)
         except ValueError as _pe:
             print(f"  error {me.label}: plan: {_pe}", file=sys.stderr)
@@ -5503,7 +5506,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
             if mc.fx.callouts else []
         reel.fx = mc.fx.reel_fx(_co)
         if reel.fx:
-            print(f"    fx: {', '.join(k for k in ('push', 'karaoke', 'progress', 'whoosh', 'callouts') if reel.fx.get(k))}"
+            print(f"    fx: {', '.join(k for k in ('push', 'karaoke', 'progress', 'whoosh', 'callouts', 'pop', 'plate_after_hook') if reel.fx.get(k))}"
                   + "".join(f" | {c['t']:.1f}s «{c['text']}»" for c in _co))
         out.append(reel)
     return out, 0
@@ -7832,7 +7835,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      overlap_max=ac.overlap_max, use_filtered=ac.use_filtered, loop=ac.loop,
                      loop_max_sec=ac.loop_max_sec, prune=ac.prune, prune_slack=ac.prune_slack,
                      hook_min_sec=ac.hook_min_sec, speed_slow_rate=ac.speed_slow_rate, speed_slow=ac.speed_slow,
-                     speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid)
+                     speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid,
+                     context_start=ac.context_start, context_max_sec=ac.context_max_sec,
+                     context_drop_words=ac.context_drop_words)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -7855,7 +7860,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         return out_s
 
     from dataclasses import replace as _dc_replace
-    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences)
+    no_start: list = []                     # M74: clips whose start leans on what was cut, with no fix
+    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                   no_start=no_start)
     # M65: the model ranks the code's hook candidates (only the first clips are worth a call)
     mode = llm or ac.hook_llm
     if mode != "none" and pool:
@@ -7871,9 +7878,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
                     _byid_t = {u["id"]: u for u in (the_map.get("units") or [])}
                     _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
-                                     if uid in _byid_t for r in sentences(_byid_t[uid]["refs"]))
+                                     if uid in _byid_t for r in sentences(pr.unit_refs.get(uid) or _byid_t[uid]["refs"]))
                     headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
-                             used_forms=_forms, log=_log)
+                             used_forms=_forms, log=_log, mode=ac.plate)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
                 _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
                 for pr in pool[:prm.clips * 2]:
@@ -7957,6 +7964,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             body.append(f"#   причина: {err}")
             body.append(f"#! {pr.line('')}")
         body.append("")
+    if no_start:
+        body.append("# --- начало ссылается на вырезанное, исправить не вышло (M74: первая фраза после крючка понятна сама):")
+        for pieces, why in no_start:
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
     if close:
         body.append("# --- слишком похожи на принятые (M68: своё начало и свои мысли у каждой сборки):")
         for pr, why in close:
@@ -7965,7 +7977,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
     print(f"autocut {stem}: предложено сборок {len(accepted)} из {len(the_map.get('units') or [])} мыслей"
           + (f" (не прошли проверку: {len(rejected)})" if rejected else "")
-          + (f" (похожи на принятые: {len(close)})" if close else "") + f" → {out_path}")
+          + (f" (похожи на принятые: {len(close)})" if close else "")
+          + (f" (без понятного начала: {len(no_start)})" if no_start else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")
     for pr, err in rejected:
