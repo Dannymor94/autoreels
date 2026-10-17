@@ -63,6 +63,8 @@ class AutoParams:
     context_start: bool = False
     context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
+    # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
+    context_min_words: int = 0        # a start shorter than this (not a question) is a fragment; 0 = off
 
 
 @dataclass
@@ -266,11 +268,34 @@ def _drop_first_ref(refs: str) -> str | None:
     return " ".join(head + pieces[1:]) or None
 
 
+Judge = Callable[[str, str], "tuple[bool, str] | None"]
+
+
+def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | None" = None) -> str | None:
+    """M74/M75: why a first sentence cannot open a clip, None = it can. Rules first (back_reference; a
+    non-question shorter than context_min_words is a fragment — «Уйти.»), then the model, when given, on
+    what rules cannot see («Хоть это…», an answer to an unheard question). The model only says yes/no;
+    no answer = the rules' verdict (invariant 11: never a silent «fine» — the caller notes it)."""
+    why = back_reference(text)
+    if why:
+        return f"ссылка назад {why}"
+    n = len(_plain_words(text))
+    if p.context_min_words and n < p.context_min_words and not (text or "").rstrip().endswith("?"):
+        return f"обрывок ({n} сл.)"
+    if judge is not None:
+        verdict = judge(text, following)
+        if verdict is not None and not verdict[0]:
+            return f"непонятно без предыдущего (модель: {verdict[1] or 'нет'})"
+    return None
+
+
 def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, seed_id: int | None = None,
-                  loop_id: int | None = None) -> tuple[list[dict] | None, list[str], str | None]:
-    """M74: one rule for every clip — the first sentence after the hook stands on its own. When it leans
-    back (back_reference), in this order:
-    (a) a short leaning sentence (≤ context_drop_words) before one that stands is dropped;
+                  loop_id: int | None = None, judge: "Judge | None" = None
+                  ) -> tuple[list[dict] | None, list[str], str | None]:
+    """M74: one rule for every clip — the first sentence after the hook stands on its own. When it does not
+    (stands_alone), in this order:
+    (a) a short leaning sentence (≤ context_drop_words) before one that stands is dropped — never a question
+        (M75: its answer would be left as a fragment, Pxl «То есть, а из чего?» → «Из чувства вины…»);
     (b) the thought right before it in the source is added as context (≤ context_max_sec, standing itself;
         not for a loop question — that one simply goes);
     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
@@ -282,14 +307,16 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
         if not rows:
             return clip, notes, None
         first = rows[0][4] or rows[0][0]
-        why = back_reference(rows[0][4])
+        nxt = rows[1][4] if len(rows) > 1 else ""
+        why = stands_alone(rows[0][4], nxt, p, judge)
         if not why:
             return clip, notes, None
-        if len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not back_reference(rows[1][4]):
+        if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
+                and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge) is None):
             refs = _drop_first_ref(u["refs"])
             if refs:
                 clip = [{**u, "refs": refs, "t0": float(u["t0"]) + float(rows[0][1])}] + clip[1:]
-                notes.append(f"начало: убрана фраза «{first[:60]}» (ссылка назад {why})")
+                notes.append(f"начало: убрана фраза «{first[:60]}» ({why})")
                 continue
         ids = {c["id"] for c in clip}
         prev = by_id.get(u["id"] - 1)
@@ -299,18 +326,63 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                 and _dur(prev) <= p.context_max_sec and sum(_dur(c) for c in clip) + _dur(prev) <= p.max_sec
                 and _pieces([prev] + clip) <= p.max_pieces + 1):
             prow = list(_sent_rows(sentences, prev["refs"]))
-            if prow and not back_reference(prow[0][4]):
+            if prow and stands_alone(prow[0][4], prow[1][4] if len(prow) > 1 else first, p, judge) is None:
                 notes.append(f"начало: добавлена мысль #{prev['id']} «{(prow[0][4] or '')[:50]}» перед "
-                             f"«{first[:50]}» (ссылка назад {why}) — контекст")
+                             f"«{first[:50]}» ({why}) — контекст")
                 return [prev] + clip, notes, None
         needed = {i for c in clip for i in leans_on(c, by_id)}
         if (len(clip) > 1 and (u["id"] == loop_id or (u["id"] != seed_id and u["id"] not in needed))
                 and sum(_dur(c) for c in clip[1:]) >= p.min_sec):
             clip = clip[1:]
-            notes.append(f"начало: мысль #{u['id']} «{first[:50]}» убрана (ссылка назад {why})")
+            notes.append(f"начало: мысль #{u['id']} «{first[:50]}» убрана ({why})")
             continue
-        return None, notes, f"«{first[:70]}» — ссылка назад {why}"
+        return None, notes, f"«{first[:70]}» — {why}"
     return None, notes, "начало не найдено"
+
+
+STANDALONE_SYSTEM = (
+    "A short vertical video is cut from the middle of a Russian talk. After a 3-second teaser it starts with the "
+    "sentence given below; the viewer has heard NOTHING of the talk before it. Decide whether that first sentence "
+    "makes sense on its own: no pronoun or «это/так/вот/тот» pointing to something not said, not an answer to a "
+    "question the viewer did not hear, not a fragment or a filler («да, допустим»), not a continuation of an "
+    "enumeration. The following sentence is given only to help you understand it. Answer only with JSON: "
+    "{\"ok\": true|false, \"why\": \"<at most 8 Russian words>\"}."
+)
+
+
+def make_judge(provider, *, log: Callable[[str], None] = print) -> "Judge":
+    """M75: the model's yes/no on «does this first sentence stand on its own» — cached per sentence, one retry,
+    None when there is no usable answer (the rules' verdict then stands)."""
+    import json as _json
+    import re as _re
+    cache: dict = {}
+
+    def judge(text: str, following: str = ""):
+        key = (text, following)
+        if key in cache:
+            return cache[key]
+        msg = f"First sentence: «{text}»\nFollowing sentence: «{following}»"
+        out = None
+        for _ in range(2):
+            try:
+                raw = provider.complete([{"role": "system", "content": STANDALONE_SYSTEM},
+                                         {"role": "user", "content": msg}], temperature=0.0)
+            except Exception as exc:  # noqa: BLE001 — no model: the rules decide
+                log(f"  начало: модель не ответила ({type(exc).__name__})")
+                break
+            m = _re.search(r"\{.*\}", raw or "", _re.S)
+            try:
+                obj = _json.loads(m.group(0)) if m else {}
+            except ValueError:
+                continue
+            if isinstance(obj.get("ok"), bool):
+                out = (obj["ok"], str(obj.get("why") or "").strip()[:60])
+                break
+        cache[key] = out
+        return out
+
+    judge.cache = cache   # type: ignore[attr-defined]
+    return judge
 
 
 def _sent_rows(sentences, refs):
@@ -404,10 +476,10 @@ def _speed(clip: Sequence[dict], p: AutoParams) -> float | None:
 
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
-            no_start: list | None = None) -> list[Proposal]:
+            no_start: list | None = None, judge: "Judge | None" = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
-    no start standing on its own."""
+    no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge)."""
     by_id = {u["id"]: u for u in units}
     seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in STORY
                     and int(u.get("punch") or 0) >= p.seed_punch),
@@ -436,7 +508,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
         unit_refs: dict = {}
         if p.context_start and sentences:
-            clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
+            clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
+                                               judge=judge)
             if clip2 is None:
                 if no_start is not None:
                     no_start.append((" ".join(u["refs"] for u in clip), why))

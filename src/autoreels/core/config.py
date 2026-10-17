@@ -288,6 +288,11 @@ class AutocutConfig(BaseModel):
     context_max_sec: float = Field(15.0, gt=0)   # … the thought right before may be added as context, this long at most
     context_drop_words: int = Field(5, ge=0)     # … a leaning first sentence this short may be dropped
     plate: str = Field("hook", pattern="^(hook|context)$")   # the model's plate t:: a curiosity headline | what the clip is about
+    # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips had no pause after the hook)
+    context_min_words: int = Field(0, ge=0)      # a start (not a question) shorter than this is a fragment; 0 = off
+    context_judge: bool = False                  # the model says whether a first sentence stands on its own
+    hook_pause_sec: float = Field(0.0, ge=0.0)   # no pause after the hook → the next of the top hooks that has one; 0 = off
+    hook_pause_top: int = Field(3, ge=1)         # … looked for among the model's first this many hooks
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)

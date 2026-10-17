@@ -473,3 +473,109 @@ def test_context_plate_names_the_subject_instead_of_a_second_hook():
     assert headline(pr, sc, text, core_text=core, log=lambda m: None, mode="context")
     assert pr.title in {"Почему мы боимся отказа", "Отказ — не приговор"} and "плашка-контекст" in pr.notes[-1]
     assert "what the clip is about" in sc.calls[0][0]["content"]
+
+
+# ── M75: a start is not a fragment; the model judges what rules cannot see; a pause after the hook ─────
+
+_P75 = AutoParams(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False, context_start=True,
+                  context_min_words=4)
+
+
+def test_stands_alone_rules_then_the_model():
+    """M75 (M74 report): «Уйти.» and «Контролер, да, допустим.» passed as starts; «Хоть это, как говорят психологи…»
+    too — the rules see the first word only."""
+    from autoreels.cloud.autocut import stands_alone
+    assert stands_alone("Уйти.", "", _P75) == "обрывок (1 сл.)"
+    assert stands_alone("Контролер, да, допустим.", "", _P75) == "обрывок (3 сл.)"
+    assert stands_alone("Как вы отдыхаете?", "", _P75) is None             # a short question is a fine start
+    assert stands_alone("Уйти.", "", AutoParams(context_start=True)) is None    # min words off = M74
+    no = lambda t, f: (False, "«это» без предмета")
+    yes = lambda t, f: (True, "")
+    silent = lambda t, f: None
+    hoth = "Хоть это, как говорят психологи, бывает полезно."
+    assert stands_alone(hoth, "", _P75) is None
+    assert stands_alone(hoth, "", _P75, no) == "непонятно без предыдущего (модель: «это» без предмета)"
+    assert stands_alone(hoth, "", _P75, yes) is None and stands_alone(hoth, "", _P75, silent) is None
+    assert stands_alone("Поэтому так.", "", _P75, yes).startswith("ссылка назад")     # rules first, no call needed
+
+
+def test_a_question_is_not_cut_from_its_answer():
+    """M75: Pxl M2 — «То есть, а из чего?» was dropped and left «Из чувства вины, из чувства стыда.» alone."""
+    units = [U(1, 0, 10, "thesis", 2, "1.1-2"), U(2, 10, 30, "thesis", 5, "2.1-3"), U(3, 40, 10, "conclusion", 4, "2.4")]
+    sent = _rows74({"2.1": "То есть, а из чего?", "2.2": "Из чувства вины, из чувства стыда.",
+                    "1.1": "Манипуляция строится на наших чувствах."})
+    (pr,) = propose(units, _P75, sent)
+    assert pr.units[0] == 1 and pr.pieces.startswith("1.1-2 2.1-3")            # context added, question kept
+    assert not any("убрана фраза" in n for n in pr.notes)
+
+
+def test_a_fragment_is_not_context_and_the_model_can_veto_a_start():
+    units = [U(1, 0, 3, "aside", 2, "1.1"), U(2, 3, 30, "thesis", 5, "2.1-3"), U(3, 33, 10, "conclusion", 4, "2.4")]
+    sent = _rows74({"1.1": "Уйти.", "2.1": "Но вы выбираете в стрессовой ситуации привычное."})
+    no_start: list = []
+    assert propose(units, _P75, sent, no_start=no_start) == []                 # «Уйти.» is no context
+    assert "ссылка назад «но…»" in no_start[0][1]
+    units2 = [U(1, 0, 10, "thesis", 2, "1.1-2"), U(2, 10, 30, "thesis", 5, "2.1-3"), U(3, 40, 10, "conclusion", 4, "2.4")]
+    sent2 = _rows74({"2.1": "Хоть это, как говорят психологи, бывает полезно.",
+                     "1.1": "Обратная связь помогает взрослеть."})
+    calls = []
+
+    def judge(text, following):
+        calls.append(text)
+        return (not text.startswith("Хоть это"), "«это» без предмета")
+    (pr,) = propose(units2, _P75, sent2, judge=judge)
+    assert pr.units[0] == 1 and any("модель: «это» без предмета" in n for n in pr.notes)
+    assert calls[0].startswith("Хоть это") and "Обратная связь помогает взрослеть." in calls
+
+
+def test_make_judge_caches_retries_and_gives_none_without_an_answer():
+    from autoreels.cloud.autocut import make_judge
+    from tests.test_label import Scripted
+    sc = Scripted([{"ok": False, "why": "обрывок"}])
+    j = make_judge(sc, log=lambda m: None)
+    assert j("Уйти.", "") == (False, "обрывок") and j("Уйти.", "") == (False, "обрывок") and len(sc.calls) == 1
+    j2 = make_judge(Scripted(["мусор", {"ok": True}]), log=lambda m: None)
+    assert j2("Фраза.", "") == (True, "")                                       # retried once
+    j3 = make_judge(Scripted(["мусор", "снова мусор"]), log=lambda m: None)
+    assert j3("Фраза.", "") is None
+
+
+def test_cmd_autocut_takes_a_top_hook_with_a_pause_after_it(tmp_path, capsys, monkeypatch):
+    """M75: 6 of 15 M74 clips had no silence after the hook — the next of the model's top hooks that has one."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    assert cli._hook_air_after("    hook air  +0.46s after the hook, +0.00s before the body") == 0.46
+    assert cli._hook_air_after("no air") is None
+    mpath = _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
+                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                   .replace("  short_variant: true ", "  short_variant: false "), encoding="utf-8")
+    r0 = cli.load_r0_config(cfg)
+    assert r0.autocut.hook_pause_sec == 0.25 and r0.autocut.hook_pause_top == 3
+    tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+    s2 = merge_group_sentences([kept[1]], tx.words)
+    unit = U(1, s2[0][0].t0, s2[4][-1].t1 - s2[0][0].t0, "conclusion", 5, "2.1-5", summary="вывод")
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [unit]}), encoding="utf-8")
+    seen = []
+
+    def fake_check(head, line, root, cache_dir):
+        seen.append(line.split("h:")[1].split(" ")[0])
+        air = "0.00" if len(seen) < 3 else "0.40"                  # the third hook tried has a pause
+        return None, f"    hook air  +{air}s after the hook, +0.00s before the body"
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+    assert len(seen) == 3 and len(set(seen)) == 3
+    assert f"| h:{seen[2]} " in text and f"крючок h:{seen[2]} — после него пауза +0.40 с" in text
+    seen.clear()
+    monkeypatch.setattr(cli, "_autocut_check", lambda h, line, r, c: (seen.append(line.split("h:")[1].split(" ")[0]),
+                                                                    (None, "hook air  +0.00s after the hook"))[1])
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 0
+    text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+    assert f"| h:{seen[0]} " in text and "паузы после него нет" in text          # none has one → the first stays

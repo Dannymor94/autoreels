@@ -7837,7 +7837,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      hook_min_sec=ac.hook_min_sec, speed_slow_rate=ac.speed_slow_rate, speed_slow=ac.speed_slow,
                      speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid,
                      context_start=ac.context_start, context_max_sec=ac.context_max_sec,
-                     context_drop_words=ac.context_drop_words)
+                     context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -7861,16 +7861,31 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
 
     from dataclasses import replace as _dc_replace
     no_start: list = []                     # M74: clips whose start leans on what was cut, with no fix
-    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
-                   no_start=no_start)
-    # M65: the model ranks the code's hook candidates (only the first clips are worth a call)
     mode = llm or ac.hook_llm
-    if mode != "none" and pool:
+    prov, judge = None, None
+    if mode != "none":
+        try:
+            prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+            _pool_banner(prov)
+        except Exception as exc:  # noqa: BLE001 — no model: the code's choices stay
+            print(f"  модель: недоступна ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+            prov = None
+    if prov is not None and ac.context_start and ac.context_judge:
+        from autoreels.cloud.autocut import make_judge   # M75: the model's yes/no on a first sentence
+        judge = make_judge(prov, log=lambda x: print(x, flush=True))
+    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                   no_start=no_start, judge=judge)
+    if judge is not None:
+        _jc = getattr(judge, "cache", {})
+        _no = sum(1 for v in _jc.values() if v is not None and not v[0])
+        _na = sum(1 for v in _jc.values() if v is None)
+        print(f"  начало: модель оценила {len(_jc)} первых фраз, непонятных без предыдущего {_no}"
+              + (f", без ответа {_na} (решили правила)" if _na else ""), flush=True)
+    # M65: the model ranks the code's hook candidates (only the first clips are worth a call)
+    if prov is not None and pool:
         try:
             from autoreels.cloud.autocut import rank_hooks
             from autoreels.cloud.autocut import check_seams, headline, seam_pairs
-            prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
-            _pool_banner(prov)
             _log = lambda x: print(x, flush=True)  # noqa: E731
             _forms: list = []                       # M73: headline shapes chosen so far in this source
             for pr in pool[:prm.clips + 2]:
@@ -7929,6 +7944,26 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             pr.hook = nxt
             tried.add(nxt)
             err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        if err is None and ac.hook_pause_sec > 0 and pr.hook:
+            # M75: no silence after the hook in the recording → try the next of the model's top hooks that has it
+            # (the plan reports the air it found; the model's first choice stays when none of the top has a pause)
+            a0 = _hook_air_after(log)
+            if a0 is not None and a0 < ac.hook_pause_sec:
+                first_hook, first_log = pr.hook, log
+                for h in [x for x in pr.hooks[:ac.hook_pause_top] if x != first_hook]:
+                    pr.hook = h
+                    e2, l2 = _autocut_check(head, pr.line("1"), _root, cache_dir)
+                    a2 = _hook_air_after(l2) if e2 is None else None
+                    if a2 is not None and a2 >= ac.hook_pause_sec:
+                        pr.hooks = [h] + [x for x in pr.hooks if x != h]
+                        pr.notes.append(f"крючок h:{h} — после него пауза +{a2:.2f} с (у h:{first_hook} "
+                                        f"+{a0:.2f} с, он первый у модели)")
+                        log = l2
+                        break
+                else:
+                    pr.hook, log = first_hook, first_log
+                    pr.notes.append(f"крючок h:{first_hook}: паузы после него нет (+{a0:.2f} с), у других из "
+                                    f"первых {ac.hook_pause_top} тоже")
         if err is None:
             accepted.append(pr)
         else:
@@ -7986,6 +8021,13 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0
+
+
+def _hook_air_after(log: str) -> float | None:
+    """M75: seconds of silence the plan kept after the cold open («hook air  +0.46s after the hook, …»)."""
+    import re as _re
+    m = _re.search(r"hook air\s+\+([\d.]+)s after the hook", log or "")
+    return float(m.group(1)) if m else None
 
 
 def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[str | None, str]:
