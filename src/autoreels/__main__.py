@@ -7865,13 +7865,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
             _pool_banner(prov)
             _log = lambda x: print(x, flush=True)  # noqa: E731
+            _forms: list = []                       # M73: headline shapes chosen so far in this source
             for pr in pool[:prm.clips + 2]:
                 rank_hooks(pr, prov, log=_log)
                 if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
                     _byid_t = {u["id"]: u for u in (the_map.get("units") or [])}
                     _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
                                      if uid in _byid_t for r in sentences(_byid_t[uid]["refs"]))
-                    headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core, log=_log)
+                    headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
+                             used_forms=_forms, log=_log)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
                 _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
                 for pr in pool[:prm.clips * 2]:

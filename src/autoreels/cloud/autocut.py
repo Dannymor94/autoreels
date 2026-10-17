@@ -482,15 +482,50 @@ def title_problem(title: str, clip_text: str, core_text: str = "") -> str | None
     return None
 
 
-def title_score(title: str) -> float:
-    """M71: one attention score for every short line the viewer reads first — the same features as the
-    cold open (hook_score: question, contrast, a number, «вы», strong words, no leaning-back start) plus
-    the plate's own: 3–7 words, at most 40 characters (two big lines on a phone)."""
+_TY = {"ты", "тебя", "тебе", "тобой", "твой", "твоя", "твое", "твои", "твоего", "твоей", "твоих"}
+_CONTRAST_T = ("или", "против", "вместо", "лучше", "хуже", "а не", "не ", "но ")
+
+
+def title_form(title: str) -> str:
+    """M73: the shape of a headline — «question» or «statement» (for variety within one source)."""
+    return "question" if (title or "").rstrip().endswith("?") else "statement"
+
+
+def title_score(title: str, core_text: str = "", used_forms: Sequence[str] = ()) -> float:
+    """M71/M73: one attention score for every plate headline. Signals, each small and general:
+    a question (+1.5), a contrast (+1.5), «вы» (+0.5), strong words (+1), a number (+1); specific to this clip —
+    content words shared with its opening or conclusion (+1 each, at most 2), a headline with fewer than two
+    content words is generic (−1.5); one register — «ты» against the talk's «вы» (−1); a weak start «И…/Это…»
+    (−2); 3–7 words (+1), more than 40 characters (−2); the same shape as headlines already chosen for this
+    source (−1 for each), so one source does not get five «Вы…?» in a row."""
     t = " ".join((title or "").split())
-    n = len(t.split())
-    s = hook_score(t, 3.0)
-    s += 1.0 if 3 <= n <= 7 else 0.0
+    low = " " + t.lower().replace("ё", "е") + " "
+    words = [_norm_word(w) for w in t.split()]
+    words = [w for w in words if w]
+    content = [w for w in words if len(w) >= 5 and not w.isdigit()]
+    s = 0.0
+    if t.rstrip().endswith("?"):
+        s += 1.5
+    if any(m in low for m in _CONTRAST_T) and len(words) >= 3:
+        s += 1.5
+    if any(w in _YOU for w in words):
+        s += 0.5
+    if any(m in low for m in _STRONG):
+        s += 1.0
+    if any(ch.isdigit() for ch in t):
+        s += 1.0
+    if core_text:
+        core = {_norm_word(w)[:5] for w in core_text.split() if len(_norm_word(w)) >= 5}
+        s += min(2, sum(1 for w in content if w[:5] in core))
+    if len(content) < 2:
+        s -= 1.5
+    if any(w in _TY for w in words):
+        s -= 1.0
+    if words and words[0] in _WEAK_START and not t.rstrip().endswith("?"):
+        s -= 2.0
+    s += 1.0 if 3 <= len(words) <= 7 else 0.0
     s -= 2.0 if len(t) > 40 else 0.0
+    s -= 1.0 * sum(1 for f in used_forms if f == title_form(t))
     return round(s, 2)
 
 
@@ -499,14 +534,15 @@ TITLE_SYSTEM = (
     "cut from a Russian talk. Its only job: make a viewer stay to get the answer the clip gives. Write THREE "
     "different headlines: a question to the viewer, a claim addressed to «вы», a contrast of two things. Rules: "
     "use only what the clip says (its own words where possible; no new facts, names or numbers); about the "
-    "clip's main point — what it opens with or concludes; about the viewer, never the speaker (no «я», «мой»); "
+    "clip's main point — what it opens with or concludes, naming its own key words (not a generic «кто вы?»); "
+    "about the viewer, never the speaker (no «я», «мой»); address the viewer as «вы», never «ты»; "
     "no lecture plan («сначала… потом…»); at most 7 Russian words and 40 characters; no quotes, emoji or "
     "hashtags. Answer only with JSON: {\"titles\": [\"<headline>\", \"<headline>\", \"<headline>\"]}."
 )
 
 
 def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
-             log: Callable[[str], None] = print) -> bool:
+             used_forms: list | None = None, log: Callable[[str], None] = print) -> bool:
     """M70/M71: the model proposes three headlines; the code drops those that break title_problem and
     keeps the best by title_score — the current plate (the opener's summary) competes too, so a weaker
     proposal never replaces it (invariant 1: the model proposes, the code picks). Returns True when the
@@ -536,9 +572,12 @@ def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
         if why:
             dropped.append(f"«{t}» — {why}")
         else:
-            cands.append((title_score(t), t))
-    base = title_score(pr.title) if pr.title else -99.0
+            cands.append((title_score(t, core_text, used_forms or ()), t))
+    base = title_score(pr.title, core_text, used_forms or ()) if pr.title else -99.0
     best = max(cands, key=lambda c: c[0]) if cands else None
+    chosen = best[1] if best and best[0] > base else pr.title
+    if used_forms is not None and chosen:
+        used_forms.append(title_form(chosen))
     if best and best[0] > base:
         pr.notes.append(f"заголовок-крючок: «{best[1]}» (балл {best[0]:g}; было «{pr.title}», {base:g})"
                         + (f"; отброшены: {'; '.join(dropped)}" if dropped else ""))

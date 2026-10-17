@@ -370,3 +370,20 @@ def test_short_variant_drops_the_weakest_middle_and_keeps_opener_and_payoff():
     assert v is not None and v.units[0] == 2 and v.units[-1] == 5 and v.seconds <= 55
     assert v.variant_of == 1 and v.hook == "2.2" and "короткая версия M1" in v.notes[0]
     assert short_variant(pr, by, AutoParams(), _rows70, short_sec=5, short_min_sec=4, label=1) is None
+
+
+def test_headline_score_prefers_the_specific_over_the_generic_and_varies_within_a_source():
+    """M73 (M71 report): the score rewarded «?» and «вы» so much that generic questions won — «Вы понимаете,
+    кто вы?» replaced «Эмпатия исцеляет лучше любого алгоритма», five of six IMG_6848 plates became «Вы…?», one
+    said «тебя». Now: specific to the clip (shared content words with its opening/conclusion), generic and
+    «ты» lose points, and a shape already used in the source costs a point."""
+    from autoreels.cloud.autocut import title_form, title_score
+    core = "Эмпатия важнее алгоритма для исцеления. Человеку нужна эмпатия."
+    assert title_score("Эмпатия исцеляет лучше любого алгоритма", core) > title_score("Вы понимаете, кто вы?", core)
+    core2 = "Какие жизненные ценности ты можешь назвать?"
+    assert title_score("Какие жизненные ценности у вас?", core2) > title_score("Какие жизненные ценности у тебя?", core2)
+    core3 = "Вся жизнь была компенсацией. Взросление — это осознание."
+    q, st = "Вся ваша жизнь была компенсацией?", "Вся ваша жизнь была компенсацией"
+    assert title_score(q, core3) > title_score(st, core3)                       # alone: the question
+    assert title_score(st, core3, ["question", "question"]) > title_score(q, core3, ["question", "question"])
+    assert title_form(q) == "question" and title_form(st) == "statement"
