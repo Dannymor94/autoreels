@@ -1,0 +1,92 @@
+name: Задача для петли
+description: Задача для агента. Создаёте вручную — мозг допишет по стандарту и поставит в очередь.
+title: "[кратко, что сделать]"
+labels: ["loop:triage"]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Тип
+      options:
+        - integrate
+        - implement
+        - brain-only
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Где
+      options:
+        - local
+        - cloud
+      default: 0
+    validations:
+      required: true
+  - type: input
+    id: estimate
+    attributes:
+      label: Оценка (мин)
+      placeholder: "40"
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Цель
+      description: Что должно получиться. 2–5 строк.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Источник
+      description: Для integrate — ветка мозга (например brain/12-loader) и что в ней.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги
+      description: Нумерованный план с полными путями к файлам и именами функций.
+  - type: textarea
+    id: criterion
+    attributes:
+      label: Критерий готовности
+      description: Команда или проверяемое условие, например `make test` и новый тест на загрузчик проходит.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Каталоги и файлы
+      description: Где можно работать, по строке на путь. Для параллельных задач — обязательно, без пересечений.
+  - type: dropdown
+    id: parallel
+    attributes:
+      label: Можно параллельно
+      description: Да — второй агент может делать эту задачу одновременно с другой такой же.
+      options:
+        - нет
+        - да
+  - type: input
+    id: depends
+    attributes:
+      label: Зависит от
+      description: Задачи, которые должны быть закрыты раньше, например «#11, #12».
+  - type: dropdown
+    id: freedom
+    attributes:
+      label: Свобода
+      options:
+        - обвязка и исправление ошибок
+        - можно менять всё
+  - type: textarea
+    id: avoid
+    attributes:
+      label: Не делать
+      description: Явные запреты — интерфейсы, зависимости, модули, которые не трогать.
+  - type: textarea
+    id: context
+    attributes:
+      label: Контекст
+      description: Ссылки, решения, ограничения.

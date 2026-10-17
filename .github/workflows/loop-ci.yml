@@ -1,0 +1,19 @@
+name: loop-ci
+on:
+  pull_request:
+  push:
+    branches: [dev]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Системные пакеты проекта
+        run: if [ -f .loop/ci-setup.sh ]; then bash .loop/ci-setup.sh; fi
+      - name: Зависимости
+        run: make setup
+      - name: Тесты
+        run: make test
