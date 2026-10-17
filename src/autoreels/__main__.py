@@ -1303,6 +1303,29 @@ def _stage_min_end_gap(reels, transcript, *, r0_cfg):
     return reels
 
 
+def _stage_content_check(reels, tx_words, *, hanging_words=None, smap=None) -> tuple[list, list[dict]]:
+    """M69, automatic path only: a model candidate that breaks the subtitle contract (last word of the
+    final sentence missing, first word mid-sentence) is dropped with its reason in the sidecar, not
+    the whole source (PXL_20260729_copy: one candidate r04 «метода.» stopped arl run with no manifest
+    for the other clips). The manual path still raises — a human clip is never dropped (invariant 5)."""
+    kept: list = []
+    disc: list[dict] = []
+    for r in reels:
+        try:
+            _check_last_subtitle_word(r, tx_words, hanging_words=hanging_words, smap=smap)
+            _check_first_subtitle_word(r, tx_words)
+        except ValueError as exc:
+            msg = str(exc)
+            print(f"  ✗ {r.id}: отброшен — {msg}", flush=True)
+            first_8 = " ".join(w.word for w in (r.subtitles or [])[:8])
+            disc.append({"id": r.id, "score": r.score, "reason": f"content_check: {msg}", "first_words": first_8})
+            continue
+        kept.append(r)
+    if disc:
+        print(f"content_check: отброшено {len(disc)} кандидатов", flush=True)
+    return kept, disc
+
+
 def _stage_min_clip_filter(reels, transcript, *, r0_cfg) -> tuple[list, list[dict]]:
     """Пост-snap: убрать клипы короче min_clip_duration, попытавшись расширить до фразы.
 
@@ -2631,6 +2654,7 @@ _MANUAL_REPAIR_STAGES = {
 _DECIDING_STAGES = (
     "apply_top_n", "dedup", "_stage_trim",
     "_stage_min_clip_filter", "_stage_meaningful_sec_recheck", "_stage_speech_density",
+    "_stage_content_check",
 )
 
 
@@ -3733,9 +3757,11 @@ def _cmd_run_impl(
     reels = _stage_subtitles(reels, transcript, smap=_run_smap)
     memtrace.mark("after subtitles")
     trim_hanging_subtitles(reels, hanging_words=getattr(r0_cfg, "hanging_end_words", []))
-    for _r in reels:
-        _check_last_subtitle_word(_r, tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []), smap=_run_smap)
-        _check_first_subtitle_word(_r, tx_words)
+    reels, content_disc = _stage_content_check(reels, tx_words, hanging_words=getattr(r0_cfg, "hanging_end_words", []),
+                                               smap=_run_smap)
+    discarded += content_disc
+    if content_disc:
+        reels = renumber_reels(reels)
     reels = _stage_two_shot_auto(reels, tx_words, render_cfg=render_cfg, smap=_run_smap)
     manifest = _assemble_manifest(
         video, reels, sha=sha, setup=setup, duration_preset=r0_cfg.duration_preset,

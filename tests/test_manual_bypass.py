@@ -305,3 +305,24 @@ def test_manual_bypass():
     for name, flag in cli._MANUAL_REPAIR_STAGES.items():
         assert f"{name}(" in src, f"manual path must run the repair half of {name}"
         assert flag in src, f"manual path must call {name} with {flag} (repair half only)"
+
+
+def test_content_check_drops_only_the_broken_candidate_on_the_automatic_path(monkeypatch, capsys):
+    """M69: PXL_20260729_copy — candidate r04 («метода.» missing from subtitles) raised in arl run and
+    the source got no manifest at all. On the automatic path the broken candidate goes to the sidecar;
+    the others stay. The manual path does not call this stage (it still raises)."""
+    from types import SimpleNamespace as NS
+
+    def last(r, words, **kw):
+        if r.id == "r02":
+            raise ValueError("[CONTENT] r02: last word of final sentence 'метода.' is missing from subtitles")
+
+    monkeypatch.setattr(cli, "_check_last_subtitle_word", last)
+    monkeypatch.setattr(cli, "_check_first_subtitle_word", lambda r, w: None)
+    reels = [NS(id=f"r0{i}", score=80, subtitles=[NS(word="Слово")]) for i in (1, 2, 3)]
+    kept, disc = cli._stage_content_check(reels, [])
+    assert [r.id for r in kept] == ["r01", "r03"]
+    assert disc == [{"id": "r02", "score": 80, "first_words": "Слово",
+                     "reason": "content_check: [CONTENT] r02: last word of final sentence 'метода.' is missing from subtitles"}]
+    assert "r02: отброшен" in capsys.readouterr().out
+    assert "_stage_content_check" in cli._DECIDING_STAGES
