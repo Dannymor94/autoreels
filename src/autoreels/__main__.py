@@ -7034,19 +7034,39 @@ def cmd_blocks(
             _al_exp = _la_exp(root / "transcripts" / f"{_stem_exp}.align.json", manifest.source_sha256)
             _exp_tone = _tl_exp(_lp_exp(root / "transcripts" / f"{_stem_exp}.prosody.json",
                                         manifest.source_sha256, _al_exp) if _al_exp else None)
+        _exp_gap = None
+        if manifest is not None and getattr(r0_cfg, "review_pause_from_map", False):
+            # M98 (M1.8 consumer 7): ⏸ after a sentence by the pause as heard (speech map / alignment), not by the
+            # Whisper gap — on part of the material those are zero, negative or overlap (invariant 9)
+            _stem_g = manifest_path.stem if manifest_path else target_path.stem
+            _smp_g = root / "transcripts" / f"{_stem_g}.speechmap.json"
+            _smap_g = None
+            if _smp_g.is_file():
+                try:
+                    from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV_g
+                    _dg = _json.loads(_smp_g.read_text(encoding="utf-8"))
+                    if _dg.get("version") == _SMV_g and _dg.get("source_sha256") == manifest.source_sha256:
+                        _smap_g = _dg
+                except (OSError, ValueError):
+                    _smap_g = None
+            from autoreels.cloud.plan import SpeechTimes as _ST_g, load_alignment as _la_g
+            _al_g = _la_g(root / "transcripts" / f"{_stem_g}.align.json", manifest.source_sha256)
+            if _smap_g is not None or _al_g is not None:
+                _times_g = _ST_g(_export_words, _smap_g, _al_g)
+                _exp_gap = lambda a, b: max(0.0, _times_g.audible(b)[0] - _times_g.audible(a)[1])  # noqa: E731
         if compact:
             review_content = export_compact_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
                 words=_export_words, tone=_exp_tone,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
-                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end, gap=_exp_gap,
             )
         else:
             review_content = export_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
                 words=_export_words, tone=_exp_tone,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
-                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end, gap=_exp_gap,
             )
         out_path.write_text(review_content, encoding="utf-8")
         print(f"\nreview: {len(kept)} блоков → {out_path}  ({len(review_content)} chars)")
