@@ -3611,3 +3611,52 @@ def test_planned_end_where_the_next_speech_touches_the_last_word_cuts_at_most_on
             assert end >= ae - 1.0 / fps - 1e-6, (fps, ae, end)                 # «last word cut» allows one frame
             assert end <= ae + 1e-9, (fps, ae, end)                             # never after the next speech
             assert abs(end * fps - round(end * fps)) < 1e-6                     # on the frame grid
+
+
+def test_cover_frame_time_plate_and_command():
+    """M89: <reel>.cover.jpg — the middle of the longest body window (the cold open, a teaser, is skipped), in the
+    reel's crop and colour, with its plate title shown from the first frame (no fade: a cover is one frame)."""
+    from autoreels.core.models import Crop, Segment, SetupProfile
+    from autoreels.core.config import load_subtitles_config
+    from autoreels.local.render import _cover_cmd, _cover_time
+    from autoreels.local.subtitles import build_cover_ass
+    from pathlib import Path
+    segs = [Segment(start=300.0, end=320.0), Segment(start=10.0, end=14.0), Segment(start=20.0, end=30.0)]
+    assert _cover_time(segs, True) == 25.0                     # the 20-s cold open is not the cover
+    assert _cover_time(segs, False) == 310.0
+    cfg = load_subtitles_config(Path(__file__).resolve().parents[1] / "config" / "subtitles.yaml")
+    ass = build_cover_ass("Почему подросток надевает маску", cfg=cfg)
+    dlg = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:")]
+    assert len(dlg) == 1 and ",Title," in dlg[0] and "\\fad" not in dlg[0] and dlg[0].startswith("Dialogue: 0,0:00:00.00,")
+    assert not [ln for ln in build_cover_ass("", cfg=cfg).splitlines() if ln.startswith("Dialogue:")]
+    cmd = _cover_cmd("ffmpeg", Path("/v.mp4"), 25.0, "crop=607:1080:656:0,scale=1080:1920,ass=r01.cover.ass",
+                     Path("/o/r01.cover.jpg"))
+    assert cmd[cmd.index("-ss") + 1] == "25.000" and cmd[cmd.index("-frames:v") + 1] == "1"
+    assert cmd.index("-ss") < cmd.index("-i") and cmd[-1] == "/o/r01.cover.jpg"
+
+
+def test_cover_is_written_with_the_reel_crop_and_a_failure_is_only_a_warning(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from autoreels.core.models import Crop, Segment, SetupProfile
+    from autoreels.local import render as R
+    setup = SetupProfile(setup_id="t", crop=Crop(x=600, y=0, w=607, h=1080), scale=[1080, 1920], frame=[1920, 1080])
+    reel = SimpleNamespace(id="r01", title_overlay="Маска", cold_open=None)
+    clip = tmp_path / "r01.mp4"
+    seen = {}
+
+    def fake_run(cmd, cwd=None, capture_output=True, text=True):
+        seen["cmd"], seen["cwd"] = cmd, cwd
+        Path(cmd[-1]).write_bytes(b"jpg")
+        return SimpleNamespace(returncode=0, stderr="")
+    from pathlib import Path
+    monkeypatch.setattr("subprocess.run", fake_run)
+    out = R._write_cover(clip, reel, [Segment(start=10.0, end=20.0)], setup, tmp_path / "v.mp4", "ffmpeg",
+                         palette_vf="eq=contrast=1.1", subtitles_cfg=None, tmp_dir=tmp_path)
+    assert out == tmp_path / "r01.cover.jpg" and out.is_file()
+    vf = seen["cmd"][seen["cmd"].index("-vf") + 1]
+    assert vf.startswith("crop=607:1080:600:0,scale=1080:1920") and vf.endswith("eq=contrast=1.1") and "ass=" not in vf
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: SimpleNamespace(returncode=1, stderr="boom"))
+    out.unlink()
+    assert R._write_cover(clip, reel, [Segment(start=10.0, end=20.0)], setup, tmp_path / "v.mp4", "ffmpeg",
+                          tmp_dir=tmp_path) is None
+    assert "обложка не записана" in capsys.readouterr().out

@@ -295,6 +295,29 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
     return "\n".join(lines) + "\n"
 
 
+def build_cover_ass(title: str, *, cfg: SubtitlesConfig, play_res: tuple[int, int] = (1080, 1920)) -> str:
+    """M89: the cover's plate — the reel's title in the Title style, shown from the first frame without a fade (a
+    cover is one frame: the reel's fade-in would leave it invisible). Empty title → no Dialogue."""
+    pw, ph = play_res
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {pw}", f"PlayResY: {ph}", "WrapStyle: 2", "",
+        "[V4+ Styles]",
+        ("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"),
+        _title_style_line(cfg), "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    t = " ".join((title or "").split())
+    if t:
+        ttext = t.upper() if cfg.uppercase else t
+        ttext = _wrap_ass(ttext, max_px=cfg.max_text_width_px, font_size=cfg.title_font_size or cfg.font_size,
+                          char_width_ratio=cfg.char_width_ratio)
+        lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(3600.0)},Title,,0,0,0,,{ttext}")
+    return "\n".join(lines) + "\n"
+
+
 # --------------------------------------------------------------------- M55: attention effects
 
 def _tag_color(rrggbb: str) -> str:

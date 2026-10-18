@@ -238,3 +238,7 @@ subtitles:
   words_per_line: [2, 4]      # группировка поп-апа по словам (\k)
   # font_dir — путь к шрифтам для ffmpeg (fontsdir). Заполняется под машину рендера.
   font_dir: null
+
+# M89: a cover for publishing — <reel>.cover.jpg next to every rendered clip: the middle of the clip's longest body
+# window in the reel's crop and colour, with its plate title. The clip itself does not change.
+cover: true

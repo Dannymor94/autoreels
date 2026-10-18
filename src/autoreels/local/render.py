@@ -3658,6 +3658,9 @@ def _render_segments(
                 )
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
+                if emit_text and getattr(render_cfg, "cover", False):     # M89: a cover for publishing
+                    _write_cover(out, reel, segs, manifest.setup, source, ffmpeg_bin, palette_vf=palette_vf,
+                                 subtitles_cfg=subtitles_cfg, tmp_dir=tmp_ass_dir)
         _unlock_dir(_lock_fd)
         return outputs
 
@@ -3691,6 +3694,46 @@ def _write_sidecar_text(clip_path: Path, reel, render_cfg=None) -> None:
         clip_path.with_name(clip_path.stem + ".transcript.txt").write_text(
             transcript + "\n", encoding="utf-8"
         )
+
+
+def _cover_time(segs, has_cold_open: bool) -> float:
+    """M89: the cover frame's source second — the middle of the longest body window (the speaker mid-thought;
+    the cold open is a teaser from later and is skipped)."""
+    body = list(segs[1:]) if has_cold_open and len(segs) > 1 else list(segs)
+    w = max(body, key=lambda s: s.end - s.start)
+    return w.start + (w.end - w.start) / 2
+
+
+def _cover_cmd(ffmpeg: str, source: Path, t: float, vf: str, out: Path) -> list[str]:
+    """M89: one frame of the source at `t`, through the reel's crop/scale/colour (and the plate) → JPEG."""
+    return [ffmpeg, "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", str(source), "-frames:v", "1", "-an",
+            "-vf", vf, "-q:v", "2", str(out)]
+
+
+def _write_cover(clip_path: Path, reel, segs, setup, source: Path, ffmpeg: str, *, palette_vf: str = "",
+                 subtitles_cfg=None, tmp_dir: Path) -> Path | None:
+    """M89: <reel>.cover.jpg next to the clip — the frame of _cover_time in the reel's crop and colour, with its
+    plate title (title_overlay). Static, no tracking. A failure is a warning: the clip itself stays."""
+    import subprocess as _sp
+    out = clip_path.with_name(clip_path.stem + ".cover.jpg")
+    vf = ",".join(x for x in (_crop_vf_for_crop(setup, setup.crop), palette_vf) if x)
+    title = (getattr(reel, "title_overlay", "") or "").strip()
+    if title and subtitles_cfg is not None:
+        from autoreels.local.subtitles import build_cover_ass
+        name = f"{reel.id}.cover.ass"
+        (tmp_dir / name).write_text(build_cover_ass(title, cfg=subtitles_cfg, play_res=tuple(setup.scale)),
+                                    encoding="utf-8")
+        vf = f"{vf},ass={name}"
+    t = _cover_time(segs, getattr(reel, "cold_open", None) is not None)
+    try:
+        r = _sp.run(_cover_cmd(ffmpeg, Path(source), t, vf, out), cwd=str(tmp_dir), capture_output=True, text=True)
+    except OSError as exc:
+        print(f"  warning ({reel.id}): обложка не записана ({exc})", flush=True)
+        return None
+    if r.returncode != 0 or not out.is_file():
+        print(f"  warning ({reel.id}): обложка не записана ({(r.stderr or '').strip()[:160]})", flush=True)
+        return None
+    return out
 
 
 def _write_index_md(manifest: Manifest, out_dir: Path, render_cfg=None) -> None:

@@ -929,6 +929,9 @@ class RenderConfig(BaseModel):
     # M1.7 step 2: per-word keyword highlighting in subtitles. Off by default — feature-off
     # renders are byte-identical. k: review field specifies words per sentence.
     subtitle_keywords: bool = False
+    # M89: <reel>.cover.jpg next to every rendered clip (a frame in the reel's crop and colour + its plate). The clip
+    # itself is unchanged; off = no file.
+    cover: bool = False
 
     @field_validator("role")
     @classmethod
