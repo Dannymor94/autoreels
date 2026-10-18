@@ -8336,7 +8336,8 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
         done, missing = describe_units(units, provider, system=system, p=prm, log=lambda x: print(x, flush=True),
                                        known=known, checkpoint=_checkpoint)
         print(f"  паспорта: {done} мыслей, без ответа {missing}")
-        topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True))
+        topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True),
+                             chunk=mc.topic_chunk)
     similar_units(units, prm)
     m = build_map(units, stem=stem, source_sha256=manifest.source_sha256, topics=topics, model=model,
                   transcript_key=tkey)
@@ -8385,6 +8386,9 @@ def _map_gaps(m: dict, max_missing: float = 0.0, topics: bool = True) -> list[st
         out.append(f"без паспорта {miss} из {len(units)} мыслей")
     if topics and units and not any(t.get("id") for t in m.get("topics") or []):
         out.append("темы не получены")
+    nmiss = sum(len(t.get("units") or []) for t in m.get("topics") or [] if t.get("missing"))
+    if topics and nmiss:                       # M84: a part of the source got no topics answer
+        out.append(f"темы: без ответа для {nmiss} мыслей")
     return out
 
 

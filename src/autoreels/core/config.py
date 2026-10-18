@@ -348,6 +348,7 @@ class MapConfig(BaseModel):
     similar_min: float = Field(0.30, ge=0, le=1)
     similar_far_sec: float = Field(60.0, ge=0)
     max_missing: float = Field(0.1, ge=0, le=1)     # M66: more thoughts without a passport → the map is incomplete
+    topic_chunk: int = Field(0, ge=0)               # M84: more thoughts → topics asked in parts of this many, merged; 0 = one request
 
 
 class LocalLLMConfig(BaseModel):
