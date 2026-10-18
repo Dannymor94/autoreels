@@ -41,6 +41,11 @@ class Card:
     montage: str = ""             # M50: the montage line (M …) the clip was built from
     edit: dict | None = None      # M52: label.edit_model + "media", "offset" (None: not editable here)
     attention: list[dict] = field(default_factory=list)   # M53: attention_marks(reel) — clip time
+    cover: str | None = None      # M95: <rid>.cover.jpg next to the page (M89)
+    post: str = ""                # M95: the post text crosspost gets — <rid>.post.txt (M94) or <rid>.txt
+    post_kind: str = ""           # «описание» (.post.txt) | «подпись рендера» (.txt)
+    hook: str = ""                # M95: the cold open's words (what the viewer hears first)
+    keywords: list[str] = field(default_factory=list)    # M95: the k: words highlighted in the subtitles
 
 
 _CSS = """
@@ -71,6 +76,10 @@ justify-content:center;color:var(--mute);text-align:center;padding:12px}
 .rid{font-weight:600}.dur{color:var(--mute);margin-left:8px}
 .title{font-size:18px;font-weight:600;margin:4px 0}
 .caption{white-space:pre-wrap;margin:4px 0 8px}
+.cover{display:block;width:96px;margin:8px auto 0;border-radius:6px;border:1px solid var(--line)}
+.covercap{text-align:center;color:var(--mute);font-size:12px}
+.kv{margin:2px 0;color:var(--mute)}.kv b{color:var(--ink);font-weight:600}
+.post{white-space:pre-wrap;margin:6px 0 8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px}
 details{margin:6px 0}summary{cursor:pointer;color:var(--mute)}
 .subs{white-space:pre-wrap;color:var(--ink)}
 .line{font-family:var(--mono);font-size:12.5px;background:var(--bg);border-radius:6px;padding:6px 8px;
@@ -379,13 +388,22 @@ def _card_html(c: Card) -> str:
     vid = (f'<video src="{_e(c.video)}" controls preload="metadata" playsinline></video>' if c.video
            else '<div class="novideo">клип не отрендерен</div>')
     warns = "".join(f"<li>{_e(w)}</li>" for w in c.warnings)
-    parts = [f'<div class="media">{vid}{_attention_html(c)}</div><div class="info">',
+    cover = (f'<img class="cover" src="{_e(c.cover)}" alt="обложка {_e(c.rid)}" loading="lazy">'
+             f'<div class="covercap">обложка</div>' if c.cover else "")
+    parts = [f'<div class="media">{vid}{_attention_html(c)}{cover}</div><div class="info">',
              f'<div><span class="rid">{_e(c.rid)}</span><span class="dur">{c.duration:.0f} с</span>'
              + (f'<span class="dur">· оценка {c.score}</span>' if c.score is not None else "") + '</div>']
     if c.title:
         parts.append(f'<div class="title">{_e(c.title)}</div>')
     if c.caption:
         parts.append(f'<div class="caption">{_e(c.caption)}</div>')
+    if c.hook:
+        parts.append(f'<div class="kv">крючок: <b>«{_e(c.hook)}»</b></div>')
+    if c.keywords:
+        parts.append(f'<div class="kv">ключевые слова: <b>{_e(", ".join(c.keywords))}</b></div>')
+    if c.post:
+        parts.append(f'<details open><summary>текст поста ({_e(c.post_kind or "crosspost")})</summary>'
+                     f'<div class="post">{_e(c.post)}</div></details>')
     if c.text:
         parts.append(f'<details><summary>текст клипа</summary><div class="subs">{_e(c.text)}</div></details>')
     if warns:

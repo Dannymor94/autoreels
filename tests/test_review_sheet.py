@@ -352,3 +352,29 @@ def test_review_apply_records_verdicts_with_the_autocut_notes(tmp_path, capsys):
     rows = [json.loads(x) for x in (tmp_path / "reviews" / "verdicts.jsonl").read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["verdict"] == "ok"
     assert draft.read_text().count("M1 85") == 1                                   # the draft line is not rewritten
+
+
+def test_card_shows_cover_post_hook_and_keywords(tmp_path):
+    """M95: what the owner judges besides the video is on the same card — the cover (M89), the post text crosspost
+    gets (M94 .post.txt, else the render's .txt), the cold open's words and the k: words."""
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Segment, Word
+    from autoreels.local.review_sheet import Card, _card_html
+    subs = [Word(word="Как", t0=10.0, t1=10.2), Word(word="отдыхаете?", t0=10.2, t1=10.8),
+            Word(word="Благодарность", t0=30.0, t1=30.6, emph=True), Word(word="лучший", t0=30.6, t1=30.9),
+            Word(word="отдых.", t0=30.9, t1=31.3, emph=True), Word(word="Это", t0=31.32, t1=31.5)]
+    reel = SimpleNamespace(id="r01", subtitles=subs, cold_open=Segment(start=29.95, end=31.33))
+    (tmp_path / "r01.cover.jpg").write_bytes(b"jpg")
+    (tmp_path / "r01.txt").write_text("Подпись.\n", encoding="utf-8")
+    ex = cli._card_extras(reel, tmp_path)
+    assert ex == {"cover": "r01.cover.jpg", "post": "Подпись.", "post_kind": "подпись рендера",
+                  "hook": "Благодарность лучший отдых.", "keywords": ["благодарность", "отдых"]}
+    (tmp_path / "r01.post.txt").write_text("Пост.\n\n#отдых\n", encoding="utf-8")
+    ex = cli._card_extras(reel, tmp_path)
+    assert ex["post"] == "Пост.\n\n#отдых" and ex["post_kind"] == "описание"
+    html = _card_html(Card(rid="r01", video="r01.mp4", duration=40.0, montage="M1 80 | 1.1-3", **ex))
+    assert 'src="r01.cover.jpg"' in html and "крючок: <b>«Благодарность лучший отдых.»</b>" in html
+    assert "ключевые слова: <b>благодарность, отдых</b>" in html and "текст поста (описание)" in html
+    plain = _card_html(Card(rid="r02", video="r02.mp4", duration=40.0, montage="M2 80 | 1.1-3"))
+    assert "cover" not in plain.split("<video")[1].split("</div>")[0] and "текст поста" not in plain

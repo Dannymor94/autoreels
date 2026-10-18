@@ -8804,6 +8804,28 @@ def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str
     return 0 if rows or not (clips or errors) else 2
 
 
+def _card_extras(reel, vdir: Path) -> dict:
+    """M95: what the owner judges besides the video, on the same card — the cover, the post text crosspost gets,
+    the cold open's words and the k: words."""
+    out: dict = {}
+    if (vdir / f"{reel.id}.cover.jpg").is_file():
+        out["cover"] = f"{reel.id}.cover.jpg"
+    for name, kind in ((f"{reel.id}.post.txt", "описание"), (f"{reel.id}.txt", "подпись рендера")):
+        if (vdir / name).is_file():
+            out["post"], out["post_kind"] = (vdir / name).read_text(encoding="utf-8").strip(), kind
+            break
+    co = getattr(reel, "cold_open", None)
+    if co is not None:
+        hook = [w.word for w in reel.subtitles if co.start <= (w.t0 + w.t1) / 2 <= co.end]
+        if hook:
+            out["hook"] = " ".join(hook)
+    kws = list(dict.fromkeys(w.word.strip(".,!?;:…—–«»\"'()").lower() for w in reel.subtitles
+                             if getattr(w, "emph", False)))
+    if kws:
+        out["keywords"] = kws
+    return out
+
+
 def cmd_review_sheet(
     target: str,
     *,
@@ -8879,7 +8901,7 @@ def cmd_review_sheet(
             text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
             seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
             marks=list(ln.marks) if ln else [], score=r.score, montage=r.montage or "",
-            edit=edits.get(r.id), attention=attention_marks(r),
+            edit=edits.get(r.id), attention=attention_marks(r), **_card_extras(r, vdir),
         ))
     notes = []
     n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
