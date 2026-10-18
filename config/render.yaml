@@ -245,3 +245,9 @@ cover: true
 # M96: … at the moment (of 7 spread over the body) whose frame shows the largest face with open eyes (OpenCV,
 # pip install -e ".[faces]"); no OpenCV or no face = the middle of the longest body window.
 cover_face: true
+
+# M97 (ending package): a clip whose last thought goes on past its end (the open_thought warning) shows the plate
+# «Продолжение →» over its last 2.5 s — the viewer looks for the next part instead of feeling the cut.
+continue_plate: true
+continue_sec: 2.5
+continue_text: "Продолжение →"

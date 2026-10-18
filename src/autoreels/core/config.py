@@ -948,6 +948,11 @@ class RenderConfig(BaseModel):
     # M96: the cover frame is the moment (of 7 in the body) with the largest face and open eyes (OpenCV); off or no
     # OpenCV = the middle of the longest body window (M89).
     cover_face: bool = False
+    # M97 (ending package, PLAN M1.7 B): a clip whose last thought goes on past its end (open_thought) shows
+    # continue_text in the title plate over its last continue_sec seconds. Off = the clip as before.
+    continue_plate: bool = False
+    continue_sec: float = Field(2.5, gt=0)
+    continue_text: str = "Продолжение →"
 
     @field_validator("role")
     @classmethod

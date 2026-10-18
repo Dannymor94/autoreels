@@ -3694,3 +3694,21 @@ def test_cover_frame_by_the_face_with_open_eyes(tmp_path, monkeypatch):
     R._write_cover(tmp_path / "r01.mp4", reel, segs[1:], setup, tmp_path / "v.mp4", "ffmpeg", tmp_dir=tmp_path,
                    by_face=True)
     assert seen[-1][seen[-1].index("-ss") + 1] == "15.300"            # the middle of the longest (first equal) window
+
+
+def test_continue_plate_over_the_last_seconds_of_an_open_thought():
+    """M97 (ending package): a clip whose thought goes on past its end shows «Продолжение →» in the title plate over
+    its last seconds; without it the subtitles are byte-identical."""
+    from pathlib import Path
+    from autoreels.core.config import load_subtitles_config
+    from autoreels.core.models import Word
+    from autoreels.local.subtitles import build_ass
+    cfg = load_subtitles_config(Path(__file__).resolve().parents[1] / "config" / "subtitles.yaml")
+    words = [Word(word="Маска", t0=0.0, t1=0.5), Word(word="защищает.", t0=0.5, t1=1.2)]
+    plain = build_ass(words, cfg=cfg, clip_start=0.0)
+    assert build_ass(words, cfg=cfg, clip_start=0.0, fx={}) == plain
+    ass = build_ass(words, cfg=cfg, clip_start=0.0, fx={"continue": {"t": 7.5, "end": 10.0, "text": "Продолжение →"}})
+    dlg = [ln for ln in ass.splitlines() if ",Title," in ln and ln.startswith("Dialogue:")]
+    assert len(dlg) == 1 and dlg[0].startswith("Dialogue: 1,0:00:07.50,0:00:10.00,Title,")
+    assert ("ПРОДОЛЖЕНИЕ →" if cfg.uppercase else "Продолжение →") in dlg[0] and "\\fad(" in dlg[0]
+    assert "Style: Title," in ass and "Style: Title," not in plain

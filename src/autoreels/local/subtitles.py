@@ -228,8 +228,9 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         break_pause_sec=cfg.subtitle_break_pause_sec,
     )
     _has_kw = enable_keywords and any(w.emph for w in words)
+    _cont = fx.get("continue") if fx.get("continue") and str(fx["continue"].get("text", "")).strip() else None
     styles = [_style_line(cfg)]
-    if title:
+    if title or _cont:
         styles.append(_title_style_line(cfg))
     if _has_kw:
         styles.append(_keyword_style_line(cfg))
@@ -260,6 +261,11 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         ttext = f"{{\\fad({fi},{fo})}}" + ttext
         _ts = max(0.0, float(title_start or 0.0))
         lines.append(f"Dialogue: 0,{_ass_time(_ts)},{_ass_time(_ts + cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
+    if _cont:     # M97: «Продолжение →» over the last seconds of a clip whose thought goes on (open_thought)
+        ctext = str(_cont["text"]).strip()
+        ctext = ctext.upper() if cfg.uppercase else ctext
+        lines.append(f"Dialogue: 1,{_ass_time(float(_cont['t']))},{_ass_time(float(_cont['end']))},Title,,0,0,0,,"
+                     f"{{\\fad({cfg.title_fade_ms},0)}}{ctext}")
     if _progress > 0:
         lines.append(_progress_line(cfg, _progress, pw, ph))
     for c in _callouts:

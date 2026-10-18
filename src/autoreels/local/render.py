@@ -2954,6 +2954,13 @@ def _render_segments(
                         if (_t := fx_output_time(segs, float(c["t"]), speed=_reel_speed, body0=_body0)) is not None
                     ],
                 }
+            if getattr(render_cfg, "continue_plate", False) and getattr(reel, "open_thought", False):
+                # M97 (ending package): the thought goes on past the clip — say so over its last seconds
+                _end_out = round(_expected_output_duration(segs, xfade_sec=_xfade_actual, speed=_reel_speed or 1.0,
+                                                           seam_xfades=_ts_seam_xfades), 3)
+                _fx_ass = dict(_fx_ass or {})
+                _fx_ass["continue"] = {"t": max(0.0, _end_out - render_cfg.continue_sec), "end": _end_out,
+                                       "text": render_cfg.continue_text}
             if subtitles_cfg is not None and (reel.subtitles or _title or _fx_ass):
                 # Remap word times onto the concatenated, speed-adjusted output timeline (gap words
                 # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
