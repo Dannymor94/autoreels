@@ -106,14 +106,32 @@ def analyse(base_ref: str):
     return violations, hard
 
 
-def pr_context():
+def _event():
     path = os.environ.get("GITHUB_EVENT_PATH")
     if not path or not os.path.exists(path):
-        return None, set()
+        return {}
     with open(path, encoding="utf-8") as f:
-        ev = json.load(f)
-    pr = ev.get("pull_request") or {}
+        return json.load(f)
+
+
+def pr_context():
+    pr = _event().get("pull_request") or {}
     return pr.get("number"), {l["name"] for l in pr.get("labels", [])}
+
+
+def owner_sync() -> bool:
+    """PR переносит основную ветку владельца (main) в рабочую ветку петли — это его собственный код.
+
+    В main пишет только владелец: мозгу это запрещено, у агентов нет прав на push. Проверять его изменения
+    тестов незачем — иначе он одобряет свой же код на каждой синхронизации (решение владельца 18.10).
+    Ветка-источник должна быть именно основной веткой этого же репозитория (не форк, не похожее имя).
+    """
+    ev = _event()
+    pr, repo = ev.get("pull_request") or {}, ev.get("repository") or {}
+    head = pr.get("head") or {}
+    default = repo.get("default_branch")
+    return bool(default) and head.get("ref") == default and \
+        (head.get("repo") or {}).get("full_name") == repo.get("full_name")
 
 
 def gh_label(number, add: bool):
@@ -151,8 +169,13 @@ def main(argv=None) -> int:
         has_remote = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"origin/{a.base}"],
                                     capture_output=True).returncode == 0
         base_ref = f"origin/{a.base}" if has_remote else a.base
-    violations, hard = analyse(base_ref)
     number, labels = (None, set()) if a.local else pr_context()
+    if not a.local and owner_sync():
+        summary("## Страж петли\nPR переносит основную ветку владельца — это его код, проверку пропускаю.")
+        if CHANGED in labels:
+            gh_label(number, add=False)
+        return 0
+    violations, hard = analyse(base_ref)
     approved = APPROVED in labels
 
     lines = ["## Страж петли"]
