@@ -1,7 +1,7 @@
 """Review sheet (`arl review-sheet`): one HTML page per source to watch the rendered clips and decide.
 
 Every clip is shown with its video, title plate, caption, subtitle text, warnings and the review
-line it came from. The owner marks each clip «оставить / убрать / переделать» (+ a note) and
+line it came from. The owner marks each clip «оставить / убрать / переделать» (+ reasons, a note) and
 downloads a decisions file; `arl review-apply` writes it into the draft (cloud/label.py). The page
 is static: it is opened from disk next to the clips (reels-out/<stem>/), no server, nothing sent
 anywhere; the choices survive a reload in the browser's local storage.
@@ -84,6 +84,13 @@ overflow-wrap:anywhere}
 .choice label:has(input[value="ok"]:checked){background:var(--ok);border-color:var(--ok);color:#fff}
 .choice label:has(input[value="drop"]:checked){background:var(--drop);border-color:var(--drop);color:#fff}
 .choice label:has(input[value="fix"]:checked){background:var(--fix);border-color:var(--fix);color:#fff}
+.why{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 6px}
+.why label{border:1px dashed var(--line);border-radius:999px;padding:2px 9px;font-size:13px;cursor:pointer;user-select:none;
+color:var(--mute)}
+.why input{position:absolute;opacity:0;pointer-events:none}
+.why input:focus-visible+span{outline:2px solid var(--accent);outline-offset:3px}
+.why label:has(input:checked){border-style:solid;border-color:var(--fix);color:var(--ink);
+background:color-mix(in srgb,var(--fix) 18%,transparent)}
 textarea{width:100%;min-height:54px;font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;
 background:var(--bg);color:var(--ink)}
 .noline{color:var(--drop)}
@@ -121,11 +128,12 @@ _JS = r"""
   const meta = JSON.parse(document.getElementById('meta').textContent);
   const CLIPS = JSON.parse(document.getElementById('clips').textContent || '{}');
   const key = 'arl-review:' + meta.stem + ':' + meta.key;
-  const cards = Array.from(document.querySelectorAll('.card[data-seq]'));
+  const cards = Array.from(document.querySelectorAll('.card[data-seq], .card[data-montage]'));
   const ED = {};                       // rid → {played:Set, hook, orig:{played, hook}}
   function load(){ try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch(e){ return {}; } }
   function save(st){ try { localStorage.setItem(key, JSON.stringify(st)); } catch(e){} }
   function verdict(c){ return (c.querySelector('input[type=radio]:checked') || {}).value || ''; }
+  function reasons(c){ return Array.from(c.querySelectorAll('.why input:checked')).map(i => i.value); }
 
   // ── M52: the clip as text ──────────────────────────────────────────────────────────────
   function ranges(ns){
@@ -274,7 +282,8 @@ _JS = r"""
       const v = verdict(c), rid = c.dataset.rid;
       const n = c.querySelector('textarea').value.trim();
       const ed = ED[rid] && changed(rid) ? {p: Array.from(ED[rid].played), h: ED[rid].hook} : null;
-      if (v || n || ed) st[rid] = {v: v, n: n, ed: ed};
+      const r = reasons(c);
+      if (v || n || ed || r.length) st[rid] = {v: v, n: n, ed: ed, r: r};
     });
     return st;
   }
@@ -283,7 +292,7 @@ _JS = r"""
     cards.forEach(c => {
       const v = verdict(c);
       c.dataset.v = v;
-      c.classList.toggle('missing-note', v === 'fix' && !c.querySelector('textarea').value.trim());
+      c.classList.toggle('missing-note', v === 'fix' && !c.querySelector('textarea').value.trim() && !reasons(c).length);
       if (v) done++;
     });
     document.getElementById('count').textContent = 'решено ' + done + ' из ' + cards.length;
@@ -294,7 +303,8 @@ _JS = r"""
     const s = st[c.dataset.rid], rid = c.dataset.rid;
     if (s) {
       if (s.ed && ED[rid]) { ED[rid].played = new Set(s.ed.p); ED[rid].hook = s.ed.h || null; }
-      const r = c.querySelector('input[value="' + s.v + '"]'); if (r) r.checked = true;
+      const r = c.querySelector('input[type=radio][value="' + s.v + '"]'); if (r) r.checked = true;
+      (s.r || []).forEach(x => { const b = c.querySelector('.why input[value="' + x + '"]'); if (b) b.checked = true; });
       c.querySelector('textarea').value = s.n || '';
     }
     if (ED[rid]) drawEditor(c);
@@ -304,12 +314,15 @@ _JS = r"""
   function text(){
     const out = ['# stem: ' + meta.stem, '# review: ' + meta.review, '# manifest: ' + meta.manifest,
                  '# decided: ' + new Date().toISOString().slice(0, 10)];
+    if (meta.gate) out.push('# gate: ' + meta.gate);
     cards.forEach(c => {
       const v = verdict(c), rid = c.dataset.rid;
-      const n = c.querySelector('textarea').value.trim().replace(/\s*\n\s*/g, ' ');
-      const head = rid + ' | line ' + c.dataset.seq;
+      const r = reasons(c);
+      const n0 = c.querySelector('textarea').value.trim().replace(/\s*\n\s*/g, ' ');
+      const n = (r.length ? 'причины: ' + r.join(', ') + (n0 ? ' | ' : '') : '') + n0;
+      const head = rid + (c.dataset.montage ? ' | montage ' + c.dataset.montage : ' | line ' + c.dataset.seq);
       if (!v) out.push('# ' + head + ' | не решено' + (n ? ' | ' + n : ''));
-      else if (v === 'edit') {
+      else if (v === 'edit' && !c.dataset.montage) {
         const f = ED[rid] ? fields(rid) : '';
         if (f && changed(rid)) out.push(head + ' | edit | ' + f + (n ? ' | ' + n : ''));
         else out.push('# ' + head + ' | правка без изменений' + (n ? ' | ' + n : ''));
@@ -341,6 +354,23 @@ _JS = r"""
 """
 
 
+# M82: why a clip is dropped or must be redone — one tap each; the verdicts with their reasons are what the
+# formulas will later learn from (arl review-apply → reviews/verdicts.jsonl).
+REASONS = ("начало", "крючок", "плашка", "конец", "темп", "стык", "кадр", "звук", "скучно")
+
+
+def _choice_html(c: "Card", *, edit: bool = False) -> str:
+    name = f"v-{_e(c.rid)}"
+    choices = (("ok", "Оставить"), ("drop", "Убрать"), ("fix", "Переделать")) + ((("edit", "Правка"),) if edit else ())
+    radios = "".join(f'<label><input type="radio" name="{name}" value="{v}"><span>{t}</span></label>'
+                     for v, t in choices)
+    why = "".join(f'<label><input type="checkbox" value="{r}"><span>{r}</span></label>' for r in REASONS)
+    return (f'<div class="choice">{radios}</div>'
+            f'<div class="why" aria-label="Что не так у {_e(c.rid)}">{why}</div>'
+            f'<textarea placeholder="Замечание (для «Переделать» — замечание или причина): что не так, '
+            f'где начать или закончить…" aria-label="Замечание к {_e(c.rid)}"></textarea>')
+
+
 def _e(s: str) -> str:
     return html.escape(s or "", quote=True)
 
@@ -361,11 +391,14 @@ def _card_html(c: Card) -> str:
     if warns:
         parts.append(f'<ul class="warns">{warns}</ul>')
     if c.montage:
+        # M82: a montage clip is decided like any other (the verdict and its reasons go to the decisions file —
+        # into reviews/verdicts.jsonl at arl review-apply; the draft line itself is not rewritten)
+        label = (c.montage.split() or ["M"])[0]
         parts.append(f'<details open><summary>сборка из кусков разных блоков</summary>'
-                     f'<div class="line">{_e(c.montage)}</div></details>'
-                     '<p class="noline">Сборка (M50, этап 1): оцените плавность стыков глазами; решение и '
-                     'замечание по ней — владельцу в чат, в файл решений она не попадает.</p></div>')
-        return f'<section class="card" data-rid="{_e(c.rid)}">' + "".join(parts) + "</section>"
+                     f'<div class="line">{_e(c.montage)}</div></details>')
+        parts.append(_choice_html(c) + "</div>")
+        return (f'<section class="card" data-rid="{_e(c.rid)}" data-montage="{_e(label)}">' + "".join(parts)
+                + "</section>")
     if c.seq is None:
         parts.append('<p class="noline">Строка черновика для этого клипа не найдена: черновик менялся '
                      'после рендера. Решение по нему здесь не принимается.</p></div>')
@@ -376,16 +409,7 @@ def _card_html(c: Card) -> str:
         parts.append('<div class="marks">' + "<br>".join(_e(m) for m in c.marks) + "</div>")
     if c.edit:
         parts.append(_editor_html(c))
-    name = f"v-{_e(c.rid)}"
-    choices = (("ok", "Оставить"), ("drop", "Убрать"), ("fix", "Переделать"))
-    if c.edit:
-        choices += (("edit", "Правка"),)
-    radios = "".join(
-        f'<label><input type="radio" name="{name}" value="{v}"><span>{t}</span></label>'
-        for v, t in choices)
-    parts.append(f'<div class="choice">{radios}</div>'
-                 f'<textarea placeholder="Замечание (для «Переделать» обязательно): что не так, '
-                 f'где начать или закончить…" aria-label="Замечание к {_e(c.rid)}"></textarea></div>')
+    parts.append(_choice_html(c, edit=bool(c.edit)) + "</div>")
     return (f'<section class="card" data-rid="{_e(c.rid)}" data-seq="{c.seq}">' + "".join(parts)
             + "</section>")
 
@@ -494,9 +518,9 @@ def _editor_html(c: Card) -> str:
 
 
 def build_sheet(stem: str, cards: list[Card], *, review_ref: str, manifest_ref: str, key: str,
-                notes: list[str] = ()) -> str:
+                notes: list[str] = (), gate: str = "") -> str:
     """The whole page. key: a short hash of the draft — choices saved in the browser belong to it."""
-    meta = json.dumps({"stem": stem, "review": review_ref, "manifest": manifest_ref, "key": key},
+    meta = json.dumps({"stem": stem, "review": review_ref, "manifest": manifest_ref, "key": key, "gate": gate or ""},
                       ensure_ascii=False).replace("</", "<\\/")
     clips = json.dumps({c.rid: c.edit for c in cards if c.edit and c.seq is not None},
                        ensure_ascii=False).replace("</", "<\\/")

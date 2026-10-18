@@ -8667,7 +8667,8 @@ def cmd_review_sheet(
         notes.append(f"Ни одного клипа нет в {vdir} — сначала рендер (или укажите --gate).")
     html_text = build_sheet(stem, cards, review_ref=_rel_ref(review_path, _root),
                             manifest_ref=_rel_ref(show_path, _root),
-                            key=hashlib.sha1(review_text.encode("utf-8")).hexdigest()[:12], notes=notes)
+                            key=hashlib.sha1(review_text.encode("utf-8")).hexdigest()[:12], notes=notes,
+                            gate=gate or "")
     vdir.mkdir(parents=True, exist_ok=True)
     out = vdir / "_review.html"
     out.write_text(html_text, encoding="utf-8")
@@ -8784,7 +8785,11 @@ def cmd_review_apply(
     if not dpath.exists():
         print(f"ошибка: файла решений нет: {decisions_path}", file=sys.stderr)
         return 1
-    head, decisions, errors = parse_decisions(dpath.read_text(encoding="utf-8"))
+    _dtext = dpath.read_text(encoding="utf-8")
+    head, decisions, errors = parse_decisions(_dtext)
+    from autoreels.cloud.label import parse_montage_decisions
+    mdecisions, _merr = parse_montage_decisions(_dtext)
+    errors = list(errors) + list(_merr)
     for e in errors:
         print(f"  ошибка в решениях: {e}", file=sys.stderr)
     if errors:
@@ -8801,6 +8806,14 @@ def cmd_review_apply(
         print(f"ошибка: черновика {review_path} нет", file=sys.stderr)
         return 1
     old_text = review_path.read_text(encoding="utf-8")
+    # M82: every verdict (with its reasons) is kept for learning — reviews/verdicts.jsonl, the owner's data
+    _nrec = _record_verdicts(_root, head, decisions, mdecisions, old_text, _rel_ref(review_path, _root),
+                             date=head.get("decided") or _dt.date.today().isoformat())
+    if mdecisions:
+        _mn = {v: sum(1 for d in mdecisions if d.verdict == v) for v in ("ok", "drop", "fix")}
+        print(f"сборки: оставить {_mn['ok']}, убрать {_mn['drop']}, переделать {_mn['fix']} "
+              f"(записаны в оценки; строки сборок в черновике не меняются)")
+    print(f"оценки: записано {_nrec} → reviews/verdicts.jsonl")
     new_text, msgs = apply_decisions(old_text, decisions, date=_dt.date.today().isoformat())
     for m in msgs:
         print(f"  {m}")
@@ -8851,6 +8864,60 @@ def cmd_review_apply(
     _q = f'"{_q}"' if " " in _q else _q
     print(f"  проверить план: arl blocks --apply {_q} --labeler auto")
     return rc
+
+
+def _record_verdicts(root: Path, head: dict, decisions, mdecisions, review_text: str, review_ref: str, *,
+                     date: str) -> int:
+    """M82: the owner's verdicts → reviews/verdicts.jsonl (one row per clip and draft; a later decision on the same
+    clip of the same draft replaces the earlier one). Each row keeps the draft line and, for a montage clip, the
+    autocut notes above it (hook, start, plate, scores) — what the formulas will learn from. Returns rows written."""
+    import json as _json
+    from autoreels.cloud.label import split_reasons
+    lines = review_text.splitlines()
+
+    def montage_block(label: str) -> tuple[str, list[str]]:
+        for i, ln in enumerate(lines):
+            if ln.startswith(label + " "):
+                notes, j = [], i - 1
+                while j >= 0 and lines[j].startswith("#   "):
+                    notes.insert(0, lines[j][4:].strip())
+                    j -= 1
+                return ln.strip(), notes
+        return "", []
+
+    def draft_line(seq: int) -> str:
+        for ln in lines:
+            t = ln.strip()
+            if t[:1].isdigit() and t.split()[0] == str(seq):
+                return t
+        return ""
+
+    rows = []
+    base = {"date": date, "stem": head.get("stem", ""), "review": review_ref, "gate": head.get("gate", "")}
+    for d in decisions:
+        reasons, note = split_reasons(d.note)
+        rows.append({**base, "rid": d.reel, "kind": "line", "ref": str(d.seq), "verdict": d.verdict,
+                     "reasons": reasons, "note": note, "line": draft_line(d.seq), "draft_notes": []})
+    for d in mdecisions:
+        line, notes = montage_block(d.label)
+        rows.append({**base, "rid": d.reel, "kind": "montage", "ref": d.label, "verdict": d.verdict,
+                     "reasons": list(d.reasons), "note": d.note, "line": line, "draft_notes": notes})
+    if not rows:
+        return 0
+    path = root / "reviews" / "verdicts.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = lambda r: (r.get("stem"), r.get("review"), r.get("gate"), r.get("kind"), r.get("ref"), r.get("line"))
+    old: list[dict] = []
+    if path.is_file():
+        for ln in path.read_text(encoding="utf-8").splitlines():
+            try:
+                old.append(_json.loads(ln))
+            except ValueError:
+                continue
+    new_keys = {key(r) for r in rows}
+    kept = [r for r in old if key(r) not in new_keys]
+    path.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in kept + rows), encoding="utf-8")
+    return len(rows)
 
 
 def cmd_prepare(

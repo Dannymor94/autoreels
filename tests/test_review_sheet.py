@@ -290,3 +290,65 @@ def test_cli_wiring():
     assert (a.cmd, a.gate, a.review) == ("review-sheet", "g1", "x.txt")
     b = parser.parse_args(["review-apply", "d.txt", "--redo"])
     assert (b.cmd, b.decisions, b.redo) == ("review-apply", "d.txt", True)
+
+
+# ── M82: verdicts on montage clips, reasons, the learning file ──────────────────────────────────
+
+def test_montage_cards_are_decided_with_reasons_and_the_gate_is_in_the_meta():
+    """M82: the auto clips are montage — the sheet had no verdict for them («решение — в чат»). Now every card has
+    оставить/убрать/переделать + reason chips; the page knows its gate."""
+    from autoreels.local.review_sheet import REASONS
+    cards = [Card("r01", "r01.mp4", 40.0, seq=3, line="3 85 | t: T"),
+             Card("r02", "r02.mp4", 38.0, montage="M3 85 | 2.2-4 5.1-3 | h:5.2 | t: Тема")]
+    html = build_sheet("v", cards, review_ref="handoff/m78/v_auto_m56.txt", manifest_ref="reviews/v.review.json",
+                       key="k", gate="m78")
+    r02 = html[html.index('data-rid="r02"'):].split("</section>")[0]
+    assert 'data-montage="M3"' in r02 and 'type="radio"' in r02 and 'value="drop"' in r02
+    assert all(f'value="{r}"' in r02 for r in REASONS) and "в файл решений она не попадает" not in html
+    r01 = html[html.index('data-rid="r01"'):].split("</section>")[0]
+    assert 'class="why"' in r01
+    meta = html[html.index('<script id="meta"'):]
+    assert json.loads(meta[meta.index(">") + 1:meta.index("</script>")])["gate"] == "m78"
+    assert ".card[data-montage]" in html and "' | montage ' + c.dataset.montage" in html
+
+
+def test_montage_verdicts_and_reasons_are_parsed():
+    from autoreels.cloud.label import parse_montage_decisions, split_reasons
+    text = ("# stem: v\n# review: handoff/m78/v_auto_m56.txt\n# gate: m78\n"
+            "r01 | line 3 | drop | причины: темп, стык | тянется\n"
+            "r02 | montage M3 | fix | причины: крючок\n"
+            "r03 | montage M4 | ok\n"
+            "r04 | montage M5 | fix\n")
+    head, ds, errors = parse_decisions(text)
+    assert errors == [] and head["gate"] == "m78" and len(ds) == 1               # montage lines skipped, no error
+    assert split_reasons(ds[0].note) == (["темп", "стык"], "тянется")
+    assert split_reasons("просто текст") == ([], "просто текст")
+    ms, merr = parse_montage_decisions(text)
+    assert [(d.reel, d.label, d.verdict, d.reasons) for d in ms] == [("r02", "M3", "fix", ["крючок"]),
+                                                                      ("r03", "M4", "ok", [])]
+    assert len(merr) == 1 and "r04" in merr[0]                                   # fix with no note and no reason
+
+
+def test_review_apply_records_verdicts_with_the_autocut_notes(tmp_path, capsys):
+    (tmp_path / "reviews").mkdir()
+    draft = tmp_path / "reviews" / "v_auto_m56.txt"
+    draft.write_text("# fingerprint: abc\n"
+                     "# --- M1: 40 с, мыслей 3\n"
+                     "#   начало: «Эмпатия лечит лучше алгоритма.»\n"
+                     "#   плашка-контекст: «Эмпатия против алгоритма»\n"
+                     "M1 85 | 2.2-4 5.1-3 | h:5.2 | t: Эмпатия против алгоритма\n", encoding="utf-8")
+    dec = tmp_path / "v_decisions.txt"
+    dec.write_text("# stem: v\n# review: reviews/v_auto_m56.txt\n# gate: m78\n# decided: 2026-10-18\n"
+                   "r01 | montage M1 | drop | причины: крючок, плашка | кресло\n", encoding="utf-8")
+    assert cli.cmd_review_apply(str(dec), root=tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "сборки: оставить 0, убрать 1" in out and "записано 1" in out
+    rows = [json.loads(x) for x in (tmp_path / "reviews" / "verdicts.jsonl").read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["verdict"] == "drop" and rows[0]["reasons"] == ["крючок", "плашка"]
+    assert rows[0]["line"].startswith("M1 85") and rows[0]["draft_notes"][0].startswith("начало:")
+    assert rows[0]["gate"] == "m78" and rows[0]["note"] == "кресло"
+    dec.write_text(dec.read_text().replace("drop | причины: крючок, плашка | кресло", "ok"), encoding="utf-8")
+    assert cli.cmd_review_apply(str(dec), root=tmp_path) == 0                     # changed mind: replaced, not added
+    rows = [json.loads(x) for x in (tmp_path / "reviews" / "verdicts.jsonl").read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["verdict"] == "ok"
+    assert draft.read_text().count("M1 85") == 1                                   # the draft line is not rewritten
