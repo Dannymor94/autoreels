@@ -890,3 +890,15 @@ def test_teaser_pointing_back_is_left_out_by_the_code():
     assert "2.1" in old.hooks                                  # off: only the −3 of M74
     (pr,) = propose(units, AutoParams(**base, hook_no_pointer=True), sent)
     assert "2.1" not in pr.hooks and "2.2" in pr.hooks
+
+
+def test_every_clip_gets_post_text_and_pronouns_are_no_key_words():
+    """M93 (m88: Pxl 112938952 r02 — its payoff was its opening thought, so d: stayed empty, the render wrote no
+    r02.txt and arl crosspost skipped it; «себя» marked as a key word in two clips)."""
+    from autoreels.cloud.autocut import AutoParams, pick_keywords, propose
+    units = [U(1, 0, 30, "conclusion", 5, "1.1-6", summary="взрослый точно чувствует себя")]
+    (pr,) = propose(units, AutoParams(clips=1, min_sec=10, target_sec=30, max_sec=60, loop=False), _rows({}))
+    assert pr.caption == "взрослый точно чувствует себя" and "| d: взрослый точно чувствует себя" in pr.line("1")
+    rows = [("1.1", "Взрослый чувствует себя."), ("1.2", "Он про своё тело.")]
+    assert pick_keywords(rows, _Answers('{"keys": [{"s": 1, "word": "себя"}, {"s": 2, "word": "своё"}]}'),
+                         n=2, log=lambda m: None) == []

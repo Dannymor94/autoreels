@@ -782,7 +782,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             units=ids, pieces=" ".join(u["refs"] for u in clip),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
-            title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
+            # M93: the post text d: is the payoff's summary even when the payoff is the opening thought — a clip
+            # without it has no <rid>.txt and crosspost refuses a post without text (Pxl 112938952 r02 in m88)
+            title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
             opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
@@ -873,7 +875,10 @@ KEYWORDS_SYSTEM = (
 )
 _KEY_STOP = frozenset("это этот эта эти так вот что как все всё они она оно его ее её мы вы ты он я там тут где "
                       "когда тогда если чтобы потому поэтому тоже также уже еще ещё просто очень какой какая "
-                      "такой такая быть есть был была было который которая которые".split())
+                      "такой такая быть есть был была было который которая которые "
+                      # M93 (m88: «себя» marked in two clips): reflexive and possessive pronouns carry no meaning
+                      "себя себе собой свой своя свое своё свои своего своей мой моя мое моё мои твой наш ваш "
+                      "меня мне тебя тебе нас нам вас вам него нее неё них нему ней ним".split())
 
 
 def _kw_norm(w: str) -> str:
