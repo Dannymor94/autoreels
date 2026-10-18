@@ -215,6 +215,7 @@ class MontageConfig(BaseModel):
     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
     join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
     hook_air_sec: float = Field(0.0, ge=0.0, le=1.5)       # M74: silence kept after the cold open and before the body (0 = off)
+    fx_auto_clips: bool = False                            # M77: the fx (not callouts) also on ordinary clips of an auto draft
 
 
 class MontageFx(BaseModel):

@@ -379,7 +379,9 @@ STANDALONE_SYSTEM = (
     "sentence given below; the viewer has heard NOTHING of the talk before it. Decide whether that first sentence "
     "makes sense on its own: no pronoun or «это/так/вот/тот» pointing to something not said, not an answer to a "
     "question the viewer did not hear, not a fragment or a filler («да, допустим»), not a continuation of an "
-    "enumeration. The following sentence is given only to help you understand it. Answer only with JSON: "
+    "enumeration, and no term or subject used as if it had been introduced before («перенос», «этот метод») — the "
+    "viewer must know what the sentence is about. The following sentence is given only to help you understand it. "
+    "Answer only with JSON: "
     "{\"ok\": true|false, \"why\": \"<at most 8 Russian words>\"}."
 )
 
@@ -716,7 +718,9 @@ _CONTRAST_T = ("или", "против", "вместо", "лучше", "хуже
 
 def title_form(title: str) -> str:
     """M73: the shape of a headline — «question» or «statement» (for variety within one source)."""
-    return "question" if (title or "").rstrip().endswith("?") else "statement"
+    t = (title or "").rstrip()
+    w = [_norm_word(x) for x in t.split()[:1]]
+    return "question" if t.endswith("?") or (w and w[0] in _WH) else "statement"   # M77: «Почему мы…» asks too
 
 
 def title_score(title: str, core_text: str = "", used_forms: Sequence[str] = ()) -> float:
@@ -779,7 +783,8 @@ def plate_score(title: str, core_text: str = "", used_forms: Sequence[str] = ())
     specific — content words shared with the clip's opening or conclusion (+1 each, at most 3), fewer than two
     content words is no subject at all (−2); a question that names the subject («Почему мы боимся отказа»)
     is fine, a yes/no or «вы»-question is a second hook (−1.5); addressing the viewer (−0.5); a weak start
-    «И…/Это…» (−2); 2–6 words (+1), more than 40 characters (−2)."""
+    «И…/Это…» (−2); 2–6 words (+1), more than 40 characters (−2); M77: the shape (question / statement) already
+    chosen for other clips of the source, −1 for each — so a source mixes plates that name and plates that ask."""
     t = " ".join((title or "").split())
     words = [_norm_word(w) for w in t.split()]
     words = [w for w in words if w]
@@ -799,6 +804,7 @@ def plate_score(title: str, core_text: str = "", used_forms: Sequence[str] = ())
         s -= 2.0
     s += 1.0 if 2 <= len(words) <= 6 else 0.0
     s -= 2.0 if len(t) > 40 else 0.0
+    s -= 1.0 * sum(1 for f in used_forms if f == title_form(t))     # M77 (owner: «свобода — где-то текст, где-то вопрос»)
     return round(s, 2)
 
 

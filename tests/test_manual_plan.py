@@ -504,3 +504,14 @@ def test_hook_air_keeps_real_silence_between_the_hook_and_the_body():
     assert any(ln.startswith("hook air  +0.30s") for ln in air.describe(sents))
     no_hook = build_manual_plan(sents, [2, 4, 5], words=words, smap=smap, params=replace(P, hook_air_sec=0.5))
     assert no_hook.hook_air is None and no_hook.body[0].start == pytest.approx(1.16)
+
+
+def test_hook_air_never_plays_the_same_silence_twice():
+    """M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the source — the hook's
+    air and the body's air were the same silence, played twice. It is shared once, cut in its middle."""
+    from dataclasses import replace
+    sents, words, smap = _sentences_and_map(_FIVE)
+    plan = build_manual_plan(sents, [2, 4, 5], words=words, smap=smap, params=replace(P, hook_air_sec=0.5), hook=1)
+    co, b0 = plan.cold_open, plan.body[0]
+    assert co.end == pytest.approx(1.0) and b0.start == pytest.approx(1.0)       # no overlap: 0.84 → 1.0 ← 1.16
+    assert co.end <= b0.start + 1e-9

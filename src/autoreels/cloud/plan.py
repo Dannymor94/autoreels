@@ -1104,6 +1104,12 @@ def build_manual_plan(
             if left_b is not None:
                 air_start = max(air_start, left_b + params.onset_margin_sec)
             air_start = max(0.0, air_start)
+            co_start = _window_start(times, hs[0], pad)
+            if co_start < air_start < air_end:
+                # M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the
+                # source — both airs are the SAME silence, played twice. The silence is shared once, cut in its
+                # middle as before (no air can be added where the hook runs straight into the body).
+                air_end = air_start = max(co_end, min(body[0].start, _cut_between(ae_h, as_b)))
             add_a = max(0.0, air_end - co_end)
             add_b = max(0.0, body[0].start - air_start)
             co_end += add_a
