@@ -554,3 +554,12 @@ chunking:
                                        # по заголовкам x-ratelimit-*
   dedup_overlap_ratio: 0.6             # порог дедупа рилов из разных R0-чанков
   fail_fast: false                     # false → продолжать при провале одного чанка
+
+# M94 — owner: «нужно делать подробное описание видео (для постинга)». arl describe <source> [--gate имя] writes
+# <rid>.post.txt next to each rendered clip: the model's post (grounded in the reel's words — cloud/postcopy.py) and
+# hashtags said in the reel, after render.yaml hashtags_always; arl crosspost takes it instead of <rid>.txt.
+post:
+  sentences_min: 3
+  sentences_max: 5
+  max_chars: 700
+  hashtags: 3

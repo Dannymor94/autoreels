@@ -8660,6 +8660,76 @@ def cmd_label_stats(*, root=None) -> int:
     return 0
 
 
+def _clip_dir(target: str, root: Path, gate: str | None, out_dir: str | None):
+    """(manifest path, source stem, clip folder) of a source — reels-out/<source>[/_gate/<gate>]; None when no manifest."""
+    mpath = _resolve_manifest_arg(target, root)
+    if mpath is None:
+        return None
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    src_stem = Path(manifest.source).stem
+    vdir = (Path(out_dir) if out_dir else root / "reels-out") / src_stem
+    return mpath, src_stem, (vdir / "_gate" / gate if gate else vdir)
+
+
+def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str | None = None,
+                 out_dir: str | None = None, llm: str = "auto", force: bool = False, provider=None) -> int:
+    """M94 (owner: «нужно делать подробное описание видео для постинга»): <rid>.post.txt next to every rendered clip —
+    the model's post of 3–5 sentences in the reel's words and hashtags said in the reel (cloud/postcopy.py checks
+    both; one retry), after render.yaml hashtags_always. Reads <rid>.transcript.txt and <rid>.txt (the caption)
+    written at render; an existing .post.txt is kept unless --force. No usable answer = no file (arl crosspost
+    then takes <rid>.txt). Writes only the .post.txt files."""
+    import re as _re
+    from autoreels.cloud.postcopy import describe_clip, post_text
+    _root = Path(root) if root else _project_root()
+    found = _clip_dir(target, _root, gate, out_dir)
+    if found is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    _mp, src_stem, vdir = found
+    if not vdir.is_dir():
+        print(f"ошибка: папки клипов нет: {vdir}", file=sys.stderr)
+        return 1
+    want = {r.strip() for r in (reels or "").split(",") if r.strip()}
+    nat = lambda p: [int(x) if x.isdigit() else x for x in _re.split(r"(\d+)", p.stem)]  # noqa: E731
+    clips = [p for p in sorted(vdir.glob("r*.mp4"), key=nat) if _re.fullmatch(r"r\d+", p.stem)
+             and (not want or p.stem in want)]
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    pc = r0_cfg.post
+    try:
+        rcfg = load_render_config(_root / "config" / "render.yaml")
+        always = list(getattr(rcfg, "hashtags_always", []) or [])
+    except Exception:  # noqa: BLE001 — no render config: no fixed hashtags
+        always = []
+    if provider is None:
+        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+        _pool_banner(provider)
+    done, skipped = 0, []
+    for clip in clips:
+        out = clip.with_name(clip.stem + ".post.txt")
+        if out.is_file() and not force:
+            skipped.append((clip.stem, "уже есть (--force — заново)"))
+            continue
+        tr = clip.with_name(clip.stem + ".transcript.txt")
+        if not tr.is_file():
+            skipped.append((clip.stem, f"нет {tr.name} (рендер его пишет)"))
+            continue
+        cap = clip.with_suffix(".txt")
+        caption = cap.read_text(encoding="utf-8").strip().split("\n\n")[0] if cap.is_file() else ""
+        res = describe_clip(provider, caption, tr.read_text(encoding="utf-8").strip(), smin=pc.sentences_min,
+                            smax=pc.sentences_max, max_chars=pc.max_chars, ntags=pc.hashtags,
+                            log=lambda x: print(x, flush=True))
+        if res is None:
+            skipped.append((clip.stem, "описание не принято — остаётся подпись рендера"))
+            continue
+        out.write_text(post_text(res[0], res[1], always), encoding="utf-8")
+        done += 1
+        print(f"  {clip.stem}: {res[0][:90]}… {' '.join('#' + t for t in res[1])}", flush=True)
+    print(f"describe {src_stem}{' (гейт ' + gate + ')' if gate else ''}: описаний {done} из {len(clips)} → <клип>.post.txt")
+    for rid, why in skipped:
+        print(f"  пропущен {rid}: {why}")
+    return 0
+
+
 def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str | None = None,
                   out_dir: str | None = None, export_dir: str | None = None) -> int:
     """M90: the rendered clips of a source → a content plan for crosspost (github.com/Dannymor94/crosspost, tab «Импорт
@@ -8709,10 +8779,12 @@ def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str
     rows, skipped = [], [(e, "[ERROR] при рендере — только .ERROR.mp4") for e in errors
                          if not (vdir / f"{e}.mp4").is_file()]
     for clip in clips:
-        txt = clip.with_suffix(".txt")
+        txt = clip.with_name(clip.stem + ".post.txt")          # M94: the detailed post, when arl describe wrote one
+        if not txt.is_file():
+            txt = clip.with_suffix(".txt")
         text = txt.read_text(encoding="utf-8").strip() if txt.is_file() else ""
         if not text:
-            skipped.append((clip.stem, f"нет подписи ({txt.name}) — crosspost не примет пост без текста"))
+            skipped.append((clip.stem, f"нет подписи ({clip.stem}.txt) — crosspost не примет пост без текста"))
             continue
         _put(clip, dest / clip.name)
         cover = clip.with_name(clip.stem + ".cover.jpg")
@@ -11915,6 +11987,22 @@ def _build_parser():
     pcx.add_argument("--export-dir", default=None, dest="export_dir",
                      help="куда выгружать (по умолчанию export/crosspost)")
 
+    pds = sub.add_parser(
+        "describe",
+        help="подробное описание клипов для постинга (модель, слова ролика) → <клип>.post.txt",
+        description="M94: the model writes a 3–5 sentence post and hashtags from each rendered clip's text "
+                    "(<rid>.transcript.txt), checked to stay in the reel's words → <rid>.post.txt; arl crosspost "
+                    "takes it instead of <rid>.txt.",
+    )
+    pds.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pds.add_argument("--root", default=None, help="корень проекта")
+    pds.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
+    pds.add_argument("--reels", default=None, help="только эти клипы: r01,r03")
+    pds.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    pds.add_argument("--llm", choices=("auto", "local", "cloud"), default="auto",
+                     help="кто пишет: auto — облако, локальная в запасе (как arl map)")
+    pds.add_argument("--force", action="store_true", default=False, help="переписать готовые .post.txt")
+
     pra = sub.add_parser(
         "review-apply",
         help="записать решения листа ревью в черновик разметки (--redo: переделать по замечаниям)",
@@ -12296,6 +12384,10 @@ def main(argv=None) -> int:
                 out_dir=getattr(args, "out_dir", None),
                 preview=getattr(args, "preview", "audio"),
             )
+        elif args.cmd == "describe":
+            return cmd_describe(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
+                                reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),
+                                llm=getattr(args, "llm", "auto"), force=getattr(args, "force", False))
         elif args.cmd == "crosspost":
             return cmd_crosspost(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
                                  reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),

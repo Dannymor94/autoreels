@@ -346,6 +346,17 @@ class TxCheckConfig(BaseModel):
     sparse_suspicious_sec: float = Field(60.0, ge=0.0)     # M60: this much «sound without words» → suspicious
 
 
+class PostConfig(BaseModel):
+    """M94: arl describe — the post under a reel (cloud/postcopy.py). Numbers: config/r0.yaml post:."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sentences_min: int = Field(3, ge=1)
+    sentences_max: int = Field(5, ge=1)
+    max_chars: int = Field(700, ge=100)
+    hashtags: int = Field(3, ge=0)            # the model's hashtags (said in the reel), after render.yaml hashtags_always
+
+
 class MapConfig(BaseModel):
     """M54: arl map — the map of a whole source (cloud/thoughtmap.py). Numbers: config/r0.yaml."""
 
@@ -532,6 +543,7 @@ class R0Config(BaseModel):
     map: MapConfig = Field(default_factory=MapConfig)
     tx_check: TxCheckConfig = Field(default_factory=TxCheckConfig)
     autocut: AutocutConfig = Field(default_factory=AutocutConfig)
+    post: PostConfig = Field(default_factory=PostConfig)
 
     @property
     def min_duration(self) -> int:
