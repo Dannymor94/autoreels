@@ -8659,6 +8659,78 @@ def cmd_label_stats(*, root=None) -> int:
     return 0
 
 
+def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str | None = None,
+                  out_dir: str | None = None, export_dir: str | None = None) -> int:
+    """M90: the rendered clips of a source → a content plan for crosspost (github.com/Dannymor94/crosspost, tab «Импорт
+    плана»). Writes export/crosspost/<source>/<rid>.mp4 (+ <rid>.cover.jpg when there is one; hard links where the disk
+    allows, else copies) and export/crosspost/<source>.csv — columns «файл;текст;тип» (UTF-8 with BOM, «;»: the table
+    crosspost reads), «файл» relative to export/crosspost (its media folder), «текст» = <rid>.txt written at render
+    (caption + hashtags), «тип» = пост. A clip with [ERROR] (only <rid>.ERROR.mp4) or without its text is skipped and
+    named. Only reads the clips; writes nothing outside the export folder."""
+    import csv as _csv
+    import io as _io
+    import os as _os
+    import re as _re
+    import shutil as _shutil
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    src_stem = Path(manifest.source).stem
+    vdir = (Path(out_dir) if out_dir else _root / "reels-out") / src_stem
+    if gate:
+        vdir = vdir / "_gate" / gate
+    if not vdir.is_dir():
+        print(f"ошибка: папки клипов нет: {vdir}", file=sys.stderr)
+        return 1
+    want = {r.strip() for r in (reels or "").split(",") if r.strip()}
+    nat = lambda p: [int(x) if x.isdigit() else x for x in _re.split(r"(\d+)", p.stem)]  # noqa: E731
+    clips = sorted((p for p in vdir.glob("r*.mp4") if _re.fullmatch(r"r\d+", p.stem)), key=nat)
+    errors = sorted(p.name.split(".")[0] for p in vdir.glob("r*.ERROR.mp4"))
+    if want:
+        clips = [p for p in clips if p.stem in want]
+        errors = [e for e in errors if e in want]
+    slug = src_stem.replace(" ", "_")
+    base = Path(export_dir) if export_dir else _root / "export" / "crosspost"
+    dest = base / slug
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def _put(src: Path, dst: Path) -> None:
+        if dst.exists():
+            dst.unlink()
+        try:
+            _os.link(src, dst)
+        except OSError:
+            _shutil.copy2(src, dst)
+
+    rows, skipped = [], [(e, "[ERROR] при рендере — только .ERROR.mp4") for e in errors
+                         if not (vdir / f"{e}.mp4").is_file()]
+    for clip in clips:
+        txt = clip.with_suffix(".txt")
+        text = txt.read_text(encoding="utf-8").strip() if txt.is_file() else ""
+        if not text:
+            skipped.append((clip.stem, f"нет подписи ({txt.name}) — crosspost не примет пост без текста"))
+            continue
+        _put(clip, dest / clip.name)
+        cover = clip.with_name(clip.stem + ".cover.jpg")
+        if cover.is_file():
+            _put(cover, dest / cover.name)
+        rows.append([f"{slug}/{clip.name}", text, "пост"])
+    buf = _io.StringIO()
+    w = _csv.writer(buf, delimiter=";", lineterminator="\n")
+    w.writerow(["файл", "текст", "тип"])
+    w.writerows(rows)
+    csv_path = base / f"{slug}{'_' + gate if gate else ''}.csv"
+    csv_path.write_text(buf.getvalue(), encoding="utf-8-sig")
+    print(f"crosspost {src_stem}{' (гейт ' + gate + ')' if gate else ''}: клипов {len(rows)} → {csv_path}")
+    for rid, why in skipped:
+        print(f"  пропущен {rid}: {why}")
+    print(f"  в crosspost: «Импорт плана» → папка-источник {base.resolve()} (один раз), таблица {csv_path.name}")
+    return 0 if rows or not (clips or errors) else 2
+
+
 def cmd_review_sheet(
     target: str,
     *,
@@ -11828,6 +11900,20 @@ def _build_parser():
                      help="M52: файл предпросмотра для правки по тексту — звук (по умолчанию), "
                           "видео 480 px со звуком или без файла")
 
+    pcx = sub.add_parser(
+        "crosspost",
+        help="выгрузка отрендеренных клипов в план crosspost (папка видео + таблица «файл;текст;тип»)",
+        description="M90: export/crosspost/<source>/<rid>.mp4 (+ cover) and export/crosspost/<source>.csv for "
+                    "crosspost «Импорт плана» (media folder = export/crosspost). Text = <rid>.txt from the render.",
+    )
+    pcx.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pcx.add_argument("--root", default=None, help="корень проекта")
+    pcx.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
+    pcx.add_argument("--reels", default=None, help="только эти клипы: r01,r03")
+    pcx.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    pcx.add_argument("--export-dir", default=None, dest="export_dir",
+                     help="куда выгружать (по умолчанию export/crosspost)")
+
     pra = sub.add_parser(
         "review-apply",
         help="записать решения листа ревью в черновик разметки (--redo: переделать по замечаниям)",
@@ -12209,6 +12295,10 @@ def main(argv=None) -> int:
                 out_dir=getattr(args, "out_dir", None),
                 preview=getattr(args, "preview", "audio"),
             )
+        elif args.cmd == "crosspost":
+            return cmd_crosspost(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
+                                 reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),
+                                 export_dir=getattr(args, "export_dir", None))
         elif args.cmd == "review-apply":
             return cmd_review_apply(
                 args.decisions,
