@@ -356,6 +356,13 @@ autocut:
   owner_examples: 6       # the latest 6 cold opens / starts the owner rejected (reason крючок / начало) and kept — examples
                           # in the judges' prompts (reviews/verdicts.jsonl, M82)
   judge_cache: true       # the judges' answers kept between runs (data/cache/autocut_judge.json; delete it to ask again)
+  # M88 — owner: «у копии PXL не хватает динамики»; k: words were only in the owner's own lines:
+  keywords: true          # the model marks key words (k:): highlighted in the subtitles, the close shot comes on them
+  keywords_every_sec: 12  # one per 12 s of the clip …
+  keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
+  # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
+  close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
+  close_last_sec: 3
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

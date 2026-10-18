@@ -305,6 +305,13 @@ class AutocutConfig(BaseModel):
     hook_judge_mode: str = Field("start", pattern="^(start|teaser)$")   # teaser: an open question is fine, a pointer back is not
     owner_examples: int = Field(0, ge=0)         # the owner's verdicts (reviews/verdicts.jsonl) as examples for the judges
     judge_cache: bool = False                    # the judges' answers kept between runs (data/cache/autocut_judge.json)
+    # M88: the model marks key words (k:) — highlighted in the subtitles, the close shot comes on them (montage.emphasis)
+    keywords: bool = False
+    keywords_every_sec: float = Field(12.0, gt=0)   # one key word per this many seconds of the clip …
+    keywords_max: int = Field(4, ge=0)              # … at most this many
+    # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
+    close_last: bool = False
+    close_last_sec: float = Field(3.0, ge=0)
     # M83 (m80: every cold open was the clip's own first sentence — no teaser): the cold open comes from later, replayed
     hook_teaser: bool = False                    # hook candidates only from hook_teaser_pos of the clip on, h:B.N!
     hook_teaser_pos: float = Field(0.5, ge=0.0, le=0.95)   # … fraction of the clip's sentences before the candidate

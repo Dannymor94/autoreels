@@ -830,3 +830,40 @@ def test_cmd_autocut_judges_every_candidate_it_reaches_and_writes_the_hook_text(
     for i in hooked:
         assert lines[i - 1].startswith("#   крючок: «") and lines[i - 1].endswith("»")
     assert (tmp_path / "cache" / "autocut_judge.json").is_file()                # the judges' answers are kept
+
+
+# ── M88: key words of the subtitles; M91: the payoff in the close shot ─────────────────────────────
+def test_key_words_are_grounded_one_per_sentence_and_capped():
+    from autoreels.cloud.autocut import pick_keywords
+    rows = [("2.1", "Маска защищает ребёнка от боли."), ("2.2", "Это так."), ("3.1", "Её можно снять по-своему!")]
+    prov = _Answers('{"keys": [{"s": 1, "word": "Маска"}, {"s": 1, "word": "боли"}, {"s": 2, "word": "это"},'
+                    ' {"s": 3, "word": "по-своему!"}, {"s": 9, "word": "снять"}, {"s": 3, "word": "вечность"}]}')
+    assert pick_keywords(rows, prov, n=4, log=lambda m: None) == [("2.1", "маска"), ("3.1", "по-своему")]
+    assert "at most 4 sentences" in prov.calls[0][0]["content"] and prov.calls[0][-1]["content"].startswith(
+        "Sentences:\n1. Маска защищает")
+    assert pick_keywords(rows, _Answers('{"keys": [{"s": 3, "word": "снять"}, {"s": 1, "word": "ребёнка"}]}'),
+                         n=1, log=lambda m: None) == [("3.1", "снять")]         # the cap keeps the first named
+    assert pick_keywords(rows, _Answers("нет"), n=2, log=lambda m: None) == []
+    assert pick_keywords([], _Answers("{}"), n=2) == [] and pick_keywords(rows, _Answers("{}"), n=0) == []
+
+
+def test_line_writes_close_last_and_key_words():
+    from autoreels.cloud.autocut import AutoParams, propose
+    units = [U(1, 0, 12, "thesis", 5, "1.1-2", summary="жизнь как компенсация"),
+             U(2, 12, 12, "example", 4, "1.3-4", standalone=False, refers=1),
+             U(3, 24, 12, "conclusion", 4, "2.1-2", standalone=False, refers=2, summary="маску можно снять")]
+    sent = _rows({"2.1": "Но на самом деле маску можно снять!"})
+    base = dict(clips=1, target_sec=36, max_sec=60, loop=False, prune=False)
+    (old,) = propose(units, AutoParams(**base), sent)
+    assert old.close == [] and " c:" not in old.line("1")
+    (pr,) = propose(units, AutoParams(**base, close_last=True, close_last_sec=3.0), sent)
+    assert pr.close == ["2.2"]                                   # 3 s is enough: one sentence
+    (pr2,) = propose(units, AutoParams(**base, close_last=True, close_last_sec=5.0), sent)
+    assert pr2.close == ["2.1", "2.2"]                           # at most two
+    pr2.keys = [("2.1", "маску"), ("1.3", "жизнь")]
+    line = pr2.line("1")
+    assert "| c:2.1,2.2 |" in line and "| k:2.1=маску;1.3=жизнь |" in line
+    from autoreels.cloud.montage import parse_montage
+    entries, errors = parse_montage(line)                        # the review parser takes it as written
+    assert not errors and entries[0].close == ((2, 1), (2, 2)) and entries[0].keys == (((2, 1), ("маску",)),
+                                                                                      ((1, 3), ("жизнь",)))

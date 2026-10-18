@@ -7897,7 +7897,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
                      context_later_min_sec=ac.context_later_min_sec,
-                     hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos)
+                     hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos,
+                     close_last=ac.close_last, close_last_sec=ac.close_last_sec)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -8003,6 +8004,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                                      if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
                     headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
                              used_forms=_forms, log=_log, mode=ac.plate)
+                if ac.keywords:                     # M88: key words of the subtitles (k:)
+                    from autoreels.cloud.autocut import pick_keywords
+                    _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
+                    pr.keys = pick_keywords([(r[0], r[4]) for r in sentences(pr.pieces)], prov, n=_n, log=_log)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
                 for pr in pool[:prm.clips * 2]:
                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)

@@ -73,6 +73,10 @@ class AutoParams:
     # second one, «В инстинкты.», «А второй момент…»): the cold open is a line from later in the clip, replayed.
     hook_teaser: bool = False         # hook candidates only from hook_teaser_pos of the clip on, written h:B.N!
     hook_teaser_pos: float = 0.5      # … the sentence starts at least this fraction into the clip's sentences
+    # M91 (ending package, PLAN M1.7 B): the payoff is said in the close shot — the clip's last sentences
+    # (at least close_last_sec of them, at most two) are written c:B.N.
+    close_last: bool = False
+    close_last_sec: float = 3.0
 
 
 @dataclass
@@ -93,12 +97,18 @@ class Proposal:
     bad_seams: int | None = None                        # M70: seams the model found jarring (None = not asked)
     unit_refs: dict = field(default_factory=dict)       # M74: a thought played without its first sentence → its refs
     hook_keep: bool = False                             # M83: the cold open is a teaser from later — h:B.N! (replayed)
+    keys: list = field(default_factory=list)            # M88: [(B.N, word)] — k: words the subtitles highlight
+    close: list = field(default_factory=list)           # M91: [B.N] — the last sentences in the close shot (c:)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
         parts = [f"M{label} {self.score}{sp}", self.pieces]
         if self.hook:
             parts.append(f"h:{self.hook}" + ("!" if self.hook_keep else ""))
+        if self.close:
+            parts.append("c:" + ",".join(self.close))
+        if self.keys:
+            parts.append("k:" + ";".join(f"{r}={w}" for r, w in self.keys))
         if self.title:
             parts.append(f"t: {self.title}")
         out = " | ".join(parts)
@@ -728,6 +738,15 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
         notes += extra_notes
         cands = _hook_cands(clip, sentences, p) if sentences else []
+        close: list[str] = []
+        if p.close_last and sentences:                  # M91: the payoff in the close shot
+            rows = [r for u in clip for r in _sent_rows(sentences, u["refs"])]
+            acc = 0.0
+            for ref, sec, _nw, _c, _t in reversed(rows):
+                if len(close) == 2 or (close and acc >= p.close_last_sec):
+                    break
+                close.insert(0, ref)
+                acc += float(sec or 0.0)
         if p.hook_teaser and sentences and not cands:
             notes.append(f"крючок: во второй части клипа (с {p.hook_teaser_pos:.0%}) нет фразы для тизера — "
                          f"сборка без крючка")
@@ -738,7 +757,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
-            opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser,
+            opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
     return out[:p.clips]
@@ -814,6 +833,73 @@ def rank_hooks(pr: "Proposal", provider, *, top: int = 6, log: Callable[[str], N
             return False
     log("  крючок: ответ модели вне кандидатов — порядок кода")
     return False
+
+
+# ── M88: key words of the subtitles ────────────────────────────────────────────────────────────────
+
+KEYWORDS_SYSTEM = (
+    "You mark the key words in the subtitles of a short vertical video (a reel cut from a Russian talk): the words "
+    "the speaker stresses and the viewer should remember. You get the clip's sentences, numbered. Pick at most {n} "
+    "sentences that carry the main point and in each of them ONE word, written exactly as in that sentence: the word "
+    "that carries the meaning — a noun, a verb, a number or a strong adjective; never a pronoun, a conjunction, a "
+    "particle, a filler or a function word. Answer only with JSON: {{\"keys\": [{{\"s\": <number>, \"word\": "
+    "\"<word>\"}}]}}."
+)
+_KEY_STOP = frozenset("это этот эта эти так вот что как все всё они она оно его ее её мы вы ты он я там тут где "
+                      "когда тогда если чтобы потому поэтому тоже также уже еще ещё просто очень какой какая "
+                      "такой такая быть есть был была было который которая которые".split())
+
+
+def _kw_norm(w: str) -> str:
+    """The k: matching rule of --apply (case, ё, edge punctuation ignored) — the form written into k:."""
+    return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
+
+
+def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
+                  log: Callable[[str], None] = print) -> list[tuple[str, str]]:
+    """M88: the model marks at most `n` key words — one per sentence — in the clip's sentences [(B.N, text)] (play
+    order). Grounded (invariant 2): the word must be a word of that very sentence (the k: matching rule — case, ё,
+    punctuation ignored), at least 3 letters, not a pronoun or a function word; anything else is dropped. One retry
+    when the answer is not JSON; no model or no usable answer = no k: (the clip as before)."""
+    import json as _json
+    import re as _re
+    if n <= 0 or not rows:
+        return []
+    msg = "Sentences:\n" + "\n".join(f"{i}. {t}" for i, (_r, t) in enumerate(rows, 1))
+    for _ in range(2):
+        try:
+            raw = provider.complete([{"role": "system", "content": KEYWORDS_SYSTEM.format(n=n)},
+                                     {"role": "user", "content": msg}], temperature=0.0)
+        except Exception as exc:  # noqa: BLE001 — no model: no k:
+            log(f"  ключевые слова: модель не ответила ({type(exc).__name__})")
+            return []
+        m = _re.search(r"\{.*\}", raw or "", _re.S)
+        try:
+            obj = _json.loads(m.group(0)) if m else None
+        except ValueError:
+            obj = None
+        if not isinstance(obj, dict):
+            continue
+        out: dict[int, str] = {}
+        for k in obj.get("keys") or []:
+            if not isinstance(k, dict):
+                continue
+            try:
+                i = int(str(k.get("s")).strip().rstrip("."))
+            except ValueError:
+                continue
+            word = _kw_norm(str(k.get("word") or ""))
+            if (not (1 <= i <= len(rows)) or i in out or sum(c.isalpha() for c in word) < 3 or word in _KEY_STOP
+                    or not all(c.isalnum() or c == "-" for c in word)):
+                continue
+            if word not in {_kw_norm(w) for w in rows[i - 1][1].split()}:
+                continue                              # not a word of that sentence — not grounded
+            out[i] = word
+            if len(out) >= n:
+                break
+        return [(rows[i - 1][0], out[i]) for i in sorted(out)]
+    log("  ключевые слова: ответ модели не JSON — без k:")
+    return []
 
 
 # ── M70: hook headline, seam coherence, short versions ─────────────────────────────────────────────
@@ -1119,5 +1205,5 @@ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, shor
                     notes=[f"короткая версия M{label}: убраны " + ", ".join(f"#{i}" for i in dropped)],
                     hooks=[hook] + [r for r in refs if r != hook] if hook else refs,
                     hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(short, p),
-                    opener=pr.opener, variant_of=label, hook_keep=pr.hook_keep,
+                    opener=pr.opener, variant_of=label, hook_keep=pr.hook_keep, close=list(pr.close),
                     unit_refs={i: r for i, r in pr.unit_refs.items() if i in {u["id"] for u in short}})
