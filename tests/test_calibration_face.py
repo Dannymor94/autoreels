@@ -10,7 +10,7 @@ def test_face_crop_centres_the_median_face_and_stays_in_frame():
     faces = [(600, 400, 200, 200), (640, 410, 200, 200), (620, 405, 200, 200), (1500, 300, 50, 50)]
     c = face_crop((W, H), faces, samples=6)
     assert (c.w, c.h, c.y) == (base.w, base.h, base.y)
-    assert abs((c.x + c.w / 2) - 630) <= 1                     # median of 600, 620, 640, 1500 = 630
+    assert abs((c.x + c.w / 2) - 620) <= 1                     # M87: 1500 is another place — median of 600, 620, 640
     assert face_crop((W, H), [(5, 400, 80, 80)] * 4, samples=4).x == 0          # clamped left
     assert face_crop((W, H), [(1915, 400, 80, 80)] * 4, samples=4).x == W - base.w
     assert face_crop((W, H), faces[:1], samples=20) is None    # a face in 1 of 20 frames: not enough
@@ -47,3 +47,21 @@ def test_detect_faces_reads_its_cache_and_needs_no_opencv_then(tmp_path, monkeyp
     logs = []
     assert autocrop.detect_faces("v.mp4", (1280, 720), cache_path=cache, log=logs.append) is None   # other frame, no cv2
     assert "OpenCV не установлен" in logs[0]
+
+
+def test_faces_in_different_places_count_only_the_group_seen_most():
+    """M87 (Pxl 20260621: a face in 10–11 of 20 frames, the median moved the frame 68–85 % of its width — between
+    two places, on nobody): faces closer than half the crop width are one place; the place seen in the most frames
+    wins (equal counts: the larger faces); that place alone must reach min_share, else the centre crop stays."""
+    W, H = 3840, 2160
+    base = auto_crop((W, H))
+    left = [(300 + i * 10, 900, 300, 300) for i in range(7)]
+    mid = [(1900 + i * 10, 800, 200, 200) for i in range(4)]
+    c = face_crop((W, H), left + mid, samples=20)
+    assert abs(c.x + c.w / 2 - 330) <= 1 or c.x == 0            # the left place (7 frames), not between the two
+    tie = [(300, 900, 300, 300)] * 6 + [(1900, 800, 200, 200)] * 6
+    assert abs(face_crop((W, H), tie, samples=20).x + base.w / 2 - 1900) > 1000      # equal: the larger faces
+    split = [(300, 900, 300, 300)] * 5 + [(1900, 800, 200, 200)] * 5 + [(3500, 800, 200, 200)]
+    assert face_crop((W, H), split, samples=20) is None         # 11 of 20 found, but no place reaches 30 %
+    one = [(1800 + i * 40, 800, 200, 200) for i in range(8)]      # one place, spread a little: as before
+    assert abs(face_crop((W, H), one, samples=20).x + base.w / 2 - (1800 + 3.5 * 40)) <= 1

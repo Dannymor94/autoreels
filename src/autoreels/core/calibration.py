@@ -305,12 +305,30 @@ def face_crop(frame_size: tuple[int, int], faces, *, samples: int = 0,
     sitting left of centre): the 9:16 crop of auto_crop (full height) moved so the median face centre is in
     its middle. `faces` — (cx, cy, w, h) in DISPLAY px, one per sampled frame where a face was found;
     `samples` — frames looked at. None when a face was found in fewer than min_share of them (then the
-    centre crop stays). Static — one rectangle for the whole source, no tracking (CLAUDE.md)."""
+    centre crop stays). Static — one rectangle for the whole source, no tracking (CLAUDE.md). M87: faces in
+    different places of the frame are grouped; only the group seen most often counts."""
     faces = list(faces or [])
     if not faces or (samples and len(faces) < min_share * samples):
         return None
     W, _H = frame_size
     base = auto_crop(frame_size)
+    # M87 (Pxl 20260621: faces in 10–11 of 20 frames, the median put the frame 68–85 % of its width aside): faces
+    # far apart are different people or false finds — the median of all of them can land between them, on nobody.
+    # Faces closer than half the crop width form one group (one place in the frame); the group seen in the most
+    # frames wins (equal: the larger faces), and it alone must reach min_share — else the centre crop stays.
+    groups: list[list] = []
+    for f in sorted(faces, key=lambda f: float(f[0])):
+        if groups and float(f[0]) - float(groups[-1][-1][0]) <= base.w / 2:
+            groups[-1].append(f)
+        else:
+            groups.append([f])
+    if len(groups) > 1:
+        def _area(g):
+            a = sorted(float(f[2]) * float(f[3]) for f in g)
+            return a[len(a) // 2]
+        faces = max(groups, key=lambda g: (len(g), _area(g)))
+        if samples and len(faces) < min_share * samples:
+            return None
     xs = sorted(float(f[0]) for f in faces)
     mid = len(xs) // 2
     cx = xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
