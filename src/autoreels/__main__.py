@@ -7872,7 +7872,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      context_start=ac.context_start, context_max_sec=ac.context_max_sec,
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
-                     context_later_min_sec=ac.context_later_min_sec)
+                     context_later_min_sec=ac.context_later_min_sec,
+                     hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):

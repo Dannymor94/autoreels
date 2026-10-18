@@ -155,7 +155,8 @@ def test_cmd_autocut_falls_back_to_the_next_hook(tmp_path, capsys, monkeypatch):
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
-                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
+                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                   .replace("  hook_teaser: true ", "  hook_teaser: false "),      # M61 alone (M83: any sentence)
                    encoding="utf-8")
     r0 = cli.load_r0_config(cfg)
     tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
@@ -552,9 +553,10 @@ def test_cmd_autocut_takes_a_top_hook_with_a_pause_after_it(tmp_path, capsys, mo
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
                    .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
-                   .replace("  short_variant: true ", "  short_variant: false "), encoding="utf-8")
+                   .replace("  short_variant: true ", "  short_variant: false ")
+                   .replace("  hook_teaser: true ", "  hook_teaser: false "), encoding="utf-8")   # M75 alone
     r0 = cli.load_r0_config(cfg)
-    assert r0.autocut.hook_pause_sec == 0.25 and r0.autocut.hook_pause_top == 3
+    assert r0.autocut.hook_pause_sec == 0.25 and not r0.autocut.hook_teaser and r0.autocut.hook_pause_top == 3
     tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
     _, kept, _ = cli._review_block_set(tx, r0, "lecture")
     s2 = merge_group_sentences([kept[1]], tx.words)
@@ -707,3 +709,24 @@ def test_hook_judge_uses_its_own_prompt():
     j = make_judge(sc, log=lambda m: None, system=HOOK_JUDGE_SYSTEM)
     assert j("Я сажаю человека в жёсткое кресло.", "", "эмпатия") == (False, "про мебель")
     assert "TEASER LINE" in sc.calls[0][0]["content"]
+
+
+def test_teaser_cold_open_comes_from_the_second_half_and_is_replayed():
+    """M83 (m80 hooks: every cold open was the clip's own first sentence — the body then went on from the
+    second one, «В инстинкты.», «А второй момент…»): the cold open is a teaser from later, replayed (h:B.N!)."""
+    from autoreels.cloud.autocut import AutoParams, propose
+    units = [U(1, 0, 12, "thesis", 5, "1.1-2", summary="жизнь как компенсация"),
+             U(2, 12, 12, "example", 4, "1.3-4", standalone=False, refers=1),
+             U(3, 24, 12, "conclusion", 4, "2.1-2", standalone=False, refers=2, summary="маску можно снять")]
+    sent = _rows({"1.1": "Вы знаете, почему вся ваша жизнь — компенсация?",
+                  "2.1": "Но на самом деле маску можно снять!"})
+    base = dict(clips=1, target_sec=36, max_sec=60, loop=False, prune=False)
+    (old,) = propose(units, AutoParams(**base), sent)
+    assert old.hook == "1.1" and "h:1.1 " in old.line("1") + " "      # off: the clip's own start, position rule
+    (pr,) = propose(units, AutoParams(**base, hook_teaser=True), sent)
+    assert pr.units == old.units
+    assert "1.1" not in pr.hooks and "1.2" not in pr.hooks and "1.3" not in pr.hooks   # first half: no teaser
+    assert pr.hook == "2.1" and "h:2.1! " in pr.line("1") + " "        # replayed in its place
+    (none,) = propose(units, AutoParams(**base, hook_teaser=True, hook_teaser_pos=0.9), sent)
+    assert none.hook is None and none.hooks == [] and "h:" not in none.line("1")
+    assert any("сборка без крючка" in n for n in none.notes)

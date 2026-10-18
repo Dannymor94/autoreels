@@ -69,6 +69,10 @@ class AutoParams:
     context_back: int = 1             # up to this many thoughts right before may be added as context (M74/M75: 1)
     context_later: bool = False       # the clip may start at a later sentence of its first thought that stands
     context_later_min_sec: float = 8.0   # … when at least this much of that thought is left
+    # M83 (m80 hooks: all 5 cold opens were the clip's own first sentence — no teaser, the body went on from the
+    # second one, «В инстинкты.», «А второй момент…»): the cold open is a line from later in the clip, replayed.
+    hook_teaser: bool = False         # hook candidates only from hook_teaser_pos of the clip on, written h:B.N!
+    hook_teaser_pos: float = 0.5      # … the sentence starts at least this fraction into the clip's sentences
 
 
 @dataclass
@@ -88,12 +92,13 @@ class Proposal:
     variant_of: int | None = None                       # M70: a short version of accepted clip M<n>
     bad_seams: int | None = None                        # M70: seams the model found jarring (None = not asked)
     unit_refs: dict = field(default_factory=dict)       # M74: a thought played without its first sentence → its refs
+    hook_keep: bool = False                             # M83: the cold open is a teaser from later — h:B.N! (replayed)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
         parts = [f"M{label} {self.score}{sp}", self.pieces]
         if self.hook:
-            parts.append(f"h:{self.hook}")
+            parts.append(f"h:{self.hook}" + ("!" if self.hook_keep else ""))
         if self.title:
             parts.append(f"t: {self.title}")
         out = " | ".join(parts)
@@ -498,13 +503,21 @@ def _sent_rows(sentences, refs):
 def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[str, float, str]]:
     """(ref, score, text) of every hook candidate, best first: finished sentences of hook length of the
     clip's thoughts. When a question opens the clip (the loop), its own sentences are left out — the
-    cold open then teases the answer instead of repeating the question."""
+    cold open then teases the answer instead of repeating the question. M83 (`hook_teaser`): only sentences
+    that start at least `hook_teaser_pos` into the clip (by the length of its sentences in play order) — a
+    teaser of what is coming, never the start the clip opens with anyway."""
     skip = clip[0]["id"] if clip and clip[0].get("role") == "question" and len(clip) > 1 else None
+    rows = [(u, list(_sent_rows(sentences, u["refs"]))) for u in clip]
+    total = sum(float(r[1] or 0.0) for _, rs in rows for r in rs)
     out = []
-    for u in clip:
-        if u["id"] == skip or int(u.get("punch") or 0) < p.min_punch:
-            continue
-        for ref, sec, nwords, complete, text in _sent_rows(sentences, u["refs"]):
+    at = 0.0
+    for u, rs in rows:
+        for ref, sec, nwords, complete, text in rs:
+            start, at = at, at + float(sec or 0.0)
+            if u["id"] == skip or int(u.get("punch") or 0) < p.min_punch:
+                continue
+            if p.hook_teaser and (total <= 0 or start / total < p.hook_teaser_pos):
+                continue                  # M83: in the first part — the clip plays it at once, it teases nothing
             if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
                 if p.context_start and back_reference(text):
@@ -641,6 +654,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
         notes += extra_notes
         cands = _hook_cands(clip, sentences, p) if sentences else []
+        if p.hook_teaser and sentences and not cands:
+            notes.append(f"крючок: во второй части клипа (с {p.hook_teaser_pos:.0%}) нет фразы для тизера — "
+                         f"сборка без крючка")
         if clip[0].get("role") == "question" and clip[0]["t0"] > min(u["t0"] for u in clip):
             notes.append("вопрос из более позднего места открывает клип (вопрос-петля)")
         out.append(Proposal(
@@ -648,7 +664,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
-            opener=opener["id"], unit_refs=unit_refs,
+            opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser,
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
     out.sort(key=lambda o: -o.score)
     return out[:p.clips]
@@ -1029,5 +1045,5 @@ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, shor
                     notes=[f"короткая версия M{label}: убраны " + ", ".join(f"#{i}" for i in dropped)],
                     hooks=[hook] + [r for r in refs if r != hook] if hook else refs,
                     hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(short, p),
-                    opener=pr.opener, variant_of=label,
+                    opener=pr.opener, variant_of=label, hook_keep=pr.hook_keep,
                     unit_refs={i: r for i, r in pr.unit_refs.items() if i in {u["id"] for u in short}})

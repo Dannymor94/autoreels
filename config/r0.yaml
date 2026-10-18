@@ -346,6 +346,9 @@ autocut:
   # M81 — owner: IMG r03/r06 «начинаются с фразы про кресло, она малоинформативна» (the cold open, heard before the start):
   hook_judge: true        # the cold open passes the start's model check (subject, makes sense alone, leads into the clip)
   hook_judge_top: 6       # … the first 6 candidates are judged; a rejected one goes before ranking; none passes = no cold open
+  # M83 — m80 hooks: all 5 cold opens were the clip's own first sentence (no teaser; the body went on «В инстинкты.»):
+  hook_teaser: true       # the cold open is a line from the second half of the clip (a teaser), replayed in its place (h:B.N!)
+  hook_teaser_pos: 0.5    # … it starts at least this far into the clip's sentences; none there = no cold open
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

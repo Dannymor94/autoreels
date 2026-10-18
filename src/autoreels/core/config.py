@@ -301,6 +301,9 @@ class AutocutConfig(BaseModel):
     # M81 (owner: IMG r03 «начинается с фразы про кресло»): the cold open passes the same model check as the start
     hook_judge: bool = False                     # subject named, makes sense alone, leads into the clip — or it goes
     hook_judge_top: int = Field(6, ge=1)         # … among the first this many hook candidates; none passes = no cold open
+    # M83 (m80: every cold open was the clip's own first sentence — no teaser): the cold open comes from later, replayed
+    hook_teaser: bool = False                    # hook candidates only from hook_teaser_pos of the clip on, h:B.N!
+    hook_teaser_pos: float = Field(0.5, ge=0.0, le=0.95)   # … fraction of the clip's sentences before the candidate
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)
