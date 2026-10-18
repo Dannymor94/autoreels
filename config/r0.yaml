@@ -200,6 +200,10 @@ manual_filler_cut: true
 # typical motion is left in (or, with jump_mask, kept and masked by a wide↔close switch);
 # min_cut_spacing_sec: cuts at least this far apart. Pick per run: arl blocks --apply … --filler-profile NAME.
 manual_filler_profile: balance
+# M79 — owner on PXL_20260729_copy r07: «интервьюер зависает между слов на несколько секунд (думает), можно сократить».
+# A pause at least this long is always shortened (to the profile's kept pause); a visible face jump is masked by a
+# wide↔close switch, and the spacing rules do not hold it back. 0 = off.
+long_pause_sec: 1.5
 manual_filler_profiles:
   careful: {jump_max: 3.5, min_cut_spacing_sec: 4.0, jump_mask: false}
   balance: {jump_max: 5.0, min_cut_spacing_sec: 3.0, jump_mask: false}

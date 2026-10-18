@@ -69,6 +69,12 @@ class ManualPlanParams:
     # every cut, masked or not, stays at least this far from any other picture change (a seam, a shot
     # switch, another cut) — no bursts of jumps. 0 = off (the previous cuts).
     change_gap_sec: float = 0.0
+    # M79 (owner on PXL_20260729_copy r07: the interviewer «зависает на несколько секунд между слов» — a thinking
+    # pause the profile left in because the face moved during it): a pause at least this long is always shortened —
+    # a visible jump is masked by a wide↔close switch, the spacing rules (min_cut_spacing_sec, change_gap_sec,
+    # mask_min_gap_sec) and the max_removed_share cap do not hold it back; seconds of dead air are worse than one
+    # switch. 0 = off.
+    long_pause_sec: float = 0.0
     # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
@@ -99,6 +105,7 @@ class PlannedWindow:
     cuts: list[list[float]] = field(default_factory=list)  # source-time stretches removed (§1.4)
     cuts_skipped: int = 0             # candidate cuts left in: the face would visibly jump
     cuts_spaced: int = 0              # M72: candidate cuts left in: too close to another picture change
+    cuts_long: int = 0                # M79: long pauses cut whatever the spacing / jump rules said
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
 
     @property
@@ -222,6 +229,7 @@ class ManualPlan:
         cuts = [c for w in self.windows for c in w.cuts]
         skipped = sum(w.cuts_skipped for w in self.windows)
         spaced = sum(w.cuts_spaced for w in self.windows)
+        longp = sum(w.cuts_long for w in self.windows)
         masked = sum(len(w.cut_flips) for w in self.windows)
         if cuts or skipped or spaced:
             removed = sum(c1 - c0 for c0, c1 in cuts)
@@ -230,7 +238,8 @@ class ManualPlan:
                          f"(clip {total:.1f}s → {total - removed:.1f}s)"
                          + (f"; {masked} masked by a shot switch" if masked else "")
                          + (f"; {skipped} left in (visible jump)" if skipped else "")
-                         + (f"; {spaced} left in (too close to another change)" if spaced else ""))
+                         + (f"; {spaced} left in (too close to another change)" if spaced else "")
+                         + (f"; {longp} long pause(s) always cut" if longp else ""))
         return lines
 
 
@@ -792,7 +801,18 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
     flips: list[list[float]] = []
     for a, b, visible, u_len in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
         mid = (a + b) / 2
-        if b - a > budget:
+        long_pause = bool(params.long_pause_sec) and b - a >= params.long_pause_sec
+        if b - a > budget and not long_pause:
+            continue
+        if long_pause:
+            # M79: seconds of dead air go whatever the spacing rules and the share cap say; a jump is masked by
+            # a shot switch (longest first, so a long pause is placed before the cuts that would crowd it out)
+            w.cuts_long += 1
+            if visible:
+                flips.append([round(a, 3), round(b, 3)])
+            changes.append(mid)
+            keep.append([round(a, 3), round(b, 3)])
+            budget -= b - a
             continue
         if any(abs(mid - (k0 + k1) / 2) < params.min_cut_spacing_sec for k0, k1 in keep):
             continue

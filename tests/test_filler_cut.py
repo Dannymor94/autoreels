@@ -330,3 +330,23 @@ def test_cuts_never_burst_change_gap_keeps_them_apart_from_every_picture_change(
     plan = build_manual_plan(sents, [1, 2, 3, 4, 5], words=words, smap=smap,
                              params=replace(P, change_gap_sec=5.0), align=align)
     assert "left in (too close to another change)" in " ".join(plan.describe(sents))
+
+
+def test_a_long_thinking_pause_is_always_shortened():
+    """M79 (owner on PXL_20260729_copy r07: the interviewer «зависает между слов на несколько секунд»): the balance
+    profile left such a pause in — the face moves while he thinks, the jump shows. A pause ≥ long_pause_sec is cut
+    anyway and the jump masked by a shot switch; the spacing rules do not hold it back. 0 = as before."""
+    from dataclasses import replace
+    spec = [[("Как", 0.0, 0.4), ("вы", 0.5, 0.8), ("считаете", 4.3, 5.0), ("это", 5.1, 5.4), ("важно?", 5.5, 6.0)],
+            [("Да.", 6.4, 6.8)]]
+    sents, words, smap, align = _setup(spec, [])
+    jumpy = lambda a, b: 9.0                                   # every cut would show a jump
+    bal = ManualPlanParams(filler_cut=True, jump_max=5.0, min_cut_spacing_sec=3.0, jump_mask=False)
+    before = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=bal, align=align, jump=jumpy).body[0]
+    assert before.cuts == []                                   # 3.5 s of silence stayed in (jump / share cap)
+    on = replace(bal, long_pause_sec=1.5, change_gap_sec=6.0)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=on, align=align, jump=jumpy)
+    w = plan.body[0]
+    assert len(w.cuts) == 1 and w.cuts[0][0] > 0.8 and w.cuts[0][1] < 4.3 and w.cuts[0][1] - w.cuts[0][0] > 3.0
+    assert w.cut_flips == w.cuts and w.cuts_long == 1          # masked by a shot switch
+    assert "1 long pause(s) always cut" in " ".join(plan.describe(sents))

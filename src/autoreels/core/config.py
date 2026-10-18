@@ -503,6 +503,9 @@ class R0Config(BaseModel):
     # Balance presets for the filler cut (jump_max, min_cut_spacing_sec, jump_mask, …) and the default.
     manual_filler_profile: str | None = None
     manual_filler_profiles: dict[str, dict[str, float | bool]] = Field(default_factory=dict)
+    # M79: a pause at least this long inside a planned clip is always shortened (a visible jump masked by a shot
+    # switch; the profile's spacing rules do not hold it back). 0 = off.
+    long_pause_sec: float = Field(0.0, ge=0.0)
     # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
