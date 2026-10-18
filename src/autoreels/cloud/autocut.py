@@ -392,7 +392,54 @@ STANDALONE_SYSTEM = (
 )
 
 
-def make_judge(provider, *, log: Callable[[str], None] = print) -> "Judge":
+HOOK_JUDGE_SYSTEM = (
+    "A short vertical video (a reel) cut from a Russian talk opens with a TEASER LINE — the first thing the viewer "
+    "hears, 2–5 seconds, before the clip proper. The viewer has heard nothing else. You also get what the clip is "
+    "about. Answer three things. subject: what the line is about, in at most 5 Russian words — empty if a viewer "
+    "could not tell. alone: true if it makes sense on its own — no pronoun or «это/так/вот/тот» pointing to something "
+    "not said, not an answer to a question the viewer did not hear, not a fragment or a filler, no term used as if it "
+    "had been introduced before. leads: true if it is about what the clip is about and makes the viewer want the "
+    "answer — not a side detail, an aside, or a remark about the room, the furniture or the setting. Answer only with "
+    "JSON: {\"subject\": \"<words>\", \"alone\": true|false, \"leads\": true|false, \"why\": \"<at most 8 Russian "
+    "words>\"}."
+)
+
+
+def judge_hooks(pr: "Proposal", judge: "Judge", core: str = "", *, top: int = 6,
+                log: Callable[[str], None] = print) -> list[str]:
+    """M81 (owner: IMG r03/r06 «начинаются с фразы про кресло — мало информативна»; M78 judged only the first sentence
+    of the body, the cold open is heard before it): the model's yes/no on the first `top` hook candidates with the
+    same three questions (subject, alone, leads into the clip). A rejected candidate leaves the list before the
+    model ranks the rest (invariant 1: it only filters the code's candidates); no answer = kept. When none of them
+    passes, the clip has no cold open — the body starts the reel. Returns the notes written."""
+    notes: list[str] = []
+    cands = list(pr.hooks)
+    kept: list[str] = []
+    dropped: list[str] = []
+    for ref in cands[:top]:
+        text = (pr.hook_texts.get(ref) or ("", 0))[0]
+        if not text:
+            kept.append(ref)
+            continue
+        v = judge(text, "", core)
+        if v is not None and not v[0]:
+            dropped.append(f"h:{ref} «{text[:50]}» — {v[1] or 'нет'}")
+        else:
+            kept.append(ref)
+    rest = cands[top:]
+    if dropped:
+        notes.append("крючки отброшены моделью: " + "; ".join(dropped))
+    if not kept:
+        pr.hooks, pr.hook = [], None
+        notes.append(f"крючок: ни один из первых {min(top, len(cands))} не прошёл проверку — сборка без крючка")
+    else:
+        pr.hooks = kept + rest
+        pr.hook = kept[0]
+    pr.notes.extend(notes)
+    return notes
+
+
+def make_judge(provider, *, log: Callable[[str], None] = print, system: str | None = None) -> "Judge":
     """M75: the model's yes/no on «does this first sentence stand on its own» — cached per sentence, one retry,
     None when there is no usable answer (the rules' verdict then stands)."""
     import json as _json
@@ -408,7 +455,7 @@ def make_judge(provider, *, log: Callable[[str], None] = print) -> "Judge":
         out = None
         for _ in range(2):
             try:
-                raw = provider.complete([{"role": "system", "content": STANDALONE_SYSTEM},
+                raw = provider.complete([{"role": "system", "content": system or STANDALONE_SYSTEM},
                                          {"role": "user", "content": msg}], temperature=0.0)
             except Exception as exc:  # noqa: BLE001 — no model: the rules decide
                 log(f"  начало: модель не ответила ({type(exc).__name__})")

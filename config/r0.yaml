@@ -343,6 +343,9 @@ autocut:
   context_back: 2         # the context may be the two thoughts right before (when the nearest leans back itself)
   context_later: false    # M77 off (owner: «"перенос — вещь неблагодарная" — непонятно»: the dropped sentences carried
   context_later_min_sec: 8   # the context) — else the clip would start at a later sentence of its first thought
+  # M81 — owner: IMG r03/r06 «начинаются с фразы про кресло, она малоинформативна» (the cold open, heard before the start):
+  hook_judge: true        # the cold open passes the start's model check (subject, makes sense alone, leads into the clip)
+  hook_judge_top: 6       # … the first 6 candidates are judged; a rejected one goes before ranking; none passes = no cold open
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

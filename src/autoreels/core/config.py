@@ -298,6 +298,9 @@ class AutocutConfig(BaseModel):
     context_back: int = Field(1, ge=1, le=4)     # up to this many thoughts right before may be added as context
     context_later: bool = False                  # the clip may start at a later sentence of its first thought that stands
     context_later_min_sec: float = Field(8.0, gt=0)   # … when at least this much of that thought is left
+    # M81 (owner: IMG r03 «начинается с фразы про кресло»): the cold open passes the same model check as the start
+    hook_judge: bool = False                     # subject named, makes sense alone, leads into the clip — or it goes
+    hook_judge_top: int = Field(6, ge=1)         # … among the first this many hook candidates; none passes = no cold open
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)

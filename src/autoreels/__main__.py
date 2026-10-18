@@ -7923,7 +7923,16 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             from autoreels.cloud.autocut import check_seams, headline, seam_pairs
             _log = lambda x: print(x, flush=True)  # noqa: E731
             _forms: list = []                       # M73: headline shapes chosen so far in this source
+            _hjudge = None
+            if ac.hook_judge:                       # M81: the cold open must lead into the clip, like its start
+                from autoreels.cloud.autocut import HOOK_JUDGE_SYSTEM, judge_hooks, make_judge as _mk_judge
+                _hjudge = _mk_judge(prov, log=_log, system=HOOK_JUDGE_SYSTEM)
+                _byid_h = {u["id"]: u for u in (the_map.get("units") or [])}
             for pr in pool[:prm.clips + 2]:
+                if _hjudge is not None and pr.hooks:
+                    _hcore = " ".join(dict.fromkeys(str(_byid_h[i].get("summary") or "")
+                                                    for i in (pr.opener, pr.units[-1]) if i in _byid_h)).strip()
+                    judge_hooks(pr, _hjudge, _hcore, top=ac.hook_judge_top, log=_log)
                 rank_hooks(pr, prov, log=_log)
                 if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
                     _byid_t = {u["id"]: u for u in (the_map.get("units") or [])}
@@ -7931,6 +7940,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                                      if uid in _byid_t for r in sentences(pr.unit_refs.get(uid) or _byid_t[uid]["refs"]))
                     headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
                              used_forms=_forms, log=_log, mode=ac.plate)
+            if _hjudge is not None:
+                _hc = getattr(_hjudge, "cache", {})
+                print(f"  крючки: модель оценила {len(_hc)}, отброшено {sum(1 for v in _hc.values() if v and not v[0])}"
+                      + f", без ответа {sum(1 for v in _hc.values() if v is None)}", flush=True)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
                 _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
                 for pr in pool[:prm.clips * 2]:

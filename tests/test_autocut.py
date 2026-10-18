@@ -670,3 +670,40 @@ def test_titles_differing_only_by_yo_are_the_same_title():
                                                 score=70, seconds=40.0, opener=opener)
     assert too_close(mk([5], 5, "Расположение и жесткий стул"), [mk([1], 1, "Расположение и жёсткий стул")]) \
         == "тот же заголовок, что у M1"
+
+
+# ── M81: the cold open passes the same check as the start ─────────────────────────────────────────
+
+def test_hooks_off_the_clip_topic_go_before_ranking_and_none_left_means_no_cold_open():
+    """M81 (owner: IMG r03/r06 «начинаются с фразы про кресло — мало информативна»: the cold open is heard first)."""
+    from autoreels.cloud.autocut import Proposal, judge_hooks
+    mk = lambda: Proposal(units=[1], pieces="1.1-5", hook="1.1", title="t", caption="", score=80, seconds=40,
+                          hooks=["1.1", "1.2", "1.3"],
+                          hook_texts={"1.1": ("Я сажаю человека в жёсткое кресло.", 5), "1.2": ("Эмпатия лечит лучше алгоритма.", 4),
+                                      "1.3": ("Это и есть ответ.", 3)})
+    seen = []
+
+    def judge(text, following, core=""):
+        seen.append((text, core))
+        if "кресло" in text:
+            return (False, "про мебель")
+        if text.startswith("Это"):
+            return None                                   # no answer → kept
+        return (True, "эмпатия")
+    pr = mk()
+    judge_hooks(pr, judge, "эмпатия лечит", log=lambda m: None)
+    assert pr.hooks == ["1.2", "1.3"] and pr.hook == "1.2"
+    assert any("про мебель" in n for n in pr.notes) and seen[0][1] == "эмпатия лечит"
+    none = mk()
+    judge_hooks(none, lambda t, f, c="": (False, "нет"), "x", log=lambda m: None)
+    assert none.hooks == [] and none.hook is None and any("без крючка" in n for n in none.notes)
+    assert none.line("1").startswith("M1 80 | 1.1-5 | t: t")          # no h: in the line → no cold open
+
+
+def test_hook_judge_uses_its_own_prompt():
+    from autoreels.cloud.autocut import HOOK_JUDGE_SYSTEM, make_judge
+    from tests.test_label import Scripted
+    sc = Scripted([{"subject": "кресло", "alone": True, "leads": False, "why": "про мебель"}])
+    j = make_judge(sc, log=lambda m: None, system=HOOK_JUDGE_SYSTEM)
+    assert j("Я сажаю человека в жёсткое кресло.", "", "эмпатия") == (False, "про мебель")
+    assert "TEASER LINE" in sc.calls[0][0]["content"]
