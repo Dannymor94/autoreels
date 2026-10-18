@@ -8735,11 +8735,13 @@ def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str 
             continue
         cap = clip.with_suffix(".txt")
         caption = cap.read_text(encoding="utf-8").strip().split("\n\n")[0] if cap.is_file() else ""
+        why: list = []
         res = describe_clip(provider, caption, tr.read_text(encoding="utf-8").strip(), smin=pc.sentences_min,
                             smax=pc.sentences_max, max_chars=pc.max_chars, ntags=pc.hashtags,
-                            log=lambda x: print(x, flush=True))
+                            log=lambda x: print(x, flush=True), why_out=why)
         if res is None:
-            skipped.append((clip.stem, "описание не принято — остаётся подпись рендера"))
+            skipped.append((clip.stem, f"описание не принято ({why[-1] if why else 'нет ответа модели'})"
+                                       " — остаётся подпись рендера"))
             continue
         out.write_text(post_text(res[0], res[1], always), encoding="utf-8")
         done += 1

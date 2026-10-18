@@ -6,7 +6,8 @@ sections, each built from named thoughts of the topic — then every section wri
 The model proposes; the code keeps only what stays in the talk (invariant 2): the title shares its content words
 with the topic, a section uses only thoughts of the topic, a section's text passes the same grounding as a post
 (cloud/postcopy.check_post: no number the talk does not say, at least half its content words from the talk, a
-size). A section that fails twice is left out; an article with fewer than two sections is not written. Pure.
+size; M101: cut to the size in code first, no stock phrases). A section that fails twice is left out; an article
+with fewer than two sections is not written. Pure.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
-from autoreels.cloud.postcopy import check_post
+from autoreels.cloud.postcopy import check_post, fit_post
 
 PLAN_SYSTEM = (
     "You plan a longread article for Telegraph from one topic of a Russian talk. You get the topic and its thoughts "
@@ -120,7 +121,7 @@ def write_article(provider, topic_name: str, units: Sequence[dict], *, smin: int
             user = f"Heading: {heading}\nThe speaker's words: {words}" + (
                 f"\nThe previous answer was rejected: {why}. Write it again." if why else "")
             obj = _ask(provider, system, user, log)
-            text = " ".join(str((obj or {}).get("text") or "").split())
+            text = fit_post(" ".join(str((obj or {}).get("text") or "").split()), smax=pmax, max_chars=max_chars)
             why = check_post(text, words, smin=pmin, smax=pmax, max_chars=max_chars) if obj else "not JSON"
             if not why:
                 break

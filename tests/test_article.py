@@ -81,3 +81,13 @@ def test_cmd_article_writes_markdown_and_a_crosspost_plan(tmp_path, capsys):
     assert rows[1] == ["", "\n".join(["Зачем ребёнку маска", S1, "Взрослому маска мешает", S2]), "статья",
                        "Маска защищает ребёнка"]
     assert "статей 1 из 1 тем" in capsys.readouterr().out
+
+
+def test_m101_a_section_over_the_size_is_cut_in_code_not_retried():
+    (t, us), = pick_topics(_map(), 1)
+    long1 = S1 + " Маска защищает ребёнка. Маска помогает выжить."
+    prov = Answers({"title": "Маски", "sections": [{"heading": "Зачем ребёнку маска", "units": [1]},
+                                                   {"heading": "Взрослому маска мешает", "units": [2]}]},
+                   {"text": long1}, {"text": S2})
+    art = write_article(prov, t["name"], us, pmax=3, log=lambda m: None)
+    assert art.sections[0][1] == S1 + " Маска защищает ребёнка." and len(prov.calls) == 3
