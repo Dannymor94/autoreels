@@ -867,3 +867,26 @@ def test_line_writes_close_last_and_key_words():
     entries, errors = parse_montage(line)                        # the review parser takes it as written
     assert not errors and entries[0].close == ((2, 1), (2, 2)) and entries[0].keys == (((2, 1), ("маску",)),
                                                                                       ((1, 3), ("жизнь",)))
+
+
+def test_teaser_pointing_back_is_left_out_by_the_code():
+    """M92 (m86: the model passed «Это и есть доверие к себе, понимание себя.», «Для меня это самый лучший отдых.»,
+    «Но опять подростковая часть…», «Он как-то хочет скриншот наложить на реальность.»)."""
+    from autoreels.cloud.autocut import AutoParams, propose, teaser_pointer
+    for t in ("Это и есть доверие к себе, понимание себя.", "Для меня это самый лучший отдых.",
+              "Но опять подростковая часть, он же про социальное.", "Он как-то хочет скриншот наложить на реальность.",
+              "И второй момент — то, что я сказал."):
+        assert teaser_pointer(t), t
+    for t in ("Поздно — это когда уже завтра заказан священник.", "Маска — это и есть какая-то эго-конструкция.",
+              "Когда есть благодарность, она тебе ложится на душу.", "А что я сейчас чувствую?",
+              "Чтобы выжить в семье, в обществе, нам приходится надевать маски."):
+        assert teaser_pointer(t) is None, t
+    units = [U(1, 0, 12, "thesis", 5, "1.1-2", summary="доверие"),
+             U(2, 12, 12, "example", 4, "1.3-4", standalone=False, refers=1),
+             U(3, 24, 12, "conclusion", 4, "2.1-2", standalone=False, refers=2, summary="доверие к себе")]
+    sent = _rows({"2.1": "Это и есть доверие к себе, понимание себя!", "2.2": "Поздно — это когда уже завтра заказан священник."})
+    base = dict(clips=1, target_sec=36, max_sec=60, loop=False, prune=False, hook_teaser=True)
+    (old,) = propose(units, AutoParams(**base), sent)
+    assert "2.1" in old.hooks                                  # off: only the −3 of M74
+    (pr,) = propose(units, AutoParams(**base, hook_no_pointer=True), sent)
+    assert "2.1" not in pr.hooks and "2.2" in pr.hooks

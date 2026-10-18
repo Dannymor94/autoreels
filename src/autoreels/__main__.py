@@ -7898,6 +7898,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      context_back=ac.context_back, context_later=ac.context_later,
                      context_later_min_sec=ac.context_later_min_sec,
                      hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos,
+                     hook_no_pointer=ac.hook_no_pointer,
                      close_last=ac.close_last, close_last_sec=ac.close_last_sec)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words

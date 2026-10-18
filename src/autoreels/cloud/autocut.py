@@ -73,6 +73,9 @@ class AutoParams:
     # second one, «В инстинкты.», «А второй момент…»): the cold open is a line from later in the clip, replayed.
     hook_teaser: bool = False         # hook candidates only from hook_teaser_pos of the clip on, written h:B.N!
     hook_teaser_pos: float = 0.5      # … the sentence starts at least this fraction into the clip's sentences
+    # M92 (m86: the model passed teasers «Это и есть доверие к себе», «Для меня это самый лучший отдых», «Но опять
+    # подростковая часть…», «Он как-то хочет скриншот…»): a cold open pointing back is left out by the code.
+    hook_no_pointer: bool = False
     # M91 (ending package, PLAN M1.7 B): the payoff is said in the close shot — the clip's last sentences
     # (at least close_last_sec of them, at most two) are written c:B.N.
     close_last: bool = False
@@ -272,6 +275,27 @@ def back_reference(text: str) -> str | None:
     q = (text or "").rstrip().endswith("?")
     if words[0] in _BACK_START and not (q and words[0] in _Q_OPEN_OK):
         return f"«{words[0]}…»"
+    return None
+
+
+def teaser_pointer(text: str) -> str | None:
+    """M92: what makes a cold open point back — it is heard first, with nothing before it: everything back_reference
+    finds (a first «Это/Но/Он/Вот…», «второй момент», «как я говорил»), and «это» standing for an unsaid thing among
+    the first three words («Для меня это самый лучший отдых») — but not «X — это …», a definition. None = stands."""
+    import re as _re
+    why = back_reference(text)
+    if why:
+        return why
+    toks = _re.findall(r"\w+(?:-\w+)*|[—–-]", (text or "").lower().replace("ё", "е"))
+    n = 0
+    for i, t in enumerate(toks):
+        if t in ("—", "–", "-"):
+            continue
+        n += 1
+        if n > 3:
+            break
+        if t == "это" and not (i > 0 and toks[i - 1] in ("—", "–", "-")):
+            return "«это» без предмета"
     return None
 
 
@@ -602,6 +626,8 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[st
                 continue
             if p.hook_teaser and (total <= 0 or start / total < p.hook_teaser_pos):
                 continue                  # M83: in the first part — the clip plays it at once, it teases nothing
+            if p.hook_teaser and p.hook_no_pointer and teaser_pointer(text):
+                continue                  # M92: heard cold, a line pointing back explains nothing
             if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
                 if p.context_start and back_reference(text):
