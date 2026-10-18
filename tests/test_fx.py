@@ -328,7 +328,7 @@ def test_montage_tempo_profile_is_shipped_and_used_for_montage_clips():
     assert r0.montage.filler_profile == "montage_tempo" and r0.montage.filler_cut is True    # M72: on
     v = cli._filler_profile_values(r0, r0.montage.filler_profile)
     assert v["pause_max_sec"] == 0.6 and v["jump_mask"] is True and v["mask_min_gap_sec"] == 3.0
-    assert r0.montage.fx.pop and r0.autocut.hook_title and r0.autocut.seam_check and r0.autocut.short_variant
+    assert r0.montage.fx.pop and r0.autocut.hook_title and r0.autocut.seam_check and not r0.autocut.short_variant   # M78: off
 
 
 def test_plate_after_hook_starts_with_the_body():

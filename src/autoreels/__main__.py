@@ -3623,6 +3623,8 @@ def _cmd_run_impl(
     setup = load_or_auto_calibrate(
         calibrations_dir, sha, Path(video).name,
         get_frame_size=lambda: _probe_frame_size_for_auto(video, ffprobe=ffprobe),
+        get_faces=_faces_getter(video, sha, Path(cache_dir) if cache_dir else Path(calibrations_dir).parent / "data" / "cache",
+                                ffmpeg=ffmpeg, ffprobe=ffprobe),
     )
 
     # Жёсткая валидация при сборке манифеста: кроп проверяется против ОТОБРАЖАЕМЫХ (display,
@@ -4683,11 +4685,32 @@ def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir, ffprob
             )
         return _probe_frame_size_for_auto(video, ffprobe=ffprobe)
 
+    def _faces():
+        try:
+            video = resolve_source(manifest, inputs_dir)
+        except SourceNotFoundError:
+            return None
+        _fp = str(ffprobe)
+        _ffm = _fp[: -len("ffprobe")] + "ffmpeg" if _fp.endswith("ffprobe") else "ffmpeg"
+        return _faces_getter(video, manifest.source_sha256, Path(calibrations_dir).parent / "data" / "cache",
+                             ffmpeg=_ffm, ffprobe=_fp)()
+
     setup = load_or_auto_calibrate(
-        calibrations_dir, manifest.source_sha256, manifest.source, get_frame_size=_frame_size
+        calibrations_dir, manifest.source_sha256, manifest.source, get_frame_size=_frame_size,
+        get_faces=_faces,
     )
     validate_crop_in_frame(setup.crop, setup.frame[0], setup.frame[1])
     return setup
+
+
+def _faces_getter(video, sha: str, cache_dir: Path, *, ffmpeg="ffmpeg", ffprobe="ffprobe"):
+    """M78: a callable for load_or_auto_calibrate — face boxes of the source (local/autocrop.py, cached)."""
+    def get():
+        from autoreels.local.autocrop import detect_faces
+        return detect_faces(video, _probe_frame_size_for_auto(video, ffprobe=ffprobe), ffmpeg=str(ffmpeg),
+                            ffprobe=str(ffprobe), cache_path=Path(cache_dir) / f"{sha[:16]}.faces.json",
+                            log=lambda m: print(m, flush=True))
+    return get
 
 
 def cmd_recrop(

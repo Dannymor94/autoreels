@@ -272,10 +272,11 @@ def _drop_first_ref(refs: str) -> str | None:
     return " ".join(head + pieces[1:]) or None
 
 
-Judge = Callable[[str, str], "tuple[bool, str] | None"]
+Judge = Callable[[str, str, str], "tuple[bool, str] | None"]
 
 
-def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | None" = None) -> str | None:
+def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | None" = None,
+                 core: str = "") -> str | None:
     """M74/M75: why a first sentence cannot open a clip, None = it can. Rules first (back_reference; a
     non-question shorter than context_min_words is a fragment — «Уйти.»), then the model, when given, on
     what rules cannot see («Хоть это…», an answer to an unheard question). The model only says yes/no;
@@ -287,9 +288,9 @@ def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | Non
     if p.context_min_words and n < p.context_min_words and not (text or "").rstrip().endswith("?"):
         return f"обрывок ({n} сл.)"
     if judge is not None:
-        verdict = judge(text, following)
+        verdict = judge(text, following, core)
         if verdict is not None and not verdict[0]:
-            return f"непонятно без предыдущего (модель: {verdict[1] or 'нет'})"
+            return f"не годится в начало (модель: {verdict[1] or 'нет'})"
     return None
 
 
@@ -308,6 +309,9 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
     otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can."""
     notes: list[str] = []
+    # M78: what the clip is about (its seed and its payoff) — the model judges whether the start leads into it
+    core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed_id, clip[-1]["id"])
+                                  if i in by_id)).strip()
     for _ in range(6):
         u = clip[0]
         rows = list(_sent_rows(sentences, u["refs"]))
@@ -315,11 +319,11 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
             return clip, notes, None
         first = rows[0][4] or rows[0][0]
         nxt = rows[1][4] if len(rows) > 1 else ""
-        why = stands_alone(rows[0][4], nxt, p, judge)
+        why = stands_alone(rows[0][4], nxt, p, judge, core)
         if not why:
             return clip, notes, None
         if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
-                and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge) is None):
+                and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
             refs = _drop_first_ref(u["refs"])
             if refs:
                 clip = [{**u, "refs": refs, "t0": float(u["t0"]) + float(rows[0][1])}] + clip[1:]
@@ -341,7 +345,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                     break
                 prow = list(_sent_rows(sentences, prev["refs"]))
                 after = prow[1][4] if len(prow) > 1 else (list(_sent_rows(sentences, nxt_u["refs"])) or [("",) * 5])[0][4]
-                if prow and stands_alone(prow[0][4], after, p, judge) is None:
+                if prow and stands_alone(prow[0][4], after, p, judge, core) is None:
                     notes.append(f"начало: добавлен{'а мысль' if len(ctx) == 1 else 'ы мысли'} "
                                  + ", ".join(f"#{c['id']}" for c in ctx)
                                  + f" «{(prow[0][4] or '')[:50]}» перед «{first[:50]}» ({why}) — контекст")
@@ -354,7 +358,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                 left = sum(float(r[1]) for r in rows[k:])
                 if left < p.context_later_min_sec or sum(_dur(c) for c in clip) - (total - left) < p.min_sec:
                     break
-                if stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge) is None:
+                if stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge, core) is None:
                     refs = u["refs"]
                     for _ in range(k):
                         refs = _drop_first_ref(refs) or refs
@@ -376,13 +380,15 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
 
 STANDALONE_SYSTEM = (
     "A short vertical video is cut from the middle of a Russian talk. After a 3-second teaser it starts with the "
-    "sentence given below; the viewer has heard NOTHING of the talk before it. Decide whether that first sentence "
-    "makes sense on its own: no pronoun or «это/так/вот/тот» pointing to something not said, not an answer to a "
-    "question the viewer did not hear, not a fragment or a filler («да, допустим»), not a continuation of an "
-    "enumeration, and no term or subject used as if it had been introduced before («перенос», «этот метод») — the "
-    "viewer must know what the sentence is about. The following sentence is given only to help you understand it. "
-    "Answer only with JSON: "
-    "{\"ok\": true|false, \"why\": \"<at most 8 Russian words>\"}."
+    "FIRST SENTENCE below; the viewer has heard NOTHING of the talk before it. You also get what the clip is about. "
+    "Answer three things. subject: what the first sentence is about, in at most 5 Russian words — empty if a viewer "
+    "could not tell. alone: true if it makes sense on its own — no pronoun or «это/так/вот/тот» pointing to "
+    "something not said, not an answer to a question the viewer did not hear, not a fragment or a filler («да, "
+    "допустим»), not a continuation of an enumeration, no term used as if it had been introduced before («перенос», "
+    "«этот метод»). leads: true if it leads into what the clip is about — not a side detail, an aside, or a remark "
+    "about the room, the furniture or the setting. The following sentence only helps you understand the first. "
+    "Answer only with JSON: {\"subject\": \"<words>\", \"alone\": true|false, \"leads\": true|false, "
+    "\"why\": \"<at most 8 Russian words>\"}."
 )
 
 
@@ -393,11 +399,12 @@ def make_judge(provider, *, log: Callable[[str], None] = print) -> "Judge":
     import re as _re
     cache: dict = {}
 
-    def judge(text: str, following: str = ""):
-        key = (text, following)
+    def judge(text: str, following: str = "", core: str = ""):
+        key = (text, following, core)
         if key in cache:
             return cache[key]
-        msg = f"First sentence: «{text}»\nFollowing sentence: «{following}»"
+        msg = (f"First sentence: «{text}»\nFollowing sentence: «{following}»"
+               + (f"\nThe clip is about: {core}" if core else ""))
         out = None
         for _ in range(2):
             try:
@@ -411,8 +418,21 @@ def make_judge(provider, *, log: Callable[[str], None] = print) -> "Judge":
                 obj = _json.loads(m.group(0)) if m else {}
             except ValueError:
                 continue
+            why = str(obj.get("why") or "").strip()[:60]
+            if isinstance(obj.get("alone"), bool) and isinstance(obj.get("leads"), bool):
+                # M78: two questions and a named subject — any «no» (or no subject) rejects the start
+                subj = str(obj.get("subject") or "").strip()
+                if not subj:
+                    out = (False, why or "не ясно, о чём фраза")
+                elif not obj["alone"]:
+                    out = (False, why or "непонятно без предыдущего")
+                elif not obj["leads"]:
+                    out = (False, why or f"не про тему ролика («{subj[:30]}»)")
+                else:
+                    out = (True, subj[:40])
+                break
             if isinstance(obj.get("ok"), bool):
-                out = (obj["ok"], str(obj.get("why") or "").strip()[:60])
+                out = (obj["ok"], why)
                 break
         cache[key] = out
         return out
@@ -594,12 +614,16 @@ def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 
     for i, o in enumerate(accepted, 1):
         if pr.opener is not None and pr.opener == o.opener:
             return f"то же начало, что у M{i} (#{pr.opener})"
-        if pr.title and pr.title == o.title:
+        if pr.title and _norm_title(pr.title) == _norm_title(o.title):   # M78: «жёсткий» = «жесткий»
             return f"тот же заголовок, что у M{i}"
         shared = sorted(set(pr.units) & set(o.units))
         if len(shared) > max_shared:
             return f"общие мысли с M{i}: " + ", ".join(f"#{u}" for u in shared)
     return None
+
+
+def _norm_title(t) -> str:
+    return " ".join(_plain_words(str(t or "")))
 
 
 def _clean(s) -> str:

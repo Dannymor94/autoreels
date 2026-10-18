@@ -299,6 +299,26 @@ def auto_crop(frame_size: tuple[int, int]) -> Crop:
     return Crop(x=x, y=0, w=w, h=H)
 
 
+def face_crop(frame_size: tuple[int, int], faces, *, samples: int = 0,
+              min_share: float = 0.3) -> Crop | None:
+    """M78 (owner on PXL_20260729_copy: «ракурс сбит» — no manual calibration, the centre crop cut the speaker
+    sitting left of centre): the 9:16 crop of auto_crop (full height) moved so the median face centre is in
+    its middle. `faces` — (cx, cy, w, h) in DISPLAY px, one per sampled frame where a face was found;
+    `samples` — frames looked at. None when a face was found in fewer than min_share of them (then the
+    centre crop stays). Static — one rectangle for the whole source, no tracking (CLAUDE.md)."""
+    faces = list(faces or [])
+    if not faces or (samples and len(faces) < min_share * samples):
+        return None
+    W, _H = frame_size
+    base = auto_crop(frame_size)
+    xs = sorted(float(f[0]) for f in faces)
+    mid = len(xs) // 2
+    cx = xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
+    x = int(round(cx - base.w / 2))
+    x = max(0, min(W - base.w, x))
+    return Crop(x=x, y=base.y, w=base.w, h=base.h)
+
+
 def _rotation_from_stream(stream: dict) -> int:
     """Угол поворота из ffprobe-стрима: display-matrix side_data (совр. ffmpeg) или tag rotate
     (старые файлы). Нормализуется в целые градусы; направление знака не важно (берём abs%180)."""
@@ -359,6 +379,7 @@ def load_or_auto_calibrate(
     source_name: str,
     *,
     get_frame_size: Callable[[], tuple[int, int]],
+    get_faces: "Callable[[], tuple[list, int] | None] | None" = None,
 ) -> SetupProfile:
     """Вернуть SetupProfile: ручная калибровка (если есть по ключу) или авто-кроп по центру.
 
@@ -400,6 +421,22 @@ def load_or_auto_calibrate(
             )
 
     frame_size = get_frame_size()
+    if get_faces is not None:
+        # M78: «умное распознавание» — the same in-memory auto crop, placed on the speaker's face (static).
+        found = None
+        try:
+            found = get_faces()
+        except Exception as exc:  # noqa: BLE001 — face search is a bonus; the centre crop is the fallback
+            print(f"поиск лица не удался ({type(exc).__name__}: {str(exc)[:120]}) — кроп по центру", flush=True)
+        if found:
+            faces, n = found
+            fc = face_crop(frame_size, faces, samples=n)
+            if fc is not None:
+                print(f"кроп не откалиброван → авто-кроп 9:16 ПО ЛИЦУ: лицо найдено в {len(faces)} из {n} кадров, "
+                      f"кроп {fc.w}×{fc.h}@{fc.x},{fc.y} в кадре {frame_size[0]}×{frame_size[1]} "
+                      f"(по центру было бы x={auto_crop(frame_size).x}; в памяти, файл не пишется)", flush=True)
+                return SetupProfile(setup_id="auto-face", crop=fc, scale=TARGET_SCALE, frame=list(frame_size))
+            print(f"лицо найдено только в {len(faces)} из {n} кадров — кроп по центру", flush=True)
     print(
         f"кроп не откалиброван → авто-кроп 9:16 по центру в ОТОБРАЖАЕМОМ кадре "
         f"{frame_size[0]}×{frame_size[1]} (в памяти, файл не пишется; "

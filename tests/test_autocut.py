@@ -489,12 +489,12 @@ def test_stands_alone_rules_then_the_model():
     assert stands_alone("Контролер, да, допустим.", "", _P75) == "обрывок (3 сл.)"
     assert stands_alone("Как вы отдыхаете?", "", _P75) is None             # a short question is a fine start
     assert stands_alone("Уйти.", "", AutoParams(context_start=True)) is None    # min words off = M74
-    no = lambda t, f: (False, "«это» без предмета")
-    yes = lambda t, f: (True, "")
-    silent = lambda t, f: None
+    no = lambda t, f, c="": (False, "«это» без предмета")
+    yes = lambda t, f, c="": (True, "")
+    silent = lambda t, f, c="": None
     hoth = "Хоть это, как говорят психологи, бывает полезно."
     assert stands_alone(hoth, "", _P75) is None
-    assert stands_alone(hoth, "", _P75, no) == "непонятно без предыдущего (модель: «это» без предмета)"
+    assert stands_alone(hoth, "", _P75, no) == "не годится в начало (модель: «это» без предмета)"
     assert stands_alone(hoth, "", _P75, yes) is None and stands_alone(hoth, "", _P75, silent) is None
     assert stands_alone("Поэтому так.", "", _P75, yes).startswith("ссылка назад")     # rules first, no call needed
 
@@ -520,7 +520,7 @@ def test_a_fragment_is_not_context_and_the_model_can_veto_a_start():
                      "1.1": "Обратная связь помогает взрослеть."})
     calls = []
 
-    def judge(text, following):
+    def judge(text, following, core=""):
         calls.append(text)
         return (not text.startswith("Хоть это"), "«это» без предмета")
     (pr,) = propose(units2, _P75, sent2, judge=judge)
@@ -621,3 +621,52 @@ def test_plates_of_one_source_mix_shapes():
     q2 = "Почему мы боимся отказа?"
     assert plate_score(st, core, ["statement", "statement"]) < plate_score(st, core)
     assert plate_score(q2, core, ["statement", "statement"]) > plate_score(q2, core, ["question", "question"])
+
+
+
+# ── M78: the model names the subject and says whether the start leads into the clip ───────────────
+
+def test_judge_rejects_a_start_without_a_subject_or_off_the_clip_topic():
+    """M78 (owner: IMG r03/r06 open on a phrase about the chair — «мало информативна»; M77 let «Конечно, перенос…»
+    and «Допустим, папа приходил…» through): one answer, three checks — any «no» rejects."""
+    from autoreels.cloud.autocut import make_judge
+    from tests.test_label import Scripted
+    sc = Scripted([{"subject": "кресло", "alone": True, "leads": False, "why": "про мебель"},
+                   {"subject": "", "alone": True, "leads": True},
+                   {"subject": "перенос", "alone": False, "leads": True, "why": "термин без пояснения"},
+                   {"subject": "эмпатия в терапии", "alone": True, "leads": True}])
+    j = make_judge(sc, log=lambda m: None)
+    assert j("Садитесь в жёсткое кресло.", "", "эмпатия лечит") == (False, "про мебель")
+    assert j("И вот так.", "", "эмпатия лечит")[0] is False
+    assert j("Конечно, перенос — вещь неблагодарная.", "", "эмпатия лечит") == (False, "термин без пояснения")
+    assert j("Эмпатия лечит лучше алгоритма.", "", "эмпатия лечит") == (True, "эмпатия в терапии")
+    assert "The clip is about: эмпатия лечит" in sc.calls[0][1]["content"]
+
+
+def test_the_clip_topic_reaches_the_judge_and_an_off_topic_start_goes():
+    units = [U(1, 0, 10, "aside", 2, "1.1-2", summary="кресло в кабинете"),
+             U(2, 10, 30, "thesis", 5, "2.1-3", summary="эмпатия лечит лучше алгоритма"),
+             U(3, 40, 10, "conclusion", 4, "2.4", summary="человеку нужна эмпатия")]
+    sent = _rows74({"1.1": "Я сажаю человека в жёсткое кресло специально.",
+                    "2.1": "Эмпатия лечит лучше любого алгоритма."})
+    seen = []
+
+    def judge(text, following, core=""):
+        seen.append(core)
+        return (not text.startswith("Я сажаю"), "про мебель")
+    from dataclasses import replace
+    p = replace(_P75, min_sec=20)
+    clip_with_chair = [units[0], units[1], units[2]]
+    from autoreels.cloud.autocut import context_start
+    by = {u["id"]: u for u in units}
+    out, notes, why = context_start(clip_with_chair, by, p, sent, seed_id=2, judge=judge)
+    assert why is None and out[0]["id"] == 2 and any("про мебель" in n for n in notes)
+    assert "эмпатия лечит лучше алгоритма" in seen[0] and "человеку нужна эмпатия" in seen[0]
+
+
+def test_titles_differing_only_by_yo_are_the_same_title():
+    from autoreels.cloud.autocut import Proposal, too_close
+    mk = lambda units, opener, title: Proposal(units=units, pieces="", hook=None, title=title, caption="",
+                                                score=70, seconds=40.0, opener=opener)
+    assert too_close(mk([5], 5, "Расположение и жесткий стул"), [mk([1], 1, "Расположение и жёсткий стул")]) \
+        == "тот же заголовок, что у M1"

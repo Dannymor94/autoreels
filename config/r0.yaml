@@ -320,7 +320,8 @@ autocut:
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
   seam_check: true        # the model judges every seam (B continues A?); a clip with a jarring seam goes behind clean ones
-  short_variant: true     # every accepted clip also gets a short version: weakest middle thoughts dropped down to short_sec
+  short_variant: false    # M78 off (owner: IMG r03 and r06 open on the same phrase — a short version keeps the start)
+                          # — on: every accepted clip also gets a short version (weakest middle thoughts dropped)
   short_sec: 25
   short_min_sec: 15
   # M74 — owner: «начала дают мало контекста ("и второй момент, как я уже говорил…")»:
