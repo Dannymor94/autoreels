@@ -242,3 +242,6 @@ subtitles:
 # M89: a cover for publishing — <reel>.cover.jpg next to every rendered clip: the middle of the clip's longest body
 # window in the reel's crop and colour, with its plate title. The clip itself does not change.
 cover: true
+# M96: … at the moment (of 7 spread over the body) whose frame shows the largest face with open eyes (OpenCV,
+# pip install -e ".[faces]"); no OpenCV or no face = the middle of the longest body window.
+cover_face: true

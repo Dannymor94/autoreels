@@ -945,6 +945,9 @@ class RenderConfig(BaseModel):
     # M89: <reel>.cover.jpg next to every rendered clip (a frame in the reel's crop and colour + its plate). The clip
     # itself is unchanged; off = no file.
     cover: bool = False
+    # M96: the cover frame is the moment (of 7 in the body) with the largest face and open eyes (OpenCV); off or no
+    # OpenCV = the middle of the longest body window (M89).
+    cover_face: bool = False
 
     @field_validator("role")
     @classmethod

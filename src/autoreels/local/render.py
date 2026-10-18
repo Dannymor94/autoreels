@@ -3660,7 +3660,8 @@ def _render_segments(
                     _write_sidecar_text(out, reel, render_cfg)
                 if emit_text and getattr(render_cfg, "cover", False):     # M89: a cover for publishing
                     _write_cover(out, reel, segs, manifest.setup, source, ffmpeg_bin, palette_vf=palette_vf,
-                                 subtitles_cfg=subtitles_cfg, tmp_dir=tmp_ass_dir)
+                                 subtitles_cfg=subtitles_cfg, tmp_dir=tmp_ass_dir,
+                                 by_face=getattr(render_cfg, "cover_face", False))
         _unlock_dir(_lock_fd)
         return outputs
 
@@ -3710,8 +3711,30 @@ def _cover_cmd(ffmpeg: str, source: Path, t: float, vf: str, out: Path) -> list[
             "-vf", vf, "-q:v", "2", str(out)]
 
 
+def _cover_face_time(segs, reel, setup, source: Path, ffmpeg: str, *, n: int = 7) -> float | None:
+    """M96: among n moments of the body, the one whose frame (in the reel's crop) shows the largest face with open
+    eyes; None without OpenCV or without a face (the middle of the longest window is used then)."""
+    import subprocess as _sp
+    from autoreels.local.autocrop import best_face_time, cover_candidates, opencv_face_eyes
+    detect = opencv_face_eyes()
+    if detect is None:
+        return None
+    times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+    vf = _crop_vf_for_crop(setup, setup.crop) + ",scale=270:480,format=gray"
+
+    def grab(t):
+        import numpy as np
+        try:
+            raw = _sp.run([ffmpeg, "-v", "error", "-ss", f"{t:.3f}", "-i", str(source), "-frames:v", "1", "-an",
+                           "-vf", vf, "-f", "rawvideo", "pipe:1"], capture_output=True, check=True).stdout
+        except (OSError, _sp.CalledProcessError):
+            return None
+        return np.frombuffer(raw[: 270 * 480], dtype=np.uint8).reshape(480, 270) if len(raw) >= 270 * 480 else None
+    return best_face_time(times, grab, detect)
+
+
 def _write_cover(clip_path: Path, reel, segs, setup, source: Path, ffmpeg: str, *, palette_vf: str = "",
-                 subtitles_cfg=None, tmp_dir: Path) -> Path | None:
+                 subtitles_cfg=None, tmp_dir: Path, by_face: bool = False) -> Path | None:
     """M89: <reel>.cover.jpg next to the clip — the frame of _cover_time in the reel's crop and colour, with its
     plate title (title_overlay). Static, no tracking. A failure is a warning: the clip itself stays."""
     import subprocess as _sp
@@ -3724,7 +3747,9 @@ def _write_cover(clip_path: Path, reel, segs, setup, source: Path, ffmpeg: str, 
         (tmp_dir / name).write_text(build_cover_ass(title, cfg=subtitles_cfg, play_res=tuple(setup.scale)),
                                     encoding="utf-8")
         vf = f"{vf},ass={name}"
-    t = _cover_time(segs, getattr(reel, "cold_open", None) is not None)
+    t = _cover_face_time(segs, reel, setup, Path(source), ffmpeg) if by_face else None
+    if t is None:
+        t = _cover_time(segs, getattr(reel, "cold_open", None) is not None)
     try:
         r = _sp.run(_cover_cmd(ffmpeg, Path(source), t, vf, out), cwd=str(tmp_dir), capture_output=True, text=True)
     except OSError as exc:

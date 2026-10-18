@@ -3660,3 +3660,37 @@ def test_cover_is_written_with_the_reel_crop_and_a_failure_is_only_a_warning(tmp
     assert R._write_cover(clip, reel, [Segment(start=10.0, end=20.0)], setup, tmp_path / "v.mp4", "ffmpeg",
                           tmp_dir=tmp_path) is None
     assert "обложка не записана" in capsys.readouterr().out
+
+
+def test_cover_frame_by_the_face_with_open_eyes(tmp_path, monkeypatch):
+    """M96: the cover is the moment (of n over the body, the cold open left out) whose frame shows the largest face
+    with open eyes; no face (or no OpenCV) → the middle of the longest body window (M89)."""
+    from types import SimpleNamespace
+    from autoreels.core.models import Crop, Segment, SetupProfile
+    from autoreels.local import render as R
+    from autoreels.local.autocrop import best_face_time, cover_candidates
+    segs = [Segment(start=300.0, end=304.0), Segment(start=10.0, end=20.6), Segment(start=30.0, end=40.6)]
+    times = cover_candidates(segs, True, n=4)
+    assert len(times) == 4 and all(10.3 <= t <= 20.3 or 30.3 <= t <= 40.3 for t in times) and 300 > max(times)
+    assert cover_candidates([Segment(start=0.0, end=0.5)], False) == []
+    faces = {times[0]: (2000, 0), times[1]: (1000, 2), times[2]: (1500, 1), times[3]: None}
+    assert best_face_time(times, lambda t: t, lambda img: faces[img]) == times[2]     # 1500×0.7 > 1000×1 > 2000×0.4
+    assert best_face_time(times, lambda t: None, lambda img: (1, 2)) is None
+    setup = SetupProfile(setup_id="t", crop=Crop(x=600, y=0, w=607, h=1080), scale=[1080, 1920], frame=[1920, 1080])
+    reel = SimpleNamespace(id="r01", title_overlay="", cold_open=None)
+    seen = []
+
+    def fake_run(cmd, cwd=None, capture_output=True, text=True):
+        seen.append(cmd)
+        Path(cmd[-1]).write_bytes(b"jpg")
+        return SimpleNamespace(returncode=0, stderr="")
+    from pathlib import Path
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(R, "_cover_face_time", lambda *a, **k: 33.333)
+    R._write_cover(tmp_path / "r01.mp4", reel, segs[1:], setup, tmp_path / "v.mp4", "ffmpeg", tmp_dir=tmp_path,
+                   by_face=True)
+    assert seen[-1][seen[-1].index("-ss") + 1] == "33.333"
+    monkeypatch.setattr(R, "_cover_face_time", lambda *a, **k: None)
+    R._write_cover(tmp_path / "r01.mp4", reel, segs[1:], setup, tmp_path / "v.mp4", "ffmpeg", tmp_dir=tmp_path,
+                   by_face=True)
+    assert seen[-1][seen[-1].index("-ss") + 1] == "15.300"            # the middle of the longest (first equal) window

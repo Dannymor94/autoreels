@@ -77,3 +77,66 @@ def detect_faces(video, frame_size: tuple[int, int], *, samples: int = 20, ffmpe
         except OSError:
             pass
     return faces, samples
+
+
+# ── M96: the cover frame — the face large, the eyes open ───────────────────────────────────────────────────
+
+def cover_candidates(segs, has_cold_open: bool, n: int = 7, edge: float = 0.3) -> list[float]:
+    """n source seconds spread evenly over the body windows (the cold open — a teaser — left out), each at least
+    `edge` inside its window."""
+    body = [s for s in (list(segs[1:]) if has_cold_open and len(segs) > 1 else list(segs))
+            if s.end - s.start > 2 * edge]
+    total = sum(s.end - s.start - 2 * edge for s in body)
+    if total <= 0 or n <= 0:
+        return []
+    out = []
+    for k in range(n):
+        x = total * (k + 0.5) / n
+        for s in body:
+            span = s.end - s.start - 2 * edge
+            if x <= span:
+                out.append(round(s.start + edge + x, 3))
+                break
+            x -= span
+    return out
+
+
+def best_face_time(times, grab, detect) -> float | None:
+    """The time whose frame shows the largest face with open eyes: score = face area × (1 with two eyes found,
+    0.7 with one, 0.4 with none). grab(t) → image or None; detect(img) → (face area, eyes) or None (no face).
+    None when no frame has a face."""
+    best, best_score = None, 0.0
+    for t in times:
+        img = grab(t)
+        if img is None:
+            continue
+        found = detect(img)
+        if not found:
+            continue
+        area, eyes = found
+        score = float(area) * (1.0 if eyes >= 2 else 0.7 if eyes == 1 else 0.4)
+        if score > best_score:
+            best, best_score = t, score
+    return best
+
+
+def opencv_face_eyes():
+    """detect(img) for best_face_time with OpenCV's Haar cascades (face, then eyes in its upper half), or None when
+    OpenCV is not installed."""
+    try:
+        import cv2
+    except ImportError:
+        return None
+    face = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    eye = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+
+    def detect(img):
+        h, w = img.shape[:2]
+        found = face.detectMultiScale(img, scaleFactor=1.1, minNeighbors=5, minSize=(max(24, w // 10),) * 2)
+        if not len(found):
+            return None
+        x, y, fw, fh = max(found, key=lambda f: f[2] * f[3])
+        roi = img[y:y + fh // 2, x:x + fw]
+        eyes = eye.detectMultiScale(roi, scaleFactor=1.1, minNeighbors=5, minSize=(max(8, fw // 10),) * 2)
+        return int(fw * fh), int(len(eyes))
+    return detect
