@@ -75,10 +75,6 @@ class ManualPlanParams:
     # mask_min_gap_sec) and the max_removed_share cap do not hold it back; seconds of dead air are worse than one
     # switch. 0 = off.
     long_pause_sec: float = 0.0
-    # M80: the last word's audible end runs into the next speech by at most this much (beyond onset_margin_sec) —
-    # the clip ends before the next speech and cuts that much of the fading tail; more overlap = end at the word's
-    # audible end as before (and render reports the next speech). 0 = off (the previous ending).
-    tail_overlap_sec: float = 0.0
     # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
@@ -1099,18 +1095,9 @@ def build_manual_plan(
     if onset is not None:
         end = min(end, onset - params.onset_margin_sec)
     if end < ae_last:
-        if params.tail_overlap_sec and onset is not None and ae_last - end <= params.tail_overlap_sec:
-            # M80 (PXL_20260729_copy r02 on the local transcript: «регулярно.» audible to 220.487, the next word
-            # aligned at 220.471): the last word's fading tail runs into the next speech by a few frames. Ending at
-            # its audible end put the next word in the clip (render [ERROR]); the clip ends onset_margin before the
-            # next speech instead — at most tail_overlap_sec of the tail goes, the word itself is heard.
-            warnings.append(f"last word «{last_word.word}» fades into the next speech ({ae_last:.3f} > "
-                            f"{onset:.3f}) — clip ends {params.onset_margin_sec:.2f}s before it, "
-                            f"{ae_last - end:.3f}s of the tail cut")
-        else:
-            warnings.append(f"no room after last word «{last_word.word}» (next speech at {onset:.3f}) — "
-                            f"clip ends at its audible end")
-            end = ae_last
+        warnings.append(f"no room after last word «{last_word.word}» (next speech at {onset:.3f}) — "
+                        f"clip ends at its audible end")
+        end = ae_last
     if source_duration is not None:
         end = min(end, source_duration)
     body[-1].end = max(end, body[-1].start + _EPS)

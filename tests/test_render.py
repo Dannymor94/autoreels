@@ -3574,3 +3574,23 @@ def test_planned_silence_check_uses_the_plans_next_onset():
     errs = _check_silence_at_clip_end("r15", last, 2208.333, smap, lookup, last_ae=2208.23,
                                       plan_onset=2208.30, planned=True)
     assert errs and "next speech at 2208.300s by the plan" in errs[0]
+
+
+def test_planned_end_on_the_frame_grid_never_crosses_the_next_speech():
+    """M80 (PXL_20260729_copy r02, local transcript: «регулярно.» ends at 220.471 where the next word starts; at
+    29.97 fps nearest-frame rounding put the end at 220.487 — render [ERROR] «next speech before clip end»).
+    The end goes down to the last frame ≥ 10 ms before the next speech; the old rule (round UP to keep the last
+    word when the next speech allows) stays (r16 «зайдет.» 2311.548, next speech 2311.588)."""
+    from autoreels.core.models import Segment
+    from autoreels.local.render import _planned_end_on_grid, _snap_windows_to_frames
+    fps = 30000 / 1001
+    segs = _snap_windows_to_frames([Segment(start=200.0, end=210.0), Segment(start=215.0, end=220.471)], fps)
+    assert segs[-1].end > 220.471 - 0.01                                        # nearest frame crosses the onset
+    out = _planned_end_on_grid(segs, 220.471, 220.471, fps)
+    assert out[-1].end <= 220.471 - 0.01 and 220.471 - out[-1].end < 1.0 / fps + 0.011
+    assert out[0] == segs[0]
+    segs2 = _snap_windows_to_frames([Segment(start=2300.0, end=2305.0), Segment(start=2306.0, end=2311.548)], fps)
+    out2 = _planned_end_on_grid(segs2, 2311.548, 2311.588, fps)
+    assert 2311.548 - 1e-6 <= out2[-1].end <= 2311.588 - 0.01 + 1e-9          # covers the word, not the next one
+    free = _snap_windows_to_frames([Segment(start=0.0, end=5.0), Segment(start=6.0, end=9.3)], fps)
+    assert _planned_end_on_grid(free, 9.0, None, fps) == free                  # nothing to fix → unchanged

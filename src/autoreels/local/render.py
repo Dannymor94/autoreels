@@ -971,6 +971,31 @@ def _snap_windows_to_frames(segments, fps: float):
             for s in segments]
 
 
+def _planned_end_on_grid(segs, last_ae: float | None, next_onset: float | None, fps: float):
+    """The final end of a planned reel on the frame grid (REEL_SPEC §4.2), after _snap_windows_to_frames.
+
+    * Nearest-frame rounding must never cut the last word: an end that fell before the word's audible end
+      goes UP to the next frame — unless that frame is past the next speech.
+    * M80 (PXL_20260729_copy r02, local transcript: «регулярно.» ends at 220.471 exactly where the next word
+      starts; at 29.97 fps the plan's end rounded UP to 220.487 — 16 ms of the next word in the clip, render
+      [ERROR] «next speech before clip end»): nearest-frame rounding must never cross the next speech either —
+      such an end goes DOWN to the last frame at least 10 ms before it (at most one frame of the fading tail).
+    """
+    if not segs:
+        return segs
+    end = segs[-1].end
+    if last_ae is not None and end < last_ae - 1e-6:
+        up = math.ceil(last_ae * fps - 1e-6) / fps
+        if next_onset is None or up <= next_onset:
+            end = up
+    if next_onset is not None and end > next_onset - 0.01 + 1e-9:
+        down = math.floor((next_onset - 0.01) * fps + 1e-6) / fps
+        end = max(down, segs[-1].start + 1.0 / fps)
+    if end == segs[-1].end:
+        return segs
+    return list(segs[:-1]) + [segs[-1].model_copy(update={"end": end})]
+
+
 def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float = 1.0,
                               seam_xfades=None) -> float:
     """Length ffmpeg emits for these playback windows — the single source of truth shared by the
@@ -2732,15 +2757,9 @@ def _render_segments(
                 # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
                 segs = _snap_windows_to_frames(segs, _fps())
-                # Planned reels (REEL_SPEC §4.2): nearest-frame rounding must never cut the last
-                # word — round the final end UP to the next frame when it fell before the word's
-                # audible end (the plan keeps ≥ onset margin before the next speech).
-                _p_ae = getattr(reel, "tail_last_word_end", None) if getattr(reel, "planned", False) else None
-                if _p_ae is not None and segs[-1].end < _p_ae - 1e-6:
-                    _p_up = math.ceil(_p_ae * _fps() - 1e-6) / _fps()
-                    _p_next = getattr(reel, "tail_next_word_start", None)
-                    if _p_next is None or _p_up <= _p_next:
-                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _p_up})]
+                if getattr(reel, "planned", False):
+                    segs = _planned_end_on_grid(segs, getattr(reel, "tail_last_word_end", None),
+                                                getattr(reel, "tail_next_word_start", None), _fps())
             # Snap close_intervals to the same frame grid so overlay enable= expressions land on
             # decoded frames. Done for both multi-window and single-window close paths.
             if any(getattr(s, "close_intervals", []) for s in segs):
