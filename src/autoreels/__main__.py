@@ -8750,6 +8750,63 @@ def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str 
     return 0
 
 
+def cmd_article(target: str, *, root=None, topics: int | None = None, llm: str = "auto",
+                export_dir: str | None = None, provider=None) -> int:
+    """M100: longreads from the source map's largest topics (cloud/article.py: a plan, then each section from its
+    thoughts' words, both checked to stay in the talk) → export/articles/<source>/NN.md and a crosspost plan
+    export/crosspost/<source>_articles.csv («файл;текст;тип;заголовок», тип «статья»: Telegraph). Needs
+    transcripts/<stem>.map.json (arl map). Writes only the export files."""
+    import csv as _csv
+    import io as _io
+    import json as _json
+    from autoreels.cloud.article import pick_topics, write_article
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    mjson = _root / "transcripts" / f"{mpath.stem}.map.json"
+    if not mjson.is_file():
+        print(f"ошибка: карты нет ({mjson}) — сначала arl map \"{mpath.stem}\"", file=sys.stderr)
+        return 1
+    the_map = _json.loads(mjson.read_text(encoding="utf-8"))
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    ac = r0_cfg.article
+    picks = pick_topics(the_map, topics or ac.topics)
+    if not picks:
+        print(f"article {mpath.stem}: в карте нет тем с тремя описанными мыслями — статей нет")
+        return 0
+    if provider is None:
+        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+        _pool_banner(provider)
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    slug = Path(manifest.source).stem.replace(" ", "_")
+    base = Path(export_dir) if export_dir else _root / "export"
+    adir = base / "articles" / slug
+    adir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for k, (t, us) in enumerate(picks, 1):
+        art = write_article(provider, str(t.get("name") or ""), us, smin=ac.sections_min, smax=ac.sections_max,
+                            pmin=ac.section_sentences_min, pmax=ac.section_sentences_max, max_chars=ac.section_chars,
+                            log=lambda x: print(x, flush=True))
+        if art is None:
+            print(f"  тема «{t.get('name')}»: статьи нет")
+            continue
+        (adir / f"{k:02d}.md").write_text(art.markdown(), encoding="utf-8")
+        rows.append(["", art.body(), "статья", art.title])
+        print(f"  {k:02d}. «{art.title}» — разделов {len(art.sections)}, {len(art.body())} знаков")
+    buf = _io.StringIO()
+    w = _csv.writer(buf, delimiter=";", lineterminator="\n")
+    w.writerow(["файл", "текст", "тип", "заголовок"])
+    w.writerows(rows)
+    cdir = base / "crosspost"
+    cdir.mkdir(parents=True, exist_ok=True)
+    csv_path = cdir / f"{slug}_articles.csv"
+    csv_path.write_text(buf.getvalue(), encoding="utf-8-sig")
+    print(f"article {mpath.stem}: статей {len(rows)} из {len(picks)} тем → {adir}, {csv_path}")
+    return 0
+
+
 def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str | None = None,
                   out_dir: str | None = None, export_dir: str | None = None) -> int:
     """M90: the rendered clips of a source → a content plan for crosspost (github.com/Dannymor94/crosspost, tab «Импорт
@@ -12029,6 +12086,20 @@ def _build_parser():
     pcx.add_argument("--export-dir", default=None, dest="export_dir",
                      help="куда выгружать (по умолчанию export/crosspost)")
 
+    par = sub.add_parser(
+        "article",
+        help="лонгриды по темам карты источника → export/articles/ и план crosspost (статьи для Telegraph)",
+        description="M100: one article per largest topic of transcripts/<stem>.map.json: a plan, then each section "
+                    "from its thoughts' words (checked to stay in the talk) → export/articles/<source>/NN.md and "
+                    "export/crosspost/<source>_articles.csv (тип «статья»).",
+    )
+    par.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    par.add_argument("--root", default=None, help="корень проекта")
+    par.add_argument("--topics", type=int, default=None, help="сколько тем (по умолчанию article.topics)")
+    par.add_argument("--llm", choices=("auto", "local", "cloud"), default="auto",
+                     help="кто пишет: auto — облако, локальная в запасе")
+    par.add_argument("--export-dir", default=None, dest="export_dir", help="куда (по умолчанию export/)")
+
     pds = sub.add_parser(
         "describe",
         help="подробное описание клипов для постинга (модель, слова ролика) → <клип>.post.txt",
@@ -12426,6 +12497,9 @@ def main(argv=None) -> int:
                 out_dir=getattr(args, "out_dir", None),
                 preview=getattr(args, "preview", "audio"),
             )
+        elif args.cmd == "article":
+            return cmd_article(args.manifest, root=getattr(args, "root", None), topics=getattr(args, "topics", None),
+                               llm=getattr(args, "llm", "auto"), export_dir=getattr(args, "export_dir", None))
         elif args.cmd == "describe":
             return cmd_describe(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
                                 reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),

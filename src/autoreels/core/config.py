@@ -357,6 +357,19 @@ class PostConfig(BaseModel):
     hashtags: int = Field(3, ge=0)            # the model's hashtags (said in the reel), after render.yaml hashtags_always
 
 
+class ArticleConfig(BaseModel):
+    """M100: arl article — longreads from the map's topics (cloud/article.py). Numbers: config/r0.yaml article:."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    topics: int = Field(3, ge=1)               # articles per source: the largest real topics
+    sections_min: int = Field(3, ge=2)
+    sections_max: int = Field(5, ge=2)
+    section_sentences_min: int = Field(2, ge=1)
+    section_sentences_max: int = Field(8, ge=1)
+    section_chars: int = Field(900, ge=200)
+
+
 class MapConfig(BaseModel):
     """M54: arl map — the map of a whole source (cloud/thoughtmap.py). Numbers: config/r0.yaml."""
 
@@ -545,6 +558,7 @@ class R0Config(BaseModel):
     tx_check: TxCheckConfig = Field(default_factory=TxCheckConfig)
     autocut: AutocutConfig = Field(default_factory=AutocutConfig)
     post: PostConfig = Field(default_factory=PostConfig)
+    article: ArticleConfig = Field(default_factory=ArticleConfig)
 
     @property
     def min_duration(self) -> int:

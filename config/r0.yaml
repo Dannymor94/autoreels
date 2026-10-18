@@ -565,3 +565,14 @@ post:
   sentences_max: 5
   max_chars: 700
   hashtags: 3
+
+# M100 — longreads (v1.0 text content): arl article <source> → export/articles/<source>/NN.md and a crosspost plan
+# export/crosspost/<source>_articles.csv (тип «статья», заголовок) for Telegraph. One article per topic of the map
+# (the largest real topics); a plan, then every section written from its thoughts' words (cloud/article.py checks it).
+article:
+  topics: 3
+  sections_min: 3
+  sections_max: 5
+  section_sentences_min: 2
+  section_sentences_max: 8
+  section_chars: 900
