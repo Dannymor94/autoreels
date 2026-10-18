@@ -204,6 +204,10 @@ manual_filler_profile: balance
 # A pause at least this long is always shortened (to the profile's kept pause); a visible face jump is masked by a
 # wide↔close switch, and the spacing rules do not hold it back. 0 = off.
 long_pause_sec: 1.5
+# M80 — PXL_20260729_copy r02 (local transcript): the last word's tail ran 16 ms into the next speech; the clip ended at the
+# word's audible end with the next word in it (render [ERROR]). Up to this much tail overlap the clip ends onset_margin
+# before the next speech (the fading tail is cut, the word is heard). 0 = off.
+tail_overlap_sec: 0.1
 manual_filler_profiles:
   careful: {jump_max: 3.5, min_cut_spacing_sec: 4.0, jump_mask: false}
   balance: {jump_max: 5.0, min_cut_spacing_sec: 3.0, jump_mask: false}

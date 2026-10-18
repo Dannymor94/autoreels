@@ -515,3 +515,20 @@ def test_hook_air_never_plays_the_same_silence_twice():
     co, b0 = plan.cold_open, plan.body[0]
     assert co.end == pytest.approx(1.0) and b0.start == pytest.approx(1.0)       # no overlap: 0.84 → 1.0 ← 1.16
     assert co.end <= b0.start + 1e-9
+
+
+def test_a_last_word_fading_into_the_next_speech_ends_before_it():
+    """M80 (PXL_20260729_copy r02, local transcript: «регулярно.» audible to 220.487, next word at 220.471 → render
+    [ERROR] «next speech before clip end»): a small tail overlap is cut, a big one keeps the old ending."""
+    from dataclasses import replace
+    spec = [[("Раз", 0.0, 0.5, 0.1, 0.5), ("регулярно.", 0.6, 1.5, 0.6, 1.50)],
+            [("Дальше", 1.48, 2.0, 1.484, 2.0)]]
+    sents, words, smap = _sentences_and_map(spec)
+    old = build_manual_plan(sents, [1], words=words, smap=smap, params=P)
+    assert old.end == pytest.approx(1.50) and any("no room after last word" in w for w in old.warnings)
+    new = build_manual_plan(sents, [1], words=words, smap=smap, params=replace(P, tail_overlap_sec=0.1))
+    assert new.end == pytest.approx(1.484 - 0.06) and any("fades into the next speech" in w for w in new.warnings)
+    far = [[("Раз", 0.0, 0.5, 0.1, 0.5), ("регулярно.", 0.6, 1.5, 0.6, 1.50)], [("Дальше", 1.3, 2.0, 1.30, 2.0)]]
+    sents2, words2, smap2 = _sentences_and_map(far)
+    big = build_manual_plan(sents2, [1], words=words2, smap=smap2, params=replace(P, tail_overlap_sec=0.1))
+    assert big.end == pytest.approx(1.50) and any("no room after last word" in w for w in big.warnings)
