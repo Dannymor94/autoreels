@@ -301,6 +301,10 @@ class AutocutConfig(BaseModel):
     # M81 (owner: IMG r03 «начинается с фразы про кресло»): the cold open passes the same model check as the start
     hook_judge: bool = False                     # subject named, makes sense alone, leads into the clip — or it goes
     hook_judge_top: int = Field(6, ge=1)         # … among the first this many hook candidates; none passes = no cold open
+    # M86 (M85: «И никогда, ребятки, не поздно.» rejected for leaving a question open — the teaser's job)
+    hook_judge_mode: str = Field("start", pattern="^(start|teaser)$")   # teaser: an open question is fine, a pointer back is not
+    owner_examples: int = Field(0, ge=0)         # the owner's verdicts (reviews/verdicts.jsonl) as examples for the judges
+    judge_cache: bool = False                    # the judges' answers kept between runs (data/cache/autocut_judge.json)
     # M83 (m80: every cold open was the clip's own first sentence — no teaser): the cold open comes from later, replayed
     hook_teaser: bool = False                    # hook candidates only from hook_teaser_pos of the clip on, h:B.N!
     hook_teaser_pos: float = Field(0.5, ge=0.0, le=0.95)   # … fraction of the clip's sentences before the candidate

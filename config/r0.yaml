@@ -349,6 +349,13 @@ autocut:
   # M83 — m80 hooks: all 5 cold opens were the clip's own first sentence (no teaser; the body went on «В инстинкты.»):
   hook_teaser: true       # the cold open is a line from the second half of the clip (a teaser), replayed in its place (h:B.N!)
   hook_teaser_pos: 0.5    # … it starts at least this far into the clip's sentences; none there = no cold open
+  # M86 — M85: strong lines («И никогда, ребятки, не поздно.») rejected for leaving a question open; 11h42 lost a clip when
+  # the model answered a borderline start differently than in m78:
+  hook_judge_mode: teaser # the cold open is judged as a teaser: an open question or a punchline is fine, a pointer back is not;
+                          # the model sees the words of the clip's ending (what the teaser promises)
+  owner_examples: 6       # the latest 6 cold opens / starts the owner rejected (reason крючок / начало) and kept — examples
+                          # in the judges' prompts (reviews/verdicts.jsonl, M82)
+  judge_cache: true       # the judges' answers kept between runs (data/cache/autocut_judge.json; delete it to ask again)
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

@@ -7464,6 +7464,30 @@ def cmd_align(
     return 0
 
 
+class _JudgeStore(dict):
+    """M86: the model's judgments of starts and cold opens kept between runs (data/cache/autocut_judge.json, local,
+    not in git; delete it to ask the model again). Keyed by the hash of the prompt and the request, so a changed
+    prompt or new owner examples ask again."""
+
+    def __init__(self, path: Path):
+        super().__init__()
+        self.path = Path(path)
+        try:
+            import json as _json
+            self.update(_json.loads(self.path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        try:
+            import json as _json
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            _write_atomic(self.path, _json.dumps(self, ensure_ascii=False))
+        except OSError:
+            pass
+
+
 def _write_atomic(path: Path, text: str) -> None:
     """Write via a temporary file and rename: a kill mid-write never leaves half a draft."""
     tmp = path.with_name(path.name + ".tmp")
@@ -7906,9 +7930,27 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         except Exception as exc:  # noqa: BLE001 — no model: the code's choices stay
             print(f"  модель: недоступна ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
             prov = None
+    # M86: the model's judgments kept between runs, and the owner's verdicts as examples for the judges
+    _jstore = _JudgeStore(_cache / "autocut_judge.json") if ac.judge_cache else None
+    _ex = {"start": ([], []), "hook": ([], [])}
+    if ac.owner_examples > 0:
+        from autoreels.cloud.autocut import owner_examples as _owner_examples
+        _vrows: list = []
+        _vp = _root / "reviews" / "verdicts.jsonl"
+        if _vp.is_file():
+            for _ln in _vp.read_text(encoding="utf-8").splitlines():
+                try:
+                    _vrows.append(_json.loads(_ln))
+                except ValueError:
+                    continue
+        _ex = {k: _owner_examples(_vrows, k, ac.owner_examples) for k in ("start", "hook")}
+        print(f"  оценки владельца: примеры для начала −{len(_ex['start'][0])}/+{len(_ex['start'][1])}, "
+              f"для крючка −{len(_ex['hook'][0])}/+{len(_ex['hook'][1])} (из {len(_vrows)} оценок)", flush=True)
     if prov is not None and ac.context_start and ac.context_judge:
         from autoreels.cloud.autocut import make_judge   # M75: the model's yes/no on a first sentence
-        judge = make_judge(prov, log=lambda x: print(x, flush=True))
+        from autoreels.cloud.autocut import STANDALONE_SYSTEM as _SS, with_examples as _with_ex
+        _ssys = _with_ex(_SS, *_ex["start"], "first sentence") if any(_ex["start"]) else None
+        judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore)
     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                    no_start=no_start, judge=judge)
     if judge is not None:
@@ -7917,38 +7959,53 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         _na = sum(1 for v in _jc.values() if v is None)
         print(f"  начало: модель оценила {len(_jc)} первых фраз, непонятных без предыдущего {_no}"
               + (f", без ответа {_na} (решили правила)" if _na else ""), flush=True)
-    # M65: the model ranks the code's hook candidates (only the first clips are worth a call)
+    # M65: the model ranks the code's hook candidates. M86: each candidate is polished (cold open judged and ranked,
+    # plate headline) when the selection below reaches it — before, only pool[:clips+2] was, so a later candidate
+    # that took a rejected one's place (or moved up after the seam sort) went out with unjudged hooks.
+    _polish = None
+    _hjudge = None
+    _log = lambda x: print(x, flush=True)  # noqa: E731
     if prov is not None and pool:
         try:
             from autoreels.cloud.autocut import rank_hooks
             from autoreels.cloud.autocut import check_seams, headline, seam_pairs
-            _log = lambda x: print(x, flush=True)  # noqa: E731
             _forms: list = []                       # M73: headline shapes chosen so far in this source
-            _hjudge = None
+            _byid_h = {u["id"]: u for u in (the_map.get("units") or [])}
             if ac.hook_judge:                       # M81: the cold open must lead into the clip, like its start
-                from autoreels.cloud.autocut import HOOK_JUDGE_SYSTEM, judge_hooks, make_judge as _mk_judge
-                _hjudge = _mk_judge(prov, log=_log, system=HOOK_JUDGE_SYSTEM)
-                _byid_h = {u["id"]: u for u in (the_map.get("units") or [])}
-            for pr in pool[:prm.clips + 2]:
+                from autoreels.cloud.autocut import (HOOK_JUDGE_SYSTEM, HOOK_TEASER_SYSTEM, judge_hooks,
+                                                     make_judge as _mk_judge, with_examples as _with_ex2)
+                _teaser = ac.hook_judge_mode == "teaser"
+                _hsys = HOOK_TEASER_SYSTEM if _teaser else HOOK_JUDGE_SYSTEM
+                if any(_ex["hook"]):
+                    _hsys = _with_ex2(_hsys, *_ex["hook"], "teaser line" if _teaser else "opening line")
+                _hjudge = _mk_judge(prov, log=_log, system=_hsys, label="Teaser line" if _teaser else "First sentence",
+                                    store=_jstore)
+
+            def _hook_core(pr) -> str:
+                base = " ".join(dict.fromkeys(str(_byid_h[i].get("summary") or "")
+                                              for i in (pr.opener, pr.units[-1]) if i in _byid_h)).strip()
+                if ac.hook_judge_mode != "teaser" or pr.units[-1] not in _byid_h:
+                    return base
+                rows = [r[4] for r in sentences(pr.unit_refs.get(pr.units[-1]) or _byid_h[pr.units[-1]]["refs"])]
+                tail: list = []
+                for t in reversed(rows):             # M86: the words of the ending (what the teaser promises)
+                    if tail and len(t) + sum(len(x) for x in tail) > 300:
+                        break
+                    tail.insert(0, t)
+                return f"{base}. Конец ролика: «{' '.join(tail)}»" if tail else base
+
+            def _polish(pr) -> None:
                 if _hjudge is not None and pr.hooks:
-                    _hcore = " ".join(dict.fromkeys(str(_byid_h[i].get("summary") or "")
-                                                    for i in (pr.opener, pr.units[-1]) if i in _byid_h)).strip()
-                    judge_hooks(pr, _hjudge, _hcore, top=ac.hook_judge_top, log=_log)
+                    judge_hooks(pr, _hjudge, _hook_core(pr), top=ac.hook_judge_top, log=_log)
                 rank_hooks(pr, prov, log=_log)
                 if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
-                    _byid_t = {u["id"]: u for u in (the_map.get("units") or [])}
                     _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
-                                     if uid in _byid_t for r in sentences(pr.unit_refs.get(uid) or _byid_t[uid]["refs"]))
+                                     if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
                     headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
                              used_forms=_forms, log=_log, mode=ac.plate)
-            if _hjudge is not None:
-                _hc = getattr(_hjudge, "cache", {})
-                print(f"  крючки: модель оценила {len(_hc)}, отброшено {sum(1 for v in _hc.values() if v and not v[0])}"
-                      + f", без ответа {sum(1 for v in _hc.values() if v is None)}", flush=True)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
-                _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
                 for pr in pool[:prm.clips * 2]:
-                    check_seams(pr, seam_pairs(pr, _by_id, sentences), prov, log=_log)
+                    check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
                 _bad = sum(1 for pr in pool if pr.bad_seams)
                 pool.sort(key=lambda pr: bool(pr.bad_seams))
                 if _bad:
@@ -7977,6 +8034,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     for pr in pool:
         if len(accepted) >= prm.clips:
             break
+        if _polish is not None:
+            try:
+                _polish(pr)
+            except Exception as exc:  # noqa: BLE001 — no model: the code's hook order and plate stay
+                print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
         why_close = too_close(pr, accepted, ac.max_shared)          # M68: distinct reels, checked for free first
         if why_close:
             close.append((pr, why_close))
@@ -8035,11 +8097,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 accepted.append(v)
             else:
                 rejected.append((v, err))
+    if _hjudge is not None:
+        _hc = getattr(_hjudge, "cache", {})
+        print(f"  крючки: модель оценила {len(_hc)}, отброшено {sum(1 for v in _hc.values() if v and not v[0])}"
+              + f", без ответа {sum(1 for v in _hc.values() if v is None)}", flush=True)
     body: list[str] = []
     for i, pr in enumerate(accepted, 1):
         body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}"
                     + (f" — короткая версия M{pr.variant_of}" if pr.variant_of else ""))
         body += [f"#   {n}" for n in pr.notes]
+        if pr.hook and (pr.hook_texts.get(pr.hook) or ("", 0))[0]:
+            body.append(f"#   крючок: «{pr.hook_texts[pr.hook][0]}»")   # M86: the owner's verdict learns from it
         body.append(pr.line(str(i)))
         body.append("")
     if rejected:

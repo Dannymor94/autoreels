@@ -730,3 +730,103 @@ def test_teaser_cold_open_comes_from_the_second_half_and_is_replayed():
     (none,) = propose(units, AutoParams(**base, hook_teaser=True, hook_teaser_pos=0.9), sent)
     assert none.hook is None and none.hooks == [] and "h:" not in none.line("1")
     assert any("сборка без крючка" in n for n in none.notes)
+
+
+# ── M86: the cold open judged as a teaser, the judges' answers kept between runs, the owner's verdicts as examples ──
+class _Answers:
+    name = "scripted"
+
+    def __init__(self, answer):
+        self.answer, self.calls = answer, []
+
+    def complete(self, messages, temperature=0.0):
+        self.calls.append(messages)
+        return self.answer
+
+
+def test_judge_answers_are_kept_between_runs_and_the_teaser_is_asked_as_a_teaser():
+    from autoreels.cloud.autocut import HOOK_TEASER_SYSTEM, make_judge
+    ok = '{"subject": "поздно", "alone": true, "leads": true, "why": ""}'
+    store: dict = {}
+    p1 = _Answers(ok)
+    j1 = make_judge(p1, log=lambda m: None, system=HOOK_TEASER_SYSTEM, label="Teaser line", store=store)
+    assert j1("И никогда, ребятки, не поздно.", "", "взросление") == (True, "поздно")
+    assert p1.calls[0][-1]["content"] == "Teaser line: «И никогда, ребятки, не поздно.»\nThe clip is about: взросление"
+    p2 = _Answers('{"subject": "", "alone": false, "leads": false, "why": "другое"}')
+    j2 = make_judge(p2, log=lambda m: None, system=HOOK_TEASER_SYSTEM, label="Teaser line", store=store)
+    assert j2("И никогда, ребятки, не поздно.", "", "взросление") == (True, "поздно") and not p2.calls   # next run
+    j3 = make_judge(p2, log=lambda m: None, label="Teaser line", store=store)       # another prompt → asked again
+    assert j3("И никогда, ребятки, не поздно.", "", "взросление")[0] is False and len(p2.calls) == 1
+    p4 = _Answers("нет ответа")
+    j4 = make_judge(p4, log=lambda m: None, store=store)
+    assert j4("Фраза.", "Дальше.") is None and len(store) == 2                      # no answer is not kept
+    p5 = _Answers(ok)
+    make_judge(p5, log=lambda m: None)("Фраза.", "Дальше.", "тема")               # the start judge's request as before
+    assert p5.calls[0][-1]["content"] == "First sentence: «Фраза.»\nFollowing sentence: «Дальше.»\nThe clip is about: тема"
+    assert "open question" in HOOK_TEASER_SYSTEM and "not a pointer" in HOOK_TEASER_SYSTEM
+
+
+def test_owner_verdicts_become_examples_for_the_judges():
+    from autoreels.cloud.autocut import owner_examples, with_examples
+    rows = [
+        {"kind": "montage", "verdict": "drop", "reasons": ["крючок"],
+         "draft_notes": ["начало: «Я стараюсь делать так практику.»", "крючок: «Есть какой-то жесткий стул, а есть мягкое кресло.»"]},
+        {"kind": "montage", "verdict": "ok", "reasons": [],
+         "draft_notes": ["начало: «Как вы отдыхаете?»", "крючок: «Чтобы выжить в семье, нам приходится надевать маски.»"]},
+        {"kind": "montage", "verdict": "fix", "reasons": ["начало", "темп"], "draft_notes": ["начало: «А второй момент — это то.»"]},
+        {"kind": "line", "verdict": "drop", "reasons": ["крючок"], "draft_notes": ["крючок: «не сборка»"]},
+        {"kind": "montage", "verdict": "drop", "reasons": ["плашка"], "draft_notes": ["крючок: «плашка виновата»"]},
+    ]
+    assert owner_examples(rows, "hook", 6) == (["Есть какой-то жесткий стул, а есть мягкое кресло."],
+                                               ["Чтобы выжить в семье, нам приходится надевать маски."])
+    assert owner_examples(rows, "start", 6) == (["А второй момент — это то."], ["Как вы отдыхаете?"])
+    assert owner_examples(rows, "hook", 0) == ([], [])
+    s = with_examples("SYS", ["плохо"], ["хорошо"], "teaser line")
+    assert s.startswith("SYS\n") and "Rejected as a teaser line: «плохо»" in s and "Kept as a teaser line: «хорошо»" in s
+    assert with_examples("SYS", [], [], "x") == "SYS"
+
+
+def test_cmd_autocut_judges_every_candidate_it_reaches_and_writes_the_hook_text(tmp_path, monkeypatch):
+    """M86: before, only pool[:clips+2] got the hook judge, ranking and headline — a later candidate that took a
+    rejected one's place went out with unjudged hooks. Now each candidate is polished when the selection reaches
+    it; the draft names the chosen cold open («крючок: «…»») for the owner's verdicts."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+                   .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
+                   encoding="utf-8")
+    r0 = cli.load_r0_config(cfg)
+    tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+    units = []
+    for b in range(6):
+        ss = merge_group_sentences([kept[b]], tx.words)
+        units.append(U(b + 1, ss[0][0].t0, ss[-1][-1].t1 - ss[0][0].t0, "conclusion", 5, f"{b + 1}.1-{len(ss)}",
+                       topic=b + 1, summary=f"вывод {b + 1}"))
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": units}), encoding="utf-8")
+    polished, checked = [], []
+    monkeypatch.setattr(ac_mod, "rank_hooks", lambda pr, prov, **k: polished.append(pr.pieces) or False)
+    monkeypatch.setattr(ac_mod, "headline", lambda *a, **k: None)
+    monkeypatch.setattr(ac_mod, "check_seams", lambda *a, **k: None)
+
+    def fake_check(head, line, root, cache_dir):
+        checked.append(line)
+        return ("plan: x", "") if len(checked) <= 4 else (None, "")              # the first four fail
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    prov = _Answers('{"subject": "вывод", "alone": true, "leads": true, "why": ""}')
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), llm="local", provider=prov) == 0
+    assert len(polished) == 6 == len(set(polished))                              # was 4 (pool[:clips + 2])
+    text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    hooked = [i for i, ln in enumerate(lines) if ln.startswith("M") and " h:" in ln]
+    assert len([ln for ln in lines if ln.startswith("M")]) == 2 and hooked
+    for i in hooked:
+        assert lines[i - 1].startswith("#   крючок: «") and lines[i - 1].endswith("»")
+    assert (tmp_path / "cache" / "autocut_judge.json").is_file()                # the judges' answers are kept

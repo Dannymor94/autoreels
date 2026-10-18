@@ -444,23 +444,39 @@ def judge_hooks(pr: "Proposal", judge: "Judge", core: str = "", *, top: int = 6,
     return notes
 
 
-def make_judge(provider, *, log: Callable[[str], None] = print, system: str | None = None) -> "Judge":
+def make_judge(provider, *, log: Callable[[str], None] = print, system: str | None = None,
+               label: str = "First sentence", store=None) -> "Judge":
     """M75: the model's yes/no on «does this first sentence stand on its own» — cached per sentence, one retry,
-    None when there is no usable answer (the rules' verdict then stands)."""
+    None when there is no usable answer (the rules' verdict then stands). M86: `label` names the line in the
+    request («Teaser line» for a cold open; the following sentence is then sent only when given); `store` — a
+    persistent mapping (hash of the prompt and the request → [ok, why]): the same line asked the same way gets
+    the same answer in every run (a borderline start no longer flips between runs); no answer is not stored."""
+    import hashlib as _hashlib
     import json as _json
     import re as _re
     cache: dict = {}
+    sys_text = system or STANDALONE_SYSTEM
 
     def judge(text: str, following: str = "", core: str = ""):
         key = (text, following, core)
         if key in cache:
             return cache[key]
-        msg = (f"First sentence: «{text}»\nFollowing sentence: «{following}»"
-               + (f"\nThe clip is about: {core}" if core else ""))
+        if label == "First sentence":
+            msg = (f"First sentence: «{text}»\nFollowing sentence: «{following}»"
+                   + (f"\nThe clip is about: {core}" if core else ""))
+        else:
+            msg = (f"{label}: «{text}»" + (f"\nFollowing sentence: «{following}»" if following else "")
+                   + (f"\nThe clip is about: {core}" if core else ""))
+        skey = _hashlib.sha256((sys_text + "\n\n" + msg).encode("utf-8")).hexdigest()[:32] if store is not None else ""
+        if store is not None and skey in store:
+            v = store[skey]
+            cache[key] = (bool(v[0]), str(v[1])) if isinstance(v, (list, tuple)) and len(v) == 2 else None
+            if cache[key] is not None:
+                return cache[key]
         out = None
         for _ in range(2):
             try:
-                raw = provider.complete([{"role": "system", "content": system or STANDALONE_SYSTEM},
+                raw = provider.complete([{"role": "system", "content": sys_text},
                                          {"role": "user", "content": msg}], temperature=0.0)
             except Exception as exc:  # noqa: BLE001 — no model: the rules decide
                 log(f"  начало: модель не ответила ({type(exc).__name__})")
@@ -487,10 +503,68 @@ def make_judge(provider, *, log: Callable[[str], None] = print, system: str | No
                 out = (obj["ok"], why)
                 break
         cache[key] = out
+        if store is not None and out is not None:
+            store[skey] = [bool(out[0]), str(out[1])]
         return out
 
     judge.cache = cache   # type: ignore[attr-defined]
     return judge
+
+
+# M86: the cold open is judged as a teaser, not as a start (M85: «И никогда, ребятки, не поздно.» and «Поздно — это
+# когда уже завтра заказан священник.» were rejected for leaving a question open — which is the teaser's job).
+HOOK_TEASER_SYSTEM = (
+    "A short vertical video (a reel) cut from a Russian talk opens with a TEASER LINE taken from later in the clip: "
+    "it is heard first, cold, 2–5 seconds, and the clip then answers it or pays it off. You get the teaser line and "
+    "what the clip is about, with the words of its ending. Answer three things. subject: what the line is about, in "
+    "at most 5 Russian words — empty only if a viewer could not tell even roughly. alone: false only when the line "
+    "points back to something not said — a pronoun or «это/так/вот/тот» standing for an unsaid thing, an answer to "
+    "a question the viewer did not hear, «второй момент», «как я говорил», a fragment or a filler; an open question, "
+    "a provocative claim, a punchline or a paradox is GOOD — leaving the viewer wanting the answer is what a teaser "
+    "is for; «это» used as «is» in a definition («Поздно — это когда…») is not a pointer. leads: true if the clip "
+    "develops, answers or pays off the line (judge by the words of the ending, not by the summary alone); false for a "
+    "remark about the room, the furniture or the setting, or an aside the clip does not develop. Answer only with "
+    "JSON: {\"subject\": \"<words>\", \"alone\": true|false, \"leads\": true|false, \"why\": \"<at most 8 "
+    "Russian words>\"}."
+)
+
+
+def owner_examples(rows: Sequence[dict], kind: str, n: int) -> tuple[list[str], list[str]]:
+    """M86 (learning, stage 1): lines from the owner's own verdicts (reviews/verdicts.jsonl, M82) → (rejected, kept),
+    the latest `n` of each, no repeats. kind «hook»: the cold open of a montage clip (draft note «крючок: «…»»),
+    rejected when the verdict is drop/fix with the reason «крючок»; kind «start»: the first sentence (note
+    «начало: «…»»), rejected with the reason «начало». Kept: verdict ok. Real data with its origin (invariant 11)."""
+    tag, reason = ("крючок: «", "крючок") if kind == "hook" else ("начало: «", "начало")
+    bad: list[str] = []
+    good: list[str] = []
+    for r in rows:
+        if r.get("kind") != "montage":
+            continue
+        text = ""
+        for note in r.get("draft_notes") or []:
+            if note.startswith(tag) and note.endswith("»"):
+                text = note[len(tag):-1].strip()
+        if not text:
+            continue
+        verdict, reasons = r.get("verdict"), [str(x).lower() for x in r.get("reasons") or []]
+        target = bad if verdict in ("drop", "fix") and reason in reasons else good if verdict == "ok" else None
+        if target is not None:
+            if text in target:
+                target.remove(text)
+            target.append(text)
+    return bad[-n:] if n > 0 else [], good[-n:] if n > 0 else []
+
+
+def with_examples(system: str, bad: Sequence[str], good: Sequence[str], what: str) -> str:
+    """M86: the channel owner's verdicts appended to a judge's prompt — real lines he rejected or kept as a `what`."""
+    if not bad and not good:
+        return system
+    out = system + f"\nThe channel owner's own verdicts on earlier reels — judge new lines the same way."
+    if bad:
+        out += f"\nRejected as a {what}: " + "; ".join(f"«{t}»" for t in bad)
+    if good:
+        out += f"\nKept as a {what}: " + "; ".join(f"«{t}»" for t in good)
+    return out
 
 
 def _sent_rows(sentences, refs):
