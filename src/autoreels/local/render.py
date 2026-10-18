@@ -980,6 +980,10 @@ def _planned_end_on_grid(segs, last_ae: float | None, next_onset: float | None, 
       starts; at 29.97 fps the plan's end rounded UP to 220.487 — 16 ms of the next word in the clip, render
       [ERROR] «next speech before clip end»): nearest-frame rounding must never cross the next speech either —
       such an end goes DOWN to the last frame at least 10 ms before it (at most one frame of the fading tail).
+    * M83b (IMG_6848 r02/r05 at 60 fps: the last word ends exactly where the next speech starts; the 10 ms
+      margin plus the frame floor cut 20–22 ms of the word — render [ERROR] «last word cut», which allows one
+      frame): when the margin would cut more than one frame of the last word, the end is the last frame not
+      after the next speech instead (the next-speech checks allow 10 ms; the word loses at most one frame).
     """
     if not segs:
         return segs
@@ -990,6 +994,8 @@ def _planned_end_on_grid(segs, last_ae: float | None, next_onset: float | None, 
             end = up
     if next_onset is not None and end > next_onset - 0.01 + 1e-9:
         down = math.floor((next_onset - 0.01) * fps + 1e-6) / fps
+        if last_ae is not None and down < last_ae - 1.0 / fps - 1e-6:
+            down = math.floor(next_onset * fps + 1e-6) / fps     # M83b: words touch — never more than a frame of the word
         end = max(down, segs[-1].start + 1.0 / fps)
     if end == segs[-1].end:
         return segs

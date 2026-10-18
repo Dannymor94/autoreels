@@ -3594,3 +3594,20 @@ def test_planned_end_on_the_frame_grid_never_crosses_the_next_speech():
     assert 2311.548 - 1e-6 <= out2[-1].end <= 2311.588 - 0.01 + 1e-9          # covers the word, not the next one
     free = _snap_windows_to_frames([Segment(start=0.0, end=5.0), Segment(start=6.0, end=9.3)], fps)
     assert _planned_end_on_grid(free, 9.0, None, fps) == free                  # nothing to fix → unchanged
+
+
+def test_planned_end_where_the_next_speech_touches_the_last_word_cuts_at_most_one_frame():
+    """M83b (IMG_6848 r02 1255.409, r05 1402.004 at 60 fps: the last word ends exactly where the next speech
+    starts; M80b's 10 ms margin plus the frame floor cut 20–22 ms of the word — render [ERROR] «last word cut»,
+    which allows one frame). The end is then the last frame not after the next speech: the word loses at most
+    one frame, the next speech is not in the clip (its checks allow 10 ms)."""
+    from autoreels.core.models import Segment
+    from autoreels.local.render import _planned_end_on_grid, _snap_windows_to_frames
+    for fps in (60.0, 60000 / 1001, 30.0, 30000 / 1001, 25.0):
+        for ae in (1255.409, 1402.004, 220.471, 10.0):
+            segs = _snap_windows_to_frames([Segment(start=ae - 20, end=ae - 12), Segment(start=ae - 10, end=ae)], fps)
+            out = _planned_end_on_grid(segs, ae, ae, fps)
+            end = out[-1].end
+            assert end >= ae - 1.0 / fps - 1e-6, (fps, ae, end)                 # «last word cut» allows one frame
+            assert end <= ae + 1e-9, (fps, ae, end)                             # never after the next speech
+            assert abs(end * fps - round(end * fps)) < 1e-6                     # on the frame grid
