@@ -102,6 +102,7 @@ class Proposal:
     hook_keep: bool = False                             # M83: the cold open is a teaser from later — h:B.N! (replayed)
     keys: list = field(default_factory=list)            # M88: [(B.N, word)] — k: words the subtitles highlight
     close: list = field(default_factory=list)           # M91: [B.N] — the last sentences in the close shot (c:)
+    plate_mode: str = ""                                # M112: how the plate t: was written (hook | context; "" = not)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""

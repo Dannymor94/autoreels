@@ -992,3 +992,75 @@ def test_m107_clips_without_a_cold_open_go_after_the_hooked_ones(tmp_path, monke
     order, ms, text, out = run("true", 5)                                    # only one hooked: one hookless fills in
     assert len(ms) == 2 and " h:" in ms[0] and " h:" not in ms[1] and ms[1].split(" | ")[1] == order[0]
     assert "без крючка — взята, когда сборки с крючком кончились (M107)" in text
+
+
+def test_m112_a_clip_without_a_cold_open_gets_a_curiosity_plate(tmp_path, monkeypatch):
+    """M112: a clip with no cold open opens on its plate t:, so there the plate is the M71/M73 curiosity headline
+    (mode «hook»); a clip with a cold open keeps the plate that names the subject (plate: context). When the checks
+    drop the cold open after the plate was written, the plate is written again. plate_hookless "" = as before."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+
+    def run(flag: str, n_hookless: int, skip_hook: bool = False):
+        root = tmp_path / f"{flag or 'off'}{n_hookless}{skip_hook}"
+        root.mkdir()
+        mpath = _source(root)
+        cfg = root / "config" / "r0.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                       .replace("  plate_hookless: hook ", f"  plate_hookless: \"{flag}\" "), encoding="utf-8")
+        r0 = cli.load_r0_config(cfg)
+        assert r0.autocut.plate_hookless == flag and r0.autocut.plate == "context"
+        tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
+        _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+        units = []
+        for b in range(6):
+            ss = merge_group_sentences([kept[b]], tx.words)
+            units.append(U(b + 1, ss[0][0].t0, ss[-1][-1].t1 - ss[0][0].t0, "conclusion", 5, f"{b + 1}.1-{len(ss)}",
+                           topic=b + 1, summary=f"вывод {b + 1}"))
+        (root / "transcripts").mkdir(exist_ok=True)
+        (root / "transcripts" / "v.map.json").write_text(json.dumps(
+            {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": units}), encoding="utf-8")
+        order, plates = [], []
+
+        def rank(pr, prov, **k):
+            order.append(pr.pieces)
+            if len(order) <= n_hookless:
+                pr.hooks, pr.hook = [], None
+            else:
+                pr.hooks = pr.hooks[:1]
+            return False
+
+        def headline(pr, prov, text, *, mode, **k):
+            plates.append((pr.pieces, mode))
+            pr.title = f"плашка {mode} {pr.pieces.split('.')[0]}"      # distinct titles (M78: same title = too close)
+            return True
+        checks = []
+
+        def check(head, line, r, c):
+            checks.append(line)
+            return (None, "    ! h:x — cold open skipped") if skip_hook and len(checks) == 1 and " h:" in line else (None, "")
+        monkeypatch.setattr(ac_mod, "rank_hooks", rank)
+        monkeypatch.setattr(ac_mod, "headline", headline)
+        monkeypatch.setattr(ac_mod, "check_seams", lambda *a, **k: None)
+        monkeypatch.setattr(cli, "_autocut_check", check)
+        prov = _Answers('{"subject": "вывод", "alone": true, "leads": true, "why": ""}')
+        assert cli.cmd_autocut("v", root=root, cache_dir=str(root / "cache"), llm="local", provider=prov) == 0
+        text = (root / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+        return order, plates, [ln for ln in text.splitlines() if ln.startswith("M")], text
+
+    order, plates, ms, _ = run("", 5)                           # off: every plate as plate: context
+    assert {m for _, m in plates} == {"context"} and len(ms) == 2
+    order, plates, ms, _ = run("hook", 5)                       # one hooked clip, one hookless fills in
+    modes = dict(plates)
+    assert modes[order[5]] == "context" and modes[order[0]] == "hook"
+    assert " h:" in ms[0] and "t: плашка context" in ms[0]
+    assert " h:" not in ms[1] and "t: плашка hook" in ms[1]
+    order, plates, ms, text = run("hook", 0, skip_hook=True)    # the check dropped the only cold open
+    first = order[0]
+    assert [m for p, m in plates if p == first] == ["context", "hook"]
+    assert " h:" not in ms[0] and "t: плашка hook" in ms[0]
+    assert "крючок снят проверкой — плашка заново (hook)" in text

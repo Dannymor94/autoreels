@@ -8117,7 +8117,13 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     # plate headline) when the selection below reaches it — before, only pool[:clips+2] was, so a later candidate
     # that took a rejected one's place (or moved up after the seam sort) went out with unjudged hooks.
     _polish = None
+    _plate = None
     _hjudge = None
+
+    def _plate_mode(pr) -> str:
+        # M112 (owner: a clip without a cold open opens on its plate — the plate has to pull, not only name the subject)
+        hl = getattr(ac, "plate_hookless", "")
+        return hl if hl and not pr.hook else ac.plate
     _log = lambda x: print(x, flush=True)  # noqa: E731
     if prov is not None and pool:
         try:
@@ -8148,15 +8154,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                     tail.insert(0, t)
                 return f"{base}. Конец ролика: «{' '.join(tail)}»" if tail else base
 
+            def _plate(pr) -> None:                 # M70/M71: a curiosity headline for the plate t:
+                _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
+                                 if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
+                pr.plate_mode = _plate_mode(pr)
+                headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
+                         used_forms=_forms, log=_log, mode=pr.plate_mode)
+
             def _polish(pr) -> None:
                 if _hjudge is not None and pr.hooks:
                     judge_hooks(pr, _hjudge, _hook_core(pr), top=ac.hook_judge_top, log=_log)
                 rank_hooks(pr, prov, log=_log)
-                if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
-                    _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
-                                     if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
-                    headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
-                             used_forms=_forms, log=_log, mode=ac.plate)
+                if ac.hook_title:
+                    _plate(pr)
                 if ac.keywords:                     # M88: key words of the subtitles (k:)
                     from autoreels.cloud.autocut import pick_keywords
                     _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
@@ -8252,6 +8262,14 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             continue
         pr.notes.append("без крючка — взята, когда сборки с крючком кончились (M107)")
         _try_accept(pr)
+    if _plate is not None and ac.hook_title and getattr(ac, "plate_hookless", ""):
+        for pr in accepted:                 # M112: the checks dropped the cold open after the plate was written
+            if pr.plate_mode and pr.plate_mode != _plate_mode(pr):
+                pr.notes.append(f"крючок снят проверкой — плашка заново ({_plate_mode(pr)})")
+                try:
+                    _plate(pr)
+                except Exception as exc:  # noqa: BLE001 — no model: the plate stays
+                    print(f"  плашка: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
     # M70: a short version of every accepted clip (weakest middle thoughts dropped), checked the same way
     if ac.short_variant and accepted:
         from autoreels.cloud.autocut import short_variant
@@ -9073,6 +9091,68 @@ def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str
     return 0 if rows or not (clips or errors) else 2
 
 
+def _gate_verdicts(root: Path, stem: str, gate: str) -> dict:
+    """M112: the owner's latest verdict per clip of one gate (reviews/verdicts.jsonl, arl review-apply writes it):
+    {rid: "ok" | "drop" | "fix" | "edit"}; a later row on the same clip wins."""
+    import json as _json
+    path = root / "reviews" / "verdicts.jsonl"
+    out: dict = {}
+    if not path.is_file():
+        return out
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        try:
+            r = _json.loads(ln)
+        except ValueError:
+            continue
+        if r.get("stem") == stem and (r.get("gate") or "") == gate and r.get("rid"):
+            out[str(r["rid"])] = str(r.get("verdict") or "")
+    return out
+
+
+def cmd_export(target: str, *, root=None, gate: str | None = None, decisions: str | None = None,
+               out_dir: str | None = None, export_dir: str | None = None, cache_dir=None) -> int:
+    """M112 (owner: «одна команда от видео до публикации»; invariant 6 — the clips leave only after the owner's
+    approval): phase 2 of `arl auto`. --decisions <the file the review sheet downloads> first records the verdicts
+    (arl review-apply); then only the gate's clips marked «оставить» go to the crosspost plan (arl crosspost
+    --reels …: video, cover, the post of arl describe). No approved clip = nothing exported. Never publishes —
+    crosspost imports the plan."""
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    if decisions:
+        from autoreels.cloud.label import parse_decisions
+        dp = Path(decisions).expanduser()
+        if not dp.is_file():
+            print(f"ошибка: файла решений нет: {decisions}", file=sys.stderr)
+            return 1
+        head, _d, _e = parse_decisions(dp.read_text(encoding="utf-8"))
+        if head.get("stem") and head["stem"] != mpath.stem:
+            print(f"ошибка: решения для «{head['stem']}», а не для «{mpath.stem}»", file=sys.stderr)
+            return 1
+        if gate and head.get("gate") and head["gate"] != gate:
+            print(f"ошибка: решения для гейта «{head['gate']}», а не «{gate}»", file=sys.stderr)
+            return 1
+        gate = gate or head.get("gate") or None
+        rc = cmd_review_apply(str(dp), root=_root, cache_dir=cache_dir)
+        if rc:
+            print("ошибка: решения не записаны — выгрузки нет", file=sys.stderr)
+            return rc
+    gate = gate or "auto"
+    verdicts = _gate_verdicts(_root, mpath.stem, gate)
+    ok = sorted(r for r, v in verdicts.items() if v == "ok")
+    tally = {v: sum(1 for x in verdicts.values() if x == v) for v in ("ok", "drop", "fix", "edit")}
+    print(f"export {mpath.stem} (гейт {gate}): оценки — оставить {tally['ok']}, убрать {tally['drop']}, "
+          f"переделать {tally['fix']}, правка {tally['edit']}", flush=True)
+    if not ok:
+        print("ошибка: одобренных клипов нет — сначала оценки на листе ревью (кнопка «скачать решения»), "
+              "потом arl export … --decisions <файл>", file=sys.stderr)
+        return 1
+    return cmd_crosspost(str(mpath), root=_root, gate=gate, reels=",".join(ok), out_dir=out_dir,
+                         export_dir=export_dir)
+
+
 def _card_extras(reel, vdir: Path) -> dict:
     """M95: what the owner judges besides the video, on the same card — the cover, the post text crosspost gets,
     the cold open's words and the k: words."""
@@ -9648,12 +9728,17 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply);
     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
        if it fails, the autocut draft alone (its lines passed the checks);
-    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music) and the review sheet.
+    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
+       review sheet. Phase 2 after the owner's verdicts: arl export (only the approved clips → crosspost plan).
     Finished stages skip themselves; a failed stage stops that source with its reason, the next goes on."""
     _root = Path(root) if root else _project_root()
     if tx:                                             # M64: transcription backend of a new video's arl run
         os.environ["TRANSCRIBE_BACKEND"] = {"local": "whispercpp"}.get(tx, tx)
     results: list[tuple[str, str, str]] = []           # (stem, "ok" | failed stage, note)
+    try:                                               # M112: posts in auto, then arl export (config/r0.yaml post.auto)
+        _post_auto = bool(load_r0_config(_root / "config" / "r0.yaml").post.auto)
+    except Exception:  # noqa: BLE001 — no config: as before
+        _post_auto = False
     for target in targets:
         tp = Path(target)
         mpath = None
@@ -9732,9 +9817,14 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
                 if err:
                     results.append((stem, "render", err))
                     continue
+                if _post_auto and llm != "none":     # M112: the post of every clip, on its card and for crosspost
+                    stage("описания постов", lambda: cmd_describe(m, root=_root, gate=gate, llm=llm))
                 stage("лист ревью", lambda: cmd_review_sheet(stem, root=_root, cache_dir=cache_dir, review=str(used),
                                                              manifest_file=str(review_json), gate=gate,
                                                              preview="none"))
+                if _post_auto:
+                    note = (note + "; " if note else "") + (f"после листа: arl export {stem} --gate {gate} "
+                                                            f"--decisions <файл решений>")
         results.append((stem, "ok", note or f"черновик {used.name}"))
     print("\n=== auto: итог ===", flush=True)
     for stem, st, note in results:
@@ -12302,6 +12392,21 @@ def _build_parser():
     pcx.add_argument("--export-dir", default=None, dest="export_dir",
                      help="куда выгружать (по умолчанию export/crosspost)")
 
+    pex = sub.add_parser(
+        "export",
+        help="M112: одобренные на листе клипы гейта → план crosspost (вторая фаза arl auto)",
+        description="M112: --decisions <файл с листа ревью> записывает оценки (arl review-apply), затем в план crosspost "
+                    "идут только клипы с оценкой «оставить». Ничего не публикует.",
+    )
+    pex.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pex.add_argument("--gate", default=None, help="гейт (по умолчанию из файла решений, иначе auto)")
+    pex.add_argument("--decisions", default=None, help="файл решений, скачанный с листа ревью")
+    pex.add_argument("--root", default=None, help="корень проекта")
+    pex.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    pex.add_argument("--export-dir", default=None, dest="export_dir",
+                     help="куда выгружать (по умолчанию export/crosspost)")
+    pex.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     par = sub.add_parser(
         "article",
         help="лонгриды по темам карты источника → export/articles/ и план crosspost (статьи для Telegraph)",
@@ -12729,6 +12834,10 @@ def main(argv=None) -> int:
             return cmd_crosspost(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
                                  reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),
                                  export_dir=getattr(args, "export_dir", None))
+        elif args.cmd == "export":
+            return cmd_export(args.manifest, root=getattr(args, "root", None), gate=args.gate,
+                              decisions=args.decisions, out_dir=getattr(args, "out_dir", None),
+                              export_dir=getattr(args, "export_dir", None), cache_dir=getattr(args, "cache_dir", None))
         elif args.cmd == "review-apply":
             return cmd_review_apply(
                 args.decisions,

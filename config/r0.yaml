@@ -347,6 +347,8 @@ autocut:
   context_max_sec: 15     # … the added context thought at most this long
   context_drop_words: 5   # … a leaning first sentence of at most this many words may be dropped
   plate: context          # the plate t: says what the clip is about (the hook already pulls) — hook = M71/M73 headline
+  plate_hookless: hook    # M112: a clip with no cold open opens on its plate — there it is the M71/M73 curiosity headline
+                          # (a question to the viewer, a claim to «вы», a contrast — in the clip's words); "" = as plate
   # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips with no pause after the hook):
   context_min_words: 4    # a start shorter than this (not a question) is a fragment — fixed like a leaning one
   context_judge: true     # the model says whether a first sentence stands on its own (rules first; no answer = rules)
@@ -578,6 +580,8 @@ post:
   sentences_max: 5
   max_chars: 700
   hashtags: 3
+  auto: true              # M112: arl auto writes the posts before the review sheet (they show on the cards); after the
+                          # owner's verdicts arl export <source> --decisions <file> sends only the approved clips to crosspost
 
 # M100 — longreads (v1.0 text content): arl article <source> → export/articles/<source>/NN.md and a crosspost plan
 # export/crosspost/<source>_articles.csv (тип «статья», заголовок) for Telegraph. One article per topic of the map
