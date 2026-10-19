@@ -1,0 +1,195 @@
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 8685a1b..c1389ba 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8354,8 +8354,28 @@ def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[s
+         return (hit or (lines[-1] if lines else f"rc={rc}"))[:200], buf.getvalue()
+ 
+ 
++def _whispercpp_overrides(base, pairs) -> "object":
++    """M111: `--wc key=value` → a copy of the whispercpp params with those fields (names and types checked by
++    the model; an empty value is an empty string — `vad_model=` turns VAD off). Raises ValueError."""
++    from autoreels.core.config import WhisperCppParams
++    upd: dict = {}
++    for pr in pairs or ():
++        k, sep, v = str(pr).partition("=")
++        k = k.strip()
++        if not sep or not k:
++            raise ValueError(f"--wc ждёт ключ=значение, получено «{pr}»")
++        if k not in WhisperCppParams.model_fields:
++            raise ValueError(f"--wc: нет поля «{k}» (есть: {', '.join(WhisperCppParams.model_fields)})")
++        upd[k] = v.strip()
++    try:
++        return WhisperCppParams.model_validate(base.model_dump() | upd)
++    except Exception as exc:  # noqa: BLE001 — pydantic message, one line
++        raise ValueError(f"--wc: {str(exc).splitlines()[0]}") from None
++
++
+ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
+-                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "") -> int:
++                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "",
++                   wc=None) -> int:
+     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
+     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
+     Groq transcript), compared word by word with the Groq one, both run through tx-check →
+@@ -8379,6 +8399,17 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
+     prm = _txcheck_params(r0_cfg, _root)
+     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
++    if wc:
++        if not tag:
++            print("ошибка: с --wc нужен --tag (вариант не должен заменить .local)", file=sys.stderr)
++            return 1
++        try:
++            wcfg = _whispercpp_overrides(wcfg, wc)
++        except ValueError as exc:
++            print(f"ошибка: {exc}", file=sys.stderr)
++            return 1
++        print("whisper.cpp: " + ", ".join(f"{k}={getattr(wcfg, k)!r}" for k in
++                                          dict.fromkeys(str(x).partition("=")[0].strip() for x in wc)), flush=True)
+     if backend is None:
+         from autoreels.core.heavy_lock import shared_lock
+         backend = WhisperCppBackend(wcfg, lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
+@@ -8449,6 +8480,9 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
+         _avg = lambda e: f"{100 / e:.0f}" if e else "∞"
+         print(f"   конец предложения на 100 слов: Groq {cmp_['ref_sent_ends']}, локально {cmp_['other_sent_ends']}"
+               f" (слов в предложении: Groq {_avg(cmp_['ref_sent_ends'])}, локально {_avg(cmp_['other_sent_ends'])})")
++        _sa = cmp_["sent_agree"]
++        print(f"   концы Groq на совпавших словах: {_sa['ref']}, локально там же {_sa['both']} ({_sa['recall']}%); "
++              f"своих концов локально {_sa['other']}, из них у Groq тоже {_sa['precision']}%")
+         print(f"   выдумки на речи: Groq {g['serious']} (известных {g['known']}, повторов {g['repeat']}), "
+               f"локально {l_['serious']} (известных {l_['known']}, повторов {l_['repeat']}); "
+               f"звук без слов: Groq {g['sparse_sec']:.0f} с, локально {l_['sparse_sec']:.0f} с")
+@@ -12178,6 +12212,9 @@ def _build_parser():
+     pxc.add_argument("--force", action="store_true", help="расшифровать заново, даже если файл уже есть")
+     pxc.add_argument("--prompt", default=None, help="M64: подсказка стиля пунктуации для whisper.cpp (иначе из конфига)")
+     pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
++    pxc.add_argument("--wc", action="append", default=None, metavar="ключ=значение",
++                     help="M111: параметр whisper.cpp для варианта (поле whispercpp в transcribe.yaml), можно несколько: "
++                          "--wc model='$W/ggml-large-v3.bin' --wc vad_model= --wc max_context=-1; нужен --tag")
+     pxc.add_argument("--root", default=None)
+     pxc.add_argument("--cache-dir", default=None, dest="cache_dir")
+ 
+@@ -12652,7 +12689,7 @@ def main(argv=None) -> int:
+         elif args.cmd == "tx-compare":
+             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
+                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
+-                                  force=args.force, prompt=args.prompt, tag=args.tag)
++                                  force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc)
+         elif args.cmd == "tx-punct":
+             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
+                                 cache_dir=getattr(args, "cache_dir", None))
+diff --git a/src/autoreels/cloud/txcheck.py b/src/autoreels/cloud/txcheck.py
+index 0c21870..cd4d6e6 100644
+--- a/src/autoreels/cloud/txcheck.py
++++ b/src/autoreels/cloud/txcheck.py
+@@ -218,6 +218,9 @@ def prompt_patterns(prompt: str, n: int = 5) -> list[str]:
+     return list(dict.fromkeys(out))
+ 
+ 
++_TERMINAL = (".", "!", "?", "…")
++
++
+ def _sent_ends(words) -> float:
+     """Sentence-ending marks per 100 words (punctuation the sentence split relies on)."""
+     if not words:
+@@ -229,7 +232,8 @@ def _sent_ends(words) -> float:
+ def compare_words(ref, other, *, show: int = 8) -> dict:
+     """Two transcripts of one audio, word by word (case, ё and punctuation folded): matched words,
+     words only in one of them, the share that differs (of the reference) and the longest
+-    disagreements with their times."""
++    disagreements with their times. M111: `sent_agree` — on the matched words, how many sentence ends
++    of `ref` the other one has too (recall) and how many of its own are also in `ref` (precision)."""
+     import difflib
+     a = [(_norm(w.word).strip("."), w) for w in ref]
+     b = [(_norm(w.word).strip("."), w) for w in other]
+@@ -237,9 +241,16 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
+     b = [x for x in b if x[0]]
+     sm = difflib.SequenceMatcher(None, [x[0] for x in a], [x[0] for x in b], autojunk=False)
+     matched, only_a, only_b, spans = 0, 0, 0, []
++    ends_ref = ends_other = ends_both = 0          # M111: sentence ends on the matched words
+     for tag, i1, i2, j1, j2 in sm.get_opcodes():
+         if tag == "equal":
+             matched += i2 - i1
++            for k in range(i2 - i1):
++                er = a[i1 + k][1].word.rstrip().endswith(_TERMINAL)
++                eo = b[j1 + k][1].word.rstrip().endswith(_TERMINAL)
++                ends_ref += er
++                ends_other += eo
++                ends_both += er and eo
+             continue
+         only_a += i2 - i1
+         only_b += j2 - j1
+@@ -250,13 +261,15 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
+     spans.sort(key=lambda s: -s["size"])
+     return {"ref_words": len(a), "other_words": len(b), "matched": matched, "only_ref": only_a,
+             "only_other": only_b, "differ": round(100.0 * (only_a + only_b) / max(1, len(a)), 1),
+-            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other), "longest": spans[:show]}
++            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other),
++            "sent_agree": {"ref": ends_ref, "other": ends_other, "both": ends_both,
++                           "recall": round(100.0 * ends_both / ends_ref, 1) if ends_ref else 0.0,
++                           "precision": round(100.0 * ends_both / ends_other, 1) if ends_other else 0.0},
++            "longest": spans[:show]}
+ 
+ 
+ # ── M64c: Groq's punctuation onto the local words ──────────────────────────────────────────────
+ 
+-_TERMINAL = (".", "!", "?", "…")
+-
+ 
+ def transfer_punctuation(target, ref) -> tuple[list, int]:
+     """Sentence ends of `ref` (Groq: 13 per 100 words) onto the same words of `target` (whisper.cpp:
+diff --git a/tests/test_whispercpp.py b/tests/test_whispercpp.py
+index 759c6c4..7019190 100644
+--- a/tests/test_whispercpp.py
++++ b/tests/test_whispercpp.py
+@@ -5,6 +5,8 @@ import json
+ from pathlib import Path
+ from types import SimpleNamespace
+ 
++import pytest
++
+ from autoreels.cloud.transcribe import WhisperCppBackend, parse_whispercpp_json, transcribe
+ from autoreels.cloud.txcheck import TxCheckParams, check, compare_words, prompt_patterns
+ from autoreels.core.config import WhisperCppParams
+@@ -211,3 +213,40 @@ def test_tx_use_refuses_when_the_map_is_from_another_transcript(tmp_path, capsys
+     assert cli.cmd_tx_use("v", "local", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1
+     assert "карта от расшифровки someone-else" in capsys.readouterr().err
+     assert (tmp_path / "transcripts" / "v.map.json").is_file()            # nothing moved
++
++
++def test_compare_words_sentence_end_agreement():
++    """M111: on the matched words — how many of Groq's sentence ends the local transcript has too."""
++    mk = lambda s: [Word(word=w, t0=i, t1=i + 0.5) for i, w in enumerate(s.split())]
++    ref = mk("Мы пришли. Сели пить чай. Потом ушли домой.")
++    other = mk("мы пришли сели пить чай. Потом ушли. Домой.")
++    sa = compare_words(ref, other)["sent_agree"]
++    assert (sa["ref"], sa["other"], sa["both"]) == (3, 3, 2)
++    assert sa["recall"] == 66.7 and sa["precision"] == 66.7
++
++
++def test_whispercpp_overrides_check_names_and_types():
++    """M111: `--wc key=value` changes only the named whispercpp fields; an empty value turns VAD off;
++    an unknown field or a bad type is an error, not silently ignored."""
++    from autoreels.__main__ import _whispercpp_overrides
++    base = WhisperCppParams()
++    w = _whispercpp_overrides(base, ["model=$W/ggml-large-v3.bin", "vad_model=", "max_context=-1"])
++    assert (w.model, w.vad_model, w.max_context) == ("$W/ggml-large-v3.bin", "", -1)
++    assert w.threads == base.threads and w.host == base.host
++    run = WhisperCppBackend(w).commands(Path("/c/a.mp3"), Path("/t/a.wav"), Path("/t/a.json"))[3][2]
++    assert "ggml-large-v3.bin" in run and "--vad" not in run and "-mc -1" in run
++    for bad in (["modle=x"], ["threads=many"], ["model"]):
++        with pytest.raises(ValueError):
++            _whispercpp_overrides(base, bad)
++
++
++def test_cmd_tx_compare_wc_needs_a_tag(tmp_path, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source, REPO_ROOT
++    import shutil
++    mpath = _source(tmp_path)
++    shutil.copy(REPO_ROOT / "config" / "transcribe.yaml", tmp_path / "config" / "transcribe.yaml")
++    assert cli.cmd_tx_compare([str(mpath)], root=tmp_path, cache_dir=str(tmp_path / "cache"),
++                              wc=["vad_model="]) == 1
++    assert "нужен --tag" in capsys.readouterr().err
++    assert not (tmp_path / "transcripts" / f"{mpath.stem}.local.transcript.json").exists()
