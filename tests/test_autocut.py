@@ -902,3 +902,33 @@ def test_every_clip_gets_post_text_and_pronouns_are_no_key_words():
     rows = [("1.1", "Взрослый чувствует себя."), ("1.2", "Он про своё тело.")]
     assert pick_keywords(rows, _Answers('{"keys": [{"s": 1, "word": "себя"}, {"s": 2, "word": "своё"}]}'),
                          n=2, log=lambda m: None) == []
+
+
+def test_m106_a_clip_without_a_teaser_says_why_and_what_a_third_would_give():
+    """M106 (m105: 3 of 5 clips of PXL_20260729_copy without a cold open, «нет фразы для тизера» — the reason
+    unseen): the note counts the sentences of the second half by the rule each fails, and how many candidates a
+    teaser from a third of the clip on would have (a measure; nothing changes in the clip)."""
+    from autoreels.cloud.autocut import AutoParams, propose, teaser_misses
+    rows = {"1.1": (4.0, True, "Вы знаете, почему жизнь — компенсация?"), "1.2": (3.0, True, "Обычная фраза про жизнь."),
+            "1.3": (3.0, True, "Это и есть доверие к себе."), "1.4": (3.0, True, "Маску можно снять, когда есть доверие!"),
+            "2.1": (3.0, False, "Когда вы поймёте себя, то"), "2.2": (8.0, True, "Взрослый понимает, что маска нужна ребёнку.")}
+
+    def sentences(refs):
+        out = []
+        for piece in refs.split():
+            b, _, r = piece.partition(".")
+            a, _, z = r.partition("-")
+            for k in range(int(a), int(z or a) + 1):
+                sec, complete, text = rows[f"{b}.{k}"]
+                out.append((f"{b}.{k}", sec, len(text.split()), complete, text))
+        return out
+    units = [U(1, 0, 7, "thesis", 5, "1.1-2", summary="жизнь как компенсация"),
+             U(2, 7, 6, "example", 4, "1.3-4", standalone=False, refers=1),
+             U(3, 13, 11, "conclusion", 4, "2.1-2", standalone=False, refers=2, summary="маску можно снять")]
+    p = AutoParams(clips=1, min_sec=10, target_sec=36, max_sec=60, loop=False, prune=False, hook_teaser=True,
+                   hook_no_pointer=True)
+    assert teaser_misses(units, sentences, p) == (2, {"незаконченная": 1, "длиннее 6 с": 1})
+    (pr,) = propose(units, p, sentences)
+    assert pr.hook is None
+    assert ("крючок: во второй части клипа (с 50%) нет фразы для тизера — сборка без крючка (фраз там 2: "
+            "незаконченная — 1, длиннее 6 с — 1; с 33% клипа нашлось бы 1)") in pr.notes

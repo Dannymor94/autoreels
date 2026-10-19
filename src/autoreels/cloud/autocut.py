@@ -25,7 +25,7 @@ Pure: the map's units and a sentence lookup in, proposals out.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
 STORY = ("thesis", "conclusion", "example", "metaphor", "question")
@@ -636,6 +636,43 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[st
     return sorted(out, key=lambda x: -x[1])
 
 
+TEASER_PROBE_POS = 1 / 3      # M106: the «what if the teaser could come from this far on» count in the note (a measure)
+
+
+def teaser_misses(clip: Sequence[dict], sentences, p: AutoParams) -> tuple[int, dict[str, int]]:
+    """M106 (m105: 3 of 5 clips of PXL_20260729_copy without a cold open, the reason unseen): the sentences from
+    hook_teaser_pos of the clip on, and why each is not a teaser — the first rule of _hook_cands it fails, in its
+    order: (number of sentences there, {reason: count})."""
+    skip = clip[0]["id"] if clip and clip[0].get("role") == "question" and len(clip) > 1 else None
+    rows = [(u, list(_sent_rows(sentences, u["refs"]))) for u in clip]
+    total = sum(float(r[1] or 0.0) for _, rs in rows for r in rs)
+    at, n, why = 0.0, 0, {}
+    for u, rs in rows:
+        for _ref, sec, nwords, complete, text in rs:
+            start, at = at, at + float(sec or 0.0)
+            if total <= 0 or start / total < p.hook_teaser_pos:
+                continue
+            n += 1
+            if u["id"] == skip:
+                r = "вопрос-петля"
+            elif int(u.get("punch") or 0) < p.min_punch:
+                r = "слабая мысль"
+            elif p.hook_no_pointer and teaser_pointer(text):
+                r = "ссылка назад"
+            elif not complete:
+                r = "незаконченная"
+            elif nwords < p.hook_min_words:
+                r = f"короче {p.hook_min_words} слов"
+            elif float(sec or 0.0) < p.hook_min_sec:
+                r = f"короче {p.hook_min_sec:g} с"
+            elif float(sec or 0.0) > p.hook_max_sec:
+                r = f"длиннее {p.hook_max_sec:g} с"
+            else:
+                r = "прошла"
+            why[r] = why.get(r, 0) + 1
+    return n, why
+
+
 def _hooks(clip: Sequence[dict], sentences, p: AutoParams) -> list[str]:
     """Hook candidates, best first (M61: the check falls back to the next one when the plan skips one)."""
     return [r for r, _, _ in _hook_cands(clip, sentences, p)]
@@ -774,8 +811,12 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 close.insert(0, ref)
                 acc += float(sec or 0.0)
         if p.hook_teaser and sentences and not cands:
+            n2, why2 = teaser_misses(clip, sentences, p)
+            parts = ", ".join(f"{k} — {v}" for k, v in sorted(why2.items(), key=lambda kv: -kv[1]))
+            probe = len(_hook_cands(clip, sentences, replace(p, hook_teaser_pos=TEASER_PROBE_POS)))
             notes.append(f"крючок: во второй части клипа (с {p.hook_teaser_pos:.0%}) нет фразы для тизера — "
-                         f"сборка без крючка")
+                         f"сборка без крючка (фраз там {n2}{': ' + parts if parts else ''}; "
+                         f"с {TEASER_PROBE_POS:.0%} клипа нашлось бы {probe})")
         if clip[0].get("role") == "question" and clip[0]["t0"] > min(u["t0"] for u in clip):
             notes.append("вопрос из более позднего места открывает клип (вопрос-петля)")
         out.append(Proposal(
