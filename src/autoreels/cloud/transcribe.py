@@ -325,10 +325,12 @@ class WhisperCppBackend:
 
     no_chunking = True
 
-    def __init__(self, cfg, *, ffmpeg: str = "ffmpeg", run: Callable[[list[str]], None] | None = None):
+    def __init__(self, cfg, *, ffmpeg: str = "ffmpeg", run: Callable[[list[str]], None] | None = None,
+                 lock=None):
         self._cfg = cfg
         self._ffmpeg = ffmpeg
         self._run = run or self._default_run
+        self.lock = lock          # M108: the shared gamebox lock (core/heavy_lock.HeavyLock) or None
 
     @staticmethod
     def _default_run(argv: list[str]) -> None:
@@ -377,7 +379,10 @@ class WhisperCppBackend:
     def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript:
         import json
         import tempfile
-        with tempfile.TemporaryDirectory(prefix="whispercpp_") as td:
+        import contextlib
+        held = (self.lock.hold(llama=False) if self.lock is not None and self._cfg.host
+                else contextlib.nullcontext())
+        with tempfile.TemporaryDirectory(prefix="whispercpp_") as td, held:
             wav, out_json = Path(td) / f"{Path(audio_path).stem}.wav", Path(td) / f"{Path(audio_path).stem}.json"
             for argv in self.commands(Path(audio_path), wav, out_json):
                 self._run(argv)

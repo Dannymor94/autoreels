@@ -825,6 +825,24 @@ class LocalLLM:
         return None   # llama-server lists its file name, not our label; reachability is probed at build
 
 
+class _LockedLocal:
+    """M108: the local model as the pool's reserve — it takes the shared gamebox lock on its first call without
+    waiting; busy (the audiobook runs) = a connect error, so the pool stays on the cloud."""
+
+    def __init__(self, inner, lock):
+        self._inner, self._lock = inner, lock
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+        if not self._lock.held and not self._lock.acquire(wait=False):
+            raise ProviderTimeout("gamebox занят (общий замок: озвучка или другая тяжёлая задача) — локальная "
+                                  "модель не берётся", provider=getattr(self._inner, "name", "Local"),
+                                  is_connect_error=True)
+        return self._inner.complete(messages, temperature=temperature)
+
+
 def local_llm_from_env(r0_cfg, *, probe: bool = True) -> "LocalLLM | None":
     """LocalLLM when LOCAL_LLM_URL is set (and the server answers GET /models when probe)."""
     url = os.environ.get("LOCAL_LLM_URL", "").strip()
@@ -1240,7 +1258,19 @@ def build_pool(r0_cfg, *, strategy: str | None = None, local: str = "off") -> Pr
     max_out = getattr(r0_cfg, "max_output_tokens", 900)
     # M40 local: "off" (R0 path, unchanged) | "first" (local, then the cloud) | "only" (local alone)
     # M47: "last" — the cloud first; the local model only when the cloud is out for long (a reserve)
+    lock = None
+    url = os.environ.get("LOCAL_LLM_URL", "").strip()
+    if local in ("first", "only", "last") and url:
+        # M108: the audiobook on gamebox and llama-server never run together — one shared lock. Asked for the
+        # local model: wait for the lock (it also starts llama-server when the audiobook's wrapper left it off).
+        from autoreels.core.heavy_lock import shared_lock
+        lock = shared_lock(getattr(r0_cfg, "heavy_lock", None),
+                           probe=lambda: probe_provider(f"{url.rstrip('/')}/models", api_key=None, timeout=5.0) == 200)
+        if lock is not None and local in ("first", "only"):
+            lock.acquire(wait=True)
     loc = local_llm_from_env(r0_cfg) if local in ("first", "only", "last") else None
+    if loc is not None and lock is not None and local == "last":
+        loc = _LockedLocal(loc, lock)            # the reserve: only when gamebox is free, never waiting for it
     if local == "only":
         if loc is None:
             raise ProviderError("локальная модель не задана или не отвечает: LOCAL_LLM_URL в .env "

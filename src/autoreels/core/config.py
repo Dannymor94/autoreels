@@ -388,6 +388,20 @@ class MapConfig(BaseModel):
     topic_chunk: int = Field(0, ge=0)               # M84: more thoughts → topics asked in parts of this many, merged; 0 = one request
 
 
+class HeavyLockConfig(BaseModel):
+    """M108: one lock for every heavy job of gamebox — the audiobook's synthesis, llama-server use, whisper.cpp
+    (core/heavy_lock.py). Both sides take `flock` on `path` there; the second comer waits. Numbers: config/r0.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = ""                                  # ssh host of the lock; "" = off (no lock, as before)
+    path: str = "/mnt/data/locks/heavy.lock"
+    llama_unit: str = "llama-server"                # systemd unit of the local model
+    start_llama: bool = True                        # start it (sudo -n systemctl start) when it is down
+    stop_if_started: bool = True                    # … and stop it again at the end when this side started it
+    ready_timeout_sec: float = Field(600.0, ge=10)  # a 27B model takes minutes to load
+
+
 class LocalLLMConfig(BaseModel):
     """M40: a local OpenAI-compatible server (llama.cpp `llama-server`) for the labeller.
     The address is machine-local: LOCAL_LLM_URL in .env (e.g. http://192.168.1.50:8080/v1)."""
@@ -554,6 +568,7 @@ class R0Config(BaseModel):
     # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
+    heavy_lock: HeavyLockConfig = Field(default_factory=HeavyLockConfig)
     montage: MontageConfig = Field(default_factory=MontageConfig)
     map: MapConfig = Field(default_factory=MapConfig)
     tx_check: TxCheckConfig = Field(default_factory=TxCheckConfig)

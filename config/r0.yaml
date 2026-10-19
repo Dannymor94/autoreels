@@ -249,6 +249,17 @@ local_llm:
   max_output_tokens: 1500
   no_think: true          # Qwen3: no reasoning block (faster, same JSON)
 
+# M108: one lock for every heavy job of gamebox (the audiobook's synthesis and checks, llama-server use, whisper.cpp):
+# flock on one file there, the second comer waits — nobody kills the other's work. Taken when the local model or
+# whisper.cpp on gamebox is used; llama-server is started when it is down and stopped again when autoreels started it.
+heavy_lock:
+  host: gamebox           # "" = off
+  path: /mnt/data/locks/heavy.lock
+  llama_unit: llama-server
+  start_llama: true
+  stop_if_started: true
+  ready_timeout_sec: 600
+
 # M50: montage — one clip from pieces of different blocks of a source (docs/REEL_SPEC.md §8).
 # A draft line «M 85 | 13.2-6 41.1-4 | h:41.3 | t: …» plays block 13 sentences 2–6, then block 41
 # sentences 1–4 (pieces in source order). Every seam between pieces: a shot change + a natural pause.

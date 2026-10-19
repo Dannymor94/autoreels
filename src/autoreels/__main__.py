@@ -673,6 +673,9 @@ def _stage_transcribe(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cf
                       ffmpeg="ffmpeg", force=False):
     print("транскрипция…" + (" (--force-transcribe)" if force else ""), flush=True)
     backend = get_backend(transcribe_cfg)
+    if r0_cfg is not None and getattr(backend, "lock", "absent") is None:     # M108: whisper.cpp on gamebox
+        from autoreels.core.heavy_lock import shared_lock
+        backend.lock = shared_lock(getattr(r0_cfg, "heavy_lock", None), log=lambda m: print(m, flush=True))
     chunking_cfg = r0_cfg.chunking if r0_cfg is not None else None
     return transcribe(
         audio, cache_dir,
@@ -3910,6 +3913,132 @@ def cmd_transcribe(
                                  out_dir=out_dir, r0_cfg=r0_cfg)
     print(f"транскрипт готов ({len(transcript.words)} слов) → {out}", flush=True)
     return out
+
+
+def _clean_media_path(text: str) -> Path | None:
+    """M109: a path typed or dragged into the terminal — quotes and «\\ » escapes (macOS drag-and-drop) undone, ~
+    expanded. None for an empty answer."""
+    import shlex as _shlex
+    t = (text or "").strip()
+    if not t:
+        return None
+    try:
+        parts = _shlex.split(t)
+    except ValueError:
+        parts = [t.strip("'\"")]
+    return Path(os.path.expanduser(" ".join(parts) if len(parts) > 1 and not Path(parts[0]).exists() else parts[0]))
+
+
+def cmd_dictate(files=None, *, groq: bool = False, fmt: str = "text", root=None, cache_dir=None,
+                ffmpeg: str = "ffmpeg", ask=input, run=None, backend=None, copy: bool = True) -> int:
+    """M109 (owner: «постоянно нужно транскрибировать аудио с диктофона… указываю файл, а далее сам идёт на
+    gamebox и транскрибирует, проверяя, запущен ли сервер»): `arl dictate [файл …]` — без файла спрашивает путь
+    (можно перетащить файл в окно терминала). Расшифровка — whisper.cpp на gamebox (config/transcribe.yaml
+    whispercpp): проверяет, что gamebox отвечает, берёт общий замок (M108; идёт озвучка — ждёт, не мешает ей),
+    результат кэшируется по содержимому файла. Текст (абзацы по паузам) — рядом с аудио, <имя>.txt (--format
+    srt|vtt|json — другие форматы), и в буфер обмена на Mac. gamebox не отвечает — предлагает Groq (--groq — сразу
+    Groq)."""
+    import shutil as _shutil
+    import subprocess as _sp
+    from autoreels.cloud.transcribe import WhisperCppBackend, get_backend
+    from autoreels.core.heavy_lock import shared_lock
+    _root = Path(root) if root else _project_root()
+    cfg = _root / "config"
+    r0_cfg = load_r0_config(cfg / "r0.yaml")
+    render_cfg = load_render_config(cfg / "render.yaml")
+    tcfg = load_transcribe_config(cfg / "transcribe.yaml")
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    _run = run or (lambda argv: _sp.run(argv, capture_output=True, text=True))
+    paths = [Path(os.path.expanduser(str(f))) for f in (files or [])]
+    if not paths:
+        while True:
+            try:
+                ans = ask("Аудио для расшифровки (путь или перетащите файл сюда; Enter — выход): ")
+            except EOFError:
+                ans = ""
+            p = _clean_media_path(ans)
+            if p is None:
+                break
+            if p.is_file():
+                paths.append(p)
+                break
+            print(f"  нет такого файла: {p}")
+    if not paths:
+        print("нечего расшифровывать")
+        return 1
+    be = backend
+    if be is None and not groq:
+        host = tcfg.whispercpp.host
+        if host and _run(["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "true"]).returncode != 0:
+            print(f"gamebox ({host}) не отвечает — выключен, спит или нет сети")
+            try:
+                yes = ask("Расшифровать через Groq? [y/N] ").strip().lower() in ("y", "yes", "д", "да")
+            except EOFError:
+                yes = False
+            if not yes:
+                return 1
+            groq = True
+        if not groq:
+            be = WhisperCppBackend(tcfg.whispercpp, ffmpeg=ffmpeg,
+                                   lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
+    if be is None:
+        be = get_backend(tcfg.model_copy(update={"backend": "groq"}))
+    rc = 0
+    for src in paths:
+        if not src.is_file():
+            print(f"нет такого файла: {src}", file=sys.stderr)
+            rc = 1
+            continue
+        where = "Groq" if groq else f"whisper.cpp на {tcfg.whispercpp.host or 'этой машине'}"
+        print(f"=== dictate: {src.name} → {where} ===", flush=True)
+        try:
+            tr = transcribe(src, _cache, backend=be, language=tcfg.language,
+                            chunking_cfg=r0_cfg.chunking if groq else None,
+                            audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg)
+        except Exception as exc:  # noqa: BLE001 — one file failed: say why, go on with the rest
+            print(f"  ошибка: {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr)
+            rc = 1
+            continue
+        out = _write_transcript_file(tr, stem=src.stem, fmt=fmt, out_dir=src.parent, r0_cfg=r0_cfg)
+        mins = (tr.words[-1].t1 / 60.0) if tr.words else 0.0
+        print(f"  готово: {len(tr.words)} слов, ~{mins:.0f} мин → {out}", flush=True)
+        if copy and len(paths) == 1 and _shutil.which("pbcopy"):
+            try:
+                _sp.run(["pbcopy"], input=out.read_text(encoding="utf-8"), text=True, check=True)
+                print("  текст скопирован в буфер обмена", flush=True)
+            except Exception:  # noqa: BLE001
+                pass
+    return rc
+
+
+def cmd_gamebox(action: str = "status", *, root=None, run=None, lock=None) -> int:
+    """M108: `arl gamebox` — свободен ли общий замок тяжёлых задач, работает ли llama-server, сколько свободно
+    памяти; `arl gamebox take` — взять замок (дождаться) и сразу отпустить: проверка, что замок работает."""
+    import subprocess as _sp
+    import time as _time
+    from autoreels.core.heavy_lock import HeavyLock
+    _root = Path(root) if root else _project_root()
+    cfg = load_r0_config(_root / "config" / "r0.yaml").heavy_lock
+    if not cfg.host:
+        print("общий замок выключен (config/r0.yaml heavy_lock.host пуст)")
+        return 0
+    _run = run or (lambda argv: _sp.run(argv, capture_output=True, text=True))
+    lk = lock or HeavyLock(cfg, run=_run, log=lambda m: print(m, flush=True))
+    if action == "take":
+        t0 = _time.monotonic()
+        lk.acquire(wait=True, llama=False)
+        lk.release()
+        print(f"замок {cfg.host}:{cfg.path} работает (взят и отпущен за {_time.monotonic() - t0:.0f} с)")
+        return 0
+    busy = lk.busy()
+    st = _run(["ssh", "-o", "ConnectTimeout=5", cfg.host,
+               f"systemctl is-active {cfg.llama_unit}; free -g | awk '/Mem:/{{print $7}}'"])
+    lines = (st.stdout or "").split()
+    unit = lines[0] if lines else "?"
+    mem = lines[1] if len(lines) > 1 else "?"
+    print(f"gamebox: замок {'ЗАНЯТ (идёт тяжёлая задача)' if busy else 'свободен'}; "
+          f"{cfg.llama_unit}: {unit}; свободно памяти: {mem} ГБ")
+    return 0
 
 
 def cmd_run_batch(
@@ -8250,7 +8379,10 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
     prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
-    be = backend or WhisperCppBackend(wcfg)
+    if backend is None:
+        from autoreels.core.heavy_lock import shared_lock
+        backend = WhisperCppBackend(wcfg, lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
+    be = backend
     suffix = f".local-{tag}" if tag else ".local"            # M64: variants side by side
     rc = 0
     for mpath in paths:
@@ -12049,6 +12181,24 @@ def _build_parser():
     pxc.add_argument("--root", default=None)
     pxc.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    pdi = sub.add_parser(
+        "dictate",
+        help="M109: аудио с диктофона → текст: whisper.cpp на gamebox (без файла — спросит путь)",
+    )
+    pdi.add_argument("files", metavar="аудио", nargs="*", help="файлы (без них — спросит; можно перетащить в терминал)")
+    pdi.add_argument("--groq", action="store_true", help="сразу через Groq, не через gamebox")
+    pdi.add_argument("--format", choices=["text", "srt", "vtt", "json"], default="text", dest="fmt")
+    pdi.add_argument("--no-copy", action="store_false", dest="copy", help="не копировать текст в буфер обмена")
+    pdi.add_argument("--root", default=None)
+    pdi.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    pgb = sub.add_parser(
+        "gamebox",
+        help="M108: общий замок тяжёлых задач gamebox — статус (по умолчанию) или take (проверка)",
+    )
+    pgb.add_argument("action", nargs="?", choices=["status", "take"], default="status")
+    pgb.add_argument("--root", default=None)
+
     pac = sub.add_parser(
         "autocut",
         help="M56: сборки (строки M) по карте источника — черновик reviews/<stem>_auto_m56.txt",
@@ -12494,6 +12644,11 @@ def main(argv=None) -> int:
             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
                             encoder=args.encoder, music=args.music, tx=args.tx)
+        elif args.cmd == "dictate":
+            return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                               cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+        elif args.cmd == "gamebox":
+            return cmd_gamebox(args.action, root=getattr(args, "root", None))
         elif args.cmd == "tx-compare":
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,

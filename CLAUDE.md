@@ -55,6 +55,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
 - **Mac** — рабочая машина полного цикла: анализ и рендер. Нужен ffmpeg с **libass** (выжигание субтитров, фильтр `ass`) и **videotoolbox** (напр. сборка из tap `homebrew-ffmpeg`). Кодек `hevc_videotoolbox` (передаётся `--encoder`; поле `codec` в `render.local.yaml` схемой не принимается). Исходники могут лежать на внешнем диске и обрабатываться на месте.
 - **Windows (системник)** — рендер и анализ, AMD → `hevc_amf`/`h264_amf`. Под VPN бывают обрывы SSL (`UNEXPECTED_EOF_WHILE_READING` одновременно у обоих провайдеров) — это сеть, не API.
 - Между машинами через git ходят только **манифесты и калибровки**. Транскрипты, ревью, кэш, клипы — локальные.
+- **gamebox** (локальная модель, whisper.cpp) делится с озвучкой книги: один замок `flock` (`config/r0.yaml heavy_lock`, `docs/GAMEBOX.md`). Чужую работу не обрывать — замок ждёт; на gamebox из sudo — только `systemctl start|stop llama-server`.
 
 ## Технические ограничения
 
