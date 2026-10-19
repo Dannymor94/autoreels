@@ -65,3 +65,38 @@ def test_faces_in_different_places_count_only_the_group_seen_most():
     assert face_crop((W, H), split, samples=20) is None         # 11 of 20 found, but no place reaches 30 %
     one = [(1800 + i * 40, 800, 200, 200) for i in range(8)]      # one place, spread a little: as before
     assert abs(face_crop((W, H), one, samples=20).x + base.w / 2 - (1800 + 3.5 * 40)) <= 1
+
+
+def test_m102_the_reel_frame_moves_only_when_its_face_is_off_the_middle():
+    from autoreels.core.calibration import reel_crop, reel_face
+    from autoreels.core.models import Crop
+    base = Crop(x=1240, y=0, w=1215, h=2160)
+    faces = [(1000, 700, 300, 300), (1010, 690, 310, 300), (1015, 710, 290, 300), (3500, 500, 80, 80)]
+    face = reel_face(faces, 7, base.w / 2)
+    assert face == (1010.0, 700.0, 300.0, 300.0)                     # the place seen most; 3500 is someone else
+    assert reel_face(faces, 20, base.w / 2) is None                  # 3 of 20 frames: below 40 %
+    assert reel_face([], 7, base.w / 2) is None
+    assert reel_crop(base, (3840, 2160), (1847, 700, 300, 300)) == base          # in the middle: as calibrated
+    assert reel_crop(base, (3840, 2160), (1847 + 180, 700, 300, 300)) == base    # within 15 % of the width
+    moved = reel_crop(base, (3840, 2160), (1007.5, 700, 300, 300))
+    assert (moved.x, moved.y, moved.w, moved.h) == (400, 0, 1215, 2160)
+    assert reel_crop(base, (3840, 2160), (100, 700, 300, 300)).x == 0           # clamped to the frame
+    assert reel_crop(base, (3840, 2160), None) == base
+
+
+def test_m102_the_close_shot_comes_from_the_face_and_does_not_go_soft():
+    from autoreels.core.calibration import face_close_crop
+    from autoreels.core.models import Crop
+    wide = Crop(x=400, y=0, w=1215, h=2160)                          # 4K source: room to zoom
+    c, z = face_close_crop(wide, (1007.5, 700, 300, 300), out_h=1920)
+    assert z == 1.6 and (c.w, c.h, c.x, c.y) == (760, 1350, 628, 160)          # capped by max_scale
+    c, z = face_close_crop(wide, (1007.5, 900, 500, 500), out_h=1920)
+    assert z == round(2160 / c.h, 3) and 1.2 < z < 1.22                          # face 28 % of the height
+    assert abs((c.y + 0.4 * c.h) - 900) <= 1 and abs((c.x + c.w / 2) - 1007.5) <= 1
+    hd = Crop(x=656, y=0, w=608, h=1080)                             # 1080p source: the upscale caps it
+    c, z = face_close_crop(hd, (960, 350, 120, 120), out_h=1920)
+    assert z == round(1080 / c.h, 3) and z <= 1080 * 2.5 / 1920 + 0.01
+    c, z = face_close_crop(hd, (960, 350, 700, 700), out_h=1920)     # a face already big: still a visible switch
+    assert z >= 1.15
+    c, _ = face_close_crop(hd, (660, 20, 120, 120), out_h=1920)      # at the corner: stays inside the wide frame
+    assert c.x == 656 and c.y == 0 and c.x + c.w <= 656 + 608

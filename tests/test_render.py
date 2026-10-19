@@ -1848,7 +1848,8 @@ def test_ass_filter_contains_only_filename_no_path(tmp_path, render_cfg, monkeyp
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
             self.args = cmd
-            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+            # диагностический ffprobe (crop-space) и кадры поиска лица (M102, rawvideo) не считаем
+            if "ffprobe" not in str(cmd[0]) and "rawvideo" not in cmd:
                 vf_seen.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
@@ -1944,7 +1945,8 @@ def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, mon
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
             self.args = cmd
-            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+            # диагностический ffprobe (crop-space) и кадры поиска лица (M102, rawvideo) не считаем
+            if "ffprobe" not in str(cmd[0]) and "rawvideo" not in cmd:
                 popen_kwargs.append(kwargs)
             self.returncode = 0
             self.stdout = iter([])
@@ -3712,3 +3714,53 @@ def test_continue_plate_over_the_last_seconds_of_an_open_thought():
     assert len(dlg) == 1 and dlg[0].startswith("Dialogue: 1,0:00:07.50,0:00:10.00,Title,")
     assert ("ПРОДОЛЖЕНИЕ →" if cfg.uppercase else "Продолжение →") in dlg[0] and "\\fad(" in dlg[0]
     assert "Style: Title," in ass and "Style: Title," not in plain
+
+
+def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, render_cfg, fake_ffmpeg, monkeypatch,
+                                                                    capsys):
+    """M102 (owner: «чтобы кадры подбирались автоматически»): the faces of THIS reel's body move its frame (the
+    source's crop, sideways) and give its close shot; both flags off — no face lookup, the command as before."""
+    from autoreels.core.calibration import face_close_crop
+    from autoreels.core.models import Segment
+    from autoreels.local import autocrop
+    from autoreels.local.render import render_crop
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"m102-video")
+    reel = _reel("r01", 10.0, 45.0).model_copy(update={
+        "segments": [Segment(start=10.0, end=20.0), Segment(start=30.0, end=45.0, shot="close")],
+        "subtitles": [Word(word="слово", t0=11.0, t1=11.5)]})
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+    face = (1007.5, 700.0, 300.0, 300.0)
+    asked = []
+
+    def faces(video, times, frame_size, **kw):
+        asked.append((list(times), frame_size))
+        return [face] * len(times), len(times)
+    monkeypatch.setattr(autocrop, "reel_faces", faces)
+    cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True})
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o1", render_cfg=cfg, subtitles_cfg=subs_cfg)
+    cmd = " ".join(map(str, fake_ffmpeg[0]))
+    assert len(asked) == 1 and asked[0][1] == (3840, 2160) and len(asked[0][0]) == 7
+    assert all(10.0 < t < 20.0 or 30.0 < t < 45.0 for t in asked[0][0])
+    close, z = face_close_crop(Crop(x=400, y=0, w=1215, h=2160), face, out_h=1920)
+    assert "crop=1215:2160:400:0,scale=1080:1920" in cmd and "crop=1215:2160:1240:0" not in cmd
+    assert f"crop={close.w}:{close.h}:{close.x}:{close.y},scale=1080:1920" in cmd
+    out = capsys.readouterr().out
+    assert "кадр r01: лицо в 7 из 7 кадров (x 1007.5, высота 300) — рамка x 1240 → 400" in out
+    assert f"крупный план r01: ×{z:g} по лицу" in out
+
+    fake_ffmpeg.clear()
+    monkeypatch.setattr(autocrop, "reel_faces", lambda *a, **k: ([], 7))         # no face: the source's frame
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o2", render_cfg=cfg, subtitles_cfg=subs_cfg)
+    cmd = " ".join(map(str, fake_ffmpeg[0]))
+    assert "crop=1215:2160:1240:0" in cmd and "лицо в 0 из 7 кадров — рамка источника" in capsys.readouterr().out
+
+    def boom(*a, **k):
+        raise AssertionError("no face lookup with both flags off")
+    monkeypatch.setattr(autocrop, "reel_faces", boom)
+    fake_ffmpeg.clear()
+    off = render_cfg.model_copy(update={"two_shot": True, "reel_framing": False, "close_from_face": False})
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o3", render_cfg=off, subtitles_cfg=subs_cfg)
+    plain = " ".join(map(str, fake_ffmpeg[0]))
+    assert "crop=1215:2160:1240:0" in plain and "кадр r01" not in capsys.readouterr().out

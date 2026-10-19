@@ -251,3 +251,10 @@ cover_face: true
 continue_plate: true
 continue_sec: 2.5
 continue_text: "Продолжение →"
+
+# M102: frames chosen by the face in each reel (OpenCV, pip install -e ".[faces]"; static within a reel — no tracking).
+# reel_framing: the reel's own wide frame — moved sideways when its face is off the middle of the source's crop.
+# close_from_face: the close shot from the face size and place (not a fixed ×close_shot_scale at the centre),
+# capped so the picture does not go soft. Off = as before. Numbers: core/config.py RenderConfig (M102).
+reel_framing: true
+close_from_face: true

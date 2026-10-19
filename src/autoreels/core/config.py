@@ -968,6 +968,23 @@ class RenderConfig(BaseModel):
     continue_plate: bool = False
     continue_sec: float = Field(2.5, gt=0)
     continue_text: str = "Продолжение →"
+    # M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»): where the face
+    # is in each reel — framing_samples frames over its body (OpenCV); the place seen in at least framing_min_share
+    # of them counts. reel_framing: the reel's own frame — the source's crop moved sideways so this reel's face is
+    # in its middle when it is more than framing_center_zone of the crop width away (static within the reel, no
+    # tracking). close_from_face: the close shot from the face — the face box close_face_h of the frame height,
+    # its centre at close_face_y from the top; the scale within close_min_scale…close_max_scale and an upscale to
+    # the output height of at most close_max_upscale. No face / no OpenCV — as before. Both off = as before.
+    reel_framing: bool = False
+    close_from_face: bool = False
+    framing_samples: int = Field(7, ge=1)
+    framing_min_share: float = Field(0.4, gt=0, le=1)
+    framing_center_zone: float = Field(0.15, ge=0, le=0.5)
+    close_face_h: float = Field(0.28, gt=0, lt=1)
+    close_face_y: float = Field(0.40, gt=0, lt=1)
+    close_max_upscale: float = Field(2.5, ge=1)
+    close_max_scale: float = Field(1.6, ge=1)
+    close_min_scale: float = Field(1.15, ge=1)
 
     @field_validator("role")
     @classmethod

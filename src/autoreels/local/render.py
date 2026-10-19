@@ -35,6 +35,7 @@ from autoreels.core.config import (
     AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.progress import is_tty, render_bar
+from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
 from autoreels.local.fx import output_time as fx_output_time, plate_start, push_vf, timeline as fx_timeline
@@ -2458,6 +2459,37 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
 
 
 
+def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg):
+    """M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания»): where the face is in
+    THIS reel — framing_samples frames spread over its body (the cold open, a teaser from its end, left out), the
+    source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
+    reel_framing). Returns (setup for this reel, face or None, a line for the log). Static within the reel: one
+    rectangle for the wide shot, one for the close shot — no tracking. No OpenCV / no face: the source's frame."""
+    from autoreels.core.calibration import reel_crop, reel_face
+    from autoreels.local.autocrop import cover_candidates, reel_faces
+    n = int(getattr(render_cfg, "framing_samples", 7))
+    times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+    found = reel_faces(source, times, (int(setup.frame[0]), int(setup.frame[1])), ffmpeg=ffmpeg,
+                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)) if times else None
+    if found is None:
+        return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
+    faces, looked = found
+    face = reel_face(faces, looked, setup.crop.w / 2, min_share=float(getattr(render_cfg, "framing_min_share", 0.4)))
+    if face is None:
+        return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
+    note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
+    if not getattr(render_cfg, "reel_framing", False):
+        return setup, face, note
+    zone = float(getattr(render_cfg, "framing_center_zone", 0.15))
+    crop = reel_crop(setup.crop, (int(setup.frame[0]), int(setup.frame[1])), face, center_zone=zone)
+    if crop == setup.crop:
+        centred = abs(float(face[0]) - (setup.crop.x + setup.crop.w / 2)) <= zone * setup.crop.w
+        return setup, face, note + (" — в центре рамки" if centred else " — рамка уже у края кадра") + \
+            ", рамка источника"
+    return (setup.model_copy(update={"crop": crop}), face,
+            note + f" — рамка x {setup.crop.x} → {crop.x}")
+
+
 def _close_crop(setup: SetupProfile, scale: float = 1.25, anchor_y: float = 0.35) -> Crop:
     """Close-shot crop rectangle: tighter by `scale`, horizontally centred, vertically anchored.
 
@@ -2752,7 +2784,11 @@ def _render_segments(
         )
         batch_encoded_secs = 0.0
         batch_start_wall = time.time()
+        _vf_base = vf          # M102: a reel may get its own frame (vf, setup) — reset for every reel
         for idx, reel in enumerate(manifest.reels, 1):
+            vf = _vf_base
+            _reel_setup = manifest.setup
+            _reel_face = None
             try:
                 reel.check_segments()   # never render a reel whose segments desynced from its bounds
             except ValueError as e:
@@ -2818,6 +2854,15 @@ def _render_segments(
                             segs = _snap_close_intervals(segs, _fps())
                         clip_dur = sum(s.end - s.start for s in segs)
 
+            # --- M102: the reel's own frame and close shot from the face in its body (static, no tracking) ---
+            if (emit_text and vf and manifest.setup is not None
+                    and (getattr(render_cfg, "reel_framing", False) or getattr(render_cfg, "close_from_face", False))):
+                _reel_setup, _reel_face, _fr_note = _reel_framing(
+                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg)
+                if _reel_setup is not manifest.setup:
+                    vf = _crop_vf(_reel_setup)
+                print(f"  кадр {reel.id}: {_fr_note}", flush=True)
+
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
             # Planned reels (REEL_SPEC §3) carry their shots in the plan — rendered whatever the
             # two_shot flag says (the flag gates the automatic path's shot machinery only).
@@ -2831,8 +2876,16 @@ def _render_segments(
             if _ts_on:
                 _cscale = getattr(render_cfg, "close_shot_scale", 1.25)
                 _canchy = getattr(render_cfg, "close_shot_anchor_y", 0.35)
-                _ccrop = _close_crop(manifest.setup, scale=_cscale, anchor_y=_canchy)
-                _close_vf_str = _crop_vf_for_crop(manifest.setup, _ccrop)
+                if _reel_face is not None and getattr(render_cfg, "close_from_face", False):
+                    _ccrop, _cz = face_close_crop(
+                        _reel_setup.crop, _reel_face, out_h=int(_reel_setup.scale[1]),
+                        face_h=render_cfg.close_face_h, face_y=render_cfg.close_face_y,
+                        max_upscale=render_cfg.close_max_upscale, max_scale=render_cfg.close_max_scale,
+                        min_scale=render_cfg.close_min_scale)
+                    print(f"  крупный план {reel.id}: ×{_cz:g} по лицу", flush=True)
+                else:
+                    _ccrop = _close_crop(_reel_setup, scale=_cscale, anchor_y=_canchy)
+                _close_vf_str = _crop_vf_for_crop(_reel_setup, _ccrop)
                 if len(segs) > 1:
                     # Per-segment crops go into the prefix; vtail gets palette+ass+vfade only.
                     _ts_seg_vfs = [_close_vf_str if s.shot == "close" else vf for s in segs]  # type: ignore[list-item]
@@ -2895,7 +2948,7 @@ def _render_segments(
                         _z_acc += _zs.end - _zs.start
                         if _xfade_actual > 0 and _zi < len(segs) - 1:
                             _z_acc -= _xfade_actual
-                _effective_vf = _crop_vf(manifest.setup, zoom_cfg, _fps(), _z_offset)
+                _effective_vf = _crop_vf(_reel_setup, zoom_cfg, _fps(), _z_offset)
 
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
@@ -3666,7 +3719,7 @@ def _render_segments(
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
                 if emit_text and getattr(render_cfg, "cover", False):     # M89: a cover for publishing
-                    _write_cover(out, reel, segs, manifest.setup, source, ffmpeg_bin, palette_vf=palette_vf,
+                    _write_cover(out, reel, segs, _reel_setup, source, ffmpeg_bin, palette_vf=palette_vf,
                                  subtitles_cfg=subtitles_cfg, tmp_dir=tmp_ass_dir,
                                  by_face=getattr(render_cfg, "cover_face", False))
         _unlock_dir(_lock_fd)

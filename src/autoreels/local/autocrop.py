@@ -23,11 +23,12 @@ def _duration(video: Path, ffprobe: str) -> float:
     return float(out or 0.0)
 
 
-def _gray_frame(video: Path, t: float, size: tuple[int, int], ffmpeg: str):
+def _gray_frame(video: Path, t: float, size: tuple[int, int], ffmpeg: str, pre_vf: str = ""):
     import numpy as np
     w, h = size
+    vf = f"scale={w}:{h},format=gray"
     cmd = [ffmpeg, "-v", "error", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", "-an",
-           "-vf", f"scale={w}:{h},format=gray", "-f", "rawvideo", "pipe:1"]
+           "-vf", f"{pre_vf},{vf}" if pre_vf else vf, "-f", "rawvideo", "pipe:1"]
     raw = subprocess.run(cmd, capture_output=True, check=True).stdout
     if len(raw) < w * h:
         return None
@@ -52,23 +53,8 @@ def detect_faces(video, frame_size: tuple[int, int], *, samples: int = 20, ffmpe
         log("поиск лица: OpenCV не установлен (pip install -e \".[faces]\") — кроп по центру")
         return None
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    W, H = frame_size
-    sw = min(640, W)
-    sw -= sw % 2
-    sh = int(round(H * sw / W / 2)) * 2
     dur = _duration(Path(video), ffprobe)
-    faces: list[tuple[float, float, float, float]] = []
-    k = W / sw
-    for i in range(samples):
-        t = dur * (i + 0.5) / samples
-        img = _gray_frame(Path(video), t, (sw, sh), ffmpeg)
-        if img is None:
-            continue
-        found = cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=6, minSize=(max(24, sw // 20),) * 2)
-        if len(found):
-            x, y, w, h = max(found, key=lambda f: f[2] * f[3])
-            faces.append((round(float(x + w / 2) * k, 1), round(float(y + h / 2) * k, 1),
-                          round(float(w) * k, 1), round(float(h) * k, 1)))
+    faces = _faces_at(cascade, video, [dur * (i + 0.5) / samples for i in range(samples)], frame_size, ffmpeg)
     if cache_path is not None:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +63,42 @@ def detect_faces(video, frame_size: tuple[int, int], *, samples: int = 20, ffmpe
         except OSError:
             pass
     return faces, samples
+
+
+def _faces_at(cascade, video, times, frame_size: tuple[int, int], ffmpeg: str, pre_vf: str = "") -> list:
+    """The largest frontal face of each frame at `times` (seconds), as (cx, cy, w, h) in display px of frame_size;
+    frames without a face are left out. Frames are looked at ≤ 640 px wide (the boxes scaled back)."""
+    W, H = frame_size
+    sw = min(640, W)
+    sw -= sw % 2
+    sh = int(round(H * sw / W / 2)) * 2
+    k = W / sw
+    faces: list[tuple[float, float, float, float]] = []
+    for t in times:
+        img = _gray_frame(Path(video), t, (sw, sh), ffmpeg, pre_vf)
+        if img is None:
+            continue
+        found = cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=6, minSize=(max(24, sw // 20),) * 2)
+        if len(found):
+            x, y, w, h = max(found, key=lambda f: f[2] * f[3])
+            faces.append((round(float(x + w / 2) * k, 1), round(float(y + h / 2) * k, 1),
+                          round(float(w) * k, 1), round(float(h) * k, 1)))
+    return faces
+
+
+def reel_faces(video, times, frame_size: tuple[int, int], *, ffmpeg: str = "ffmpeg",
+               pre_vf: str = "") -> tuple[list, int] | None:
+    """M102: faces in the frames of one reel (`times` — source seconds, e.g. cover_candidates over its body), the
+    source in display orientation with the reel's rotation (`pre_vf`, as render applies it before the crop) —
+    (faces, frames looked at), or None without OpenCV. No cache: a handful of frames, the same frames → the same
+    faces."""
+    try:
+        import cv2
+    except ImportError:
+        return None
+    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    times = list(times)
+    return _faces_at(cascade, video, times, frame_size, ffmpeg, pre_vf), len(times)
 
 
 # ── M96: the cover frame — the face large, the eyes open ───────────────────────────────────────────────────
