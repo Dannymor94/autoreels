@@ -7,7 +7,7 @@ T="${1:?укажи задачу, например m109}"; shift || true
 ROOT="$(git rev-parse --show-toplevel)"; cd "$ROOT"
 [ -f "handoff/$T/REPORT.md" ] || { echo "нет handoff/$T/REPORT.md — сначала запиши отчёт"; exit 1; }
 WT="${TMPDIR:-/tmp}/autoreels-handoff"
-git fetch -q origin handoff
+git fetch -q origin +refs/heads/handoff:refs/remotes/origin/handoff
 if git -C "$WT" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$WT" reset -q --hard && git -C "$WT" clean -fdq && git -C "$WT" checkout -q --detach origin/handoff
 else
@@ -22,6 +22,6 @@ if git diff --cached --quiet; then echo "отчёт $T уже в ветке hand
 git commit -q -m "report $T"
 for i in 1 2 3; do
   if git push -q origin HEAD:handoff; then echo "отчёт $T отправлен в ветку handoff"; exit 0; fi
-  git fetch -q origin handoff && git rebase -q origin/handoff
+  git fetch -q origin +refs/heads/handoff:refs/remotes/origin/handoff && git rebase -q origin/handoff
 done
 echo "отчёт $T не отправлен (push не прошёл трижды) — сообщи владельцу"; exit 1

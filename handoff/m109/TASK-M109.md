@@ -35,7 +35,7 @@ git push; git status --short
 ```bash
 cd /Users/danny/Documents/autoreels
 bash handoff/bin/report.sh m109
-git fetch -q origin handoff && git show origin/handoff:handoff/m109/REPORT.md | head -5
+git fetch -q origin +refs/heads/handoff:refs/remotes/origin/handoff && git show origin/handoff:handoff/m109/REPORT.md | head -5
 git status --short; git log --oneline -1
 ```
 Ожидается:

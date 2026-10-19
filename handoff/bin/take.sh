@@ -4,7 +4,7 @@
 set -euo pipefail
 T="${1:?укажи задачу, например m109}"
 cd "$(git rev-parse --show-toplevel)"
-git fetch -q origin handoff
+git fetch -q origin +refs/heads/handoff:refs/remotes/origin/handoff
 if ! git cat-file -e "origin/handoff:handoff/$T" 2>/dev/null; then
   echo "в ветке handoff нет handoff/$T — ассистент её ещё не выложил"
   exit 1

@@ -9,4 +9,4 @@
 
 Окну MAIN: «Выполни mNN». Правило записано в `CLAUDE.md` проекта.
 Первый раз, пока скриптов нет:
-`git fetch -q origin handoff && git restore --source=origin/handoff --worktree -- handoff/bin && bash handoff/bin/take.sh mNN`.
+`git fetch -q origin +refs/heads/handoff:refs/remotes/origin/handoff && git restore --source=origin/handoff --worktree -- handoff/bin && bash handoff/bin/take.sh mNN`.
