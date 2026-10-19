@@ -1,0 +1,479 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 48fcd78..f2303f5 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -347,6 +347,8 @@ autocut:
+   context_max_sec: 15     # … the added context thought at most this long
+   context_drop_words: 5   # … a leaning first sentence of at most this many words may be dropped
+   plate: context          # the plate t: says what the clip is about (the hook already pulls) — hook = M71/M73 headline
++  plate_hookless: hook    # M112: a clip with no cold open opens on its plate — there it is the M71/M73 curiosity headline
++                          # (a question to the viewer, a claim to «вы», a contrast — in the clip's words); "" = as plate
+   # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips with no pause after the hook):
+   context_min_words: 4    # a start shorter than this (not a question) is a fragment — fixed like a leaning one
+   context_judge: true     # the model says whether a first sentence stands on its own (rules first; no answer = rules)
+@@ -578,6 +580,8 @@ post:
+   sentences_max: 5
+   max_chars: 700
+   hashtags: 3
++  auto: true              # M112: arl auto writes the posts before the review sheet (they show on the cards); after the
++                          # owner's verdicts arl export <source> --decisions <file> sends only the approved clips to crosspost
+ 
+ # M100 — longreads (v1.0 text content): arl article <source> → export/articles/<source>/NN.md and a crosspost plan
+ # export/crosspost/<source>_articles.csv (тип «статья», заголовок) for Telegraph. One article per topic of the map
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 5044546..a5321ca 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -104,6 +104,8 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ 
+ **Лист ревью** (M37): после рендера `arl review-sheet <stem> [--gate <имя>]` пишет `reels-out/<stem>/[_gate/<имя>/]_review.html` рядом с клипами: каждый клип с видео, плашкой, подписью, текстом, предупреждениями и строкой черновика, из которой он собран. Клип привязывается к строке по тому, где он звучит в исходнике (блоки строки покрывают бóльшую часть клипа); клип без строки (черновик правили после рендера) показывается без выбора. Владелец отмечает «оставить / убрать / переделать» с замечанием и скачивает `<stem>_decisions.txt`. `arl review-apply <файл>` записывает решения в черновик: «убрать» — строка `#- … ← убрано владельцем`, «переделать» — замечание `# ✎ владелец (rNN дата): …` над строкой, «оставить» — отметка `# ✓`. Повторное применение ничего не меняет, прежний черновик — `.bak`. С `--redo` LLM переделывает каждую строку с замечанием по тем же проверкам, что и `arl label` (окно — блоки клипа ±1, блоки других строк недоступны): удачная правка заменяет строку, старая остаётся как `#~ было: …`; неудачная — `#! правка …` с причиной, замечание остаётся для следующего `--redo`. Ничего не устанавливается и не рендерится. Код — `src/autoreels/local/review_sheet.py`, `cloud/label.py` (решения и переделка).
+ 
++**Выдача после ревью** (M112, инвариант 6). `arl auto` перед листом пишет посты (`arl describe`, `post.auto` в `config/r0.yaml`) — они видны на карточках. После оценок: `arl export <источник> --decisions <файл решений>` записывает решения (`arl review-apply`) и выгружает в план crosspost (`arl crosspost --reels …`) только клипы гейта с оценкой «оставить»; последняя оценка клипа главнее прежней. Нет одобренных — нет выгрузки. Ничего не публикуется.
++
+ **Карта источника** (M54). `arl map <stem> [--llm auto|local|cloud|none] [--force]` → `transcripts/<stem>.map.json` и `reels-out/<stem>/_map.html` — основа для сборки рилсов из разных мест (`cloud/thoughtmap.py`). **Неполная карта** (M66): мыслей без паспорта больше `map.max_missing` или темы не получены (модель не отвечала — лимит облака, выключенный локальный сервер) → `✗ карта неполна`, код 3; файл всё равно пишется, `arl auto` останавливается на «map», `arl autocut` отказывает. Повторный `arl map` без `--force` берёт паспорта прежней карты (та же мысль: номер, ссылки, начало) и дозапрашивает только недостающие и темы. (10h59 на local-gp: Groq выдохся после 8 из 152 мыслей, карта записалась как готовая, сборок 0.) **M67:** карта пишется после каждого окна (убитый или вышедший по таймауту прогон теряет одно окно — Pxl 112938952 дважды терял всё после 90 минут) и помнит расшифровку (`transcript_key`); карта другой расшифровки, чем в манифесте, — отказ `arl map` (без `--force`), `arl autocut` и `arl tx-use` с названием обоих ключей (10h59: две сессии переключали источник одновременно, карта local-gp осталась под манифестом Groq). `map`, `label` и выбор крючков первой строкой печатают, кто отвечает: `модели: Groq → OpenRouter · запас: Local <адрес>` — запас из `LOCAL_LLM_URL` (`.env`). **M84** (G7: один запрос тем по всем мыслям длинного источника не дождался ответа; ответ на 150+ номеров к тому же не помещается в `max_output_tokens`): мыслей больше `map.topic_chunk` — темы спрашиваются частями подряд идущих мыслей (каждая часть — ответ или один повтор), затем один запрос сливает одну и ту же тему из разных частей (модель только группирует темы частей; тема, которую она не назвала, остаётся своей; нет ответа — темы частей остаются раздельными). Часть без ответа — тема «без ответа» (`missing`), карта неполна, повторный `arl map` спросит снова; не ответила ни одна — «темы не получены», как раньше.
+ - **Мысли:** подряд 1–4 предложения разметки (`map.unit_min_sec`…`map.unit_max_sec`), конец — на законченном предложении после паузы `map.pause_split_sec`. У каждого предложения блока разметки — его `B.k`, у мысли — куски для строки сборки (`13.2-5 14.1`). Мысли из отсеянных блоков (начало, конец, промо) тоже на карте, с пометкой «вне разметки».
+ - **Голос** (`local/voice.py`): уровень речи, высота и размах высоты голоса, темп; `energy` — место мысли по их сумме внутри источника (0–100).
+@@ -127,7 +129,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ **Начало с контекстом** (M74; владелец: «начала дают мало контекста — „и второй момент, как я уже говорил…“; после крючка сильно резко идёт тело»). Три правила, одни для всех сборок (`autocut.context_start`, `autocut.plate`, `montage.hook_air_sec`, `montage.fx.plate_after_hook`; выключены — прежний выход):
+ 1. **Первая фраза после крючка понятна сама.** Ссылка назад — фраза «как я уже говорил», «второй момент», «во-вторых», «об этом»… в первых 8 словах или первое слово-связка/местоимение («И…», «Поэтому…», «Это…»; вопрос может начинаться с «А/И/Вот…»). Чинится по порядку: короткая (≤ `context_drop_words` слов) фраза-связка перед понятной убирается; иначе мысль прямо перед ней в лекции (≤ `context_max_sec`, сама понятная) добавляется как контекст; иначе эта мысль (вопрос-петля или мысль, на которую ничто не опирается, не зерно) убирается; иначе сборки нет — она в черновике в списке «начало ссылается на вырезанное». Крючок, ссылающийся назад, −3 балла. Слова внутри предложения не вырезаются (клип = целые предложения, инвариант 10).
+ 2. **Воздух между крючком и телом.** После холодного старта и перед первым словом тела — до `hook_air_sec` настоящей тишины, никогда не в речь (за `onset_margin_sec` до неё). План пишет «hook air +X s after the hook, +Y s before the body».
+-3. **Плашка — о чём ролик, и появляется с телом.** Крючок голосом цепляет; плашка `t:` появляется на стыке крючок → тело и называет тему словами ролика. Модель предлагает три (тема фразой, вопрос «Как/Почему/Что…», главная мысль), код отбрасывает по жёстким правилам M71 и выбирает по `plate_score`: общие содержательные слова с началом/выводом (+1 за каждое, до 3), меньше двух содержательных слов (−2), вопрос «да/нет» или на «вы» — второй крючок (−1,5), обращение к зрителю (−0,5), «И…/Это…» (−2), 2–6 слов (+1), длиннее 40 знаков (−2). `plate: hook` — заголовок-крючок M71/M73 над крючком, как раньше.
++3. **Плашка — о чём ролик, и появляется с телом.** Крючок голосом цепляет; плашка `t:` появляется на стыке крючок → тело и называет тему словами ролика. Модель предлагает три (тема фразой, вопрос «Как/Почему/Что…», главная мысль), код отбрасывает по жёстким правилам M71 и выбирает по `plate_score`: общие содержательные слова с началом/выводом (+1 за каждое, до 3), меньше двух содержательных слов (−2), вопрос «да/нет» или на «вы» — второй крючок (−1,5), обращение к зрителю (−0,5), «И…/Это…» (−2), 2–6 слов (+1), длиннее 40 знаков (−2). `plate: hook` — заголовок-крючок M71/M73 над крючком, как раньше. **M112:** у клипа без холодного старта плашка идёт первой и должна цеплять сама — для него берётся заголовок-крючок M71/M73 (`plate_hookless`, `config/r0.yaml`); если проверки сняли крючок уже после плашки, плашка пишется заново.
+ **M75** (отчёт M74: начала «Уйти.», «Контролер, да, допустим.», «Хоть это, как говорят психологи…»; у Pxl M2 убран вопрос «То есть, а из чего?» и остался ответ без вопроса; у 6 из 15 клипов нет паузы после крючка): начало (не вопрос) короче `context_min_words` слов — обрывок, чинится как ссылка назад, и такое же правило для мысли-контекста; вопрос не убирается от своего ответа; после правил модель отвечает «понятна ли первая фраза зрителю, не слышавшему ничего до неё» (`context_judge`; только да/нет, нет ответа — решают правила, в выводе счётчик); если после крючка в записи нет тишины (`hook air` < `hook_pause_sec`), берётся следующий из первых `hook_pause_top` крючков модели, после которого она есть, иначе остаётся первый (запись в черновике). **M76** (отчёт M75: у 11h42 сборок 4 → 2, у Pxl 5 → 3 — отбрасывались начала, которые можно починить): контекстом могут стать до `context_back` мыслей прямо перед началом (если ближайшая сама ссылается назад, а предыдущая — нет; вместе ≤ `context_max_sec`); иначе (`context_later`) клип начинается с первой более поздней фразы той же мысли, которая понятна сама, — ответ от своего вопроса не отрывается, от мысли остаётся ≥ `context_later_min_sec`; только потом мысль убирается или сборки нет. **M77** (владелец по m76): `context_later` выключен — «Конечно, перенос — вещь неблагодарная…» без двух убранных фраз непонятно; модель теперь считает непонятным и термин, введённый как уже известный («перенос», «этот метод»); плашки одного источника чередуют форму (вопрос/тема, −1 за уже выбранную, «свобода — где-то текст, где-то вопрос»); воздух после крючка не дублируется, когда тело идёт в записи сразу за крючком (одна и та же тишина игралась дважды — «кадр двоится»); эффекты сборок (`montage.fx`, без выносок) — и на обычных клипах автоматического черновика (`montage.fx_auto_clips`; «у копии PXL не хватает динамики»), клипы разметки владельца не меняются. **M78** (владелец по m77): модель на каждое начало отвечает одним JSON — о чём фраза (предмет), понятна ли сама, ведёт ли к теме ролика (тема — краткое содержание зерна и вывода); нет предмета или хоть одно «нет» — начало чинится цепочкой или сборки нет («фраза про кресло мало информативна»); короткие версии выключены (`short_variant: false` — у IMG r03 и r06 было одно начало); заголовки, отличающиеся только «ё/е», — один заголовок. Кроп источника без ручной калибровки ставится по лицу (`local/autocrop.py`, OpenCV 4 — `pip install -e ".[faces]"`): 20 кадров по всему видео, медиана центра лица, рамка 9:16 полной высоты, неподвижная (не слежение); лица меньше чем в 30 % кадров или нет OpenCV — по центру, как раньше; ручная калибровка главнее. Найденное кэшируется в `data/cache/<sha16>.faces.json`. **M87** (Pxl 20260621: лицо в 10–11 из 20 кадров, медиана всех лиц сдвигала рамку на 68–85 % её ширины — между двумя местами, ни на ком): лица ближе половины ширины кропа — одно место в кадре; считается только место, что видно в большем числе кадров (поровну — где лица крупнее), и оно само должно набрать 30 % кадров, иначе кроп по центру. **M79** (владелец по копии PXL r07: интервьюер «зависает между слов на несколько секунд»): пауза длиннее `long_pause_sec` внутри клипа вырезается всегда (до паузы профиля); заметный скачок лица маскируется сменой плана, правила разнесения вырезов (`min_cut_spacing_sec`, `change_gap_sec`, `mask_min_gap_sec`) её не держат — секунды тишины хуже одной смены плана. План пишет «N long pause(s) always cut». **M80** (копия PXL r02, локальная расшифровка: «регулярно.» кончается ровно там, где начинается следующее слово; при 29,97 кадра/с конец клипа округлялся вверх и заходил в следующую речь на 16 мс): при выравнивании конца клипа по кадрам рендер не переходит начало следующей речи — такой конец идёт вниз, на последний кадр не позже чем за 10 мс до неё (срезается не больше кадра затухания). План не меняется (попытка M80 резать конец в плане попадала внутрь слова — откачена). **M83b** (IMG_6848 r02/r05, 60 кадров/с: слово кончается ровно там, где начинается следующая речь; запас 10 мс плюс округление вниз срезали 20–22 мс слова, а проверка «last word cut» допускает один кадр): если запас срезал бы больше кадра последнего слова, конец — последний кадр не позже начала следующей речи (проверки следующей речи допускают 10 мс; слово теряет не больше кадра). **M81** (владелец: IMG r03/r06 «начинаются с фразы про кресло — малоинформативна» — холодный старт звучит раньше начала тела): первые `hook_judge_top` кандидатов в крючок проходят ту же проверку модели, что и начало (предмет назван, понятен сам, ведёт к теме ролика — тема: краткое содержание первой опорной мысли и вывода); отклонённые уходят до ранжирования; если не прошёл ни один — сборка без крючка, ролик начинается с тела. Модель только отсеивает кандидатов кода; нет ответа — кандидат остаётся. **M82** (оценки владельца — основа для обучения формул): на листе ревью у каждого клипа, и у сборок тоже (раньше у сборок решения не было — «владельцу в чат»), — «оставить / убрать / переделать», причины одним касанием (начало, крючок, плашка, конец, темп, стык, кадр, звук, скучно) и замечание; «переделать» требует замечание или причину. Строка решения сборки: `rNN | montage M3 | drop | причины: крючок, плашка | замечание`. `arl review-apply` применяет решения по строкам черновика как раньше, а все оценки с причинами пишет в `reviews/verdicts.jsonl` (данные владельца, не в git проекта): источник, гейт, черновик, строка, для сборки — заметки автосборщика над ней (крючок, начало, плашка, баллы). Повторное решение по тому же клипу того же черновика заменяет прежнее. Строки сборок в черновике не меняются. **M83** (замер m80: у всех пяти сборок с холодным стартом крючок — собственная первая фраза клипа; по правилу повтора она убиралась из тела, и тело шло со второй фразы — «В инстинкты.», «А второй момент…», «То есть…»; тизера не было): кандидаты в крючок — только фразы, начинающиеся не раньше `hook_teaser_pos` длины клипа (по длительности его фраз в порядке проигрывания), строка пишет `h:B.N!` — тизер звучит ещё раз на своём месте, в теле нет дыры; нет такой фразы — сборка без крючка (заметка в черновике). Проверка модели (M81) и выбор крючка с паузой (M75) — как раньше, среди этих кандидатов. **M86** (замер M85: у 11h42 и Pxl модель отбросила все тизеры, среди них «И никогда, ребятки, не поздно.» и «Поздно — это когда уже завтра заказан священник.» — за открытый вопрос, а это работа тизера; у 11h42 пропала сборка — пограничное начало модель в m83 оценила иначе, чем в m78): крючок проверяется как тизер (`hook_judge_mode: teaser`) — открытый вопрос, провокация, парадокс годятся, ссылка на несказанное («это/вот» вместо предмета, ответ на неслышанный вопрос, «второй момент») — нет; модель видит слова конца ролика (что тизер обещает). Ответы моделей на начала и крючки хранятся между прогонами (`judge_cache`, `data/cache/autocut_judge.json`, ключ — хэш промпта и запроса): та же фраза — тот же ответ; удалить файл — спросить заново. Оценки владельца (M82) — примеры в промптах проверок (`owner_examples`: последние отклонённые с причиной «крючок»/«начало» и оставленные, до 6 каждого); черновик называет выбранный крючок строкой `крючок: «…»`, чтобы оценка знала его текст. Каждый кандидат проходит проверку крючка, выбор модели и заголовок плашки, когда до него доходит отбор (раньше — только первые clips+2: кандидат на месте отклонённого уходил с непроверенным крючком). **M88** (владелец: «у копии PXL не хватает динамики»; слова `k:` были только в разметке владельца): модель отмечает ключевые слова сборки — одно на фразу, не больше одного на `keywords_every_sec` секунд ролика и не больше `keywords_max`; слово обязано быть словом этой фразы (правило `k:`: регистр, ё, пунктуация по краям не важны), не короче 3 букв, не местоимение и не служебное — иначе отбрасывается; строка пишет `k:B.N=слово;…`. Слова подсвечиваются в субтитрах, на них приходит крупный план (`montage.keywords`, `montage.emphasis`). Нет модели — нет `k:`. **M91** (пакет концовки, PLAN M1.7 B — та часть, что согласна с правилами владельца: без стоп-кадра, быстрая концовка): вывод звучит крупным планом — последние фразы клипа (не меньше `close_last_sec`, не больше двух) пишутся `c:B.N,…`. **M89** (обложка для публикации, PLAN M1.7 шаг 3): рядом с каждым отрендеренным клипом — `<клип>.cover.jpg` (`render.yaml: cover`): кадр из середины самого длинного окна тела (холодный старт — тизер из конца — не берётся) в кропе и цвете ролика, с его плашкой `t:` с первого кадра, без фейда. Сам клип не меняется; ошибка обложки — предупреждение. **M90** (выгрузка в crosspost, PLAN M2 п. 3): `arl crosspost <источник> [--gate имя] [--reels r01,r03]` → `export/crosspost/<источник>/<клип>.mp4` (+ обложка; жёсткая ссылка, где диск позволяет, иначе копия) и таблица `export/crosspost/<источник>[_<гейт>].csv` с колонками «файл;текст;тип» (UTF-8 с BOM, «;» — то, что читает «Импорт плана» crosspost): «файл» — путь от `export/crosspost` (папка-источник в crosspost задаётся один раз), «текст» — `<клип>.txt` рендера (подпись и хэштеги), «тип» — пост. Клип с `[ERROR]` или без подписи пропускается с причиной. Время публикации задаётся правилом раскидки в crosspost. **M92** (m86: модель в режиме тизера пропустила «Это и есть доверие к себе», «Для меня это самый лучший отдых», «Но опять подростковая часть…», «Он как-то хочет скриншот…»): тизер, который ссылается назад, код убирает из кандидатов до модели (`hook_no_pointer`) — всё, что находит проверка начала M74 (первое «Это/Но/Он/Вот…», «второй момент», «как я говорил»), и «это» без предмета среди первых трёх слов (но не «X — это …» — определение). **M93** (m88: у Pxl 112938952 r02 вывод совпал с начальной мыслью — подпись `d:` осталась пустой, рендер не записал `r02.txt`, выгрузка в crosspost клип пропустила; «себя» стало ключевым словом в двух клипах): подпись `d:` — итог вывода всегда, даже когда вывод и есть начальная мысль; возвратные и притяжательные местоимения («себя», «свой», «мне»…) не бывают ключевыми словами. **M94** (владелец: «нужно делать подробное описание видео для постинга»): `arl describe <источник> [--gate имя] [--reels …] [--llm auto|local|cloud] [--force]` — рядом с каждым отрендеренным клипом `<клип>.post.txt`: пост модели из 3–5 предложений (`post:` в `config/r0.yaml`) по словам ролика (`<клип>.transcript.txt`, подпись `<клип>.txt` — подсказка) и хэштеги, сказанные в ролике, после `hashtags_always` из `render.yaml`. Код проверяет (`cloud/postcopy.py`): длина и число предложений, нет числа, которого нет в ролике, не меньше половины содержательных слов — из ролика, нет «|» и хэштегов в тексте; хэштег — одно слово, его основа сказана в ролике. Один повтор с причиной; нет годного ответа — файла нет, остаётся подпись рендера. Готовый `.post.txt` не переписывается без `--force`. `arl crosspost` берёт `.post.txt` вместо `.txt`. **M95** (владелец смотрит всё разом): карточка листа ревью показывает под видео обложку (`<клип>.cover.jpg`), а в описании — слова холодного старта (что зритель слышит первым; слово — в окне крючка по середине своего звучания), ключевые слова `k:` и текст поста, который уйдёт в crosspost (`.post.txt` M94, иначе `.txt` рендера), с пометкой, откуда он. **M96** (обложка по лицу, `render.yaml: cover_face`): из 7 моментов, разнесённых по телу клипа (без холодного старта), обложкой берётся кадр, где в кропе ролика лицо крупнее и глаза открыты (OpenCV: лицо, глаза в его верхней половине; оценка — площадь лица × 1 при двух глазах, × 0,7 при одном, × 0,4 без глаз); нет OpenCV или лица — середина самого длинного окна (M89). **M97** (пакет концовки, PLAN M1.7 B): клип, мысль которого продолжается за его концом (предупреждение `open_thought`), показывает в плашке «Продолжение →» (`render.yaml: continue_plate`, `continue_text`) последние `continue_sec` секунд — зритель ищет продолжение, а не чувствует обрыв. Без флага — субтитры побайтово прежние. **M98** (M1.8, потребитель 7 — маркеры пауз в выгрузке): `⏸N.N` / `⏸⏸N.N` после фразы в файле для разметки (`arl blocks --review`) считаются по паузе на слух — от слышимого конца последнего слова до слышимого начала следующей фразы (карта речи / выравнивание, `review_pause_from_map`), а не по зазору Whisper; без карты и выравнивания — как раньше. **M100** (v1.0, текстовый контент): `arl article <источник> [--topics N] [--llm auto|local|cloud]` — лонгрид на каждую из крупнейших тем карты (`article:` в `config/r0.yaml`; тема — мысли не служебные, описанные, сила ≥ 3, не меньше трёх): модель делает план (заголовок и 3–5 разделов, каждый — из названных мыслей темы, мысль — в одном разделе), затем пишет каждый раздел по словам его мыслей; код оставляет только то, что держится текста лекции (заголовок и заголовки разделов — содержательные слова лекции, иначе название темы / итог мысли; раздел — проверка поста M94: размер, нет чужих чисел, половина содержательных слов из лекции; один повтор с причиной). Меньше двух разделов — статьи нет. Итог: `export/articles/<источник>/NN.md` и план crosspost `export/crosspost/<источник>_articles.csv` («файл;текст;тип;заголовок», тип «статья», абзац — строка: так crosspost собирает статью Telegraph). Проверено разборщиком импорта crosspost. **M101** (m94: оба поста, что видел владелец, шли по шаблону «Почему…? Вы поймёте, что…» — в ленте все посты звучали бы одинаково; два клипа из девяти остались без поста, причина терялась в выводе): пост говорит саму мысль, а не объявляет её — шаблонная фраза («вы поймёте», «вы узнаете», «в этом видео», «смотрите до конца»…, список в `cloud/postcopy.py`), которой нет в словах ролика, — причина отказа и повтора; пост или раздел статьи сверх размера код сокращает до целых предложений с начала (не больше максимума предложений и знаков) до проверки — лишнее предложение модели больше не повод выбросить пост; `arl describe` пишет причину отказа в строке пропущенного клипа. **M102** (владелец: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»; рамка — своя у каждого ролика, решение владельца): рендер смотрит `framing_samples` кадров тела ролика (холодный старт — тизер из конца — не берётся; источник повёрнут, как перед кропом) и находит лицо (OpenCV); считается место, что видно чаще (M87) и не меньше чем в `framing_min_share` кадров. `reel_framing`: рамка ролика — кроп источника (калибровка, ручная или по лицу), сдвинутый по горизонтали так, чтобы лицо этого ролика было посередине, если оно дальше `framing_center_zone` ширины рамки от середины; внутри ролика рамка неподвижна (не слежение). `close_from_face`: крупный план — от лица, а не фиксированное ×`close_shot_scale` по центру: рамка такая, что лицо — `close_face_h` высоты кадра, его центр на `close_face_y` сверху и посередине; масштаб в пределах `close_min_scale`…`close_max_scale` и такой, чтобы растяжение до выходной высоты не превышало `close_max_upscale` (иначе картинка мылится); крупный план — внутри общего. Нет лица или OpenCV — как раньше. Лог рендера: `кадр rNN: лицо в K из N кадров … — рамка x A → B` и `крупный план rNN: ×Z по лицу`. Обложка берётся в рамке ролика. **M103** (владелец: переход на крупный — «оба, сравню на гейте»): `render.yaml: shot_transition: punch` (или `arl render --transition punch`) — за `punch_sec` до крупного плана, который приходит внутри окна (ключевое слово `k:`, вывод `c:`), общий план быстро наезжает (с ускорением) туда, где будет крупный: точка, вокруг которой растёт масштаб, и масштаб — те, что превращают общий кадр в рамку крупного (`local/fx.punch_point`); склейка в момент смены попадает на то, к чему шёл наезд, и не видна. Наезд (push) этого плана кончается там, где начинается наезд-переход, переход стартует с достигнутого масштаба; переход, который задел бы «pop» в начале клипа, не ставится. Стыки кусков и вырезы пауз остаются склейками. `cut` — как раньше. Длительность и швы не меняются (инвариант 8). Исправлено заодно (M55/M70): медленный наезд и «pop» тянули кадр к левому верхнему углу — фильтр crop брал размер первого кадра (`iw`/`ih`), а не текущего; теперь положение рамки считается из того же выражения масштаба, и увеличение идёт к центру (лицо больше не сползает вниз-вправо за длинный план). **M104** (m101: хэштег «#себе»): хэштег поста не бывает местоимением или служебным словом — тот же стоп-список, что у ключевых слов `k:`. **M106** (m105: у 3 из 5 сборок PXL_20260729_copy нет холодного старта — «нет фразы для тизера», причина не видна): заметка черновика называет, почему: сколько фраз во второй части клипа и по какому правилу кандидатов каждая не прошла (первое из правил в их порядке: вопрос-петля, слабая мысль, ссылка назад, незаконченная, короче `hook_min_words` слов, короче `hook_min_sec`, длиннее `hook_max_sec`), и сколько кандидатов нашлось бы, если бы тизер мог начинаться с трети клипа. Это замер: сборка не меняется. **M107** (замер m106: у 6 из 15 сборок нет холодного старта — во второй половине клипа одна–четыре фразы, большинство ссылаются назад, остальные отклонила модель; тизер с трети клипа дал бы одну): кандидат, оставшийся после проверок без крючка, откладывается (`hookless_last`); сначала берутся сборки с крючком, отложенные — только когда те кончились (с заметкой «без крючка — взята, когда сборки с крючком кончились»). Не взятые отложенные — в конце черновика закомментированными строками `#!` (можно раскомментировать). Выключено — порядок по баллу, как раньше.
+ 
+ **Первые секунды, стыки, темп** (M70). Автосборщик (`autocut:` в `config/r0.yaml`): `hook_title` — модель предлагает заголовок-крючок для плашки `t:` (вопрос или напряжение из слов ролика); код берёт его, только если он не длиннее 60 знаков и 9 слов, без чисел, которых ролик не говорит, и не меньше 60 % содержательных слов совпадают с ролика (иначе остаётся краткое содержание мысли); `seam_check` — модель судит каждый стык сборки («Б продолжает А?»), ответ обязателен для каждого стыка; сборки с рваным стыком идут после чистых (модель только упорядочивает, решает проверка `--apply`); `short_variant` — к каждой принятой сборке короткая версия (слабые мысли из середины убраны до `short_sec`), проверяется так же, в черновике помечена «короткая версия Mn». Монтаж: `montage.fx.pop` — клип открывается на `pop_pct` % ближе и за `pop_sec` возвращается к кадру (резкий старт); `montage.filler_profile: montage_tempo` — профиль вырезки пауз для сборок, когда она включена (`f:1` / `--filler`): только паузы длиннее 0,6 с и «э/мм», заметный скачок лица закрывается сменой плана не чаще раза в 3 с (по умолчанию вырезка в сборках выключена — M53b; сравнение A/B — `--filler`).
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index c1389ba..2c9911d 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8117,7 +8117,13 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+     # plate headline) when the selection below reaches it — before, only pool[:clips+2] was, so a later candidate
+     # that took a rejected one's place (or moved up after the seam sort) went out with unjudged hooks.
+     _polish = None
++    _plate = None
+     _hjudge = None
++
++    def _plate_mode(pr) -> str:
++        # M112 (owner: a clip without a cold open opens on its plate — the plate has to pull, not only name the subject)
++        hl = getattr(ac, "plate_hookless", "")
++        return hl if hl and not pr.hook else ac.plate
+     _log = lambda x: print(x, flush=True)  # noqa: E731
+     if prov is not None and pool:
+         try:
+@@ -8148,15 +8154,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                     tail.insert(0, t)
+                 return f"{base}. Конец ролика: «{' '.join(tail)}»" if tail else base
+ 
++            def _plate(pr) -> None:                 # M70/M71: a curiosity headline for the plate t:
++                _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
++                                 if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
++                pr.plate_mode = _plate_mode(pr)
++                headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
++                         used_forms=_forms, log=_log, mode=pr.plate_mode)
++
+             def _polish(pr) -> None:
+                 if _hjudge is not None and pr.hooks:
+                     judge_hooks(pr, _hjudge, _hook_core(pr), top=ac.hook_judge_top, log=_log)
+                 rank_hooks(pr, prov, log=_log)
+-                if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
+-                    _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
+-                                     if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
+-                    headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
+-                             used_forms=_forms, log=_log, mode=ac.plate)
++                if ac.hook_title:
++                    _plate(pr)
+                 if ac.keywords:                     # M88: key words of the subtitles (k:)
+                     from autoreels.cloud.autocut import pick_keywords
+                     _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
+@@ -8252,6 +8262,14 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             continue
+         pr.notes.append("без крючка — взята, когда сборки с крючком кончились (M107)")
+         _try_accept(pr)
++    if _plate is not None and ac.hook_title and getattr(ac, "plate_hookless", ""):
++        for pr in accepted:                 # M112: the checks dropped the cold open after the plate was written
++            if pr.plate_mode and pr.plate_mode != _plate_mode(pr):
++                pr.notes.append(f"крючок снят проверкой — плашка заново ({_plate_mode(pr)})")
++                try:
++                    _plate(pr)
++                except Exception as exc:  # noqa: BLE001 — no model: the plate stays
++                    print(f"  плашка: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+     # M70: a short version of every accepted clip (weakest middle thoughts dropped), checked the same way
+     if ac.short_variant and accepted:
+         from autoreels.cloud.autocut import short_variant
+@@ -9073,6 +9091,68 @@ def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str
+     return 0 if rows or not (clips or errors) else 2
+ 
+ 
++def _gate_verdicts(root: Path, stem: str, gate: str) -> dict:
++    """M112: the owner's latest verdict per clip of one gate (reviews/verdicts.jsonl, arl review-apply writes it):
++    {rid: "ok" | "drop" | "fix" | "edit"}; a later row on the same clip wins."""
++    import json as _json
++    path = root / "reviews" / "verdicts.jsonl"
++    out: dict = {}
++    if not path.is_file():
++        return out
++    for ln in path.read_text(encoding="utf-8").splitlines():
++        try:
++            r = _json.loads(ln)
++        except ValueError:
++            continue
++        if r.get("stem") == stem and (r.get("gate") or "") == gate and r.get("rid"):
++            out[str(r["rid"])] = str(r.get("verdict") or "")
++    return out
++
++
++def cmd_export(target: str, *, root=None, gate: str | None = None, decisions: str | None = None,
++               out_dir: str | None = None, export_dir: str | None = None, cache_dir=None) -> int:
++    """M112 (owner: «одна команда от видео до публикации»; invariant 6 — the clips leave only after the owner's
++    approval): phase 2 of `arl auto`. --decisions <the file the review sheet downloads> first records the verdicts
++    (arl review-apply); then only the gate's clips marked «оставить» go to the crosspost plan (arl crosspost
++    --reels …: video, cover, the post of arl describe). No approved clip = nothing exported. Never publishes —
++    crosspost imports the plan."""
++    _root = Path(root) if root else _project_root()
++    mpath = _resolve_manifest_arg(target, _root)
++    if mpath is None:
++        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
++        return 1
++    if decisions:
++        from autoreels.cloud.label import parse_decisions
++        dp = Path(decisions).expanduser()
++        if not dp.is_file():
++            print(f"ошибка: файла решений нет: {decisions}", file=sys.stderr)
++            return 1
++        head, _d, _e = parse_decisions(dp.read_text(encoding="utf-8"))
++        if head.get("stem") and head["stem"] != mpath.stem:
++            print(f"ошибка: решения для «{head['stem']}», а не для «{mpath.stem}»", file=sys.stderr)
++            return 1
++        if gate and head.get("gate") and head["gate"] != gate:
++            print(f"ошибка: решения для гейта «{head['gate']}», а не «{gate}»", file=sys.stderr)
++            return 1
++        gate = gate or head.get("gate") or None
++        rc = cmd_review_apply(str(dp), root=_root, cache_dir=cache_dir)
++        if rc:
++            print("ошибка: решения не записаны — выгрузки нет", file=sys.stderr)
++            return rc
++    gate = gate or "auto"
++    verdicts = _gate_verdicts(_root, mpath.stem, gate)
++    ok = sorted(r for r, v in verdicts.items() if v == "ok")
++    tally = {v: sum(1 for x in verdicts.values() if x == v) for v in ("ok", "drop", "fix", "edit")}
++    print(f"export {mpath.stem} (гейт {gate}): оценки — оставить {tally['ok']}, убрать {tally['drop']}, "
++          f"переделать {tally['fix']}, правка {tally['edit']}", flush=True)
++    if not ok:
++        print("ошибка: одобренных клипов нет — сначала оценки на листе ревью (кнопка «скачать решения»), "
++              "потом arl export … --decisions <файл>", file=sys.stderr)
++        return 1
++    return cmd_crosspost(str(mpath), root=_root, gate=gate, reels=",".join(ok), out_dir=out_dir,
++                         export_dir=export_dir)
++
++
+ def _card_extras(reel, vdir: Path) -> dict:
+     """M95: what the owner judges besides the video, on the same card — the cover, the post text crosspost gets,
+     the cold open's words and the k: words."""
+@@ -9648,12 +9728,17 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply);
+     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
+        if it fails, the autocut draft alone (its lines passed the checks);
+-    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music) and the review sheet.
++    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
++       review sheet. Phase 2 after the owner's verdicts: arl export (only the approved clips → crosspost plan).
+     Finished stages skip themselves; a failed stage stops that source with its reason, the next goes on."""
+     _root = Path(root) if root else _project_root()
+     if tx:                                             # M64: transcription backend of a new video's arl run
+         os.environ["TRANSCRIBE_BACKEND"] = {"local": "whispercpp"}.get(tx, tx)
+     results: list[tuple[str, str, str]] = []           # (stem, "ok" | failed stage, note)
++    try:                                               # M112: posts in auto, then arl export (config/r0.yaml post.auto)
++        _post_auto = bool(load_r0_config(_root / "config" / "r0.yaml").post.auto)
++    except Exception:  # noqa: BLE001 — no config: as before
++        _post_auto = False
+     for target in targets:
+         tp = Path(target)
+         mpath = None
+@@ -9732,9 +9817,14 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+                 if err:
+                     results.append((stem, "render", err))
+                     continue
++                if _post_auto and llm != "none":     # M112: the post of every clip, on its card and for crosspost
++                    stage("описания постов", lambda: cmd_describe(m, root=_root, gate=gate, llm=llm))
+                 stage("лист ревью", lambda: cmd_review_sheet(stem, root=_root, cache_dir=cache_dir, review=str(used),
+                                                              manifest_file=str(review_json), gate=gate,
+                                                              preview="none"))
++                if _post_auto:
++                    note = (note + "; " if note else "") + (f"после листа: arl export {stem} --gate {gate} "
++                                                            f"--decisions <файл решений>")
+         results.append((stem, "ok", note or f"черновик {used.name}"))
+     print("\n=== auto: итог ===", flush=True)
+     for stem, st, note in results:
+@@ -12302,6 +12392,21 @@ def _build_parser():
+     pcx.add_argument("--export-dir", default=None, dest="export_dir",
+                      help="куда выгружать (по умолчанию export/crosspost)")
+ 
++    pex = sub.add_parser(
++        "export",
++        help="M112: одобренные на листе клипы гейта → план crosspost (вторая фаза arl auto)",
++        description="M112: --decisions <файл с листа ревью> записывает оценки (arl review-apply), затем в план crosspost "
++                    "идут только клипы с оценкой «оставить». Ничего не публикует.",
++    )
++    pex.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
++    pex.add_argument("--gate", default=None, help="гейт (по умолчанию из файла решений, иначе auto)")
++    pex.add_argument("--decisions", default=None, help="файл решений, скачанный с листа ревью")
++    pex.add_argument("--root", default=None, help="корень проекта")
++    pex.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
++    pex.add_argument("--export-dir", default=None, dest="export_dir",
++                     help="куда выгружать (по умолчанию export/crosspost)")
++    pex.add_argument("--cache-dir", default=None, dest="cache_dir")
++
+     par = sub.add_parser(
+         "article",
+         help="лонгриды по темам карты источника → export/articles/ и план crosspost (статьи для Telegraph)",
+@@ -12729,6 +12834,10 @@ def main(argv=None) -> int:
+             return cmd_crosspost(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
+                                  reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),
+                                  export_dir=getattr(args, "export_dir", None))
++        elif args.cmd == "export":
++            return cmd_export(args.manifest, root=getattr(args, "root", None), gate=args.gate,
++                              decisions=args.decisions, out_dir=getattr(args, "out_dir", None),
++                              export_dir=getattr(args, "export_dir", None), cache_dir=getattr(args, "cache_dir", None))
+         elif args.cmd == "review-apply":
+             return cmd_review_apply(
+                 args.decisions,
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index c8ed9cf..b24f823 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -102,6 +102,7 @@ class Proposal:
+     hook_keep: bool = False                             # M83: the cold open is a teaser from later — h:B.N! (replayed)
+     keys: list = field(default_factory=list)            # M88: [(B.N, word)] — k: words the subtitles highlight
+     close: list = field(default_factory=list)           # M91: [B.N] — the last sentences in the close shot (c:)
++    plate_mode: str = ""                                # M112: how the plate t: was written (hook | context; "" = not)
+ 
+     def line(self, label: str) -> str:
+         sp = f"@{self.speed:g}" if self.speed else ""
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index eb07b32..f6c2356 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -289,6 +289,7 @@ class AutocutConfig(BaseModel):
+     context_max_sec: float = Field(15.0, gt=0)   # … the thought right before may be added as context, this long at most
+     context_drop_words: int = Field(5, ge=0)     # … a leaning first sentence this short may be dropped
+     plate: str = Field("hook", pattern="^(hook|context)$")   # the model's plate t:: a curiosity headline | what the clip is about
++    plate_hookless: str = Field("", pattern="^(|hook|context)$")   # M112: the plate of a clip with no cold open; "" = as plate
+     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips had no pause after the hook)
+     context_min_words: int = Field(0, ge=0)      # a start (not a question) shorter than this is a fragment; 0 = off
+     context_judge: bool = False                  # the model says whether a first sentence stands on its own
+@@ -356,6 +357,7 @@ class PostConfig(BaseModel):
+     sentences_max: int = Field(5, ge=1)
+     max_chars: int = Field(700, ge=100)
+     hashtags: int = Field(3, ge=0)            # the model's hashtags (said in the reel), after render.yaml hashtags_always
++    auto: bool = False                        # M112: arl auto writes the posts (arl describe) before the review sheet
+ 
+ 
+ class ArticleConfig(BaseModel):
+diff --git a/tests/test_auto.py b/tests/test_auto.py
+index a2a09f1..15a2727 100644
+--- a/tests/test_auto.py
++++ b/tests/test_auto.py
+@@ -31,6 +31,7 @@ def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None):
+         return rcs.pop(0) if rcs else 0
+     monkeypatch.setattr(cli, "_blocks_do_apply", apply)
+     monkeypatch.setattr(cli, "cmd_render", lambda **k: calls.append(("render", (), k)) or [Path("x.mp4")])
++    monkeypatch.setattr(cli, "cmd_describe", rec("describe"))
+     monkeypatch.setattr(cli, "cmd_review_sheet", rec("sheet"))
+     return calls
+ 
+@@ -54,13 +55,35 @@ def test_auto_runs_every_stage_in_order_and_merges_the_drafts(tmp_path, monkeypa
+     calls = _stub(monkeypatch, tmp_path)
+     assert cli.cmd_auto([str(mpath)], root=tmp_path, music="pad.m4a", gate="g1") == 0
+     names = [c[0] for c in calls]
+-    assert names == ["prepare", "tx-check", "map", "autocut", "apply", "render", "sheet"]
++    assert names == ["prepare", "tx-check", "map", "autocut", "apply", "render", "describe", "sheet"]   # M112: posts
+     combined = (tmp_path / "reviews" / "v_auto_all.txt").read_text(encoding="utf-8")
+     assert combined.startswith("# label head") and "2 80" in combined and "M1 80 | 2.1-3" in combined
+     assert combined.count("# fingerprint:") == 1
+     render = next(c for c in calls if c[0] == "render")[2]
+     assert render["gate_name"] == "g1" and render["music"] == "pad.m4a" and render["reels_filter"] == "1-1"
+-    assert "✓ v: готово" in capsys.readouterr().out
++    out = capsys.readouterr().out
++    assert "✓ v: готово" in out and "после листа: arl export v --gate g1 --decisions <файл решений>" in out
++    describe = next(c for c in calls if c[0] == "describe")
++    assert describe[2]["gate"] == "g1" and describe[2]["llm"] == "auto"
++
++
++def test_auto_without_posts_is_as_before(tmp_path, monkeypatch, capsys):
++    """M112 off (post.auto: false) or --llm none: no describe stage, no export hint — the M63 sequence."""
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    cfg = tmp_path / "config" / "r0.yaml"
++    text = cfg.read_text(encoding="utf-8")
++    assert "  auto: true " in text
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, llm="none") == 0
++    assert [c[0] for c in calls][-2:] == ["render", "sheet"]
++    capsys.readouterr()
++    cfg.write_text(text.replace("  auto: true ", "  auto: false "), encoding="utf-8")
++    calls.clear()
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    assert [c[0] for c in calls] == ["prepare", "tx-check", "map", "autocut", "apply", "render", "sheet"]
++    assert "arl export" not in capsys.readouterr().out
+ 
+ 
+ def test_auto_falls_back_to_the_autocut_draft(tmp_path, monkeypatch, capsys):
+diff --git a/tests/test_autocut.py b/tests/test_autocut.py
+index 0f2015d..fea9510 100644
+--- a/tests/test_autocut.py
++++ b/tests/test_autocut.py
+@@ -992,3 +992,75 @@ def test_m107_clips_without_a_cold_open_go_after_the_hooked_ones(tmp_path, monke
+     order, ms, text, out = run("true", 5)                                    # only one hooked: one hookless fills in
+     assert len(ms) == 2 and " h:" in ms[0] and " h:" not in ms[1] and ms[1].split(" | ")[1] == order[0]
+     assert "без крючка — взята, когда сборки с крючком кончились (M107)" in text
++
++
++def test_m112_a_clip_without_a_cold_open_gets_a_curiosity_plate(tmp_path, monkeypatch):
++    """M112: a clip with no cold open opens on its plate t:, so there the plate is the M71/M73 curiosity headline
++    (mode «hook»); a clip with a cold open keeps the plate that names the subject (plate: context). When the checks
++    drop the cold open after the plate was written, the plate is written again. plate_hookless "" = as before."""
++    from autoreels import __main__ as cli
++    from autoreels.cloud import autocut as ac_mod
++    from autoreels.cloud.edit import merge_group_sentences
++    from autoreels.core.models import Manifest
++    from tests.test_montage import _source
++
++    def run(flag: str, n_hookless: int, skip_hook: bool = False):
++        root = tmp_path / f"{flag or 'off'}{n_hookless}{skip_hook}"
++        root.mkdir()
++        mpath = _source(root)
++        cfg = root / "config" / "r0.yaml"
++        cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
++                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
++                       .replace("  plate_hookless: hook ", f"  plate_hookless: \"{flag}\" "), encoding="utf-8")
++        r0 = cli.load_r0_config(cfg)
++        assert r0.autocut.plate_hookless == flag and r0.autocut.plate == "context"
++        tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
++        _, kept, _ = cli._review_block_set(tx, r0, "lecture")
++        units = []
++        for b in range(6):
++            ss = merge_group_sentences([kept[b]], tx.words)
++            units.append(U(b + 1, ss[0][0].t0, ss[-1][-1].t1 - ss[0][0].t0, "conclusion", 5, f"{b + 1}.1-{len(ss)}",
++                           topic=b + 1, summary=f"вывод {b + 1}"))
++        (root / "transcripts").mkdir(exist_ok=True)
++        (root / "transcripts" / "v.map.json").write_text(json.dumps(
++            {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": units}), encoding="utf-8")
++        order, plates = [], []
++
++        def rank(pr, prov, **k):
++            order.append(pr.pieces)
++            if len(order) <= n_hookless:
++                pr.hooks, pr.hook = [], None
++            else:
++                pr.hooks = pr.hooks[:1]
++            return False
++
++        def headline(pr, prov, text, *, mode, **k):
++            plates.append((pr.pieces, mode))
++            pr.title = f"плашка {mode} {pr.pieces.split('.')[0]}"      # distinct titles (M78: same title = too close)
++            return True
++        checks = []
++
++        def check(head, line, r, c):
++            checks.append(line)
++            return (None, "    ! h:x — cold open skipped") if skip_hook and len(checks) == 1 and " h:" in line else (None, "")
++        monkeypatch.setattr(ac_mod, "rank_hooks", rank)
++        monkeypatch.setattr(ac_mod, "headline", headline)
++        monkeypatch.setattr(ac_mod, "check_seams", lambda *a, **k: None)
++        monkeypatch.setattr(cli, "_autocut_check", check)
++        prov = _Answers('{"subject": "вывод", "alone": true, "leads": true, "why": ""}')
++        assert cli.cmd_autocut("v", root=root, cache_dir=str(root / "cache"), llm="local", provider=prov) == 0
++        text = (root / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
++        return order, plates, [ln for ln in text.splitlines() if ln.startswith("M")], text
++
++    order, plates, ms, _ = run("", 5)                           # off: every plate as plate: context
++    assert {m for _, m in plates} == {"context"} and len(ms) == 2
++    order, plates, ms, _ = run("hook", 5)                       # one hooked clip, one hookless fills in
++    modes = dict(plates)
++    assert modes[order[5]] == "context" and modes[order[0]] == "hook"
++    assert " h:" in ms[0] and "t: плашка context" in ms[0]
++    assert " h:" not in ms[1] and "t: плашка hook" in ms[1]
++    order, plates, ms, text = run("hook", 0, skip_hook=True)    # the check dropped the only cold open
++    first = order[0]
++    assert [m for p, m in plates if p == first] == ["context", "hook"]
++    assert " h:" not in ms[0] and "t: плашка hook" in ms[0]
++    assert "крючок снят проверкой — плашка заново (hook)" in text
+diff --git a/tests/test_crosspost_export.py b/tests/test_crosspost_export.py
+index 7fd9759..f7c89d0 100644
+--- a/tests/test_crosspost_export.py
++++ b/tests/test_crosspost_export.py
+@@ -36,3 +36,74 @@ def test_crosspost_export_folder_and_table(tmp_path, capsys):
+     assert list(csv.reader(io.StringIO((exp / "v_m86.csv").read_text(encoding="utf-8-sig")), delimiter=";"))[1:] == [
+         ["v/r10.mp4", "Десятый.", "пост"]]
+     assert cli.cmd_crosspost("v", root=tmp_path, gate="nope") == 1                  # no such folder
++
++
++def _gate(tmp_path):
++    g = tmp_path / "reels-out" / "v" / "_gate" / "m112"
++    g.mkdir(parents=True)
++    for rid in ("r01", "r02", "r03"):
++        (g / f"{rid}.mp4").write_bytes(rid.encode())
++        (g / f"{rid}.txt").write_text(f"Подпись {rid}.", encoding="utf-8")
++    (g / "r02.post.txt").write_text("Пост r02.", encoding="utf-8")
++    return g
++
++
++def _rows(tmp_path, name="v_m112.csv"):
++    return list(csv.reader(io.StringIO((tmp_path / "export" / "crosspost" / name).read_text(encoding="utf-8-sig")),
++                           delimiter=";"))[1:]
++
++
++def test_export_sends_only_the_clips_the_owner_kept(tmp_path, capsys):
++    """M112 (invariant 6): phase 2 of arl auto — only the gate's clips with the owner's «оставить» go to crosspost;
++    the latest verdict on a clip wins; verdicts of another gate or source do not count; none approved = no export."""
++    import json
++    _source(tmp_path)
++    _gate(tmp_path)
++    assert cli.cmd_export("v", root=tmp_path, gate="m112") == 1                    # no verdicts yet
++    assert "одобренных клипов нет" in capsys.readouterr().err
++    assert not (tmp_path / "export" / "crosspost" / "v_m112.csv").exists()
++    rows = [{"stem": "v", "gate": "m112", "rid": "r01", "verdict": "fix"},
++            {"stem": "v", "gate": "m112", "rid": "r02", "verdict": "ok"},
++            {"stem": "v", "gate": "m112", "rid": "r03", "verdict": "drop"},
++            {"stem": "v", "gate": "other", "rid": "r03", "verdict": "ok"},
++            {"stem": "w", "gate": "m112", "rid": "r03", "verdict": "ok"},
++            {"stem": "v", "gate": "m112", "rid": "r01", "verdict": "ok"}]           # changed mind on r01
++    (tmp_path / "reviews").mkdir(exist_ok=True)
++    (tmp_path / "reviews" / "verdicts.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
++    assert cli.cmd_export("v", root=tmp_path, gate="m112") == 0
++    out = capsys.readouterr().out
++    assert "оставить 2, убрать 1, переделать 0" in out and "клипов 2" in out
++    assert _rows(tmp_path) == [["v/r01.mp4", "Подпись r01.", "пост"], ["v/r02.mp4", "Пост r02.", "пост"]]
++    assert not (tmp_path / "export" / "crosspost" / "v" / "r03.mp4").exists()
++
++
++def test_export_records_the_sheet_decisions_first(tmp_path, capsys):
++    """M112: --decisions <file from the review sheet> = arl review-apply, then the export; the gate comes from the
++    file; decisions of another source are refused before anything is written."""
++    _source(tmp_path)
++    _gate(tmp_path)
++    (tmp_path / "reviews").mkdir(exist_ok=True)
++    (tmp_path / "reviews" / "v_auto_m56.txt").write_text(
++        "# fingerprint: abc\nM1 85 | 2.2-4 | t: А\nM2 80 | 3.1-2 | t: Б\nM3 70 | 4.1-2 | t: В\n", encoding="utf-8")
++    dec = tmp_path / "v_decisions.txt"
++    dec.write_text("# stem: v\n# review: reviews/v_auto_m56.txt\n# gate: m112\n# decided: 2026-10-19\n"
++                   "r01 | montage M1 | ok\nr02 | montage M2 | drop | причины: крючок\nr03 | montage M3 | ok\n",
++                   encoding="utf-8")
++    other = tmp_path / "w_decisions.txt"
++    other.write_text(dec.read_text(encoding="utf-8").replace("# stem: v", "# stem: w"), encoding="utf-8")
++    assert cli.cmd_export("v", root=tmp_path, decisions=str(other)) == 1
++    assert "решения для «w»" in capsys.readouterr().err
++    assert not (tmp_path / "reviews" / "verdicts.jsonl").exists()
++    assert cli.cmd_export("v", root=tmp_path, decisions=str(dec), gate="nope") == 1
++    assert "гейта «m112»" in capsys.readouterr().err
++    assert cli.cmd_export("v", root=tmp_path, decisions=str(dec)) == 0
++    out = capsys.readouterr().out
++    assert "записано 3" in out and "оставить 2, убрать 1" in out
++    assert _rows(tmp_path) == [["v/r01.mp4", "Подпись r01.", "пост"], ["v/r03.mp4", "Подпись r03.", "пост"]]
++
++
++def test_export_command_is_wired(monkeypatch):
++    seen = {}
++    monkeypatch.setattr(cli, "cmd_export", lambda m, **k: seen.update(m=m, **k) or 0)
++    assert cli.main(["export", "v", "--decisions", "d.txt", "--gate", "g"]) == 0
++    assert seen["m"] == "v" and seen["decisions"] == "d.txt" and seen["gate"] == "g"
