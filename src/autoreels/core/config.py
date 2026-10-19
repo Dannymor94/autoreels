@@ -310,6 +310,8 @@ class AutocutConfig(BaseModel):
     keywords: bool = False
     keywords_every_sec: float = Field(12.0, gt=0)   # one key word per this many seconds of the clip …
     keywords_max: int = Field(4, ge=0)              # … at most this many
+    keywords_voice: bool = False                    # M116 (M1.9 D): words the voice draws out are shown to the model
+    keywords_voice_ratio: float = Field(1.25, ge=1.0)   # … duration per letter ≥ this × the sentence's median
     # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
     close_last: bool = False
     close_last_sec: float = Field(3.0, ge=0)
@@ -407,6 +409,18 @@ class HeavyLockConfig(BaseModel):
     ready_timeout_sec: float = Field(600.0, ge=10)  # a 27B model takes minutes to load
 
 
+class AnthropicConfig(BaseModel):
+    """M116: Claude through the Messages API — `--llm haiku | sonnet` (paid: the owner's ANTHROPIC_API_KEY in .env).
+    Model ids and prices (USD per 1M tokens, input/output) live here, not in the code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    models: dict[str, str] = Field(default_factory=lambda: {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5"})
+    prices: dict[str, list[float]] = Field(default_factory=dict)
+    max_output_tokens: int = Field(2048, ge=100)
+    timeout_sec: float = Field(120.0, ge=10, le=590)
+
+
 class LocalLLMConfig(BaseModel):
     """M40: a local OpenAI-compatible server (llama.cpp `llama-server`) for the labeller.
     The address is machine-local: LOCAL_LLM_URL in .env (e.g. http://192.168.1.50:8080/v1)."""
@@ -416,6 +430,7 @@ class LocalLLMConfig(BaseModel):
     model: str = "local"                           # llama-server serves one model; the name is a label
     timeout_sec: float = Field(540.0, ge=10, le=590)  # a window on an RX 580 takes minutes; < pool budget 600 s
     max_output_tokens: int = Field(1500, ge=100)
+    think_max_output_tokens: int = Field(3000, ge=500)   # M116: --llm local-think — the reasoning block counts too
     no_think: bool = True                          # Qwen3: answer without a reasoning block
 
 
@@ -573,6 +588,7 @@ class R0Config(BaseModel):
     # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
+    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     heavy_lock: HeavyLockConfig = Field(default_factory=HeavyLockConfig)
     montage: MontageConfig = Field(default_factory=MontageConfig)
     map: MapConfig = Field(default_factory=MapConfig)

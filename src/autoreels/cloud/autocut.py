@@ -527,34 +527,74 @@ def judge_hooks(pr: "Proposal", judge: "Judge", core: str = "", *, top: int = 6,
     return notes
 
 
+def parse_judge(raw: str) -> "tuple[bool, str] | None":
+    """The judge's answer → (ok, why); None = not usable (asked again). M78: subject + alone + leads — any «no» (or
+    no subject) rejects; a plain {"ok": bool} is taken as it is."""
+    import json as _json
+    import re as _re
+    text = _re.sub(r"<think>.*?</think>", " ", raw or "", flags=_re.S)
+    obj, dec = None, _json.JSONDecoder()
+    for m in _re.finditer(r"\{", text):                         # the last JSON object that decodes
+        try:
+            cand, _ = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(cand, dict):
+            obj = cand
+    if not isinstance(obj, dict):
+        return None
+    why = str(obj.get("why") or "").strip()[:60]
+    if isinstance(obj.get("alone"), bool) and isinstance(obj.get("leads"), bool):
+        subj = str(obj.get("subject") or "").strip()
+        if not subj:
+            return (False, why or "не ясно, о чём фраза")
+        if not obj["alone"]:
+            return (False, why or "непонятно без предыдущего")
+        if not obj["leads"]:
+            return (False, why or f"не про тему ролика («{subj[:30]}»)")
+        return (True, subj[:40])
+    if isinstance(obj.get("ok"), bool):
+        return (obj["ok"], why)
+    return None
+
+
 def make_judge(provider, *, log: Callable[[str], None] = print, system: str | None = None,
-               label: str = "First sentence", store=None) -> "Judge":
+               label: str = "First sentence", store=None, jlog: Callable[[dict], None] | None = None) -> "Judge":
     """M75: the model's yes/no on «does this first sentence stand on its own» — cached per sentence, one retry,
     None when there is no usable answer (the rules' verdict then stands). M86: `label` names the line in the
     request («Teaser line» for a cold open; the following sentence is then sent only when given); `store` — a
     persistent mapping (hash of the prompt and the request → [ok, why]): the same line asked the same way gets
-    the same answer in every run (a borderline start no longer flips between runs); no answer is not stored."""
+    the same answer in every run (a borderline start no longer flips between runs); no answer is not stored.
+    M116: the store key carries the answering model (provider.model_id) — one model's answer is never handed to
+    another; `jlog` gets every judgment {label, model, system, msg, ok, why, cached} (arl autocut --judge-log)."""
     import hashlib as _hashlib
-    import json as _json
-    import re as _re
     cache: dict = {}
     sys_text = system or STANDALONE_SYSTEM
+    mid = str(getattr(provider, "model_id", "") or "")
+
+    def _log(msg: str, out, cached: bool) -> None:
+        if jlog is not None:
+            jlog({"label": label, "model": mid, "system": sys_text, "msg": msg,
+                  "ok": None if out is None else bool(out[0]), "why": None if out is None else out[1], "cached": cached})
 
     def judge(text: str, following: str = "", core: str = ""):
         key = (text, following, core)
-        if key in cache:
-            return cache[key]
         if label == "First sentence":
             msg = (f"First sentence: «{text}»\nFollowing sentence: «{following}»"
                    + (f"\nThe clip is about: {core}" if core else ""))
         else:
             msg = (f"{label}: «{text}»" + (f"\nFollowing sentence: «{following}»" if following else "")
                    + (f"\nThe clip is about: {core}" if core else ""))
-        skey = _hashlib.sha256((sys_text + "\n\n" + msg).encode("utf-8")).hexdigest()[:32] if store is not None else ""
+        if key in cache:
+            _log(msg, cache[key], True)
+            return cache[key]
+        base = (f"{mid}\n" if mid else "") + sys_text + "\n\n" + msg
+        skey = _hashlib.sha256(base.encode("utf-8")).hexdigest()[:32] if store is not None else ""
         if store is not None and skey in store:
             v = store[skey]
             cache[key] = (bool(v[0]), str(v[1])) if isinstance(v, (list, tuple)) and len(v) == 2 else None
             if cache[key] is not None:
+                _log(msg, cache[key], True)
                 return cache[key]
         out = None
         for _ in range(2):
@@ -564,30 +604,13 @@ def make_judge(provider, *, log: Callable[[str], None] = print, system: str | No
             except Exception as exc:  # noqa: BLE001 — no model: the rules decide
                 log(f"  начало: модель не ответила ({type(exc).__name__})")
                 break
-            m = _re.search(r"\{.*\}", raw or "", _re.S)
-            try:
-                obj = _json.loads(m.group(0)) if m else {}
-            except ValueError:
-                continue
-            why = str(obj.get("why") or "").strip()[:60]
-            if isinstance(obj.get("alone"), bool) and isinstance(obj.get("leads"), bool):
-                # M78: two questions and a named subject — any «no» (or no subject) rejects the start
-                subj = str(obj.get("subject") or "").strip()
-                if not subj:
-                    out = (False, why or "не ясно, о чём фраза")
-                elif not obj["alone"]:
-                    out = (False, why or "непонятно без предыдущего")
-                elif not obj["leads"]:
-                    out = (False, why or f"не про тему ролика («{subj[:30]}»)")
-                else:
-                    out = (True, subj[:40])
-                break
-            if isinstance(obj.get("ok"), bool):
-                out = (obj["ok"], why)
+            out = parse_judge(raw)
+            if out is not None:
                 break
         cache[key] = out
         if store is not None and out is not None:
             store[skey] = [bool(out[0]), str(out[1])]
+        _log(msg, out, False)
         return out
 
     judge.cache = cache   # type: ignore[attr-defined]
@@ -977,6 +1000,10 @@ KEYWORDS_SYSTEM = (
     "particle, a filler or a function word. Answer only with JSON: {{\"keys\": [{{\"s\": <number>, \"word\": "
     "\"<word>\"}}]}}."
 )
+KEYWORDS_VOICE_NOTE = (
+    " Some sentences end with [voice: …] — words the speaker draws out with the voice; when one of them carries the "
+    "point, prefer it."
+)
 _KEY_STOP = frozenset("это этот эта эти так вот что как все всё они она оно его ее её мы вы ты он я там тут где "
                       "когда тогда если чтобы потому поэтому тоже также уже еще ещё просто очень какой какая "
                       "такой такая быть есть был была было который которая которые "
@@ -990,20 +1017,50 @@ def _kw_norm(w: str) -> str:
     return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
 
 
+def voice_stressed(words: Sequence, dur_of: Callable, *, ratio: float = 1.25, top: int = 1) -> list[str]:
+    """M116 (M1.9 D; M99: the owner's k: word is drawn out — longer per letter than the median of the other words of its
+    sentence — in 106 of 131 sentences, 65 % for content words that are not the last): the sentence's content words
+    (≥ 5 letters, not the last word — it is drawn out anyway — not a function word) whose duration per letter is at
+    least `ratio` × the median of the sentence's words, the most drawn out first, at most `top`. `dur_of(word)` → the
+    aligned duration (intonation map) or None. Too few measured words = no hint."""
+    per: list[tuple[float, str]] = []
+    allv: list[float] = []
+    for k, w in enumerate(words):
+        d = dur_of(w)
+        n = sum(c.isalpha() for c in w.word)
+        if d is None or n < 2:
+            continue
+        allv.append(float(d) / n)
+        word = _kw_norm(w.word)
+        if k < len(words) - 1 and n >= 5 and word not in _KEY_STOP:
+            per.append((float(d) / n, word))
+    if len(allv) < 3 or not per:
+        return []
+    med = sorted(allv)[len(allv) // 2]
+    out = [w for v, w in sorted(per, key=lambda x: -x[0]) if med > 0 and v >= ratio * med]
+    return list(dict.fromkeys(out))[:top]
+
+
 def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
-                  log: Callable[[str], None] = print) -> list[tuple[str, str]]:
+                  log: Callable[[str], None] = print, voiced: Sequence[Sequence[str]] | None = None
+                  ) -> list[tuple[str, str]]:
     """M88: the model marks at most `n` key words — one per sentence — in the clip's sentences [(B.N, text)] (play
     order). Grounded (invariant 2): the word must be a word of that very sentence (the k: matching rule — case, ё,
     punctuation ignored), at least 3 letters, not a pronoun or a function word; anything else is dropped. One retry
-    when the answer is not JSON; no model or no usable answer = no k: (the clip as before)."""
+    when the answer is not JSON; no model or no usable answer = no k: (the clip as before). M116: `voiced` — per row the
+    words the voice draws out (voice_stressed): shown to the model as a hint; the model still picks, the same checks."""
     import json as _json
     import re as _re
     if n <= 0 or not rows:
         return []
-    msg = "Sentences:\n" + "\n".join(f"{i}. {t}" for i, (_r, t) in enumerate(rows, 1))
+    hint = voiced is not None and any(voiced)
+    msg = "Sentences:\n" + "\n".join(
+        f"{i}. {t}" + (f" [voice: {', '.join(voiced[i - 1])}]" if hint and i - 1 < len(voiced) and voiced[i - 1] else "")
+        for i, (_r, t) in enumerate(rows, 1))
+    system = KEYWORDS_SYSTEM.format(n=n) + (KEYWORDS_VOICE_NOTE if hint else "")
     for _ in range(2):
         try:
-            raw = provider.complete([{"role": "system", "content": KEYWORDS_SYSTEM.format(n=n)},
+            raw = provider.complete([{"role": "system", "content": system},
                                      {"role": "user", "content": msg}], temperature=0.0)
         except Exception as exc:  # noqa: BLE001 — no model: no k:
             log(f"  ключевые слова: модель не ответила ({type(exc).__name__})")

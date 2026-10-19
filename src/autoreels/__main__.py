@@ -7740,6 +7740,33 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
 # M47: auto = the cloud first, the local model as a reserve when the cloud is out for long
 # (M40b/M40c: Qwen3-8B found 3 of 8 owner clips, 30B-A3B 1, the cloud 6).
 _LOCAL_MODE = {"auto": "last", "local": "only", "cloud": "off"}
+_LLM_MODES = ("auto", "local", "cloud", "haiku", "sonnet", "local-think")   # M116: + Claude and the reasoning local model
+
+
+def _make_pool(r0_cfg, mode: str):
+    """M116: the model a command asks. auto / local / cloud — as before (build_pool); haiku / sonnet — Claude alone
+    (config/r0.yaml anthropic, the owner's ANTHROPIC_API_KEY); local-think — the gamebox model with its reasoning on
+    (slower; the shared gamebox lock as for local)."""
+    from autoreels.cloud.providers import AnthropicLLM, ProviderError, ProviderPool
+    if mode in ("haiku", "sonnet"):
+        ac = r0_cfg.anthropic
+        model = ac.models.get(mode)
+        if not model:
+            raise ProviderError(f"нет модели Claude «{mode}» в config/r0.yaml anthropic.models")
+        prices = tuple(ac.prices.get(model) or (0.0, 0.0))
+        return ProviderPool([AnthropicLLM(model=model, max_output_tokens=ac.max_output_tokens,
+                                          timeout_sec=ac.timeout_sec, prices=(float(prices[0]), float(prices[1])))])
+    if mode == "local-think":
+        lc = r0_cfg.local_llm.model_copy(update={"no_think": False,
+                                                 "max_output_tokens": r0_cfg.local_llm.think_max_output_tokens})
+        return build_pool(r0_cfg.model_copy(update={"local_llm": lc}), local="only")
+    return build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+
+
+def _usage_report(prov) -> None:
+    """M116: what the paid models cost this run (one line per provider; nothing for the free ones)."""
+    for ln in (getattr(prov, "usage_lines", lambda: [])() if prov is not None else []):
+        print(f"  {ln}", flush=True)
 
 
 def cmd_label(
@@ -7825,7 +7852,7 @@ def cmd_label(
         bak = out_path.with_name(out_path.name + ".bak")
         if retry:
             if provider is None:
-                provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+                provider = _make_pool(r0_cfg, llm)
                 provider.preflight()
                 _pool_banner(provider)
             bak.write_text(old_text, encoding="utf-8")   # before the first checkpoint touches the draft
@@ -7841,7 +7868,7 @@ def cmd_label(
             from autoreels.cloud.label import is_ranked as _is_ranked
             if not _is_ranked(new_text):
                 if provider is None:
-                    provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+                    provider = _make_pool(r0_cfg, llm)
                     provider.preflight()
                     _pool_banner(provider)
                 new_text, _ = rank_draft(new_text, wblocks, words, provider, system=_rank_system(),
@@ -7856,7 +7883,7 @@ def cmd_label(
             print(f"→ {out_path} без изменений")
         return 0
     if provider is None:
-        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+        provider = _make_pool(r0_cfg, llm)
         provider.preflight()
         _pool_banner(provider)
     from autoreels.cloud.label import windows as _label_windows
@@ -7998,7 +8025,8 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
 
 
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
-                out: str | None = None, check: bool = True, llm: str | None = None, provider=None) -> int:
+                out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
+                judge_log: str | None = None, voice_keys: bool = True) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -8076,33 +8104,49 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
 
     end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
     open_end: list = []                     # … clips that ended «→» and could not be shortened
-    if prm.end_tone:
+    dur_of = None                           # M116 (M1.9 D): the aligned duration of a word, intonation map
+    _want_voice = bool(getattr(ac, "keywords", False) and getattr(ac, "keywords_voice", False) and voice_keys)
+    if prm.end_tone or _want_voice:
         from autoreels.cloud.plan import load_alignment as _la_et
         from autoreels.local.prosody import load_prosody as _lp_et, tone_lookup as _tl_et
         _al_et = _la_et(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
-        _tone_et = _tl_et(_lp_et(_root / "transcripts" / f"{stem}.prosody.json", manifest.source_sha256, _al_et)
-                          if _al_et else None)
+        _pros_et = _lp_et(_root / "transcripts" / f"{stem}.prosody.json", manifest.source_sha256, _al_et) if _al_et else None
+        _tone_et = _tl_et(_pros_et)
         if _tone_et is None:
-            print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы сборок по голосу («→») не "
-                  f"проверены; сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
+            print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы сборок по голосу («→») и "
+                  f"подсказки голоса для k: не работают; сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
         else:
-            def end_tone(ref: str):
-                st = sent_by_ref.get(ref)
-                r = _tone_et(st[-1]) if st else None
-                return r[0] if r else None
+            if prm.end_tone:
+                def end_tone(ref: str):
+                    st = sent_by_ref.get(ref)
+                    r = _tone_et(st[-1]) if st else None
+                    return r[0] if r else None
+            if _want_voice:
+                _dur_idx = {round(float(w["t0"]) * 1000): w.get("dur") for w in (_pros_et or {}).get("words") or []}
+
+                def dur_of(word):
+                    return _dur_idx.get(round(float(word.t0) * 1000))
     from dataclasses import replace as _dc_replace
     no_start: list = []                     # M74: clips whose start leans on what was cut, with no fix
     mode = llm or ac.hook_llm
     prov, judge = None, None
     if mode != "none":
         try:
-            prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+            prov = provider or _make_pool(r0_cfg, mode)
             _pool_banner(prov)
         except Exception as exc:  # noqa: BLE001 — no model: the code's choices stay
             print(f"  модель: недоступна ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
             prov = None
     # M86: the model's judgments kept between runs, and the owner's verdicts as examples for the judges
     _jstore = _JudgeStore(_cache / "autocut_judge.json") if ac.judge_cache else None
+    _jlog = None
+    if judge_log:                           # M116: every judgment of this run, for arl judge-bench and the report
+        _jl_path = Path(judge_log)
+        _jl_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _jlog(row: dict) -> None:
+            with _jl_path.open("a", encoding="utf-8") as fh:
+                fh.write(_json.dumps({"stem": stem, **row}, ensure_ascii=False) + "\n")
     _ex = {"start": ([], []), "hook": ([], [])}
     if ac.owner_examples > 0:
         from autoreels.cloud.autocut import owner_examples as _owner_examples
@@ -8121,7 +8165,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         from autoreels.cloud.autocut import make_judge   # M75: the model's yes/no on a first sentence
         from autoreels.cloud.autocut import STANDALONE_SYSTEM as _SS, with_examples as _with_ex
         _ssys = _with_ex(_SS, *_ex["start"], "first sentence") if any(_ex["start"]) else None
-        judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore)
+        judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                    no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end)
     if judge is not None:
@@ -8156,7 +8200,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 if any(_ex["hook"]):
                     _hsys = _with_ex2(_hsys, *_ex["hook"], "teaser line" if _teaser else "opening line")
                 _hjudge = _mk_judge(prov, log=_log, system=_hsys, label="Teaser line" if _teaser else "First sentence",
-                                    store=_jstore)
+                                    store=_jstore, jlog=_jlog)
 
             def _hook_core(pr) -> str:
                 base = " ".join(dict.fromkeys(str(_byid_h[i].get("summary") or "")
@@ -8185,9 +8229,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 if ac.hook_title:
                     _plate(pr)
                 if ac.keywords:                     # M88: key words of the subtitles (k:)
-                    from autoreels.cloud.autocut import pick_keywords
+                    from autoreels.cloud.autocut import pick_keywords, voice_stressed
                     _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
-                    pr.keys = pick_keywords([(r[0], r[4]) for r in sentences(pr.pieces)], prov, n=_n, log=_log)
+                    _krows = [(r[0], r[4]) for r in sentences(pr.pieces)]
+                    _voiced = None
+                    if dur_of is not None:          # M116 (M1.9 D): the words the voice draws out — a hint
+                        _voiced = [voice_stressed(sent_by_ref.get(ref) or [], dur_of,
+                                                  ratio=ac.keywords_voice_ratio) for ref, _t in _krows]
+                        _vn = [f"{ref} «{v[0]}»" for (ref, _t), v in zip(_krows, _voiced) if v]
+                        if _vn:
+                            pr.notes.append("голос выделяет: " + ", ".join(_vn))
+                    pr.keys = pick_keywords(_krows, prov, n=_n, log=_log, voiced=_voiced)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
                 for pr in pool[:prm.clips * 2]:
                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
@@ -8355,6 +8407,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         print(f"  {pr.line(str(i))}")
     for pr, err in rejected:
         print(f"  ✗ {pr.pieces} — {err}")
+    _usage_report(prov)
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0
@@ -8416,7 +8469,7 @@ def _whispercpp_overrides(base, pairs) -> "object":
 
 def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
                    force: bool = False, backend=None, prompt: str | None = None, tag: str = "",
-                   wc=None) -> int:
+                   wc=None, groq_prompt: str | None = None) -> int:
     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
     Groq transcript), compared word by word with the Groq one, both run through tx-check →
@@ -8440,6 +8493,18 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
     prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
+    if groq_prompt is not None:             # M116: a Groq variant — the same audio with another initial_prompt
+        if not tag:
+            print("ошибка: с --groq-prompt нужен --tag (вариант не должен смешаться с расшифровкой манифеста)",
+                  file=sys.stderr)
+            return 1
+        from autoreels.cloud.transcribe import GroqBackend, transcribe as _tx_groq
+        from autoreels.cloud.txcheck import prompt_patterns as _pp_g
+        if backend is None:
+            backend = GroqBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
+        from dataclasses import replace as _dc_rep_g
+        prm = _dc_rep_g(prm, known=tuple(prm.known) + tuple(_pp_g(groq_prompt)))
+        print(f"Groq: initial_prompt {'пустой' if not groq_prompt else repr(groq_prompt[:60])}", flush=True)
     if wc:
         if not tag:
             print("ошибка: с --wc нужен --tag (вариант не должен заменить .local)", file=sys.stderr)
@@ -8456,6 +8521,8 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
         backend = WhisperCppBackend(wcfg, lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
     be = backend
     suffix = f".local-{tag}" if tag else ".local"            # M64: variants side by side
+    if groq_prompt is not None:
+        suffix = f".groq-{tag}"
     rc = 0
     for mpath in paths:
         try:
@@ -8488,9 +8555,15 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
                     continue
             t0 = time.monotonic()
             try:
-                local = be.transcribe(Path(audio), language=tcfg.whispercpp.language)
+                if groq_prompt is not None:   # chunked as in production; chunks and the result in a side cache
+                    local = _tx_groq(Path(audio), _cache / "_variants", backend=be, language=tcfg.language,
+                                     chunking_cfg=r0_cfg.chunking,
+                                     audio_cfg=load_render_config(_root / "config" / "render.yaml").audio_extract)
+                else:
+                    local = be.transcribe(Path(audio), language=tcfg.whispercpp.language)
             except Exception as exc:  # noqa: BLE001 — one source must not stop the rest
-                print(f"== {stem}: whisper.cpp не отработал ({type(exc).__name__}: {str(exc)[:200]})", file=sys.stderr)
+                print(f"== {stem}: {'Groq' if groq_prompt is not None else 'whisper.cpp'} не отработал "
+                      f"({type(exc).__name__}: {str(exc)[:200]})", file=sys.stderr)
                 rc = 1
                 continue
             meta = be.describe()
@@ -8513,8 +8586,9 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
         rep = {"stem": stem, "compare": cmp_,
                "groq": {k: cg[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cg["known"]), "repeat": len(cg["repeat"])},
                "local": {k: cl[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cl["known"]), "repeat": len(cl["repeat"])}}
-        (_root / "transcripts" / f"{stem}{suffix.replace('.local', '.txcompare')}.json").write_text(_json.dumps(rep, ensure_ascii=False, indent=1),
-                                                                   encoding="utf-8")
+        _rep_name = (f"{stem}.txcompare-groq-{tag}.json" if groq_prompt is not None
+                     else f"{stem}{suffix.replace('.local', '.txcompare')}.json")
+        (_root / "transcripts" / _rep_name).write_text(_json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
         g, l_ = rep["groq"], rep["local"]
         print(f"== {stem} (локально: {took}): слов Groq {cmp_['ref_words']}, локально {cmp_['other_words']}, "
               f"совпало {cmp_['matched']}, различается {cmp_['differ']}%")
@@ -8530,6 +8604,78 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
         for z in cmp_["longest"][:5]:
             print(f"   {_mmss_long(z['t'])} Groq: «{z['ref'][:70]}» | локально: «{z['other'][:70]}»")
     return rc
+
+
+def cmd_judge_bench(log_path: str, *, llm: str = "cloud", root=None, out: str | None = None,
+                    limit: int | None = None, provider=None) -> int:
+    """M116 (owner: «выяснить разницу между Haiku, Sonnet, Qwen на Groq и Qwen с размышлениями и без»): the judgments
+    one run asked (arl autocut --judge-log: starts and cold opens, each with its exact prompt) asked again of another
+    model — the same requests for every model. Writes <log>.<llm>.jsonl (one line per request, as it comes: a long run
+    keeps what it has) and prints, per kind: answered, «yes» share, agreement with the logged model, seconds per
+    request, and the price of a paid model. Changes nothing else."""
+    import json as _json
+    from autoreels.cloud.autocut import parse_judge
+    _root = Path(root) if root else _project_root()
+    lp = Path(log_path)
+    if not lp.is_file():
+        print(f"ошибка: нет журнала {lp} — сначала arl autocut … --judge-log {lp}", file=sys.stderr)
+        return 1
+    uniq: dict = {}
+    for ln in lp.read_text(encoding="utf-8").splitlines():
+        try:
+            r = _json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and r.get("system") and r.get("msg"):
+            uniq.setdefault((r["system"], r["msg"]), r)
+    reqs = list(uniq.values())[:limit] if limit else list(uniq.values())
+    if not reqs:
+        print(f"ошибка: в {lp.name} нет суждений", file=sys.stderr)
+        return 1
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    prov = provider or _make_pool(r0_cfg, llm)
+    _pool_banner(prov)
+    mid = str(getattr(prov, "model_id", llm))
+    op = Path(out) if out else lp.with_name(f"{lp.stem}.{llm}.jsonl")
+    op.write_text("", encoding="utf-8")
+    stats: dict = {}
+    for k, r in enumerate(reqs, 1):
+        t0 = time.monotonic()
+        got, err = None, ""
+        for _try in range(2):
+            try:
+                raw = prov.complete([{"role": "system", "content": r["system"]},
+                                     {"role": "user", "content": r["msg"]}], temperature=0.0)
+            except Exception as exc:  # noqa: BLE001 — one request failed: recorded, the rest go on
+                err = f"{type(exc).__name__}: {str(exc)[:120]}"
+                break
+            got = parse_judge(raw)
+            if got is not None:
+                break
+        sec = round(time.monotonic() - t0, 2)
+        row = {"stem": r.get("stem"), "label": r.get("label"), "msg": r["msg"], "ref_model": r.get("model"),
+               "ref_ok": r.get("ok"), "model": mid, "ok": None if got is None else got[0],
+               "why": None if got is None else got[1], "sec": sec, "error": err}
+        with op.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(row, ensure_ascii=False) + "\n")
+        st = stats.setdefault(r.get("label") or "?", {"n": 0, "ans": 0, "yes": 0, "cmp": 0, "agree": 0, "sec": 0.0})
+        st["n"] += 1
+        st["sec"] += sec
+        if got is not None:
+            st["ans"] += 1
+            st["yes"] += bool(got[0])
+            if r.get("ok") is not None:
+                st["cmp"] += 1
+                st["agree"] += bool(got[0]) == bool(r["ok"])
+        if k % 10 == 0:
+            print(f"  … {k}/{len(reqs)}", flush=True)
+    print(f"judge-bench {lp.name} → {mid}: запросов {len(reqs)} → {op}")
+    for lab, st in sorted(stats.items()):
+        print(f"  {lab}: ответов {st['ans']}/{st['n']}, «да» {100 * st['yes'] / max(1, st['ans']):.0f}%, "
+              f"совпало с журналом {st['agree']}/{st['cmp']} ({100 * st['agree'] / max(1, st['cmp']):.0f}%), "
+              f"{st['sec'] / max(1, st['n']):.1f} с на запрос")
+    _usage_report(prov)
+    return 0
 
 
 def _mmss_long(t: float) -> str:
@@ -8637,7 +8783,7 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     tkey = manifest.transcript_params_key or ""
     if llm != "none":
         if provider is None:
-            provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+            provider = _make_pool(r0_cfg, llm)
             provider.preflight()
             _pool_banner(provider)
         model = getattr(provider, "name", None) or type(provider).__name__
@@ -8952,7 +9098,7 @@ def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str 
     except Exception:  # noqa: BLE001 — no render config: no fixed hashtags
         always = []
     if provider is None:
-        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+        provider = _make_pool(r0_cfg, llm)
         _pool_banner(provider)
     done, skipped = 0, []
     for clip in clips:
@@ -9010,7 +9156,7 @@ def cmd_article(target: str, *, root=None, topics: int | None = None, llm: str =
         print(f"article {mpath.stem}: в карте нет тем с тремя описанными мыслями — статей нет")
         return 0
     if provider is None:
-        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+        provider = _make_pool(r0_cfg, llm)
         _pool_banner(provider)
     manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
     slug = Path(manifest.source).stem.replace(" ", "_")
@@ -9636,7 +9782,7 @@ def cmd_tx_punct(target: str, *, src: str = "local", out_tag: str | None = None,
     else:
         r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
         if provider is None:
-            provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+            provider = _make_pool(r0_cfg, llm)
             _pool_banner(provider)
         t0 = _time.monotonic()
         raws: list = []
@@ -12310,7 +12456,7 @@ def _build_parser():
     pmp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     pmp.add_argument("--root", default=None)
     pmp.add_argument("--cache-dir", default=None, dest="cache_dir")
-    pmp.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default="auto",
+    pmp.add_argument("--llm", choices=_LLM_MODES + ("none",), default="auto",
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
@@ -12323,7 +12469,7 @@ def _build_parser():
     ptp.add_argument("--out-tag", default=None, dest="out_tag", help="имя результата (по умолчанию <src>-gp / <src>-lp)")
     ptp.add_argument("--by", choices=("groq", "llm"), default="groq",
                      help="M113: откуда точки — groq (перенос с расшифровки Groq) | llm (модель расставляет концы предложений)")
-    ptp.add_argument("--llm", choices=("auto", "local", "cloud"), default="cloud",
+    ptp.add_argument("--llm", choices=_LLM_MODES, default="cloud",
                      help="M113: модель для --by llm: cloud | local (gamebox, общий замок) | auto")
     ptp.add_argument("--root", default=None)
     ptp.add_argument("--cache-dir", default=None, dest="cache_dir")
@@ -12343,7 +12489,7 @@ def _build_parser():
     )
     pau.add_argument("targets", metavar="видео_или_манифест", nargs="+",
                      help="видеофайл (сначала arl run) или манифест/имя в manifests/")
-    pau.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default="auto", help="модель карты")
+    pau.add_argument("--llm", choices=_LLM_MODES + ("none",), default="auto", help="модель карты")
     pau.add_argument("--clips", type=int, default=None, help="сколько сборок предложить")
     pau.add_argument("--no-render", action="store_false", dest="render", help="без рендера и листа")
     pau.add_argument("--gate", default="auto", help="папка рендера reels-out/<stem>/_gate/<имя>/")
@@ -12352,6 +12498,16 @@ def _build_parser():
     pau.add_argument("--tx", default=None, help="M64: расшифровка нового видео: groq | local (whisper.cpp на gamebox)")
     pau.add_argument("--root", default=None)
     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    pjb = sub.add_parser(
+        "judge-bench",
+        help="M116: суждения прогона autocut (--judge-log) заново другой моделью — сравнение моделей",
+    )
+    pjb.add_argument("log", metavar="журнал", help="файл arl autocut --judge-log")
+    pjb.add_argument("--llm", choices=_LLM_MODES, default="cloud")
+    pjb.add_argument("--out", default=None, help="куда писать ответы (по умолчанию <журнал>.<llm>.jsonl)")
+    pjb.add_argument("--limit", type=int, default=None, help="только первые N запросов")
+    pjb.add_argument("--root", default=None)
 
     pxc = sub.add_parser(
         "tx-compare",
@@ -12362,6 +12518,8 @@ def _build_parser():
     pxc.add_argument("--force", action="store_true", help="расшифровать заново, даже если файл уже есть")
     pxc.add_argument("--prompt", default=None, help="M64: подсказка стиля пунктуации для whisper.cpp (иначе из конфига)")
     pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
+    pxc.add_argument("--groq-prompt", default=None, dest="groq_prompt", metavar="текст",
+                     help="M116: вариант Groq с этим initial_prompt (\"\" — без подсказки) → transcripts/<stem>.groq-<tag>; нужен --tag")
     pxc.add_argument("--wc", action="append", default=None, metavar="ключ=значение",
                      help="M111: параметр whisper.cpp для варианта (поле whispercpp в transcribe.yaml), можно несколько: "
                           "--wc model='$W/ggml-large-v3.bin' --wc vad_model= --wc max_context=-1; нужен --tag")
@@ -12393,8 +12551,12 @@ def _build_parser():
     pac.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     pac.add_argument("--clips", type=int, default=None, help="сколько сборок предложить (по умолчанию из r0.yaml)")
     pac.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto_m56.txt)")
-    pac.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default=None,
+    pac.add_argument("--llm", choices=_LLM_MODES + ("none",), default=None,
                      help="M65: модель выбирает крючок из кандидатов кода (по умолчанию autocut.hook_llm)")
+    pac.add_argument("--judge-log", default=None, dest="judge_log",
+                     help="M116: каждое суждение модели (начало, крючок) — строкой JSON в этот файл (для arl judge-bench)")
+    pac.add_argument("--no-voice-keys", action="store_false", dest="voice_keys",
+                     help="M116: без подсказок голоса для k: (сравнение с подсказками)")
     pac.add_argument("--no-check", action="store_false", dest="check",
                      help="не прогонять каждое предложение через проверки --apply (M60)")
     pac.add_argument("--root", default=None)
@@ -12477,7 +12639,7 @@ def _build_parser():
     par.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     par.add_argument("--root", default=None, help="корень проекта")
     par.add_argument("--topics", type=int, default=None, help="сколько тем (по умолчанию article.topics)")
-    par.add_argument("--llm", choices=("auto", "local", "cloud"), default="auto",
+    par.add_argument("--llm", choices=_LLM_MODES, default="auto",
                      help="кто пишет: auto — облако, локальная в запасе")
     par.add_argument("--export-dir", default=None, dest="export_dir", help="куда (по умолчанию export/)")
 
@@ -12493,7 +12655,7 @@ def _build_parser():
     pds.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
     pds.add_argument("--reels", default=None, help="только эти клипы: r01,r03")
     pds.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
-    pds.add_argument("--llm", choices=("auto", "local", "cloud"), default="auto",
+    pds.add_argument("--llm", choices=_LLM_MODES, default="auto",
                      help="кто пишет: auto — облако, локальная в запасе (как arl map)")
     pds.add_argument("--force", action="store_true", default=False, help="переписать готовые .post.txt")
 
@@ -12851,10 +13013,14 @@ def main(argv=None) -> int:
                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
         elif args.cmd == "gamebox":
             return cmd_gamebox(args.action, root=getattr(args, "root", None))
+        elif args.cmd == "judge-bench":
+            return cmd_judge_bench(args.log, llm=args.llm, root=getattr(args, "root", None), out=args.out,
+                                   limit=args.limit)
         elif args.cmd == "tx-compare":
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
-                                  force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc)
+                                  force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc,
+                                  groq_prompt=args.groq_prompt)
         elif args.cmd == "tx-punct":
             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), by=args.by, llm=args.llm)
@@ -12864,7 +13030,7 @@ def main(argv=None) -> int:
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
-                               check=args.check, llm=args.llm)
+                               check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

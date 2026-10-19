@@ -1131,7 +1131,7 @@ def test_m115_cmd_autocut_reads_the_voice_from_the_intonation_map(tmp_path, monk
         if with_map:                                             # every sentence of block 2 ends with the voice up
             ends = {round(s[-1].t0 * 1000) for s in ss}
             monkeypatch.setattr(plan_mod, "load_alignment", lambda *a, **k: {"words": []})
-            monkeypatch.setattr(pros, "load_prosody", lambda *a, **k: {"words": [1]})
+            monkeypatch.setattr(pros, "load_prosody", lambda *a, **k: {"words": []})
             monkeypatch.setattr(pros, "tone_lookup", lambda p, *a: (lambda w: ("open", "x")
                                                                     if round(w.t0 * 1000) in ends else ("final", "x")))
         monkeypatch.setattr(cli, "_autocut_check", lambda head, line, r, c: (None, ""))
@@ -1143,3 +1143,56 @@ def test_m115_cmd_autocut_reads_the_voice_from_the_intonation_map(tmp_path, monk
     text, n = run(True)
     assert "# --- конец звучит с продолжением" in text and f"укоротить нельзя: 2.1-{n}" in text
     assert not any(ln.startswith("M1 ") for ln in text.splitlines())
+
+
+def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(tmp_path, monkeypatch):
+    """M116 (M1.9 D): with keywords_voice the words the voice draws out (intonation map: duration per letter) go to the
+    k: request as a hint and into the draft note; --no-voice-keys (voice_keys=False) = the M88 request."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from autoreels.cloud import plan as plan_mod
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from autoreels.local import prosody as pros
+    from tests.test_montage import _source
+
+    def run(voice: bool):
+        root = tmp_path / f"v{voice}"
+        root.mkdir()
+        mpath = _source(root)
+        cfg = root / "config" / "r0.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+                       .replace("  clips: 5\n", "  clips: 1\n"), encoding="utf-8")
+        r0 = cli.load_r0_config(cfg)
+        assert r0.autocut.keywords and r0.autocut.keywords_voice
+        tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
+        _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+        ss = merge_group_sentences([kept[1]], tx.words)
+        unit = U(1, ss[0][0].t0, ss[-1][-1].t1 - ss[0][0].t0, "conclusion", 5, f"2.1-{len(ss)}", summary="вывод")
+        (root / "transcripts").mkdir(exist_ok=True)
+        (root / "transcripts" / "v.map.json").write_text(json.dumps(
+            {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [unit]}), encoding="utf-8")
+        long = {s[1].t0 for s in ss if len(s) > 2}                   # the second word of each sentence drawn out
+        monkeypatch.setattr(plan_mod, "load_alignment", lambda *a, **k: {"words": []})
+        monkeypatch.setattr(pros, "load_prosody", lambda *a, **k: {"words": [
+            {"t0": w.t0, "v": 20, "end_pct": 10.0,                   # speech at 0.06 s a letter, the drawn-out 0.2
+             "dur": (0.2 if w.t0 in long else 0.06) * sum(c.isalpha() for c in w.word)} for w in tx.words]})
+        seen = []
+        monkeypatch.setattr(ac_mod, "pick_keywords", lambda rows, prov, **k: seen.append(k.get("voiced")) or [])
+        monkeypatch.setattr(ac_mod, "rank_hooks", lambda *a, **k: False)
+        monkeypatch.setattr(ac_mod, "headline", lambda *a, **k: False)
+        monkeypatch.setattr(ac_mod, "check_seams", lambda *a, **k: None)
+        monkeypatch.setattr(cli, "_autocut_check", lambda head, line, r, c: (None, ""))
+        prov = _Answers('{"subject": "вывод", "alone": true, "leads": true, "why": ""}')
+        assert cli.cmd_autocut("v", root=root, cache_dir=str(root / "cache"), llm="local", provider=prov,
+                               voice_keys=voice) == 0
+        return seen, (root / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8"), ss
+
+    seen, text, ss = run(True)
+    assert seen and seen[0] is not None and any(seen[0])
+    from autoreels.cloud.autocut import _kw_norm
+    hinted = {w for v in seen[0] for w in v}
+    assert hinted <= {_kw_norm(s[1].word) for s in ss}
+    assert "голос выделяет: 2." in text
+    seen, text, _ = run(False)
+    assert seen == [None] and "голос выделяет" not in text

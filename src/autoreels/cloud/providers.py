@@ -42,6 +42,7 @@ import httpx
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"   # M116: Claude (paid; owner's key in .env)
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 # Актуальная Qwen на Groq. Модель конфигурируема через config/r0.yaml (model:).
@@ -548,6 +549,10 @@ class GroqLLM:
             self._scale_loaded = True
         return self._token_scale
 
+    @property
+    def model_id(self) -> str:
+        return f"groq:{self._model}"
+
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         """Вернуть текст ответа модели (content первого choice). Пустой → ProviderEmptyResponse."""
         request = self._request_fn or self._default_request
@@ -741,6 +746,10 @@ class OpenRouterLLM:
         data = request(messages, temperature)
         return _extract_content(data, self.name)
 
+    @property
+    def model_id(self) -> str:
+        return f"openrouter:{self._model}"
+
     def _model_404_hint(self, model: str) -> str:
         return (
             f"модель '{model}' не найдена у OpenRouter (404) — снята или переименована. "
@@ -824,6 +833,10 @@ class LocalLLM:
         self._no_think = no_think
         self._post = post_fn or httpx.post
 
+    @property
+    def model_id(self) -> str:
+        return f"local:{self._model}" + ("" if self._no_think else "+think")
+
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         msgs = [dict(m) for m in messages]
         if self._no_think and msgs and msgs[-1].get("role") == "user":
@@ -845,10 +858,101 @@ class LocalLLM:
             resp.raise_for_status()
         except httpx.HTTPError as e:
             raise ProviderError(f"локальная модель: {e}") from e
-        return _extract_content(resp.json(), self.name)
+        text = _extract_content(resp.json(), self.name)
+        if not self._no_think:           # M116: with reasoning on, the answer comes after the reasoning block
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip() or text
+        return text
 
     def available_models(self) -> set[str] | None:
         return None   # llama-server lists its file name, not our label; reachability is probed at build
+
+
+class AnthropicLLM:
+    """M116: Claude through the Messages API (paid — the owner's ANTHROPIC_API_KEY in .env). Same interface as the
+    other providers: complete(messages) -> text. The system messages go to `system`; the answer is the text blocks.
+    Counts requests and tokens; `prices` (USD per 1M tokens, input/output) give the cost line of a run."""
+
+    name = "Claude"
+
+    def __init__(self, *, model: str, api_key: str | None = None, max_output_tokens: int = 2048,
+                 timeout_sec: float = 120.0, prices: tuple[float, float] = (0.0, 0.0),
+                 post_fn: Callable | None = None):
+        self._model = model
+        self._api_key = api_key
+        self._max_tokens = max_output_tokens
+        self._timeout = timeout_sec
+        self._prices = prices
+        self._post = post_fn or httpx.post
+        self._temperature_ok = True
+        self.calls = 0
+        self.tokens_in = 0
+        self.tokens_out = 0
+
+    @property
+    def model_id(self) -> str:
+        return f"anthropic:{self._model}"
+
+    def cost(self) -> float:
+        return (self.tokens_in * self._prices[0] + self.tokens_out * self._prices[1]) / 1_000_000
+
+    def usage_line(self) -> str:
+        if not self.calls:
+            return ""
+        return (f"{self.name} {self._model}: запросов {self.calls}, вход {self.tokens_in}, ответ {self.tokens_out} "
+                f"токенов ≈ ${self.cost():.4f}")
+
+    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+        key = (self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")).strip()
+        if not key:
+            raise ProviderError("нет ANTHROPIC_API_KEY — добавьте ключ Claude в .env")
+        system = "\n\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+        msgs = [{"role": m["role"], "content": str(m.get("content") or "")} for m in messages
+                if m.get("role") in ("user", "assistant")]
+        payload: dict = {"model": self._model, "max_tokens": self._max_tokens, "messages": msgs}
+        if system:
+            payload["system"] = system
+        if self._temperature_ok:
+            payload["temperature"] = temperature
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        for _attempt in range(2):
+            try:
+                resp = self._post(ANTHROPIC_MESSAGES_URL, json=payload, headers=headers,
+                                  timeout=httpx.Timeout(self._timeout, connect=10.0))
+            except httpx.ConnectError as e:
+                raise ProviderTimeout(f"Claude недоступен: {e}", provider=self.name, is_connect_error=True) from e
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                raise ProviderTimeout(f"Claude не ответил за {self._timeout:.0f} с: {e}", provider=self.name) from e
+            code = resp.status_code
+            if code == 400 and "temperature" in (resp.text or "") and "temperature" in payload:
+                self._temperature_ok = False          # a model that takes no temperature: ask again without it
+                payload.pop("temperature")
+                continue
+            break
+        if code in (401, 403):
+            raise ProviderError(f"Claude отклонил ключ (HTTP {code}): проверь ANTHROPIC_API_KEY в .env")
+        if code == 404:
+            raise ProviderModelNotFound(f"модель Claude '{self._model}' не найдена (404) — обнови anthropic.models "
+                                        f"в config/r0.yaml", model=self._model, provider=self.name)
+        if code in (429, 529):
+            try:
+                wait = float(resp.headers.get("retry-after") or 20)
+            except ValueError:
+                wait = 20.0
+            raise ProviderThrottled(f"Claude: HTTP {code} (лимит/перегрузка), retry-after={wait:.0f}с", retry_after=wait)
+        if code >= 500:
+            raise ProviderTimeout(f"Claude: HTTP {code}", provider=self.name)
+        if code != 200:
+            raise ProviderError(f"Claude: HTTP {code}: {(resp.text or '')[:300]}")
+        data = resp.json()
+        usage = data.get("usage") or {}
+        self.calls += 1
+        self.tokens_in += int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
+        self.tokens_out += int(usage.get("output_tokens") or 0)
+        text = "".join(b.get("text", "") for b in data.get("content") or [] if b.get("type") == "text")
+        if not text.strip():
+            raise ProviderEmptyResponse(f"Claude вернул пустой ответ (stop_reason={data.get('stop_reason')})",
+                                        provider=self.name)
+        return text
 
 
 class _LockedLocal:
@@ -860,6 +964,10 @@ class _LockedLocal:
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
+
+    @property
+    def model_id(self) -> str:
+        return getattr(self._inner, "model_id", "local")
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         if not self._lock.held and not self._lock.acquire(wait=False):
@@ -951,6 +1059,16 @@ class ProviderPool:
     @property
     def name(self) -> str:
         return "pool(" + ",".join(m.name for m in self._members) + ")"
+
+    @property
+    def model_id(self) -> str:
+        """M116: who answers — the regular providers' models in order (a cache keyed by it never hands one model's
+        answer to another)."""
+        return "+".join(getattr(m.provider, "model_id", m.model) for m in self._members if not m.reserve) or "?"
+
+    def usage_lines(self) -> list[str]:
+        """M116: requests, tokens and the price of the paid providers (Claude), one line each."""
+        return [ln for m in self._members for ln in [getattr(m.provider, "usage_line", lambda: "")()] if ln]
 
     def describe(self) -> str:
         """M67: who answers, in order — printed first by map / label / autocut, so a run on the wrong

@@ -248,6 +248,16 @@ local_llm:
   timeout_sec: 540        # one window takes minutes on an RX 580 (must stay under the pool's 600 s)
   max_output_tokens: 1500
   no_think: true          # Qwen3: no reasoning block (faster, same JSON)
+  think_max_output_tokens: 3000   # M116: --llm local-think — Qwen3 reasons first; the reasoning counts toward the limit (longer
+                                  # than local_llm.timeout_sec on an RX 580 = no answer; the bench counts it)
+
+# M116: Claude (paid; the owner's ANTHROPIC_API_KEY in .env) — --llm haiku | sonnet. Prices: USD per 1M tokens (in, out),
+# from the Claude pricing page (2026-10); they only feed the cost line printed at the end of a run.
+anthropic:
+  models: {haiku: claude-haiku-5-5, sonnet: claude-sonnet-5-5}
+  prices: {claude-haiku-5-5: [0.10, 0.50], claude-sonnet-5-5: [2.0, 10.0]}
+  max_output_tokens: 2048
+  timeout_sec: 120
 
 # M108: one lock for every heavy job of gamebox (the audiobook's synthesis and checks, llama-server use, whisper.cpp):
 # flock on one file there, the second comer waits — nobody kills the other's work. Taken when the local model or
@@ -379,6 +389,9 @@ autocut:
   keywords: true          # the model marks key words (k:): highlighted in the subtitles, the close shot comes on them
   keywords_every_sec: 12  # one per 12 s of the clip …
   keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
+  # M116 — M1.9 stage D (owner: «давай»; M99: the owner's k: word is drawn out by the voice in 81 % of sentences):
+  keywords_voice: true    # the words the voice draws out (intonation map: duration per letter) are shown to the model as a
+  keywords_voice_ratio: 1.25   # hint («[voice: …]»); the model still picks the word, the same checks; no map = no hint
   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
   close_last_sec: 3
