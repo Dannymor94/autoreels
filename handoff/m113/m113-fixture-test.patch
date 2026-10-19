@@ -1,0 +1,21 @@
+diff --git a/tests/test_whispercpp.py b/tests/test_whispercpp.py
+index d6caa35..62819e7 100644
+--- a/tests/test_whispercpp.py
++++ b/tests/test_whispercpp.py
+@@ -339,3 +339,16 @@ def test_cmd_tx_punct_by_llm_writes_an_lp_variant_and_measures_against_groq(tmp_
+     raw = json.loads((tmp_path / "transcripts" / "v.local-lp.punct_raw.json").read_text())
+     assert raw["llm"] == "cloud" and raw["answers"] and all(a["ok"] for a in raw["answers"])
+     assert cli.cmd_tx_punct("v", root=tmp_path, by="nope") == 1
++
++
++def test_m113_real_model_answers_parse():
++    """M113: real answers of the models to PUNCT_SYSTEM (tests/fixtures/punct_answers.json — the m113 run of arl tx-punct
++    --by llm on IMG_6848, provenance inside) go through parse_ends as they came: wrappers, marks, plain numbers."""
++    import json
++    from autoreels.cloud.txcheck import parse_ends
++    d = json.loads((Path(__file__).parent / "fixtures" / "punct_answers.json").read_text(encoding="utf-8"))
++    assert d["provenance"] and {"cloud"} <= {a["llm"] for a in d["answers"]}
++    parsed = [parse_ends(a["raw"], a["k"]) for a in d["answers"]]
++    for a, ends in zip(d["answers"], parsed):
++        assert ends is not None, f"{a['llm']}: {a['raw'][:300]}"
++    assert any(parsed)
