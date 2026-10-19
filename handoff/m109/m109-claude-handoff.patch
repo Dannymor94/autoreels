@@ -1,0 +1,18 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 94fa7ff..5ac78dd 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -91,6 +91,13 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
+ - **«By design» не принимается** для нарушения правила из `PLAN.md` / `PROJECT_GUIDE.md` / этого файла. Нарушение называется нарушением и попадает в отчёт.
+ - **Файлы разметки владельца** — `reviews/*_answer.txt` (оценённые строки). `*.review.json` — копии манифестов, применять их нельзя. Копии разметки для гейта не применяются с `--install` (защищено кодом).
+ 
++## Задачи от ассистента (ветка `handoff`)
++
++- Задачи, патчи и скрипты ассистента лежат в ветке `origin/handoff`, в папке `handoff/mNN/`. В `main` ассистент не пишет: в `main` коммитит только агент, после тестов.
++- «Выполни mNN» = `bash handoff/bin/take.sh mNN`, затем выполнить `handoff/mNN/TASK-MNN.md`. Если `handoff/bin` ещё нет: `git fetch -q origin handoff && git restore --source=origin/handoff --worktree -- handoff/bin`.
++- Отчёт по задаче — в `handoff/mNN/REPORT.md` (тот же текст, что владельцу), затем `bash handoff/bin/report.sh mNN [файлы из handoff/mNN …]`: отчёт уходит в ветку `handoff`, и ассистент читает его сам. Владельцу в чат — коротко: статус и что смотреть.
++- `handoff/` в `main` не коммитится (он в `.gitignore`).
++
+ ## Чего НЕ делать
+ 
+ - НЕ писать трекинг / active-speaker detection. Кроп — статичный прямоугольник: профиль сетапа, у каждого ролика сдвинутый по лицу в его кадрах (M102, решение владельца 2026-10-19); внутри ролика рамка неподвижна.
