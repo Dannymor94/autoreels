@@ -1,0 +1,21 @@
+diff --git a/tests/test_models_m116.py b/tests/test_models_m116.py
+index 6b5a190..e655a27 100644
+--- a/tests/test_models_m116.py
++++ b/tests/test_models_m116.py
+@@ -255,3 +255,16 @@ def test_tx_compare_groq_variant_needs_a_tag_and_keeps_the_manifest_transcript(t
+     assert after == sorted(before + ["_variants"])                    # the variant went to the side cache only
+     assert cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()),
+                                           tmp_path / "cache").words == groq.words
++
++
++def test_claude_provider_reads_a_recorded_answer():
++    """M116: a real Messages API answer (tests/fixtures/anthropic_messages_envelope.json — recorded by the m116 run,
++    provenance inside) goes through the provider as it came: text, usage, and the judge's parser."""
++    from autoreels.cloud.autocut import parse_judge
++    d = json.loads((Path(__file__).parent / "fixtures" / "anthropic_messages_envelope.json").read_text(encoding="utf-8"))
++    body = d["response"]
++    llm = P.AnthropicLLM(model=body.get("model", "claude-haiku-5-5"), prices=(0.10, 0.50),
++                         api_key="k", post_fn=lambda *a, **k: _Resp(200, body))
++    text = llm.complete([{"role": "system", "content": "s"}, {"role": "user", "content": "u"}])
++    assert d["provenance"] and text.strip() and llm.tokens_in > 0 and llm.tokens_out > 0
++    assert parse_judge(text) is not None
