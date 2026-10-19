@@ -1,0 +1,80 @@
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  ⚠ Groq token scale 0.037 для qwen/qwen3.8-27b вне 0.5–3.0 — не принят, беру 1.45
+  ℹ Groq token scale factor: 1.450 (model=qwen/qwen3.8-27b)
+  ℹ Groq token calibration: est_text=522 actual_prompt=859 delta=+324 observed_factor=1.621 → scale=1.501
+  ℹ Groq token calibration: est_text=539 actual_prompt=893 delta=+341 observed_factor=1.633 → scale=1.541
+  ℹ Groq token calibration: est_text=528 actual_prompt=894 delta=+353 observed_factor=1.669 → scale=1.579
+  ℹ Groq token calibration: est_text=542 actual_prompt=914 delta=+359 observed_factor=1.662 → scale=1.604
+  ℹ Groq token calibration: est_text=529 actual_prompt=906 delta=+364 observed_factor=1.688 → scale=1.629
+  ℹ Groq token calibration: est_text=536 actual_prompt=917 delta=+368 observed_factor=1.687 → scale=1.646
+  ℹ Groq token calibration: est_text=507 actual_prompt=831 delta=+311 observed_factor=1.613 → scale=1.637
+
+  ⏳ Groq TPM: remaining=1806 < ~2162 — ждём 50с до сброса квоты
+  ℹ Groq token calibration: est_text=527 actual_prompt=887 delta=+347 observed_factor=1.658 → scale=1.643
+  ℹ Groq token calibration: est_text=474 actual_prompt=770 delta=+283 observed_factor=1.597 → scale=1.629
+  ℹ Groq token calibration: est_text=447 actual_prompt=685 delta=+225 observed_factor=1.503 → scale=1.592
+  ℹ Groq token calibration: est_text=488 actual_prompt=798 delta=+297 observed_factor=1.609 → scale=1.597
+  ℹ Groq token calibration: est_text=509 actual_prompt=829 delta=+307 observed_factor=1.603 → scale=1.599
+  ℹ Groq token calibration: est_text=518 actual_prompt=831 delta=+300 observed_factor=1.579 → scale=1.593
+  ℹ Groq token calibration: est_text=529 actual_prompt=889 delta=+347 observed_factor=1.656 → scale=1.612
+  ℹ Groq token calibration: est_text=512 actual_prompt=842 delta=+317 observed_factor=1.619 → scale=1.614
+
+  ⏳ Groq TPM: remaining=1725 < ~2110 — ждём 52с до сброса квоты
+  ℹ Groq token calibration: est_text=502 actual_prompt=813 delta=+298 observed_factor=1.594 → scale=1.608
+  ℹ Groq token calibration: est_text=478 actual_prompt=759 delta=+268 observed_factor=1.561 → scale=1.594
+  ℹ Groq token calibration: est_text=537 actual_prompt=882 delta=+332 observed_factor=1.618 → scale=1.601
+  ℹ Groq token calibration: est_text=533 actual_prompt=851 delta=+305 observed_factor=1.572 → scale=1.592
+  ℹ Groq token calibration: est_text=535 actual_prompt=912 delta=+364 observed_factor=1.680 → scale=1.619
+  ℹ Groq token calibration: est_text=530 actual_prompt=887 delta=+344 observed_factor=1.649 → scale=1.628
+  ℹ Groq token calibration: est_text=437 actual_prompt=681 delta=+231 observed_factor=1.529 → scale=1.598
+  [diag] Groq 429 headers: retry-after=5, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=978, x-ratelimit-remaining-tokens=2434, x-ratelimit-reset-requests=31m40.8s, x-ratelimit-reset-tokens=45.291s
+
+  ⏳ Groq троттлит (retry-after=5с)
+  [diag] OpenRouter 429 headers: x-ratelimit-limit=50, x-ratelimit-remaining=0, x-ratelimit-reset=1792454400000
+
+  ⏳ OpenRouter исчерпан (retry-after=23311с)
+⏸ ждём провайдеров: осталось ~4с · Groq через ~4с · OpenRouter через ~23310с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=526 actual_prompt=888 delta=+349 observed_factor=1.663 → scale=1.618
+
+  ⏳ Groq TPM: remaining=2151 < ~2154 — ждём 48с до сброса квоты
+  ℹ Groq token calibration: est_text=528 actual_prompt=902 delta=+361 observed_factor=1.684 → scale=1.638
+  ℹ Groq token calibration: est_text=548 actual_prompt=918 delta=+357 observed_factor=1.651 → scale=1.642
+  ℹ Groq token calibration: est_text=477 actual_prompt=757 delta=+267 observed_factor=1.560 → scale=1.617
+  [diag] Groq 429 headers: retry-after=9, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=974, x-ratelimit-remaining-tokens=5404, x-ratelimit-reset-requests=37m26.4s, x-ratelimit-reset-tokens=20.185s
+
+  ⏳ Groq троттлит (retry-after=9с)
+⏸ ждём провайдеров: осталось ~9с · Groq через ~9с · OpenRouter через ~23255с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=516 actual_prompt=903 delta=+374 observed_factor=1.725 → scale=1.649
+  ℹ Groq token calibration: est_text=502 actual_prompt=871 delta=+356 observed_factor=1.709 → scale=1.667
+  ℹ Groq token calibration: est_text=501 actual_prompt=805 delta=+291 observed_factor=1.581 → scale=1.641
+  ℹ Groq token calibration: est_text=496 actual_prompt=810 delta=+301 observed_factor=1.607 → scale=1.631
+  ℹ Groq token calibration: est_text=420 actual_prompt=654 delta=+221 observed_factor=1.526 → scale=1.600
+  ℹ Groq token calibration: est_text=535 actual_prompt=902 delta=+354 observed_factor=1.662 → scale=1.618
+
+  ⏳ Groq TPM: remaining=1698 < ~2177 — ждём 51с до сброса квоты
+  ℹ Groq token calibration: est_text=542 actual_prompt=906 delta=+351 observed_factor=1.648 → scale=1.627
+  ℹ Groq token calibration: est_text=496 actual_prompt=823 delta=+314 observed_factor=1.633 → scale=1.629
+  ℹ Groq token calibration: est_text=521 actual_prompt=845 delta=+311 observed_factor=1.597 → scale=1.619
+  ℹ Groq token calibration: est_text=467 actual_prompt=739 delta=+259 observed_factor=1.555 → scale=1.600
+  ℹ Groq token calibration: est_text=507 actual_prompt=835 delta=+315 observed_factor=1.621 → scale=1.606
+  ℹ Groq token calibration: est_text=526 actual_prompt=886 delta=+347 observed_factor=1.660 → scale=1.622
+  ℹ Groq token calibration: est_text=503 actual_prompt=801 delta=+285 observed_factor=1.567 → scale=1.606
+  ℹ Groq token calibration: est_text=359 actual_prompt=528 delta=+156 observed_factor=1.435 → scale=1.554
+  точки моделью (cloud): кусков 40, без ответа 0, добавлено 105 (вопросов 6, восклицаний 0) за 241 с
+IMG_6848: точки модели → local-m111-novad: добавлено 105; концы предложения на 100 слов: local-m111-novad 5.5 → local-m111-novad-lpc 7.9 (Groq 10.3)
+   local-m111-novad: концы Groq на совпавших словах 263, там же 136 (51.7%); своих 152, из них у Groq тоже 89.5%
+   local-m111-novad-lpc: концы Groq на совпавших словах 263, там же 153 (58.2%); своих 217, из них у Groq тоже 70.5%
+  → IMG_6848.local-m111-novad-lpc.transcript.json · перевести источник: arl tx-use "IMG_6848" local-m111-novad-lpc
+{
+  "qwen/qwen3.6-27b": 1.3953,
+  "qwen/qwen3.8-27b": 1.5543
+}gamebox: замок взят
+  модели: Local http://192.168.3.17:8081/v1
+  точки моделью (local): кусков 40, без ответа 0, добавлено 97 (вопросов 7, восклицаний 0) за 1432 с
+IMG_6848: точки модели → local-m111-novad: добавлено 97; концы предложения на 100 слов: local-m111-novad 5.5 → local-m111-novad-lpl 7.8 (Groq 10.3)
+   local-m111-novad: концы Groq на совпавших словах 263, там же 136 (51.7%); своих 152, из них у Groq тоже 89.5%
+   local-m111-novad-lpl: концы Groq на совпавших словах 263, там же 153 (58.2%); своих 212, из них у Groq тоже 72.2%
+  → IMG_6848.local-m111-novad-lpl.transcript.json · перевести источник: arl tx-use "IMG_6848" local-m111-novad-lpl
+gamebox: замок отпущен
