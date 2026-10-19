@@ -1,0 +1,159 @@
+=== IMG_6848
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ℹ Groq token scale factor: 1.143 (model=qwen/qwen3.8-27b)
+  ℹ Groq token calibration: est_text=335 actual_prompt=345 delta=-3 observed_factor=0.991 → scale=1.097
+  ℹ Groq token calibration: est_text=315 actual_prompt=326 delta=-2 observed_factor=0.994 → scale=1.066
+  ℹ Groq token calibration: est_text=320 actual_prompt=335 delta=+2 observed_factor=1.006 → scale=1.048
+  ℹ Groq token calibration: est_text=312 actual_prompt=331 delta=+6 observed_factor=1.019 → scale=1.039
+  ℹ Groq token calibration: est_text=336 actual_prompt=348 delta=-1 observed_factor=0.997 → scale=1.027
+  ℹ Groq token calibration: est_text=282 actual_prompt=296 delta=+1 observed_factor=1.004 → scale=1.020
+  ℹ Groq token calibration: est_text=310 actual_prompt=331 delta=+8 observed_factor=1.026 → scale=1.022
+  ℹ Groq token calibration: est_text=302 actual_prompt=314 delta=-1 observed_factor=0.997 → scale=1.014
+  ℹ Groq token calibration: est_text=297 actual_prompt=315 delta=+5 observed_factor=1.017 → scale=1.015
+  ℹ Groq token calibration: est_text=316 actual_prompt=335 delta=+6 observed_factor=1.019 → scale=1.016
+  начало: модель оценила 10 первых фраз, непонятных без предыдущего 5
+  ℹ Groq token calibration: est_text=143 actual_prompt=172 delta=+16 observed_factor=1.112 → scale=1.045
+  ℹ Groq token calibration: est_text=132 actual_prompt=161 delta=+16 observed_factor=1.121 → scale=1.068
+  ℹ Groq token calibration: est_text=176 actual_prompt=214 delta=+25 observed_factor=1.142 → scale=1.090
+  стыки: у 3 кандидатов модель нашла рваный стык — они после остальных
+  ℹ Groq token calibration: est_text=400 actual_prompt=416 delta=+3 observed_factor=1.008 → scale=1.065
+  ℹ Groq token calibration: est_text=493 actual_prompt=522 delta=+16 observed_factor=1.032 → scale=1.055
+  ℹ Groq token calibration: est_text=314 actual_prompt=342 delta=+15 observed_factor=1.048 → scale=1.053
+  ℹ Groq token calibration: est_text=411 actual_prompt=436 delta=+12 observed_factor=1.029 → scale=1.046
+  ℹ Groq token calibration: est_text=527 actual_prompt=549 delta=+9 observed_factor=1.017 → scale=1.037
+  ℹ Groq token calibration: est_text=346 actual_prompt=381 delta=+22 observed_factor=1.064 → scale=1.045
+  ℹ Groq token calibration: est_text=396 actual_prompt=417 delta=+8 observed_factor=1.020 → scale=1.038
+
+  ⏳ Groq TPM: remaining=1593 < ~1709 — ждём 49с до сброса квоты
+  ℹ Groq token calibration: est_text=395 actual_prompt=425 delta=+17 observed_factor=1.043 → scale=1.039
+  ℹ Groq token calibration: est_text=390 actual_prompt=413 delta=+10 observed_factor=1.026 → scale=1.035
+  ℹ Groq token calibration: est_text=388 actual_prompt=415 delta=+14 observed_factor=1.036 → scale=1.035
+  ℹ Groq token calibration: est_text=259 actual_prompt=291 delta=+19 observed_factor=1.073 → scale=1.047
+  ℹ Groq token calibration: est_text=464 actual_prompt=488 delta=+11 observed_factor=1.024 → scale=1.040
+  ℹ Groq token calibration: est_text=329 actual_prompt=366 delta=+24 observed_factor=1.073 → scale=1.050
+  ℹ Groq token calibration: est_text=494 actual_prompt=516 delta=+9 observed_factor=1.018 → scale=1.040
+  ℹ Groq token calibration: est_text=363 actual_prompt=412 delta=+36 observed_factor=1.099 → scale=1.058
+  ℹ Groq token calibration: est_text=404 actual_prompt=438 delta=+21 observed_factor=1.052 → scale=1.056
+  ℹ Groq token calibration: est_text=402 actual_prompt=432 delta=+17 observed_factor=1.042 → scale=1.052
+  ℹ Groq token calibration: est_text=239 actual_prompt=281 delta=+29 observed_factor=1.121 → scale=1.073
+  ℹ Groq token calibration: est_text=507 actual_prompt=593 delta=+73 observed_factor=1.144 → scale=1.094
+  ℹ Groq token calibration: est_text=389 actual_prompt=480 delta=+78 observed_factor=1.201 → scale=1.126
+  крючки: модель оценила 8, отброшено 1, без ответа 0
+autocut IMG_6848: предложено сборок 5 из 107 мыслей (без понятного начала: 3) → reviews/IMG_6848_auto_m116-cloud.txt
+  M1 76@1.08 | 17.7-10 18.1-4 | h:18.2! | c:18.3,18.4 | k:17.9=выгораешь;17.10=месте;18.1=благодарен;18.4=отдых | t: Отдых: благодарность на душе | d: Благодарность клиентов является лучшим отдыхом.
+  M2 79@1.08 | 13.4-7 15.7 16.1 16.2-5 | h:16.5! | c:16.4,16.5 | k:13.6=инсайт;16.1=задача;16.5=кресло | t: Развернуть ситуацию для инсайта | d: Цель терапии — опора на себя, а не на терапевта.
+  M3 59@1.05 | 26.8-11 26.12-15 28.1-4 28.10-12 | h:28.12! | c:28.12 | k:28.10=маску;28.11=эго-конструкция | t: Маска: эго-конструкция подростка | d: Маска — способ выживания подростка в жесткой социальной системе.
+  M4 73@1.05 | 25.3-6 25.7 26.1-3 | c:26.3 | k:25.6=самоуважение;25.7=делали;26.3=честен | t: Честны ли вы к себе? | d: Честность к себе и другим как основа социального взаимодействия.
+  M5 71@1.08 | 35.10 36.1-3 36.12 37.1-3 37.4-6 | c:37.6 | k:35.10=взрослый;36.1=принятие;37.5=потом;37.6=понимание | t: Вы понимаете, кто вы? | d: Не нужно постоянно анализировать, просто живите и радуйтесь жизни.
+real 83,21
+user 8,42
+sys 1,92
+=== 2026-08-08 11h 42m 49s
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ℹ Groq token scale factor: 1.126 (model=qwen/qwen3.8-27b)
+  ℹ Groq token calibration: est_text=293 actual_prompt=315 delta=+9 observed_factor=1.031 → scale=1.097
+  ℹ Groq token calibration: est_text=304 actual_prompt=317 delta=+0 observed_factor=1.000 → scale=1.068
+  [diag] Groq 429 headers: retry-after=13, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=965, x-ratelimit-remaining-tokens=4332, x-ratelimit-reset-requests=50m24s, x-ratelimit-reset-tokens=28.799s
+
+  ⏳ Groq троттлит (retry-after=13с)
+  [diag] OpenRouter 429 headers: x-ratelimit-limit=50, x-ratelimit-remaining=0, x-ratelimit-reset=1792454400000
+
+  ⏳ OpenRouter исчерпан (retry-after=6537с)
+⏸ ждём провайдеров: осталось ~12с · Groq через ~12с · OpenRouter через ~6536с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=301 actual_prompt=318 delta=+4 observed_factor=1.013 → scale=1.052
+  [diag] Groq 429 headers: retry-after=3, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=964, x-ratelimit-remaining-tokens=5674, x-ratelimit-reset-requests=51m50.399s, x-ratelimit-reset-tokens=18.694s
+
+  ⏳ Groq троттлит (retry-after=3с)
+⏸ ждём провайдеров: осталось ~3с · Groq через ~3с · OpenRouter через ~6523с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=287 actual_prompt=310 delta=+10 observed_factor=1.035 → scale=1.047
+  ℹ Groq token calibration: est_text=289 actual_prompt=307 delta=+5 observed_factor=1.017 → scale=1.038
+  начало: модель оценила 5 первых фраз, непонятных без предыдущего 4
+  ℹ Groq token calibration: est_text=411 actual_prompt=445 delta=+21 observed_factor=1.051 → scale=1.042
+  ℹ Groq token calibration: est_text=410 actual_prompt=450 delta=+27 observed_factor=1.066 → scale=1.049
+  ℹ Groq token calibration: est_text=408 actual_prompt=443 delta=+22 observed_factor=1.054 → scale=1.051
+  ℹ Groq token calibration: est_text=256 actual_prompt=294 delta=+25 observed_factor=1.098 → scale=1.065
+  ℹ Groq token calibration: est_text=540 actual_prompt=587 delta=+34 observed_factor=1.063 → scale=1.064
+  [diag] Groq 429 headers: retry-after=14, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=957, x-ratelimit-remaining-tokens=3433, x-ratelimit-reset-requests=1h1m55.2s, x-ratelimit-reset-tokens=36.334s
+
+  ⏳ Groq троттлит (retry-after=14с)
+⏸ ждём провайдеров: осталось ~14с · Groq через ~14с · OpenRouter через ~6516с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=424 actual_prompt=505 delta=+68 observed_factor=1.160 → scale=1.093
+  крючки: модель оценила 3, отброшено 1, без ответа 0
+autocut 2026-08-08 11h 42m 49s: предложено сборок 1 из 47 мыслей (без понятного начала: 3) → reviews/2026-08-08 11h 42m 49s_auto_m116-cloud.txt
+  M1 78 | 13.5-8 13.9-12 14.1-4 14.5-8 | h:14.4! | c:14.8 | k:13.6=компенсацией;13.11=предназначение;14.6=раскрыть | t: Раскрыть нервную систему самому себе | d: Никогда не поздно раскрыть себя правильно, пока жив.
+real 37,96
+user 1,18
+sys 0,24
+=== Pxl 20260621 112938952
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ℹ Groq token scale factor: 1.093 (model=qwen/qwen3.8-27b)
+  [diag] Groq 429 headers: retry-after=2, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=956, x-ratelimit-remaining-tokens=5137, x-ratelimit-reset-requests=1h3m21.6s, x-ratelimit-reset-tokens=23.502s
+
+  ⏳ Groq троттлит (retry-after=2с)
+  [diag] OpenRouter 429 headers: x-ratelimit-limit=50, x-ratelimit-remaining=0, x-ratelimit-reset=1792454400000
+
+  ⏳ OpenRouter исчерпан (retry-after=6500с)
+⏸ ждём провайдеров: осталось ~1с · Groq через ~1с · OpenRouter через ~6499с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=312 actual_prompt=339 delta=+14 observed_factor=1.045 → scale=1.079
+  ℹ Groq token calibration: est_text=325 actual_prompt=351 delta=+13 observed_factor=1.040 → scale=1.067
+  ℹ Groq token calibration: est_text=293 actual_prompt=318 delta=+12 observed_factor=1.041 → scale=1.059
+  ℹ Groq token calibration: est_text=320 actual_prompt=335 delta=+2 observed_factor=1.006 → scale=1.043
+  ℹ Groq token calibration: est_text=312 actual_prompt=331 delta=+6 observed_factor=1.019 → scale=1.036
+  ℹ Groq token calibration: est_text=311 actual_prompt=334 delta=+10 observed_factor=1.032 → scale=1.035
+  ℹ Groq token calibration: est_text=297 actual_prompt=314 delta=+4 observed_factor=1.013 → scale=1.028
+  ℹ Groq token calibration: est_text=301 actual_prompt=326 delta=+12 observed_factor=1.040 → scale=1.032
+  [diag] Groq 429 headers: retry-after=17, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=948, x-ratelimit-remaining-tokens=3083, x-ratelimit-reset-requests=1h14m52.8s, x-ratelimit-reset-tokens=38.931s
+
+  ⏳ Groq троттлит (retry-after=17с)
+⏸ ждём провайдеров: осталось ~17с · Groq через ~17с · OpenRouter через ~6492с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=294 actual_prompt=317 delta=+10 observed_factor=1.034 → scale=1.033
+  ℹ Groq token calibration: est_text=329 actual_prompt=352 delta=+10 observed_factor=1.030 → scale=1.032
+  начало: модель оценила 10 первых фраз, непонятных без предыдущего 7
+  ℹ Groq token calibration: est_text=164 actual_prompt=194 delta=+17 observed_factor=1.104 → scale=1.053
+  ℹ Groq token calibration: est_text=203 actual_prompt=232 delta=+16 observed_factor=1.079 → scale=1.061
+  стыки: у 1 кандидатов модель нашла рваный стык — они после остальных
+  [diag] Groq 429 headers: retry-after=9, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=944, x-ratelimit-remaining-tokens=4343, x-ratelimit-reset-requests=1h20m38.4s, x-ratelimit-reset-tokens=29.331s
+
+  ⏳ Groq троттлит (retry-after=9с)
+⏸ ждём провайдеров: осталось ~9с · Groq через ~9с · OpenRouter через ~6473с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=384 actual_prompt=425 delta=+28 observed_factor=1.073 → scale=1.065
+  ℹ Groq token calibration: est_text=438 actual_prompt=507 delta=+56 observed_factor=1.128 → scale=1.084
+  ℹ Groq token calibration: est_text=295 actual_prompt=347 delta=+39 observed_factor=1.132 → scale=1.098
+  ℹ Groq token calibration: est_text=395 actual_prompt=444 delta=+36 observed_factor=1.091 → scale=1.096
+  [diag] Groq 429 headers: retry-after=7, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=940, x-ratelimit-remaining-tokens=4072, x-ratelimit-reset-requests=1h26m24s, x-ratelimit-reset-tokens=31.851s
+
+  ⏳ Groq троттлит (retry-after=7с)
+⏸ ждём провайдеров: осталось ~7с · Groq через ~7с · OpenRouter через ~6461с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=536 actual_prompt=602 delta=+53 observed_factor=1.099 → scale=1.097
+  ℹ Groq token calibration: est_text=417 actual_prompt=500 delta=+70 observed_factor=1.168 → scale=1.118
+  [diag] Groq 429 headers: retry-after=9, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=938, x-ratelimit-remaining-tokens=3889, x-ratelimit-reset-requests=1h29m16.8s, x-ratelimit-reset-tokens=33.128s
+
+  ⏳ Groq троттлит (retry-after=9с)
+⏸ ждём провайдеров: осталось ~9с · Groq через ~9с · OpenRouter через ~6453с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=372 actual_prompt=408 delta=+23 observed_factor=1.062 → scale=1.101
+  ℹ Groq token calibration: est_text=472 actual_prompt=534 delta=+49 observed_factor=1.104 → scale=1.102
+  [diag] Groq 429 headers: retry-after=4, x-ratelimit-limit-requests=1000, x-ratelimit-limit-tokens=8000, x-ratelimit-remaining-requests=936, x-ratelimit-remaining-tokens=4196, x-ratelimit-reset-requests=1h32m9.6s, x-ratelimit-reset-tokens=31.2s
+
+  ⏳ Groq троттлит (retry-after=4с)
+⏸ ждём провайдеров: осталось ~4с · Groq через ~4с · OpenRouter через ~6443с
+▶ Groq доступен, продолжаю
+  ℹ Groq token calibration: est_text=381 actual_prompt=465 delta=+71 observed_factor=1.186 → scale=1.127
+  крючки: модель оценила 3, отброшено 1, без ответа 0
+autocut Pxl 20260621 112938952: предложено сборок 3 из 189 мыслей (без понятного начала: 8) → reviews/Pxl 20260621 112938952_auto_m116-cloud.txt
+  M1 73 | 15.7-8 16.1-2 16.3-7 | h:16.2! | c:16.7 | k:16.1=зарубили;16.7=повторялись | t: Сценарии: лидер стал изгоем | d: Школьные сценарии падения и унижения повторяются в жизни.
+  M2 66@1.08 | 33.7 34.1-3 34.4-5 36.8-11 36.12-17 | h:36.13! | c:36.16,36.17 | k:34.5=заботу;36.11=социальное;36.13=взрослый;36.17=точно | t: Взрослый точно чувствует себя | d: Взрослая часть личности сфокусирована на себе и своих чувствах.
+  M3 65@1.08 | 51.5-7 52.1-3 52.4-7 52.8-10 53.1 | c:52.10,53.1 | k:51.7=мудрец;52.3=каждое;52.7=скриншот;52.9=инстинктов | t: Вы накладываете скриншот на реальность? | d: Мудрец не накладывает скриншот, так как он из инстинктов.
+real 66,24
+user 4,38
+sys 0,69

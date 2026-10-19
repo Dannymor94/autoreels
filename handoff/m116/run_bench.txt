@@ -1,0 +1,16 @@
+  модели: Claude · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  … 10/39
+  … 20/39
+  … 30/39
+judge-bench judge_cloud.jsonl → anthropic:claude-haiku-5-5: запросов 39 → handoff/m116/bench_haiku.jsonl
+  First sentence: ответов 25/25, «да» 36%, совпало с журналом 19/25 (76%), 3.2 с на запрос
+  Teaser line: ответов 14/14, «да» 71%, совпало с журналом 13/14 (93%), 3.5 с на запрос
+  Claude claude-haiku-5-5: запросов 39, вход 19384, ответ 18802 токенов ≈ $0.0113
+  модели: Claude · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  … 10/39
+  … 20/39
+  … 30/39
+judge-bench judge_cloud.jsonl → anthropic:claude-sonnet-5-5: запросов 39 → handoff/m116/bench_sonnet.jsonl
+  First sentence: ответов 25/25, «да» 16%, совпало с журналом 20/25 (80%), 1.9 с на запрос
+  Teaser line: ответов 14/14, «да» 36%, совпало с журналом 8/14 (57%), 3.1 с на запрос
+  Claude claude-sonnet-5-5: запросов 39, вход 19384, ответ 5632 токенов ≈ $0.0951
