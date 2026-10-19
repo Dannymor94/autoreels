@@ -8060,21 +8060,16 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     # kept only as a commented line with the reason, and the next candidate takes its place.
     from autoreels.cloud.autocut import too_close
     accepted, rejected, close = [], [], []
-    for pr in pool:
-        if len(accepted) >= prm.clips:
-            break
-        if _polish is not None:
-            try:
-                _polish(pr)
-            except Exception as exc:  # noqa: BLE001 — no model: the code's hook order and plate stay
-                print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+    hookless: list = []           # M107: candidates left without a cold open — taken only when the hooked run out
+
+    def _try_accept(pr) -> None:
         why_close = too_close(pr, accepted, ac.max_shared)          # M68: distinct reels, checked for free first
         if why_close:
             close.append((pr, why_close))
-            continue
+            return
         if not check:
             accepted.append(pr)
-            continue
+            return
         err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
         tried = {pr.hook}
@@ -8108,6 +8103,26 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             accepted.append(pr)
         else:
             rejected.append((pr, err))
+
+    for pr in pool:
+        if len(accepted) >= prm.clips:
+            break
+        if _polish is not None:
+            try:
+                _polish(pr)
+            except Exception as exc:  # noqa: BLE001 — no model: the code's hook order and plate stay
+                print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+        if getattr(ac, "hookless_last", False) and ac.hook_teaser and not pr.hook:
+            hookless.append(pr)       # M107 (m106: 6 of 15 clips had no cold open): the hooked ones go first
+            continue
+        _try_accept(pr)
+    hookless_left: list = []
+    for pr in hookless:
+        if len(accepted) >= prm.clips:
+            hookless_left.append(pr)
+            continue
+        pr.notes.append("без крючка — взята, когда сборки с крючком кончились (M107)")
+        _try_accept(pr)
     # M70: a short version of every accepted clip (weakest middle thoughts dropped), checked the same way
     if ac.short_variant and accepted:
         from autoreels.cloud.autocut import short_variant
@@ -8155,11 +8170,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         for pr, why in close:
             body.append(f"#   {why}: {pr.pieces}")
         body.append("")
+    if hookless_left:
+        body.append("# --- без холодного старта — не взяты, хватило сборок с крючком (M107; можно раскомментировать):")
+        for pr in hookless_left:
+            body.append(f"#! {pr.line('')}")
+        body.append("")
     out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
     print(f"autocut {stem}: предложено сборок {len(accepted)} из {len(the_map.get('units') or [])} мыслей"
           + (f" (не прошли проверку: {len(rejected)})" if rejected else "")
           + (f" (похожи на принятые: {len(close)})" if close else "")
-          + (f" (без понятного начала: {len(no_start)})" if no_start else "") + f" → {out_path}")
+          + (f" (без понятного начала: {len(no_start)})" if no_start else "")
+          + (f" (без крючка не взяты: {len(hookless_left)})" if hookless_left else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")
     for pr, err in rejected:

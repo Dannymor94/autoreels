@@ -314,6 +314,7 @@ class AutocutConfig(BaseModel):
     close_last_sec: float = Field(3.0, ge=0)
     # M83 (m80: every cold open was the clip's own first sentence — no teaser): the cold open comes from later, replayed
     hook_teaser: bool = False                    # hook candidates only from hook_teaser_pos of the clip on, h:B.N!
+    hookless_last: bool = False                  # M107: a clip left without a cold open is taken only when the hooked run out
     hook_teaser_pos: float = Field(0.5, ge=0.0, le=0.95)   # … fraction of the clip's sentences before the candidate
     hook_no_pointer: bool = False                # M92: a teaser pointing back («Это и есть…», «Но…», «Он…») is left out by the code
     # M65: interesting, hooky reels (cloud/autocut.py)

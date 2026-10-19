@@ -117,7 +117,9 @@ def test_cmd_autocut_replaces_a_proposal_that_fails_the_apply_checks(tmp_path, c
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
-                   .replace("  clips: 5\n", "  clips: 1\n"), encoding="utf-8")
+                   .replace("  clips: 5\n", "  clips: 1\n")
+                   .replace("  hookless_last: true ", "  hookless_last: false "),     # M60 alone (M107 puts «битая» last)
+                   encoding="utf-8")
     r0 = cli.load_r0_config(cfg)
     tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
     _, kept, _ = cli._review_block_set(tx, r0, "lecture")
@@ -932,3 +934,61 @@ def test_m106_a_clip_without_a_teaser_says_why_and_what_a_third_would_give():
     assert pr.hook is None
     assert ("крючок: во второй части клипа (с 50%) нет фразы для тизера — сборка без крючка (фраз там 2: "
             "незаконченная — 1, длиннее 6 с — 1; с 33% клипа нашлось бы 1)") in pr.notes
+
+
+def test_m107_clips_without_a_cold_open_go_after_the_hooked_ones(tmp_path, monkeypatch, capsys):
+    """M107 (m106: 6 of 15 clips had no cold open — one to four sentences in the second half, most pointing back):
+    a candidate left without a hook after the judges is put aside; the hooked candidates are taken first, the
+    hookless ones only when those run out. The ones not taken are listed (commented) in the draft. Off = as before."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+
+    def run(flag: str, n_hookless: int):
+        root = tmp_path / f"{flag}{n_hookless}"
+        root.mkdir()
+        mpath = _source(root)
+        cfg = root / "config" / "r0.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                       .replace("  hookless_last: true ", f"  hookless_last: {flag} "), encoding="utf-8")
+        r0 = cli.load_r0_config(cfg)
+        tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
+        _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+        units = []
+        for b in range(6):
+            ss = merge_group_sentences([kept[b]], tx.words)
+            units.append(U(b + 1, ss[0][0].t0, ss[-1][-1].t1 - ss[0][0].t0, "conclusion", 5, f"{b + 1}.1-{len(ss)}",
+                           topic=b + 1, summary=f"вывод {b + 1}"))
+        (root / "transcripts").mkdir(exist_ok=True)
+        (root / "transcripts" / "v.map.json").write_text(json.dumps(
+            {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": units}), encoding="utf-8")
+        order = []
+
+        def rank(pr, prov, **k):
+            order.append(pr.pieces)
+            if len(order) <= n_hookless:                     # the judges left the first candidates without a hook
+                pr.hooks, pr.hook = [], None
+            return False
+        monkeypatch.setattr(ac_mod, "rank_hooks", rank)
+        monkeypatch.setattr(ac_mod, "headline", lambda *a, **k: None)
+        monkeypatch.setattr(ac_mod, "check_seams", lambda *a, **k: None)
+        monkeypatch.setattr(cli, "_autocut_check", lambda head, line, r, c: (None, ""))
+        prov = _Answers('{"subject": "вывод", "alone": true, "leads": true, "why": ""}')
+        assert cli.cmd_autocut("v", root=root, cache_dir=str(root / "cache"), llm="local", provider=prov) == 0
+        text = (root / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+        ms = [ln for ln in text.splitlines() if ln.startswith("M")]
+        return order, ms, text, capsys.readouterr().out
+
+    order, ms, text, out = run("false", 2)
+    assert [m.split(" | ")[1] for m in ms] == order[:2] and all(" h:" not in m for m in ms)      # as before
+    order, ms, text, out = run("true", 2)
+    assert [m.split(" | ")[1] for m in ms] == order[2:4] and all(" h:" in m for m in ms)        # the hooked first
+    left = text.split("# --- без холодного старта — не взяты")[1].splitlines()
+    assert [any(ln.startswith("#! M") and f"| {o} |" in ln for ln in left) for o in order[:2]] == [True, True]
+    assert "без крючка не взяты: 2" in out
+    order, ms, text, out = run("true", 5)                                    # only one hooked: one hookless fills in
+    assert len(ms) == 2 and " h:" in ms[0] and " h:" not in ms[1] and ms[1].split(" | ")[1] == order[0]
+    assert "без крючка — взята, когда сборки с крючком кончились (M107)" in text

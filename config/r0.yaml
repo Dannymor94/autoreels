@@ -353,6 +353,8 @@ autocut:
   hook_teaser_pos: 0.5    # … it starts at least this far into the clip's sentences; none there = no cold open
   hook_no_pointer: true   # M92 (m86: the model passed «Это и есть доверие к себе», «Но опять…», «Он как-то хочет…»): a teaser
                           # that points back — a first «Это/Но/Он/Вот…», «это» among the first 3 words — is left out by the code
+  hookless_last: true     # M107 (m106: 6 of 15 clips had no cold open — few sentences in the second half, most pointing
+                          # back): a clip left without one goes after every clip with one; taken only when those run out
   # M86 — M85: strong lines («И никогда, ребятки, не поздно.») rejected for leaving a question open; 11h42 lost a clip when
   # the model answered a borderline start differently than in m78:
   hook_judge_mode: teaser # the cold open is judged as a teaser: an open question or a punchline is fine, a pointer back is not;
