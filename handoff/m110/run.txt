@@ -1,0 +1,14 @@
+== gamebox (whisper.cpp)
+=== dictate: m110.m4a → whisper.cpp на gamebox ===
+gamebox: замок взят
+gamebox: замок отпущен
+  готово: 145 слов, ~1 мин → /tmp/m110.txt
+== Groq
+=== dictate: m110.m4a → Groq ===
+  готово: 132 слов, ~1 мин → /tmp/m110.txt
+слов: gamebox      145, Groq      132
+== M108-кусок через Groq
+=== dictate: dictate_test.m4a → Groq ===
+  готово: 15 слов, ~1 мин → /tmp/dictate_test.txt
+слов Groq:       15 (gamebox в M108: 13)
+пауз длиннее 2 с: 4
