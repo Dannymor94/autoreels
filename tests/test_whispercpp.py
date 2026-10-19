@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from autoreels.cloud.transcribe import WhisperCppBackend, parse_whispercpp_json, transcribe
 from autoreels.cloud.txcheck import TxCheckParams, check, compare_words, prompt_patterns
 from autoreels.core.config import WhisperCppParams
@@ -211,3 +213,40 @@ def test_tx_use_refuses_when_the_map_is_from_another_transcript(tmp_path, capsys
     assert cli.cmd_tx_use("v", "local", root=tmp_path, cache_dir=str(tmp_path / "cache")) == 1
     assert "карта от расшифровки someone-else" in capsys.readouterr().err
     assert (tmp_path / "transcripts" / "v.map.json").is_file()            # nothing moved
+
+
+def test_compare_words_sentence_end_agreement():
+    """M111: on the matched words — how many of Groq's sentence ends the local transcript has too."""
+    mk = lambda s: [Word(word=w, t0=i, t1=i + 0.5) for i, w in enumerate(s.split())]
+    ref = mk("Мы пришли. Сели пить чай. Потом ушли домой.")
+    other = mk("мы пришли сели пить чай. Потом ушли. Домой.")
+    sa = compare_words(ref, other)["sent_agree"]
+    assert (sa["ref"], sa["other"], sa["both"]) == (3, 3, 2)
+    assert sa["recall"] == 66.7 and sa["precision"] == 66.7
+
+
+def test_whispercpp_overrides_check_names_and_types():
+    """M111: `--wc key=value` changes only the named whispercpp fields; an empty value turns VAD off;
+    an unknown field or a bad type is an error, not silently ignored."""
+    from autoreels.__main__ import _whispercpp_overrides
+    base = WhisperCppParams()
+    w = _whispercpp_overrides(base, ["model=$W/ggml-large-v3.bin", "vad_model=", "max_context=-1"])
+    assert (w.model, w.vad_model, w.max_context) == ("$W/ggml-large-v3.bin", "", -1)
+    assert w.threads == base.threads and w.host == base.host
+    run = WhisperCppBackend(w).commands(Path("/c/a.mp3"), Path("/t/a.wav"), Path("/t/a.json"))[3][2]
+    assert "ggml-large-v3.bin" in run and "--vad" not in run and "-mc -1" in run
+    for bad in (["modle=x"], ["threads=many"], ["model"]):
+        with pytest.raises(ValueError):
+            _whispercpp_overrides(base, bad)
+
+
+def test_cmd_tx_compare_wc_needs_a_tag(tmp_path, capsys):
+    from autoreels import __main__ as cli
+    from tests.test_montage import _source, REPO_ROOT
+    import shutil
+    mpath = _source(tmp_path)
+    shutil.copy(REPO_ROOT / "config" / "transcribe.yaml", tmp_path / "config" / "transcribe.yaml")
+    assert cli.cmd_tx_compare([str(mpath)], root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                              wc=["vad_model="]) == 1
+    assert "нужен --tag" in capsys.readouterr().err
+    assert not (tmp_path / "transcripts" / f"{mpath.stem}.local.transcript.json").exists()

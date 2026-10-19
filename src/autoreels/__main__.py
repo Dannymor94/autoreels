@@ -8354,8 +8354,28 @@ def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[s
         return (hit or (lines[-1] if lines else f"rc={rc}"))[:200], buf.getvalue()
 
 
+def _whispercpp_overrides(base, pairs) -> "object":
+    """M111: `--wc key=value` → a copy of the whispercpp params with those fields (names and types checked by
+    the model; an empty value is an empty string — `vad_model=` turns VAD off). Raises ValueError."""
+    from autoreels.core.config import WhisperCppParams
+    upd: dict = {}
+    for pr in pairs or ():
+        k, sep, v = str(pr).partition("=")
+        k = k.strip()
+        if not sep or not k:
+            raise ValueError(f"--wc ждёт ключ=значение, получено «{pr}»")
+        if k not in WhisperCppParams.model_fields:
+            raise ValueError(f"--wc: нет поля «{k}» (есть: {', '.join(WhisperCppParams.model_fields)})")
+        upd[k] = v.strip()
+    try:
+        return WhisperCppParams.model_validate(base.model_dump() | upd)
+    except Exception as exc:  # noqa: BLE001 — pydantic message, one line
+        raise ValueError(f"--wc: {str(exc).splitlines()[0]}") from None
+
+
 def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
-                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "") -> int:
+                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "",
+                   wc=None) -> int:
     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
     Groq transcript), compared word by word with the Groq one, both run through tx-check →
@@ -8379,6 +8399,17 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
     prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
+    if wc:
+        if not tag:
+            print("ошибка: с --wc нужен --tag (вариант не должен заменить .local)", file=sys.stderr)
+            return 1
+        try:
+            wcfg = _whispercpp_overrides(wcfg, wc)
+        except ValueError as exc:
+            print(f"ошибка: {exc}", file=sys.stderr)
+            return 1
+        print("whisper.cpp: " + ", ".join(f"{k}={getattr(wcfg, k)!r}" for k in
+                                          dict.fromkeys(str(x).partition("=")[0].strip() for x in wc)), flush=True)
     if backend is None:
         from autoreels.core.heavy_lock import shared_lock
         backend = WhisperCppBackend(wcfg, lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
@@ -8449,6 +8480,9 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
         _avg = lambda e: f"{100 / e:.0f}" if e else "∞"
         print(f"   конец предложения на 100 слов: Groq {cmp_['ref_sent_ends']}, локально {cmp_['other_sent_ends']}"
               f" (слов в предложении: Groq {_avg(cmp_['ref_sent_ends'])}, локально {_avg(cmp_['other_sent_ends'])})")
+        _sa = cmp_["sent_agree"]
+        print(f"   концы Groq на совпавших словах: {_sa['ref']}, локально там же {_sa['both']} ({_sa['recall']}%); "
+              f"своих концов локально {_sa['other']}, из них у Groq тоже {_sa['precision']}%")
         print(f"   выдумки на речи: Groq {g['serious']} (известных {g['known']}, повторов {g['repeat']}), "
               f"локально {l_['serious']} (известных {l_['known']}, повторов {l_['repeat']}); "
               f"звук без слов: Groq {g['sparse_sec']:.0f} с, локально {l_['sparse_sec']:.0f} с")
@@ -12178,6 +12212,9 @@ def _build_parser():
     pxc.add_argument("--force", action="store_true", help="расшифровать заново, даже если файл уже есть")
     pxc.add_argument("--prompt", default=None, help="M64: подсказка стиля пунктуации для whisper.cpp (иначе из конфига)")
     pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
+    pxc.add_argument("--wc", action="append", default=None, metavar="ключ=значение",
+                     help="M111: параметр whisper.cpp для варианта (поле whispercpp в transcribe.yaml), можно несколько: "
+                          "--wc model='$W/ggml-large-v3.bin' --wc vad_model= --wc max_context=-1; нужен --tag")
     pxc.add_argument("--root", default=None)
     pxc.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -12652,7 +12689,7 @@ def main(argv=None) -> int:
         elif args.cmd == "tx-compare":
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
-                                  force=args.force, prompt=args.prompt, tag=args.tag)
+                                  force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc)
         elif args.cmd == "tx-punct":
             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None))

@@ -218,6 +218,9 @@ def prompt_patterns(prompt: str, n: int = 5) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+_TERMINAL = (".", "!", "?", "…")
+
+
 def _sent_ends(words) -> float:
     """Sentence-ending marks per 100 words (punctuation the sentence split relies on)."""
     if not words:
@@ -229,7 +232,8 @@ def _sent_ends(words) -> float:
 def compare_words(ref, other, *, show: int = 8) -> dict:
     """Two transcripts of one audio, word by word (case, ё and punctuation folded): matched words,
     words only in one of them, the share that differs (of the reference) and the longest
-    disagreements with their times."""
+    disagreements with their times. M111: `sent_agree` — on the matched words, how many sentence ends
+    of `ref` the other one has too (recall) and how many of its own are also in `ref` (precision)."""
     import difflib
     a = [(_norm(w.word).strip("."), w) for w in ref]
     b = [(_norm(w.word).strip("."), w) for w in other]
@@ -237,9 +241,16 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
     b = [x for x in b if x[0]]
     sm = difflib.SequenceMatcher(None, [x[0] for x in a], [x[0] for x in b], autojunk=False)
     matched, only_a, only_b, spans = 0, 0, 0, []
+    ends_ref = ends_other = ends_both = 0          # M111: sentence ends on the matched words
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             matched += i2 - i1
+            for k in range(i2 - i1):
+                er = a[i1 + k][1].word.rstrip().endswith(_TERMINAL)
+                eo = b[j1 + k][1].word.rstrip().endswith(_TERMINAL)
+                ends_ref += er
+                ends_other += eo
+                ends_both += er and eo
             continue
         only_a += i2 - i1
         only_b += j2 - j1
@@ -250,12 +261,14 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
     spans.sort(key=lambda s: -s["size"])
     return {"ref_words": len(a), "other_words": len(b), "matched": matched, "only_ref": only_a,
             "only_other": only_b, "differ": round(100.0 * (only_a + only_b) / max(1, len(a)), 1),
-            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other), "longest": spans[:show]}
+            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other),
+            "sent_agree": {"ref": ends_ref, "other": ends_other, "both": ends_both,
+                           "recall": round(100.0 * ends_both / ends_ref, 1) if ends_ref else 0.0,
+                           "precision": round(100.0 * ends_both / ends_other, 1) if ends_other else 0.0},
+            "longest": spans[:show]}
 
 
 # ── M64c: Groq's punctuation onto the local words ──────────────────────────────────────────────
-
-_TERMINAL = (".", "!", "?", "…")
 
 
 def transfer_punctuation(target, ref) -> tuple[list, int]:
