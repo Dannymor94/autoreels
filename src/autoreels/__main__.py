@@ -8051,7 +8051,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      context_later_min_sec=ac.context_later_min_sec,
                      hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos,
                      hook_no_pointer=ac.hook_no_pointer,
-                     close_last=ac.close_last, close_last_sec=ac.close_last_sec)
+                     close_last=ac.close_last, close_last_sec=ac.close_last_sec,
+                     end_tone=getattr(ac, "end_tone", False))
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -8073,6 +8074,22 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                                   _ends_terminal(st[-1]), " ".join(w.word for w in st)))
         return out_s
 
+    end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
+    open_end: list = []                     # … clips that ended «→» and could not be shortened
+    if prm.end_tone:
+        from autoreels.cloud.plan import load_alignment as _la_et
+        from autoreels.local.prosody import load_prosody as _lp_et, tone_lookup as _tl_et
+        _al_et = _la_et(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+        _tone_et = _tl_et(_lp_et(_root / "transcripts" / f"{stem}.prosody.json", manifest.source_sha256, _al_et)
+                          if _al_et else None)
+        if _tone_et is None:
+            print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы сборок по голосу («→») не "
+                  f"проверены; сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
+        else:
+            def end_tone(ref: str):
+                st = sent_by_ref.get(ref)
+                r = _tone_et(st[-1]) if st else None
+                return r[0] if r else None
     from dataclasses import replace as _dc_replace
     no_start: list = []                     # M74: clips whose start leans on what was cut, with no fix
     mode = llm or ac.hook_llm
@@ -8106,7 +8123,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         _ssys = _with_ex(_SS, *_ex["start"], "first sentence") if any(_ex["start"]) else None
         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore)
     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
-                   no_start=no_start, judge=judge)
+                   no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end)
     if judge is not None:
         _jc = getattr(judge, "cache", {})
         _no = sum(1 for v in _jc.values() if v is not None and not v[0])
@@ -8312,6 +8329,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         for pieces, why in no_start:
             body.append(f"#   {why}: {pieces}")
         body.append("")
+    if open_end:
+        body.append("# --- конец звучит с продолжением («→», голос не опустился), укоротить нельзя (M115):")
+        for pieces, why in open_end:
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
     if close:
         body.append("# --- слишком похожи на принятые (M68: своё начало и свои мысли у каждой сборки):")
         for pr, why in close:
@@ -8327,6 +8349,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
           + (f" (не прошли проверку: {len(rejected)})" if rejected else "")
           + (f" (похожи на принятые: {len(close)})" if close else "")
           + (f" (без понятного начала: {len(no_start)})" if no_start else "")
+          + (f" (конец «→», не укоротить: {len(open_end)})" if open_end else "")
           + (f" (без крючка не взяты: {len(hookless_left)})" if hookless_left else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")

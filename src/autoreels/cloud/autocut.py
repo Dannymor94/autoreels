@@ -80,6 +80,9 @@ class AutoParams:
     # (at least close_last_sec of them, at most two) are written c:B.N.
     close_last: bool = False
     close_last_sec: float = 3.0
+    # M115 (M1.9 C; M99: 62 of 65 endings of the owner's clips are «↘», one «→»): a clip does not end on a sentence
+    # whose voice stays up — the speaker goes on. Needs end_tone in propose (the intonation map); False = as before.
+    end_tone: bool = False
 
 
 @dataclass
@@ -310,6 +313,51 @@ def _drop_first_ref(refs: str) -> str | None:
     a_i, z_i = int(a), int(z or a)
     head = [f"{b}.{a_i + 1}" + (f"-{z_i}" if z_i > a_i + 1 else "")] if a_i < z_i else []
     return " ".join(head + pieces[1:]) or None
+
+
+def keep_refs_until(refs: str, last: str) -> str | None:
+    """«13.2-5 14.1-3» up to «14.2» → «13.2-5 14.1-2»; up to «13.4» → «13.2-4»; None when `last` is not in refs."""
+    out = []
+    lb, _, lk = last.partition(".")
+    for piece in refs.split():
+        b, _, r = piece.partition(".")
+        a, _, z = r.partition("-")
+        a_i, z_i = int(a), int(z or a)
+        if b == lb and a_i <= int(lk) <= z_i:
+            k = int(lk)
+            out.append(f"{b}.{a_i}" + (f"-{k}" if k > a_i else ""))
+            return " ".join(out)
+        out.append(piece)
+    return None
+
+
+def fix_open_end(clip: list[dict], sentences, end_tone: Callable[[str], "str | None"], p: "AutoParams"
+                 ) -> tuple[list[dict] | None, str | None, str | None]:
+    """M115 (M1.9 C): one rule for every clip — it does not end on a sentence spoken «→», with the voice up (the
+    intonation map: M99 — 62 of 65 endings of the owner's clips are «↘», one is «→»; inside clips 45 of 484 sentence
+    ends are «→»). The text's full stop does not count, the voice does. The last thought loses its trailing sentences
+    back to the latest finished one that is not «→», while the clip stays ≥ min_sec; otherwise the clip goes.
+    «unsure» and «no pitch» endings stay (the plan reports them, as before). Returns (clip, note, None) — clip
+    unchanged and note None when its ending is not «→» — or (None, None, why)."""
+    last = clip[-1]
+    rows = list(_sent_rows(sentences, last["refs"]))
+    if not rows or end_tone(rows[-1][0]) != "open":
+        return clip, None, None
+    total = sum(_dur(u) for u in clip)
+    cut = 0.0
+    for k in range(len(rows) - 1, 0, -1):            # keep rows[:k]
+        cut += float(rows[k][1] or 0.0)
+        if total - cut < p.min_sec:
+            break
+        ref, _sec, _nw, complete, text = rows[k - 1]
+        if complete and end_tone(ref) != "open":
+            refs = keep_refs_until(last["refs"], ref)
+            if refs:
+                new_last = {**last, "refs": refs, "t1": float(last["t1"]) - cut}
+                return (clip[:-1] + [new_last],
+                        f"конец: «{(rows[-1][4] or rows[-1][0])[-50:]}» звучит с продолжением («→») — клип кончается на "
+                        f"{ref} «{(text or ref)[-50:]}» (убрано фраз: {len(rows) - k})", None)
+    return None, None, f"конец «{(rows[-1][4] or rows[-1][0])[-60:]}» звучит с продолжением («→»), укоротить нельзя"
 
 
 Judge = Callable[[str, str, str], "tuple[bool, str] | None"]
@@ -740,10 +788,13 @@ def _speed(clip: Sequence[dict], p: AutoParams) -> float | None:
 
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
-            no_start: list | None = None, judge: "Judge | None" = None) -> list[Proposal]:
+            no_start: list | None = None, judge: "Judge | None" = None,
+            end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
-    no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge)."""
+    no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
+    M115: `end_tone(B.k)` → «final» | «open» | «unsure» | None — the voice at the end of that sentence; with
+    p.end_tone a clip does not end «→» (fix_open_end); `open_end` collects (pieces, why) of the clips that went."""
     by_id = {u["id"]: u for u in units}
     seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in STORY
                     and int(u.get("punch") or 0) >= p.seed_punch),
@@ -784,6 +835,17 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             _r0 = list(_sent_rows(sentences, clip[0]["refs"]))
             if _r0:
                 extra_notes.append(f"начало: «{(_r0[0][4] or _r0[0][0])[:80]}»")
+        if p.end_tone and end_tone is not None and sentences:
+            clip3, enote, ewhy = fix_open_end(clip, sentences, end_tone, p)
+            if clip3 is None:
+                gone = (" ".join(u["refs"] for u in clip), ewhy)
+                if open_end is not None and gone not in open_end:     # another seed may build the same clip
+                    open_end.append(gone)
+                continue
+            if enote:
+                clip = clip3
+                extra_notes.append(enote)
+                unit_refs = {**unit_refs, clip[-1]["id"]: clip[-1]["refs"]}
         ids = [u["id"] for u in clip]
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
                or ids[-1] == o.units[-1] for o in out):

@@ -382,6 +382,10 @@ autocut:
   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
   close_last_sec: 3
+  # M115 — M1.9 stage C (owner: «давай»; M99: 62 of 65 endings of the owner's clips are «↘», one «→»):
+  end_tone: true          # a clip does not end on a sentence spoken with the voice up («→», the speaker goes on): the last
+                          # thought loses trailing sentences back to one that is not «→» (clip stays ≥ min_sec), else the clip
+                          # goes; needs transcripts/<stem>.prosody.json (arl prosody); the manual path only warns, as before
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long

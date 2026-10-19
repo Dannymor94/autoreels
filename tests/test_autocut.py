@@ -1064,3 +1064,82 @@ def test_m112_a_clip_without_a_cold_open_gets_a_curiosity_plate(tmp_path, monkey
     assert [m for p, m in plates if p == first] == ["context", "hook"]
     assert " h:" not in ms[0] and "t: плашка hook" in ms[0]
     assert "крючок снят проверкой — плашка заново (hook)" in text
+
+
+def test_keep_refs_until():
+    from autoreels.cloud.autocut import keep_refs_until
+    assert keep_refs_until("13.2-5 14.1-3", "14.2") == "13.2-5 14.1-2"
+    assert keep_refs_until("13.2-5 14.1-3", "13.4") == "13.2-4"
+    assert keep_refs_until("13.2-5", "13.2") == "13.2"
+    assert keep_refs_until("13.2-5", "12.1") is None and keep_refs_until("13.2-5", "13.7") is None
+
+
+def test_m115_a_clip_does_not_end_with_the_voice_up():
+    """M115 (M1.9 C): the last sentence spoken «→» (voice up — the speaker goes on) is not an ending: the last thought
+    loses trailing sentences back to one that is not «→» while the clip stays ≥ min_sec; else the clip goes and is
+    listed. «unsure» stays. Off (end_tone false) = as before, whatever the intonation says."""
+    from autoreels.cloud.autocut import AutoParams, propose
+    units = [U(1, 0, 12, "thesis", 5, "1.1-4", summary="жизнь как компенсация"),
+             U(2, 12, 15, "conclusion", 4, "2.1-5", standalone=False, refers=1, summary="маску можно снять")]
+    sent = _rows({})                                             # every sentence 3 s, finished
+    base = dict(clips=1, min_sec=20, target_sec=36, max_sec=60, loop=False, prune=False)
+    tones = {"2.5": "open", "2.4": "open", "2.3": "final"}
+    tone = lambda ref: tones.get(ref)                           # noqa: E731
+    (old,) = propose(units, AutoParams(**base), sent, end_tone=tone)
+    assert old.pieces == "1.1-4 2.1-5"                           # flag off: as before
+    gone: list = []
+    (pr,) = propose(units, AutoParams(**base, end_tone=True), sent, end_tone=tone, open_end=gone)
+    assert pr.pieces == "1.1-4 2.1-3" and pr.unit_refs == {2: "2.1-3"} and not gone
+    assert pr.seconds == 21.0                                    # 27 s − two sentences of 3 s
+    assert any(n.startswith("конец: «") and "клип кончается на 2.3" in n and "убрано фраз: 2" in n for n in pr.notes)
+    tones["2.5"] = "unsure"
+    (pr2,) = propose(units, AutoParams(**base, end_tone=True), sent, end_tone=tone)
+    assert pr2.pieces == "1.1-4 2.1-5"                           # unsure is not «→»
+    tones.update({"2.5": "open", "2.3": "open"})                 # the nearest non-«→» end would leave < 20 s
+    assert propose(units, AutoParams(**base, end_tone=True), sent, end_tone=tone, open_end=gone) == []
+    assert len(gone) == 1 and gone[0][0] == "1.1-4 2.1-5" and "укоротить нельзя" in gone[0][1]
+    assert propose(units, AutoParams(**base, end_tone=True), sent, end_tone=None)[0].pieces == "1.1-4 2.1-5"
+
+
+def test_m115_cmd_autocut_reads_the_voice_from_the_intonation_map(tmp_path, monkeypatch):
+    """M115: arl autocut takes the end tone of each sentence from the intonation map (prosody by Whisper t0); a clip
+    whose ending stays «→» and cannot be shortened is listed in the draft; no map — a warning, clips as before."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import plan as plan_mod
+    from autoreels.cloud.edit import merge_group_sentences
+    from autoreels.core.models import Manifest
+    from autoreels.local import prosody as pros
+    from tests.test_montage import _source
+
+    def run(with_map: bool):
+        root = tmp_path / f"m{with_map}"
+        root.mkdir()
+        mpath = _source(root)
+        cfg = root / "config" / "r0.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+                       .replace("  hook_llm: auto ", "  hook_llm: none ").replace("  clips: 5\n", "  clips: 1\n"),
+                       encoding="utf-8")
+        r0 = cli.load_r0_config(cfg)
+        assert r0.autocut.end_tone is True
+        tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
+        _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+        ss = merge_group_sentences([kept[1]], tx.words)
+        unit = U(1, ss[0][0].t0, ss[-1][-1].t1 - ss[0][0].t0, "conclusion", 5, f"2.1-{len(ss)}", summary="вывод")
+        (root / "transcripts").mkdir(exist_ok=True)
+        (root / "transcripts" / "v.map.json").write_text(json.dumps(
+            {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [unit]}), encoding="utf-8")
+        if with_map:                                             # every sentence of block 2 ends with the voice up
+            ends = {round(s[-1].t0 * 1000) for s in ss}
+            monkeypatch.setattr(plan_mod, "load_alignment", lambda *a, **k: {"words": []})
+            monkeypatch.setattr(pros, "load_prosody", lambda *a, **k: {"words": [1]})
+            monkeypatch.setattr(pros, "tone_lookup", lambda p, *a: (lambda w: ("open", "x")
+                                                                    if round(w.t0 * 1000) in ends else ("final", "x")))
+        monkeypatch.setattr(cli, "_autocut_check", lambda head, line, r, c: (None, ""))
+        assert cli.cmd_autocut("v", root=root, cache_dir=str(root / "cache")) == 0
+        return (root / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8"), len(ss)
+
+    text, n = run(False)
+    assert f"| 2.1-{n} |" in text and "M115" not in text
+    text, n = run(True)
+    assert "# --- конец звучит с продолжением" in text and f"укоротить нельзя: 2.1-{n}" in text
+    assert not any(ln.startswith("M1 ") for ln in text.splitlines())

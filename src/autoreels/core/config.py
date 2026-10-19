@@ -313,6 +313,8 @@ class AutocutConfig(BaseModel):
     # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
     close_last: bool = False
     close_last_sec: float = Field(3.0, ge=0)
+    # M115 (M1.9 C): a clip does not end on a sentence spoken with the voice up («→»; the intonation map, arl prosody)
+    end_tone: bool = False
     # M83 (m80: every cold open was the clip's own first sentence — no teaser): the cold open comes from later, replayed
     hook_teaser: bool = False                    # hook candidates only from hook_teaser_pos of the clip on, h:B.N!
     hookless_last: bool = False                  # M107: a clip left without a cold open is taken only when the hooked run out
