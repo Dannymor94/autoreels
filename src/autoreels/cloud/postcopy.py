@@ -96,12 +96,14 @@ def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_char
 
 def check_hashtags(tags: Sequence, source: str, *, n: int = 3) -> list[str]:
     """The hashtags that can be used (without «#», lower case): one word of letters/digits, 3–30 characters, its
-    first five letters said in the reel (a short word: said as is); no repeats; at most n."""
+    first five letters said in the reel (a short word: said as is); no repeats; at most n. M104 (m101: «#себе»):
+    not a pronoun or a function word — the stop list of the key words (cloud/autocut._KEY_STOP)."""
+    from autoreels.cloud.autocut import _KEY_STOP
     stems, words = _stems(source), {_norm(w) for w in (source or "").split()}
     out: list[str] = []
     for t in tags or []:
         w = _norm(str(t).lstrip("#"))
-        if not 3 <= len(w) <= 30 or w in out or w.isdigit():
+        if not 3 <= len(w) <= 30 or w in out or w.isdigit() or w in _KEY_STOP:
             continue
         if (w[:5] in stems) if len(w) >= 5 else (w in words):
             out.append(w)

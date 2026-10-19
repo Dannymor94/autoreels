@@ -101,3 +101,8 @@ def test_m101_the_post_over_the_size_loses_its_last_sentences_in_code():
     assert "rejected: шаблонная фраза «вы узнаете»" in prov.calls[1][-1]["content"]
     system = prov.calls[0][0]["content"]
     assert "do not announce it" in system and "what the viewer will understand" not in system
+
+
+def test_m104_a_pronoun_is_never_a_hashtag():
+    src = "Раз я здесь, значит я должен быть честным к себе. Честность к себе и уважение к другим."
+    assert check_hashtags(["честность", "себе", "уважение", "свой", "это"], src) == ["честность", "уважение"]
