@@ -1,0 +1,60 @@
+=== IMG_6848
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  начало: модель оценила 10 первых фраз, непонятных без предыдущего 5
+  ℹ Groq token scale factor: 1.284 (model=qwen/qwen3.8-27b)
+  ℹ Groq token calibration: est_text=143 actual_prompt=172 delta=-371 observed_factor=-1.594 → scale=0.420
+  ℹ Groq token calibration: est_text=132 actual_prompt=161 delta=-371 observed_factor=-1.811 → scale=-0.249
+  ℹ Groq token calibration: est_text=176 actual_prompt=214 delta=-362 observed_factor=-1.057 → scale=-0.491
+  стыки: у 3 кандидатов модель нашла рваный стык — они после остальных
+  ℹ Groq token calibration: est_text=493 actual_prompt=522 delta=-371 observed_factor=0.247 → scale=-0.270
+  ℹ Groq token calibration: est_text=278 actual_prompt=307 delta=-371 observed_factor=-0.335 → scale=-0.289
+  ℹ Groq token calibration: est_text=527 actual_prompt=549 delta=-378 observed_factor=0.283 → scale=-0.118
+  ℹ Groq token calibration: est_text=292 actual_prompt=323 delta=-369 observed_factor=-0.264 → scale=-0.161
+  ℹ Groq token calibration: est_text=259 actual_prompt=291 delta=-368 observed_factor=-0.421 → scale=-0.239
+  ℹ Groq token calibration: est_text=464 actual_prompt=488 delta=-376 observed_factor=0.190 → scale=-0.111
+  ℹ Groq token calibration: est_text=277 actual_prompt=311 delta=-366 observed_factor=-0.321 → scale=-0.174
+  ℹ Groq token calibration: est_text=494 actual_prompt=516 delta=-378 observed_factor=0.235 → scale=-0.051
+  ℹ Groq token calibration: est_text=314 actual_prompt=359 delta=-355 observed_factor=-0.131 → scale=-0.075
+  ℹ Groq token calibration: est_text=256 actual_prompt=299 delta=-357 observed_factor=-0.395 → scale=-0.171
+  ℹ Groq token calibration: est_text=539 actual_prompt=623 delta=-316 observed_factor=0.414 → scale=0.005
+  ℹ Groq token calibration: est_text=361 actual_prompt=454 delta=-307 observed_factor=0.150 → scale=0.048
+  крючки: модель оценила 9, отброшено 1, без ответа 0
+autocut IMG_6848: предложено сборок 5 из 107 мыслей (без понятного начала: 3) → reviews/IMG_6848_auto_m112.txt
+  M1 76@1.08 | 17.7-10 18.1-4 | h:18.2! | c:18.3,18.4 | k:17.9=выгораешь;18.1=благодарен;18.4=отдых | t: Благодарность как лучший отдых | d: Благодарность клиентов является лучшим отдыхом.
+  M2 79@1.08 | 13.4-7 15.7 16.1 16.2-5 | h:16.5! | c:16.4,16.5 | k:13.6=инсайт;16.5=кресло | t: Развернуть ситуацию для инсайта | d: Цель терапии — опора на себя, а не на терапевта.
+  M3 58@1.05 | 26.8-11 26.12-15 28.1-4 28.10-12 29.1 | h:29.1! | c:29.1 | k:28.10=маску;28.11=эго-конструкция;29.1=выжить | t: Почему подросток надевает маску | d: Маска — способ выживания подростка в жесткой социальной системе.
+  M4 73@1.05 | 25.3-6 25.7 26.1-3 | c:26.3 | k:25.3=должен;25.6=самоуважение;26.3=честный | t: Честны ли вы к себе? | d: Честность к себе и другим как основа социального взаимодействия.
+  M5 71@1.08 | 35.10 36.1-3 36.12 37.1-3 37.4-6 | c:37.6 | k:35.10=понимает;37.3=книжка;37.5=инструменты;37.6=понимание | t: Вы понимаете, кто вы? | d: Не нужно постоянно анализировать, просто живите и радуйтесь жизни.
+=== 2026-08-08 11h 42m 49s
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  начало: модель оценила 5 первых фраз, непонятных без предыдущего 4
+  ℹ Groq token scale factor: 0.048 (model=qwen/qwen3.8-27b)
+  ℹ Groq token calibration: est_text=256 actual_prompt=305 delta=-351 observed_factor=-0.371 → scale=-0.078
+  ℹ Groq token calibration: est_text=540 actual_prompt=587 delta=-353 observed_factor=0.346 → scale=0.049
+  ℹ Groq token calibration: est_text=359 actual_prompt=427 delta=-332 observed_factor=0.075 → scale=0.057
+  крючки: модель оценила 3, отброшено 0, без ответа 0
+autocut 2026-08-08 11h 42m 49s: предложено сборок 1 из 47 мыслей (без понятного начала: 3) → reviews/2026-08-08 11h 42m 49s_auto_m112.txt
+  M1 78 | 13.5-8 13.9-12 14.1-4 14.5-8 | h:14.4! | c:14.8 | k:13.6=компенсацией;13.11=предназначение;14.6=раскрыть | t: Раскрыть нервную систему самому себе | d: Никогда не поздно раскрыть себя правильно, пока жив.
+=== Pxl 20260621 112938952
+  модели: Groq → OpenRouter · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  начало: модель оценила 10 первых фраз, непонятных без предыдущего 7
+  ℹ Groq token scale factor: 0.057 (model=qwen/qwen3.8-27b)
+  ℹ Groq token calibration: est_text=164 actual_prompt=194 delta=-370 observed_factor=-1.256 → scale=-0.337
+  ℹ Groq token calibration: est_text=203 actual_prompt=232 delta=-371 observed_factor=-0.828 → scale=-0.484
+  стыки: у 1 кандидатов модель нашла рваный стык — они после остальных
+  ℹ Groq token calibration: est_text=438 actual_prompt=507 delta=-331 observed_factor=0.244 → scale=-0.266
+  ℹ Groq token calibration: est_text=250 actual_prompt=299 delta=-351 observed_factor=-0.404 → scale=-0.307
+  ℹ Groq token calibration: est_text=536 actual_prompt=602 delta=-334 observed_factor=0.377 → scale=-0.102
+  ℹ Groq token calibration: est_text=364 actual_prompt=440 delta=-324 observed_factor=0.110 → scale=-0.038
+
+  ⏳ Groq TPM: remaining=1064 < ~1282 — ждём 53с до сброса квоты
+  ℹ Groq token calibration: est_text=472 actual_prompt=534 delta=-338 observed_factor=0.284 → scale=0.058
+  ℹ Groq token calibration: est_text=323 actual_prompt=396 delta=-327 observed_factor=-0.012 → scale=0.037
+  крючки: модель оценила 3, отброшено 1, без ответа 0
+autocut Pxl 20260621 112938952: предложено сборок 3 из 189 мыслей (без понятного начала: 8) → reviews/Pxl 20260621 112938952_auto_m112.txt
+  M1 73 | 15.7-8 16.1-2 16.3-7 | h:16.2! | c:16.7 | k:16.1=зарубили;16.7=повторялись | t: Сценарии: лидер стал изгоем | d: Школьные сценарии падения и унижения повторяются в жизни.
+  M2 66@1.08 | 33.7 34.1-3 34.4-5 36.8-11 36.12-17 | h:36.13! | c:36.16,36.17 | k:34.1=инстинкты;34.5=любовь;36.9=сверстники | t: Взрослый точно чувствует себя | d: Взрослая часть личности сфокусирована на себе и своих чувствах.
+  M3 65@1.08 | 51.5-7 52.1-3 52.4-7 52.8-10 53.1 | c:52.10,53.1 | k:51.5=мудреца;51.7=сверху;52.4=подростка;52.9=скриншот | t: Вы видите реальность без скриншота? | d: Мудрец не накладывает скриншот, так как он из инстинктов.
