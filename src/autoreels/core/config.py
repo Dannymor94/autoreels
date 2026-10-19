@@ -346,6 +346,7 @@ class TxCheckConfig(BaseModel):
     known: list[str] = Field(default_factory=list)         # extra known inventions (added to the built-in list)
     on_speech_sec: float = Field(2.0, ge=0.0)              # M60: speech heard around a flagged place → «на речи»
     sparse_suspicious_sec: float = Field(60.0, ge=0.0)     # M60: this much «sound without words» → suspicious
+    punct_chunk_words: int = Field(120, ge=20)             # M113: arl tx-punct --by llm — words the model sees at once
 
 
 class PostConfig(BaseModel):

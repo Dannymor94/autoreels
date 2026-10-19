@@ -96,6 +96,15 @@ _GROQ_CHAT_TEMPLATE_OVERHEAD = 400  # conservative: 200 template + 200 buffer
 # each successful request and persisted to _TOKEN_SCALE_FILE, keyed by model name.
 _TOKEN_SCALE_DEFAULT = 1.45   # start conservative; calibrates down to observed 1.37-1.40
 _TOKEN_SCALE_EMA_ALPHA = 0.3  # EMA weight for new observations (fast-ish convergence)
+# M113: calibration subtracts the REAL chat-template cost of a request (Qwen «<|im_start|>role\n…<|im_end|>\n» ≈ 5 tokens
+# per message + 3 for the assistant prefix), not the conservative pacing overhead above. Subtracting the 400-token pacing
+# buffer from short prompts (autocut judges and headlines, 130–540 tokens) gave negative factors and drove the persisted
+# scale of qwen/qwen3.8-27b to −0.04 in the m112 run: the next R0 request would have been paced as if its text cost nothing.
+_GROQ_TEMPLATE_PER_MESSAGE = 5
+_GROQ_TEMPLATE_PER_REQUEST = 3
+# A tokenizer ratio outside this range means the estimate itself failed for that request (or a persisted value was
+# written by the bug above) — it is not learned / not loaded; the default is used instead.
+_TOKEN_SCALE_RANGE = (0.5, 3.0)
 # Machine-local calibration state (not in git). Path is env-overridable so tests never write to
 # the real repo copy (env AUTOREELS_TOKEN_SCALE_FILE); default = <repo>/data/token_scale.json.
 _TOKEN_SCALE_FILE_DEFAULT = Path(__file__).resolve().parents[3] / "data" / "token_scale.json"
@@ -118,9 +127,17 @@ def _load_token_scale(model: str) -> float | None:
     try:
         data = json.loads(_token_scale_file().read_text())
         v = data.get(model)
-        return float(v) if v is not None else None
+        if v is None:
+            return None
+        v = float(v)
     except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
         return None
+    lo, hi = _TOKEN_SCALE_RANGE
+    if not lo <= v <= hi:                 # M113: a value the old calibration wrote (m112: −0.04) — not a ratio
+        print(f"  ⚠ Groq token scale {v:.3f} для {model} вне {lo}–{hi} — не принят, беру {_TOKEN_SCALE_DEFAULT}",
+              flush=True)
+        return None
+    return v
 
 
 def _save_token_scale(model: str, factor: float) -> None:
@@ -667,18 +684,27 @@ class GroqLLM:
         # Learn underestimation factor from usage.prompt_tokens and persist via EMA.
         actual_prompt_tokens = data.get("usage", {}).get("prompt_tokens") if isinstance(data, dict) else None
         if actual_prompt_tokens is not None and estimated > 0:
-            # text_real ≈ actual_prompt_tokens minus fixed template overhead
-            text_real = actual_prompt_tokens - _template_tok
+            # text_real ≈ actual_prompt_tokens minus the real template cost (M113: not the pacing buffer)
+            template_real = _GROQ_TEMPLATE_PER_MESSAGE * len(messages) + _GROQ_TEMPLATE_PER_REQUEST
+            text_real = actual_prompt_tokens - template_real
             observed_factor = text_real / estimated
-            new_scale = (1 - _TOKEN_SCALE_EMA_ALPHA) * self._token_scale + _TOKEN_SCALE_EMA_ALPHA * observed_factor
-            delta = actual_prompt_tokens - (estimated + _template_tok)
-            print(
-                f"  ℹ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
-                f"delta={delta:+d} observed_factor={observed_factor:.3f} → scale={new_scale:.3f}",
-                flush=True,
-            )
-            self._token_scale = new_scale
-            _save_token_scale(self._model, new_scale)
+            delta = actual_prompt_tokens - (estimated + template_real)
+            lo, hi = _TOKEN_SCALE_RANGE
+            if lo <= observed_factor <= hi:
+                new_scale = (1 - _TOKEN_SCALE_EMA_ALPHA) * self._token_scale + _TOKEN_SCALE_EMA_ALPHA * observed_factor
+                print(
+                    f"  ℹ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
+                    f"delta={delta:+d} observed_factor={observed_factor:.3f} → scale={new_scale:.3f}",
+                    flush=True,
+                )
+                self._token_scale = new_scale
+                _save_token_scale(self._model, new_scale)
+            else:
+                print(
+                    f"  ⚠ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
+                    f"observed_factor={observed_factor:.3f} вне {lo}–{hi} — не учтён (scale {self._token_scale:.3f})",
+                    flush=True,
+                )
         return data
 
 

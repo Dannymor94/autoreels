@@ -250,3 +250,93 @@ def test_cmd_tx_compare_wc_needs_a_tag(tmp_path, capsys):
                               wc=["vad_model="]) == 1
     assert "нужен --tag" in capsys.readouterr().err
     assert not (tmp_path / "transcripts" / f"{mpath.stem}.local.transcript.json").exists()
+
+
+def _mkw(s: str):
+    return [Word(word=w, t0=i * 0.5, t1=i * 0.5 + 0.4) for i, w in enumerate(s.split())]
+
+
+def test_punct_chunks_end_on_a_sentence_end_when_one_is_near():
+    """M113: a chunk border falls after an existing end in the chunk's second half, else at the size."""
+    from autoreels.cloud.txcheck import punct_chunks
+    ws = _mkw(" ".join(f"w{i}" + ("." if i in (7, 15) else "") for i in range(30)))
+    assert punct_chunks(ws, 10) == [(0, 8), (8, 16), (16, 26), (26, 30)]
+    assert punct_chunks(ws, 100) == [(0, 30)]
+
+
+def test_parse_ends_checks_every_index():
+    """M113: the model's answer is used only when every index is inside the chunk and the ends are sentences
+    (at most one per three words); a JSON wrapped in text (a code fence, a <think> block) is fine."""
+    from autoreels.cloud.txcheck import parse_ends
+    assert parse_ends('```json\n{"ends": [[3, "."], [9, "?"]]}\n```', 12) == [(2, "."), (8, "?")]
+    assert parse_ends('<think>\n</think>\n{"ends": [5, [9, "!"]]}', 12) == [(4, "."), (8, "!")]
+    assert parse_ends('{"ends": []}', 12) == []
+    assert parse_ends('<think>слова {5} и {9}…</think>\nИтог: {"ends": [[9, "."]]}', 12) == [(8, ".")]   # braces before
+    assert parse_ends('{"ends": [[13, "."]]}', 12) is None                     # outside the chunk
+    assert parse_ends('{"ends": [[1,"."],[2,"."],[3,"."],[4,"."],[5,"."],[6,"."]]}', 12) is None   # not sentences
+    assert parse_ends('конец на слове 5', 12) is None and parse_ends('{"ends": [["x", "."]]}', 12) is None
+
+
+def test_restore_sentence_ends_adds_marks_and_keeps_words_and_times():
+    """M113: the model names the last words of sentences; the code adds the marks (words, times and marks already
+    there stay; the next word gets a capital). An unusable answer is asked again; twice unusable = the chunk stays
+    as it was and is counted as missing."""
+    from autoreels.cloud.txcheck import restore_sentence_ends
+    ws = _mkw("ну мы говорили о детстве это важно, потому что всё оттуда. а ты знаешь как это")
+    asked = []
+
+    def ask(msgs):
+        asked.append(msgs[-1]["content"])
+        return '{"ends": [[5, "."], [11, "."], [15, "?"]]}' if len(asked) > 1 else "не знаю"
+    raws: list = []
+    out, st = restore_sentence_ends(ws, ask, chunk_words=50, log=lambda x: None, raw_out=raws)
+    assert [w.word for w in out] == ["ну", "мы", "говорили", "о", "детстве.", "Это", "важно,", "потому", "что", "всё",
+                                     "оттуда.", "а", "ты", "знаешь", "как?", "Это"]   # 11 had its «.»: left as it was
+    assert [w.t0 for w in out] == [w.t0 for w in ws] and len(out) == len(ws)
+    assert st == {"chunks": 1, "missing": 0, "added": 2, "question": 1, "exclaim": 0}
+    assert "ну[1] мы[2]" in asked[0] and "Context after" not in asked[0]
+    assert [r["ok"] for r in raws] == [False, True]
+    out2, st2 = restore_sentence_ends(ws, lambda m: '{"ends": [[99, "."]]}', chunk_words=50, log=lambda x: None)
+    assert [w.word for w in out2] == [w.word for w in ws] and st2["missing"] == 1
+
+
+def test_restore_sentence_ends_shows_the_next_words_as_context():
+    from autoreels.cloud.txcheck import restore_sentence_ends
+    ws = _mkw(" ".join(f"слово{i}" for i in range(30)))
+    seen = []
+    restore_sentence_ends(ws, lambda m: seen.append(m[-1]["content"]) or '{"ends": []}', chunk_words=20,
+                          context_words=3, log=lambda x: None)
+    assert len(seen) == 2 and "слово19[20]" in seen[0] and "Context after (not numbered): слово20 слово21 слово22" in seen[0]
+    assert "слово20[1]" in seen[1] and "Context after" not in seen[1]
+
+
+def test_cmd_tx_punct_by_llm_writes_an_lp_variant_and_measures_against_groq(tmp_path, capsys):
+    """M113: arl tx-punct --by llm → <src>-lp (+ the model's raw answers), with Groq's agreement before / after."""
+    import json
+    from autoreels import __main__ as cli
+    from autoreels.core.models import Manifest
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    groq = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+    bare = [w.model_copy(update={"word": w.word.rstrip(".").lower()}) for w in groq.words]
+    (tmp_path / "transcripts" / "v.local.transcript.json").write_text(
+        Transcript(language="ru", words=bare, provider="whispercpp", model="turbo").model_dump_json(), encoding="utf-8")
+
+    class Prov:
+        def complete(self, msgs, *, temperature=0.0):           # the words Groq ended, by their number in the chunk
+            import re
+            toks = re.findall(r"(\S+)\[(\d+)\]", msgs[-1]["content"])
+            nums = [int(n) for _, n in toks]
+            ends = [int(n) for w, n in toks if any(g.word.endswith(".") and g.word.rstrip(".").lower() == w
+                                                   for g in groq.words)]
+            return json.dumps({"ends": [[n, "."] for n in ends[: max(1, len(nums) // 3)]]})
+    assert cli.cmd_tx_punct("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), by="llm", provider=Prov()) == 0
+    out = capsys.readouterr().out
+    t = Transcript.model_validate_json((tmp_path / "transcripts" / "v.local-lp.transcript.json").read_text())
+    assert t.model == "turbo+llmpunct-cloud" and [w.t0 for w in t.words] == [w.t0 for w in bare]
+    assert sum(w.word.endswith(".") for w in t.words) > 0
+    assert "точки моделью (cloud): кусков" in out and "концы Groq на совпавших словах" in out
+    raw = json.loads((tmp_path / "transcripts" / "v.local-lp.punct_raw.json").read_text())
+    assert raw["llm"] == "cloud" and raw["answers"] and all(a["ok"] for a in raw["answers"])
+    assert cli.cmd_tx_punct("v", root=tmp_path, by="nope") == 1

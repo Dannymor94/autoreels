@@ -408,6 +408,7 @@ tx_check:
   on_speech_sec: 2.0        # M60: a flagged place with ≥ 2 s of speech in [t−1, t+4] is «на речи» (hides what was said);
                             # one in silence is Whisper filling a pause — it only matters if a clip plays that pause
   sparse_suspicious_sec: 60 # M60: a transcript is suspicious with an invention on speech or ≥ 60 s of «sound without words»
+  punct_chunk_words: 120    # M113: arl tx-punct --by llm — words the model sees at once (it answers with numbers: small output)
 
 # M54: arl map <stem> — the map of a whole source (transcripts/<stem>.map.json + reels-out/<stem>/_map.html):
 # thoughts (1–4 sentences), voice energy, role / strength / references / topic (LLM), similar thoughts far apart.
