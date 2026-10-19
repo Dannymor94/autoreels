@@ -223,7 +223,8 @@ beat_clip_shots_only_at_seams: true
 # Used when transcript words are absent (legacy manifests). Never a literal in code.
 jump_seam_gap_sec: 2.0
 # M1.7 step 1d: transitions at ci shot-changes and same-shot seams. Off by default.
-shot_transition: cut         # "cut" only; punch (crop-animation) is a future task
+shot_transition: cut         # cut | punch (M103: a fast zoom into a close shot inside a window; arl render --transition)
+punch_sec: 0.3
 same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses video_xfade_sec fallback)
 
 # M1.7 step 2: sentence-scoped keyword highlighting in subtitles. Off by default.

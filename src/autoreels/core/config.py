@@ -937,8 +937,10 @@ class RenderConfig(BaseModel):
     # Fallback gap threshold for is_jump_seam when sentence words are not available.
     jump_seam_gap_sec: float = 2.0
     # M1.7 step 1d: shot-change transitions inside close_intervals windows. Off by default.
-    # Flag off → identical cmd. ("punch" crop-animation: future task, deferred.)
-    shot_transition: str = "cut"         # "cut" only; punch deferred
+    # Flag off → identical cmd. M103: "punch" — over punch_sec before a close shot that comes inside a window the
+    # wide frame zooms into it (local/fx.push_vf), the switch lands on it; seams and filler cuts stay hard cuts.
+    shot_transition: str = "cut"         # "cut" | "punch" (arl render --transition)
+    punch_sec: float = Field(0.3, gt=0, le=1.0)
     # M1.7 step 1d: dissolve on same-shot seams (filler/splice without shot change). Off by default.
     # 0 = disabled (falls back to video_xfade_sec). Flag off → identical cmd.
     same_shot_dissolve_frames: int = 0   # dissolve duration in frames (0 = disabled)
@@ -985,6 +987,13 @@ class RenderConfig(BaseModel):
     close_max_upscale: float = Field(2.5, ge=1)
     close_max_scale: float = Field(1.6, ge=1)
     close_min_scale: float = Field(1.15, ge=1)
+
+    @field_validator("shot_transition")
+    @classmethod
+    def _validate_transition(cls, v: str) -> str:
+        if v not in ("cut", "punch"):
+            raise ValueError(f"shot_transition must be 'cut' or 'punch'; got '{v}'")
+        return v
 
     @field_validator("role")
     @classmethod

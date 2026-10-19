@@ -4309,6 +4309,7 @@ def cmd_render(
     manifest_name: str | None = None,
     reels_filter: str | None = None,
     gate_name: str | None = None,
+    transition: str | None = None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -4324,6 +4325,8 @@ def cmd_render(
     if pull_first:
         _git_pull(root, what="манифесты")       # свежие манифесты с Mac (после run)
     render_cfg = load_render_config(root / "config" / "render.yaml")
+    if transition:                      # M103: arl render --transition cut|punch (A/B on a gate)
+        render_cfg = render_cfg.model_copy(update={"shot_transition": transition})
     if render_cfg.role == "analyze":
         print(
             '⊘ рендер недоступен на этой машине: role = "analyze" '
@@ -11614,6 +11617,9 @@ def _build_parser():
     pd.add_argument("--gate", default=None, dest="gate",
                     help="название гейт-прогона; вывод идёт в reels-out/<источник>/_gate/<имя>/, "
                          "никогда не перезаписывает реальные клипы")
+    pd.add_argument("--transition", choices=["cut", "punch"], default=None,
+                    help="переход на крупный план внутри окна: cut — склейка, punch — быстрый наезд "
+                         "(переопределяет render.yaml shot_transition; M103)")
 
     ppv = sub.add_parser(
         "preview",
@@ -12375,7 +12381,7 @@ def main(argv=None) -> int:
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
                        auto_recrop=not args.no_auto_recrop,
                        reels_filter=args.reels_filter, manifest_name=args.manifest_name,
-                       gate_name=args.gate)
+                       gate_name=args.gate, transition=getattr(args, "transition", None))
         elif args.cmd == "preview":
             pals = [p.strip() for p in args.palettes.split(",") if p.strip()] if args.palettes else None
             return cmd_preview(args.manifest, palettes=pals, seconds=args.seconds,

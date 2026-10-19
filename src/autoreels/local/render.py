@@ -38,7 +38,8 @@ from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
-from autoreels.local.fx import output_time as fx_output_time, plate_start, push_vf, timeline as fx_timeline
+from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
+from autoreels.local.fx import timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
@@ -2976,14 +2977,23 @@ def _render_segments(
                         else [_xfade_actual] * (len(_s) - 1))
             _reel_speed = getattr(reel, "speed", 1.0)
             _push_vf = ""
-            if _fx.get("push") or _fx.get("pop"):
+            # M103 (shot_transition: punch): a fast zoom leads into every close shot that comes inside a window
+            _punches: list = []
+            if (_ts_on and getattr(render_cfg, "shot_transition", "cut") == "punch"
+                    and any(getattr(s, "close_intervals", None) for s in segs)):
+                _pp = punch_point(_reel_setup.crop, _ccrop)
+                if _pp is not None:
+                    _punches = [(t, *_pp) for t in punch_times(segs, speed=_reel_speed, xfades=_fx_xfades(segs))]
+            if _fx.get("push") or _fx.get("pop") or _punches:
                 _, _fx_changes, _fx_total = fx_timeline(segs, speed=_reel_speed, xfades=_fx_xfades(segs))
                 _push_vf = push_vf(_fx_changes, _fx_total,
                                    pct=float(_fx.get("push_pct", 4.0)) if _fx.get("push") else 0.0,
                                    min_sec=float(_fx.get("push_min_sec", 6.0)),
                                    size=tuple(render_cfg.scale),
                                    pop_pct=float(_fx.get("pop_pct", 0.0)) if _fx.get("pop") else 0.0,
-                                   pop_sec=float(_fx.get("pop_sec", 0.6)))
+                                   pop_sec=float(_fx.get("pop_sec", 0.6)),
+                                   punches=_punches, punch_sec=float(getattr(render_cfg, "punch_sec", 0.3)),
+                                   fps=_fps() if _punches else 30.0)
             base_vf = ",".join(x for x in (_effective_vf, _push_vf, palette_vf) if x) or None  # type: ignore[assignment]
             reel_vf = base_vf
             # Speed-up via setpts (video) + atempo (audio); both applied before other filters.
