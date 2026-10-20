@@ -83,6 +83,12 @@ class AutoParams:
     # M115 (M1.9 C; M99: 62 of 65 endings of the owner's clips are «↘», one «→»): a clip does not end on a sentence
     # whose voice stays up — the speaker goes on. Needs end_tone in propose (the intonation map); False = as before.
     end_tone: bool = False
+    # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts):
+    generator: str = "montage"        # montage (build_clip) | passage (build_passage)
+    seed_roles: tuple = ()            # roles a clip may grow around (punch ≥ seed_punch); () = STORY
+    passage_gap_sec: float = 30.0     # passage: a neighbour joins when at most this far from the run
+    start_judge: str = "veto"         # veto | rank — a start only the model rejects keeps the clip, sorted last
+    lean_depth: int = 0               # montage: a thought brings this many links of what it leans on; 0 = the chain
 
 
 @dataclass
@@ -106,6 +112,7 @@ class Proposal:
     keys: list = field(default_factory=list)            # M88: [(B.N, word)] — k: words the subtitles highlight
     close: list = field(default_factory=list)           # M91: [B.N] — the last sentences in the close shot (c:)
     plate_mode: str = ""                                # M112: how the plate t: was written (hook | context; "" = not)
+    start_doubt: str | None = None                      # M119: the model rejected the start the rules accept (rank)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
@@ -136,10 +143,12 @@ def eligible(u: dict, p: AutoParams) -> bool:
     return int(u.get("punch") or 0) >= p.min_punch
 
 
-def leans_on(u: dict, by_id: dict) -> list[int]:
-    """The chain of earlier units u leans on (refers, transitively), nearest first."""
+def leans_on(u: dict, by_id: dict, depth: int = 0) -> list[int]:
+    """The chain of earlier units u leans on (refers, transitively), nearest first. M119: depth > 0 — only that many
+    links (the start rules, context_start, see to the first sentence of the earliest one); 0 — the whole chain."""
     out, seen, cur = [], {u["id"]}, u
-    while not cur.get("standalone", True) and cur.get("refers") in by_id and cur["refers"] not in seen:
+    while (not cur.get("standalone", True) and cur.get("refers") in by_id and cur["refers"] not in seen
+           and not (depth and len(out) >= depth)):
         cur = by_id[cur["refers"]]
         seen.add(cur["id"])
         out.append(cur["id"])
@@ -179,7 +188,7 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     chosen: dict[int, dict] = {}
 
     def add(u: dict) -> bool:
-        group = [u] + [by_id[i] for i in leans_on(u, by_id)]
+        group = [u] + [by_id[i] for i in leans_on(u, by_id, p.lean_depth)]
         if any(not eligible(g, p) and g["id"] not in chosen for g in group[1:]):
             # an earlier unit it leans on is unusable (filler / missing): this one cannot stand
             return False
@@ -208,6 +217,56 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     if clip[-1].get("role") == "question":
         return None                                   # never end on an open question
     return clip
+
+
+def _strength(u: dict) -> int:
+    return int(u.get("punch") or 0) + (1 if u.get("role") in PAYOFFS else 0)
+
+
+def build_passage(seed: dict, by_id: dict, p: AutoParams, taken=frozenset()) -> list[dict] | None:
+    """M119 (m118: 60 of the owner's 66 clips are one stretch of the talk — no jump over 30 s — of 1–5 neighbouring
+    thoughts inside one topic; build_clip failed on 10 of 20 seeds of IMG_6848: a thought that leans back brings its
+    whole chain, over max_sec or through a weak thought): a run of adjacent thoughts around the seed, in source order.
+    It grows one neighbour at a time: after a question — forward (its answer); while the first thought leans on the
+    one before (the map's standalone) — back; else toward the stronger neighbour (punch, a conclusion +1; a tie goes
+    forward). Up to target_sec, never past max_sec. A neighbour joins when it is of the seed's topic, has refs, is not
+    missing, filtered (unless use_filtered) or in another clip (`taken`), and is at most passage_gap_sec away. A weak
+    thought (not eligible: below min_punch, an aside) may sit inside, never at an end; nor does a question end it.
+    None when the run is shorter than min_sec or the seed itself is a question left at the end."""
+    def usable(u: dict | None) -> bool:
+        return (u is not None and u["id"] not in taken and not u.get("missing") and bool(u.get("refs"))
+                and u.get("topic") == seed.get("topic") and float(u.get("t1") or 0) > float(u.get("t0") or 0)
+                and not (u.get("filtered") and not p.use_filtered))
+
+    if not usable(seed) or _dur(seed) > p.max_sec:
+        return None
+    run = [seed]
+    total = _dur(seed)
+    while total < p.target_sec:
+        prv, nxt = by_id.get(run[0]["id"] - 1), by_id.get(run[-1]["id"] + 1)
+        if not (usable(prv) and float(run[0]["t0"]) - float(prv["t1"]) <= p.passage_gap_sec):
+            prv = None
+        if not (usable(nxt) and float(nxt["t0"]) - float(run[-1]["t1"]) <= p.passage_gap_sec):
+            nxt = None
+        if nxt is not None and (prv is None or run[-1].get("role") == "question"):
+            pick = nxt
+        elif prv is not None and (nxt is None or not run[0].get("standalone", True)):
+            pick = prv
+        elif prv is None:
+            break
+        else:
+            pick = nxt if _strength(nxt) >= _strength(prv) else prv
+        if total + _dur(pick) > p.max_sec:
+            break
+        run = [pick] + run if pick is prv else run + [pick]
+        total += _dur(pick)
+    while len(run) > 1 and run[-1] is not seed and (not eligible(run[-1], p) or run[-1].get("role") == "question"):
+        run.pop()
+    while len(run) > 1 and run[0] is not seed and not eligible(run[0], p):
+        run.pop(0)
+    if run[-1].get("role") == "question" or sum(_dur(u) for u in run) < p.min_sec:
+        return None
+    return run
 
 
 _CONTRAST = ("на самом деле", "но ", "однако", "а вот", "парадокс", "наоборот", "вместо того", "не потому")
@@ -456,7 +515,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                     break
             if clip[0] is not u:
                 continue
-        needed = {i for c in clip for i in leans_on(c, by_id)}
+        needed = {i for c in clip for i in leans_on(c, by_id, p.lean_depth)}
         if (len(clip) > 1 and (u["id"] == loop_id or (u["id"] != seed_id and u["id"] not in needed))
                 and sum(_dur(c) for c in clip[1:]) >= p.min_sec):
             clip = clip[1:]
@@ -760,7 +819,7 @@ def _loop_question(clip: list[dict], units: Sequence[dict], by_id: dict, p: Auto
     """M65: a question the clip answers — one a chosen thought leans on, else one of the clip's topic
     (or «similar» to its seed); short, standalone enough, not used elsewhere."""
     ids = {u["id"] for u in clip}
-    leaned = {i for u in clip for i in leans_on(u, by_id)}
+    leaned = {i for u in clip for i in leans_on(u, by_id, p.lean_depth)}
     topics = {u.get("topic") for u in clip}
     sims = {i for u in clip for i, _ in (u.get("similar") or [])}
     best, best_s = None, 0.0
@@ -782,7 +841,7 @@ def _prune(clip: list[dict], by_id: dict, p: AutoParams) -> tuple[list[dict], li
     thought leans on) while the clip is longer than target_sec + prune_slack and stays ≥ min_sec."""
     dropped: list[int] = []
     while sum(_dur(u) for u in clip) > p.target_sec + p.prune_slack and len(clip) > 2:
-        needed = {i for u in clip for i in leans_on(u, by_id)}
+        needed = {i for u in clip for i in leans_on(u, by_id, p.lean_depth)}
         middle = [u for u in clip[1:-1] if u["id"] not in needed]
         if not middle:
             break
@@ -817,22 +876,30 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
     M115: `end_tone(B.k)` → «final» | «open» | «unsure» | None — the voice at the end of that sentence; with
-    p.end_tone a clip does not end «→» (fix_open_end); `open_end` collects (pieces, why) of the clips that went."""
+    p.end_tone a clip does not end «→» (fix_open_end); `open_end` collects (pieces, why) of the clips that went.
+    M119: p.generator «passage» — a run of adjacent thoughts (build_passage; no loop question from elsewhere, no
+    pruning from the middle, no thought shared with an earlier clip); p.seed_roles — the roles a clip grows around;
+    p.start_judge «rank» — a start the model rejects but the rules accept keeps the clip, marked start_doubt (the
+    caller sorts it after the clean ones: invariant 1, the model only ranks)."""
     by_id = {u["id"]: u for u in units}
-    seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in STORY
+    roles = tuple(p.seed_roles) or STORY
+    passage = p.generator == "passage"
+    seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in roles
                     and int(u.get("punch") or 0) >= p.seed_punch),
                    key=lambda u: (-int(u["punch"]), -float((u.get("voice") or {}).get("energy") or 50.0), u["t0"]))
     out: list[Proposal] = []
     used_seeds: set[int] = set()
+    taken: set[int] = set()                 # M119 passage: thoughts already in a clip
     for seed in seeds:
-        if seed["id"] in used_seeds:
+        if seed["id"] in used_seeds or seed["id"] in taken:
             continue
-        clip = build_clip(seed, units, by_id, p)
+        clip = build_passage(seed, by_id, p, taken) if passage else build_clip(seed, units, by_id, p)
         if clip is None:
             continue
         extra_notes: list[str] = []
+        start_doubt = None
         loop_id = None
-        if p.loop and clip[0].get("role") != "question":
+        if p.loop and not passage and clip[0].get("role") != "question":
             taken = {i for o in out for i in o.units}
             q = _loop_question(clip, units, by_id, p, taken)
             if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
@@ -840,7 +907,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 clip = [q] + clip
                 loop_id = q["id"]
                 extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
-        if p.prune:
+        if p.prune and not passage:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
@@ -848,6 +915,14 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
                                                judge=judge)
+            if clip2 is None and judge is not None and p.start_judge == "rank":
+                # M119: the rules decide; the model's «no» only sorts the clip after the clean ones
+                clip2, cnotes, why2 = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
+                if clip2 is not None:
+                    start_doubt = why
+                    cnotes = cnotes + [f"начало: модель против ({why}) — правила принимают, сборка после чистых"]
+                else:
+                    why = why2
             if clip2 is None:
                 if no_start is not None:
                     no_start.append((" ".join(u["refs"] for u in clip), why))
@@ -870,10 +945,14 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 extra_notes.append(enote)
                 unit_refs = {**unit_refs, clip[-1]["id"]: clip[-1]["refs"]}
         ids = [u["id"] for u in clip]
+        if passage and set(ids) & taken:
+            continue                      # M119: context added in front reached an earlier clip
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
                or ids[-1] == o.units[-1] for o in out):
             continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
         used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
+        if passage:
+            taken.update(ids)
         secs = sum(_dur(u) for u in clip)
         roles = [u.get("role") for u in clip]
         punch = sum(int(u.get("punch") or 0) for u in clip) / len(clip)
@@ -913,7 +992,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             # without it has no <rid>.txt and crosspost refuses a post without text (Pxl 112938952 r02 in m88)
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
             opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
-            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
+            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt))
     out.sort(key=lambda o: -o.score)
     return out[:p.clips]
 

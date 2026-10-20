@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -278,6 +279,15 @@ class AutocutConfig(BaseModel):
     use_filtered: bool = False
     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
+    # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+    # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
+    generator: str = Field("montage", pattern="^(montage|passage)$")   # passage: adjacent thoughts around a strong one
+    seed_roles: list[Literal["thesis", "conclusion", "example", "metaphor", "question", "explanation", "address"]] = \
+        Field(default_factory=list)                # roles a clip may grow around (punch ≥ seed_punch); [] = STORY
+    passage_gap_sec: float = Field(30.0, gt=0)     # passage: a neighbour joins when at most this far from the run
+    start_judge: str = Field("veto", pattern="^(veto|rank)$")   # rank: a start only the model rejects sorts the clip last
+    clips_every_min: float = Field(0.0, ge=0)      # clips = max(clips, source minutes ÷ this); 0 = clips
+    lean_depth: int = Field(0, ge=0)               # montage: links of what a thought leans on it brings; 0 = the chain
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones

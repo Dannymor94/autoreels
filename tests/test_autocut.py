@@ -1206,3 +1206,143 @@ def test_m118_hedges_and_fillers_are_never_key_words():
     ans = _Answers('{"keys": [{"s": 1, "word": "потом"}, {"s": 1, "word": "какой-то"}, {"s": 2, "word": "вообще"},'
                    ' {"s": 2, "word": "доверие"}]}')
     assert pick_keywords(rows, ans, n=2, log=lambda m: None) == [("1.2", "доверие")]
+
+
+def _units119():
+    return [
+        U(1, 0, 10, "explanation", 3, "1.1"),
+        U(2, 10, 12, "example", 2, "1.2", standalone=False, refers=1),          # weak: inside a run, never at an end
+        U(3, 22, 14, "thesis", 4, "1.3", standalone=False, refers=2),           # the seed leans back
+        U(4, 36, 10, "conclusion", 3, "1.4"),
+        U(5, 46, 8, "question", 3, "1.5"),
+        U(6, 54, 20, "explanation", 4, "2.1", topic=2),                          # another topic
+        U(7, 74, 15, "thesis", 4, "2.2", topic=2),
+        U(8, 200, 15, "example", 3, "3.1", topic=2),                             # 111 s after #7
+    ]
+
+
+def test_m119_passage_is_a_run_of_adjacent_thoughts_of_one_topic():
+    """M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half
+    the seeds — a thought that leans back brings its whole chain, here through the weak #2)."""
+    from autoreels.cloud.autocut import build_passage
+    units = _units119()
+    by = {u["id"]: u for u in units}
+    p = AutoParams(min_sec=20, target_sec=40, max_sec=65, generator="passage")
+    assert build_clip(by[3], units, by, p) is None                    # the montage builder gives up on this seed
+    run = build_passage(by[3], by, p)
+    assert [u["id"] for u in run] == [1, 2, 3, 4]                      # back while it leans, then the neighbour
+    run = build_passage(by[3], by, AutoParams(min_sec=20, target_sec=70, max_sec=80))
+    assert [u["id"] for u in run] == [1, 2, 3, 4]                      # #5 (a question) does not end it, #6 is topic 2
+    assert [u["id"] for u in build_passage(by[3], by, p, taken={1})] == [3, 4]   # the weak #2 is not left at the start
+    assert build_passage(by[3], by, AutoParams(min_sec=50, target_sec=60, max_sec=80)) is None
+    assert [u["id"] for u in build_passage(by[7], by, AutoParams(min_sec=20, target_sec=60, max_sec=80))] == [6, 7]
+    assert [u["id"] for u in build_passage(by[7], by, AutoParams(min_sec=20, target_sec=60, max_sec=80,
+                                                                 passage_gap_sec=200))] == [6, 7, 8]
+
+
+def test_m119_propose_passages_share_no_thought_and_take_no_question_from_elsewhere():
+    units = _units119() + [U(9, 300, 8, "question", 4, "4.1", summary="зачем?")]
+    p = AutoParams(clips=5, min_sec=20, target_sec=40, max_sec=65, generator="passage")
+    props = propose(units, p)
+    assert props and all(pr.units == list(range(pr.units[0], pr.units[-1] + 1)) for pr in props)
+    flat = [i for pr in props for i in pr.units]
+    assert len(flat) == len(set(flat)) and 9 not in flat
+    assert all(pr.start_doubt is None for pr in props)
+    montage = propose(units, AutoParams(clips=5, min_sec=20, target_sec=40, max_sec=65))
+    assert [pr.units for pr in montage] != [pr.units for pr in props]          # the flag off = the montage builder
+
+
+def test_m119_seed_roles_choose_what_a_clip_grows_around():
+    units = [U(1, 0, 25, "explanation", 4, "1.1-2"), U(2, 25, 10, "explanation", 3, "1.3")]
+    p = AutoParams(clips=5, min_sec=20, target_sec=40, max_sec=65, generator="passage")
+    assert propose(units, p) == []                                              # explanation is not in STORY
+    (pr,) = propose(units, AutoParams(**{**p.__dict__, "seed_roles": ("explanation",)}))
+    assert pr.units == [1, 2]
+
+
+def test_m119_rank_keeps_a_start_only_the_model_rejects_and_marks_it():
+    """M119 (m118: the judges accepted 22–46% of the owner's own starts): with start_judge rank the model's «no» on a
+    start the rules accept only marks the clip (start_doubt); veto — the M75 behaviour — drops it."""
+    units = [U(1, 0, 30, "thesis", 5, "1.1-3"), U(2, 30, 10, "conclusion", 4, "1.4")]
+    sent = _rows74({"1.1": "Хоть это бывает полезно, как говорят психологи."})
+
+    def judge(text, following, core=""):
+        return (not text.startswith("Хоть это"), "«это» без предмета")
+    base = dict(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False, context_start=True)
+    no_start: list = []
+    assert propose(units, AutoParams(**base), sent, judge=judge, no_start=no_start) == []
+    assert "«это» без предмета" in no_start[0][1]
+    (pr,) = propose(units, AutoParams(**base, start_judge="rank"), sent, judge=judge)
+    assert pr.start_doubt and "«это» без предмета" in pr.start_doubt
+    assert any("модель против" in n and "правила принимают" in n for n in pr.notes)
+    rules_no = _rows74({"1.1": "Поэтому это бывает полезно, как говорят психологи."})
+    no_start = []
+    assert propose(units, AutoParams(**base, start_judge="rank"), rules_no, judge=judge, no_start=no_start) == []
+    assert "ссылка назад «поэтому…»" in no_start[0][1]                        # the rules still decide
+
+
+def test_m119_ac_overrides_check_names_and_types():
+    from autoreels.__main__ import _autocut_overrides
+    from autoreels.core.config import AutocutConfig
+    base = AutocutConfig()
+    assert (base.generator, base.seed_roles, base.start_judge, base.clips_every_min) == ("montage", [], "veto", 0.0)
+    c = _autocut_overrides(base, ["generator=passage", "seed_roles=thesis, explanation", "target_sec=35",
+                                  "start_judge=rank", "clips_every_min=3.5"])
+    assert (c.generator, c.seed_roles, c.target_sec, c.start_judge, c.clips_every_min) == \
+        ("passage", ["thesis", "explanation"], 35.0, "rank", 3.5)
+    assert _autocut_overrides(base, ["seed_roles="]).seed_roles == []
+    for bad in (["generator=collage"], ["nope=1"], ["target_sec"], ["seed_roles=aside"]):
+        try:
+            _autocut_overrides(base, bad)
+        except ValueError as exc:
+            assert str(exc).startswith("--ac")
+        else:
+            raise AssertionError(bad)
+
+
+def test_m119_cmd_autocut_takes_overrides_counts_clips_by_length_and_puts_doubts_last(tmp_path, monkeypatch, capsys):
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from autoreels.cloud.autocut import Proposal
+    from tests.test_montage import _source
+    _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [U(1, 0, 30, "thesis", 5, "2.1")]}),
+        encoding="utf-8")
+    seen = {}
+
+    def fake_propose(units, p, sentences=None, **kw):
+        seen["p"] = p
+        return [Proposal(units=[1], pieces="2.1", hook=None, title="сомнение", caption="", score=90, seconds=30,
+                         opener=1, start_doubt="модель: нет"),
+                Proposal(units=[2], pieces="2.2", hook=None, title="чистое", caption="", score=80, seconds=30,
+                         opener=2)]
+    monkeypatch.setattr(ac_mod, "propose", fake_propose)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False,
+                           ac_over=["generator=passage", "clips_every_min=0.001", "start_judge=rank"]) == 0
+    out = capsys.readouterr().out
+    assert seen["p"].generator == "passage" and seen["p"].start_judge == "rank" and seen["p"].clips > 5
+    assert "autocut для этого запуска: generator=passage" in out and "сборок: до " in out
+    assert "у 1 кандидатов модель против начала" in out
+    lines = [ln for ln in (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8").splitlines()
+             if ln.startswith("M")]
+    assert "t: чистое" in lines[0] and "t: сомнение" in lines[1]
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), ac_over=["generator=x"]) == 1
+    assert "--ac" in capsys.readouterr().err
+    assert "generator: montage" in cfg.read_text(encoding="utf-8")                 # the config file is not touched
+
+
+def test_m119_lean_depth_limits_the_chain_a_thought_brings():
+    """M119 (IMG_6848: 10 of 20 seeds built nothing — the map marks 71% of thoughts as leaning back, chains ran over
+    16 thoughts or through a weak one): lean_depth 1 — a thought brings only the one it leans on; 0 — as before."""
+    by = {u["id"]: u for u in _units()}
+    assert leans_on(by[5], by) == [3, 2] and leans_on(by[5], by, 1) == [3] and leans_on(by[5], by, 2) == [3, 2]
+    units = [U(1, 0, 10, "explanation", 2, "1.1"), U(2, 10, 15, "example", 3, "1.2", standalone=False, refers=1),
+             U(3, 25, 15, "conclusion", 5, "1.3", standalone=False, refers=2)]
+    by = {u["id"]: u for u in units}
+    assert build_clip(by[3], units, by, AutoParams(min_sec=20, target_sec=40)) is None      # through the weak #1
+    clip = build_clip(by[3], units, by, AutoParams(min_sec=20, target_sec=40, lean_depth=1))
+    assert [u["id"] for u in clip] == [2, 3]

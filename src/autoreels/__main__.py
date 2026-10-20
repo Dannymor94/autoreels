@@ -8024,9 +8024,33 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
     return rc
 
 
+def _autocut_overrides(base, pairs) -> "object":
+    """M119: `--ac key=value` → a copy of the autocut config with those fields (names and types checked by the model;
+    a list field takes comma-separated values, an empty value is an empty list). Raises ValueError."""
+    import typing as _typing
+    from autoreels.core.config import AutocutConfig
+    upd: dict = {}
+    for pr in pairs or ():
+        k, sep, v = str(pr).partition("=")
+        k = k.strip()
+        if not sep or not k:
+            raise ValueError(f"--ac ждёт ключ=значение, получено «{pr}»")
+        if k not in AutocutConfig.model_fields:
+            raise ValueError(f"--ac: нет поля «{k}» в autocut (config/r0.yaml)")
+        v = v.strip()
+        if _typing.get_origin(AutocutConfig.model_fields[k].annotation) in (list, tuple):
+            upd[k] = [x.strip() for x in v.split(",") if x.strip()]
+        else:
+            upd[k] = v
+    try:
+        return AutocutConfig.model_validate(base.model_dump() | upd)
+    except Exception as exc:  # noqa: BLE001 — pydantic message, short
+        raise ValueError("--ac: " + " | ".join(str(exc).splitlines()[:3])) from None
+
+
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
-                judge_log: str | None = None, voice_keys: bool = True) -> int:
+                judge_log: str | None = None, voice_keys: bool = True, ac_over=None) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -8066,7 +8090,20 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
               f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
         return 1
     ac = r0_cfg.autocut
-    prm = AutoParams(clips=clips or ac.clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
+    if ac_over:                             # M119: --ac key=value for this run only (config/r0.yaml unchanged)
+        try:
+            ac = _autocut_overrides(ac, ac_over)
+        except ValueError as exc:
+            print(f"ошибка: {exc}", file=sys.stderr)
+            return 1
+        r0_cfg = r0_cfg.model_copy(update={"autocut": ac})
+        print("  autocut для этого запуска: " + ", ".join(str(x).strip() for x in ac_over), flush=True)
+    n_clips = clips or ac.clips
+    if not clips and ac.clips_every_min > 0:    # M119: the owner takes one clip per ~3.5 min of a talk
+        _src_min = max((float(w.t1) for w in tx.words), default=0.0) / 60.0
+        n_clips = max(ac.clips, round(_src_min / ac.clips_every_min))
+        print(f"  сборок: до {n_clips} (источник {_src_min:.0f} мин ÷ {ac.clips_every_min:g})", flush=True)
+    prm = AutoParams(clips=n_clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
                      max_pieces=ac.max_pieces, min_punch=ac.min_punch, seed_punch=ac.seed_punch,
                      hook_max_sec=getattr(r0_cfg, "hook_max_sec", 6.0), hook_min_words=ac.hook_min_words,
                      overlap_max=ac.overlap_max, use_filtered=ac.use_filtered, loop=ac.loop,
@@ -8080,7 +8117,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos,
                      hook_no_pointer=ac.hook_no_pointer,
                      close_last=ac.close_last, close_last_sec=ac.close_last_sec,
-                     end_tone=getattr(ac, "end_tone", False))
+                     end_tone=getattr(ac, "end_tone", False), generator=ac.generator,
+                     seed_roles=tuple(ac.seed_roles), passage_gap_sec=ac.passage_gap_sec, start_judge=ac.start_judge,
+                     lean_depth=ac.lean_depth)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -8168,6 +8207,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                    no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end)
+    _doubt = sum(1 for pr in pool if pr.start_doubt)
+    if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
+        pool.sort(key=lambda pr: bool(pr.start_doubt))
+        print(f"  начало: у {_doubt} кандидатов модель против начала, правила за — они после остальных", flush=True)
     if judge is not None:
         _jc = getattr(judge, "cache", {})
         _no = sum(1 for v in _jc.values() if v is not None and not v[0])
@@ -8244,7 +8287,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 for pr in pool[:prm.clips * 2]:
                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
                 _bad = sum(1 for pr in pool if pr.bad_seams)
-                pool.sort(key=lambda pr: bool(pr.bad_seams))
+                pool.sort(key=lambda pr: bool(pr.bad_seams) + bool(pr.start_doubt))   # M119: doubts add up
                 if _bad:
                     print(f"  стыки: у {_bad} кандидатов модель нашла рваный стык — они после остальных", flush=True)
         except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
@@ -12559,6 +12602,8 @@ def _build_parser():
                      help="M116: без подсказок голоса для k: (сравнение с подсказками)")
     pac.add_argument("--no-check", action="store_false", dest="check",
                      help="не прогонять каждое предложение через проверки --apply (M60)")
+    pac.add_argument("--ac", action="append", default=None, dest="ac_over", metavar="ключ=значение",
+                     help="M119: поле autocut из config/r0.yaml на этот запуск (можно несколько раз; список — через запятую)")
     pac.add_argument("--root", default=None)
     pac.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -13030,7 +13075,8 @@ def main(argv=None) -> int:
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
-                               check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys)
+                               check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys,
+                               ac_over=args.ac_over)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

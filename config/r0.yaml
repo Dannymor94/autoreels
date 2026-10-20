@@ -343,6 +343,15 @@ autocut:
   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
+  # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts;
+  # the montage builder failed on half its seeds; the start judge rejected 54–78% of the owner's starts):
+  generator: montage      # montage — thoughts of one topic from anywhere | passage — adjacent thoughts around a strong one
+  seed_roles: []          # roles a clip may grow around (with seed_punch); [] = thesis, conclusion, example, metaphor, question
+  passage_gap_sec: 30     # passage: a neighbour joins when at most this far from the run (owner clips jump ≤ 30 s)
+  start_judge: veto       # veto — a start the model rejects drops the clip | rank — rules decide, the model only sorts it last
+  clips_every_min: 0      # clips = max(clips, source minutes ÷ this) (owner: 66 clips in 231 min); 0 = clips
+  lean_depth: 0           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
+                          # chain (m119: IMG_6848 — 10 of 20 seeds built nothing, chains ran over 16 thoughts)
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
