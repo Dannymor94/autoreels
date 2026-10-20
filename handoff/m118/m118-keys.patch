@@ -1,0 +1,59 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 6dff9bc..e2a6bea 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -390,7 +390,9 @@ autocut:
+   keywords_every_sec: 12  # one per 12 s of the clip …
+   keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
+   # M116 — M1.9 stage D (owner: «давай»; M99: the owner's k: word is drawn out by the voice in 81 % of sentences):
+-  keywords_voice: true    # the words the voice draws out (intonation map: duration per letter) are shown to the model as a
++  keywords_voice: false   # M118 off (m116: with the hints Haiku picked «потом», «месте», «школу» where without them it took
++                          # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
++                          # words the voice draws out (intonation map: duration per letter) are shown to the model as a
+   keywords_voice_ratio: 1.25   # hint («[voice: …]»); the model still picks the word, the same checks; no map = no hint
+   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
+   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 21d5b48..41a80b0 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -1009,7 +1009,11 @@ _KEY_STOP = frozenset("это этот эта эти так вот что как
+                       "такой такая быть есть был была было который которая которые "
+                       # M93 (m88: «себя» marked in two clips): reflexive and possessive pronouns carry no meaning
+                       "себя себе собой свой своя свое своё свои своего своей мой моя мое моё мои твой наш ваш "
+-                      "меня мне тебя тебе нас нам вас вам него нее неё них нему ней ним".split())
++                      "меня мне тебя тебе нас нам вас вам него нее неё них нему ней ним "
++                      # M118 (m116: k: «потом» in two clips; the voice hints held «допустим», «какой-то», «каким-то» — the
++                      # voice draws out hedges and fillers): words that never carry the point
++                      "потом затем допустим конечно вообще значит короче типа какой-то какая-то какое-то какие-то "
++                      "каким-то какую-то как-то где-то что-то кто-то когда-то куда-то".split())
+ 
+ 
+ def _kw_norm(w: str) -> str:
+diff --git a/tests/test_autocut.py b/tests/test_autocut.py
+index 86695a7..7b4c257 100644
+--- a/tests/test_autocut.py
++++ b/tests/test_autocut.py
+@@ -1162,7 +1162,8 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
+         mpath = _source(root)
+         cfg = root / "config" / "r0.yaml"
+         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+-                       .replace("  clips: 5\n", "  clips: 1\n"), encoding="utf-8")
++                       .replace("  clips: 5\n", "  clips: 1\n")
++                       .replace("  keywords_voice: false ", "  keywords_voice: true "), encoding="utf-8")   # M118: off by default
+         r0 = cli.load_r0_config(cfg)
+         assert r0.autocut.keywords and r0.autocut.keywords_voice
+         tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
+@@ -1196,3 +1197,12 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
+     assert "голос выделяет: 2." in text
+     seen, text, _ = run(False)
+     assert seen == [None] and "голос выделяет" not in text
++
++
++def test_m118_hedges_and_fillers_are_never_key_words():
++    """M118 (m116: k: «потом»; the voice hints «допустим», «какой-то»): the code drops them whatever the model says."""
++    from autoreels.cloud.autocut import pick_keywords
++    rows = [("1.1", "Потом допустим какой-то человек приходит к психологу."), ("1.2", "Вообще это значит доверие.")]
++    ans = _Answers('{"keys": [{"s": 1, "word": "потом"}, {"s": 1, "word": "какой-то"}, {"s": 2, "word": "вообще"},'
++                   ' {"s": 2, "word": "доверие"}]}')
++    assert pick_keywords(rows, ans, n=2, log=lambda m: None) == [("1.2", "доверие")]
