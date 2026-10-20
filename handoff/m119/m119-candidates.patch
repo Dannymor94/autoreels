@@ -1,0 +1,537 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index e2a6bea..c081e39 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -343,6 +343,15 @@ autocut:
+   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
+   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
+                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
++  # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts;
++  # the montage builder failed on half its seeds; the start judge rejected 54–78% of the owner's starts):
++  generator: montage      # montage — thoughts of one topic from anywhere | passage — adjacent thoughts around a strong one
++  seed_roles: []          # roles a clip may grow around (with seed_punch); [] = thesis, conclusion, example, metaphor, question
++  passage_gap_sec: 30     # passage: a neighbour joins when at most this far from the run (owner clips jump ≤ 30 s)
++  start_judge: veto       # veto — a start the model rejects drops the clip | rank — rules decide, the model only sorts it last
++  clips_every_min: 0      # clips = max(clips, source minutes ÷ this) (owner: 66 clips in 231 min); 0 = clips
++  lean_depth: 0           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
++                          # chain (m119: IMG_6848 — 10 of 20 seeds built nothing, chains ran over 16 thoughts)
+   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
+   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
+                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 0ea181d..5ee7153 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -137,6 +137,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ **Автосборщик** (M56). `arl autocut <манифест> [--clips N]` предлагает строки сборки по карте источника (`transcripts/<stem>.map.json`, `arl map`) → черновик `reviews/<stem>_auto_m56.txt` с заголовком разметки (`cloud/autocut.py`, числа — `autocut:` в `config/r0.yaml`). Решает код, не модель (модель только описала мысли в карте): **M68:** принятые сборки одного источника не начинаются с одной мысли, не повторяют заголовок и не делят мыслей (`autocut.max_shared`, по умолчанию 0) — кандидат, слишком похожий на принятый, пропускается без проверки и записывается в конец черновика с причиной (11h42: два ролика из четырёх открывались «Вы не сломаны, просто не изучали себя»). Карта другого исходника (другой `source_sha256`) — отказ, как карта другой расшифровки (M67).
+ - клип растёт вокруг сильной мысли (сила ≥ `autocut.seed_punch`, роль — тезис, вывод, пример, образ или вопрос): берёт мысли, на которые она опирается (сноски — по цепочке), затем мысли той же темы и её «похожие» из других мест — по силе, энергии голоса и недостающей роли (начало, пример, вывод), пока клип не дорос до `target_sec`, не длиннее `max_sec`, не больше `max_pieces` кусков; служебные, слабые (< `min_punch`) и неописанные мысли не берутся; мысль, опору которой взять нельзя, не берётся;
+ - предлагается, только если не короче `min_sec`, есть начало (тезис или вопрос) или вывод, и клип не кончается вопросом;
++- **M119 (флаги, по умолчанию выключены):** `autocut.generator: passage` — клип — отрезок подряд идущих мыслей одной темы вокруг сильной (m118: 60 из 66 клипов владельца — один отрезок разговора внутри одной темы, 1–5 соседних мыслей; сборка из разных мест не строилась у половины зёрен — мысль со сноской тянула всю цепочку). Отрезок растёт по одной соседней мысли: после вопроса — вперёд, пока первая мысль опирается на предыдущую — назад, иначе к более сильной соседней; соседняя мысль той же темы, не дальше `passage_gap_sec`, не в другом клипе; слабая мысль может стоять внутри, не на краю. Вопроса-петли из другого места и выбрасывания мыслей из середины нет, клипы не делят мыслей. `autocut.lean_depth: 1` — в сборке из разных мест мысль берёт с собой только ту, на которую опирается, а не всю цепочку сносок (карта помечает 71% мыслей IMG_6848 как опирающиеся на предыдущую — цепочки шли через 16 мыслей или через слабую; начало первой мысли по-прежнему проверяют правила начала). `autocut.seed_roles` — роли, вокруг которых растёт клип (пусто — тезис, вывод, пример, образ, вопрос). `autocut.start_judge: rank` — если начало принимают правила, а модель против, клип остаётся и идёт после чистых (инвариант 1: модель только ранжирует; m118: судьи принимали 22–46% начал самого владельца). `autocut.clips_every_min` — сборок не меньше, чем минут источника ÷ это число. `arl autocut … --ac ключ=значение` — любое поле `autocut:` на один запуск, файл конфига не меняется.
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+ - крючок `h:` — законченное предложение (≥ `hook_min_words` слов, ≤ `hook_max_sec`) самой сильной мысли-вывода, вопроса или образа; плашка `t:` — итог начальной мысли, подпись `d:` — итог вывода;
+ - сборки, у которых больше `overlap_max` мыслей общих с лучшей или тот же вывод в конце (M61), отбрасываются; остаются `clips` лучших. Если план пропустил крючок (нет своего звука), проверка берёт следующий кандидат крючка, а если их нет — строка идёт без `h:` (M61; в комментарии над строкой — какой крючок заменён). Над каждой строкой — комментарий: мысли, роли, сила, итоги. Каждое предложение сразу проходит настоящие проверки `--apply` по отдельности, во временном корне (M60; кандидатов до `clips × autocut.check_pool`): не прошедшее остаётся в конце черновика закомментированным (`#! M …`) с причиной, его место занимает следующий кандидат; `--no-check` выключает. Черновик проверяется и обычным `arl blocks --apply <файл> --labeler auto`, без `--install` ничего не ставится.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index aa916cc..bc4277b 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8024,9 +8024,33 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources:
+     return rc
+ 
+ 
++def _autocut_overrides(base, pairs) -> "object":
++    """M119: `--ac key=value` → a copy of the autocut config with those fields (names and types checked by the model;
++    a list field takes comma-separated values, an empty value is an empty list). Raises ValueError."""
++    import typing as _typing
++    from autoreels.core.config import AutocutConfig
++    upd: dict = {}
++    for pr in pairs or ():
++        k, sep, v = str(pr).partition("=")
++        k = k.strip()
++        if not sep or not k:
++            raise ValueError(f"--ac ждёт ключ=значение, получено «{pr}»")
++        if k not in AutocutConfig.model_fields:
++            raise ValueError(f"--ac: нет поля «{k}» в autocut (config/r0.yaml)")
++        v = v.strip()
++        if _typing.get_origin(AutocutConfig.model_fields[k].annotation) in (list, tuple):
++            upd[k] = [x.strip() for x in v.split(",") if x.strip()]
++        else:
++            upd[k] = v
++    try:
++        return AutocutConfig.model_validate(base.model_dump() | upd)
++    except Exception as exc:  # noqa: BLE001 — pydantic message, short
++        raise ValueError("--ac: " + " | ".join(str(exc).splitlines()[:3])) from None
++
++
+ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
+                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
+-                judge_log: str | None = None, voice_keys: bool = True) -> int:
++                judge_log: str | None = None, voice_keys: bool = True, ac_over=None) -> int:
+     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
+     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
+     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
+@@ -8066,7 +8090,20 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+               f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
+         return 1
+     ac = r0_cfg.autocut
+-    prm = AutoParams(clips=clips or ac.clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
++    if ac_over:                             # M119: --ac key=value for this run only (config/r0.yaml unchanged)
++        try:
++            ac = _autocut_overrides(ac, ac_over)
++        except ValueError as exc:
++            print(f"ошибка: {exc}", file=sys.stderr)
++            return 1
++        r0_cfg = r0_cfg.model_copy(update={"autocut": ac})
++        print("  autocut для этого запуска: " + ", ".join(str(x).strip() for x in ac_over), flush=True)
++    n_clips = clips or ac.clips
++    if not clips and ac.clips_every_min > 0:    # M119: the owner takes one clip per ~3.5 min of a talk
++        _src_min = max((float(w.t1) for w in tx.words), default=0.0) / 60.0
++        n_clips = max(ac.clips, round(_src_min / ac.clips_every_min))
++        print(f"  сборок: до {n_clips} (источник {_src_min:.0f} мин ÷ {ac.clips_every_min:g})", flush=True)
++    prm = AutoParams(clips=n_clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
+                      max_pieces=ac.max_pieces, min_punch=ac.min_punch, seed_punch=ac.seed_punch,
+                      hook_max_sec=getattr(r0_cfg, "hook_max_sec", 6.0), hook_min_words=ac.hook_min_words,
+                      overlap_max=ac.overlap_max, use_filtered=ac.use_filtered, loop=ac.loop,
+@@ -8080,7 +8117,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                      hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos,
+                      hook_no_pointer=ac.hook_no_pointer,
+                      close_last=ac.close_last, close_last_sec=ac.close_last_sec,
+-                     end_tone=getattr(ac, "end_tone", False))
++                     end_tone=getattr(ac, "end_tone", False), generator=ac.generator,
++                     seed_roles=tuple(ac.seed_roles), passage_gap_sec=ac.passage_gap_sec, start_judge=ac.start_judge,
++                     lean_depth=ac.lean_depth)
+     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+     words = tx.words
+     if getattr(r0_cfg, "credit_word_patterns", None):
+@@ -8168,6 +8207,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
+     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                    no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end)
++    _doubt = sum(1 for pr in pool if pr.start_doubt)
++    if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
++        pool.sort(key=lambda pr: bool(pr.start_doubt))
++        print(f"  начало: у {_doubt} кандидатов модель против начала, правила за — они после остальных", flush=True)
+     if judge is not None:
+         _jc = getattr(judge, "cache", {})
+         _no = sum(1 for v in _jc.values() if v is not None and not v[0])
+@@ -8244,7 +8287,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                 for pr in pool[:prm.clips * 2]:
+                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
+                 _bad = sum(1 for pr in pool if pr.bad_seams)
+-                pool.sort(key=lambda pr: bool(pr.bad_seams))
++                pool.sort(key=lambda pr: bool(pr.bad_seams) + bool(pr.start_doubt))   # M119: doubts add up
+                 if _bad:
+                     print(f"  стыки: у {_bad} кандидатов модель нашла рваный стык — они после остальных", flush=True)
+         except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
+@@ -12559,6 +12602,8 @@ def _build_parser():
+                      help="M116: без подсказок голоса для k: (сравнение с подсказками)")
+     pac.add_argument("--no-check", action="store_false", dest="check",
+                      help="не прогонять каждое предложение через проверки --apply (M60)")
++    pac.add_argument("--ac", action="append", default=None, dest="ac_over", metavar="ключ=значение",
++                     help="M119: поле autocut из config/r0.yaml на этот запуск (можно несколько раз; список — через запятую)")
+     pac.add_argument("--root", default=None)
+     pac.add_argument("--cache-dir", default=None, dest="cache_dir")
+ 
+@@ -13030,7 +13075,8 @@ def main(argv=None) -> int:
+         elif args.cmd == "autocut":
+             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
+-                               check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys)
++                               check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys,
++                               ac_over=args.ac_over)
+         elif args.cmd == "tx-check":
+             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
+                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 41a80b0..da4f4f2 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -83,6 +83,12 @@ class AutoParams:
+     # M115 (M1.9 C; M99: 62 of 65 endings of the owner's clips are «↘», one «→»): a clip does not end on a sentence
+     # whose voice stays up — the speaker goes on. Needs end_tone in propose (the intonation map); False = as before.
+     end_tone: bool = False
++    # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts):
++    generator: str = "montage"        # montage (build_clip) | passage (build_passage)
++    seed_roles: tuple = ()            # roles a clip may grow around (punch ≥ seed_punch); () = STORY
++    passage_gap_sec: float = 30.0     # passage: a neighbour joins when at most this far from the run
++    start_judge: str = "veto"         # veto | rank — a start only the model rejects keeps the clip, sorted last
++    lean_depth: int = 0               # montage: a thought brings this many links of what it leans on; 0 = the chain
+ 
+ 
+ @dataclass
+@@ -106,6 +112,7 @@ class Proposal:
+     keys: list = field(default_factory=list)            # M88: [(B.N, word)] — k: words the subtitles highlight
+     close: list = field(default_factory=list)           # M91: [B.N] — the last sentences in the close shot (c:)
+     plate_mode: str = ""                                # M112: how the plate t: was written (hook | context; "" = not)
++    start_doubt: str | None = None                      # M119: the model rejected the start the rules accept (rank)
+ 
+     def line(self, label: str) -> str:
+         sp = f"@{self.speed:g}" if self.speed else ""
+@@ -136,10 +143,12 @@ def eligible(u: dict, p: AutoParams) -> bool:
+     return int(u.get("punch") or 0) >= p.min_punch
+ 
+ 
+-def leans_on(u: dict, by_id: dict) -> list[int]:
+-    """The chain of earlier units u leans on (refers, transitively), nearest first."""
++def leans_on(u: dict, by_id: dict, depth: int = 0) -> list[int]:
++    """The chain of earlier units u leans on (refers, transitively), nearest first. M119: depth > 0 — only that many
++    links (the start rules, context_start, see to the first sentence of the earliest one); 0 — the whole chain."""
+     out, seen, cur = [], {u["id"]}, u
+-    while not cur.get("standalone", True) and cur.get("refers") in by_id and cur["refers"] not in seen:
++    while (not cur.get("standalone", True) and cur.get("refers") in by_id and cur["refers"] not in seen
++           and not (depth and len(out) >= depth)):
+         cur = by_id[cur["refers"]]
+         seen.add(cur["id"])
+         out.append(cur["id"])
+@@ -179,7 +188,7 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
+     chosen: dict[int, dict] = {}
+ 
+     def add(u: dict) -> bool:
+-        group = [u] + [by_id[i] for i in leans_on(u, by_id)]
++        group = [u] + [by_id[i] for i in leans_on(u, by_id, p.lean_depth)]
+         if any(not eligible(g, p) and g["id"] not in chosen for g in group[1:]):
+             # an earlier unit it leans on is unusable (filler / missing): this one cannot stand
+             return False
+@@ -210,6 +219,56 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
+     return clip
+ 
+ 
++def _strength(u: dict) -> int:
++    return int(u.get("punch") or 0) + (1 if u.get("role") in PAYOFFS else 0)
++
++
++def build_passage(seed: dict, by_id: dict, p: AutoParams, taken=frozenset()) -> list[dict] | None:
++    """M119 (m118: 60 of the owner's 66 clips are one stretch of the talk — no jump over 30 s — of 1–5 neighbouring
++    thoughts inside one topic; build_clip failed on 10 of 20 seeds of IMG_6848: a thought that leans back brings its
++    whole chain, over max_sec or through a weak thought): a run of adjacent thoughts around the seed, in source order.
++    It grows one neighbour at a time: after a question — forward (its answer); while the first thought leans on the
++    one before (the map's standalone) — back; else toward the stronger neighbour (punch, a conclusion +1; a tie goes
++    forward). Up to target_sec, never past max_sec. A neighbour joins when it is of the seed's topic, has refs, is not
++    missing, filtered (unless use_filtered) or in another clip (`taken`), and is at most passage_gap_sec away. A weak
++    thought (not eligible: below min_punch, an aside) may sit inside, never at an end; nor does a question end it.
++    None when the run is shorter than min_sec or the seed itself is a question left at the end."""
++    def usable(u: dict | None) -> bool:
++        return (u is not None and u["id"] not in taken and not u.get("missing") and bool(u.get("refs"))
++                and u.get("topic") == seed.get("topic") and float(u.get("t1") or 0) > float(u.get("t0") or 0)
++                and not (u.get("filtered") and not p.use_filtered))
++
++    if not usable(seed) or _dur(seed) > p.max_sec:
++        return None
++    run = [seed]
++    total = _dur(seed)
++    while total < p.target_sec:
++        prv, nxt = by_id.get(run[0]["id"] - 1), by_id.get(run[-1]["id"] + 1)
++        if not (usable(prv) and float(run[0]["t0"]) - float(prv["t1"]) <= p.passage_gap_sec):
++            prv = None
++        if not (usable(nxt) and float(nxt["t0"]) - float(run[-1]["t1"]) <= p.passage_gap_sec):
++            nxt = None
++        if nxt is not None and (prv is None or run[-1].get("role") == "question"):
++            pick = nxt
++        elif prv is not None and (nxt is None or not run[0].get("standalone", True)):
++            pick = prv
++        elif prv is None:
++            break
++        else:
++            pick = nxt if _strength(nxt) >= _strength(prv) else prv
++        if total + _dur(pick) > p.max_sec:
++            break
++        run = [pick] + run if pick is prv else run + [pick]
++        total += _dur(pick)
++    while len(run) > 1 and run[-1] is not seed and (not eligible(run[-1], p) or run[-1].get("role") == "question"):
++        run.pop()
++    while len(run) > 1 and run[0] is not seed and not eligible(run[0], p):
++        run.pop(0)
++    if run[-1].get("role") == "question" or sum(_dur(u) for u in run) < p.min_sec:
++        return None
++    return run
++
++
+ _CONTRAST = ("на самом деле", "но ", "однако", "а вот", "парадокс", "наоборот", "вместо того", "не потому")
+ _STRONG = ("никогда", "всегда", "главное", "главная", "секрет", "ошибк", "важно", "самое", "страх", "боль",
+            "любов", "счасть", "правд", "смерт", "деньг")
+@@ -456,7 +515,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *,
+                     break
+             if clip[0] is not u:
+                 continue
+-        needed = {i for c in clip for i in leans_on(c, by_id)}
++        needed = {i for c in clip for i in leans_on(c, by_id, p.lean_depth)}
+         if (len(clip) > 1 and (u["id"] == loop_id or (u["id"] != seed_id and u["id"] not in needed))
+                 and sum(_dur(c) for c in clip[1:]) >= p.min_sec):
+             clip = clip[1:]
+@@ -760,7 +819,7 @@ def _loop_question(clip: list[dict], units: Sequence[dict], by_id: dict, p: Auto
+     """M65: a question the clip answers — one a chosen thought leans on, else one of the clip's topic
+     (or «similar» to its seed); short, standalone enough, not used elsewhere."""
+     ids = {u["id"] for u in clip}
+-    leaned = {i for u in clip for i in leans_on(u, by_id)}
++    leaned = {i for u in clip for i in leans_on(u, by_id, p.lean_depth)}
+     topics = {u.get("topic") for u in clip}
+     sims = {i for u in clip for i, _ in (u.get("similar") or [])}
+     best, best_s = None, 0.0
+@@ -782,7 +841,7 @@ def _prune(clip: list[dict], by_id: dict, p: AutoParams) -> tuple[list[dict], li
+     thought leans on) while the clip is longer than target_sec + prune_slack and stays ≥ min_sec."""
+     dropped: list[int] = []
+     while sum(_dur(u) for u in clip) > p.target_sec + p.prune_slack and len(clip) > 2:
+-        needed = {i for u in clip for i in leans_on(u, by_id)}
++        needed = {i for u in clip for i in leans_on(u, by_id, p.lean_depth)}
+         middle = [u for u in clip[1:-1] if u["id"] not in needed]
+         if not middle:
+             break
+@@ -817,22 +876,30 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
+     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
+     M115: `end_tone(B.k)` → «final» | «open» | «unsure» | None — the voice at the end of that sentence; with
+-    p.end_tone a clip does not end «→» (fix_open_end); `open_end` collects (pieces, why) of the clips that went."""
++    p.end_tone a clip does not end «→» (fix_open_end); `open_end` collects (pieces, why) of the clips that went.
++    M119: p.generator «passage» — a run of adjacent thoughts (build_passage; no loop question from elsewhere, no
++    pruning from the middle, no thought shared with an earlier clip); p.seed_roles — the roles a clip grows around;
++    p.start_judge «rank» — a start the model rejects but the rules accept keeps the clip, marked start_doubt (the
++    caller sorts it after the clean ones: invariant 1, the model only ranks)."""
+     by_id = {u["id"]: u for u in units}
+-    seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in STORY
++    roles = tuple(p.seed_roles) or STORY
++    passage = p.generator == "passage"
++    seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in roles
+                     and int(u.get("punch") or 0) >= p.seed_punch),
+                    key=lambda u: (-int(u["punch"]), -float((u.get("voice") or {}).get("energy") or 50.0), u["t0"]))
+     out: list[Proposal] = []
+     used_seeds: set[int] = set()
++    taken: set[int] = set()                 # M119 passage: thoughts already in a clip
+     for seed in seeds:
+-        if seed["id"] in used_seeds:
++        if seed["id"] in used_seeds or seed["id"] in taken:
+             continue
+-        clip = build_clip(seed, units, by_id, p)
++        clip = build_passage(seed, by_id, p, taken) if passage else build_clip(seed, units, by_id, p)
+         if clip is None:
+             continue
+         extra_notes: list[str] = []
++        start_doubt = None
+         loop_id = None
+-        if p.loop and clip[0].get("role") != "question":
++        if p.loop and not passage and clip[0].get("role") != "question":
+             taken = {i for o in out for i in o.units}
+             q = _loop_question(clip, units, by_id, p, taken)
+             if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
+@@ -840,7 +907,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+                 clip = [q] + clip
+                 loop_id = q["id"]
+                 extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
+-        if p.prune:
++        if p.prune and not passage:
+             clip, dropped = _prune(clip, by_id, p)
+             if dropped:
+                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
+@@ -848,6 +915,14 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+         if p.context_start and sentences:
+             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
+                                                judge=judge)
++            if clip2 is None and judge is not None and p.start_judge == "rank":
++                # M119: the rules decide; the model's «no» only sorts the clip after the clean ones
++                clip2, cnotes, why2 = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
++                if clip2 is not None:
++                    start_doubt = why
++                    cnotes = cnotes + [f"начало: модель против ({why}) — правила принимают, сборка после чистых"]
++                else:
++                    why = why2
+             if clip2 is None:
+                 if no_start is not None:
+                     no_start.append((" ".join(u["refs"] for u in clip), why))
+@@ -870,10 +945,14 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+                 extra_notes.append(enote)
+                 unit_refs = {**unit_refs, clip[-1]["id"]: clip[-1]["refs"]}
+         ids = [u["id"] for u in clip]
++        if passage and set(ids) & taken:
++            continue                      # M119: context added in front reached an earlier clip
+         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
+                or ids[-1] == o.units[-1] for o in out):
+             continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
+         used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
++        if passage:
++            taken.update(ids)
+         secs = sum(_dur(u) for u in clip)
+         roles = [u.get("role") for u in clip]
+         punch = sum(int(u.get("punch") or 0) for u in clip) / len(clip)
+@@ -913,7 +992,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+             # without it has no <rid>.txt and crosspost refuses a post without text (Pxl 112938952 r02 in m88)
+             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
+             opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
+-            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
++            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt))
+     out.sort(key=lambda o: -o.score)
+     return out[:p.clips]
+ 
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index db7cdb5..907984d 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -12,6 +12,7 @@ from __future__ import annotations
+ 
+ import json
+ from pathlib import Path
++from typing import Literal
+ 
+ import yaml
+ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+@@ -278,6 +279,15 @@ class AutocutConfig(BaseModel):
+     use_filtered: bool = False
+     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
+     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
++    # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
++    # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
++    generator: str = Field("montage", pattern="^(montage|passage)$")   # passage: adjacent thoughts around a strong one
++    seed_roles: list[Literal["thesis", "conclusion", "example", "metaphor", "question", "explanation", "address"]] = \
++        Field(default_factory=list)                # roles a clip may grow around (punch ≥ seed_punch); [] = STORY
++    passage_gap_sec: float = Field(30.0, gt=0)     # passage: a neighbour joins when at most this far from the run
++    start_judge: str = Field("veto", pattern="^(veto|rank)$")   # rank: a start only the model rejects sorts the clip last
++    clips_every_min: float = Field(0.0, ge=0)      # clips = max(clips, source minutes ÷ this); 0 = clips
++    lean_depth: int = Field(0, ge=0)               # montage: links of what a thought leans on it brings; 0 = the chain
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+diff --git a/tests/test_autocut.py b/tests/test_autocut.py
+index 7b4c257..6c4cd19 100644
+--- a/tests/test_autocut.py
++++ b/tests/test_autocut.py
+@@ -1206,3 +1206,143 @@ def test_m118_hedges_and_fillers_are_never_key_words():
+     ans = _Answers('{"keys": [{"s": 1, "word": "потом"}, {"s": 1, "word": "какой-то"}, {"s": 2, "word": "вообще"},'
+                    ' {"s": 2, "word": "доверие"}]}')
+     assert pick_keywords(rows, ans, n=2, log=lambda m: None) == [("1.2", "доверие")]
++
++
++def _units119():
++    return [
++        U(1, 0, 10, "explanation", 3, "1.1"),
++        U(2, 10, 12, "example", 2, "1.2", standalone=False, refers=1),          # weak: inside a run, never at an end
++        U(3, 22, 14, "thesis", 4, "1.3", standalone=False, refers=2),           # the seed leans back
++        U(4, 36, 10, "conclusion", 3, "1.4"),
++        U(5, 46, 8, "question", 3, "1.5"),
++        U(6, 54, 20, "explanation", 4, "2.1", topic=2),                          # another topic
++        U(7, 74, 15, "thesis", 4, "2.2", topic=2),
++        U(8, 200, 15, "example", 3, "3.1", topic=2),                             # 111 s after #7
++    ]
++
++
++def test_m119_passage_is_a_run_of_adjacent_thoughts_of_one_topic():
++    """M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half
++    the seeds — a thought that leans back brings its whole chain, here through the weak #2)."""
++    from autoreels.cloud.autocut import build_passage
++    units = _units119()
++    by = {u["id"]: u for u in units}
++    p = AutoParams(min_sec=20, target_sec=40, max_sec=65, generator="passage")
++    assert build_clip(by[3], units, by, p) is None                    # the montage builder gives up on this seed
++    run = build_passage(by[3], by, p)
++    assert [u["id"] for u in run] == [1, 2, 3, 4]                      # back while it leans, then the neighbour
++    run = build_passage(by[3], by, AutoParams(min_sec=20, target_sec=70, max_sec=80))
++    assert [u["id"] for u in run] == [1, 2, 3, 4]                      # #5 (a question) does not end it, #6 is topic 2
++    assert [u["id"] for u in build_passage(by[3], by, p, taken={1})] == [3, 4]   # the weak #2 is not left at the start
++    assert build_passage(by[3], by, AutoParams(min_sec=50, target_sec=60, max_sec=80)) is None
++    assert [u["id"] for u in build_passage(by[7], by, AutoParams(min_sec=20, target_sec=60, max_sec=80))] == [6, 7]
++    assert [u["id"] for u in build_passage(by[7], by, AutoParams(min_sec=20, target_sec=60, max_sec=80,
++                                                                 passage_gap_sec=200))] == [6, 7, 8]
++
++
++def test_m119_propose_passages_share_no_thought_and_take_no_question_from_elsewhere():
++    units = _units119() + [U(9, 300, 8, "question", 4, "4.1", summary="зачем?")]
++    p = AutoParams(clips=5, min_sec=20, target_sec=40, max_sec=65, generator="passage")
++    props = propose(units, p)
++    assert props and all(pr.units == list(range(pr.units[0], pr.units[-1] + 1)) for pr in props)
++    flat = [i for pr in props for i in pr.units]
++    assert len(flat) == len(set(flat)) and 9 not in flat
++    assert all(pr.start_doubt is None for pr in props)
++    montage = propose(units, AutoParams(clips=5, min_sec=20, target_sec=40, max_sec=65))
++    assert [pr.units for pr in montage] != [pr.units for pr in props]          # the flag off = the montage builder
++
++
++def test_m119_seed_roles_choose_what_a_clip_grows_around():
++    units = [U(1, 0, 25, "explanation", 4, "1.1-2"), U(2, 25, 10, "explanation", 3, "1.3")]
++    p = AutoParams(clips=5, min_sec=20, target_sec=40, max_sec=65, generator="passage")
++    assert propose(units, p) == []                                              # explanation is not in STORY
++    (pr,) = propose(units, AutoParams(**{**p.__dict__, "seed_roles": ("explanation",)}))
++    assert pr.units == [1, 2]
++
++
++def test_m119_rank_keeps_a_start_only_the_model_rejects_and_marks_it():
++    """M119 (m118: the judges accepted 22–46% of the owner's own starts): with start_judge rank the model's «no» on a
++    start the rules accept only marks the clip (start_doubt); veto — the M75 behaviour — drops it."""
++    units = [U(1, 0, 30, "thesis", 5, "1.1-3"), U(2, 30, 10, "conclusion", 4, "1.4")]
++    sent = _rows74({"1.1": "Хоть это бывает полезно, как говорят психологи."})
++
++    def judge(text, following, core=""):
++        return (not text.startswith("Хоть это"), "«это» без предмета")
++    base = dict(clips=1, min_sec=20, target_sec=40, max_sec=80, loop=False, prune=False, context_start=True)
++    no_start: list = []
++    assert propose(units, AutoParams(**base), sent, judge=judge, no_start=no_start) == []
++    assert "«это» без предмета" in no_start[0][1]
++    (pr,) = propose(units, AutoParams(**base, start_judge="rank"), sent, judge=judge)
++    assert pr.start_doubt and "«это» без предмета" in pr.start_doubt
++    assert any("модель против" in n and "правила принимают" in n for n in pr.notes)
++    rules_no = _rows74({"1.1": "Поэтому это бывает полезно, как говорят психологи."})
++    no_start = []
++    assert propose(units, AutoParams(**base, start_judge="rank"), rules_no, judge=judge, no_start=no_start) == []
++    assert "ссылка назад «поэтому…»" in no_start[0][1]                        # the rules still decide
++
++
++def test_m119_ac_overrides_check_names_and_types():
++    from autoreels.__main__ import _autocut_overrides
++    from autoreels.core.config import AutocutConfig
++    base = AutocutConfig()
++    assert (base.generator, base.seed_roles, base.start_judge, base.clips_every_min) == ("montage", [], "veto", 0.0)
++    c = _autocut_overrides(base, ["generator=passage", "seed_roles=thesis, explanation", "target_sec=35",
++                                  "start_judge=rank", "clips_every_min=3.5"])
++    assert (c.generator, c.seed_roles, c.target_sec, c.start_judge, c.clips_every_min) == \
++        ("passage", ["thesis", "explanation"], 35.0, "rank", 3.5)
++    assert _autocut_overrides(base, ["seed_roles="]).seed_roles == []
++    for bad in (["generator=collage"], ["nope=1"], ["target_sec"], ["seed_roles=aside"]):
++        try:
++            _autocut_overrides(base, bad)
++        except ValueError as exc:
++            assert str(exc).startswith("--ac")
++        else:
++            raise AssertionError(bad)
++
++
++def test_m119_cmd_autocut_takes_overrides_counts_clips_by_length_and_puts_doubts_last(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from autoreels.cloud import autocut as ac_mod
++    from autoreels.cloud.autocut import Proposal
++    from tests.test_montage import _source
++    _source(tmp_path)
++    cfg = tmp_path / "config" / "r0.yaml"
++    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
++    (tmp_path / "transcripts").mkdir(exist_ok=True)
++    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
++        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [U(1, 0, 30, "thesis", 5, "2.1")]}),
++        encoding="utf-8")
++    seen = {}
++
++    def fake_propose(units, p, sentences=None, **kw):
++        seen["p"] = p
++        return [Proposal(units=[1], pieces="2.1", hook=None, title="сомнение", caption="", score=90, seconds=30,
++                         opener=1, start_doubt="модель: нет"),
++                Proposal(units=[2], pieces="2.2", hook=None, title="чистое", caption="", score=80, seconds=30,
++                         opener=2)]
++    monkeypatch.setattr(ac_mod, "propose", fake_propose)
++    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False,
++                           ac_over=["generator=passage", "clips_every_min=0.001", "start_judge=rank"]) == 0
++    out = capsys.readouterr().out
++    assert seen["p"].generator == "passage" and seen["p"].start_judge == "rank" and seen["p"].clips > 5
++    assert "autocut для этого запуска: generator=passage" in out and "сборок: до " in out
++    assert "у 1 кандидатов модель против начала" in out
++    lines = [ln for ln in (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8").splitlines()
++             if ln.startswith("M")]
++    assert "t: чистое" in lines[0] and "t: сомнение" in lines[1]
++    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), ac_over=["generator=x"]) == 1
++    assert "--ac" in capsys.readouterr().err
++    assert "generator: montage" in cfg.read_text(encoding="utf-8")                 # the config file is not touched
++
++
++def test_m119_lean_depth_limits_the_chain_a_thought_brings():
++    """M119 (IMG_6848: 10 of 20 seeds built nothing — the map marks 71% of thoughts as leaning back, chains ran over
++    16 thoughts or through a weak one): lean_depth 1 — a thought brings only the one it leans on; 0 — as before."""
++    by = {u["id"]: u for u in _units()}
++    assert leans_on(by[5], by) == [3, 2] and leans_on(by[5], by, 1) == [3] and leans_on(by[5], by, 2) == [3, 2]
++    units = [U(1, 0, 10, "explanation", 2, "1.1"), U(2, 10, 15, "example", 3, "1.2", standalone=False, refers=1),
++             U(3, 25, 15, "conclusion", 5, "1.3", standalone=False, refers=2)]
++    by = {u["id"]: u for u in units}
++    assert build_clip(by[3], units, by, AutoParams(min_sec=20, target_sec=40)) is None      # through the weak #1
++    clip = build_clip(by[3], units, by, AutoParams(min_sec=20, target_sec=40, lean_depth=1))
++    assert [u["id"] for u in clip] == [2, 3]
