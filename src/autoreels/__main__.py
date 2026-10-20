@@ -8119,7 +8119,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      close_last=ac.close_last, close_last_sec=ac.close_last_sec,
                      end_tone=getattr(ac, "end_tone", False), generator=ac.generator,
                      seed_roles=tuple(ac.seed_roles), passage_gap_sec=ac.passage_gap_sec, start_judge=ac.start_judge,
-                     lean_depth=ac.lean_depth)
+                     lean_depth=ac.lean_depth, rhythm=ac.rhythm, max_jumps=ac.rhythm_max_jumps,
+                     jump_sec=ac.rhythm_jump_sec, settle_near_sec=ac.rhythm_settle_near,
+                     settle_far_sec=ac.rhythm_settle_far, settle_far_at_sec=ac.rhythm_far_sec,
+                     settle_tail=ac.rhythm_tail)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -8205,8 +8208,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         from autoreels.cloud.autocut import STANDALONE_SYSTEM as _SS, with_examples as _with_ex
         _ssys = _with_ex(_SS, *_ex["start"], "first sentence") if any(_ex["start"]) else None
         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
+    rhythm_out: list = []                   # M120: clips that could not keep the jump rule
     pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
-                   no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end)
+                   no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out)
     _doubt = sum(1 for pr in pool if pr.start_doubt)
     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
         pool.sort(key=lambda pr: bool(pr.start_doubt))
@@ -8429,6 +8433,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         for pieces, why in open_end:
             body.append(f"#   {why}: {pieces}")
         body.append("")
+    if rhythm_out:
+        body.append("# --- скачки: ритм не держится, поправить не вышло (M120: не больше 2 скачков, кусок успевает «осесть»):")
+        for pieces, why in dict.fromkeys(rhythm_out):
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
     if close:
         body.append("# --- слишком похожи на принятые (M68: своё начало и свои мысли у каждой сборки):")
         for pr, why in close:
@@ -8445,6 +8454,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
           + (f" (похожи на принятые: {len(close)})" if close else "")
           + (f" (без понятного начала: {len(no_start)})" if no_start else "")
           + (f" (конец «→», не укоротить: {len(open_end)})" if open_end else "")
+          + (f" (скачки, не поправить: {len(dict.fromkeys(rhythm_out))})" if rhythm_out else "")
           + (f" (без крючка не взяты: {len(hookless_left)})" if hookless_left else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")

@@ -1346,3 +1346,104 @@ def test_m119_lean_depth_limits_the_chain_a_thought_brings():
     assert build_clip(by[3], units, by, AutoParams(min_sec=20, target_sec=40)) is None      # through the weak #1
     clip = build_clip(by[3], units, by, AutoParams(min_sec=20, target_sec=40, lean_depth=1))
     assert [u["id"] for u in clip] == [2, 3]
+
+
+def test_m120_the_jump_rule_is_flexible_by_distance_and_place():
+    """M120 (owner: «перестановки можно, но без частых быстрых скачков; гибкий алгоритм кусков»; his 66 clips: 48 one
+    stretch, 12 one jump, 6 two, none three): the piece after a jump needs more time the farther the jump, the last one
+    (the payoff) half of it; no more than max_jumps."""
+    from autoreels.cloud.autocut import rhythm_pieces, rhythm_why, settle_need
+    p = AutoParams(rhythm=True)
+    assert rhythm_pieces([(0, 10), (12, 20), (40, 50), (5, 8)], 10.0) == [[0, 1], [2], [3]]   # 20 s gap; back
+    assert settle_need(10, p) == 6.0 and settle_need(120, p) == 12.0 and settle_need(500, p) == 12.0
+    assert settle_need(-1, p) == 12.0 and 6.0 < settle_need(65, p) < 12.0
+    assert rhythm_why([(0, 40)], p) == (None, None)
+    why, k = rhythm_why([(0, 20), (300, 308), (500, 530)], p)                  # 8 s between two far jumps
+    assert why and "8.0 с" in why and k == 1
+    assert rhythm_why([(0, 20), (300, 313), (500, 520)], p)[0] is None         # 13 s after a far jump
+    assert rhythm_why([(0, 20), (300, 306.5)], p)[0] is None                   # a punchline: 6.5 ≥ 12 × 0.5
+    assert "5.0 с" in rhythm_why([(0, 20), (300, 305)], p)[0]
+    assert rhythm_why([(0, 20), (35, 41.5), (42, 60)], p)[0] is None           # a 15 s skip needs ~6 s
+    assert "скачков 3" in rhythm_why([(0, 15), (100, 115), (200, 215), (300, 315)], p)[0]
+    assert "до первого скачка" in rhythm_why([(0, 4), (100, 130)], p)[0]
+    assert rhythm_why([(0, 4), (100, 130)], p, first_is_question=True)[0] is None   # the loop question opens
+
+
+def test_m120_fit_rhythm_grows_the_piece_at_fault_or_drops_it():
+    from autoreels.cloud.autocut import fit_rhythm
+    units = [U(1, 0, 20, "thesis", 4, "1.1"), U(2, 300, 5, "example", 3, "5.1"), U(3, 305, 9, "example", 3, "5.2"),
+             U(4, 600, 20, "conclusion", 4, "9.1"), U(5, 900, 5, "example", 3, "12.1", topic=2)]
+    by = {u["id"]: u for u in units}
+    p = AutoParams(rhythm=True, min_sec=20, max_sec=80)
+    clip, notes = fit_rhythm([by[1], by[2], by[4]], by, p, {1, 4})
+    assert [u["id"] for u in clip] == [1, 2, 3, 4] and "дополнен мыслью #3" in notes[0]
+    clip, notes = fit_rhythm([by[1], by[5], by[4]], by, p, {1, 4})                 # #5 cannot grow: it goes
+    assert [u["id"] for u in clip] == [1, 4] and "убран кусок #5" in notes[0]
+    assert fit_rhythm([by[1], by[5], by[4]], by, p, {1, 5, 4})[0] is None          # … unless it is the seed
+    assert fit_rhythm([by[1], by[2], by[4]], by, p, {1, 4}, taken={3})[1][0].endswith("убран кусок #2")
+
+
+def test_m120_builders_keep_the_jump_cap_and_mixed_ends_on_a_later_conclusion():
+    from autoreels.cloud.autocut import add_payoff, build_passage
+    units = [U(i, 30 * (i - 1) + (25 * (i - 1) if i > 1 else 0), 15, "example", 3, f"{i}.1") for i in range(1, 6)]
+    by = {u["id"]: u for u in units}                                                # 40 s gaps between thoughts
+    on = AutoParams(min_sec=20, target_sec=70, max_sec=80, passage_gap_sec=60, rhythm=True, max_jumps=2)
+    assert len(build_passage(by[3], by, on)) == 3                                   # two skips, no third
+    assert len(build_passage(by[3], by, AutoParams(min_sec=20, target_sec=70, max_sec=80, passage_gap_sec=60))) == 5
+    run = [U(1, 0, 20, "thesis", 4, "1.1"), U(2, 20, 15, "example", 3, "1.2")]
+    later = [U(3, 60, 10, "conclusion", 4, "3.1"), U(4, 400, 10, "conclusion", 5, "9.1"),
+             U(5, 30, 10, "conclusion", 5, "0.9", topic=2), U(6, 500, 10, "conclusion", 4, "10.1", standalone=False,
+                                                              refers=99)]
+    p = AutoParams(max_sec=60)
+    clip, note = add_payoff(run, run[0], run + later, p)
+    assert [u["id"] for u in clip] == [1, 2, 3] and "вывод из другого места: #3" in note   # the nearest later one
+    assert add_payoff(run, run[0], run + later, p, taken={3})[0][-1]["id"] == 4
+    assert add_payoff(run + [later[0]], run[0], run + later, p)[1] is None          # it has its payoff
+    props = propose(run + later, AutoParams(clips=5, min_sec=20, target_sec=35, max_sec=60, generator="mixed",
+                                            rhythm=True))
+    assert any(pr.units[-1] in (3, 4) for pr in props)
+
+
+def test_m120_a_rank_doubt_is_the_models_word_on_the_start_actually_used():
+    """m119: «И работай дальше.» — ссылка назад «и…» was noted as the model's verdict: the judge's run failed on another
+    sentence (a repair path), the rules' run kept the first one. The doubt is the judge's word on the start used."""
+    units = [U(1, 0, 20, "thesis", 4, "1.1-2"), U(2, 20, 20, "conclusion", 5, "2.1-2")]
+    sent = _rows74({"1.1": "Хоть это бывает полезно, как говорят психологи.",
+                    "2.1": "И работай дальше, всё получится обязательно у вас."})
+
+    def judge(text, following, core=""):
+        return (not text.startswith("Хоть это"), "«это» без предмета")
+    p = AutoParams(clips=1, min_sec=15, target_sec=40, max_sec=80, loop=False, prune=False, context_start=True,
+                   start_judge="rank")
+    (pr,) = propose(units, p, sent, judge=judge)
+    assert pr.units == [1, 2] and "«это» без предмета" in pr.start_doubt and "ссылка назад" not in pr.start_doubt
+    (pr,) = propose(units, p, sent, judge=lambda t, f, c="": (True, ""))
+    assert pr.start_doubt is None
+
+
+def test_m120_cmd_autocut_lists_clips_that_could_not_keep_the_rhythm(tmp_path, monkeypatch, capsys):
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from tests.test_montage import _source
+    _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [U(1, 0, 30, "thesis", 5, "2.1")]}),
+        encoding="utf-8")
+    seen = {}
+
+    def fake_propose(units, p, sentences=None, rhythm_out=None, **kw):
+        seen["p"] = p
+        rhythm_out.append(("2.1 7.1", "скачков 3 (можно 2)"))
+        rhythm_out.append(("2.1 7.1", "скачков 3 (можно 2)"))                    # the same clip from another seed
+        return []
+    monkeypatch.setattr(ac_mod, "propose", fake_propose)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False,
+                           ac_over=["rhythm=true", "generator=mixed", "context_judge=false"]) == 0
+    p = seen["p"]
+    assert p.rhythm and p.generator == "mixed" and p.max_jumps == 2 and p.settle_far_sec == 12.0
+    assert "(скачки, не поправить: 1)" in capsys.readouterr().out
+    text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
+    assert text.count("скачков 3 (можно 2): 2.1 7.1") == 1 and "# --- скачки:" in text

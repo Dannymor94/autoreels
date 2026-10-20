@@ -84,11 +84,20 @@ class AutoParams:
     # whose voice stays up — the speaker goes on. Needs end_tone in propose (the intonation map); False = as before.
     end_tone: bool = False
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts):
-    generator: str = "montage"        # montage (build_clip) | passage (build_passage)
+    generator: str = "montage"        # montage (build_clip) | passage (build_passage) | mixed (passage + loop + payoff)
     seed_roles: tuple = ()            # roles a clip may grow around (punch ≥ seed_punch); () = STORY
     passage_gap_sec: float = 30.0     # passage: a neighbour joins when at most this far from the run
     start_judge: str = "veto"         # veto | rank — a start only the model rejects keeps the clip, sorted last
     lean_depth: int = 0               # montage: a thought brings this many links of what it leans on; 0 = the chain
+    # M120 (owner: «перестановки можно, но без частых быстрых скачков»; his 66 clips: 48 one stretch, 12 one jump,
+    # 6 two, none three; a piece after a far jump ≥ 12 s, a last piece — the punchline — down to 6 s):
+    rhythm: bool = False              # the jump rule below on every clip (rhythm_why); False = as before
+    max_jumps: int = 2
+    jump_sec: float = 10.0            # a gap in the source longer than this (or going back) is a jump
+    settle_near_sec: float = 6.0      # the piece after a jump lasts at least this after a short skip …
+    settle_far_sec: float = 12.0      # … up to this after a jump of settle_far_at_sec or more (or back in the source)
+    settle_far_at_sec: float = 120.0
+    settle_tail: float = 0.5          # the last piece (the payoff) needs only this share of it
 
 
 @dataclass
@@ -196,6 +205,9 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
         trial = {**chosen, **new}
         if sum(_dur(g) for g in trial.values()) > p.max_sec or _pieces(_order(list(trial.values()))) > p.max_pieces:
             return False
+        if p.rhythm and len(rhythm_pieces([(float(g["t0"]), float(g["t1"])) for g in _order(list(trial.values()))],
+                                          p.jump_sec)) - 1 > p.max_jumps:
+            return False                  # M120: no more than max_jumps jumps — it grows where it already is
         chosen.update(new)
         return True
 
@@ -217,6 +229,116 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     if clip[-1].get("role") == "question":
         return None                                   # never end on an open question
     return clip
+
+
+def rhythm_pieces(spans: Sequence[tuple[float, float]], jump_sec: float) -> list[list[int]]:
+    """M120: indexes of `spans` (source t0, t1 in play order) grouped into pieces — a new piece where the next span
+    starts more than jump_sec after the previous one ends, or before it starts (played out of source order)."""
+    out: list[list[int]] = []
+    for i, (a, _b) in enumerate(spans):
+        if out and not (a < spans[i - 1][0] or a - spans[i - 1][1] > jump_sec):
+            out[-1].append(i)
+        else:
+            out.append([i])
+    return out
+
+
+def settle_need(gap: float, p: "AutoParams") -> float:
+    """M120: seconds the piece after a jump of `gap` source seconds needs before the viewer has settled — from
+    settle_near_sec after a short skip up to settle_far_sec at settle_far_at_sec and beyond; a jump back is far."""
+    if gap < 0:
+        return p.settle_far_sec
+    span = max(1e-6, p.settle_far_at_sec - p.jump_sec)
+    k = min(1.0, max(0.0, (gap - p.jump_sec) / span))
+    return p.settle_near_sec + (p.settle_far_sec - p.settle_near_sec) * k
+
+
+def rhythm_why(spans: Sequence[tuple[float, float]], p: "AutoParams", first_is_question: bool = False
+               ) -> tuple[str | None, int | None]:
+    """M120 (owner: «перестановки можно, но чтобы не было частых быстрых скачков»): one flexible rule for every clip.
+    At most max_jumps jumps; the piece after a jump lasts at least settle_need(jump) — longer after a far jump, a
+    short skip of a digression needs little —, the last piece (the payoff, a punchline) only settle_tail of it; the
+    piece before the first jump at least settle_near_sec (a question opening the clip — the loop — may be short).
+    Returns (why, index of the piece to fix) or (None, None). Calibrated on the owner's 66 clips (all pass)."""
+    pieces = rhythm_pieces(spans, p.jump_sec)
+    dur = [sum(spans[i][1] - spans[i][0] for i in pc) for pc in pieces]
+    if len(pieces) - 1 > p.max_jumps:
+        k = min(range(len(pieces)), key=lambda j: dur[j])
+        return f"скачков {len(pieces) - 1} (можно {p.max_jumps})", k
+    if len(pieces) > 1 and dur[0] < p.settle_near_sec and not first_is_question:
+        return f"кусок до первого скачка {dur[0]:.0f} с (нужно ≥ {p.settle_near_sec:g})", 0
+    for k in range(1, len(pieces)):
+        a, b = spans[pieces[k - 1][-1]], spans[pieces[k][0]]
+        gap = b[0] - a[1] if b[0] >= a[0] else -1.0
+        need = settle_need(gap, p) * (p.settle_tail if k == len(pieces) - 1 else 1.0)
+        if dur[k] < need:
+            jump = "назад" if gap < 0 else f"{gap:.0f} с"
+            return f"кусок после скачка ({jump}) {dur[k]:.1f} с, нужно ≥ {need:.1f}", k
+    return None, None
+
+
+def fit_rhythm(clip: list[dict], by_id: dict, p: "AutoParams", keep: set[int], taken=frozenset()
+               ) -> tuple[list[dict] | None, list[str]]:
+    """M120: makes a clip keep the rhythm (rhythm_why) — the piece at fault grows by its neighbours in the source
+    (same topic, usable, not in another clip, while the clip stays ≤ max_sec) or, when it holds nothing in `keep`
+    (the seed, the payoff), goes. None when neither helps. Play order stays (a loop question first, then the source)."""
+    notes: list[str] = []
+    for _ in range(12):
+        spans = [(float(u["t0"]), float(u["t1"])) for u in clip]
+        why, k = rhythm_why(spans, p, clip[0].get("role") == "question")
+        if why is None:
+            return clip, notes
+        piece = [clip[i] for i in rhythm_pieces(spans, p.jump_sec)[k]]
+        ids = {u["id"] for u in clip}
+        total = sum(_dur(u) for u in clip)
+        grown = False
+        for nb_id, at_end in ((piece[-1]["id"] + 1, True), (piece[0]["id"] - 1, False)):
+            nb = by_id.get(nb_id)
+            if (nb is None or nb_id in ids or nb_id in taken or nb.get("missing") or not nb.get("refs")
+                    or nb.get("topic") != piece[0].get("topic") or (nb.get("filtered") and not p.use_filtered)
+                    or total + _dur(nb) > p.max_sec
+                    or (float(nb["t0"]) - float(piece[-1]["t1"]) if at_end
+                        else float(piece[0]["t0"]) - float(nb["t1"])) > p.jump_sec):
+                continue
+            if not eligible(nb, p):
+                continue                                  # a weak thought or an aside does not fill a piece
+            pos = clip.index(piece[-1]) + 1 if at_end else clip.index(piece[0])
+            clip = clip[:pos] + [nb] + clip[pos:]
+            notes.append(f"ритм: {why} — кусок дополнен мыслью #{nb_id}")
+            grown = True
+            break
+        if grown:
+            continue
+        if any(u["id"] in keep for u in piece) or len(piece) == len(clip):
+            return None, notes + [why]
+        clip = [u for u in clip if u not in piece]
+        notes.append(f"ритм: {why} — убран кусок " + ", ".join(f"#{u['id']}" for u in piece))
+        if sum(_dur(u) for u in clip) < p.min_sec:
+            return None, notes + ["короче min_sec после ритма"]
+    return None, notes + ["ритм не сошёлся"]
+
+
+def add_payoff(clip: list[dict], seed: dict, units: Sequence[dict], p: "AutoParams", taken=frozenset()
+               ) -> tuple[list[dict], str | None]:
+    """M120 mixed (owner: «смысловые перестановки, чтобы было интересно, но без частых скачков»): a run with no payoff
+    gets the nearest later conclusion of its topic (or «similar» to its seed) — strong (punch ≥ seed_punch), standing
+    on its own or leaning on a thought of the run, not in another clip, within max_sec — at its end. It comes later in
+    the source, so the play order stays the source order. The clip as it was when there is none."""
+    if any(u.get("role") in PAYOFFS for u in clip):
+        return clip, None
+    ids = {u["id"] for u in clip}
+    sims = {i for i, _ in (seed.get("similar") or [])}
+    end = max(float(u["t1"]) for u in clip)
+    room = p.max_sec - sum(_dur(u) for u in clip)
+    cands = [u for u in units if u["id"] not in ids and u["id"] not in taken and eligible(u, p)
+             and u.get("role") in PAYOFFS and int(u.get("punch") or 0) >= p.seed_punch and float(u["t0"]) >= end
+             and (u.get("topic") == seed.get("topic") or u["id"] in sims) and _dur(u) <= room
+             and (u.get("standalone", True) or u.get("refers") in ids)]
+    if not cands:
+        return clip, None
+    u = min(cands, key=lambda c: float(c["t0"]))
+    return clip + [u], (f"вывод из другого места: #{u['id']} «{u.get('summary') or ''}» "
+                        f"(+{float(u['t0']) - end:.0f} с по исходнику) — в конце")
 
 
 def _strength(u: dict) -> int:
@@ -248,6 +370,12 @@ def build_passage(seed: dict, by_id: dict, p: AutoParams, taken=frozenset()) -> 
             prv = None
         if not (usable(nxt) and float(nxt["t0"]) - float(run[-1]["t1"]) <= p.passage_gap_sec):
             nxt = None
+        if p.rhythm:                      # M120: a skip over a cut part counts as a jump — no more than max_jumps
+            jumps = sum(1 for a, b in zip(run, run[1:]) if float(b["t0"]) - float(a["t1"]) > p.jump_sec)
+            if prv is not None and float(run[0]["t0"]) - float(prv["t1"]) > p.jump_sec and jumps >= p.max_jumps:
+                prv = None
+            if nxt is not None and float(nxt["t0"]) - float(run[-1]["t1"]) > p.jump_sec and jumps >= p.max_jumps:
+                nxt = None
         if nxt is not None and (prv is None or run[-1].get("role") == "question"):
             pick = nxt
         elif prv is not None and (nxt is None or not run[0].get("standalone", True)):
@@ -871,7 +999,8 @@ def _speed(clip: Sequence[dict], p: AutoParams) -> float | None:
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
             no_start: list | None = None, judge: "Judge | None" = None,
-            end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None) -> list[Proposal]:
+            end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
+            rhythm_out: list | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
@@ -880,10 +1009,13 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
     M119: p.generator «passage» — a run of adjacent thoughts (build_passage; no loop question from elsewhere, no
     pruning from the middle, no thought shared with an earlier clip); p.seed_roles — the roles a clip grows around;
     p.start_judge «rank» — a start the model rejects but the rules accept keeps the clip, marked start_doubt (the
-    caller sorts it after the clean ones: invariant 1, the model only ranks)."""
+    caller sorts it after the clean ones: invariant 1, the model only ranks).
+    M120: p.rhythm — every clip keeps the jump rule (fit_rhythm before its start is fixed, rhythm_why on the final
+    clip); `rhythm_out` collects (pieces, why) of the clips that could not."""
     by_id = {u["id"]: u for u in units}
     roles = tuple(p.seed_roles) or STORY
-    passage = p.generator == "passage"
+    passage = p.generator in ("passage", "mixed")
+    mixed = p.generator == "mixed"
     seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in roles
                     and int(u.get("punch") or 0) >= p.seed_punch),
                    key=lambda u: (-int(u["punch"]), -float((u.get("voice") or {}).get("energy") or 50.0), u["t0"]))
@@ -899,18 +1031,30 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         extra_notes: list[str] = []
         start_doubt = None
         loop_id = None
-        if p.loop and not passage and clip[0].get("role") != "question":
-            taken = {i for o in out for i in o.units}
-            q = _loop_question(clip, units, by_id, p, taken)
+        if p.loop and (mixed or not passage) and clip[0].get("role") != "question":
+            in_clips = {i for o in out for i in o.units}
+            q = _loop_question(clip, units, by_id, p, in_clips)
             if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
                     and _pieces([q] + clip) <= p.max_pieces + 1:
                 clip = [q] + clip
                 loop_id = q["id"]
                 extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
+        if mixed:
+            clip, pnote = add_payoff(clip, seed, units, p, taken)
+            if pnote:
+                extra_notes.append(pnote)
         if p.prune and not passage:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
+        if p.rhythm:
+            clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]}, taken if passage else frozenset())
+            if clip_r is None:
+                if rhythm_out is not None:
+                    rhythm_out.append((" ".join(u["refs"] for u in clip), rnotes[-1] if rnotes else "ритм"))
+                continue
+            clip = clip_r
+            extra_notes += rnotes
         unit_refs: dict = {}
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
@@ -919,8 +1063,16 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 # M119: the rules decide; the model's «no» only sorts the clip after the clean ones
                 clip2, cnotes, why2 = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
                 if clip2 is not None:
-                    start_doubt = why
-                    cnotes = cnotes + [f"начало: модель против ({why}) — правила принимают, сборка после чистых"]
+                    # M120 (m119: «И работай дальше.» — ссылка назад «и…» was noted as the model's word): the doubt is
+                    # the model's verdict on the start the rules chose (the same question context_start asks)
+                    _rows = list(_sent_rows(sentences, clip2[0]["refs"]))
+                    _core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed["id"], clip[-1]["id"])
+                                                   if i in by_id)).strip()
+                    start_doubt = (stands_alone(_rows[0][4], _rows[1][4] if len(_rows) > 1 else "", p, judge, _core)
+                                   if _rows else None)
+                    if start_doubt:
+                        cnotes = cnotes + [f"начало: модель против («{(_rows[0][4] or '')[:60]}» — {start_doubt}) — "
+                                           f"правила принимают, сборка после чистых"]
                 else:
                     why = why2
             if clip2 is None:
@@ -944,6 +1096,13 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 clip = clip3
                 extra_notes.append(enote)
                 unit_refs = {**unit_refs, clip[-1]["id"]: clip[-1]["refs"]}
+        if p.rhythm:                      # M120: the final clip (after its start and its end) keeps the rhythm
+            rwhy, _k = rhythm_why([(float(u["t0"]), float(u["t1"])) for u in clip], p,
+                                  clip[0].get("role") == "question")
+            if rwhy:
+                if rhythm_out is not None:
+                    rhythm_out.append((" ".join(u["refs"] for u in clip), f"после начала и конца: {rwhy}"))
+                continue
         ids = [u["id"] for u in clip]
         if passage and set(ids) & taken:
             continue                      # M119: context added in front reached an earlier clip

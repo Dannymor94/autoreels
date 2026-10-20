@@ -281,13 +281,22 @@ class AutocutConfig(BaseModel):
     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
-    generator: str = Field("montage", pattern="^(montage|passage)$")   # passage: adjacent thoughts around a strong one
+    generator: str = Field("montage", pattern="^(montage|passage|mixed)$")   # passage: adjacent thoughts around a strong
+    # one; mixed (M120): passage + a loop question from elsewhere + a later conclusion when the run has none
     seed_roles: list[Literal["thesis", "conclusion", "example", "metaphor", "question", "explanation", "address"]] = \
         Field(default_factory=list)                # roles a clip may grow around (punch ≥ seed_punch); [] = STORY
     passage_gap_sec: float = Field(30.0, gt=0)     # passage: a neighbour joins when at most this far from the run
     start_judge: str = Field("veto", pattern="^(veto|rank)$")   # rank: a start only the model rejects sorts the clip last
     clips_every_min: float = Field(0.0, ge=0)      # clips = max(clips, source minutes ÷ this); 0 = clips
     lean_depth: int = Field(0, ge=0)               # montage: links of what a thought leans on it brings; 0 = the chain
+    # M120 (owner: «перестановки можно, без частых быстрых скачков; гибкий алгоритм кусков»): the jump rule
+    rhythm: bool = False                           # every clip keeps it (cloud/autocut.py rhythm_why); False = as before
+    rhythm_max_jumps: int = Field(2, ge=0)
+    rhythm_jump_sec: float = Field(10.0, gt=0)     # a gap in the source longer than this (or going back) is a jump
+    rhythm_settle_near: float = Field(6.0, ge=0)   # the piece after a jump: at least this after a short skip …
+    rhythm_settle_far: float = Field(12.0, ge=0)   # … up to this after a far jump (rhythm_far_sec or more, or back)
+    rhythm_far_sec: float = Field(120.0, gt=0)
+    rhythm_tail: float = Field(0.5, ge=0, le=1)    # the last piece (the payoff) needs only this share
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
