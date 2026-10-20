@@ -1162,7 +1162,8 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
         mpath = _source(root)
         cfg = root / "config" / "r0.yaml"
         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
-                       .replace("  clips: 5\n", "  clips: 1\n"), encoding="utf-8")
+                       .replace("  clips: 5\n", "  clips: 1\n")
+                       .replace("  keywords_voice: false ", "  keywords_voice: true "), encoding="utf-8")   # M118: off by default
         r0 = cli.load_r0_config(cfg)
         assert r0.autocut.keywords and r0.autocut.keywords_voice
         tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
@@ -1196,3 +1197,12 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
     assert "голос выделяет: 2." in text
     seen, text, _ = run(False)
     assert seen == [None] and "голос выделяет" not in text
+
+
+def test_m118_hedges_and_fillers_are_never_key_words():
+    """M118 (m116: k: «потом»; the voice hints «допустим», «какой-то»): the code drops them whatever the model says."""
+    from autoreels.cloud.autocut import pick_keywords
+    rows = [("1.1", "Потом допустим какой-то человек приходит к психологу."), ("1.2", "Вообще это значит доверие.")]
+    ans = _Answers('{"keys": [{"s": 1, "word": "потом"}, {"s": 1, "word": "какой-то"}, {"s": 2, "word": "вообще"},'
+                   ' {"s": 2, "word": "доверие"}]}')
+    assert pick_keywords(rows, ans, n=2, log=lambda m: None) == [("1.2", "доверие")]

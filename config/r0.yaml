@@ -390,7 +390,9 @@ autocut:
   keywords_every_sec: 12  # one per 12 s of the clip …
   keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
   # M116 — M1.9 stage D (owner: «давай»; M99: the owner's k: word is drawn out by the voice in 81 % of sentences):
-  keywords_voice: true    # the words the voice draws out (intonation map: duration per letter) are shown to the model as a
+  keywords_voice: false   # M118 off (m116: with the hints Haiku picked «потом», «месте», «школу» where without them it took
+                          # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
+                          # words the voice draws out (intonation map: duration per letter) are shown to the model as a
   keywords_voice_ratio: 1.25   # hint («[voice: …]»); the model still picks the word, the same checks; no map = no hint
   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
