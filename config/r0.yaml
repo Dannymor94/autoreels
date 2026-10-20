@@ -332,7 +332,7 @@ montage:
 autocut:
   clips: 5
   min_sec: 25             # shorter clips are not proposed
-  target_sec: 45          # a clip stops growing here … (M65: 60 → 45 — reels that hold attention are short)
+  target_sec: 35          # a clip stops growing here … (M65: 60 → 45 — reels that hold attention are short)
   max_sec: 65             # … and never goes past this (M65: 90 → 65)
   max_pieces: 4           # at most this many pieces (adjacent thoughts join without a seam)
   min_punch: 3            # weaker thoughts are never used
@@ -343,19 +343,21 @@ autocut:
   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
+  # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+  # m120 measurement): generator, seed_roles, target_sec, lean_depth, rhythm, clips_every_min, context_judge below.
   # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts;
   # the montage builder failed on half its seeds; the start judge rejected 54–78% of the owner's starts):
-  generator: montage      # montage — thoughts of one topic from anywhere | passage — adjacent thoughts around a strong one
+  generator: mixed       # montage — thoughts of one topic from anywhere | passage — adjacent thoughts around a strong one
                           # | mixed (M120) — passage + a loop question from elsewhere + a later conclusion when it has none
-  seed_roles: []          # roles a clip may grow around (with seed_punch); [] = thesis, conclusion, example, metaphor, question
+  seed_roles: [thesis, conclusion, example, metaphor, question, explanation, address]          # roles a clip may grow around (with seed_punch); [] = thesis, conclusion, example, metaphor, question
   passage_gap_sec: 30     # passage: a neighbour joins when at most this far from the run (owner clips jump ≤ 30 s)
   start_judge: veto       # veto — a start the model rejects drops the clip | rank — rules decide, the model only sorts it last
-  clips_every_min: 0      # clips = max(clips, source minutes ÷ this) (owner: 66 clips in 231 min); 0 = clips
-  lean_depth: 0           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
+  clips_every_min: 3.5      # clips = max(clips, source minutes ÷ this) (owner: 66 clips in 231 min); 0 = clips
+  lean_depth: 1           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
                           # chain (m119: IMG_6848 — 10 of 20 seeds built nothing, chains ran over 16 thoughts)
   # M120 — the jump rule (owner: «перестановки можно, но без частых быстрых скачков»; his 66 clips: 48 one stretch,
   # 12 one jump, 6 two, none three; after a far jump the next piece ≥ 12 s, a last piece — the punchline — down to 6 s):
-  rhythm: false           # every clip keeps it; a piece at fault grows by its neighbours or goes, else the clip goes
+  rhythm: true            # every clip keeps it; a piece at fault grows by its neighbours or goes, else the clip goes
   rhythm_max_jumps: 2
   rhythm_jump_sec: 10     # a gap in the source longer than this (or going back) is a jump
   rhythm_settle_near: 6   # the piece after a jump lasts ≥ 6 s after a short skip …
@@ -380,7 +382,7 @@ autocut:
                           # (a question to the viewer, a claim to «вы», a contrast — in the clip's words); "" = as plate
   # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips with no pause after the hook):
   context_min_words: 4    # a start shorter than this (not a question) is a fragment — fixed like a leaning one
-  context_judge: true     # the model says whether a first sentence stands on its own (rules first; no answer = rules)
+  context_judge: false     # the model says whether a first sentence stands on its own (rules first; no answer = rules)
   hook_pause_sec: 0.25    # the hook has no silence after it in the recording → the next of the model's top hooks that has
   hook_pause_top: 3       # at least this much (montage.hook_air_sec), among its first hook_pause_top; else the first stays
   # M76 (M75 report: 11h42 4 → 2 clips, Pxl 5 → 3 — starts that could be repaired were dropped):

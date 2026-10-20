@@ -97,13 +97,15 @@ def test_cmd_autocut_writes_a_draft_that_applies(tmp_path, capsys):
     out = capsys.readouterr().out
     draft = tmp_path / "reviews" / "v_auto_m56.txt"
     text = draft.read_text(encoding="utf-8")
-    assert "# fingerprint: " in text and "M1 " in text and "| t: тезис про маски" in text and "предложено сборок 1" in out
+    import re
+    n = int(re.search(r"предложено сборок (\d+)", out).group(1))   # M120: 1 by montage, 2 by mixed (the defaults)
+    assert "# fingerprint: " in text and "M1 " in text and "| t: тезис про маски" in text and n >= 1
     rc = cli._blocks_do_apply(str(draft), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto")
     err = capsys.readouterr().err
     assert rc == 0, err[-1500:]
     man = Manifest.model_validate_json((tmp_path / "reviews" / "v.review.json").read_text())
-    (mont,) = man.reels
-    assert mont.montage.startswith("M1 ") and mont.title_overlay == "тезис про маски"
+    assert len(man.reels) == n and all(r.montage.startswith("M") for r in man.reels)
+    assert "тезис про маски" in {r.title_overlay for r in man.reels}
     assert cli.cmd_autocut("nope", root=tmp_path) == 1
 
 
@@ -1308,6 +1310,7 @@ def test_m119_cmd_autocut_takes_overrides_counts_clips_by_length_and_puts_doubts
     _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
+    cfg_text = cfg.read_text(encoding="utf-8")
     (tmp_path / "transcripts").mkdir(exist_ok=True)
     (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
         {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": [U(1, 0, 30, "thesis", 5, "2.1")]}),
@@ -1332,7 +1335,7 @@ def test_m119_cmd_autocut_takes_overrides_counts_clips_by_length_and_puts_doubts
     assert "t: чистое" in lines[0] and "t: сомнение" in lines[1]
     assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), ac_over=["generator=x"]) == 1
     assert "--ac" in capsys.readouterr().err
-    assert "generator: montage" in cfg.read_text(encoding="utf-8")                 # the config file is not touched
+    assert cfg.read_text(encoding="utf-8") == cfg_text                            # the config file is not touched
 
 
 def test_m119_lean_depth_limits_the_chain_a_thought_brings():
