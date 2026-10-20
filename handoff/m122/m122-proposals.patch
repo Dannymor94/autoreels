@@ -1,0 +1,54 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index d47e170..a51865e 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -354,3 +354,4 @@ autocut:
+   start_judge: veto       # veto — a start the model rejects drops the clip | rank — rules decide, the model only sorts it last
+-  clips_every_min: 3.5      # clips = max(clips, source minutes ÷ this) (owner: 66 clips in 231 min); 0 = clips
++  clips_every_min: 2      # clips = max(clips, source minutes ÷ this); 0 = clips. M122: the owner keeps one per
++                          # 3.5 min (66 in 231 min) — the draft offers about twice that, he chooses on the sheet
+   lean_depth: 1           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
+diff --git a/tests/test_autocut.py b/tests/test_autocut.py
+index dc4639b..e4a5262 100644
+--- a/tests/test_autocut.py
++++ b/tests/test_autocut.py
+@@ -121,3 +121,3 @@ def test_cmd_autocut_replaces_a_proposal_that_fails_the_apply_checks(tmp_path, c
+     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
+-                   .replace("  clips: 5\n", "  clips: 1\n")
++                   .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ")
+                    .replace("  hookless_last: true ", "  hookless_last: false "),     # M60 alone (M107 puts «битая» last)
+@@ -161,3 +161,3 @@ def test_cmd_autocut_falls_back_to_the_next_hook(tmp_path, capsys, monkeypatch):
+     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
+-                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
++                   .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                    .replace("  hook_teaser: true ", "  hook_teaser: false "),      # M61 alone (M83: any sentence)
+@@ -558,3 +558,3 @@ def test_cmd_autocut_takes_a_top_hook_with_a_pause_after_it(tmp_path, capsys, mo
+     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
+-                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
++                   .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                    .replace("  short_variant: true ", "  short_variant: false ")
+@@ -804,3 +804,3 @@ def test_cmd_autocut_judges_every_candidate_it_reaches_and_writes_the_hook_text(
+     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+-                   .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
++                   .replace("  clips: 5\n", "  clips: 2\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
+                    encoding="utf-8")
+@@ -956,3 +956,3 @@ def test_m107_clips_without_a_cold_open_go_after_the_hooked_ones(tmp_path, monke
+         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+-                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
++                       .replace("  clips: 5\n", "  clips: 2\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                        .replace("  hookless_last: true ", f"  hookless_last: {flag} "), encoding="utf-8")
+@@ -1014,3 +1014,3 @@ def test_m112_a_clip_without_a_cold_open_gets_a_curiosity_plate(tmp_path, monkey
+         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+-                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
++                       .replace("  clips: 5\n", "  clips: 2\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                        .replace("  plate_hookless: hook ", f"  plate_hookless: \"{flag}\" "), encoding="utf-8")
+@@ -1121,3 +1121,3 @@ def test_m115_cmd_autocut_reads_the_voice_from_the_intonation_map(tmp_path, monk
+         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+-                       .replace("  hook_llm: auto ", "  hook_llm: none ").replace("  clips: 5\n", "  clips: 1\n"),
++                       .replace("  hook_llm: auto ", "  hook_llm: none ").replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # "),
+                        encoding="utf-8")
+@@ -1166,3 +1166,3 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
+         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+-                       .replace("  clips: 5\n", "  clips: 1\n")
++                       .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ")
+                        .replace("  keywords_voice: false ", "  keywords_voice: true "), encoding="utf-8")   # M118: off by default
