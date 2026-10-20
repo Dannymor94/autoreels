@@ -7763,6 +7763,75 @@ def _make_pool(r0_cfg, mode: str):
     return build_pool(r0_cfg, local=_LOCAL_MODE[mode])
 
 
+def _scenario_examples(root: Path, stem: str, n: int = 3) -> str:
+    """M123: up to n clips the owner made himself from OTHER talks (manifests with selection_source: human) — their
+    text, for the style (invariant 11: real data with provenance; never the talk being cut)."""
+    import glob as _glob
+    import json as _json
+    out = []
+    for mp in sorted(_glob.glob(str(root / "manifests" / "*.json"))):
+        if Path(mp).stem == stem or len(out) >= n:
+            continue
+        try:
+            m = _json.loads(Path(mp).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(m, dict) or m.get("selection_source") != "human":
+            continue
+        for r in m.get("reels") or []:
+            co = r.get("cold_open") or {}
+            subs = [w for w in (r.get("subtitles") or []) if not co or (w["t0"] + w["t1"]) / 2 > co.get("end", -1)]
+            secs = sum(float(s["end"]) - float(s["start"]) for s in (r.get("segments") or []))
+            if subs and 25 <= secs <= 75 and (r.get("title_overlay") or r.get("title")):
+                text = " ".join(w["word"].strip() for w in subs[:140])
+                out.append(f"— {Path(mp).stem} {r.get('id')} «{r.get('title_overlay') or r.get('title')}» ({secs:.0f} с): {text}")
+                break
+    if not out:
+        return ""
+    return ("\n\nReels the owner made himself from other talks (real, for the style only — do not copy them):\n"
+            + "\n".join(out))
+
+
+def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None):
+    """M123: the scenarist's reels as the pool of arl autocut --scenario (None = cannot ask). The model is named
+    explicitly (haiku | sonnet: the whole talk in one request); its answer is kept in data/cache/scenario/ by the
+    request — the same request is not paid twice."""
+    import hashlib
+    from autoreels.cloud.edit import _ends_terminal
+    from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
+                                          scenario_proposals)
+    if provider is None and mode not in ("haiku", "sonnet"):
+        print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
+              file=sys.stderr)
+        return None
+    sent = {ref: (float(st[0].t0), float(st[-1].t1), " ".join(w.word.strip() for w in st), bool(_ends_terminal(st[-1])),
+                  sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
+    system = SCENARIO_SYSTEM.format(jumps=jumps_rule(prm), min_s=f"{prm.min_sec:g}", max_s=f"{prm.max_sec:g}",
+                                    n=prm.clips)
+    user = numbered_text([(r, v[1] - v[0], v[2]) for r, v in sent.items()]) + _scenario_examples(root, stem)
+    if provider is None:
+        provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
+            update={"max_output_tokens": ac.scenario_max_tokens, "timeout_sec": ac.scenario_timeout_sec})}), mode)
+    mid = getattr(provider, "model_id", "") or mode
+    key = hashlib.sha256(f"{mid}\n{system}\n{user}".encode("utf-8")).hexdigest()[:16]
+    cpath = Path(cache) / "scenario" / f"{stem}.{key}.txt"
+    if cpath.is_file():
+        raw = cpath.read_text(encoding="utf-8")
+        print(f"  сценарист: ответ из кэша {cpath.name}", flush=True)
+    else:
+        print(f"  сценарист: {mid}, фраз {len(sent)}, до {prm.clips} роликов …", flush=True)
+        raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}])
+        cpath.parent.mkdir(parents=True, exist_ok=True)
+        cpath.write_text(raw or "", encoding="utf-8")
+        _usage_report(provider)
+    scens, bad = parse_scenarios(raw, set(sent))
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone)
+    scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
+    print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
+          + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
+    return pool
+
+
 def _usage_report(prov) -> None:
     """M116: what the paid models cost this run (one line per provider; nothing for the free ones)."""
     for ln in (getattr(prov, "usage_lines", lambda: [])() if prov is not None else []):
@@ -8050,7 +8119,8 @@ def _autocut_overrides(base, pairs) -> "object":
 
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
-                judge_log: str | None = None, voice_keys: bool = True, ac_over=None) -> int:
+                judge_log: str | None = None, voice_keys: bool = True, ac_over=None, scenario: bool = False,
+                scenario_provider=None) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -8209,8 +8279,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         _ssys = _with_ex(_SS, *_ex["start"], "first sentence") if any(_ex["start"]) else None
         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
     rhythm_out: list = []                   # M120: clips that could not keep the jump rule
-    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
-                   no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out)
+    scen_out: list = []                     # M123: the scenarist's lines the code did not take, with the reason
+    if scenario:
+        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
+                              end_tone, scen_out, scenario_provider)
+        if pool is None:
+            return 1
+    else:
+        pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                       no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out)
     _doubt = sum(1 for pr in pool if pr.start_doubt)
     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
         pool.sort(key=lambda pr: bool(pr.start_doubt))
@@ -8431,6 +8508,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     if open_end:
         body.append("# --- конец звучит с продолжением («→», голос не опустился), укоротить нельзя (M115):")
         for pieces, why in open_end:
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
+    if scen_out:
+        body.append("# --- сценарист: строки, которые код не принял (M123: те же правила, что у автосборки):")
+        for pieces, why in scen_out:
             body.append(f"#   {why}: {pieces}")
         body.append("")
     if rhythm_out:
@@ -12612,6 +12694,8 @@ def _build_parser():
                      help="M116: без подсказок голоса для k: (сравнение с подсказками)")
     pac.add_argument("--no-check", action="store_false", dest="check",
                      help="не прогонять каждое предложение через проверки --apply (M60)")
+    pac.add_argument("--scenario", action="store_true",
+                     help="M123: ролики пишет сценарист (модель читает весь текст; --llm sonnet|haiku), код проверяет")
     pac.add_argument("--ac", action="append", default=None, dest="ac_over", metavar="ключ=значение",
                      help="M119: поле autocut из config/r0.yaml на этот запуск (можно несколько раз; список — через запятую)")
     pac.add_argument("--root", default=None)
@@ -13086,7 +13170,7 @@ def main(argv=None) -> int:
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
                                check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys,
-                               ac_over=args.ac_over)
+                               ac_over=args.ac_over, scenario=args.scenario)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

@@ -332,8 +332,8 @@ montage:
 autocut:
   clips: 5
   min_sec: 25             # shorter clips are not proposed
-  target_sec: 35          # a clip stops growing here … (M65: 60 → 45 — reels that hold attention are short)
-  max_sec: 65             # … and never goes past this (M65: 90 → 65)
+  target_sec: 55          # a clip stops growing here … (M65: 60 → 45; M121: 35; M123: 55 — owner: «коротко, можно длиннее»)
+  max_sec: 90             # … and never goes past this (M65: 90 → 65; M123: 90)
   max_pieces: 4           # at most this many pieces (adjacent thoughts join without a seam)
   min_punch: 3            # weaker thoughts are never used
   seed_punch: 4           # a clip grows only around a thought at least this strong
@@ -365,6 +365,9 @@ autocut:
   rhythm_settle_far: 12   # … up to ≥ 12 s after a jump of rhythm_far_sec or more (or back in the source)
   rhythm_far_sec: 120
   rhythm_tail: 0.5        # the last piece (the payoff) needs half of that
+  # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+  scenario_max_tokens: 6000   # arl autocut --scenario: the scenarist's answer (one line per reel)
+  scenario_timeout_sec: 300   # … the whole talk in one request
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
