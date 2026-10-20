@@ -1,0 +1,16 @@
+IMG_6848: точки Groq → groq-noprompt: добавлено 174; концы предложения на 100 слов: groq-noprompt 3.6 → groq-noprompt-gp 7.5 (Groq 10.3)
+  → IMG_6848.groq-noprompt-gp.transcript.json · перевести источник: arl tx-use "IMG_6848" groq-noprompt-gp
+Pxl 20260621 112938952: точки Groq → groq-noprompt: добавлено 397; концы предложения на 100 слов: groq-noprompt 5.2 → groq-noprompt-gp 12.0 (Groq 14.2)
+  → Pxl 20260621 112938952.groq-noprompt-gp.transcript.json · перевести источник: arl tx-use "Pxl 20260621 112938952" groq-noprompt-gp
+=== IMG_6848
+   расшифровка                      слов концов/100 известных на речи повторов звук без слов слов whisper.cpp в ней
+   Groq с подсказкой (сейчас)       3372       10.3         9      10        1          385с                  66.0%
+   groq-noprompt                    4434        3.6         0       0        0           45с                  89.5%
+   groq-noprompt-gp                 4434        7.5         0       0        0           45с                  89.5%
+   whisper.cpp local-m111-novad     4345        5.5         0       0        0           85с                 100.0%
+=== Pxl 20260621 112938952
+   расшифровка                      слов концов/100 известных на речи повторов звук без слов слов whisper.cpp в ней
+   Groq с подсказкой (сейчас)       4964       14.2         7       8        1          285с                  78.2%
+   groq-noprompt                    5865        5.2         0       2        2           25с                  93.0%
+   groq-noprompt-gp                 5865       12.0         0       2        2           25с                  93.0%
+   whisper.cpp local-m114-novad     5924        5.0         0       2        2            0с                 100.0%
