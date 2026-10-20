@@ -119,7 +119,7 @@ def test_cmd_autocut_replaces_a_proposal_that_fails_the_apply_checks(tmp_path, c
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
-                   .replace("  clips: 5\n", "  clips: 1\n")
+                   .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ")
                    .replace("  hookless_last: true ", "  hookless_last: false "),     # M60 alone (M107 puts «битая» last)
                    encoding="utf-8")
     r0 = cli.load_r0_config(cfg)
@@ -159,7 +159,7 @@ def test_cmd_autocut_falls_back_to_the_next_hook(tmp_path, capsys, monkeypatch):
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
-                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                   .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
                    .replace("  hook_teaser: true ", "  hook_teaser: false "),      # M61 alone (M83: any sentence)
                    encoding="utf-8")
     r0 = cli.load_r0_config(cfg)
@@ -556,7 +556,7 @@ def test_cmd_autocut_takes_a_top_hook_with_a_pause_after_it(tmp_path, capsys, mo
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ").replace("  hook_llm: auto ", "  hook_llm: none ")
-                   .replace("  clips: 5\n", "  clips: 1\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                   .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
                    .replace("  short_variant: true ", "  short_variant: false ")
                    .replace("  hook_teaser: true ", "  hook_teaser: false "), encoding="utf-8")   # M75 alone
     r0 = cli.load_r0_config(cfg)
@@ -802,7 +802,7 @@ def test_cmd_autocut_judges_every_candidate_it_reaches_and_writes_the_hook_text(
     mpath = _source(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
-                   .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
+                   .replace("  clips: 5\n", "  clips: 2\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 "),
                    encoding="utf-8")
     r0 = cli.load_r0_config(cfg)
     tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
@@ -954,7 +954,7 @@ def test_m107_clips_without_a_cold_open_go_after_the_hooked_ones(tmp_path, monke
         mpath = _source(root)
         cfg = root / "config" / "r0.yaml"
         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
-                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                       .replace("  clips: 5\n", "  clips: 2\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
                        .replace("  hookless_last: true ", f"  hookless_last: {flag} "), encoding="utf-8")
         r0 = cli.load_r0_config(cfg)
         tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
@@ -1012,7 +1012,7 @@ def test_m112_a_clip_without_a_cold_open_gets_a_curiosity_plate(tmp_path, monkey
         mpath = _source(root)
         cfg = root / "config" / "r0.yaml"
         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
-                       .replace("  clips: 5\n", "  clips: 2\n").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
+                       .replace("  clips: 5\n", "  clips: 2\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ").replace("  hook_min_words: 4 ", "  hook_min_words: 2 ")
                        .replace("  plate_hookless: hook ", f"  plate_hookless: \"{flag}\" "), encoding="utf-8")
         r0 = cli.load_r0_config(cfg)
         assert r0.autocut.plate_hookless == flag and r0.autocut.plate == "context"
@@ -1119,7 +1119,7 @@ def test_m115_cmd_autocut_reads_the_voice_from_the_intonation_map(tmp_path, monk
         mpath = _source(root)
         cfg = root / "config" / "r0.yaml"
         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
-                       .replace("  hook_llm: auto ", "  hook_llm: none ").replace("  clips: 5\n", "  clips: 1\n"),
+                       .replace("  hook_llm: auto ", "  hook_llm: none ").replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # "),
                        encoding="utf-8")
         r0 = cli.load_r0_config(cfg)
         assert r0.autocut.end_tone is True
@@ -1164,7 +1164,7 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
         mpath = _source(root)
         cfg = root / "config" / "r0.yaml"
         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
-                       .replace("  clips: 5\n", "  clips: 1\n")
+                       .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ")
                        .replace("  keywords_voice: false ", "  keywords_voice: true "), encoding="utf-8")   # M118: off by default
         r0 = cli.load_r0_config(cfg)
         assert r0.autocut.keywords and r0.autocut.keywords_voice

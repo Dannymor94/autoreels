@@ -352,7 +352,8 @@ autocut:
   seed_roles: [thesis, conclusion, example, metaphor, question, explanation, address]          # roles a clip may grow around (with seed_punch); [] = thesis, conclusion, example, metaphor, question
   passage_gap_sec: 30     # passage: a neighbour joins when at most this far from the run (owner clips jump ≤ 30 s)
   start_judge: veto       # veto — a start the model rejects drops the clip | rank — rules decide, the model only sorts it last
-  clips_every_min: 3.5      # clips = max(clips, source minutes ÷ this) (owner: 66 clips in 231 min); 0 = clips
+  clips_every_min: 2      # clips = max(clips, source minutes ÷ this); 0 = clips. M122: the owner keeps one per
+                          # 3.5 min (66 in 231 min) — the draft offers about twice that, he chooses on the sheet
   lean_depth: 1           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
                           # chain (m119: IMG_6848 — 10 of 20 seeds built nothing, chains ran over 16 thoughts)
   # M120 — the jump rule (owner: «перестановки можно, но без частых быстрых скачков»; his 66 clips: 48 one stretch,
