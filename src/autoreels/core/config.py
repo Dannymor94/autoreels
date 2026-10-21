@@ -1049,6 +1049,12 @@ class RenderConfig(BaseModel):
     close_max_upscale: float = Field(2.5, ge=1)
     close_max_scale: float = Field(1.6, ge=1)
     close_min_scale: float = Field(1.15, ge=1)
+    # M127 (owner on Pxl 112938952 m125: «фокус взят на чайник» — 12 of 16 reels found no face of their own and kept
+    # the source's frame, the middle): a reel without its own face is framed on the speaker's place in the whole
+    # source (framing_source_samples frames, the dominant place seen in ≥ framing_source_min_faces). Off = as before.
+    framing_source_fallback: bool = False
+    framing_source_samples: int = Field(40, ge=1)
+    framing_source_min_faces: int = Field(4, ge=1)
 
     @field_validator("shot_transition")
     @classmethod

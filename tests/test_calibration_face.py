@@ -100,3 +100,31 @@ def test_m102_the_close_shot_comes_from_the_face_and_does_not_go_soft():
     assert z >= 1.15
     c, _ = face_close_crop(hd, (660, 20, 120, 120), out_h=1920)      # at the corner: stays inside the wide frame
     assert c.x == 656 and c.y == 0 and c.x + c.w <= 656 + 608
+
+
+def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypatch):
+    """M127 (owner on Pxl 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»)."""
+    from types import SimpleNamespace
+    from autoreels.core.models import Crop, SetupProfile
+    from autoreels.local import autocrop, render
+    setup = SetupProfile(setup_id="auto", crop=Crop(x=1312, y=0, w=1215, h=2160), scale=(1080, 1920),
+                         frame=(3840, 2160))
+    cfg = SimpleNamespace(framing_samples=7, framing_min_share=0.4, reel_framing=True, framing_center_zone=0.15,
+                          framing_source_samples=40, framing_source_min_faces=4)
+    reel = SimpleNamespace(cold_open=None)
+    segs = [SimpleNamespace(start=0.0, end=60.0)]
+    calls = []
+
+    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf=""):
+        calls.append(len(times))
+        if len(times) == 40:                                  # the whole source: the speaker left, 20 of 40 frames
+            return [(1100.0 + i % 3, 900.0, 300.0, 300.0) for i in range(20)] + [(2600.0, 800.0, 90.0, 90.0)] * 3, 40
+        return [(1100.0, 900.0, 300.0, 300.0)], 7               # the reel: 1 of 7 frames — not its own face
+    monkeypatch.setattr(autocrop, "reel_faces", fake_faces)
+    monkeypatch.setattr(autocrop, "_duration", lambda *a, **k: 3000.0)
+    sf = render._source_face(setup, "v.mp4", "ffmpeg", cfg)
+    assert sf[:4] == (1101.0, 900.0, 300.0, 300.0) and sf[4:] == (20, 40)
+    s2, face, note = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg, source_face=sf)
+    assert face == sf[:4] and s2.crop.x == 1101 - 607 and "по лицу источника" in note
+    s3, face3, note3 = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg)
+    assert s3 is setup and face3 is None and "рамка источника" in note3          # no source face = as before

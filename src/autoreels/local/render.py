@@ -2460,7 +2460,30 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
 
 
 
-def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg):
+def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
+    """M127 (owner on Pxl 20260621 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»; the
+    frontal-face finder sees this speaker in about half the frames, so 12 of 16 reels found no face of their own
+    and kept the source's frame — the middle, on the shelves): where the face is in the WHOLE source —
+    framing_source_samples frames spread over it, the dominant place (dominant_faces) when seen in at least
+    framing_source_min_faces of them. A reel without its own face is framed on it. None = not found."""
+    from autoreels.core.calibration import _median, dominant_faces
+    from autoreels.local.autocrop import _duration, reel_faces
+    n = int(getattr(render_cfg, "framing_source_samples", 40))
+    try:
+        dur = _duration(Path(source), "ffprobe")
+    except Exception:  # noqa: BLE001 — no duration: no source face
+        return None
+    found = reel_faces(source, [dur * (i + 0.5) / n for i in range(n)], (int(setup.frame[0]), int(setup.frame[1])),
+                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0))
+    if not found:
+        return None
+    dom = dominant_faces(found[0], setup.crop.w / 2)
+    if len(dom) < int(getattr(render_cfg, "framing_source_min_faces", 4)):
+        return None
+    return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4)) + (len(dom), n)
+
+
+def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg, source_face=None):
     """M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания»): where the face is in
     THIS reel — framing_samples frames spread over its body (the cold open, a teaser from its end, left out), the
     source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
@@ -2476,9 +2499,14 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
         return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
     faces, looked = found
     face = reel_face(faces, looked, setup.crop.w / 2, min_share=float(getattr(render_cfg, "framing_min_share", 0.4)))
-    if face is None:
+    if face is None and source_face is not None:
+        face = tuple(source_face[:4])     # M127: the speaker's place in the whole source
+        note = (f"лицо в {len(faces)} из {looked} кадров ролика — по лицу источника ({source_face[4]} из "
+                f"{source_face[5]} кадров, x {face[0]:g}, высота {face[3]:g})")
+    elif face is None:
         return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
-    note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
+    else:
+        note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
     if not getattr(render_cfg, "reel_framing", False):
         return setup, face, note
     zone = float(getattr(render_cfg, "framing_center_zone", 0.15))
@@ -2786,6 +2814,7 @@ def _render_segments(
         batch_encoded_secs = 0.0
         batch_start_wall = time.time()
         _vf_base = vf          # M102: a reel may get its own frame (vf, setup) — reset for every reel
+        _src_face_cache: dict = {}   # M127: the speaker's place in the whole source, looked for once
         for idx, reel in enumerate(manifest.reels, 1):
             vf = _vf_base
             _reel_setup = manifest.setup
@@ -2858,8 +2887,14 @@ def _render_segments(
             # --- M102: the reel's own frame and close shot from the face in its body (static, no tracking) ---
             if (emit_text and vf and manifest.setup is not None
                     and (getattr(render_cfg, "reel_framing", False) or getattr(render_cfg, "close_from_face", False))):
+                if getattr(render_cfg, "framing_source_fallback", False) and _src_face_cache.get(str(source), 0) == 0:
+                    _src_face_cache[str(source)] = _source_face(manifest.setup, source, ffmpeg_bin, render_cfg)
+                    _sf = _src_face_cache[str(source)]
+                    print("  лицо источника: " + (f"x {_sf[0]:g}, в {_sf[4]} из {_sf[5]} кадров" if _sf
+                                                  else "не найдено"), flush=True)
                 _reel_setup, _reel_face, _fr_note = _reel_framing(
-                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg)
+                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg,
+                    source_face=_src_face_cache.get(str(source)) or None)
                 if _reel_setup is not manifest.setup:
                     vf = _crop_vf(_reel_setup)
                 print(f"  кадр {reel.id}: {_fr_note}", flush=True)

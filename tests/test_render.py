@@ -3738,7 +3738,8 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
         asked.append((list(times), frame_size))
         return [face] * len(times), len(times)
     monkeypatch.setattr(autocrop, "reel_faces", faces)
-    cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True})
+    cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True,
+                                        "framing_source_fallback": False})   # M127: its own test
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o1", render_cfg=cfg, subtitles_cfg=subs_cfg)
     cmd = " ".join(map(str, fake_ffmpeg[0]))
     assert len(asked) == 1 and asked[0][1] == (3840, 2160) and len(asked[0][0]) == 7

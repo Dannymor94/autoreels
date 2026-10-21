@@ -259,3 +259,7 @@ continue_text: "Продолжение →"
 # capped so the picture does not go soft. Off = as before. Numbers: core/config.py RenderConfig (M102).
 reel_framing: true
 close_from_face: true
+# M127 (owner on Pxl 112938952: «фокус взят на чайник, человек левее» — the face finder sees this speaker in about half
+# the frames, 12 of 16 reels kept the source's middle frame): a reel that finds no face of its own is framed on the
+# speaker's place in the whole source (40 frames over it; numbers: core/config.py RenderConfig M127).
+framing_source_fallback: true
