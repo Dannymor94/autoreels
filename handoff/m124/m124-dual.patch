@@ -1,0 +1,253 @@
+diff --git a/config/transcribe.yaml b/config/transcribe.yaml
+index 49f9ed5..c6eb3d2 100644
+--- a/config/transcribe.yaml
++++ b/config/transcribe.yaml
+@@ -17,6 +17,11 @@ groq:
+     Тема сегодняшней беседы — психология принятия решений. Специалисты выделяют
+     несколько ключевых факторов. Каждый из них влияет на результат по-своему.
+ 
++  # M124: два прохода Groq на каждый кусок — слова без подсказки (с ней Groq терял слова: IMG_6848 66% слов
++  # whisper.cpp, без неё 89,5%; и вписывал подсказку в текст), концы предложений — с подсказкой, переносятся на
++  # те же слова. Новые видео; готовые источники не трогаются. Вдвое больше запросов к Groq Whisper.
++  dual: false
++
+ # Необязательный CPU-fallback (offline). НЕ дефолт: prod на AMD-GPU без CUDA → только CPU.
+ faster_whisper:
+   model_size: large-v3
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index c40f494..64cf7fc 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -114,7 +114,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **Похожие:** косинус TF-IDF символьных 4-грамм, только мысли не ближе `map.similar_far_sec` друг к другу — одна мысль, сказанная в разных местах.
+ - Готовая карта не пересчитывается без `--force` (пересобирается только страница).
+ 
+-**Переключение расшифровки** (M64). Новое видео: `arl auto <видео> --tx local|groq` (или `backend:` в `config/transcribe.yaml`). Готовый источник: `arl tx-use <манифест> groq|local|local-<tag>` — выбранная расшифровка идёт в кэш, `transcript_params_key` манифеста указывает на неё; построенное по прежней (карта речи, выравнивание, интонация, карта, проверка, черновики auto) уходит в `transcripts/_archive/<stem>/<ключ>/` и `reviews/_archive/…`, обратное переключение возвращает его. Разметка владельца не трогается — команда называет файлы, которые `--apply` больше не примет (другой отпечаток блоков). Варианты whisper.cpp: `arl tx-compare <манифест> --tag <имя> [--prompt "…"]` → `transcripts/<stem>.local-<имя>.transcript.json`; `whispercpp.prompt` — подсказка стиля пунктуации, её куски тоже ищет `tx-check`; с подсказкой при `max_context: 0` берётся `-mc prompt_context` (M64b: при `-mc 0` whisper.cpp подсказку выбрасывает — вариант «p1» вышел слово в слово как без неё). Подсказка точек не вернула (M64b: p2 8,1, p3 7,0 концов на 100 слов против 8,9 без неё и 13,1 у Groq), поэтому `arl tx-punct <манифест> [--src local|local-<tag>]` (M64c) переносит концы предложений Groq на те же слова локальной расшифровки (слова сопоставляются по порядку; слова, время и всё вне совпавших участков не трогаются; следующему слову — заглавная) → `transcripts/<stem>.<src>-gp.transcript.json`, дальше `arl tx-use <манифест> <src>-gp`. Флаги whisper.cpp точек не возвращают (M111, `arl tx-compare … --wc ключ=значение`: без VAD 5,5 концов на 100 слов, полная large-v3 3,8 при 7× времени, против 10,3 у Groq). **M116:** `arl tx-compare <манифест> --tag <имя> --groq-prompt "<текст>"` (пустой — без подсказки) — вариант Groq с другой подсказкой, нарезка как в работе → `transcripts/<stem>.groq-<имя>.transcript.json` (кэш и манифест не трогаются). **M113:** `arl tx-punct <манифест> --src <src> --by llm [--llm cloud|local]` — концы предложений ставит модель: она видит кусок с пронумерованными словами (`tx_check.punct_chunk_words`) и называет номера последних слов предложений, код ставит знаки; слова, время и прежние знаки не меняются, ответ с номером вне куска не принимается, после второго такого ответа кусок остаётся как был → `transcripts/<stem>.<src>-lp.transcript.json` и ответы модели `….punct_raw.json`; `--llm local` — всё на gamebox.
++**Переключение расшифровки** (M64). Новое видео: `arl auto <видео> --tx local|groq` (или `backend:` в `config/transcribe.yaml`). Готовый источник: `arl tx-use <манифест> groq|local|local-<tag>` — выбранная расшифровка идёт в кэш, `transcript_params_key` манифеста указывает на неё; построенное по прежней (карта речи, выравнивание, интонация, карта, проверка, черновики auto) уходит в `transcripts/_archive/<stem>/<ключ>/` и `reviews/_archive/…`, обратное переключение возвращает его. Разметка владельца не трогается — команда называет файлы, которые `--apply` больше не примет (другой отпечаток блоков). Варианты whisper.cpp: `arl tx-compare <манифест> --tag <имя> [--prompt "…"]` → `transcripts/<stem>.local-<имя>.transcript.json`; `whispercpp.prompt` — подсказка стиля пунктуации, её куски тоже ищет `tx-check`; с подсказкой при `max_context: 0` берётся `-mc prompt_context` (M64b: при `-mc 0` whisper.cpp подсказку выбрасывает — вариант «p1» вышел слово в слово как без неё). Подсказка точек не вернула (M64b: p2 8,1, p3 7,0 концов на 100 слов против 8,9 без неё и 13,1 у Groq), поэтому `arl tx-punct <манифест> [--src local|local-<tag>]` (M64c) переносит концы предложений Groq на те же слова локальной расшифровки (слова сопоставляются по порядку; слова, время и всё вне совпавших участков не трогаются; следующему слову — заглавная) → `transcripts/<stem>.<src>-gp.transcript.json`, дальше `arl tx-use <манифест> <src>-gp`. Флаги whisper.cpp точек не возвращают (M111, `arl tx-compare … --wc ключ=значение`: без VAD 5,5 концов на 100 слов, полная large-v3 3,8 при 7× времени, против 10,3 у Groq). **M116:** `arl tx-compare <манифест> --tag <имя> --groq-prompt "<текст>"` (пустой — без подсказки) — вариант Groq с другой подсказкой, нарезка как в работе → `transcripts/<stem>.groq-<имя>.transcript.json` (кэш и манифест не трогаются). **M124:** `groq.dual` в `config/transcribe.yaml` — каждый кусок аудио идёт в Groq дважды: без подсказки (слова и время; с подсказкой Groq терял слова и вписывал её в текст) и с ней (только концы предложений, переносятся на те же слова, как `arl tx-punct`). Касается новых видео; кэш расшифровки отдельный. Проверка на готовом источнике — `arl tx-compare <манифест> --groq-dual --tag <имя>`. **M113:** `arl tx-punct <манифест> --src <src> --by llm [--llm cloud|local]` — концы предложений ставит модель: она видит кусок с пронумерованными словами (`tx_check.punct_chunk_words`) и называет номера последних слов предложений, код ставит знаки; слова, время и прежние знаки не меняются, ответ с номером вне куска не принимается, после второго такого ответа кусок остаётся как был → `transcripts/<stem>.<src>-lp.transcript.json` и ответы модели `….punct_raw.json`; `--llm local` — всё на gamebox.
+ 
+ **Конвейер одной командой** (M63). `arl auto <видео|манифест…> [--music трек] [--gate имя] [--no-render]`: видеофайл → `arl run` (видео остаётся на месте) → `arl prepare` (карта речи, выравнивание, интонация, движение, черновик разметки, сухой план) → `arl tx-check` → `arl map` (готовая карта сохраняется) → `arl autocut` → общий черновик `reviews/<stem>_auto_all.txt` (строки разметки + строки сборок) → `--apply` без `--install` (не прошёл — берётся только черновик сборок, его строки уже проверены) → рендер в `_gate/<имя>/` и лист ревью. Готовые этапы пропускаются сами; упавший этап останавливает этот источник с причиной, следующий идёт дальше; в конце — итог по источникам. Ничего не ставится.
+ 
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index c692392..5fe4055 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8604,7 +8604,7 @@ def _whispercpp_overrides(base, pairs) -> "object":
+ 
+ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
+                    force: bool = False, backend=None, prompt: str | None = None, tag: str = "",
+-                   wc=None, groq_prompt: str | None = None) -> int:
++                   wc=None, groq_prompt: str | None = None, groq_dual: bool = False) -> int:
+     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
+     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
+     Groq transcript), compared word by word with the Groq one, both run through tx-check →
+@@ -8628,6 +8628,8 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
+     prm = _txcheck_params(r0_cfg, _root)
+     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
++    if groq_dual and groq_prompt is None:   # M124: the dual Groq variant takes the configured prompt for its ends
++        groq_prompt = tcfg.groq.initial_prompt
+     if groq_prompt is not None:             # M116: a Groq variant — the same audio with another initial_prompt
+         if not tag:
+             print("ошибка: с --groq-prompt нужен --tag (вариант не должен смешаться с расшифровкой манифеста)",
+@@ -8635,6 +8637,9 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
+             return 1
+         from autoreels.cloud.transcribe import GroqBackend, transcribe as _tx_groq
+         from autoreels.cloud.txcheck import prompt_patterns as _pp_g
++        if backend is None and groq_dual:
++            from autoreels.cloud.transcribe import GroqDualBackend
++            backend = GroqDualBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
+         if backend is None:
+             backend = GroqBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
+         from dataclasses import replace as _dc_rep_g
+@@ -12655,6 +12660,8 @@ def _build_parser():
+     pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
+     pxc.add_argument("--groq-prompt", default=None, dest="groq_prompt", metavar="текст",
+                      help="M116: вариант Groq с этим initial_prompt (\"\" — без подсказки) → transcripts/<stem>.groq-<tag>; нужен --tag")
++    pxc.add_argument("--groq-dual", action="store_true", dest="groq_dual",
++                     help="M124: вариант Groq в два прохода (слова без подсказки, концы с подсказкой) → transcripts/<stem>.groq-<tag>")
+     pxc.add_argument("--wc", action="append", default=None, metavar="ключ=значение",
+                      help="M111: параметр whisper.cpp для варианта (поле whispercpp в transcribe.yaml), можно несколько: "
+                           "--wc model='$W/ggml-large-v3.bin' --wc vad_model= --wc max_context=-1; нужен --tag")
+@@ -13159,7 +13166,7 @@ def main(argv=None) -> int:
+             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
+                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
+                                   force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc,
+-                                  groq_prompt=args.groq_prompt)
++                                  groq_prompt=args.groq_prompt, groq_dual=args.groq_dual)
+         elif args.cmd == "tx-punct":
+             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
+                                 cache_dir=getattr(args, "cache_dir", None), by=args.by, llm=args.llm)
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 3c5b00c..046bb80 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -185,6 +185,9 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+                 close.insert(0, r)
+                 acc += sent[r][1] - sent[r][0]
+         notes.append(f"куски: {len(pieces)}, скачков {len(pieces) - 1}, {secs:.0f} с")
++        # M124: the thoughts of the map it plays, as the automatic path writes them (the measures read these lines)
++        notes = [f"#{i} {by_id[i].get('role')}★{by_id[i].get('punch')} {unit_refs.get(i) or by_id[i].get('refs')} — "
++                 f"{by_id[i].get('summary') or ''}" for i in uids] + notes
+         payoff = by_id.get(uids[-1]) if uids else None
+         out.append(Proposal(
+             units=uids or [-1], pieces=" ".join(compress_refs(pc) for pc in pieces),
+diff --git a/src/autoreels/cloud/transcribe.py b/src/autoreels/cloud/transcribe.py
+index 54f4f08..7c9e1fe 100644
+--- a/src/autoreels/cloud/transcribe.py
++++ b/src/autoreels/cloud/transcribe.py
+@@ -397,6 +397,36 @@ class WhisperCppBackend:
+         return {"provider": "whispercpp", "model": model, "prompt_hash": ph}
+ 
+ 
++class GroqDualBackend:
++    """M124 (M116/M118: with initial_prompt Groq lost words — IMG_6848 66% of whisper.cpp's, Pxl 112938952 78% — and
++    wrote the prompt into the text; without it 89–93% of the words, no leaks, but a third of the sentence ends):
++    each piece of audio goes to Groq twice — without the prompt (the words and their times) and with it (only its
++    sentence ends, moved onto the same words by txcheck.transfer_punctuation; a stretch Groq invented with the prompt
++    matches nothing and moves nothing). Words, times and everything else come from the pass without the prompt.
++    `describe()` names the mode, so its transcripts are cached apart (invariant 4)."""
++
++    def __init__(self, *, model: str = GROQ_WHISPER_MODEL, initial_prompt: str = "", request_fn=None, api_key=None):
++        self._words = GroqBackend(api_key=api_key, model=model, initial_prompt="", request_fn=request_fn)
++        self._ends = GroqBackend(api_key=api_key, model=model, initial_prompt=initial_prompt, request_fn=request_fn)
++        self._model = model
++        self._prompt = initial_prompt
++        self._initial_prompt = ""        # the words carry no prompt: nothing for the leak filter to strip
++        self.last_marks = 0
++
++    def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript:
++        from autoreels.cloud.txcheck import transfer_punctuation
++        words = self._words.transcribe(audio_path, language=language)
++        if not self._prompt:
++            return words
++        ends = self._ends.transcribe(audio_path, language=language)
++        new, self.last_marks = transfer_punctuation(words.words, ends.words)
++        return words.model_copy(update={"words": new})
++
++    def describe(self) -> dict:
++        prompt_hash = hashlib.sha256(self._prompt.encode("utf-8")).hexdigest()[:12] if self._prompt else ""
++        return {"provider": "groq-dual", "model": self._model, "prompt_hash": prompt_hash}
++
++
+ def get_backend(config=None) -> TranscriptionBackend:
+     """Бэкенд транскрипции. Источник выбора: config (transcribe.yaml), env перебивает.
+ 
+@@ -409,6 +439,8 @@ def get_backend(config=None) -> TranscriptionBackend:
+     if name == "groq":
+         model = config.groq.model if config is not None else GROQ_WHISPER_MODEL
+         initial_prompt = config.groq.initial_prompt if config is not None else ""
++        if config is not None and getattr(config.groq, "dual", False):
++            return GroqDualBackend(model=model, initial_prompt=initial_prompt)   # M124
+         return GroqBackend(model=model, initial_prompt=initial_prompt)
+     if name == "faster_whisper":
+         if config is not None:
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index ea858a8..83fe2de 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -1137,6 +1137,8 @@ class GroqWhisper(BaseModel):
+         "Специалисты выделяют несколько ключевых факторов. "
+         "Каждый из них влияет на результат по-своему."
+     )
++    # M124: two passes — words without the prompt, sentence ends with it (cloud/transcribe.py GroqDualBackend)
++    dual: bool = False
+ 
+ 
+ class FasterWhisperParams(BaseModel):
+diff --git a/tests/test_scenario.py b/tests/test_scenario.py
+index d0aa4fc..56faff9 100644
+--- a/tests/test_scenario.py
++++ b/tests/test_scenario.py
+@@ -46,6 +46,7 @@ def test_proposals_keep_the_rules_and_map_the_thoughts():
+     assert pr.pieces == "1.1-4 5.1" and pr.units == [1, 2, 3] and pr.unit_refs == {} and pr.title == "Тема"
+     assert pr.hook == "1.4" and any("крючок сценариста: h:1.4" in n for n in pr.notes) and pr.close == ["5.1"] and pr.caption == "вывод"
+     assert any(n.startswith("сценарий: a → b → c") for n in pr.notes)
++    assert pr.notes[0].startswith("#1 None★None 1.1-2 — мысль 1") and pr.notes[2].startswith("#3 ")   # M124
+     whys = [w for _, w in gone]
+     assert len(gone) == 3 and any("длина" in w for w in whys) and any("скачки" in w for w in whys)
+     assert any("конец не законченный" in w for w in whys)
+diff --git a/tests/test_transcribe_dual.py b/tests/test_transcribe_dual.py
+new file mode 100644
+index 0000000..6db3511
+--- /dev/null
++++ b/tests/test_transcribe_dual.py
+@@ -0,0 +1,79 @@
++"""M124: two Groq passes — words without the prompt, sentence ends with it (cloud/transcribe.py GroqDualBackend)."""
++from __future__ import annotations
++
++import copy
++import json
++from pathlib import Path
++
++from autoreels.cloud.transcribe import GroqBackend, GroqDualBackend, get_backend, params_key
++
++FIX = json.loads((Path(__file__).parent / "fixtures" / "groq_whisper_word.json").read_text(encoding="utf-8"))
++
++
++def test_dual_takes_the_words_without_the_prompt_and_the_ends_with_it(tmp_path):
++    plain = FIX                                                     # a recorded Groq answer (no prompt, no marks)
++    marked = copy.deepcopy(FIX)                                     # the prompted pass: the same words, with ends
++    marked["words"][5]["word"] = "вскликнул."
++    marked["words"][20]["word"] += "?"
++    marked["words"].insert(10, {"word": "Каждый", "start": 3.0, "end": 3.1})     # a prompt leak: matches nothing
++    calls = []
++
++    def req(path, lang):
++        calls.append(path)
++        return plain if len(calls) == 1 else marked
++    b = GroqDualBackend(model="whisper-large-v3", initial_prompt="Тема беседы.", request_fn=req)
++    tr = b.transcribe(tmp_path / "a.mp3", language="ru")
++    assert len(calls) == 2 and len(tr.words) == len(plain["words"]) and b.last_marks == 2
++    assert tr.words[5].word == "вскликнул." and tr.words[20].word.endswith("?")
++    assert [(w.t0, w.t1) for w in tr.words] == [(float(w["start"]), float(w["end"])) for w in plain["words"]]
++    assert "Каждый" not in {w.word for w in tr.words}
++    assert tr.words[6].word[0].isupper()                           # the next word after a new end gets a capital
++    assert b._initial_prompt == ""                                  # nothing for the chunker's leak filter
++
++
++def test_dual_is_cached_apart_and_chosen_by_the_config():
++    from autoreels.core.config import load_transcribe_config
++    d = GroqDualBackend(model="whisper-large-v3", initial_prompt="Тема.")
++    g = GroqBackend(model="whisper-large-v3", initial_prompt="Тема.")
++    assert d.describe()["provider"] == "groq-dual" and params_key(d.describe()) != params_key(g.describe())
++    cfg = load_transcribe_config(Path(__file__).parents[1] / "config" / "transcribe.yaml")
++    assert type(get_backend(cfg)).__name__ == ("GroqDualBackend" if cfg.groq.dual else "GroqBackend")
++    on = cfg.model_copy(update={"groq": cfg.groq.model_copy(update={"dual": True}), "backend": "groq"})
++    assert isinstance(get_backend(on), GroqDualBackend)
++
++
++def test_tx_compare_groq_dual_variant_takes_the_configured_prompt(tmp_path, monkeypatch, capsys):
++    import shutil
++    from autoreels import __main__ as cli
++    from autoreels.cloud import chunk_transcribe
++    from autoreels.cloud import transcribe as tmod
++    from autoreels.core.config import load_transcribe_config
++    from autoreels.core.models import Manifest, Transcript
++    from tests.test_montage import REPO_ROOT, _source
++    mpath = _source(tmp_path)
++    shutil.copy(REPO_ROOT / "config" / "transcribe.yaml", tmp_path / "config" / "transcribe.yaml")
++    (tmp_path / "config" / "render.yaml").write_text((REPO_ROOT / "config" / "render.yaml").read_text(encoding="utf-8"),
++                                                     encoding="utf-8")
++    (tmp_path / "transcripts").mkdir(exist_ok=True)
++    groq = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
++    monkeypatch.setattr(chunk_transcribe, "should_chunk", lambda *a, **k: False)
++    monkeypatch.setattr(chunk_transcribe, "_probe_duration", lambda *a, **k: 60.0)
++    made = {}
++
++    class FakeDual:
++        _initial_prompt = ""
++
++        def __init__(self, *, model, initial_prompt):
++            made["prompt"] = initial_prompt
++
++        def transcribe(self, audio, *, language=None):
++            return Transcript(language="ru", words=list(groq.words)[:200])
++
++        def describe(self):
++            return {"provider": "groq-dual", "model": "whisper-large-v3", "prompt_hash": "x"}
++    monkeypatch.setattr(tmod, "GroqDualBackend", FakeDual)
++    assert cli.cmd_tx_compare([str(mpath)], root=tmp_path, cache_dir=str(tmp_path / "cache"), groq_dual=True) == 1
++    assert cli.cmd_tx_compare([str(mpath)], root=tmp_path, cache_dir=str(tmp_path / "cache"), groq_dual=True,
++                              tag="dual") == 0
++    assert made["prompt"] == load_transcribe_config(tmp_path / "config" / "transcribe.yaml").groq.initial_prompt
++    assert (tmp_path / "transcripts" / "v.groq-dual.transcript.json").is_file()
