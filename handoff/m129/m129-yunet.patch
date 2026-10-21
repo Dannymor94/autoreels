@@ -1,0 +1,192 @@
+diff --git a/config/render.yaml b/config/render.yaml
+index c13a253..6824961 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -263,3 +263,8 @@ close_from_face: true
+ # the frames, 12 of 16 reels kept the source's middle frame): a reel that finds no face of its own is framed on the
+ # speaker's place in the whole source (40 frames over it; numbers: core/config.py RenderConfig M127).
+ framing_source_fallback: true
++# M129 (m128: on Pxl 112938952 the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye; YuNet found the
++# speaker in 12 of 12, score ≥ 0.84): the reel framing looks for faces with YuNet. The file is fetched once (opencv_zoo,
++# ~230 KB): curl -L -o data/models/face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
++# — no file = the Haar cascade, as before.
++face_model: data/models/face_detection_yunet_2023mar.onnx
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 29d5484..36ccd3d 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -140,6 +140,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M119 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** `autocut.generator: passage` — клип — отрезок подряд идущих мыслей одной темы вокруг сильной (m118: 60 из 66 клипов владельца — один отрезок разговора внутри одной темы, 1–5 соседних мыслей; сборка из разных мест не строилась у половины зёрен — мысль со сноской тянула всю цепочку). Отрезок растёт по одной соседней мысли: после вопроса — вперёд, пока первая мысль опирается на предыдущую — назад, иначе к более сильной соседней; соседняя мысль той же темы, не дальше `passage_gap_sec`, не в другом клипе; слабая мысль может стоять внутри, не на краю. Вопроса-петли из другого места и выбрасывания мыслей из середины нет, клипы не делят мыслей. `autocut.lean_depth: 1` — в сборке из разных мест мысль берёт с собой только ту, на которую опирается, а не всю цепочку сносок (карта помечает 71% мыслей IMG_6848 как опирающиеся на предыдущую — цепочки шли через 16 мыслей или через слабую; начало первой мысли по-прежнему проверяют правила начала). `autocut.seed_roles` — роли, вокруг которых растёт клип (пусто — тезис, вывод, пример, образ, вопрос). `autocut.start_judge: rank` — если начало принимают правила, а модель против, клип остаётся и идёт после чистых (инвариант 1: модель только ранжирует; m118: судьи принимали 22–46% начал самого владельца). `autocut.clips_every_min` — сборок не меньше, чем минут источника ÷ это число. `arl autocut … --ac ключ=значение` — любое поле `autocut:` на один запуск, файл конфига не меняется.
+ - **M120 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** правило скачков `autocut.rhythm` (владелец: «перестановки можно, но без частых быстрых скачков; гибкий алгоритм кусков»). Скачок — промежуток в исходнике больше `rhythm_jump_sec` между соседними мыслями клипа или шаг назад. Скачков не больше `rhythm_max_jumps`; кусок после скачка длится не меньше, чем нужно зрителю, чтобы «осесть»: после короткого пропуска — `rhythm_settle_near`, растёт с дальностью скачка до `rhythm_settle_far` (на `rhythm_far_sec` и дальше, и при шаге назад); последний кусок — вывод, точка — `rhythm_tail` от этого; кусок до первого скачка — не короче `rhythm_settle_near` (вопрос-петля в начале может быть коротким). Клипы владельца: 48 из 66 без скачков, 12 с одним, 6 с двумя, с тремя нет; правило проходят все, кроме одного старого формата, где первые 3 с — крючок. Кусок, который не держит правило, дополняется соседними мыслями той же темы или убирается, если в нём нет зерна и вывода; иначе клип не предлагается и попадает в черновик отдельным списком. Проверка — на окончательном клипе, после начала и конца. `autocut.generator: mixed` — отрезок подряд (как passage) + вопрос-петля из другого места + вывод из более позднего места той же темы, если в отрезке вывода нет. При `start_judge: rank` сомнение — это ответ модели на ту первую фразу, с которой клип действительно начинается (m119: в заметку попадала причина правил с другой фразы).
+ - **M127: рамка по лицу источника** (`framing_source_fallback`, `config/render.yaml`). Ролик, в своих кадрах которого лицо не нашлось (на Pxl 112938952 детектор видит говорящего примерно в половине кадров — 12 из 16 роликов остались с рамкой источника посередине, «на чайнике»), кадрируется по месту лица во всём источнике: кадры равномерно по видео, преобладающее место (то же правило групп, что у ролика). Рамка внутри ролика по-прежнему неподвижна.
++- **M127/M129: рамка по лицу.** Ролик без своего лица кадрируется по месту лица во всём источнике (`framing_source_fallback`). Лица для рамки ищет нейросетевой детектор YuNet (`face_model`, `config/render.yaml`; m128 на Pxl 112938952: каскад Хаара находил говорящего в 5 из 12 кадров, а самой большой его находкой была полка с чайниками — рамки уходили туда; YuNet — 12 из 12). Нет файла модели — каскад Хаара, как раньше.
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 9f115b2..6d15a2b 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -1055,6 +1055,9 @@ class RenderConfig(BaseModel):
+     framing_source_fallback: bool = False
+     framing_source_samples: int = Field(40, ge=1)
+     framing_source_min_faces: int = Field(4, ge=1)
++    # M129 (m128 on Pxl 112938952: the Haar cascade framed the reels on a shelf of teapots, YuNet found the face in 12 of
++    # 12 frames): the YuNet face model (OpenCV FaceDetectorYN) for the reel framing; "" or no file = the Haar cascade
++    face_model: str = ""
+ 
+     @field_validator("shot_transition")
+     @classmethod
+diff --git a/src/autoreels/local/autocrop.py b/src/autoreels/local/autocrop.py
+index 82094b8..fa8c9a1 100644
+--- a/src/autoreels/local/autocrop.py
++++ b/src/autoreels/local/autocrop.py
+@@ -86,18 +86,68 @@ def _faces_at(cascade, video, times, frame_size: tuple[int, int], ffmpeg: str, p
+     return faces
+ 
+ 
++def _color_frame(video: Path, t: float, size: tuple[int, int], ffmpeg: str, pre_vf: str = ""):
++    import numpy as np
++    w, h = size
++    vf = f"scale={w}:{h},format=bgr24"
++    cmd = [ffmpeg, "-v", "error", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", "-an",
++           "-vf", f"{pre_vf},{vf}" if pre_vf else vf, "-f", "rawvideo", "pipe:1"]
++    raw = subprocess.run(cmd, capture_output=True, check=True).stdout
++    if len(raw) < w * h * 3:
++        return None
++    return np.frombuffer(raw[: w * h * 3], dtype=np.uint8).reshape(h, w, 3)
++
++
++def yunet_model(path) -> "Path | None":
++    """M129: the YuNet face model file when it is there and this OpenCV has FaceDetectorYN, else None."""
++    try:
++        import cv2
++    except ImportError:
++        return None
++    p = Path(path) if path else None
++    return p if p is not None and p.is_file() and hasattr(cv2, "FaceDetectorYN") else None
++
++
++def _yunet_faces_at(model: Path, video, times, frame_size: tuple[int, int], ffmpeg: str, pre_vf: str = "",
++                    score: float = 0.7) -> list:
++    """M129 (m128 on Pxl 112938952: the Haar cascade found the speaker in 5 of 12 frames, its biggest find was the
++    shelf of teapots — x 894, 668 px high, no eye — and M102 framed the reels there; YuNet found the face in 12 of
++    12, score ≥ 0.84): the largest YuNet face of each frame at `times`, as (cx, cy, w, h) in display px of
++    frame_size; frames without a face are left out. Frames ≤ 960 px wide (the boxes scaled back)."""
++    import cv2
++    W, H = frame_size
++    sw = min(960, W)
++    sw -= sw % 2
++    sh = int(round(H * sw / W / 2)) * 2
++    k = W / sw
++    det = cv2.FaceDetectorYN.create(str(model), "", (sw, sh), score)
++    faces: list[tuple[float, float, float, float]] = []
++    for t in times:
++        img = _color_frame(Path(video), t, (sw, sh), ffmpeg, pre_vf)
++        if img is None:
++            continue
++        _, found = det.detect(img)
++        if found is not None and len(found):
++            x, y, w, h = (float(v) for v in max(found, key=lambda f: float(f[2]) * float(f[3]))[:4])
++            faces.append((round((x + w / 2) * k, 1), round((y + h / 2) * k, 1), round(w * k, 1), round(h * k, 1)))
++    return faces
++
++
+ def reel_faces(video, times, frame_size: tuple[int, int], *, ffmpeg: str = "ffmpeg",
+-               pre_vf: str = "") -> tuple[list, int] | None:
++               pre_vf: str = "", model=None) -> tuple[list, int] | None:
+     """M102: faces in the frames of one reel (`times` — source seconds, e.g. cover_candidates over its body), the
+     source in display orientation with the reel's rotation (`pre_vf`, as render applies it before the crop) —
+-    (faces, frames looked at), or None without OpenCV. No cache: a handful of frames, the same frames → the same
+-    faces."""
++    (faces, frames looked at), or None without OpenCV. M129: with `model` (yunet_model) the YuNet detector, else the
++    Haar cascade as before. No cache: a handful of frames, the same frames → the same faces."""
+     try:
+         import cv2
+     except ImportError:
+         return None
+-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+     times = list(times)
++    m = yunet_model(model) if model else None
++    if m is not None:
++        return _yunet_faces_at(m, video, times, frame_size, ffmpeg, pre_vf), len(times)
++    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+     return _faces_at(cascade, video, times, frame_size, ffmpeg, pre_vf), len(times)
+ 
+ 
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 5b28771..da9e480 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -2460,6 +2460,15 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
+ 
+ 
+ 
++def _face_model(render_cfg):
++    """M129: the YuNet model file of render.yaml face_model (relative to the project), or None — the Haar cascade."""
++    name = getattr(render_cfg, "face_model", "") or ""
++    if not name:
++        return None
++    p = Path(name)
++    return p if p.is_absolute() else Path(__file__).resolve().parents[3] / p
++
++
+ def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
+     """M127 (owner on Pxl 20260621 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»; the
+     frontal-face finder sees this speaker in about half the frames, so 12 of 16 reels found no face of their own
+@@ -2474,7 +2483,8 @@ def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
+     except Exception:  # noqa: BLE001 — no duration: no source face
+         return None
+     found = reel_faces(source, [dur * (i + 0.5) / n for i in range(n)], (int(setup.frame[0]), int(setup.frame[1])),
+-                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0))
++                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
++                       model=_face_model(render_cfg))
+     if not found:
+         return None
+     dom = dominant_faces(found[0], setup.crop.w / 2)
+@@ -2494,7 +2504,8 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
+     n = int(getattr(render_cfg, "framing_samples", 7))
+     times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+     found = reel_faces(source, times, (int(setup.frame[0]), int(setup.frame[1])), ffmpeg=ffmpeg,
+-                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)) if times else None
++                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
++                       model=_face_model(render_cfg)) if times else None
+     if found is None:
+         return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
+     faces, looked = found
+diff --git a/tests/test_calibration_face.py b/tests/test_calibration_face.py
+index 6875ef8..24780d8 100644
+--- a/tests/test_calibration_face.py
++++ b/tests/test_calibration_face.py
+@@ -115,7 +115,7 @@ def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypa
+     segs = [SimpleNamespace(start=0.0, end=60.0)]
+     calls = []
+ 
+-    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf=""):
++    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf="", model=None):
+         calls.append(len(times))
+         if len(times) == 40:                                  # the whole source: the speaker left, 20 of 40 frames
+             return [(1100.0 + i % 3, 900.0, 300.0, 300.0) for i in range(20)] + [(2600.0, 800.0, 90.0, 90.0)] * 3, 40
+@@ -128,3 +128,22 @@ def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypa
+     assert face == sf[:4] and s2.crop.x == 1101 - 607 and "по лицу источника" in note
+     s3, face3, note3 = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg)
+     assert s3 is setup and face3 is None and "рамка источника" in note3          # no source face = as before
++
++
++def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, monkeypatch):
++    """M129 (m128 on Pxl 112938952: the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye —
++    YuNet found the speaker in 12 of 12): reel_faces uses YuNet with a model file, the Haar cascade without one."""
++    from types import SimpleNamespace
++    from autoreels.local import autocrop, render
++    used = []
++    monkeypatch.setattr(autocrop, "_yunet_faces_at", lambda m, v, ts, fs, ff, pv="": used.append("yunet") or
++                        [(1850.0, 700.0, 210.0, 210.0)] * len(ts))
++    monkeypatch.setattr(autocrop, "_faces_at", lambda c, v, ts, fs, ff, pv="": used.append("haar") or [])
++    model = tmp_path / "yunet.onnx"
++    assert autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model) == ([], 2)          # no file yet
++    model.write_bytes(b"x")
++    faces, n = autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model)
++    assert used == ["haar", "yunet"] and n == 2 and faces[0][0] == 1850.0
++    assert render._face_model(SimpleNamespace(face_model="")) is None
++    rel = render._face_model(SimpleNamespace(face_model="data/models/m.onnx"))
++    assert rel.is_absolute() and rel.parts[-3:] == ("data", "models", "m.onnx")
