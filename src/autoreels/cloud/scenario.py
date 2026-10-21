@@ -185,6 +185,9 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
                 close.insert(0, r)
                 acc += sent[r][1] - sent[r][0]
         notes.append(f"куски: {len(pieces)}, скачков {len(pieces) - 1}, {secs:.0f} с")
+        # M124: the thoughts of the map it plays, as the automatic path writes them (the measures read these lines)
+        notes = [f"#{i} {by_id[i].get('role')}★{by_id[i].get('punch')} {unit_refs.get(i) or by_id[i].get('refs')} — "
+                 f"{by_id[i].get('summary') or ''}" for i in uids] + notes
         payoff = by_id.get(uids[-1]) if uids else None
         out.append(Proposal(
             units=uids or [-1], pieces=" ".join(compress_refs(pc) for pc in pieces),

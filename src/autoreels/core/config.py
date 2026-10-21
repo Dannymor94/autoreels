@@ -1137,6 +1137,8 @@ class GroqWhisper(BaseModel):
         "Специалисты выделяют несколько ключевых факторов. "
         "Каждый из них влияет на результат по-своему."
     )
+    # M124: two passes — words without the prompt, sentence ends with it (cloud/transcribe.py GroqDualBackend)
+    dual: bool = False
 
 
 class FasterWhisperParams(BaseModel):

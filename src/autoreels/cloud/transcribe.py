@@ -397,6 +397,36 @@ class WhisperCppBackend:
         return {"provider": "whispercpp", "model": model, "prompt_hash": ph}
 
 
+class GroqDualBackend:
+    """M124 (M116/M118: with initial_prompt Groq lost words — IMG_6848 66% of whisper.cpp's, Pxl 112938952 78% — and
+    wrote the prompt into the text; without it 89–93% of the words, no leaks, but a third of the sentence ends):
+    each piece of audio goes to Groq twice — without the prompt (the words and their times) and with it (only its
+    sentence ends, moved onto the same words by txcheck.transfer_punctuation; a stretch Groq invented with the prompt
+    matches nothing and moves nothing). Words, times and everything else come from the pass without the prompt.
+    `describe()` names the mode, so its transcripts are cached apart (invariant 4)."""
+
+    def __init__(self, *, model: str = GROQ_WHISPER_MODEL, initial_prompt: str = "", request_fn=None, api_key=None):
+        self._words = GroqBackend(api_key=api_key, model=model, initial_prompt="", request_fn=request_fn)
+        self._ends = GroqBackend(api_key=api_key, model=model, initial_prompt=initial_prompt, request_fn=request_fn)
+        self._model = model
+        self._prompt = initial_prompt
+        self._initial_prompt = ""        # the words carry no prompt: nothing for the leak filter to strip
+        self.last_marks = 0
+
+    def transcribe(self, audio_path: Path, *, language: str | None = None) -> Transcript:
+        from autoreels.cloud.txcheck import transfer_punctuation
+        words = self._words.transcribe(audio_path, language=language)
+        if not self._prompt:
+            return words
+        ends = self._ends.transcribe(audio_path, language=language)
+        new, self.last_marks = transfer_punctuation(words.words, ends.words)
+        return words.model_copy(update={"words": new})
+
+    def describe(self) -> dict:
+        prompt_hash = hashlib.sha256(self._prompt.encode("utf-8")).hexdigest()[:12] if self._prompt else ""
+        return {"provider": "groq-dual", "model": self._model, "prompt_hash": prompt_hash}
+
+
 def get_backend(config=None) -> TranscriptionBackend:
     """Бэкенд транскрипции. Источник выбора: config (transcribe.yaml), env перебивает.
 
@@ -409,6 +439,8 @@ def get_backend(config=None) -> TranscriptionBackend:
     if name == "groq":
         model = config.groq.model if config is not None else GROQ_WHISPER_MODEL
         initial_prompt = config.groq.initial_prompt if config is not None else ""
+        if config is not None and getattr(config.groq, "dual", False):
+            return GroqDualBackend(model=model, initial_prompt=initial_prompt)   # M124
         return GroqBackend(model=model, initial_prompt=initial_prompt)
     if name == "faster_whisper":
         if config is not None:

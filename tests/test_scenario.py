@@ -46,6 +46,7 @@ def test_proposals_keep_the_rules_and_map_the_thoughts():
     assert pr.pieces == "1.1-4 5.1" and pr.units == [1, 2, 3] and pr.unit_refs == {} and pr.title == "Тема"
     assert pr.hook == "1.4" and any("крючок сценариста: h:1.4" in n for n in pr.notes) and pr.close == ["5.1"] and pr.caption == "вывод"
     assert any(n.startswith("сценарий: a → b → c") for n in pr.notes)
+    assert pr.notes[0].startswith("#1 None★None 1.1-2 — мысль 1") and pr.notes[2].startswith("#3 ")   # M124
     whys = [w for _, w in gone]
     assert len(gone) == 3 and any("длина" in w for w in whys) and any("скачки" in w for w in whys)
     assert any("конец не законченный" in w for w in whys)

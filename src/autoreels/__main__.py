@@ -8604,7 +8604,7 @@ def _whispercpp_overrides(base, pairs) -> "object":
 
 def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
                    force: bool = False, backend=None, prompt: str | None = None, tag: str = "",
-                   wc=None, groq_prompt: str | None = None) -> int:
+                   wc=None, groq_prompt: str | None = None, groq_dual: bool = False) -> int:
     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
     Groq transcript), compared word by word with the Groq one, both run through tx-check →
@@ -8628,6 +8628,8 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
     prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
+    if groq_dual and groq_prompt is None:   # M124: the dual Groq variant takes the configured prompt for its ends
+        groq_prompt = tcfg.groq.initial_prompt
     if groq_prompt is not None:             # M116: a Groq variant — the same audio with another initial_prompt
         if not tag:
             print("ошибка: с --groq-prompt нужен --tag (вариант не должен смешаться с расшифровкой манифеста)",
@@ -8635,6 +8637,9 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
             return 1
         from autoreels.cloud.transcribe import GroqBackend, transcribe as _tx_groq
         from autoreels.cloud.txcheck import prompt_patterns as _pp_g
+        if backend is None and groq_dual:
+            from autoreels.cloud.transcribe import GroqDualBackend
+            backend = GroqDualBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
         if backend is None:
             backend = GroqBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
         from dataclasses import replace as _dc_rep_g
@@ -12655,6 +12660,8 @@ def _build_parser():
     pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
     pxc.add_argument("--groq-prompt", default=None, dest="groq_prompt", metavar="текст",
                      help="M116: вариант Groq с этим initial_prompt (\"\" — без подсказки) → transcripts/<stem>.groq-<tag>; нужен --tag")
+    pxc.add_argument("--groq-dual", action="store_true", dest="groq_dual",
+                     help="M124: вариант Groq в два прохода (слова без подсказки, концы с подсказкой) → transcripts/<stem>.groq-<tag>")
     pxc.add_argument("--wc", action="append", default=None, metavar="ключ=значение",
                      help="M111: параметр whisper.cpp для варианта (поле whispercpp в transcribe.yaml), можно несколько: "
                           "--wc model='$W/ggml-large-v3.bin' --wc vad_model= --wc max_context=-1; нужен --tag")
@@ -13159,7 +13166,7 @@ def main(argv=None) -> int:
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
                                   force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc,
-                                  groq_prompt=args.groq_prompt)
+                                  groq_prompt=args.groq_prompt, groq_dual=args.groq_dual)
         elif args.cmd == "tx-punct":
             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), by=args.by, llm=args.llm)
