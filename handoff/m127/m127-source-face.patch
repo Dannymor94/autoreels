@@ -1,0 +1,168 @@
+diff --git a/config/render.yaml b/config/render.yaml
+index c56a3d7..c13a253 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -259,3 +259,7 @@ continue_text: "Продолжение →"
+ # capped so the picture does not go soft. Off = as before. Numbers: core/config.py RenderConfig (M102).
+ reel_framing: true
+ close_from_face: true
++# M127 (owner on Pxl 112938952: «фокус взят на чайник, человек левее» — the face finder sees this speaker in about half
++# the frames, 12 of 16 reels kept the source's middle frame): a reel that finds no face of its own is framed on the
++# speaker's place in the whole source (40 frames over it; numbers: core/config.py RenderConfig M127).
++framing_source_fallback: true
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index c32152e..29d5484 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -139,6 +139,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - предлагается, только если не короче `min_sec`, есть начало (тезис или вопрос) или вывод, и клип не кончается вопросом;
+ - **M119 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** `autocut.generator: passage` — клип — отрезок подряд идущих мыслей одной темы вокруг сильной (m118: 60 из 66 клипов владельца — один отрезок разговора внутри одной темы, 1–5 соседних мыслей; сборка из разных мест не строилась у половины зёрен — мысль со сноской тянула всю цепочку). Отрезок растёт по одной соседней мысли: после вопроса — вперёд, пока первая мысль опирается на предыдущую — назад, иначе к более сильной соседней; соседняя мысль той же темы, не дальше `passage_gap_sec`, не в другом клипе; слабая мысль может стоять внутри, не на краю. Вопроса-петли из другого места и выбрасывания мыслей из середины нет, клипы не делят мыслей. `autocut.lean_depth: 1` — в сборке из разных мест мысль берёт с собой только ту, на которую опирается, а не всю цепочку сносок (карта помечает 71% мыслей IMG_6848 как опирающиеся на предыдущую — цепочки шли через 16 мыслей или через слабую; начало первой мысли по-прежнему проверяют правила начала). `autocut.seed_roles` — роли, вокруг которых растёт клип (пусто — тезис, вывод, пример, образ, вопрос). `autocut.start_judge: rank` — если начало принимают правила, а модель против, клип остаётся и идёт после чистых (инвариант 1: модель только ранжирует; m118: судьи принимали 22–46% начал самого владельца). `autocut.clips_every_min` — сборок не меньше, чем минут источника ÷ это число. `arl autocut … --ac ключ=значение` — любое поле `autocut:` на один запуск, файл конфига не меняется.
+ - **M120 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** правило скачков `autocut.rhythm` (владелец: «перестановки можно, но без частых быстрых скачков; гибкий алгоритм кусков»). Скачок — промежуток в исходнике больше `rhythm_jump_sec` между соседними мыслями клипа или шаг назад. Скачков не больше `rhythm_max_jumps`; кусок после скачка длится не меньше, чем нужно зрителю, чтобы «осесть»: после короткого пропуска — `rhythm_settle_near`, растёт с дальностью скачка до `rhythm_settle_far` (на `rhythm_far_sec` и дальше, и при шаге назад); последний кусок — вывод, точка — `rhythm_tail` от этого; кусок до первого скачка — не короче `rhythm_settle_near` (вопрос-петля в начале может быть коротким). Клипы владельца: 48 из 66 без скачков, 12 с одним, 6 с двумя, с тремя нет; правило проходят все, кроме одного старого формата, где первые 3 с — крючок. Кусок, который не держит правило, дополняется соседними мыслями той же темы или убирается, если в нём нет зерна и вывода; иначе клип не предлагается и попадает в черновик отдельным списком. Проверка — на окончательном клипе, после начала и конца. `autocut.generator: mixed` — отрезок подряд (как passage) + вопрос-петля из другого места + вывод из более позднего места той же темы, если в отрезке вывода нет. При `start_judge: rank` сомнение — это ответ модели на ту первую фразу, с которой клип действительно начинается (m119: в заметку попадала причина правил с другой фразы).
++- **M127: рамка по лицу источника** (`framing_source_fallback`, `config/render.yaml`). Ролик, в своих кадрах которого лицо не нашлось (на Pxl 112938952 детектор видит говорящего примерно в половине кадров — 12 из 16 роликов остались с рамкой источника посередине, «на чайнике»), кадрируется по месту лица во всём источнике: кадры равномерно по видео, преобладающее место (то же правило групп, что у ролика). Рамка внутри ролика по-прежнему неподвижна.
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index ed8839d..9f115b2 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -1049,6 +1049,12 @@ class RenderConfig(BaseModel):
+     close_max_upscale: float = Field(2.5, ge=1)
+     close_max_scale: float = Field(1.6, ge=1)
+     close_min_scale: float = Field(1.15, ge=1)
++    # M127 (owner on Pxl 112938952 m125: «фокус взят на чайник» — 12 of 16 reels found no face of their own and kept
++    # the source's frame, the middle): a reel without its own face is framed on the speaker's place in the whole
++    # source (framing_source_samples frames, the dominant place seen in ≥ framing_source_min_faces). Off = as before.
++    framing_source_fallback: bool = False
++    framing_source_samples: int = Field(40, ge=1)
++    framing_source_min_faces: int = Field(4, ge=1)
+ 
+     @field_validator("shot_transition")
+     @classmethod
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 9c44270..5b28771 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -2460,7 +2460,30 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
+ 
+ 
+ 
+-def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg):
++def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
++    """M127 (owner on Pxl 20260621 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»; the
++    frontal-face finder sees this speaker in about half the frames, so 12 of 16 reels found no face of their own
++    and kept the source's frame — the middle, on the shelves): where the face is in the WHOLE source —
++    framing_source_samples frames spread over it, the dominant place (dominant_faces) when seen in at least
++    framing_source_min_faces of them. A reel without its own face is framed on it. None = not found."""
++    from autoreels.core.calibration import _median, dominant_faces
++    from autoreels.local.autocrop import _duration, reel_faces
++    n = int(getattr(render_cfg, "framing_source_samples", 40))
++    try:
++        dur = _duration(Path(source), "ffprobe")
++    except Exception:  # noqa: BLE001 — no duration: no source face
++        return None
++    found = reel_faces(source, [dur * (i + 0.5) / n for i in range(n)], (int(setup.frame[0]), int(setup.frame[1])),
++                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0))
++    if not found:
++        return None
++    dom = dominant_faces(found[0], setup.crop.w / 2)
++    if len(dom) < int(getattr(render_cfg, "framing_source_min_faces", 4)):
++        return None
++    return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4)) + (len(dom), n)
++
++
++def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg, source_face=None):
+     """M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания»): where the face is in
+     THIS reel — framing_samples frames spread over its body (the cold open, a teaser from its end, left out), the
+     source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
+@@ -2476,9 +2499,14 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
+         return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
+     faces, looked = found
+     face = reel_face(faces, looked, setup.crop.w / 2, min_share=float(getattr(render_cfg, "framing_min_share", 0.4)))
+-    if face is None:
++    if face is None and source_face is not None:
++        face = tuple(source_face[:4])     # M127: the speaker's place in the whole source
++        note = (f"лицо в {len(faces)} из {looked} кадров ролика — по лицу источника ({source_face[4]} из "
++                f"{source_face[5]} кадров, x {face[0]:g}, высота {face[3]:g})")
++    elif face is None:
+         return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
+-    note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
++    else:
++        note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
+     if not getattr(render_cfg, "reel_framing", False):
+         return setup, face, note
+     zone = float(getattr(render_cfg, "framing_center_zone", 0.15))
+@@ -2786,6 +2814,7 @@ def _render_segments(
+         batch_encoded_secs = 0.0
+         batch_start_wall = time.time()
+         _vf_base = vf          # M102: a reel may get its own frame (vf, setup) — reset for every reel
++        _src_face_cache: dict = {}   # M127: the speaker's place in the whole source, looked for once
+         for idx, reel in enumerate(manifest.reels, 1):
+             vf = _vf_base
+             _reel_setup = manifest.setup
+@@ -2858,8 +2887,14 @@ def _render_segments(
+             # --- M102: the reel's own frame and close shot from the face in its body (static, no tracking) ---
+             if (emit_text and vf and manifest.setup is not None
+                     and (getattr(render_cfg, "reel_framing", False) or getattr(render_cfg, "close_from_face", False))):
++                if getattr(render_cfg, "framing_source_fallback", False) and _src_face_cache.get(str(source), 0) == 0:
++                    _src_face_cache[str(source)] = _source_face(manifest.setup, source, ffmpeg_bin, render_cfg)
++                    _sf = _src_face_cache[str(source)]
++                    print("  лицо источника: " + (f"x {_sf[0]:g}, в {_sf[4]} из {_sf[5]} кадров" if _sf
++                                                  else "не найдено"), flush=True)
+                 _reel_setup, _reel_face, _fr_note = _reel_framing(
+-                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg)
++                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg,
++                    source_face=_src_face_cache.get(str(source)) or None)
+                 if _reel_setup is not manifest.setup:
+                     vf = _crop_vf(_reel_setup)
+                 print(f"  кадр {reel.id}: {_fr_note}", flush=True)
+diff --git a/tests/test_calibration_face.py b/tests/test_calibration_face.py
+index 4d18d49..6875ef8 100644
+--- a/tests/test_calibration_face.py
++++ b/tests/test_calibration_face.py
+@@ -100,3 +100,31 @@ def test_m102_the_close_shot_comes_from_the_face_and_does_not_go_soft():
+     assert z >= 1.15
+     c, _ = face_close_crop(hd, (660, 20, 120, 120), out_h=1920)      # at the corner: stays inside the wide frame
+     assert c.x == 656 and c.y == 0 and c.x + c.w <= 656 + 608
++
++
++def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypatch):
++    """M127 (owner on Pxl 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»)."""
++    from types import SimpleNamespace
++    from autoreels.core.models import Crop, SetupProfile
++    from autoreels.local import autocrop, render
++    setup = SetupProfile(setup_id="auto", crop=Crop(x=1312, y=0, w=1215, h=2160), scale=(1080, 1920),
++                         frame=(3840, 2160))
++    cfg = SimpleNamespace(framing_samples=7, framing_min_share=0.4, reel_framing=True, framing_center_zone=0.15,
++                          framing_source_samples=40, framing_source_min_faces=4)
++    reel = SimpleNamespace(cold_open=None)
++    segs = [SimpleNamespace(start=0.0, end=60.0)]
++    calls = []
++
++    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf=""):
++        calls.append(len(times))
++        if len(times) == 40:                                  # the whole source: the speaker left, 20 of 40 frames
++            return [(1100.0 + i % 3, 900.0, 300.0, 300.0) for i in range(20)] + [(2600.0, 800.0, 90.0, 90.0)] * 3, 40
++        return [(1100.0, 900.0, 300.0, 300.0)], 7               # the reel: 1 of 7 frames — not its own face
++    monkeypatch.setattr(autocrop, "reel_faces", fake_faces)
++    monkeypatch.setattr(autocrop, "_duration", lambda *a, **k: 3000.0)
++    sf = render._source_face(setup, "v.mp4", "ffmpeg", cfg)
++    assert sf[:4] == (1101.0, 900.0, 300.0, 300.0) and sf[4:] == (20, 40)
++    s2, face, note = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg, source_face=sf)
++    assert face == sf[:4] and s2.crop.x == 1101 - 607 and "по лицу источника" in note
++    s3, face3, note3 = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg)
++    assert s3 is setup and face3 is None and "рамка источника" in note3          # no source face = as before
+diff --git a/tests/test_render.py b/tests/test_render.py
+index 3b605ae..88eb949 100644
+--- a/tests/test_render.py
++++ b/tests/test_render.py
+@@ -3738,7 +3738,8 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
+         asked.append((list(times), frame_size))
+         return [face] * len(times), len(times)
+     monkeypatch.setattr(autocrop, "reel_faces", faces)
+-    cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True})
++    cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True,
++                                        "framing_source_fallback": False})   # M127: its own test
+     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o1", render_cfg=cfg, subtitles_cfg=subs_cfg)
+     cmd = " ".join(map(str, fake_ffmpeg[0]))
+     assert len(asked) == 1 and asked[0][1] == (3840, 2160) and len(asked[0][0]) == 7
