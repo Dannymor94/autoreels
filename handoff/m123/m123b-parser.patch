@@ -1,0 +1,87 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 5e90c58..878cee7 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -366,7 +366,7 @@ autocut:
+   rhythm_far_sec: 120
+   rhythm_tail: 0.5        # the last piece (the payoff) needs half of that
+   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+-  scenario_max_tokens: 6000   # arl autocut --scenario: the scenarist's answer (one line per reel)
++  scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
+   scenario_timeout_sec: 300   # … the whole talk in one request
+   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
+   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 6be5d07..3c5b00c 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -22,11 +22,16 @@ SCENARIO_SYSTEM = (
+     "but {jumps}. Use whole sentences only, in the numbering given. Each reel lasts {min_s}–{max_s} seconds (sum of "
+     "the seconds of its sentences). Reels do not share sentences. A teaser h: is one striking finished sentence from "
+     "the second half of the reel, replayed at its start — it must make sense heard cold. Write up to {n} reels, best "
+-    "first; fewer is fine, a weak reel is worse than none. One line per reel, nothing else:\n"
++    "first; fewer is fine, a weak reel is worse than none. Be brief: one line per reel, nothing else, every line "
++    "starting with «M |»:\n"
+     "M | <sentences in play order, e.g. 14.2-5 15.1-3> | h:<B.k> | t: <the subject in at most 6 Russian words from the "
+-    "reel> | why: <one Russian line: what it asks or promises → how it develops → how it lands>"
++    "reel> | why: <at most 15 Russian words: what it asks or promises → how it develops → how it lands>"
+ )
+ 
++# M123b (m123: Sonnet wrote «1 | 30.4-30.7 | …» — numbers instead of «M», ranges with the block repeated): a reel line
++# is any line whose first field is «M», «M3», «3», «3.» or «3)» (markdown backticks/stars around it allowed)
++REEL_LINE = re.compile(r"^\s*[`*]*\s*(?:M\s*\d*|\d+)\s*[.)]?\s*[`*]*\s*\|")
++
+ 
+ def jumps_rule(p: AutoParams) -> str:
+     if not p.rhythm:
+@@ -43,11 +48,11 @@ def numbered_text(rows: Sequence[tuple[str, float, str]]) -> str:
+ def expand_refs(field: str) -> list[str] | None:
+     """«14.2-5 15.1» → [14.2, 14.3, 14.4, 14.5, 15.1]; None when a piece is not «B.k» or «B.k-m»."""
+     out: list[str] = []
+-    for piece in field.replace(",", " ").split():
+-        m = re.fullmatch(r"(\w+)\.(\d+)(?:-(\d+))?", piece)
+-        if not m:
+-            return None
+-        a, z = int(m.group(2)), int(m.group(3) or m.group(2))
++    for piece in field.replace(",", " ").replace("–", "-").split():
++        m = re.fullmatch(r"(\w+)\.(\d+)(?:-(?:(\w+)\.)?(\d+))?", piece)
++        if not m or (m.group(3) and m.group(3) != m.group(1)):
++            return None                   # «14.5-15.2» crosses blocks: the size of 14 is unknown here
++        a, z = int(m.group(2)), int(m.group(4) or m.group(2))
+         if z < a:
+             return None
+         out += [f"{m.group(1)}.{k}" for k in range(a, z + 1)]
+@@ -80,8 +85,9 @@ def parse_scenarios(raw: str, known: set[str]) -> tuple[list[dict], list[str]]:
+     out, bad, used = [], [], set()
+     for ln in (raw or "").splitlines():
+         ln = ln.strip().strip("`")
+-        if not re.match(r"^M\d*\s*\|", ln):
++        if not REEL_LINE.match(ln):
+             continue
++        ln = ln.strip("*").strip()
+         parts = [x.strip() for x in ln.split("|")]
+         refs = expand_refs(parts[1]) if len(parts) > 1 else None
+         if not refs:
+diff --git a/tests/test_scenario.py b/tests/test_scenario.py
+index 0f7b5cd..d0aa4fc 100644
+--- a/tests/test_scenario.py
++++ b/tests/test_scenario.py
+@@ -89,3 +89,18 @@ def test_cmd_autocut_scenario_takes_the_models_lines_and_lists_the_rest(tmp_path
+     assert rc == 0 and len(asked) == 1 and "ответ из кэша" in capsys.readouterr().out   # not asked twice
+     assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                            llm="cloud") == 1                                       # the model must be named
++
++
++def test_m123b_reel_lines_in_the_forms_the_model_writes():
++    """m123: Sonnet wrote «1 | 30.4-30.7 | …» — a number for «M» and the block repeated in a range; the answer was cut
++    at max_tokens, its last line half written."""
++    from autoreels.cloud.scenario import REEL_LINE
++    assert all(REEL_LINE.match(s) for s in ("M | 1.1", "M3 | 1.1", "1 | 1.1", "3. | 1.1", "12) | 1.1", "**M2** | 1.1"))
++    assert not REEL_LINE.match("Вот | 1.1") and not REEL_LINE.match("Ролики:")
++    assert expand_refs("30.4-30.7") == ["30.4", "30.5", "30.6", "30.7"] and expand_refs("30.4–5") == ["30.4", "30.5"]
++    assert expand_refs("14.5-15.2") is None
++    known = {"30.4", "30.5", "30.6", "30.7", "31.1", "31.2"}
++    scens, bad = parse_scenarios("1 | 30.4-30.7 | h:30.6 | t: Тема | why: a → b\n**2** | 31.1 | t: Б | why: c\n3 | 31.2-31",
++                                 known)
++    assert [s["refs"] for s in scens] == [["30.4", "30.5", "30.6", "30.7"], ["31.1"]] and scens[0]["hook"] == "30.6"
++    assert len(bad) == 1                                              # the cut last line goes, with its reason
