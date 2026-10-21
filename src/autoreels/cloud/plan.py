@@ -69,6 +69,14 @@ class ManualPlanParams:
     # every cut, masked or not, stays at least this far from any other picture change (a seam, a shot
     # switch, another cut) — no bursts of jumps. 0 = off (the previous cuts).
     change_gap_sec: float = 0.0
+    # M126 (owner: «много вводных слов у человека, который говорит»; «2 можно делать не часто, иначе вернётся
+    # дёрганье»): standalone filler words (filler_words, a phrase between punctuation or sentence edges — never one
+    # that carries the clause) — hidden from the subtitles (subs_hide_fillers; the sound keeps them) and/or cut from
+    # the sound (filler_word_cut: a candidate of the filler cut, under its spacing, jump, mask and share rules, so
+    # rarely). Both off = the previous output.
+    filler_words: tuple = ()
+    subs_hide_fillers: bool = False
+    filler_word_cut: bool = False
     # M79 (owner on PXL_20260729_copy r07: the interviewer «зависает на несколько секунд между слов» — a thinking
     # pause the profile left in because the face moved during it): a pause at least this long is always shortened —
     # a visible jump is masked by a wide↔close switch, the spacing rules (min_cut_spacing_sec, change_gap_sec,
@@ -107,6 +115,7 @@ class PlannedWindow:
     cuts_spaced: int = 0              # M72: candidate cuts left in: too close to another picture change
     cuts_long: int = 0                # M79: long pauses cut whatever the spacing / jump rules said
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
+    word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
 
     @property
     def last_shot(self) -> str:
@@ -750,6 +759,65 @@ def _limit_static(times: SpeechTimes, sentences, w: "PlannedWindow", ci: list[li
     return out
 
 
+_PUNCT_END = (",", ".", "!", "?", ";", ":", "…", "—", "–")
+
+
+def _fold(word: str) -> str:
+    return "".join(c for c in word.lower().replace("ё", "е") if c.isalnum() or c == "-")
+
+
+def standalone_fillers(sentence: Sequence[Word], filler_words) -> list[tuple[int, int]]:
+    """M126: (first, last) word indexes of the standalone filler phrases of a sentence — a phrase of filler_words that
+    starts the sentence or follows a punctuation mark, and ends the sentence or carries one («Ну, …», «…, вот, …»,
+    «…, как бы, …»). «Вот этот дом», «как бы ни было» are not standalone and stay."""
+    phrases = sorted({tuple(_fold(x) for x in str(p).split()) for p in filler_words if str(p).strip()},
+                     key=len, reverse=True)
+    words = list(sentence)
+    folded = [_fold(w.word) for w in words]
+    out, i = [], 0
+    while i < len(words):
+        hit = None
+        for ph in phrases:
+            j = i + len(ph) - 1
+            if j < len(words) and tuple(folded[i:j + 1]) == ph \
+                    and (i == 0 or words[i - 1].word.rstrip().endswith(_PUNCT_END)) \
+                    and (j == len(words) - 1 or words[j].word.rstrip().endswith(_PUNCT_END)):
+                hit = (i, j)
+                break
+        if hit and hit != (0, len(words) - 1):       # a sentence that is only a filler stays (it is the sentence)
+            out.append(hit)
+            i = hit[1] + 1
+        else:
+            i += 1
+    return out
+
+
+def hide_fillers(sentence: Sequence[Word], filler_words) -> list[Word]:
+    """M126: the sentence's words for the subtitles without its standalone fillers — a sentence-ending mark moves to
+    the word before, the word after a hidden sentence start gets a capital («Ну, я думаю.» → «Я думаю.»)."""
+    words = list(sentence)
+    spans = standalone_fillers(words, filler_words)
+    if not spans:
+        return words
+    drop = {k for a, b in spans for k in range(a, b + 1)}
+    out: list[Word] = []
+    cap_next = False
+    for k, w in enumerate(words):
+        if k in drop:
+            end = w.word.rstrip()
+            if k == len(words) - 1 and out and end.endswith((".", "!", "?", "…")):
+                prev = out[-1]
+                out[-1] = prev.model_copy(update={"word": prev.word.rstrip().rstrip(",;:—–") + end[-1]})
+            if k == 0 or (k > 0 and (k - 1) not in drop and words[k - 1].word.rstrip().endswith((".", "!", "?"))):
+                cap_next = cap_next or (w.word[:1].isupper())
+            continue
+        if cap_next and w.word[:1].islower():
+            w = w.model_copy(update={"word": w.word[:1].upper() + w.word[1:]})
+        cap_next = False
+        out.append(w)
+    return out
+
+
 def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "ManualPlanParams",
                  jump: Callable[[float, float], float] | None = None) -> list[list[float]]:
     """Cuts of the window (sorted); masked ones are also recorded in w.cut_flips."""
@@ -794,6 +862,32 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         if times.heard_between(a, b) is not None:
             continue
         cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, u_len))
+    # M126: standalone filler words — the stretch from the word before to the word after goes (their sound only)
+    word_cand: dict[tuple[float, float], set[int]] = {}
+    if params.filler_word_cut and params.filler_words:
+        for n in w.sentences:
+            s = sentences[n - 1]
+            for i, j in standalone_fillers(s, params.filler_words):
+                prev_w = s[i - 1] if i > 0 else (sentences[n - 2][-1] if n - 2 >= 0 and (n - 1) in w.sentences
+                                                 else None)
+                next_w = s[j + 1] if j + 1 < len(s) else (sentences[n][0] if n < len(sentences) and (n + 1) in
+                                                          w.sentences else None)
+                if prev_w is None or next_w is None:
+                    continue              # never at a window edge: the window's start and end stay where they are
+                ae = times.pair(prev_w, s[i])[0]
+                as_ = times.pair(s[j], next_w)[1]
+                f0, f1 = times.span(s[i])[0], times.span(s[j])[1]
+                end_of_sentence = s[j].word.rstrip().endswith((".", "!", "?", "…"))
+                half = (params.keep_sentence_sec if end_of_sentence else params.keep_word_sec) / 2
+                a = ae + max(params.edge_min_sec, min(half, max(0.0, f0 - ae)))
+                b = as_ - max(params.edge_min_sec, min(half, max(0.0, as_ - f1)))
+                if b - a < params.min_cut_sec or a > f0 + _EPS or b < f1 - _EPS:
+                    continue
+                if times.heard_between(a, f0) is not None or times.heard_between(f1, b) is not None:
+                    continue              # another word's sound is in the stretch: the filler stays
+                key = (round(a, 3), round(b, 3))
+                word_cand[key] = {round(x.t0 * 1000) for x in s[i:j + 1]}
+                cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, f1 - f0))
     # shot changes already in the window (its start is a seam; close spans switch in and out)
     changes = [w.start] + [w.start + x for ci in w.close_intervals for x in ci]
     budget = params.max_removed_share * (w.end - w.start)
@@ -834,6 +928,7 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         budget -= b - a
     keep.sort()
     w.cut_flips = sorted(flips)
+    w.word_cuts = {k for c in keep for k in word_cand.get((c[0], c[1]), set())}
     return keep
 
 
@@ -1191,9 +1286,12 @@ def build_manual_plan(
         pieces = w.pieces()
         prev_t0 = None
         for n in w.sentences:
-            for word in sentences[n - 1]:
+            shown = sentences[n - 1]
+            if params.subs_hide_fillers and params.filler_words:    # M126: the screen without the fillers
+                shown = hide_fillers(shown, params.filler_words)
+            for word in shown:
                 key = round(word.t0 * 1000)
-                if key in subs:
+                if key in subs or key in w.word_cuts:              # M126: a filler whose sound is cut is not shown
                     continue
                 if prev_t0 is not None and word.t0 < prev_t0:
                     word = word.model_copy(update={"t0": prev_t0, "t1": max(word.t1, prev_t0)})

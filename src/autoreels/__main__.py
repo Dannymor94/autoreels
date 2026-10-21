@@ -5335,6 +5335,9 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
         filler_cut=bool(getattr(r0_cfg, "manual_filler_cut", False) if filler_cut is None else filler_cut),
         break_pad_sec=getattr(getattr(r0_cfg, "montage", None), "seam_pad_sec", 0.20),
         long_pause_sec=float(getattr(r0_cfg, "long_pause_sec", 0.0) or 0.0),
+        filler_words=tuple(getattr(getattr(r0_cfg, "filler_removal", None), "filler_words", None) or ()),
+        subs_hide_fillers=bool(getattr(r0_cfg, "subtitles_hide_fillers", False)),
+        filler_word_cut=bool(getattr(r0_cfg, "filler_word_cut", False)),
         **_filler_profile_values(r0_cfg, filler_profile),
     )
 

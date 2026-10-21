@@ -350,3 +350,47 @@ def test_a_long_thinking_pause_is_always_shortened():
     assert len(w.cuts) == 1 and w.cuts[0][0] > 0.8 and w.cuts[0][1] < 4.3 and w.cuts[0][1] - w.cuts[0][0] > 3.0
     assert w.cut_flips == w.cuts and w.cuts_long == 1          # masked by a shot switch
     assert "1 long pause(s) always cut" in " ".join(plan.describe(sents))
+
+
+# M126 (owner: «много вводных слов у человека, который говорит»; «можно не часто, иначе вернётся дёрганье»)
+FW = ("ну", "вот", "как бы", "значит")
+SPEC_FW = [[("Ну,", 0.0, 0.3), ("я", 0.6, 0.8), ("думаю,", 0.8, 1.3), ("как", 1.6, 1.8), ("бы,", 1.8, 2.1),
+            ("это", 2.4, 2.7), ("важно.", 2.7, 3.4)],
+           [("Вот", 4.0, 4.3), ("этот", 4.3, 4.6), ("дом", 4.6, 5.0), ("стоит,", 5.0, 5.6), ("вот.", 5.9, 6.3)]]
+
+
+def test_m126_standalone_fillers_only():
+    from autoreels.cloud.plan import hide_fillers, standalone_fillers
+    sents, *_ = _setup(SPEC_FW, [])
+    assert standalone_fillers(sents[0], FW) == [(0, 0), (3, 4)]          # «Ну,» opens, «как бы,» between commas
+    assert standalone_fillers(sents[1], FW) == [(4, 4)]                  # «Вот этот дом» carries the clause
+    assert [w.word for w in hide_fillers(sents[0], FW)] == ["Я", "думаю,", "это", "важно."]
+    assert [w.word for w in hide_fillers(sents[1], FW)] == ["Вот", "этот", "дом", "стоит."]
+    only = [Word(word="Вот.", t0=0.0, t1=0.3)]
+    assert hide_fillers(only, FW) == only                                # a sentence that is only a filler stays
+
+
+def test_m126_subtitles_hide_fillers_and_the_sound_keeps_them():
+    sents, words, smap, align = _setup(SPEC_FW, [])
+    p = ManualPlanParams(filler_words=FW, subs_hide_fillers=True)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align)
+    assert [s.word for s in plan.subtitles] == ["Я", "думаю,", "это", "важно.", "Вот", "этот", "дом", "стоит."]
+    assert plan.body[0].cuts == []                                       # nothing cut from the sound
+    off = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=ManualPlanParams(filler_words=FW),
+                            align=align)
+    assert len(off.subtitles) == len(words)                              # off = as before
+
+
+def test_m126_filler_words_cut_from_the_sound_rarely_and_not_at_the_edges():
+    sents, words, smap, align = _setup(SPEC_FW, [])
+    p = ManualPlanParams(filler_cut=True, filler_words=FW, filler_word_cut=True, pause_max_sec=10.0)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align).body[0]
+    # «Ну,» opens the window and «вот.» ends it — never cut; «как бы,» goes, from «думаю,» to «это»
+    assert len(w.cuts) == 1 and 1.3 <= w.cuts[0][0] <= 1.6 and 2.1 <= w.cuts[0][1] <= 2.4
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align)
+    assert "как" not in [s.word for s in plan.subtitles] and "бы," not in [s.word for s in plan.subtitles]
+    rare = ManualPlanParams(filler_cut=True, filler_words=FW, filler_word_cut=True, pause_max_sec=10.0,
+                            change_gap_sec=6.0)
+    assert build_manual_plan(sents, [1, 2], words=words, smap=smap, params=rare, align=align).body[0].cuts == []
+    keep = ManualPlanParams(filler_cut=True, filler_words=FW, pause_max_sec=10.0)
+    assert build_manual_plan(sents, [1, 2], words=words, smap=smap, params=keep, align=align).body[0].cuts == []
