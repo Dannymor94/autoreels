@@ -86,18 +86,68 @@ def _faces_at(cascade, video, times, frame_size: tuple[int, int], ffmpeg: str, p
     return faces
 
 
-def reel_faces(video, times, frame_size: tuple[int, int], *, ffmpeg: str = "ffmpeg",
-               pre_vf: str = "") -> tuple[list, int] | None:
-    """M102: faces in the frames of one reel (`times` — source seconds, e.g. cover_candidates over its body), the
-    source in display orientation with the reel's rotation (`pre_vf`, as render applies it before the crop) —
-    (faces, frames looked at), or None without OpenCV. No cache: a handful of frames, the same frames → the same
-    faces."""
+def _color_frame(video: Path, t: float, size: tuple[int, int], ffmpeg: str, pre_vf: str = ""):
+    import numpy as np
+    w, h = size
+    vf = f"scale={w}:{h},format=bgr24"
+    cmd = [ffmpeg, "-v", "error", "-ss", f"{t:.3f}", "-i", str(video), "-frames:v", "1", "-an",
+           "-vf", f"{pre_vf},{vf}" if pre_vf else vf, "-f", "rawvideo", "pipe:1"]
+    raw = subprocess.run(cmd, capture_output=True, check=True).stdout
+    if len(raw) < w * h * 3:
+        return None
+    return np.frombuffer(raw[: w * h * 3], dtype=np.uint8).reshape(h, w, 3)
+
+
+def yunet_model(path) -> "Path | None":
+    """M129: the YuNet face model file when it is there and this OpenCV has FaceDetectorYN, else None."""
     try:
         import cv2
     except ImportError:
         return None
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    p = Path(path) if path else None
+    return p if p is not None and p.is_file() and hasattr(cv2, "FaceDetectorYN") else None
+
+
+def _yunet_faces_at(model: Path, video, times, frame_size: tuple[int, int], ffmpeg: str, pre_vf: str = "",
+                    score: float = 0.7) -> list:
+    """M129 (m128 on Pxl 112938952: the Haar cascade found the speaker in 5 of 12 frames, its biggest find was the
+    shelf of teapots — x 894, 668 px high, no eye — and M102 framed the reels there; YuNet found the face in 12 of
+    12, score ≥ 0.84): the largest YuNet face of each frame at `times`, as (cx, cy, w, h) in display px of
+    frame_size; frames without a face are left out. Frames ≤ 960 px wide (the boxes scaled back)."""
+    import cv2
+    W, H = frame_size
+    sw = min(960, W)
+    sw -= sw % 2
+    sh = int(round(H * sw / W / 2)) * 2
+    k = W / sw
+    det = cv2.FaceDetectorYN.create(str(model), "", (sw, sh), score)
+    faces: list[tuple[float, float, float, float]] = []
+    for t in times:
+        img = _color_frame(Path(video), t, (sw, sh), ffmpeg, pre_vf)
+        if img is None:
+            continue
+        _, found = det.detect(img)
+        if found is not None and len(found):
+            x, y, w, h = (float(v) for v in max(found, key=lambda f: float(f[2]) * float(f[3]))[:4])
+            faces.append((round((x + w / 2) * k, 1), round((y + h / 2) * k, 1), round(w * k, 1), round(h * k, 1)))
+    return faces
+
+
+def reel_faces(video, times, frame_size: tuple[int, int], *, ffmpeg: str = "ffmpeg",
+               pre_vf: str = "", model=None) -> tuple[list, int] | None:
+    """M102: faces in the frames of one reel (`times` — source seconds, e.g. cover_candidates over its body), the
+    source in display orientation with the reel's rotation (`pre_vf`, as render applies it before the crop) —
+    (faces, frames looked at), or None without OpenCV. M129: with `model` (yunet_model) the YuNet detector, else the
+    Haar cascade as before. No cache: a handful of frames, the same frames → the same faces."""
+    try:
+        import cv2
+    except ImportError:
+        return None
     times = list(times)
+    m = yunet_model(model) if model else None
+    if m is not None:
+        return _yunet_faces_at(m, video, times, frame_size, ffmpeg, pre_vf), len(times)
+    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     return _faces_at(cascade, video, times, frame_size, ffmpeg, pre_vf), len(times)
 
 

@@ -263,3 +263,8 @@ close_from_face: true
 # the frames, 12 of 16 reels kept the source's middle frame): a reel that finds no face of its own is framed on the
 # speaker's place in the whole source (40 frames over it; numbers: core/config.py RenderConfig M127).
 framing_source_fallback: true
+# M129 (m128: on Pxl 112938952 the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye; YuNet found the
+# speaker in 12 of 12, score ≥ 0.84): the reel framing looks for faces with YuNet. The file is fetched once (opencv_zoo,
+# ~230 KB): curl -L -o data/models/face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+# — no file = the Haar cascade, as before.
+face_model: data/models/face_detection_yunet_2023mar.onnx

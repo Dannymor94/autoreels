@@ -2460,6 +2460,15 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
 
 
 
+def _face_model(render_cfg):
+    """M129: the YuNet model file of render.yaml face_model (relative to the project), or None — the Haar cascade."""
+    name = getattr(render_cfg, "face_model", "") or ""
+    if not name:
+        return None
+    p = Path(name)
+    return p if p.is_absolute() else Path(__file__).resolve().parents[3] / p
+
+
 def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
     """M127 (owner on Pxl 20260621 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»; the
     frontal-face finder sees this speaker in about half the frames, so 12 of 16 reels found no face of their own
@@ -2474,7 +2483,8 @@ def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
     except Exception:  # noqa: BLE001 — no duration: no source face
         return None
     found = reel_faces(source, [dur * (i + 0.5) / n for i in range(n)], (int(setup.frame[0]), int(setup.frame[1])),
-                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0))
+                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
+                       model=_face_model(render_cfg))
     if not found:
         return None
     dom = dominant_faces(found[0], setup.crop.w / 2)
@@ -2494,7 +2504,8 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
     n = int(getattr(render_cfg, "framing_samples", 7))
     times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
     found = reel_faces(source, times, (int(setup.frame[0]), int(setup.frame[1])), ffmpeg=ffmpeg,
-                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0)) if times else None
+                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
+                       model=_face_model(render_cfg)) if times else None
     if found is None:
         return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
     faces, looked = found

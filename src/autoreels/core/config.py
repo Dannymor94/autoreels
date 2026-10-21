@@ -1055,6 +1055,9 @@ class RenderConfig(BaseModel):
     framing_source_fallback: bool = False
     framing_source_samples: int = Field(40, ge=1)
     framing_source_min_faces: int = Field(4, ge=1)
+    # M129 (m128 on Pxl 112938952: the Haar cascade framed the reels on a shelf of teapots, YuNet found the face in 12 of
+    # 12 frames): the YuNet face model (OpenCV FaceDetectorYN) for the reel framing; "" or no file = the Haar cascade
+    face_model: str = ""
 
     @field_validator("shot_transition")
     @classmethod

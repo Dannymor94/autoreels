@@ -115,7 +115,7 @@ def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypa
     segs = [SimpleNamespace(start=0.0, end=60.0)]
     calls = []
 
-    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf=""):
+    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf="", model=None):
         calls.append(len(times))
         if len(times) == 40:                                  # the whole source: the speaker left, 20 of 40 frames
             return [(1100.0 + i % 3, 900.0, 300.0, 300.0) for i in range(20)] + [(2600.0, 800.0, 90.0, 90.0)] * 3, 40
@@ -128,3 +128,22 @@ def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypa
     assert face == sf[:4] and s2.crop.x == 1101 - 607 and "по лицу источника" in note
     s3, face3, note3 = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg)
     assert s3 is setup and face3 is None and "рамка источника" in note3          # no source face = as before
+
+
+def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, monkeypatch):
+    """M129 (m128 on Pxl 112938952: the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye —
+    YuNet found the speaker in 12 of 12): reel_faces uses YuNet with a model file, the Haar cascade without one."""
+    from types import SimpleNamespace
+    from autoreels.local import autocrop, render
+    used = []
+    monkeypatch.setattr(autocrop, "_yunet_faces_at", lambda m, v, ts, fs, ff, pv="": used.append("yunet") or
+                        [(1850.0, 700.0, 210.0, 210.0)] * len(ts))
+    monkeypatch.setattr(autocrop, "_faces_at", lambda c, v, ts, fs, ff, pv="": used.append("haar") or [])
+    model = tmp_path / "yunet.onnx"
+    assert autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model) == ([], 2)          # no file yet
+    model.write_bytes(b"x")
+    faces, n = autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model)
+    assert used == ["haar", "yunet"] and n == 2 and faces[0][0] == 1850.0
+    assert render._face_model(SimpleNamespace(face_model="")) is None
+    rel = render._face_model(SimpleNamespace(face_model="data/models/m.onnx"))
+    assert rel.is_absolute() and rel.parts[-3:] == ("data", "models", "m.onnx")
