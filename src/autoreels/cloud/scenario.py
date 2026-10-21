@@ -22,10 +22,15 @@ SCENARIO_SYSTEM = (
     "but {jumps}. Use whole sentences only, in the numbering given. Each reel lasts {min_s}–{max_s} seconds (sum of "
     "the seconds of its sentences). Reels do not share sentences. A teaser h: is one striking finished sentence from "
     "the second half of the reel, replayed at its start — it must make sense heard cold. Write up to {n} reels, best "
-    "first; fewer is fine, a weak reel is worse than none. One line per reel, nothing else:\n"
+    "first; fewer is fine, a weak reel is worse than none. Be brief: one line per reel, nothing else, every line "
+    "starting with «M |»:\n"
     "M | <sentences in play order, e.g. 14.2-5 15.1-3> | h:<B.k> | t: <the subject in at most 6 Russian words from the "
-    "reel> | why: <one Russian line: what it asks or promises → how it develops → how it lands>"
+    "reel> | why: <at most 15 Russian words: what it asks or promises → how it develops → how it lands>"
 )
+
+# M123b (m123: Sonnet wrote «1 | 30.4-30.7 | …» — numbers instead of «M», ranges with the block repeated): a reel line
+# is any line whose first field is «M», «M3», «3», «3.» or «3)» (markdown backticks/stars around it allowed)
+REEL_LINE = re.compile(r"^\s*[`*]*\s*(?:M\s*\d*|\d+)\s*[.)]?\s*[`*]*\s*\|")
 
 
 def jumps_rule(p: AutoParams) -> str:
@@ -43,11 +48,11 @@ def numbered_text(rows: Sequence[tuple[str, float, str]]) -> str:
 def expand_refs(field: str) -> list[str] | None:
     """«14.2-5 15.1» → [14.2, 14.3, 14.4, 14.5, 15.1]; None when a piece is not «B.k» or «B.k-m»."""
     out: list[str] = []
-    for piece in field.replace(",", " ").split():
-        m = re.fullmatch(r"(\w+)\.(\d+)(?:-(\d+))?", piece)
-        if not m:
-            return None
-        a, z = int(m.group(2)), int(m.group(3) or m.group(2))
+    for piece in field.replace(",", " ").replace("–", "-").split():
+        m = re.fullmatch(r"(\w+)\.(\d+)(?:-(?:(\w+)\.)?(\d+))?", piece)
+        if not m or (m.group(3) and m.group(3) != m.group(1)):
+            return None                   # «14.5-15.2» crosses blocks: the size of 14 is unknown here
+        a, z = int(m.group(2)), int(m.group(4) or m.group(2))
         if z < a:
             return None
         out += [f"{m.group(1)}.{k}" for k in range(a, z + 1)]
@@ -80,8 +85,9 @@ def parse_scenarios(raw: str, known: set[str]) -> tuple[list[dict], list[str]]:
     out, bad, used = [], [], set()
     for ln in (raw or "").splitlines():
         ln = ln.strip().strip("`")
-        if not re.match(r"^M\d*\s*\|", ln):
+        if not REEL_LINE.match(ln):
             continue
+        ln = ln.strip("*").strip()
         parts = [x.strip() for x in ln.split("|")]
         refs = expand_refs(parts[1]) if len(parts) > 1 else None
         if not refs:

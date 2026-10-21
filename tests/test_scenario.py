@@ -89,3 +89,18 @@ def test_cmd_autocut_scenario_takes_the_models_lines_and_lists_the_rest(tmp_path
     assert rc == 0 and len(asked) == 1 and "ответ из кэша" in capsys.readouterr().out   # not asked twice
     assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
                            llm="cloud") == 1                                       # the model must be named
+
+
+def test_m123b_reel_lines_in_the_forms_the_model_writes():
+    """m123: Sonnet wrote «1 | 30.4-30.7 | …» — a number for «M» and the block repeated in a range; the answer was cut
+    at max_tokens, its last line half written."""
+    from autoreels.cloud.scenario import REEL_LINE
+    assert all(REEL_LINE.match(s) for s in ("M | 1.1", "M3 | 1.1", "1 | 1.1", "3. | 1.1", "12) | 1.1", "**M2** | 1.1"))
+    assert not REEL_LINE.match("Вот | 1.1") and not REEL_LINE.match("Ролики:")
+    assert expand_refs("30.4-30.7") == ["30.4", "30.5", "30.6", "30.7"] and expand_refs("30.4–5") == ["30.4", "30.5"]
+    assert expand_refs("14.5-15.2") is None
+    known = {"30.4", "30.5", "30.6", "30.7", "31.1", "31.2"}
+    scens, bad = parse_scenarios("1 | 30.4-30.7 | h:30.6 | t: Тема | why: a → b\n**2** | 31.1 | t: Б | why: c\n3 | 31.2-31",
+                                 known)
+    assert [s["refs"] for s in scens] == [["30.4", "30.5", "30.6", "30.7"], ["31.1"]] and scens[0]["hook"] == "30.6"
+    assert len(bad) == 1                                              # the cut last line goes, with its reason

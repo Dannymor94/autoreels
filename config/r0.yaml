@@ -366,7 +366,7 @@ autocut:
   rhythm_far_sec: 120
   rhythm_tail: 0.5        # the last piece (the payoff) needs half of that
   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
-  scenario_max_tokens: 6000   # arl autocut --scenario: the scenarist's answer (one line per reel)
+  scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
   scenario_timeout_sec: 300   # … the whole talk in one request
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
