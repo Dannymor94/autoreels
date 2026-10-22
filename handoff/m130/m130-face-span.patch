@@ -1,0 +1,149 @@
+diff --git a/config/render.yaml b/config/render.yaml
+index 6824961..ac4f489 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -268,3 +268,6 @@ framing_source_fallback: true
+ # ~230 KB): curl -L -o data/models/face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+ # — no file = the Haar cascade, as before.
+ face_model: data/models/face_detection_yunet_2023mar.onnx
++# M130 (owner on Pxl r06: «в этом кадре нет фокуса на человеке» — he leaned out of the close shot): the frames of a
++# reel keep the whole way its face goes (the close shot zooms out to hold it); more frames looked at to see it.
++framing_samples: 15
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 36ccd3d..23f6733 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -140,7 +140,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M119 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** `autocut.generator: passage` — клип — отрезок подряд идущих мыслей одной темы вокруг сильной (m118: 60 из 66 клипов владельца — один отрезок разговора внутри одной темы, 1–5 соседних мыслей; сборка из разных мест не строилась у половины зёрен — мысль со сноской тянула всю цепочку). Отрезок растёт по одной соседней мысли: после вопроса — вперёд, пока первая мысль опирается на предыдущую — назад, иначе к более сильной соседней; соседняя мысль той же темы, не дальше `passage_gap_sec`, не в другом клипе; слабая мысль может стоять внутри, не на краю. Вопроса-петли из другого места и выбрасывания мыслей из середины нет, клипы не делят мыслей. `autocut.lean_depth: 1` — в сборке из разных мест мысль берёт с собой только ту, на которую опирается, а не всю цепочку сносок (карта помечает 71% мыслей IMG_6848 как опирающиеся на предыдущую — цепочки шли через 16 мыслей или через слабую; начало первой мысли по-прежнему проверяют правила начала). `autocut.seed_roles` — роли, вокруг которых растёт клип (пусто — тезис, вывод, пример, образ, вопрос). `autocut.start_judge: rank` — если начало принимают правила, а модель против, клип остаётся и идёт после чистых (инвариант 1: модель только ранжирует; m118: судьи принимали 22–46% начал самого владельца). `autocut.clips_every_min` — сборок не меньше, чем минут источника ÷ это число. `arl autocut … --ac ключ=значение` — любое поле `autocut:` на один запуск, файл конфига не меняется.
+ - **M120 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** правило скачков `autocut.rhythm` (владелец: «перестановки можно, но без частых быстрых скачков; гибкий алгоритм кусков»). Скачок — промежуток в исходнике больше `rhythm_jump_sec` между соседними мыслями клипа или шаг назад. Скачков не больше `rhythm_max_jumps`; кусок после скачка длится не меньше, чем нужно зрителю, чтобы «осесть»: после короткого пропуска — `rhythm_settle_near`, растёт с дальностью скачка до `rhythm_settle_far` (на `rhythm_far_sec` и дальше, и при шаге назад); последний кусок — вывод, точка — `rhythm_tail` от этого; кусок до первого скачка — не короче `rhythm_settle_near` (вопрос-петля в начале может быть коротким). Клипы владельца: 48 из 66 без скачков, 12 с одним, 6 с двумя, с тремя нет; правило проходят все, кроме одного старого формата, где первые 3 с — крючок. Кусок, который не держит правило, дополняется соседними мыслями той же темы или убирается, если в нём нет зерна и вывода; иначе клип не предлагается и попадает в черновик отдельным списком. Проверка — на окончательном клипе, после начала и конца. `autocut.generator: mixed` — отрезок подряд (как passage) + вопрос-петля из другого места + вывод из более позднего места той же темы, если в отрезке вывода нет. При `start_judge: rank` сомнение — это ответ модели на ту первую фразу, с которой клип действительно начинается (m119: в заметку попадала причина правил с другой фразы).
+ - **M127: рамка по лицу источника** (`framing_source_fallback`, `config/render.yaml`). Ролик, в своих кадрах которого лицо не нашлось (на Pxl 112938952 детектор видит говорящего примерно в половине кадров — 12 из 16 роликов остались с рамкой источника посередине, «на чайнике»), кадрируется по месту лица во всём источнике: кадры равномерно по видео, преобладающее место (то же правило групп, что у ролика). Рамка внутри ролика по-прежнему неподвижна.
+-- **M127/M129: рамка по лицу.** Ролик без своего лица кадрируется по месту лица во всём источнике (`framing_source_fallback`). Лица для рамки ищет нейросетевой детектор YuNet (`face_model`, `config/render.yaml`; m128 на Pxl 112938952: каскад Хаара находил говорящего в 5 из 12 кадров, а самой большой его находкой была полка с чайниками — рамки уходили туда; YuNet — 12 из 12). Нет файла модели — каскад Хаара, как раньше.
++- **M127/M129: рамка по лицу.** Ролик без своего лица кадрируется по месту лица во всём источнике (`framing_source_fallback`). Лица для рамки ищет нейросетевой детектор YuNet (`face_model`, `config/render.yaml`; m128 на Pxl 112938952: каскад Хаара находил говорящего в 5 из 12 кадров, а самой большой его находкой была полка с чайниками — рамки уходили туда; YuNet — 12 из 12). Нет файла модели — каскад Хаара, как раньше. **M130:** рамки ролика держат весь путь его лица — от самого левого до самого правого положения в кадрах ролика (`framing_samples`); крупный план отъезжает настолько, чтобы его вместить, не меньше `close_min_scale` (владелец о Pxl r06: говорящий наклонился и вышел из крупного плана).
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/src/autoreels/core/calibration.py b/src/autoreels/core/calibration.py
+index 4570c7e..4a5a7af 100644
+--- a/src/autoreels/core/calibration.py
++++ b/src/autoreels/core/calibration.py
+@@ -356,14 +356,30 @@ def reel_face(faces, samples: int, gap: float, *, min_share: float = 0.4) -> tup
+     return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4))
+ 
+ 
++def reel_face_span(faces, gap: float) -> tuple[float, float] | None:
++    """M130: how far the speaker's face goes across in one reel — (leftmost, rightmost edge) of the face boxes of the
++    dominant place (dominant_faces); None for no face."""
++    dom = dominant_faces(faces, gap)
++    if not dom:
++        return None
++    return (round(min(float(f[0]) - float(f[2]) / 2 for f in dom), 1),
++            round(max(float(f[0]) + float(f[2]) / 2 for f in dom), 1))
++
++
+ def reel_crop(base: Crop, frame_size: tuple[int, int], face, *, center_zone: float = 0.15) -> Crop:
+     """M102 (owner: «чтобы кадры подбирались автоматически»): the reel's own frame — the source's crop (calibration,
+     manual or by face) moved sideways so the face of THIS reel is in its middle, when the face is more than
+     center_zone of the crop width away from the middle. Static within the reel — no tracking (CLAUDE.md). No face
+     (None) or a face near the middle — the source's crop as is (a manual calibration stays unless it misses)."""
+-    if face is None or abs(float(face[0]) - (base.x + base.w / 2)) <= center_zone * base.w:
++    if face is None:
++        return base
++    span = (float(face[4]), float(face[5])) if len(face) >= 6 else None
++    inside = span is None or (base.x <= span[0] and span[1] <= base.x + base.w)
++    if abs(float(face[0]) - (base.x + base.w / 2)) <= center_zone * base.w and inside:
+         return base
+     x = int(round(float(face[0]) - base.w / 2))
++    if span is not None and span[1] - span[0] <= base.w:      # M130: the whole way the face goes stays in the frame
++        x = int(min(max(x, span[1] - base.w), span[0]))
+     x = max(0, min(int(frame_size[0]) - base.w, x))
+     return base if x == base.x else Crop(x=x, y=base.y, w=base.w, h=base.h)
+ 
+@@ -376,10 +392,15 @@ def face_close_crop(wide: Crop, face, *, out_h: int, face_h: float = 0.28, face_
+     max_upscale (the picture would go soft), at least min_scale (else the switch is not seen). The rectangle stays
+     inside the wide one — what the close shot shows, the wide shot shows too."""
+     z = wide.h * face_h / max(1.0, float(face[3]))
+-    z = max(min(z, max_scale, wide.h * max_upscale / max(1, out_h)), min_scale)
++    z = min(z, max_scale, wide.h * max_upscale / max(1, out_h))
++    span = (float(face[4]), float(face[5])) if len(face) >= 6 else None
++    if span is not None:                  # M130 (owner, Pxl r06: the speaker leaned out of the close shot): the
++        z = min(z, wide.w / max(1.0, (span[1] - span[0]) * 1.2))   # close shot holds the whole way his face goes
++    z = max(z, min_scale)
+     ch = max(2, int(wide.h / z)) & ~1
+     cw = max(2, round(ch * wide.w / wide.h / 2) * 2)
+-    x = int(round(float(face[0]) - cw / 2))
++    cx = float(face[0]) if span is None else (span[0] + span[1]) / 2
++    x = int(round(cx - cw / 2))
+     y = int(round(float(face[1]) - face_y * ch))
+     x = max(wide.x, min(x, wide.x + wide.w - cw))
+     y = max(wide.y, min(y, wide.y + wide.h - ch))
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index da9e480..8b65df5 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -2499,7 +2499,7 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
+     source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
+     reel_framing). Returns (setup for this reel, face or None, a line for the log). Static within the reel: one
+     rectangle for the wide shot, one for the close shot — no tracking. No OpenCV / no face: the source's frame."""
+-    from autoreels.core.calibration import reel_crop, reel_face
++    from autoreels.core.calibration import reel_crop, reel_face, reel_face_span
+     from autoreels.local.autocrop import cover_candidates, reel_faces
+     n = int(getattr(render_cfg, "framing_samples", 7))
+     times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+@@ -2518,6 +2518,10 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
+         return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
+     else:
+         note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
++        span = reel_face_span(faces, setup.crop.w / 2)
++        if span is not None:              # M130: how far the face goes in this reel — the frames keep all of it
++            face = tuple(face[:4]) + span
++            note += f", лицо ходит по x {span[0]:g}…{span[1]:g}"
+     if not getattr(render_cfg, "reel_framing", False):
+         return setup, face, note
+     zone = float(getattr(render_cfg, "framing_center_zone", 0.15))
+diff --git a/tests/test_calibration_face.py b/tests/test_calibration_face.py
+index 24780d8..5b3abe6 100644
+--- a/tests/test_calibration_face.py
++++ b/tests/test_calibration_face.py
+@@ -147,3 +147,20 @@ def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, m
+     assert render._face_model(SimpleNamespace(face_model="")) is None
+     rel = render._face_model(SimpleNamespace(face_model="data/models/m.onnx"))
+     assert rel.is_absolute() and rel.parts[-3:] == ("data", "models", "m.onnx")
++
++
++def test_m130_the_frames_hold_the_whole_way_the_face_goes():
++    """M130 (owner on Pxl 112938952 r06: «в этом кадре нет фокуса на человеке» — he leaned out of the close shot)."""
++    from autoreels.core.calibration import face_close_crop, reel_crop, reel_face, reel_face_span
++    from autoreels.core.models import Crop
++    base = Crop(x=1312, y=0, w=1215, h=2160)
++    faces = [(1600.0, 700.0, 210.0, 210.0)] * 10 + [(2200.0, 760.0, 210.0, 210.0)] * 3
++    face = reel_face(faces, 15, base.w / 2)
++    span = reel_face_span(faces, base.w / 2)
++    assert span == (1495.0, 2305.0)
++    wide = reel_crop(base, (3840, 2160), face + span)
++    assert wide.x <= 1495 and wide.x + wide.w >= 2305                          # the wide frame holds it all
++    close, z = face_close_crop(wide, face + span, out_h=1920)
++    assert close.x <= 1495 and close.x + close.w >= 2305 and z >= 1.15         # so does the close shot
++    tight, z0 = face_close_crop(wide, face, out_h=1920)
++    assert z0 > z and tight.x + tight.w < 2305                                 # without the span it lost him
+diff --git a/tests/test_render.py b/tests/test_render.py
+index 88eb949..39499e4 100644
+--- a/tests/test_render.py
++++ b/tests/test_render.py
+@@ -3739,7 +3739,7 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
+         return [face] * len(times), len(times)
+     monkeypatch.setattr(autocrop, "reel_faces", faces)
+     cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True,
+-                                        "framing_source_fallback": False})   # M127: its own test
++                                        "framing_source_fallback": False, "framing_samples": 7})   # M127, M130
+     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o1", render_cfg=cfg, subtitles_cfg=subs_cfg)
+     cmd = " ".join(map(str, fake_ffmpeg[0]))
+     assert len(asked) == 1 and asked[0][1] == (3840, 2160) and len(asked[0][0]) == 7
+@@ -3748,7 +3748,7 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
+     assert "crop=1215:2160:400:0,scale=1080:1920" in cmd and "crop=1215:2160:1240:0" not in cmd
+     assert f"crop={close.w}:{close.h}:{close.x}:{close.y},scale=1080:1920" in cmd
+     out = capsys.readouterr().out
+-    assert "кадр r01: лицо в 7 из 7 кадров (x 1007.5, высота 300) — рамка x 1240 → 400" in out
++    assert "кадр r01: лицо в 7 из 7 кадров (x 1007.5, высота 300), лицо ходит по x 857.5…1157.5 — рамка x 1240 → 400" in out
+     assert f"крупный план r01: ×{z:g} по лицу" in out
+ 
+     fake_ffmpeg.clear()
