@@ -147,3 +147,20 @@ def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, m
     assert render._face_model(SimpleNamespace(face_model="")) is None
     rel = render._face_model(SimpleNamespace(face_model="data/models/m.onnx"))
     assert rel.is_absolute() and rel.parts[-3:] == ("data", "models", "m.onnx")
+
+
+def test_m130_the_frames_hold_the_whole_way_the_face_goes():
+    """M130 (owner on Pxl 112938952 r06: «в этом кадре нет фокуса на человеке» — he leaned out of the close shot)."""
+    from autoreels.core.calibration import face_close_crop, reel_crop, reel_face, reel_face_span
+    from autoreels.core.models import Crop
+    base = Crop(x=1312, y=0, w=1215, h=2160)
+    faces = [(1600.0, 700.0, 210.0, 210.0)] * 10 + [(2200.0, 760.0, 210.0, 210.0)] * 3
+    face = reel_face(faces, 15, base.w / 2)
+    span = reel_face_span(faces, base.w / 2)
+    assert span == (1495.0, 2305.0)
+    wide = reel_crop(base, (3840, 2160), face + span)
+    assert wide.x <= 1495 and wide.x + wide.w >= 2305                          # the wide frame holds it all
+    close, z = face_close_crop(wide, face + span, out_h=1920)
+    assert close.x <= 1495 and close.x + close.w >= 2305 and z >= 1.15         # so does the close shot
+    tight, z0 = face_close_crop(wide, face, out_h=1920)
+    assert z0 > z and tight.x + tight.w < 2305                                 # without the span it lost him

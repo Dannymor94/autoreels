@@ -2499,7 +2499,7 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
     source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
     reel_framing). Returns (setup for this reel, face or None, a line for the log). Static within the reel: one
     rectangle for the wide shot, one for the close shot — no tracking. No OpenCV / no face: the source's frame."""
-    from autoreels.core.calibration import reel_crop, reel_face
+    from autoreels.core.calibration import reel_crop, reel_face, reel_face_span
     from autoreels.local.autocrop import cover_candidates, reel_faces
     n = int(getattr(render_cfg, "framing_samples", 7))
     times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
@@ -2518,6 +2518,10 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
         return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
     else:
         note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
+        span = reel_face_span(faces, setup.crop.w / 2)
+        if span is not None:              # M130: how far the face goes in this reel — the frames keep all of it
+            face = tuple(face[:4]) + span
+            note += f", лицо ходит по x {span[0]:g}…{span[1]:g}"
     if not getattr(render_cfg, "reel_framing", False):
         return setup, face, note
     zone = float(getattr(render_cfg, "framing_center_zone", 0.15))

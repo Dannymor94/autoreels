@@ -356,14 +356,30 @@ def reel_face(faces, samples: int, gap: float, *, min_share: float = 0.4) -> tup
     return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4))
 
 
+def reel_face_span(faces, gap: float) -> tuple[float, float] | None:
+    """M130: how far the speaker's face goes across in one reel — (leftmost, rightmost edge) of the face boxes of the
+    dominant place (dominant_faces); None for no face."""
+    dom = dominant_faces(faces, gap)
+    if not dom:
+        return None
+    return (round(min(float(f[0]) - float(f[2]) / 2 for f in dom), 1),
+            round(max(float(f[0]) + float(f[2]) / 2 for f in dom), 1))
+
+
 def reel_crop(base: Crop, frame_size: tuple[int, int], face, *, center_zone: float = 0.15) -> Crop:
     """M102 (owner: «чтобы кадры подбирались автоматически»): the reel's own frame — the source's crop (calibration,
     manual or by face) moved sideways so the face of THIS reel is in its middle, when the face is more than
     center_zone of the crop width away from the middle. Static within the reel — no tracking (CLAUDE.md). No face
     (None) or a face near the middle — the source's crop as is (a manual calibration stays unless it misses)."""
-    if face is None or abs(float(face[0]) - (base.x + base.w / 2)) <= center_zone * base.w:
+    if face is None:
+        return base
+    span = (float(face[4]), float(face[5])) if len(face) >= 6 else None
+    inside = span is None or (base.x <= span[0] and span[1] <= base.x + base.w)
+    if abs(float(face[0]) - (base.x + base.w / 2)) <= center_zone * base.w and inside:
         return base
     x = int(round(float(face[0]) - base.w / 2))
+    if span is not None and span[1] - span[0] <= base.w:      # M130: the whole way the face goes stays in the frame
+        x = int(min(max(x, span[1] - base.w), span[0]))
     x = max(0, min(int(frame_size[0]) - base.w, x))
     return base if x == base.x else Crop(x=x, y=base.y, w=base.w, h=base.h)
 
@@ -376,10 +392,15 @@ def face_close_crop(wide: Crop, face, *, out_h: int, face_h: float = 0.28, face_
     max_upscale (the picture would go soft), at least min_scale (else the switch is not seen). The rectangle stays
     inside the wide one — what the close shot shows, the wide shot shows too."""
     z = wide.h * face_h / max(1.0, float(face[3]))
-    z = max(min(z, max_scale, wide.h * max_upscale / max(1, out_h)), min_scale)
+    z = min(z, max_scale, wide.h * max_upscale / max(1, out_h))
+    span = (float(face[4]), float(face[5])) if len(face) >= 6 else None
+    if span is not None:                  # M130 (owner, Pxl r06: the speaker leaned out of the close shot): the
+        z = min(z, wide.w / max(1.0, (span[1] - span[0]) * 1.2))   # close shot holds the whole way his face goes
+    z = max(z, min_scale)
     ch = max(2, int(wide.h / z)) & ~1
     cw = max(2, round(ch * wide.w / wide.h / 2) * 2)
-    x = int(round(float(face[0]) - cw / 2))
+    cx = float(face[0]) if span is None else (span[0] + span[1]) / 2
+    x = int(round(cx - cw / 2))
     y = int(round(float(face[1]) - face_y * ch))
     x = max(wide.x, min(x, wide.x + wide.w - cw))
     y = max(wide.y, min(y, wide.y + wide.h - ch))

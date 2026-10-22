@@ -268,3 +268,6 @@ framing_source_fallback: true
 # ~230 KB): curl -L -o data/models/face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 # — no file = the Haar cascade, as before.
 face_model: data/models/face_detection_yunet_2023mar.onnx
+# M130 (owner on Pxl r06: «в этом кадре нет фокуса на человеке» — he leaned out of the close shot): the frames of a
+# reel keep the whole way its face goes (the close shot zooms out to hold it); more frames looked at to see it.
+framing_samples: 15

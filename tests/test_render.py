@@ -3739,7 +3739,7 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
         return [face] * len(times), len(times)
     monkeypatch.setattr(autocrop, "reel_faces", faces)
     cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True,
-                                        "framing_source_fallback": False})   # M127: its own test
+                                        "framing_source_fallback": False, "framing_samples": 7})   # M127, M130
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o1", render_cfg=cfg, subtitles_cfg=subs_cfg)
     cmd = " ".join(map(str, fake_ffmpeg[0]))
     assert len(asked) == 1 and asked[0][1] == (3840, 2160) and len(asked[0][0]) == 7
@@ -3748,7 +3748,7 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
     assert "crop=1215:2160:400:0,scale=1080:1920" in cmd and "crop=1215:2160:1240:0" not in cmd
     assert f"crop={close.w}:{close.h}:{close.x}:{close.y},scale=1080:1920" in cmd
     out = capsys.readouterr().out
-    assert "кадр r01: лицо в 7 из 7 кадров (x 1007.5, высота 300) — рамка x 1240 → 400" in out
+    assert "кадр r01: лицо в 7 из 7 кадров (x 1007.5, высота 300), лицо ходит по x 857.5…1157.5 — рамка x 1240 → 400" in out
     assert f"крупный план r01: ×{z:g} по лицу" in out
 
     fake_ffmpeg.clear()
