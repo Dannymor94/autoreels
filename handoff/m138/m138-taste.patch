@@ -1,0 +1,367 @@
+diff --git a/PLAN.md b/PLAN.md
+index bf31e80..a3beb7c 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -259,6 +259,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Транскрипция | whisper.cpp на gamebox и `arl tx-compare`; `arl tx-use` переключает транскрипт источника; `arl tx-punct` переносит концы предложений Groq (или модели) на слова локального транскрипта; Groq в два прохода — слова без промпта, концы предложений с промптом (`groq.dual`, включён) | M62, M64, M111, M113, M124 |
+ | Слова-паразиты | отдельно стоящие паразиты скрыты в субтитрах и изредка вырезаны из звука по правилам вычистки; сценарист их избегает (исключение к правилу «экран = звук» — решение владельца) | M126 |
+ | Рамка ролика | у каждого ролика свой статичный кроп по лицу в его теле и крупный план по размеру лица; без своего лица — по лицу всего источника; лица ищет YuNet (Haar находил полку с чайниками); рамка вмещает весь путь лица; берётся лицо ближе к месту говорящего (не самое крупное — слушатель у камеры) | M87, M102, M127, M129–M131 |
++| Вкус владельца | модель по его 66 клипам упорядочивает предложения автомонтажа (`taste_weight`); смех и аплодисменты зала (PANNs) в источниках не найдены — путь закрыт | M137, M138 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+ 
+ **Замеры.** Урожай черновиков на трёх источниках вырос с 7 до 40; покрытие клипов владельца (кандидат накрывает ≥ 50 % клипа) — 9 из 31 при `clips_every_min: 2`. Стиль владельца на 66 клипах семи источников: 48 без прыжков, 12 с одним, 6 с двумя, ни одного с тремя. Судьи начала (Haiku, Groq) принимают начала владельца так же часто, как случайные, — сигнала вкуса владельца в них нет, поэтому они вне отбора.
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index e79f76c..87525a4 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -84,6 +84,7 @@ autoreels/
+ │   │   ├── thoughtmap.py     # M54: карта мыслей источника (`arl map`)
+ │   │   ├── autocut.py        # M56+: автомонтаж — генераторы, ритм прыжков, крючок, плашка, судьи
+ │   │   ├── scenario.py       # M123: сценарист — промпт, разбор строк, предложения
++│   │   ├── taste.py          # M138: вкус владельца — модель по его клипам, только порядок предложений
+ │   │   ├── montage.py        # M50: клип из кусков разных блоков
+ │   │   ├── plan.py           # план ручного пути как одна чистая функция (REEL_SPEC §1–§4), паразиты (M126)
+ │   │   ├── edit.py           # сегментная модель: филлеры, x:, h:, такты `>` → окна (фабрика Segment)
+diff --git a/R0_SPEC.md b/R0_SPEC.md
+index b7a4431..6e9ae03 100644
+--- a/R0_SPEC.md
++++ b/R0_SPEC.md
+@@ -250,6 +250,8 @@ Word-level нужен **коду** (для snap границ при нарезк
+ - *Отбор:* каждая строка проходит настоящие проверки `--apply`; отказ заменяется следующим кандидатом. У клипов источника не совпадают открытие, заголовок, мысль и развязка. Число клипов — по длине источника (`clips_every_min`). Судья начала в отбор не входит: замер показал, что Haiku и Groq принимают начала владельца так же часто, как случайные.
+ - *Выход:* черновик `reviews/<stem>_auto_*.txt` в грамматике §11 (`k:`, `h:`, куски, плашка `t:`, пост `d:`); дальше — ручной путь (инвариант 5).
+ 
++**Вкус владельца (M138, `cloud/taste.py`).** Две логистические головы по признакам мысли карты (длина, сила, громкость, положение, роль, первые слова): «мысль взята в клип владельца» и «клип владельца начат с неё». Модель подбирается по клипам владельца (`config/taste.json`, происхождение внутри) и добавляет `taste_weight × вкус` к оценке предложения — меняется только порядок (инвариант 1). Замер m137: «вирусные» признаки крючка (число, вопрос, «вы») сигнала не несут; проверка на отложенном источнике — начало 0.65, выбор мысли 0.59.
++
+ **Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер).
+ 
+ **Посты (`arl describe`, `cloud/postcopy.py`).** Пост говорит мысль, а не анонсирует её: 3–5 предложений словами ролика; стандартная фраза, которой нет в ролике, отвергается; сверх размера код отрезает последние предложения. Хэштеги — только слова, сказанные в ролике; местоимения и служебные — никогда.
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 50cc664..ebbe5da 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -371,6 +371,11 @@ autocut:
+   rhythm_settle_far: 12   # … up to ≥ 12 s after a jump of rhythm_far_sec or more (or back in the source)
+   rhythm_far_sec: 120
+   rhythm_tail: 0.5        # the last piece (the payoff) needs half of that
++  # M138 (m137: the owner starts on a longer finished thought, takes strong ones from the first half; «viral» hook
++  # features carry nothing): a logistic model of his choice (cloud/taste.py, fitted on his clips) adds
++  # taste_weight × its logit to a proposal's score — the order only. 0 = off; the model file from handoff/m138/fit_eval.py.
++  taste_weight: 0
++  taste_model: config/taste.json
+   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
+   scenario_timeout_sec: 300   # … the whole talk in one request
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index deb4238..b89802e 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8203,7 +8203,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                      lean_depth=ac.lean_depth, rhythm=ac.rhythm, max_jumps=ac.rhythm_max_jumps,
+                      jump_sec=ac.rhythm_jump_sec, settle_near_sec=ac.rhythm_settle_near,
+                      settle_far_sec=ac.rhythm_settle_far, settle_far_at_sec=ac.rhythm_far_sec,
+-                     settle_tail=ac.rhythm_tail)
++                     settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0))
++    _taste = None
++    if prm.taste_weight:
++        # M138: the owner's taste orders the proposals (invariant 1: the order only)
++        from autoreels.cloud.taste import clip_taste as _clip_taste, load as _taste_load
++        _tm_path = _root / ac.taste_model
++        try:
++            _tm = _taste_load(_tm_path)
++        except (OSError, ValueError) as _e_t:
++            print(f"ошибка: модель вкуса не прочитана ({_tm_path}: {_e_t}) — taste_weight требует её "
++                  f"(handoff/m138/fit_eval.py), или taste_weight: 0", file=sys.stderr)
++            return 1
++        _src_dur = max((float(u["t1"]) for u in the_map.get("units") or []), default=1.0)
++        _taste = lambda clip: _clip_taste(clip, _tm, _src_dur)  # noqa: E731
++        print(f"  вкус владельца: {ac.taste_model} (строк {_tm.get('rows')}), вес {prm.taste_weight:g}", flush=True)
+     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
+     words = tx.words
+     if getattr(r0_cfg, "credit_word_patterns", None):
+@@ -8298,7 +8312,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             return 1
+     else:
+         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+-                       no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out)
++                       no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
++                       taste=_taste)
+     _doubt = sum(1 for pr in pool if pr.start_doubt)
+     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
+         pool.sort(key=lambda pr: bool(pr.start_doubt))
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index ca868d2..3196a3e 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -98,6 +98,8 @@ class AutoParams:
+     settle_far_sec: float = 12.0      # … up to this after a jump of settle_far_at_sec or more (or back in the source)
+     settle_far_at_sec: float = 120.0
+     settle_tail: float = 0.5          # the last piece (the payoff) needs only this share of it
++    # M138: the owner's taste (cloud/taste.py) adds taste_weight × clip_taste to a proposal's score; 0 = off
++    taste_weight: float = 0.0
+ 
+ 
+ @dataclass
+@@ -1000,7 +1002,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
+             no_start: list | None = None, judge: "Judge | None" = None,
+             end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
+-            rhythm_out: list | None = None) -> list[Proposal]:
++            rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None) -> list[Proposal]:
+     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
+     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
+     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
+@@ -1011,7 +1013,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+     p.start_judge «rank» — a start the model rejects but the rules accept keeps the clip, marked start_doubt (the
+     caller sorts it after the clean ones: invariant 1, the model only ranks).
+     M120: p.rhythm — every clip keeps the jump rule (fit_rhythm before its start is fixed, rhythm_why on the final
+-    clip); `rhythm_out` collects (pieces, why) of the clips that could not."""
++    clip); `rhythm_out` collects (pieces, why) of the clips that could not.
++    M138: `taste(clip)` → the owner's taste of the clip (cloud/taste.clip_taste); with p.taste_weight it is added to the
++    score — the order only (invariant 1); taste_weight 0 or no `taste` = the score as before."""
+     by_id = {u["id"]: u for u in units}
+     roles = tuple(p.seed_roles) or STORY
+     passage = p.generator in ("passage", "mixed")
+@@ -1120,6 +1124,10 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+         loop = clip[0].get("role") == "question" and clip[-1].get("role") in PAYOFFS
+         over = max(0.0, secs - p.target_sec)
+         score = 15 * punch + 0.15 * energy + cover - 4 * (_pieces(clip) - 1) + 10 * loop - 0.2 * over
++        if taste is not None and p.taste_weight:
++            _t = taste(clip)
++            score += p.taste_weight * _t
++            extra_notes.append(f"вкус владельца: {_t:+.2f} (× {p.taste_weight:g})")
+         opener = next((u for u in clip if u.get("role") in OPENERS), clip[0])
+         payoff = next((u for u in reversed(clip) if u.get("role") in PAYOFFS), clip[-1])
+         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
+diff --git a/src/autoreels/cloud/taste.py b/src/autoreels/cloud/taste.py
+new file mode 100644
+index 0000000..ea8e3dd
+--- /dev/null
++++ b/src/autoreels/cloud/taste.py
+@@ -0,0 +1,135 @@
++"""M138: the owner's taste as a score of map thoughts — learned from his own clips, used only to ORDER (invariant 1).
++
++m137 (7 sources, 66 owner clips, 799 thoughts): the owner starts a clip on a longer finished thought (AUC 0.71), takes
++thoughts the map calls strong (punch, 0.65–0.67), from the first half of a talk, said louder; the «viral» hook
++features (a number, a question, «вы», a contrast) carry nothing (≈ 0.50). Leave-one-source-out logistic regression:
++start 0.65, taken 0.59 — a weak but real signal.
++
++A model is two logistic heads over standardized features of a thought:
++  taken — the thought lies in an owner clip;  start — an owner clip starts on it.
++`fit(rows)` builds it from (features, taken, start) rows; config/taste.json holds the model fitted on all the owner's
++clips (with its provenance). autocut adds `taste_weight × clip_taste(clip)` to a proposal's score (taste_weight 0 =
++off: the score and the order are as before).
++"""
++from __future__ import annotations
++
++import json
++import math
++import re
++from pathlib import Path
++from typing import Sequence
++
++VERSION = 1
++HEDGE = ("наверное", "может быть", "мне кажется", "как бы", "в принципе", "типа", "вроде", "кажется", "возможно")
++FILLER = ("ну", "вот", "так", "значит", "короче", "э", "эм")
++BACKREF = ("это", "этот", "эта", "эти", "он", "она", "они", "оно", "но", "и", "а", "поэтому", "тогда",
++           "там", "тут", "здесь", "его", "её", "их", "то")
++ROLES = ("question", "thesis", "explanation", "example", "metaphor", "conclusion", "address", "aside")
++
++
++def _norm(t: str) -> str:
++    return re.sub(r"[^\w\s-]", " ", t.lower().replace("ё", "е")).strip()
++
++
++def features(u: dict, src_dur: float) -> dict[str, float]:
++    """Features of one map thought (transcripts/<stem>.map.json unit); `src_dur` — the source's length (max t1)."""
++    v = u.get("voice") or {}
++    words = str(u.get("text") or "").split()
++    fw = _norm(" ".join(words[:10])).split()
++    f = {
++        "punch": float(u.get("punch") or 0),
++        "standalone": float(bool(u.get("standalone"))),
++        "refers": float(u.get("refers") is not None),
++        "energy": float(v.get("energy") or 0),
++        "level_db": float(v.get("level_db") if v.get("level_db") is not None else -90.0),
++        "rate": float(v.get("rate") or 0),
++        "dur": float(u["t1"]) - float(u["t0"]),
++        "pos": float(u["t0"]) / max(1.0, src_dur),
++        "filtered": float(bool(u.get("filtered"))),
++        "h_words_to_stop": float(next((i + 1 for i, w in enumerate(words) if w.endswith((".", "?", "!"))), len(words))),
++        "h_name": float(any(w[:1].isupper() for w in words[1:10] if w[:1].isalpha())),
++        "h_backref_first": float(bool(fw) and fw[0] in BACKREF),
++        "h_filler_first": float(bool(fw) and fw[0] in FILLER),
++        "h_hedge": float(any(h in " ".join(fw) for h in HEDGE)),
++    }
++    for r in ROLES:
++        f[f"role_{r}"] = float(u.get("role") == r)
++    return f
++
++
++def _logreg(X: list[list[float]], y: list[int], l2: float = 1.0, it: int = 400, lr: float = 0.1) -> list[float]:
++    d = len(X[0])
++    w = [0.0] * (d + 1)
++    n = len(X)
++    for _ in range(it):
++        g = [0.0] * (d + 1)
++        for xi, yi in zip(X, y):
++            z = w[-1] + sum(a * b for a, b in zip(w, xi))
++            p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, z))))
++            for k in range(d):
++                g[k] += (p - yi) * xi[k]
++            g[-1] += p - yi
++        for k in range(d):
++            w[k] -= lr * (g[k] / n + l2 * w[k] / n)
++        w[-1] -= lr * g[-1] / n
++    return w
++
++
++def fit(rows: Sequence[tuple[dict, int, int]], provenance: str = "") -> dict:
++    """rows: (features, taken, start). Returns the model (JSON-ready)."""
++    if not rows:
++        raise ValueError("no rows to fit the taste model on")
++    names = sorted(rows[0][0])
++    n = len(rows)
++    mu = {k: sum(r[0][k] for r in rows) / n for k in names}
++    sd = {k: (sum((r[0][k] - mu[k]) ** 2 for r in rows) / n) ** 0.5 or 1.0 for k in names}
++    X = [[(r[0][k] - mu[k]) / sd[k] for k in names] for r in rows]
++    heads = {}
++    for i, head in ((1, "taken"), (2, "start")):
++        y = [int(r[i]) for r in rows]
++        if not any(y) or all(y):
++            raise ValueError(f"taste head «{head}»: every row has the same label")
++        w = _logreg(X, y)
++        heads[head] = {"w": [round(x, 6) for x in w[:-1]], "b": round(w[-1], 6)}
++    return {"version": VERSION, "features": names, "mu": mu, "sd": sd, "heads": heads,
++            "rows": n, "provenance": provenance}
++
++
++def load(path: str | Path) -> dict:
++    m = json.loads(Path(path).read_text(encoding="utf-8"))
++    if m.get("version") != VERSION:
++        raise ValueError(f"{path}: taste model version {m.get('version')} ≠ {VERSION}")
++    return m
++
++
++def logit(model: dict, f: dict[str, float], head: str) -> float:
++    h = model["heads"][head]
++    return h["b"] + sum(w * (f.get(k, model["mu"][k]) - model["mu"][k]) / model["sd"][k]
++                        for w, k in zip(h["w"], model["features"]))
++
++
++def clip_taste(clip: Sequence[dict], model: dict, src_dur: float) -> float:
++    """Half the mean «taken» logit of the clip's thoughts + half the «start» logit of its first thought."""
++    if not clip:
++        return 0.0
++    taken = sum(logit(model, features(u, src_dur), "taken") for u in clip) / len(clip)
++    return 0.5 * taken + 0.5 * logit(model, features(clip[0], src_dur), "start")
++
++
++def owner_rows(manifest: dict, units: Sequence[dict]) -> list[tuple[dict, int, int]]:
++    """(features, taken, start) of every thought of a source with owner clips (manifest selection_source human):
++    taken — ≥ 50 % of the thought lies in an owner clip; start — an owner clip starts inside it (± 1 s)."""
++    if not units:
++        return []
++    src_dur = max(float(u["t1"]) for u in units)
++    clips = [[(float(s["start"]), float(s["end"])) for s in (r.get("segments") or [])]
++             or [(float(r["start"]), float(r["end"]))] for r in manifest.get("reels") or []]
++    starts = [min(a for a, _ in c) for c in clips if c]
++    spans = [s for c in clips for s in c]
++    out = []
++    for u in units:
++        a, b = float(u["t0"]), float(u["t1"])
++        ins = sum(max(0.0, min(b, s1) - max(a, s0)) for s0, s1 in spans)
++        out.append((features(u, src_dur), int(ins >= 0.5 * (b - a)),
++                    int(any(a - 1.0 <= s <= b + 1.0 and s < b - 0.5 for s in starts))))
++    return out
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index f38585c..d33b581 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -298,6 +298,9 @@ class AutocutConfig(BaseModel):
+     rhythm_settle_far: float = Field(12.0, ge=0)   # … up to this after a far jump (rhythm_far_sec or more, or back)
+     rhythm_far_sec: float = Field(120.0, gt=0)
+     rhythm_tail: float = Field(0.5, ge=0, le=1)    # the last piece (the payoff) needs only this share
++    # M138: the owner's taste learned from his clips (cloud/taste.py) orders the proposals; 0 = off
++    taste_weight: float = Field(0.0, ge=0)
++    taste_model: str = "config/taste.json"
+     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
+     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+diff --git a/tests/test_taste.py b/tests/test_taste.py
+new file mode 100644
+index 0000000..99efbe9
+--- /dev/null
++++ b/tests/test_taste.py
+@@ -0,0 +1,72 @@
++"""M138: the owner's taste (cloud/taste.py) — learned from his clips, it only orders autocut's proposals."""
++from __future__ import annotations
++
++import json
++
++import pytest
++
++from autoreels.cloud.autocut import AutoParams, propose
++from autoreels.cloud.taste import clip_taste, features, fit, load, logit, owner_rows
++from autoreels.core.config import AutocutConfig
++from tests.test_autocut import _units
++
++
++def _rows():
++    # the owner starts on long thoughts and takes the strong ones (m137), on a toy set
++    rows = []
++    for i in range(40):
++        u = {"id": i, "t0": float(i * 20), "t1": float(i * 20 + (25 if i % 4 == 0 else 8)), "punch": 5 if i % 2 else 2,
++             "role": "thesis", "text": "Слово слово слово.", "voice": {"energy": 50, "level_db": -30, "rate": 2.0}}
++        rows.append((features(u, 800.0), int(i % 2 == 1), int(i % 4 == 0)))
++    return rows
++
++
++def test_off_by_default():
++    assert AutoParams().taste_weight == 0.0
++    assert AutocutConfig().taste_weight == 0.0 and AutocutConfig().taste_model == "config/taste.json"
++
++
++def test_fit_learns_the_direction_and_round_trips(tmp_path):
++    m = fit(_rows(), provenance="toy")
++    long_ = features({"t0": 0.0, "t1": 25.0, "punch": 2, "text": "А.", "voice": {}}, 800.0)
++    short = features({"t0": 0.0, "t1": 8.0, "punch": 2, "text": "А.", "voice": {}}, 800.0)
++    assert logit(m, long_, "start") > logit(m, short, "start")
++    strong = features({"t0": 0.0, "t1": 8.0, "punch": 5, "text": "А.", "voice": {}}, 800.0)
++    assert logit(m, strong, "taken") > logit(m, short, "taken")
++    p = tmp_path / "taste.json"
++    p.write_text(json.dumps(m), encoding="utf-8")
++    assert load(p)["heads"] == m["heads"] and load(p)["provenance"] == "toy"
++
++
++def test_fit_refuses_a_head_without_both_labels():
++    rows = [(r[0], 0, r[2]) for r in _rows()]
++    with pytest.raises(ValueError):
++        fit(rows)
++
++
++def test_owner_rows_label_taken_and_start():
++    units = [{"id": 1, "t0": 0.0, "t1": 10.0}, {"id": 2, "t0": 10.0, "t1": 20.0}, {"id": 3, "t0": 50.0, "t1": 60.0}]
++    man = {"reels": [{"start": 9.5, "end": 21.0, "segments": [{"start": 9.5, "end": 21.0}]}]}
++    rows = owner_rows(man, units)
++    assert [(r[1], r[2]) for r in rows] == [(0, 0), (1, 1), (0, 0)]
++
++
++def test_taste_only_orders_and_weight_zero_is_as_before():
++    units = _units()
++    base = propose(units, AutoParams(clips=5, target_sec=40))
++    same = propose(units, AutoParams(clips=5, target_sec=40), taste=lambda clip: 100.0)     # weight 0: ignored
++    assert [(p.units, p.score) for p in same] == [(p.units, p.score) for p in base]
++    last = base[-1].units
++    liked = propose(units, AutoParams(clips=5, target_sec=40, taste_weight=10.0),
++                    taste=lambda clip: 1.0 if [u["id"] for u in clip] == last else -1.0)
++    assert liked[0].units == last                                  # the clip the owner would like comes first
++    assert sorted(p.units for p in liked) == sorted(p.units for p in base)   # the same clips, another order
++    assert any("вкус владельца" in n for n in liked[0].notes)
++
++
++def test_clip_taste_mixes_taken_and_start():
++    m = fit(_rows())
++    u_long = {"id": 1, "t0": 0.0, "t1": 25.0, "punch": 5, "text": "А.", "voice": {}}
++    u_short = {"id": 2, "t0": 30.0, "t1": 38.0, "punch": 2, "text": "Б.", "voice": {}}
++    assert clip_taste([u_long, u_short], m, 800.0) > clip_taste([u_short, u_long], m, 800.0)
++    assert clip_taste([], m, 800.0) == 0.0
