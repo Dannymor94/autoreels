@@ -595,6 +595,16 @@ def _speech_before(times: SpeechTimes, first: Word) -> tuple[float | None, float
     return left, as_f
 
 
+def heard_pause(times: SpeechTimes, last: Word, first: Word) -> float | None:
+    """M134: the silence heard between `last` and `first` when `first` is the very next transcript word
+    (untranscribed speech between them counts as speech); None when another word stands between them."""
+    prev = times.prev(first)
+    if prev is None or round(prev.t0 * 1000) != round(last.t0 * 1000):
+        return None
+    left, onset = _speech_before(times, first)
+    return max(0.0, onset - left) if left is not None else None
+
+
 def _speech_after(times: SpeechTimes, last: Word) -> tuple[float, float | None]:
     """(end of `last`, onset of the next speech: next word or untranscribed speech)."""
     nxt = times.next(last)
