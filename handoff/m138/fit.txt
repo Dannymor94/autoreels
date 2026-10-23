@@ -1,0 +1,10 @@
+2026-08-08 09h 33m 14s: thoughts 121, taken 37, starts 15
+2026-08-08 10h 59m 38s: thoughts 140, taken 22, starts 8
+2026-08-08 11h 42m 49s: thoughts 47, taken 11, starts 4
+IMG_6848: thoughts 107, taken 23, starts 8
+PXL_20260729_085910095_34f06abf: thoughts 156, taken 24, starts 10
+Pxl 20260621 112938952: thoughts 189, taken 50, starts 18
+Pxl 20260621 122006193: thoughts 39, taken 5, starts 2
+held-out AUC taken: 0.65
+held-out AUC start: 0.73
+config/taste.json written; start head strongest: dur +0.54, punch +0.44, level_db +0.21, filtered -0.18, role_explanation -0.17, role_thesis +0.16
