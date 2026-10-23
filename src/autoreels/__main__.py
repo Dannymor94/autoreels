@@ -8314,6 +8314,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
                        taste=_taste)
+        _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
+        if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
+            # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
+            from autoreels.cloud.autocut import fill_pool
+            _extra = propose(the_map.get("units") or [],
+                             _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
+                             judge=judge, end_tone=end_tone, taste=_taste)
+            _n0 = len(pool)
+            pool = fill_pool(pool, _extra)
+            print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
+                  f"силы {_fsp}", flush=True)
     _doubt = sum(1 for pr in pool if pr.start_doubt)
     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
         pool.sort(key=lambda pr: bool(pr.start_doubt))

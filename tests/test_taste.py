@@ -70,3 +70,14 @@ def test_clip_taste_mixes_taken_and_start():
     u_short = {"id": 2, "t0": 30.0, "t1": 38.0, "punch": 2, "text": "Б.", "voice": {}}
     assert clip_taste([u_long, u_short], m, 800.0) > clip_taste([u_short, u_long], m, 800.0)
     assert clip_taste([], m, 800.0) == 0.0
+
+
+def test_m140_fill_pool_adds_only_new_thoughts_and_orders_by_score():
+    from autoreels.cloud.autocut import Proposal, fill_pool
+    mk = lambda units, score: Proposal(units=units, pieces="", hook=None, title="", caption="", score=score, seconds=30.0)
+    pool = [mk([1, 2], 80), mk([5], 70)]
+    extra = [mk([2, 3], 99), mk([7, 8], 75), mk([8, 9], 90)]
+    out = fill_pool(pool, extra)
+    assert [o.units for o in out] == [[1, 2], [7, 8], [5]]       # [2,3] shares 2; [8,9] shares 8 with the added one
+    assert fill_pool(pool, []) == sorted(pool, key=lambda o: -o.score)
+    assert AutocutConfig().fill_seed_punch == 0

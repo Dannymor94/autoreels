@@ -1164,6 +1164,21 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
     return out[:p.clips]
 
 
+def fill_pool(pool: Sequence["Proposal"], extra: Sequence["Proposal"]) -> list["Proposal"]:
+    """M140: proposals grown around weaker seeds (autocut.fill_seed_punch) join a pool that came out smaller than the
+    draft can take (m138: 13 proposals for 16 places on 09h33 — the order did not matter, every one went in). An extra
+    proposal that shares a thought with one already in the pool is left out; the pool is then ordered by score (the
+    owner's taste included), so a weak-seed clip goes in only where it scores."""
+    have = set().union(*(set(pr.units) for pr in pool)) if pool else set()
+    add = []
+    for pr in extra:
+        if set(pr.units) & have:
+            continue
+        add.append(pr)
+        have |= set(pr.units)
+    return sorted(list(pool) + add, key=lambda o: -o.score)
+
+
 def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 0) -> str | None:
     """M68: a viewer sees two reels of one source side by side — no two may open on the same thought
     (11h42 r01/r03: both «Вы не сломаны, просто не изучали себя») nor reuse more than max_shared

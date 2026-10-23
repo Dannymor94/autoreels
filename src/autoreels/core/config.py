@@ -301,6 +301,8 @@ class AutocutConfig(BaseModel):
     # M138: the owner's taste learned from his clips (cloud/taste.py) orders the proposals; 0 = off
     taste_weight: float = Field(0.0, ge=0)
     taste_model: str = "config/taste.json"
+    # M140: a pool smaller than the draft can take is filled with clips grown around seeds this strong; 0 = off
+    fill_seed_punch: int = Field(0, ge=0, le=5)
     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
