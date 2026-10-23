@@ -25,7 +25,7 @@ Pure: the map's units and a sentence lookup in, proposals out.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
 STORY = ("thesis", "conclusion", "example", "metaphor", "question")
@@ -69,6 +69,37 @@ class AutoParams:
     context_back: int = 1             # up to this many thoughts right before may be added as context (M74/M75: 1)
     context_later: bool = False       # the clip may start at a later sentence of its first thought that stands
     context_later_min_sec: float = 8.0   # … when at least this much of that thought is left
+    # M83 (m80 hooks: all 5 cold opens were the clip's own first sentence — no teaser, the body went on from the
+    # second one, «В инстинкты.», «А второй момент…»): the cold open is a line from later in the clip, replayed.
+    hook_teaser: bool = False         # hook candidates only from hook_teaser_pos of the clip on, written h:B.N!
+    hook_teaser_pos: float = 0.5      # … the sentence starts at least this fraction into the clip's sentences
+    # M92 (m86: the model passed teasers «Это и есть доверие к себе», «Для меня это самый лучший отдых», «Но опять
+    # подростковая часть…», «Он как-то хочет скриншот…»): a cold open pointing back is left out by the code.
+    hook_no_pointer: bool = False
+    # M91 (ending package, PLAN M1.7 B): the payoff is said in the close shot — the clip's last sentences
+    # (at least close_last_sec of them, at most two) are written c:B.N.
+    close_last: bool = False
+    close_last_sec: float = 3.0
+    # M115 (M1.9 C; M99: 62 of 65 endings of the owner's clips are «↘», one «→»): a clip does not end on a sentence
+    # whose voice stays up — the speaker goes on. Needs end_tone in propose (the intonation map); False = as before.
+    end_tone: bool = False
+    # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts):
+    generator: str = "montage"        # montage (build_clip) | passage (build_passage) | mixed (passage + loop + payoff)
+    seed_roles: tuple = ()            # roles a clip may grow around (punch ≥ seed_punch); () = STORY
+    passage_gap_sec: float = 30.0     # passage: a neighbour joins when at most this far from the run
+    start_judge: str = "veto"         # veto | rank — a start only the model rejects keeps the clip, sorted last
+    lean_depth: int = 0               # montage: a thought brings this many links of what it leans on; 0 = the chain
+    # M120 (owner: «перестановки можно, но без частых быстрых скачков»; his 66 clips: 48 one stretch, 12 one jump,
+    # 6 two, none three; a piece after a far jump ≥ 12 s, a last piece — the punchline — down to 6 s):
+    rhythm: bool = False              # the jump rule below on every clip (rhythm_why); False = as before
+    max_jumps: int = 2
+    jump_sec: float = 10.0            # a gap in the source longer than this (or going back) is a jump
+    settle_near_sec: float = 6.0      # the piece after a jump lasts at least this after a short skip …
+    settle_far_sec: float = 12.0      # … up to this after a jump of settle_far_at_sec or more (or back in the source)
+    settle_far_at_sec: float = 120.0
+    settle_tail: float = 0.5          # the last piece (the payoff) needs only this share of it
+    # M138: the owner's taste (cloud/taste.py) adds taste_weight × clip_taste to a proposal's score; 0 = off
+    taste_weight: float = 0.0
 
 
 @dataclass
@@ -88,12 +119,21 @@ class Proposal:
     variant_of: int | None = None                       # M70: a short version of accepted clip M<n>
     bad_seams: int | None = None                        # M70: seams the model found jarring (None = not asked)
     unit_refs: dict = field(default_factory=dict)       # M74: a thought played without its first sentence → its refs
+    hook_keep: bool = False                             # M83: the cold open is a teaser from later — h:B.N! (replayed)
+    keys: list = field(default_factory=list)            # M88: [(B.N, word)] — k: words the subtitles highlight
+    close: list = field(default_factory=list)           # M91: [B.N] — the last sentences in the close shot (c:)
+    plate_mode: str = ""                                # M112: how the plate t: was written (hook | context; "" = not)
+    start_doubt: str | None = None                      # M119: the model rejected the start the rules accept (rank)
 
     def line(self, label: str) -> str:
         sp = f"@{self.speed:g}" if self.speed else ""
         parts = [f"M{label} {self.score}{sp}", self.pieces]
         if self.hook:
-            parts.append(f"h:{self.hook}")
+            parts.append(f"h:{self.hook}" + ("!" if self.hook_keep else ""))
+        if self.close:
+            parts.append("c:" + ",".join(self.close))
+        if self.keys:
+            parts.append("k:" + ";".join(f"{r}={w}" for r, w in self.keys))
         if self.title:
             parts.append(f"t: {self.title}")
         out = " | ".join(parts)
@@ -114,10 +154,12 @@ def eligible(u: dict, p: AutoParams) -> bool:
     return int(u.get("punch") or 0) >= p.min_punch
 
 
-def leans_on(u: dict, by_id: dict) -> list[int]:
-    """The chain of earlier units u leans on (refers, transitively), nearest first."""
+def leans_on(u: dict, by_id: dict, depth: int = 0) -> list[int]:
+    """The chain of earlier units u leans on (refers, transitively), nearest first. M119: depth > 0 — only that many
+    links (the start rules, context_start, see to the first sentence of the earliest one); 0 — the whole chain."""
     out, seen, cur = [], {u["id"]}, u
-    while not cur.get("standalone", True) and cur.get("refers") in by_id and cur["refers"] not in seen:
+    while (not cur.get("standalone", True) and cur.get("refers") in by_id and cur["refers"] not in seen
+           and not (depth and len(out) >= depth)):
         cur = by_id[cur["refers"]]
         seen.add(cur["id"])
         out.append(cur["id"])
@@ -157,7 +199,7 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     chosen: dict[int, dict] = {}
 
     def add(u: dict) -> bool:
-        group = [u] + [by_id[i] for i in leans_on(u, by_id)]
+        group = [u] + [by_id[i] for i in leans_on(u, by_id, p.lean_depth)]
         if any(not eligible(g, p) and g["id"] not in chosen for g in group[1:]):
             # an earlier unit it leans on is unusable (filler / missing): this one cannot stand
             return False
@@ -165,6 +207,9 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
         trial = {**chosen, **new}
         if sum(_dur(g) for g in trial.values()) > p.max_sec or _pieces(_order(list(trial.values()))) > p.max_pieces:
             return False
+        if p.rhythm and len(rhythm_pieces([(float(g["t0"]), float(g["t1"])) for g in _order(list(trial.values()))],
+                                          p.jump_sec)) - 1 > p.max_jumps:
+            return False                  # M120: no more than max_jumps jumps — it grows where it already is
         chosen.update(new)
         return True
 
@@ -186,6 +231,172 @@ def build_clip(seed: dict, units: Sequence[dict], by_id: dict, p: AutoParams) ->
     if clip[-1].get("role") == "question":
         return None                                   # never end on an open question
     return clip
+
+
+def rhythm_pieces(spans: Sequence[tuple[float, float]], jump_sec: float) -> list[list[int]]:
+    """M120: indexes of `spans` (source t0, t1 in play order) grouped into pieces — a new piece where the next span
+    starts more than jump_sec after the previous one ends, or before it starts (played out of source order)."""
+    out: list[list[int]] = []
+    for i, (a, _b) in enumerate(spans):
+        if out and not (a < spans[i - 1][0] or a - spans[i - 1][1] > jump_sec):
+            out[-1].append(i)
+        else:
+            out.append([i])
+    return out
+
+
+def settle_need(gap: float, p: "AutoParams") -> float:
+    """M120: seconds the piece after a jump of `gap` source seconds needs before the viewer has settled — from
+    settle_near_sec after a short skip up to settle_far_sec at settle_far_at_sec and beyond; a jump back is far."""
+    if gap < 0:
+        return p.settle_far_sec
+    span = max(1e-6, p.settle_far_at_sec - p.jump_sec)
+    k = min(1.0, max(0.0, (gap - p.jump_sec) / span))
+    return p.settle_near_sec + (p.settle_far_sec - p.settle_near_sec) * k
+
+
+def rhythm_why(spans: Sequence[tuple[float, float]], p: "AutoParams", first_is_question: bool = False
+               ) -> tuple[str | None, int | None]:
+    """M120 (owner: «перестановки можно, но чтобы не было частых быстрых скачков»): one flexible rule for every clip.
+    At most max_jumps jumps; the piece after a jump lasts at least settle_need(jump) — longer after a far jump, a
+    short skip of a digression needs little —, the last piece (the payoff, a punchline) only settle_tail of it; the
+    piece before the first jump at least settle_near_sec (a question opening the clip — the loop — may be short).
+    Returns (why, index of the piece to fix) or (None, None). Calibrated on the owner's 66 clips (all pass)."""
+    pieces = rhythm_pieces(spans, p.jump_sec)
+    dur = [sum(spans[i][1] - spans[i][0] for i in pc) for pc in pieces]
+    if len(pieces) - 1 > p.max_jumps:
+        k = min(range(len(pieces)), key=lambda j: dur[j])
+        return f"скачков {len(pieces) - 1} (можно {p.max_jumps})", k
+    if len(pieces) > 1 and dur[0] < p.settle_near_sec and not first_is_question:
+        return f"кусок до первого скачка {dur[0]:.0f} с (нужно ≥ {p.settle_near_sec:g})", 0
+    for k in range(1, len(pieces)):
+        a, b = spans[pieces[k - 1][-1]], spans[pieces[k][0]]
+        gap = b[0] - a[1] if b[0] >= a[0] else -1.0
+        need = settle_need(gap, p) * (p.settle_tail if k == len(pieces) - 1 else 1.0)
+        if dur[k] < need:
+            jump = "назад" if gap < 0 else f"{gap:.0f} с"
+            return f"кусок после скачка ({jump}) {dur[k]:.1f} с, нужно ≥ {need:.1f}", k
+    return None, None
+
+
+def fit_rhythm(clip: list[dict], by_id: dict, p: "AutoParams", keep: set[int], taken=frozenset()
+               ) -> tuple[list[dict] | None, list[str]]:
+    """M120: makes a clip keep the rhythm (rhythm_why) — the piece at fault grows by its neighbours in the source
+    (same topic, usable, not in another clip, while the clip stays ≤ max_sec) or, when it holds nothing in `keep`
+    (the seed, the payoff), goes. None when neither helps. Play order stays (a loop question first, then the source)."""
+    notes: list[str] = []
+    for _ in range(12):
+        spans = [(float(u["t0"]), float(u["t1"])) for u in clip]
+        why, k = rhythm_why(spans, p, clip[0].get("role") == "question")
+        if why is None:
+            return clip, notes
+        piece = [clip[i] for i in rhythm_pieces(spans, p.jump_sec)[k]]
+        ids = {u["id"] for u in clip}
+        total = sum(_dur(u) for u in clip)
+        grown = False
+        for nb_id, at_end in ((piece[-1]["id"] + 1, True), (piece[0]["id"] - 1, False)):
+            nb = by_id.get(nb_id)
+            if (nb is None or nb_id in ids or nb_id in taken or nb.get("missing") or not nb.get("refs")
+                    or nb.get("topic") != piece[0].get("topic") or (nb.get("filtered") and not p.use_filtered)
+                    or total + _dur(nb) > p.max_sec
+                    or (float(nb["t0"]) - float(piece[-1]["t1"]) if at_end
+                        else float(piece[0]["t0"]) - float(nb["t1"])) > p.jump_sec):
+                continue
+            if not eligible(nb, p):
+                continue                                  # a weak thought or an aside does not fill a piece
+            pos = clip.index(piece[-1]) + 1 if at_end else clip.index(piece[0])
+            clip = clip[:pos] + [nb] + clip[pos:]
+            notes.append(f"ритм: {why} — кусок дополнен мыслью #{nb_id}")
+            grown = True
+            break
+        if grown:
+            continue
+        if any(u["id"] in keep for u in piece) or len(piece) == len(clip):
+            return None, notes + [why]
+        clip = [u for u in clip if u not in piece]
+        notes.append(f"ритм: {why} — убран кусок " + ", ".join(f"#{u['id']}" for u in piece))
+        if sum(_dur(u) for u in clip) < p.min_sec:
+            return None, notes + ["короче min_sec после ритма"]
+    return None, notes + ["ритм не сошёлся"]
+
+
+def add_payoff(clip: list[dict], seed: dict, units: Sequence[dict], p: "AutoParams", taken=frozenset()
+               ) -> tuple[list[dict], str | None]:
+    """M120 mixed (owner: «смысловые перестановки, чтобы было интересно, но без частых скачков»): a run with no payoff
+    gets the nearest later conclusion of its topic (or «similar» to its seed) — strong (punch ≥ seed_punch), standing
+    on its own or leaning on a thought of the run, not in another clip, within max_sec — at its end. It comes later in
+    the source, so the play order stays the source order. The clip as it was when there is none."""
+    if any(u.get("role") in PAYOFFS for u in clip):
+        return clip, None
+    ids = {u["id"] for u in clip}
+    sims = {i for i, _ in (seed.get("similar") or [])}
+    end = max(float(u["t1"]) for u in clip)
+    room = p.max_sec - sum(_dur(u) for u in clip)
+    cands = [u for u in units if u["id"] not in ids and u["id"] not in taken and eligible(u, p)
+             and u.get("role") in PAYOFFS and int(u.get("punch") or 0) >= p.seed_punch and float(u["t0"]) >= end
+             and (u.get("topic") == seed.get("topic") or u["id"] in sims) and _dur(u) <= room
+             and (u.get("standalone", True) or u.get("refers") in ids)]
+    if not cands:
+        return clip, None
+    u = min(cands, key=lambda c: float(c["t0"]))
+    return clip + [u], (f"вывод из другого места: #{u['id']} «{u.get('summary') or ''}» "
+                        f"(+{float(u['t0']) - end:.0f} с по исходнику) — в конце")
+
+
+def _strength(u: dict) -> int:
+    return int(u.get("punch") or 0) + (1 if u.get("role") in PAYOFFS else 0)
+
+
+def build_passage(seed: dict, by_id: dict, p: AutoParams, taken=frozenset()) -> list[dict] | None:
+    """M119 (m118: 60 of the owner's 66 clips are one stretch of the talk — no jump over 30 s — of 1–5 neighbouring
+    thoughts inside one topic; build_clip failed on 10 of 20 seeds of IMG_6848: a thought that leans back brings its
+    whole chain, over max_sec or through a weak thought): a run of adjacent thoughts around the seed, in source order.
+    It grows one neighbour at a time: after a question — forward (its answer); while the first thought leans on the
+    one before (the map's standalone) — back; else toward the stronger neighbour (punch, a conclusion +1; a tie goes
+    forward). Up to target_sec, never past max_sec. A neighbour joins when it is of the seed's topic, has refs, is not
+    missing, filtered (unless use_filtered) or in another clip (`taken`), and is at most passage_gap_sec away. A weak
+    thought (not eligible: below min_punch, an aside) may sit inside, never at an end; nor does a question end it.
+    None when the run is shorter than min_sec or the seed itself is a question left at the end."""
+    def usable(u: dict | None) -> bool:
+        return (u is not None and u["id"] not in taken and not u.get("missing") and bool(u.get("refs"))
+                and u.get("topic") == seed.get("topic") and float(u.get("t1") or 0) > float(u.get("t0") or 0)
+                and not (u.get("filtered") and not p.use_filtered))
+
+    if not usable(seed) or _dur(seed) > p.max_sec:
+        return None
+    run = [seed]
+    total = _dur(seed)
+    while total < p.target_sec:
+        prv, nxt = by_id.get(run[0]["id"] - 1), by_id.get(run[-1]["id"] + 1)
+        if not (usable(prv) and float(run[0]["t0"]) - float(prv["t1"]) <= p.passage_gap_sec):
+            prv = None
+        if not (usable(nxt) and float(nxt["t0"]) - float(run[-1]["t1"]) <= p.passage_gap_sec):
+            nxt = None
+        if p.rhythm:                      # M120: a skip over a cut part counts as a jump — no more than max_jumps
+            jumps = sum(1 for a, b in zip(run, run[1:]) if float(b["t0"]) - float(a["t1"]) > p.jump_sec)
+            if prv is not None and float(run[0]["t0"]) - float(prv["t1"]) > p.jump_sec and jumps >= p.max_jumps:
+                prv = None
+            if nxt is not None and float(nxt["t0"]) - float(run[-1]["t1"]) > p.jump_sec and jumps >= p.max_jumps:
+                nxt = None
+        if nxt is not None and (prv is None or run[-1].get("role") == "question"):
+            pick = nxt
+        elif prv is not None and (nxt is None or not run[0].get("standalone", True)):
+            pick = prv
+        elif prv is None:
+            break
+        else:
+            pick = nxt if _strength(nxt) >= _strength(prv) else prv
+        if total + _dur(pick) > p.max_sec:
+            break
+        run = [pick] + run if pick is prv else run + [pick]
+        total += _dur(pick)
+    while len(run) > 1 and run[-1] is not seed and (not eligible(run[-1], p) or run[-1].get("role") == "question"):
+        run.pop()
+    while len(run) > 1 and run[0] is not seed and not eligible(run[0], p):
+        run.pop(0)
+    if run[-1].get("role") == "question" or sum(_dur(u) for u in run) < p.min_sec:
+        return None
+    return run
 
 
 _CONTRAST = ("на самом деле", "но ", "однако", "а вот", "парадокс", "наоборот", "вместо того", "не потому")
@@ -260,6 +471,27 @@ def back_reference(text: str) -> str | None:
     return None
 
 
+def teaser_pointer(text: str) -> str | None:
+    """M92: what makes a cold open point back — it is heard first, with nothing before it: everything back_reference
+    finds (a first «Это/Но/Он/Вот…», «второй момент», «как я говорил»), and «это» standing for an unsaid thing among
+    the first three words («Для меня это самый лучший отдых») — but not «X — это …», a definition. None = stands."""
+    import re as _re
+    why = back_reference(text)
+    if why:
+        return why
+    toks = _re.findall(r"\w+(?:-\w+)*|[—–-]", (text or "").lower().replace("ё", "е"))
+    n = 0
+    for i, t in enumerate(toks):
+        if t in ("—", "–", "-"):
+            continue
+        n += 1
+        if n > 3:
+            break
+        if t == "это" and not (i > 0 and toks[i - 1] in ("—", "–", "-")):
+            return "«это» без предмета"
+    return None
+
+
 def _drop_first_ref(refs: str) -> str | None:
     """«13.2-5 14.1» → «13.3-5 14.1»; «13.2 14.1» → «14.1»; None when nothing is left."""
     pieces = refs.split()
@@ -272,10 +504,56 @@ def _drop_first_ref(refs: str) -> str | None:
     return " ".join(head + pieces[1:]) or None
 
 
-Judge = Callable[[str, str], "tuple[bool, str] | None"]
+def keep_refs_until(refs: str, last: str) -> str | None:
+    """«13.2-5 14.1-3» up to «14.2» → «13.2-5 14.1-2»; up to «13.4» → «13.2-4»; None when `last` is not in refs."""
+    out = []
+    lb, _, lk = last.partition(".")
+    for piece in refs.split():
+        b, _, r = piece.partition(".")
+        a, _, z = r.partition("-")
+        a_i, z_i = int(a), int(z or a)
+        if b == lb and a_i <= int(lk) <= z_i:
+            k = int(lk)
+            out.append(f"{b}.{a_i}" + (f"-{k}" if k > a_i else ""))
+            return " ".join(out)
+        out.append(piece)
+    return None
 
 
-def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | None" = None) -> str | None:
+def fix_open_end(clip: list[dict], sentences, end_tone: Callable[[str], "str | None"], p: "AutoParams"
+                 ) -> tuple[list[dict] | None, str | None, str | None]:
+    """M115 (M1.9 C): one rule for every clip — it does not end on a sentence spoken «→», with the voice up (the
+    intonation map: M99 — 62 of 65 endings of the owner's clips are «↘», one is «→»; inside clips 45 of 484 sentence
+    ends are «→»). The text's full stop does not count, the voice does. The last thought loses its trailing sentences
+    back to the latest finished one that is not «→», while the clip stays ≥ min_sec; otherwise the clip goes.
+    «unsure» and «no pitch» endings stay (the plan reports them, as before). Returns (clip, note, None) — clip
+    unchanged and note None when its ending is not «→» — or (None, None, why)."""
+    last = clip[-1]
+    rows = list(_sent_rows(sentences, last["refs"]))
+    if not rows or end_tone(rows[-1][0]) != "open":
+        return clip, None, None
+    total = sum(_dur(u) for u in clip)
+    cut = 0.0
+    for k in range(len(rows) - 1, 0, -1):            # keep rows[:k]
+        cut += float(rows[k][1] or 0.0)
+        if total - cut < p.min_sec:
+            break
+        ref, _sec, _nw, complete, text = rows[k - 1]
+        if complete and end_tone(ref) != "open":
+            refs = keep_refs_until(last["refs"], ref)
+            if refs:
+                new_last = {**last, "refs": refs, "t1": float(last["t1"]) - cut}
+                return (clip[:-1] + [new_last],
+                        f"конец: «{(rows[-1][4] or rows[-1][0])[-50:]}» звучит с продолжением («→») — клип кончается на "
+                        f"{ref} «{(text or ref)[-50:]}» (убрано фраз: {len(rows) - k})", None)
+    return None, None, f"конец «{(rows[-1][4] or rows[-1][0])[-60:]}» звучит с продолжением («→»), укоротить нельзя"
+
+
+Judge = Callable[[str, str, str], "tuple[bool, str] | None"]
+
+
+def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | None" = None,
+                 core: str = "") -> str | None:
     """M74/M75: why a first sentence cannot open a clip, None = it can. Rules first (back_reference; a
     non-question shorter than context_min_words is a fragment — «Уйти.»), then the model, when given, on
     what rules cannot see («Хоть это…», an answer to an unheard question). The model only says yes/no;
@@ -287,9 +565,9 @@ def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | Non
     if p.context_min_words and n < p.context_min_words and not (text or "").rstrip().endswith("?"):
         return f"обрывок ({n} сл.)"
     if judge is not None:
-        verdict = judge(text, following)
+        verdict = judge(text, following, core)
         if verdict is not None and not verdict[0]:
-            return f"непонятно без предыдущего (модель: {verdict[1] or 'нет'})"
+            return f"не годится в начало (модель: {verdict[1] or 'нет'})"
     return None
 
 
@@ -308,6 +586,9 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
     otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can."""
     notes: list[str] = []
+    # M78: what the clip is about (its seed and its payoff) — the model judges whether the start leads into it
+    core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed_id, clip[-1]["id"])
+                                  if i in by_id)).strip()
     for _ in range(6):
         u = clip[0]
         rows = list(_sent_rows(sentences, u["refs"]))
@@ -315,11 +596,11 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
             return clip, notes, None
         first = rows[0][4] or rows[0][0]
         nxt = rows[1][4] if len(rows) > 1 else ""
-        why = stands_alone(rows[0][4], nxt, p, judge)
+        why = stands_alone(rows[0][4], nxt, p, judge, core)
         if not why:
             return clip, notes, None
         if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
-                and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge) is None):
+                and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
             refs = _drop_first_ref(u["refs"])
             if refs:
                 clip = [{**u, "refs": refs, "t0": float(u["t0"]) + float(rows[0][1])}] + clip[1:]
@@ -341,7 +622,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                     break
                 prow = list(_sent_rows(sentences, prev["refs"]))
                 after = prow[1][4] if len(prow) > 1 else (list(_sent_rows(sentences, nxt_u["refs"])) or [("",) * 5])[0][4]
-                if prow and stands_alone(prow[0][4], after, p, judge) is None:
+                if prow and stands_alone(prow[0][4], after, p, judge, core) is None:
                     notes.append(f"начало: добавлен{'а мысль' if len(ctx) == 1 else 'ы мысли'} "
                                  + ", ".join(f"#{c['id']}" for c in ctx)
                                  + f" «{(prow[0][4] or '')[:50]}» перед «{first[:50]}» ({why}) — контекст")
@@ -354,7 +635,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                 left = sum(float(r[1]) for r in rows[k:])
                 if left < p.context_later_min_sec or sum(_dur(c) for c in clip) - (total - left) < p.min_sec:
                     break
-                if stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge) is None:
+                if stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge, core) is None:
                     refs = u["refs"]
                     for _ in range(k):
                         refs = _drop_first_ref(refs) or refs
@@ -364,7 +645,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                     break
             if clip[0] is not u:
                 continue
-        needed = {i for c in clip for i in leans_on(c, by_id)}
+        needed = {i for c in clip for i in leans_on(c, by_id, p.lean_depth)}
         if (len(clip) > 1 and (u["id"] == loop_id or (u["id"] != seed_id and u["id"] not in needed))
                 and sum(_dur(c) for c in clip[1:]) >= p.min_sec):
             clip = clip[1:]
@@ -376,49 +657,209 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
 
 STANDALONE_SYSTEM = (
     "A short vertical video is cut from the middle of a Russian talk. After a 3-second teaser it starts with the "
-    "sentence given below; the viewer has heard NOTHING of the talk before it. Decide whether that first sentence "
-    "makes sense on its own: no pronoun or «это/так/вот/тот» pointing to something not said, not an answer to a "
-    "question the viewer did not hear, not a fragment or a filler («да, допустим»), not a continuation of an "
-    "enumeration, and no term or subject used as if it had been introduced before («перенос», «этот метод») — the "
-    "viewer must know what the sentence is about. The following sentence is given only to help you understand it. "
-    "Answer only with JSON: "
-    "{\"ok\": true|false, \"why\": \"<at most 8 Russian words>\"}."
+    "FIRST SENTENCE below; the viewer has heard NOTHING of the talk before it. You also get what the clip is about. "
+    "Answer three things. subject: what the first sentence is about, in at most 5 Russian words — empty if a viewer "
+    "could not tell. alone: true if it makes sense on its own — no pronoun or «это/так/вот/тот» pointing to "
+    "something not said, not an answer to a question the viewer did not hear, not a fragment or a filler («да, "
+    "допустим»), not a continuation of an enumeration, no term used as if it had been introduced before («перенос», "
+    "«этот метод»). leads: true if it leads into what the clip is about — not a side detail, an aside, or a remark "
+    "about the room, the furniture or the setting. The following sentence only helps you understand the first. "
+    "Answer only with JSON: {\"subject\": \"<words>\", \"alone\": true|false, \"leads\": true|false, "
+    "\"why\": \"<at most 8 Russian words>\"}."
 )
 
 
-def make_judge(provider, *, log: Callable[[str], None] = print) -> "Judge":
-    """M75: the model's yes/no on «does this first sentence stand on its own» — cached per sentence, one retry,
-    None when there is no usable answer (the rules' verdict then stands)."""
+HOOK_JUDGE_SYSTEM = (
+    "A short vertical video (a reel) cut from a Russian talk opens with a TEASER LINE — the first thing the viewer "
+    "hears, 2–5 seconds, before the clip proper. The viewer has heard nothing else. You also get what the clip is "
+    "about. Answer three things. subject: what the line is about, in at most 5 Russian words — empty if a viewer "
+    "could not tell. alone: true if it makes sense on its own — no pronoun or «это/так/вот/тот» pointing to something "
+    "not said, not an answer to a question the viewer did not hear, not a fragment or a filler, no term used as if it "
+    "had been introduced before. leads: true if it is about what the clip is about and makes the viewer want the "
+    "answer — not a side detail, an aside, or a remark about the room, the furniture or the setting. Answer only with "
+    "JSON: {\"subject\": \"<words>\", \"alone\": true|false, \"leads\": true|false, \"why\": \"<at most 8 Russian "
+    "words>\"}."
+)
+
+
+def judge_hooks(pr: "Proposal", judge: "Judge", core: str = "", *, top: int = 6,
+                log: Callable[[str], None] = print) -> list[str]:
+    """M81 (owner: IMG r03/r06 «начинаются с фразы про кресло — мало информативна»; M78 judged only the first sentence
+    of the body, the cold open is heard before it): the model's yes/no on the first `top` hook candidates with the
+    same three questions (subject, alone, leads into the clip). A rejected candidate leaves the list before the
+    model ranks the rest (invariant 1: it only filters the code's candidates); no answer = kept. When none of them
+    passes, the clip has no cold open — the body starts the reel. Returns the notes written."""
+    notes: list[str] = []
+    cands = list(pr.hooks)
+    kept: list[str] = []
+    dropped: list[str] = []
+    for ref in cands[:top]:
+        text = (pr.hook_texts.get(ref) or ("", 0))[0]
+        if not text:
+            kept.append(ref)
+            continue
+        v = judge(text, "", core)
+        if v is not None and not v[0]:
+            dropped.append(f"h:{ref} «{text[:50]}» — {v[1] or 'нет'}")
+        else:
+            kept.append(ref)
+    rest = cands[top:]
+    if dropped:
+        notes.append("крючки отброшены моделью: " + "; ".join(dropped))
+    if not kept:
+        pr.hooks, pr.hook = [], None
+        notes.append(f"крючок: ни один из первых {min(top, len(cands))} не прошёл проверку — сборка без крючка")
+    else:
+        pr.hooks = kept + rest
+        pr.hook = kept[0]
+    pr.notes.extend(notes)
+    return notes
+
+
+def parse_judge(raw: str) -> "tuple[bool, str] | None":
+    """The judge's answer → (ok, why); None = not usable (asked again). M78: subject + alone + leads — any «no» (or
+    no subject) rejects; a plain {"ok": bool} is taken as it is."""
     import json as _json
     import re as _re
-    cache: dict = {}
+    text = _re.sub(r"<think>.*?</think>", " ", raw or "", flags=_re.S)
+    obj, dec = None, _json.JSONDecoder()
+    for m in _re.finditer(r"\{", text):                         # the last JSON object that decodes
+        try:
+            cand, _ = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(cand, dict):
+            obj = cand
+    if not isinstance(obj, dict):
+        return None
+    why = str(obj.get("why") or "").strip()[:60]
+    if isinstance(obj.get("alone"), bool) and isinstance(obj.get("leads"), bool):
+        subj = str(obj.get("subject") or "").strip()
+        if not subj:
+            return (False, why or "не ясно, о чём фраза")
+        if not obj["alone"]:
+            return (False, why or "непонятно без предыдущего")
+        if not obj["leads"]:
+            return (False, why or f"не про тему ролика («{subj[:30]}»)")
+        return (True, subj[:40])
+    if isinstance(obj.get("ok"), bool):
+        return (obj["ok"], why)
+    return None
 
-    def judge(text: str, following: str = ""):
-        key = (text, following)
+
+def make_judge(provider, *, log: Callable[[str], None] = print, system: str | None = None,
+               label: str = "First sentence", store=None, jlog: Callable[[dict], None] | None = None) -> "Judge":
+    """M75: the model's yes/no on «does this first sentence stand on its own» — cached per sentence, one retry,
+    None when there is no usable answer (the rules' verdict then stands). M86: `label` names the line in the
+    request («Teaser line» for a cold open; the following sentence is then sent only when given); `store` — a
+    persistent mapping (hash of the prompt and the request → [ok, why]): the same line asked the same way gets
+    the same answer in every run (a borderline start no longer flips between runs); no answer is not stored.
+    M116: the store key carries the answering model (provider.model_id) — one model's answer is never handed to
+    another; `jlog` gets every judgment {label, model, system, msg, ok, why, cached} (arl autocut --judge-log)."""
+    import hashlib as _hashlib
+    cache: dict = {}
+    sys_text = system or STANDALONE_SYSTEM
+    mid = str(getattr(provider, "model_id", "") or "")
+
+    def _log(msg: str, out, cached: bool) -> None:
+        if jlog is not None:
+            jlog({"label": label, "model": mid, "system": sys_text, "msg": msg,
+                  "ok": None if out is None else bool(out[0]), "why": None if out is None else out[1], "cached": cached})
+
+    def judge(text: str, following: str = "", core: str = ""):
+        key = (text, following, core)
+        if label == "First sentence":
+            msg = (f"First sentence: «{text}»\nFollowing sentence: «{following}»"
+                   + (f"\nThe clip is about: {core}" if core else ""))
+        else:
+            msg = (f"{label}: «{text}»" + (f"\nFollowing sentence: «{following}»" if following else "")
+                   + (f"\nThe clip is about: {core}" if core else ""))
         if key in cache:
+            _log(msg, cache[key], True)
             return cache[key]
-        msg = f"First sentence: «{text}»\nFollowing sentence: «{following}»"
+        base = (f"{mid}\n" if mid else "") + sys_text + "\n\n" + msg
+        skey = _hashlib.sha256(base.encode("utf-8")).hexdigest()[:32] if store is not None else ""
+        if store is not None and skey in store:
+            v = store[skey]
+            cache[key] = (bool(v[0]), str(v[1])) if isinstance(v, (list, tuple)) and len(v) == 2 else None
+            if cache[key] is not None:
+                _log(msg, cache[key], True)
+                return cache[key]
         out = None
         for _ in range(2):
             try:
-                raw = provider.complete([{"role": "system", "content": STANDALONE_SYSTEM},
+                raw = provider.complete([{"role": "system", "content": sys_text},
                                          {"role": "user", "content": msg}], temperature=0.0)
             except Exception as exc:  # noqa: BLE001 — no model: the rules decide
                 log(f"  начало: модель не ответила ({type(exc).__name__})")
                 break
-            m = _re.search(r"\{.*\}", raw or "", _re.S)
-            try:
-                obj = _json.loads(m.group(0)) if m else {}
-            except ValueError:
-                continue
-            if isinstance(obj.get("ok"), bool):
-                out = (obj["ok"], str(obj.get("why") or "").strip()[:60])
+            out = parse_judge(raw)
+            if out is not None:
                 break
         cache[key] = out
+        if store is not None and out is not None:
+            store[skey] = [bool(out[0]), str(out[1])]
+        _log(msg, out, False)
         return out
 
     judge.cache = cache   # type: ignore[attr-defined]
     return judge
+
+
+# M86: the cold open is judged as a teaser, not as a start (M85: «И никогда, ребятки, не поздно.» and «Поздно — это
+# когда уже завтра заказан священник.» were rejected for leaving a question open — which is the teaser's job).
+HOOK_TEASER_SYSTEM = (
+    "A short vertical video (a reel) cut from a Russian talk opens with a TEASER LINE taken from later in the clip: "
+    "it is heard first, cold, 2–5 seconds, and the clip then answers it or pays it off. You get the teaser line and "
+    "what the clip is about, with the words of its ending. Answer three things. subject: what the line is about, in "
+    "at most 5 Russian words — empty only if a viewer could not tell even roughly. alone: false only when the line "
+    "points back to something not said — a pronoun or «это/так/вот/тот» standing for an unsaid thing, an answer to "
+    "a question the viewer did not hear, «второй момент», «как я говорил», a fragment or a filler; an open question, "
+    "a provocative claim, a punchline or a paradox is GOOD — leaving the viewer wanting the answer is what a teaser "
+    "is for; «это» used as «is» in a definition («Поздно — это когда…») is not a pointer. leads: true if the clip "
+    "develops, answers or pays off the line (judge by the words of the ending, not by the summary alone); false for a "
+    "remark about the room, the furniture or the setting, or an aside the clip does not develop. Answer only with "
+    "JSON: {\"subject\": \"<words>\", \"alone\": true|false, \"leads\": true|false, \"why\": \"<at most 8 "
+    "Russian words>\"}."
+)
+
+
+def owner_examples(rows: Sequence[dict], kind: str, n: int) -> tuple[list[str], list[str]]:
+    """M86 (learning, stage 1): lines from the owner's own verdicts (reviews/verdicts.jsonl, M82) → (rejected, kept),
+    the latest `n` of each, no repeats. kind «hook»: the cold open of a montage clip (draft note «крючок: «…»»),
+    rejected when the verdict is drop/fix with the reason «крючок»; kind «start»: the first sentence (note
+    «начало: «…»»), rejected with the reason «начало». Kept: verdict ok. Real data with its origin (invariant 11)."""
+    tag, reason = ("крючок: «", "крючок") if kind == "hook" else ("начало: «", "начало")
+    bad: list[str] = []
+    good: list[str] = []
+    for r in rows:
+        if r.get("kind") != "montage":
+            continue
+        text = ""
+        for note in r.get("draft_notes") or []:
+            if note.startswith(tag) and note.endswith("»"):
+                text = note[len(tag):-1].strip()
+        if not text:
+            continue
+        verdict, reasons = r.get("verdict"), [str(x).lower() for x in r.get("reasons") or []]
+        target = bad if verdict in ("drop", "fix") and reason in reasons else good if verdict == "ok" else None
+        if target is not None:
+            if text in target:
+                target.remove(text)
+            target.append(text)
+    return bad[-n:] if n > 0 else [], good[-n:] if n > 0 else []
+
+
+def with_examples(system: str, bad: Sequence[str], good: Sequence[str], what: str) -> str:
+    """M86: the channel owner's verdicts appended to a judge's prompt — real lines he rejected or kept as a `what`."""
+    if not bad and not good:
+        return system
+    out = system + f"\nThe channel owner's own verdicts on earlier reels — judge new lines the same way."
+    if bad:
+        out += f"\nRejected as a {what}: " + "; ".join(f"«{t}»" for t in bad)
+    if good:
+        out += f"\nKept as a {what}: " + "; ".join(f"«{t}»" for t in good)
+    return out
 
 
 def _sent_rows(sentences, refs):
@@ -431,19 +872,66 @@ def _sent_rows(sentences, refs):
 def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[str, float, str]]:
     """(ref, score, text) of every hook candidate, best first: finished sentences of hook length of the
     clip's thoughts. When a question opens the clip (the loop), its own sentences are left out — the
-    cold open then teases the answer instead of repeating the question."""
+    cold open then teases the answer instead of repeating the question. M83 (`hook_teaser`): only sentences
+    that start at least `hook_teaser_pos` into the clip (by the length of its sentences in play order) — a
+    teaser of what is coming, never the start the clip opens with anyway."""
     skip = clip[0]["id"] if clip and clip[0].get("role") == "question" and len(clip) > 1 else None
+    rows = [(u, list(_sent_rows(sentences, u["refs"]))) for u in clip]
+    total = sum(float(r[1] or 0.0) for _, rs in rows for r in rs)
     out = []
-    for u in clip:
-        if u["id"] == skip or int(u.get("punch") or 0) < p.min_punch:
-            continue
-        for ref, sec, nwords, complete, text in _sent_rows(sentences, u["refs"]):
+    at = 0.0
+    for u, rs in rows:
+        for ref, sec, nwords, complete, text in rs:
+            start, at = at, at + float(sec or 0.0)
+            if u["id"] == skip or int(u.get("punch") or 0) < p.min_punch:
+                continue
+            if p.hook_teaser and (total <= 0 or start / total < p.hook_teaser_pos):
+                continue                  # M83: in the first part — the clip plays it at once, it teases nothing
+            if p.hook_teaser and p.hook_no_pointer and teaser_pointer(text):
+                continue                  # M92: heard cold, a line pointing back explains nothing
             if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
                 if p.context_start and back_reference(text):
                     bonus -= 3.0          # M74: a cold open that points back («как я говорил») explains nothing
                 out.append((ref, hook_score(text, sec, u) + bonus, text))
     return sorted(out, key=lambda x: -x[1])
+
+
+TEASER_PROBE_POS = 1 / 3      # M106: the «what if the teaser could come from this far on» count in the note (a measure)
+
+
+def teaser_misses(clip: Sequence[dict], sentences, p: AutoParams) -> tuple[int, dict[str, int]]:
+    """M106 (m105: 3 of 5 clips of PXL_20260729_copy without a cold open, the reason unseen): the sentences from
+    hook_teaser_pos of the clip on, and why each is not a teaser — the first rule of _hook_cands it fails, in its
+    order: (number of sentences there, {reason: count})."""
+    skip = clip[0]["id"] if clip and clip[0].get("role") == "question" and len(clip) > 1 else None
+    rows = [(u, list(_sent_rows(sentences, u["refs"]))) for u in clip]
+    total = sum(float(r[1] or 0.0) for _, rs in rows for r in rs)
+    at, n, why = 0.0, 0, {}
+    for u, rs in rows:
+        for _ref, sec, nwords, complete, text in rs:
+            start, at = at, at + float(sec or 0.0)
+            if total <= 0 or start / total < p.hook_teaser_pos:
+                continue
+            n += 1
+            if u["id"] == skip:
+                r = "вопрос-петля"
+            elif int(u.get("punch") or 0) < p.min_punch:
+                r = "слабая мысль"
+            elif p.hook_no_pointer and teaser_pointer(text):
+                r = "ссылка назад"
+            elif not complete:
+                r = "незаконченная"
+            elif nwords < p.hook_min_words:
+                r = f"короче {p.hook_min_words} слов"
+            elif float(sec or 0.0) < p.hook_min_sec:
+                r = f"короче {p.hook_min_sec:g} с"
+            elif float(sec or 0.0) > p.hook_max_sec:
+                r = f"длиннее {p.hook_max_sec:g} с"
+            else:
+                r = "прошла"
+            why[r] = why.get(r, 0) + 1
+    return n, why
 
 
 def _hooks(clip: Sequence[dict], sentences, p: AutoParams) -> list[str]:
@@ -461,7 +949,7 @@ def _loop_question(clip: list[dict], units: Sequence[dict], by_id: dict, p: Auto
     """M65: a question the clip answers — one a chosen thought leans on, else one of the clip's topic
     (or «similar» to its seed); short, standalone enough, not used elsewhere."""
     ids = {u["id"] for u in clip}
-    leaned = {i for u in clip for i in leans_on(u, by_id)}
+    leaned = {i for u in clip for i in leans_on(u, by_id, p.lean_depth)}
     topics = {u.get("topic") for u in clip}
     sims = {i for u in clip for i, _ in (u.get("similar") or [])}
     best, best_s = None, 0.0
@@ -483,7 +971,7 @@ def _prune(clip: list[dict], by_id: dict, p: AutoParams) -> tuple[list[dict], li
     thought leans on) while the clip is longer than target_sec + prune_slack and stays ≥ min_sec."""
     dropped: list[int] = []
     while sum(_dur(u) for u in clip) > p.target_sec + p.prune_slack and len(clip) > 2:
-        needed = {i for u in clip for i in leans_on(u, by_id)}
+        needed = {i for u in clip for i in leans_on(u, by_id, p.lean_depth)}
         middle = [u for u in clip[1:-1] if u["id"] not in needed]
         if not middle:
             break
@@ -512,40 +1000,85 @@ def _speed(clip: Sequence[dict], p: AutoParams) -> float | None:
 
 def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
-            no_start: list | None = None, judge: "Judge | None" = None) -> list[Proposal]:
+            no_start: list | None = None, judge: "Judge | None" = None,
+            end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
+            rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
-    no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge)."""
+    no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
+    M115: `end_tone(B.k)` → «final» | «open» | «unsure» | None — the voice at the end of that sentence; with
+    p.end_tone a clip does not end «→» (fix_open_end); `open_end` collects (pieces, why) of the clips that went.
+    M119: p.generator «passage» — a run of adjacent thoughts (build_passage; no loop question from elsewhere, no
+    pruning from the middle, no thought shared with an earlier clip); p.seed_roles — the roles a clip grows around;
+    p.start_judge «rank» — a start the model rejects but the rules accept keeps the clip, marked start_doubt (the
+    caller sorts it after the clean ones: invariant 1, the model only ranks).
+    M120: p.rhythm — every clip keeps the jump rule (fit_rhythm before its start is fixed, rhythm_why on the final
+    clip); `rhythm_out` collects (pieces, why) of the clips that could not.
+    M138: `taste(clip)` → the owner's taste of the clip (cloud/taste.clip_taste); with p.taste_weight it is added to the
+    score — the order only (invariant 1); taste_weight 0 or no `taste` = the score as before."""
     by_id = {u["id"]: u for u in units}
-    seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in STORY
+    roles = tuple(p.seed_roles) or STORY
+    passage = p.generator in ("passage", "mixed")
+    mixed = p.generator == "mixed"
+    seeds = sorted((u for u in units if eligible(u, p) and u.get("role") in roles
                     and int(u.get("punch") or 0) >= p.seed_punch),
                    key=lambda u: (-int(u["punch"]), -float((u.get("voice") or {}).get("energy") or 50.0), u["t0"]))
     out: list[Proposal] = []
     used_seeds: set[int] = set()
+    taken: set[int] = set()                 # M119 passage: thoughts already in a clip
     for seed in seeds:
-        if seed["id"] in used_seeds:
+        if seed["id"] in used_seeds or seed["id"] in taken:
             continue
-        clip = build_clip(seed, units, by_id, p)
+        clip = build_passage(seed, by_id, p, taken) if passage else build_clip(seed, units, by_id, p)
         if clip is None:
             continue
         extra_notes: list[str] = []
+        start_doubt = None
         loop_id = None
-        if p.loop and clip[0].get("role") != "question":
-            taken = {i for o in out for i in o.units}
-            q = _loop_question(clip, units, by_id, p, taken)
+        if p.loop and (mixed or not passage) and clip[0].get("role") != "question":
+            in_clips = {i for o in out for i in o.units}
+            q = _loop_question(clip, units, by_id, p, in_clips)
             if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
                     and _pieces([q] + clip) <= p.max_pieces + 1:
                 clip = [q] + clip
                 loop_id = q["id"]
                 extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
-        if p.prune:
+        if mixed:
+            clip, pnote = add_payoff(clip, seed, units, p, taken)
+            if pnote:
+                extra_notes.append(pnote)
+        if p.prune and not passage:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
+        if p.rhythm:
+            clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]}, taken if passage else frozenset())
+            if clip_r is None:
+                if rhythm_out is not None:
+                    rhythm_out.append((" ".join(u["refs"] for u in clip), rnotes[-1] if rnotes else "ритм"))
+                continue
+            clip = clip_r
+            extra_notes += rnotes
         unit_refs: dict = {}
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
                                                judge=judge)
+            if clip2 is None and judge is not None and p.start_judge == "rank":
+                # M119: the rules decide; the model's «no» only sorts the clip after the clean ones
+                clip2, cnotes, why2 = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
+                if clip2 is not None:
+                    # M120 (m119: «И работай дальше.» — ссылка назад «и…» was noted as the model's word): the doubt is
+                    # the model's verdict on the start the rules chose (the same question context_start asks)
+                    _rows = list(_sent_rows(sentences, clip2[0]["refs"]))
+                    _core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed["id"], clip[-1]["id"])
+                                                   if i in by_id)).strip()
+                    start_doubt = (stands_alone(_rows[0][4], _rows[1][4] if len(_rows) > 1 else "", p, judge, _core)
+                                   if _rows else None)
+                    if start_doubt:
+                        cnotes = cnotes + [f"начало: модель против («{(_rows[0][4] or '')[:60]}» — {start_doubt}) — "
+                                           f"правила принимают, сборка после чистых"]
+                else:
+                    why = why2
             if clip2 is None:
                 if no_start is not None:
                     no_start.append((" ".join(u["refs"] for u in clip), why))
@@ -556,11 +1089,33 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             _r0 = list(_sent_rows(sentences, clip[0]["refs"]))
             if _r0:
                 extra_notes.append(f"начало: «{(_r0[0][4] or _r0[0][0])[:80]}»")
+        if p.end_tone and end_tone is not None and sentences:
+            clip3, enote, ewhy = fix_open_end(clip, sentences, end_tone, p)
+            if clip3 is None:
+                gone = (" ".join(u["refs"] for u in clip), ewhy)
+                if open_end is not None and gone not in open_end:     # another seed may build the same clip
+                    open_end.append(gone)
+                continue
+            if enote:
+                clip = clip3
+                extra_notes.append(enote)
+                unit_refs = {**unit_refs, clip[-1]["id"]: clip[-1]["refs"]}
+        if p.rhythm:                      # M120: the final clip (after its start and its end) keeps the rhythm
+            rwhy, _k = rhythm_why([(float(u["t0"]), float(u["t1"])) for u in clip], p,
+                                  clip[0].get("role") == "question")
+            if rwhy:
+                if rhythm_out is not None:
+                    rhythm_out.append((" ".join(u["refs"] for u in clip), f"после начала и конца: {rwhy}"))
+                continue
         ids = [u["id"] for u in clip]
+        if passage and set(ids) & taken:
+            continue                      # M119: context added in front reached an earlier clip
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
                or ids[-1] == o.units[-1] for o in out):
             continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
         used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
+        if passage:
+            taken.update(ids)
         secs = sum(_dur(u) for u in clip)
         roles = [u.get("role") for u in clip]
         punch = sum(int(u.get("punch") or 0) for u in clip) / len(clip)
@@ -569,22 +1124,59 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         loop = clip[0].get("role") == "question" and clip[-1].get("role") in PAYOFFS
         over = max(0.0, secs - p.target_sec)
         score = 15 * punch + 0.15 * energy + cover - 4 * (_pieces(clip) - 1) + 10 * loop - 0.2 * over
+        if taste is not None and p.taste_weight:
+            _t = taste(clip)
+            score += p.taste_weight * _t
+            extra_notes.append(f"вкус владельца: {_t:+.2f} (× {p.taste_weight:g})")
         opener = next((u for u in clip if u.get("role") in OPENERS), clip[0])
         payoff = next((u for u in reversed(clip) if u.get("role") in PAYOFFS), clip[-1])
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
         notes += extra_notes
         cands = _hook_cands(clip, sentences, p) if sentences else []
+        close: list[str] = []
+        if p.close_last and sentences:                  # M91: the payoff in the close shot
+            rows = [r for u in clip for r in _sent_rows(sentences, u["refs"])]
+            acc = 0.0
+            for ref, sec, _nw, _c, _t in reversed(rows):
+                if len(close) == 2 or (close and acc >= p.close_last_sec):
+                    break
+                close.insert(0, ref)
+                acc += float(sec or 0.0)
+        if p.hook_teaser and sentences and not cands:
+            n2, why2 = teaser_misses(clip, sentences, p)
+            parts = ", ".join(f"{k} — {v}" for k, v in sorted(why2.items(), key=lambda kv: -kv[1]))
+            probe = len(_hook_cands(clip, sentences, replace(p, hook_teaser_pos=TEASER_PROBE_POS)))
+            notes.append(f"крючок: во второй части клипа (с {p.hook_teaser_pos:.0%}) нет фразы для тизера — "
+                         f"сборка без крючка (фраз там {n2}{': ' + parts if parts else ''}; "
+                         f"с {TEASER_PROBE_POS:.0%} клипа нашлось бы {probe})")
         if clip[0].get("role") == "question" and clip[0]["t0"] > min(u["t0"] for u in clip):
             notes.append("вопрос из более позднего места открывает клип (вопрос-петля)")
         out.append(Proposal(
             units=ids, pieces=" ".join(u["refs"] for u in clip),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
-            title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") if payoff is not opener else ""),
-            opener=opener["id"], unit_refs=unit_refs,
-            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes))
+            # M93: the post text d: is the payoff's summary even when the payoff is the opening thought — a clip
+            # without it has no <rid>.txt and crosspost refuses a post without text (Pxl 112938952 r02 in m88)
+            title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
+            opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
+            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt))
     out.sort(key=lambda o: -o.score)
     return out[:p.clips]
+
+
+def fill_pool(pool: Sequence["Proposal"], extra: Sequence["Proposal"]) -> list["Proposal"]:
+    """M140: proposals grown around weaker seeds (autocut.fill_seed_punch) join a pool that came out smaller than the
+    draft can take (m138: 13 proposals for 16 places on 09h33 — the order did not matter, every one went in). An extra
+    proposal that shares a thought with one already in the pool is left out; the pool is then ordered by score (the
+    owner's taste included), so a weak-seed clip goes in only where it scores."""
+    have = set().union(*(set(pr.units) for pr in pool)) if pool else set()
+    add = []
+    for pr in extra:
+        if set(pr.units) & have:
+            continue
+        add.append(pr)
+        have |= set(pr.units)
+    return sorted(list(pool) + add, key=lambda o: -o.score)
 
 
 def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 0) -> str | None:
@@ -594,12 +1186,16 @@ def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 
     for i, o in enumerate(accepted, 1):
         if pr.opener is not None and pr.opener == o.opener:
             return f"то же начало, что у M{i} (#{pr.opener})"
-        if pr.title and pr.title == o.title:
+        if pr.title and _norm_title(pr.title) == _norm_title(o.title):   # M78: «жёсткий» = «жесткий»
             return f"тот же заголовок, что у M{i}"
         shared = sorted(set(pr.units) & set(o.units))
         if len(shared) > max_shared:
             return f"общие мысли с M{i}: " + ", ".join(f"#{u}" for u in shared)
     return None
+
+
+def _norm_title(t) -> str:
+    return " ".join(_plain_words(str(t or "")))
 
 
 def _clean(s) -> str:
@@ -653,6 +1249,114 @@ def rank_hooks(pr: "Proposal", provider, *, top: int = 6, log: Callable[[str], N
             return False
     log("  крючок: ответ модели вне кандидатов — порядок кода")
     return False
+
+
+# ── M88: key words of the subtitles ────────────────────────────────────────────────────────────────
+
+KEYWORDS_SYSTEM = (
+    "You mark the key words in the subtitles of a short vertical video (a reel cut from a Russian talk): the words "
+    "the speaker stresses and the viewer should remember. You get the clip's sentences, numbered. Pick at most {n} "
+    "sentences that carry the main point and in each of them ONE word, written exactly as in that sentence: the word "
+    "that carries the meaning — a noun, a verb, a number or a strong adjective; never a pronoun, a conjunction, a "
+    "particle, a filler or a function word. Answer only with JSON: {{\"keys\": [{{\"s\": <number>, \"word\": "
+    "\"<word>\"}}]}}."
+)
+KEYWORDS_VOICE_NOTE = (
+    " Some sentences end with [voice: …] — words the speaker draws out with the voice; when one of them carries the "
+    "point, prefer it."
+)
+_KEY_STOP = frozenset("это этот эта эти так вот что как все всё они она оно его ее её мы вы ты он я там тут где "
+                      "когда тогда если чтобы потому поэтому тоже также уже еще ещё просто очень какой какая "
+                      "такой такая быть есть был была было который которая которые "
+                      # M93 (m88: «себя» marked in two clips): reflexive and possessive pronouns carry no meaning
+                      "себя себе собой свой своя свое своё свои своего своей мой моя мое моё мои твой наш ваш "
+                      "меня мне тебя тебе нас нам вас вам него нее неё них нему ней ним "
+                      # M118 (m116: k: «потом» in two clips; the voice hints held «допустим», «какой-то», «каким-то» — the
+                      # voice draws out hedges and fillers): words that never carry the point
+                      "потом затем допустим конечно вообще значит короче типа какой-то какая-то какое-то какие-то "
+                      "каким-то какую-то как-то где-то что-то кто-то когда-то куда-то".split())
+
+
+def _kw_norm(w: str) -> str:
+    """The k: matching rule of --apply (case, ё, edge punctuation ignored) — the form written into k:."""
+    return w.lower().replace("ё", "е").strip(".,!?;:—–-\"'«»()[]")
+
+
+def voice_stressed(words: Sequence, dur_of: Callable, *, ratio: float = 1.25, top: int = 1) -> list[str]:
+    """M116 (M1.9 D; M99: the owner's k: word is drawn out — longer per letter than the median of the other words of its
+    sentence — in 106 of 131 sentences, 65 % for content words that are not the last): the sentence's content words
+    (≥ 5 letters, not the last word — it is drawn out anyway — not a function word) whose duration per letter is at
+    least `ratio` × the median of the sentence's words, the most drawn out first, at most `top`. `dur_of(word)` → the
+    aligned duration (intonation map) or None. Too few measured words = no hint."""
+    per: list[tuple[float, str]] = []
+    allv: list[float] = []
+    for k, w in enumerate(words):
+        d = dur_of(w)
+        n = sum(c.isalpha() for c in w.word)
+        if d is None or n < 2:
+            continue
+        allv.append(float(d) / n)
+        word = _kw_norm(w.word)
+        if k < len(words) - 1 and n >= 5 and word not in _KEY_STOP:
+            per.append((float(d) / n, word))
+    if len(allv) < 3 or not per:
+        return []
+    med = sorted(allv)[len(allv) // 2]
+    out = [w for v, w in sorted(per, key=lambda x: -x[0]) if med > 0 and v >= ratio * med]
+    return list(dict.fromkeys(out))[:top]
+
+
+def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
+                  log: Callable[[str], None] = print, voiced: Sequence[Sequence[str]] | None = None
+                  ) -> list[tuple[str, str]]:
+    """M88: the model marks at most `n` key words — one per sentence — in the clip's sentences [(B.N, text)] (play
+    order). Grounded (invariant 2): the word must be a word of that very sentence (the k: matching rule — case, ё,
+    punctuation ignored), at least 3 letters, not a pronoun or a function word; anything else is dropped. One retry
+    when the answer is not JSON; no model or no usable answer = no k: (the clip as before). M116: `voiced` — per row the
+    words the voice draws out (voice_stressed): shown to the model as a hint; the model still picks, the same checks."""
+    import json as _json
+    import re as _re
+    if n <= 0 or not rows:
+        return []
+    hint = voiced is not None and any(voiced)
+    msg = "Sentences:\n" + "\n".join(
+        f"{i}. {t}" + (f" [voice: {', '.join(voiced[i - 1])}]" if hint and i - 1 < len(voiced) and voiced[i - 1] else "")
+        for i, (_r, t) in enumerate(rows, 1))
+    system = KEYWORDS_SYSTEM.format(n=n) + (KEYWORDS_VOICE_NOTE if hint else "")
+    for _ in range(2):
+        try:
+            raw = provider.complete([{"role": "system", "content": system},
+                                     {"role": "user", "content": msg}], temperature=0.0)
+        except Exception as exc:  # noqa: BLE001 — no model: no k:
+            log(f"  ключевые слова: модель не ответила ({type(exc).__name__})")
+            return []
+        m = _re.search(r"\{.*\}", raw or "", _re.S)
+        try:
+            obj = _json.loads(m.group(0)) if m else None
+        except ValueError:
+            obj = None
+        if not isinstance(obj, dict):
+            continue
+        out: dict[int, str] = {}
+        for k in obj.get("keys") or []:
+            if not isinstance(k, dict):
+                continue
+            try:
+                i = int(str(k.get("s")).strip().rstrip("."))
+            except ValueError:
+                continue
+            word = _kw_norm(str(k.get("word") or ""))
+            if (not (1 <= i <= len(rows)) or i in out or sum(c.isalpha() for c in word) < 3 or word in _KEY_STOP
+                    or not all(c.isalnum() or c == "-" for c in word)):
+                continue
+            if word not in {_kw_norm(w) for w in rows[i - 1][1].split()}:
+                continue                              # not a word of that sentence — not grounded
+            out[i] = word
+            if len(out) >= n:
+                break
+        return [(rows[i - 1][0], out[i]) for i in sorted(out)]
+    log("  ключевые слова: ответ модели не JSON — без k:")
+    return []
 
 
 # ── M70: hook headline, seam coherence, short versions ─────────────────────────────────────────────
@@ -958,5 +1662,5 @@ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, shor
                     notes=[f"короткая версия M{label}: убраны " + ", ".join(f"#{i}" for i in dropped)],
                     hooks=[hook] + [r for r in refs if r != hook] if hook else refs,
                     hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(short, p),
-                    opener=pr.opener, variant_of=label,
+                    opener=pr.opener, variant_of=label, hook_keep=pr.hook_keep, close=list(pr.close),
                     unit_refs={i: r for i, r in pr.unit_refs.items() if i in {u["id"] for u in short}})

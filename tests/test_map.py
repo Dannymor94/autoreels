@@ -115,6 +115,54 @@ def test_topics_cover_every_unit():
     assert [u.info["topic"] for u in units] == [1, 1, 1, 2, 0, 0]
 
 
+def test_topics_of_a_long_source_by_parts_then_merged():
+    """M84 (G7: one TOPICS request over a whole long source timed out): parts of consecutive units, each
+    retried once; the same theme found in several parts is merged; the request of a short source is one."""
+    units = _units(7)
+    for u in units:
+        u.info["summary"] = f"кратко {u.id}"
+    prov = Scripted([{"topics": [{"name": "Маски", "units": [1, 2]}, {"name": "Дыхание", "units": [3]}]},
+                     TimeoutError("read timed out"),                                   # part 2: retried
+                     {"topics": [{"name": "Маски снова", "units": [4, 5, 6, 1]}]},     # 1 is not in this part
+                     {"topics": [{"name": "Тело", "units": [7]}]},
+                     {"topics": [{"name": "Маски", "parts": ["T1", "T3"]}, {"name": "Дыхание и тело", "parts": [2, 4]}]}])
+    logs = []
+    topics = topic_units(units, prov, system="S", log=logs.append, chunk=3)
+    assert [c[-1]["content"].split(" (")[0].split(".")[0] for c in prov.calls] == [
+        "TOPICS of part 1 of 3 of the source", "TOPICS of part 2 of 3 of the source",
+        "TOPICS of part 2 of 3 of the source", "TOPICS of part 3 of 3 of the source", "MERGE TOPICS"]
+    assert "T3 [part 2] Маски снова: кратко 4; кратко 5; кратко 6" in prov.calls[-1][-1]["content"]
+    assert [(t["id"], t["name"], t["units"]) for t in topics] == [(1, "Маски", [1, 2, 4, 5, 6]),
+                                                                 (2, "Дыхание и тело", [3, 7])]
+    assert [u.info["topic"] for u in units] == [1, 1, 2, 1, 1, 1, 2]
+    assert any("слияние — 2 тем из 4" in m for m in logs)
+    one = Scripted([{"topics": [{"name": "Маски", "units": [1, 2, 3, 4, 5, 6, 7]}]}])
+    topic_units(units, one, system="S", log=lambda m: None, chunk=10)
+    assert len(one.calls) == 1 and one.calls[0][-1]["content"].startswith("TOPICS of the whole source")
+
+
+def test_topics_part_without_answer_is_marked_and_a_failed_merge_keeps_the_parts():
+    """M84: a part with no answer after the retry → topic −1 «без ответа» and the map is incomplete (arl map
+    asks again); no merge answer → the parts' topics stay apart; nothing at all → «темы не получены»."""
+    units = _units(4)
+    for u in units:
+        u.info.update(summary=f"кратко {u.id}", role="thesis")
+    topics = topic_units(units, Scripted([{"topics": [{"name": "Маски", "units": [1, 2]}]},
+                                          TimeoutError("t"), "не JSON"]), system="S", log=lambda m: None, chunk=2)
+    assert [(t["id"], t["name"], t["units"]) for t in topics] == [(1, "Маски", [1, 2]), (-1, "без ответа", [3, 4])]
+    m = build_map(units, stem="v", source_sha256="f" * 64, topics=topics)
+    assert cli._map_gaps(m) == ["темы: без ответа для 2 мыслей"]
+    assert cli._map_gaps(m, topics=False) == []                       # autocut does not wait for topics
+    assert "без ответа" in build_map_page(m)
+    topics = topic_units(units, Scripted([{"topics": [{"name": "А", "units": [1, 2]}]},
+                                          {"topics": [{"name": "Б", "units": [3, 4]}]}, "нет", TimeoutError("t")]),
+                         system="S", log=lambda m: None, chunk=2)
+    assert [(t["id"], t["name"], t["units"]) for t in topics] == [(1, "А", [1, 2]), (2, "Б", [3, 4])]
+    topics = topic_units(units, Scripted(["нет"] * 4), system="S", log=lambda m: None, chunk=2)
+    assert [(t["id"], t["units"]) for t in topics] == [(0, [1, 2, 3, 4])]
+    assert cli._map_gaps(build_map(units, stem="v", source_sha256="f" * 64, topics=topics)) == ["темы не получены"]
+
+
 def test_similar_finds_the_same_thought_far_away_only():
     texts = ["Ваша нервная система сжимается под давлением родителей и школы.",
              "Сегодня мы дышим глубоко и быстро, это холотропное дыхание.",

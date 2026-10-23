@@ -217,17 +217,27 @@ class MontageBuild:
     errors: list[str] = field(default_factory=list)
 
 
-def _continues(sentences: list, a: int, gap_sec: float) -> bool:
+def _continues(sentences: list, a: int, gap_sec: float,
+               pause: Callable[[object, object], float | None] | None = None) -> bool:
     """Sentence a (1-based) follows sentence a-1 straight on in the source: at most gap_sec between
-    them (a filtered block in between, or a skipped sentence, is far longer)."""
+    them (a filtered block in between, or a skipped sentence, is far longer).
+
+    M134 (invariant 9): with `pause(last_word, first_word)` the gap is the silence HEARD between them (speech
+    map / alignment; None = another word stands between them). The Whisper gap is negative on overlapping
+    words (IMG_6848: 65 of 345 sentence ends) — such a straight-on piece got a seam."""
     prev, cur = sentences[a - 2], sentences[a - 1]
+    if pause is not None:
+        p = pause(prev[-1], cur[0])
+        return p is not None and p <= gap_sec
     return 0.0 <= cur[0].t0 - prev[-1].t1 <= gap_sec
 
 
 def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[object], list], *,
-                  join_gap_sec: float = 2.0) -> MontageBuild:
+                  join_gap_sec: float = 2.0,
+                  pause: Callable[[object, object], float | None] | None = None) -> MontageBuild:
     """Map a montage line to one sentence numbering. `blocks`: review number → block (the blocks
-    apply may use); `block_sentences(block)` → that block's sentences in the review numbering."""
+    apply may use); `block_sentences(block)` → that block's sentences in the review numbering.
+    `pause`: the heard pause between two words (M134, see _continues); None = the Whisper gap."""
     out = MontageBuild(sentences=[], play=[], breaks=[], pieces=[])
     used = {p.block for p in entry.pieces} | ({entry.hook[0]} if entry.hook else set())
     missing = sorted((b for b in used if b not in blocks), key=str)
@@ -265,7 +275,7 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
         if seen & set(rng):
             out.errors.append(f"piece {p} repeats a sentence of an earlier piece")
             continue
-        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec):
+        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec, pause):
             # M58: the piece goes straight on from the previous one in the source (the next sentence of
             # the block, or sentence 1 of the next block right after the last one) — no seam
             out.joined.append(f"{out.pieces[-1][0]}-{out.pieces[-1][1]} + {p}")

@@ -31,6 +31,7 @@ def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None):
         return rcs.pop(0) if rcs else 0
     monkeypatch.setattr(cli, "_blocks_do_apply", apply)
     monkeypatch.setattr(cli, "cmd_render", lambda **k: calls.append(("render", (), k)) or [Path("x.mp4")])
+    monkeypatch.setattr(cli, "cmd_describe", rec("describe"))
     monkeypatch.setattr(cli, "cmd_review_sheet", rec("sheet"))
     return calls
 
@@ -54,13 +55,35 @@ def test_auto_runs_every_stage_in_order_and_merges_the_drafts(tmp_path, monkeypa
     calls = _stub(monkeypatch, tmp_path)
     assert cli.cmd_auto([str(mpath)], root=tmp_path, music="pad.m4a", gate="g1") == 0
     names = [c[0] for c in calls]
-    assert names == ["prepare", "tx-check", "map", "autocut", "apply", "render", "sheet"]
+    assert names == ["prepare", "tx-check", "map", "autocut", "apply", "render", "describe", "sheet"]   # M112: posts
     combined = (tmp_path / "reviews" / "v_auto_all.txt").read_text(encoding="utf-8")
     assert combined.startswith("# label head") and "2 80" in combined and "M1 80 | 2.1-3" in combined
     assert combined.count("# fingerprint:") == 1
     render = next(c for c in calls if c[0] == "render")[2]
     assert render["gate_name"] == "g1" and render["music"] == "pad.m4a" and render["reels_filter"] == "1-1"
-    assert "✓ v: готово" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "✓ v: готово" in out and "после листа: arl export v --gate g1 --decisions <файл решений>" in out
+    describe = next(c for c in calls if c[0] == "describe")
+    assert describe[2]["gate"] == "g1" and describe[2]["llm"] == "auto"
+
+
+def test_auto_without_posts_is_as_before(tmp_path, monkeypatch, capsys):
+    """M112 off (post.auto: false) or --llm none: no describe stage, no export hint — the M63 sequence."""
+    from autoreels import __main__ as cli
+    from tests.test_montage import _source
+    mpath = _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    text = cfg.read_text(encoding="utf-8")
+    assert "  auto: true " in text
+    calls = _stub(monkeypatch, tmp_path)
+    assert cli.cmd_auto([str(mpath)], root=tmp_path, llm="none") == 0
+    assert [c[0] for c in calls][-2:] == ["render", "sheet"]
+    capsys.readouterr()
+    cfg.write_text(text.replace("  auto: true ", "  auto: false "), encoding="utf-8")
+    calls.clear()
+    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
+    assert [c[0] for c in calls] == ["prepare", "tx-check", "map", "autocut", "apply", "render", "sheet"]
+    assert "arl export" not in capsys.readouterr().out
 
 
 def test_auto_falls_back_to_the_autocut_draft(tmp_path, monkeypatch, capsys):

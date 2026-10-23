@@ -1,0 +1,186 @@
+"""M78: the auto crop placed on the speaker's face (owner on PXL_20260729_copy: «ракурс сбит»)."""
+from __future__ import annotations
+
+from autoreels.core.calibration import auto_crop, face_crop, load_or_auto_calibrate
+
+
+def test_face_crop_centres_the_median_face_and_stays_in_frame():
+    W, H = 1920, 1080
+    base = auto_crop((W, H))
+    faces = [(600, 400, 200, 200), (640, 410, 200, 200), (620, 405, 200, 200), (1500, 300, 50, 50)]
+    c = face_crop((W, H), faces, samples=6)
+    assert (c.w, c.h, c.y) == (base.w, base.h, base.y)
+    assert abs((c.x + c.w / 2) - 620) <= 1                     # M87: 1500 is another place — median of 600, 620, 640
+    assert face_crop((W, H), [(5, 400, 80, 80)] * 4, samples=4).x == 0          # clamped left
+    assert face_crop((W, H), [(1915, 400, 80, 80)] * 4, samples=4).x == W - base.w
+    assert face_crop((W, H), faces[:1], samples=20) is None    # a face in 1 of 20 frames: not enough
+    assert face_crop((W, H), [], samples=20) is None
+
+
+def test_auto_calibration_uses_the_face_and_falls_back_to_the_centre(tmp_path, capsys):
+    size = (1920, 1080)
+    s = load_or_auto_calibrate(tmp_path, "a" * 64, "v.mp4", get_frame_size=lambda: size,
+                               get_faces=lambda: ([(600, 400, 200, 200)] * 10, 20))
+    assert s.setup_id == "auto-face" and abs(s.crop.x + s.crop.w / 2 - 600) <= 1
+    assert "ПО ЛИЦУ" in capsys.readouterr().out
+    assert load_or_auto_calibrate(tmp_path, "a" * 64, "v.mp4", get_frame_size=lambda: size,
+                                  get_faces=lambda: None).crop == auto_crop(size)
+    def boom():
+        raise RuntimeError("no ffmpeg")
+    assert load_or_auto_calibrate(tmp_path, "a" * 64, "v.mp4", get_frame_size=lambda: size,
+                                  get_faces=boom).crop == auto_crop(size)
+    assert load_or_auto_calibrate(tmp_path, "a" * 64, "v.mp4", get_frame_size=lambda: size).crop == auto_crop(size)
+    assert not list(tmp_path.iterdir())                         # nothing written to calibrations/
+
+
+def test_detect_faces_reads_its_cache_and_needs_no_opencv_then(tmp_path, monkeypatch):
+    import json
+    import builtins
+    from autoreels.local import autocrop
+    cache = tmp_path / "x.faces.json"
+    cache.write_text(json.dumps({"version": autocrop.FACES_VERSION, "samples": 20, "frame": [1920, 1080],
+                                 "faces": [[600, 400, 200, 200]]}))
+    real_import = builtins.__import__
+    monkeypatch.setattr(builtins, "__import__",
+                        lambda name, *a, **k: (_ for _ in ()).throw(ImportError(name)) if name == "cv2" else real_import(name, *a, **k))
+    assert autocrop.detect_faces("v.mp4", (1920, 1080), cache_path=cache) == ([(600, 400, 200, 200)], 20)
+    logs = []
+    assert autocrop.detect_faces("v.mp4", (1280, 720), cache_path=cache, log=logs.append) is None   # other frame, no cv2
+    assert "OpenCV не установлен" in logs[0]
+
+
+def test_faces_in_different_places_count_only_the_group_seen_most():
+    """M87 (Pxl 20260621: a face in 10–11 of 20 frames, the median moved the frame 68–85 % of its width — between
+    two places, on nobody): faces closer than half the crop width are one place; the place seen in the most frames
+    wins (equal counts: the larger faces); that place alone must reach min_share, else the centre crop stays."""
+    W, H = 3840, 2160
+    base = auto_crop((W, H))
+    left = [(300 + i * 10, 900, 300, 300) for i in range(7)]
+    mid = [(1900 + i * 10, 800, 200, 200) for i in range(4)]
+    c = face_crop((W, H), left + mid, samples=20)
+    assert abs(c.x + c.w / 2 - 330) <= 1 or c.x == 0            # the left place (7 frames), not between the two
+    tie = [(300, 900, 300, 300)] * 6 + [(1900, 800, 200, 200)] * 6
+    assert abs(face_crop((W, H), tie, samples=20).x + base.w / 2 - 1900) > 1000      # equal: the larger faces
+    split = [(300, 900, 300, 300)] * 5 + [(1900, 800, 200, 200)] * 5 + [(3500, 800, 200, 200)]
+    assert face_crop((W, H), split, samples=20) is None         # 11 of 20 found, but no place reaches 30 %
+    one = [(1800 + i * 40, 800, 200, 200) for i in range(8)]      # one place, spread a little: as before
+    assert abs(face_crop((W, H), one, samples=20).x + base.w / 2 - (1800 + 3.5 * 40)) <= 1
+
+
+def test_m102_the_reel_frame_moves_only_when_its_face_is_off_the_middle():
+    from autoreels.core.calibration import reel_crop, reel_face
+    from autoreels.core.models import Crop
+    base = Crop(x=1240, y=0, w=1215, h=2160)
+    faces = [(1000, 700, 300, 300), (1010, 690, 310, 300), (1015, 710, 290, 300), (3500, 500, 80, 80)]
+    face = reel_face(faces, 7, base.w / 2)
+    assert face == (1010.0, 700.0, 300.0, 300.0)                     # the place seen most; 3500 is someone else
+    assert reel_face(faces, 20, base.w / 2) is None                  # 3 of 20 frames: below 40 %
+    assert reel_face([], 7, base.w / 2) is None
+    assert reel_crop(base, (3840, 2160), (1847, 700, 300, 300)) == base          # in the middle: as calibrated
+    assert reel_crop(base, (3840, 2160), (1847 + 180, 700, 300, 300)) == base    # within 15 % of the width
+    moved = reel_crop(base, (3840, 2160), (1007.5, 700, 300, 300))
+    assert (moved.x, moved.y, moved.w, moved.h) == (400, 0, 1215, 2160)
+    assert reel_crop(base, (3840, 2160), (100, 700, 300, 300)).x == 0           # clamped to the frame
+    assert reel_crop(base, (3840, 2160), None) == base
+
+
+def test_m102_the_close_shot_comes_from_the_face_and_does_not_go_soft():
+    from autoreels.core.calibration import face_close_crop
+    from autoreels.core.models import Crop
+    wide = Crop(x=400, y=0, w=1215, h=2160)                          # 4K source: room to zoom
+    c, z = face_close_crop(wide, (1007.5, 700, 300, 300), out_h=1920)
+    assert z == 1.6 and (c.w, c.h, c.x, c.y) == (760, 1350, 628, 160)          # capped by max_scale
+    c, z = face_close_crop(wide, (1007.5, 900, 500, 500), out_h=1920)
+    assert z == round(2160 / c.h, 3) and 1.2 < z < 1.22                          # face 28 % of the height
+    assert abs((c.y + 0.4 * c.h) - 900) <= 1 and abs((c.x + c.w / 2) - 1007.5) <= 1
+    hd = Crop(x=656, y=0, w=608, h=1080)                             # 1080p source: the upscale caps it
+    c, z = face_close_crop(hd, (960, 350, 120, 120), out_h=1920)
+    assert z == round(1080 / c.h, 3) and z <= 1080 * 2.5 / 1920 + 0.01
+    c, z = face_close_crop(hd, (960, 350, 700, 700), out_h=1920)     # a face already big: still a visible switch
+    assert z >= 1.15
+    c, _ = face_close_crop(hd, (660, 20, 120, 120), out_h=1920)      # at the corner: stays inside the wide frame
+    assert c.x == 656 and c.y == 0 and c.x + c.w <= 656 + 608
+
+
+def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypatch):
+    """M127 (owner on Pxl 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»)."""
+    from types import SimpleNamespace
+    from autoreels.core.models import Crop, SetupProfile
+    from autoreels.local import autocrop, render
+    setup = SetupProfile(setup_id="auto", crop=Crop(x=1312, y=0, w=1215, h=2160), scale=(1080, 1920),
+                         frame=(3840, 2160))
+    cfg = SimpleNamespace(framing_samples=7, framing_min_share=0.4, reel_framing=True, framing_center_zone=0.15,
+                          framing_source_samples=40, framing_source_min_faces=4)
+    reel = SimpleNamespace(cold_open=None)
+    segs = [SimpleNamespace(start=0.0, end=60.0)]
+    calls = []
+
+    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf="", model=None, near_x=None):
+        calls.append(len(times))
+        if len(times) == 40:                                  # the whole source: the speaker left, 20 of 40 frames
+            return [(1100.0 + i % 3, 900.0, 300.0, 300.0) for i in range(20)] + [(2600.0, 800.0, 90.0, 90.0)] * 3, 40
+        return [(1100.0, 900.0, 300.0, 300.0)], 7               # the reel: 1 of 7 frames — not its own face
+    monkeypatch.setattr(autocrop, "reel_faces", fake_faces)
+    monkeypatch.setattr(autocrop, "_duration", lambda *a, **k: 3000.0)
+    sf = render._source_face(setup, "v.mp4", "ffmpeg", cfg)
+    assert sf[:4] == (1101.0, 900.0, 300.0, 300.0) and sf[4:] == (20, 40)
+    s2, face, note = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg, source_face=sf)
+    assert face == sf[:4] and s2.crop.x == 1101 - 607 and "по лицу источника" in note
+    s3, face3, note3 = render._reel_framing(setup, reel, segs, "v.mp4", "ffmpeg", cfg)
+    assert s3 is setup and face3 is None and "рамка источника" in note3          # no source face = as before
+
+
+def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, monkeypatch):
+    """M129 (m128 on Pxl 112938952: the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye —
+    YuNet found the speaker in 12 of 12): reel_faces uses YuNet with a model file, the Haar cascade without one."""
+    from types import SimpleNamespace
+    from autoreels.local import autocrop, render
+    used = []
+    monkeypatch.setattr(autocrop, "_yunet_faces_at", lambda m, v, ts, fs, ff, pv="", near_x=None: used.append("yunet") or
+                        [(1850.0, 700.0, 210.0, 210.0)] * len(ts))
+    monkeypatch.setattr(autocrop, "_faces_at", lambda c, v, ts, fs, ff, pv="": used.append("haar") or [])
+    model = tmp_path / "yunet.onnx"
+    assert autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model) == ([], 2)          # no file yet
+    model.write_bytes(b"x")
+    faces, n = autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model)
+    assert used == ["haar", "yunet"] and n == 2 and faces[0][0] == 1850.0
+    assert render._face_model(SimpleNamespace(face_model="")) is None
+    rel = render._face_model(SimpleNamespace(face_model="data/models/m.onnx"))
+    assert rel.is_absolute() and rel.parts[-3:] == ("data", "models", "m.onnx")
+
+
+def test_m130_the_frames_hold_the_whole_way_the_face_goes():
+    """M130 (owner on Pxl 112938952 r06: «в этом кадре нет фокуса на человеке» — he leaned out of the close shot)."""
+    from autoreels.core.calibration import face_close_crop, reel_crop, reel_face, reel_face_span
+    from autoreels.core.models import Crop
+    base = Crop(x=1312, y=0, w=1215, h=2160)
+    faces = [(1600.0, 700.0, 210.0, 210.0)] * 10 + [(2200.0, 760.0, 210.0, 210.0)] * 3
+    face = reel_face(faces, 15, base.w / 2)
+    span = reel_face_span(faces, base.w / 2)
+    assert span == (1495.0, 2305.0)
+    wide = reel_crop(base, (3840, 2160), face + span)
+    assert wide.x <= 1495 and wide.x + wide.w >= 2305                          # the wide frame holds it all
+    close, z = face_close_crop(wide, face + span, out_h=1920)
+    assert close.x <= 1495 and close.x + close.w >= 2305 and z >= 1.15         # so does the close shot
+    tight, z0 = face_close_crop(wide, face, out_h=1920)
+    assert z0 > z and tight.x + tight.w < 2305                                 # without the span it lost him
+
+
+def test_m131_the_speaker_is_the_face_nearest_his_place_not_the_largest(tmp_path, monkeypatch):
+    """M131 (owner on Pxl 112938952 m130 r14: «камера поплыла» — a listener near the camera, x ≈ 70, had a larger face
+    than the speaker in every frame of that reel, and the largest face won)."""
+    import cv2
+    import numpy as np
+    from autoreels.local import autocrop
+    # two faces per frame, in a 960-wide frame of a 3840 source (k = 4): the listener at the edge, larger
+    found = np.array([[5.0, 100.0, 60.0, 60.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.9],
+                      [440.0, 160.0, 52.0, 52.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.9]], dtype=np.float32)
+
+    class Det:
+        def detect(self, img):
+            return 1, found
+    monkeypatch.setattr(cv2, "FaceDetectorYN", type("Y", (), {"create": staticmethod(lambda *a, **k: Det())}))
+    monkeypatch.setattr(autocrop, "_color_frame", lambda *a, **k: np.zeros((540, 960, 3), np.uint8))
+    largest = autocrop._yunet_faces_at(tmp_path / "m.onnx", "v.mp4", [1.0], (3840, 2160), "ffmpeg")
+    near = autocrop._yunet_faces_at(tmp_path / "m.onnx", "v.mp4", [1.0], (3840, 2160), "ffmpeg", near_x=1860.0)
+    assert largest[0][0] == 140.0 and near[0][0] == 1864.0

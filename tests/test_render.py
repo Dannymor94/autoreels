@@ -1848,7 +1848,8 @@ def test_ass_filter_contains_only_filename_no_path(tmp_path, render_cfg, monkeyp
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
             self.args = cmd
-            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+            # диагностический ffprobe (crop-space) и кадры поиска лица (M102, rawvideo) не считаем
+            if "ffprobe" not in str(cmd[0]) and "rawvideo" not in cmd:
                 vf_seen.append(cmd)
             self.returncode = 0
             self.stdout = iter([])
@@ -1944,7 +1945,8 @@ def test_ffmpeg_popen_receives_cwd_pointing_to_ass_dir(tmp_path, render_cfg, mon
     class _FakeProc:
         def __init__(self, cmd, **kwargs):
             self.args = cmd
-            if "ffprobe" not in str(cmd[0]):   # диагностический ffprobe (crop-space) не считаем
+            # диагностический ffprobe (crop-space) и кадры поиска лица (M102, rawvideo) не считаем
+            if "ffprobe" not in str(cmd[0]) and "rawvideo" not in cmd:
                 popen_kwargs.append(kwargs)
             self.returncode = 0
             self.stdout = iter([])
@@ -3574,3 +3576,192 @@ def test_planned_silence_check_uses_the_plans_next_onset():
     errs = _check_silence_at_clip_end("r15", last, 2208.333, smap, lookup, last_ae=2208.23,
                                       plan_onset=2208.30, planned=True)
     assert errs and "next speech at 2208.300s by the plan" in errs[0]
+
+
+def test_planned_end_on_the_frame_grid_never_crosses_the_next_speech():
+    """M80 (PXL_20260729_copy r02, local transcript: «регулярно.» ends at 220.471 where the next word starts; at
+    29.97 fps nearest-frame rounding put the end at 220.487 — render [ERROR] «next speech before clip end»).
+    The end goes down to the last frame ≥ 10 ms before the next speech; the old rule (round UP to keep the last
+    word when the next speech allows) stays (r16 «зайдет.» 2311.548, next speech 2311.588)."""
+    from autoreels.core.models import Segment
+    from autoreels.local.render import _planned_end_on_grid, _snap_windows_to_frames
+    fps = 30000 / 1001
+    segs = _snap_windows_to_frames([Segment(start=200.0, end=210.0), Segment(start=215.0, end=220.471)], fps)
+    assert segs[-1].end > 220.471 - 0.01                                        # nearest frame crosses the onset
+    out = _planned_end_on_grid(segs, 220.471, 220.471, fps)
+    assert out[-1].end <= 220.471 - 0.01 and 220.471 - out[-1].end < 1.0 / fps + 0.011
+    assert out[0] == segs[0]
+    segs2 = _snap_windows_to_frames([Segment(start=2300.0, end=2305.0), Segment(start=2306.0, end=2311.548)], fps)
+    out2 = _planned_end_on_grid(segs2, 2311.548, 2311.588, fps)
+    assert 2311.548 - 1e-6 <= out2[-1].end <= 2311.588 - 0.01 + 1e-9          # covers the word, not the next one
+    free = _snap_windows_to_frames([Segment(start=0.0, end=5.0), Segment(start=6.0, end=9.3)], fps)
+    assert _planned_end_on_grid(free, 9.0, None, fps) == free                  # nothing to fix → unchanged
+
+
+def test_planned_end_where_the_next_speech_touches_the_last_word_cuts_at_most_one_frame():
+    """M83b (IMG_6848 r02 1255.409, r05 1402.004 at 60 fps: the last word ends exactly where the next speech
+    starts; M80b's 10 ms margin plus the frame floor cut 20–22 ms of the word — render [ERROR] «last word cut»,
+    which allows one frame). The end is then the last frame not after the next speech: the word loses at most
+    one frame, the next speech is not in the clip (its checks allow 10 ms)."""
+    from autoreels.core.models import Segment
+    from autoreels.local.render import _planned_end_on_grid, _snap_windows_to_frames
+    for fps in (60.0, 60000 / 1001, 30.0, 30000 / 1001, 25.0):
+        for ae in (1255.409, 1402.004, 220.471, 10.0):
+            segs = _snap_windows_to_frames([Segment(start=ae - 20, end=ae - 12), Segment(start=ae - 10, end=ae)], fps)
+            out = _planned_end_on_grid(segs, ae, ae, fps)
+            end = out[-1].end
+            assert end >= ae - 1.0 / fps - 1e-6, (fps, ae, end)                 # «last word cut» allows one frame
+            assert end <= ae + 1e-9, (fps, ae, end)                             # never after the next speech
+            assert abs(end * fps - round(end * fps)) < 1e-6                     # on the frame grid
+
+
+def test_cover_frame_time_plate_and_command():
+    """M89: <reel>.cover.jpg — the middle of the longest body window (the cold open, a teaser, is skipped), in the
+    reel's crop and colour, with its plate title shown from the first frame (no fade: a cover is one frame)."""
+    from autoreels.core.models import Crop, Segment, SetupProfile
+    from autoreels.core.config import load_subtitles_config
+    from autoreels.local.render import _cover_cmd, _cover_time
+    from autoreels.local.subtitles import build_cover_ass
+    from pathlib import Path
+    segs = [Segment(start=300.0, end=320.0), Segment(start=10.0, end=14.0), Segment(start=20.0, end=30.0)]
+    assert _cover_time(segs, True) == 25.0                     # the 20-s cold open is not the cover
+    assert _cover_time(segs, False) == 310.0
+    cfg = load_subtitles_config(Path(__file__).resolve().parents[1] / "config" / "subtitles.yaml")
+    ass = build_cover_ass("Почему подросток надевает маску", cfg=cfg)
+    dlg = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:")]
+    assert len(dlg) == 1 and ",Title," in dlg[0] and "\\fad" not in dlg[0] and dlg[0].startswith("Dialogue: 0,0:00:00.00,")
+    assert not [ln for ln in build_cover_ass("", cfg=cfg).splitlines() if ln.startswith("Dialogue:")]
+    cmd = _cover_cmd("ffmpeg", Path("/v.mp4"), 25.0, "crop=607:1080:656:0,scale=1080:1920,ass=r01.cover.ass",
+                     Path("/o/r01.cover.jpg"))
+    assert cmd[cmd.index("-ss") + 1] == "25.000" and cmd[cmd.index("-frames:v") + 1] == "1"
+    assert cmd.index("-ss") < cmd.index("-i") and cmd[-1] == "/o/r01.cover.jpg"
+
+
+def test_cover_is_written_with_the_reel_crop_and_a_failure_is_only_a_warning(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from autoreels.core.models import Crop, Segment, SetupProfile
+    from autoreels.local import render as R
+    setup = SetupProfile(setup_id="t", crop=Crop(x=600, y=0, w=607, h=1080), scale=[1080, 1920], frame=[1920, 1080])
+    reel = SimpleNamespace(id="r01", title_overlay="Маска", cold_open=None)
+    clip = tmp_path / "r01.mp4"
+    seen = {}
+
+    def fake_run(cmd, cwd=None, capture_output=True, text=True):
+        seen["cmd"], seen["cwd"] = cmd, cwd
+        Path(cmd[-1]).write_bytes(b"jpg")
+        return SimpleNamespace(returncode=0, stderr="")
+    from pathlib import Path
+    monkeypatch.setattr("subprocess.run", fake_run)
+    out = R._write_cover(clip, reel, [Segment(start=10.0, end=20.0)], setup, tmp_path / "v.mp4", "ffmpeg",
+                         palette_vf="eq=contrast=1.1", subtitles_cfg=None, tmp_dir=tmp_path)
+    assert out == tmp_path / "r01.cover.jpg" and out.is_file()
+    vf = seen["cmd"][seen["cmd"].index("-vf") + 1]
+    assert vf.startswith("crop=607:1080:600:0,scale=1080:1920") and vf.endswith("eq=contrast=1.1") and "ass=" not in vf
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: SimpleNamespace(returncode=1, stderr="boom"))
+    out.unlink()
+    assert R._write_cover(clip, reel, [Segment(start=10.0, end=20.0)], setup, tmp_path / "v.mp4", "ffmpeg",
+                          tmp_dir=tmp_path) is None
+    assert "обложка не записана" in capsys.readouterr().out
+
+
+def test_cover_frame_by_the_face_with_open_eyes(tmp_path, monkeypatch):
+    """M96: the cover is the moment (of n over the body, the cold open left out) whose frame shows the largest face
+    with open eyes; no face (or no OpenCV) → the middle of the longest body window (M89)."""
+    from types import SimpleNamespace
+    from autoreels.core.models import Crop, Segment, SetupProfile
+    from autoreels.local import render as R
+    from autoreels.local.autocrop import best_face_time, cover_candidates
+    segs = [Segment(start=300.0, end=304.0), Segment(start=10.0, end=20.6), Segment(start=30.0, end=40.6)]
+    times = cover_candidates(segs, True, n=4)
+    assert len(times) == 4 and all(10.3 <= t <= 20.3 or 30.3 <= t <= 40.3 for t in times) and 300 > max(times)
+    assert cover_candidates([Segment(start=0.0, end=0.5)], False) == []
+    faces = {times[0]: (2000, 0), times[1]: (1000, 2), times[2]: (1500, 1), times[3]: None}
+    assert best_face_time(times, lambda t: t, lambda img: faces[img]) == times[2]     # 1500×0.7 > 1000×1 > 2000×0.4
+    assert best_face_time(times, lambda t: None, lambda img: (1, 2)) is None
+    setup = SetupProfile(setup_id="t", crop=Crop(x=600, y=0, w=607, h=1080), scale=[1080, 1920], frame=[1920, 1080])
+    reel = SimpleNamespace(id="r01", title_overlay="", cold_open=None)
+    seen = []
+
+    def fake_run(cmd, cwd=None, capture_output=True, text=True):
+        seen.append(cmd)
+        Path(cmd[-1]).write_bytes(b"jpg")
+        return SimpleNamespace(returncode=0, stderr="")
+    from pathlib import Path
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(R, "_cover_face_time", lambda *a, **k: 33.333)
+    R._write_cover(tmp_path / "r01.mp4", reel, segs[1:], setup, tmp_path / "v.mp4", "ffmpeg", tmp_dir=tmp_path,
+                   by_face=True)
+    assert seen[-1][seen[-1].index("-ss") + 1] == "33.333"
+    monkeypatch.setattr(R, "_cover_face_time", lambda *a, **k: None)
+    R._write_cover(tmp_path / "r01.mp4", reel, segs[1:], setup, tmp_path / "v.mp4", "ffmpeg", tmp_dir=tmp_path,
+                   by_face=True)
+    assert seen[-1][seen[-1].index("-ss") + 1] == "15.300"            # the middle of the longest (first equal) window
+
+
+def test_continue_plate_over_the_last_seconds_of_an_open_thought():
+    """M97 (ending package): a clip whose thought goes on past its end shows «Продолжение →» in the title plate over
+    its last seconds; without it the subtitles are byte-identical."""
+    from pathlib import Path
+    from autoreels.core.config import load_subtitles_config
+    from autoreels.core.models import Word
+    from autoreels.local.subtitles import build_ass
+    cfg = load_subtitles_config(Path(__file__).resolve().parents[1] / "config" / "subtitles.yaml")
+    words = [Word(word="Маска", t0=0.0, t1=0.5), Word(word="защищает.", t0=0.5, t1=1.2)]
+    plain = build_ass(words, cfg=cfg, clip_start=0.0)
+    assert build_ass(words, cfg=cfg, clip_start=0.0, fx={}) == plain
+    ass = build_ass(words, cfg=cfg, clip_start=0.0, fx={"continue": {"t": 7.5, "end": 10.0, "text": "Продолжение →"}})
+    dlg = [ln for ln in ass.splitlines() if ",Title," in ln and ln.startswith("Dialogue:")]
+    assert len(dlg) == 1 and dlg[0].startswith("Dialogue: 1,0:00:07.50,0:00:10.00,Title,")
+    assert ("ПРОДОЛЖЕНИЕ →" if cfg.uppercase else "Продолжение →") in dlg[0] and "\\fad(" in dlg[0]
+    assert "Style: Title," in ass and "Style: Title," not in plain
+
+
+def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, render_cfg, fake_ffmpeg, monkeypatch,
+                                                                    capsys):
+    """M102 (owner: «чтобы кадры подбирались автоматически»): the faces of THIS reel's body move its frame (the
+    source's crop, sideways) and give its close shot; both flags off — no face lookup, the command as before."""
+    from autoreels.core.calibration import face_close_crop
+    from autoreels.core.models import Segment
+    from autoreels.local import autocrop
+    from autoreels.local.render import render_crop
+    subs_cfg = load_subtitles_config(ROOT / "config" / "subtitles.yaml")
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"m102-video")
+    reel = _reel("r01", 10.0, 45.0).model_copy(update={
+        "segments": [Segment(start=10.0, end=20.0), Segment(start=30.0, end=45.0, shot="close")],
+        "subtitles": [Word(word="слово", t0=11.0, t1=11.5)]})
+    m = _manifest("v.mp4", sha, [reel], setup=_crop_setup())
+    face = (1007.5, 700.0, 300.0, 300.0)
+    asked = []
+
+    def faces(video, times, frame_size, **kw):
+        asked.append((list(times), frame_size))
+        return [face] * len(times), len(times)
+    monkeypatch.setattr(autocrop, "reel_faces", faces)
+    cfg = render_cfg.model_copy(update={"two_shot": True, "reel_framing": True, "close_from_face": True,
+                                        "framing_source_fallback": False, "framing_samples": 7})   # M127, M130
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o1", render_cfg=cfg, subtitles_cfg=subs_cfg)
+    cmd = " ".join(map(str, fake_ffmpeg[0]))
+    assert len(asked) == 1 and asked[0][1] == (3840, 2160) and len(asked[0][0]) == 7
+    assert all(10.0 < t < 20.0 or 30.0 < t < 45.0 for t in asked[0][0])
+    close, z = face_close_crop(Crop(x=400, y=0, w=1215, h=2160), face, out_h=1920)
+    assert "crop=1215:2160:400:0,scale=1080:1920" in cmd and "crop=1215:2160:1240:0" not in cmd
+    assert f"crop={close.w}:{close.h}:{close.x}:{close.y},scale=1080:1920" in cmd
+    out = capsys.readouterr().out
+    assert "кадр r01: лицо в 7 из 7 кадров (x 1007.5, высота 300), лицо ходит по x 857.5…1157.5 — рамка x 1240 → 400" in out
+    assert f"крупный план r01: ×{z:g} по лицу" in out
+
+    fake_ffmpeg.clear()
+    monkeypatch.setattr(autocrop, "reel_faces", lambda *a, **k: ([], 7))         # no face: the source's frame
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o2", render_cfg=cfg, subtitles_cfg=subs_cfg)
+    cmd = " ".join(map(str, fake_ffmpeg[0]))
+    assert "crop=1215:2160:1240:0" in cmd and "лицо в 0 из 7 кадров — рамка источника" in capsys.readouterr().out
+
+    def boom(*a, **k):
+        raise AssertionError("no face lookup with both flags off")
+    monkeypatch.setattr(autocrop, "reel_faces", boom)
+    fake_ffmpeg.clear()
+    off = render_cfg.model_copy(update={"two_shot": True, "reel_framing": False, "close_from_face": False})
+    render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o3", render_cfg=off, subtitles_cfg=subs_cfg)
+    plain = " ".join(map(str, fake_ffmpeg[0]))
+    assert "crop=1215:2160:1240:0" in plain and "кадр r01" not in capsys.readouterr().out

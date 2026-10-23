@@ -35,9 +35,11 @@ from autoreels.core.config import (
     AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.progress import is_tty, render_bar
+from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
-from autoreels.local.fx import output_time as fx_output_time, plate_start, push_vf, timeline as fx_timeline
+from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
+from autoreels.local.fx import timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
@@ -681,9 +683,11 @@ def _check_synth_tail_seam(
             ssim = float(m.group(1))
             if ssim < 0.85:
                 return f"tail-seam SSIM {ssim:.3f} < 0.85 — tail may bypass body crop"
-    except Exception:
-        pass
-    return None
+            return None
+        # M135: a check that could not measure says so instead of passing silently
+        return f"tail-seam SSIM not measured (ffmpeg printed no value, rc {result.returncode})"
+    except Exception as e:  # noqa: BLE001
+        return f"tail-seam SSIM not measured ({e})"
 
 
 def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float, float]]:
@@ -969,6 +973,37 @@ def _snap_windows_to_frames(segments, fps: float):
     return [s.model_copy(update={"start": round(s.start * fps) / fps,
                                  "end":   round(s.end   * fps) / fps})
             for s in segments]
+
+
+def _planned_end_on_grid(segs, last_ae: float | None, next_onset: float | None, fps: float):
+    """The final end of a planned reel on the frame grid (REEL_SPEC §4.2), after _snap_windows_to_frames.
+
+    * Nearest-frame rounding must never cut the last word: an end that fell before the word's audible end
+      goes UP to the next frame — unless that frame is past the next speech.
+    * M80 (PXL_20260729_copy r02, local transcript: «регулярно.» ends at 220.471 exactly where the next word
+      starts; at 29.97 fps the plan's end rounded UP to 220.487 — 16 ms of the next word in the clip, render
+      [ERROR] «next speech before clip end»): nearest-frame rounding must never cross the next speech either —
+      such an end goes DOWN to the last frame at least 10 ms before it (at most one frame of the fading tail).
+    * M83b (IMG_6848 r02/r05 at 60 fps: the last word ends exactly where the next speech starts; the 10 ms
+      margin plus the frame floor cut 20–22 ms of the word — render [ERROR] «last word cut», which allows one
+      frame): when the margin would cut more than one frame of the last word, the end is the last frame not
+      after the next speech instead (the next-speech checks allow 10 ms; the word loses at most one frame).
+    """
+    if not segs:
+        return segs
+    end = segs[-1].end
+    if last_ae is not None and end < last_ae - 1e-6:
+        up = math.ceil(last_ae * fps - 1e-6) / fps
+        if next_onset is None or up <= next_onset:
+            end = up
+    if next_onset is not None and end > next_onset - 0.01 + 1e-9:
+        down = math.floor((next_onset - 0.01) * fps + 1e-6) / fps
+        if last_ae is not None and down < last_ae - 1.0 / fps - 1e-6:
+            down = math.floor(next_onset * fps + 1e-6) / fps     # M83b: words touch — never more than a frame of the word
+        end = max(down, segs[-1].start + 1.0 / fps)
+    if end == segs[-1].end:
+        return segs
+    return list(segs[:-1]) + [segs[-1].model_copy(update={"end": end})]
 
 
 def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float = 1.0,
@@ -2427,6 +2462,81 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
 
 
 
+def _face_model(render_cfg):
+    """M129: the YuNet model file of render.yaml face_model (relative to the project), or None — the Haar cascade."""
+    name = getattr(render_cfg, "face_model", "") or ""
+    if not name:
+        return None
+    p = Path(name)
+    return p if p.is_absolute() else Path(__file__).resolve().parents[3] / p
+
+
+def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
+    """M127 (owner on Pxl 20260621 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»; the
+    frontal-face finder sees this speaker in about half the frames, so 12 of 16 reels found no face of their own
+    and kept the source's frame — the middle, on the shelves): where the face is in the WHOLE source —
+    framing_source_samples frames spread over it, the dominant place (dominant_faces) when seen in at least
+    framing_source_min_faces of them. A reel without its own face is framed on it. None = not found."""
+    from autoreels.core.calibration import _median, dominant_faces
+    from autoreels.local.autocrop import _duration, reel_faces
+    n = int(getattr(render_cfg, "framing_source_samples", 40))
+    try:
+        dur = _duration(Path(source), "ffprobe")
+    except Exception:  # noqa: BLE001 — no duration: no source face
+        return None
+    found = reel_faces(source, [dur * (i + 0.5) / n for i in range(n)], (int(setup.frame[0]), int(setup.frame[1])),
+                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
+                       model=_face_model(render_cfg))
+    if not found:
+        return None
+    dom = dominant_faces(found[0], setup.crop.w / 2)
+    if len(dom) < int(getattr(render_cfg, "framing_source_min_faces", 4)):
+        return None
+    return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4)) + (len(dom), n)
+
+
+def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg, source_face=None):
+    """M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания»): where the face is in
+    THIS reel — framing_samples frames spread over its body (the cold open, a teaser from its end, left out), the
+    source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
+    reel_framing). Returns (setup for this reel, face or None, a line for the log). Static within the reel: one
+    rectangle for the wide shot, one for the close shot — no tracking. No OpenCV / no face: the source's frame."""
+    from autoreels.core.calibration import reel_crop, reel_face, reel_face_span
+    from autoreels.local.autocrop import cover_candidates, reel_faces
+    n = int(getattr(render_cfg, "framing_samples", 7))
+    times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+    found = reel_faces(source, times, (int(setup.frame[0]), int(setup.frame[1])), ffmpeg=ffmpeg,
+                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
+                       model=_face_model(render_cfg),
+                       near_x=float(source_face[0]) if source_face is not None else None) if times else None
+    if found is None:
+        return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
+    faces, looked = found
+    face = reel_face(faces, looked, setup.crop.w / 2, min_share=float(getattr(render_cfg, "framing_min_share", 0.4)))
+    if face is None and source_face is not None:
+        face = tuple(source_face[:4])     # M127: the speaker's place in the whole source
+        note = (f"лицо в {len(faces)} из {looked} кадров ролика — по лицу источника ({source_face[4]} из "
+                f"{source_face[5]} кадров, x {face[0]:g}, высота {face[3]:g})")
+    elif face is None:
+        return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
+    else:
+        note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
+        span = reel_face_span(faces, setup.crop.w / 2)
+        if span is not None:              # M130: how far the face goes in this reel — the frames keep all of it
+            face = tuple(face[:4]) + span
+            note += f", лицо ходит по x {span[0]:g}…{span[1]:g}"
+    if not getattr(render_cfg, "reel_framing", False):
+        return setup, face, note
+    zone = float(getattr(render_cfg, "framing_center_zone", 0.15))
+    crop = reel_crop(setup.crop, (int(setup.frame[0]), int(setup.frame[1])), face, center_zone=zone)
+    if crop == setup.crop:
+        centred = abs(float(face[0]) - (setup.crop.x + setup.crop.w / 2)) <= zone * setup.crop.w
+        return setup, face, note + (" — в центре рамки" if centred else " — рамка уже у края кадра") + \
+            ", рамка источника"
+    return (setup.model_copy(update={"crop": crop}), face,
+            note + f" — рамка x {setup.crop.x} → {crop.x}")
+
+
 def _close_crop(setup: SetupProfile, scale: float = 1.25, anchor_y: float = 0.35) -> Crop:
     """Close-shot crop rectangle: tighter by `scale`, horizontally centred, vertically anchored.
 
@@ -2721,7 +2831,12 @@ def _render_segments(
         )
         batch_encoded_secs = 0.0
         batch_start_wall = time.time()
+        _vf_base = vf          # M102: a reel may get its own frame (vf, setup) — reset for every reel
+        _src_face_cache: dict = {}   # M127: the speaker's place in the whole source, looked for once
         for idx, reel in enumerate(manifest.reels, 1):
+            vf = _vf_base
+            _reel_setup = manifest.setup
+            _reel_face = None
             try:
                 reel.check_segments()   # never render a reel whose segments desynced from its bounds
             except ValueError as e:
@@ -2732,15 +2847,9 @@ def _render_segments(
                 # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
                 segs = _snap_windows_to_frames(segs, _fps())
-                # Planned reels (REEL_SPEC §4.2): nearest-frame rounding must never cut the last
-                # word — round the final end UP to the next frame when it fell before the word's
-                # audible end (the plan keeps ≥ onset margin before the next speech).
-                _p_ae = getattr(reel, "tail_last_word_end", None) if getattr(reel, "planned", False) else None
-                if _p_ae is not None and segs[-1].end < _p_ae - 1e-6:
-                    _p_up = math.ceil(_p_ae * _fps() - 1e-6) / _fps()
-                    _p_next = getattr(reel, "tail_next_word_start", None)
-                    if _p_next is None or _p_up <= _p_next:
-                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _p_up})]
+                if getattr(reel, "planned", False):
+                    segs = _planned_end_on_grid(segs, getattr(reel, "tail_last_word_end", None),
+                                                getattr(reel, "tail_next_word_start", None), _fps())
             # Snap close_intervals to the same frame grid so overlay enable= expressions land on
             # decoded frames. Done for both multi-window and single-window close paths.
             if any(getattr(s, "close_intervals", []) for s in segs):
@@ -2793,6 +2902,21 @@ def _render_segments(
                             segs = _snap_close_intervals(segs, _fps())
                         clip_dur = sum(s.end - s.start for s in segs)
 
+            # --- M102: the reel's own frame and close shot from the face in its body (static, no tracking) ---
+            if (emit_text and vf and manifest.setup is not None
+                    and (getattr(render_cfg, "reel_framing", False) or getattr(render_cfg, "close_from_face", False))):
+                if getattr(render_cfg, "framing_source_fallback", False) and str(source) not in _src_face_cache:
+                    _src_face_cache[str(source)] = _source_face(manifest.setup, source, ffmpeg_bin, render_cfg)
+                    _sf = _src_face_cache[str(source)]
+                    print("  лицо источника: " + (f"x {_sf[0]:g}, в {_sf[4]} из {_sf[5]} кадров" if _sf
+                                                  else "не найдено"), flush=True)
+                _reel_setup, _reel_face, _fr_note = _reel_framing(
+                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg,
+                    source_face=_src_face_cache.get(str(source)) or None)
+                if _reel_setup is not manifest.setup:
+                    vf = _crop_vf(_reel_setup)
+                print(f"  кадр {reel.id}: {_fr_note}", flush=True)
+
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
             # Planned reels (REEL_SPEC §3) carry their shots in the plan — rendered whatever the
             # two_shot flag says (the flag gates the automatic path's shot machinery only).
@@ -2806,8 +2930,16 @@ def _render_segments(
             if _ts_on:
                 _cscale = getattr(render_cfg, "close_shot_scale", 1.25)
                 _canchy = getattr(render_cfg, "close_shot_anchor_y", 0.35)
-                _ccrop = _close_crop(manifest.setup, scale=_cscale, anchor_y=_canchy)
-                _close_vf_str = _crop_vf_for_crop(manifest.setup, _ccrop)
+                if _reel_face is not None and getattr(render_cfg, "close_from_face", False):
+                    _ccrop, _cz = face_close_crop(
+                        _reel_setup.crop, _reel_face, out_h=int(_reel_setup.scale[1]),
+                        face_h=render_cfg.close_face_h, face_y=render_cfg.close_face_y,
+                        max_upscale=render_cfg.close_max_upscale, max_scale=render_cfg.close_max_scale,
+                        min_scale=render_cfg.close_min_scale)
+                    print(f"  крупный план {reel.id}: ×{_cz:g} по лицу", flush=True)
+                else:
+                    _ccrop = _close_crop(_reel_setup, scale=_cscale, anchor_y=_canchy)
+                _close_vf_str = _crop_vf_for_crop(_reel_setup, _ccrop)
                 if len(segs) > 1:
                     # Per-segment crops go into the prefix; vtail gets palette+ass+vfade only.
                     _ts_seg_vfs = [_close_vf_str if s.shot == "close" else vf for s in segs]  # type: ignore[list-item]
@@ -2870,7 +3002,7 @@ def _render_segments(
                         _z_acc += _zs.end - _zs.start
                         if _xfade_actual > 0 and _zi < len(segs) - 1:
                             _z_acc -= _xfade_actual
-                _effective_vf = _crop_vf(manifest.setup, zoom_cfg, _fps(), _z_offset)
+                _effective_vf = _crop_vf(_reel_setup, zoom_cfg, _fps(), _z_offset)
 
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
@@ -2898,14 +3030,23 @@ def _render_segments(
                         else [_xfade_actual] * (len(_s) - 1))
             _reel_speed = getattr(reel, "speed", 1.0)
             _push_vf = ""
-            if _fx.get("push") or _fx.get("pop"):
+            # M103 (shot_transition: punch): a fast zoom leads into every close shot that comes inside a window
+            _punches: list = []
+            if (_ts_on and getattr(render_cfg, "shot_transition", "cut") == "punch"
+                    and any(getattr(s, "close_intervals", None) for s in segs)):
+                _pp = punch_point(_reel_setup.crop, _ccrop)
+                if _pp is not None:
+                    _punches = [(t, *_pp) for t in punch_times(segs, speed=_reel_speed, xfades=_fx_xfades(segs))]
+            if _fx.get("push") or _fx.get("pop") or _punches:
                 _, _fx_changes, _fx_total = fx_timeline(segs, speed=_reel_speed, xfades=_fx_xfades(segs))
                 _push_vf = push_vf(_fx_changes, _fx_total,
                                    pct=float(_fx.get("push_pct", 4.0)) if _fx.get("push") else 0.0,
                                    min_sec=float(_fx.get("push_min_sec", 6.0)),
                                    size=tuple(render_cfg.scale),
                                    pop_pct=float(_fx.get("pop_pct", 0.0)) if _fx.get("pop") else 0.0,
-                                   pop_sec=float(_fx.get("pop_sec", 0.6)))
+                                   pop_sec=float(_fx.get("pop_sec", 0.6)),
+                                   punches=_punches, punch_sec=float(getattr(render_cfg, "punch_sec", 0.3)),
+                                   fps=_fps() if _punches else 30.0)
             base_vf = ",".join(x for x in (_effective_vf, _push_vf, palette_vf) if x) or None  # type: ignore[assignment]
             reel_vf = base_vf
             # Speed-up via setpts (video) + atempo (audio); both applied before other filters.
@@ -2929,6 +3070,13 @@ def _render_segments(
                         if (_t := fx_output_time(segs, float(c["t"]), speed=_reel_speed, body0=_body0)) is not None
                     ],
                 }
+            if getattr(render_cfg, "continue_plate", False) and getattr(reel, "open_thought", False):
+                # M97 (ending package): the thought goes on past the clip — say so over its last seconds
+                _end_out = round(_expected_output_duration(segs, xfade_sec=_xfade_actual, speed=_reel_speed or 1.0,
+                                                           seam_xfades=_ts_seam_xfades), 3)
+                _fx_ass = dict(_fx_ass or {})
+                _fx_ass["continue"] = {"t": max(0.0, _end_out - render_cfg.continue_sec), "end": _end_out,
+                                       "text": render_cfg.continue_text}
             if subtitles_cfg is not None and (reel.subtitles or _title or _fx_ass):
                 # Remap word times onto the concatenated, speed-adjusted output timeline (gap words
                 # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
@@ -3633,6 +3781,10 @@ def _render_segments(
                 )
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
+                if emit_text and getattr(render_cfg, "cover", False):     # M89: a cover for publishing
+                    _write_cover(out, reel, segs, _reel_setup, source, ffmpeg_bin, palette_vf=palette_vf,
+                                 subtitles_cfg=subtitles_cfg, tmp_dir=tmp_ass_dir,
+                                 by_face=getattr(render_cfg, "cover_face", False))
         _unlock_dir(_lock_fd)
         return outputs
 
@@ -3666,6 +3818,70 @@ def _write_sidecar_text(clip_path: Path, reel, render_cfg=None) -> None:
         clip_path.with_name(clip_path.stem + ".transcript.txt").write_text(
             transcript + "\n", encoding="utf-8"
         )
+
+
+def _cover_time(segs, has_cold_open: bool) -> float:
+    """M89: the cover frame's source second — the middle of the longest body window (the speaker mid-thought;
+    the cold open is a teaser from later and is skipped)."""
+    body = list(segs[1:]) if has_cold_open and len(segs) > 1 else list(segs)
+    w = max(body, key=lambda s: s.end - s.start)
+    return w.start + (w.end - w.start) / 2
+
+
+def _cover_cmd(ffmpeg: str, source: Path, t: float, vf: str, out: Path) -> list[str]:
+    """M89: one frame of the source at `t`, through the reel's crop/scale/colour (and the plate) → JPEG."""
+    return [ffmpeg, "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", str(source), "-frames:v", "1", "-an",
+            "-vf", vf, "-q:v", "2", str(out)]
+
+
+def _cover_face_time(segs, reel, setup, source: Path, ffmpeg: str, *, n: int = 7) -> float | None:
+    """M96: among n moments of the body, the one whose frame (in the reel's crop) shows the largest face with open
+    eyes; None without OpenCV or without a face (the middle of the longest window is used then)."""
+    import subprocess as _sp
+    from autoreels.local.autocrop import best_face_time, cover_candidates, opencv_face_eyes
+    detect = opencv_face_eyes()
+    if detect is None:
+        return None
+    times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+    vf = _crop_vf_for_crop(setup, setup.crop) + ",scale=270:480,format=gray"
+
+    def grab(t):
+        import numpy as np
+        try:
+            raw = _sp.run([ffmpeg, "-v", "error", "-ss", f"{t:.3f}", "-i", str(source), "-frames:v", "1", "-an",
+                           "-vf", vf, "-f", "rawvideo", "pipe:1"], capture_output=True, check=True).stdout
+        except (OSError, _sp.CalledProcessError):
+            return None
+        return np.frombuffer(raw[: 270 * 480], dtype=np.uint8).reshape(480, 270) if len(raw) >= 270 * 480 else None
+    return best_face_time(times, grab, detect)
+
+
+def _write_cover(clip_path: Path, reel, segs, setup, source: Path, ffmpeg: str, *, palette_vf: str = "",
+                 subtitles_cfg=None, tmp_dir: Path, by_face: bool = False) -> Path | None:
+    """M89: <reel>.cover.jpg next to the clip — the frame of _cover_time in the reel's crop and colour, with its
+    plate title (title_overlay). Static, no tracking. A failure is a warning: the clip itself stays."""
+    import subprocess as _sp
+    out = clip_path.with_name(clip_path.stem + ".cover.jpg")
+    vf = ",".join(x for x in (_crop_vf_for_crop(setup, setup.crop), palette_vf) if x)
+    title = (getattr(reel, "title_overlay", "") or "").strip()
+    if title and subtitles_cfg is not None:
+        from autoreels.local.subtitles import build_cover_ass
+        name = f"{reel.id}.cover.ass"
+        (tmp_dir / name).write_text(build_cover_ass(title, cfg=subtitles_cfg, play_res=tuple(setup.scale)),
+                                    encoding="utf-8")
+        vf = f"{vf},ass={name}"
+    t = _cover_face_time(segs, reel, setup, Path(source), ffmpeg) if by_face else None
+    if t is None:
+        t = _cover_time(segs, getattr(reel, "cold_open", None) is not None)
+    try:
+        r = _sp.run(_cover_cmd(ffmpeg, Path(source), t, vf, out), cwd=str(tmp_dir), capture_output=True, text=True)
+    except OSError as exc:
+        print(f"  warning ({reel.id}): обложка не записана ({exc})", flush=True)
+        return None
+    if r.returncode != 0 or not out.is_file():
+        print(f"  warning ({reel.id}): обложка не записана ({(r.stderr or '').strip()[:160]})", flush=True)
+        return None
+    return out
 
 
 def _write_index_md(manifest: Manifest, out_dir: Path, render_cfg=None) -> None:

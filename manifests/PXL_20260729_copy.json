@@ -6,9 +6,9 @@
   "source_kind": "lecture",
   "duration_preset": "shorts",
   "setup": {
-    "setup_id": "auto",
+    "setup_id": "auto-face",
     "crop": {
-      "x": 656,
+      "x": 594,
       "y": 0,
       "w": 608,
       "h": 1080
