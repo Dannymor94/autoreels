@@ -905,6 +905,10 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
     flips: list[list[float]] = []
     for a, b, visible, u_len in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
         mid = (a + b) / 2
+        if any(a < k1 - _EPS and b > k0 + _EPS for k0, k1 in keep):
+            # M136: a filler-word cut (M126) and the pause next to the filler cover the same silence; a long pause
+            # skips the spacing rules (M79), so both were kept and the piece between them came out reversed
+            continue
         long_pause = bool(params.long_pause_sec) and b - a >= params.long_pause_sec
         if b - a > budget and not long_pause:
             continue

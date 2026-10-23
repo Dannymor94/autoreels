@@ -394,3 +394,19 @@ def test_m126_filler_words_cut_from_the_sound_rarely_and_not_at_the_edges():
     assert build_manual_plan(sents, [1, 2], words=words, smap=smap, params=rare, align=align).body[0].cuts == []
     keep = ManualPlanParams(filler_cut=True, filler_words=FW, pause_max_sec=10.0)
     assert build_manual_plan(sents, [1, 2], words=words, smap=smap, params=keep, align=align).body[0].cuts == []
+
+
+def test_m136_cuts_never_overlap_long_pause_next_to_a_filler():
+    """M136 (m134: Pxl 112938952 r13 «segment 1 empty/reversed [1690.978, 1688.880]»): a long pause (M79) right before a
+    standalone filler (M126) gave two candidates over the same silence — the pause, and «word before → filler → word
+    after». Both are ≥ long_pause_sec, and a long pause skips the spacing rules, so both were kept and the piece between
+    them came out reversed. A cut that overlaps a kept one is never kept."""
+    spec = [[("Я", 0.0, 0.3), ("думаю,", 0.4, 0.9), ("ну,", 3.9, 4.2), ("это", 4.4, 4.7), ("важно.", 4.7, 5.3)],
+            [("Да.", 5.8, 6.2)]]
+    sents, words, smap, align = _setup(spec, [])
+    p = ManualPlanParams(filler_cut=True, filler_words=FW, filler_word_cut=True, long_pause_sec=1.5,
+                         pause_max_sec=1.0)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align).body[0]
+    cuts = sorted(w.cuts)
+    assert cuts and all(b0 >= a1 for (a0, a1), (b0, b1) in zip(cuts, cuts[1:]))
+    assert all(s.end > s.start for s in w.segments())
