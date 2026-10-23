@@ -8320,7 +8320,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             from autoreels.cloud.autocut import fill_pool
             _extra = propose(the_map.get("units") or [],
                              _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
-                             judge=judge, end_tone=end_tone, taste=_taste)
+                             judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[])
             _n0 = len(pool)
             pool = fill_pool(pool, _extra)
             print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
