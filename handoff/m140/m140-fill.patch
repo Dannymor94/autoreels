@@ -1,0 +1,108 @@
+diff --git a/R0_SPEC.md b/R0_SPEC.md
+index 6e9ae03..52fe07d 100644
+--- a/R0_SPEC.md
++++ b/R0_SPEC.md
+@@ -247,7 +247,7 @@ Word-level нужен **коду** (для snap границ при нарезк
+ - *Правило прыжков:* не больше двух прыжков по таймлайну; кусок после дальнего прыжка держится дольше, последний — половину; почему кусок отвергнут, пишется в черновик.
+ - *Крючок и холодный старт:* тизер из второй половины клипа, проигрываемый на своём месте (`h:B.N!`); судится моделью как тизер (открытый вопрос можно, отсылка назад — нет); отсылку первым словом отсекает код до модели. Клип без тизера получает плашку-интригу и идёт после клипов с тизером.
+ - *Начало:* первое предложение после крючка понятно само по себе — ремонт контекстом назад до двух мыслей, иначе другое начало; не обрывок, вопрос остаётся с ответом.
+-- *Отбор:* каждая строка проходит настоящие проверки `--apply`; отказ заменяется следующим кандидатом. У клипов источника не совпадают открытие, заголовок, мысль и развязка. Число клипов — по длине источника (`clips_every_min`). Судья начала в отбор не входит: замер показал, что Haiku и Groq принимают начала владельца так же часто, как случайные.
++- *Отбор:* каждая строка проходит настоящие проверки `--apply`; отказ заменяется следующим кандидатом. У клипов источника не совпадают открытие, заголовок, мысль и развязка. Число клипов — по длине источника (`clips_every_min`). Если пул меньше, чем черновик может взять, его можно добрать клипами вокруг более слабых зёрен (`fill_seed_punch`, M140; без общих мыслей с уже взятыми). Судья начала в отбор не входит: замер показал, что Haiku и Groq принимают начала владельца так же часто, как случайные.
+ - *Выход:* черновик `reviews/<stem>_auto_*.txt` в грамматике §11 (`k:`, `h:`, куски, плашка `t:`, пост `d:`); дальше — ручной путь (инвариант 5).
+ 
+ **Вкус владельца (M138, `cloud/taste.py`).** Две логистические головы по признакам мысли карты (длина, сила, громкость, положение, роль, первые слова): «мысль взята в клип владельца» и «клип владельца начат с неё». Модель подбирается по клипам владельца (`config/taste.json`, происхождение внутри) и добавляет `taste_weight × вкус` к оценке предложения — меняется только порядок (инвариант 1). Замер m137: «вирусные» признаки крючка (число, вопрос, «вы») сигнала не несут; проверка на отложенном источнике — начало 0.65, выбор мысли 0.59.
+diff --git a/config/r0.yaml b/config/r0.yaml
+index ebbe5da..a3e07a8 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -376,6 +376,10 @@ autocut:
+   # taste_weight × its logit to a proposal's score — the order only. 0 = off; the model file from handoff/m138/fit_eval.py.
+   taste_weight: 0
+   taste_model: config/taste.json
++  # M140 (m138: the pool was smaller than the draft — 13 proposals for 16 places on 09h33 — so the order did not
++  # decide anything): when it is, clips grown around seeds of this punch join it (no shared thought), ordered by score
++  # with the taste. 0 = off.
++  fill_seed_punch: 0
+   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
+   scenario_timeout_sec: 300   # … the whole talk in one request
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index b89802e..c04f79f 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8314,6 +8314,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
+                        taste=_taste)
++        _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
++        if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
++            # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
++            from autoreels.cloud.autocut import fill_pool
++            _extra = propose(the_map.get("units") or [],
++                             _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
++                             judge=judge, end_tone=end_tone, taste=_taste)
++            _n0 = len(pool)
++            pool = fill_pool(pool, _extra)
++            print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
++                  f"силы {_fsp}", flush=True)
+     _doubt = sum(1 for pr in pool if pr.start_doubt)
+     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
+         pool.sort(key=lambda pr: bool(pr.start_doubt))
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 3196a3e..76c542f 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -1164,6 +1164,21 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+     return out[:p.clips]
+ 
+ 
++def fill_pool(pool: Sequence["Proposal"], extra: Sequence["Proposal"]) -> list["Proposal"]:
++    """M140: proposals grown around weaker seeds (autocut.fill_seed_punch) join a pool that came out smaller than the
++    draft can take (m138: 13 proposals for 16 places on 09h33 — the order did not matter, every one went in). An extra
++    proposal that shares a thought with one already in the pool is left out; the pool is then ordered by score (the
++    owner's taste included), so a weak-seed clip goes in only where it scores."""
++    have = set().union(*(set(pr.units) for pr in pool)) if pool else set()
++    add = []
++    for pr in extra:
++        if set(pr.units) & have:
++            continue
++        add.append(pr)
++        have |= set(pr.units)
++    return sorted(list(pool) + add, key=lambda o: -o.score)
++
++
+ def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 0) -> str | None:
+     """M68: a viewer sees two reels of one source side by side — no two may open on the same thought
+     (11h42 r01/r03: both «Вы не сломаны, просто не изучали себя») nor reuse more than max_shared
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index d33b581..87f89ca 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -301,6 +301,8 @@ class AutocutConfig(BaseModel):
+     # M138: the owner's taste learned from his clips (cloud/taste.py) orders the proposals; 0 = off
+     taste_weight: float = Field(0.0, ge=0)
+     taste_model: str = "config/taste.json"
++    # M140: a pool smaller than the draft can take is filled with clips grown around seeds this strong; 0 = off
++    fill_seed_punch: int = Field(0, ge=0, le=5)
+     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
+     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+diff --git a/tests/test_taste.py b/tests/test_taste.py
+index 99efbe9..44cdfd6 100644
+--- a/tests/test_taste.py
++++ b/tests/test_taste.py
+@@ -70,3 +70,14 @@ def test_clip_taste_mixes_taken_and_start():
+     u_short = {"id": 2, "t0": 30.0, "t1": 38.0, "punch": 2, "text": "Б.", "voice": {}}
+     assert clip_taste([u_long, u_short], m, 800.0) > clip_taste([u_short, u_long], m, 800.0)
+     assert clip_taste([], m, 800.0) == 0.0
++
++
++def test_m140_fill_pool_adds_only_new_thoughts_and_orders_by_score():
++    from autoreels.cloud.autocut import Proposal, fill_pool
++    mk = lambda units, score: Proposal(units=units, pieces="", hook=None, title="", caption="", score=score, seconds=30.0)
++    pool = [mk([1, 2], 80), mk([5], 70)]
++    extra = [mk([2, 3], 99), mk([7, 8], 75), mk([8, 9], 90)]
++    out = fill_pool(pool, extra)
++    assert [o.units for o in out] == [[1, 2], [7, 8], [5]]       # [2,3] shares 2; [8,9] shares 8 with the added one
++    assert fill_pool(pool, []) == sorted(pool, key=lambda o: -o.score)
++    assert AutocutConfig().fill_seed_punch == 0
