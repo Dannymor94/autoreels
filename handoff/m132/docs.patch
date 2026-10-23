@@ -302,10 +302,10 @@ index 73a4327..cbd0b49 100644
  **Имена моделей протухают молча** — у Groq и у OpenRouter. Наличие модели в каталоге OpenRouter не означает доступность: часть бесплатных отдаётся только по своему ключу провайдера. `arl models` показывает живые списки и пингует настроенные, возвращая ненулевой код при проблеме.
  
 diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
-index fa6e84a..48a3ccb 100644
+index fa6e84a..e79f76c 100644
 --- a/PROJECT_STRUCTURE.md
 +++ b/PROJECT_STRUCTURE.md
-@@ -6,120 +6,142 @@
+@@ -6,120 +6,145 @@
  autoreels/
  ├── CLAUDE.md                 # агентские инварианты
  ├── PROJECT_GUIDE.md          # архитектура
@@ -354,6 +354,9 @@ index fa6e84a..48a3ccb 100644
 +│   ├── make_label_fewshot.py # few-shot для `arl label` из реальной разметки
 +│   ├── verify_gate.py        # проверка гейт-клипов против эталонных ожиданий
 +│   └── gc.py                 # уборка рабочего пространства
++│
++├── tools/flash_check.py      # поиск мигания в готовых клипах двух планов (сверка с исходником)
++├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
  │
 -├── docs/                     # планы шагов, аудиты и технические разборы
 +├── docs/
