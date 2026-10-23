@@ -1,0 +1,142 @@
+== 1. Пустые .render.lock старше суток
+  reels-out/2026-08-08 10h 59m 38s/_gate/dynamic/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/m65/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/m53/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/m55/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto-local-gp2/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto1/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto-local-gp/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto-local/.render.lock
+  reels-out/2026-08-08 10h 59m 38s/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/dynamic/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m53/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m55/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m130/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m70/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m83/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m77/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m76/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m125/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m78/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m102p/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/manual/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m68/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/auto1/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m94/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m102/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m127/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m74/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m129/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m86/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m75/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m88/.render.lock
+  reels-out/Pxl 20260621 112938952/_gate/m55dbg/.render.lock
+  reels-out/Pxl 20260621 112938952/.render.lock
+  reels-out/PXL_20260729_copy/_gate/auto-gp/.render.lock
+  reels-out/PXL_20260729_copy/_gate/auto/.render.lock
+  reels-out/PXL_20260729_copy/_gate/m79/.render.lock
+  reels-out/PXL_20260729_copy/_gate/m77/.render.lock
+  reels-out/PXL_20260729_copy/_gate/m78/.render.lock
+  reels-out/PXL_20260729_copy/_gate/m105/.render.lock
+  reels-out/PXL_20260729_copy/_gate/m80/.render.lock
+  reels-out/Pxl 20260621 122006193/_gate/g5d/.render.lock
+  reels-out/Pxl 20260621 122006193/_gate/dynamic/.render.lock
+  reels-out/Pxl 20260621 122006193/_gate/auto1/.render.lock
+  reels-out/Pxl 20260621 122006193/_gate/m105/.render.lock
+  reels-out/Pxl 20260621 122006193/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/g5d/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/dynamic/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m70/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m83/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m77/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m76/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m78/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m102p/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m68/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/auto1/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m94/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m102/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m74/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m86/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m75/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/_gate/m88/.render.lock
+  reels-out/2026-08-08 11h 42m 49s/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/dynamic/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/m65/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/m53/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/m55/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/m61/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/auto1/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/m56/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/_gate/m60/.render.lock
+  reels-out/2026-08-08 09h 33m 14s/.render.lock
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/dynamic/.render.lock
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/manual/.render.lock
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/auto1/.render.lock
+  reels-out/PXL_20260729_085910095_34f06abf/.render.lock
+  reels-out/IMG_6848/_gate/dynamic/.render.lock
+  reels-out/IMG_6848/_gate/m65/.render.lock
+  reels-out/IMG_6848/_gate/m53/.render.lock
+  reels-out/IMG_6848/_gate/careful/.render.lock
+  reels-out/IMG_6848/_gate/m55/.render.lock
+  reels-out/IMG_6848/_gate/fill/.render.lock
+  reels-out/IMG_6848/_gate/m123/.render.lock
+  reels-out/IMG_6848/_gate/m70/.render.lock
+  reels-out/IMG_6848/_gate/m83/.render.lock
+  reels-out/IMG_6848/_gate/m77/.render.lock
+  reels-out/IMG_6848/_gate/m70-tempo/.render.lock
+  reels-out/IMG_6848/_gate/m76/.render.lock
+  reels-out/IMG_6848/_gate/m78/.render.lock
+  reels-out/IMG_6848/_gate/m122/.render.lock
+  reels-out/IMG_6848/_gate/spec/.render.lock
+  reels-out/IMG_6848/_gate/balance/.render.lock
+  reels-out/IMG_6848/_gate/m102p/.render.lock
+  reels-out/IMG_6848/_gate/manual/.render.lock
+  reels-out/IMG_6848/_gate/m61/.render.lock
+  reels-out/IMG_6848/_gate/auto1/.render.lock
+  reels-out/IMG_6848/_gate/m56/.render.lock
+  reels-out/IMG_6848/_gate/m94/.render.lock
+  reels-out/IMG_6848/_gate/m102/.render.lock
+  reels-out/IMG_6848/_gate/m60/.render.lock
+  reels-out/IMG_6848/_gate/m74/.render.lock
+  reels-out/IMG_6848/_gate/m86/.render.lock
+  reels-out/IMG_6848/_gate/m72/.render.lock
+  reels-out/IMG_6848/_gate/m75/.render.lock
+  reels-out/IMG_6848/_gate/m88/.render.lock
+  reels-out/IMG_6848/_gate/m126/.render.lock
+  reels-out/IMG_6848/.render.lock
+  всего: 107
+== 2. .DS_Store
+  всего: 25
+== 3. .bak / .orig → Корзина
+  handoff/m52/09h33_copy.txt.bak
+  manifests/_archive/IMG_6848.2026-10-08.json.bak
+  reviews/_montage2/lec0933_answer_montage.txt.bak
+  reviews/PXL_20260729_copy_auto.txt.bak
+  всего: 4
+== 4. Гейты старше 14 дней (кроме ^(m18_final|m88|m94|m101|m102|m105|m112|m115|m126|m131|m134)) → Корзина
+  reels-out/2026-08-08 09h 33m 14s/_gate/m18_synth  13 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/manual  223 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/montage  32 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/montage2  161 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/manual  95 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/montage2  68 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m18_synth  0 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/manual  110 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/montage  6120 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/montage2  80 МБ
+  reels-out/IMG_6848/_gate/codec_test  62 МБ
+  reels-out/IMG_6848/_gate/m18_synth  53 МБ
+  reels-out/IMG_6848/_gate/montage  159 МБ
+  reels-out/IMG_6848/_gate/montage2  163 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m18_synth  0 МБ
+  reels-out/Pxl 20260621 112938952/_gate/montage  171 МБ
+  reels-out/Pxl 20260621 112938952/_gate/montage2  150 МБ
+  reels-out/Pxl 20260621 122006193/_gate/m18_synth  0 МБ
+  reels-out/Pxl 20260621 122006193/_gate/montage  64 МБ
+  reels-out/Pxl 20260621 122006193/_gate/montage2  92 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/m18_synth  0 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/montage  239 МБ
+  всего: 22 гейтов, 7 ГБ
+СДЕЛАНО. Корзина: /Users/danny/.Trash/autoreels-m135 (место освободится после очистки Корзины)
