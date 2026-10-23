@@ -1,0 +1,17 @@
+clips off/on 16/16; joins off/on 8/12; errors off/on 0/0
+- r01: windows 7 → 7
+- r02: windows 4 → 4
+- r03: windows 4 → 3  ← изменилось
+- r04: windows 3 → 3
+- r05: windows 4 → 5  ← изменилось
+- r06: windows 2 → 2
+- r07: windows 5 → 5
+- r08: windows 6 → 6
+- r09: windows 7 → 7
+- r10: windows 3 → 3
+- r11: windows 2 → 2
+- r12: windows 6 → 6
+- r13: windows 9 → 9
+- r14: windows 2 → 2
+- r15: windows 6 → 6
+- r16: windows 6 → 6
