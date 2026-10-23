@@ -1,0 +1,74 @@
+# M134 measure — block set on Whisper gaps (A) vs heard pauses (B)
+
+## 2026-08-08 09h 33m 14s
+- words: 3443
+- gap_flips@sentence_pause: 325
+- gap_flips@phrase_end: 42
+- blocks_all A→B: 46→47
+- kept A→B: 43→44
+- kept boundaries same: 12 of 75
+- fingerprint same: False
+
+## 2026-08-08 10h 59m 38s
+- words: 3532
+- gap_flips@sentence_pause: 367
+- gap_flips@phrase_end: 84
+- blocks_all A→B: 62→64
+- kept A→B: 53→58
+- kept boundaries same: 19 of 92
+- fingerprint same: False
+
+## 2026-08-08 11h 42m 49s
+- words: 1383
+- gap_flips@sentence_pause: 134
+- gap_flips@phrase_end: 15
+- blocks_all A→B: 18→19
+- kept A→B: 15→16
+- kept boundaries same: 4 of 27
+- fingerprint same: False
+
+## IMG_6848
+- words: 3372
+- gap_flips@sentence_pause: 162
+- gap_flips@phrase_end: 41
+- blocks_all A→B: 44→47
+- kept A→B: 40→45
+- kept boundaries same: 13 of 72
+- fingerprint same: False
+
+## PXL_20260729_085910095_34f06abf
+- words: 4680
+- gap_flips@sentence_pause: 236
+- gap_flips@phrase_end: 50
+- blocks_all A→B: 64→65
+- kept A→B: 62→63
+- kept boundaries same: 20 of 105
+- fingerprint same: False
+
+## PXL_20260729_copy
+- words: 5465
+- gap_flips@sentence_pause: 373
+- gap_flips@phrase_end: 31
+- blocks_all A→B: 64→63
+- kept A→B: 62→61
+- kept boundaries same: 15 of 108
+- fingerprint same: False
+
+## Pxl 20260621 112938952
+- words: 4964
+- gap_flips@sentence_pause: 306
+- gap_flips@phrase_end: 63
+- blocks_all A→B: 66→65
+- kept A→B: 62→63
+- kept boundaries same: 9 of 116
+- fingerprint same: False
+
+## Pxl 20260621 122006193
+- words: 957
+- gap_flips@sentence_pause: 92
+- gap_flips@phrase_end: 21
+- blocks_all A→B: 17→16
+- kept A→B: 13→12
+- kept boundaries same: 2 of 23
+- fingerprint same: False
+
