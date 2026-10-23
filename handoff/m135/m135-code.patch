@@ -1,0 +1,376 @@
+diff --git a/.gitignore b/.gitignore
+index 9a68780..0b7b128 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -4,13 +4,19 @@ data/runs/
+ data/outputs/
+ # машинно-локальная история прогонов (как transcripts/ — не в git)
+ data/history.jsonl
++# M129: модель лиц YuNet — бинарь, качается командой из config/render.yaml (face_model)
++data/models/
++# ручной архив старых манифестов на машине (в git — только живые манифесты)
++manifests/_archive/
+ 
+ # рабочие папки локального рендера (гигабайты исходников + готовые клипы — НЕ в git;
+ # манифест в manifests/ остаётся версионируемым — это контракт для машины рендера)
+ inputs/
+ inputs-archive/
+ reels-out/
+-transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
++# текстовые транскрипты для контента (autoreels transcribe). Комментарий — отдельной строкой: git не знает
++# комментариев в конце строки, и правило «transcripts/   # …» ничего не игнорировало (M135).
++transcripts/
+ # review files (working material, not shared)
+ reviews/
+ # handoff: patches / task files from the assistant for the agent (local only)
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 39c55d8..aad9dac 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -43,7 +43,6 @@ candidate_multiplier: 1.75     # over-generation: цель кандидатов
+                                # Копим с запасом, ранжируем по score, режем top-N; отсев — в
+                                # <манифест>.discarded.json рядом с манифестом.
+ chunk_tokens: 3500
+-chunk_overlap_sec: 60
+ dedup_overlap_threshold: 0.6
+ dangling_words:                # блоклист ПЕРВОГО слова клипа (проверка dangling-start, post-snap;
+                                # регистр не важен). К слову, стоящему сразу после терминального
+@@ -138,7 +137,6 @@ too_long_policy: trim              # trim | drop | keep (что делать с
+                                    # завязку зритель догоняет по контексту.
+ title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
+ language: ru                   # язык вывода LLM
+-prompt_language: en            # system-промпт на английском (крепче grounding)
+ 
+ # Пресеты длины (сек) — PROJECT_GUIDE / R0_SPEC §3. Код-валидатор ставит too_long/too_short.
+ # 90с: площадки допускают до 180с (Shorts и Reels — 3 мин), но вовлечённость падает раньше,
+diff --git a/config/render.yaml b/config/render.yaml
+index ac4f489..9904685 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -80,9 +80,7 @@ audio_processing:
+   fade_duration: 0.25
+   # Аудио-фейд в конце клипа (ТОЛЬКО звук). Два режима по word-таймингам манифеста:
+   # CLEAN (нет следующего слова в хвосте): fade только последних tail_fade_sec — дыхание слышно.
+-  # INTRUDED (следующее слово в хвосте): fade от (nw_start − intrusion_guard_sec), гасит вторжение.
+   tail_fade_sec: 0.35
+-  intrusion_guard_sec: 0.12
+   # Видео-фейд в чёрное в конце клипа (только legacy-путь, dynamic_ending выкл).
+   tail_video_fade: false
+   tail_video_fade_min_sec: 0.25
+@@ -231,15 +229,6 @@ same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses v
+ # When off, render is byte-identical to pre-M1.7-step-2 output even if k: fields present.
+ subtitle_keywords: false
+ 
+-subtitles:
+-  # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
+-  font: Montserrat
+-  font_size: 72
+-  margin_v: 300               # сажает текст в нижнюю треть (зона над UI платформы)
+-  words_per_line: [2, 4]      # группировка поп-апа по словам (\k)
+-  # font_dir — путь к шрифтам для ffmpeg (fontsdir). Заполняется под машину рендера.
+-  font_dir: null
+-
+ # M89: a cover for publishing — <reel>.cover.jpg next to every rendered clip: the middle of the clip's longest body
+ # window in the reel's crop and colour, with its plate title. The clip itself does not change.
+ cover: true
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 9b18a75..ec194ce 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -2682,7 +2682,6 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float
+     to last_word_end + tail_pad_sec, clamped to the video length. The word used is stashed on the
+     reel so the invariant checks against the same value (extension must not redefine "last word").
+     A short audio fade at render masks any next-phrase speech pulled into the tail."""
+-    from autoreels.core.models import Segment as _Seg
+     for r in reels:
+         segs = r.effective_segments()
+         last = segs[-1]
+@@ -4472,8 +4471,9 @@ def cmd_render(
+             import yaml as _yaml_r
+             _r0_raw_r = _yaml_r.safe_load(_r0_yaml_r.read_text(encoding="utf-8")) or {}
+             _credit_pats_render = _r0_raw_r.get("credit_word_patterns", []) or []
+-        except Exception:
+-            pass
++        except Exception as _e_r0:  # noqa: BLE001 — M135: no longer silent
++            print(f"  warning: config/r0.yaml not read for credit_word_patterns ({_e_r0}) — credits are not cut",
++                  file=sys.stderr)
+     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
+     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
+     out_dir = Path(out_dir) if out_dir else root / "reels-out"
+@@ -5243,7 +5243,9 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
+         mf = Path(mf)
+         try:
+             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
+-        except Exception:
++        except Exception as _e_mf:  # noqa: BLE001 — M135: its fixtures are left alone, but say so
++            print(f"  warning: {mf.name} unreadable ({_e_mf}) — its fixtures are not checked for orphans",
++                  file=sys.stderr)
+             continue
+         stem_reel_counts[Path(manifest.source).stem] = len(manifest.reels)
+     deleted_orphans = 0
+@@ -5722,7 +5724,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
+     )
+     from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences, _refine_seams, merge_group_sentences
+-    from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
++    from autoreels.core.models import make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
+     from autoreels.cloud.compress import compress_transcript
+     from autoreels.cloud.snap import trim_hanging_subtitles
+     from autoreels.cloud.chunk_transcribe import renumber_reels
+@@ -5946,7 +5948,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+     # blocks they are identical.  A non-zero difference count flags a code regression where the
+     # two paths diverge.  Out-of-range s:/e: references are reported as warnings (sentence_bounds
+     # already clamps them silently, so they don't break clips; this just surfaces the staleness).
+-    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss, words_in_span as _wis
++    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss
+     _sn_compared = 0
+     _sn_diffs = 0
+     for _g in groups:
+diff --git a/src/autoreels/cloud/blocks.py b/src/autoreels/cloud/blocks.py
+index 64780cd..0243419 100644
+--- a/src/autoreels/cloud/blocks.py
++++ b/src/autoreels/cloud/blocks.py
+@@ -484,7 +484,6 @@ def score_block(block: "CandidateBlock", cfg: "BlockScoringConfig") -> tuple[flo
+     Returns (score, breakdown) where breakdown maps feature name → raw points contributed.
+     Positive entries add to score, negative subtract. Clamped to [0, 100].
+     """
+-    from autoreels.core.config import BlockScoringConfig as _BSC  # local to avoid top-level cycle
+     text = block.text
+     text_lower = text.lower()
+ 
+diff --git a/src/autoreels/cloud/providers.py b/src/autoreels/cloud/providers.py
+index 5e366ee..687ac6a 100644
+--- a/src/autoreels/cloud/providers.py
++++ b/src/autoreels/cloud/providers.py
+@@ -14,8 +14,8 @@ Groq и OpenRouter увеличивает пропускную способно
+ - ProviderPool — quota-aware роутер: держит провайдеров с состоянием кулдауна, льёт каждый
+   запрос на лучший СВОБОДНЫЙ провайдер по стратегии (adaptive|round_robin), пропускает тех,
+   кто в лимите, и спит только когда ВСЕ в лимите — с внятной оценкой, кто когда освободится.
+-- FallbackLLM — простая последовательная цепочка (устаревшая, оставлена для совместимости);
+-  ProviderPool её обобщает (failover = adaptive с кулдауном во всю квоту).
++- (FallbackLLM, простая последовательная цепочка, удалена в M135: нигде не создавалась;
++  ProviderPool её обобщает — failover = adaptive с кулдауном во всю квоту.)
+ 
+ Стратегии распределения:
+ - adaptive (дефолт): предпочитать Groq (модель сильнее → качество выборки), сливать на
+@@ -281,7 +281,6 @@ class ProviderExhausted(ProviderError):
+ 
+     Пул трактует это как ДЛИННЫЙ кулдаун (не как вечную смерть провайдера): по истечении
+     retry_after провайдер снова опрашивается — так реализуется «вернуться когда остынет».
+-    FallbackLLM же ловит это исключение и переключается на следующий провайдер навсегда.
+     """
+ 
+     def __init__(self, message: str, *, retry_after: float = 0.0):
+@@ -1324,35 +1323,6 @@ class ProviderPool:
+             )
+ 
+ 
+-class FallbackLLM:
+-    """Цепочка провайдеров: при ProviderExhausted переключается на следующий (навсегда).
+-
+-    Устаревшая простая стратегия; ProviderPool её обобщает (распределение + возврат после
+-    кулдауна). Оставлена для обратной совместимости. Пример: FallbackLLM([GroqLLM(), OpenRouterLLM()]).
+-    """
+-
+-    def __init__(self, providers: list) -> None:
+-        self._providers = list(providers)
+-        self._current = 0
+-
+-    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+-        while self._current < len(self._providers):
+-            try:
+-                return self._providers[self._current].complete(
+-                    messages, temperature=temperature
+-                )
+-            except ProviderExhausted as e:
+-                self._current += 1
+-                if self._current < len(self._providers):
+-                    print(
+-                        f"\n  ℹ {e} — переключаюсь на следующий провайдер "
+-                        f"(OpenRouter #{self._current})",
+-                        flush=True,
+-                    )
+-                    continue
+-        raise ProviderError("все провайдеры исчерпаны — добавьте ключи или подождите сброса квоты")
+-
+-
+ def _openrouter_shared_pool_blocked(model: str, api_key: str) -> str | None:
+     """Minimal chat-completion ping to OpenRouter. Returns reason string if the model is
+     blocked by the upstream shared pool (is_byok:false), else None.
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 6d15a2b..8f6133c 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -486,7 +486,6 @@ class R0Config(BaseModel):
+     candidate_multiplier: float = 1.75   # over-generation: цель кандидатов = max_reels * это.
+                                          # Копим больше, ранжируем по score, режем top-N.
+     chunk_tokens: int
+-    chunk_overlap_sec: int
+     dedup_overlap_threshold: float
+     sentence_pause_sec: float
+     max_sentence_buffer_sec: float
+@@ -550,7 +549,6 @@ class R0Config(BaseModel):
+     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
+     title_style: str
+     language: str
+-    prompt_language: str
+     presets: dict[str, Preset]
+     prompts: PromptPaths
+     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
+@@ -761,10 +759,8 @@ class AudioProcessing(BaseModel):
+     fade_duration: float = 0.25      # секунды (0.2-0.3 обычно)
+     # Аудио-фейд в САМОМ конце клипа (только звук, БЕЗ видео-фейда в чёрное). Два режима:
+     # CLEAN — чистый хвост (нет следующего слова): fade только последних tail_fade_sec, дыхание слышно.
+-    # INTRUDED — следующее слово в хвосте: fade от (nw_start − intrusion_guard_sec), гасит вторжение.
+     # Оба случая вычисляются из tail_last_word_end/tail_next_word_start манифеста при рендере.
+     tail_fade_sec: float = 0.35          # clean tail: длина fade в конце клипа
+-    intrusion_guard_sec: float = 0.12   # intruded tail: начало fade за это время до следующего слова
+     last_word_margin_sec: float = 0.2   # safety margin added after last subtitle word's t1 on every path
+     # Микро-фейд на КРАЯХ каждого аудиосегмента многосегментного клипа (гасит щелчок на склейке).
+     # НЕ кроссфейд: fade-out в конце сегмента + fade-in в начале следующего, затем обычный concat —
+@@ -836,16 +832,6 @@ class Zoom(BaseModel):
+     fps: int = 30               # ignored: renderer follows source fps to prevent A/V drift
+ 
+ 
+-class SubtitleStyle(BaseModel):
+-    model_config = ConfigDict(extra="forbid")
+-
+-    font: str
+-    font_size: int
+-    margin_v: int
+-    words_per_line: list[int]
+-    font_dir: str | None
+-
+-
+ class PaletteEq(BaseModel):
+     """eq-фильтр цветокоррекции. Дефолты = нейтрально (картинка не меняется)."""
+     model_config = ConfigDict(extra="forbid")
+@@ -964,7 +950,6 @@ class RenderConfig(BaseModel):
+     encoder: Encoder
+     audio: Audio
+     audio_extract: AudioExtract
+-    subtitles: SubtitleStyle
+     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
+     audio_processing: AudioProcessing = Field(default_factory=AudioProcessing)
+     music: Music = Field(default_factory=Music)
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index c2e83c9..0d2e36d 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -683,9 +683,11 @@ def _check_synth_tail_seam(
+             ssim = float(m.group(1))
+             if ssim < 0.85:
+                 return f"tail-seam SSIM {ssim:.3f} < 0.85 — tail may bypass body crop"
+-    except Exception:
+-        pass
+-    return None
++            return None
++        # M135: a check that could not measure says so instead of passing silently
++        return f"tail-seam SSIM not measured (ffmpeg printed no value, rc {result.returncode})"
++    except Exception as e:  # noqa: BLE001
++        return f"tail-seam SSIM not measured ({e})"
+ 
+ 
+ def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float, float]]:
+diff --git a/tests/test_config.py b/tests/test_config.py
+index ad54cc4..079bfa9 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -61,7 +61,7 @@ def test_load_render_config_returns_typed_object():
+     cfg = load_render_config(RENDER_YAML)
+     assert isinstance(cfg, RenderConfig)
+     assert cfg.scale == [1080, 1920]
+-    assert cfg.subtitles.font == "Montserrat"
++    assert not hasattr(cfg, "subtitles")    # M135: the dead copy of the subtitle style is gone (config/subtitles.yaml rules)
+ 
+ 
+ # ---- render.local.yaml: машинный override поверх общего render.yaml (в .gitignore) ----
+@@ -95,12 +95,12 @@ def test_render_no_local_yaml_uses_base(tmp_path):
+ 
+ 
+ def test_render_local_yaml_partial_keeps_other_sections(tmp_path):
+-    """Частичный override (только ffmpeg) сохраняет прочие секции базы (subtitles, audio)."""
++    """Частичный override (только ffmpeg) сохраняет прочие секции базы (audio, encoder)."""
+     base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
+     _write(tmp_path, "render.local.yaml", "ffmpeg: /opt/ffmpeg\n")
+     cfg = load_render_config(base)
+     assert cfg.ffmpeg == "/opt/ffmpeg"
+-    assert cfg.subtitles.font == "Montserrat"               # секция subtitles цела
++    assert cfg.encoder.codec                               # секция encoder цела
+     assert cfg.audio.codec == "aac"
+ 
+ 
+diff --git a/tests/test_progress.py b/tests/test_progress.py
+index 40fc961..aac7f69 100644
+--- a/tests/test_progress.py
++++ b/tests/test_progress.py
+@@ -261,7 +261,6 @@ def _r0_cfg_chunked():
+         min_score=65,
+         max_reels=None,
+         chunk_tokens=3500,
+-        chunk_overlap_sec=60,
+         dedup_overlap_threshold=0.5,
+         sentence_pause_sec=0.35,
+         max_sentence_buffer_sec=30,
+@@ -270,7 +269,6 @@ def _r0_cfg_chunked():
+         too_long_policy="trim",
+         title_style="clickbait_ru",
+         language="ru",
+-        prompt_language="en",
+         presets={"shorts": Preset(min=15, max=59)},
+         prompts=PromptPaths(system="prompts/r0_system.md", fewshot="prompts/r0_fewshot.json"),
+         chunking=chunking,
+diff --git a/tests/test_providers.py b/tests/test_providers.py
+index 3092d55..7be3eda 100644
+--- a/tests/test_providers.py
++++ b/tests/test_providers.py
+@@ -6,7 +6,7 @@
+ import pytest
+ 
+ from autoreels.cloud.providers import (
+-    FallbackLLM, GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
++    GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
+     ProviderExhausted, ProviderRequestTooLarge,
+ )
+ 
+@@ -233,40 +233,6 @@ def test_openrouter_llm_missing_key_raises(monkeypatch):
+     assert "OPENROUTER_API_KEY" in str(exc.value)
+ 
+ 
+-def test_fallback_llm_returns_first_provider_result():
+-    """FallbackLLM возвращает ответ первого провайдера если он работает."""
+-    primary = GroqLLM(request_fn=lambda m, t: _good_envelope())
+-    secondary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(AssertionError("не должно вызываться")))
+-    fb = FallbackLLM([primary, secondary])
+-    assert fb.complete([]) == '{"segments": []}'
+-
+-
+-def test_fallback_llm_switches_on_exhausted():
+-    """FallbackLLM переключается на второй провайдер при ProviderExhausted первого."""
+-    primary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(ProviderExhausted("Groq исчерпан")))
+-    secondary = GroqLLM(request_fn=lambda m, t: _good_envelope())
+-    fb = FallbackLLM([primary, secondary])
+-    assert fb.complete([]) == '{"segments": []}'
+-
+-
+-def test_fallback_llm_raises_when_all_exhausted():
+-    """FallbackLLM поднимает ProviderError когда все провайдеры исчерпаны."""
+-    def _exhausted(m, t):
+-        raise ProviderExhausted("лимит")
+-    fb = FallbackLLM([GroqLLM(request_fn=_exhausted), GroqLLM(request_fn=_exhausted)])
+-    with pytest.raises(ProviderError, match="все провайдеры"):
+-        fb.complete([])
+-
+-
+-def test_fallback_llm_prints_switch_message(capsys):
+-    """FallbackLLM печатает сообщение о переключении провайдера."""
+-    primary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(ProviderExhausted("Groq исчерпан")))
+-    secondary = GroqLLM(request_fn=lambda m, t: _good_envelope())
+-    FallbackLLM([primary, secondary]).complete([])
+-    out = capsys.readouterr().out
+-    assert "OpenRouter" in out or "провайдер" in out.lower()
+-
+-
+ # ========================================================= ProviderThrottled (defer)
+ 
+ def test_groq_defer_throttle_raises_throttled_not_sleeps(monkeypatch):
