@@ -109,7 +109,7 @@ def yunet_model(path) -> "Path | None":
 
 
 def _yunet_faces_at(model: Path, video, times, frame_size: tuple[int, int], ffmpeg: str, pre_vf: str = "",
-                    score: float = 0.7) -> list:
+                    score: float = 0.7, near_x: float | None = None) -> list:
     """M129 (m128 on Pxl 112938952: the Haar cascade found the speaker in 5 of 12 frames, its biggest find was the
     shelf of teapots — x 894, 668 px high, no eye — and M102 framed the reels there; YuNet found the face in 12 of
     12, score ≥ 0.84): the largest YuNet face of each frame at `times`, as (cx, cy, w, h) in display px of
@@ -128,13 +128,17 @@ def _yunet_faces_at(model: Path, video, times, frame_size: tuple[int, int], ffmp
             continue
         _, found = det.detect(img)
         if found is not None and len(found):
-            x, y, w, h = (float(v) for v in max(found, key=lambda f: float(f[2]) * float(f[3]))[:4])
+            if near_x is None:
+                best = max(found, key=lambda f: float(f[2]) * float(f[3]))
+            else:                         # M131: the speaker — the face nearest his place in the source, not the largest
+                best = min(found, key=lambda f: abs((float(f[0]) + float(f[2]) / 2) * k - near_x))
+            x, y, w, h = (float(v) for v in best[:4])
             faces.append((round((x + w / 2) * k, 1), round((y + h / 2) * k, 1), round(w * k, 1), round(h * k, 1)))
     return faces
 
 
 def reel_faces(video, times, frame_size: tuple[int, int], *, ffmpeg: str = "ffmpeg",
-               pre_vf: str = "", model=None) -> tuple[list, int] | None:
+               pre_vf: str = "", model=None, near_x: float | None = None) -> tuple[list, int] | None:
     """M102: faces in the frames of one reel (`times` — source seconds, e.g. cover_candidates over its body), the
     source in display orientation with the reel's rotation (`pre_vf`, as render applies it before the crop) —
     (faces, frames looked at), or None without OpenCV. M129: with `model` (yunet_model) the YuNet detector, else the
@@ -146,7 +150,7 @@ def reel_faces(video, times, frame_size: tuple[int, int], *, ffmpeg: str = "ffmp
     times = list(times)
     m = yunet_model(model) if model else None
     if m is not None:
-        return _yunet_faces_at(m, video, times, frame_size, ffmpeg, pre_vf), len(times)
+        return _yunet_faces_at(m, video, times, frame_size, ffmpeg, pre_vf, near_x=near_x), len(times)
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     return _faces_at(cascade, video, times, frame_size, ffmpeg, pre_vf), len(times)
 

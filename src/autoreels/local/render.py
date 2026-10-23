@@ -2505,7 +2505,8 @@ def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, re
     times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
     found = reel_faces(source, times, (int(setup.frame[0]), int(setup.frame[1])), ffmpeg=ffmpeg,
                        pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
-                       model=_face_model(render_cfg)) if times else None
+                       model=_face_model(render_cfg),
+                       near_x=float(source_face[0]) if source_face is not None else None) if times else None
     if found is None:
         return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
     faces, looked = found
@@ -2902,7 +2903,7 @@ def _render_segments(
             # --- M102: the reel's own frame and close shot from the face in its body (static, no tracking) ---
             if (emit_text and vf and manifest.setup is not None
                     and (getattr(render_cfg, "reel_framing", False) or getattr(render_cfg, "close_from_face", False))):
-                if getattr(render_cfg, "framing_source_fallback", False) and _src_face_cache.get(str(source), 0) == 0:
+                if getattr(render_cfg, "framing_source_fallback", False) and str(source) not in _src_face_cache:
                     _src_face_cache[str(source)] = _source_face(manifest.setup, source, ffmpeg_bin, render_cfg)
                     _sf = _src_face_cache[str(source)]
                     print("  лицо источника: " + (f"x {_sf[0]:g}, в {_sf[4]} из {_sf[5]} кадров" if _sf

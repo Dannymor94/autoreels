@@ -115,7 +115,7 @@ def test_m127_a_reel_without_its_own_face_is_framed_on_the_sources_face(monkeypa
     segs = [SimpleNamespace(start=0.0, end=60.0)]
     calls = []
 
-    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf="", model=None):
+    def fake_faces(video, times, frame, ffmpeg="ffmpeg", pre_vf="", model=None, near_x=None):
         calls.append(len(times))
         if len(times) == 40:                                  # the whole source: the speaker left, 20 of 40 frames
             return [(1100.0 + i % 3, 900.0, 300.0, 300.0) for i in range(20)] + [(2600.0, 800.0, 90.0, 90.0)] * 3, 40
@@ -136,7 +136,7 @@ def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, m
     from types import SimpleNamespace
     from autoreels.local import autocrop, render
     used = []
-    monkeypatch.setattr(autocrop, "_yunet_faces_at", lambda m, v, ts, fs, ff, pv="": used.append("yunet") or
+    monkeypatch.setattr(autocrop, "_yunet_faces_at", lambda m, v, ts, fs, ff, pv="", near_x=None: used.append("yunet") or
                         [(1850.0, 700.0, 210.0, 210.0)] * len(ts))
     monkeypatch.setattr(autocrop, "_faces_at", lambda c, v, ts, fs, ff, pv="": used.append("haar") or [])
     model = tmp_path / "yunet.onnx"
@@ -164,3 +164,23 @@ def test_m130_the_frames_hold_the_whole_way_the_face_goes():
     assert close.x <= 1495 and close.x + close.w >= 2305 and z >= 1.15         # so does the close shot
     tight, z0 = face_close_crop(wide, face, out_h=1920)
     assert z0 > z and tight.x + tight.w < 2305                                 # without the span it lost him
+
+
+def test_m131_the_speaker_is_the_face_nearest_his_place_not_the_largest(tmp_path, monkeypatch):
+    """M131 (owner on Pxl 112938952 m130 r14: «камера поплыла» — a listener near the camera, x ≈ 70, had a larger face
+    than the speaker in every frame of that reel, and the largest face won)."""
+    import cv2
+    import numpy as np
+    from autoreels.local import autocrop
+    # two faces per frame, in a 960-wide frame of a 3840 source (k = 4): the listener at the edge, larger
+    found = np.array([[5.0, 100.0, 60.0, 60.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.9],
+                      [440.0, 160.0, 52.0, 52.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.9]], dtype=np.float32)
+
+    class Det:
+        def detect(self, img):
+            return 1, found
+    monkeypatch.setattr(cv2, "FaceDetectorYN", type("Y", (), {"create": staticmethod(lambda *a, **k: Det())}))
+    monkeypatch.setattr(autocrop, "_color_frame", lambda *a, **k: np.zeros((540, 960, 3), np.uint8))
+    largest = autocrop._yunet_faces_at(tmp_path / "m.onnx", "v.mp4", [1.0], (3840, 2160), "ffmpeg")
+    near = autocrop._yunet_faces_at(tmp_path / "m.onnx", "v.mp4", [1.0], (3840, 2160), "ffmpeg", near_x=1860.0)
+    assert largest[0][0] == 140.0 and near[0][0] == 1864.0
