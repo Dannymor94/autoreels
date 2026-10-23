@@ -1,0 +1,236 @@
+diff --git a/PLAN.md b/PLAN.md
+index 72b7110..bf31e80 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -215,9 +215,10 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | 2. Зазоры тактов (1c) | реализован: прыжок — по слышимому концу + `beat_gap_sec`, соседние предложения — исходный тайминг |
+ | 3. Кандидаты авторитма | реализован (на 11h 42m сдвинулось одно переключение) |
+ | 4. Снап начала | ✅ принят просмотром |
+-| 5. Границы блоков | не начат — меняет нарезку и отпечаток выгрузки; нужна версия нарезки, чтобы старые файлы разметки продолжали применяться |
+-| 6. Укорачивание пауз при вычистке | не начат |
++| 5. Границы блоков | отложен по замеру (M134): по слышимым паузам из границ блоков совпали бы 13 из 72 (IMG_6848) и 19 из 92 (10h59) — нумерация `B.k`, отпечатки файлов владельца, карты и черновики перестали бы применяться. Нарезка блоков — нумерация, а не решение о клипе; решения о клипе уже по звуку |
++| 6. Укорачивание пауз при вычистке | для клипов по плану (ручной путь, автомонтаж) — по звуку (`plan.py`); на зазорах Whisper остаётся только классический `arl run` (`edit.remove_fillers`) |
+ | 7. Маркеры `⏸` в выгрузке | реализован (M98, `review_pause_from_map`) |
++| 8. «Кусок идёт подряд» в монтаже (без стыка) | реализован (M134, `montage.join_heard`) |
+ 
+ `speech_map` по умолчанию выключен; включается после итогового просмотра. **Этап C** — удалить точечные звуковые пробы хвоста в пользу карты.
+ 
+@@ -303,7 +304,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ - **Подлагивание при воспроизведении с Яндекс.Диска.** `faststart` стоял изначально, опорные кадры у аппаратного кодека частые — правка коснулась только программных. Если повторится, проверить, не перекодирует ли сам Диск: скачать файл и открыть локально.
+ - **Мало чистых данных для оценки модели** — 37 оценённых блоков по текущей нарезке.
+ - **Хэштеги** частотной генерацией отключены; пишет их `arl describe` — только слова, сказанные в ролике.
+-- **Таймкоды Whisper** ненадёжны — M1.8 переводит на карту речи; потребители 5–6 ещё на зазорах Whisper.
++- **Таймкоды Whisper** ненадёжны — M1.8 переводит на карту речи; на зазорах Whisper остались нумерация блоков (отложено по замеру) и вычистка классического `arl run`.
+ - **Длинные паузы (≥ `long_pause_sec`) укорачиваются в обход интервала между резами** (M79) — на m126 это дало частые резы в r03/r08/r09/r12; ждёт просмотра, возможно, нужен предел.
+ - **Незаконченная мысль при явном `e:`** — решает владелец по списку предупреждений (сейчас: PXL r06 и IMG_6848 r06 — предложено продлить; PXL r01, r10, IMG_6848 r10 — предложено оставить; лекция r02, r03 — конец на «понятно?». Решение владельца не получено).
+ - **Слитная речь в конце** — если последнее размеченное слово слитно переходит в следующую фразу (лекция r03), чисто отрезать нельзя: предупреждение, решение в разметке.
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index 48a3ccb..e79f76c 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -40,6 +40,9 @@ autoreels/
+ │   ├── verify_gate.py        # проверка гейт-клипов против эталонных ожиданий
+ │   └── gc.py                 # уборка рабочего пространства
+ │
++├── tools/flash_check.py      # поиск мигания в готовых клипах двух планов (сверка с исходником)
++├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
++│
+ ├── docs/
+ │   ├── REEL_SPEC.md          # как собирается клип: звук, крючок, план, конец, файл, субтитры, рамка;
+ │   │                         #   §8 «где это в коде» с заметками по вехам
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 39c55d8..d6913cb 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -307,6 +307,9 @@ montage:
+   # M58: a piece that goes straight on from the previous one in the source (next sentence, or sentence 1 of the
+   # next block right after the last one) is played as one piece — no seam. x1, x2… name the filtered blocks.
+   join_gap_sec: 2.0
++  # M134 (invariant 9): that gap is the pause HEARD (speech map / alignment), not the Whisper gap — on IMG_6848 65 of
++  # 345 sentence ends overlap in Whisper times (gap < 0), so a straight-on piece got a seam. false = the Whisper gap.
++  join_heard: false
+   # M74 — owner: «после крючка сильно резко идёт тело»: up to this much real silence after the cold open and before
+   # the body's first word (never into speech) — the hook and the start of the clip are heard as two things. 0 = off.
+   hook_air_sec: 0.5
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index aa39da5..0cd839d 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -99,7 +99,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - Куски играются в порядке записи — любом (M59: вопрос из конца лекции может открыть клип, ответ из начала — идти следом), не повторяют друг друга; крючок `h:` — из любого блока. У такого клипа `Reel.reordered`: окна в порядке проигрывания, `start`/`end` — начало первого и конец последнего сыгранного окна, субтитры — в порядке проигрывания (последний субтитр = последнее слышимое слово, все проверки конца прежние). Ошибка в строке `M` (нет блока, номер вне блока) — `--apply` отказывает и называет причину.
+ - План тот же (`build_manual_plan`), с параметром `breaks`: с каждого куска начинается новое окно, даже если номера предложений идут подряд (соседние блоки). Шов между кусками — смена плана (§3) и естественная пауза: с каждой стороны по `montage.seam_pad_sec` воздуха, но только в тишине между словами, не дальше середины тишины до соседней речи.
+ - Что делает стык заметным, печатается в плане (`seam N …`: сколько пропущено, пауза, скачок картинки по `arl motion`, темп речи, громкость и высота голоса по `montage.side_sec` сыгранной речи с каждой стороны, интонация конца куска) и попадает в предупреждения клипа: кусок короче `montage.piece_min_sec`; швов больше `montage.seams_per_min_max` в минуту (один шов можно всегда); темп по разные стороны шва различается больше чем в `montage.pace_ratio_max` раз; скачок картинки больше `montage.seam_jump_warn`; громкость речи по сторонам шва различается больше `montage.loudness_diff_db` дБ; высота голоса — больше `montage.pitch_diff_st` полутонов (`local/voice.py`: уровень речевых кадров выше порога карты речи, высота Praat относительно средней высоты голоса из `arl prosody`); кусок кончается с голосом вверх (↗ — шов звучит как перебитая фраза); кусок начинается со слова, которое отсылает назад («И», «Это», «Поэтому» — к пропущенному). Код сборку не правит.
+-- Отсеянные блоки (начало, хвост, промо) тоже можно брать: `x1`, `x2`… — по порядку источника (M58; `arl blocks-text` печатает их после нумерации разметки, на карте у таких мыслей номер `x…`). Кусок, который в источнике идёт сразу за предыдущим (следующее предложение или первое предложение следующего блока, пауза не больше `montage.join_gap_sec`), играется вместе с ним — без стыка.
++- Отсеянные блоки (начало, хвост, промо) тоже можно брать: `x1`, `x2`… — по порядку источника (M58; `arl blocks-text` печатает их после нумерации разметки, на карте у таких мыслей номер `x…`). Кусок, который в источнике идёт сразу за предыдущим (следующее предложение или первое предложение следующего блока, пауза не больше `montage.join_gap_sec`), играется вместе с ним — без стыка. **M134:** при `montage.join_heard` пауза — слышимая (карта речи / выравнивание; незаписанная речь между ними — речь), а не зазор Whisper: на IMG_6848 у 65 из 345 концов предложений времена Whisper перекрываются (зазор < 0), и кусок, идущий подряд, получал стык.
+ - Клип сборки идёт после клипов обычных строк (их номера не сдвигаются), с флагом `montage` и строкой сборки в манифесте (`Reel.montage`). В датасет оценок блоков не пишется. На листе ревью у него нет кнопок решения: оценка плавности — владельцем.
+ 
+ **Лист ревью** (M37): после рендера `arl review-sheet <stem> [--gate <имя>]` пишет `reels-out/<stem>/[_gate/<имя>/]_review.html` рядом с клипами: каждый клип с видео, плашкой, подписью, текстом, предупреждениями и строкой черновика, из которой он собран. Клип привязывается к строке по тому, где он звучит в исходнике (блоки строки покрывают бóльшую часть клипа); клип без строки (черновик правили после рендера) показывается без выбора. Владелец отмечает «оставить / убрать / переделать» с замечанием и скачивает `<stem>_decisions.txt`. `arl review-apply <файл>` записывает решения в черновик: «убрать» — строка `#- … ← убрано владельцем`, «переделать» — замечание `# ✎ владелец (rNN дата): …` над строкой, «оставить» — отметка `# ✓`. Повторное применение ничего не меняет, прежний черновик — `.bak`. С `--redo` LLM переделывает каждую строку с замечанием по тем же проверкам, что и `arl label` (окно — блоки клипа ±1, блоки других строк недоступны): удачная правка заменяет строку, старая остаётся как `#~ было: …`; неудачная — `#! правка …` с причиной, замечание остаётся для следующего `--redo`. Ничего не устанавливается и не рендерится. Код — `src/autoreels/local/review_sheet.py`, `cloud/label.py` (решения и переделка).
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 9b18a75..1b6f56d 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -5596,9 +5596,15 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
+     from autoreels.core.models import Reel
+     mc = r0_cfg.montage
+     out: list = []
++    _join_pause = None
++    if getattr(mc, "join_heard", False) and (smap is not None or align is not None):
++        # M134 (invariant 9): «goes straight on» by the pause heard, not the Whisper gap
++        from autoreels.cloud.plan import SpeechTimes, heard_pause
++        _jt = SpeechTimes(tx_words, smap, align)
++        _join_pause = lambda a, b: heard_pause(_jt, a, b)  # noqa: E731
+     for me in entries:
+         mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words),
+-                           join_gap_sec=mc.join_gap_sec)
++                           join_gap_sec=mc.join_gap_sec, pause=_join_pause)
+         for _e in mb.errors:
+             print(f"  [ERROR] {me.label} (review:{me.lineno}): {_e}", file=sys.stderr)
+         if mb.errors:
+diff --git a/src/autoreels/cloud/montage.py b/src/autoreels/cloud/montage.py
+index c6a8e46..509950e 100644
+--- a/src/autoreels/cloud/montage.py
++++ b/src/autoreels/cloud/montage.py
+@@ -217,17 +217,27 @@ class MontageBuild:
+     errors: list[str] = field(default_factory=list)
+ 
+ 
+-def _continues(sentences: list, a: int, gap_sec: float) -> bool:
++def _continues(sentences: list, a: int, gap_sec: float,
++               pause: Callable[[object, object], float | None] | None = None) -> bool:
+     """Sentence a (1-based) follows sentence a-1 straight on in the source: at most gap_sec between
+-    them (a filtered block in between, or a skipped sentence, is far longer)."""
++    them (a filtered block in between, or a skipped sentence, is far longer).
++
++    M134 (invariant 9): with `pause(last_word, first_word)` the gap is the silence HEARD between them (speech
++    map / alignment; None = another word stands between them). The Whisper gap is negative on overlapping
++    words (IMG_6848: 65 of 345 sentence ends) — such a straight-on piece got a seam."""
+     prev, cur = sentences[a - 2], sentences[a - 1]
++    if pause is not None:
++        p = pause(prev[-1], cur[0])
++        return p is not None and p <= gap_sec
+     return 0.0 <= cur[0].t0 - prev[-1].t1 <= gap_sec
+ 
+ 
+ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[object], list], *,
+-                  join_gap_sec: float = 2.0) -> MontageBuild:
++                  join_gap_sec: float = 2.0,
++                  pause: Callable[[object, object], float | None] | None = None) -> MontageBuild:
+     """Map a montage line to one sentence numbering. `blocks`: review number → block (the blocks
+-    apply may use); `block_sentences(block)` → that block's sentences in the review numbering."""
++    apply may use); `block_sentences(block)` → that block's sentences in the review numbering.
++    `pause`: the heard pause between two words (M134, see _continues); None = the Whisper gap."""
+     out = MontageBuild(sentences=[], play=[], breaks=[], pieces=[])
+     used = {p.block for p in entry.pieces} | ({entry.hook[0]} if entry.hook else set())
+     missing = sorted((b for b in used if b not in blocks), key=str)
+@@ -265,7 +275,7 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
+         if seen & set(rng):
+             out.errors.append(f"piece {p} repeats a sentence of an earlier piece")
+             continue
+-        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec):
++        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec, pause):
+             # M58: the piece goes straight on from the previous one in the source (the next sentence of
+             # the block, or sentence 1 of the next block right after the last one) — no seam
+             out.joined.append(f"{out.pieces[-1][0]}-{out.pieces[-1][1]} + {p}")
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index e690ba4..c728d38 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -595,6 +595,16 @@ def _speech_before(times: SpeechTimes, first: Word) -> tuple[float | None, float
+     return left, as_f
+ 
+ 
++def heard_pause(times: SpeechTimes, last: Word, first: Word) -> float | None:
++    """M134: the silence heard between `last` and `first` when `first` is the very next transcript word
++    (untranscribed speech between them counts as speech); None when another word stands between them."""
++    prev = times.prev(first)
++    if prev is None or round(prev.t0 * 1000) != round(last.t0 * 1000):
++        return None
++    left, onset = _speech_before(times, first)
++    return max(0.0, onset - left) if left is not None else None
++
++
+ def _speech_after(times: SpeechTimes, last: Word) -> tuple[float, float | None]:
+     """(end of `last`, onset of the next speech: next word or untranscribed speech)."""
+     nxt = times.next(last)
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 6d15a2b..a90be64 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -215,6 +215,7 @@ class MontageConfig(BaseModel):
+     filler_profile: str | None = None                      # M70: manual_filler_profiles entry for montage clips (--filler-profile wins)
+     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
+     join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
++    join_heard: bool = False                                # M134: that gap is the pause heard (speech map / alignment), not Whisper's
+     hook_air_sec: float = Field(0.0, ge=0.0, le=1.5)       # M74: silence kept after the cold open and before the body (0 = off)
+     fx_auto_clips: bool = False                            # M77: the fx (not callouts) also on ordinary clips of an auto draft
+ 
+diff --git a/tests/test_montage_heard_join.py b/tests/test_montage_heard_join.py
+new file mode 100644
+index 0000000..a876590
+--- /dev/null
++++ b/tests/test_montage_heard_join.py
+@@ -0,0 +1,64 @@
++"""M134 (invariant 9): «a piece goes straight on from the previous one» by the pause HEARD between the two
++sentences (speech map / alignment), not by the Whisper gap — Whisper times overlap at sentence ends (IMG_6848:
++65 of 345 sentence ends have a negative gap), and such a straight-on piece got a seam."""
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++from autoreels.cloud.montage import build_montage, parse_montage
++from autoreels.cloud.plan import SpeechTimes, heard_pause
++from autoreels.core.config import MontageConfig
++from autoreels.core.models import Word
++
++
++def _w(text, t0, t1):
++    return Word(word=text, t0=t0, t1=t1)
++
++
++def _one_block(s1, s2, s3):
++    bl = SimpleNamespace(start=s1[0].t0, end=s3[-1].t1, sents=[s1, s2, s3])
++    return {1: bl}
++
++
++def test_flag_is_off_by_default():
++    assert MontageConfig().join_heard is False
++
++
++def test_whisper_overlap_is_a_seam_without_heard_pause_and_joined_with_it():
++    s1 = [_w("раз", 0.0, 0.4), _w("два.", 0.5, 1.02)]
++    s2 = [_w("три", 1.0, 1.4), _w("четыре.", 1.5, 1.9)]            # Whisper gap −0.02 s
++    s3 = [_w("пять.", 2.5, 2.9)]
++    bl = _one_block(s1, s2, s3)
++    (e,), _ = parse_montage("M 80 | 1.1 1.2\n")
++    assert build_montage(e, bl, lambda b: b.sents).breaks == [2]        # before: a seam
++    mb = build_montage(e, bl, lambda b: b.sents, pause=lambda a, b: 0.1)
++    assert mb.breaks == [] and mb.pieces == [(1, 2)] and mb.joined == ["1-1 + 1.2"]
++
++
++def test_long_heard_pause_is_a_seam_even_when_whisper_shows_none():
++    s1 = [_w("Хорошо.", 0.0, 3.3)]                                   # Whisper stretched the word over the silence
++    s2 = [_w("Второй.", 3.3, 3.8)]
++    s3 = [_w("Третий.", 4.0, 4.5)]
++    bl = _one_block(s1, s2, s3)
++    (e,), _ = parse_montage("M 80 | 1.1 1.2\n")
++    assert build_montage(e, bl, lambda b: b.sents).breaks == []          # Whisper gap 0.0: joined
++    assert build_montage(e, bl, lambda b: b.sents, pause=lambda a, b: 2.76).breaks == [2]
++
++
++def test_a_word_between_the_sentences_is_never_straight_on():
++    s1 = [_w("раз.", 0.0, 0.4)]
++    s2 = [_w("два.", 0.6, 1.0)]
++    s3 = [_w("три.", 1.2, 1.6)]
++    bl = _one_block(s1, s2, s3)
++    (e,), _ = parse_montage("M 80 | 1.1 1.2\n")
++    assert build_montage(e, bl, lambda b: b.sents, pause=lambda a, b: None).breaks == [2]
++
++
++def test_heard_pause_from_the_speech_map():
++    a, b, c = _w("два.", 0.5, 1.02), _w("три", 1.0, 1.4), _w("четыре.", 1.5, 1.9)
++    smap = {"words": [{"t0": 0.5, "audible_start": 0.5, "audible_end": 0.9},
++                      {"t0": 1.0, "audible_start": 1.05, "audible_end": 1.4},
++                      {"t0": 1.5, "audible_start": 1.5, "audible_end": 1.9}]}
++    times = SpeechTimes([a, b, c], smap)
++    assert abs(heard_pause(times, a, b) - 0.15) < 1e-6                 # heard 0.9 → 1.05, Whisper −0.02
++    assert heard_pause(times, a, c) is None                            # «три» stands between them
