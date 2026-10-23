@@ -1,0 +1,40 @@
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+2026-08-08 09h 33m 14s: 1968 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/15, random 0.0/15
+  thr 0.4: owner clips with laughter/applause 0/15, random 0.0/15
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+2026-08-08 10h 59m 38s: 2590 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/8, random 0.0/8
+  thr 0.4: owner clips with laughter/applause 0/8, random 0.0/8
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+2026-08-08 11h 42m 49s: 830 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/4, random 0.0/4
+  thr 0.4: owner clips with laughter/applause 0/4, random 0.0/4
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+IMG_6848: 2124 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/8, random 0.0/8
+  thr 0.4: owner clips with laughter/applause 0/8, random 0.0/8
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+PXL_20260729_085910095_34f06abf: 2862 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/10, random 0.0/10
+  thr 0.4: owner clips with laughter/applause 0/10, random 0.0/10
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+Pxl 20260621 112938952: 2806 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/19, random 0.2/19
+  thr 0.4: owner clips with laughter/applause 0/19, random 0.0/19
+Checkpoint path: /Users/danny/panns_data/Cnn14_DecisionLevelMax.pth
+Using CPU.
+Pxl 20260621 122006193: 706 s, laughter seconds ≥0.4: 0, applause ≥0.4: 0
+  thr 0.2: owner clips with laughter/applause 0/2, random 0.1/2
+  thr 0.4: owner clips with laughter/applause 0/2, random 0.0/2
+
+=== ALL
+thr 0.2: owner clips 0/66 (0%), random 0.3/66 (0%)
+thr 0.4: owner clips 0/66 (0%), random 0.0/66 (0%)
+map units 799: AUC laughter→taken 0.50, →start 0.50
