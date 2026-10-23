@@ -371,6 +371,11 @@ autocut:
   rhythm_settle_far: 12   # … up to ≥ 12 s after a jump of rhythm_far_sec or more (or back in the source)
   rhythm_far_sec: 120
   rhythm_tail: 0.5        # the last piece (the payoff) needs half of that
+  # M138 (m137: the owner starts on a longer finished thought, takes strong ones from the first half; «viral» hook
+  # features carry nothing): a logistic model of his choice (cloud/taste.py, fitted on his clips) adds
+  # taste_weight × its logit to a proposal's score — the order only. 0 = off; the model file from handoff/m138/fit_eval.py.
+  taste_weight: 0
+  taste_model: config/taste.json
   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
   scenario_timeout_sec: 300   # … the whole talk in one request

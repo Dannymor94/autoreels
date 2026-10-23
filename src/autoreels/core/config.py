@@ -298,6 +298,9 @@ class AutocutConfig(BaseModel):
     rhythm_settle_far: float = Field(12.0, ge=0)   # … up to this after a far jump (rhythm_far_sec or more, or back)
     rhythm_far_sec: float = Field(120.0, gt=0)
     rhythm_tail: float = Field(0.5, ge=0, le=1)    # the last piece (the payoff) needs only this share
+    # M138: the owner's taste learned from his clips (cloud/taste.py) orders the proposals; 0 = off
+    taste_weight: float = Field(0.0, ge=0)
+    taste_model: str = "config/taste.json"
     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo

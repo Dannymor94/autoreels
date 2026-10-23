@@ -98,6 +98,8 @@ class AutoParams:
     settle_far_sec: float = 12.0      # … up to this after a jump of settle_far_at_sec or more (or back in the source)
     settle_far_at_sec: float = 120.0
     settle_tail: float = 0.5          # the last piece (the payoff) needs only this share of it
+    # M138: the owner's taste (cloud/taste.py) adds taste_weight × clip_taste to a proposal's score; 0 = off
+    taste_weight: float = 0.0
 
 
 @dataclass
@@ -1000,7 +1002,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
             no_start: list | None = None, judge: "Judge | None" = None,
             end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
-            rhythm_out: list | None = None) -> list[Proposal]:
+            rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
@@ -1011,7 +1013,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
     p.start_judge «rank» — a start the model rejects but the rules accept keeps the clip, marked start_doubt (the
     caller sorts it after the clean ones: invariant 1, the model only ranks).
     M120: p.rhythm — every clip keeps the jump rule (fit_rhythm before its start is fixed, rhythm_why on the final
-    clip); `rhythm_out` collects (pieces, why) of the clips that could not."""
+    clip); `rhythm_out` collects (pieces, why) of the clips that could not.
+    M138: `taste(clip)` → the owner's taste of the clip (cloud/taste.clip_taste); with p.taste_weight it is added to the
+    score — the order only (invariant 1); taste_weight 0 or no `taste` = the score as before."""
     by_id = {u["id"]: u for u in units}
     roles = tuple(p.seed_roles) or STORY
     passage = p.generator in ("passage", "mixed")
@@ -1120,6 +1124,10 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         loop = clip[0].get("role") == "question" and clip[-1].get("role") in PAYOFFS
         over = max(0.0, secs - p.target_sec)
         score = 15 * punch + 0.15 * energy + cover - 4 * (_pieces(clip) - 1) + 10 * loop - 0.2 * over
+        if taste is not None and p.taste_weight:
+            _t = taste(clip)
+            score += p.taste_weight * _t
+            extra_notes.append(f"вкус владельца: {_t:+.2f} (× {p.taste_weight:g})")
         opener = next((u for u in clip if u.get("role") in OPENERS), clip[0])
         payoff = next((u for u in reversed(clip) if u.get("role") in PAYOFFS), clip[-1])
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]

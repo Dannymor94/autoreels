@@ -8203,7 +8203,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      lean_depth=ac.lean_depth, rhythm=ac.rhythm, max_jumps=ac.rhythm_max_jumps,
                      jump_sec=ac.rhythm_jump_sec, settle_near_sec=ac.rhythm_settle_near,
                      settle_far_sec=ac.rhythm_settle_far, settle_far_at_sec=ac.rhythm_far_sec,
-                     settle_tail=ac.rhythm_tail)
+                     settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0))
+    _taste = None
+    if prm.taste_weight:
+        # M138: the owner's taste orders the proposals (invariant 1: the order only)
+        from autoreels.cloud.taste import clip_taste as _clip_taste, load as _taste_load
+        _tm_path = _root / ac.taste_model
+        try:
+            _tm = _taste_load(_tm_path)
+        except (OSError, ValueError) as _e_t:
+            print(f"ошибка: модель вкуса не прочитана ({_tm_path}: {_e_t}) — taste_weight требует её "
+                  f"(handoff/m138/fit_eval.py), или taste_weight: 0", file=sys.stderr)
+            return 1
+        _src_dur = max((float(u["t1"]) for u in the_map.get("units") or []), default=1.0)
+        _taste = lambda clip: _clip_taste(clip, _tm, _src_dur)  # noqa: E731
+        print(f"  вкус владельца: {ac.taste_model} (строк {_tm.get('rows')}), вес {prm.taste_weight:g}", flush=True)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -8298,7 +8312,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             return 1
     else:
         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
-                       no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out)
+                       no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
+                       taste=_taste)
     _doubt = sum(1 for pr in pool if pr.start_doubt)
     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
         pool.sort(key=lambda pr: bool(pr.start_doubt))
