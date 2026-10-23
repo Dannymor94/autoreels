@@ -80,9 +80,7 @@ audio_processing:
   fade_duration: 0.25
   # Аудио-фейд в конце клипа (ТОЛЬКО звук). Два режима по word-таймингам манифеста:
   # CLEAN (нет следующего слова в хвосте): fade только последних tail_fade_sec — дыхание слышно.
-  # INTRUDED (следующее слово в хвосте): fade от (nw_start − intrusion_guard_sec), гасит вторжение.
   tail_fade_sec: 0.35
-  intrusion_guard_sec: 0.12
   # Видео-фейд в чёрное в конце клипа (только legacy-путь, dynamic_ending выкл).
   tail_video_fade: false
   tail_video_fade_min_sec: 0.25
@@ -230,15 +228,6 @@ same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses v
 # M1.7 step 2: sentence-scoped keyword highlighting in subtitles. Off by default.
 # When off, render is byte-identical to pre-M1.7-step-2 output even if k: fields present.
 subtitle_keywords: false
-
-subtitles:
-  # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
-  font: Montserrat
-  font_size: 72
-  margin_v: 300               # сажает текст в нижнюю треть (зона над UI платформы)
-  words_per_line: [2, 4]      # группировка поп-апа по словам (\k)
-  # font_dir — путь к шрифтам для ffmpeg (fontsdir). Заполняется под машину рендера.
-  font_dir: null
 
 # M89: a cover for publishing — <reel>.cover.jpg next to every rendered clip: the middle of the clip's longest body
 # window in the reel's crop and colour, with its plate title. The clip itself does not change.

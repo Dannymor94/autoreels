@@ -683,9 +683,11 @@ def _check_synth_tail_seam(
             ssim = float(m.group(1))
             if ssim < 0.85:
                 return f"tail-seam SSIM {ssim:.3f} < 0.85 — tail may bypass body crop"
-    except Exception:
-        pass
-    return None
+            return None
+        # M135: a check that could not measure says so instead of passing silently
+        return f"tail-seam SSIM not measured (ffmpeg printed no value, rc {result.returncode})"
+    except Exception as e:  # noqa: BLE001
+        return f"tail-seam SSIM not measured ({e})"
 
 
 def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float, float]]:

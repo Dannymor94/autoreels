@@ -487,7 +487,6 @@ class R0Config(BaseModel):
     candidate_multiplier: float = 1.75   # over-generation: цель кандидатов = max_reels * это.
                                          # Копим больше, ранжируем по score, режем top-N.
     chunk_tokens: int
-    chunk_overlap_sec: int
     dedup_overlap_threshold: float
     sentence_pause_sec: float
     max_sentence_buffer_sec: float
@@ -551,7 +550,6 @@ class R0Config(BaseModel):
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str
-    prompt_language: str
     presets: dict[str, Preset]
     prompts: PromptPaths
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
@@ -762,10 +760,8 @@ class AudioProcessing(BaseModel):
     fade_duration: float = 0.25      # секунды (0.2-0.3 обычно)
     # Аудио-фейд в САМОМ конце клипа (только звук, БЕЗ видео-фейда в чёрное). Два режима:
     # CLEAN — чистый хвост (нет следующего слова): fade только последних tail_fade_sec, дыхание слышно.
-    # INTRUDED — следующее слово в хвосте: fade от (nw_start − intrusion_guard_sec), гасит вторжение.
     # Оба случая вычисляются из tail_last_word_end/tail_next_word_start манифеста при рендере.
     tail_fade_sec: float = 0.35          # clean tail: длина fade в конце клипа
-    intrusion_guard_sec: float = 0.12   # intruded tail: начало fade за это время до следующего слова
     last_word_margin_sec: float = 0.2   # safety margin added after last subtitle word's t1 on every path
     # Микро-фейд на КРАЯХ каждого аудиосегмента многосегментного клипа (гасит щелчок на склейке).
     # НЕ кроссфейд: fade-out в конце сегмента + fade-in в начале следующего, затем обычный concat —
@@ -835,16 +831,6 @@ class Zoom(BaseModel):
     scheme: str = "hook"        # hook (лёгкий зум в начале + возврат) | none
     hook_seconds: float = 2.5   # длина hook-жеста от начала клипа (наезд+удержание+возврат)
     fps: int = 30               # ignored: renderer follows source fps to prevent A/V drift
-
-
-class SubtitleStyle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    font: str
-    font_size: int
-    margin_v: int
-    words_per_line: list[int]
-    font_dir: str | None
 
 
 class PaletteEq(BaseModel):
@@ -965,7 +951,6 @@ class RenderConfig(BaseModel):
     encoder: Encoder
     audio: Audio
     audio_extract: AudioExtract
-    subtitles: SubtitleStyle
     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
     audio_processing: AudioProcessing = Field(default_factory=AudioProcessing)
     music: Music = Field(default_factory=Music)

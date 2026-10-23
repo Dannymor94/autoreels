@@ -484,7 +484,6 @@ def score_block(block: "CandidateBlock", cfg: "BlockScoringConfig") -> tuple[flo
     Returns (score, breakdown) where breakdown maps feature name → raw points contributed.
     Positive entries add to score, negative subtract. Clamped to [0, 100].
     """
-    from autoreels.core.config import BlockScoringConfig as _BSC  # local to avoid top-level cycle
     text = block.text
     text_lower = text.lower()
 

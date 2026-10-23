@@ -14,8 +14,8 @@ Groq и OpenRouter увеличивает пропускную способно�
 - ProviderPool — quota-aware роутер: держит провайдеров с состоянием кулдауна, льёт каждый
   запрос на лучший СВОБОДНЫЙ провайдер по стратегии (adaptive|round_robin), пропускает тех,
   кто в лимите, и спит только когда ВСЕ в лимите — с внятной оценкой, кто когда освободится.
-- FallbackLLM — простая последовательная цепочка (устаревшая, оставлена для совместимости);
-  ProviderPool её обобщает (failover = adaptive с кулдауном во всю квоту).
+- (FallbackLLM, простая последовательная цепочка, удалена в M135: нигде не создавалась;
+  ProviderPool её обобщает — failover = adaptive с кулдауном во всю квоту.)
 
 Стратегии распределения:
 - adaptive (дефолт): предпочитать Groq (модель сильнее → качество выборки), сливать на
@@ -281,7 +281,6 @@ class ProviderExhausted(ProviderError):
 
     Пул трактует это как ДЛИННЫЙ кулдаун (не как вечную смерть провайдера): по истечении
     retry_after провайдер снова опрашивается — так реализуется «вернуться когда остынет».
-    FallbackLLM же ловит это исключение и переключается на следующий провайдер навсегда.
     """
 
     def __init__(self, message: str, *, retry_after: float = 0.0):
@@ -1322,35 +1321,6 @@ class ProviderPool:
                 "ни одна модель провайдеров не доступна — проверь model/openrouter_model "
                 "в config/r0.yaml"
             )
-
-
-class FallbackLLM:
-    """Цепочка провайдеров: при ProviderExhausted переключается на следующий (навсегда).
-
-    Устаревшая простая стратегия; ProviderPool её обобщает (распределение + возврат после
-    кулдауна). Оставлена для обратной совместимости. Пример: FallbackLLM([GroqLLM(), OpenRouterLLM()]).
-    """
-
-    def __init__(self, providers: list) -> None:
-        self._providers = list(providers)
-        self._current = 0
-
-    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
-        while self._current < len(self._providers):
-            try:
-                return self._providers[self._current].complete(
-                    messages, temperature=temperature
-                )
-            except ProviderExhausted as e:
-                self._current += 1
-                if self._current < len(self._providers):
-                    print(
-                        f"\n  ℹ {e} — переключаюсь на следующий провайдер "
-                        f"(OpenRouter #{self._current})",
-                        flush=True,
-                    )
-                    continue
-        raise ProviderError("все провайдеры исчерпаны — добавьте ключи или подождите сброса квоты")
 
 
 def _openrouter_shared_pool_blocked(model: str, api_key: str) -> str | None:

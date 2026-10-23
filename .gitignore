@@ -4,13 +4,19 @@ data/runs/
 data/outputs/
 # машинно-локальная история прогонов (как transcripts/ — не в git)
 data/history.jsonl
+# M129: модель лиц YuNet — бинарь, качается командой из config/render.yaml (face_model)
+data/models/
+# ручной архив старых манифестов на машине (в git — только живые манифесты)
+manifests/_archive/
 
 # рабочие папки локального рендера (гигабайты исходников + готовые клипы — НЕ в git;
 # манифест в manifests/ остаётся версионируемым — это контракт для машины рендера)
 inputs/
 inputs-archive/
 reels-out/
-transcripts/            # текстовые транскрипты для контента (autoreels transcribe)
+# текстовые транскрипты для контента (autoreels transcribe). Комментарий — отдельной строкой: git не знает
+# комментариев в конце строки, и правило «transcripts/   # …» ничего не игнорировало (M135).
+transcripts/
 # review files (working material, not shared)
 reviews/
 # handoff: patches / task files from the assistant for the agent (local only)

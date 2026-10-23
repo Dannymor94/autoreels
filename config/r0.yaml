@@ -43,7 +43,6 @@ candidate_multiplier: 1.75     # over-generation: цель кандидатов 
                                # Копим с запасом, ранжируем по score, режем top-N; отсев — в
                                # <манифест>.discarded.json рядом с манифестом.
 chunk_tokens: 3500
-chunk_overlap_sec: 60
 dedup_overlap_threshold: 0.6
 dangling_words:                # блоклист ПЕРВОГО слова клипа (проверка dangling-start, post-snap;
                                # регистр не важен). К слову, стоящему сразу после терминального
@@ -138,7 +137,6 @@ too_long_policy: trim              # trim | drop | keep (что делать с 
                                    # завязку зритель догоняет по контексту.
 title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
 language: ru                   # язык вывода LLM
-prompt_language: en            # system-промпт на английском (крепче grounding)
 
 # Пресеты длины (сек) — PROJECT_GUIDE / R0_SPEC §3. Код-валидатор ставит too_long/too_short.
 # 90с: площадки допускают до 180с (Shorts и Reels — 3 мин), но вовлечённость падает раньше,

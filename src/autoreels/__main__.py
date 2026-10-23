@@ -2682,7 +2682,6 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
     to last_word_end + tail_pad_sec, clamped to the video length. The word used is stashed on the
     reel so the invariant checks against the same value (extension must not redefine "last word").
     A short audio fade at render masks any next-phrase speech pulled into the tail."""
-    from autoreels.core.models import Segment as _Seg
     for r in reels:
         segs = r.effective_segments()
         last = segs[-1]
@@ -4472,8 +4471,9 @@ def cmd_render(
             import yaml as _yaml_r
             _r0_raw_r = _yaml_r.safe_load(_r0_yaml_r.read_text(encoding="utf-8")) or {}
             _credit_pats_render = _r0_raw_r.get("credit_word_patterns", []) or []
-        except Exception:
-            pass
+        except Exception as _e_r0:  # noqa: BLE001 — M135: no longer silent
+            print(f"  warning: config/r0.yaml not read for credit_word_patterns ({_e_r0}) — credits are not cut",
+                  file=sys.stderr)
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
@@ -5243,7 +5243,9 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
         mf = Path(mf)
         try:
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as _e_mf:  # noqa: BLE001 — M135: its fixtures are left alone, but say so
+            print(f"  warning: {mf.name} unreadable ({_e_mf}) — its fixtures are not checked for orphans",
+                  file=sys.stderr)
             continue
         stem_reel_counts[Path(manifest.source).stem] = len(manifest.reels)
     deleted_orphans = 0
@@ -5728,7 +5730,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
     from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences, _refine_seams, merge_group_sentences
-    from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
+    from autoreels.core.models import make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
     from autoreels.cloud.chunk_transcribe import renumber_reels
@@ -5952,7 +5954,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # blocks they are identical.  A non-zero difference count flags a code regression where the
     # two paths diverge.  Out-of-range s:/e: references are reported as warnings (sentence_bounds
     # already clamps them silently, so they don't break clips; this just surfaces the staleness).
-    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss, words_in_span as _wis
+    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss
     _sn_compared = 0
     _sn_diffs = 0
     for _g in groups:

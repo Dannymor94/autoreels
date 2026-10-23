@@ -6,7 +6,7 @@
 import pytest
 
 from autoreels.cloud.providers import (
-    FallbackLLM, GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
+    GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
     ProviderExhausted, ProviderRequestTooLarge,
 )
 
@@ -231,40 +231,6 @@ def test_openrouter_llm_missing_key_raises(monkeypatch):
     with pytest.raises(ProviderError) as exc:
         llm.complete([{"role": "user", "content": "hi"}])
     assert "OPENROUTER_API_KEY" in str(exc.value)
-
-
-def test_fallback_llm_returns_first_provider_result():
-    """FallbackLLM возвращает ответ первого провайдера если он работает."""
-    primary = GroqLLM(request_fn=lambda m, t: _good_envelope())
-    secondary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(AssertionError("не должно вызываться")))
-    fb = FallbackLLM([primary, secondary])
-    assert fb.complete([]) == '{"segments": []}'
-
-
-def test_fallback_llm_switches_on_exhausted():
-    """FallbackLLM переключается на второй провайдер при ProviderExhausted первого."""
-    primary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(ProviderExhausted("Groq исчерпан")))
-    secondary = GroqLLM(request_fn=lambda m, t: _good_envelope())
-    fb = FallbackLLM([primary, secondary])
-    assert fb.complete([]) == '{"segments": []}'
-
-
-def test_fallback_llm_raises_when_all_exhausted():
-    """FallbackLLM поднимает ProviderError когда все провайдеры исчерпаны."""
-    def _exhausted(m, t):
-        raise ProviderExhausted("лимит")
-    fb = FallbackLLM([GroqLLM(request_fn=_exhausted), GroqLLM(request_fn=_exhausted)])
-    with pytest.raises(ProviderError, match="все провайдеры"):
-        fb.complete([])
-
-
-def test_fallback_llm_prints_switch_message(capsys):
-    """FallbackLLM печатает сообщение о переключении провайдера."""
-    primary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(ProviderExhausted("Groq исчерпан")))
-    secondary = GroqLLM(request_fn=lambda m, t: _good_envelope())
-    FallbackLLM([primary, secondary]).complete([])
-    out = capsys.readouterr().out
-    assert "OpenRouter" in out or "провайдер" in out.lower()
 
 
 # ========================================================= ProviderThrottled (defer)
