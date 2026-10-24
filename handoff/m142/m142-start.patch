@@ -1,0 +1,228 @@
+diff --git a/R0_SPEC.md b/R0_SPEC.md
+index 52fe07d..1436783 100644
+--- a/R0_SPEC.md
++++ b/R0_SPEC.md
+@@ -252,7 +252,7 @@ Word-level нужен **коду** (для snap границ при нарезк
+ 
+ **Вкус владельца (M138, `cloud/taste.py`).** Две логистические головы по признакам мысли карты (длина, сила, громкость, положение, роль, первые слова): «мысль взята в клип владельца» и «клип владельца начат с неё». Модель подбирается по клипам владельца (`config/taste.json`, происхождение внутри) и добавляет `taste_weight × вкус` к оценке предложения — меняется только порядок (инвариант 1). Замер m137: «вирусные» признаки крючка (число, вопрос, «вы») сигнала не несут; проверка на отложенном источнике — начало 0.65, выбор мысли 0.59.
+ 
+-**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер).
++**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же.
+ 
+ **Посты (`arl describe`, `cloud/postcopy.py`).** Пост говорит мысль, а не анонсирует её: 3–5 предложений словами ролика; стандартная фраза, которой нет в ролике, отвергается; сверх размера код отрезает последние предложения. Хэштеги — только слова, сказанные в ролике; местоимения и служебные — никогда.
+ 
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 5c6e144..bf13063 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -61,6 +61,9 @@ sentence_pause_sec: 0.35        # склейка предложений: пау
+ tail_sec: 0.3                   # хвост при snap к границе слова (технический, не трогать)
+ tail_pad_sec: 1.5               # «воздух» после последнего слова клипа (apply_padding, post-snap)
+ lead_pad_sec: 0.3               # заход перед первым словом клипа (apply_padding, post-snap)
++# M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): air before the FIRST sound of a planned clip (body
++# start and cold open) instead of the inner seam_pad_sec (0.04 s); never into the speech before it. 0 = as before.
++start_pad_sec: 0
+ snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
+ max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
+                                 # слово после терминального знака (.?!), иначе слово с заглавной.
+@@ -382,6 +385,9 @@ autocut:
+   fill_seed_punch: 3
+   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
++  # M142 (owner: «можно задавать тон сценаристу — строгий или фановый»): one line of tone in the scenarist's prompt,
++  # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
++  scenario_tone: ""
+   scenario_timeout_sec: 300   # … the whole talk in one request
+   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
+   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index f424914..2011e7c 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -142,6 +142,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M127: рамка по лицу источника** (`framing_source_fallback`, `config/render.yaml`). Ролик, в своих кадрах которого лицо не нашлось (на Pxl 112938952 детектор видит говорящего примерно в половине кадров — 12 из 16 роликов остались с рамкой источника посередине, «на чайнике»), кадрируется по месту лица во всём источнике: кадры равномерно по видео, преобладающее место (то же правило групп, что у ролика). Рамка внутри ролика по-прежнему неподвижна.
+ - **M127/M129: рамка по лицу.** Ролик без своего лица кадрируется по месту лица во всём источнике (`framing_source_fallback`). Лица для рамки ищет нейросетевой детектор YuNet (`face_model`, `config/render.yaml`; m128 на Pxl 112938952: каскад Хаара находил говорящего в 5 из 12 кадров, а самой большой его находкой была полка с чайниками — рамки уходили туда; YuNet — 12 из 12). Нет файла модели — каскад Хаара, как раньше. **M130:** рамки ролика держат весь путь его лица — от самого левого до самого правого положения в кадрах ролика (`framing_samples`); крупный план отъезжает настолько, чтобы его вместить, не меньше `close_min_scale` (владелец о Pxl r06: говорящий наклонился и вышел из крупного плана). **M131:** лицо ролика в каждом кадре — ближайшее к месту говорящего во всём источнике, а не самое большое (Pxl r14: слушатель у камеры, с лицом крупнее, увёл рамку к краю).
+ - **M136: вырезы не перекрываются.** Вырез паразита (M126) и длинная пауза рядом с ним (M79) покрывали одну и ту же тишину; длинная пауза обходит правила интервала, обе оставались, и кусок между ними выходил перевёрнутым (m134, Pxl 112938952 r13: `segment 1 empty/reversed`, `--apply` падал на всём черновике). Вырез, перекрывающий уже взятый, не берётся.
++- **M142: первый звук клипа.** Перед первым словом клипа (начало тела и холодный старт) остаётся `start_pad_sec` воздуха вместо внутреннего `seam_pad_sec`: выровненное начало слова бывает позже его первой согласной (владелец о IMG_6848 m126: «часто не слышно первой буквы слова»). Не заходит в речь перед ним — режет посередине тишины. 0 = как раньше.
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 168509a..3c2d37f 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -5329,6 +5329,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
+     _sm = getattr(render_cfg, "speech_map_cfg", None) if render_cfg else None
+     return ManualPlanParams(
+         seam_pad_sec=getattr(r0_cfg, "seam_pad_sec", 0.04),
++        start_pad_sec=float(getattr(r0_cfg, "start_pad_sec", 0.0) or 0.0),
+         end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
+         onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
+         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
+@@ -7810,7 +7811,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+     import hashlib
+     from autoreels.cloud.edit import _ends_terminal
+     from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
+-                                          scenario_proposals)
++                                          scenario_proposals, tone_rule)
+     if provider is None and mode not in ("haiku", "sonnet"):
+         print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
+               file=sys.stderr)
+@@ -7818,7 +7819,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+     sent = {ref: (float(st[0].t0), float(st[-1].t1), " ".join(w.word.strip() for w in st), bool(_ends_terminal(st[-1])),
+                   sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
+     system = SCENARIO_SYSTEM.format(jumps=jumps_rule(prm), min_s=f"{prm.min_sec:g}", max_s=f"{prm.max_sec:g}",
+-                                    n=prm.clips)
++                                    n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
+     user = numbered_text([(r, v[1] - v[0], v[2]) for r, v in sent.items()]) + _scenario_examples(root, stem)
+     if provider is None:
+         provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index 76f5b09..7eba80c 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -33,6 +33,7 @@ class ManualPlanParams:
+     """Numbers from config (r0.yaml / render.yaml). Defaults mirror the shipped config."""
+ 
+     seam_pad_sec: float = 0.04        # air kept at an internal seam, inside the silence between words
++    start_pad_sec: float = 0.0        # M142: air before the clip's FIRST sound (body start, cold open); 0 = seam_pad_sec
+     end_air_sec: float = 0.30         # air after the last word (REEL_SPEC §4)
+     hook_min_sec: float = 0.30        # M60: a cold open shorter than this (or reversed) is skipped
+     onset_margin_sec: float = 0.06    # never closer than this to the next speech onset
+@@ -1105,6 +1106,11 @@ def build_manual_plan(
+             first = sentences[run[0] - 1][0]
+             last = sentences[run[-1] - 1][-1]
+             pad_a = params.break_pad_sec if run[0] in brk else pad
++            if k == 0 and params.start_pad_sec:
++                # M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): the clip's first sound keeps
++                # more air than an inner seam — the aligned onset of a word can come after its first consonant;
++                # never into the speech before it (_window_start stops at the middle of the silence)
++                pad_a = max(pad_a, params.start_pad_sec)
+             pad_b = params.break_pad_sec if k + 1 < len(runs) and runs[k + 1][0] in brk else pad
+             w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad_a),
+                               end=_window_end(times, last, pad_b), shot="wide")
+@@ -1130,7 +1136,7 @@ def build_manual_plan(
+     # a warning, as a hook over hook_max_sec is refused (the body is not touched).
+     if hook is not None:
+         _hs = sentences[hook - 1]
+-        _ha, _hb = _window_start(times, _hs[0], pad), _window_end(times, _hs[-1], pad)
++        _ha, _hb = _window_start(times, _hs[0], max(pad, params.start_pad_sec)), _window_end(times, _hs[-1], pad)
+         if _hb - _ha < params.hook_min_sec:
+             warnings.append(f"h:{hook} «{_txt(_hs)[:40]}» has no sound of its own ({_ha:.3f}–{_hb:.3f}: "
+                             f"the alignment runs backwards or the sentence is too short) — cold open skipped")
+@@ -1233,7 +1239,7 @@ def build_manual_plan(
+             if left_b is not None:
+                 air_start = max(air_start, left_b + params.onset_margin_sec)
+             air_start = max(0.0, air_start)
+-            co_start = _window_start(times, hs[0], pad)
++            co_start = _window_start(times, hs[0], max(pad, params.start_pad_sec))
+             if co_start < air_start < air_end:
+                 # M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the
+                 # source — both airs are the SAME silence, played twice. The silence is shared once, cut in its
+@@ -1244,7 +1250,7 @@ def build_manual_plan(
+             co_end += add_a
+             body[0].start -= add_b
+             hook_air = (round(add_a, 3), round(add_b, 3))
+-        windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], pad),
++        windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], max(pad, params.start_pad_sec)),
+                                      end=co_end, shot="close", cold_open=True))
+     windows.extend(body)
+ 
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 2365cfa..1ac0fb6 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -116,6 +116,17 @@ def parse_scenarios(raw: str, known: set[str]) -> tuple[list[dict], list[str]]:
+     return out, bad
+ 
+ 
++def tone_rule(tone: str) -> str:
++    """M142 (owner: «можно задавать тон сценаристу, например строгий или фановый»): one line added to the system
++    prompt — the tone the reels keep, in the owner's words. Empty = nothing added (the prompt and its cache as before).
++    The code's checks of every line do not change: the tone only steers which moments and openings the model picks."""
++    tone = (tone or "").strip()
++    if not tone:
++        return ""
++    return (f"\nTONE of the reels, as the owner put it: «{tone}». Pick moments, openings and endings that keep this "
++            f"tone across the set; the rules above still decide what a reel may be.")
++
++
+ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float, str, bool, int]],
+                        units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None
+                        ) -> tuple[list[Proposal], list[tuple[str, str]]]:
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 87f89ca..2eceacd 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -305,6 +305,7 @@ class AutocutConfig(BaseModel):
+     fill_seed_punch: int = Field(0, ge=0, le=5)
+     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
+     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
++    scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+@@ -563,6 +564,7 @@ class R0Config(BaseModel):
+     manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
+     beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
+     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
++    start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
+     speed: float = 1.0                       # default playback speed for all clips
+     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
+     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
+diff --git a/tests/test_m142_start.py b/tests/test_m142_start.py
+new file mode 100644
+index 0000000..7803d1b
+--- /dev/null
++++ b/tests/test_m142_start.py
+@@ -0,0 +1,50 @@
++"""M142 (owner on IMG_6848 m126): «часто не слышно первой буквы слова» — a clip's first sound keeps start_pad_sec of
++air (0 = the inner seam pad, as before), never reaching into the speech before it; the scenarist's tone line."""
++from __future__ import annotations
++
++from autoreels.cloud.plan import ManualPlanParams, build_manual_plan
++from autoreels.cloud.scenario import tone_rule
++from autoreels.core.config import AutocutConfig
++from tests.test_filler_cut import _setup
++
++SPEC = [[("Раз", 0.0, 0.4), ("два.", 0.5, 0.9)],            # s1: speech before the clip
++        [("Сначала", 2.0, 2.6), ("так.", 2.7, 3.1)],        # s2: the clip starts here (1.1 s of silence before)
++        [("Потом", 3.15, 3.6), ("вот.", 3.7, 4.0)],         # s3: right after s2 (0.05 s)
++        [("Конец.", 6.0, 6.5)]]
++
++
++def test_off_by_default_is_the_seam_pad():
++    sents, words, smap, align = _setup(SPEC, [])
++    w = build_manual_plan(sents, [2, 3], words=words, smap=smap, params=ManualPlanParams(), align=align).body[0]
++    assert abs(w.start - (2.0 - 0.04)) < 1e-6
++
++
++def test_first_sound_keeps_start_pad_inner_seams_do_not():
++    sents, words, smap, align = _setup(SPEC, [])
++    p = ManualPlanParams(start_pad_sec=0.15)
++    plan = build_manual_plan(sents, [2, 4], words=words, smap=smap, params=p, align=align)
++    first, second = plan.body[0], plan.body[1]
++    assert abs(first.start - (2.0 - 0.15)) < 1e-6           # the clip's first word: 0.15 s of air
++    assert abs(second.start - (6.0 - 0.04)) < 1e-6          # an inner seam keeps the seam pad
++
++
++def test_start_pad_never_reaches_into_the_speech_before():
++    spec = [[("Раз", 0.0, 0.4), ("два.", 0.5, 1.9)], [("Сначала", 2.0, 2.6), ("так.", 2.7, 3.1)]]
++    sents, words, smap, align = _setup(spec, [])
++    w = build_manual_plan(sents, [2], words=words, smap=smap, params=ManualPlanParams(start_pad_sec=0.3),
++                          align=align).body[0]
++    assert w.start >= 1.95 - 1e-6                           # the middle of the 0.1 s silence, not 1.7
++
++
++def test_cold_open_keeps_start_pad():
++    sents, words, smap, align = _setup(SPEC, [])
++    plan = build_manual_plan(sents, [2, 3], words=words, smap=smap, params=ManualPlanParams(start_pad_sec=0.15),
++                             align=align, hook=4, hook_mode="-")
++    assert plan.cold_open is not None and abs(plan.cold_open.start - (6.0 - 0.15)) < 1e-6
++    assert abs(plan.windows[1].start - (2.0 - 0.15)) < 1e-6   # the body after the teaser starts the same way
++
++
++def test_tone_rule():
++    assert tone_rule("") == "" and tone_rule("   ") == ""
++    assert "«фановый»" in tone_rule("фановый")
++    assert AutocutConfig().scenario_tone == ""
