@@ -33,6 +33,7 @@ class ManualPlanParams:
     """Numbers from config (r0.yaml / render.yaml). Defaults mirror the shipped config."""
 
     seam_pad_sec: float = 0.04        # air kept at an internal seam, inside the silence between words
+    start_pad_sec: float = 0.0        # M142: air before the clip's FIRST sound (body start, cold open); 0 = seam_pad_sec
     end_air_sec: float = 0.30         # air after the last word (REEL_SPEC §4)
     hook_min_sec: float = 0.30        # M60: a cold open shorter than this (or reversed) is skipped
     onset_margin_sec: float = 0.06    # never closer than this to the next speech onset
@@ -1105,6 +1106,11 @@ def build_manual_plan(
             first = sentences[run[0] - 1][0]
             last = sentences[run[-1] - 1][-1]
             pad_a = params.break_pad_sec if run[0] in brk else pad
+            if k == 0 and params.start_pad_sec:
+                # M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): the clip's first sound keeps
+                # more air than an inner seam — the aligned onset of a word can come after its first consonant;
+                # never into the speech before it (_window_start stops at the middle of the silence)
+                pad_a = max(pad_a, params.start_pad_sec)
             pad_b = params.break_pad_sec if k + 1 < len(runs) and runs[k + 1][0] in brk else pad
             w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad_a),
                               end=_window_end(times, last, pad_b), shot="wide")
@@ -1130,7 +1136,7 @@ def build_manual_plan(
     # a warning, as a hook over hook_max_sec is refused (the body is not touched).
     if hook is not None:
         _hs = sentences[hook - 1]
-        _ha, _hb = _window_start(times, _hs[0], pad), _window_end(times, _hs[-1], pad)
+        _ha, _hb = _window_start(times, _hs[0], max(pad, params.start_pad_sec)), _window_end(times, _hs[-1], pad)
         if _hb - _ha < params.hook_min_sec:
             warnings.append(f"h:{hook} «{_txt(_hs)[:40]}» has no sound of its own ({_ha:.3f}–{_hb:.3f}: "
                             f"the alignment runs backwards or the sentence is too short) — cold open skipped")
@@ -1233,7 +1239,7 @@ def build_manual_plan(
             if left_b is not None:
                 air_start = max(air_start, left_b + params.onset_margin_sec)
             air_start = max(0.0, air_start)
-            co_start = _window_start(times, hs[0], pad)
+            co_start = _window_start(times, hs[0], max(pad, params.start_pad_sec))
             if co_start < air_start < air_end:
                 # M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the
                 # source — both airs are the SAME silence, played twice. The silence is shared once, cut in its
@@ -1244,7 +1250,7 @@ def build_manual_plan(
             co_end += add_a
             body[0].start -= add_b
             hook_air = (round(add_a, 3), round(add_b, 3))
-        windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], pad),
+        windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], max(pad, params.start_pad_sec)),
                                      end=co_end, shot="close", cold_open=True))
     windows.extend(body)
 

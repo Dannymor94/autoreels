@@ -5329,6 +5329,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
     _sm = getattr(render_cfg, "speech_map_cfg", None) if render_cfg else None
     return ManualPlanParams(
         seam_pad_sec=getattr(r0_cfg, "seam_pad_sec", 0.04),
+        start_pad_sec=float(getattr(r0_cfg, "start_pad_sec", 0.0) or 0.0),
         end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
         onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
@@ -7810,7 +7811,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
     import hashlib
     from autoreels.cloud.edit import _ends_terminal
     from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
-                                          scenario_proposals)
+                                          scenario_proposals, tone_rule)
     if provider is None and mode not in ("haiku", "sonnet"):
         print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
               file=sys.stderr)
@@ -7818,7 +7819,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
     sent = {ref: (float(st[0].t0), float(st[-1].t1), " ".join(w.word.strip() for w in st), bool(_ends_terminal(st[-1])),
                   sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
     system = SCENARIO_SYSTEM.format(jumps=jumps_rule(prm), min_s=f"{prm.min_sec:g}", max_s=f"{prm.max_sec:g}",
-                                    n=prm.clips)
+                                    n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
     user = numbered_text([(r, v[1] - v[0], v[2]) for r, v in sent.items()]) + _scenario_examples(root, stem)
     if provider is None:
         provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(

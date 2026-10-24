@@ -61,6 +61,9 @@ sentence_pause_sec: 0.35        # склейка предложений: пау�
 tail_sec: 0.3                   # хвост при snap к границе слова (технический, не трогать)
 tail_pad_sec: 1.5               # «воздух» после последнего слова клипа (apply_padding, post-snap)
 lead_pad_sec: 0.3               # заход перед первым словом клипа (apply_padding, post-snap)
+# M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): air before the FIRST sound of a planned clip (body
+# start and cold open) instead of the inner seam_pad_sec (0.04 s); never into the speech before it. 0 = as before.
+start_pad_sec: 0
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
 max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
                                 # слово после терминального знака (.?!), иначе слово с заглавной.
@@ -382,6 +385,9 @@ autocut:
   fill_seed_punch: 3
   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
+  # M142 (owner: «можно задавать тон сценаристу — строгий или фановый»): one line of tone in the scenarist's prompt,
+  # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
+  scenario_tone: ""
   scenario_timeout_sec: 300   # … the whole talk in one request
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the

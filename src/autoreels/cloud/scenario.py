@@ -116,6 +116,17 @@ def parse_scenarios(raw: str, known: set[str]) -> tuple[list[dict], list[str]]:
     return out, bad
 
 
+def tone_rule(tone: str) -> str:
+    """M142 (owner: «можно задавать тон сценаристу, например строгий или фановый»): one line added to the system
+    prompt — the tone the reels keep, in the owner's words. Empty = nothing added (the prompt and its cache as before).
+    The code's checks of every line do not change: the tone only steers which moments and openings the model picks."""
+    tone = (tone or "").strip()
+    if not tone:
+        return ""
+    return (f"\nTONE of the reels, as the owner put it: «{tone}». Pick moments, openings and endings that keep this "
+            f"tone across the set; the rules above still decide what a reel may be.")
+
+
 def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float, str, bool, int]],
                        units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None
                        ) -> tuple[list[Proposal], list[tuple[str, str]]]:

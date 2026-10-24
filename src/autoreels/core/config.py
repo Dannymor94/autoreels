@@ -305,6 +305,7 @@ class AutocutConfig(BaseModel):
     fill_seed_punch: int = Field(0, ge=0, le=5)
     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
+    scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
@@ -563,6 +564,7 @@ class R0Config(BaseModel):
     manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
     beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
+    start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
     speed: float = 1.0                       # default playback speed for all clips
     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
