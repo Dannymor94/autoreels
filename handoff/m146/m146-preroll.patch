@@ -1,0 +1,248 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index ea07d0f..8857b54 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -46,7 +46,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
+ 8. **Новая фича — под флагом, выключенный флаг = прежний выход.** Доказывается на рендере: побайтово, если кодек детерминирован, иначе совпадением argv ffmpeg и фильтрграфа. Визуальные приёмы не меняют длительность и не создают новых швов (`hevc_videotoolbox` добавляет кадр на шов); переключение внутри окна — по времени, без разреза окна.
+ 9. **Время — от звука, не от зазоров Whisper.** На части материала таймкоды слов нулевые, отрицательные, перекрываются, слова теряются на стыках фраз. Паузы, конец слова и «тишина после слова» не выводятся из зазоров Whisper; до M1.8 (карта речи) — звуковые пробы, после — только карта.
+ 10. **Клип = ровно размеченные предложения; экран = звук.** Клип кончается на законченном предложении. Явный `e:`/`s:` человека код не двигает — только предупреждает (`open_thought`, `ends_on_filler`). В клипе нет ни слова следующего предложения — ни в субтитрах, ни в звуке; если следом речь, клип кончается **до** неё, звук и картинка вместе (глушить чужую речь под картинкой нельзя). Последнее слово слышно целиком. Эти правила проверяются на каждом клипе при `--apply` и рендере как ошибки.
+-    *Единственное исключение (решение владельца, M126):* отдельно стоящие слова-паразиты («ну», «вот», «как бы»…) не показываются в субтитрах (`subtitles_hide_fillers`), а изредка вырезаются из звука по правилам вычистки (`filler_word_cut`). Других расхождений экрана и звука нет.
++    *Единственное исключение (решение владельца, M126):* отдельно стоящие слова-паразиты («ну», «вот», «как бы»…) не показываются в субтитрах (`subtitles_hide_fillers`), а изредка вырезаются из звука по правилам вычистки (`filler_word_cut`). Второе (решение владельца, M146, под флагом `start_preroll_sec`): склеенное с предыдущим словом начало клипа начинается на десятки миллисекунд раньше, в заглушённом нарастанием хвосте предыдущего слова. Других расхождений экрана и звука нет.
+ 11. **Ответ LLM полон или повторён.** В пакетных вызовах каждый id обязан получить значение; пропуск — повтор, затем явная пометка `missing`, никогда не «ноль». Few-shot — только реальные данные с указанным происхождением.
+ 12. **Объекты не пересобираются конструктором.** `Segment`/`Word` меняются через `model_copy(update=…)`; голые конструкторы вне фабрик ловит гвард-тест. Выражения времени внутри окна считаются от обнулённых меток сегмента; таймбаза и допуски — от **выходного** потока.
+ 
+diff --git a/config/r0.yaml b/config/r0.yaml
+index c426225..76e0255 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -64,6 +64,10 @@ lead_pad_sec: 0.3               # заход перед первым слово
+ # M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): air before the FIRST sound of a planned clip (body
+ # start and cold open) instead of the inner seam_pad_sec (0.04 s); never into the speech before it. 0 = as before.
+ start_pad_sec: 0
++# M146 (owner: «давай» — an exception to invariant 10 by his decision): a planned clip's first word GLUED to the word
++# before it (heard pause under this) starts this much before its onset, in that word's tail, so its first consonant is
++# not lost (m143/m145: 46 of 59 draft starts have no pause to cut in). Goes with render.yaml start_fade_in_sec. 0 = off.
++start_preroll_sec: 0
+ snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
+ max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
+                                 # слово после терминального знака (.?!), иначе слово с заглавной.
+@@ -388,7 +392,8 @@ autocut:
+   # needs this much silence heard before it (speech map / alignment). A glued start is repaired like one that does not
+   # stand alone (context before, a later sentence, another thought); the scenarist's reel starts earlier or later.
+   # 0 = off.
+-  start_pause_min: 0
++  # M145 (m145: glued starts 59 → 46 with the owner's clips covered as before, 40 of 66; owner: «давай»)
++  start_pause_min: 0.15
+   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
+   # M142 (owner: «можно задавать тон сценаристу — строгий или фановый»): one line of tone in the scenarist's prompt,
+diff --git a/config/render.yaml b/config/render.yaml
+index 9904685..a524909 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -97,6 +97,9 @@ audio_processing:
+   # Микро-фейд на краях аудиосегментов многосегментного клипа (гасит щелчок склейки, без
+   # перекрытия — длина звука = длине видео). Только клипы с >1 сегментом. 0 → встык без фейдов.
+   audio_edge_fade_sec: 0.01
++  # M146: the clip's sound fades in over this, so the pre-rolled tail of the word before (r0.yaml start_preroll_sec) is
++  # not heard as a word. 0 = off.
++  start_fade_in_sec: 0
+ 
+ # Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
+ # mp3 64k mono 16kHz: 8 000 байт/с → 46 мин = ~22 МБ (под лимит Groq 25 МБ).
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 972f9c5..b959511 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -144,6 +144,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M136: вырезы не перекрываются.** Вырез паразита (M126) и длинная пауза рядом с ним (M79) покрывали одну и ту же тишину; длинная пауза обходит правила интервала, обе оставались, и кусок между ними выходил перевёрнутым (m134, Pxl 112938952 r13: `segment 1 empty/reversed`, `--apply` падал на всём черновике). Вырез, перекрывающий уже взятый, не берётся.
+ - **M142: первый звук клипа.** Перед первым словом клипа (начало тела и холодный старт) остаётся `start_pad_sec` воздуха вместо внутреннего `seam_pad_sec`: выровненное начало слова бывает позже его первой согласной (владелец о IMG_6848 m126: «часто не слышно первой буквы слова»). Не заходит в речь перед ним — режет посередине тишины. 0 = как раньше.
+ - **M144: начало не склеено.** m143: у 11 из 12 клипов IMG_6848 m126 перед первым словом не было паузы — речь до него шла вплотную к резу, первая согласная терялась, и воздух M142 сдвинуть рез не мог. С `autocut.start_pause_min` первый звук клипа (начало и холодный старт) требует столько слышимой тишины перед собой; склеенное начало чинится теми же шагами, что начало, непонятное без предыдущего (контекст перед, более поздняя фраза, другая мысль), у сценариста — фраза раньше или позже. 0 = как раньше. **M145:** если начало само по себе понятное и только склеено, а починить нечем, клип остаётся с пометкой, а не выбрасывается (m144: жёсткое правило снизило покрытие клипов владельца с 40 до 27 из 66).
++- **M146: пред-ролл склеенного начала (флаг, решение владельца — исключение из инварианта 10).** Если перед первым словом клипа слышимой паузы меньше `start_preroll_sec`, звук начинается на столько раньше — в хвосте предыдущего слова, — а рендер наращивает звук за `start_fade_in_sec` (`render.yaml`): первая согласная не теряется, хвост чужого слова не слышен как слово. 0 = как раньше.
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 0e2ad19..f86dd97 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -5330,6 +5330,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
+     return ManualPlanParams(
+         seam_pad_sec=getattr(r0_cfg, "seam_pad_sec", 0.04),
+         start_pad_sec=float(getattr(r0_cfg, "start_pad_sec", 0.0) or 0.0),
++        start_preroll_sec=float(getattr(r0_cfg, "start_preroll_sec", 0.0) or 0.0),
+         end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
+         onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
+         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index 7eba80c..772c87d 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -34,6 +34,7 @@ class ManualPlanParams:
+ 
+     seam_pad_sec: float = 0.04        # air kept at an internal seam, inside the silence between words
+     start_pad_sec: float = 0.0        # M142: air before the clip's FIRST sound (body start, cold open); 0 = seam_pad_sec
++    start_preroll_sec: float = 0.0    # M146: a glued first word starts this much earlier, in the tail of the word before
+     end_air_sec: float = 0.30         # air after the last word (REEL_SPEC §4)
+     hook_min_sec: float = 0.30        # M60: a cold open shorter than this (or reversed) is skipped
+     onset_margin_sec: float = 0.06    # never closer than this to the next speech onset
+@@ -628,6 +629,20 @@ def _window_start(times: SpeechTimes, first: Word, pad: float) -> float:
+     return min(start, as_f)
+ 
+ 
++def _clip_start(times: SpeechTimes, first: Word, pad: float, params: "ManualPlanParams") -> float:
++    """The start of a clip's FIRST sound (the body's first window, a cold open). M142: start_pad_sec of air (never into
++    the speech before). M146 (owner: «давай» to the editor's pre-roll — an exception to invariant 10 by his decision):
++    a first word GLUED to the word before it (heard pause under start_preroll_sec) starts start_preroll_sec before its
++    onset, in the tail of that word — the first consonant sits in the coarticulation and is otherwise lost; the render
++    fades the sound in over render.yaml audio_processing.start_fade_in_sec, so the tail is not heard as a word."""
++    start = _window_start(times, first, max(pad, params.start_pad_sec))
++    if params.start_preroll_sec:
++        left, as_f = _speech_before(times, first)
++        if left is not None and as_f - left < params.start_preroll_sec:
++            start = min(start, as_f - params.start_preroll_sec)
++    return start
++
++
+ def _window_end(times: SpeechTimes, last: Word, pad: float) -> float:
+     ae_l, right = _speech_after(times, last)
+     end = ae_l + pad
+@@ -1106,13 +1121,10 @@ def build_manual_plan(
+             first = sentences[run[0] - 1][0]
+             last = sentences[run[-1] - 1][-1]
+             pad_a = params.break_pad_sec if run[0] in brk else pad
+-            if k == 0 and params.start_pad_sec:
+-                # M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): the clip's first sound keeps
+-                # more air than an inner seam — the aligned onset of a word can come after its first consonant;
+-                # never into the speech before it (_window_start stops at the middle of the silence)
+-                pad_a = max(pad_a, params.start_pad_sec)
+             pad_b = params.break_pad_sec if k + 1 < len(runs) and runs[k + 1][0] in brk else pad
+-            w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad_a),
++            # M142/M146: the clip's first sound — more air, and a glued first word pre-rolled (_clip_start)
++            w_start = _clip_start(times, first, pad_a, params) if k == 0 else _window_start(times, first, pad_a)
++            w = PlannedWindow(sentences=list(run), start=w_start,
+                               end=_window_end(times, last, pad_b), shot="wide")
+             prev = out[-1] if out else None
+             # A forward seam whose next window starts before the previous one ends has no silence
+@@ -1136,7 +1148,7 @@ def build_manual_plan(
+     # a warning, as a hook over hook_max_sec is refused (the body is not touched).
+     if hook is not None:
+         _hs = sentences[hook - 1]
+-        _ha, _hb = _window_start(times, _hs[0], max(pad, params.start_pad_sec)), _window_end(times, _hs[-1], pad)
++        _ha, _hb = _clip_start(times, _hs[0], pad, params), _window_end(times, _hs[-1], pad)
+         if _hb - _ha < params.hook_min_sec:
+             warnings.append(f"h:{hook} «{_txt(_hs)[:40]}» has no sound of its own ({_ha:.3f}–{_hb:.3f}: "
+                             f"the alignment runs backwards or the sentence is too short) — cold open skipped")
+@@ -1239,7 +1251,7 @@ def build_manual_plan(
+             if left_b is not None:
+                 air_start = max(air_start, left_b + params.onset_margin_sec)
+             air_start = max(0.0, air_start)
+-            co_start = _window_start(times, hs[0], max(pad, params.start_pad_sec))
++            co_start = _clip_start(times, hs[0], pad, params)
+             if co_start < air_start < air_end:
+                 # M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the
+                 # source — both airs are the SAME silence, played twice. The silence is shared once, cut in its
+@@ -1250,7 +1262,7 @@ def build_manual_plan(
+             co_end += add_a
+             body[0].start -= add_b
+             hook_air = (round(add_a, 3), round(add_b, 3))
+-        windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], max(pad, params.start_pad_sec)),
++        windows.append(PlannedWindow(sentences=[hook], start=_clip_start(times, hs[0], pad, params),
+                                      end=co_end, shot="close", cold_open=True))
+     windows.extend(body)
+ 
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 811770f..0508ada 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -567,6 +567,7 @@ class R0Config(BaseModel):
+     beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
+     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
+     start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
++    start_preroll_sec: float = Field(0.0, ge=0.0, le=0.2)  # M146: a glued first word starts this much earlier; 0 = off
+     speed: float = 1.0                       # default playback speed for all clips
+     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
+     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
+@@ -777,6 +778,7 @@ class AudioProcessing(BaseModel):
+     # без перекрытия, поэтому длина звука в ТОЧНОСТИ равна длине видео (нет дрейфа губ-синка). Только
+     # клипы с >1 сегментом; одиночный span не затрагивается. 0 → встык без фейдов.
+     audio_edge_fade_sec: float = 0.01
++    start_fade_in_sec: float = Field(0.0, ge=0.0, le=0.2)   # M146: the clip's sound fades in over this (pre-roll); 0 = off
+     # Видео-кроссфейд на каждом внутреннем шве многосегментного клипа (xfade-фильтр). Сглаживает
+     # «прыжок» при смене позы (холодный старт, склейки). Аудио НЕ кроссфейдируется — остаётся concat,
+     # иначе укорочение аудио вернуло бы дрейф. Выход короче суммы сегментов на (N−1)×xfade_sec.
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 0d2e36d..cc99e07 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -1453,6 +1453,13 @@ def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:
+     return parts
+ 
+ 
++def _start_fade_in(ap: AudioProcessing, planned: bool) -> str:
++    """M146: a planned clip's sound fades in over start_fade_in_sec — the pre-rolled tail of the word before its first
++    word (r0.yaml start_preroll_sec) is not heard as a word. "" = off (the chain as before)."""
++    d = float(getattr(ap, "start_fade_in_sec", 0.0) or 0.0)
++    return f"afade=t=in:st=0:d={_num(d)}" if d > 0 and planned else ""
++
++
+ def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
+     """afade in/out (если фейд вкл). Хвост fade-out ложится на padding-«воздух» конца клипа."""
+     if not (ap.fade_enabled and ap.fade_duration > 0):
+@@ -3429,6 +3436,9 @@ def _render_segments(
+                 # atempo goes FIRST; the fade st (in _out_dur / post-speed time) then lands correctly.
+                 reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur,
+                                               tail_fade=_tail_fade, word_end_out=_word_end_out) or None
++                _afi = _start_fade_in(ap, _planned)
++                if _afi:
++                    reel_af = f"{_afi},{reel_af}" if reel_af else _afi
+                 if _reel_speed != 1.0:
+                     _tempo = f"atempo={_reel_speed:.4g}"
+                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
+diff --git a/tests/test_m146_preroll.py b/tests/test_m146_preroll.py
+new file mode 100644
+index 0000000..620d18c
+--- /dev/null
++++ b/tests/test_m146_preroll.py
+@@ -0,0 +1,41 @@
++"""M146 (owner: «давай» — the editor's pre-roll, an exception to invariant 10 by his decision): a clip's first word glued
++to the word before starts start_preroll_sec earlier, and the render fades the sound in."""
++from __future__ import annotations
++
++from autoreels.cloud.plan import ManualPlanParams, build_manual_plan
++from autoreels.core.config import AudioProcessing, R0Config
++from autoreels.local.render import _start_fade_in
++from tests.test_filler_cut import _setup
++
++GLUED = [[("Раз", 0.0, 0.4), ("два.", 0.5, 1.98)], [("Сначала", 2.0, 2.6), ("так.", 2.7, 3.1)], [("Конец.", 4.0, 4.5)]]
++APART = [[("Раз", 0.0, 0.4), ("два.", 0.5, 1.2)], [("Сначала", 2.0, 2.6), ("так.", 2.7, 3.1)], [("Конец.", 4.0, 4.5)]]
++
++
++def _start(spec, **kw):
++    s, w, sm, al = _setup(spec, [])
++    return build_manual_plan(s, [2, 3], words=w, smap=sm, params=ManualPlanParams(**kw), align=al).windows[0].start
++
++
++def test_off_by_default():
++    assert ManualPlanParams().start_preroll_sec == 0.0
++    assert R0Config.model_fields["start_preroll_sec"].default == 0.0
++    assert AudioProcessing.model_fields["start_fade_in_sec"].default == 0.0
++    assert abs(_start(GLUED) - 1.99) < 1e-6                    # the middle of the 0.02 s gap, as before
++
++
++def test_a_glued_first_word_starts_in_the_tail_of_the_word_before():
++    assert abs(_start(GLUED, start_preroll_sec=0.06) - 1.94) < 1e-6
++
++
++def test_a_first_word_after_a_pause_is_not_moved():
++    assert abs(_start(APART, start_preroll_sec=0.06) - _start(APART)) < 1e-6
++
++
++def test_render_fade_in_only_when_on_and_planned():
++    class _AP:
++        start_fade_in_sec = 0.03
++    assert _start_fade_in(_AP(), True) == "afade=t=in:st=0:d=0.03"
++    assert _start_fade_in(_AP(), False) == ""
++    class _Off:
++        start_fade_in_sec = 0.0
++    assert _start_fade_in(_Off(), True) == ""
