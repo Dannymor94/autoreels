@@ -31,6 +31,23 @@ def test_a_first_word_after_a_pause_is_not_moved():
     assert abs(_start(APART, start_preroll_sec=0.06) - _start(APART)) < 1e-6
 
 
+def test_prerolled_flag_set_on_glued_start_segment():
+    """prerolled=True on the first Segment so _check_seam_inside_word skips its start."""
+    s, w, sm, al = _setup(GLUED, [])
+    plan = build_manual_plan(s, [2, 3], words=w, smap=sm, params=ManualPlanParams(start_preroll_sec=0.06), align=al)
+    assert plan.windows[0].prerolled is True
+    assert plan.windows[0].segment().prerolled is True
+
+
+def test_prerolled_flag_not_set_when_off_or_paused():
+    s, w, sm, al = _setup(GLUED, [])
+    plan_off = build_manual_plan(s, [2, 3], words=w, smap=sm, params=ManualPlanParams(), align=al)
+    assert plan_off.windows[0].prerolled is False
+    s, w, sm, al = _setup(APART, [])
+    plan_apart = build_manual_plan(s, [2, 3], words=w, smap=sm, params=ManualPlanParams(start_preroll_sec=0.06), align=al)
+    assert plan_apart.windows[0].prerolled is False
+
+
 def test_render_fade_in_only_when_on_and_planned():
     class _AP:
         start_fade_in_sec = 0.03

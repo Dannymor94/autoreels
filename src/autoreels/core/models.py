@@ -129,6 +129,9 @@ class Segment(BaseModel):
     # planned window, same source run). Render decodes such a run once and drops the cut stretches
     # (one input per run, not per piece — 30 inputs of a 1080p source exhaust memory).
     window_cut: bool = False
+    # M146: the start of this window was pre-rolled into the tail of the previous word (owner's
+    # exception to invariant 10); seam-inside-word check skips its start intentionally.
+    prerolled: bool = False
 
 
 class Reel(BaseModel):

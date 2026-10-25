@@ -118,6 +118,7 @@ class PlannedWindow:
     cuts_long: int = 0                # M79: long pauses cut whatever the spacing / jump rules said
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
     word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
+    prerolled: bool = False                        # M146: start was pushed into the previous word's tail
 
     @property
     def last_shot(self) -> str:
@@ -129,7 +130,8 @@ class PlannedWindow:
 
     def segment(self) -> Segment:
         return make_segment(self.start, self.end).model_copy(update={
-            "shot": self.shot, "close_intervals": [list(ci) for ci in self.close_intervals]})
+            "shot": self.shot, "close_intervals": [list(ci) for ci in self.close_intervals],
+            "prerolled": self.prerolled})
 
     def pieces(self) -> list[tuple[float, float]]:
         """Played stretches of the window (source time): the window minus its cuts."""
@@ -168,7 +170,8 @@ class PlannedWindow:
             elif len(spans) == 1 and spans[0][0] < _EPS and spans[0][1] > (b - a) - _EPS:
                 shot, ci = "close", []
             out.append(make_segment(a, b).model_copy(update={"shot": shot, "close_intervals": ci,
-                                                             "window_cut": bool(out)}))
+                                                             "window_cut": bool(out),
+                                                             "prerolled": self.prerolled if k == 0 else False}))
         return out
 
     @property
@@ -629,18 +632,18 @@ def _window_start(times: SpeechTimes, first: Word, pad: float) -> float:
     return min(start, as_f)
 
 
-def _clip_start(times: SpeechTimes, first: Word, pad: float, params: "ManualPlanParams") -> float:
-    """The start of a clip's FIRST sound (the body's first window, a cold open). M142: start_pad_sec of air (never into
-    the speech before). M146 (owner: «давай» to the editor's pre-roll — an exception to invariant 10 by his decision):
-    a first word GLUED to the word before it (heard pause under start_preroll_sec) starts start_preroll_sec before its
-    onset, in the tail of that word — the first consonant sits in the coarticulation and is otherwise lost; the render
-    fades the sound in over render.yaml audio_processing.start_fade_in_sec, so the tail is not heard as a word."""
+def _clip_start(times: SpeechTimes, first: Word, pad: float, params: "ManualPlanParams") -> "tuple[float, bool]":
+    """The start of a clip's FIRST sound (the body's first window, a cold open). Returns (start, prerolled).
+    M142: start_pad_sec of air (never into the speech before). M146 (owner: «давай» — exception to invariant 10):
+    a first word GLUED to the word before it starts start_preroll_sec earlier, in that word's tail; prerolled=True
+    tells _check_seam_inside_word to skip the start (intentional overlap)."""
     start = _window_start(times, first, max(pad, params.start_pad_sec))
     if params.start_preroll_sec:
         left, as_f = _speech_before(times, first)
         if left is not None and as_f - left < params.start_preroll_sec:
             start = min(start, as_f - params.start_preroll_sec)
-    return start
+            return start, True
+    return start, False
 
 
 def _window_end(times: SpeechTimes, last: Word, pad: float) -> float:
@@ -1123,9 +1126,12 @@ def build_manual_plan(
             pad_a = params.break_pad_sec if run[0] in brk else pad
             pad_b = params.break_pad_sec if k + 1 < len(runs) and runs[k + 1][0] in brk else pad
             # M142/M146: the clip's first sound — more air, and a glued first word pre-rolled (_clip_start)
-            w_start = _clip_start(times, first, pad_a, params) if k == 0 else _window_start(times, first, pad_a)
+            if k == 0:
+                w_start, _pr = _clip_start(times, first, pad_a, params)
+            else:
+                w_start, _pr = _window_start(times, first, pad_a), False
             w = PlannedWindow(sentences=list(run), start=w_start,
-                              end=_window_end(times, last, pad_b), shot="wide")
+                              end=_window_end(times, last, pad_b), shot="wide", prerolled=_pr)
             prev = out[-1] if out else None
             # A forward seam whose next window starts before the previous one ends has no silence
             # to cut in: the skipped sentence is a Whisper duplicate overlapping its neighbours.
@@ -1148,7 +1154,8 @@ def build_manual_plan(
     # a warning, as a hook over hook_max_sec is refused (the body is not touched).
     if hook is not None:
         _hs = sentences[hook - 1]
-        _ha, _hb = _clip_start(times, _hs[0], pad, params), _window_end(times, _hs[-1], pad)
+        _ha, _ = _clip_start(times, _hs[0], pad, params)
+        _hb = _window_end(times, _hs[-1], pad)
         if _hb - _ha < params.hook_min_sec:
             warnings.append(f"h:{hook} «{_txt(_hs)[:40]}» has no sound of its own ({_ha:.3f}–{_hb:.3f}: "
                             f"the alignment runs backwards or the sentence is too short) — cold open skipped")
@@ -1251,7 +1258,7 @@ def build_manual_plan(
             if left_b is not None:
                 air_start = max(air_start, left_b + params.onset_margin_sec)
             air_start = max(0.0, air_start)
-            co_start = _clip_start(times, hs[0], pad, params)
+            co_start, _ = _clip_start(times, hs[0], pad, params)
             if co_start < air_start < air_end:
                 # M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the
                 # source — both airs are the SAME silence, played twice. The silence is shared once, cut in its
@@ -1262,8 +1269,9 @@ def build_manual_plan(
             co_end += add_a
             body[0].start -= add_b
             hook_air = (round(add_a, 3), round(add_b, 3))
-        windows.append(PlannedWindow(sentences=[hook], start=_clip_start(times, hs[0], pad, params),
-                                     end=co_end, shot="close", cold_open=True))
+        _co_s, _co_pr = _clip_start(times, hs[0], pad, params)
+        windows.append(PlannedWindow(sentences=[hook], start=_co_s,
+                                     end=co_end, shot="close", cold_open=True, prerolled=_co_pr))
     windows.extend(body)
 
     # §3 shots: cold open close; body starts wide; every seam flips; c: close; nothing else.

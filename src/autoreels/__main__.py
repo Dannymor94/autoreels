@@ -1125,6 +1125,9 @@ def _check_seam_inside_word(reel, smap: "dict | None", words=None, align=None) -
         _out: list[str] = []
         for _wi, _win in enumerate(reel.playback_windows()):
             for _t in (_win.start, _win.end):
+                # M146: prerolled windows intentionally start inside the previous word's tail
+                if _t == _win.start and getattr(_win, "prerolled", False):
+                    continue
                 _hit = _times.word_cut_by(_t)
                 if _hit is not None:
                     _a, _b = _times.span(_hit)
