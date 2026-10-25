@@ -1,0 +1,112 @@
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 386e981..972f9c5 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -143,7 +143,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M127/M129: рамка по лицу.** Ролик без своего лица кадрируется по месту лица во всём источнике (`framing_source_fallback`). Лица для рамки ищет нейросетевой детектор YuNet (`face_model`, `config/render.yaml`; m128 на Pxl 112938952: каскад Хаара находил говорящего в 5 из 12 кадров, а самой большой его находкой была полка с чайниками — рамки уходили туда; YuNet — 12 из 12). Нет файла модели — каскад Хаара, как раньше. **M130:** рамки ролика держат весь путь его лица — от самого левого до самого правого положения в кадрах ролика (`framing_samples`); крупный план отъезжает настолько, чтобы его вместить, не меньше `close_min_scale` (владелец о Pxl r06: говорящий наклонился и вышел из крупного плана). **M131:** лицо ролика в каждом кадре — ближайшее к месту говорящего во всём источнике, а не самое большое (Pxl r14: слушатель у камеры, с лицом крупнее, увёл рамку к краю).
+ - **M136: вырезы не перекрываются.** Вырез паразита (M126) и длинная пауза рядом с ним (M79) покрывали одну и ту же тишину; длинная пауза обходит правила интервала, обе оставались, и кусок между ними выходил перевёрнутым (m134, Pxl 112938952 r13: `segment 1 empty/reversed`, `--apply` падал на всём черновике). Вырез, перекрывающий уже взятый, не берётся.
+ - **M142: первый звук клипа.** Перед первым словом клипа (начало тела и холодный старт) остаётся `start_pad_sec` воздуха вместо внутреннего `seam_pad_sec`: выровненное начало слова бывает позже его первой согласной (владелец о IMG_6848 m126: «часто не слышно первой буквы слова»). Не заходит в речь перед ним — режет посередине тишины. 0 = как раньше.
+-- **M144: начало не склеено.** m143: у 11 из 12 клипов IMG_6848 m126 перед первым словом не было паузы — речь до него шла вплотную к резу, первая согласная терялась, и воздух M142 сдвинуть рез не мог. С `autocut.start_pause_min` первый звук клипа (начало и холодный старт) требует столько слышимой тишины перед собой; склеенное начало чинится теми же шагами, что начало, непонятное без предыдущего (контекст перед, более поздняя фраза, другая мысль), у сценариста — фраза раньше или позже. 0 = как раньше.
++- **M144: начало не склеено.** m143: у 11 из 12 клипов IMG_6848 m126 перед первым словом не было паузы — речь до него шла вплотную к резу, первая согласная терялась, и воздух M142 сдвинуть рез не мог. С `autocut.start_pause_min` первый звук клипа (начало и холодный старт) требует столько слышимой тишины перед собой; склеенное начало чинится теми же шагами, что начало, непонятное без предыдущего (контекст перед, более поздняя фраза, другая мысль), у сценариста — фраза раньше или позже. 0 = как раньше. **M145:** если начало само по себе понятное и только склеено, а починить нечем, клип остаётся с пометкой, а не выбрасывается (m144: жёсткое правило снизило покрытие клипов владельца с 40 до 27 из 66).
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 686f958..b17524a 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -588,11 +588,14 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *,
+         answer cut from its question — while at least context_later_min_sec of the thought is left;
+     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
+     otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can.
+-    M144: a start glued to the speech before it (glued_start, p.start_pause_min) is repaired by the same steps."""
++    M144: a start glued to the speech before it (glued_start, p.start_pause_min) is repaired by the same steps.
++    M145 (m144: rejecting the clips whose glued start found no repair cut the owner's covered clips 40 → 27): a clip
++    whose start stands on its own and is ONLY glued keeps its start when no repair works — noted, not dropped."""
+     notes: list[str] = []
+     # M78: what the clip is about (its seed and its payoff) — the model judges whether the start leads into it
+     core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed_id, clip[-1]["id"])
+                                   if i in by_id)).strip()
++    soft = None
+     for _ in range(6):
+         u = clip[0]
+         rows = list(_sent_rows(sentences, u["refs"]))
+@@ -600,9 +603,13 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *,
+             return clip, notes, None
+         first = rows[0][4] or rows[0][0]
+         nxt = rows[1][4] if len(rows) > 1 else ""
+-        why = glued_start(rows[0][0], p, start_pause) or stands_alone(rows[0][4], nxt, p, judge, core)
++        _glued = glued_start(rows[0][0], p, start_pause)
++        _alone = stands_alone(rows[0][4], nxt, p, judge, core)
++        why = _glued or _alone
+         if not why:
+             return clip, notes, None
++        if _glued and _alone is None and soft is None:
++            soft = (clip, list(notes), _glued)       # M145: the start is fine but glued — kept if nothing repairs it
+         if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
+                 and glued_start(rows[1][0], p, start_pause) is None
+                 and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
+@@ -658,7 +665,11 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *,
+             clip = clip[1:]
+             notes.append(f"начало: мысль #{u['id']} «{first[:50]}» убрана ({why})")
+             continue
++        if soft is not None:
++            return soft[0], soft[1] + [f"начало: {soft[2]} — исправить нельзя, оставлено"], None
+         return None, notes, f"«{first[:70]}» — {why}"
++    if soft is not None:
++        return soft[0], soft[1] + [f"начало: {soft[2]} — исправить нельзя, оставлено"], None
+     return None, notes, "начало не найдено"
+ 
+ 
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 918d0bb..6028d6d 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -137,7 +137,7 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+     finished and not «→» (trailing sentences go while the reel stays ≥ min_sec). The thoughts of the map it plays give
+     `units` (partly played ones get unit_refs); the model's teaser comes first among the code's hook candidates.
+     M144 (`start_pause`, p.start_pause_min): a reel whose first sentence is glued to the speech before it starts up to two
+-    sentences earlier (context, ≤ max_sec), else later (≥ min_sec), else goes; a glued teaser is not taken."""
++    sentences earlier (context, ≤ max_sec); M145: else it keeps its start, noted. A glued teaser is not taken."""
+     by_ref_unit: dict[str, dict] = {}
+     for u in units:
+         for r in (expand_refs(u.get("refs") or "") or []):
+@@ -166,13 +166,9 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+                     break
+                 notes.append(f"начало: добавлена фраза перед — «{sent[prv][2][:50]}» (начало было склеено с речью)")
+                 refs = [prv] + refs
+-            while glued_start(refs[0], p, start_pause) and len(refs) > 1 and dur(refs[1:]) >= p.min_sec:
+-                notes.append(f"начало: убрана фраза «{sent[refs[0]][2][:50]}» — склеена с речью перед ней")
+-                refs = refs[1:]
+             _g = glued_start(refs[0], p, start_pause)
+-            if _g:
+-                gone.append((label, f"начало: {_g}, исправить нельзя"))
+-                continue
++            if _g:                            # M145: the model's start is kept (a later one may not stand alone)
++                notes.append(f"начало: {_g} — исправить нельзя, оставлено")
+         secs = dur(refs)
+         if not p.min_sec <= secs <= p.max_sec:
+             gone.append((label, f"длина {secs:.0f} с вне {p.min_sec:g}–{p.max_sec:g} с"))
+diff --git a/tests/test_m144_glued.py b/tests/test_m144_glued.py
+index 7ebc9a4..32cbb28 100644
+--- a/tests/test_m144_glued.py
++++ b/tests/test_m144_glued.py
+@@ -61,7 +61,16 @@ def test_scenarist_reel_starts_earlier_or_goes():
+     scens = [{"refs": ["2.1", "2.2"], "hook": None, "title": "", "why": ""},
+              {"refs": ["3.1", "3.2"], "hook": None, "title": "", "why": ""}]
+     props, gone = scenario_proposals(scens, sent, units, p, None, sp)
+-    assert [pr.pieces for pr in props] == ["1.1 2.1-2"]                       # 1.1 put before the glued 2.1
+-    assert len(gone) == 1 and "склеено" in gone[0][1]                         # 3.x: everything glued, too short later
++    assert [pr.pieces for pr in props] == ["1.1 2.1-2", "3.1-2"]              # 1.1 put before the glued 2.1
++    assert not gone and any("оставлено" in n for n in props[1].notes)         # M145: 3.1 cannot be fixed — kept, noted
+     props0, gone0 = scenario_proposals(scens, sent, units, AutoParams(min_sec=20, target_sec=55, max_sec=90), None, sp)
+     assert len(props0) == 2 and not gone0                                      # off: as before
++
++
++def test_m145_a_glued_start_with_no_repair_is_kept_not_dropped():
++    u3 = U(3, 300, 30, "thesis", 4, "3.1-2")                                 # nothing before it to borrow
++    p = AutoParams(context_start=True, min_sec=6, max_sec=60, context_max_sec=20, start_pause_min=0.15,
++                   context_later=True, context_later_min_sec=5)
++    clip, notes, why = context_start([u3], {3: u3}, p, _sentences, start_pause=sp)
++    assert why is None and [u["id"] for u in clip] == [3] and clip[0]["refs"] == "3.1-2"
++    assert any("оставлено" in n for n in notes)
