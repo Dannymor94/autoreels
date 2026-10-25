@@ -61,7 +61,16 @@ def test_scenarist_reel_starts_earlier_or_goes():
     scens = [{"refs": ["2.1", "2.2"], "hook": None, "title": "", "why": ""},
              {"refs": ["3.1", "3.2"], "hook": None, "title": "", "why": ""}]
     props, gone = scenario_proposals(scens, sent, units, p, None, sp)
-    assert [pr.pieces for pr in props] == ["1.1 2.1-2"]                       # 1.1 put before the glued 2.1
-    assert len(gone) == 1 and "склеено" in gone[0][1]                         # 3.x: everything glued, too short later
+    assert [pr.pieces for pr in props] == ["1.1 2.1-2", "3.1-2"]              # 1.1 put before the glued 2.1
+    assert not gone and any("оставлено" in n for n in props[1].notes)         # M145: 3.1 cannot be fixed — kept, noted
     props0, gone0 = scenario_proposals(scens, sent, units, AutoParams(min_sec=20, target_sec=55, max_sec=90), None, sp)
     assert len(props0) == 2 and not gone0                                      # off: as before
+
+
+def test_m145_a_glued_start_with_no_repair_is_kept_not_dropped():
+    u3 = U(3, 300, 30, "thesis", 4, "3.1-2")                                 # nothing before it to borrow
+    p = AutoParams(context_start=True, min_sec=6, max_sec=60, context_max_sec=20, start_pause_min=0.15,
+                   context_later=True, context_later_min_sec=5)
+    clip, notes, why = context_start([u3], {3: u3}, p, _sentences, start_pause=sp)
+    assert why is None and [u["id"] for u in clip] == [3] and clip[0]["refs"] == "3.1-2"
+    assert any("оставлено" in n for n in notes)

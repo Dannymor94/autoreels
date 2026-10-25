@@ -588,11 +588,14 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
         answer cut from its question — while at least context_later_min_sec of the thought is left;
     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
     otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can.
-    M144: a start glued to the speech before it (glued_start, p.start_pause_min) is repaired by the same steps."""
+    M144: a start glued to the speech before it (glued_start, p.start_pause_min) is repaired by the same steps.
+    M145 (m144: rejecting the clips whose glued start found no repair cut the owner's covered clips 40 → 27): a clip
+    whose start stands on its own and is ONLY glued keeps its start when no repair works — noted, not dropped."""
     notes: list[str] = []
     # M78: what the clip is about (its seed and its payoff) — the model judges whether the start leads into it
     core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed_id, clip[-1]["id"])
                                   if i in by_id)).strip()
+    soft = None
     for _ in range(6):
         u = clip[0]
         rows = list(_sent_rows(sentences, u["refs"]))
@@ -600,9 +603,13 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
             return clip, notes, None
         first = rows[0][4] or rows[0][0]
         nxt = rows[1][4] if len(rows) > 1 else ""
-        why = glued_start(rows[0][0], p, start_pause) or stands_alone(rows[0][4], nxt, p, judge, core)
+        _glued = glued_start(rows[0][0], p, start_pause)
+        _alone = stands_alone(rows[0][4], nxt, p, judge, core)
+        why = _glued or _alone
         if not why:
             return clip, notes, None
+        if _glued and _alone is None and soft is None:
+            soft = (clip, list(notes), _glued)       # M145: the start is fine but glued — kept if nothing repairs it
         if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
                 and glued_start(rows[1][0], p, start_pause) is None
                 and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
@@ -658,7 +665,11 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
             clip = clip[1:]
             notes.append(f"начало: мысль #{u['id']} «{first[:50]}» убрана ({why})")
             continue
+        if soft is not None:
+            return soft[0], soft[1] + [f"начало: {soft[2]} — исправить нельзя, оставлено"], None
         return None, notes, f"«{first[:70]}» — {why}"
+    if soft is not None:
+        return soft[0], soft[1] + [f"начало: {soft[2]} — исправить нельзя, оставлено"], None
     return None, notes, "начало не найдено"
 
 

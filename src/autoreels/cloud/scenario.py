@@ -137,7 +137,7 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
     finished and not «→» (trailing sentences go while the reel stays ≥ min_sec). The thoughts of the map it plays give
     `units` (partly played ones get unit_refs); the model's teaser comes first among the code's hook candidates.
     M144 (`start_pause`, p.start_pause_min): a reel whose first sentence is glued to the speech before it starts up to two
-    sentences earlier (context, ≤ max_sec), else later (≥ min_sec), else goes; a glued teaser is not taken."""
+    sentences earlier (context, ≤ max_sec); M145: else it keeps its start, noted. A glued teaser is not taken."""
     by_ref_unit: dict[str, dict] = {}
     for u in units:
         for r in (expand_refs(u.get("refs") or "") or []):
@@ -166,13 +166,9 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
                     break
                 notes.append(f"начало: добавлена фраза перед — «{sent[prv][2][:50]}» (начало было склеено с речью)")
                 refs = [prv] + refs
-            while glued_start(refs[0], p, start_pause) and len(refs) > 1 and dur(refs[1:]) >= p.min_sec:
-                notes.append(f"начало: убрана фраза «{sent[refs[0]][2][:50]}» — склеена с речью перед ней")
-                refs = refs[1:]
             _g = glued_start(refs[0], p, start_pause)
-            if _g:
-                gone.append((label, f"начало: {_g}, исправить нельзя"))
-                continue
+            if _g:                            # M145: the model's start is kept (a later one may not stand alone)
+                notes.append(f"начало: {_g} — исправить нельзя, оставлено")
         secs = dur(refs)
         if not p.min_sec <= secs <= p.max_sec:
             gone.append((label, f"длина {secs:.0f} с вне {p.min_sec:g}–{p.max_sec:g} с"))
