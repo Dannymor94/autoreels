@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Sequence
 
-from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, rhythm_pieces, rhythm_why)
+from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, glued_start, rhythm_pieces,
+                                      rhythm_why)
 
 SCENARIO_SYSTEM = (
     "You are the editor of short vertical videos (reels) cut from a long Russian talk. You get the whole talk as "
@@ -128,18 +129,23 @@ def tone_rule(tone: str) -> str:
 
 
 def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float, str, bool, int]],
-                       units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None
+                       units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None,
+                       start_pause: Callable[[str], "float | None"] | None = None
                        ) -> tuple[list[Proposal], list[tuple[str, str]]]:
     """M123: each scenario → a Proposal the automatic path checks and polishes as its own, or a reason it goes.
     `sent` — B.k → (t0, t1, text, finished, words). Checks: length min_sec…max_sec; the jump rule (p.rhythm); the end
     finished and not «→» (trailing sentences go while the reel stays ≥ min_sec). The thoughts of the map it plays give
-    `units` (partly played ones get unit_refs); the model's teaser comes first among the code's hook candidates."""
+    `units` (partly played ones get unit_refs); the model's teaser comes first among the code's hook candidates.
+    M144 (`start_pause`, p.start_pause_min): a reel whose first sentence is glued to the speech before it starts up to two
+    sentences earlier (context, ≤ max_sec), else later (≥ min_sec), else goes; a glued teaser is not taken."""
     by_ref_unit: dict[str, dict] = {}
     for u in units:
         for r in (expand_refs(u.get("refs") or "") or []):
             by_ref_unit.setdefault(r, u)
     out: list[Proposal] = []
     gone: list[tuple[str, str]] = []
+    _order = sorted(sent, key=lambda r: sent[r][0])
+    prev_ref = {_order[i]: _order[i - 1] for i in range(1, len(_order))}
     for rank, sc in enumerate(scens):
         refs = list(sc["refs"])
         label = compress_refs(refs)
@@ -151,6 +157,21 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
                 refs = refs[:-1]
             if not sent[refs[-1]][3] or end_tone(refs[-1]) == "open":
                 gone.append((label, "конец не законченный или звучит «→», укоротить нельзя"))
+                continue
+        if start_pause is not None and p.start_pause_min:
+            for _ in range(2):                # M144: context before a glued start
+                prv = prev_ref.get(refs[0])
+                if not glued_start(refs[0], p, start_pause) or prv is None or prv in refs \
+                        or sent[refs[0]][0] - sent[prv][1] > 3.0 or dur([prv] + refs) > p.max_sec:
+                    break
+                notes.append(f"начало: добавлена фраза перед — «{sent[prv][2][:50]}» (начало было склеено с речью)")
+                refs = [prv] + refs
+            while glued_start(refs[0], p, start_pause) and len(refs) > 1 and dur(refs[1:]) >= p.min_sec:
+                notes.append(f"начало: убрана фраза «{sent[refs[0]][2][:50]}» — склеена с речью перед ней")
+                refs = refs[1:]
+            _g = glued_start(refs[0], p, start_pause)
+            if _g:
+                gone.append((label, f"начало: {_g}, исправить нельзя"))
                 continue
         secs = dur(refs)
         if not p.min_sec <= secs <= p.max_sec:
@@ -180,11 +201,12 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
 
         def rows(rf: str):
             return [(r, sent[r][1] - sent[r][0], sent[r][4], sent[r][3], sent[r][2]) for r in (expand_refs(rf) or [])]
-        cands = _hook_cands(pseudo, rows, p)
+        cands = _hook_cands(pseudo, rows, p, start_pause)
         hooks = [c[0] for c in cands]
         hook_texts = {r: (t, s) for r, s, t in cands}
         h = sc.get("hook")
         if h and h in refs and refs.index(h) >= len(refs) * p.hook_teaser_pos and sent[h][3] \
+                and glued_start(h, p, start_pause) is None \
                 and sent[h][4] >= p.hook_min_words and p.hook_min_sec <= sent[h][1] - sent[h][0] <= p.hook_max_sec:
             hooks = [h] + [x for x in hooks if x != h]
             hook_texts.setdefault(h, (sent[h][2], 0.0))

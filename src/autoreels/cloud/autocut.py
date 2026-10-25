@@ -100,6 +100,8 @@ class AutoParams:
     settle_tail: float = 0.5          # the last piece (the payoff) needs only this share of it
     # M138: the owner's taste (cloud/taste.py) adds taste_weight × clip_taste to a proposal's score; 0 = off
     taste_weight: float = 0.0
+    # M144: a clip's first sound (its start, a cold open) needs this much silence HEARD before it; 0 = off
+    start_pause_min: float = 0.0
 
 
 @dataclass
@@ -572,7 +574,8 @@ def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | Non
 
 
 def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, seed_id: int | None = None,
-                  loop_id: int | None = None, judge: "Judge | None" = None
+                  loop_id: int | None = None, judge: "Judge | None" = None,
+                  start_pause: Callable[[str], "float | None"] | None = None
                   ) -> tuple[list[dict] | None, list[str], str | None]:
     """M74: one rule for every clip — the first sentence after the hook stands on its own. When it does not
     (stands_alone), in this order:
@@ -584,7 +587,8 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
     (b2) M76 (context_later): the clip starts at the first later sentence of that thought that stands — never an
         answer cut from its question — while at least context_later_min_sec of the thought is left;
     (c) a loop question, or an opening thought nothing else needs (not the seed), goes;
-    otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can."""
+    otherwise the clip cannot start — (None, notes, why). Returns (clip, notes, None) when it can.
+    M144: a start glued to the speech before it (glued_start, p.start_pause_min) is repaired by the same steps."""
     notes: list[str] = []
     # M78: what the clip is about (its seed and its payoff) — the model judges whether the start leads into it
     core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed_id, clip[-1]["id"])
@@ -596,10 +600,11 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
             return clip, notes, None
         first = rows[0][4] or rows[0][0]
         nxt = rows[1][4] if len(rows) > 1 else ""
-        why = stands_alone(rows[0][4], nxt, p, judge, core)
+        why = glued_start(rows[0][0], p, start_pause) or stands_alone(rows[0][4], nxt, p, judge, core)
         if not why:
             return clip, notes, None
         if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
+                and glued_start(rows[1][0], p, start_pause) is None
                 and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
             refs = _drop_first_ref(u["refs"])
             if refs:
@@ -622,7 +627,8 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                     break
                 prow = list(_sent_rows(sentences, prev["refs"]))
                 after = prow[1][4] if len(prow) > 1 else (list(_sent_rows(sentences, nxt_u["refs"])) or [("",) * 5])[0][4]
-                if prow and stands_alone(prow[0][4], after, p, judge, core) is None:
+                if prow and glued_start(prow[0][0], p, start_pause) is None \
+                        and stands_alone(prow[0][4], after, p, judge, core) is None:
                     notes.append(f"начало: добавлен{'а мысль' if len(ctx) == 1 else 'ы мысли'} "
                                  + ", ".join(f"#{c['id']}" for c in ctx)
                                  + f" «{(prow[0][4] or '')[:50]}» перед «{first[:50]}» ({why}) — контекст")
@@ -635,7 +641,8 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                 left = sum(float(r[1]) for r in rows[k:])
                 if left < p.context_later_min_sec or sum(_dur(c) for c in clip) - (total - left) < p.min_sec:
                     break
-                if stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge, core) is None:
+                if glued_start(rows[k][0], p, start_pause) is None \
+                        and stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge, core) is None:
                     refs = u["refs"]
                     for _ in range(k):
                         refs = _drop_first_ref(refs) or refs
@@ -869,7 +876,20 @@ def _sent_rows(sentences, refs):
         yield ref, sec, nwords, complete, (row[4] if len(row) > 4 else "")
 
 
-def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[str, float, str]]:
+def glued_start(ref: str, p: AutoParams, start_pause: Callable[[str], "float | None"] | None) -> str | None:
+    """M144 (m143: 11 of 12 IMG_6848 m126 clips started with no pause before the first word — the speech before ran up
+    to the cut and the first consonant was lost; the owner's own clips: 27 of 66): why a sentence cannot be a clip's
+    first sound — the silence heard before it is under p.start_pause_min. None = it can (or the rule is off)."""
+    if not (start_pause and p.start_pause_min):
+        return None
+    sp = start_pause(ref)
+    if sp is not None and sp < p.start_pause_min:
+        return f"склеено с речью перед ним (пауза {sp:.2f} с)"
+    return None
+
+
+def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams,
+                start_pause: Callable[[str], "float | None"] | None = None) -> list[tuple[str, float, str]]:
     """(ref, score, text) of every hook candidate, best first: finished sentences of hook length of the
     clip's thoughts. When a question opens the clip (the loop), its own sentences are left out — the
     cold open then teases the answer instead of repeating the question. M83 (`hook_teaser`): only sentences
@@ -889,6 +909,8 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams) -> list[tuple[st
                 continue                  # M83: in the first part — the clip plays it at once, it teases nothing
             if p.hook_teaser and p.hook_no_pointer and teaser_pointer(text):
                 continue                  # M92: heard cold, a line pointing back explains nothing
+            if glued_start(ref, p, start_pause):
+                continue                  # M144: a cold open glued to the speech before it loses its first sound
             if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
                 if p.context_start and back_reference(text):
@@ -1002,7 +1024,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             sentences: Callable[[str], list[tuple[str, float, int, bool]]] | None = None,
             no_start: list | None = None, judge: "Judge | None" = None,
             end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
-            rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None) -> list[Proposal]:
+            rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None,
+            start_pause: Callable[[str], "float | None"] | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
@@ -1062,10 +1085,11 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         unit_refs: dict = {}
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
-                                               judge=judge)
+                                               judge=judge, start_pause=start_pause)
             if clip2 is None and judge is not None and p.start_judge == "rank":
                 # M119: the rules decide; the model's «no» only sorts the clip after the clean ones
-                clip2, cnotes, why2 = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id)
+                clip2, cnotes, why2 = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
+                                                    start_pause=start_pause)
                 if clip2 is not None:
                     # M120 (m119: «И работай дальше.» — ссылка назад «и…» was noted as the model's word): the doubt is
                     # the model's verdict on the start the rules chose (the same question context_start asks)
@@ -1132,7 +1156,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         payoff = next((u for u in reversed(clip) if u.get("role") in PAYOFFS), clip[-1])
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
         notes += extra_notes
-        cands = _hook_cands(clip, sentences, p) if sentences else []
+        cands = _hook_cands(clip, sentences, p, start_pause) if sentences else []
         close: list[str] = []
         if p.close_last and sentences:                  # M91: the payoff in the close shot
             rows = [r for u in clip for r in _sent_rows(sentences, u["refs"])]

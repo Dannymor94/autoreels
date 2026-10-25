@@ -7804,7 +7804,8 @@ def _scenario_examples(root: Path, stem: str, n: int = 3) -> str:
             + "\n".join(out))
 
 
-def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None):
+def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None,
+                   start_pause=None):
     """M123: the scenarist's reels as the pool of arl autocut --scenario (None = cannot ask). The model is named
     explicitly (haiku | sonnet: the whole talk in one request); its answer is kept in data/cache/scenario/ by the
     request — the same request is not paid twice."""
@@ -7837,7 +7838,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
         cpath.write_text(raw or "", encoding="utf-8")
         _usage_report(provider)
     scens, bad = parse_scenarios(raw, set(sent))
-    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone)
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause)
     scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
     print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
           + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
@@ -8204,7 +8205,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      lean_depth=ac.lean_depth, rhythm=ac.rhythm, max_jumps=ac.rhythm_max_jumps,
                      jump_sec=ac.rhythm_jump_sec, settle_near_sec=ac.rhythm_settle_near,
                      settle_far_sec=ac.rhythm_settle_far, settle_far_at_sec=ac.rhythm_far_sec,
-                     settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0))
+                     settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0),
+                     start_pause_min=float(getattr(ac, "start_pause_min", 0.0) or 0.0))
     _taste = None
     if prm.taste_weight:
         # M138: the owner's taste orders the proposals (invariant 1: the order only)
@@ -8239,6 +8241,33 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                     out_s.append((f"{blk}.{k}", st[-1].t1 - st[0].t0, sum(1 for w in st if any(c.isalnum() for c in w.word)),
                                   _ends_terminal(st[-1]), " ".join(w.word for w in st)))
         return out_s
+
+    start_pause = None                      # M144: the silence heard before a sentence (B.k)
+    if prm.start_pause_min:
+        from autoreels.cloud.plan import SpeechTimes as _ST_sp, _speech_before as _sb_sp, load_alignment as _la_sp
+        _al_sp = _la_sp(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+        _sm_sp = None
+        _smp = _root / "transcripts" / f"{stem}.speechmap.json"
+        if _smp.is_file():
+            try:
+                from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV_sp
+                _d_sp = _json.loads(_smp.read_text(encoding="utf-8"))
+                if _d_sp.get("version") == _SMV_sp and _d_sp.get("source_sha256") == manifest.source_sha256:
+                    _sm_sp = _d_sp
+            except (OSError, ValueError):
+                _sm_sp = None
+        if _al_sp is None and _sm_sp is None:
+            print(f"  warning: нет карты речи и выравнивания для {stem} — правило паузы перед началом "
+                  f"(start_pause_min) не работает", file=sys.stderr)
+        else:
+            _times_sp = _ST_sp(tx.words, _sm_sp, _al_sp)
+
+            def start_pause(ref: str):
+                st = sent_by_ref.get(ref)
+                if not st:
+                    return None
+                left, onset = _sb_sp(_times_sp, st[0])
+                return 9.9 if left is None else max(0.0, onset - left)
 
     end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
     open_end: list = []                     # … clips that ended «→» and could not be shortened
@@ -8308,20 +8337,20 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     scen_out: list = []                     # M123: the scenarist's lines the code did not take, with the reason
     if scenario:
         pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
-                              end_tone, scen_out, scenario_provider)
+                              end_tone, scen_out, scenario_provider, start_pause=start_pause)
         if pool is None:
             return 1
     else:
         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
-                       taste=_taste)
+                       taste=_taste, start_pause=start_pause)
         _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
         if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
             # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
             from autoreels.cloud.autocut import fill_pool
             _extra = propose(the_map.get("units") or [],
                              _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
-                             judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[])
+                             judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[], start_pause=start_pause)
             _n0 = len(pool)
             pool = fill_pool(pool, _extra)
             print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "

@@ -383,6 +383,12 @@ autocut:
   # decide anything): when it is, clips grown around seeds of this punch join it (no shared thought), ordered by score
   # with the taste. 0 = off.
   fill_seed_punch: 3
+  # M144 (m143: 11 of 12 IMG_6848 m126 clips started glued to the speech before them — no pause, the first consonant
+  # lost — «не слышно первой буквы»; the owner's own clips: 27 of 66): a clip's first sound (its start, a cold open)
+  # needs this much silence heard before it (speech map / alignment). A glued start is repaired like one that does not
+  # stand alone (context before, a later sentence, another thought); the scenarist's reel starts earlier or later.
+  # 0 = off.
+  start_pause_min: 0
   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
   # M142 (owner: «можно задавать тон сценаристу — строгий или фановый»): one line of tone in the scenarist's prompt,
