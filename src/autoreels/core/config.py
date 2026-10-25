@@ -567,6 +567,7 @@ class R0Config(BaseModel):
     beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
     start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
+    start_preroll_sec: float = Field(0.0, ge=0.0, le=0.2)  # M146: a glued first word starts this much earlier; 0 = off
     speed: float = 1.0                       # default playback speed for all clips
     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
@@ -777,6 +778,7 @@ class AudioProcessing(BaseModel):
     # без перекрытия, поэтому длина звука в ТОЧНОСТИ равна длине видео (нет дрейфа губ-синка). Только
     # клипы с >1 сегментом; одиночный span не затрагивается. 0 → встык без фейдов.
     audio_edge_fade_sec: float = 0.01
+    start_fade_in_sec: float = Field(0.0, ge=0.0, le=0.2)   # M146: the clip's sound fades in over this (pre-roll); 0 = off
     # Видео-кроссфейд на каждом внутреннем шве многосегментного клипа (xfade-фильтр). Сглаживает
     # «прыжок» при смене позы (холодный старт, склейки). Аудио НЕ кроссфейдируется — остаётся concat,
     # иначе укорочение аудио вернуло бы дрейф. Выход короче суммы сегментов на (N−1)×xfade_sec.

@@ -64,6 +64,10 @@ lead_pad_sec: 0.3               # заход перед первым слово�
 # M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): air before the FIRST sound of a planned clip (body
 # start and cold open) instead of the inner seam_pad_sec (0.04 s); never into the speech before it. 0 = as before.
 start_pad_sec: 0
+# M146 (owner: «давай» — an exception to invariant 10 by his decision): a planned clip's first word GLUED to the word
+# before it (heard pause under this) starts this much before its onset, in that word's tail, so its first consonant is
+# not lost (m143/m145: 46 of 59 draft starts have no pause to cut in). Goes with render.yaml start_fade_in_sec. 0 = off.
+start_preroll_sec: 0
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
 max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
                                 # слово после терминального знака (.?!), иначе слово с заглавной.
@@ -388,7 +392,8 @@ autocut:
   # needs this much silence heard before it (speech map / alignment). A glued start is repaired like one that does not
   # stand alone (context before, a later sentence, another thought); the scenarist's reel starts earlier or later.
   # 0 = off.
-  start_pause_min: 0
+  # M145 (m145: glued starts 59 → 46 with the owner's clips covered as before, 40 of 66; owner: «давай»)
+  start_pause_min: 0.15
   # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
   scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
   # M142 (owner: «можно задавать тон сценаристу — строгий или фановый»): one line of tone in the scenarist's prompt,

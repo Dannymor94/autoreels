@@ -97,6 +97,9 @@ audio_processing:
   # Микро-фейд на краях аудиосегментов многосегментного клипа (гасит щелчок склейки, без
   # перекрытия — длина звука = длине видео). Только клипы с >1 сегментом. 0 → встык без фейдов.
   audio_edge_fade_sec: 0.01
+  # M146: the clip's sound fades in over this, so the pre-rolled tail of the word before (r0.yaml start_preroll_sec) is
+  # not heard as a word. 0 = off.
+  start_fade_in_sec: 0
 
 # Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
 # mp3 64k mono 16kHz: 8 000 байт/с → 46 мин = ~22 МБ (под лимит Groq 25 МБ).

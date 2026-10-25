@@ -5330,6 +5330,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
     return ManualPlanParams(
         seam_pad_sec=getattr(r0_cfg, "seam_pad_sec", 0.04),
         start_pad_sec=float(getattr(r0_cfg, "start_pad_sec", 0.0) or 0.0),
+        start_preroll_sec=float(getattr(r0_cfg, "start_preroll_sec", 0.0) or 0.0),
         end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
         onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),

@@ -1453,6 +1453,13 @@ def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:
     return parts
 
 
+def _start_fade_in(ap: AudioProcessing, planned: bool) -> str:
+    """M146: a planned clip's sound fades in over start_fade_in_sec — the pre-rolled tail of the word before its first
+    word (r0.yaml start_preroll_sec) is not heard as a word. "" = off (the chain as before)."""
+    d = float(getattr(ap, "start_fade_in_sec", 0.0) or 0.0)
+    return f"afade=t=in:st=0:d={_num(d)}" if d > 0 and planned else ""
+
+
 def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
     """afade in/out (если фейд вкл). Хвост fade-out ложится на padding-«воздух» конца клипа."""
     if not (ap.fade_enabled and ap.fade_duration > 0):
@@ -3429,6 +3436,9 @@ def _render_segments(
                 # atempo goes FIRST; the fade st (in _out_dur / post-speed time) then lands correctly.
                 reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur,
                                               tail_fade=_tail_fade, word_end_out=_word_end_out) or None
+                _afi = _start_fade_in(ap, _planned)
+                if _afi:
+                    reel_af = f"{_afi},{reel_af}" if reel_af else _afi
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
