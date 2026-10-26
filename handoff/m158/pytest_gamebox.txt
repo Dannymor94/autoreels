@@ -1,0 +1,12 @@
+>       with open(live_path) as f:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/mnt/data/autoreels/tests/../data/runs/r0_live_response.json'
+
+tests/test_providers.py:1279: FileNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_cli.py::test_run_dispatch_bad_path_returns_error - Assertio...
+FAILED tests/test_cli.py::test_run_dispatch_url_calls_download - assert 1 == 0
+FAILED tests/test_cli.py::test_run_dispatch_url_download_error_returns_1 - As...
+FAILED tests/test_cli.py::test_run_dispatch_yandex_calls_yandex_downloader - ...
+FAILED tests/test_providers.py::test_r0_output_parsing_survives_lower_max_tokens
+5 failed, 2511 passed, 5 skipped, 9 deselected in 84.22s (0:01:24)

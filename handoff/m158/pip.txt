@@ -1,0 +1,41 @@
+  Created wheel for autoreels: filename=autoreels-0.0.0-py3-none-any.whl size=2561 sha256=12f19cbdd1999abc66e320dae199dbca4c668f3b165c41b6ef677817c93bbcba
+  Stored in directory: /tmp/pip-ephem-wheel-cache-sms40y7g/wheels/96/71/62/c84fcec65c8ef539baa0f16303d260c02d0f94111c97ab382b
+Successfully built autoreels
+Installing collected packages: pygments, pluggy, packaging, iniconfig, pytest, autoreels
+  Attempting uninstall: autoreels
+    Found existing installation: autoreels 0.0.0
+    Uninstalling autoreels-0.0.0:
+      Successfully uninstalled autoreels-0.0.0
+
+Successfully installed autoreels-0.0.0 iniconfig-2.3.1 packaging-26.3 pluggy-1.7.0 pygments-2.21.0 pytest-9.1.1
+No broken requirements found.
+НЕТ cv2 ModuleNotFoundError No module named 'cv2'
+ok  numpy 2.5.4
+НЕТ parselmouth ModuleNotFoundError No module named 'parselmouth'
+ok  httpx 0.28.1
+ok  pydantic 2.14.1
+ok  yaml 6.0.3
+ok  autoreels.local.render 
+ok  autoreels.cloud.plan 
+bash: line 1: .venv/bin/pip: No such file or directory
+Collecting opencv-python-headless<5,>=4.8
+  Downloading opencv_python_headless-4.14.0.94-cp37-abi3-manylinux_2_28_x86_64.whl.metadata (19 kB)
+Collecting praat-parselmouth==0.4.7
+  Downloading praat_parselmouth-0.4.7-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.9 kB)
+Requirement already satisfied: numpy>=1.7.0 in ./.venv/lib/python3.14/site-packages (from praat-parselmouth==0.4.7) (2.5.4)
+Downloading praat_parselmouth-0.4.7-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (10.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.7/10.7 MB 150.1 kB/s  0:01:16
+Downloading opencv_python_headless-4.14.0.94-cp37-abi3-manylinux_2_28_x86_64.whl (62.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 62.0/62.0 MB 104.2 kB/s  0:08:18
+Installing collected packages: praat-parselmouth, opencv-python-headless
+
+Successfully installed opencv-python-headless-4.14.0.94 praat-parselmouth-0.4.7
+No broken requirements found.
+ok  cv2 4.14.0
+ok  numpy 2.5.4
+ok  parselmouth 0.4.7
+ok  httpx 0.28.1
+ok  pydantic 2.14.1
+ok  yaml 6.0.3
+ok  autoreels.local.render 
+ok  autoreels.cloud.plan 
