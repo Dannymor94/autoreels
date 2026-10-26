@@ -1,0 +1,28 @@
+== 1. декодирование клипов на Mac (строк ошибок; 0 = чисто)
+  reels-out/IMG_6848/_gate/m146b/r01.mp4: ошибок 0 | Main,0,yuv420p | кадры:  361 I    1 I, 3972 P 
+  reels-out/IMG_6848/_gate/m146b/r02.mp4: ошибок 0 | Main,0,yuv420p | кадры:  326 I    1 I, 3595 P 
+  reels-out/IMG_6848/_gate/m146b/r03.mp4: ошибок 0 | Main,0,yuv420p | кадры:  213 I    1 I, 2352 P 
+  reels-out/IMG_6848/_gate/m156/r01.mp4: ошибок 0 | Main,0,yuv420p | кадры:   37 I 4297 P 
+  reels-out/IMG_6848/_gate/m156/r02.mp4: ошибок 1 | Main,0,yuv420p | кадры:   33 I 3889 P 
+  reels-out/IMG_6848/_gate/m156/r03.mp4: ошибок 0 | Main,0,yuv420p | кадры:   22 I 2544 P 
+  reels-out/IMG_6848/_gate/m158/r01.mp4: ошибок 2 | Main,0,yuv420p | кадры:   37 I 4297 P 
+  reels-out/IMG_6848/_gate/m158/r02.mp4: ошибок 0 | Main,0,yuv420p | кадры:   33 I 3889 P 
+  reels-out/IMG_6848/_gate/m158/r03.mp4: ошибок 0 | Main,0,yuv420p | кадры:   22 I 2544 P 
+== 2. gamebox: режимы кодера на 10 с исходника (PSNR, ошибки декодирования)
+исходник: inputs/IMG_6848.mov
+  hevc_default: PSNR average:35.167421 | ошибок декодирования 0 | битрейт,b 0,5015666
+  hevc_vbr: PSNR average:35.171154 | ошибок декодирования 0 | битрейт,b 0,5012489
+  hevc_vbr_bf0: PSNR average:35.171154 | ошибок декодирования 0 | битрейт,b 0,5012489
+  hevc_cbr: PSNR average:35.168470 | ошибок декодирования 0 | битрейт,b 0,5013424
+  hevc_cqp: PSNR average:35.898555 | ошибок декодирования 0 | битрейт,b 0,12514686
+  h264_vbr: PSNR average:35.564069 | ошибок декодирования 0 | битрейт,b 0,7388597
+  h264_vbr_bf0: PSNR average:35.564069 | ошибок декодирования 0 | битрейт,b 0,7388597
+== 3. те же файлы — декодирование на Mac (как у владельца)
+  m159_h264_vbr_bf0.mp4: ошибок 0
+  m159_h264_vbr.mp4: ошибок 0
+  m159_hevc_cbr.mp4: ошибок 0
+  m159_hevc_cqp.mp4: ошибок 0
+  m159_hevc_default.mp4: ошибок 0
+  m159_hevc_vbr_bf0.mp4: ошибок 0
+  m159_hevc_vbr.mp4: ошибок 0
+файлы для глаз: /tmp/m159/ (открыть в QuickTime)
