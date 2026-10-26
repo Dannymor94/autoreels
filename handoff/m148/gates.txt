@@ -1,0 +1,116 @@
+  reels-out/2026-08-08 09h 33m 14s/_gate/auto1  352 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/dynamic  135 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m18_final  0 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m53  38 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m55  36 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m56  136 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m60  136 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m61  136 МБ
+  reels-out/2026-08-08 09h 33m 14s/_gate/m65  93 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto-local-gp  97 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto-local-gp2  289 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto-local  290 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto  385 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/auto1  188 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/dynamic  55 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/m53  48 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/m55  46 МБ
+  reels-out/2026-08-08 10h 59m 38s/_gate/m65  143 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/auto1  99 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/dynamic  94 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/g5d  105 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m102  34 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m102p  34 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m18_final  0 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m68  76 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m70  89 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m74  94 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m75  57 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m76  57 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m77  57 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m78  57 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m83  31 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m86  33 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m88  34 МБ
+  reels-out/2026-08-08 11h 42m 49s/_gate/m94  34 МБ
+  reels-out/IMG_6848/_gate/auto1  206 МБ
+  reels-out/IMG_6848/_gate/balance  70 МБ
+  reels-out/IMG_6848/_gate/careful  75 МБ
+  reels-out/IMG_6848/_gate/dynamic  202 МБ
+  reels-out/IMG_6848/_gate/fill  202 МБ
+  reels-out/IMG_6848/_gate/m102  134 МБ
+  reels-out/IMG_6848/_gate/m102p  134 МБ
+  reels-out/IMG_6848/_gate/m122  320 МБ
+  reels-out/IMG_6848/_gate/m123  398 МБ
+  reels-out/IMG_6848/_gate/m126  384 МБ
+  оставлен: reels-out/IMG_6848/_gate/m146a
+  оставлен: reels-out/IMG_6848/_gate/m146b
+  оставлен: reels-out/IMG_6848/_gate/m147
+  reels-out/IMG_6848/_gate/m18_final  0 МБ
+  reels-out/IMG_6848/_gate/m53  83 МБ
+  reels-out/IMG_6848/_gate/m55  80 МБ
+  reels-out/IMG_6848/_gate/m56  100 МБ
+  reels-out/IMG_6848/_gate/m60  221 МБ
+  reels-out/IMG_6848/_gate/m61  180 МБ
+  reels-out/IMG_6848/_gate/m65  140 МБ
+  reels-out/IMG_6848/_gate/m70-tempo  139 МБ
+  reels-out/IMG_6848/_gate/m70  158 МБ
+  reels-out/IMG_6848/_gate/m72  148 МБ
+  reels-out/IMG_6848/_gate/m74  146 МБ
+  reels-out/IMG_6848/_gate/m75  114 МБ
+  reels-out/IMG_6848/_gate/m76  137 МБ
+  reels-out/IMG_6848/_gate/m77  147 МБ
+  reels-out/IMG_6848/_gate/m78  130 МБ
+  reels-out/IMG_6848/_gate/m83  130 МБ
+  reels-out/IMG_6848/_gate/m86  132 МБ
+  reels-out/IMG_6848/_gate/m88  135 МБ
+  reels-out/IMG_6848/_gate/m94  134 МБ
+  reels-out/IMG_6848/_gate/manual  261 МБ
+  reels-out/IMG_6848/_gate/spec  206 МБ
+  reels-out/Pxl 20260621 112938952/_gate/auto1  427 МБ
+  reels-out/Pxl 20260621 112938952/_gate/dynamic  0 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m102  80 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m102p  80 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m125  518 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m127  518 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m129  520 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m130  520 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m131  520 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m134  80 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m136  115 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m18_final  0 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m53  37 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m55  35 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m55dbg  37 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m68  120 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m70  119 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m74  136 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m75  76 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m76  76 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m77  100 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m78  75 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m83  74 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m86  81 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m88  81 МБ
+  reels-out/Pxl 20260621 112938952/_gate/m94  81 МБ
+  reels-out/Pxl 20260621 112938952/_gate/manual  23 МБ
+  reels-out/Pxl 20260621 122006193/_gate/auto1  41 МБ
+  reels-out/Pxl 20260621 122006193/_gate/dynamic  55 МБ
+  reels-out/Pxl 20260621 122006193/_gate/g5d  26 МБ
+  reels-out/Pxl 20260621 122006193/_gate/m105  19 МБ
+  reels-out/Pxl 20260621 122006193/_gate/m18_final  0 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/auto  0 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/auto1  240 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/dynamic  212 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/m18_final  0 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/manual  318 МБ
+  reels-out/PXL_20260729_085910095_34f06abf/_gate/montage2  198 МБ
+  reels-out/PXL_20260729_copy/_gate/auto-gp  393 МБ
+  reels-out/PXL_20260729_copy/_gate/auto  142 МБ
+  reels-out/PXL_20260729_copy/_gate/m105  126 МБ
+  reels-out/PXL_20260729_copy/_gate/m77  393 МБ
+  reels-out/PXL_20260729_copy/_gate/m78  392 МБ
+  reels-out/PXL_20260729_copy/_gate/m79  378 МБ
+  reels-out/PXL_20260729_copy/_gate/m80  54 МБ
+  всего: 111 гейтов, 16201 МБ
+DRY RUN — ничего не изменено
