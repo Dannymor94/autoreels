@@ -4,9 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None):
+def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False):
     from autoreels import __main__ as cli
     calls = []
+    cfg = tmp_path / "config" / "r0.yaml"          # M157: the paid window off unless a test asks for it
+    if not paid and cfg.is_file():
+        t = cfg.read_text(encoding="utf-8")
+        assert "  paid_llm: sonnet\n" in t
+        cfg.write_text(t.replace("  paid_llm: sonnet\n", '  paid_llm: ""\n'), encoding="utf-8")
 
     def rec(name, rc=0):
         def f(*a, **k):
@@ -19,7 +24,7 @@ def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None):
 
     def autocut(m, **k):
         calls.append(("autocut", (m,), k))
-        (tmp_path / "reviews" / "v_auto_m56.txt").write_text(
+        Path(k.get("out") or tmp_path / "reviews" / "v_auto_m56.txt").write_text(
             "# head\n# fingerprint: abc\n\n# --- M1\nM1 80 | 2.1-3 | t: Тест\n", encoding="utf-8")
         return 0
     monkeypatch.setattr(cli, "cmd_autocut", autocut)

@@ -310,6 +310,8 @@ class AutocutConfig(BaseModel):
     scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
     auto_mode: Literal["autocut", "scenario"] = "autocut"   # M153: who writes the reels in arl auto
     scenario_llm: Literal["haiku", "sonnet"] = "sonnet"     # M153: the scenarist's model in arl auto (paid)
+    paid_llm: Literal["", "haiku", "sonnet"] = ""   # M157: arl auto --llm auto (map, judges, posts) → this model
+    paid_until: str = ""                    # M157: …until this date (YYYY-MM-DD, inclusive); after it arl auto is free
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones

@@ -10131,7 +10131,8 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
 def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
              encoder: str | None = None, music: str | None = None, tx: str | None = None,
-             mode: str | None = None, scenario_llm: str | None = None) -> int:
+             mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
+             today=None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
@@ -10140,7 +10141,11 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     3. arl map (LLM; an existing map is kept);
     4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply). M153: who writes the reels —
        r0.yaml autocut.auto_mode (scenario = the scenarist, paid model autocut.scenario_llm; autocut = the free
-       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut;
+       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut.
+       M157: until autocut.paid_until, --llm auto (map, judges, posts) becomes autocut.paid_llm; after it arl auto
+       is free (the scenarist only with --mode scenario). --tag: the run's drafts and review.json under their own
+       names (<stem>_auto_<tag>.txt, <stem>_auto_all_<tag>.txt, <stem>_<tag>.review.json) — an earlier sheet's
+       drafts, which its decisions file names, stay as they were;
     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
        if it fails, the autocut draft alone (its lines passed the checks);
     6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
@@ -10157,8 +10162,20 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     try:                                               # M153: who writes the reels (config, then --mode)
         _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
         _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
+        _paid_llm, _paid_until = _ac.paid_llm, _ac.paid_until
     except Exception:  # noqa: BLE001 — no config: the free autocut, as before
-        _mode, _scen_llm = "autocut", "sonnet"
+        _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
+    import datetime as _dt                             # M157: the paid models while the promo credit lasts
+    _today = today or _dt.date.today()
+    _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
+    if _paid_llm and not _expired and llm == "auto":
+        llm = _paid_llm
+        print(f"=== auto: карта, судьи и посты — {llm}" + (f" (до {_paid_until} включительно)" if _paid_until else "")
+              + " ===", flush=True)
+    if _expired and _paid_llm and mode is None and _mode == "scenario":
+        _mode = "autocut"
+        print(f"=== auto: срок платных моделей прошёл ({_paid_until}) — автомонтаж бесплатно; сценарист: --mode scenario"
+              f" ===", flush=True)
     _mode = mode or _mode
     _scen_llm = scenario_llm or _scen_llm
     print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
@@ -10206,22 +10223,24 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
             results.append((stem, "map", err))
             continue
         _scen_note = ""
+        auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
+        _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft
         if _mode == "scenario":
             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
-                                                                        llm=_scen_llm, scenario=True))
+                                                                        llm=_scen_llm, scenario=True, **_out))
             if err:
                 _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
                 print(f"  ⚠ {_scen_note}", flush=True)
                 err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
-                                                               llm=llm))
+                                                               llm=llm, **_out))
         else:
-            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
+            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm,
+                                                           **_out))
         if err:
             results.append((stem, "autocut", err))
             continue
         label_draft = _root / "reviews" / f"{stem}_auto.txt"
-        auto_draft = _root / "reviews" / f"{stem}_auto_m56.txt"
-        combined = _root / "reviews" / f"{stem}_auto_all.txt"
+        combined = _root / "reviews" / (f"{stem}_auto_all_{tag}.txt" if tag else f"{stem}_auto_all.txt")
         n_m = _merge_drafts(label_draft, auto_draft, combined)
         print(f"--- черновик {combined.name}: строки разметки + сборок {n_m}", flush=True)
         used = combined
@@ -10239,6 +10258,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
                 results.append((stem, "apply", err))
                 continue
         review_json = _root / "reviews" / f"{stem}.review.json"
+        if tag and review_json.is_file():              # M157: the run's own copy for render, sheet and export
+            _tagged = _root / "reviews" / f"{stem}_{tag}.review.json"
+            shutil.copyfile(review_json, _tagged)
+            review_json = _tagged
         if render:
             try:
                 n = len(Manifest.model_validate_json(review_json.read_text(encoding="utf-8")).reels)
@@ -12732,6 +12755,9 @@ def _build_parser():
     pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
                      help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
                           "по умолчанию r0.yaml autocut.auto_mode")
+    pau.add_argument("--tag", default=None,
+                     help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
+                          "черновики прежнего листа и его файл решений не трогаются")
     pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
                      help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
     pau.add_argument("--root", default=None)
@@ -13252,7 +13278,8 @@ def main(argv=None) -> int:
             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
                             encoder=args.encoder, music=args.music, tx=args.tx,
-                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None))
+                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
+                            tag=getattr(args, "tag", None))
         elif args.cmd == "dictate":
             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)

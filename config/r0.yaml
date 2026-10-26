@@ -407,6 +407,12 @@ autocut:
   # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
   auto_mode: scenario
   scenario_llm: sonnet
+  # M157 (owner 2026-10-26: «все прогоним через промо-кредиты» — 96 $ of promo credit expire 2026-11-03 UTC):
+  # until paid_until (inclusive) `arl auto` without --llm runs the map, the judges and the posts on paid_llm too.
+  # After it arl auto is free again: --llm auto = the free models, and the scenarist only with --mode scenario
+  # (after the promo, the paid model is charged to the card through auto top-up). "" = off.
+  paid_llm: sonnet
+  paid_until: "2026-11-02"
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
