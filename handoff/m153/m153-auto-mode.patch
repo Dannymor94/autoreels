@@ -1,0 +1,333 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 8857b54..c3a937e 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -60,7 +60,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
+ 
+ ## Технические ограничения
+ 
+-- **Только бесплатные API.** LLM — Groq → OpenRouter failover. Whisper — Groq (два прохода, `transcribe.yaml groq.dual`) либо whisper.cpp на gamebox. Исключение по решению владельца (2026-10-20): платный Claude (`--llm haiku | sonnet`, ключ `ANTHROPIC_API_KEY` в `.env`, цены — `config/r0.yaml anthropic`) — только когда режим назван явно; по умолчанию — бесплатные. Узкое место — **OTPM на R0** (output tokens per minute = 1000 на free-tier; не публикуется, отсутствует в заголовках `x-ratelimit-*`): урожай определяется **числом запросов**, не размером каждого → чанки держать мелкими, `max_tokens` < 1000. Prompt-cache не применим (Groq — только GPT-OSS; снимает вход, а упираемся в выход). Подробно — `docs/audit-groq-413.md`. Ручной режим в лимитах не участвует.
++- **Только бесплатные API.** LLM — Groq → OpenRouter failover. Whisper — Groq (два прохода, `transcribe.yaml groq.dual`) либо whisper.cpp на gamebox. Исключение по решению владельца (2026-10-20): платный Claude (`--llm haiku | sonnet`, ключ `ANTHROPIC_API_KEY` в `.env`, цены — `config/r0.yaml anthropic`) — только когда режим назван явно; по умолчанию — бесплатные. Названным считается и `config/r0.yaml autocut.auto_mode: scenario` (решение владельца 2026-10-26: `arl auto` пишет ролики сценаристом, модель `autocut.scenario_llm`); `--mode autocut` — бесплатно. Узкое место — **OTPM на R0** (output tokens per minute = 1000 на free-tier; не публикуется, отсутствует в заголовках `x-ratelimit-*`): урожай определяется **числом запросов**, не размером каждого → чанки держать мелкими, `max_tokens` < 1000. Prompt-cache не применим (Groq — только GPT-OSS; снимает вход, а упираемся в выход). Подробно — `docs/audit-groq-413.md`. Ручной режим в лимитах не участвует.
+ - **Имена моделей протухают молча** — и у Groq, и у OpenRouter. Наличие в каталоге OpenRouter ≠ доступность (часть бесплатных только по своему ключу). Перед диагностикой — `arl models`.
+ - **Reasoning-выхлоп бьёт по OTPM** → `reasoning_effort=none` для qwen3; gpt-oss принимают только `low/medium/high` — при смене модели проверять.
+ - **Промпты:** system на английском, вывод на русском.
+diff --git a/PLAN.md b/PLAN.md
+index 5aebcf1..980258f 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -244,7 +244,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ Ручная разметка источника — самый медленный шаг. Автомонтаж пишет её черновик сам; владелец решает на листе ревью. Правила клипа — `docs/REEL_SPEC.md`; значения — `config/r0.yaml autocut:` и `config/render.yaml`. Каждый шаг закрывает только просмотр владельца.
+ 
+-**Конвейер (`arl auto <источник>`, M63):** prepare → tx-check → map → autocut → общий черновик → `--apply` → рендер → посты → лист ревью.
++**Конвейер (`arl auto <источник>`, M63):** prepare → tx-check → map → сценарист или автомонтаж (M153, `autocut.auto_mode`) → общий черновик → `--apply` → рендер → посты → лист ревью.
+ 
+ | блок | что сделано | вехи |
+ |---|---|---|
+@@ -255,6 +255,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Автомонтаж | `arl autocut`: строки монтажа из карты; каждое предложение проходит настоящие проверки `--apply`, отказ заменяется; крючок по интересу, петля вопрос → ответ, холодный старт — тизер из второй половины клипа, судимый моделью как тизер; начало, дающее контекст; плашка-заголовок по одному алгоритму; у клипов источника не повторяются открытие, заголовок и мысль | M56, M60, M61, M65, M68, M70–M77, M81, M83, M86, M92, M106, M107, M112 |
+ | Генераторы и ритм | генераторы montage / passage / mixed (по умолчанию mixed); правило прыжков — не больше двух, кусок после дальнего прыжка держится дольше, последний — половину; глубина опор `lean_depth`; судья начала вне отбора; число клипов по длине источника (`clips_every_min`); `--ac ключ=значение` меняет любое поле `autocut:` на один прогон | M119–M122 |
+ | Сценарист | `arl autocut <src> --scenario --llm sonnet` или `haiku`: названная модель пишет ролики по всему тексту, код проверяет каждую строку правилами автоматического пути; few-shot — клипы владельца из других источников; ответ кэшируется | M123, M123b |
++| Кто пишет в `arl auto` | `autocut.auto_mode` (`scenario` — решение владельца 2026-10-26 для текущей работы; `autocut` — бесплатно), модель `autocut.scenario_llm`; на прогон `--mode`, `--scenario-llm`; сценарист не ответил — автомонтаж с пометкой в итоге. Переключатели — README | M153 |
+ | Посты и экспорт | `arl describe`: пост 3–5 предложений словами ролика, хэштеги только из сказанного (местоимения и служебные — никогда) → `<rid>.post.txt`; `arl article` — лонгриды из тем карты; `arl crosspost` / `arl export` — клипы, обложки и тексты в `export/` для импорта. Публикации нет | M90, M93, M94, M100, M101, M104 |
+ | Транскрипция | whisper.cpp на gamebox и `arl tx-compare`; `arl tx-use` переключает транскрипт источника; `arl tx-punct` переносит концы предложений Groq (или модели) на слова локального транскрипта; Groq в два прохода — слова без промпта, концы предложений с промптом (`groq.dual`, включён) | M62, M64, M111, M113, M124 |
+ | Слова-паразиты | отдельно стоящие паразиты скрыты в субтитрах и изредка вырезаны из звука по правилам вычистки; сценарист их избегает (исключение к правилу «экран = звук» — решение владельца) | M126 |
+@@ -270,7 +271,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ **Замеры.** Урожай черновиков на трёх источниках вырос с 7 до 40; покрытие клипов владельца (кандидат накрывает ≥ 50 % клипа) — 9 из 31 при `clips_every_min: 2`; на семи источниках с добором (M140) — 40 из 66. Стиль владельца на 66 клипах семи источников: 48 без прыжков, 12 с одним, 6 с двумя, ни одного с тремя. Судьи начала (Haiku, Groq) принимают начала владельца так же часто, как случайные, — сигнала вкуса владельца в них нет, поэтому они вне отбора.
+ 
+-**Ждут владельца:** громкость одним усилением на источник (m147, на слух); `HF_TOKEN` для замера разделения говорящих (m141); решения кнопками на листе ревью (для вкуса и автоправок «переделать»); автомонтаж или сценарист в `arl auto` по умолчанию. Незаконченные мысли при явном `e:` (PXL r06, IMG_6848 r06) — владелец: «переделать», правка — копией файла ответа (m150). **Старые гейты** (m18_final, m88, m94, m101, m102, m105, m112, m115, m126, m131, m134, m136) закрыты владельцем 2026-10-26 и удаляются.
++**Ждут владельца:** громкость одним усилением на источник (m147, на слух); `HF_TOKEN` для замера разделения говорящих (m141); решения кнопками на листе ревью (для вкуса и автоправок «переделать»). Незаконченные мысли при явном `e:` (PXL r06, IMG_6848 r06) — владелец: «переделать», правка — копией файла ответа (m150). **Старые гейты** (m18_final, m88, m94, m101, m102, m105, m112, m115, m126, m131, m134, m136) закрыты владельцем 2026-10-26 и удаляются.
+ 
+ ---
+ 
+diff --git a/PROJECT_GUIDE.md b/PROJECT_GUIDE.md
+index dce607a..9896194 100644
+--- a/PROJECT_GUIDE.md
++++ b/PROJECT_GUIDE.md
+@@ -46,7 +46,8 @@ MAC ИЛИ СИСТЕМНИК (весь поток):
+   3. arl r                       # рендер → reels-out/<stem>/
+ 
+   или одной командой (M63):
+-  arl auto inputs/video.mp4      # prepare → tx-check → map → autocut → --apply → рендер → посты → лист ревью
++  arl auto inputs/video.mp4      # prepare → tx-check → map → сценарист|автомонтаж → --apply → рендер → посты → лист ревью
++  arl auto inputs/video.mp4 --mode autocut   # бесплатный автомонтаж вместо сценариста (переключатели — README)
+ ```
+ 
+ Пункт меню «Анализ + рендер» и флаг `--render` совмещают шаги 2 и 3. В батче рендер готового манифеста идёт **фоном**, пока анализируется следующий источник: сеть и GPU перестают простаивать по очереди. Одновременно рендерится не более одного манифеста.
+@@ -103,7 +104,7 @@ Sidecar-файлы рядом с манифестом (`.discarded.json`, `.bloc
+ 
+ Оба пути дают одно и то же — список блоков со score; манифест отличается полем `selection_source`.
+ 
+-- **Автомонтаж** *(облако предлагает, код проверяет)* — основной автоматический путь для новых источников (M56+). `arl map` строит карту мыслей источника (роль, сила, опоры, тема, энергия голоса); `arl autocut` собирает из неё строки монтажа (генератор, правило прыжков, крючок, холодный старт, плашка) либо `--scenario` отдаёт весь текст названной модели. Каждое предложение каждой строки проходит настоящие проверки `--apply`; не прошедшее заменяется или клип отбрасывается. Результат — черновик `reviews/<stem>_auto_*.txt` той же грамматики, что ручная разметка; дальше он идёт по ручному пути. Подробно — `R0_SPEC.md` §13.
++- **Автомонтаж** *(облако предлагает, код проверяет)* — основной автоматический путь для новых источников (M56+). `arl map` строит карту мыслей источника (роль, сила, опоры, тема, энергия голоса); `arl autocut` собирает из неё строки монтажа (генератор, правило прыжков, крючок, холодный старт, плашка) либо `--scenario` отдаёт весь текст названной модели. Кто пишет ролики в `arl auto` — `config/r0.yaml autocut.auto_mode` (решение владельца 2026-10-26 для текущей работы: сценарист), на прогон `--mode`; сценарист не ответил — автомонтаж. Каждое предложение каждой строки проходит настоящие проверки `--apply`; не прошедшее заменяется или клип отбрасывается. Результат — черновик `reviews/<stem>_auto_*.txt` той же грамматики, что ручная разметка; дальше он идёт по ручному пути. Подробно — `R0_SPEC.md` §13.
+ 
+ Ручная разметка давно больше, чем оценка: это монтажный лист — границы по предложениям, вырезы из середины, холодный старт, крупный план, ключевые слова, перестановка тактами, заголовок-плашка, подпись. Грамматика — `PLAN.md` (M1.6, «Грамматика ответа») и `R0_SPEC.md` §11.
+ 
+diff --git a/README.md b/README.md
+index 76f2ea1..ed10f65 100644
+--- a/README.md
++++ b/README.md
+@@ -58,6 +58,18 @@
+           лист ревью ◄── describe (посты) ◄── render ◄── --apply (проверки каждого клипа)
+ ```
+ 
++**Переключатели `arl auto`** (M153; значения по умолчанию — в `config/r0.yaml`, раздел `autocut:`, и `config/render.yaml`):
++
++| что | как переключить |
++|---|---|
++| кто пишет ролики: сценарист (платный Claude) или автомонтаж (бесплатно) | `autocut.auto_mode`; на один прогон `arl auto … --mode scenario \| autocut`. Сценарист не ответил (нет ключа, ошибка API) — источник идёт автомонтажом, итог это называет |
++| модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
++| тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
++| модель карты и постов (бесплатные) | `--llm auto \| cloud \| local \| none` |
++| расшифровка нового видео | `--tx groq \| local` |
++| рендер, музыка, папка | `--no-render`, `--music <трек>`, `--gate <имя>` |
++| остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
++
+ Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
+ 
+ **Determinism-first:** LLM только предлагает и ранжирует кандидатов; финальные границы,
+@@ -150,7 +162,7 @@ source /путь/к/autoreels/aliases.sh
+ | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
+ | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
+ | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
+-| `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → autocut → --apply → рендер → посты |
++| `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
+ | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
+ | `arl autocut <ист>` | черновик монтажа из карты; `--ac ключ=значение` — поле `autocut:` на один прогон |
+ | `arl autocut <ист> --scenario --llm sonnet` | сценарист: ролики пишет названная модель Claude, код проверяет |
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 5ba4181..2a41c4b 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -400,6 +400,13 @@ autocut:
+   # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
+   scenario_tone: ""
+   scenario_timeout_sec: 300   # … the whole talk in one request
++  # M153 — who writes the reels in `arl auto` (owner 2026-10-26: «сценарист по умолчанию для текущей работы»):
++  #   scenario — the scenarist (paid Claude, scenario_llm; the answer is cached per request in data/cache/scenario/);
++  #              if it cannot answer (no key, API error), arl auto falls back to the free autocut and says so;
++  #   autocut  — the free code-built montage (map → clips).
++  # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
++  auto_mode: scenario
++  scenario_llm: sonnet
+   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
+   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
+                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 7e6c84c..c392124 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -116,7 +116,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ 
+ **Переключение расшифровки** (M64). Новое видео: `arl auto <видео> --tx local|groq` (или `backend:` в `config/transcribe.yaml`). Готовый источник: `arl tx-use <манифест> groq|local|local-<tag>` — выбранная расшифровка идёт в кэш, `transcript_params_key` манифеста указывает на неё; построенное по прежней (карта речи, выравнивание, интонация, карта, проверка, черновики auto) уходит в `transcripts/_archive/<stem>/<ключ>/` и `reviews/_archive/…`, обратное переключение возвращает его. Разметка владельца не трогается — команда называет файлы, которые `--apply` больше не примет (другой отпечаток блоков). Варианты whisper.cpp: `arl tx-compare <манифест> --tag <имя> [--prompt "…"]` → `transcripts/<stem>.local-<имя>.transcript.json`; `whispercpp.prompt` — подсказка стиля пунктуации, её куски тоже ищет `tx-check`; с подсказкой при `max_context: 0` берётся `-mc prompt_context` (M64b: при `-mc 0` whisper.cpp подсказку выбрасывает — вариант «p1» вышел слово в слово как без неё). Подсказка точек не вернула (M64b: p2 8,1, p3 7,0 концов на 100 слов против 8,9 без неё и 13,1 у Groq), поэтому `arl tx-punct <манифест> [--src local|local-<tag>]` (M64c) переносит концы предложений Groq на те же слова локальной расшифровки (слова сопоставляются по порядку; слова, время и всё вне совпавших участков не трогаются; следующему слову — заглавная) → `transcripts/<stem>.<src>-gp.transcript.json`, дальше `arl tx-use <манифест> <src>-gp`. Флаги whisper.cpp точек не возвращают (M111, `arl tx-compare … --wc ключ=значение`: без VAD 5,5 концов на 100 слов, полная large-v3 3,8 при 7× времени, против 10,3 у Groq). **M116:** `arl tx-compare <манифест> --tag <имя> --groq-prompt "<текст>"` (пустой — без подсказки) — вариант Groq с другой подсказкой, нарезка как в работе → `transcripts/<stem>.groq-<имя>.transcript.json` (кэш и манифест не трогаются). **M124:** `groq.dual` в `config/transcribe.yaml` — каждый кусок аудио идёт в Groq дважды: без подсказки (слова и время; с подсказкой Groq терял слова и вписывал её в текст) и с ней (только концы предложений, переносятся на те же слова, как `arl tx-punct`). Касается новых видео; кэш расшифровки отдельный. Проверка на готовом источнике — `arl tx-compare <манифест> --groq-dual --tag <имя>`. **M113:** `arl tx-punct <манифест> --src <src> --by llm [--llm cloud|local]` — концы предложений ставит модель: она видит кусок с пронумерованными словами (`tx_check.punct_chunk_words`) и называет номера последних слов предложений, код ставит знаки; слова, время и прежние знаки не меняются, ответ с номером вне куска не принимается, после второго такого ответа кусок остаётся как был → `transcripts/<stem>.<src>-lp.transcript.json` и ответы модели `….punct_raw.json`; `--llm local` — всё на gamebox.
+ 
+-**Конвейер одной командой** (M63). `arl auto <видео|манифест…> [--music трек] [--gate имя] [--no-render]`: видеофайл → `arl run` (видео остаётся на месте) → `arl prepare` (карта речи, выравнивание, интонация, движение, черновик разметки, сухой план) → `arl tx-check` → `arl map` (готовая карта сохраняется) → `arl autocut` → общий черновик `reviews/<stem>_auto_all.txt` (строки разметки + строки сборок) → `--apply` без `--install` (не прошёл — берётся только черновик сборок, его строки уже проверены) → рендер в `_gate/<имя>/` и лист ревью. Готовые этапы пропускаются сами; упавший этап останавливает этот источник с причиной, следующий идёт дальше; в конце — итог по источникам. Ничего не ставится.
++**Конвейер одной командой** (M63). `arl auto <видео|манифест…> [--mode scenario|autocut] [--scenario-llm haiku|sonnet] [--music трек] [--gate имя] [--no-render]`: видеофайл → `arl run` (видео остаётся на месте) → `arl prepare` (карта речи, выравнивание, интонация, движение, черновик разметки, сухой план) → `arl tx-check` → `arl map` (готовая карта сохраняется) → `arl autocut` (M153: сценарист `--scenario`, если `autocut.auto_mode: scenario` или `--mode scenario`; не ответил — автомонтаж) → общий черновик `reviews/<stem>_auto_all.txt` (строки разметки + строки сборок) → `--apply` без `--install` (не прошёл — берётся только черновик сборок, его строки уже проверены) → рендер в `_gate/<имя>/` и лист ревью. Готовые этапы пропускаются сами; упавший этап останавливает этот источник с причиной, следующий идёт дальше; в конце — итог по источникам. Ничего не ставится.
+ 
+ **Расшифровка на gamebox** (M62). `backend: whispercpp` в `config/transcribe.yaml` — whisper.cpp на gamebox по ssh (`whispercpp:` — хост, пути, модель, VAD): аудио → WAV 16 кГц → scp → `whisper-cli -ml 1 -sow -oj -mc 0 [--vad]` → JSON обратно; без initial_prompt (у Groq он протекал в текст), без чанков. `arl tx-compare <манифест…> | --all [--force]` расшифровывает источник на gamebox в `transcripts/<stem>.local.transcript.json` (не в кэш — манифесты остаются на расшифровке Groq) и сравнивает пословно с Groq: сколько слов совпало, что есть только у одной, пунктуация (концы предложений на 100 слов), выдумки на речи и «звук без слов» у обеих, самые длинные расхождения → `transcripts/<stem>.txcompare.json`. Куски initial_prompt Groq (по 5 слов) — известные выдумки для `tx-check` и предупреждений клипов.
+ 
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 5dff556..2864b3c 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -10130,14 +10130,17 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
+ 
+ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
+              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
+-             encoder: str | None = None, music: str | None = None, tx: str | None = None) -> int:
++             encoder: str | None = None, music: str | None = None, tx: str | None = None,
++             mode: str | None = None, scenario_llm: str | None = None) -> int:
+     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+ 
+     0. a video file → arl run (transcript + manifest; the video stays where it is);
+     1. arl prepare: speech map → alignment → intonation → motion → label draft → dry plan;
+     2. arl tx-check (report → transcripts/<stem>.txcheck.json);
+     3. arl map (LLM; an existing map is kept);
+-    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply);
++    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply). M153: who writes the reels —
++       r0.yaml autocut.auto_mode (scenario = the scenarist, paid model autocut.scenario_llm; autocut = the free
++       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut;
+     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
+        if it fails, the autocut draft alone (its lines passed the checks);
+     6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
+@@ -10151,6 +10154,15 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         _post_auto = bool(load_r0_config(_root / "config" / "r0.yaml").post.auto)
+     except Exception:  # noqa: BLE001 — no config: as before
+         _post_auto = False
++    try:                                               # M153: who writes the reels (config, then --mode)
++        _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
++        _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
++    except Exception:  # noqa: BLE001 — no config: the free autocut, as before
++        _mode, _scen_llm = "autocut", "sonnet"
++    _mode = mode or _mode
++    _scen_llm = scenario_llm or _scen_llm
++    print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
++          f" — переключить: --mode autocut | scenario ===", flush=True)
+     for target in targets:
+         tp = Path(target)
+         mpath = None
+@@ -10193,7 +10205,17 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         if err:
+             results.append((stem, "map", err))
+             continue
+-        err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
++        _scen_note = ""
++        if _mode == "scenario":
++            err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
++                                                                        llm=_scen_llm, scenario=True))
++            if err:
++                _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
++                print(f"  ⚠ {_scen_note}", flush=True)
++                err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
++                                                               llm=llm))
++        else:
++            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
+         if err:
+             results.append((stem, "autocut", err))
+             continue
+@@ -10205,10 +10227,11 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         used = combined
+         err = stage("план (--apply без --install)",
+                     lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto"))
+-        note = ""
++        note = _scen_note
+         if err:
+-            note = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
+-            print(f"  ⚠ {note}", flush=True)
++            _fb = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
++            note = (note + "; " if note else "") + _fb
++            print(f"  ⚠ {_fb}", flush=True)
+             used = auto_draft
+             err = stage("план по черновику сборок",
+                         lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto"))
+@@ -12706,6 +12729,11 @@ def _build_parser():
+     pau.add_argument("--encoder", default=None)
+     pau.add_argument("--music", default=None, help="фоновая музыка (файл в music/)")
+     pau.add_argument("--tx", default=None, help="M64: расшифровка нового видео: groq | local (whisper.cpp на gamebox)")
++    pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
++                     help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
++                          "по умолчанию r0.yaml autocut.auto_mode")
++    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
++                     help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
+     pau.add_argument("--root", default=None)
+     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
+ 
+@@ -13223,7 +13251,8 @@ def main(argv=None) -> int:
+         elif args.cmd == "auto":
+             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
+                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
+-                            encoder=args.encoder, music=args.music, tx=args.tx)
++                            encoder=args.encoder, music=args.music, tx=args.tx,
++                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None))
+         elif args.cmd == "dictate":
+             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 3e8f8e8..3535967 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -308,6 +308,8 @@ class AutocutConfig(BaseModel):
+     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
+     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
+     scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
++    auto_mode: Literal["autocut", "scenario"] = "autocut"   # M153: who writes the reels in arl auto
++    scenario_llm: Literal["haiku", "sonnet"] = "sonnet"     # M153: the scenarist's model in arl auto (paid)
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+diff --git a/tests/test_m153_auto_mode.py b/tests/test_m153_auto_mode.py
+new file mode 100644
+index 0000000..6b7cb25
+--- /dev/null
++++ b/tests/test_m153_auto_mode.py
+@@ -0,0 +1,89 @@
++"""M153: who writes the reels in arl auto — the scenarist (owner 2026-10-26, config) or the free autocut."""
++from __future__ import annotations
++
++from tests.test_auto import _stub
++
++
++def _autocut_kw(calls):
++    return [c[2] for c in calls if c[0] == "autocut"]
++
++
++def _set_mode(tmp_path, mode):
++    cfg = tmp_path / "config" / "r0.yaml"
++    text = cfg.read_text(encoding="utf-8")
++    assert "  auto_mode: scenario\n" in text
++    cfg.write_text(text.replace("  auto_mode: scenario\n", f"  auto_mode: {mode}\n"), encoding="utf-8")
++
++
++def test_m153_config_default_is_off_in_code_and_scenario_in_repo_config():
++    from autoreels.core.config import AutocutConfig
++    from autoreels.__main__ import load_r0_config
++    from tests.test_montage import REPO_ROOT
++    assert AutocutConfig().auto_mode == "autocut"          # flag off in code = the M63 sequence
++    ac = load_r0_config(REPO_ROOT / "config" / "r0.yaml").autocut
++    assert ac.auto_mode == "scenario" and ac.scenario_llm == "sonnet"
++
++
++def test_m153_auto_uses_the_scenarist_with_its_named_model(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    kw = _autocut_kw(calls)
++    assert len(kw) == 1 and kw[0]["scenario"] is True and kw[0]["llm"] == "sonnet"
++    assert next(c for c in calls if c[0] == "map")[2]["llm"] == "auto"     # the map stays on the free models
++    assert "сценарист (sonnet)" in capsys.readouterr().out
++
++
++def test_m153_mode_autocut_is_the_m63_sequence(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    _set_mode(tmp_path, "autocut")
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    kw = _autocut_kw(calls)
++    assert len(kw) == 1 and not kw[0].get("scenario") and kw[0]["llm"] == "auto"
++
++
++def test_m153_cli_mode_overrides_the_config(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, mode="autocut") == 0
++    assert not _autocut_kw(calls)[0].get("scenario")
++    calls.clear()
++    _set_mode(tmp_path, "autocut")
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, mode="scenario", scenario_llm="haiku") == 0
++    kw = _autocut_kw(calls)[0]
++    assert kw["scenario"] is True and kw["llm"] == "haiku"
++
++
++def test_m153_scenarist_failure_falls_back_to_the_free_autocut(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++    inner = cli.cmd_autocut
++
++    def autocut(m, **k):
++        if k.get("scenario"):
++            calls.append(("autocut", (m,), k))
++            return 1
++        return inner(m, **k)
++    monkeypatch.setattr(cli, "cmd_autocut", autocut)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    kw = _autocut_kw(calls)
++    assert [bool(k.get("scenario")) for k in kw] == [True, False] and kw[1]["llm"] == "auto"
++    out = capsys.readouterr().out
++    assert "сценарист не ответил" in out and "автомонтаж" in out
++
++
++def test_m153_cli_parser_has_mode_and_scenario_llm():
++    from autoreels.__main__ import _build_parser as build_parser
++    a = build_parser().parse_args(["auto", "x.mp4", "--mode", "autocut", "--scenario-llm", "haiku"])
++    assert a.mode == "autocut" and a.scenario_llm == "haiku"
++    a = build_parser().parse_args(["auto", "x.mp4"])
++    assert a.mode is None and a.scenario_llm is None
