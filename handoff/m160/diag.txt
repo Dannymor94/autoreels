@@ -1,0 +1,67 @@
+== reels-out/IMG_6848/_gate/m158/r01.mp4
+[hevc @ 0x12c633030] CABAC_MAX_BIN : 27
+[hevc @ 0x12c60f940] CABAC_MAX_BIN : 30
+[hevc @ 0x12660ea70] CABAC_MAX_BIN : 27
+[hevc @ 0x12660ea70] CABAC_MAX_BIN : 30
+1,0.000000,I
+1,2.002000,I
+1,4.004000,I
+1,6.006000,I
+1,8.008000,I
+1,10.010000,I
+1,12.012000,I
+1,14.014000,I
+== reels-out/IMG_6848/_gate/m156/r02.mp4
+[hevc @ 0x15b1063a0] CABAC_MAX_BIN : 28
+[hevc @ 0x120e0ee80] CABAC_MAX_BIN : 28
+1,0.000000,I
+1,2.002000,I
+1,4.004000,I
+1,6.006000,I
+1,8.008000,I
+1,10.010000,I
+1,12.012000,I
+1,14.014000,I
+total 270824
+drwxr-xr-x@  5 danny  wheel       160 26 окт 21:35 .
+drwxrwxrwt  99 root   wheel      3168 26 окт 21:35 ..
+-rw-r--r--@  1 danny  wheel  44499257 26 окт 21:35 r01_from5s.mp4
+-rw-r--r--@  1 danny  wheel  47076049 26 окт 21:35 r01_hev1.mp4
+-rw-r--r--@  1 danny  wheel  47076049 26 окт 21:35 r01_hvc1_remux.mp4
+[ERROR] r01: seam inside word — cut at 1368.434s is inside [1368.216, 1368.666]
+[ERROR] r01: seam inside word — cut at 1371.540s is inside [1369.936, 1371.686]
+[ERROR] r01: seam inside word — cut at 1374.505s is inside [1374.376, 1374.726]
+[ERROR] r01: seam inside word — cut at 1376.183s is inside [1375.696, 1376.466]
+[ERROR] r01: seam inside word — cut at 1392.127s is inside [1391.850, 1392.606]
+[ERROR] r01: seam inside word — cut at 1393.358s is inside [1392.656, 1393.426]
+[ERROR] r01: seam inside word — cut at 1397.921s is inside [1397.376, 1398.186]
+[ERROR] r01: seam inside word — cut at 1402.004s is inside [1401.776, 1402.086]
+[ERROR] r01: seam inside word — cut at 1405.687s is inside [1405.476, 1405.866]
+[ERROR] r01: seam inside word — cut at 1415.524s is inside [1415.176, 1416.046]
+[ERROR] r01: seam inside word — cut at 1416.147s is inside [1416.096, 1416.446]
+[ERROR] r01: seam inside word — cut at 1422.991s is inside [1422.736, 1423.326]
+[ERROR] r01: seam inside word — cut at 1423.611s is inside [1423.376, 1423.826]
+  ✓ клип 1/1: r01 (1:12) готово
+готово: 1 клипов → /mnt/data/autoreels/reels-out/IMG_6848/_gate/m160h264
+m160h264: ошибок 0, I-кадров 37
+[ERROR] r01: seam inside word — cut at 1368.434s is inside [1368.216, 1368.666]
+[ERROR] r01: seam inside word — cut at 1371.540s is inside [1369.936, 1371.686]
+[ERROR] r01: seam inside word — cut at 1374.505s is inside [1374.376, 1374.726]
+[ERROR] r01: seam inside word — cut at 1376.183s is inside [1375.696, 1376.466]
+[ERROR] r01: seam inside word — cut at 1392.127s is inside [1391.850, 1392.606]
+[ERROR] r01: seam inside word — cut at 1393.358s is inside [1392.656, 1393.426]
+[ERROR] r01: seam inside word — cut at 1397.921s is inside [1397.376, 1398.186]
+[ERROR] r01: seam inside word — cut at 1402.004s is inside [1401.776, 1402.086]
+[ERROR] r01: seam inside word — cut at 1405.687s is inside [1405.476, 1405.866]
+[ERROR] r01: seam inside word — cut at 1415.524s is inside [1415.176, 1416.046]
+[ERROR] r01: seam inside word — cut at 1416.147s is inside [1416.096, 1416.446]
+[ERROR] r01: seam inside word — cut at 1422.991s is inside [1422.736, 1423.326]
+[ERROR] r01: seam inside word — cut at 1423.611s is inside [1423.376, 1423.826]
+  ✓ клип 1/1: r01 (1:12) готово
+готово: 1 клипов → /mnt/data/autoreels/reels-out/IMG_6848/_gate/m160hevc
+m160hevc: ошибок 2, I-кадров 37
+  /tmp/m160/r01_hev1.mp4: ошибок 2
+  /tmp/m160/r01_hvc1_remux.mp4: ошибок 2
+  /tmp/m160/r01_from5s.mp4: ошибок 2
+  reels-out/IMG_6848/_gate/m160h264/r01.mp4: ошибок 0
+  reels-out/IMG_6848/_gate/m160hevc/r01.mp4: ошибок 2
