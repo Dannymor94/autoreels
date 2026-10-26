@@ -760,6 +760,10 @@ class AudioProcessing(BaseModel):
     loudnorm_enabled: bool = True
     target_lufs: float = -14.0     # I=  (целевая интегральная громкость, LUFS)
     true_peak: float = -1.5        # TP= (потолок истинного пика, дБ)
+    # M147: dynamic = one-pass loudnorm per clip (its gain settles in the first second: −2.4 dB in the first 0.3 s, m143);
+    # source = one gain for the whole source (measured once), a peak limiter — no settling, clips of a source equally loud
+    loudnorm_mode: str = "dynamic"
+    static_gain_db: float | None = None   # set by the render for loudnorm_mode: source (not in yaml)
     loudness_range: float = 11.0   # LRA=
     # Шумоподавление (afftdn) — ВЫКЛ по умолчанию: агрессивно может съедать голос.
     denoise_enabled: bool = False

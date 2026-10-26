@@ -67,7 +67,7 @@ start_pad_sec: 0
 # M146 (owner: «давай» — an exception to invariant 10 by his decision): a planned clip's first word GLUED to the word
 # before it (heard pause under this) starts this much before its onset, in that word's tail, so its first consonant is
 # not lost (m143/m145: 46 of 59 draft starts have no pause to cut in). Goes with render.yaml start_fade_in_sec. 0 = off.
-start_preroll_sec: 0
+start_preroll_sec: 0.06     # M146 on (owner on m146b: «ровнее, плавнее»)
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
 max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
                                 # слово после терминального знака (.?!), иначе слово с заглавной.

@@ -1439,8 +1439,45 @@ def _loudnorm_str(ap: AudioProcessing) -> str:
     меток по числу сэмплов (asetpts=N/SR/TB) на Яндекс Диске дала чистый старт.
     Звук после склейки непрерывен по построению, поэтому его время = номер сэмпла / частота.
     """
+    g = getattr(ap, "static_gain_db", None)
+    if getattr(ap, "loudnorm_mode", "dynamic") == "source" and g is not None:
+        # M147: one gain for the whole source + a true-peak limiter (latency compensated) — nothing settles at the start
+        return (f"volume={_num(round(g, 2))}dB,alimiter=limit={10 ** (ap.true_peak / 20):.4f}:level=disabled:latency=1,"
+                f"aresample=48000,asetpts=N/SR/TB")
     return (f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)},"
             f"aresample=48000,asetpts=N/SR/TB")
+
+
+def _parse_loudnorm_json(text: str) -> dict | None:
+    """The JSON block ffmpeg's loudnorm prints with print_format=json (the last {...} of stderr)."""
+    import json as _json
+    i, j = text.rfind("{"), text.rfind("}")
+    if i < 0 or j < i:
+        return None
+    try:
+        return _json.loads(text[i:j + 1])
+    except ValueError:
+        return None
+
+
+_SOURCE_GAIN: dict[str, float] = {}
+
+
+def _source_gain(source: Path, ffmpeg_bin: str, ap: AudioProcessing) -> float:
+    """M147: the gain that brings the whole source to target_lufs (loudnorm measuring pass over its audio, once per
+    source per process). Raises RenderError when ffmpeg prints no measurement — never a silent default."""
+    key = str(source)
+    if key not in _SOURCE_GAIN:
+        r = subprocess.run([ffmpeg_bin, "-hide_banner", "-nostats", "-i", str(source), "-vn", "-af",
+                            f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)}"
+                            f":print_format=json", "-f", "null", "-"], capture_output=True, text=True, check=False)
+        m = _parse_loudnorm_json(r.stderr)
+        if not m or "input_i" not in m:
+            raise RenderError(f"loudness of {source.name} not measured (loudnorm_mode: source): rc {r.returncode}")
+        _SOURCE_GAIN[key] = float(ap.target_lufs) - float(m["input_i"])
+        print(f"  громкость источника: {float(m['input_i']):.1f} LUFS → усиление {_SOURCE_GAIN[key]:+.1f} dB "
+              f"(пик {float(m.get('input_tp', 0)):.1f} dBTP, ограничитель {ap.true_peak:g})", flush=True)
+    return _SOURCE_GAIN[key]
 
 
 def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:
@@ -2801,6 +2838,8 @@ def _render_segments(
     enc = render_cfg.encoder
     aud = render_cfg.audio
     ap = render_cfg.audio_processing
+    if ap.loudnorm_enabled and getattr(ap, "loudnorm_mode", "dynamic") == "source":
+        ap = ap.model_copy(update={"static_gain_db": _source_gain(source, ffmpeg_bin, ap)})
     music = render_cfg.music
     # Профиль: явный аргумент > env RENDER_PROFILE > активный из конфига. Кодек+битрейт —
     # из профиля; но явный encoder (флаг/env) может переопределить только кодек (Mac-дев:

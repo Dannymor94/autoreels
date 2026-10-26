@@ -70,6 +70,9 @@ audio_processing:
   loudnorm_enabled: true
   target_lufs: -14.0
   true_peak: -1.5             # потолок истинного пика, дБ
+  # M147 (m143: one-pass loudnorm settles in the first second — −2.4 dB in the first 0.3 s of IMG_6848 clips; the owner:
+  # «первая фраза плохо слышна»): dynamic = as before; source = one gain for the whole source + a peak limiter.
+  loudnorm_mode: dynamic
   loudness_range: 11.0
   # Шумоподавление (afftdn) для фонового гула/шипения — ВЫКЛ по умолчанию (агрессивно съедает голос).
   denoise_enabled: false
@@ -99,7 +102,7 @@ audio_processing:
   audio_edge_fade_sec: 0.01
   # M146: the clip's sound fades in over this, so the pre-rolled tail of the word before (r0.yaml start_preroll_sec) is
   # not heard as a word. 0 = off.
-  start_fade_in_sec: 0
+  start_fade_in_sec: 0.03    # M146 on (owner on m146b: «ровнее, плавнее»)
 
 # Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
 # mp3 64k mono 16kHz: 8 000 байт/с → 46 мин = ~22 МБ (под лимит Groq 25 МБ).
