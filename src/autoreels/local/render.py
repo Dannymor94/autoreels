@@ -443,6 +443,10 @@ def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: st
         args += ["-preset", preset, "-g", "30"]
     if _is_amf(codec) and quality:
         args += ["-quality", quality]
+    if _is_vaapi(codec):
+        # M158: VAAPI without a rate-control mode picks its own (RX 580: constant QP) and ignores -b:v / -maxrate —
+        # m156 clips came out at 7.0 Mbit/s against 4.9 from videotoolbox at the same profile.
+        args += ["-rc_mode", "VBR"]
     if _is_amf(codec) and rate_control == "cqp" and qp is not None:
         # Постоянный QP: качество приоритетно, размер плавает (для hevc_hq).
         args += ["-rc", "cqp", "-qp_i", str(qp), "-qp_p", str(qp + 2), "-pix_fmt", pix_fmt]

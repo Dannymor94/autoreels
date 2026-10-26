@@ -82,3 +82,10 @@ def test_m156_probe_and_progress_runner_use_the_vaapi_command(monkeypatch):
     assert seen[-1][1:3] == ["-vaapi_device", "/dev/dri/renderD128"]
     R._run_ffmpeg_with_progress(_cut("libx264", vf="null"), reel_id="r01", idx=1, total=1, duration_sec=10.0)
     assert seen[-1] == _cut("libx264", vf="null")
+
+
+def test_m158_vaapi_gets_vbr_rate_control_others_do_not():
+    vq = R._video_quality_args("hevc_vaapi", "medium", "5M", "yuv420p")
+    assert vq[vq.index("-rc_mode") + 1] == "VBR" and vq[vq.index("-b:v") + 1] == "5M"
+    for c in ("libx264", "hevc_videotoolbox", "hevc_amf", "libx265"):
+        assert "-rc_mode" not in R._video_quality_args(c, "medium", "5M", "yuv420p")
