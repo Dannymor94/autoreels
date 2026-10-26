@@ -1,0 +1,167 @@
+diff --git a/PLAN.md b/PLAN.md
+index 7eaa35a..29c40cd 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -220,7 +220,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | 7. Маркеры `⏸` в выгрузке | реализован (M98, `review_pause_from_map`) |
+ | 8. «Кусок идёт подряд» в монтаже (без стыка) | реализован (M134, `montage.join_heard`) |
+ 
+-`speech_map`: **включён M149** (2026-10-26): карта у всех 8 источников, хуже 0 (замер на файлах ответов не дал пар — старый формат без `# source:`, совпадение начал < 60%; флаг включён по правилу «хуже 0»). Без флага план клипа и так читает готовую карту речи; флаг включает её для авторитма планов и тактов. **Этап C** — удалить точечные звуковые пробы хвоста в пользу карты.
++`speech_map`: **включён M149** (2026-10-26): карта у всех 8 источников, хуже 0 (замер на файлах ответов не дал пар — старый формат без `# source:`, совпадение начал < 60%; флаг включён по правилу «хуже 0»). Без флага план клипа и так читает готовую карту речи; флаг включает её для авторитма планов и тактов. **Этап C** (M164): точечная звуковая проба хвоста (`_tail_find_word_end`, silencedetect) удалена — конец последнего слова и начало следующей речи только из карты; без карты клип сохраняет конец разметки с предупреждением. Замер перед удалением — m164.
+ 
+ **Раскладка на все источники** (после просмотра): `speech_map: true`, повторное `--apply` всех источников с файлами ответов, рендер, выборочный просмотр 2–3 клипов на источник. IMG_6848 и остальные пока собраны по старой логике («ии», «ну», «и всё» на конце, «такая истор…» в хвосте).
+ 
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index d6d7605..1f28f2b 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -146,6 +146,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M144: начало не склеено.** m143: у 11 из 12 клипов IMG_6848 m126 перед первым словом не было паузы — речь до него шла вплотную к резу, первая согласная терялась, и воздух M142 сдвинуть рез не мог. С `autocut.start_pause_min` первый звук клипа (начало и холодный старт) требует столько слышимой тишины перед собой; склеенное начало чинится теми же шагами, что начало, непонятное без предыдущего (контекст перед, более поздняя фраза, другая мысль), у сценариста — фраза раньше или позже. 0 = как раньше. **M145:** если начало само по себе понятное и только склеено, а починить нечем, клип остаётся с пометкой, а не выбрасывается (m144: жёсткое правило снизило покрытие клипов владельца с 40 до 27 из 66).
+ - **M146: пред-ролл склеенного начала (флаг, решение владельца — исключение из инварианта 10).** Если перед первым словом клипа слышимой паузы меньше `start_preroll_sec`, звук начинается на столько раньше — в хвосте предыдущего слова, — а рендер наращивает звук за `start_fade_in_sec` (`render.yaml`): первая согласная не теряется, хвост чужого слова не слышен как слово. 0 = как раньше.
+ - **M147: громкость одним усилением на источник.** Однопроходный `loudnorm` подстраивается в первую секунду клипа (m143: −2.4 dB в первые 0.3 с у IMG_6848). `loudnorm_mode: source` (`render.yaml`) измеряет громкость всего источника один раз и даёт всем его клипам одно усиление до `target_lufs` плюс ограничитель пика `true_peak` — в начале ничего не проседает, клипы одного источника одинаково громкие. `dynamic` = как раньше.
++- **M164 (M1.8, этап C): хвост — только по карте речи.** Звуковая проба конца последнего слова (silencedetect) удалена; без карты клип не сдвигается, рендер предупреждает.
+ - **M156: рендер на видеокарте Linux (VAAPI).** `--encoder hevc_vaapi | h264_vaapi`: устройство, загрузка в GPU в конце видеофильтра, без выходного `-pix_fmt`; другие кодеры — та же команда (`docs/GAMEBOX.md`).
+ - **M151: опции концовки (выключены).** `ending_loop` — клип с холодным стартом без ухода в чёрное (зацикливается в тизер); `end_freeze_sec` — последний кадр держится столько после клипа, затем чёрное; `end_sting_path` — звук после последнего слова (клип удлиняется на его длину). Проверка «кадр завис» пропускает только добавленный стоп-кадр.
+ - **M152: правила сценариста.** Не открывать на отсылке назад, не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера (владелец об IMG_6848 r01 и r09); ролик, открытый отсылкой, — в конце пула.
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index cd7e459..43c4ec5 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -2347,57 +2347,6 @@ def _beat_segs_from_smap(
+     return result
+ 
+ 
+-def _tail_find_word_end(
+-    ffmpeg_bin: str | Path,
+-    source: str | Path,
+-    t0: float,
+-    t1: float,
+-    *,
+-    margin: float = 0.2,
+-    noise_db: float = -40.0,
+-    min_sil: float = 0.08,
+-) -> tuple[float, float | None]:
+-    """Locate where the last subtitle word ends and where next speech begins.
+-
+-    Searches [t0-0.1, t1+margin+0.1] with silencedetect.  Returns:
+-      word_end   – first silence_start after t0 (fallback: t1)
+-      next_onset – first silence_end after word_end (fallback: None)
+-
+-    min_sil=0.08 is intentional: smaller values detect tight inter-word gaps
+-    (e.g. 99 ms between "понятно?" and "Когда").  Raising to >=0.15 misses those
+-    gaps and computes wrong next_onset, causing the fallback to overshoot into the
+-    next sentence.  Stop-consonant false positives (50–100 ms closures that put
+-    word_end too early) are instead rejected by the 0.6*(t1-t0) sanity floor in
+-    the caller.
+-
+-    volumedetect/silencedetect log at INFO; loglevel must not be 'error'.
+-    """
+-    import re as _re
+-    ws = max(0.0, t0 - 0.1)
+-    wlen = t1 + margin + 0.1 - ws
+-    if wlen < 0.02:
+-        return t1, None
+-    cmd = [
+-        str(ffmpeg_bin), "-hide_banner", "-loglevel", "info",
+-        "-ss", f"{ws:.6f}", "-i", str(source),
+-        "-t", f"{wlen:.6f}", "-ac", "1",
+-        "-af", f"silencedetect=noise={noise_db}dB:duration={min_sil:.3f}",
+-        "-f", "null", "-",
+-    ]
+-    try:
+-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stderr
+-    except Exception:
+-        return t1, None
+-    sil_starts = [float(m) + ws for m in _re.findall(r"silence_start:\s*([\d.]+)", out)]
+-    sil_ends   = [float(m) + ws for m in _re.findall(r"silence_end:\s*([\d.]+)", out)]
+-    word_end = next((s for s in sil_starts if s > t0), None)
+-    we = word_end if word_end is not None else t1
+-    next_onset = next((e for e in sil_ends if e > we), None)
+-    return we, next_onset
+-
+-
+-
+-
+ def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
+     """Invariant: clip end must include the last subtitle word.
+ 
+@@ -3417,58 +3366,11 @@ def _render_segments(
+                                     f"but no room tone found (nearest silence too short), skipping",
+                                     flush=True,
+                                 )
+-            elif not _planned:
+-                _nw_start = getattr(reel, "tail_next_word_start", None)
+-                if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
+-                    # Intruded tail: next phrase starts before segment end.
+-                    # Cut to word_end + pad, strictly before the intruder — video and audio end together.
+-                    _last = reel.subtitles[-1]
+-                    _word_end, _ = _tail_find_word_end(
+-                        ffmpeg_bin, source, _last.t0, _last.t1, margin=_lw_margin)
+-                    _pad = 0.10
+-                    _new_end = min(_word_end + _pad, _nw_start - _pad)
+-                    _new_end = max(_new_end, _last.t0 + 0.04)
+-                    _new_end = min(_new_end, _nw_start)  # hard cap when gap <= pad
+-                    if len(segs) > 1:
+-                        _new_end = round(_new_end * _fps()) / _fps()
+-                    if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
+-                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
+-                        clip_dur = sum(s.end - s.start for s in segs)
+-                elif reel.subtitles:
+-                    # Audio-based tail placement: detect where the last word actually ends and where
+-                    # the next sentence begins, then place the clip end between them.
+-                    # Only runs when clip end is within the tail adjustment window (end ≤ t1+margin+ε);
+-                    # if the clip extends far beyond the last subtitle word the gap is intentional.
+-                    _last = reel.subtitles[-1]
+-                    _last_t1 = _last.t1
+-                    if segs[-1].end <= _last_t1 + _lw_margin + 0.05:
+-                        _word_end, _next_onset = _tail_find_word_end(  # type: ignore[assignment]
+-                            ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
+-                        )
+-                        _pad = 0.10
+-                        # Sanity floor: word_end must be >= t0 + 0.6*(t1-t0).
+-                        # A shorter detected end is likely a stop-consonant closure (п/т/к),
+-                        # not the actual word boundary.  Exception: when next_onset < floor
+-                        # the gap is too tight to reach the floor without crossing into the
+-                        # next sentence — "next onset forces earlier", accept word_end as-is.
+-                        _floor = _last.t0 + 0.6 * (_last_t1 - _last.t0)
+-                        _onset_forces = _next_onset is not None and _next_onset < _floor
+-                        if not _onset_forces and _word_end < _floor:
+-                            # stop-consonant false positive → fall back to timestamp-based end
+-                            _new_end = _last_t1 + _lw_margin
+-                            if _next_onset is not None:
+-                                _new_end = min(_new_end, _next_onset - _pad)
+-                        else:
+-                            _new_end = _word_end + _pad
+-                            if _next_onset is not None:
+-                                _cap = max(_word_end + 0.04, _next_onset - _pad)
+-                                _new_end = min(_new_end, _cap)
+-                        _new_end = max(_new_end, _last.t0 + 0.04)
+-                        if len(segs) > 1:
+-                            _new_end = round(_new_end * _fps()) / _fps()
+-                        if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
+-                            segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
+-                            clip_dur = sum(s.end - s.start for s in segs)
++            elif not _planned and reel.subtitles:
++                # M164 (M1.8 stage C): where the last word ends and the next speech begins comes from the speech
++                # map only (invariant 9). The point audio probe of the tail is gone (M164): without a
++                # map (flag off, build failed) the clip keeps the end its markup gave it — nothing is guessed.
++                print(f"  ⚠ {reel.id}: нет карты речи — конец клипа как в разметке (без звуковой пробы)", flush=True)
+             # Convert audio word-end to output timeline for fade parameter computation.
+             _word_end_out: float | None
+             if _word_end is not None:
+diff --git a/tests/test_m164_stage_c.py b/tests/test_m164_stage_c.py
+new file mode 100644
+index 0000000..5f0adeb
+--- /dev/null
++++ b/tests/test_m164_stage_c.py
+@@ -0,0 +1,10 @@
++"""M164 (M1.8 stage C): the tail is placed by the speech map only — no point audio probe left in the render."""
++from __future__ import annotations
++
++import inspect
++
++
++def test_m164_no_point_tail_probe_in_render():
++    from autoreels.local import render as R
++    assert not hasattr(R, "_tail_find_word_end")
++    assert "silencedetect=" not in inspect.getsource(R)
