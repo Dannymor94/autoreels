@@ -5,7 +5,7 @@
 ## Зачем
 По m156 рендер на видеокарте gamebox работает, длительности клипов совпали с Mac до миллисекунды. Два расхождения:
 1. **Битрейт 7,0 Мбит/с против 4,9 у Mac** при том же профиле. Без режима скорости VAAPI на RX 580 кодирует с постоянным QP и не слушает `-b:v`/`-maxrate`. Патч: для `*_vaapi` добавляется `-rc_mode VBR`, остальные кодеры не меняются (тест).
-2. **Лица не искались**: «нет OpenCV», рамка встала по источнику, а не по лицу, и картинка не та, что на Mac. `opencv-python-headless` есть в зависимостях проекта, значит установка в venv на gamebox прошла не полностью.
+2. **Лица не искались**: «нет OpenCV», рамка встала по источнику, а не по лицу, и картинка не та, что на Mac. `opencv-python-headless` есть в зависимостях проекта, значит установка в venv на gamebox прошла не полностью. Владелец: доставить на gamebox **все** зависимости проекта.
 
 ## Правила
 Как в m156:
@@ -26,15 +26,29 @@ git add src tests docs && git commit -q -m "Render (M158): VAAPI gets -rc_mode V
 ```
 Ожидается: `applied`; pytest — все прошли; push прошёл. Если main ушёл вперёд — `git pull --rebase origin main` и снова push.
 
-## Шаг 2. gamebox: OpenCV в venv
+## Шаг 2. gamebox: все зависимости проекта (владелец 2026-10-26: «доустановим всё на gamebox»)
+Сначала код из worktree, затем полная установка с видимым выводом, проверка импорта и все тесты на gamebox — так видно, что окружение полное, а не только OpenCV.
 ```bash
-ssh gamebox 'cd /mnt/data/autoreels && .venv/bin/python -c "import cv2; print(\"cv2\", cv2.__version__)" 2>&1 | tail -1'
-ssh gamebox 'cd /mnt/data/autoreels && .venv/bin/pip install "opencv-python-headless>=4.8,<5" 2>&1 | tail -3; .venv/bin/python -c "import cv2; print(\"cv2\", cv2.__version__)"'
-ssh gamebox 'cd /mnt/data/autoreels && .venv/bin/pip check 2>&1 | tail -5'
+rsync -a --delete --exclude .git --exclude .venv --exclude handoff --exclude inputs --exclude reels-out --exclude data \
+  --exclude reviews --exclude transcripts --exclude config/render.local.yaml "$W/" gamebox:/mnt/data/autoreels/
+ssh gamebox 'cd /mnt/data/autoreels && .venv/bin/pip install -U pip -q && .venv/bin/pip install -e ".[dev]" 2>&1 | tail -5' | tee "$M/handoff/m158/pip.txt"
+ssh gamebox 'cd /mnt/data/autoreels && .venv/bin/pip check 2>&1 | tail -5; .venv/bin/python - <<PY
+import importlib
+for m in ("cv2", "numpy", "parselmouth", "httpx", "pydantic", "yaml", "autoreels.local.render", "autoreels.cloud.plan"):
+    try:
+        mod = importlib.import_module(m); print("ok ", m, getattr(mod, "__version__", ""))
+    except Exception as e:
+        print("НЕТ", m, type(e).__name__, str(e)[:80])
+PY' | tee -a "$M/handoff/m158/pip.txt"
+ssh gamebox 'cd /mnt/data/autoreels && .venv/bin/python -m pytest -q -p no:cacheprovider 2>&1 | tail -8' | tee "$M/handoff/m158/pytest_gamebox.txt"
 ```
-Ожидается строка `cv2 4.x`. Если колеса для Python 3.14 нет и pip собирает из исходников с ошибкой — СТОП с выводом pip. Решим: Python 3.13 через `uv` в `/mnt/data`.
+Ожидается: в `pip.txt` все модули `ok` (cv2 4.x), `pip check` без проблем; pytest на gamebox — все прошли, кроме тестов, которым нужны ключи из `.env` или локальные данные Mac (`test_run_dispatch_*`, `test_r0_output_parsing_survives_lower_max_tokens`): их перечислить.
 
-`pip check` назовёт и другие недостающие зависимости. Их доставить тем же `pip install`, имена — в отчёт.
+Если колеса для Python 3.14 нет и pip собирает из исходников с ошибкой — поставить Python 3.13 без sudo и пересоздать venv:
+```bash
+ssh gamebox 'cd /mnt/data && (command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh) && ~/.local/bin/uv python install 3.13 && cd autoreels && rm -rf .venv && ~/.local/bin/uv venv -p 3.13 .venv && ~/.local/bin/uv pip install -p .venv -e ".[dev]" 2>&1 | tail -3'
+```
+затем проверка импорта и pytest заново. Не получилось и так — СТОП с выводом.
 
 ## Шаг 3. Код на gamebox и рендер тех же трёх клипов
 ```bash
@@ -52,7 +66,7 @@ for g in m158 m146b; do for f in reels-out/IMG_6848/_gate/$g/r0[1-3].mp4; do ech
 
 ## Шаг 4. Отчёт
 `handoff/m158/REPORT.md`: коммит, pytest, версия cv2, `pip check`, `render.txt`, `probe.txt`, секунд на 3 клипа.
-`TMPDIR=$(mktemp -d) bash handoff/bin/report.sh m158 render.txt probe.txt`; затем `git worktree remove "$W"`.
+`TMPDIR=$(mktemp -d) bash handoff/bin/report.sh m158 pip.txt pytest_gamebox.txt render.txt probe.txt`; затем `git worktree remove "$W"`.
 Владельцу — одна строка: «gamebox: битрейт X против 4,9 у Mac, лица находятся; сравни reels-out/IMG_6848/_gate/m158 и _gate/m146b — кадр и субтитры одинаковые?».
 
 Статус: IMPLEMENTED, GATE PENDING.
