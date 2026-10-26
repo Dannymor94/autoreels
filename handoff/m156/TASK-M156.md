@@ -57,19 +57,20 @@ git add src tests config docs CLAUDE.md && git commit -m "Render (M156): VAAPI e
 Ожидается: `свободно`, `applied`, pytest — все прошли, коммит запушен.
 
 ## Шаг 3. Проект на gamebox и пробный рендер трёх клипов
+**Проект — на HDD: `/mnt/data/autoreels`** (владелец; SSD системный, там 157 ГБ, исходники и клипы туда не класть). venv, исходники и клипы — там же. Нет прав на `/mnt/data` (mkdir упал) → СТОП, владельцу: `ssh -t gamebox 'sudo mkdir -p /mnt/data/autoreels && sudo chown $USER: /mnt/data/autoreels'`.
 Код и данные — rsync с Mac: репозиторий может быть закрыт для gamebox. Гигабайтные папки не копируются. Исходник — только IMG_6848.
 ```bash
 rsync -a --delete --exclude .venv --exclude inputs --exclude inputs-archive --exclude reels-out --exclude export \
-  --exclude data/cache --exclude handoff --exclude .git ./ gamebox:autoreels/
-ssh gamebox 'mkdir -p ~/.local/share/fonts autoreels/inputs'
+  --exclude data/cache --exclude handoff --exclude .git ./ gamebox:/mnt/data/autoreels/
+ssh gamebox 'mkdir -p ~/.local/share/fonts /mnt/data/autoreels/inputs && ls -ld /mnt/data/autoreels'
 scp /System/Library/Fonts/Supplemental/Arial*.ttf gamebox:.local/share/fonts/ && ssh gamebox 'fc-cache -f >/dev/null; fc-match Arial'
 F=$(.venv/bin/python -c "
 import json; from pathlib import Path; from autoreels.core.models import Manifest; from autoreels.local.render import resolve_source
 m = Manifest.model_validate_json(Path('reviews/IMG_6848_m146b.review.json').read_text()); print(resolve_source(m, 'inputs'))")
-echo "исходник: $F"; rsync -a --progress "$F" gamebox:autoreels/inputs/ | tail -1
-ssh gamebox 'cd autoreels && python3 -m venv .venv && .venv/bin/pip install -q -e ".[dev]" 2>&1 | tail -2; printf "role: both\n" > config/render.local.yaml; .venv/bin/python -m autoreels doctor 2>&1 | tail -5'
-ssh gamebox 'cd autoreels && s=$(date +%s); flock /mnt/data/locks/heavy.lock .venv/bin/python -m autoreels render --manifest reviews/IMG_6848_m146b.review.json --reels 1-3 --gate m156 --encoder hevc_vaapi 2>&1 | tail -8; echo "$(( $(date +%s) - s )) с (с ожиданием замка)"' | tee handoff/m156/render.txt
-mkdir -p reels-out/IMG_6848/_gate/m156 && rsync -a gamebox:autoreels/reels-out/IMG_6848/_gate/m156/ reels-out/IMG_6848/_gate/m156/
+echo "исходник: $F"; rsync -a --progress "$F" gamebox:/mnt/data/autoreels/inputs/ | tail -1
+ssh gamebox 'cd /mnt/data/autoreels && python3 -m venv .venv && .venv/bin/pip install -q -e ".[dev]" 2>&1 | tail -2; printf "role: both\n" > config/render.local.yaml; .venv/bin/python -m autoreels doctor 2>&1 | tail -5'
+ssh gamebox 'cd /mnt/data/autoreels && s=$(date +%s); flock /mnt/data/locks/heavy.lock .venv/bin/python -m autoreels render --manifest reviews/IMG_6848_m146b.review.json --reels 1-3 --gate m156 --encoder hevc_vaapi 2>&1 | tail -8; echo "$(( $(date +%s) - s )) с (с ожиданием замка)"' | tee handoff/m156/render.txt
+mkdir -p reels-out/IMG_6848/_gate/m156 && rsync -a gamebox:/mnt/data/autoreels/reels-out/IMG_6848/_gate/m156/ reels-out/IMG_6848/_gate/m156/
 for f in reels-out/IMG_6848/_gate/m156/r0[1-3]*.mp4 reels-out/IMG_6848/_gate/m146b/r0[1-3]*.mp4; do echo "$f $(ffprobe -v error -show_entries stream=codec_name,width,height,bit_rate -show_entries format=duration -of csv=p=0 "$f" | tr '\n' ' ')"; done | tee handoff/m156/probe.txt
 ```
 Ожидается:
