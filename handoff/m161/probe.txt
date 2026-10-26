@@ -1,0 +1,6 @@
+reels-out/IMG_6848/_gate/m161/r01.mp4 h264,6916549 72.322000  ошибок 0
+reels-out/IMG_6848/_gate/m161/r02.mp4 h264,6982385 65.448000  ошибок 0
+reels-out/IMG_6848/_gate/m161/r03.mp4 h264,7050752 42.842000  ошибок 0
+reels-out/IMG_6848/_gate/m146b/r01.mp4 hevc,4894303 72.322000  ошибок 0
+reels-out/IMG_6848/_gate/m146b/r02.mp4 hevc,4893928 65.448000  ошибок 0
+reels-out/IMG_6848/_gate/m146b/r03.mp4 hevc,4889017 42.842000  ошибок 0
