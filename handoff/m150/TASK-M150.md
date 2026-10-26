@@ -1,70 +1,99 @@
-# TASK M150 (окно MAIN, Mac): «переделать» незаконченные мысли PXL r06 и IMG_6848 r06 — копией файла ответа
+# TASK M150 v2 (окно MAIN, Mac): «переделать» r06 PXL и IMG_6848 — разметка в текущей нумерации блоков
 
-Файлы — ветка `handoff`, папка `handoff/m150/`: `TASK-M150.md`, `find_src.py`, `endcheck.py`. Выполнять **после M149b** (одна задача за раз). Около 20 минут, два клипа рендера, без платных моделей, без патча.
+Файлы — ветка `handoff`, папка `handoff/m150/`: `TASK-M150.md`, `endcheck.py`. Около 30 минут, до пяти клипов рендера, без платных моделей, без патча.
 
-## Зачем
-У двух клипов владельца явный `e:` стоит на незаконченном предложении. Код такой конец не двигает (инвариант 10), только предупреждает (`open_thought`). Владелец 2026-10-26 об этих клипах: «переделать». Правка — продлить `e:` до предложения, которым говорящий закрывает мысль. **Оригиналы `reviews/*_answer.txt` не меняются**: правится копия `reviews/<T>_m150.txt`, применяется как гейт, владелец сравнивает и решает сам (переносит правку в свой файл или на листе ревью).
+## Что выяснил первый проход (find.*.txt)
+- **PXL r06**, 862.58–903.51, `open_thought=True`. Начинается на «Но» (dangling start), кончается «…но именно для него это нужно было.», вплотную к следующей речи. Старый `PXL_review_answer.txt` к текущему манифесту не применяется: r09 — «starts mid-sentence».
+- **IMG_6848 r06**, 1405.69–1441.33, `open_thought=False`. Начинается на «Но», кончается законченной фразой. Старый `img6848_answer.txt` не даёт такого клипа.
+
+Старые файлы не годятся. Поэтому делается свежая выгрузка блоков текущего манифеста и маленькие разметки на один клип с тем же отрезком, что r06. Варианты:
+- `a` — как сейчас (`s:N0 e:N1`);
+- `b` — конец продлён до законченной фразы (только PXL);
+- `c` — начало на одно предложение раньше, чтобы было понятно, чему возражает «Но»; у PXL — вместе с продлённым концом.
+
+Старые файлы ответов и манифесты не трогаются, всё идёт как гейт. Выбирает владелец.
 
 ## Правила
 1. Шаг упал или не совпал с «Ожидается» → **СТОП**: шаг, команда, последние 40 строк.
-2. `reviews/*_answer.txt` только читаются (проверка `shasum` в начале и в конце). `--install`, `arl auto` не запускать. `reviews/<S>.review.json` сохраняется и возвращается. Манифест `manifests/PXL_20260729_085910095_34f06abf.json` не трогать: только читается при `--apply`.
+2. `reviews/*_answer*.txt` не трогать (проверка `shasum -c` в конце). Манифесты только читаются. `--install`, `arl auto` не запускать. `reviews/<S>.review.json` сохраняется и возвращается.
 3. Рендер один за раз.
 
-## Шаг 1. Найти, из какого файла установлен r06
-В m149 старые файлы ответов не совпали с ручными манифестами: `PXL_review_answer.txt` к манифесту PXL — `rc=1`, `img6848_answer.txt` — 25 % совпадения. Значит, r06 мог быть установлен из другой версии разметки (рядом лежат `*_answer_2026-10-02.txt`, `*_answer_montage*.txt`, `*_review.txt`). `find_src.py` применяет каждую версию к манифесту и ищет клип, совпадающий с r06 манифеста.
+## Шаг 1. Выгрузки и r06 манифестов
 ```bash
 arl() { .venv/bin/python -m autoreels "$@"; }
 cd /Users/danny/Documents/autoreels; git pull -q; git log --oneline -1; pgrep -fl "autoreels" || echo "не запущен"
 bash handoff/bin/take.sh m150; mkdir -p handoff/m150
-shasum reviews/*_answer*.txt | tee handoff/m150/answers.sha
-.venv/bin/python handoff/m150/find_src.py "PXL_20260729_085910095_34f06abf" 'reviews/PXL_review*.txt' 'reviews/PXL_20260729*answer*.txt' 2>&1 | tee handoff/m150/find.PXL.txt
-.venv/bin/python handoff/m150/find_src.py "IMG_6848" 'reviews/img6848*.txt' 'reviews/IMG_6848*answer*.txt' 2>&1 | tee handoff/m150/find.IMG.txt
-```
-Ожидается: первая строка — «манифест r06: …», у r06 есть предупреждение `e: ends on incomplete sentence` или `open_thought=True`. Дальше по строке на файл. Подходящий файл — тот, где `rc=0` и «r06 манифеста ↔ rNN open_thought=True». Его имя — `A`, номер клипа в нём — `RID` (обычно r06). **СТОП с обоими `find.*.txt`**, если у источника подходящего файла нет или у r06 манифеста нет предупреждения о незаконченной мысли.
-
-Для каждого источника (`S`, `A`, `RID`; `T` — имя `A` без `.txt`):
-```bash
-R="reviews/$S.review.json"; B="handoff/m150/$S.review.json.before"; rm -f "$B"; [ -f "$R" ] && cp "$R" "$B"
-arl blocks "manifests/$S.json" --apply "$A" > "handoff/m150/apply.$T.orig.txt" 2>&1; echo "rc=$?"; cp "$R" "reviews/${S}_m150a.review.json"
-grep -n "incomplete\|open_thought" "handoff/m150/apply.$T.orig.txt" | head
-```
-Найти строку клипа `RID`. В его предупреждении `e: ends on incomplete sentence ('…')` — последние четыре слова. В файле `A` есть строка оценки с `| e:N`, и предложение `[N]` под ней (или в выгрузке блока) кончается этими словами. Записать номер строки файла `L` и `N`.
-
-## Шаг 2. Копия с продлённым `e:`, применение, проверка
-Копия: та же строка `L`, `e:N` → `e:N+1`. Если предложение `[N+1]` помечено `…→` или не кончается на `.`, `!`, `?`, взять `N+2`. Дальше `+2` не продлевать: тогда записать «не нашлось законченного предложения в пределах двух» и для этого файла перейти к шагу 3 без рендера. Больше ничего в копии не менять.
-```bash
-cp "$A" "reviews/${T}_m150.txt"
-L=…; N=…; M=…   # строка файла, было e:N, стало e:M
-.venv/bin/python - "reviews/${T}_m150.txt" "$L" "$N" "$M" <<'PY'
-import re, sys
-f, L, N, M = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
-ls = open(f, encoding="utf-8").read().split("\n")
-new = re.sub(rf"(\|\s*e:){N}(?!\d)", rf"\g<1>{M}", ls[L - 1], count=1)
-assert new != ls[L - 1], f"в строке {L} нет e:{N}"
-ls[L - 1] = new; open(f, "w", encoding="utf-8").write("\n".join(ls))
+shasum reviews/*_answer*.txt > handoff/m150/answers.sha
+for S in PXL_20260729_085910095_34f06abf IMG_6848; do
+  .venv/bin/python - "$S" <<'PY' | tee "handoff/m150/r06.$S.txt"
+import json, sys
+S = sys.argv[1]
+r = {x["id"]: x for x in json.load(open(f"manifests/{S}.json"))["reels"]}["r06"]
+print(f"r06 {r['start']:.2f}–{r['end']:.2f} open_thought={r.get('open_thought')}")
+print(" ".join(w["word"] for w in r.get("subtitles") or []))
 PY
-diff "$A" "reviews/${T}_m150.txt"      # ровно одна изменённая строка
-arl blocks "manifests/$S.json" --apply "reviews/${T}_m150.txt" > "handoff/m150/apply.$T.m150.txt" 2>&1; echo "rc=$?"
-cp "$R" "reviews/${S}_m150.review.json"
-if [ -f "$B" ]; then cp "$B" "$R" && cmp "$B" "$R" && echo "review.json возвращён"; else rm -f "$R" && echo "review.json не было — убран"; fi
-.venv/bin/python handoff/m150/endcheck.py "reviews/${S}_m150a.review.json" "reviews/${S}_m150.review.json" "$RID" | tee "handoff/m150/end.$T.txt"
-grep -c "\[ERROR\]" "handoff/m150/apply.$T.m150.txt"
+  arl blocks "manifests/$S.json" --review --out "handoff/m150/$S.export.txt" 2>&1 | tail -1
+  head -3 "handoff/m150/$S.export.txt"
+done
 ```
-Ожидается: `diff` — одна строка; `rc=0`; «review.json возвращён»; в `end.$T.txt` у «стало» `open_thought=False` (или None), строка «добавлено: …» с законченной фразой; `[ERROR]` — 0. Если ошибка `--apply` (например, следом реплика ведущего или стык блоков) — не СТОП: записать текст ошибки, рендер этого клипа не делать.
+Ожидается: в `r06.*.txt` отрезки 862–903 и 1405–1441 и текст клипов. Выгрузки начинаются со строк `# source:` и `# fingerprint:`.
 
-## Шаг 3. Рендер r06 из копии
+## Шаг 2. Разметки на один клип
+По тексту `r06.$S.txt` найти в выгрузке блок или блоки, покрывающие отрезок r06. Нумерация предложений сквозная через склейку (R0_SPEC §11). Определить:
+- `N0` — первое предложение r06, обычно на «Но»;
+- `N1` — последнее предложение r06.
+
+Каждая разметка — копия выгрузки. Оценка `5` стоит только на блоке r06; если r06 захватывает соседний блок — склейка `+`, или `-`, если нужен предыдущий блок для `c`. Все остальные строки оценок пустые, как в выгрузке. Меняются только поля:
+
+| файл | поля |
+|---|---|
+| `reviews/<S>_m150a.txt` | `s:N0 e:N1` |
+| `reviews/<S>_m150b.txt` (только PXL) | `s:N0 e:N2` |
+| `reviews/<S>_m150c.txt` | PXL: `s:N0-1 e:N2`; IMG: `s:N0-1 e:N1` |
+
+Здесь `N2` — `N1+1`. Если `[N1+1]` помечено `…→` или не кончается на `.`, `!`, `?`, то `N2` = `N1+2`. Дальше не продлевать: тогда написать «нет законченной фразы в пределах двух», `b` не делать, у `c` оставить `e:N1`.
+
+Если `[N0-1]` сам начинается на «Но / И / А / То есть / Это / Вот», `c` не делать и записать это.
+
 ```bash
-arl render --manifest "reviews/${S}_m150.review.json" --reels "$RID" --gate m150 --encoder hevc_videotoolbox 2>&1 | tail -3
-ls "reels-out/$S/_gate/m150/"
+for S in PXL_20260729_085910095_34f06abf IMG_6848; do
+  R="reviews/$S.review.json"; B="handoff/m150/$S.review.json.before"; rm -f "$B"; [ -f "$R" ] && cp "$R" "$B"
+  for V in a b c; do
+    [ -f "reviews/${S}_m150$V.txt" ] || continue
+    arl blocks --apply "reviews/${S}_m150$V.txt" > "handoff/m150/apply.$S.$V.txt" 2>&1; rc=$?; echo "$S $V rc=$rc"
+    rm -f "reviews/${S}_m150$V.review.json"; [ $rc = 0 ] && cp "$R" "reviews/${S}_m150$V.review.json"
+  done
+  if [ -f "$B" ]; then cp "$B" "$R" && cmp "$B" "$R" && echo "review.json возвращён"; else rm -f "$R" && echo "review.json не было — убран"; fi
+  for V in b c; do
+    [ -f "reviews/${S}_m150$V.review.json" ] && .venv/bin/python handoff/m150/endcheck.py "reviews/${S}_m150a.review.json" "reviews/${S}_m150$V.review.json" r01 > "handoff/m150/end.$S.$V.txt" && cat "handoff/m150/end.$S.$V.txt"
+  done
+  grep -c "\[ERROR\]" handoff/m150/apply.$S.*.txt
+done
 ```
-Ожидается один клип без `[ERROR]`. Сравнивать владелец будет с текущим клипом `reels-out/$S/` того же номера.
+Ожидается:
+- `rc=0` у `a` и, по возможности, у остальных; «review.json возвращён» дважды; `[ERROR]` — 0.
+- У `a` начало и конец около r06 манифеста.
+- У PXL `b` — `open_thought` False/None и строка «добавлено: …».
+- У `c` начало раньше. `endcheck` покажет «начало или середина тоже изменились» — так и должно быть.
 
-## Шаг 4. Отчёт
+Ошибка `--apply` у `b` или `c` — не СТОП: текст ошибки в отчёт, этот вариант не рендерить. Ошибка у `a` — СТОП.
+
+## Шаг 3. Рендер
 ```bash
+for S in PXL_20260729_085910095_34f06abf IMG_6848; do
+  for V in a b c; do
+    [ -f "reviews/${S}_m150$V.review.json" ] || continue
+    arl render --manifest "reviews/${S}_m150$V.review.json" --reels r01 --gate m150$V --encoder hevc_videotoolbox 2>&1 | tail -1
+  done
+done
+ls reels-out/*/_gate/m150?/r*.mp4 | tee handoff/m150/clips.txt
 shasum -c -q handoff/m150/answers.sha && echo "оригиналы не тронуты"
 ```
-`handoff/m150/REPORT.md`: для каждого файла строка `L`, `e:N → e:M`, `end.$T.txt` целиком, пути клипов, «оригиналы не тронуты».
-`bash handoff/bin/report.sh m150 end.*.txt`
-Владельцу — по строке на клип: «r06 <источник>: добавлено “…” (+X с) — reels-out/<S>/_gate/m150/; нравится — перенеси `e:M` в свой файл ответа (строка L) или поправь на листе ревью».
+Ожидается: по клипу на каждый вариант, без `[ERROR]`; «оригиналы не тронуты».
+
+## Шаг 4. Отчёт
+`handoff/m150/REPORT.md`: по источнику — блоки, `N0`/`N1`/`N2`, тексты добавленных предложений (`[N2]`, `[N0-1]`), `end.*.txt`, `clips.txt`.
+`bash handoff/bin/report.sh m150 r06.*.txt end.*.txt clips.txt`
+Владельцу — по строке на источник: «r06 <источник>: a — как сейчас, b — + “…” в конце, c — + “…” в начале; reels-out/<S>/_gate/m150a|b|c — скажи букву».
 
 Статус: IMPLEMENTED, GATE PENDING.
