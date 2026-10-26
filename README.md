@@ -66,6 +66,7 @@
 | модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
 | тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
 | модель карты, судей и постов | `--llm auto \| cloud \| local \| none \| sonnet`; до `autocut.paid_until` `auto` = `autocut.paid_llm` (M157: промо-кредиты), после — бесплатные модели, а сценарист только с `--mode scenario` |
+| рендер на gamebox (видеокарта, H.264) | `arl render --manifest … --gate … --remote`, `arl auto … --remote` (M161; `config/render.yaml remote:`) |
 | черновики прогона под своими именами | `--tag <имя>` → `<ист>_auto_<имя>.txt`, `<ист>_auto_all_<имя>.txt`, `<ист>_<имя>.review.json`: черновики прежнего листа и его файл решений не трогаются |
 | расшифровка нового видео | `--tx groq \| local` |
 | рендер, музыка, папка | `--no-render`, `--music <трек>`, `--gate <имя>` |

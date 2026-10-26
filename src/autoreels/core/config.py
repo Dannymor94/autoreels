@@ -961,6 +961,15 @@ class SpeechMapConfig(BaseModel):
     own_tail_t1_margin_sec: float = 0.15  # iv_e <= last_t1 + margin → own tail (Whisper hint)
 
 
+class RemoteRender(BaseModel):
+    """M161: render on another machine over ssh (local/remote.py)."""
+    host: str = ""                        # ssh name; "" = off
+    root: str = ""                        # project folder there
+    encoder: str = "h264_vaapi"           # RX 580: HEVC breaks long clips (m160), H.264 is clean
+    profile: str = "h264"
+    lock: str = ""                        # flock file of the shared heavy lock there ("" = none)
+
+
 class RenderConfig(BaseModel):
     """Типизированный config/render.yaml."""
 
@@ -1040,6 +1049,7 @@ class RenderConfig(BaseModel):
     end_freeze_sec: float = Field(0.0, ge=0.0, le=5.0)   # hold the last frame this long after the clip, then black
     end_sting_path: str = ""              # a sound played after the clip ends (under the held frame); "" = none
     end_sting_volume: float = Field(0.8, ge=0.0, le=2.0)
+    remote: RemoteRender = Field(default_factory=RemoteRender)   # M161: arl render --remote, arl auto --remote
     continue_sec: float = Field(2.5, gt=0)
     continue_text: str = "Продолжение →"
     # M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»): where the face

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "r02",
+    "score": 75,
+    "reason": "overlap_dedup: overlaps r01",
+    "first_words": "В спальне у папы и мамы был закрытый шкаф. Мне все время было интересно, почему "
+  },
+  {
+    "id": "r01",
+    "score": 88,
+    "reason": "content_check: [CONTENT] r01: last word of final sentence 'доступе.' (t0=160.780) is missing from subtitles; actual last subtitle 'йоге' (t0=159.380)",
+    "first_words": "Ну да, вот я как-то говорил, что впервые"
+  },
+  {
+    "id": "r05",
+    "score": 85,
+    "reason": "content_check: [CONTENT] r05: last word of final sentence 'метода.' (t0=1719.190) is missing from subtitles; actual last subtitle 'мантра.' (t0=1712.990)",
+    "first_words": "Если собрать всю книгу и сжать до одной,"
+  },
+  {
+    "id": "r08",
+    "score": 82,
+    "reason": "content_check: [CONTENT] r08: last word of final sentence 'интересный.' (t0=2595.352) is missing from subtitles; actual last subtitle 'всего.' (t0=2592.192)",
+    "first_words": "Мы с вами сразу договариваемся, что что-то к"
+  },
+  {
+    "id": "r11",
+    "score": 78,
+    "reason": "content_check: [CONTENT] r11: last word of final sentence 'природе.' (t0=2156.661) is missing from subtitles; actual last subtitle 'где?' (t0=2153.341)",
+    "first_words": "На самом деле, это наш дом, в котором"
+  },
+  {
+    "id": "r12",
+    "score": 78,
+    "reason": "content_check: [CONTENT] r12: last word of final sentence 'скажу.' (t0=2630.398) is missing from subtitles; actual last subtitle 'всегда.' (t0=2622.052)",
+    "first_words": "Как говорится, я художник, я так вижу. Кому-то"
+  }
+]

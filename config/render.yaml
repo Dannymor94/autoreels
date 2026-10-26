@@ -255,6 +255,17 @@ ending_loop: false
 end_freeze_sec: 0
 end_sting_path: ""
 end_sting_volume: 0.8
+
+# M161: render on gamebox over ssh — `arl render --manifest … --remote`, `arl auto … --remote`. The code, the review copy,
+# the transcripts and the cached transcript go there, the source only when it is missing there (by content); the
+# render runs under the shared lock; the gate folder comes back. HEVC on the RX 580 breaks long clips (m160: CABAC
+# errors, green blocks) — H.264 on the GPU is clean.
+remote:
+  host: gamebox
+  root: /mnt/data/autoreels
+  encoder: h264_vaapi
+  profile: h264
+  lock: /mnt/data/locks/heavy.lock
 continue_sec: 2.5
 continue_text: "Продолжение →"
 

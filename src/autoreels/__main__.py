@@ -4717,6 +4717,42 @@ def cmd_render(
     return all_outputs
 
 
+def cmd_render_remote(manifest_name: str, *, root=None, reels_filter: str | None = None, gate_name: str | None = None,
+                      music: str | None = None, run=None) -> int:
+    """M161: render a review copy on the remote machine (config/render.yaml `remote:`) into a gate folder and bring
+    the clips back (local/remote.py). Only gate renders: the real clips are never written from another machine."""
+    from autoreels.local.remote import RemoteRenderError, render_remote
+    _root = Path(root) if root else _project_root()
+    rcfg = load_render_config(_root / "config" / "render.yaml").remote
+    if not rcfg.host or not rcfg.root:
+        print("ошибка: удалённый рендер не настроен — config/render.yaml remote: host, root", file=sys.stderr)
+        return 2
+    if not gate_name:
+        print("ошибка: удалённый рендер — только в гейт (--gate <имя>)", file=sys.stderr)
+        return 2
+    review = Path(manifest_name)
+    if not review.is_absolute():
+        review = (Path.cwd() / review) if (Path.cwd() / review).is_file() else _root / review
+    try:
+        review.resolve().relative_to(_root.resolve())
+        m = Manifest.model_validate_json(review.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"ошибка: {manifest_name}: {type(exc).__name__}: {str(exc)[:160]}", file=sys.stderr)
+        return 2
+    try:
+        local_src = resolve_source(m, _root / "inputs")
+    except Exception:  # noqa: BLE001 — the remote may still have it
+        local_src = None
+    try:
+        render_remote(rcfg, root=_root, review=review, stem=Path(m.source).stem, source_sha256=m.source_sha256,
+                      local_source=local_src, reels=reels_filter or f"1-{len(m.reels)}", gate=gate_name,
+                      music=music, run=run, log=lambda s: print(s, flush=True))
+    except RemoteRenderError as exc:
+        print(f"ошибка: удалённый рендер — {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_preview(
     manifest_arg=None,
     *,
@@ -10132,7 +10168,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
              encoder: str | None = None, music: str | None = None, tx: str | None = None,
              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
-             today=None) -> int:
+             today=None, remote: bool = False) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
@@ -10269,9 +10305,15 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
                 results.append((stem, "apply", f"нет {review_json.name}: {type(exc).__name__}"))
                 continue
             if n:
-                err = stage(f"рендер {n} клипов → _gate/{gate}",
-                            lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
-                                               gate_name=gate, encoder=encoder, music=music, _raise_on_failure=False))
+                if remote:                     # M161: on the remote machine, clips back into the same gate
+                    err = stage(f"рендер {n} клипов на удалённой машине → _gate/{gate}",
+                                lambda: cmd_render_remote(str(review_json), root=_root, reels_filter=f"1-{n}",
+                                                          gate_name=gate, music=music))
+                else:
+                    err = stage(f"рендер {n} клипов → _gate/{gate}",
+                                lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
+                                                   gate_name=gate, encoder=encoder, music=music,
+                                                   _raise_on_failure=False))
                 if err:
                     results.append((stem, "render", err))
                     continue
@@ -12352,6 +12394,9 @@ def _build_parser():
     pd.add_argument("--gate", default=None, dest="gate",
                     help="название гейт-прогона; вывод идёт в reels-out/<источник>/_gate/<имя>/, "
                          "никогда не перезаписывает реальные клипы")
+    pd.add_argument("--remote", action="store_true",
+                    help="M161: рендер на машине из render.yaml remote: (gamebox, видеокарта, H.264) и клипы обратно; "
+                         "нужны --manifest и --gate")
     pd.add_argument("--transition", choices=["cut", "punch"], default=None,
                     help="переход на крупный план внутри окна: cut — склейка, punch — быстрый наезд "
                          "(переопределяет render.yaml shot_transition; M103)")
@@ -12755,6 +12800,8 @@ def _build_parser():
     pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
                      help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
                           "по умолчанию r0.yaml autocut.auto_mode")
+    pau.add_argument("--remote", action="store_true",
+                     help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
     pau.add_argument("--tag", default=None,
                      help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
                           "черновики прежнего листа и его файл решений не трогаются")
@@ -13180,6 +13227,12 @@ def main(argv=None) -> int:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
+            if getattr(args, "remote", False):                    # M161
+                if not args.manifest_name:
+                    print("ошибка: --remote нужен с --manifest", file=sys.stderr)
+                    return 2
+                return cmd_render_remote(args.manifest_name, reels_filter=args.reels_filter, gate_name=args.gate,
+                                         music=args.music)
             zoom_flag = {"on": True, "off": False}.get(args.zoom)   # None = из конфига
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
                        palette=args.palette, zoom=zoom_flag, music=args.music,
@@ -13279,7 +13332,7 @@ def main(argv=None) -> int:
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
                             encoder=args.encoder, music=args.music, tx=args.tx,
                             mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
-                            tag=getattr(args, "tag", None))
+                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False))
         elif args.cmd == "dictate":
             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
