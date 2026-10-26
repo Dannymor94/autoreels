@@ -1,0 +1,6 @@
+/Users/danny/Documents/autoreels/reels-out/IMG_6848/_gate/m156/r01.mp4 hevc,1080,1920,7022938 aac,183727 72.322000 
+/Users/danny/Documents/autoreels/reels-out/IMG_6848/_gate/m156/r02.mp4 hevc,1080,1920,7017859 aac,182052 65.448000 
+/Users/danny/Documents/autoreels/reels-out/IMG_6848/_gate/m156/r03.mp4 hevc,1080,1920,7032114 aac,186389 42.842000 
+/Users/danny/Documents/autoreels/reels-out/IMG_6848/_gate/m146b/r01.mp4 hevc,1080,1920,4894303 aac,178443 72.322000 
+/Users/danny/Documents/autoreels/reels-out/IMG_6848/_gate/m146b/r02.mp4 hevc,1080,1920,4893928 aac,178196 65.448000 
+/Users/danny/Documents/autoreels/reels-out/IMG_6848/_gate/m146b/r03.mp4 hevc,1080,1920,4889017 aac,181932 42.842000 

@@ -1,0 +1,13 @@
+  warning: web-safe: video codec is hevc, not h264 — web players may transcode and drop audio
+  кадр r02: лицо не искалось (нет OpenCV или кадров) — рамка источника
+
+клип 2/3: r02 (1:05)…
+  ✓ клип 2/3: r02 (1:05) готово
+  warning: web-safe: video codec is hevc, not h264 — web players may transcode and drop audio
+  кадр r03: лицо не искалось (нет OpenCV или кадров) — рамка источника
+
+клип 3/3: r03 (0:42)…
+  ✓ клип 3/3: r03 (0:42) готово
+  warning: web-safe: video codec is hevc, not h264 — web players may transcode and drop audio
+готово: 3 клипов → /mnt/data/autoreels/reels-out/IMG_6848/_gate/m156
+112 с (с ожиданием замка)
