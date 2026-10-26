@@ -54,9 +54,9 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
 
 - **Роль машины** задаётся в `config/render.local.yaml` (не в git): `role: analyze | render | both`. Машина с ролью `analyze` откажется рендерить.
 - **Mac** — рабочая машина полного цикла: анализ и рендер. Нужен ffmpeg с **libass** (выжигание субтитров, фильтр `ass`) и **videotoolbox** (напр. сборка из tap `homebrew-ffmpeg`). Кодек `hevc_videotoolbox` (передаётся `--encoder`; поле `codec` в `render.local.yaml` схемой не принимается). Исходники могут лежать на внешнем диске и обрабатываться на месте.
-- **Windows (системник)** — рендер и анализ, AMD → `hevc_amf`/`h264_amf`. Под VPN бывают обрывы SSL (`UNEXPECTED_EOF_WHILE_READING` одновременно у обоих провайдеров) — это сеть, не API.
+- **Системник** — теперь Ubuntu, это и есть gamebox (Ryzen 7, RX 580). Рендер на видеокарте через VAAPI: `--encoder hevc_vaapi | h264_vaapi` (M156, `docs/GAMEBOX.md`); AMF был только под Windows. Рендер на gamebox запускается под общим замком: `flock /mnt/data/locks/heavy.lock …`.
 - Между машинами через git ходят только **манифесты и калибровки**. Транскрипты, ревью, кэш, клипы — локальные.
-- **gamebox** (локальная модель, whisper.cpp) делится с озвучкой книги: один замок `flock` (`config/r0.yaml heavy_lock`, `docs/GAMEBOX.md`). Чужую работу не обрывать — замок ждёт; на gamebox из sudo — только `systemctl start|stop llama-server`.
+- **gamebox** (локальная модель, whisper.cpp) делится с озвучкой книги: один замок `flock` (`config/r0.yaml heavy_lock`, `docs/GAMEBOX.md`). Чужую работу не обрывать — замок ждёт; на gamebox из sudo — только `systemctl start|stop llama-server`; пакеты для рендера (ffmpeg, VAAPI) поставлены по решению владельца 2026-10-26 (M156), другие установки — только по его задаче.
 
 ## Технические ограничения
 

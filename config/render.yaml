@@ -12,6 +12,8 @@ encoder:
   # перекодируют → выбирать явно --profile hevc. Профиль — env-параметр (RENDER_PROFILE) или флаг
   # --profile. Кодеки — AMF (системник Windows AMD); Mac-дев без AMF переопределяет кодек через
   # RENDER_ENCODER (h264_videotoolbox/libx264), битрейт профиля остаётся.
+  # M156: Linux с AMD/Intel GPU (gamebox, RX 580) — --encoder hevc_vaapi | h264_vaapi (VAAPI через Mesa); устройство
+  # /dev/dri/renderD128, другое — env RENDER_VAAPI_DEVICE. Не прошёл пробный кадр — рендер берёт запасной кодер.
   profile: h264               # DELIVERY-дефолт: H.264 High — универсально совместим, web-плееры
                               #   (включая Yandex Disk) не перекодируют его, звук не теряется.
                               #   HEVC компактнее, но web-плееры его перекодируют → выбирать явно

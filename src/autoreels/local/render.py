@@ -53,6 +53,53 @@ _MIN_CLIP_RENDER_SEC = 2.0
 # энкодеров (h264_amf/hevc_amf/av1_amf/nvenc) -preset невалиден (у AMF свой пресет).
 _SOFTWARE_X26X = {"libx264", "libx265"}
 
+# M156: VAAPI encoders (Linux, AMD/Intel GPU via Mesa: gamebox RX 580 → hevc_vaapi / h264_vaapi). The encoder takes
+# GPU surfaces: every command whose -c:v is *_vaapi gets the device, an upload at the end of its video filter and no
+# output -pix_fmt (_hw_argv). Any other encoder: the command is returned unchanged (invariant 8).
+_VAAPI_DEVICE_ENV = "RENDER_VAAPI_DEVICE"
+_VAAPI_DEVICE_DEFAULT = "/dev/dri/renderD128"
+_VAAPI_UPLOAD = "format=nv12,hwupload"
+
+
+def _is_vaapi(codec: str) -> bool:
+    return codec.endswith("_vaapi")
+
+
+def _hw_argv(cmd: list[str]) -> list[str]:
+    """M156: an ffmpeg command for a VAAPI encoder — `-vaapi_device` first, the frames uploaded to the GPU at the end of
+    the video filter (`-filter_complex` with `-map [v]` → a `[v]…[vhw]` chain; `-vf` → appended; none → added) and
+    the output `-pix_fmt` dropped (the surface format is nv12). Not a VAAPI command → the same list."""
+    try:
+        i = cmd.index("-c:v")
+    except ValueError:
+        return cmd
+    if i + 1 >= len(cmd) or not _is_vaapi(str(cmd[i + 1])):
+        return cmd
+    dev = os.environ.get(_VAAPI_DEVICE_ENV) or _VAAPI_DEVICE_DEFAULT
+    last_in = max((k for k, a in enumerate(cmd) if a == "-i"), default=0)
+    out = list(cmd[: last_in + 1])
+    k = last_in + 1
+    while k < len(cmd):
+        if cmd[k] == "-pix_fmt" and k + 1 < len(cmd):
+            k += 2
+            continue
+        out.append(cmd[k])
+        k += 1
+    if "-filter_complex" in out:
+        f = out.index("-filter_complex")
+        m = next((j for j in range(len(out) - 1) if out[j] == "-map" and out[j + 1] == "[v]"), None)
+        if m is None:
+            raise RenderError("VAAPI: в -filter_complex нет выхода [v] — некуда добавить загрузку в GPU")
+        out[f + 1] = f"{out[f + 1]};[v]{_VAAPI_UPLOAD}[vhw]"
+        out[m + 1] = "[vhw]"
+    elif "-vf" in out:
+        f = out.index("-vf")
+        out[f + 1] = f"{out[f + 1]},{_VAAPI_UPLOAD}"
+    else:
+        c = out.index("-c:v")
+        out[c:c] = ["-vf", _VAAPI_UPLOAD]
+    return [out[0], "-vaapi_device", dev] + out[1:]
+
 
 def probe_encoder(codec: str, *, ffmpeg: str = "ffmpeg", run=None) -> bool:
     """True, если энкодер РЕАЛЬНО работает на этой машине (пробный encode 1 кадра).
@@ -71,8 +118,8 @@ def probe_encoder(codec: str, *, ffmpeg: str = "ffmpeg", run=None) -> bool:
     ]
     runner = run or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=30))
     try:
-        return runner(cmd).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+        return runner(_hw_argv(cmd)).returncode == 0
+    except (OSError, subprocess.SubprocessError, RenderError):
         return False
 
 # env-переопределение энкодера/профиля (рантайм-конфиг машины рендера поверх render.yaml).
@@ -114,6 +161,7 @@ def _run_ffmpeg_with_progress(
     """
     _CLEAR_EOL = "\033[K"
     _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    cmd = _hw_argv(cmd)                      # M156: VAAPI encoder → device + GPU upload; any other → unchanged
 
     header = f"клип {idx}/{total}: {reel_id} ({_fmt_time(duration_sec)})"
     tty = is_tty() and not background
@@ -2100,7 +2148,7 @@ def _build_synth_tail_clip(
         "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
         str(tmp_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(_hw_argv(cmd), capture_output=True, text=True)
     if result.returncode != 0:
         raise RenderError(f"synth tail clip render failed (exit {result.returncode})\n{result.stderr[:600]}")
 
@@ -2160,7 +2208,7 @@ def _append_synth_tail_to_rendered(
             *_web_safe_out_args(faststart),
             str(tmp_path),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(_hw_argv(cmd), capture_output=True, text=True)
         if result.returncode != 0:
             raise RenderError(f"synthetic tail append failed (exit {result.returncode})\n{result.stderr[:600]}")
     finally:
@@ -2218,7 +2266,7 @@ def _extend_ending(ffmpeg_bin: str, clip: Path, *, freeze_sec: float, sting_path
         "-c:v", codec, *quality_args, "-bf", "0",
         "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
         *_web_safe_out_args(faststart), str(tmp)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(_hw_argv(cmd), capture_output=True, text=True)
     if r.returncode != 0 or not tmp.exists():
         tmp.unlink(missing_ok=True)
         raise RenderError(f"ending pass failed (exit {r.returncode})\n{r.stderr[:600]}")
