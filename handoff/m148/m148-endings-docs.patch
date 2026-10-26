@@ -1,0 +1,768 @@
+diff --git a/PLAN.md b/PLAN.md
+index a3beb7c..29ceebc 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -35,7 +35,7 @@
+ - **`arl models`** — живые списки моделей Groq и OpenRouter с пингом настроенных.
+ - **Идемпотентность по содержимому** — `run_key` (хэш источника + пресет) проверяется до анализа; ручной манифест не перезаписывается автоматическим прогоном без `--force`. Версии рубрики в ключе нет: после правки промпта нужен `--force`.
+ - **История прогонов** — `data/history.jsonl`, команда `arl history`, хвост последних записей в `arl s`. Пишется и при неудаче.
+-- **Обработка на месте** — файл по указанному пути обрабатывается там, где лежит; поиск источника по sha256 в `inputs/` и `inputs-archive/` (`borrow_from_archive` с возвратом при сбое).
++- **Обработка на месте** — файл по указанному пути обрабатывается там, где лежит; рендер ищет источник по sha256 в `inputs/` и `inputs-archive/` (`resolve_source` в `local/render.py`; модуль `local/archive.py` с `borrow_from_archive` не использовался и удалён в M148).
+ - **Нулевой урожай не архивируется** — источник с непустым транскриптом и нулём рилсов остаётся на месте и попадает в сводку отдельной категорией.
+ 
+ Осталось в M1:
+@@ -188,12 +188,12 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | 1 | Два плана: общий (калибровка) и крупный (`close_shot_scale`, `close_shot_anchor_y`). Крупный на `h:` и `c:`; переключение посреди окна без разреза | ✅ закрыт |
+ | 1b | Авторитм планов `two_shot_auto`: смена на швах (`x:`, склейки, филлеры), предел длины плана с откатом «пауза → граница предложения → запятая», минимум длины по итоговому списку. Оба пути отбора | ✅ закрыт |
+ | 1c | Перестановка тактами `>`: стыки прыжков получают `beat_gap_sec` и обязательную смену плана, соседние предложения — исходный тайминг; такт не содержит звука чужого такта | ✅ закрыт |
+-| 2 | Ключевые слова в субтитрах `k:` (стиль `Keyword`, пунктуация вне выделения) | реализован, ждёт просмотра |
++| 2 | Ключевые слова в субтитрах `k:` (стиль `Keyword`, пунктуация вне выделения) | ✅ закрыт (владелец 2026-10-26: старые гейты закрыты по последующим просмотрам) |
+ | 1d | Мигание. Замер: скоплений событий нет, битых кадров нет — мигание даёт сама частота смен. Выбрано просмотром: предел плана 14 с + растворение 4 кадра на склейках одного плана. «Наезд» через смешивание кропов убран (двоение, 35 мин рендера) | ✅ выбрано, включено |
+-| B | Финальный пакет концовки (7 приёмов, каждый под флагом): «кнопка» последней, последнее предложение крупным, стоп-кадр + чёрное, фирменный звук, подложка с приглушением, плашка «Продолжение →» для `open_thought`, концовка-петля | плашка «Продолжение →» реализована (M97); остальное не начато |
++| B | Финальный пакет концовки (7 приёмов, каждый под флагом): «кнопка» последней, последнее предложение крупным, стоп-кадр + чёрное, фирменный звук, подложка с приглушением, плашка «Продолжение →» для `open_thought`, концовка-петля | опции (M151, все выключены): концовка-петля `ending_loop`, стоп-кадр `end_freeze_sec`, фирменный звук `end_sting_path`; уже были: плашка «Продолжение →» (M97), последнее предложение крупным (`close_last`, M91), подложка с приглушением (M55); «кнопку» даёт автомонтаж (развязка последней) |
+ | — | Монтажный проход: выгрузка уже отобранных клипов (`--montage`) для разметки `k:`/`>`/`c:`/`h:` в чате | вытеснен автомонтажом: черновики `arl autocut` сразу пишут `k:`, `h:`, куски и плашку (см. «Автомонтаж») |
+ | 3 | Обложка `<reel>.cover.jpg`: кадр тела ролика с самым крупным лицом и открытыми глазами, в кропе ролика, с плашкой (M89, M96) | реализован |
+-| 4 | Две длины из одной разметки | после первых публикаций |
++| 4 | Две длины из одной разметки | реализовано в автомонтаже: у каждой принятой сборки короткая версия (`autocut.short_variant`, M70) |
+ 
+ **Отложено из сценарной разметки** (`docs/task-scripted-clips.md`): `zoom:` (наплыв), `hold:` (пауза перед ударной репликой), `emph` — после M1.8, потому что опираются на паузы.
+ 
+@@ -211,7 +211,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ | потребитель | статус |
+ |---|---|
+-| 1. Хвост (решение + конец) | ✅ принят просмотром, дальше уточнён (см. «Механика клипа»); итоговый просмотр `_gate/m18_final/` ждёт |
++| 1. Хвост (решение + конец) | ✅ закрыт (итоговый просмотр `m18_final` закрыт владельцем 2026-10-26) |
+ | 2. Зазоры тактов (1c) | реализован: прыжок — по слышимому концу + `beat_gap_sec`, соседние предложения — исходный тайминг |
+ | 3. Кандидаты авторитма | реализован (на 11h 42m сдвинулось одно переключение) |
+ | 4. Снап начала | ✅ принят просмотром |
+@@ -220,7 +220,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | 7. Маркеры `⏸` в выгрузке | реализован (M98, `review_pause_from_map`) |
+ | 8. «Кусок идёт подряд» в монтаже (без стыка) | реализован (M134, `montage.join_heard`) |
+ 
+-`speech_map` по умолчанию выключен; включается после итогового просмотра. **Этап C** — удалить точечные звуковые пробы хвоста в пользу карты.
++`speech_map`: итоговый просмотр закрыт (2026-10-26); включение и раскладка — замер m149 (тот же файл ответов с флагом и без, на всех источниках). Без флага план клипа и так читает готовую карту речи; флаг включает её для авторитма планов и тактов. **Этап C** — удалить точечные звуковые пробы хвоста в пользу карты.
+ 
+ **Раскладка на все источники** (после просмотра): `speech_map: true`, повторное `--apply` всех источников с файлами ответов, рендер, выборочный просмотр 2–3 клипов на источник. IMG_6848 и остальные пока собраны по старой логике («ии», «ну», «и всё» на конце, «такая истор…» в хвосте).
+ 
+@@ -240,7 +240,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ ---
+ 
+-## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M131) 🔄 В РАБОТЕ
++## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M152) 🔄 В РАБОТЕ
+ 
+ Ручная разметка источника — самый медленный шаг. Автомонтаж пишет её черновик сам; владелец решает на листе ревью. Правила клипа — `docs/REEL_SPEC.md`; значения — `config/r0.yaml autocut:` и `config/render.yaml`. Каждый шаг закрывает только просмотр владельца.
+ 
+@@ -259,12 +259,18 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Транскрипция | whisper.cpp на gamebox и `arl tx-compare`; `arl tx-use` переключает транскрипт источника; `arl tx-punct` переносит концы предложений Groq (или модели) на слова локального транскрипта; Groq в два прохода — слова без промпта, концы предложений с промптом (`groq.dual`, включён) | M62, M64, M111, M113, M124 |
+ | Слова-паразиты | отдельно стоящие паразиты скрыты в субтитрах и изредка вырезаны из звука по правилам вычистки; сценарист их избегает (исключение к правилу «экран = звук» — решение владельца) | M126 |
+ | Рамка ролика | у каждого ролика свой статичный кроп по лицу в его теле и крупный план по размеру лица; без своего лица — по лицу всего источника; лица ищет YuNet (Haar находил полку с чайниками); рамка вмещает весь путь лица; берётся лицо ближе к месту говорящего (не самое крупное — слушатель у камеры) | M87, M102, M127, M129–M131 |
+-| Вкус владельца | модель по его 66 клипам упорядочивает предложения автомонтажа (`taste_weight`); смех и аплодисменты зала (PANNs) в источниках не найдены — путь закрыт | M137, M138 |
++| Пул кандидатов | пул меньше черновика добирается клипами вокруг зёрен силы 3 без общих мыслей (`fill_seed_punch`, включён: покрыто клипов владельца 35 → 40 из 66) | M140 |
++| Вкус владельца | модель по его 66 клипам (`cloud/taste.py`, `config/taste.json`) может упорядочивать предложения (`taste_weight`), **выключена**: верх черновика не улучшила (m138b: 27 / 27 / 25 из 66). Смех и аплодисменты зала (PANNs) в источниках не найдены — путь закрыт. Решений с листа ревью (`reviews/verdicts.jsonl`) пока нет | M137–M139 |
++| Начало клипа | m143: 11 из 12 начал черновика IMG_6848 «склеены» с речью перед ними — первая согласная терялась. Правило паузы перед первым звуком (`start_pause_min`, мягкое — нечем починить, клип остаётся с пометкой; включено: склеено 59 → 46, покрытие то же); пред-ролл склеенного начала + нарастание звука (`start_preroll_sec`, `start_fade_in_sec`, включены; исключение к инварианту 10 — решение владельца); воздух перед первым словом (`start_pad_sec`) не помог — выключен; громкость одним усилением на источник (`loudnorm_mode: source`, M147, выбор на слух) | M142–M147 |
++| Звук внутри клипа | соседние куски монтажа склеиваются по слышимой паузе (`montage.join_heard`, включено); вырез паразита и длинная пауза рядом больше не перекрываются (Pxl r13 падал) | M134, M136 |
++| Сценарист — правила | тон набора словами владельца (`scenario_tone`); склеенное начало — фраза-две раньше; не открывать на отсылке («То есть», «Но», «И»…: такой ролик идёт в конце пула), не выбрасывать мелкие фразы из середины, не кончать реакцией интервьюера | M142, M144, M152 |
++| Концовки | опции пакета концовки: петля, стоп-кадр, фирменный звук (`render.yaml`, выключены) | M151 |
++| Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+ 
+-**Замеры.** Урожай черновиков на трёх источниках вырос с 7 до 40; покрытие клипов владельца (кандидат накрывает ≥ 50 % клипа) — 9 из 31 при `clips_every_min: 2`. Стиль владельца на 66 клипах семи источников: 48 без прыжков, 12 с одним, 6 с двумя, ни одного с тремя. Судьи начала (Haiku, Groq) принимают начала владельца так же часто, как случайные, — сигнала вкуса владельца в них нет, поэтому они вне отбора.
++**Замеры.** Урожай черновиков на трёх источниках вырос с 7 до 40; покрытие клипов владельца (кандидат накрывает ≥ 50 % клипа) — 9 из 31 при `clips_every_min: 2`; на семи источниках с добором (M140) — 40 из 66. Стиль владельца на 66 клипах семи источников: 48 без прыжков, 12 с одним, 6 с двумя, ни одного с тремя. Судьи начала (Haiku, Groq) принимают начала владельца так же часто, как случайные, — сигнала вкуса владельца в них нет, поэтому они вне отбора.
+ 
+-**Ждут владельца:** автомонтаж или сценарист как вариант `arl auto` по умолчанию; просмотр рамки после M131 и вырезов паразитов (m126); незаконченные мысли при явном `e:` (см. «Открытые дефекты»).
++**Ждут владельца:** громкость одним усилением на источник (m147, на слух); `HF_TOKEN` для замера разделения говорящих (m141); решения кнопками на листе ревью (для вкуса и автоправок «переделать»); автомонтаж или сценарист в `arl auto` по умолчанию. Незаконченные мысли при явном `e:` (PXL r06, IMG_6848 r06) — владелец: «переделать», правка — копией файла ответа (m150). **Старые гейты** (m18_final, m88, m94, m101, m102, m105, m112, m115, m126, m131, m134, m136) закрыты владельцем 2026-10-26 и удаляются.
+ 
+ ---
+ 
+@@ -307,7 +313,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ - **Хэштеги** частотной генерацией отключены; пишет их `arl describe` — только слова, сказанные в ролике.
+ - **Таймкоды Whisper** ненадёжны — M1.8 переводит на карту речи; на зазорах Whisper остались нумерация блоков (отложено по замеру) и вычистка классического `arl run`.
+ - **Длинные паузы (≥ `long_pause_sec`) укорачиваются в обход интервала между резами** (M79) — на m126 это дало частые резы в r03/r08/r09/r12; ждёт просмотра, возможно, нужен предел.
+-- **Незаконченная мысль при явном `e:`** — решает владелец по списку предупреждений (сейчас: PXL r06 и IMG_6848 r06 — предложено продлить; PXL r01, r10, IMG_6848 r10 — предложено оставить; лекция r02, r03 — конец на «понятно?». Решение владельца не получено).
++- **Незаконченная мысль при явном `e:`** — PXL r06 и IMG_6848 r06: владелец — «переделать» (2026-10-26), правка копией файла ответа и рендер для сравнения (m150); PXL r01, r10, IMG_6848 r10 — оставить; лекция r02, r03 — конец на «понятно?».
+ - **Слитная речь в конце** — если последнее размеченное слово слитно переходит в следующую фразу (лекция r03), чисто отрезать нельзя: предупреждение, решение в разметке.
+ - **Вопросы ведущего без паузы (interview)** — три типа не детектируются автоматически: (a) безличный вопрос без слов 2-го лица («Если собрать всю книгу и сжать — как бы она звучала?», Q3); (b) вопрос слит с предыдущим без паузы — идёт подряд в одном потоке речи («Что они могут сделать прямо сейчас?», Q5, пауза 0.02с); (c) вопрос ведущего через паузу <0.7с, без тире («Это как ты это все объединяешь?», Q7, пауза 0.14с). Детектор основан на паузе + 2-м лице + вопросе — без разделения говорящих структурно не отличить от реплики гостя. На ручном пути: явный `e:` защищает от захвата; на автоматическом — ограничение детектора; исправляется только speaker-ID моделью (M2+).
+ 
+diff --git a/PROJECT_GUIDE.md b/PROJECT_GUIDE.md
+index cbd0b49..dce607a 100644
+--- a/PROJECT_GUIDE.md
++++ b/PROJECT_GUIDE.md
+@@ -208,6 +208,8 @@ Snap начала и конца к паузам, словам и предлож
+ - **`<id>.post.txt`** — пост для публикации от `arl describe`: 3–5 предложений словами ролика, хэштеги только из сказанного (M94, M101, M104). `arl crosspost` берёт его вместо `<id>.txt`.
+ - **`_review.html`** — лист ревью источника (`arl review-sheet`): видео, плашка, обложка, пост, решения с причинами.
+ 
++**Концовка (M151, опции `render.yaml`, выключены):** петля для клипов с холодным стартом (без ухода в чёрное), стоп-кадр после клипа (`end_freeze_sec`), фирменный звук (`end_sting_path`).
++
+ **Хэштеги:** `hashtags_always` в `config/render.yaml` — фиксированные теги на все клипы источника. `hashtags_max: 0` отключает частотную генерацию (дефолт для ручного пути, где ревьюер пишет теги в поле `d:`). Если нужны автоматические теги — поднять `hashtags_max` и убедиться, что установлен `pymorphy3` (иначе лемматизация не работает).
+ 
+ ---
+@@ -231,6 +233,10 @@ Snap начала и конца к паузам, словам и предлож
+ - Кэш `transcripts/<stem>.speechmap.json` — по хэшу аудио, всем параметрам и `SPEECHMAP_VERSION`; строится автоматически, если флаг включён и карты нет или она устарела.
+ - Флаг `speech_map` (по умолчанию выключен, включается после итогового просмотра). Переведены: хвост, зазоры тактов, кандидаты авторитма, снап начала. Ещё на Whisper: границы блоков, укорачивание пауз при вычистке, маркеры `⏸` выгрузки.
+ 
++### Начало клипа (M142–M147)
++
++Первое слово клипа часто «склеено» с речью перед ним: паузы нет, и первая согласная сидит на стыке слов (m143: 11 из 12 начал черновика IMG_6848). Поэтому: автомонтаж и сценарист предпочитают начало после слышимой паузы (`r0.yaml autocut.start_pause_min`); склеенное начало начинается на десятки миллисекунд раньше, в хвосте предыдущего слова, а звук нарастает (`start_preroll_sec`, `render.yaml start_fade_in_sec` — исключение к правилу «экран = звук» по решению владельца). Громкость: однопроходный `loudnorm` подстраивается в первую секунду; режим `loudnorm_mode: source` даёт всем клипам источника одно усиление и ограничитель пика.
++
+ ### Хвост клипа
+ 
+ «Речь» = слова + незаписанная речь из карты. Конец — после **слышимого** конца последнего слова.
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index 87525a4..a1d4499 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -107,8 +107,7 @@ autoreels/
+ │   │   ├── scenes.py         # PySceneDetect
+ │   │   ├── review_sheet.py   # лист ревью `_review.html`
+ │   │   ├── map_page.py       # страница карты `_map.html`
+-│   │   ├── hashtags.py       # хэштеги из сказанных слов
+-│   │   └── archive.py        # перенос обработанных видео в inputs-archive/
++│   │   └── hashtags.py       # хэштеги из сказанных слов (архивация исходников — _archive_video в __main__)
+ │   │
+ │   └── orchestr/             # заглушки: api.py (FastAPI), queue.py, ingest.py (M2)
+ │
+diff --git a/R0_SPEC.md b/R0_SPEC.md
+index 1436783..477f4bf 100644
+--- a/R0_SPEC.md
++++ b/R0_SPEC.md
+@@ -248,11 +248,12 @@ Word-level нужен **коду** (для snap границ при нарезк
+ - *Крючок и холодный старт:* тизер из второй половины клипа, проигрываемый на своём месте (`h:B.N!`); судится моделью как тизер (открытый вопрос можно, отсылка назад — нет); отсылку первым словом отсекает код до модели. Клип без тизера получает плашку-интригу и идёт после клипов с тизером.
+ - *Начало:* первое предложение после крючка понятно само по себе — ремонт контекстом назад до двух мыслей, иначе другое начало; не обрывок, вопрос остаётся с ответом.
+ - *Отбор:* каждая строка проходит настоящие проверки `--apply`; отказ заменяется следующим кандидатом. У клипов источника не совпадают открытие, заголовок, мысль и развязка. Число клипов — по длине источника (`clips_every_min`). Если пул меньше, чем черновик может взять, его можно добрать клипами вокруг более слабых зёрен (`fill_seed_punch`, M140; без общих мыслей с уже взятыми). Судья начала в отбор не входит: замер показал, что Haiku и Groq принимают начала владельца так же часто, как случайные.
++- *Начало (M144–M146):* первый звук клипа должен идти после слышимой паузы (`start_pause_min`): склеенное начало чинится теми же шагами, что непонятное; нечем — клип остаётся с пометкой. Склеенный крючок не берётся.
+ - *Выход:* черновик `reviews/<stem>_auto_*.txt` в грамматике §11 (`k:`, `h:`, куски, плашка `t:`, пост `d:`); дальше — ручной путь (инвариант 5).
+ 
+ **Вкус владельца (M138, `cloud/taste.py`).** Две логистические головы по признакам мысли карты (длина, сила, громкость, положение, роль, первые слова): «мысль взята в клип владельца» и «клип владельца начат с неё». Модель подбирается по клипам владельца (`config/taste.json`, происхождение внутри) и добавляет `taste_weight × вкус` к оценке предложения — меняется только порядок (инвариант 1). Замер m137: «вирусные» признаки крючка (число, вопрос, «вы») сигнала не несут; проверка на отложенном источнике — начало 0.65, выбор мысли 0.59.
+ 
+-**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же.
++**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Промпт (M152): не открывать на отсылке назад («То есть», «Но», «И»…), не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера; ролик, открытый отсылкой, код ставит в конец пула (`start_doubt`). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же.
+ 
+ **Посты (`arl describe`, `cloud/postcopy.py`).** Пост говорит мысль, а не анонсирует её: 3–5 предложений словами ролика; стандартная фраза, которой нет в ролике, отвергается; сверх размера код отрезает последние предложения. Хэштеги — только слова, сказанные в ролике; местоимения и служебные — никогда.
+ 
+diff --git a/README.md b/README.md
+index 334b936..76f2ea1 100644
+--- a/README.md
++++ b/README.md
+@@ -237,7 +237,7 @@ env `RENDER_FFMPEG` / `RENDER_ENCODER`. Приоритет: флаг > env > `re
+ | **M1.7** — «смонтировано, а не нарезано» | 🔄 два плана, авторитм, перестановка, мигание — закрыты; ключевые слова — ждут просмотра; финальный пакет концовки и монтажный проход — следующие |
+ | **M1.8** — карта речи по звуку | 🔄 карта готова; хвост, начало, такты, авторитм, маркеры выгрузки переведены; итоговый просмотр и раскладка на все источники впереди |
+ | **M1.9** — карта интонации | 🔄 замер, подсказки ↗, правило концовки на автоматическом пути; признаки для оценки — впереди |
+-| **Автомонтаж** (M52–M131) | 🔄 `arl auto` до листа ревью: карта мыслей, автомонтаж (mixed + правило прыжков), сценарист, посты, обложки, экспорт, рамка по лицу (YuNet); ждёт решений владельца |
++| **Автомонтаж** (M52–M152) | 🔄 `arl auto` до листа ревью: карта мыслей, автомонтаж (mixed + правило прыжков + добор пула), сценарист (тон, правила начала), посты, обложки, экспорт, рамка по лицу (YuNet), начало клипа без потерянной первой буквы (пауза, пред-ролл); ждёт решений владельца |
+ 
+ Подробно — [PLAN.md](PLAN.md).
+ 
+diff --git a/config/render.yaml b/config/render.yaml
+index 7c147b3..b3d4b6d 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -245,6 +245,14 @@ cover_face: true
+ # M97 (ending package): a clip whose last thought goes on past its end (the open_thought warning) shows the plate
+ # «Продолжение →» over its last 2.5 s — the viewer looks for the next part instead of feeling the cut.
+ continue_plate: true
++# M151 (ending package, PLAN M1.7 B; owner: «просто чтобы была такая опция») — every option off by default:
++# ending_loop — a planned clip with a cold open ends without the fade to black (it loops into its teaser);
++# end_freeze_sec — the last frame is held this long after the clip (silence, or the sting under it), then black;
++# end_sting_path — a sound (your file) after the clip's last word, at end_sting_volume; the clip grows by its length.
++ending_loop: false
++end_freeze_sec: 0
++end_sting_path: ""
++end_sting_volume: 0.8
+ continue_sec: 2.5
+ continue_text: "Продолжение →"
+ 
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index f91bb10..7e6c84c 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -146,6 +146,8 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M144: начало не склеено.** m143: у 11 из 12 клипов IMG_6848 m126 перед первым словом не было паузы — речь до него шла вплотную к резу, первая согласная терялась, и воздух M142 сдвинуть рез не мог. С `autocut.start_pause_min` первый звук клипа (начало и холодный старт) требует столько слышимой тишины перед собой; склеенное начало чинится теми же шагами, что начало, непонятное без предыдущего (контекст перед, более поздняя фраза, другая мысль), у сценариста — фраза раньше или позже. 0 = как раньше. **M145:** если начало само по себе понятное и только склеено, а починить нечем, клип остаётся с пометкой, а не выбрасывается (m144: жёсткое правило снизило покрытие клипов владельца с 40 до 27 из 66).
+ - **M146: пред-ролл склеенного начала (флаг, решение владельца — исключение из инварианта 10).** Если перед первым словом клипа слышимой паузы меньше `start_preroll_sec`, звук начинается на столько раньше — в хвосте предыдущего слова, — а рендер наращивает звук за `start_fade_in_sec` (`render.yaml`): первая согласная не теряется, хвост чужого слова не слышен как слово. 0 = как раньше.
+ - **M147: громкость одним усилением на источник.** Однопроходный `loudnorm` подстраивается в первую секунду клипа (m143: −2.4 dB в первые 0.3 с у IMG_6848). `loudnorm_mode: source` (`render.yaml`) измеряет громкость всего источника один раз и даёт всем его клипам одно усиление до `target_lufs` плюс ограничитель пика `true_peak` — в начале ничего не проседает, клипы одного источника одинаково громкие. `dynamic` = как раньше.
++- **M151: опции концовки (выключены).** `ending_loop` — клип с холодным стартом без ухода в чёрное (зацикливается в тизер); `end_freeze_sec` — последний кадр держится столько после клипа, затем чёрное; `end_sting_path` — звук после последнего слова (клип удлиняется на его длину). Проверка «кадр завис» пропускает только добавленный стоп-кадр.
++- **M152: правила сценариста.** Не открывать на отсылке назад, не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера (владелец об IMG_6848 r01 и r09); ролик, открытый отсылкой, — в конце пула.
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+ - **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+diff --git a/docs/audit-idempotency-location.md b/docs/audit-idempotency-location.md
+index 4957e4b..5a88730 100644
+--- a/docs/audit-idempotency-location.md
++++ b/docs/audit-idempotency-location.md
+@@ -51,7 +51,7 @@ case). Who checks it and how:
+   successfully-processed video is no longer in `inputs/`, so the next `arl go`
+   simply does not enumerate it. **The absence from `inputs/` *is* the "done"
+   signal** — nothing ever reads `inputs-archive/` to decide "processed".
+-- Note: `local/archive.py` implements a proper content-identity pre-skip
++- Note (removed in M148 as unused): `local/archive.py` implemented a proper content-identity pre-skip
+   (`is_archived`, name **and** sha256) and a safe move (`archive_input`). **That
+   module is dead in production** — it is not imported by `__main__.py` (only by
+   `tests/test_archive.py`). The live path is the simpler `_archive_video`, which
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index f5c1dd1..5dff556 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -72,7 +72,6 @@ from autoreels.core.models import Manifest, Transcript
+ from autoreels.local.calibrate import (
+     CalibrateError, InputInvalid, cmd_calibrate, validate_input,
+ )
+-from autoreels.local.archive import borrow_from_archive
+ from autoreels.local.render import (
+     RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
+     render_preview, resolve_source,
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 6028d6d..3f68138 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -10,8 +10,8 @@ from __future__ import annotations
+ import re
+ from typing import Callable, Sequence
+ 
+-from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, glued_start, rhythm_pieces,
+-                                      rhythm_why)
++from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start,
++                                      rhythm_pieces, rhythm_why)
+ 
+ SCENARIO_SYSTEM = (
+     "You are the editor of short vertical videos (reels) cut from a long Russian talk. You get the whole talk as "
+@@ -20,7 +20,11 @@ SCENARIO_SYSTEM = (
+     "a passage answers a question, the question comes with it), develops one thought and lands on a sentence that "
+     "concludes it. Prefer concrete examples, vivid images, a surprising turn; the speaker uses many fillers («ну», "
+     "«вот», «как бы», «то есть», «значит») — prefer sentences with few, and never open or close a reel on a sentence "
+-    "that is mostly fillers. You may take sentences from different "
++    "that is mostly fillers. Within a passage keep the sentences in a row: leave one out only when it is a filler or an "
++    "aside — never the one that names the next point («Второй момент — …») or that the next sentence leans on; a reel "
++    "with many small cuts reads as a jumble. Never open on a sentence that begins «То есть», «Но», «И», «А», «Это», "
++    "«Вот» — it carries on something the viewer did not hear. End where the speaker himself closes the thought — not "
++    "on the interviewer's reaction. You may take sentences from different "
+     "places when they tell one story (a question from later may open it, a conclusion from elsewhere may close it), "
+     "but {jumps}. Use whole sentences only, in the numbering given. Each reel lasts {min_s}–{max_s} seconds (sum of "
+     "the seconds of its sentences). Reels do not share sentences. A teaser h: is one striking finished sentence from "
+@@ -117,6 +121,14 @@ def parse_scenarios(raw: str, known: set[str]) -> tuple[list[dict], list[str]]:
+     return out, bad
+ 
+ 
++def _start_doubt(text: str) -> str | None:
++    """M152 (owner on IMG_6848 m126 r01: «спутанный сценарий» — it opened on «То есть…»): a reel whose first sentence
++    leans on what came before (autocut.back_reference) keeps its place in the pool but is sorted after the clean ones
++    (start_doubt, as the rank mode of the start judge: invariant 1 — the order only)."""
++    why = back_reference(text)
++    return f"начало опирается на сказанное до него ({why})" if why else None
++
++
+ def tone_rule(tone: str) -> str:
+     """M142 (owner: «можно задавать тон сценаристу, например строгий или фановый»): one line added to the system
+     prompt — the tone the reels keep, in the owner's words. Empty = nothing added (the prompt and its cache as before).
+@@ -226,5 +238,6 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+             title=_clean(sc.get("title") or (by_id[uids[0]].get("summary") if uids else "")),
+             caption=_clean((payoff or {}).get("summary") or sc.get("why") or ""),
+             opener=uids[0] if uids else None, unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
+-            score=max(40, 95 - rank), seconds=round(secs, 1), notes=notes))
++            score=max(40, 95 - rank), seconds=round(secs, 1), notes=notes,
++            start_doubt=_start_doubt(sent[refs[0]][2])))
+     return out, gone
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 742f7b6..3e8f8e8 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -1031,6 +1031,11 @@ class RenderConfig(BaseModel):
+     # M97 (ending package, PLAN M1.7 B): a clip whose last thought goes on past its end (open_thought) shows
+     # continue_text in the title plate over its last continue_sec seconds. Off = the clip as before.
+     continue_plate: bool = False
++    # M151 (ending package, PLAN M1.7 B — owner: «просто чтобы была такая опция»): options, all off
++    ending_loop: bool = False             # a clip with a cold open does not fade to black — it loops into its teaser
++    end_freeze_sec: float = Field(0.0, ge=0.0, le=5.0)   # hold the last frame this long after the clip, then black
++    end_sting_path: str = ""              # a sound played after the clip ends (under the held frame); "" = none
++    end_sting_volume: float = Field(0.8, ge=0.0, le=2.0)
+     continue_sec: float = Field(2.5, gt=0)
+     continue_text: str = "Продолжение →"
+     # M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»): where the face
+diff --git a/src/autoreels/local/archive.py b/src/autoreels/local/archive.py
+deleted file mode 100644
+index baef189..0000000
+--- a/src/autoreels/local/archive.py
++++ /dev/null
+@@ -1,116 +0,0 @@
+-"""Архивация обработанного входа: inputs/ → inputs-archive/ ПОСЛЕ полного успеха (batch).
+-
+-Локальный тир, машинно-локальная операция (видео между тирами не ходит). Машины
+-независимы: у Mac своя inputs/+inputs-archive/, у системника свои. Архивация на одной
+-машине не мешает другой брать своё видео из своей inputs/ по sha (render смотрит в
+-inputs/, не в архив).
+-
+-Контракт `archive_input`: после успеха видео гарантированно в архиве и НЕ в inputs/
+-(дренаж). Идемпотентно — повторный batch не падает:
+-- архива ещё нет / имени нет → move (ARCHIVED);
+-- то же имя И то же содержимое уже в архиве → дубль из inputs/ убрать, архив не трогать
+-  (SKIPPED);
+-- то же имя, но ДРУГОЕ содержимое → ArchiveError, ничего не двигаем (не теряем данные
+-  молчаливой перезаписью).
+-"""
+-from __future__ import annotations
+-
+-import shutil
+-from contextlib import contextmanager
+-from dataclasses import dataclass
+-from pathlib import Path
+-
+-from autoreels.core import state
+-
+-
+-class ArchiveError(Exception):
+-    """Архивация невозможна без потери данных (в архиве тёзка с другим содержимым)."""
+-
+-
+-@dataclass(frozen=True)
+-class ArchiveResult:
+-    status: str          # "archived" | "skipped"
+-    dest: Path
+-
+-
+-def is_archived(video: str | Path, archive_dir: str | Path) -> bool:
+-    """Видео уже в архиве? True только при совпадении имени И sha256 (контентная идентичность).
+-
+-    Используется batch'ем как pre-skip ДО обработки (не жечь Groq на уже обработанном)."""
+-    video = Path(video)
+-    target = Path(archive_dir) / video.name
+-    if not target.is_file():
+-        return False
+-    return state.file_sha256(target) == state.file_sha256(video)
+-
+-
+-def archive_input(video: str | Path, archive_dir: str | Path) -> ArchiveResult:
+-    """Переместить видео в архив после успеха. Идемпотентно (см. модульный docstring)."""
+-    video = Path(video)
+-    archive_dir = Path(archive_dir)
+-    target = archive_dir / video.name
+-
+-    if target.is_file():
+-        if state.file_sha256(target) == state.file_sha256(video):
+-            video.unlink()                       # дубль идентичен архиву → дренируем inputs/
+-            return ArchiveResult(status="skipped", dest=target)
+-        raise ArchiveError(
+-            f"в архиве уже есть {video.name} с ДРУГИМ содержимым "
+-            f"({archive_dir}) — не перезаписываю, чтобы не потерять данные"
+-        )
+-
+-    archive_dir.mkdir(parents=True, exist_ok=True)
+-    shutil.move(str(video), str(target))
+-    return ArchiveResult(status="archived", dest=target)
+-
+-
+-@contextmanager
+-def borrow_from_archive(manifest, *, inputs_dir: str | Path, archive_dir: str | Path | None = None):
+-    """Temporarily move source to inputs/ if it lives only in inputs-archive/.
+-
+-    Finds the source by sha256 (via resolve_source). If it is already in inputs/, yields
+-    the path unchanged. If it is only in archive, moves it to inputs/, yields the new path,
+-    and moves it back on exit — even if the body raises or is interrupted. If _archive_video
+-    (or anything else) moves the file to archive while the context is open, the finally is a
+-    no-op (file already returned).
+-
+-    If the source is in neither location, raises SourceNotFoundError naming both dirs.
+-    Reports every move to stdout so it is never a silent side effect.
+-    """
+-    # Lazy import avoids making archive.py depend on the heavy render module at import time.
+-    from autoreels.local.render import resolve_source, SourceNotFoundError  # noqa: PLC0415
+-
+-    inputs_dir = Path(inputs_dir)
+-    if archive_dir is None:
+-        archive_dir = inputs_dir.parent / f"{inputs_dir.name}-archive"
+-    else:
+-        archive_dir = Path(archive_dir)
+-
+-    try:
+-        source = resolve_source(manifest, inputs_dir)
+-    except SourceNotFoundError:
+-        raise SourceNotFoundError(
+-            f"исходник не найден (sha256={manifest.source_sha256[:12] if manifest.source_sha256 else '?'}…): "
+-            f"ни в {inputs_dir}, ни в {archive_dir}"
+-        )
+-
+-    # Already in inputs/ — nothing to move.
+-    try:
+-        source.relative_to(inputs_dir)
+-        yield source
+-        return
+-    except ValueError:
+-        pass
+-
+-    # Source is in archive — borrow it.
+-    dest = inputs_dir / source.name
+-    inputs_dir.mkdir(parents=True, exist_ok=True)
+-    shutil.move(str(source), str(dest))
+-    print(f"взят из архива: {source.name} → inputs/", flush=True)
+-    try:
+-        yield dest
+-    finally:
+-        if dest.exists():
+-            archive_dir.mkdir(parents=True, exist_ok=True)
+-            shutil.move(str(dest), str(source))
+-            print(f"возвращён в архив: {source.name} → inputs-archive/", flush=True)
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index e7b30ed..8c9eba0 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -2167,6 +2167,65 @@ def _append_synth_tail_to_rendered(
+         tail_file.unlink(missing_ok=True)
+ 
+ 
++def _ending_flags(render_cfg, reel, planned: bool) -> tuple[bool, bool]:
++    """M151: (extend, loop) of a clip's ending. loop — a planned clip with a cold open and ending_loop: no fade to
++    black; extend — a planned clip with end_freeze_sec or end_sting_path (not a looping one): no fade to black in the
++    main pass, the held frame / the sting are appended after it (_extend_ending)."""
++    if not planned:
++        return False, False
++    loop = bool(getattr(render_cfg, "ending_loop", False)) and getattr(reel, "cold_open", None) is not None
++    extend = (float(getattr(render_cfg, "end_freeze_sec", 0.0) or 0.0) > 0
++              or bool(str(getattr(render_cfg, "end_sting_path", "") or "").strip()))
++    return extend and not loop, loop
++
++
++def _extend_ending(ffmpeg_bin: str, clip: Path, *, freeze_sec: float, sting_path: str, sting_volume: float,
++                   fade_sec: float, codec: str, quality_args: list, audio_codec: str, audio_bitrate: str,
++                   faststart: bool) -> float:
++    """M151: hold the clip's last frame for max(freeze_sec, the sting's length) seconds — silence under it, or the
++    sting (from the clip's end) — then fade to black. Re-encodes the clip in place; returns the seconds added."""
++    ffprobe = _sibling_ffprobe(ffmpeg_bin)
++    dur = _probe_duration_sec(clip, ffprobe)
++    if dur is None:
++        raise RenderError(f"ending: duration of {clip.name} not read")
++    sting = Path(sting_path).expanduser() if str(sting_path or "").strip() else None
++    if sting is not None and not sting.is_file():
++        raise RenderError(f"ending: end_sting_path not found: {sting}")
++    sdur = 0.0
++    if sting is not None:
++        _o = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(sting)],
++                            capture_output=True, text=True, check=False).stdout.strip()
++        try:
++            sdur = float(_o)
++        except ValueError:
++            raise RenderError(f"ending: length of the sting {sting.name} not read") from None
++    ext = max(float(freeze_sec or 0.0), sdur)
++    if ext <= 0:
++        return 0.0
++    fade = min(float(fade_sec or 0.25), ext)
++    st = max(0.0, dur + ext - fade)
++    fc = (f"[0:v]tpad=stop_mode=clone:stop_duration={_num(round(ext, 3))},"
++          f"fade=t=out:st={_num(round(st, 3))}:d={_num(round(fade, 3))}[v];"
++          f"[0:a]apad=pad_dur={_num(round(ext, 3))}[a0];")
++    if sting is not None:
++        fc += (f"[1:a]volume={_num(sting_volume)},adelay={int(round(dur * 1000))}:all=1[s];"
++               f"[a0][s]amix=inputs=2:duration=first:normalize=0[a]")
++    else:
++        fc += "[a0]anull[a]"
++    tmp = clip.with_suffix(".ending.mp4")
++    cmd = [str(ffmpeg_bin), "-y", "-loglevel", "error", "-i", str(clip)] + (["-i", str(sting)] if sting else []) + [
++        "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
++        "-c:v", codec, *quality_args, "-bf", "0",
++        "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
++        *_web_safe_out_args(faststart), str(tmp)]
++    r = subprocess.run(cmd, capture_output=True, text=True)
++    if r.returncode != 0 or not tmp.exists():
++        tmp.unlink(missing_ok=True)
++        raise RenderError(f"ending pass failed (exit {r.returncode})\n{r.stderr[:600]}")
++    tmp.replace(clip)
++    return ext
++
++
+ _BEAT_CAP_MARGIN = 0.04    # gap left before next speech onset when capping beat end
+ _ADJACENT_MAX_GAP = 2.0   # source gap (s) at or below which consecutive beats are adjacent
+ 
+@@ -3166,6 +3225,7 @@ def _render_segments(
+             _smap_fade_len: float | None = None    # fade_len from _tail_from_smap result
+             # Planned reels (REEL_SPEC) arrive with their final ending — executed as-is.
+             _planned = bool(getattr(reel, "planned", False))
++            _end_ext, _end_loop = _ending_flags(render_cfg, reel, _planned)     # M151
+             _use_smap_tail = (smap is not None
+                               and getattr(render_cfg, "speech_map", False)
+                               and reel.subtitles and segs and not _planned)
+@@ -3458,7 +3518,7 @@ def _render_segments(
+                     ap, _out_dur, _word_end_out,
+                     min_sec_floor=_evf if _de else _smap_fade_floor,
+                     force=_use_smap_tail or (_de and _evf > 0),
+-                )
++                ) if not (_end_ext or _end_loop) else ""     # M151: the loop / the appended ending fade instead
+                 if tvfade:
+                     reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
+             if _speed_frames is not None:
+@@ -3507,7 +3567,7 @@ def _render_segments(
+                         ap, _out_dur, _word_end_out,
+                         min_sec_floor=_evf1 if _de1 else _smap_fade_floor,
+                         force=_de1 and _evf1 > 0,
+-                    )
++                    ) if not (_end_ext or _end_loop) else ""     # M151
+                     if _tvfade1:
+                         _post_parts1.append(_tvfade1)
+                     _post1 = ",".join(_post_parts1)
+@@ -3765,6 +3825,22 @@ def _render_segments(
+                     finally:
+                         _wwav.unlink(missing_ok=True)
+                         _wout.unlink(missing_ok=True)
++            _ending_added = 0.0
++            if _end_ext and out.exists():
++                # M151: the held last frame and / or the sting, appended after the main pass
++                try:
++                    _ending_added = _extend_ending(
++                        ffmpeg_bin, out, freeze_sec=float(getattr(render_cfg, "end_freeze_sec", 0.0) or 0.0),
++                        sting_path=str(getattr(render_cfg, "end_sting_path", "") or ""),
++                        sting_volume=float(getattr(render_cfg, "end_sting_volume", 0.8)),
++                        fade_sec=float(getattr(ap, "end_video_fade_sec", 0.25) or 0.25), codec=codec,
++                        quality_args=_video_quality_args(codec, enc.preset, video_bitrate, enc.pix_fmt,
++                                                         quality=active.quality, rate_control=active.rate_control,
++                                                         qp=active.qp),
++                        audio_codec=aud.codec, audio_bitrate=aud.bitrate, faststart=enc.faststart)
++                    _out_dur += _ending_added
++                except RenderError as _ee:
++                    _clip_errors.append(f"  [ERROR] {reel.id}: {str(_ee)[:300]}")
+             _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
+             if _integrity_err:
+                 print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
+@@ -3795,6 +3871,8 @@ def _render_segments(
+             # Skip freeze detect for synthetic tail clips: the frozen/slowed tail is intentional.
+             if not _synth_active:
+                 for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
++                    if _ending_added and _actual is not None and _fs >= _actual - _ending_added - 0.5:
++                        continue          # M151: the held last frame is the ending asked for, not a freeze
+                     _clip_errors.append(
+                         f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)"
+                     )
+diff --git a/tests/test_archive.py b/tests/test_archive.py
+deleted file mode 100644
+index 115f858..0000000
+--- a/tests/test_archive.py
++++ /dev/null
+@@ -1,80 +0,0 @@
+-"""Архивация обработанного входа: inputs/ → inputs-archive/ ПОСЛЕ успеха (batch, M0).
+-
+-Инварианты:
+-- успех → видео уезжает в архив, из inputs/ исчезает (дренаж, не копия);
+-- идемпотентность: то же видео уже в архиве (имя+содержимое) → skip, дубликат из
+-  inputs/ убирается, архив не трогаем (повторный batch не падает и не плодит);
+-- конфликт: в архиве файл с тем же именем, но ДРУГИМ содержимым → ошибка, ничего не
+-  двигаем (не теряем данные молчаливой перезаписью);
+-- is_archived — True только при совпадении имени И sha (контентная идентичность).
+-"""
+-from pathlib import Path
+-
+-import pytest
+-
+-from autoreels.local.archive import ArchiveError, archive_input, is_archived
+-
+-
+-def _file(path: Path, data: bytes) -> Path:
+-    path.parent.mkdir(parents=True, exist_ok=True)
+-    path.write_bytes(data)
+-    return path
+-
+-
+-def test_archive_input_moves_video_to_archive(tmp_path):
+-    inputs = tmp_path / "inputs"
+-    archive = tmp_path / "inputs-archive"
+-    video = _file(inputs / "lecture.mp4", b"VIDEO-BYTES")
+-
+-    res = archive_input(video, archive)
+-
+-    assert res.status == "archived"
+-    assert res.dest == archive / "lecture.mp4"
+-    assert (archive / "lecture.mp4").read_bytes() == b"VIDEO-BYTES"   # в архиве
+-    assert not video.exists()                                         # из inputs/ ушло (дренаж)
+-
+-
+-def test_archive_creates_archive_dir_if_missing(tmp_path):
+-    video = _file(tmp_path / "inputs" / "v.mp4", b"x")
+-    archive = tmp_path / "inputs-archive"           # ещё не существует
+-    archive_input(video, archive)
+-    assert (archive / "v.mp4").is_file()
+-
+-
+-def test_archive_idempotent_when_same_video_already_archived(tmp_path):
+-    # то же видео (имя+содержимое) уже в архиве, дубль завис в inputs/ → skip + дренаж дубля
+-    archive = tmp_path / "inputs-archive"
+-    _file(archive / "v.mp4", b"SAME")
+-    dup = _file(tmp_path / "inputs" / "v.mp4", b"SAME")
+-
+-    res = archive_input(dup, archive)
+-
+-    assert res.status == "skipped"
+-    assert (archive / "v.mp4").read_bytes() == b"SAME"   # архив не тронут
+-    assert not dup.exists()                              # дубль из inputs/ убран
+-
+-
+-def test_archive_conflict_same_name_different_content_errors(tmp_path):
+-    # в архиве тот же ИМЯ, но другое содержимое → ошибка, ничего не двигаем (не теряем)
+-    archive = tmp_path / "inputs-archive"
+-    _file(archive / "v.mp4", b"OLD")
+-    video = _file(tmp_path / "inputs" / "v.mp4", b"NEW")
+-
+-    with pytest.raises(ArchiveError):
+-        archive_input(video, archive)
+-
+-    assert (archive / "v.mp4").read_bytes() == b"OLD"    # архив не перезаписан
+-    assert video.read_bytes() == b"NEW"                  # вход на месте (не потеряли)
+-
+-
+-def test_is_archived_true_only_on_same_content(tmp_path):
+-    archive = tmp_path / "inputs-archive"
+-    video = _file(tmp_path / "inputs" / "v.mp4", b"DATA")
+-
+-    assert is_archived(video, archive) is False          # архива нет вовсе
+-
+-    _file(archive / "v.mp4", b"DATA")
+-    assert is_archived(video, archive) is True           # имя+содержимое совпали
+-
+-    _file(archive / "v.mp4", b"OTHER")
+-    assert is_archived(video, archive) is False           # имя то же, содержимое иное
+diff --git a/tests/test_m151_ending.py b/tests/test_m151_ending.py
+new file mode 100644
+index 0000000..caa57e4
+--- /dev/null
++++ b/tests/test_m151_ending.py
+@@ -0,0 +1,51 @@
++"""M151 (ending package, PLAN M1.7 B; owner: «просто чтобы была такая опция»): loop / held last frame / sting."""
++from __future__ import annotations
++
++import shutil
++import subprocess
++from types import SimpleNamespace
++
++import pytest
++
++from autoreels.core.config import RenderConfig
++from autoreels.local.render import RenderError, _ending_flags, _extend_ending, _probe_duration_sec, _sibling_ffprobe
++
++FF = shutil.which("ffmpeg")
++
++
++def test_off_by_default():
++    f = RenderConfig.model_fields
++    assert f["ending_loop"].default is False and f["end_freeze_sec"].default == 0.0 and f["end_sting_path"].default == ""
++
++
++def test_flags():
++    cfg = SimpleNamespace(ending_loop=True, end_freeze_sec=1.0, end_sting_path="")
++    hooked, plain = SimpleNamespace(cold_open=object()), SimpleNamespace(cold_open=None)
++    assert _ending_flags(cfg, hooked, True) == (False, True)       # the loop wins: no freeze on a looping clip
++    assert _ending_flags(cfg, plain, True) == (True, False)
++    assert _ending_flags(cfg, plain, False) == (False, False)      # unplanned clips: as before
++    off = SimpleNamespace(ending_loop=False, end_freeze_sec=0.0, end_sting_path="")
++    assert _ending_flags(off, hooked, True) == (False, False)
++
++
++def _clip(path, sec=2.0):
++    subprocess.run([FF, "-y", "-loglevel", "error", "-f", "lavfi", "-i", f"testsrc=d={sec}:s=320x240:r=30",
++                    "-f", "lavfi", "-i", f"sine=f=440:d={sec}", "-c:v", "libx264", "-pix_fmt", "yuv420p",
++                    "-c:a", "aac", "-shortest", str(path)], check=True)
++
++
++@pytest.mark.skipif(FF is None, reason="ffmpeg not installed")
++def test_held_frame_and_sting_extend_the_clip(tmp_path):
++    kw = dict(fade_sec=0.25, codec="libx264", quality_args=["-pix_fmt", "yuv420p"], audio_codec="aac",
++              audio_bitrate="128k", faststart=True)
++    a = tmp_path / "a.mp4"
++    _clip(a)
++    assert abs(_extend_ending(FF, a, freeze_sec=1.0, sting_path="", sting_volume=0.8, **kw) - 1.0) < 1e-9
++    assert abs(_probe_duration_sec(a, _sibling_ffprobe(FF)) - 3.0) < 0.1
++    b, s = tmp_path / "b.mp4", tmp_path / "s.wav"
++    _clip(b)
++    subprocess.run([FF, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=f=880:d=0.6", str(s)], check=True)
++    added = _extend_ending(FF, b, freeze_sec=0.0, sting_path=str(s), sting_volume=0.8, **kw)
++    assert abs(added - 0.6) < 0.05 and abs(_probe_duration_sec(b, _sibling_ffprobe(FF)) - 2.6) < 0.1
++    with pytest.raises(RenderError):
++        _extend_ending(FF, b, freeze_sec=0.0, sting_path=str(tmp_path / "none.wav"), sting_volume=0.8, **kw)
+diff --git a/tests/test_m152_scenario.py b/tests/test_m152_scenario.py
+new file mode 100644
+index 0000000..8f7034f
+--- /dev/null
++++ b/tests/test_m152_scenario.py
+@@ -0,0 +1,24 @@
++"""M152 (owner on IMG_6848 m126: r01 «спутанный сценарий» — opened on «То есть…», small cuts in the middle; r09 ended
++on the interviewer's reaction): the scenarist is told so, and a reel opening on a back reference is sorted last."""
++from __future__ import annotations
++
++from autoreels.cloud.autocut import AutoParams
++from autoreels.cloud.scenario import SCENARIO_SYSTEM, _start_doubt, scenario_proposals
++
++
++def test_the_prompt_names_the_rules():
++    assert "Второй момент" in SCENARIO_SYSTEM and "«То есть»" in SCENARIO_SYSTEM and "interviewer's reaction" in SCENARIO_SYSTEM
++
++
++def test_a_reel_opening_on_a_back_reference_is_doubted():
++    assert _start_doubt("То есть ребенок, если у человека, он может быть.") is not None
++    assert _start_doubt("Взрослый понимает, что врёт себе.") is None
++    sent = {"1.1": (0, 15, "То есть ребёнок говорит правду в лоб.", True, 6),
++            "1.2": (15, 30, "И кому-то это заходит, а кого-то обижает.", True, 7),
++            "2.1": (100, 115, "Взрослый понимает, что врёт себе.", True, 5),
++            "2.2": (115, 130, "Он выбирает, когда сказать правду.", True, 5)}
++    units = [{"id": 1, "refs": "1.1-2", "summary": "а"}, {"id": 2, "refs": "2.1-2", "summary": "б"}]
++    scens = [{"refs": ["1.1", "1.2"], "hook": None, "title": "", "why": ""},
++             {"refs": ["2.1", "2.2"], "hook": None, "title": "", "why": ""}]
++    props, _ = scenario_proposals(scens, sent, units, AutoParams(min_sec=20, target_sec=55, max_sec=90))
++    assert props[0].start_doubt and "«то…»" in props[0].start_doubt and props[1].start_doubt is None
+diff --git a/tests/test_render.py b/tests/test_render.py
+index 39499e4..b74f3f1 100644
+--- a/tests/test_render.py
++++ b/tests/test_render.py
+@@ -2188,60 +2188,9 @@ def test_real_rotated_video_calibration_and_render_same_space(tmp_path):
+     assert (v["width"], v["height"]) == (1080, 1920), "выход не 1080×1920"
+ 
+ 
+-# --- borrow_from_archive ---
+-
+-from autoreels.local.archive import borrow_from_archive  # noqa: E402
+ from autoreels.local.render import SourceNotFoundError   # noqa: E402 (already imported via render module)
+ 
+ 
+-def test_borrow_finds_source_in_archive_and_returns_it(tmp_path):
+-    """Source only in inputs-archive/ → borrow moves it to inputs/, restores it on exit."""
+-    inputs = tmp_path / "inputs"
+-    archive = tmp_path / "inputs-archive"
+-    sha = _make_source(archive, "lecture.mp4", b"video-bytes")
+-    m = _manifest("lecture.mp4", sha, [])
+-
+-    with borrow_from_archive(m, inputs_dir=inputs, archive_dir=archive) as p:
+-        assert p == inputs / "lecture.mp4"
+-        assert p.is_file()
+-        assert not (archive / "lecture.mp4").exists()
+-
+-    assert (archive / "lecture.mp4").is_file()
+-    assert not (inputs / "lecture.mp4").exists()
+-
+-
+-def test_borrow_returns_to_archive_on_failure(tmp_path):
+-    """File returns to inputs-archive/ even if the body raises."""
+-    inputs = tmp_path / "inputs"
+-    archive = tmp_path / "inputs-archive"
+-    sha = _make_source(archive, "clip.mp4", b"content")
+-    m = _manifest("clip.mp4", sha, [])
+-
+-    with pytest.raises(RuntimeError):
+-        with borrow_from_archive(m, inputs_dir=inputs, archive_dir=archive):
+-            raise RuntimeError("simulated failure")
+-
+-    assert (archive / "clip.mp4").is_file()
+-    assert not (inputs / "clip.mp4").exists()
+-
+-
+-def test_borrow_names_both_dirs_when_source_not_found(tmp_path):
+-    """Neither inputs/ nor archive has the source → SourceNotFoundError names both dirs."""
+-    inputs = tmp_path / "inputs"
+-    inputs.mkdir()
+-    archive = tmp_path / "inputs-archive"
+-    archive.mkdir()
+-    m = _manifest("missing.mp4", "a" * 64, [])
+-
+-    with pytest.raises(SourceNotFoundError) as exc_info:
+-        with borrow_from_archive(m, inputs_dir=inputs, archive_dir=archive):
+-            pass
+-
+-    msg = str(exc_info.value)
+-    assert str(inputs) in msg
+-    assert str(archive) in msg
+-
+-
+ # ------------------------------------------------ _probe_source_fps / _parse_fps_token
+ 
+ def test_parse_fps_token_trailing_comma():
