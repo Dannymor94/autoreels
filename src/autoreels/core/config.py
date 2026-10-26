@@ -1031,6 +1031,11 @@ class RenderConfig(BaseModel):
     # M97 (ending package, PLAN M1.7 B): a clip whose last thought goes on past its end (open_thought) shows
     # continue_text in the title plate over its last continue_sec seconds. Off = the clip as before.
     continue_plate: bool = False
+    # M151 (ending package, PLAN M1.7 B — owner: «просто чтобы была такая опция»): options, all off
+    ending_loop: bool = False             # a clip with a cold open does not fade to black — it loops into its teaser
+    end_freeze_sec: float = Field(0.0, ge=0.0, le=5.0)   # hold the last frame this long after the clip, then black
+    end_sting_path: str = ""              # a sound played after the clip ends (under the held frame); "" = none
+    end_sting_volume: float = Field(0.8, ge=0.0, le=2.0)
     continue_sec: float = Field(2.5, gt=0)
     continue_text: str = "Продолжение →"
     # M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»): where the face

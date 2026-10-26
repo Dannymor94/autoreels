@@ -107,8 +107,7 @@ autoreels/
 │   │   ├── scenes.py         # PySceneDetect
 │   │   ├── review_sheet.py   # лист ревью `_review.html`
 │   │   ├── map_page.py       # страница карты `_map.html`
-│   │   ├── hashtags.py       # хэштеги из сказанных слов
-│   │   └── archive.py        # перенос обработанных видео в inputs-archive/
+│   │   └── hashtags.py       # хэштеги из сказанных слов (архивация исходников — _archive_video в __main__)
 │   │
 │   └── orchestr/             # заглушки: api.py (FastAPI), queue.py, ingest.py (M2)
 │

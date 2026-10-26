@@ -51,7 +51,7 @@ case). Who checks it and how:
   successfully-processed video is no longer in `inputs/`, so the next `arl go`
   simply does not enumerate it. **The absence from `inputs/` *is* the "done"
   signal** — nothing ever reads `inputs-archive/` to decide "processed".
-- Note: `local/archive.py` implements a proper content-identity pre-skip
+- Note (removed in M148 as unused): `local/archive.py` implemented a proper content-identity pre-skip
   (`is_archived`, name **and** sha256) and a safe move (`archive_input`). **That
   module is dead in production** — it is not imported by `__main__.py` (only by
   `tests/test_archive.py`). The live path is the simpler `_archive_video`, which

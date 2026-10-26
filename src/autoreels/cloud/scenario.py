@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Sequence
 
-from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, glued_start, rhythm_pieces,
-                                      rhythm_why)
+from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start,
+                                      rhythm_pieces, rhythm_why)
 
 SCENARIO_SYSTEM = (
     "You are the editor of short vertical videos (reels) cut from a long Russian talk. You get the whole talk as "
@@ -20,7 +20,11 @@ SCENARIO_SYSTEM = (
     "a passage answers a question, the question comes with it), develops one thought and lands on a sentence that "
     "concludes it. Prefer concrete examples, vivid images, a surprising turn; the speaker uses many fillers («ну», "
     "«вот», «как бы», «то есть», «значит») — prefer sentences with few, and never open or close a reel on a sentence "
-    "that is mostly fillers. You may take sentences from different "
+    "that is mostly fillers. Within a passage keep the sentences in a row: leave one out only when it is a filler or an "
+    "aside — never the one that names the next point («Второй момент — …») or that the next sentence leans on; a reel "
+    "with many small cuts reads as a jumble. Never open on a sentence that begins «То есть», «Но», «И», «А», «Это», "
+    "«Вот» — it carries on something the viewer did not hear. End where the speaker himself closes the thought — not "
+    "on the interviewer's reaction. You may take sentences from different "
     "places when they tell one story (a question from later may open it, a conclusion from elsewhere may close it), "
     "but {jumps}. Use whole sentences only, in the numbering given. Each reel lasts {min_s}–{max_s} seconds (sum of "
     "the seconds of its sentences). Reels do not share sentences. A teaser h: is one striking finished sentence from "
@@ -115,6 +119,14 @@ def parse_scenarios(raw: str, known: set[str]) -> tuple[list[dict], list[str]]:
         used.update(refs)
         out.append(sc)
     return out, bad
+
+
+def _start_doubt(text: str) -> str | None:
+    """M152 (owner on IMG_6848 m126 r01: «спутанный сценарий» — it opened on «То есть…»): a reel whose first sentence
+    leans on what came before (autocut.back_reference) keeps its place in the pool but is sorted after the clean ones
+    (start_doubt, as the rank mode of the start judge: invariant 1 — the order only)."""
+    why = back_reference(text)
+    return f"начало опирается на сказанное до него ({why})" if why else None
 
 
 def tone_rule(tone: str) -> str:
@@ -226,5 +238,6 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
             title=_clean(sc.get("title") or (by_id[uids[0]].get("summary") if uids else "")),
             caption=_clean((payoff or {}).get("summary") or sc.get("why") or ""),
             opener=uids[0] if uids else None, unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
-            score=max(40, 95 - rank), seconds=round(secs, 1), notes=notes))
+            score=max(40, 95 - rank), seconds=round(secs, 1), notes=notes,
+            start_doubt=_start_doubt(sent[refs[0]][2])))
     return out, gone

@@ -245,6 +245,14 @@ cover_face: true
 # M97 (ending package): a clip whose last thought goes on past its end (the open_thought warning) shows the plate
 # «Продолжение →» over its last 2.5 s — the viewer looks for the next part instead of feeling the cut.
 continue_plate: true
+# M151 (ending package, PLAN M1.7 B; owner: «просто чтобы была такая опция») — every option off by default:
+# ending_loop — a planned clip with a cold open ends without the fade to black (it loops into its teaser);
+# end_freeze_sec — the last frame is held this long after the clip (silence, or the sting under it), then black;
+# end_sting_path — a sound (your file) after the clip's last word, at end_sting_volume; the clip grows by its length.
+ending_loop: false
+end_freeze_sec: 0
+end_sting_path: ""
+end_sting_volume: 0.8
 continue_sec: 2.5
 continue_text: "Продолжение →"
 

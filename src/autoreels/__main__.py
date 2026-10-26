@@ -72,7 +72,6 @@ from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import (
     CalibrateError, InputInvalid, cmd_calibrate, validate_input,
 )
-from autoreels.local.archive import borrow_from_archive
 from autoreels.local.render import (
     RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
     render_preview, resolve_source,

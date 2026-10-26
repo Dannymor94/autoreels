@@ -2167,6 +2167,65 @@ def _append_synth_tail_to_rendered(
         tail_file.unlink(missing_ok=True)
 
 
+def _ending_flags(render_cfg, reel, planned: bool) -> tuple[bool, bool]:
+    """M151: (extend, loop) of a clip's ending. loop — a planned clip with a cold open and ending_loop: no fade to
+    black; extend — a planned clip with end_freeze_sec or end_sting_path (not a looping one): no fade to black in the
+    main pass, the held frame / the sting are appended after it (_extend_ending)."""
+    if not planned:
+        return False, False
+    loop = bool(getattr(render_cfg, "ending_loop", False)) and getattr(reel, "cold_open", None) is not None
+    extend = (float(getattr(render_cfg, "end_freeze_sec", 0.0) or 0.0) > 0
+              or bool(str(getattr(render_cfg, "end_sting_path", "") or "").strip()))
+    return extend and not loop, loop
+
+
+def _extend_ending(ffmpeg_bin: str, clip: Path, *, freeze_sec: float, sting_path: str, sting_volume: float,
+                   fade_sec: float, codec: str, quality_args: list, audio_codec: str, audio_bitrate: str,
+                   faststart: bool) -> float:
+    """M151: hold the clip's last frame for max(freeze_sec, the sting's length) seconds — silence under it, or the
+    sting (from the clip's end) — then fade to black. Re-encodes the clip in place; returns the seconds added."""
+    ffprobe = _sibling_ffprobe(ffmpeg_bin)
+    dur = _probe_duration_sec(clip, ffprobe)
+    if dur is None:
+        raise RenderError(f"ending: duration of {clip.name} not read")
+    sting = Path(sting_path).expanduser() if str(sting_path or "").strip() else None
+    if sting is not None and not sting.is_file():
+        raise RenderError(f"ending: end_sting_path not found: {sting}")
+    sdur = 0.0
+    if sting is not None:
+        _o = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(sting)],
+                            capture_output=True, text=True, check=False).stdout.strip()
+        try:
+            sdur = float(_o)
+        except ValueError:
+            raise RenderError(f"ending: length of the sting {sting.name} not read") from None
+    ext = max(float(freeze_sec or 0.0), sdur)
+    if ext <= 0:
+        return 0.0
+    fade = min(float(fade_sec or 0.25), ext)
+    st = max(0.0, dur + ext - fade)
+    fc = (f"[0:v]tpad=stop_mode=clone:stop_duration={_num(round(ext, 3))},"
+          f"fade=t=out:st={_num(round(st, 3))}:d={_num(round(fade, 3))}[v];"
+          f"[0:a]apad=pad_dur={_num(round(ext, 3))}[a0];")
+    if sting is not None:
+        fc += (f"[1:a]volume={_num(sting_volume)},adelay={int(round(dur * 1000))}:all=1[s];"
+               f"[a0][s]amix=inputs=2:duration=first:normalize=0[a]")
+    else:
+        fc += "[a0]anull[a]"
+    tmp = clip.with_suffix(".ending.mp4")
+    cmd = [str(ffmpeg_bin), "-y", "-loglevel", "error", "-i", str(clip)] + (["-i", str(sting)] if sting else []) + [
+        "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+        "-c:v", codec, *quality_args, "-bf", "0",
+        "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
+        *_web_safe_out_args(faststart), str(tmp)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        raise RenderError(f"ending pass failed (exit {r.returncode})\n{r.stderr[:600]}")
+    tmp.replace(clip)
+    return ext
+
+
 _BEAT_CAP_MARGIN = 0.04    # gap left before next speech onset when capping beat end
 _ADJACENT_MAX_GAP = 2.0   # source gap (s) at or below which consecutive beats are adjacent
 
@@ -3166,6 +3225,7 @@ def _render_segments(
             _smap_fade_len: float | None = None    # fade_len from _tail_from_smap result
             # Planned reels (REEL_SPEC) arrive with their final ending — executed as-is.
             _planned = bool(getattr(reel, "planned", False))
+            _end_ext, _end_loop = _ending_flags(render_cfg, reel, _planned)     # M151
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
                               and reel.subtitles and segs and not _planned)
@@ -3458,7 +3518,7 @@ def _render_segments(
                     ap, _out_dur, _word_end_out,
                     min_sec_floor=_evf if _de else _smap_fade_floor,
                     force=_use_smap_tail or (_de and _evf > 0),
-                )
+                ) if not (_end_ext or _end_loop) else ""     # M151: the loop / the appended ending fade instead
                 if tvfade:
                     reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             if _speed_frames is not None:
@@ -3507,7 +3567,7 @@ def _render_segments(
                         ap, _out_dur, _word_end_out,
                         min_sec_floor=_evf1 if _de1 else _smap_fade_floor,
                         force=_de1 and _evf1 > 0,
-                    )
+                    ) if not (_end_ext or _end_loop) else ""     # M151
                     if _tvfade1:
                         _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
@@ -3765,6 +3825,22 @@ def _render_segments(
                     finally:
                         _wwav.unlink(missing_ok=True)
                         _wout.unlink(missing_ok=True)
+            _ending_added = 0.0
+            if _end_ext and out.exists():
+                # M151: the held last frame and / or the sting, appended after the main pass
+                try:
+                    _ending_added = _extend_ending(
+                        ffmpeg_bin, out, freeze_sec=float(getattr(render_cfg, "end_freeze_sec", 0.0) or 0.0),
+                        sting_path=str(getattr(render_cfg, "end_sting_path", "") or ""),
+                        sting_volume=float(getattr(render_cfg, "end_sting_volume", 0.8)),
+                        fade_sec=float(getattr(ap, "end_video_fade_sec", 0.25) or 0.25), codec=codec,
+                        quality_args=_video_quality_args(codec, enc.preset, video_bitrate, enc.pix_fmt,
+                                                         quality=active.quality, rate_control=active.rate_control,
+                                                         qp=active.qp),
+                        audio_codec=aud.codec, audio_bitrate=aud.bitrate, faststart=enc.faststart)
+                    _out_dur += _ending_added
+                except RenderError as _ee:
+                    _clip_errors.append(f"  [ERROR] {reel.id}: {str(_ee)[:300]}")
             _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
             if _integrity_err:
                 print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
@@ -3795,6 +3871,8 @@ def _render_segments(
             # Skip freeze detect for synthetic tail clips: the frozen/slowed tail is intentional.
             if not _synth_active:
                 for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
+                    if _ending_added and _actual is not None and _fs >= _actual - _ending_added - 0.5:
+                        continue          # M151: the held last frame is the ending asked for, not a freeze
                     _clip_errors.append(
                         f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)"
                     )
