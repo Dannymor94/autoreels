@@ -400,6 +400,13 @@ autocut:
   # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
   scenario_tone: ""
   scenario_timeout_sec: 300   # … the whole talk in one request
+  # M153 — who writes the reels in `arl auto` (owner 2026-10-26: «сценарист по умолчанию для текущей работы»):
+  #   scenario — the scenarist (paid Claude, scenario_llm; the answer is cached per request in data/cache/scenario/);
+  #              if it cannot answer (no key, API error), arl auto falls back to the free autocut and says so;
+  #   autocut  — the free code-built montage (map → clips).
+  # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
+  auto_mode: scenario
+  scenario_llm: sonnet
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)

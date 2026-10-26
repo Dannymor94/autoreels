@@ -58,6 +58,18 @@
           лист ревью ◄── describe (посты) ◄── render ◄── --apply (проверки каждого клипа)
 ```
 
+**Переключатели `arl auto`** (M153; значения по умолчанию — в `config/r0.yaml`, раздел `autocut:`, и `config/render.yaml`):
+
+| что | как переключить |
+|---|---|
+| кто пишет ролики: сценарист (платный Claude) или автомонтаж (бесплатно) | `autocut.auto_mode`; на один прогон `arl auto … --mode scenario \| autocut`. Сценарист не ответил (нет ключа, ошибка API) — источник идёт автомонтажом, итог это называет |
+| модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
+| тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
+| модель карты и постов (бесплатные) | `--llm auto \| cloud \| local \| none` |
+| расшифровка нового видео | `--tx groq \| local` |
+| рендер, музыка, папка | `--no-render`, `--music <трек>`, `--gate <имя>` |
+| остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+
 Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
 
 **Determinism-first:** LLM только предлагает и ранжирует кандидатов; финальные границы,
@@ -150,7 +162,7 @@ source /путь/к/autoreels/aliases.sh
 | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
 | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
 | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
-| `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → autocut → --apply → рендер → посты |
+| `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
 | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
 | `arl autocut <ист>` | черновик монтажа из карты; `--ac ключ=значение` — поле `autocut:` на один прогон |
 | `arl autocut <ист> --scenario --llm sonnet` | сценарист: ролики пишет названная модель Claude, код проверяет |

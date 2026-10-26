@@ -308,6 +308,8 @@ class AutocutConfig(BaseModel):
     scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
     scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
     scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
+    auto_mode: Literal["autocut", "scenario"] = "autocut"   # M153: who writes the reels in arl auto
+    scenario_llm: Literal["haiku", "sonnet"] = "sonnet"     # M153: the scenarist's model in arl auto (paid)
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones

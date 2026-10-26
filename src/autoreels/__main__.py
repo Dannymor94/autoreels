@@ -10130,14 +10130,17 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
 
 def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
-             encoder: str | None = None, music: str | None = None, tx: str | None = None) -> int:
+             encoder: str | None = None, music: str | None = None, tx: str | None = None,
+             mode: str | None = None, scenario_llm: str | None = None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
     1. arl prepare: speech map → alignment → intonation → motion → label draft → dry plan;
     2. arl tx-check (report → transcripts/<stem>.txcheck.json);
     3. arl map (LLM; an existing map is kept);
-    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply);
+    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply). M153: who writes the reels —
+       r0.yaml autocut.auto_mode (scenario = the scenarist, paid model autocut.scenario_llm; autocut = the free
+       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut;
     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
        if it fails, the autocut draft alone (its lines passed the checks);
     6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
@@ -10151,6 +10154,15 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         _post_auto = bool(load_r0_config(_root / "config" / "r0.yaml").post.auto)
     except Exception:  # noqa: BLE001 — no config: as before
         _post_auto = False
+    try:                                               # M153: who writes the reels (config, then --mode)
+        _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
+        _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
+    except Exception:  # noqa: BLE001 — no config: the free autocut, as before
+        _mode, _scen_llm = "autocut", "sonnet"
+    _mode = mode or _mode
+    _scen_llm = scenario_llm or _scen_llm
+    print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
+          f" — переключить: --mode autocut | scenario ===", flush=True)
     for target in targets:
         tp = Path(target)
         mpath = None
@@ -10193,7 +10205,17 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         if err:
             results.append((stem, "map", err))
             continue
-        err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
+        _scen_note = ""
+        if _mode == "scenario":
+            err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+                                                                        llm=_scen_llm, scenario=True))
+            if err:
+                _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
+                print(f"  ⚠ {_scen_note}", flush=True)
+                err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+                                                               llm=llm))
+        else:
+            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
         if err:
             results.append((stem, "autocut", err))
             continue
@@ -10205,10 +10227,11 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         used = combined
         err = stage("план (--apply без --install)",
                     lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto"))
-        note = ""
+        note = _scen_note
         if err:
-            note = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
-            print(f"  ⚠ {note}", flush=True)
+            _fb = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
+            note = (note + "; " if note else "") + _fb
+            print(f"  ⚠ {_fb}", flush=True)
             used = auto_draft
             err = stage("план по черновику сборок",
                         lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto"))
@@ -12706,6 +12729,11 @@ def _build_parser():
     pau.add_argument("--encoder", default=None)
     pau.add_argument("--music", default=None, help="фоновая музыка (файл в music/)")
     pau.add_argument("--tx", default=None, help="M64: расшифровка нового видео: groq | local (whisper.cpp на gamebox)")
+    pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
+                     help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
+                          "по умолчанию r0.yaml autocut.auto_mode")
+    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
+                     help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
     pau.add_argument("--root", default=None)
     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -13223,7 +13251,8 @@ def main(argv=None) -> int:
         elif args.cmd == "auto":
             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
-                            encoder=args.encoder, music=args.music, tx=args.tx)
+                            encoder=args.encoder, music=args.music, tx=args.tx,
+                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None))
         elif args.cmd == "dictate":
             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
