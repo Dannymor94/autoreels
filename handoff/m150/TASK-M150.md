@@ -15,14 +15,14 @@
 arl() { .venv/bin/python -m autoreels "$@"; }
 cd /Users/danny/Documents/autoreels; git pull -q; git log --oneline -1; pgrep -fl "autoreels" || echo "не запущен"
 bash handoff/bin/take.sh m150; mkdir -p handoff/m150
-ls reviews/*PXL_20260729*_answer.txt reviews/IMG_6848*_answer.txt
-shasum reviews/*PXL_20260729*_answer.txt reviews/IMG_6848*_answer.txt | tee handoff/m150/answers.sha
+grep -E "^(PXL_review|img6848)[[:space:]]" handoff/m149/pairs.txt
+shasum reviews/*_answer.txt | tee handoff/m150/answers.sha
 ```
-Для каждого из двух файлов (`T` — имя без `_answer.txt`, `S` — стем из строки `# source:`):
+Пары «файл ответа → манифест» берутся из m149 (`handoff/m149/pairs.txt`): PXL — `PXL_review` → `PXL_20260729_085910095_34f06abf`, IMG — `img6848` → `IMG_6848`. Если какой-то из двух строк нет — СТОП. Для каждой пары (`T`, `S`):
 ```bash
-A="reviews/${T}_answer.txt"; S=$(basename "$(grep -m1 '^# source:' "$A" | sed 's/^# source: *//')" .json)
+A="reviews/${T}_answer.txt"
 R="reviews/$S.review.json"; B="handoff/m150/$S.review.json.before"; rm -f "$B"; [ -f "$R" ] && cp "$R" "$B"
-arl blocks --apply "$A" > "handoff/m150/apply.$T.orig.txt" 2>&1; echo "rc=$?"; cp "$R" "reviews/${S}_m150a.review.json"
+arl blocks "manifests/$S.json" --apply "$A" > "handoff/m150/apply.$T.orig.txt" 2>&1; echo "rc=$?"; cp "$R" "reviews/${S}_m150a.review.json"
 grep -n "incomplete\|open_thought" "handoff/m150/apply.$T.orig.txt" | head
 ```
 Найти строку клипа r06. В предупреждении `e: ends on incomplete sentence ('…')` у r06 — последние четыре слова. В файле ответа есть строка оценки с `| e:N`: под ней (или в выгрузке блока) предложение `[N]` кончается этими словами. Записать номер строки файла `L` и `N`.
@@ -33,7 +33,7 @@ grep -n "incomplete\|open_thought" "handoff/m150/apply.$T.orig.txt" | head
 cp "$A" "reviews/${T}_answer_m150.txt"
 # правка строки L в копии (пример для N=7 → 8): sed -i '' "${L}s/| e:7\b/| e:8/" "reviews/${T}_answer_m150.txt"
 diff "$A" "reviews/${T}_answer_m150.txt"      # ровно одна изменённая строка
-arl blocks --apply "reviews/${T}_answer_m150.txt" > "handoff/m150/apply.$T.m150.txt" 2>&1; echo "rc=$?"
+arl blocks "manifests/$S.json" --apply "reviews/${T}_answer_m150.txt" > "handoff/m150/apply.$T.m150.txt" 2>&1; echo "rc=$?"
 cp "$R" "reviews/${S}_m150.review.json"
 if [ -f "$B" ]; then cp "$B" "$R" && cmp "$B" "$R" && echo "review.json возвращён"; else rm -f "$R" && echo "review.json не было — убран"; fi
 .venv/bin/python handoff/m150/endcheck.py "reviews/${S}_m150a.review.json" "reviews/${S}_m150.review.json" r06 | tee "handoff/m150/end.$T.txt"
@@ -50,7 +50,7 @@ ls "reels-out/$S/_gate/m150/"
 
 ## Шаг 4. Отчёт
 ```bash
-shasum reviews/*PXL_20260729*_answer.txt reviews/IMG_6848*_answer.txt | diff handoff/m150/answers.sha - && echo "оригиналы не тронуты"
+shasum reviews/*_answer.txt | diff handoff/m150/answers.sha - && echo "оригиналы не тронуты"
 ```
 `handoff/m150/REPORT.md`: для каждого файла строка `L`, `e:N → e:M`, `end.$T.txt` целиком, пути клипов, «оригиналы не тронуты».
 `bash handoff/bin/report.sh m150 end.*.txt`

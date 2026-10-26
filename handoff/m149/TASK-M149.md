@@ -15,27 +15,26 @@
 ```bash
 arl() { .venv/bin/python -m autoreels "$@"; }
 cd /Users/danny/Documents/autoreels; git pull -q; git log --oneline -1; pgrep -fl "autoreels" || echo "не запущен"
-bash handoff/bin/take.sh m149; mkdir -p handoff/m149; : > handoff/m149/pairs.txt
+bash handoff/bin/take.sh m149; mkdir -p handoff/m149
 git status --short manifests/ > handoff/m149/manifests.before
 grep -n '^speech_map:' config/render.yaml
-for A in reviews/*_answer.txt; do
-  T=$(basename "$A" _answer.txt)
-  M=$(grep -m1 '^# source:' "$A" | sed 's/^# source: *//')
-  [ -n "$M" ] || { echo "$T: нет '# source:' — пропуск"; continue; }
-  S=$(basename "$M" .json); printf '%s\t%s\n' "$T" "$S" >> handoff/m149/pairs.txt
+.venv/bin/python handoff/m149/pairs.py 2>&1 | tee handoff/m149/pairs.log | grep -v "^  "
+while IFS=$'\t' read -r T S; do
   echo "$T → $S; карта: $([ -f "transcripts/$S.speechmap.json" ] && echo есть || echo нет)"
-done | tee handoff/m149/maps.before.txt
+done < handoff/m149/pairs.txt | tee handoff/m149/maps.before.txt
 ab() {  # ab <state>: применить все файлы ответов, сохранить копии review.json
   while IFS=$'\t' read -r T S; do
     R="reviews/$S.review.json"; B="handoff/m149/$S.review.json.before"; rm -f "$B"; [ -f "$R" ] && cp "$R" "$B"
-    arl blocks --apply "reviews/${T}_answer.txt" > "handoff/m149/apply.$1.$T.txt" 2>&1; echo "$1 $T rc=$?"
-    [ -f "$R" ] && cp "$R" "reviews/${S}_m149$1.review.json"
+    arl blocks "manifests/$S.json" --apply "reviews/${T}_answer.txt" > "handoff/m149/apply.$1.$T.txt" 2>&1; rc=$?; echo "$1 $T rc=$rc"
+    rm -f "reviews/${S}_m149$1.review.json"; [ $rc = 0 ] && [ -f "$R" ] && cp "$R" "reviews/${S}_m149$1.review.json"
     if [ -f "$B" ]; then cp "$B" "$R" && cmp -s "$B" "$R" || echo "!! $R не возвращён"; else rm -f "$R"; fi
   done < handoff/m149/pairs.txt
 }
 ab before
 ```
-Ожидается: строка `speech_map: false`; по строке «T → S; карта: есть/нет» на каждый файл ответа; `before T rc=…` на каждый. `rc≠0` — не СТОП: такой файл в сравнение идёт как есть (часто старая разметка или изменились блоки, причину называет `apply.before.T.txt`). Строк «!! … не возвращён» быть не должно.
+Файлы ответов старого формата, без строки `# source:`. `pairs.py` подбирает манифест сам. Кандидаты берутся по имени: img6848 → IMG_6848, lec0933 → «09h 33m», PXL_review → PXL_20260729…, pxl1129 → «…112938952». Для pxl0621 пробуются оба Pxl того дня, для lecture — все лекции. Файл применяется к каждому кандидату, и выбирается тот, чьи клипы совпадают с установленным ручным манифестом: у ≥ 60 % клипов манифеста есть клип с началом ±3 с. review.json каждый раз возвращается.
+
+Ожидается: строка `speech_map: false`. В выводе `pairs.py` — «T: → S» или «T: пары нет» на каждый из 6 файлов, затем `=== пар: K`. «Пары нет» — не СТОП: файл в замер не идёт, в отчёте назвать его и строки кандидатов из `pairs.log`. Если `pairs.py` сам завершился «!! … не возвращён» — это СТОП. Дальше по строке «T → S; карта: есть/нет» и `before T rc=…` на каждую пару. `rc≠0` — не СТОП: такой файл в сравнение идёт как есть (часто старая разметка или изменились блоки, причину называет `apply.before.T.txt`). Строк «!! … не возвращён» быть не должно.
 
 ## Шаг 2. Карта всем, затем «off» и «on»
 ```bash
