@@ -19,8 +19,6 @@ n=0; tot=0
 for g in reels-out/*/_gate/*/; do
   [ -d "$g" ] || continue
   g="${g%/}"; name="$(basename "$g")"; stem="$(basename "$(dirname "$(dirname "$g")")")"; k="$(keep_for "$stem")"
-  # m147 (громкость по источнику) ещё не прослушан владельцем — пара m146b/m147 остаётся до его решения
-  if [ "$stem" = IMG_6848 ] && { [ "$name" = m146b ] || [ "$name" = m147 ]; }; then echo "  оставлен (ждёт прослушивания громкости): $g"; continue; fi
   if [ -n "$k" ] && [ "$name" = "$k" ]; then echo "  оставлен: $g ($(ls "$g"/r*.mp4 2>/dev/null | wc -l | tr -d ' ') клипов)"; continue; fi
   kb=$(du -sk "$g" | cut -f1); tot=$((tot+kb)); n=$((n+1))
   echo "  в Корзину: $g  $((kb/1024)) МБ"
