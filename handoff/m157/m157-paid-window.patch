@@ -1,0 +1,305 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index ef48f6f..4263a92 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -60,7 +60,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
+ 
+ ## Технические ограничения
+ 
+-- **Только бесплатные API.** LLM — Groq → OpenRouter failover. Whisper — Groq (два прохода, `transcribe.yaml groq.dual`) либо whisper.cpp на gamebox. Исключение по решению владельца (2026-10-20): платный Claude (`--llm haiku | sonnet`, ключ `ANTHROPIC_API_KEY` в `.env`, цены — `config/r0.yaml anthropic`) — только когда режим назван явно; по умолчанию — бесплатные. Названным считается и `config/r0.yaml autocut.auto_mode: scenario` (решение владельца 2026-10-26: `arl auto` пишет ролики сценаристом, модель `autocut.scenario_llm`); `--mode autocut` — бесплатно. Узкое место — **OTPM на R0** (output tokens per minute = 1000 на free-tier; не публикуется, отсутствует в заголовках `x-ratelimit-*`): урожай определяется **числом запросов**, не размером каждого → чанки держать мелкими, `max_tokens` < 1000. Prompt-cache не применим (Groq — только GPT-OSS; снимает вход, а упираемся в выход). Подробно — `docs/audit-groq-413.md`. Ручной режим в лимитах не участвует.
++- **Только бесплатные API.** LLM — Groq → OpenRouter failover. Whisper — Groq (два прохода, `transcribe.yaml groq.dual`) либо whisper.cpp на gamebox. Исключение по решению владельца (2026-10-20): платный Claude (`--llm haiku | sonnet`, ключ `ANTHROPIC_API_KEY` в `.env`, цены — `config/r0.yaml anthropic`) — только когда режим назван явно; по умолчанию — бесплатные. Названным считается и `config/r0.yaml autocut.auto_mode: scenario` (решение владельца 2026-10-26: `arl auto` пишет ролики сценаристом, модель `autocut.scenario_llm`); `--mode autocut` — бесплатно. До `autocut.paid_until` (промо-кредиты владельца, M157) `arl auto --llm auto` идёт на `autocut.paid_llm`; после даты `arl auto` бесплатный, сценарист — только по `--mode scenario`. Узкое место — **OTPM на R0** (output tokens per minute = 1000 на free-tier; не публикуется, отсутствует в заголовках `x-ratelimit-*`): урожай определяется **числом запросов**, не размером каждого → чанки держать мелкими, `max_tokens` < 1000. Prompt-cache не применим (Groq — только GPT-OSS; снимает вход, а упираемся в выход). Подробно — `docs/audit-groq-413.md`. Ручной режим в лимитах не участвует.
+ - **Имена моделей протухают молча** — и у Groq, и у OpenRouter. Наличие в каталоге OpenRouter ≠ доступность (часть бесплатных только по своему ключу). Перед диагностикой — `arl models`.
+ - **Reasoning-выхлоп бьёт по OTPM** → `reasoning_effort=none` для qwen3; gpt-oss принимают только `low/medium/high` — при смене модели проверять.
+ - **Промпты:** system на английском, вывод на русском.
+diff --git a/PLAN.md b/PLAN.md
+index 980258f..7eaa35a 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -255,6 +255,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Автомонтаж | `arl autocut`: строки монтажа из карты; каждое предложение проходит настоящие проверки `--apply`, отказ заменяется; крючок по интересу, петля вопрос → ответ, холодный старт — тизер из второй половины клипа, судимый моделью как тизер; начало, дающее контекст; плашка-заголовок по одному алгоритму; у клипов источника не повторяются открытие, заголовок и мысль | M56, M60, M61, M65, M68, M70–M77, M81, M83, M86, M92, M106, M107, M112 |
+ | Генераторы и ритм | генераторы montage / passage / mixed (по умолчанию mixed); правило прыжков — не больше двух, кусок после дальнего прыжка держится дольше, последний — половину; глубина опор `lean_depth`; судья начала вне отбора; число клипов по длине источника (`clips_every_min`); `--ac ключ=значение` меняет любое поле `autocut:` на один прогон | M119–M122 |
+ | Сценарист | `arl autocut <src> --scenario --llm sonnet` или `haiku`: названная модель пишет ролики по всему тексту, код проверяет каждую строку правилами автоматического пути; few-shot — клипы владельца из других источников; ответ кэшируется | M123, M123b |
++| Платное окно `arl auto` | до `autocut.paid_until` (2026-11-02: промо-кредиты истекают 03.11) карта, судьи и посты — `autocut.paid_llm` (sonnet); после — бесплатно, сценарист только по `--mode scenario`. `--tag` — черновики прогона под своими именами | M157 |
+ | Кто пишет в `arl auto` | `autocut.auto_mode` (`scenario` — решение владельца 2026-10-26 для текущей работы; `autocut` — бесплатно), модель `autocut.scenario_llm`; на прогон `--mode`, `--scenario-llm`; сценарист не ответил — автомонтаж с пометкой в итоге. Переключатели — README | M153 |
+ | Посты и экспорт | `arl describe`: пост 3–5 предложений словами ролика, хэштеги только из сказанного (местоимения и служебные — никогда) → `<rid>.post.txt`; `arl article` — лонгриды из тем карты; `arl crosspost` / `arl export` — клипы, обложки и тексты в `export/` для импорта. Публикации нет | M90, M93, M94, M100, M101, M104 |
+ | Транскрипция | whisper.cpp на gamebox и `arl tx-compare`; `arl tx-use` переключает транскрипт источника; `arl tx-punct` переносит концы предложений Groq (или модели) на слова локального транскрипта; Groq в два прохода — слова без промпта, концы предложений с промптом (`groq.dual`, включён) | M62, M64, M111, M113, M124 |
+diff --git a/README.md b/README.md
+index ed10f65..1c1d4c0 100644
+--- a/README.md
++++ b/README.md
+@@ -65,7 +65,8 @@
+ | кто пишет ролики: сценарист (платный Claude) или автомонтаж (бесплатно) | `autocut.auto_mode`; на один прогон `arl auto … --mode scenario \| autocut`. Сценарист не ответил (нет ключа, ошибка API) — источник идёт автомонтажом, итог это называет |
+ | модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
+ | тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
+-| модель карты и постов (бесплатные) | `--llm auto \| cloud \| local \| none` |
++| модель карты, судей и постов | `--llm auto \| cloud \| local \| none \| sonnet`; до `autocut.paid_until` `auto` = `autocut.paid_llm` (M157: промо-кредиты), после — бесплатные модели, а сценарист только с `--mode scenario` |
++| черновики прогона под своими именами | `--tag <имя>` → `<ист>_auto_<имя>.txt`, `<ист>_auto_all_<имя>.txt`, `<ист>_<имя>.review.json`: черновики прежнего листа и его файл решений не трогаются |
+ | расшифровка нового видео | `--tx groq \| local` |
+ | рендер, музыка, папка | `--no-render`, `--music <трек>`, `--gate <имя>` |
+ | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 2a41c4b..3b4b62d 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -407,6 +407,12 @@ autocut:
+   # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
+   auto_mode: scenario
+   scenario_llm: sonnet
++  # M157 (owner 2026-10-26: «все прогоним через промо-кредиты» — 96 $ of promo credit expire 2026-11-03 UTC):
++  # until paid_until (inclusive) `arl auto` without --llm runs the map, the judges and the posts on paid_llm too.
++  # After it arl auto is free again: --llm auto = the free models, and the scenarist only with --mode scenario
++  # (after the promo, the paid model is charged to the card through auto top-up). "" = off.
++  paid_llm: sonnet
++  paid_until: "2026-11-02"
+   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
+   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
+                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 2864b3c..5abe75b 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -10131,7 +10131,8 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
+ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
+              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
+              encoder: str | None = None, music: str | None = None, tx: str | None = None,
+-             mode: str | None = None, scenario_llm: str | None = None) -> int:
++             mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
++             today=None) -> int:
+     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+ 
+     0. a video file → arl run (transcript + manifest; the video stays where it is);
+@@ -10140,7 +10141,11 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     3. arl map (LLM; an existing map is kept);
+     4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply). M153: who writes the reels —
+        r0.yaml autocut.auto_mode (scenario = the scenarist, paid model autocut.scenario_llm; autocut = the free
+-       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut;
++       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut.
++       M157: until autocut.paid_until, --llm auto (map, judges, posts) becomes autocut.paid_llm; after it arl auto
++       is free (the scenarist only with --mode scenario). --tag: the run's drafts and review.json under their own
++       names (<stem>_auto_<tag>.txt, <stem>_auto_all_<tag>.txt, <stem>_<tag>.review.json) — an earlier sheet's
++       drafts, which its decisions file names, stay as they were;
+     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
+        if it fails, the autocut draft alone (its lines passed the checks);
+     6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
+@@ -10157,8 +10162,20 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     try:                                               # M153: who writes the reels (config, then --mode)
+         _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
+         _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
++        _paid_llm, _paid_until = _ac.paid_llm, _ac.paid_until
+     except Exception:  # noqa: BLE001 — no config: the free autocut, as before
+-        _mode, _scen_llm = "autocut", "sonnet"
++        _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
++    import datetime as _dt                             # M157: the paid models while the promo credit lasts
++    _today = today or _dt.date.today()
++    _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
++    if _paid_llm and not _expired and llm == "auto":
++        llm = _paid_llm
++        print(f"=== auto: карта, судьи и посты — {llm}" + (f" (до {_paid_until} включительно)" if _paid_until else "")
++              + " ===", flush=True)
++    if _expired and _paid_llm and mode is None and _mode == "scenario":
++        _mode = "autocut"
++        print(f"=== auto: срок платных моделей прошёл ({_paid_until}) — автомонтаж бесплатно; сценарист: --mode scenario"
++              f" ===", flush=True)
+     _mode = mode or _mode
+     _scen_llm = scenario_llm or _scen_llm
+     print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
+@@ -10206,22 +10223,24 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+             results.append((stem, "map", err))
+             continue
+         _scen_note = ""
++        auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
++        _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft
+         if _mode == "scenario":
+             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+-                                                                        llm=_scen_llm, scenario=True))
++                                                                        llm=_scen_llm, scenario=True, **_out))
+             if err:
+                 _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
+                 print(f"  ⚠ {_scen_note}", flush=True)
+                 err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+-                                                               llm=llm))
++                                                               llm=llm, **_out))
+         else:
+-            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
++            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm,
++                                                           **_out))
+         if err:
+             results.append((stem, "autocut", err))
+             continue
+         label_draft = _root / "reviews" / f"{stem}_auto.txt"
+-        auto_draft = _root / "reviews" / f"{stem}_auto_m56.txt"
+-        combined = _root / "reviews" / f"{stem}_auto_all.txt"
++        combined = _root / "reviews" / (f"{stem}_auto_all_{tag}.txt" if tag else f"{stem}_auto_all.txt")
+         n_m = _merge_drafts(label_draft, auto_draft, combined)
+         print(f"--- черновик {combined.name}: строки разметки + сборок {n_m}", flush=True)
+         used = combined
+@@ -10239,6 +10258,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+                 results.append((stem, "apply", err))
+                 continue
+         review_json = _root / "reviews" / f"{stem}.review.json"
++        if tag and review_json.is_file():              # M157: the run's own copy for render, sheet and export
++            _tagged = _root / "reviews" / f"{stem}_{tag}.review.json"
++            shutil.copyfile(review_json, _tagged)
++            review_json = _tagged
+         if render:
+             try:
+                 n = len(Manifest.model_validate_json(review_json.read_text(encoding="utf-8")).reels)
+@@ -12732,6 +12755,9 @@ def _build_parser():
+     pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
+                      help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
+                           "по умолчанию r0.yaml autocut.auto_mode")
++    pau.add_argument("--tag", default=None,
++                     help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
++                          "черновики прежнего листа и его файл решений не трогаются")
+     pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
+                      help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
+     pau.add_argument("--root", default=None)
+@@ -13252,7 +13278,8 @@ def main(argv=None) -> int:
+             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
+                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
+                             encoder=args.encoder, music=args.music, tx=args.tx,
+-                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None))
++                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
++                            tag=getattr(args, "tag", None))
+         elif args.cmd == "dictate":
+             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 3535967..ff9a186 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -310,6 +310,8 @@ class AutocutConfig(BaseModel):
+     scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
+     auto_mode: Literal["autocut", "scenario"] = "autocut"   # M153: who writes the reels in arl auto
+     scenario_llm: Literal["haiku", "sonnet"] = "sonnet"     # M153: the scenarist's model in arl auto (paid)
++    paid_llm: Literal["", "haiku", "sonnet"] = ""   # M157: arl auto --llm auto (map, judges, posts) → this model
++    paid_until: str = ""                    # M157: …until this date (YYYY-MM-DD, inclusive); after it arl auto is free
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+diff --git a/tests/test_auto.py b/tests/test_auto.py
+index 15a2727..dda8cd0 100644
+--- a/tests/test_auto.py
++++ b/tests/test_auto.py
+@@ -4,9 +4,14 @@ from __future__ import annotations
+ from pathlib import Path
+ 
+ 
+-def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None):
++def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False):
+     from autoreels import __main__ as cli
+     calls = []
++    cfg = tmp_path / "config" / "r0.yaml"          # M157: the paid window off unless a test asks for it
++    if not paid and cfg.is_file():
++        t = cfg.read_text(encoding="utf-8")
++        assert "  paid_llm: sonnet\n" in t
++        cfg.write_text(t.replace("  paid_llm: sonnet\n", '  paid_llm: ""\n'), encoding="utf-8")
+ 
+     def rec(name, rc=0):
+         def f(*a, **k):
+@@ -19,7 +24,7 @@ def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None):
+ 
+     def autocut(m, **k):
+         calls.append(("autocut", (m,), k))
+-        (tmp_path / "reviews" / "v_auto_m56.txt").write_text(
++        Path(k.get("out") or tmp_path / "reviews" / "v_auto_m56.txt").write_text(
+             "# head\n# fingerprint: abc\n\n# --- M1\nM1 80 | 2.1-3 | t: Тест\n", encoding="utf-8")
+         return 0
+     monkeypatch.setattr(cli, "cmd_autocut", autocut)
+diff --git a/tests/test_m157_paid_window.py b/tests/test_m157_paid_window.py
+new file mode 100644
+index 0000000..54a0649
+--- /dev/null
++++ b/tests/test_m157_paid_window.py
+@@ -0,0 +1,91 @@
++"""M157: arl auto on the paid model while the promo credit lasts (autocut.paid_llm / paid_until); --tag keeps an
++earlier sheet's drafts."""
++from __future__ import annotations
++
++import datetime as dt
++
++from tests.test_auto import _stub
++
++
++def _kw(calls, name):
++    return [c[2] for c in calls if c[0] == name]
++
++
++def test_m157_repo_config_has_the_window():
++    from autoreels.__main__ import load_r0_config
++    from autoreels.core.config import AutocutConfig
++    from tests.test_montage import REPO_ROOT
++    assert AutocutConfig().paid_llm == "" and AutocutConfig().paid_until == ""     # off in code
++    ac = load_r0_config(REPO_ROOT / "config" / "r0.yaml").autocut
++    assert ac.paid_llm == "sonnet" and dt.date.fromisoformat(ac.paid_until) == dt.date(2026, 11, 2)
++
++
++def test_m157_inside_the_window_map_judges_posts_run_on_the_paid_model(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path, paid=True)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, today=dt.date(2026, 11, 2)) == 0
++    assert _kw(calls, "map")[0]["llm"] == "sonnet" and _kw(calls, "describe")[0]["llm"] == "sonnet"
++    ac = _kw(calls, "autocut")[0]
++    assert ac["scenario"] is True and ac["llm"] == "sonnet"
++    assert "до 2026-11-02 включительно" in capsys.readouterr().out
++
++
++def test_m157_an_explicit_llm_wins(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path, paid=True)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, llm="cloud", today=dt.date(2026, 10, 30)) == 0
++    assert _kw(calls, "map")[0]["llm"] == "cloud"
++
++
++def test_m157_after_the_window_arl_auto_is_free(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path, paid=True)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, today=dt.date(2026, 11, 3)) == 0
++    assert _kw(calls, "map")[0]["llm"] == "auto"
++    ac = _kw(calls, "autocut")[0]
++    assert not ac.get("scenario") and ac["llm"] == "auto"
++    assert "срок платных моделей прошёл" in capsys.readouterr().out
++    calls.clear()                                      # the scenarist still on request
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, mode="scenario", today=dt.date(2026, 11, 3)) == 0
++    assert _kw(calls, "autocut")[0]["scenario"] is True
++
++
++def test_m157_tag_writes_its_own_drafts_and_review_json(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    old = tmp_path / "reviews" / "v_auto_all.txt"
++    old.write_text("# the m154 sheet's draft\n", encoding="utf-8")
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, tag="m157", gate="m157") == 0
++    assert _kw(calls, "autocut")[0]["out"].endswith("v_auto_m157.txt")
++    applies = [c[1][0] for c in calls if c[0] == "apply"]
++    assert applies[0].endswith("v_auto_all_m157.txt")
++    assert old.read_text(encoding="utf-8") == "# the m154 sheet's draft\n"
++    assert (tmp_path / "reviews" / "v_m157.review.json").is_file()
++    render = _kw(calls, "render")[0]
++    assert render["manifest_name"].endswith("v_m157.review.json")
++    sheet = _kw(calls, "sheet")[0]
++    assert sheet["review"].endswith("v_auto_all_m157.txt") and sheet["manifest_file"].endswith("v_m157.review.json")
++
++
++def test_m157_without_tag_names_are_as_before(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    assert "out" not in _kw(calls, "autocut")[0]
++    assert [c[1][0] for c in calls if c[0] == "apply"][0].endswith("v_auto_all.txt")
++    assert _kw(calls, "render")[0]["manifest_name"].endswith("v.review.json")
++
++
++def test_m157_cli_tag():
++    from autoreels.__main__ import _build_parser
++    assert _build_parser().parse_args(["auto", "x", "--tag", "m157"]).tag == "m157"
