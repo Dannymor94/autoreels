@@ -1,0 +1,40 @@
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index bc44267..05491fd 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -18,4 +18,4 @@
+ 
+ ## Рендер на видеокарте (M156)
+ 
+-Видеокарта RX 580 кодирует HEVC/H.264 через VAAPI (Mesa, пакет `mesa-va-drivers`; проверка — `vainfo`, строки `VAEntrypointEncSlice`). Пользователь рендера — в группах `render` и `video`. Кодер `--encoder hevc_vaapi` или `h264_vaapi`. Каждая команда ffmpeg с таким кодером получает `-vaapi_device` (по умолчанию `/dev/dri/renderD128`, иначе env `RENDER_VAAPI_DEVICE`), загрузку кадров в GPU в конце видеофильтра (`format=nv12,hwupload`) и не получает выходного `-pix_fmt` (`local/render.py _hw_argv`). Субтитры (`ass`), кроп и цвет считаются процессором, кодирование — видеокартой. Остальные кодеры не меняются. Пробный кадр не прошёл — рендер берёт запасной кодер, как при AMF. Рендер на gamebox — тяжёлая задача: запускать под общим замком (`flock /mnt/data/locks/heavy.lock .venv/bin/python -m autoreels render …`), озвучка книги ждёт его или он её.
++Видеокарта RX 580 кодирует HEVC/H.264 через VAAPI (Mesa, пакет `mesa-va-drivers`; проверка — `vainfo`, строки `VAEntrypointEncSlice`). Пользователь рендера — в группах `render` и `video`. Кодер `--encoder hevc_vaapi` или `h264_vaapi`. Каждая команда ffmpeg с таким кодером получает `-vaapi_device` (по умолчанию `/dev/dri/renderD128`, иначе env `RENDER_VAAPI_DEVICE`), загрузку кадров в GPU в конце видеофильтра (`format=nv12,hwupload`) и не получает выходного `-pix_fmt` (`local/render.py _hw_argv`). Субтитры (`ass`), кроп и цвет считаются процессором, кодирование — видеокартой. Скорость задаёт `-rc_mode VBR` (M158: без режима RX 580 кодировал с постоянным QP и не держал битрейт профиля — 7,0 Мбит/с против 4,9 у videotoolbox). Остальные кодеры не меняются. Пробный кадр не прошёл — рендер берёт запасной кодер, как при AMF. Рендер на gamebox — тяжёлая задача: запускать под общим замком (`flock /mnt/data/locks/heavy.lock .venv/bin/python -m autoreels render …`), озвучка книги ждёт его или он её.
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 8cc74e1..cd7e459 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -443,6 +443,10 @@ def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: st
+         args += ["-preset", preset, "-g", "30"]
+     if _is_amf(codec) and quality:
+         args += ["-quality", quality]
++    if _is_vaapi(codec):
++        # M158: VAAPI without a rate-control mode picks its own (RX 580: constant QP) and ignores -b:v / -maxrate —
++        # m156 clips came out at 7.0 Mbit/s against 4.9 from videotoolbox at the same profile.
++        args += ["-rc_mode", "VBR"]
+     if _is_amf(codec) and rate_control == "cqp" and qp is not None:
+         # Постоянный QP: качество приоритетно, размер плавает (для hevc_hq).
+         args += ["-rc", "cqp", "-qp_i", str(qp), "-qp_p", str(qp + 2), "-pix_fmt", pix_fmt]
+diff --git a/tests/test_m156_vaapi.py b/tests/test_m156_vaapi.py
+index 6f22268..942be7c 100644
+--- a/tests/test_m156_vaapi.py
++++ b/tests/test_m156_vaapi.py
+@@ -82,3 +82,10 @@ def test_m156_probe_and_progress_runner_use_the_vaapi_command(monkeypatch):
+     assert seen[-1][1:3] == ["-vaapi_device", "/dev/dri/renderD128"]
+     R._run_ffmpeg_with_progress(_cut("libx264", vf="null"), reel_id="r01", idx=1, total=1, duration_sec=10.0)
+     assert seen[-1] == _cut("libx264", vf="null")
++
++
++def test_m158_vaapi_gets_vbr_rate_control_others_do_not():
++    vq = R._video_quality_args("hevc_vaapi", "medium", "5M", "yuv420p")
++    assert vq[vq.index("-rc_mode") + 1] == "VBR" and vq[vq.index("-b:v") + 1] == "5M"
++    for c in ("libx264", "hevc_videotoolbox", "hevc_amf", "libx265"):
++        assert "-rc_mode" not in R._video_quality_args(c, "medium", "5M", "yuv420p")
