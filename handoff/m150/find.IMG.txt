@@ -1,0 +1,3 @@
+манифест r06: 1405.69–1441.33, open_thought=False, …он понимает, что он врет сам себе и врет другим.
+   ⚠ dangling start: opens on «Но»
+reviews/img6848_answer.txt: rc=0; клипов 10; клипа как r06 манифеста нет

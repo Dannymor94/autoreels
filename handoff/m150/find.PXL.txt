@@ -1,0 +1,4 @@
+манифест r06: 862.58–903.51, open_thought=True, …и идти дом, но именно для него это нужно было.
+   ⚠ no room after last word «было.» (next speech at 903.393) — clip ends at its audible end
+   ⚠ dangling start: opens on «Но»
+reviews/PXL_review_answer.txt: rc=1;     raise ValueError(
