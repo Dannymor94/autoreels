@@ -1,0 +1,488 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 4263a92..3890441 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -54,7 +54,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
+ 
+ - **Роль машины** задаётся в `config/render.local.yaml` (не в git): `role: analyze | render | both`. Машина с ролью `analyze` откажется рендерить.
+ - **Mac** — рабочая машина полного цикла: анализ и рендер. Нужен ffmpeg с **libass** (выжигание субтитров, фильтр `ass`) и **videotoolbox** (напр. сборка из tap `homebrew-ffmpeg`). Кодек `hevc_videotoolbox` (передаётся `--encoder`; поле `codec` в `render.local.yaml` схемой не принимается). Исходники могут лежать на внешнем диске и обрабатываться на месте.
+-- **Системник** — теперь Ubuntu, это и есть gamebox (Ryzen 7, RX 580). Рендер на видеокарте через VAAPI: `--encoder hevc_vaapi | h264_vaapi` (M156, `docs/GAMEBOX.md`); AMF был только под Windows. Рендер на gamebox запускается под общим замком: `flock /mnt/data/locks/heavy.lock …`.
++- **Системник** — теперь Ubuntu, это и есть gamebox (Ryzen 7, RX 580). Рендер на видеокарте через VAAPI — только `h264_vaapi`: `hevc_vaapi` на RX 580 портит длинные клипы (M160: ошибки CABAC, зелёные блоки). С Mac: `arl render --manifest … --gate … --remote`, `arl auto … --remote` (M161, `config/render.yaml remote:`, `docs/GAMEBOX.md`); AMF был только под Windows. Рендер на gamebox запускается под общим замком: `flock /mnt/data/locks/heavy.lock …`.
+ - Между машинами через git ходят только **манифесты и калибровки**. Транскрипты, ревью, кэш, клипы — локальные.
+ - **gamebox** (локальная модель, whisper.cpp) делится с озвучкой книги: один замок `flock` (`config/r0.yaml heavy_lock`, `docs/GAMEBOX.md`). Чужую работу не обрывать — замок ждёт; на gamebox из sudo — только `systemctl start|stop llama-server`; пакеты для рендера (ffmpeg, VAAPI) поставлены по решению владельца 2026-10-26 (M156), другие установки — только по его задаче.
+ 
+diff --git a/README.md b/README.md
+index 1c1d4c0..44e8254 100644
+--- a/README.md
++++ b/README.md
+@@ -66,6 +66,7 @@
+ | модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
+ | тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
+ | модель карты, судей и постов | `--llm auto \| cloud \| local \| none \| sonnet`; до `autocut.paid_until` `auto` = `autocut.paid_llm` (M157: промо-кредиты), после — бесплатные модели, а сценарист только с `--mode scenario` |
++| рендер на gamebox (видеокарта, H.264) | `arl render --manifest … --gate … --remote`, `arl auto … --remote` (M161; `config/render.yaml remote:`) |
+ | черновики прогона под своими именами | `--tag <имя>` → `<ист>_auto_<имя>.txt`, `<ист>_auto_all_<имя>.txt`, `<ист>_<имя>.review.json`: черновики прежнего листа и его файл решений не трогаются |
+ | расшифровка нового видео | `--tx groq \| local` |
+ | рендер, музыка, папка | `--no-render`, `--music <трек>`, `--gate <имя>` |
+diff --git a/config/render.yaml b/config/render.yaml
+index ffdf8c1..2434f68 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -255,6 +255,17 @@ ending_loop: false
+ end_freeze_sec: 0
+ end_sting_path: ""
+ end_sting_volume: 0.8
++
++# M161: render on gamebox over ssh — `arl render --manifest … --remote`, `arl auto … --remote`. The code, the review copy,
++# the transcripts and the cached transcript go there, the source only when it is missing there (by content); the
++# render runs under the shared lock; the gate folder comes back. HEVC on the RX 580 breaks long clips (m160: CABAC
++# errors, green blocks) — H.264 on the GPU is clean.
++remote:
++  host: gamebox
++  root: /mnt/data/autoreels
++  encoder: h264_vaapi
++  profile: h264
++  lock: /mnt/data/locks/heavy.lock
+ continue_sec: 2.5
+ continue_text: "Продолжение →"
+ 
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index 05491fd..b1bb6fd 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -19,3 +19,9 @@
+ ## Рендер на видеокарте (M156)
+ 
+ Видеокарта RX 580 кодирует HEVC/H.264 через VAAPI (Mesa, пакет `mesa-va-drivers`; проверка — `vainfo`, строки `VAEntrypointEncSlice`). Пользователь рендера — в группах `render` и `video`. Кодер `--encoder hevc_vaapi` или `h264_vaapi`. Каждая команда ffmpeg с таким кодером получает `-vaapi_device` (по умолчанию `/dev/dri/renderD128`, иначе env `RENDER_VAAPI_DEVICE`), загрузку кадров в GPU в конце видеофильтра (`format=nv12,hwupload`) и не получает выходного `-pix_fmt` (`local/render.py _hw_argv`). Субтитры (`ass`), кроп и цвет считаются процессором, кодирование — видеокартой. Скорость задаёт `-rc_mode VBR` (M158: без режима RX 580 кодировал с постоянным QP и не держал битрейт профиля — 7,0 Мбит/с против 4,9 у videotoolbox). Остальные кодеры не меняются. Пробный кадр не прошёл — рендер берёт запасной кодер, как при AMF. Рендер на gamebox — тяжёлая задача: запускать под общим замком (`flock /mnt/data/locks/heavy.lock .venv/bin/python -m autoreels render …`), озвучка книги ждёт его или он её.
++
++**HEVC на RX 580 не годится (M160).** На длинных клипах `hevc_vaapi` выдаёт кадры с ошибками в самих данных (`CABAC_MAX_BIN`): в QuickTime — зелёные блоки до следующего ключевого кадра; перепаковка и режимы скорости не помогают, 10-секундные пробы чистые. `h264_vaapi` — 0 ошибок. Поэтому gamebox рендерит в H.264 (профиль `h264`).
++
++## Рендер с Mac на gamebox (M161)
++
++`arl render --manifest reviews/<копия>.review.json --gate <имя> --remote` или `arl auto <источники> --remote`. Mac отправляет на gamebox (`config/render.yaml remote:`, папка `/mnt/data/autoreels`): отслеживаемый код (`git ls-files`), копию разметки, `transcripts/<источник>.*`, кэшированную расшифровку источника из `data/cache/` (без неё рендер там проверяет швы грубым правилом и печатает ложные «seam inside word» — m158, m160), модель лиц и музыку; исходник — только если gamebox не находит его по содержимому. Рендер идёт там под общим замком с кодером и профилем из `remote:`, папка гейта возвращается на Mac (`tar` по ssh: в именах источников бывают пробелы). Только в гейт: настоящие клипы с другой машины не пишутся. Окружение там: `/mnt/data/autoreels/.venv` (`pip install -e ".[dev]"`, OpenCV обязателен — без него рамка не по лицу).
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 5abe75b..0044e1c 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -4717,6 +4717,42 @@ def cmd_render(
+     return all_outputs
+ 
+ 
++def cmd_render_remote(manifest_name: str, *, root=None, reels_filter: str | None = None, gate_name: str | None = None,
++                      music: str | None = None, run=None) -> int:
++    """M161: render a review copy on the remote machine (config/render.yaml `remote:`) into a gate folder and bring
++    the clips back (local/remote.py). Only gate renders: the real clips are never written from another machine."""
++    from autoreels.local.remote import RemoteRenderError, render_remote
++    _root = Path(root) if root else _project_root()
++    rcfg = load_render_config(_root / "config" / "render.yaml").remote
++    if not rcfg.host or not rcfg.root:
++        print("ошибка: удалённый рендер не настроен — config/render.yaml remote: host, root", file=sys.stderr)
++        return 2
++    if not gate_name:
++        print("ошибка: удалённый рендер — только в гейт (--gate <имя>)", file=sys.stderr)
++        return 2
++    review = Path(manifest_name)
++    if not review.is_absolute():
++        review = (Path.cwd() / review) if (Path.cwd() / review).is_file() else _root / review
++    try:
++        review.resolve().relative_to(_root.resolve())
++        m = Manifest.model_validate_json(review.read_text(encoding="utf-8"))
++    except (OSError, ValueError) as exc:
++        print(f"ошибка: {manifest_name}: {type(exc).__name__}: {str(exc)[:160]}", file=sys.stderr)
++        return 2
++    try:
++        local_src = resolve_source(m, _root / "inputs")
++    except Exception:  # noqa: BLE001 — the remote may still have it
++        local_src = None
++    try:
++        render_remote(rcfg, root=_root, review=review, stem=Path(m.source).stem, source_sha256=m.source_sha256,
++                      local_source=local_src, reels=reels_filter or f"1-{len(m.reels)}", gate=gate_name,
++                      music=music, run=run, log=lambda s: print(s, flush=True))
++    except RemoteRenderError as exc:
++        print(f"ошибка: удалённый рендер — {exc}", file=sys.stderr)
++        return 1
++    return 0
++
++
+ def cmd_preview(
+     manifest_arg=None,
+     *,
+@@ -10132,7 +10168,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
+              encoder: str | None = None, music: str | None = None, tx: str | None = None,
+              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
+-             today=None) -> int:
++             today=None, remote: bool = False) -> int:
+     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+ 
+     0. a video file → arl run (transcript + manifest; the video stays where it is);
+@@ -10269,9 +10305,15 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+                 results.append((stem, "apply", f"нет {review_json.name}: {type(exc).__name__}"))
+                 continue
+             if n:
+-                err = stage(f"рендер {n} клипов → _gate/{gate}",
+-                            lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
+-                                               gate_name=gate, encoder=encoder, music=music, _raise_on_failure=False))
++                if remote:                     # M161: on the remote machine, clips back into the same gate
++                    err = stage(f"рендер {n} клипов на удалённой машине → _gate/{gate}",
++                                lambda: cmd_render_remote(str(review_json), root=_root, reels_filter=f"1-{n}",
++                                                          gate_name=gate, music=music))
++                else:
++                    err = stage(f"рендер {n} клипов → _gate/{gate}",
++                                lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
++                                                   gate_name=gate, encoder=encoder, music=music,
++                                                   _raise_on_failure=False))
+                 if err:
+                     results.append((stem, "render", err))
+                     continue
+@@ -12352,6 +12394,9 @@ def _build_parser():
+     pd.add_argument("--gate", default=None, dest="gate",
+                     help="название гейт-прогона; вывод идёт в reels-out/<источник>/_gate/<имя>/, "
+                          "никогда не перезаписывает реальные клипы")
++    pd.add_argument("--remote", action="store_true",
++                    help="M161: рендер на машине из render.yaml remote: (gamebox, видеокарта, H.264) и клипы обратно; "
++                         "нужны --manifest и --gate")
+     pd.add_argument("--transition", choices=["cut", "punch"], default=None,
+                     help="переход на крупный план внутри окна: cut — склейка, punch — быстрый наезд "
+                          "(переопределяет render.yaml shot_transition; M103)")
+@@ -12755,6 +12800,8 @@ def _build_parser():
+     pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
+                      help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
+                           "по умолчанию r0.yaml autocut.auto_mode")
++    pau.add_argument("--remote", action="store_true",
++                     help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
+     pau.add_argument("--tag", default=None,
+                      help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
+                           "черновики прежнего листа и его файл решений не трогаются")
+@@ -13180,6 +13227,12 @@ def main(argv=None) -> int:
+                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
+                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
+         elif args.cmd == "render":
++            if getattr(args, "remote", False):                    # M161
++                if not args.manifest_name:
++                    print("ошибка: --remote нужен с --manifest", file=sys.stderr)
++                    return 2
++                return cmd_render_remote(args.manifest_name, reels_filter=args.reels_filter, gate_name=args.gate,
++                                         music=args.music)
+             zoom_flag = {"on": True, "off": False}.get(args.zoom)   # None = из конфига
+             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
+                        palette=args.palette, zoom=zoom_flag, music=args.music,
+@@ -13279,7 +13332,7 @@ def main(argv=None) -> int:
+                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
+                             encoder=args.encoder, music=args.music, tx=args.tx,
+                             mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
+-                            tag=getattr(args, "tag", None))
++                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False))
+         elif args.cmd == "dictate":
+             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index ff9a186..e7c6ecc 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -961,6 +961,15 @@ class SpeechMapConfig(BaseModel):
+     own_tail_t1_margin_sec: float = 0.15  # iv_e <= last_t1 + margin → own tail (Whisper hint)
+ 
+ 
++class RemoteRender(BaseModel):
++    """M161: render on another machine over ssh (local/remote.py)."""
++    host: str = ""                        # ssh name; "" = off
++    root: str = ""                        # project folder there
++    encoder: str = "h264_vaapi"           # RX 580: HEVC breaks long clips (m160), H.264 is clean
++    profile: str = "h264"
++    lock: str = ""                        # flock file of the shared heavy lock there ("" = none)
++
++
+ class RenderConfig(BaseModel):
+     """Типизированный config/render.yaml."""
+ 
+@@ -1040,6 +1049,7 @@ class RenderConfig(BaseModel):
+     end_freeze_sec: float = Field(0.0, ge=0.0, le=5.0)   # hold the last frame this long after the clip, then black
+     end_sting_path: str = ""              # a sound played after the clip ends (under the held frame); "" = none
+     end_sting_volume: float = Field(0.8, ge=0.0, le=2.0)
++    remote: RemoteRender = Field(default_factory=RemoteRender)   # M161: arl render --remote, arl auto --remote
+     continue_sec: float = Field(2.5, gt=0)
+     continue_text: str = "Продолжение →"
+     # M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»): where the face
+diff --git a/src/autoreels/local/remote.py b/src/autoreels/local/remote.py
+new file mode 100644
+index 0000000..71a417b
+--- /dev/null
++++ b/src/autoreels/local/remote.py
+@@ -0,0 +1,122 @@
++"""M161: render on another machine over ssh (gamebox, RX 580 → h264_vaapi) and bring the clips back.
++
++The Mac stays the machine of record: the code, the review copy, the transcripts and the source live here. One call
++sends the rest a render needs (tracked code, the review.json, transcripts/<stem>.*, the cached transcript of the
++source — without it the remote render falls back to a coarse seam check and reports false «seam inside word» errors,
++m158/m160 — the face model, the music track and, only when the remote cannot find it by content, the source), runs
++`arl render` there under the shared gamebox lock with the remote's encoder and profile, and copies
++reels-out/<stem>/_gate/<gate>/ back. HEVC on the RX 580 breaks long clips (CABAC errors, green blocks — m160), so the
++remote encoder is H.264 (config/render.yaml `remote:`).
++
++`run` (argv, **kw) → CompletedProcess is the injection point for tests: no ssh, no rsync.
++"""
++from __future__ import annotations
++
++import json
++import shlex
++import subprocess
++import tempfile
++from pathlib import Path
++from typing import Callable
++
++
++class RemoteRenderError(RuntimeError):
++    """A step of the remote render failed; the message names the step."""
++
++
++def transcript_cache_files(cache_dir: Path, source_sha256: str) -> list[Path]:
++    """The cached transcripts of this source (data/cache/*.transcript.json stamped with its sha256)."""
++    out: list[Path] = []
++    if not source_sha256 or not Path(cache_dir).is_dir():
++        return out
++    for p in sorted(Path(cache_dir).glob("*.transcript.json")):
++        try:
++            if json.loads(p.read_text(encoding="utf-8")).get("source_sha256") == source_sha256:
++                out.append(p)
++        except (OSError, ValueError):
++            continue
++    return out
++
++
++def data_files(root: Path, review: Path, stem: str, source_sha256: str, music: str | None = None) -> list[str]:
++    """Paths relative to `root` that a render of this review needs besides the tracked code."""
++    rel = [str(review.resolve().relative_to(root.resolve()))]
++    rel += sorted(str(p.relative_to(root)) for p in (root / "transcripts").glob(f"{_glob_escape(stem)}.*") if p.is_file())
++    rel += [str(p.relative_to(root)) for p in transcript_cache_files(root / "data" / "cache", source_sha256)]
++    if (root / "data" / "models").is_dir():
++        rel.append("data/models")
++    if music:
++        m = root / "music" / music
++        if m.is_file():
++            rel.append(str(m.relative_to(root)))
++    return rel
++
++
++def _glob_escape(s: str) -> str:
++    return "".join(f"[{c}]" if c in "*?[" else c for c in s)
++
++
++def remote_render_cmd(cfg, review_rel: str, *, reels: str, gate: str, music: str | None = None) -> str:
++    """The shell line run on the remote: arl render under the shared lock with the remote encoder and profile."""
++    argv = [".venv/bin/python", "-m", "autoreels", "render", "--manifest", review_rel, "--reels", reels,
++            "--gate", gate, "--encoder", cfg.encoder, "--profile", cfg.profile]
++    if music:
++        argv += ["--music", music]
++    line = " ".join(shlex.quote(a) for a in argv)
++    if cfg.lock:
++        line = f"flock {shlex.quote(cfg.lock)} {line}"
++    return f"cd {shlex.quote(cfg.root)} && {line}"
++
++
++def render_remote(cfg, *, root: Path, review: Path, stem: str, source_sha256: str, local_source: Path | None,
++                  reels: str, gate: str, music: str | None = None, run: Callable | None = None,
++                  log: Callable[[str], None] = print) -> Path:
++    """Send, render there, bring back. Returns the local gate folder. Raises RemoteRenderError naming the step."""
++    run = run or (lambda argv, **kw: subprocess.run(argv, **kw))
++    host, rroot = cfg.host, cfg.root.rstrip("/")
++    root = Path(root)
++
++    def step(name: str, argv: list[str], **kw):
++        r = run(argv, **kw)
++        if getattr(r, "returncode", 1) != 0:
++            err = (getattr(r, "stderr", "") or "").strip().splitlines()[-3:]
++            raise RemoteRenderError(f"{name}: код {getattr(r, 'returncode', '?')}" + (f" — {' | '.join(err)}" if err else ""))
++        return r
++
++    log(f"  удалённый рендер: {host}:{rroot} ({cfg.encoder}, профиль {cfg.profile})")
++    step("ssh", ["ssh", host, f"test -x {shlex.quote(rroot)}/.venv/bin/python && echo ok"],
++         capture_output=True, text=True)
++    # 1. tracked code (same version as here)
++    files = step("git ls-files", ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True).stdout
++    with tempfile.NamedTemporaryFile("w", suffix=".files", delete=False, encoding="utf-8") as fh:
++        fh.write(files.replace("\0", "\n"))
++        flist = fh.name
++    step("код", ["rsync", "-a", f"--files-from={flist}", f"{root}/", f"{host}:{rroot}/"], capture_output=True, text=True)
++    # 2. the render's data (relative paths keep the layout; names with spaces travel inside the protocol)
++    rel = data_files(root, review, stem, source_sha256, music)
++    step("данные", ["rsync", "-aR", *rel, f"{host}:{rroot}/"], capture_output=True, text=True, cwd=str(root))
++    log(f"  отправлено: код, {len(rel)} путей данных")
++    # 3. the source — only when the remote cannot find it by content
++    review_rel = rel[0]
++    probe = (f"cd {shlex.quote(rroot)} && .venv/bin/python -c "
++             + shlex.quote("import sys; from pathlib import Path; from autoreels.core.models import Manifest; "
++                           "from autoreels.local.render import resolve_source; "
++                           f"m = Manifest.model_validate_json(Path({review_rel!r}).read_text(encoding='utf-8')); "
++                           "print(resolve_source(m, 'inputs'))"))
++    r = run(["ssh", host, probe], capture_output=True, text=True)
++    if getattr(r, "returncode", 1) != 0:
++        if local_source is None or not Path(local_source).is_file():
++            raise RemoteRenderError("исходник: нет ни там, ни здесь")
++        log(f"  исходник: копирую {Path(local_source).name} …")
++        step("исходник", ["rsync", "-a", "--partial", str(local_source), f"{host}:{rroot}/inputs/"])
++    # 4. render there (output streams to this terminal)
++    step("рендер", ["ssh", host, remote_render_cmd(cfg, review_rel, reels=reels, gate=gate, music=music)])
++    # 5. clips back (tar over ssh: the stem may contain spaces)
++    local_gate = root / "reels-out" / stem / "_gate" / gate
++    local_gate.mkdir(parents=True, exist_ok=True)
++    pull = (f"ssh {shlex.quote(host)} "
++            + shlex.quote(f"cd {shlex.quote(rroot + '/reels-out/' + stem + '/_gate/' + gate)} && tar -cf - .")
++            + f" | tar -xf - -C {shlex.quote(str(local_gate))}")
++    step("назад", ["sh", "-c", pull], capture_output=True, text=True)
++    log(f"  клипы здесь: {local_gate}")
++    return local_gate
+diff --git a/tests/test_m161_remote.py b/tests/test_m161_remote.py
+new file mode 100644
+index 0000000..4ebe076
+--- /dev/null
++++ b/tests/test_m161_remote.py
+@@ -0,0 +1,149 @@
++"""M161: render on the remote machine (gamebox) — what goes there, what runs there, what comes back."""
++from __future__ import annotations
++
++import json
++import shutil
++import subprocess
++from pathlib import Path
++
++from autoreels.core.config import RemoteRender
++from autoreels.local import remote as RM
++
++CFG = RemoteRender(host="gamebox", root="/mnt/data/autoreels", encoder="h264_vaapi", profile="h264",
++                   lock="/mnt/data/locks/heavy.lock")
++STEM = "2026-08-08 09h 33m 14s"
++SHA = "a" * 64
++
++
++def _tree(tmp: Path) -> Path:
++    for d in ("reviews", "transcripts", "data/cache", "data/models", "music"):
++        (tmp / d).mkdir(parents=True, exist_ok=True)
++    (tmp / "reviews" / f"{STEM}_m157.review.json").write_text("{}", encoding="utf-8")
++    for suf in ("speechmap.json", "align.json", "map.json"):
++        (tmp / "transcripts" / f"{STEM}.{suf}").write_text("{}", encoding="utf-8")
++    (tmp / "transcripts" / "other.map.json").write_text("{}", encoding="utf-8")
++    (tmp / "data" / "cache" / "x.k1.transcript.json").write_text(json.dumps({"source_sha256": SHA}), encoding="utf-8")
++    (tmp / "data" / "cache" / "y.k1.transcript.json").write_text(json.dumps({"source_sha256": "b" * 64}), encoding="utf-8")
++    (tmp / "data" / "cache" / "z.mp3").write_bytes(b"0")
++    (tmp / "data" / "models" / "face.onnx").write_bytes(b"0")
++    (tmp / "music" / "pad.m4a").write_bytes(b"0")
++    return tmp
++
++
++def test_m161_data_files_are_the_review_transcripts_cached_transcript_models_music(tmp_path):
++    root = _tree(tmp_path)
++    rel = RM.data_files(root, root / "reviews" / f"{STEM}_m157.review.json", STEM, SHA, music="pad.m4a")
++    assert rel[0] == f"reviews/{STEM}_m157.review.json"
++    assert {f"transcripts/{STEM}.speechmap.json", f"transcripts/{STEM}.align.json", f"transcripts/{STEM}.map.json"} <= set(rel)
++    assert "transcripts/other.map.json" not in rel
++    assert "data/cache/x.k1.transcript.json" in rel and "data/cache/y.k1.transcript.json" not in rel
++    assert "data/cache/z.mp3" not in rel and "data/models" in rel and "music/pad.m4a" in rel
++
++
++def test_m161_remote_command_quotes_and_takes_the_lock():
++    line = RM.remote_render_cmd(CFG, f"reviews/{STEM}_m157.review.json", reels="1-9", gate="m161")
++    assert line.startswith("cd /mnt/data/autoreels && flock /mnt/data/locks/heavy.lock .venv/bin/python -m autoreels render")
++    assert f"'reviews/{STEM}_m157.review.json'" in line
++    assert "--encoder h264_vaapi --profile h264" in line and "--gate m161" in line and "--reels 1-9" in line
++
++
++class _Run:
++    def __init__(self, probe_rc=0, fail=None):
++        self.calls, self.probe_rc, self.fail = [], probe_rc, fail
++
++    def __call__(self, argv, **kw):
++        self.calls.append(argv)
++        rc = 0
++        if argv[0] == "ssh" and "resolve_source" in argv[-1]:
++            rc = self.probe_rc
++        if self.fail and self.fail(argv):
++            rc = 7
++        return subprocess.CompletedProcess(argv, rc, stdout="a.py\0b.py\0" if argv[0] == "git" else "",
++                                           stderr="boom" if rc else "")
++
++
++def test_m161_render_remote_sequence_without_source_copy(tmp_path):
++    root = _tree(tmp_path)
++    run = _Run(probe_rc=0)
++    out = RM.render_remote(CFG, root=root, review=root / "reviews" / f"{STEM}_m157.review.json", stem=STEM,
++                           source_sha256=SHA, local_source=None, reels="1-9", gate="m161", run=run, log=lambda s: None)
++    kinds = [c[0] for c in run.calls]
++    assert kinds == ["ssh", "git", "rsync", "rsync", "ssh", "ssh", "sh"]
++    assert run.calls[2][-1] == "gamebox:/mnt/data/autoreels/" and any(a.startswith("--files-from=") for a in run.calls[2])
++    assert run.calls[3][:2] == ["rsync", "-aR"] and f"reviews/{STEM}_m157.review.json" in run.calls[3]
++    assert "render" in run.calls[5][-1] and "flock" in run.calls[5][-1]
++    pull = run.calls[6][-1]
++    assert "tar -cf - ." in pull and "_gate/m161" in pull and STEM in pull
++    assert out == root / "reels-out" / STEM / "_gate" / "m161" and out.is_dir()
++
++
++def test_m161_source_copied_only_when_missing_there(tmp_path):
++    root = _tree(tmp_path)
++    src = root / "src.mp4"
++    src.write_bytes(b"0")
++    run = _Run(probe_rc=1)
++    RM.render_remote(CFG, root=root, review=root / "reviews" / f"{STEM}_m157.review.json", stem=STEM,
++                     source_sha256=SHA, local_source=src, reels="1-2", gate="g", run=run, log=lambda s: None)
++    copies = [c for c in run.calls if c[0] == "rsync" and c[-1].endswith("/inputs/")]
++    assert len(copies) == 1 and copies[0][-2] == str(src)
++
++
++def test_m161_a_failed_step_is_named(tmp_path):
++    import pytest
++    root = _tree(tmp_path)
++    run = _Run(fail=lambda a: a[0] == "ssh" and "render" in a[-1] and "resolve_source" not in a[-1])
++    with pytest.raises(RM.RemoteRenderError, match="рендер: код 7"):
++        RM.render_remote(CFG, root=root, review=root / "reviews" / f"{STEM}_m157.review.json", stem=STEM,
++                         source_sha256=SHA, local_source=None, reels="1", gate="g", run=run, log=lambda s: None)
++
++
++def test_m161_cmd_render_remote_needs_gate_and_config(tmp_path, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import REPO_ROOT
++    root = _tree(tmp_path)
++    (root / "config").mkdir()
++    shutil.copy(REPO_ROOT / "config" / "render.yaml", root / "config" / "render.yaml")
++    review = root / "reviews" / f"{STEM}_m157.review.json"
++    review.write_text(json.dumps({"source": f"{STEM}.mp4", "source_sha256": SHA, "source_hash_scheme": "partial-p1",
++                                  "duration_preset": "shorts", "run_key": "r",
++                                  "setup": {"setup_id": "t", "crop": {"x": 0, "y": 0, "w": 960, "h": 1700},
++                                            "scale": [1080, 1920], "frame": [1920, 1080]},
++                                  "reels": [{"id": "r01", "start": 1.0, "end": 20.0, "score": 80, "hook": "h",
++                                             "title": "", "description": ""}]}), encoding="utf-8")
++    assert cli.cmd_render_remote(str(review), root=root, gate_name=None) == 2
++    run = _Run()
++    assert cli.cmd_render_remote(str(review), root=root, gate_name="m161", run=run) == 0
++    assert any(c[0] == "ssh" and "--reels 1-1" in c[-1] for c in run.calls)
++    cfg = (root / "config" / "render.yaml").read_text(encoding="utf-8")
++    (root / "config" / "render.yaml").write_text(cfg.replace("  host: gamebox", '  host: ""'), encoding="utf-8")
++    assert cli.cmd_render_remote(str(review), root=root, gate_name="m161", run=run) == 2
++    assert "не настроен" in capsys.readouterr().err
++
++
++def test_m161_config_off_in_code_and_gamebox_in_repo():
++    from autoreels.core.config import RenderConfig, load_render_config
++    from tests.test_montage import REPO_ROOT
++    assert RenderConfig.model_fields["remote"].default_factory().host == ""
++    r = load_render_config(REPO_ROOT / "config" / "render.yaml", local_path=REPO_ROOT / "nope.yaml").remote
++    assert (r.host, r.root, r.encoder, r.profile) == ("gamebox", "/mnt/data/autoreels", "h264_vaapi", "h264")
++
++
++def test_m161_auto_remote_renders_there(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_auto import _stub
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++    monkeypatch.setattr(cli, "cmd_render_remote", lambda *a, **k: calls.append(("remote", a, k)) or 0)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, remote=True, gate="g") == 0
++    names = [c[0] for c in calls]
++    assert "remote" in names and "render" not in names
++    r = next(c for c in calls if c[0] == "remote")
++    assert r[2]["gate_name"] == "g" and r[2]["reels_filter"] == "1-1"
++
++
++def test_m161_cli_flags():
++    from autoreels.__main__ import _build_parser
++    p = _build_parser()
++    assert p.parse_args(["render", "--manifest", "x", "--gate", "g", "--remote"]).remote is True
++    assert p.parse_args(["auto", "x", "--remote"]).remote is True
