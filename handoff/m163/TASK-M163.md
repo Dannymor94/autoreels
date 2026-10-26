@@ -50,14 +50,14 @@ grep -hE "Claude .*≈ \\$" handoff/m163/auto.txt handoff/m163/describe.*.txt 2>
 ```
 
 ## Шаг 5. Уборка reels-out (после успешного шага 2)
-Остаётся по одному набору: пять источников — m163, IMG_6848 и PXL_20260729_copy — m157. Остальные гейты уходят в Корзину (`~/.Trash/autoreels-m163/`). Настоящие клипы не трогаются.
+Остаётся по одному набору: пять источников — m163, IMG_6848 и PXL_20260729_copy — m157; плюс у IMG_6848 пара m146b/m147, пока владелец не прослушал громкость. Остальные гейты уходят в Корзину (`~/.Trash/autoreels-m163/`). Настоящие клипы не трогаются.
 ```bash
 bash handoff/m163/gates.sh | tee handoff/m163/gates.txt | tail -12
 bash handoff/m163/gates.sh --do | tail -2
 ls -d reels-out/*/_gate/*/
 ssh gamebox 'ls -d /mnt/data/autoreels/reels-out/*/_gate/*/ 2>/dev/null; rm -rf /mnt/data/autoreels/reels-out/*/_gate/*; echo "gamebox: пробные гейты удалены"'
 ```
-Ожидается: в `ls` ровно 7 папок — пять `m163` и две `m157`. На gamebox удалены только пробные рендеры m156–m161 (там они ничьи).
+Ожидается: в `ls` ровно 9 папок — пять `m163`, две `m157` и у IMG_6848 пара `m146b`/`m147` (сравнение громкости ждёт владельца). На gamebox удалены только пробные рендеры m156–m161 (там они ничьи).
 
 ## Шаг 6. Отчёт
 `handoff/m163/REPORT.md`: `itog.txt`, `posts.txt`, `errors.txt`, `cost.txt`, `gates.txt` (сколько МБ ушло в Корзину), итоговый список папок.
