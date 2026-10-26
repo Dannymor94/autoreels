@@ -1,0 +1,9 @@
+было : 862.58–903.51, 29.6 с, open_thought=True, предупреждений 2
+        ⚠ no room after last word «было.» (next speech at 903.509) — clip ends at its audible end
+        ⚠ dangling start: opens on «Но»
+        …это, нужно прекращать спать и идти дом, но именно для него это нужно было.
+стало: 862.58–909.26, 34.9 с, open_thought=False, предупреждений 2
+        ⚠ ending intonation open (end pitch 97/100 in the speaker's range): «человека.» sounds unfinished — the speaker goes on; finished sentence ends nearby: s6 «днем.», s7 «было.», s8 «встречаться.»
+        ⚠ dangling start: opens on «Но»
+        …вот мы сейчас с ней будем раз в неделю встречаться. В зависимости от человека.
+добавлено: И вот мы сейчас с ней будем раз в неделю встречаться. В зависимости от человека.
