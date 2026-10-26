@@ -18,7 +18,7 @@ say "занятость (замок, llama-server, озвучка)"
 ssh $H "flock -n $L true && echo 'замок свободен' || echo 'ЗАМОК ЗАНЯТ'; systemctl is-active llama-server; pgrep -fl 'run.sh|synth' | head -3 || true"
 say "пробное кодирование 1080x1920, 10 с (только при свободном замке)"
 ssh $H "flock -n $L sh -c '
-  t(){ s=\$(date +%s.%N); \"\$@\" >/tmp/m155.log 2>&1; rc=\$?; e=\$(date +%s.%N); echo \"rc=\$rc \$(echo \"\$e - \$s\" | bc) с\"; [ \$rc = 0 ] || tail -3 /tmp/m155.log; }
+  t(){ s=\$(date +%s.%N); \"\$@\" >/tmp/m155.log 2>&1; rc=\$?; e=\$(date +%s.%N); echo \"rc=\$rc \$(python3 -c \"print(round(\$e-\$s,1))\") с\"; [ \$rc = 0 ] || tail -3 /tmp/m155.log; }
   echo -n \"hevc_vaapi 5M: \"; t ffmpeg -hide_banner -y -f lavfi -i testsrc2=s=1080x1920:r=30 -t 10 -vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -c:v hevc_vaapi -b:v 5M -f null -
   echo -n \"h264_vaapi 8M: \"; t ffmpeg -hide_banner -y -f lavfi -i testsrc2=s=1080x1920:r=30 -t 10 -vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -c:v h264_vaapi -b:v 8M -f null -
   echo -n \"libx265 medium 5M: \"; t ffmpeg -hide_banner -y -f lavfi -i testsrc2=s=1080x1920:r=30 -t 10 -c:v libx265 -preset medium -b:v 5M -f null -
