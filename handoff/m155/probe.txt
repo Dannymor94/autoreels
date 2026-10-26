@@ -1,0 +1,60 @@
+
+== система
+Ubuntu 26.04.1 LTS
+7.0.0-38-generic
+16
+               total        used        free      shared  buff/cache   available
+Mem:              30           1           7           0          21          29
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sdb2       218G   51G  157G  25% /
+/dev/sda2       3.6T  365G  3.1T  11% /mnt/data
+
+== ffmpeg и libass
+/usr/bin/ffmpeg
+ffmpeg version 8.0.1-3ubuntu2 Copyright (c) 2000-2025 the FFmpeg developers
+ .. ass               V->V       Render ASS subtitles onto input video using the libass library.
+ .. subtitles         V->V       Render text subtitles onto input video using the libass library.
+
+== кодеры
+ V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
+ V....D libx264rgb           libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 RGB (codec h264)
+ V....D h264_vaapi           H.264/AVC (VAAPI) (codec h264)
+ V....D libx265              libx265 H.265 / HEVC (codec hevc)
+ V....D hevc_vaapi           H.265/HEVC (VAAPI) (codec hevc)
+
+== GPU (VAAPI)
+total 0
+drwxr-xr-x  2 root root        100 Oct 26 13:20 by-path
+crw-rw----+ 1 root video  226,   1 Oct 26 13:20 card1
+crw-rw----+ 1 root render 226, 128 Oct 26 13:20 renderD128
+danavrata adm cdrom sudo dip video plugdev users lxd render input
+libva info: Found init function __vaDriverInit_1_23
+libva info: va_openDriver() returns 0
+vainfo: Driver version: Mesa Gallium driver 26.0.8-1ubuntu0.3 for AMD Radeon RX 580 Series (radeonsi, polaris10, ACO, DRM 3.64, 7.0.0-38-generic)
+      VAProfileH264ConstrainedBaseline:	VAEntrypointVLD
+      VAProfileH264ConstrainedBaseline:	VAEntrypointEncSlice
+      VAProfileH264Main               :	VAEntrypointVLD
+      VAProfileH264Main               :	VAEntrypointEncSlice
+      VAProfileH264High               :	VAEntrypointVLD
+
+== python, git, проект
+Python 3.14.4
+git version 2.53.0
+проекта нет
+
+== занятость (замок, llama-server, озвучка)
+замок свободен
+inactive
+10266 bash
+
+== пробное кодирование 1080x1920, 10 с (только при свободном замке)
+hevc_vaapi 5M: rc=0 1.9 с
+h264_vaapi 8M: rc=0 3.7 с
+libx265 medium 5M: rc=0 4.5 с
+libx264 medium 8M: rc=0 1.4 с
+
+== сеть Mac → gamebox (500 МБ)
+16 МБ/с (31 с)
+
+== то же на Mac для сравнения (videotoolbox)
+hevc_videotoolbox: rc=0 2 с
