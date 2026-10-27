@@ -419,7 +419,7 @@ autocut:
   #         a laugh); the speaker carries the clip (more than half of its time); the scenarist sees «[ведущий]»;
   #   off — no clip contains the interviewer;   "" — the map is not read (as before M165).
   # Per run: arl auto … --interviewer off|on   (arl autocut … --ac interviewer=off)
-  interviewer: "on"
+  interviewer: "off"
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)

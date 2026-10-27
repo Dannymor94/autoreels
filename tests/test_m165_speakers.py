@@ -81,7 +81,7 @@ def test_m165_config_default_off_in_code_on_in_repo():
     from autoreels.core.config import AutocutConfig
     from tests.test_montage import REPO_ROOT
     assert AutocutConfig().interviewer == ""
-    assert load_r0_config(REPO_ROOT / "config" / "r0.yaml").autocut.interviewer == "on"
+    assert load_r0_config(REPO_ROOT / "config" / "r0.yaml").autocut.interviewer == "off"
 
 
 def test_m165_override_parses():
