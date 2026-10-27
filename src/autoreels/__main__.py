@@ -7844,7 +7844,7 @@ def _scenario_examples(root: Path, stem: str, n: int = 3) -> str:
 
 
 def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None,
-                   start_pause=None):
+                   start_pause=None, other=None):
     """M123: the scenarist's reels as the pool of arl autocut --scenario (None = cannot ask). The model is named
     explicitly (haiku | sonnet: the whole talk in one request); its answer is kept in data/cache/scenario/ by the
     request — the same request is not paid twice."""
@@ -7852,6 +7852,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
     from autoreels.cloud.edit import _ends_terminal
     from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
                                           scenario_proposals, tone_rule)
+    from autoreels.cloud.speakers import interviewer_rule
     if provider is None and mode not in ("haiku", "sonnet"):
         print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
               file=sys.stderr)
@@ -7860,7 +7861,10 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
                   sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
     system = SCENARIO_SYSTEM.format(jumps=jumps_rule(prm), min_s=f"{prm.min_sec:g}", max_s=f"{prm.max_sec:g}",
                                     n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
-    user = numbered_text([(r, v[1] - v[0], v[2]) for r, v in sent.items()]) + _scenario_examples(root, stem)
+    _ivm = getattr(ac, "interviewer", "") if other else ""     # M165: the interviewer's sentences marked
+    system += interviewer_rule(_ivm)
+    user = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
+                          for r, v in sent.items()]) + _scenario_examples(root, stem)
     if provider is None:
         provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
             update={"max_output_tokens": ac.scenario_max_tokens, "timeout_sec": ac.scenario_timeout_sec})}), mode)
@@ -7877,7 +7881,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
         cpath.write_text(raw or "", encoding="utf-8")
         _usage_report(provider)
     scens, bad = parse_scenarios(raw, set(sent))
-    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause)
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm)
     scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
     print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
           + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
@@ -8076,6 +8080,76 @@ def _txcheck_params(r0_cfg, root=None):
                          sparse_win_sec=tc.sparse_win_sec, sparse_min_speech_sec=tc.sparse_min_speech_sec,
                          sparse_max_rate=tc.sparse_max_rate, known=tuple(KNOWN) + tuple(tc.known) + leak,
                          on_speech_sec=tc.on_speech_sec, sparse_suspicious_sec=tc.sparse_suspicious_sec)
+
+
+def cmd_speakers(target: str, *, root=None, inputs_dir: str | None = None, from_json: str | None = None,
+                 python: str | None = None, force: bool = False, run=None) -> int:
+    """M165: the speaker map of a source → transcripts/<stem>.speakers.json (cloud/speakers.py).
+    --from <diar.json>: import a ready diarization (m141 data/cache/m141/<stem>.diar.json; the turns are times in the
+    source, so a re-encoded copy with the same timeline takes them too). Otherwise pyannote runs tools/diarize.py in
+    the environment of --python (or env SPEAKERS_PYTHON; torch is not a project dependency) with HF_TOKEN from the
+    environment or .env. An existing map of this source is kept unless --force."""
+    import json as _json
+    import os as _os
+    import tempfile as _tf
+    from autoreels.cloud.speakers import build as _sp_build, load as _sp_load, write as _sp_write
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 2
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    out = _root / "transcripts" / f"{mpath.stem}.speakers.json"
+    if not force and _sp_load(out, manifest.source_sha256) is not None:
+        print(f"✓ уже есть: {out} (пересчитать: --force)")
+        return 0
+    run = run or (lambda argv, **kw: subprocess.run(argv, **kw))
+    if from_json:
+        try:
+            turns = _json.loads(Path(from_json).read_text(encoding="utf-8"))["turns"]
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"ошибка: {from_json}: {type(exc).__name__}", file=sys.stderr)
+            return 2
+        origin = f"import:{Path(from_json).name}"
+    else:
+        py = python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable
+        tok = _os.environ.get("HF_TOKEN")
+        env_file = _root / ".env"
+        if not tok and env_file.is_file():
+            for ln in env_file.read_text(encoding="utf-8").splitlines():
+                if ln.strip().startswith("HF_TOKEN="):
+                    tok = ln.split("=", 1)[1].strip().strip("'\"")
+        if not tok:
+            print("ошибка: нет HF_TOKEN (окружение или .env)", file=sys.stderr)
+            return 2
+        try:
+            src = resolve_source(manifest, Path(inputs_dir) if inputs_dir else _root / "inputs")
+        except Exception as exc:  # noqa: BLE001
+            print(f"ошибка: исходник не найден: {exc}", file=sys.stderr)
+            return 2
+        with _tf.TemporaryDirectory() as td:
+            wav, js = Path(td) / "a.wav", Path(td) / "d.json"
+            r = run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+            if getattr(r, "returncode", 1) != 0:
+                print("ошибка: ffmpeg не извлёк звук", file=sys.stderr)
+                return 1
+            r = run([py, str(_root / "tools" / "diarize.py"), str(wav), str(js)], env={**_os.environ, "HF_TOKEN": tok})
+            if getattr(r, "returncode", 1) != 0 or not js.is_file():
+                print(f"ошибка: разделение голосов не прошло ({py}); нужен pyannote.audio в этом окружении "
+                      f"(--python <venv>/bin/python)", file=sys.stderr)
+                return 1
+            turns = _json.loads(js.read_text(encoding="utf-8"))["turns"]
+        origin = "pyannote/speaker-diarization-3.1"
+    data = _sp_build(turns, manifest.source_sha256, origin)
+    _sp_write(out, data)
+    talk: dict = {}
+    for a, b, s in data["turns"]:
+        talk[s] = talk.get(s, 0.0) + b - a
+    tot = sum(talk.values()) or 1.0
+    print(f"✓ {out.name}: реплик {len(data['turns'])}, говорящих {len(talk)} — "
+          + ", ".join(f"{s} {v / tot:.0%}" for s, v in sorted(talk.items(), key=lambda kv: -kv[1]))
+          + f"; главный {data['main']}")
+    return 0
 
 
 def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
@@ -8374,9 +8448,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
     rhythm_out: list = []                   # M120: clips that could not keep the jump rule
     scen_out: list = []                     # M123: the scenarist's lines the code did not take, with the reason
+    _ivmode = getattr(ac, "interviewer", "")             # M165: the speaker map → the interviewer's sentences
+    _other = None
+    if _ivmode:
+        from autoreels.cloud.speakers import load as _sp_load, other_refs as _sp_other
+        _spm = _sp_load(_root / "transcripts" / f"{stem}.speakers.json", manifest.source_sha256)
+        if _spm is None:
+            print(f"  ведущий: карты говорящих нет (arl speakers {stem}) — реплики ведущего не различаются", flush=True)
+        else:
+            _other = _sp_other({r: (float(st[0].t0), float(st[-1].t1)) for r, st in sent_by_ref.items() if st}, _spm)
+            print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
     if scenario:
         pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
-                              end_tone, scen_out, scenario_provider, start_pause=start_pause)
+                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other)
         if pool is None:
             return 1
     else:
@@ -8394,6 +8478,12 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             pool = fill_pool(pool, _extra)
             print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
                   f"силы {_fsp}", flush=True)
+    if _other and _ivmode == "off" and not scenario:  # M165: no clip of the montage plays the interviewer
+        from autoreels.cloud.scenario import expand_refs as _xr
+        _n0 = len(pool)
+        pool = [pr for pr in pool if not (set(_xr(pr.pieces) or []) & _other)]
+        if len(pool) < _n0:
+            print(f"  ведущий: убрано сборок с его репликами {_n0 - len(pool)} (interviewer: off)", flush=True)
     _doubt = sum(1 for pr in pool if pr.start_doubt)
     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
         pool.sort(key=lambda pr: bool(pr.start_doubt))
@@ -10168,7 +10258,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
              encoder: str | None = None, music: str | None = None, tx: str | None = None,
              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
-             today=None, remote: bool = False) -> int:
+             today=None, remote: bool = False, interviewer: str | None = None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
@@ -10261,6 +10351,8 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         _scen_note = ""
         auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
         _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft
+        if interviewer:                                  # M165: --interviewer on|off for this run
+            _out["ac_over"] = [f"interviewer={interviewer}"]
         if _mode == "scenario":
             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
                                                                         llm=_scen_llm, scenario=True, **_out))
@@ -12800,6 +12892,9 @@ def _build_parser():
     pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
                      help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
                           "по умолчанию r0.yaml autocut.auto_mode")
+    pau.add_argument("--interviewer", choices=["on", "off"], default=None,
+                     help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
+                          "по умолчанию r0.yaml autocut.interviewer")
     pau.add_argument("--remote", action="store_true",
                      help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
     pau.add_argument("--tag", default=None,
@@ -12878,6 +12973,13 @@ def _build_parser():
                      help="M119: поле autocut из config/r0.yaml на этот запуск (можно несколько раз; список — через запятую)")
     pac.add_argument("--root", default=None)
     pac.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    psp = sub.add_parser("speakers", help="M165: карта говорящих источника (pyannote) → transcripts/<stem>.speakers.json")
+    psp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    psp.add_argument("--from", dest="from_json", default=None, help="готовое разделение голосов (JSON с turns)")
+    psp.add_argument("--python", default=None, help="Python окружения с pyannote.audio (иначе env SPEAKERS_PYTHON)")
+    psp.add_argument("--force", action="store_true")
+    psp.add_argument("--root", default=None)
 
     ptc = sub.add_parser(
         "tx-check",
@@ -13332,7 +13434,8 @@ def main(argv=None) -> int:
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
                             encoder=args.encoder, music=args.music, tx=args.tx,
                             mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
-                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False))
+                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False),
+                            interviewer=getattr(args, "interviewer", None))
         elif args.cmd == "dictate":
             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
@@ -13357,6 +13460,9 @@ def main(argv=None) -> int:
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
                                check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys,
                                ac_over=args.ac_over, scenario=args.scenario)
+        elif args.cmd == "speakers":
+            return cmd_speakers(args.manifest, root=getattr(args, "root", None), from_json=args.from_json,
+                                python=args.python, force=args.force)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)

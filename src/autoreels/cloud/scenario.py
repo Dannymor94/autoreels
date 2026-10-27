@@ -142,7 +142,8 @@ def tone_rule(tone: str) -> str:
 
 def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float, str, bool, int]],
                        units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None,
-                       start_pause: Callable[[str], "float | None"] | None = None
+                       start_pause: Callable[[str], "float | None"] | None = None,
+                       other: "set[str] | None" = None, interviewer: str = ""
                        ) -> tuple[list[Proposal], list[tuple[str, str]]]:
     """M123: each scenario → a Proposal the automatic path checks and polishes as its own, or a reason it goes.
     `sent` — B.k → (t0, t1, text, finished, words). Checks: length min_sec…max_sec; the jump rule (p.rhythm); the end
@@ -163,6 +164,16 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
         label = compress_refs(refs)
         dur = lambda rs: sum(sent[r][1] - sent[r][0] for r in rs)  # noqa: E731
         notes = [f"сценарий: {sc.get('why') or '—'}"]
+        if other and interviewer in ("on", "off"):      # M165: the interviewer's sentences (speaker map)
+            _iv = [r for r in refs if r in other]
+            if _iv and interviewer == "off":
+                gone.append((label, f"реплика ведущего ({compress_refs(_iv)}), interviewer: off"))
+                continue
+            if _iv and dur(_iv) * 2 >= dur(refs):
+                gone.append((label, f"ведущий говорит половину ролика и больше ({compress_refs(_iv)})"))
+                continue
+            if _iv:
+                notes.append(f"ведущий: {compress_refs(_iv)} — контекст или реплика (interviewer: on)")
         if end_tone is not None and p.end_tone:
             while refs and (end_tone(refs[-1]) == "open" or not sent[refs[-1]][3]) and dur(refs[:-1]) >= p.min_sec:
                 notes.append(f"конец: «{sent[refs[-1]][2][-40:]}» не законченный или «→» — убран")

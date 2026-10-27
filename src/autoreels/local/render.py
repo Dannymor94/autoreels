@@ -2347,57 +2347,6 @@ def _beat_segs_from_smap(
     return result
 
 
-def _tail_find_word_end(
-    ffmpeg_bin: str | Path,
-    source: str | Path,
-    t0: float,
-    t1: float,
-    *,
-    margin: float = 0.2,
-    noise_db: float = -40.0,
-    min_sil: float = 0.08,
-) -> tuple[float, float | None]:
-    """Locate where the last subtitle word ends and where next speech begins.
-
-    Searches [t0-0.1, t1+margin+0.1] with silencedetect.  Returns:
-      word_end   – first silence_start after t0 (fallback: t1)
-      next_onset – first silence_end after word_end (fallback: None)
-
-    min_sil=0.08 is intentional: smaller values detect tight inter-word gaps
-    (e.g. 99 ms between "понятно?" and "Когда").  Raising to >=0.15 misses those
-    gaps and computes wrong next_onset, causing the fallback to overshoot into the
-    next sentence.  Stop-consonant false positives (50–100 ms closures that put
-    word_end too early) are instead rejected by the 0.6*(t1-t0) sanity floor in
-    the caller.
-
-    volumedetect/silencedetect log at INFO; loglevel must not be 'error'.
-    """
-    import re as _re
-    ws = max(0.0, t0 - 0.1)
-    wlen = t1 + margin + 0.1 - ws
-    if wlen < 0.02:
-        return t1, None
-    cmd = [
-        str(ffmpeg_bin), "-hide_banner", "-loglevel", "info",
-        "-ss", f"{ws:.6f}", "-i", str(source),
-        "-t", f"{wlen:.6f}", "-ac", "1",
-        "-af", f"silencedetect=noise={noise_db}dB:duration={min_sil:.3f}",
-        "-f", "null", "-",
-    ]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stderr
-    except Exception:
-        return t1, None
-    sil_starts = [float(m) + ws for m in _re.findall(r"silence_start:\s*([\d.]+)", out)]
-    sil_ends   = [float(m) + ws for m in _re.findall(r"silence_end:\s*([\d.]+)", out)]
-    word_end = next((s for s in sil_starts if s > t0), None)
-    we = word_end if word_end is not None else t1
-    next_onset = next((e for e in sil_ends if e > we), None)
-    return we, next_onset
-
-
-
-
 def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
     """Invariant: clip end must include the last subtitle word.
 
@@ -3417,58 +3366,11 @@ def _render_segments(
                                     f"but no room tone found (nearest silence too short), skipping",
                                     flush=True,
                                 )
-            elif not _planned:
-                _nw_start = getattr(reel, "tail_next_word_start", None)
-                if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
-                    # Intruded tail: next phrase starts before segment end.
-                    # Cut to word_end + pad, strictly before the intruder — video and audio end together.
-                    _last = reel.subtitles[-1]
-                    _word_end, _ = _tail_find_word_end(
-                        ffmpeg_bin, source, _last.t0, _last.t1, margin=_lw_margin)
-                    _pad = 0.10
-                    _new_end = min(_word_end + _pad, _nw_start - _pad)
-                    _new_end = max(_new_end, _last.t0 + 0.04)
-                    _new_end = min(_new_end, _nw_start)  # hard cap when gap <= pad
-                    if len(segs) > 1:
-                        _new_end = round(_new_end * _fps()) / _fps()
-                    if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
-                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
-                        clip_dur = sum(s.end - s.start for s in segs)
-                elif reel.subtitles:
-                    # Audio-based tail placement: detect where the last word actually ends and where
-                    # the next sentence begins, then place the clip end between them.
-                    # Only runs when clip end is within the tail adjustment window (end ≤ t1+margin+ε);
-                    # if the clip extends far beyond the last subtitle word the gap is intentional.
-                    _last = reel.subtitles[-1]
-                    _last_t1 = _last.t1
-                    if segs[-1].end <= _last_t1 + _lw_margin + 0.05:
-                        _word_end, _next_onset = _tail_find_word_end(  # type: ignore[assignment]
-                            ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
-                        )
-                        _pad = 0.10
-                        # Sanity floor: word_end must be >= t0 + 0.6*(t1-t0).
-                        # A shorter detected end is likely a stop-consonant closure (п/т/к),
-                        # not the actual word boundary.  Exception: when next_onset < floor
-                        # the gap is too tight to reach the floor without crossing into the
-                        # next sentence — "next onset forces earlier", accept word_end as-is.
-                        _floor = _last.t0 + 0.6 * (_last_t1 - _last.t0)
-                        _onset_forces = _next_onset is not None and _next_onset < _floor
-                        if not _onset_forces and _word_end < _floor:
-                            # stop-consonant false positive → fall back to timestamp-based end
-                            _new_end = _last_t1 + _lw_margin
-                            if _next_onset is not None:
-                                _new_end = min(_new_end, _next_onset - _pad)
-                        else:
-                            _new_end = _word_end + _pad
-                            if _next_onset is not None:
-                                _cap = max(_word_end + 0.04, _next_onset - _pad)
-                                _new_end = min(_new_end, _cap)
-                        _new_end = max(_new_end, _last.t0 + 0.04)
-                        if len(segs) > 1:
-                            _new_end = round(_new_end * _fps()) / _fps()
-                        if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
-                            segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
-                            clip_dur = sum(s.end - s.start for s in segs)
+            elif not _planned and reel.subtitles:
+                # M164 (M1.8 stage C): where the last word ends and the next speech begins comes from the speech
+                # map only (invariant 9). The point audio probe of the tail is gone (M164): without a
+                # map (flag off, build failed) the clip keeps the end its markup gave it — nothing is guessed.
+                print(f"  ⚠ {reel.id}: нет карты речи — конец клипа как в разметке (без звуковой пробы)", flush=True)
             # Convert audio word-end to output timeline for fade parameter computation.
             _word_end_out: float | None
             if _word_end is not None:
