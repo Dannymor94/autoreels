@@ -1111,6 +1111,29 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
+def _drop_last_sentence(pr, sent_by_ref, min_sec: float):
+    """M167: the proposal without its last sentence (None when it would fall under min_sec or keep nothing). A hook,
+    keys or close shot on the dropped sentence go with it."""
+    from dataclasses import replace as _dc_rep
+    from autoreels.cloud.scenario import compress_refs, expand_refs
+    refs = expand_refs(pr.pieces) or []
+    if len(refs) < 2:
+        return None
+    keep, gone = refs[:-1], refs[-1]
+
+    def _dur(r):
+        st = sent_by_ref.get(r) or []
+        return float(st[-1].t1) - float(st[0].t0) if st else 0.0
+    secs = sum(_dur(r) for r in keep)
+    if secs < min_sec:
+        return None
+    return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
+                   hook=None if pr.hook == gone else pr.hook,
+                   hooks=[h for h in pr.hooks if h != gone],
+                   keys=[k for k in pr.keys if k[0] != gone],
+                   close=[c for c in pr.close if c != gone], notes=list(pr.notes))
+
+
 def _no_room_errors(reels) -> list[tuple[str, str]]:
     """M166: planned reels whose last word ends after the next speech begins (plan warning «no room after last word»)."""
     return [(r.id, w) for r in reels if getattr(r, "planned", False)
@@ -8623,6 +8646,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             accepted.append(pr)
             return
         err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        # M167 (m167: 10h59 13 → 8 clips): no room after the last word — end one sentence earlier, up to twice, while
+        # the clip keeps min_sec (the rule of the ends: a clip lands on a finished sentence the next speech leaves room for)
+        for _ in range(2):
+            if err is None or "no room after last word" not in err:
+                break
+            _short = _drop_last_sentence(pr, sent_by_ref, prm.min_sec)
+            if _short is None:
+                break
+            pr.notes.append(f"конец: после последнего слова нет места до следующей речи — клип кончается фразой раньше "
+                            f"({pr.pieces} → {_short.pieces})")
+            _short.notes = pr.notes
+            pr = _short
+            err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
         tried = {pr.hook}
         while err is None and pr.hook and "cold open skipped" in log:
