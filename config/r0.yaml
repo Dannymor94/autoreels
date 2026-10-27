@@ -413,6 +413,13 @@ autocut:
   # (after the promo, the paid model is charged to the card through auto top-up). "" = off.
   paid_llm: sonnet
   paid_until: "2026-11-02"
+  # M165 (owner 2026-10-27: «распознавать голос интервьюера — там бывают смешные моменты или контекст; нужен
+  # переключатель»). Reads transcripts/<stem>.speakers.json (arl speakers); without the map nothing changes.
+  #   on  — the interviewer's sentences may stay as context (a question that opens the clip) or a real exchange (a joke,
+  #         a laugh); the speaker carries the clip (more than half of its time); the scenarist sees «[ведущий]»;
+  #   off — no clip contains the interviewer;   "" — the map is not read (as before M165).
+  # Per run: arl auto … --interviewer off|on   (arl autocut … --ac interviewer=off)
+  interviewer: "on"
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
