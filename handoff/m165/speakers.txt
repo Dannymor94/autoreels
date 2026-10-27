@@ -1,0 +1,7 @@
+✓ 2026-08-08 09h 33m 14s.speakers.json: реплик 392, говорящих 1 — SPEAKER_00 100%; главный SPEAKER_00
+✓ 2026-08-08 10h 59m 38s.speakers.json: реплик 555, говорящих 2 — SPEAKER_01 97%, SPEAKER_00 3%; главный SPEAKER_01
+✓ 2026-08-08 11h 42m 49s.speakers.json: реплик 184, говорящих 2 — SPEAKER_00 99%, SPEAKER_01 1%; главный SPEAKER_00
+✓ IMG_6848.speakers.json: реплик 470, говорящих 4 — SPEAKER_03 87%, SPEAKER_01 10%, SPEAKER_00 2%, SPEAKER_02 1%; главный SPEAKER_03
+✓ Pxl 20260621 112938952.speakers.json: реплик 494, говорящих 2 — SPEAKER_00 100%, SPEAKER_01 0%; главный SPEAKER_00
+✓ Pxl 20260621 122006193.speakers.json: реплик 151, говорящих 2 — SPEAKER_00 100%, SPEAKER_01 0%; главный SPEAKER_00
+✓ PXL_20260729_copy.speakers.json: реплик 485, говорящих 2 — SPEAKER_01 86%, SPEAKER_00 14%; главный SPEAKER_01

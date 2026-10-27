@@ -1,0 +1,3 @@
+=== auto: итог ===
+  ✓ IMG_6848: готово — после листа: arl export IMG_6848 --gate m165 --decisions <файл решений>
+  ✓ PXL_20260729_copy: готово — после листа: arl export PXL_20260729_copy --gate m165 --decisions <файл решений>
