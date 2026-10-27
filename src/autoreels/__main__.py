@@ -8138,6 +8138,7 @@ def cmd_speakers(target: str, *, root=None, inputs_dir: str | None = None, from_
     environment or .env. An existing map of this source is kept unless --force."""
     import json as _json
     import os as _os
+    import subprocess
     import tempfile as _tf
     from autoreels.cloud.speakers import build as _sp_build, load as _sp_load, write as _sp_write
     _root = Path(root) if root else _project_root()
