@@ -1,0 +1,7 @@
+270:  [ERROR] review:61: montage M1: label used twice
+271:  [ERROR] review:73: montage M2: label used twice
+629:  ✗ 53.8-9 x10.2-3 — [ERROR] r01: seam inside word — cut at 2589.993s splits 'диагностировать.' [2589.139, 2590.060] (window 3)
+1012:  [ERROR] r13: last word cut — clip end 1680.816s < audible end 1681.380s
+1025:  [ERROR] r15: last word cut — clip end 341.017s < audible end 341.430s
+1322:  [ERROR] r02: first word cut — source_start=125.328s > audible_start=125.180s ('Если' t0=125.380)
+1963:  [ERROR] review:83: montage M1: label used twice
