@@ -313,6 +313,8 @@ class AutocutConfig(BaseModel):
     paid_llm: Literal["", "haiku", "sonnet"] = ""   # M157: arl auto --llm auto (map, judges, posts) → this model
     paid_until: str = ""                    # M157: …until this date (YYYY-MM-DD, inclusive); after it arl auto is free
     interviewer: Literal["", "off", "on"] = ""   # M165: the interviewer's sentences (speaker map): ""=ignored, off, on
+    speakers_auto: bool = False             # M170: arl auto builds the speaker map (arl speakers) when it is missing
+    speakers_python: str = ""               # M170: the Python of an environment with pyannote.audio ("" = env SPEAKERS_PYTHON)
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones

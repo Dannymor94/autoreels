@@ -8159,7 +8159,7 @@ def cmd_speakers(target: str, *, root=None, inputs_dir: str | None = None, from_
             return 2
         origin = f"import:{Path(from_json).name}"
     else:
-        py = python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable
+        py = _os.path.expanduser(python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable)
         tok = _os.environ.get("HF_TOKEN")
         env_file = _root / ".env"
         if not tok and env_file.is_file():
@@ -10349,8 +10349,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
         _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
         _paid_llm, _paid_until = _ac.paid_llm, _ac.paid_until
+        _spk_auto, _spk_py = bool(getattr(_ac, "speakers_auto", False)), getattr(_ac, "speakers_python", "")
     except Exception:  # noqa: BLE001 — no config: the free autocut, as before
         _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
+        _spk_auto, _spk_py = False, ""
     import datetime as _dt                             # M157: the paid models while the promo credit lasts
     _today = today or _dt.date.today()
     _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
@@ -10408,6 +10410,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         if err:
             results.append((stem, "map", err))
             continue
+        if _spk_auto:                                  # M170: who speaks when — once per source, non-fatal
+            _spk_err = stage("карта говорящих", lambda: cmd_speakers(m, root=_root, python=_spk_py or None))
+            if _spk_err:
+                print(f"  ⚠ карта говорящих не построена ({_spk_err}) — дальше без неё", flush=True)
         _scen_note = ""
         auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
         _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False):
+def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False, speakers=False):
     from autoreels import __main__ as cli
     calls = []
     cfg = tmp_path / "config" / "r0.yaml"          # M157: the paid window off unless a test asks for it
@@ -12,6 +12,10 @@ def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False):
         t = cfg.read_text(encoding="utf-8")
         assert "  paid_llm: sonnet\n" in t
         cfg.write_text(t.replace("  paid_llm: sonnet\n", '  paid_llm: ""\n'), encoding="utf-8")
+    if not speakers and cfg.is_file():             # M170: the speaker-map stage off unless a test asks for it
+        t = cfg.read_text(encoding="utf-8")
+        assert "  speakers_auto: true\n" in t
+        cfg.write_text(t.replace("  speakers_auto: true\n", "  speakers_auto: false\n"), encoding="utf-8")
 
     def rec(name, rc=0):
         def f(*a, **k):

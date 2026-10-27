@@ -400,6 +400,11 @@ autocut:
   # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
   scenario_tone: ""
   scenario_timeout_sec: 300   # … the whole talk in one request
+  # M170 (owner 2026-10-27: «карта говорящих для новых видео — не отдельной командой»): arl auto builds the speaker map
+  # (arl speakers: pyannote, tools/diarize.py) when the source has none; the environment with pyannote and torch is
+  # speakers_python (on the Mac: ~/.venvs/m141), HF_TOKEN in .env. Fails or no environment — the run goes on without it.
+  speakers_auto: true
+  speakers_python: "~/.venvs/m141/bin/python"
   # M153 — who writes the reels in `arl auto` (owner 2026-10-26: «сценарист по умолчанию для текущей работы»):
   #   scenario — the scenarist (paid Claude, scenario_llm; the answer is cached per request in data/cache/scenario/);
   #              if it cannot answer (no key, API error), arl auto falls back to the free autocut and says so;
