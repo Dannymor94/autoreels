@@ -192,6 +192,7 @@ class Reel(BaseModel):
     # reel.end sits tail_pad_sec of air past it; a next-phrase word can be pulled into that air.
     # None = legacy manifest (render falls back to the configured audio_tail_fade_sec tail fade).
     tail_last_word_end: float | None = None
+    head_first_word_start: float | None = None  # M166: planned reels — the plan's audible start of the first word
     # Source-time start of the next transcript word that falls inside the trailing air (the intruder
     # pulled into the tail), or None when the tail is clean. Recorded at apply time from the FULL
     # transcript — the intruder is trimmed out of `subtitles`, so render cannot rediscover it there.

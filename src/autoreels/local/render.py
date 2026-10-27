@@ -61,6 +61,15 @@ _VAAPI_DEVICE_DEFAULT = "/dev/dri/renderD128"
 _VAAPI_UPLOAD = "format=nv12,hwupload"
 
 
+def _first_word_reference(reel, map_onset: float) -> float:
+    """M166: where the render checks the first word starts — a planned reel by the plan's own span of the word (the
+    alignment first; m163 11h42 r02: the map onset 125.180 was glued to the word before, the alignment 125.381, and a
+    prerolled start between them was refused); any other reel by the speech map."""
+    if getattr(reel, "planned", False) and getattr(reel, "head_first_word_start", None) is not None:
+        return float(reel.head_first_word_start)
+    return map_onset
+
+
 def _is_vaapi(codec: str) -> bool:
     return codec.endswith("_vaapi")
 
@@ -2987,7 +2996,7 @@ def _render_segments(
                 _fsub_lk = _smap_word_lookup(smap)
                 _fse = _fsub_lk.get(round(reel.subtitles[0].t0 * 1000))
                 if _fse is not None:
-                    _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
+                    _first_sub_as = _first_word_reference(reel, _fse[1].get("audible_start", reel.subtitles[0].t0))
                     # Skip when segs[0] is the cold-open hook: its start is in hook time,
                     # not body time; the first subtitle word lives in the body (segs[1]+).
                     _is_cold_open_first = reel.cold_open is not None and len(segs) > 1

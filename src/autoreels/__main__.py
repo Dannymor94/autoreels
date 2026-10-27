@@ -1111,6 +1111,12 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
+def _no_room_errors(reels) -> list[tuple[str, str]]:
+    """M166: planned reels whose last word ends after the next speech begins (plan warning «no room after last word»)."""
+    return [(r.id, w) for r in reels if getattr(r, "planned", False)
+            for w in (r.warnings or []) if w.startswith("no room after last word")]
+
+
 def _check_seam_inside_word(reel, smap: "dict | None", words=None, align=None) -> list[str]:
     """Return list of violation messages (empty = clean) for internal seam cuts inside words.
 
@@ -5493,6 +5499,15 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     reel.planned = True
     reel.tail_last_word_end = plan.last_audible_end
     reel.tail_next_word_start = plan.next_onset
+    # M166: the render checks the first word against the plan's own word span (alignment first), not the raw map
+    # onset — m163 11h42 r02: map 125.180 (glued to the word before) vs alignment 125.381, a prerolled start between
+    try:
+        from autoreels.cloud.plan import SpeechTimes as _ST
+        _fw = next((w for w in plan.subtitles if any(c.isalnum() for c in w.word)), None)
+        reel.head_first_word_start = (_ST(tx_words, smap, align).span(_fw)[0]
+                                      if _fw is not None and tx_words else None)
+    except Exception:  # noqa: BLE001 — no word times: the render keeps the map onset
+        reel.head_first_word_start = None
     reel.subtitle_gate = plan.end
     reel._hook_keep = bool(plan.hook_replayed)
     reel._hook_window = None
@@ -6574,7 +6589,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                   f"cannot restore planned reels by position", file=sys.stderr)
             return 1
         _restore = ("start", "end", "segments", "cold_open", "subtitles", "beat_gap_sec", "planned",
-                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings")
+                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings", "head_first_word_start")
         for _i, (_snap, _hk_keep_snap, _plan_snap) in _planned_snap.items():
             for _f in _restore:
                 setattr(reels[_i], _f, getattr(_snap, _f))
@@ -6601,6 +6616,15 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     if _planned_seam_err:
         print("  [ERROR] planned clip cuts inside a word — refusing", file=sys.stderr)
         return 1
+    if labeler == "auto":
+        # M166 (m163 10h59 r13, r15): the last word's audible end lies past the start of the next speech — the clip
+        # cannot both play its last word whole and stop before the next words (invariant 10). The owner's own line is
+        # kept with the warning (invariant 5); the automatic path takes another end (its line check replaces it).
+        _noroom = _no_room_errors(reels)
+        for _rid, _w in _noroom:
+            print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another end", file=sys.stderr, flush=True)
+        if _noroom:
+            return 1
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.
