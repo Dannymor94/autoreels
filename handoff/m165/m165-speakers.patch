@@ -1,0 +1,585 @@
+diff --git a/PLAN.md b/PLAN.md
+index 7eaa35a..030505b 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -255,6 +255,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Автомонтаж | `arl autocut`: строки монтажа из карты; каждое предложение проходит настоящие проверки `--apply`, отказ заменяется; крючок по интересу, петля вопрос → ответ, холодный старт — тизер из второй половины клипа, судимый моделью как тизер; начало, дающее контекст; плашка-заголовок по одному алгоритму; у клипов источника не повторяются открытие, заголовок и мысль | M56, M60, M61, M65, M68, M70–M77, M81, M83, M86, M92, M106, M107, M112 |
+ | Генераторы и ритм | генераторы montage / passage / mixed (по умолчанию mixed); правило прыжков — не больше двух, кусок после дальнего прыжка держится дольше, последний — половину; глубина опор `lean_depth`; судья начала вне отбора; число клипов по длине источника (`clips_every_min`); `--ac ключ=значение` меняет любое поле `autocut:` на один прогон | M119–M122 |
+ | Сценарист | `arl autocut <src> --scenario --llm sonnet` или `haiku`: названная модель пишет ролики по всему тексту, код проверяет каждую строку правилами автоматического пути; few-shot — клипы владельца из других источников; ответ кэшируется | M123, M123b |
++| Ведущий (интервьюер) | карта говорящих `transcripts/<ист>.speakers.json` (`arl speakers`: pyannote или импорт m141); `autocut.interviewer`: `on` — реплики ведущего можно брать как контекст (вопрос, открывающий ролик) или живую реплику (шутка, смех), спикер — больше половины ролика, сценарист видит «[ведущий]»; `off` — без них; на прогон `arl auto --interviewer on|off`. m141: правило «пауза + вы/ты» ловило 6 из 55 вопросов ведущего | M141, M165 |
+ | Платное окно `arl auto` | до `autocut.paid_until` (2026-11-02: промо-кредиты истекают 03.11) карта, судьи и посты — `autocut.paid_llm` (sonnet); после — бесплатно, сценарист только по `--mode scenario`. `--tag` — черновики прогона под своими именами | M157 |
+ | Кто пишет в `arl auto` | `autocut.auto_mode` (`scenario` — решение владельца 2026-10-26 для текущей работы; `autocut` — бесплатно), модель `autocut.scenario_llm`; на прогон `--mode`, `--scenario-llm`; сценарист не ответил — автомонтаж с пометкой в итоге. Переключатели — README | M153 |
+ | Посты и экспорт | `arl describe`: пост 3–5 предложений словами ролика, хэштеги только из сказанного (местоимения и служебные — никогда) → `<rid>.post.txt`; `arl article` — лонгриды из тем карты; `arl crosspost` / `arl export` — клипы, обложки и тексты в `export/` для импорта. Публикации нет | M90, M93, M94, M100, M101, M104 |
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index a1d4499..98cbb76 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -41,6 +41,7 @@ autoreels/
+ │   └── gc.py                 # уборка рабочего пространства
+ │
+ ├── tools/flash_check.py      # поиск мигания в готовых клипах двух планов (сверка с исходником)
++├── tools/diarize.py          # M165: pyannote — разделение голосов (своё окружение с torch, `arl speakers --python`)
+ ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
+ │
+ ├── docs/
+@@ -84,6 +85,7 @@ autoreels/
+ │   │   ├── thoughtmap.py     # M54: карта мыслей источника (`arl map`)
+ │   │   ├── autocut.py        # M56+: автомонтаж — генераторы, ритм прыжков, крючок, плашка, судьи
+ │   │   ├── scenario.py       # M123: сценарист — промпт, разбор строк, предложения
++│   │   ├── speakers.py       # M165: карта говорящих (кто когда говорит), реплики ведущего
+ │   │   ├── taste.py          # M138: вкус владельца — модель по его клипам, только порядок предложений
+ │   │   ├── montage.py        # M50: клип из кусков разных блоков
+ │   │   ├── plan.py           # план ручного пути как одна чистая функция (REEL_SPEC §1–§4), паразиты (M126)
+diff --git a/R0_SPEC.md b/R0_SPEC.md
+index 477f4bf..e1c7dff 100644
+--- a/R0_SPEC.md
++++ b/R0_SPEC.md
+@@ -253,7 +253,7 @@ Word-level нужен **коду** (для snap границ при нарезк
+ 
+ **Вкус владельца (M138, `cloud/taste.py`).** Две логистические головы по признакам мысли карты (длина, сила, громкость, положение, роль, первые слова): «мысль взята в клип владельца» и «клип владельца начат с неё». Модель подбирается по клипам владельца (`config/taste.json`, происхождение внутри) и добавляет `taste_weight × вкус` к оценке предложения — меняется только порядок (инвариант 1). Замер m137: «вирусные» признаки крючка (число, вопрос, «вы») сигнала не несут; проверка на отложенном источнике — начало 0.65, выбор мысли 0.59.
+ 
+-**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Промпт (M152): не открывать на отсылке назад («То есть», «Но», «И»…), не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера; ролик, открытый отсылкой, код ставит в конец пула (`start_doubt`). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же.
++**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Ведущий (M165): по карте говорящих (`transcripts/<ист>.speakers.json`) фразы не главного говорящего помечены «[ведущий]»; `autocut.interviewer: off` — ролик с ними код не берёт, `on` — берёт, если спикер говорит больше половины ролика (заметка «ведущий: …»). Без карты ничего не меняется. Промпт (M152): не открывать на отсылке назад («То есть», «Но», «И»…), не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера; ролик, открытый отсылкой, код ставит в конец пула (`start_doubt`). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же.
+ 
+ **Посты (`arl describe`, `cloud/postcopy.py`).** Пост говорит мысль, а не анонсирует её: 3–5 предложений словами ролика; стандартная фраза, которой нет в ролике, отвергается; сверх размера код отрезает последние предложения. Хэштеги — только слова, сказанные в ролике; местоимения и служебные — никогда.
+ 
+diff --git a/README.md b/README.md
+index 44e8254..9c1a21b 100644
+--- a/README.md
++++ b/README.md
+@@ -66,6 +66,7 @@
+ | модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
+ | тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
+ | модель карты, судей и постов | `--llm auto \| cloud \| local \| none \| sonnet`; до `autocut.paid_until` `auto` = `autocut.paid_llm` (M157: промо-кредиты), после — бесплатные модели, а сценарист только с `--mode scenario` |
++| реплики ведущего (интервью) | `autocut.interviewer: on \| off`; на прогон `arl auto … --interviewer on \| off`; карта говорящих — `arl speakers <ист>` (M165) |
+ | рендер на gamebox (видеокарта, H.264) | `arl render --manifest … --gate … --remote`, `arl auto … --remote` (M161; `config/render.yaml remote:`) |
+ | черновики прогона под своими именами | `--tag <имя>` → `<ист>_auto_<имя>.txt`, `<ист>_auto_all_<имя>.txt`, `<ист>_<имя>.review.json`: черновики прежнего листа и его файл решений не трогаются |
+ | расшифровка нового видео | `--tx groq \| local` |
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 3b4b62d..aaacd5a 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -413,6 +413,13 @@ autocut:
+   # (after the promo, the paid model is charged to the card through auto top-up). "" = off.
+   paid_llm: sonnet
+   paid_until: "2026-11-02"
++  # M165 (owner 2026-10-27: «распознавать голос интервьюера — там бывают смешные моменты или контекст; нужен
++  # переключатель»). Reads transcripts/<stem>.speakers.json (arl speakers); without the map nothing changes.
++  #   on  — the interviewer's sentences may stay as context (a question that opens the clip) or a real exchange (a joke,
++  #         a laugh); the speaker carries the clip (more than half of its time); the scenarist sees «[ведущий]»;
++  #   off — no clip contains the interviewer;   "" — the map is not read (as before M165).
++  # Per run: arl auto … --interviewer off|on   (arl autocut … --ac interviewer=off)
++  interviewer: "on"
+   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
+   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
+                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 0044e1c..1c570c7 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -7844,7 +7844,7 @@ def _scenario_examples(root: Path, stem: str, n: int = 3) -> str:
+ 
+ 
+ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None,
+-                   start_pause=None):
++                   start_pause=None, other=None):
+     """M123: the scenarist's reels as the pool of arl autocut --scenario (None = cannot ask). The model is named
+     explicitly (haiku | sonnet: the whole talk in one request); its answer is kept in data/cache/scenario/ by the
+     request — the same request is not paid twice."""
+@@ -7852,6 +7852,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+     from autoreels.cloud.edit import _ends_terminal
+     from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
+                                           scenario_proposals, tone_rule)
++    from autoreels.cloud.speakers import interviewer_rule
+     if provider is None and mode not in ("haiku", "sonnet"):
+         print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
+               file=sys.stderr)
+@@ -7860,7 +7861,10 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+                   sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
+     system = SCENARIO_SYSTEM.format(jumps=jumps_rule(prm), min_s=f"{prm.min_sec:g}", max_s=f"{prm.max_sec:g}",
+                                     n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
+-    user = numbered_text([(r, v[1] - v[0], v[2]) for r, v in sent.items()]) + _scenario_examples(root, stem)
++    _ivm = getattr(ac, "interviewer", "") if other else ""     # M165: the interviewer's sentences marked
++    system += interviewer_rule(_ivm)
++    user = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
++                          for r, v in sent.items()]) + _scenario_examples(root, stem)
+     if provider is None:
+         provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
+             update={"max_output_tokens": ac.scenario_max_tokens, "timeout_sec": ac.scenario_timeout_sec})}), mode)
+@@ -7877,7 +7881,7 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+         cpath.write_text(raw or "", encoding="utf-8")
+         _usage_report(provider)
+     scens, bad = parse_scenarios(raw, set(sent))
+-    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause)
++    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm)
+     scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
+     print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
+           + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
+@@ -8078,6 +8082,76 @@ def _txcheck_params(r0_cfg, root=None):
+                          on_speech_sec=tc.on_speech_sec, sparse_suspicious_sec=tc.sparse_suspicious_sec)
+ 
+ 
++def cmd_speakers(target: str, *, root=None, inputs_dir: str | None = None, from_json: str | None = None,
++                 python: str | None = None, force: bool = False, run=None) -> int:
++    """M165: the speaker map of a source → transcripts/<stem>.speakers.json (cloud/speakers.py).
++    --from <diar.json>: import a ready diarization (m141 data/cache/m141/<stem>.diar.json; the turns are times in the
++    source, so a re-encoded copy with the same timeline takes them too). Otherwise pyannote runs tools/diarize.py in
++    the environment of --python (or env SPEAKERS_PYTHON; torch is not a project dependency) with HF_TOKEN from the
++    environment or .env. An existing map of this source is kept unless --force."""
++    import json as _json
++    import os as _os
++    import tempfile as _tf
++    from autoreels.cloud.speakers import build as _sp_build, load as _sp_load, write as _sp_write
++    _root = Path(root) if root else _project_root()
++    mpath = _resolve_manifest_arg(target, _root)
++    if mpath is None:
++        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
++        return 2
++    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
++    out = _root / "transcripts" / f"{mpath.stem}.speakers.json"
++    if not force and _sp_load(out, manifest.source_sha256) is not None:
++        print(f"✓ уже есть: {out} (пересчитать: --force)")
++        return 0
++    run = run or (lambda argv, **kw: subprocess.run(argv, **kw))
++    if from_json:
++        try:
++            turns = _json.loads(Path(from_json).read_text(encoding="utf-8"))["turns"]
++        except (OSError, ValueError, KeyError) as exc:
++            print(f"ошибка: {from_json}: {type(exc).__name__}", file=sys.stderr)
++            return 2
++        origin = f"import:{Path(from_json).name}"
++    else:
++        py = python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable
++        tok = _os.environ.get("HF_TOKEN")
++        env_file = _root / ".env"
++        if not tok and env_file.is_file():
++            for ln in env_file.read_text(encoding="utf-8").splitlines():
++                if ln.strip().startswith("HF_TOKEN="):
++                    tok = ln.split("=", 1)[1].strip().strip("'\"")
++        if not tok:
++            print("ошибка: нет HF_TOKEN (окружение или .env)", file=sys.stderr)
++            return 2
++        try:
++            src = resolve_source(manifest, Path(inputs_dir) if inputs_dir else _root / "inputs")
++        except Exception as exc:  # noqa: BLE001
++            print(f"ошибка: исходник не найден: {exc}", file=sys.stderr)
++            return 2
++        with _tf.TemporaryDirectory() as td:
++            wav, js = Path(td) / "a.wav", Path(td) / "d.json"
++            r = run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
++            if getattr(r, "returncode", 1) != 0:
++                print("ошибка: ffmpeg не извлёк звук", file=sys.stderr)
++                return 1
++            r = run([py, str(_root / "tools" / "diarize.py"), str(wav), str(js)], env={**_os.environ, "HF_TOKEN": tok})
++            if getattr(r, "returncode", 1) != 0 or not js.is_file():
++                print(f"ошибка: разделение голосов не прошло ({py}); нужен pyannote.audio в этом окружении "
++                      f"(--python <venv>/bin/python)", file=sys.stderr)
++                return 1
++            turns = _json.loads(js.read_text(encoding="utf-8"))["turns"]
++        origin = "pyannote/speaker-diarization-3.1"
++    data = _sp_build(turns, manifest.source_sha256, origin)
++    _sp_write(out, data)
++    talk: dict = {}
++    for a, b, s in data["turns"]:
++        talk[s] = talk.get(s, 0.0) + b - a
++    tot = sum(talk.values()) or 1.0
++    print(f"✓ {out.name}: реплик {len(data['turns'])}, говорящих {len(talk)} — "
++          + ", ".join(f"{s} {v / tot:.0%}" for s, v in sorted(talk.items(), key=lambda kv: -kv[1]))
++          + f"; главный {data['main']}")
++    return 0
++
++
+ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
+                  show: int = 8) -> int:
+     """M57: Whisper inventions and holes in each source's transcript (cloud/txcheck.py) →
+@@ -8374,9 +8448,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+         judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
+     rhythm_out: list = []                   # M120: clips that could not keep the jump rule
+     scen_out: list = []                     # M123: the scenarist's lines the code did not take, with the reason
++    _ivmode = getattr(ac, "interviewer", "")             # M165: the speaker map → the interviewer's sentences
++    _other = None
++    if _ivmode:
++        from autoreels.cloud.speakers import load as _sp_load, other_refs as _sp_other
++        _spm = _sp_load(_root / "transcripts" / f"{stem}.speakers.json", manifest.source_sha256)
++        if _spm is None:
++            print(f"  ведущий: карты говорящих нет (arl speakers {stem}) — реплики ведущего не различаются", flush=True)
++        else:
++            _other = _sp_other({r: (float(st[0].t0), float(st[-1].t1)) for r, st in sent_by_ref.items() if st}, _spm)
++            print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
+     if scenario:
+         pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
+-                              end_tone, scen_out, scenario_provider, start_pause=start_pause)
++                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other)
+         if pool is None:
+             return 1
+     else:
+@@ -8394,6 +8478,12 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             pool = fill_pool(pool, _extra)
+             print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
+                   f"силы {_fsp}", flush=True)
++    if _other and _ivmode == "off" and not scenario:  # M165: no clip of the montage plays the interviewer
++        from autoreels.cloud.scenario import expand_refs as _xr
++        _n0 = len(pool)
++        pool = [pr for pr in pool if not (set(_xr(pr.pieces) or []) & _other)]
++        if len(pool) < _n0:
++            print(f"  ведущий: убрано сборок с его репликами {_n0 - len(pool)} (interviewer: off)", flush=True)
+     _doubt = sum(1 for pr in pool if pr.start_doubt)
+     if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
+         pool.sort(key=lambda pr: bool(pr.start_doubt))
+@@ -10168,7 +10258,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
+              encoder: str | None = None, music: str | None = None, tx: str | None = None,
+              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
+-             today=None, remote: bool = False) -> int:
++             today=None, remote: bool = False, interviewer: str | None = None) -> int:
+     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+ 
+     0. a video file → arl run (transcript + manifest; the video stays where it is);
+@@ -10261,6 +10351,8 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         _scen_note = ""
+         auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
+         _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft
++        if interviewer:                                  # M165: --interviewer on|off for this run
++            _out["ac_over"] = [f"interviewer={interviewer}"]
+         if _mode == "scenario":
+             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+                                                                         llm=_scen_llm, scenario=True, **_out))
+@@ -12800,6 +12892,9 @@ def _build_parser():
+     pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
+                      help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
+                           "по умолчанию r0.yaml autocut.auto_mode")
++    pau.add_argument("--interviewer", choices=["on", "off"], default=None,
++                     help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
++                          "по умолчанию r0.yaml autocut.interviewer")
+     pau.add_argument("--remote", action="store_true",
+                      help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
+     pau.add_argument("--tag", default=None,
+@@ -12879,6 +12974,13 @@ def _build_parser():
+     pac.add_argument("--root", default=None)
+     pac.add_argument("--cache-dir", default=None, dest="cache_dir")
+ 
++    psp = sub.add_parser("speakers", help="M165: карта говорящих источника (pyannote) → transcripts/<stem>.speakers.json")
++    psp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
++    psp.add_argument("--from", dest="from_json", default=None, help="готовое разделение голосов (JSON с turns)")
++    psp.add_argument("--python", default=None, help="Python окружения с pyannote.audio (иначе env SPEAKERS_PYTHON)")
++    psp.add_argument("--force", action="store_true")
++    psp.add_argument("--root", default=None)
++
+     ptc = sub.add_parser(
+         "tx-check",
+         help="M57: выдумки и дыры расшифровки (известные фразы Whisper, дословные повторы, звук без слов)",
+@@ -13332,7 +13434,8 @@ def main(argv=None) -> int:
+                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
+                             encoder=args.encoder, music=args.music, tx=args.tx,
+                             mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
+-                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False))
++                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False),
++                            interviewer=getattr(args, "interviewer", None))
+         elif args.cmd == "dictate":
+             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+@@ -13357,6 +13460,9 @@ def main(argv=None) -> int:
+                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
+                                check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys,
+                                ac_over=args.ac_over, scenario=args.scenario)
++        elif args.cmd == "speakers":
++            return cmd_speakers(args.manifest, root=getattr(args, "root", None), from_json=args.from_json,
++                                python=args.python, force=args.force)
+         elif args.cmd == "tx-check":
+             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
+                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 3f68138..05acd24 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -142,7 +142,8 @@ def tone_rule(tone: str) -> str:
+ 
+ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float, str, bool, int]],
+                        units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None,
+-                       start_pause: Callable[[str], "float | None"] | None = None
++                       start_pause: Callable[[str], "float | None"] | None = None,
++                       other: "set[str] | None" = None, interviewer: str = ""
+                        ) -> tuple[list[Proposal], list[tuple[str, str]]]:
+     """M123: each scenario → a Proposal the automatic path checks and polishes as its own, or a reason it goes.
+     `sent` — B.k → (t0, t1, text, finished, words). Checks: length min_sec…max_sec; the jump rule (p.rhythm); the end
+@@ -163,6 +164,16 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+         label = compress_refs(refs)
+         dur = lambda rs: sum(sent[r][1] - sent[r][0] for r in rs)  # noqa: E731
+         notes = [f"сценарий: {sc.get('why') or '—'}"]
++        if other and interviewer in ("on", "off"):      # M165: the interviewer's sentences (speaker map)
++            _iv = [r for r in refs if r in other]
++            if _iv and interviewer == "off":
++                gone.append((label, f"реплика ведущего ({compress_refs(_iv)}), interviewer: off"))
++                continue
++            if _iv and dur(_iv) * 2 >= dur(refs):
++                gone.append((label, f"ведущий говорит половину ролика и больше ({compress_refs(_iv)})"))
++                continue
++            if _iv:
++                notes.append(f"ведущий: {compress_refs(_iv)} — контекст или реплика (interviewer: on)")
+         if end_tone is not None and p.end_tone:
+             while refs and (end_tone(refs[-1]) == "open" or not sent[refs[-1]][3]) and dur(refs[:-1]) >= p.min_sec:
+                 notes.append(f"конец: «{sent[refs[-1]][2][-40:]}» не законченный или «→» — убран")
+diff --git a/src/autoreels/cloud/speakers.py b/src/autoreels/cloud/speakers.py
+new file mode 100644
+index 0000000..8b3ef9a
+--- /dev/null
++++ b/src/autoreels/cloud/speakers.py
+@@ -0,0 +1,83 @@
++"""M165: who speaks when — the speaker map of a source (transcripts/<stem>.speakers.json) and what it says about
++sentences. The main speaker is the one with the most talk; everyone else is «the interviewer» (host, audience).
++
++The map is made by pyannote speaker diarization (tools/diarize.py, its own environment — torch is not a project
++dependency) or imported from an existing diarization (m141). It is a layer like the speech map: the code only reads it.
++config/r0.yaml autocut.interviewer decides what the automatic path does with the interviewer's sentences:
++  ""    — nothing (the map is not read; as before M165);
++  "off" — a clip never contains them;
++  "on"  — they may stay when they give context (a question that opens the clip) or a real exchange (a joke, a laugh);
++          the speaker must carry the clip (more than half of its time).
++"""
++from __future__ import annotations
++
++import json
++from collections import defaultdict
++from pathlib import Path
++
++SPEAKERS_VERSION = 1
++
++
++def main_speaker(turns) -> str | None:
++    talk: dict[str, float] = defaultdict(float)
++    for a, b, s in turns:
++        talk[str(s)] += max(0.0, float(b) - float(a))
++    return max(talk, key=talk.get) if talk else None
++
++
++def build(turns, source_sha256: str, origin: str = "") -> dict:
++    t = [[round(float(a), 3), round(float(b), 3), str(s)] for a, b, s in turns if float(b) > float(a)]
++    t.sort()
++    return {"version": SPEAKERS_VERSION, "source_sha256": source_sha256, "main": main_speaker(t), "turns": t,
++            "origin": origin}
++
++
++def write(path: Path, data: dict) -> None:
++    Path(path).parent.mkdir(parents=True, exist_ok=True)
++    Path(path).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
++
++
++def load(path: Path, source_sha256: str) -> dict | None:
++    """The map when it is this source's and of this version; None otherwise."""
++    try:
++        d = json.loads(Path(path).read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        return None
++    if d.get("version") != SPEAKERS_VERSION or d.get("source_sha256") != source_sha256 or not d.get("turns"):
++        return None
++    return d
++
++
++def span_speaker(a: float, b: float, sp: dict) -> str | None:
++    """«main» | «other» for the stretch a…b (who covers more of it); None when the map is silent there."""
++    main, cov_main, cov_other = sp.get("main"), 0.0, 0.0
++    for ta, tb, s in sp["turns"]:
++        if tb <= a:
++            continue
++        if ta >= b:
++            break
++        o = min(b, tb) - max(a, ta)
++        if o > 0:
++            if s == main:
++                cov_main += o
++            else:
++                cov_other += o
++    if cov_main + cov_other <= 0:
++        return None
++    return "other" if cov_other > cov_main else "main"
++
++
++def other_refs(sent_spans: dict, sp: dict) -> set:
++    """{ref: (t0, t1)} → refs of the sentences the interviewer says."""
++    return {r for r, (a, b) in sent_spans.items() if span_speaker(float(a), float(b), sp) == "other"}
++
++
++def interviewer_rule(mode: str) -> str:
++    """The scenarist's extra rule for sentences marked «[ведущий]»."""
++    if mode == "off":
++        return (" Sentences marked «[ведущий]» are the interviewer: never use them — no reel contains one.")
++    if mode == "on":
++        return (" Sentences marked «[ведущий]» are the interviewer. Use one only when it gives the reel context (a "
++                "question that opens it and the speaker answers) or a real exchange (a joke, a laugh, a warm reaction) "
++                "that makes the reel better; the speaker must carry the reel — most of its time is his.")
++    return ""
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index e7c6ecc..5d09e44 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -312,6 +312,7 @@ class AutocutConfig(BaseModel):
+     scenario_llm: Literal["haiku", "sonnet"] = "sonnet"     # M153: the scenarist's model in arl auto (paid)
+     paid_llm: Literal["", "haiku", "sonnet"] = ""   # M157: arl auto --llm auto (map, judges, posts) → this model
+     paid_until: str = ""                    # M157: …until this date (YYYY-MM-DD, inclusive); after it arl auto is free
++    interviewer: Literal["", "off", "on"] = ""   # M165: the interviewer's sentences (speaker map): ""=ignored, off, on
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+diff --git a/tests/test_m165_speakers.py b/tests/test_m165_speakers.py
+new file mode 100644
+index 0000000..93a6b04
+--- /dev/null
++++ b/tests/test_m165_speakers.py
+@@ -0,0 +1,111 @@
++"""M165: the speaker map (who speaks when) and the interviewer switch of the automatic path."""
++from __future__ import annotations
++
++import json
++
++from autoreels.cloud import speakers as SP
++
++TURNS = [[0.0, 10.0, "SPEAKER_01"], [10.0, 12.0, "SPEAKER_00"], [12.0, 30.0, "SPEAKER_01"], [30.0, 31.5, "SPEAKER_02"]]
++
++
++def test_m165_main_speaker_and_span_speaker():
++    sp = SP.build(TURNS, "s" * 64, "test")
++    assert sp["main"] == "SPEAKER_01" and sp["version"] == SP.SPEAKERS_VERSION
++    assert SP.span_speaker(10.2, 11.8, sp) == "other"          # the host's question
++    assert SP.span_speaker(9.0, 13.0, sp) == "main"            # mostly the speaker
++    assert SP.span_speaker(30.1, 31.4, sp) == "other"          # audience
++    assert SP.span_speaker(40.0, 41.0, sp) is None             # silence in the map
++    assert SP.other_refs({"1.1": (0.5, 9.5), "1.2": (10.1, 11.9), "1.3": (12.5, 20)}, sp) == {"1.2"}
++
++
++def test_m165_load_checks_source_and_version(tmp_path):
++    p = tmp_path / "x.speakers.json"
++    SP.write(p, SP.build(TURNS, "a" * 64))
++    assert SP.load(p, "a" * 64) is not None and SP.load(p, "b" * 64) is None
++    d = json.loads(p.read_text())
++    d["version"] = 0
++    p.write_text(json.dumps(d))
++    assert SP.load(p, "a" * 64) is None
++
++
++def test_m165_rules_for_the_scenarist():
++    assert SP.interviewer_rule("") == ""
++    assert "never use them" in SP.interviewer_rule("off")
++    assert "context" in SP.interviewer_rule("on") and "joke" in SP.interviewer_rule("on")
++
++
++def _sent():
++    # B.k → (t0, t1, text, finished, words)
++    s = {}
++    t = 100.0
++    for k in range(1, 9):
++        s[f"5.{k}"] = (t, t + 6.0, f"Фраза номер {k} про практику.", True, 5)
++        t += 6.2
++    return s
++
++
++def test_m165_scenario_off_drops_reels_with_the_host_on_keeps_context():
++    from autoreels.cloud.autocut import AutoParams
++    from autoreels.cloud.scenario import scenario_proposals
++    p = AutoParams(min_sec=20, max_sec=90, rhythm=False, end_tone=False, start_pause_min=0)
++    sent = _sent()
++    scen = [{"refs": [f"5.{k}" for k in range(1, 7)], "hook": None, "title": "Тест", "why": "вопрос → ответ"}]
++    other = {"5.1"}
++    pool, gone = scenario_proposals(scen, sent, [], p, other=other, interviewer="off")
++    assert not pool and "interviewer: off" in gone[0][1]
++    pool, gone = scenario_proposals(scen, sent, [], p, other=other, interviewer="on")
++    assert len(pool) == 1 and any("ведущий: 5.1" in n for n in pool[0].notes)
++    pool, gone = scenario_proposals(scen, sent, [], p, other={"5.1", "5.2", "5.3"}, interviewer="on")
++    assert not pool and "половину" in gone[0][1]
++    pool, gone = scenario_proposals(scen, sent, [], p, other=other, interviewer="")
++    assert len(pool) == 1 and not any("ведущий" in n for n in pool[0].notes)
++
++
++def test_m165_cmd_speakers_imports_a_diarization(tmp_path, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    (tmp_path / "transcripts").mkdir(exist_ok=True)
++    d = tmp_path / "d.json"
++    d.write_text(json.dumps({"turns": TURNS}))
++    assert cli.cmd_speakers(str(mpath), root=tmp_path, from_json=str(d)) == 0
++    out = tmp_path / "transcripts" / f"{mpath.stem}.speakers.json"
++    sha = json.loads(mpath.read_text())["source_sha256"]
++    assert SP.load(out, sha)["main"] == "SPEAKER_01"
++    assert cli.cmd_speakers(str(mpath), root=tmp_path, from_json=str(d)) == 0
++    assert "уже есть" in capsys.readouterr().out
++
++
++def test_m165_config_default_off_in_code_on_in_repo():
++    from autoreels.__main__ import load_r0_config
++    from autoreels.core.config import AutocutConfig
++    from tests.test_montage import REPO_ROOT
++    assert AutocutConfig().interviewer == ""
++    assert load_r0_config(REPO_ROOT / "config" / "r0.yaml").autocut.interviewer == "on"
++
++
++def test_m165_override_parses():
++    from autoreels.__main__ import _autocut_overrides
++    from autoreels.core.config import AutocutConfig
++    assert _autocut_overrides(AutocutConfig(), ["interviewer=off"]).interviewer == "off"
++
++
++def test_m165_auto_switch_goes_to_autocut(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_auto import _stub
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path, interviewer="off") == 0
++    assert [c[2] for c in calls if c[0] == "autocut"][0]["ac_over"] == ["interviewer=off"]
++    calls.clear()
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    assert "ac_over" not in [c[2] for c in calls if c[0] == "autocut"][0]
++
++
++def test_m165_cli():
++    from autoreels.__main__ import _build_parser
++    p = _build_parser()
++    a = p.parse_args(["speakers", "x", "--from", "d.json"])
++    assert a.from_json == "d.json"
++    assert p.parse_args(["auto", "x", "--interviewer", "off"]).interviewer == "off"
+diff --git a/tools/diarize.py b/tools/diarize.py
+new file mode 100644
+index 0000000..85b0c2b
+--- /dev/null
++++ b/tools/diarize.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++"""M165: pyannote speaker diarization of one audio file → JSON {"turns": [[start, end, "SPEAKER_00"], …]}.
++Runs in its OWN environment (torch + pyannote.audio, not project dependencies), e.g. ~/.venvs/m141:
++    <python> tools/diarize.py <audio.wav> <out.json>
++The Hugging Face token comes from HF_TOKEN (environment); the conditions of pyannote/speaker-diarization-3.1 and
++pyannote/segmentation-3.0 must be accepted on huggingface.co. The token is never printed."""
++import json
++import os
++import sys
++import time
++
++
++def main(wav: str, out: str) -> int:
++    tok = os.environ.get("HF_TOKEN")
++    if not tok:
++        print("ошибка: нет HF_TOKEN", file=sys.stderr)
++        return 2
++    import torch
++    from pyannote.audio import Pipeline
++    try:
++        pipe = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token=tok)
++    except TypeError:
++        pipe = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=tok)
++    if pipe is None:
++        print("ошибка: модель не выдана — условия на huggingface.co не приняты", file=sys.stderr)
++        return 2
++    dev = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
++    pipe.to(torch.device(dev))
++    t = time.time()
++    res = pipe(wav)
++    ann = getattr(res, "speaker_diarization", res)
++    turns = [[round(s.start, 3), round(s.end, 3), str(k)] for s, _, k in ann.itertracks(yield_label=True)]
++    with open(out, "w", encoding="utf-8") as fh:
++        json.dump({"turns": turns, "device": dev, "sec": round(time.time() - t, 1)}, fh)
++    print(f"реплик {len(turns)}, говорящих {len({x[2] for x in turns})}, {time.time() - t:.0f} с на {dev}")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main(sys.argv[1], sys.argv[2]))

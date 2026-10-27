@@ -19,6 +19,8 @@ n=0; tot=0
 for g in reels-out/*/_gate/*/; do
   [ -d "$g" ] || continue
   g="${g%/}"; name="$(basename "$g")"; stem="$(basename "$(dirname "$(dirname "$g")")")"; k="$(keep_for "$stem")"
+  # m165 (интервью с репликами ведущего) у IMG_6848 и PXL_copy — новый набор рядом с m157, не убирать
+  if { [ "$stem" = IMG_6848 ] || [ "$stem" = PXL_20260729_copy ]; } && [ "$name" = m165 ]; then echo "  оставлен: $g"; continue; fi
   if [ -n "$k" ] && [ "$name" = "$k" ]; then echo "  оставлен: $g ($(ls "$g"/r*.mp4 2>/dev/null | wc -l | tr -d ' ') клипов)"; continue; fi
   kb=$(du -sk "$g" | cut -f1); tot=$((tot+kb)); n=$((n+1))
   echo "  в Корзину: $g  $((kb/1024)) МБ"
