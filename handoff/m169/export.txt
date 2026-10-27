@@ -1,0 +1,30 @@
+crosspost 2026-08-08 09h 33m 14s (гейт m163): клипов 6 → /Users/danny/Documents/autoreels/export/crosspost/2026-08-08_09h_33m_14s_m163.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица 2026-08-08_09h_33m_14s_m163.csv
+crosspost 2026-08-08 10h 59m 38s (гейт m163): клипов 10 → /Users/danny/Documents/autoreels/export/crosspost/2026-08-08_10h_59m_38s_m163.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица 2026-08-08_10h_59m_38s_m163.csv
+crosspost 2026-08-08 11h 42m 49s (гейт m163): клипов 8 → /Users/danny/Documents/autoreels/export/crosspost/2026-08-08_11h_42m_49s_m163.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица 2026-08-08_11h_42m_49s_m163.csv
+crosspost Pxl 20260621 122006193 (гейт m163): клипов 5 → /Users/danny/Documents/autoreels/export/crosspost/Pxl_20260621_122006193_m163.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица Pxl_20260621_122006193_m163.csv
+crosspost Pxl 20260621 112938952 (гейт m163): клипов 13 → /Users/danny/Documents/autoreels/export/crosspost/Pxl_20260621_112938952_m163.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица Pxl_20260621_112938952_m163.csv
+crosspost IMG_6848 (гейт m157): клипов 20 → /Users/danny/Documents/autoreels/export/crosspost/IMG_6848_m157.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица IMG_6848_m157.csv
+crosspost PXL_20260729_copy (гейт m157): клипов 24 → /Users/danny/Documents/autoreels/export/crosspost/PXL_20260729_copy_m157.csv
+  в crosspost: «Импорт плана» → папка-источник /Users/danny/Documents/autoreels/export/crosspost (один раз), таблица PXL_20260729_copy_m157.csv
+export/crosspost/2026-08-08_09h_33m_14s_m163.csv: постов 18
+export/crosspost/2026-08-08_10h_59m_38s_m163.csv: постов 30
+export/crosspost/2026-08-08_11h_42m_49s_m163.csv: постов 24
+export/crosspost/2026-08-08_11h_42m_49s_m88.csv: постов 1
+export/crosspost/2026-08-08_11h_42m_49s_m94.csv: постов 3
+export/crosspost/IMG_6848_articles.csv: постов 10
+export/crosspost/IMG_6848_m157.csv: постов 60
+export/crosspost/IMG_6848_m88.csv: постов 5
+export/crosspost/IMG_6848_m94.csv: постов 15
+export/crosspost/Pxl_20260621_112938952_m163.csv: постов 39
+export/crosspost/Pxl_20260621_112938952_m88.csv: постов 2
+export/crosspost/Pxl_20260621_112938952_m94.csv: постов 9
+export/crosspost/Pxl_20260621_122006193_m105.csv: постов 3
+export/crosspost/Pxl_20260621_122006193_m163.csv: постов 15
+export/crosspost/PXL_20260729_copy_m105.csv: постов 13
+export/crosspost/PXL_20260729_copy_m157.csv: постов 72
