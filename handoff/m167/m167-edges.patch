@@ -1,0 +1,144 @@
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 1f28f2b..cd2e8f5 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -146,6 +146,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M144: начало не склеено.** m143: у 11 из 12 клипов IMG_6848 m126 перед первым словом не было паузы — речь до него шла вплотную к резу, первая согласная терялась, и воздух M142 сдвинуть рез не мог. С `autocut.start_pause_min` первый звук клипа (начало и холодный старт) требует столько слышимой тишины перед собой; склеенное начало чинится теми же шагами, что начало, непонятное без предыдущего (контекст перед, более поздняя фраза, другая мысль), у сценариста — фраза раньше или позже. 0 = как раньше. **M145:** если начало само по себе понятное и только склеено, а починить нечем, клип остаётся с пометкой, а не выбрасывается (m144: жёсткое правило снизило покрытие клипов владельца с 40 до 27 из 66).
+ - **M146: пред-ролл склеенного начала (флаг, решение владельца — исключение из инварианта 10).** Если перед первым словом клипа слышимой паузы меньше `start_preroll_sec`, звук начинается на столько раньше — в хвосте предыдущего слова, — а рендер наращивает звук за `start_fade_in_sec` (`render.yaml`): первая согласная не теряется, хвост чужого слова не слышен как слово. 0 = как раньше.
+ - **M147: громкость одним усилением на источник.** Однопроходный `loudnorm` подстраивается в первую секунду клипа (m143: −2.4 dB в первые 0.3 с у IMG_6848). `loudnorm_mode: source` (`render.yaml`) измеряет громкость всего источника один раз и даёт всем его клипам одно усиление до `target_lufs` плюс ограничитель пика `true_peak` — в начале ничего не проседает, клипы одного источника одинаково громкие. `dynamic` = как раньше.
++- **M166: начало и конец клипа — по одному и тому же времени слова.** Рендер проверяет первое слово планового клипа по промежутку слова из плана (сначала выравнивание; `head_first_word_start`), а не по сырой карте: склеенное начало карта отдавала предыдущему слову (m163 11h42 r02). Автоматический клип, у которого последнее слово кончается позже начала следующей речи («no room after last word»), при `--apply` отклоняется — проверка строки автомонтажа берёт другой конец; у ручного клипа это предупреждение (m163 10h59 r13, r15).
+ - **M164 (M1.8, этап C): хвост — только по карте речи.** Звуковая проба конца последнего слова (silencedetect) удалена; без карты клип не сдвигается, рендер предупреждает.
+ - **M156: рендер на видеокарте Linux (VAAPI).** `--encoder hevc_vaapi | h264_vaapi`: устройство, загрузка в GPU в конце видеофильтра, без выходного `-pix_fmt`; другие кодеры — та же команда (`docs/GAMEBOX.md`).
+ - **M151: опции концовки (выключены).** `ending_loop` — клип с холодным стартом без ухода в чёрное (зацикливается в тизер); `end_freeze_sec` — последний кадр держится столько после клипа, затем чёрное; `end_sting_path` — звук после последнего слова (клип удлиняется на его длину). Проверка «кадр завис» пропускает только добавленный стоп-кадр.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 1c570c7..b981e0f 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -1111,6 +1111,12 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
+         )
+ 
+ 
++def _no_room_errors(reels) -> list[tuple[str, str]]:
++    """M166: planned reels whose last word ends after the next speech begins (plan warning «no room after last word»)."""
++    return [(r.id, w) for r in reels if getattr(r, "planned", False)
++            for w in (r.warnings or []) if w.startswith("no room after last word")]
++
++
+ def _check_seam_inside_word(reel, smap: "dict | None", words=None, align=None) -> list[str]:
+     """Return list of violation messages (empty = clean) for internal seam cuts inside words.
+ 
+@@ -5493,6 +5499,15 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
+     reel.planned = True
+     reel.tail_last_word_end = plan.last_audible_end
+     reel.tail_next_word_start = plan.next_onset
++    # M166: the render checks the first word against the plan's own word span (alignment first), not the raw map
++    # onset — m163 11h42 r02: map 125.180 (glued to the word before) vs alignment 125.381, a prerolled start between
++    try:
++        from autoreels.cloud.plan import SpeechTimes as _ST
++        _fw = next((w for w in plan.subtitles if any(c.isalnum() for c in w.word)), None)
++        reel.head_first_word_start = (_ST(tx_words, smap, align).span(_fw)[0]
++                                      if _fw is not None and tx_words else None)
++    except Exception:  # noqa: BLE001 — no word times: the render keeps the map onset
++        reel.head_first_word_start = None
+     reel.subtitle_gate = plan.end
+     reel._hook_keep = bool(plan.hook_replayed)
+     reel._hook_window = None
+@@ -6574,7 +6589,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+                   f"cannot restore planned reels by position", file=sys.stderr)
+             return 1
+         _restore = ("start", "end", "segments", "cold_open", "subtitles", "beat_gap_sec", "planned",
+-                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings")
++                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings", "head_first_word_start")
+         for _i, (_snap, _hk_keep_snap, _plan_snap) in _planned_snap.items():
+             for _f in _restore:
+                 setattr(reels[_i], _f, getattr(_snap, _f))
+@@ -6601,6 +6616,15 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+     if _planned_seam_err:
+         print("  [ERROR] planned clip cuts inside a word — refusing", file=sys.stderr)
+         return 1
++    if labeler == "auto":
++        # M166 (m163 10h59 r13, r15): the last word's audible end lies past the start of the next speech — the clip
++        # cannot both play its last word whole and stop before the next words (invariant 10). The owner's own line is
++        # kept with the warning (invariant 5); the automatic path takes another end (its line check replaces it).
++        _noroom = _no_room_errors(reels)
++        for _rid, _w in _noroom:
++            print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another end", file=sys.stderr, flush=True)
++        if _noroom:
++            return 1
+ 
+     # Warn when the last subtitle word is not the last transcript word before r0_end.
+     # A word excluded by the audible_end criterion drops silently; this surfaces it.
+diff --git a/src/autoreels/core/models.py b/src/autoreels/core/models.py
+index d23fea5..283797b 100644
+--- a/src/autoreels/core/models.py
++++ b/src/autoreels/core/models.py
+@@ -192,6 +192,7 @@ class Reel(BaseModel):
+     # reel.end sits tail_pad_sec of air past it; a next-phrase word can be pulled into that air.
+     # None = legacy manifest (render falls back to the configured audio_tail_fade_sec tail fade).
+     tail_last_word_end: float | None = None
++    head_first_word_start: float | None = None  # M166: planned reels — the plan's audible start of the first word
+     # Source-time start of the next transcript word that falls inside the trailing air (the intruder
+     # pulled into the tail), or None when the tail is clean. Recorded at apply time from the FULL
+     # transcript — the intruder is trimmed out of `subtitles`, so render cannot rediscover it there.
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 43c4ec5..4b1fa0e 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -61,6 +61,15 @@ _VAAPI_DEVICE_DEFAULT = "/dev/dri/renderD128"
+ _VAAPI_UPLOAD = "format=nv12,hwupload"
+ 
+ 
++def _first_word_reference(reel, map_onset: float) -> float:
++    """M166: where the render checks the first word starts — a planned reel by the plan's own span of the word (the
++    alignment first; m163 11h42 r02: the map onset 125.180 was glued to the word before, the alignment 125.381, and a
++    prerolled start between them was refused); any other reel by the speech map."""
++    if getattr(reel, "planned", False) and getattr(reel, "head_first_word_start", None) is not None:
++        return float(reel.head_first_word_start)
++    return map_onset
++
++
+ def _is_vaapi(codec: str) -> bool:
+     return codec.endswith("_vaapi")
+ 
+@@ -2987,7 +2996,7 @@ def _render_segments(
+                 _fsub_lk = _smap_word_lookup(smap)
+                 _fse = _fsub_lk.get(round(reel.subtitles[0].t0 * 1000))
+                 if _fse is not None:
+-                    _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
++                    _first_sub_as = _first_word_reference(reel, _fse[1].get("audible_start", reel.subtitles[0].t0))
+                     # Skip when segs[0] is the cold-open hook: its start is in hook time,
+                     # not body time; the first subtitle word lives in the body (segs[1]+).
+                     _is_cold_open_first = reel.cold_open is not None and len(segs) > 1
+diff --git a/tests/test_m166_edges.py b/tests/test_m166_edges.py
+new file mode 100644
+index 0000000..61b398b
+--- /dev/null
++++ b/tests/test_m166_edges.py
+@@ -0,0 +1,27 @@
++"""M166: the render checks the first word against the plan's span; an automatic clip with no room after its last
++word is refused (it needs another end), the owner's own keeps the warning."""
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++
++def test_m166_first_word_reference_planned_uses_the_plan():
++    from autoreels.local.render import _first_word_reference
++    planned = SimpleNamespace(planned=True, head_first_word_start=125.381)
++    assert _first_word_reference(planned, 125.180) == 125.381
++    assert _first_word_reference(SimpleNamespace(planned=True, head_first_word_start=None), 125.18) == 125.18
++    assert _first_word_reference(SimpleNamespace(planned=False, head_first_word_start=125.381), 125.18) == 125.18
++
++
++def test_m166_no_room_errors_only_planned_with_the_warning():
++    from autoreels.__main__ import _no_room_errors
++    w = "no room after last word «опытом.» (next speech at 341.050) — clip ends at its audible end"
++    reels = [SimpleNamespace(id="r15", planned=True, warnings=[w]),
++             SimpleNamespace(id="r16", planned=True, warnings=["other"]),
++             SimpleNamespace(id="r17", planned=False, warnings=[w])]
++    assert _no_room_errors(reels) == [("r15", w)]
++
++
++def test_m166_reel_model_has_head_first_word_start():
++    from autoreels.core.models import Reel
++    assert "head_first_word_start" in Reel.model_fields
