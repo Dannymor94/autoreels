@@ -1,0 +1,15 @@
+== 2026-08-08 10h 59m 38s r13: planned=True окон 6 | первое окно 1622.924–1624.770 prerolled=False | последнее окно 1673.600–1681.380
+   первое «Если»: whisper 1622.974–1623.026 | карта as=None ae=None | выравнивание None–None
+   последнее «вечара.»: whisper 1679.594–1681.334 | карта as=1679.5437325 ae=1679.69 | выравнивание 1680.878–1681.339
+   план: tail_last_word_end=1681.38 tail_next_word_start=1680.83 subtitle_gate=1681.38 | предупреждения: ['no room after last word «вечара.» (next speech at 1680.830) — clip ends at its audible end', 'montage: 2 seams in 28s — more than 3 per minute: the clip may feel like constant jumping', 'montage: piece 37.2 is 3.9s (< 6s): too short to settle into', 'montage: seam 1 (37.1→37.2): picture jump 3.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it', 'montage: seam 1 (37.1→37.2): the voice gets louder by 5.0 dB (> 4) — the jump is heard', 'montage: seam 2 (37.2→38.1-3): speech rate 2.3 → 1.5 words/s — the voice changes tempo at the seam', 'montage: seam 2 (37.2→38.1-3): piece 38.1-3 starts on «Эта» — it points back to what was skipped', 'расшифровка (27:40.5): фраза повторяется в 2 местах «когда вы постоянно возвращаете свой ум» — возможна выдумка Whisper — проверить на слух']
+== 2026-08-08 10h 59m 38s r15: planned=True окон 4 | первое окно 294.150–298.420 prerolled=False | последнее окно 317.976–341.430
+   первое «Випассана»: whisper 295.017–298.420 | карта as=294.19 ae=298.37 | выравнивание None–None
+   последнее «опытом.»: whisper 340.357–341.397 | карта as=340.45678000000004 ae=340.68 | выравнивание 341.104–341.424
+   план: tail_last_word_end=341.43 tail_next_word_start=341.05 subtitle_gate=341.43 | предупреждения: ['no room after last word «опытом.» (next speech at 341.050) — clip ends at its audible end']
+== 2026-08-08 11h 42m 49s r02: planned=True окон 9 | первое окно 125.321–128.160 prerolled=True | последнее окно 170.030–176.379
+   первое «Если»: whisper 125.380–125.520 | карта as=125.18 ae=125.57 | выравнивание 125.381–125.541
+   последнее «окружающих.»: whisper 175.180–176.060 | карта as=175.28000000000003 ae=176.05 | выравнивание 175.298–176.079
+   план: tail_last_word_end=176.079 tail_next_word_start=176.621 subtitle_gate=176.37900000000002 | предупреждения: []
+1012:  [ERROR] r13: last word cut — clip end 1680.816s < audible end 1681.380s
+1025:  [ERROR] r15: last word cut — clip end 341.017s < audible end 341.430s
+1322:  [ERROR] r02: first word cut — source_start=125.328s > audible_start=125.180s ('Если' t0=125.380)
