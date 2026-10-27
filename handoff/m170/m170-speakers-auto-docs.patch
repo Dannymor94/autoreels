@@ -1,0 +1,190 @@
+diff --git a/PLAN.md b/PLAN.md
+index 68a126e..e2ab02b 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -240,7 +240,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ ---
+ 
+-## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M152) 🔄 В РАБОТЕ
++## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M170) 🔄 В РАБОТЕ
+ 
+ Ручная разметка источника — самый медленный шаг. Автомонтаж пишет её черновик сам; владелец решает на листе ревью. Правила клипа — `docs/REEL_SPEC.md`; значения — `config/r0.yaml autocut:` и `config/render.yaml`. Каждый шаг закрывает только просмотр владельца.
+ 
+@@ -255,7 +255,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Автомонтаж | `arl autocut`: строки монтажа из карты; каждое предложение проходит настоящие проверки `--apply`, отказ заменяется; крючок по интересу, петля вопрос → ответ, холодный старт — тизер из второй половины клипа, судимый моделью как тизер; начало, дающее контекст; плашка-заголовок по одному алгоритму; у клипов источника не повторяются открытие, заголовок и мысль | M56, M60, M61, M65, M68, M70–M77, M81, M83, M86, M92, M106, M107, M112 |
+ | Генераторы и ритм | генераторы montage / passage / mixed (по умолчанию mixed); правило прыжков — не больше двух, кусок после дальнего прыжка держится дольше, последний — половину; глубина опор `lean_depth`; судья начала вне отбора; число клипов по длине источника (`clips_every_min`); `--ac ключ=значение` меняет любое поле `autocut:` на один прогон | M119–M122 |
+ | Сценарист | `arl autocut <src> --scenario --llm sonnet` или `haiku`: названная модель пишет ролики по всему тексту, код проверяет каждую строку правилами автоматического пути; few-shot — клипы владельца из других источников; ответ кэшируется | M123, M123b |
+-| Ведущий (интервьюер) | карта говорящих `transcripts/<ист>.speakers.json` (`arl speakers`: pyannote или импорт m141); `autocut.interviewer`: `on` — реплики ведущего можно брать как контекст (вопрос, открывающий ролик) или живую реплику (шутка, смех), спикер — больше половины ролика, сценарист видит «[ведущий]»; `off` — без них; на прогон `arl auto --interviewer on|off`. m141: правило «пауза + вы/ты» ловило 6 из 55 вопросов ведущего | M141, M165 |
++| Ведущий (интервьюер) | карта говорящих `transcripts/<ист>.speakers.json` (`arl speakers`: pyannote или импорт m141); `autocut.interviewer`: `on` — реплики ведущего можно брать как контекст (вопрос, открывающий ролик) или живую реплику (шутка, смех), спикер — больше половины ролика, сценарист видит «[ведущий]»; `off` — без них; на прогон `arl auto --interviewer on|off`. m141: правило «пауза + вы/ты» ловило 6 из 55 вопросов ведущего. По умолчанию `off` — владелец 2026-10-27: в продакшн ролики без ведущего (M169). Карту `arl auto` строит сам, если её нет (`autocut.speakers_auto`, окружение с pyannote — `speakers_python`; не вышло — прогон идёт без неё, M170) | M141, M165, M169, M170 |
+ | Платное окно `arl auto` | до `autocut.paid_until` (2026-11-02: промо-кредиты истекают 03.11) карта, судьи и посты — `autocut.paid_llm` (sonnet); после — бесплатно, сценарист только по `--mode scenario`. `--tag` — черновики прогона под своими именами | M157 |
+ | Кто пишет в `arl auto` | `autocut.auto_mode` (`scenario` — решение владельца 2026-10-26 для текущей работы; `autocut` — бесплатно), модель `autocut.scenario_llm`; на прогон `--mode`, `--scenario-llm`; сценарист не ответил — автомонтаж с пометкой в итоге. Переключатели — README | M153 |
+ | Посты и экспорт | `arl describe`: пост 3–5 предложений словами ролика, хэштеги только из сказанного (местоимения и служебные — никогда) → `<rid>.post.txt`; `arl article` — лонгриды из тем карты; `arl crosspost` / `arl export` — клипы, обложки и тексты в `export/` для импорта. Публикации нет | M90, M93, M94, M100, M101, M104 |
+@@ -268,12 +268,15 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Звук внутри клипа | соседние куски монтажа склеиваются по слышимой паузе (`montage.join_heard`, включено); вырез паразита и длинная пауза рядом больше не перекрываются (Pxl r13 падал) | M134, M136 |
+ | Сценарист — правила | тон набора словами владельца (`scenario_tone`); склеенное начало — фраза-две раньше; не открывать на отсылке («То есть», «Но», «И»…: такой ролик идёт в конце пула), не выбрасывать мелкие фразы из середины, не кончать реакцией интервьюера | M142, M144, M152 |
+ | Концовки | опции пакета концовки: петля, стоп-кадр, фирменный звук (`render.yaml`, выключены) | M151 |
++| Концы клипа и время слова | рендер проверяет первое слово планового клипа по промежутку плана (`head_first_word_start`), не по сырой карте; автоматический клип, у которого последнее слово кончается позже начала следующей речи, при `--apply` отклоняется, строка кончается фразой раньше (до двух раз, ≥ `min_sec`) — m163: 3 клипа с ошибкой → 0, 10h59 8 → 10, 11h42 6 → 8. Этап C карты речи: точечная звуковая проба хвоста удалена (m164: нужна была 0 клипам из 509, рендер до/после совпал) | M164, M166–M168 |
++| Рендер на gamebox | видеокарта RX 580 через VAAPI, только H.264 (`hevc_vaapi` портит длинные клипы — ошибки CABAC, зелёные блоки, m160); `arl render … --remote`, `arl auto … --remote` отправляют код, разметку, расшифровки и исходник (если его там нет), рендер под общим замком, клипы обратно (`render.yaml remote:`); проект там — `/mnt/data/autoreels` (HDD). Принято владельцем 2026-10-26 (m161) | M155–M161 |
++| Продакшн 2026-10-27 | в crosspost (`export/crosspost/`) — все клипы наборов: пять источников `_gate/m163` (сценарист заново), IMG_6848 и PXL_copy `_gate/m157` (без ведущего); остальные гейты убраны. Публикует владелец | M163, M169 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+ 
+ **Замеры.** Урожай черновиков на трёх источниках вырос с 7 до 40; покрытие клипов владельца (кандидат накрывает ≥ 50 % клипа) — 9 из 31 при `clips_every_min: 2`; на семи источниках с добором (M140) — 40 из 66. Стиль владельца на 66 клипах семи источников: 48 без прыжков, 12 с одним, 6 с двумя, ни одного с тремя. Судьи начала (Haiku, Groq) принимают начала владельца так же часто, как случайные, — сигнала вкуса владельца в них нет, поэтому они вне отбора.
+ 
+-**Ждут владельца:** `HF_TOKEN` для замера разделения говорящих (m141); решения кнопками на листе ревью (для вкуса и автоправок «переделать»). Незаконченные мысли при явном `e:` (PXL r06, IMG_6848 r06) — владелец: «переделать», правка — копией файла ответа (m150). **Старые гейты** (m18_final, m88, m94, m101, m102, m105, m112, m115, m126, m131, m134, m136) закрыты владельцем 2026-10-26 и удаляются.
++**Ждут владельца:** решения кнопками на листе ревью (для вкуса и автоправок «переделать»). Закрыто 2026-10-26/27: `HF_TOKEN` и замер говорящих (m141), громкость (m147 — разницы нет, `dynamic`), «переделать» r06 (m150: IMG r06 уже закрыт, PXL r06 — исходник заменён сжатой копией, оставлен как есть), старые гейты удалены. **Техдолг:** ложная жалоба проверки целостности на gamebox для H.264 (клипы целые); общий черновик `arl auto` не проходит из-за повторных номеров `M` при склейке разметки и сборок (берётся черновик сборок).
+ 
+ ---
+ 
+diff --git a/README.md b/README.md
+index 9c1a21b..4d58f54 100644
+--- a/README.md
++++ b/README.md
+@@ -252,7 +252,7 @@ env `RENDER_FFMPEG` / `RENDER_ENCODER`. Приоритет: флаг > env > `re
+ | **M1.7** — «смонтировано, а не нарезано» | 🔄 два плана, авторитм, перестановка, мигание — закрыты; ключевые слова — ждут просмотра; финальный пакет концовки и монтажный проход — следующие |
+ | **M1.8** — карта речи по звуку | 🔄 карта готова; хвост, начало, такты, авторитм, маркеры выгрузки переведены; итоговый просмотр и раскладка на все источники впереди |
+ | **M1.9** — карта интонации | 🔄 замер, подсказки ↗, правило концовки на автоматическом пути; признаки для оценки — впереди |
+-| **Автомонтаж** (M52–M152) | 🔄 `arl auto` до листа ревью: карта мыслей, автомонтаж (mixed + правило прыжков + добор пула), сценарист (тон, правила начала), посты, обложки, экспорт, рамка по лицу (YuNet), начало клипа без потерянной первой буквы (пауза, пред-ролл); ждёт решений владельца |
++| **Автомонтаж** (M52–M170) | 🔄 `arl auto` до листа ревью: карта мыслей, сценарист по умолчанию (тон, правила начала и конца) или автомонтаж, карта говорящих и переключатель ведущего, посты, обложки, экспорт, рамка по лицу (YuNet), начало клипа без потерянной первой буквы, рендер на gamebox (`--remote`); первый продакшн 2026-10-27 |
+ 
+ Подробно — [PLAN.md](PLAN.md).
+ 
+diff --git a/config/r0.yaml b/config/r0.yaml
+index aaacd5a..52e8275 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -400,6 +400,11 @@ autocut:
+   # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
+   scenario_tone: ""
+   scenario_timeout_sec: 300   # … the whole talk in one request
++  # M170 (owner 2026-10-27: «карта говорящих для новых видео — не отдельной командой»): arl auto builds the speaker map
++  # (arl speakers: pyannote, tools/diarize.py) when the source has none; the environment with pyannote and torch is
++  # speakers_python (on the Mac: ~/.venvs/m141), HF_TOKEN in .env. Fails or no environment — the run goes on without it.
++  speakers_auto: true
++  speakers_python: "~/.venvs/m141/bin/python"
+   # M153 — who writes the reels in `arl auto` (owner 2026-10-26: «сценарист по умолчанию для текущей работы»):
+   #   scenario — the scenarist (paid Claude, scenario_llm; the answer is cached per request in data/cache/scenario/);
+   #              if it cannot answer (no key, API error), arl auto falls back to the free autocut and says so;
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index b1bb6fd..88913e6 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -25,3 +25,7 @@
+ ## Рендер с Mac на gamebox (M161)
+ 
+ `arl render --manifest reviews/<копия>.review.json --gate <имя> --remote` или `arl auto <источники> --remote`. Mac отправляет на gamebox (`config/render.yaml remote:`, папка `/mnt/data/autoreels`): отслеживаемый код (`git ls-files`), копию разметки, `transcripts/<источник>.*`, кэшированную расшифровку источника из `data/cache/` (без неё рендер там проверяет швы грубым правилом и печатает ложные «seam inside word» — m158, m160), модель лиц и музыку; исходник — только если gamebox не находит его по содержимому. Рендер идёт там под общим замком с кодером и профилем из `remote:`, папка гейта возвращается на Mac (`tar` по ssh: в именах источников бывают пробелы). Только в гейт: настоящие клипы с другой машины не пишутся. Окружение там: `/mnt/data/autoreels/.venv` (`pip install -e ".[dev]"`, OpenCV обязателен — без него рамка не по лицу).
++
++## Карта говорящих (M165, M170)
++
++`arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 87914e3..481e095 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8159,7 +8159,7 @@ def cmd_speakers(target: str, *, root=None, inputs_dir: str | None = None, from_
+             return 2
+         origin = f"import:{Path(from_json).name}"
+     else:
+-        py = python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable
++        py = _os.path.expanduser(python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable)
+         tok = _os.environ.get("HF_TOKEN")
+         env_file = _root / ".env"
+         if not tok and env_file.is_file():
+@@ -10349,8 +10349,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
+         _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
+         _paid_llm, _paid_until = _ac.paid_llm, _ac.paid_until
++        _spk_auto, _spk_py = bool(getattr(_ac, "speakers_auto", False)), getattr(_ac, "speakers_python", "")
+     except Exception:  # noqa: BLE001 — no config: the free autocut, as before
+         _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
++        _spk_auto, _spk_py = False, ""
+     import datetime as _dt                             # M157: the paid models while the promo credit lasts
+     _today = today or _dt.date.today()
+     _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
+@@ -10408,6 +10410,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         if err:
+             results.append((stem, "map", err))
+             continue
++        if _spk_auto:                                  # M170: who speaks when — once per source, non-fatal
++            _spk_err = stage("карта говорящих", lambda: cmd_speakers(m, root=_root, python=_spk_py or None))
++            if _spk_err:
++                print(f"  ⚠ карта говорящих не построена ({_spk_err}) — дальше без неё", flush=True)
+         _scen_note = ""
+         auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
+         _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 5d09e44..f819e48 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -313,6 +313,8 @@ class AutocutConfig(BaseModel):
+     paid_llm: Literal["", "haiku", "sonnet"] = ""   # M157: arl auto --llm auto (map, judges, posts) → this model
+     paid_until: str = ""                    # M157: …until this date (YYYY-MM-DD, inclusive); after it arl auto is free
+     interviewer: Literal["", "off", "on"] = ""   # M165: the interviewer's sentences (speaker map): ""=ignored, off, on
++    speakers_auto: bool = False             # M170: arl auto builds the speaker map (arl speakers) when it is missing
++    speakers_python: str = ""               # M170: the Python of an environment with pyannote.audio ("" = env SPEAKERS_PYTHON)
+     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
+     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
+     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
+diff --git a/tests/test_auto.py b/tests/test_auto.py
+index dda8cd0..4913ee8 100644
+--- a/tests/test_auto.py
++++ b/tests/test_auto.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+ from pathlib import Path
+ 
+ 
+-def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False):
++def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False, speakers=False):
+     from autoreels import __main__ as cli
+     calls = []
+     cfg = tmp_path / "config" / "r0.yaml"          # M157: the paid window off unless a test asks for it
+@@ -12,6 +12,10 @@ def _stub(monkeypatch, tmp_path, *, apply_rc=(0,), fail=None, paid=False):
+         t = cfg.read_text(encoding="utf-8")
+         assert "  paid_llm: sonnet\n" in t
+         cfg.write_text(t.replace("  paid_llm: sonnet\n", '  paid_llm: ""\n'), encoding="utf-8")
++    if not speakers and cfg.is_file():             # M170: the speaker-map stage off unless a test asks for it
++        t = cfg.read_text(encoding="utf-8")
++        assert "  speakers_auto: true\n" in t
++        cfg.write_text(t.replace("  speakers_auto: true\n", "  speakers_auto: false\n"), encoding="utf-8")
+ 
+     def rec(name, rc=0):
+         def f(*a, **k):
+diff --git a/tests/test_m170_speakers_auto.py b/tests/test_m170_speakers_auto.py
+new file mode 100644
+index 0000000..738a6c3
+--- /dev/null
++++ b/tests/test_m170_speakers_auto.py
+@@ -0,0 +1,32 @@
++"""M170: arl auto builds the speaker map itself (once, non-fatal)."""
++from __future__ import annotations
++
++from tests.test_auto import _stub
++
++
++def test_m170_auto_runs_the_speaker_stage_after_the_map(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path, speakers=True)
++    monkeypatch.setattr(cli, "cmd_speakers", lambda m, **k: calls.append(("speakers", (m,), k)) or 0)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    names = [c[0] for c in calls]
++    assert names.index("map") < names.index("speakers") < names.index("autocut")
++    assert next(c for c in calls if c[0] == "speakers")[2]["python"] == "~/.venvs/m141/bin/python"
++
++
++def test_m170_a_failed_speaker_map_does_not_stop_the_source(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path, speakers=True)
++    monkeypatch.setattr(cli, "cmd_speakers", lambda m, **k: 2)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    assert "autocut" in [c[0] for c in calls]
++    assert "карта говорящих не построена" in capsys.readouterr().out
++
++
++def test_m170_off_by_default_in_code():
++    from autoreels.core.config import AutocutConfig
++    assert AutocutConfig().speakers_auto is False and AutocutConfig().speakers_python == ""
