@@ -5798,7 +5798,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
 
 
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner",
-                     filler_profile: str | None = None) -> int:
+                     filler_profile: str | None = None, drop_refused: bool = False) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     A human selection is FORMATTED, never second-guessed: this path runs the formatting stages
@@ -6684,17 +6684,22 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         # cannot both play its last word whole and stop before the next words (invariant 10). The owner's own line is
         # kept with the warning (invariant 5); the automatic path takes another end (its line check replaces it).
         _noroom = _no_room_errors(reels)
-        for _rid, _w in _noroom:
-            print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another end", file=sys.stderr, flush=True)
-        if _noroom:
-            return 1
         # M173 (owner on 09h33 m163 r01: «чтобы таких скачков кадра не возникало»): a shot under short_shot_sec between
         # two picture changes — the automatic path drops that shot's sentences (its line check); the owner's own line
         # keeps the warning (invariant 5)
         _short_shots = _short_shot_errors(reels)
-        for _rid, _w in _short_shots:
-            print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another cut", file=sys.stderr, flush=True)
-        if _short_shots:
+        _refused = [(_rid, _w, "another end") for _rid, _w in _noroom] + \
+                   [(_rid, _w, "another cut") for _rid, _w in _short_shots]
+        if _refused and drop_refused:
+            # M176 (m175: 5 of 7 sources lost every label clip — one label line with no room after its last word refused
+            # the whole combined draft of arl auto): the refused automatic clip leaves the draft alone, the rest is built
+            _gone = {_rid for _rid, _w, _ in _refused}
+            for _rid, _w, _why in _refused:
+                print(f"  ⚠ {_rid} убран из черновика: {_w} — automatic clip needs {_why}", flush=True)
+            reels = [r for r in reels if r.id not in _gone]
+        elif _refused:
+            for _rid, _w, _why in _refused:
+                print(f"  [ERROR] {_rid}: {_w} — automatic clip needs {_why}", file=sys.stderr, flush=True)
             return 1
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
@@ -10371,6 +10376,29 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
     base = label_draft.read_text(encoding="utf-8").rstrip("\n") if label_draft.is_file() else ""
     auto = auto_draft.read_text(encoding="utf-8") if auto_draft.is_file() else ""
     body = auto.split("\n\n", 1)[1] if "\n\n" in auto else ""
+    if base:
+        # M176 (m175: «montage M1: label used twice» — the label draft has montage lines of its own): the autocut lines
+        # are numbered after the label draft's, so every montage label of the combined draft is one of a kind
+        from autoreels.cloud.montage import _LINE_RE
+        _n = 0
+        _used: set = set()
+        for ln in base.splitlines():
+            mm = _LINE_RE.match(ln.strip())
+            if mm:
+                _n += 1
+                _used.add(int(mm.group(1) or _n))
+        if _used:
+            _off = max(_used)
+            _k = 0
+
+            def _renum(ln: str) -> str:
+                nonlocal _k
+                mm = _LINE_RE.match(ln.strip()) if ln.startswith("M") else None
+                if not mm:
+                    return ln
+                _k += 1
+                return f"M{_off + int(mm.group(1) or _k)} " + ln.strip()[len("M" + (mm.group(1) or "")):].lstrip()
+            body = "\n".join(_renum(ln) for ln in body.split("\n"))
     if not base:                                   # no label draft: the autocut draft as it is
         out.write_text(auto, encoding="utf-8")
     else:
@@ -10503,7 +10531,8 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         print(f"--- черновик {combined.name}: строки разметки + сборок {n_m}", flush=True)
         used = combined
         err = stage("план (--apply без --install)",
-                    lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto"))
+                    lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto",
+                                             drop_refused=True))
         note = _scen_note
         if err:
             _fb = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
@@ -10511,7 +10540,8 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
             print(f"  ⚠ {_fb}", flush=True)
             used = auto_draft
             err = stage("план по черновику сборок",
-                        lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto"))
+                        lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto",
+                                                 drop_refused=True))
             if err:
                 results.append((stem, "apply", err))
                 continue
