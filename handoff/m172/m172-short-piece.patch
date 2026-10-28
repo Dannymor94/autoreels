@@ -1,0 +1,198 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index f60922b..3b826a4 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -315,6 +315,11 @@ montage:
+   # M134 (invariant 9): that gap is the pause HEARD (speech map / alignment), not the Whisper gap — on IMG_6848 65 of
+   # 345 sentence ends overlap in Whisper times (gap < 0), so a straight-on piece got a seam. false = the Whisper gap.
+   join_heard: true
++  # M172 — owner on 09h33 m163 r01 (hook, 0.7 s of one sentence, then a jump): a piece speaking less than
++  # join_short_sec joins its straight-on neighbour across a pause up to join_short_gap_sec (played, the filler cut may
++  # shorten it) — no seam a second after the last picture change. 0 = off.
++  join_short_sec: 2.0
++  join_short_gap_sec: 4.0
+   # M74 — owner: «после крючка сильно резко идёт тело»: up to this much real silence after the cold open and before
+   # the body's first word (never into speech) — the hook and the start of the clip are heard as two things. 0 = off.
+   hook_air_sec: 0.5
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 655097c..e1642fa 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -5677,14 +5677,19 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
+     mc = r0_cfg.montage
+     out: list = []
+     _join_pause = None
++    _join_span = None
+     if getattr(mc, "join_heard", False) and (smap is not None or align is not None):
+         # M134 (invariant 9): «goes straight on» by the pause heard, not the Whisper gap
+         from autoreels.cloud.plan import SpeechTimes, heard_pause
+         _jt = SpeechTimes(tx_words, smap, align)
+         _join_pause = lambda a, b: heard_pause(_jt, a, b)  # noqa: E731
++        _join_span = lambda f, l: _jt.audible(l)[1] - _jt.audible(f)[0]  # noqa: E731 — M172: heard piece length
+     for me in entries:
+         mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words),
+-                           join_gap_sec=mc.join_gap_sec, pause=_join_pause)
++                           join_gap_sec=mc.join_gap_sec, pause=_join_pause,
++                           join_short_sec=float(getattr(mc, "join_short_sec", 0.0) or 0.0),
++                           join_short_gap_sec=float(getattr(mc, "join_short_gap_sec", 0.0) or 0.0),
++                           span=_join_span)
+         for _e in mb.errors:
+             print(f"  [ERROR] {me.label} (review:{me.lineno}): {_e}", file=sys.stderr)
+         if mb.errors:
+diff --git a/src/autoreels/cloud/montage.py b/src/autoreels/cloud/montage.py
+index 509950e..6c272ca 100644
+--- a/src/autoreels/cloud/montage.py
++++ b/src/autoreels/cloud/montage.py
+@@ -218,7 +218,8 @@ class MontageBuild:
+ 
+ 
+ def _continues(sentences: list, a: int, gap_sec: float,
+-               pause: Callable[[object, object], float | None] | None = None) -> bool:
++               pause: Callable[[object, object], float | None] | None = None,
++               short_gap_sec: float = 0.0) -> bool:
+     """Sentence a (1-based) follows sentence a-1 straight on in the source: at most gap_sec between
+     them (a filtered block in between, or a skipped sentence, is far longer).
+ 
+@@ -226,18 +227,32 @@ def _continues(sentences: list, a: int, gap_sec: float,
+     map / alignment; None = another word stands between them). The Whisper gap is negative on overlapping
+     words (IMG_6848: 65 of 345 sentence ends) — such a straight-on piece got a seam."""
+     prev, cur = sentences[a - 2], sentences[a - 1]
++    gap_sec = max(gap_sec, short_gap_sec)
+     if pause is not None:
+         p = pause(prev[-1], cur[0])
+         return p is not None and p <= gap_sec
+     return 0.0 <= cur[0].t0 - prev[-1].t1 <= gap_sec
+ 
+ 
++def _piece_sec(sentences: list, a: int, z: int,
++               span: Callable[[object, object], float] | None = None) -> float:
++    """Seconds a piece (sentences a..z, 1-based) speaks: `span(first_word, last_word)` (heard), else Whisper."""
++    first, last = sentences[a - 1][0], sentences[z - 1][-1]
++    return span(first, last) if span is not None else last.t1 - first.t0
++
++
+ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[object], list], *,
+                   join_gap_sec: float = 2.0,
+-                  pause: Callable[[object, object], float | None] | None = None) -> MontageBuild:
++                  pause: Callable[[object, object], float | None] | None = None,
++                  join_short_sec: float = 0.0, join_short_gap_sec: float = 0.0,
++                  span: Callable[[object, object], float] | None = None) -> MontageBuild:
+     """Map a montage line to one sentence numbering. `blocks`: review number → block (the blocks
+     apply may use); `block_sentences(block)` → that block's sentences in the review numbering.
+-    `pause`: the heard pause between two words (M134, see _continues); None = the Whisper gap."""
++    `pause`: the heard pause between two words (M134, see _continues); None = the Whisper gap.
++    M172 (owner on 09h33 m163 r01: hook, then 0.7 s of sentence 17.7, then a jump to 18.1 — «такие скачки — плохо»):
++    when the previous piece or this one speaks less than `join_short_sec` (`span`: heard seconds of a piece), a
++    piece going straight on joins it across a pause up to `join_short_gap_sec` — the pause is played (the filler
++    cut may shorten it inside the window) instead of a seam a second after the last one. 0 = off (the M58 rule)."""
+     out = MontageBuild(sentences=[], play=[], breaks=[], pieces=[])
+     used = {p.block for p in entry.pieces} | ({entry.hook[0]} if entry.hook else set())
+     missing = sorted((b for b in used if b not in blocks), key=str)
+@@ -275,7 +290,12 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
+         if seen & set(rng):
+             out.errors.append(f"piece {p} repeats a sentence of an earlier piece")
+             continue
+-        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec, pause):
++        _short = 0.0
++        if join_short_sec > 0 and out.pieces and (
++                _piece_sec(out.sentences, *out.pieces[-1], span) < join_short_sec
++                or _piece_sec(out.sentences, a, z, span) < join_short_sec):
++            _short = join_short_gap_sec
++        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec, pause, _short):
+             # M58: the piece goes straight on from the previous one in the source (the next sentence of
+             # the block, or sentence 1 of the next block right after the last one) — no seam
+             out.joined.append(f"{out.pieces[-1][0]}-{out.pieces[-1][1]} + {p}")
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index f819e48..0e8b76b 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -216,6 +216,8 @@ class MontageConfig(BaseModel):
+     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
+     join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
+     join_heard: bool = False                                # M134: that gap is the pause heard (speech map / alignment), not Whisper's
++    join_short_sec: float = Field(0.0, ge=0.0)             # M172: a piece speaking less than this joins its straight-on neighbour …
++    join_short_gap_sec: float = Field(0.0, ge=0.0)         # … across a pause up to this (0 = off, the M58 rule)
+     hook_air_sec: float = Field(0.0, ge=0.0, le=1.5)       # M74: silence kept after the cold open and before the body (0 = off)
+     fx_auto_clips: bool = False                            # M77: the fx (not callouts) also on ordinary clips of an auto draft
+ 
+diff --git a/tests/test_m172_short_piece_join.py b/tests/test_m172_short_piece_join.py
+new file mode 100644
+index 0000000..d29b6a7
+--- /dev/null
++++ b/tests/test_m172_short_piece_join.py
+@@ -0,0 +1,75 @@
++"""M172 (owner on 09h33 m163 r01: cold open, 0.7 s of sentence 17.7, a jump to 18.1 — «такие скачки — плохо»):
++a montage piece that speaks less than join_short_sec joins its straight-on neighbour across a pause up to
++join_short_gap_sec (over the M58 join_gap_sec). Off (0) = the M58 rule unchanged."""
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++from autoreels.cloud.montage import build_montage, parse_montage
++from autoreels.core.config import MontageConfig, load_r0_config
++from autoreels.core.models import Word
++
++
++def _w(text, t0, t1):
++    return Word(word=text, t0=t0, t1=t1)
++
++
++def _bl():
++    # like r01: a 0.75 s sentence, a 2.3 s pause, then the long piece; then a sentence far away
++    s1 = [_w("Короче.", 780.29, 781.04)]
++    s2 = [_w("Если", 783.34, 783.6), _w("так.", 783.7, 790.0)]
++    s3 = [_w("Дальше.", 790.3, 795.0)]
++    s4 = [_w("Далеко.", 900.0, 902.0)]
++    return {1: SimpleNamespace(start=780.29, end=902.0, sents=[s1, s2, s3, s4])}
++
++
++def test_off_by_default_and_the_m58_rule_unchanged():
++    assert MontageConfig().join_short_sec == 0.0 and MontageConfig().join_short_gap_sec == 0.0
++    (e,), _ = parse_montage("M 95 | 1.1 1.2-3\n")
++    mb = build_montage(e, _bl(), lambda b: b.sents, pause=lambda a, b: 2.3)
++    assert mb.breaks == [2] and mb.joined == []                        # 2.3 s > join_gap 2.0: a seam (before)
++
++
++def test_short_piece_joins_across_a_longer_pause():
++    (e,), _ = parse_montage("M 95 | 1.1 1.2-3\n")
++    mb = build_montage(e, _bl(), lambda b: b.sents, pause=lambda a, b: 2.3,
++                       join_short_sec=2.0, join_short_gap_sec=4.0)
++    assert mb.breaks == [] and mb.pieces == [(1, 3)] and mb.joined == ["1-1 + 1.2-3"]
++
++
++def test_short_piece_after_the_long_one_joins_too():
++    (e,), _ = parse_montage("M 95 | 1.2 1.3\n")
++    bl = _bl()
++    bl[1].sents[2] = [_w("Дальше.", 792.3, 793.0)]                       # 0.7 s piece after a 2.3 s pause
++    mb = build_montage(e, bl, lambda b: b.sents, pause=lambda a, b: 2.3,
++                       join_short_sec=2.0, join_short_gap_sec=4.0)
++    assert mb.breaks == []
++
++
++def test_long_pieces_keep_the_m58_gap():
++    (e,), _ = parse_montage("M 95 | 1.2 1.3\n")
++    mb = build_montage(e, _bl(), lambda b: b.sents, pause=lambda a, b: 2.3,
++                       join_short_sec=2.0, join_short_gap_sec=4.0)
++    assert mb.breaks == [3]                                            # both pieces ≥ 2 s: a seam as before
++
++
++def test_pause_over_the_cap_or_a_word_between_stays_a_seam():
++    (e,), _ = parse_montage("M 95 | 1.1 1.2-3\n")
++    kw = dict(join_short_sec=2.0, join_short_gap_sec=4.0)
++    assert build_montage(e, _bl(), lambda b: b.sents, pause=lambda a, b: 4.5, **kw).breaks == [2]
++    assert build_montage(e, _bl(), lambda b: b.sents, pause=lambda a, b: None, **kw).breaks == [2]
++    (e,), _ = parse_montage("M 95 | 1.1 1.4\n")                        # not the next sentence: never joined
++    assert build_montage(e, _bl(), lambda b: b.sents, pause=lambda a, b: 0.1, **kw).breaks == [4]
++
++
++def test_heard_span_decides_the_length():
++    (e,), _ = parse_montage("M 95 | 1.1 1.2-3\n")
++    kw = dict(join_short_sec=2.0, join_short_gap_sec=4.0, pause=lambda a, b: 2.3)
++    # Whisper says 0.75 s, but heard it is 2.5 s (and the long piece too): a seam
++    assert build_montage(e, _bl(), lambda b: b.sents, span=lambda f, l: 2.5, **kw).breaks == [2]
++
++
++def test_repo_config_turns_it_on():
++    from pathlib import Path
++    mc = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").montage
++    assert mc.join_short_sec > 0 and mc.join_short_gap_sec > mc.join_gap_sec
