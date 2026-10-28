@@ -1,0 +1,554 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index f60922b..1d29650 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -68,6 +68,7 @@ start_pad_sec: 0
+ # before it (heard pause under this) starts this much before its onset, in that word's tail, so its first consonant is
+ # not lost (m143/m145: 46 of 59 draft starts have no pause to cut in). Goes with render.yaml start_fade_in_sec. 0 = off.
+ start_preroll_sec: 0.06     # M146 on (owner on m146b: «ровнее, плавнее»)
++short_shot_sec: 2.0         # M173: shot between two picture changes shorter → warning; automatic clip drops its sentences (0 = off)
+ snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
+ max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
+                                 # слово после терминального знака (.?!), иначе слово с заглавной.
+@@ -682,6 +683,7 @@ post:
+   sentences_max: 5
+   max_chars: 700
+   hashtags: 3
++  voice: author           # M174 (owner: «от „я“ — видео публикует сам автор на своём канале»); reader = about the reel, «вы»
+   auto: true              # M112: arl auto writes the posts before the review sheet (they show on the cards); after the
+                           # owner's verdicts arl export <source> --decisions <file> sends only the approved clips to crosspost
+ 
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 655097c..b2757e0 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -1134,6 +1134,40 @@ def _drop_last_sentence(pr, sent_by_ref, min_sec: float):
+                    close=[c for c in pr.close if c != gone], notes=list(pr.notes))
+ 
+ 
++def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
++    """M173: the proposal without the sentences whose first word starts at `t0s` (Whisper seconds, from a «short
++    shot» warning) — None when none of them is in the proposal, or the rest would fall under min_sec or be empty.
++    A hook, keys or close shot on a dropped sentence go with it."""
++    from dataclasses import replace as _dc_rep
++    from autoreels.cloud.scenario import compress_refs, expand_refs
++    refs = expand_refs(pr.pieces) or []
++    want = {round(float(t) * 1000) for t in t0s}
++    gone = {r for r in refs if (sent_by_ref.get(r) or [None])[0] is not None
++            and round(float(sent_by_ref[r][0].t0) * 1000) in want}
++    keep = [r for r in refs if r not in gone]
++    if not gone or not keep:
++        return None
++
++    def _dur(r):
++        st = sent_by_ref.get(r) or []
++        return float(st[-1].t1) - float(st[0].t0) if st else 0.0
++    secs = sum(_dur(r) for r in keep)
++    if secs < min_sec:
++        return None
++    return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
++                   hook=None if pr.hook in gone else pr.hook,
++                   hooks=[h for h in pr.hooks if h not in gone],
++                   keys=[k for k in pr.keys if k[0] not in gone],
++                   close=[c for c in pr.close if c not in gone], notes=list(pr.notes))
++
++
++def _short_shot_errors(reels) -> list[tuple[str, str]]:
++    """M173: planned montage reels (the automatic lines the line check can fix) with a shot under short_shot_sec
++    between two picture changes (plan warning «short shot»)."""
++    return [(r.id, w) for r in reels if getattr(r, "planned", False) and "montage" in (r.flags or [])
++            for w in (r.warnings or []) if w.startswith("short shot")]
++
++
+ def _no_room_errors(reels) -> list[tuple[str, str]]:
+     """M166: planned reels whose last word ends after the next speech begins (plan warning «no room after last word»)."""
+     return [(r.id, w) for r in reels if getattr(r, "planned", False)
+@@ -5409,6 +5443,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
+         filler_words=tuple(getattr(getattr(r0_cfg, "filler_removal", None), "filler_words", None) or ()),
+         subs_hide_fillers=bool(getattr(r0_cfg, "subtitles_hide_fillers", False)),
+         filler_word_cut=bool(getattr(r0_cfg, "filler_word_cut", False)),
++        short_shot_sec=float(getattr(r0_cfg, "short_shot_sec", 0.0) or 0.0),
+         **_filler_profile_values(r0_cfg, filler_profile),
+     )
+ 
+@@ -6648,6 +6683,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+             print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another end", file=sys.stderr, flush=True)
+         if _noroom:
+             return 1
++        # M173 (owner on 09h33 m163 r01: «чтобы таких скачков кадра не возникало»): a shot under short_shot_sec between
++        # two picture changes — the automatic path drops that shot's sentences (its line check); the owner's own line
++        # keeps the warning (invariant 5)
++        _short_shots = _short_shot_errors(reels)
++        for _rid, _w in _short_shots:
++            print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another cut", file=sys.stderr, flush=True)
++        if _short_shots:
++            return 1
+ 
+     # Warn when the last subtitle word is not the last transcript word before r0_end.
+     # A word excluded by the audible_end criterion drops silently; this surfaces it.
+@@ -8660,6 +8703,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             _short.notes = pr.notes
+             pr = _short
+             err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
++        # M173: a shot under short_shot_sec between two picture changes — drop the sentences heard whole in it (the
++        # 0.7 s sentence between the cold open and a cut), up to twice; a short shot inside a sentence refuses the line
++        import re as _re_ss
++        for _ in range(2):
++            if err is None or "short shot" not in err or "whole sentences" not in err:
++                break
++            _t0s = _re_ss.findall(r"s\d+@(\d+(?:\.\d+)?)", err)
++            _less = _drop_sentences(pr, sent_by_ref, _t0s, prm.min_sec)
++            if _less is None:
++                break
++            pr.notes.append(f"скачок кадра: короткий план между двумя сменами картинки — фразы этого плана убраны "
++                            f"({pr.pieces} → {_less.pieces})")
++            _less.notes = pr.notes
++            pr = _less
++            err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+         # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
+         tried = {pr.hook}
+         while err is None and pr.hook and "cold open skipped" in log:
+@@ -9512,7 +9570,7 @@ def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str
+         why: list = []
+         res = describe_clip(provider, caption, tr.read_text(encoding="utf-8").strip(), smin=pc.sentences_min,
+                             smax=pc.sentences_max, max_chars=pc.max_chars, ntags=pc.hashtags,
+-                            log=lambda x: print(x, flush=True), why_out=why)
++                            log=lambda x: print(x, flush=True), why_out=why, voice=getattr(pc, "voice", "reader"))
+         if res is None:
+             skipped.append((clip.stem, f"описание не принято ({why[-1] if why else 'нет ответа модели'})"
+                                        " — остаётся подпись рендера"))
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index ec260a3..366cb6c 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -102,6 +102,11 @@ class ManualPlanParams:
+     # first word — only real silence (never into the next speech, onset_margin_sec away from it), so the hook and
+     # the start of the clip are heard as two things. 0 = off (the previous windows).
+     hook_air_sec: float = 0.0
++    # M173 (owner on 09h33 m163 r01: hook, 0.7 s of one sentence, then a cut — «нужно отталкиваться от алгоритма, чтобы
++    # таких скачков кадра не возникало»): a shot between two picture changes (the clip start, a seam, a cut, a
++    # wide↔close switch) shorter than this is reported («short shot»); an automatic clip with one is refused at --apply
++    # and its line check drops the sentences of that shot. The cold open and the last shot are not counted. 0 = off.
++    short_shot_sec: float = 0.0
+ 
+ 
+ @dataclass
+@@ -119,6 +124,7 @@ class PlannedWindow:
+     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
+     word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
+     prerolled: bool = False                        # M146: start was pushed into the previous word's tail
++    min_span_sec: float = 0.0                      # M173: no wide/close span inside a piece shorter than this (0 = off)
+ 
+     @property
+     def last_shot(self) -> str:
+@@ -129,9 +135,11 @@ class PlannedWindow:
+         return "wide"
+ 
+     def segment(self) -> Segment:
++        shot, ci = self.shot, [list(c) for c in self.close_intervals]
++        if self.min_span_sec > 0 and shot == "wide" and ci:
++            shot, ci = _shot_of(_tidy_spans(ci, self.end - self.start, self.min_span_sec), self.end - self.start)
+         return make_segment(self.start, self.end).model_copy(update={
+-            "shot": self.shot, "close_intervals": [list(ci) for ci in self.close_intervals],
+-            "prerolled": self.prerolled})
++            "shot": shot, "close_intervals": ci, "prerolled": self.prerolled})
+ 
+     def pieces(self) -> list[tuple[float, float]]:
+         """Played stretches of the window (source time): the window minus its cuts."""
+@@ -164,6 +172,8 @@ class PlannedWindow:
+                         spans.append([round(s0 - a, 6), round(s1 - a, 6)])
+             if flipped:
+                 spans = _complement(spans, b - a)
++            if self.min_span_sec > 0:
++                spans = _tidy_spans(spans, b - a, self.min_span_sec)
+             shot, ci = "wide", spans
+             if not spans:
+                 ci = []
+@@ -257,6 +267,31 @@ class ManualPlan:
+         return lines
+ 
+ 
++def _tidy_spans(spans: list[list[float]], dur: float, m: float) -> list[list[float]]:
++    """M173 (owner on disko_beach_p3 m172 r01: one frame «стреляет» by scale): close spans of one piece with no wide
++    or close stretch under `m` — a gap under m between two spans is closed, an edge under m from the piece edge goes
++    to the edge, a span still under m is dropped. Seconds of a piece are never moved, only where the switch falls."""
++    out: list[list[float]] = []
++    for a, b in sorted([max(0.0, a), min(dur, b)] for a, b in spans):
++        if b - a <= _EPS:
++            continue
++        if a < m:
++            a = 0.0
++        if dur - b < m:
++            b = dur
++        if out and a - out[-1][1] < m:
++            out[-1][1] = max(out[-1][1], b)
++        else:
++            out.append([a, b])
++    return [[round(a, 6), round(b, 6)] for a, b in out if b - a >= m - _EPS or (a == 0.0 and b == dur)]
++
++
++def _shot_of(spans: list[list[float]], dur: float) -> tuple[str, list[list[float]]]:
++    if len(spans) == 1 and spans[0][0] < _EPS and spans[0][1] > dur - _EPS:
++        return "close", []
++    return "wide", spans
++
++
+ def _complement(spans: list[list[float]], dur: float) -> list[list[float]]:
+     """[0, dur] minus the (sorted, disjoint) spans."""
+     out, t0 = [], 0.0
+@@ -1368,9 +1403,76 @@ def build_manual_plan(
+                       hook_replayed=hook_replayed, warnings=warnings, errors=errors, hook_air=hook_air)
+     plan._sent_bounds = sent_bounds
+     plan._times = times
++    if params.short_shot_sec > 0:
++        for w in windows:
++            w.min_span_sec = params.short_shot_sec
++        warnings.extend(short_shot_warnings(plan, sentences, params.short_shot_sec))
+     return plan
+ 
+ 
++def picture_shots(windows: Sequence["PlannedWindow"]) -> list[tuple[float, float, list[tuple[float, float, float]]]]:
++    """M173: the shots of a clip in output time, in play order: (out_start, out_end, [(out_a, out_b, src_a)…]).
++
++    A new shot begins at every played piece (a seam between windows, a cut inside one) and at every wide↔close
++    switch inside a piece. The third item maps the shot back to source time (src = src_a + out − out_a)."""
++    bounds: list[float] = [0.0]
++    spans: list[tuple[float, float, float]] = []
++    t = 0.0
++    for w in windows:
++        for seg in w.segments():
++            dur = seg.end - seg.start
++            if dur <= _EPS:
++                continue
++            if t > _EPS:
++                bounds.append(t)
++            for c0, c1 in (seg.close_intervals or []):
++                for e in (c0, c1):
++                    if _EPS < e < dur - _EPS:
++                        bounds.append(t + e)
++            spans.append((t, t + dur, seg.start))
++            t += dur
++    bounds = sorted(set(round(b, 6) for b in bounds)) + [t]
++    out = []
++    for a, b in zip(bounds, bounds[1:]):
++        if b - a <= _EPS:
++            continue
++        m = [(max(a, sa), min(b, sb), src + (max(a, sa) - sa)) for sa, sb, src in spans if min(b, sb) - max(a, sa) > _EPS]
++        out.append((a, b, m))
++    return out
++
++
++def short_shot_warnings(plan: "ManualPlan", sentences: Sequence[Sequence[Word]], min_sec: float) -> list[str]:
++    """M173: «short shot» for every shot under `min_sec` between two picture changes. Not counted: shots inside the
++    cold open (the hook is its own unit, hook_min_sec) and the last shot (nothing cuts after it). The sentences heard
++    whole inside the shot are named by their first word's Whisper start (`s<n>@<t0>`), so the automatic line check can
++    drop exactly them; a shot inside a sentence is «inside a sentence» (no sentence to drop)."""
++    times = plan._times
++    co = plan.cold_open
++    co_len = (co.end - co.start - sum(c1 - c0 for c0, c1 in co.cuts)) if co is not None else 0.0
++    shots = picture_shots(plan.windows)
++    body_sents = [n for w in plan.body for n in w.sentences]
++    out: list[str] = []
++    for i, (a, b, m) in enumerate(shots):
++        if i == len(shots) - 1 or b - a >= min_sec - _EPS or b <= co_len + _EPS:
++            continue
++        src = [(sa, sa + (ob - oa)) for oa, ob, sa in m]
++        whole, partial = [], False
++        for n in body_sents:
++            ws = [w for w in sentences[n - 1] if any(c.isalnum() for c in w.word)]
++            heard = [times.audible(w) for w in ws] if times is not None else [(w.t0, w.t1) for w in ws]
++            inside = [any(x0 - _EPS <= h0 and h1 <= x1 + 0.05 for x0, x1 in src) for h0, h1 in heard]
++            touch = [any(min(h1, x1) - max(h0, x0) > _EPS for x0, x1 in src) for h0, h1 in heard]
++            if ws and all(inside):
++                whole.append((n, ws[0].t0))
++            elif any(touch):
++                partial = True
++        what = ("whole sentences " + ", ".join(f"s{n}@{t0:.3f}" for n, t0 in whole)
++                if whole and not partial else "inside a sentence")
++        out.append(f"short shot {b - a:.2f}s between two picture changes (out {a:.2f}–{b:.2f}s, "
++                   f"src {src[0][0]:.2f}–{src[-1][1]:.2f}): {what}")
++    return out
++
++
+ def _ending_tone_warnings(sentences: Sequence[Sequence[Word]], last: int,
+                           tone: Callable[[Word], tuple[str, str] | None]) -> list[str]:
+     """REEL_SPEC §4.3: the clip should end where the VOICE ends, not only the text. An open or
+diff --git a/src/autoreels/cloud/postcopy.py b/src/autoreels/cloud/postcopy.py
+index ec45212..dbf5e57 100644
+--- a/src/autoreels/cloud/postcopy.py
++++ b/src/autoreels/cloud/postcopy.py
+@@ -22,7 +22,7 @@ DESCRIBE_SYSTEM = (
+     "caption (its point) and its full spoken text. Write in Russian. The post: {smin}–{smax} sentences, at most "
+     "{max_chars} characters. The first sentence makes the reader want to watch — a question or a strong claim from the "
+     "reel; then the reel's thought itself in the speaker's own ideas, images and words — say it, do not announce it "
+-    "(never «вы поймете», «вы узнаете», «в этом видео»); address the reader as «вы» where it fits. "
++    "(never «вы поймете», «вы узнаете», «в этом видео»); {voice} "
+     "Never invent facts, names, numbers, stories or promises that are not in the reel; no emojis, no hashtags in the "
+     "text, no quotes of whole sentences. Then {ntags} hashtags: single Russian words (lower case, no spaces) naming "
+     "what the reel is about, each said in the reel. Answer only with JSON: {{\"text\": \"<post>\", \"hashtags\": "
+@@ -30,6 +30,23 @@ DESCRIBE_SYSTEM = (
+ )
+ 
+ 
++# M174 (owner: «текст постов нужно делать от „я“, так как видео публикует сам автор на своём канале»): the voice of the
++# post. "reader" = the M94 post (about the reel, the reader as «вы»); "author" = the speaker himself, first person.
++VOICES = {
++    "reader": "address the reader as «вы» where it fits.",
++    "author": ("write in the first person as the speaker himself or herself («я», «мне», «мой») — the speaker "
++               "publishes this video on their own channel; keep the speaker's grammatical gender as in the spoken "
++               "text; never call the speaker «автор», «спикер», «рассказчик», «он» or «она»; the reader may be «вы»."),
++}
++# third-person names of the speaker a first-person post must not use (normalised), unless the reel says them
++THIRD_PERSON = ("автор", "автора", "автору", "спикер", "спикера", "рассказчик", "рассказчика", "лектор", "лектора",
++                "ведущий", "ведущая", "гость", "гостья", "героиня", "герой ролика", "по его словам", "по ее словам",
++                "он рассказывает", "она рассказывает", "он говорит", "она говорит", "он считает", "она считает",
++                "он делится", "она делится", "он вспоминает", "она вспоминает")
++FIRST_PERSON = ("я", "мне", "меня", "мной", "мой", "моя", "мое", "мои", "моего", "моей", "моему", "моим", "моих",
++                "моем", "мою")
++
++
+ # M101: stock phrases of post copy that announce the thought instead of saying it (normalised: lower case, ё → е,
+ # words only). Rejected unless the reel itself says them.
+ STOCK_PHRASES = ("вы поймете", "вы узнаете", "вы откроете для себя", "узнайте", "в этом видео", "в этом ролике",
+@@ -65,8 +82,10 @@ def _stems(text: str) -> set[str]:
+     return {w[:5] for w in (_norm(x) for x in (text or "").split()) if len(w) >= 5}
+ 
+ 
+-def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_chars: int = 700) -> str | None:
+-    """Why the description cannot be used, None = fine (grounded in the reel, the configured size)."""
++def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_chars: int = 700,
++               voice: str = "reader") -> str | None:
++    """Why the description cannot be used, None = fine (grounded in the reel, the configured size; M174: with
++    voice="author" in the first person and never naming the speaker in the third)."""
+     t = " ".join((text or "").split())
+     if not t:
+         return "пусто"
+@@ -78,6 +97,12 @@ def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_char
+     for ph in STOCK_PHRASES:
+         if f" {ph} " in plain and f" {ph} " not in said:
+             return f"шаблонная фраза «{ph}» — скажите саму мысль"
++    if voice == "author":
++        for ph in THIRD_PERSON:
++            if f" {ph} " in plain and f" {ph} " not in said:
++                return f"о себе в третьем лице («{ph}») — пост пишет сам автор, от «я»"
++        if not any(f" {w} " in plain for w in FIRST_PERSON):
++            return "нет «я» — пост пишет сам автор, от первого лица"
+     n = len(_sentences(t))
+     if not smin <= n <= smax:
+         return f"предложений {n} (нужно {smin}–{smax})"
+@@ -114,10 +139,10 @@ def check_hashtags(tags: Sequence, source: str, *, n: int = 3) -> list[str]:
+ 
+ def describe_clip(provider, caption: str, transcript: str, *, smin: int = 3, smax: int = 5, max_chars: int = 700,
+                   ntags: int = 3, log: Callable[[str], None] = print,
+-                  why_out: list | None = None) -> tuple[str, list[str]] | None:
++                  why_out: list | None = None, voice: str = "reader") -> tuple[str, list[str]] | None:
+     """(description, hashtags) the model wrote and the code accepted (cut to the size first, fit_post); one retry
+     told why; None = no usable answer (the last reason is appended to why_out, when given)."""
+-    system = DESCRIBE_SYSTEM.format(smin=smin, smax=smax, max_chars=max_chars, ntags=ntags)
++    system = DESCRIBE_SYSTEM.format(smin=smin, smax=smax, max_chars=max_chars, ntags=ntags, voice=VOICES[voice])
+     msg = f"Caption: {caption or '—'}\nSpoken text: {transcript}"
+     why = ""
+     for _ in range(2):
+@@ -138,7 +163,7 @@ def describe_clip(provider, caption: str, transcript: str, *, smin: int = 3, sma
+             continue
+         raw_text = " ".join(str(obj.get("text") or "").split())
+         text = fit_post(raw_text, smax=smax, max_chars=max_chars)
+-        why = check_post(text, transcript, smin=smin, smax=smax, max_chars=max_chars) or ""
++        why = check_post(text, transcript, smin=smin, smax=smax, max_chars=max_chars, voice=voice) or ""
+         if not why:
+             if text != raw_text:
+                 log(f"  описание: сокращено до {len(_sentences(text))} предл. ({len(text)} знаков)")
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index f819e48..c0ca411 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -400,6 +400,7 @@ class PostConfig(BaseModel):
+     max_chars: int = Field(700, ge=100)
+     hashtags: int = Field(3, ge=0)            # the model's hashtags (said in the reel), after render.yaml hashtags_always
+     auto: bool = False                        # M112: arl auto writes the posts (arl describe) before the review sheet
++    voice: Literal["reader", "author"] = "reader"   # M174: "author" = the speaker's own first-person post («я»)
+ 
+ 
+ class ArticleConfig(BaseModel):
+@@ -575,6 +576,7 @@ class R0Config(BaseModel):
+     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
+     start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
+     start_preroll_sec: float = Field(0.0, ge=0.0, le=0.2)  # M146: a glued first word starts this much earlier; 0 = off
++    short_shot_sec: float = Field(0.0, ge=0.0)             # M173: a shot between two picture changes shorter than this is reported (auto: refused); 0 = off
+     speed: float = 1.0                       # default playback speed for all clips
+     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
+     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
+diff --git a/tests/test_m173_short_shot.py b/tests/test_m173_short_shot.py
+new file mode 100644
+index 0000000..b2bbad2
+--- /dev/null
++++ b/tests/test_m173_short_shot.py
+@@ -0,0 +1,100 @@
++"""M173 (owner on 09h33 m163 r01: hook, 0.7 s of one sentence, then a cut — «нужно отталкиваться от алгоритма, чтобы
++таких скачков кадра не возникало»; on m172: one frame «стреляет» by scale): a shot between two picture changes
++shorter than short_shot_sec is reported; inside one piece no wide/close span is shorter (the switch moves); an
++automatic montage clip with a short shot is refused at --apply and its line check drops that shot's sentences.
++short_shot_sec 0 = the previous plan."""
++from __future__ import annotations
++
++from dataclasses import replace
++from pathlib import Path
++from types import SimpleNamespace
++
++from autoreels.cloud.plan import (ManualPlanParams, PlannedWindow, _tidy_spans, build_manual_plan,
++                                  picture_shots)
++from tests.test_montage import P, _spec_sents
++
++ON = replace(P, short_shot_sec=2.0)
++
++
++def test_off_by_default_and_no_warning_without_it():
++    assert ManualPlanParams().short_shot_sec == 0.0
++    sents, words, smap = _spec_sents()
++    plan = build_manual_plan(sents, [3, 4, 5], words=words, smap=smap, params=P, breaks=[4])
++    assert not [w for w in plan.warnings if w.startswith("short shot")]
++    assert all(w.min_span_sec == 0.0 for w in plan.windows)
++
++
++def test_short_first_piece_is_reported_with_its_sentence():
++    sents, words, smap = _spec_sents()
++    plan = build_manual_plan(sents, [3, 4, 5], words=words, smap=smap, params=ON, breaks=[4])
++    ss = [w for w in plan.warnings if w.startswith("short shot")]
++    assert len(ss) == 1 and "whole sentences s3@4.000" in ss[0], plan.warnings
++    # the same clip from s2: the first piece is 3.6 s — no short shot
++    plan = build_manual_plan(sents, [2, 3, 4, 5], words=words, smap=smap, params=ON, breaks=[4])
++    assert not [w for w in plan.warnings if w.startswith("short shot")]
++
++
++def test_last_shot_is_not_counted():
++    sents, words, smap = _spec_sents()
++    plan = build_manual_plan(sents, [2, 3, 4], words=words, smap=smap, params=ON, breaks=[4])
++    assert not [w for w in plan.warnings if w.startswith("short shot")]       # s4 alone is the last shot
++
++
++def test_picture_shots_split_at_seams_cuts_and_switches():
++    w1 = PlannedWindow(sentences=[1], start=0.0, end=4.0, shot="wide", close_intervals=[[1.0, 2.0]])
++    w2 = PlannedWindow(sentences=[2], start=10.0, end=13.0, shot="wide", cuts=[[11.0, 12.0]])
++    shots = picture_shots([w1, w2])
++    assert [(round(a, 3), round(b, 3)) for a, b, _ in shots] == [(0, 1), (1, 2), (2, 4), (4, 5), (5, 6)]
++    assert shots[3][2] == [(4.0, 5.0, 10.0)] and shots[4][2] == [(5.0, 6.0, 12.0)]
++
++
++def test_tidy_spans_leaves_no_sliver():
++    assert _tidy_spans([[0.03, 1.0]], 3.0, 0.5) == [[0.0, 1.0]]            # 1 frame of wide before the close
++    assert _tidy_spans([[0.5, 2.97]], 3.0, 0.5) == [[0.5, 3.0]]             # … and after it
++    assert _tidy_spans([[0.5, 1.0], [1.1, 2.0]], 3.0, 0.5) == [[0.5, 2.0]]  # a flash of wide between two closes
++    assert _tidy_spans([[1.0, 1.2]], 3.0, 0.5) == []                        # a flash of close
++    assert _tidy_spans([[0.6, 1.8]], 3.0, 0.5) == [[0.6, 1.8]]              # nothing short: unchanged
++
++
++def test_window_segments_carry_the_tidy_spans_only_when_on():
++    w = PlannedWindow(sentences=[1], start=0.0, end=4.0, shot="wide", close_intervals=[[0.02, 2.0]])
++    assert w.segments()[0].close_intervals == [[0.02, 2.0]]
++    w.min_span_sec = 2.0
++    seg = w.segments()[0]
++    assert seg.shot == "wide" and seg.close_intervals == [[0.0, 2.0]]
++    w2 = PlannedWindow(sentences=[1], start=0.0, end=4.0, shot="wide", close_intervals=[[0.0, 1.0], [1.04, 4.0]],
++                       min_span_sec=0.5)
++    assert w2.segments()[0].shot == "close"
++
++
++def test_drop_sentences_takes_out_the_named_ones():
++    from autoreels import __main__ as cli
++    from autoreels.core.models import Word
++    sbr = {"17.7": [Word(word="Короче.", t0=780.29, t1=781.04)],
++           "18.1": [Word(word="Если", t0=783.34, t1=783.6), Word(word="так.", t0=783.7, t1=790.0)],
++           "18.2": [Word(word="Дальше.", t0=790.3, t1=809.0)]}
++    pr = SimpleNamespace(pieces="17.7 18.1-2", hook="17.7", hooks=["17.7", "18.2"], keys=[("17.7", ("к",))],
++                         close=[], notes=[], seconds=30.0)
++    import dataclasses
++    PR = dataclasses.make_dataclass("PR", ["pieces", "hook", "hooks", "keys", "close", "notes", "seconds"])
++    pr = PR(**vars(pr))
++    out = cli._drop_sentences(pr, sbr, ["780.290"], 5.0)
++    assert out.pieces == "18.1-2" and out.hook is None and out.hooks == ["18.2"] and out.keys == []
++    assert cli._drop_sentences(pr, sbr, ["999.0"], 5.0) is None                 # not in the line
++    assert cli._drop_sentences(pr, sbr, ["780.290"], 60.0) is None              # the rest too short
++
++
++def test_short_shot_errors_only_for_montage_reels():
++    from autoreels import __main__ as cli
++    r = lambda flags: SimpleNamespace(id="r01", planned=True, flags=flags,          # noqa: E731
++                                      warnings=["short shot 0.95s between two picture changes …"])
++    assert cli._short_shot_errors([r(["montage"])]) and not cli._short_shot_errors([r([])])
++
++
++def test_params_and_repo_config():
++    from autoreels import __main__ as cli
++    from autoreels.core.config import R0Config, load_r0_config
++    assert R0Config.model_fields["short_shot_sec"].default == 0.0
++    r0 = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml")
++    assert r0.short_shot_sec > 0
++    assert cli._manual_plan_params(r0, None).short_shot_sec == r0.short_shot_sec
+diff --git a/tests/test_m174_post_voice.py b/tests/test_m174_post_voice.py
+new file mode 100644
+index 0000000..e823229
+--- /dev/null
++++ b/tests/test_m174_post_voice.py
+@@ -0,0 +1,48 @@
++"""M174 (owner: «текст постов нужно делать от „я“, так как видео публикует сам автор на своём канале»): post.voice
++"author" — the prompt asks for the first person and the check refuses a post that names the speaker in the third
++person or has no «я». voice "reader" (default) = the M94 post unchanged."""
++from __future__ import annotations
++
++from pathlib import Path
++
++from autoreels.cloud.postcopy import DESCRIBE_SYSTEM, VOICES, check_post, describe_clip
++from autoreels.core.config import PostConfig, load_r0_config
++
++SRC = ("Я жил в Ростове, а потом оставил там всё и уехал в Москву. Я сменил сферу, стал тренером по йоге и глубже "
++       "изучал психологию. Друзей стало очень много, и я перешёл на другой уровень понимания себя.")
++THIRD = ("Что, если нужно бросить всё и начать с нуля? Автор жил в Ростове, а потом уехал в Москву. Он сменил сферу и "
++         "стал тренером по йоге. Друзей стало очень много.")
++FIRST = ("Что, если нужно бросить всё и начать с нуля? Я жил в Ростове, а потом уехал в Москву. Я сменил сферу и "
++         "стал тренером по йоге. Друзей стало очень много.")
++
++
++def test_default_voice_is_the_old_post():
++    assert PostConfig().voice == "reader"
++    assert check_post(THIRD, SRC) is None
++    assert "address the reader as «вы»" in DESCRIBE_SYSTEM.format(smin=3, smax=5, max_chars=700, ntags=3,
++                                                                   voice=VOICES["reader"])
++
++
++def test_author_voice_refuses_third_person_and_needs_i():
++    assert "третьем лице" in check_post(THIRD, SRC, voice="author")
++    assert check_post(FIRST, SRC, voice="author") is None
++    no_i = "Что, если нужно бросить всё? Жизнь в Ростове кончилась переездом в Москву. Сфера сменилась. Друзей много."
++    assert "нет «я»" in (check_post(no_i, SRC + " Жизнь кончилась переездом сменилась", voice="author") or "нет «я»")
++
++
++def test_describe_sends_the_author_prompt_and_retries_with_the_reason():
++    sent = []
++
++    class Prov:
++        def complete(self, msgs, temperature=0.0):
++            sent.append(msgs)
++            text = THIRD if len(sent) == 1 else FIRST
++            return '{"text": "%s", "hashtags": ["йога"]}' % text
++
++    res = describe_clip(Prov(), "переезд", SRC, voice="author", log=lambda x: None)
++    assert res is not None and res[0].startswith("Что, если") and "Я жил" in res[0]
++    assert "first person" in sent[0][0]["content"] and "третьем лице" in sent[1][1]["content"]
++
++
++def test_repo_config_is_author():
++    assert load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").post.voice == "author"
+diff --git a/tests/test_postcopy.py b/tests/test_postcopy.py
+index 9bd17b6..cd5bcb1 100644
+--- a/tests/test_postcopy.py
++++ b/tests/test_postcopy.py
+@@ -52,6 +52,9 @@ def test_describe_retries_once_with_the_reason_then_gives_up():
+ 
+ def test_cmd_describe_writes_post_files_and_crosspost_takes_them(tmp_path, capsys):
+     _source(tmp_path)
++    _r0 = tmp_path / "config" / "r0.yaml"          # M174: this fixture post is about the reel (voice reader)
++    if _r0.is_file():
++        _r0.write_text(_r0.read_text(encoding="utf-8").replace("voice: author", "voice: reader"), encoding="utf-8")
+     g = tmp_path / "reels-out" / "v" / "_gate" / "m88"
+     g.mkdir(parents=True)
+     for rid in ("r01", "r02", "r03"):
