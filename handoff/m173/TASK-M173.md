@@ -101,7 +101,7 @@ cp export/crosspost/grid.csv handoff/m173/grid.csv; head -c 1500 export/crosspos
 - 7 строк «клипов N», в сумме 86;
 - `grid.csv: 86 строк`; `в третьем лице: 0`;
 - `check_grid` — OK;
-- в начале `grid.csv` колонки `Дата;Время;Что;Куда;Текст поста`, посты от «я».
+- в начале `grid.csv` колонки `Дата;Время;Что;Куда;Заголовок;Текст поста`, посты от «я»; «Куда» — Telegram, VK Клипы, Instagram Reels, Дзен, MAX, YouTube Shorts (владелец 2026-10-28).
 
 ## Шаг 7. Отчёт
 `handoff/m173/REPORT.md`:
