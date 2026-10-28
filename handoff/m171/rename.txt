@@ -1,0 +1,381 @@
+  видео: /Users/danny/Documents/autoreels/inputs-archive/IMG_6848.mov → prew_isaev_anna.mov
+  манифест: manifests/IMG_6848.json → prew_isaev_anna.json
+  transcripts: transcripts/IMG_6848.align.json → prew_isaev_anna.align.json
+  transcripts: transcripts/IMG_6848.groq-dual.transcript.json → prew_isaev_anna.groq-dual.transcript.json
+  transcripts: transcripts/IMG_6848.groq-noprompt-gp.transcript.json → prew_isaev_anna.groq-noprompt-gp.transcript.json
+  transcripts: transcripts/IMG_6848.groq-noprompt.transcript.json → prew_isaev_anna.groq-noprompt.transcript.json
+  transcripts: transcripts/IMG_6848.local-gp.transcript.json → prew_isaev_anna.local-gp.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-base.transcript.json → prew_isaev_anna.local-m111-base.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-ctx.transcript.json → prew_isaev_anna.local-m111-ctx.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-novad-lpc.punct_raw.json → prew_isaev_anna.local-m111-novad-lpc.punct_raw.json
+  transcripts: transcripts/IMG_6848.local-m111-novad-lpc.transcript.json → prew_isaev_anna.local-m111-novad-lpc.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-novad-lpl.punct_raw.json → prew_isaev_anna.local-m111-novad-lpl.punct_raw.json
+  transcripts: transcripts/IMG_6848.local-m111-novad-lpl.transcript.json → prew_isaev_anna.local-m111-novad-lpl.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-novad.transcript.json → prew_isaev_anna.local-m111-novad.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-v3.transcript.json → prew_isaev_anna.local-m111-v3.transcript.json
+  transcripts: transcripts/IMG_6848.local-m111-v3novad.transcript.json → prew_isaev_anna.local-m111-v3novad.transcript.json
+  transcripts: transcripts/IMG_6848.local.transcript.json → prew_isaev_anna.local.transcript.json
+  transcripts: transcripts/IMG_6848.map.json → prew_isaev_anna.map.json
+  transcripts: transcripts/IMG_6848.prosody.json → prew_isaev_anna.prosody.json
+  transcripts: transcripts/IMG_6848.speakers.json → prew_isaev_anna.speakers.json
+  transcripts: transcripts/IMG_6848.speechmap.json → prew_isaev_anna.speechmap.json
+  transcripts: transcripts/IMG_6848.txcheck.json → prew_isaev_anna.txcheck.json
+  transcripts: transcripts/IMG_6848.txcompare-groq-dual.json → prew_isaev_anna.txcompare-groq-dual.json
+  transcripts: transcripts/IMG_6848.txcompare-groq-noprompt.json → prew_isaev_anna.txcompare-groq-noprompt.json
+  transcripts: transcripts/IMG_6848.txcompare-m111-base.json → prew_isaev_anna.txcompare-m111-base.json
+  transcripts: transcripts/IMG_6848.txcompare-m111-ctx.json → prew_isaev_anna.txcompare-m111-ctx.json
+  transcripts: transcripts/IMG_6848.txcompare-m111-novad.json → prew_isaev_anna.txcompare-m111-novad.json
+  transcripts: transcripts/IMG_6848.txcompare-m111-v3.json → prew_isaev_anna.txcompare-m111-v3.json
+  transcripts: transcripts/IMG_6848.txcompare-m111-v3novad.json → prew_isaev_anna.txcompare-m111-v3novad.json
+  transcripts: transcripts/IMG_6848.txcompare.json → prew_isaev_anna.txcompare.json
+  transcripts: transcripts/IMG_6848.txt → prew_isaev_anna.txt
+  reviews: reviews/IMG_6848.review.json → prew_isaev_anna.review.json
+  reviews: reviews/IMG_6848.review.md → prew_isaev_anna.review.md
+  reviews: reviews/IMG_6848_auto.txt → prew_isaev_anna_auto.txt
+  reviews: reviews/IMG_6848_auto_all.txt → prew_isaev_anna_auto_all.txt
+  reviews: reviews/IMG_6848_auto_all_m157.txt → prew_isaev_anna_auto_all_m157.txt
+  reviews: reviews/IMG_6848_auto_all_m165.txt → prew_isaev_anna_auto_all_m165.txt
+  reviews: reviews/IMG_6848_auto_m112.txt → prew_isaev_anna_auto_m112.txt
+  reviews: reviews/IMG_6848_auto_m115.txt → prew_isaev_anna_auto_m115.txt
+  reviews: reviews/IMG_6848_auto_m116-cloud.txt → prew_isaev_anna_auto_m116-cloud.txt
+  reviews: reviews/IMG_6848_auto_m116-haiku-novoice.txt → prew_isaev_anna_auto_m116-haiku-novoice.txt
+  reviews: reviews/IMG_6848_auto_m116-haiku.txt → prew_isaev_anna_auto_m116-haiku.txt
+  reviews: reviews/IMG_6848_auto_m116-local.txt → prew_isaev_anna_auto_m116-local.txt
+  reviews: reviews/IMG_6848_auto_m116-sonnet.txt → prew_isaev_anna_auto_m116-sonnet.txt
+  reviews: reviews/IMG_6848_auto_m118-rules.txt → prew_isaev_anna_auto_m118-rules.txt
+  reviews: reviews/IMG_6848_auto_m119-montage.txt → prew_isaev_anna_auto_m119-montage.txt
+  reviews: reviews/IMG_6848_auto_m119-passage.txt → prew_isaev_anna_auto_m119-passage.txt
+  reviews: reviews/IMG_6848_auto_m120-mixed.txt → prew_isaev_anna_auto_m120-mixed.txt
+  reviews: reviews/IMG_6848_auto_m120-montage.txt → prew_isaev_anna_auto_m120-montage.txt
+  reviews: reviews/IMG_6848_auto_m121-check.txt → prew_isaev_anna_auto_m121-check.txt
+  reviews: reviews/IMG_6848_auto_m122.txt → prew_isaev_anna_auto_m122.txt
+  reviews: reviews/IMG_6848_auto_m123-scen.txt → prew_isaev_anna_auto_m123-scen.txt
+  reviews: reviews/IMG_6848_auto_m123.txt → prew_isaev_anna_auto_m123.txt
+  reviews: reviews/IMG_6848_auto_m126-scen.txt → prew_isaev_anna_auto_m126-scen.txt
+  reviews: reviews/IMG_6848_auto_m138-off.txt → prew_isaev_anna_auto_m138-off.txt
+  reviews: reviews/IMG_6848_auto_m138-w10.txt → prew_isaev_anna_auto_m138-w10.txt
+  reviews: reviews/IMG_6848_auto_m138-w20.txt → prew_isaev_anna_auto_m138-w20.txt
+  reviews: reviews/IMG_6848_auto_m140-fill.txt → prew_isaev_anna_auto_m140-fill.txt
+  reviews: reviews/IMG_6848_auto_m140-fillw10.txt → prew_isaev_anna_auto_m140-fillw10.txt
+  reviews: reviews/IMG_6848_auto_m144-off.txt → prew_isaev_anna_auto_m144-off.txt
+  reviews: reviews/IMG_6848_auto_m144-on.txt → prew_isaev_anna_auto_m144-on.txt
+  reviews: reviews/IMG_6848_auto_m145-p10.txt → prew_isaev_anna_auto_m145-p10.txt
+  reviews: reviews/IMG_6848_auto_m145-p15.txt → prew_isaev_anna_auto_m145-p15.txt
+  reviews: reviews/IMG_6848_auto_m157.txt → prew_isaev_anna_auto_m157.txt
+  reviews: reviews/IMG_6848_auto_m165.txt → prew_isaev_anna_auto_m165.txt
+  reviews: reviews/IMG_6848_auto_m56.txt → prew_isaev_anna_auto_m56.txt
+  reviews: reviews/IMG_6848_m122.review.json → prew_isaev_anna_m122.review.json
+  reviews: reviews/IMG_6848_m123.review.json → prew_isaev_anna_m123.review.json
+  reviews: reviews/IMG_6848_m126.review.json → prew_isaev_anna_m126.review.json
+  reviews: reviews/IMG_6848_m134off.review.json → prew_isaev_anna_m134off.review.json
+  reviews: reviews/IMG_6848_m134on.review.json → prew_isaev_anna_m134on.review.json
+  reviews: reviews/IMG_6848_m142.review.json → prew_isaev_anna_m142.review.json
+  reviews: reviews/IMG_6848_m146a.review.json → prew_isaev_anna_m146a.review.json
+  reviews: reviews/IMG_6848_m146b.review.json → prew_isaev_anna_m146b.review.json
+  reviews: reviews/IMG_6848_m149bbefore.review.json → prew_isaev_anna_m149bbefore.review.json
+  reviews: reviews/IMG_6848_m149bon.review.json → prew_isaev_anna_m149bon.review.json
+  reviews: reviews/IMG_6848_m150a.review.json → prew_isaev_anna_m150a.review.json
+  reviews: reviews/IMG_6848_m150a.txt → prew_isaev_anna_m150a.txt
+  reviews: reviews/IMG_6848_m157.review.json → prew_isaev_anna_m157.review.json
+  reviews: reviews/IMG_6848_m165.review.json → prew_isaev_anna_m165.review.json
+  reviews: reviews/IMG_6848_m53.txt → prew_isaev_anna_m53.txt
+  reviews: reviews/IMG_6848_m55.txt → prew_isaev_anna_m55.txt
+  reviews: reviews/IMG_6848_spec.txt → prew_isaev_anna_spec.txt
+  data/cache: data/cache/IMG_6848.motion.npz → prew_isaev_anna.motion.npz
+  data/cache/scenario: data/cache/scenario/IMG_6848.29cd7332a82e0ec6.txt → prew_isaev_anna.29cd7332a82e0ec6.txt
+  data/cache/scenario: data/cache/scenario/IMG_6848.443265b957d4f94f.txt → prew_isaev_anna.443265b957d4f94f.txt
+  data/cache/scenario: data/cache/scenario/IMG_6848.6b1133d20be30f21.txt → prew_isaev_anna.6b1133d20be30f21.txt
+  data/cache/scenario: data/cache/scenario/IMG_6848.eb520fff80c0981b.txt → prew_isaev_anna.eb520fff80c0981b.txt
+  data/cache/scenario: data/cache/scenario/IMG_6848.fb7f31e2a628cef1.txt → prew_isaev_anna.fb7f31e2a628cef1.txt
+  папка: reels-out/IMG_6848 → prew_isaev_anna
+  видео: /Users/danny/Documents/autoreels/inputs-archive/PXL_20260729_085910095_34f06abf.mp4 → prew_isaev_danny.mp4
+  манифест: manifests/PXL_20260729_copy.json → prew_isaev_danny.json
+  transcripts: transcripts/PXL_20260729_copy.align.json → prew_isaev_danny.align.json
+  transcripts: transcripts/PXL_20260729_copy.local-gp.transcript.json → prew_isaev_danny.local-gp.transcript.json
+  transcripts: transcripts/PXL_20260729_copy.local.transcript.json → prew_isaev_danny.local.transcript.json
+  transcripts: transcripts/PXL_20260729_copy.map.json → prew_isaev_danny.map.json
+  transcripts: transcripts/PXL_20260729_copy.prosody.json → prew_isaev_danny.prosody.json
+  transcripts: transcripts/PXL_20260729_copy.speakers.json → prew_isaev_danny.speakers.json
+  transcripts: transcripts/PXL_20260729_copy.speechmap.json → prew_isaev_danny.speechmap.json
+  transcripts: transcripts/PXL_20260729_copy.txcheck.json → prew_isaev_danny.txcheck.json
+  transcripts: transcripts/PXL_20260729_copy.txcompare.json → prew_isaev_danny.txcompare.json
+  transcripts: transcripts/PXL_20260729_copy.txt → prew_isaev_danny.txt
+  reviews: reviews/PXL_20260729_copy.review.json → prew_isaev_danny.review.json
+  reviews: reviews/PXL_20260729_copy_auto.txt → prew_isaev_danny_auto.txt
+  reviews: reviews/PXL_20260729_copy_auto_all.txt → prew_isaev_danny_auto_all.txt
+  reviews: reviews/PXL_20260729_copy_auto_all_m157.txt → prew_isaev_danny_auto_all_m157.txt
+  reviews: reviews/PXL_20260729_copy_auto_all_m165.txt → prew_isaev_danny_auto_all_m165.txt
+  reviews: reviews/PXL_20260729_copy_auto_m157.txt → prew_isaev_danny_auto_m157.txt
+  reviews: reviews/PXL_20260729_copy_auto_m165.txt → prew_isaev_danny_auto_m165.txt
+  reviews: reviews/PXL_20260729_copy_auto_m56.txt → prew_isaev_danny_auto_m56.txt
+  reviews: reviews/PXL_20260729_copy_m150a.review.json → prew_isaev_danny_m150a.review.json
+  reviews: reviews/PXL_20260729_copy_m150a.txt → prew_isaev_danny_m150a.txt
+  reviews: reviews/PXL_20260729_copy_m150b.review.json → prew_isaev_danny_m150b.review.json
+  reviews: reviews/PXL_20260729_copy_m150b.txt → prew_isaev_danny_m150b.txt
+  reviews: reviews/PXL_20260729_copy_m157.review.json → prew_isaev_danny_m157.review.json
+  reviews: reviews/PXL_20260729_copy_m165.review.json → prew_isaev_danny_m165.review.json
+  data/cache: data/cache/PXL_20260729_copy.motion.npz → prew_isaev_danny.motion.npz
+  data/cache/scenario: data/cache/scenario/PXL_20260729_copy.55e50a41fd7eecea.txt → prew_isaev_danny.55e50a41fd7eecea.txt
+  data/cache/scenario: data/cache/scenario/PXL_20260729_copy.9844c48a3686508c.txt → prew_isaev_danny.9844c48a3686508c.txt
+  папка: transcripts/_archive/PXL_20260729_copy → prew_isaev_danny
+  папка: reels-out/PXL_20260729_copy → prew_isaev_danny
+  папка: reviews/_archive/PXL_20260729_copy → prew_isaev_danny
+  видео: /Users/danny/Documents/autoreels/inputs-archive/Pxl 20260621 122006193.mp4 → day_yoga_p1.mp4
+  манифест: manifests/Pxl 20260621 122006193.json → day_yoga_p1.json
+  transcripts: transcripts/Pxl 20260621 122006193.align.json → day_yoga_p1.align.json
+  transcripts: transcripts/Pxl 20260621 122006193.local-gp.transcript.json → day_yoga_p1.local-gp.transcript.json
+  transcripts: transcripts/Pxl 20260621 122006193.local.transcript.json → day_yoga_p1.local.transcript.json
+  transcripts: transcripts/Pxl 20260621 122006193.map.json → day_yoga_p1.map.json
+  transcripts: transcripts/Pxl 20260621 122006193.prosody.json → day_yoga_p1.prosody.json
+  transcripts: transcripts/Pxl 20260621 122006193.speakers.json → day_yoga_p1.speakers.json
+  transcripts: transcripts/Pxl 20260621 122006193.speechmap.json → day_yoga_p1.speechmap.json
+  transcripts: transcripts/Pxl 20260621 122006193.txcheck.json → day_yoga_p1.txcheck.json
+  transcripts: transcripts/Pxl 20260621 122006193.txcompare.json → day_yoga_p1.txcompare.json
+  transcripts: transcripts/Pxl 20260621 122006193.txt → day_yoga_p1.txt
+  reviews: reviews/Pxl 20260621 122006193.review.json → day_yoga_p1.review.json
+  reviews: reviews/Pxl 20260621 122006193.review.md → day_yoga_p1.review.md
+  reviews: reviews/Pxl 20260621 122006193_auto.txt → day_yoga_p1_auto.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_all.txt → day_yoga_p1_auto_all.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_all_m157.txt → day_yoga_p1_auto_all_m157.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_all_m163.txt → day_yoga_p1_auto_all_m163.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m118-rules.txt → day_yoga_p1_auto_m118-rules.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m138-off.txt → day_yoga_p1_auto_m138-off.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m138-w10.txt → day_yoga_p1_auto_m138-w10.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m138-w20.txt → day_yoga_p1_auto_m138-w20.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m140-fill.txt → day_yoga_p1_auto_m140-fill.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m140-fillw10.txt → day_yoga_p1_auto_m140-fillw10.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m144-off.txt → day_yoga_p1_auto_m144-off.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m144-on.txt → day_yoga_p1_auto_m144-on.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m145-p10.txt → day_yoga_p1_auto_m145-p10.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m145-p15.txt → day_yoga_p1_auto_m145-p15.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m157.txt → day_yoga_p1_auto_m157.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m163.txt → day_yoga_p1_auto_m163.txt
+  reviews: reviews/Pxl 20260621 122006193_auto_m56.txt → day_yoga_p1_auto_m56.txt
+  reviews: reviews/Pxl 20260621 122006193_m149bbefore.review.json → day_yoga_p1_m149bbefore.review.json
+  reviews: reviews/Pxl 20260621 122006193_m149bon.review.json → day_yoga_p1_m149bon.review.json
+  reviews: reviews/Pxl 20260621 122006193_m157.review.json → day_yoga_p1_m157.review.json
+  reviews: reviews/Pxl 20260621 122006193_m163.review.json → day_yoga_p1_m163.review.json
+  data/cache: data/cache/Pxl 20260621 122006193.motion.npz → day_yoga_p1.motion.npz
+  data/cache/scenario: data/cache/scenario/Pxl 20260621 122006193.f0b7dececef8de7c.txt → day_yoga_p1.f0b7dececef8de7c.txt
+  папка: reels-out/Pxl 20260621 122006193 → day_yoga_p1
+  видео: /Users/danny/Documents/autoreels/inputs-archive/Pxl 20260621 112938952.mp4 → day_yoga_p2.mp4
+  манифест: manifests/Pxl 20260621 112938952.json → day_yoga_p2.json
+  transcripts: transcripts/Pxl 20260621 112938952.align.json → day_yoga_p2.align.json
+  transcripts: transcripts/Pxl 20260621 112938952.groq-noprompt-gp.transcript.json → day_yoga_p2.groq-noprompt-gp.transcript.json
+  transcripts: transcripts/Pxl 20260621 112938952.groq-noprompt.transcript.json → day_yoga_p2.groq-noprompt.transcript.json
+  transcripts: transcripts/Pxl 20260621 112938952.local-gp.transcript.json → day_yoga_p2.local-gp.transcript.json
+  transcripts: transcripts/Pxl 20260621 112938952.local-m114-novad-lp.punct_raw.json → day_yoga_p2.local-m114-novad-lp.punct_raw.json
+  transcripts: transcripts/Pxl 20260621 112938952.local-m114-novad-lp.transcript.json → day_yoga_p2.local-m114-novad-lp.transcript.json
+  transcripts: transcripts/Pxl 20260621 112938952.local-m114-novad.transcript.json → day_yoga_p2.local-m114-novad.transcript.json
+  transcripts: transcripts/Pxl 20260621 112938952.local.transcript.json → day_yoga_p2.local.transcript.json
+  transcripts: transcripts/Pxl 20260621 112938952.map.json → day_yoga_p2.map.json
+  transcripts: transcripts/Pxl 20260621 112938952.prosody.json → day_yoga_p2.prosody.json
+  transcripts: transcripts/Pxl 20260621 112938952.speakers.json → day_yoga_p2.speakers.json
+  transcripts: transcripts/Pxl 20260621 112938952.speechmap.json → day_yoga_p2.speechmap.json
+  transcripts: transcripts/Pxl 20260621 112938952.txcheck.json → day_yoga_p2.txcheck.json
+  transcripts: transcripts/Pxl 20260621 112938952.txcompare-groq-noprompt.json → day_yoga_p2.txcompare-groq-noprompt.json
+  transcripts: transcripts/Pxl 20260621 112938952.txcompare-m114-novad.json → day_yoga_p2.txcompare-m114-novad.json
+  transcripts: transcripts/Pxl 20260621 112938952.txcompare.json → day_yoga_p2.txcompare.json
+  transcripts: transcripts/Pxl 20260621 112938952.txt → day_yoga_p2.txt
+  reviews: reviews/Pxl 20260621 112938952.review.json → day_yoga_p2.review.json
+  reviews: reviews/Pxl 20260621 112938952.review.md → day_yoga_p2.review.md
+  reviews: reviews/Pxl 20260621 112938952_auto.txt → day_yoga_p2_auto.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_all.txt → day_yoga_p2_auto_all.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_all_m157.txt → day_yoga_p2_auto_all_m157.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_all_m163.txt → day_yoga_p2_auto_all_m163.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m112.txt → day_yoga_p2_auto_m112.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m115.txt → day_yoga_p2_auto_m115.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m116-cloud.txt → day_yoga_p2_auto_m116-cloud.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m116-haiku-novoice.txt → day_yoga_p2_auto_m116-haiku-novoice.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m116-haiku.txt → day_yoga_p2_auto_m116-haiku.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m116-local.txt → day_yoga_p2_auto_m116-local.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m116-sonnet.txt → day_yoga_p2_auto_m116-sonnet.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m118-rules.txt → day_yoga_p2_auto_m118-rules.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m119-montage.txt → day_yoga_p2_auto_m119-montage.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m119-passage.txt → day_yoga_p2_auto_m119-passage.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m120-mixed.txt → day_yoga_p2_auto_m120-mixed.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m120-montage.txt → day_yoga_p2_auto_m120-montage.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m122.txt → day_yoga_p2_auto_m122.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m123-scen.txt → day_yoga_p2_auto_m123-scen.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m123.txt → day_yoga_p2_auto_m123.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m138-off.txt → day_yoga_p2_auto_m138-off.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m138-w10.txt → day_yoga_p2_auto_m138-w10.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m138-w20.txt → day_yoga_p2_auto_m138-w20.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m140-fill.txt → day_yoga_p2_auto_m140-fill.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m140-fillw10.txt → day_yoga_p2_auto_m140-fillw10.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m144-off.txt → day_yoga_p2_auto_m144-off.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m144-on.txt → day_yoga_p2_auto_m144-on.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m145-p10.txt → day_yoga_p2_auto_m145-p10.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m145-p15.txt → day_yoga_p2_auto_m145-p15.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m157.txt → day_yoga_p2_auto_m157.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m163.txt → day_yoga_p2_auto_m163.txt
+  reviews: reviews/Pxl 20260621 112938952_auto_m56.txt → day_yoga_p2_auto_m56.txt
+  reviews: reviews/Pxl 20260621 112938952_m125.review.json → day_yoga_p2_m125.review.json
+  reviews: reviews/Pxl 20260621 112938952_m134off.review.json → day_yoga_p2_m134off.review.json
+  reviews: reviews/Pxl 20260621 112938952_m134on.review.json → day_yoga_p2_m134on.review.json
+  reviews: reviews/Pxl 20260621 112938952_m136off.review.json → day_yoga_p2_m136off.review.json
+  reviews: reviews/Pxl 20260621 112938952_m136on.review.json → day_yoga_p2_m136on.review.json
+  reviews: reviews/Pxl 20260621 112938952_m149bbefore.review.json → day_yoga_p2_m149bbefore.review.json
+  reviews: reviews/Pxl 20260621 112938952_m149bon.review.json → day_yoga_p2_m149bon.review.json
+  reviews: reviews/Pxl 20260621 112938952_m157.review.json → day_yoga_p2_m157.review.json
+  reviews: reviews/Pxl 20260621 112938952_m163.review.json → day_yoga_p2_m163.review.json
+  reviews: reviews/Pxl 20260621 112938952_m53.txt → day_yoga_p2_m53.txt
+  reviews: reviews/Pxl 20260621 112938952_m55.txt → day_yoga_p2_m55.txt
+  data/cache: data/cache/Pxl 20260621 112938952.motion.npz → day_yoga_p2.motion.npz
+  data/cache/scenario: data/cache/scenario/Pxl 20260621 112938952.b6636752c9410984.txt → day_yoga_p2.b6636752c9410984.txt
+  папка: reels-out/Pxl 20260621 112938952 → day_yoga_p2
+  видео: /Users/danny/Documents/autoreels/inputs-archive/2026-08-08 10h 59m 38s.mp4 → disko_beach_p1.mp4
+  манифест: manifests/2026-08-08 10h 59m 38s.json → disko_beach_p1.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.align.json → disko_beach_p1.align.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.local-gp.transcript.json → disko_beach_p1.local-gp.transcript.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.local-p1.transcript.json → disko_beach_p1.local-p1.transcript.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.local-p2.transcript.json → disko_beach_p1.local-p2.transcript.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.local-p3.transcript.json → disko_beach_p1.local-p3.transcript.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.local.transcript.json → disko_beach_p1.local.transcript.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.map.json → disko_beach_p1.map.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.prosody.json → disko_beach_p1.prosody.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.speakers.json → disko_beach_p1.speakers.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.speechmap.json → disko_beach_p1.speechmap.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.txcheck.json → disko_beach_p1.txcheck.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.txcompare-p1.json → disko_beach_p1.txcompare-p1.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.txcompare-p2.json → disko_beach_p1.txcompare-p2.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.txcompare-p3.json → disko_beach_p1.txcompare-p3.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.txcompare.json → disko_beach_p1.txcompare.json
+  transcripts: transcripts/2026-08-08 10h 59m 38s.txt → disko_beach_p1.txt
+  reviews: reviews/2026-08-08 10h 59m 38s.review.json → disko_beach_p1.review.json
+  reviews: reviews/2026-08-08 10h 59m 38s.review.md → disko_beach_p1.review.md
+  reviews: reviews/2026-08-08 10h 59m 38s_auto.txt → disko_beach_p1_auto.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_all.txt → disko_beach_p1_auto_all.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_all_m157.txt → disko_beach_p1_auto_all_m157.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_all_m163.txt → disko_beach_p1_auto_all_m163.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m118-rules.txt → disko_beach_p1_auto_m118-rules.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m138-off.txt → disko_beach_p1_auto_m138-off.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m138-w10.txt → disko_beach_p1_auto_m138-w10.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m138-w20.txt → disko_beach_p1_auto_m138-w20.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m140-fill.txt → disko_beach_p1_auto_m140-fill.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m140-fillw10.txt → disko_beach_p1_auto_m140-fillw10.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m144-off.txt → disko_beach_p1_auto_m144-off.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m144-on.txt → disko_beach_p1_auto_m144-on.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m145-p10.txt → disko_beach_p1_auto_m145-p10.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m145-p15.txt → disko_beach_p1_auto_m145-p15.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m157.txt → disko_beach_p1_auto_m157.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m163.txt → disko_beach_p1_auto_m163.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_auto_m56.txt → disko_beach_p1_auto_m56.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_m149bbefore.review.json → disko_beach_p1_m149bbefore.review.json
+  reviews: reviews/2026-08-08 10h 59m 38s_m149bon.review.json → disko_beach_p1_m149bon.review.json
+  reviews: reviews/2026-08-08 10h 59m 38s_m157.review.json → disko_beach_p1_m157.review.json
+  reviews: reviews/2026-08-08 10h 59m 38s_m163.review.json → disko_beach_p1_m163.review.json
+  reviews: reviews/2026-08-08 10h 59m 38s_m53.txt → disko_beach_p1_m53.txt
+  reviews: reviews/2026-08-08 10h 59m 38s_m55.txt → disko_beach_p1_m55.txt
+  data/cache: data/cache/2026-08-08 10h 59m 38s.motion.npz → disko_beach_p1.motion.npz
+  data/cache/scenario: data/cache/scenario/2026-08-08 10h 59m 38s.fad46eacc75936f0.txt → disko_beach_p1.fad46eacc75936f0.txt
+  папка: transcripts/_archive/2026-08-08 10h 59m 38s → disko_beach_p1
+  папка: reels-out/2026-08-08 10h 59m 38s → disko_beach_p1
+  папка: reviews/_archive/2026-08-08 10h 59m 38s → disko_beach_p1
+  видео: /Users/danny/Documents/autoreels/inputs-archive/2026-08-08 11h 42m 49s.mp4 → disko_beach_p2.mp4
+  манифест: manifests/2026-08-08 11h 42m 49s.json → disko_beach_p2.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.align.json → disko_beach_p2.align.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.local-gp.transcript.json → disko_beach_p2.local-gp.transcript.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.local.transcript.json → disko_beach_p2.local.transcript.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.map.json → disko_beach_p2.map.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.prosody.json → disko_beach_p2.prosody.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.speakers.json → disko_beach_p2.speakers.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.speechmap.json → disko_beach_p2.speechmap.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.txcheck.json → disko_beach_p2.txcheck.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.txcompare.json → disko_beach_p2.txcompare.json
+  transcripts: transcripts/2026-08-08 11h 42m 49s.txt → disko_beach_p2.txt
+  reviews: reviews/2026-08-08 11h 42m 49s.review.json → disko_beach_p2.review.json
+  reviews: reviews/2026-08-08 11h 42m 49s.review.md → disko_beach_p2.review.md
+  reviews: reviews/2026-08-08 11h 42m 49s_auto.txt → disko_beach_p2_auto.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_all.txt → disko_beach_p2_auto_all.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_all_m157.txt → disko_beach_p2_auto_all_m157.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_all_m163.txt → disko_beach_p2_auto_all_m163.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m112.txt → disko_beach_p2_auto_m112.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m115.txt → disko_beach_p2_auto_m115.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m116-cloud.txt → disko_beach_p2_auto_m116-cloud.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m116-haiku-novoice.txt → disko_beach_p2_auto_m116-haiku-novoice.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m116-haiku.txt → disko_beach_p2_auto_m116-haiku.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m116-local.txt → disko_beach_p2_auto_m116-local.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m116-sonnet.txt → disko_beach_p2_auto_m116-sonnet.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m118-rules.txt → disko_beach_p2_auto_m118-rules.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m119-montage.txt → disko_beach_p2_auto_m119-montage.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m119-passage.txt → disko_beach_p2_auto_m119-passage.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m120-mixed.txt → disko_beach_p2_auto_m120-mixed.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m120-montage.txt → disko_beach_p2_auto_m120-montage.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m122.txt → disko_beach_p2_auto_m122.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m123-scen.txt → disko_beach_p2_auto_m123-scen.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m123.txt → disko_beach_p2_auto_m123.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m138-off.txt → disko_beach_p2_auto_m138-off.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m138-w10.txt → disko_beach_p2_auto_m138-w10.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m138-w20.txt → disko_beach_p2_auto_m138-w20.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m140-fill.txt → disko_beach_p2_auto_m140-fill.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m140-fillw10.txt → disko_beach_p2_auto_m140-fillw10.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m144-off.txt → disko_beach_p2_auto_m144-off.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m144-on.txt → disko_beach_p2_auto_m144-on.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m145-p10.txt → disko_beach_p2_auto_m145-p10.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m145-p15.txt → disko_beach_p2_auto_m145-p15.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m157.txt → disko_beach_p2_auto_m157.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m163.txt → disko_beach_p2_auto_m163.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_auto_m56.txt → disko_beach_p2_auto_m56.txt
+  reviews: reviews/2026-08-08 11h 42m 49s_m149bbefore.review.json → disko_beach_p2_m149bbefore.review.json
+  reviews: reviews/2026-08-08 11h 42m 49s_m149bon.review.json → disko_beach_p2_m149bon.review.json
+  reviews: reviews/2026-08-08 11h 42m 49s_m157.review.json → disko_beach_p2_m157.review.json
+  reviews: reviews/2026-08-08 11h 42m 49s_m163.review.json → disko_beach_p2_m163.review.json
+  data/cache: data/cache/2026-08-08 11h 42m 49s.motion.npz → disko_beach_p2.motion.npz
+  data/cache/scenario: data/cache/scenario/2026-08-08 11h 42m 49s.86fbc13302949b43.txt → disko_beach_p2.86fbc13302949b43.txt
+  папка: reels-out/2026-08-08 11h 42m 49s → disko_beach_p2
+  видео: /Users/danny/Documents/autoreels/inputs-archive/2026-08-08 09h 33m 14s.mp4 → disko_beach_p3.mp4
+  манифест: manifests/2026-08-08 09h 33m 14s.json → disko_beach_p3.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.align.json → disko_beach_p3.align.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.local-gp.transcript.json → disko_beach_p3.local-gp.transcript.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.local.transcript.json → disko_beach_p3.local.transcript.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.map.json → disko_beach_p3.map.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.prosody.json → disko_beach_p3.prosody.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.speakers.json → disko_beach_p3.speakers.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.speechmap.json → disko_beach_p3.speechmap.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.txcheck.json → disko_beach_p3.txcheck.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.txcompare.json → disko_beach_p3.txcompare.json
+  transcripts: transcripts/2026-08-08 09h 33m 14s.txt → disko_beach_p3.txt
+  reviews: reviews/2026-08-08 09h 33m 14s.review.json → disko_beach_p3.review.json
+  reviews: reviews/2026-08-08 09h 33m 14s.review.md → disko_beach_p3.review.md
+  reviews: reviews/2026-08-08 09h 33m 14s_auto.txt → disko_beach_p3_auto.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_all.txt → disko_beach_p3_auto_all.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_all_m157.txt → disko_beach_p3_auto_all_m157.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_all_m163.txt → disko_beach_p3_auto_all_m163.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m118-rules.txt → disko_beach_p3_auto_m118-rules.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m138-off.txt → disko_beach_p3_auto_m138-off.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m138-w10.txt → disko_beach_p3_auto_m138-w10.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m138-w20.txt → disko_beach_p3_auto_m138-w20.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m140-fill.txt → disko_beach_p3_auto_m140-fill.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m140-fillw10.txt → disko_beach_p3_auto_m140-fillw10.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m144-off.txt → disko_beach_p3_auto_m144-off.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m144-on.txt → disko_beach_p3_auto_m144-on.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m145-p10.txt → disko_beach_p3_auto_m145-p10.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m145-p15.txt → disko_beach_p3_auto_m145-p15.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m157.txt → disko_beach_p3_auto_m157.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m163.txt → disko_beach_p3_auto_m163.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_auto_m56.txt → disko_beach_p3_auto_m56.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_m149bbefore.review.json → disko_beach_p3_m149bbefore.review.json
+  reviews: reviews/2026-08-08 09h 33m 14s_m149bon.review.json → disko_beach_p3_m149bon.review.json
+  reviews: reviews/2026-08-08 09h 33m 14s_m157.review.json → disko_beach_p3_m157.review.json
+  reviews: reviews/2026-08-08 09h 33m 14s_m163.review.json → disko_beach_p3_m163.review.json
+  reviews: reviews/2026-08-08 09h 33m 14s_m53.txt → disko_beach_p3_m53.txt
+  reviews: reviews/2026-08-08 09h 33m 14s_m55.txt → disko_beach_p3_m55.txt
+  data/cache: data/cache/2026-08-08 09h 33m 14s.motion.npz → disko_beach_p3.motion.npz
+  data/cache/scenario: data/cache/scenario/2026-08-08 09h 33m 14s.6dc20298cd9c513a.txt → disko_beach_p3.6dc20298cd9c513a.txt
+  папка: reels-out/2026-08-08 09h 33m 14s → disko_beach_p3
+=== операций: 366
+  ярлык: Pxl 20260621 112938952.mp4 → day_yoga_p2.mp4
+  ярлык: IMG_6848.mov → prew_isaev_anna.mov
+  ярлык: 2026-08-08 09h 33m 14s.mp4 → disko_beach_p3.mp4
+  ярлык: PXL_20260729_copy.mp4 → prew_isaev_danny.mp4
+  ярлык: 2026-08-08 11h 42m 49s.mp4 → disko_beach_p2.mp4
+Traceback (most recent call last):
+  File "/Users/danny/Documents/autoreels/handoff/m171/rename_sources.py", line 104, in <module>
+    (p.parent / nb.name).symlink_to(nb)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/pathlib/_local.py", line 789, in symlink_to
+    os.symlink(target, self, target_is_directory)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileExistsError: [Errno 17] File exists: '/Users/danny/Documents/autoreels/inputs-archive/prew_isaev_danny.mp4' -> 'inputs-archive/prew_isaev_danny.mp4'
+СДЕЛАНО: переименовано 366, правок внутри файлов (symlinks исправлены вручную)
