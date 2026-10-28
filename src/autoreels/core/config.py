@@ -402,6 +402,7 @@ class PostConfig(BaseModel):
     max_chars: int = Field(700, ge=100)
     hashtags: int = Field(3, ge=0)            # the model's hashtags (said in the reel), after render.yaml hashtags_always
     auto: bool = False                        # M112: arl auto writes the posts (arl describe) before the review sheet
+    voice: Literal["reader", "author"] = "reader"   # M174: "author" = the speaker's own first-person post («я»)
 
 
 class ArticleConfig(BaseModel):
@@ -577,6 +578,7 @@ class R0Config(BaseModel):
     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
     start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
     start_preroll_sec: float = Field(0.0, ge=0.0, le=0.2)  # M146: a glued first word starts this much earlier; 0 = off
+    short_shot_sec: float = Field(0.0, ge=0.0)             # M173: a shot between two picture changes shorter than this is reported (auto: refused); 0 = off
     speed: float = 1.0                       # default playback speed for all clips
     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).

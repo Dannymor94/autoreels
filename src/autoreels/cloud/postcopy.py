@@ -22,12 +22,29 @@ DESCRIBE_SYSTEM = (
     "caption (its point) and its full spoken text. Write in Russian. The post: {smin}–{smax} sentences, at most "
     "{max_chars} characters. The first sentence makes the reader want to watch — a question or a strong claim from the "
     "reel; then the reel's thought itself in the speaker's own ideas, images and words — say it, do not announce it "
-    "(never «вы поймете», «вы узнаете», «в этом видео»); address the reader as «вы» where it fits. "
+    "(never «вы поймете», «вы узнаете», «в этом видео»); {voice} "
     "Never invent facts, names, numbers, stories or promises that are not in the reel; no emojis, no hashtags in the "
     "text, no quotes of whole sentences. Then {ntags} hashtags: single Russian words (lower case, no spaces) naming "
     "what the reel is about, each said in the reel. Answer only with JSON: {{\"text\": \"<post>\", \"hashtags\": "
     "[\"<word>\", …]}}."
 )
+
+
+# M174 (owner: «текст постов нужно делать от „я“, так как видео публикует сам автор на своём канале»): the voice of the
+# post. "reader" = the M94 post (about the reel, the reader as «вы»); "author" = the speaker himself, first person.
+VOICES = {
+    "reader": "address the reader as «вы» where it fits.",
+    "author": ("write in the first person as the speaker himself or herself («я», «мне», «мой») — the speaker "
+               "publishes this video on their own channel; keep the speaker's grammatical gender as in the spoken "
+               "text; never call the speaker «автор», «спикер», «рассказчик», «он» or «она»; the reader may be «вы»."),
+}
+# third-person names of the speaker a first-person post must not use (normalised), unless the reel says them
+THIRD_PERSON = ("автор", "автора", "автору", "спикер", "спикера", "рассказчик", "рассказчика", "лектор", "лектора",
+                "ведущий", "ведущая", "гость", "гостья", "героиня", "герой ролика", "по его словам", "по ее словам",
+                "он рассказывает", "она рассказывает", "он говорит", "она говорит", "он считает", "она считает",
+                "он делится", "она делится", "он вспоминает", "она вспоминает")
+FIRST_PERSON = ("я", "мне", "меня", "мной", "мой", "моя", "мое", "мои", "моего", "моей", "моему", "моим", "моих",
+                "моем", "мою")
 
 
 # M101: stock phrases of post copy that announce the thought instead of saying it (normalised: lower case, ё → е,
@@ -65,8 +82,10 @@ def _stems(text: str) -> set[str]:
     return {w[:5] for w in (_norm(x) for x in (text or "").split()) if len(w) >= 5}
 
 
-def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_chars: int = 700) -> str | None:
-    """Why the description cannot be used, None = fine (grounded in the reel, the configured size)."""
+def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_chars: int = 700,
+               voice: str = "reader") -> str | None:
+    """Why the description cannot be used, None = fine (grounded in the reel, the configured size; M174: with
+    voice="author" in the first person and never naming the speaker in the third)."""
     t = " ".join((text or "").split())
     if not t:
         return "пусто"
@@ -78,6 +97,12 @@ def check_post(text: str, source: str, *, smin: int = 3, smax: int = 5, max_char
     for ph in STOCK_PHRASES:
         if f" {ph} " in plain and f" {ph} " not in said:
             return f"шаблонная фраза «{ph}» — скажите саму мысль"
+    if voice == "author":
+        for ph in THIRD_PERSON:
+            if f" {ph} " in plain and f" {ph} " not in said:
+                return f"о себе в третьем лице («{ph}») — пост пишет сам автор, от «я»"
+        if not any(f" {w} " in plain for w in FIRST_PERSON):
+            return "нет «я» — пост пишет сам автор, от первого лица"
     n = len(_sentences(t))
     if not smin <= n <= smax:
         return f"предложений {n} (нужно {smin}–{smax})"
@@ -114,10 +139,10 @@ def check_hashtags(tags: Sequence, source: str, *, n: int = 3) -> list[str]:
 
 def describe_clip(provider, caption: str, transcript: str, *, smin: int = 3, smax: int = 5, max_chars: int = 700,
                   ntags: int = 3, log: Callable[[str], None] = print,
-                  why_out: list | None = None) -> tuple[str, list[str]] | None:
+                  why_out: list | None = None, voice: str = "reader") -> tuple[str, list[str]] | None:
     """(description, hashtags) the model wrote and the code accepted (cut to the size first, fit_post); one retry
     told why; None = no usable answer (the last reason is appended to why_out, when given)."""
-    system = DESCRIBE_SYSTEM.format(smin=smin, smax=smax, max_chars=max_chars, ntags=ntags)
+    system = DESCRIBE_SYSTEM.format(smin=smin, smax=smax, max_chars=max_chars, ntags=ntags, voice=VOICES[voice])
     msg = f"Caption: {caption or '—'}\nSpoken text: {transcript}"
     why = ""
     for _ in range(2):
@@ -138,7 +163,7 @@ def describe_clip(provider, caption: str, transcript: str, *, smin: int = 3, sma
             continue
         raw_text = " ".join(str(obj.get("text") or "").split())
         text = fit_post(raw_text, smax=smax, max_chars=max_chars)
-        why = check_post(text, transcript, smin=smin, smax=smax, max_chars=max_chars) or ""
+        why = check_post(text, transcript, smin=smin, smax=smax, max_chars=max_chars, voice=voice) or ""
         if not why:
             if text != raw_text:
                 log(f"  описание: сокращено до {len(_sentences(text))} предл. ({len(text)} знаков)")

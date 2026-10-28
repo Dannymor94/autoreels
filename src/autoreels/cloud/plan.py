@@ -102,6 +102,11 @@ class ManualPlanParams:
     # first word — only real silence (never into the next speech, onset_margin_sec away from it), so the hook and
     # the start of the clip are heard as two things. 0 = off (the previous windows).
     hook_air_sec: float = 0.0
+    # M173 (owner on 09h33 m163 r01: hook, 0.7 s of one sentence, then a cut — «нужно отталкиваться от алгоритма, чтобы
+    # таких скачков кадра не возникало»): a shot between two picture changes (the clip start, a seam, a cut, a
+    # wide↔close switch) shorter than this is reported («short shot»); an automatic clip with one is refused at --apply
+    # and its line check drops the sentences of that shot. The cold open and the last shot are not counted. 0 = off.
+    short_shot_sec: float = 0.0
 
 
 @dataclass
@@ -119,6 +124,7 @@ class PlannedWindow:
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
     word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
     prerolled: bool = False                        # M146: start was pushed into the previous word's tail
+    min_span_sec: float = 0.0                      # M173: no wide/close span inside a piece shorter than this (0 = off)
 
     @property
     def last_shot(self) -> str:
@@ -129,9 +135,11 @@ class PlannedWindow:
         return "wide"
 
     def segment(self) -> Segment:
+        shot, ci = self.shot, [list(c) for c in self.close_intervals]
+        if self.min_span_sec > 0 and shot == "wide" and ci:
+            shot, ci = _shot_of(_tidy_spans(ci, self.end - self.start, self.min_span_sec), self.end - self.start)
         return make_segment(self.start, self.end).model_copy(update={
-            "shot": self.shot, "close_intervals": [list(ci) for ci in self.close_intervals],
-            "prerolled": self.prerolled})
+            "shot": shot, "close_intervals": ci, "prerolled": self.prerolled})
 
     def pieces(self) -> list[tuple[float, float]]:
         """Played stretches of the window (source time): the window minus its cuts."""
@@ -164,6 +172,8 @@ class PlannedWindow:
                         spans.append([round(s0 - a, 6), round(s1 - a, 6)])
             if flipped:
                 spans = _complement(spans, b - a)
+            if self.min_span_sec > 0:
+                spans = _tidy_spans(spans, b - a, self.min_span_sec)
             shot, ci = "wide", spans
             if not spans:
                 ci = []
@@ -255,6 +265,31 @@ class ManualPlan:
                          + (f"; {spaced} left in (too close to another change)" if spaced else "")
                          + (f"; {longp} long pause(s) always cut" if longp else ""))
         return lines
+
+
+def _tidy_spans(spans: list[list[float]], dur: float, m: float) -> list[list[float]]:
+    """M173 (owner on disko_beach_p3 m172 r01: one frame «стреляет» by scale): close spans of one piece with no wide
+    or close stretch under `m` — a gap under m between two spans is closed, an edge under m from the piece edge goes
+    to the edge, a span still under m is dropped. Seconds of a piece are never moved, only where the switch falls."""
+    out: list[list[float]] = []
+    for a, b in sorted([max(0.0, a), min(dur, b)] for a, b in spans):
+        if b - a <= _EPS:
+            continue
+        if a < m:
+            a = 0.0
+        if dur - b < m:
+            b = dur
+        if out and a - out[-1][1] < m:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [[round(a, 6), round(b, 6)] for a, b in out if b - a >= m - _EPS or (a == 0.0 and b == dur)]
+
+
+def _shot_of(spans: list[list[float]], dur: float) -> tuple[str, list[list[float]]]:
+    if len(spans) == 1 and spans[0][0] < _EPS and spans[0][1] > dur - _EPS:
+        return "close", []
+    return "wide", spans
 
 
 def _complement(spans: list[list[float]], dur: float) -> list[list[float]]:
@@ -1368,7 +1403,74 @@ def build_manual_plan(
                       hook_replayed=hook_replayed, warnings=warnings, errors=errors, hook_air=hook_air)
     plan._sent_bounds = sent_bounds
     plan._times = times
+    if params.short_shot_sec > 0:
+        for w in windows:
+            w.min_span_sec = params.short_shot_sec
+        warnings.extend(short_shot_warnings(plan, sentences, params.short_shot_sec))
     return plan
+
+
+def picture_shots(windows: Sequence["PlannedWindow"]) -> list[tuple[float, float, list[tuple[float, float, float]]]]:
+    """M173: the shots of a clip in output time, in play order: (out_start, out_end, [(out_a, out_b, src_a)…]).
+
+    A new shot begins at every played piece (a seam between windows, a cut inside one) and at every wide↔close
+    switch inside a piece. The third item maps the shot back to source time (src = src_a + out − out_a)."""
+    bounds: list[float] = [0.0]
+    spans: list[tuple[float, float, float]] = []
+    t = 0.0
+    for w in windows:
+        for seg in w.segments():
+            dur = seg.end - seg.start
+            if dur <= _EPS:
+                continue
+            if t > _EPS:
+                bounds.append(t)
+            for c0, c1 in (seg.close_intervals or []):
+                for e in (c0, c1):
+                    if _EPS < e < dur - _EPS:
+                        bounds.append(t + e)
+            spans.append((t, t + dur, seg.start))
+            t += dur
+    bounds = sorted(set(round(b, 6) for b in bounds)) + [t]
+    out = []
+    for a, b in zip(bounds, bounds[1:]):
+        if b - a <= _EPS:
+            continue
+        m = [(max(a, sa), min(b, sb), src + (max(a, sa) - sa)) for sa, sb, src in spans if min(b, sb) - max(a, sa) > _EPS]
+        out.append((a, b, m))
+    return out
+
+
+def short_shot_warnings(plan: "ManualPlan", sentences: Sequence[Sequence[Word]], min_sec: float) -> list[str]:
+    """M173: «short shot» for every shot under `min_sec` between two picture changes. Not counted: shots inside the
+    cold open (the hook is its own unit, hook_min_sec) and the last shot (nothing cuts after it). The sentences heard
+    whole inside the shot are named by their first word's Whisper start (`s<n>@<t0>`), so the automatic line check can
+    drop exactly them; a shot inside a sentence is «inside a sentence» (no sentence to drop)."""
+    times = plan._times
+    co = plan.cold_open
+    co_len = (co.end - co.start - sum(c1 - c0 for c0, c1 in co.cuts)) if co is not None else 0.0
+    shots = picture_shots(plan.windows)
+    body_sents = [n for w in plan.body for n in w.sentences]
+    out: list[str] = []
+    for i, (a, b, m) in enumerate(shots):
+        if i == len(shots) - 1 or b - a >= min_sec - _EPS or b <= co_len + _EPS:
+            continue
+        src = [(sa, sa + (ob - oa)) for oa, ob, sa in m]
+        whole, partial = [], False
+        for n in body_sents:
+            ws = [w for w in sentences[n - 1] if any(c.isalnum() for c in w.word)]
+            heard = [times.audible(w) for w in ws] if times is not None else [(w.t0, w.t1) for w in ws]
+            inside = [any(x0 - _EPS <= h0 and h1 <= x1 + 0.05 for x0, x1 in src) for h0, h1 in heard]
+            touch = [any(min(h1, x1) - max(h0, x0) > _EPS for x0, x1 in src) for h0, h1 in heard]
+            if ws and all(inside):
+                whole.append((n, ws[0].t0))
+            elif any(touch):
+                partial = True
+        what = ("whole sentences " + ", ".join(f"s{n}@{t0:.3f}" for n, t0 in whole)
+                if whole and not partial else "inside a sentence")
+        out.append(f"short shot {b - a:.2f}s between two picture changes (out {a:.2f}–{b:.2f}s, "
+                   f"src {src[0][0]:.2f}–{src[-1][1]:.2f}): {what}")
+    return out
 
 
 def _ending_tone_warnings(sentences: Sequence[Sequence[Word]], last: int,

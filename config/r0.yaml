@@ -68,6 +68,7 @@ start_pad_sec: 0
 # before it (heard pause under this) starts this much before its onset, in that word's tail, so its first consonant is
 # not lost (m143/m145: 46 of 59 draft starts have no pause to cut in). Goes with render.yaml start_fade_in_sec. 0 = off.
 start_preroll_sec: 0.06     # M146 on (owner on m146b: «ровнее, плавнее»)
+short_shot_sec: 2.0         # M173: shot between two picture changes shorter → warning; automatic clip drops its sentences (0 = off)
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
 max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
                                 # слово после терминального знака (.?!), иначе слово с заглавной.
@@ -687,6 +688,7 @@ post:
   sentences_max: 5
   max_chars: 700
   hashtags: 3
+  voice: author           # M174 (owner: «от „я“ — видео публикует сам автор на своём канале»); reader = about the reel, «вы»
   auto: true              # M112: arl auto writes the posts before the review sheet (they show on the cards); after the
                           # owner's verdicts arl export <source> --decisions <file> sends only the approved clips to crosspost
 

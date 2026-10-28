@@ -1134,6 +1134,40 @@ def _drop_last_sentence(pr, sent_by_ref, min_sec: float):
                    close=[c for c in pr.close if c != gone], notes=list(pr.notes))
 
 
+def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
+    """M173: the proposal without the sentences whose first word starts at `t0s` (Whisper seconds, from a «short
+    shot» warning) — None when none of them is in the proposal, or the rest would fall under min_sec or be empty.
+    A hook, keys or close shot on a dropped sentence go with it."""
+    from dataclasses import replace as _dc_rep
+    from autoreels.cloud.scenario import compress_refs, expand_refs
+    refs = expand_refs(pr.pieces) or []
+    want = {round(float(t) * 1000) for t in t0s}
+    gone = {r for r in refs if (sent_by_ref.get(r) or [None])[0] is not None
+            and round(float(sent_by_ref[r][0].t0) * 1000) in want}
+    keep = [r for r in refs if r not in gone]
+    if not gone or not keep:
+        return None
+
+    def _dur(r):
+        st = sent_by_ref.get(r) or []
+        return float(st[-1].t1) - float(st[0].t0) if st else 0.0
+    secs = sum(_dur(r) for r in keep)
+    if secs < min_sec:
+        return None
+    return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
+                   hook=None if pr.hook in gone else pr.hook,
+                   hooks=[h for h in pr.hooks if h not in gone],
+                   keys=[k for k in pr.keys if k[0] not in gone],
+                   close=[c for c in pr.close if c not in gone], notes=list(pr.notes))
+
+
+def _short_shot_errors(reels) -> list[tuple[str, str]]:
+    """M173: planned montage reels (the automatic lines the line check can fix) with a shot under short_shot_sec
+    between two picture changes (plan warning «short shot»)."""
+    return [(r.id, w) for r in reels if getattr(r, "planned", False) and "montage" in (r.flags or [])
+            for w in (r.warnings or []) if w.startswith("short shot")]
+
+
 def _no_room_errors(reels) -> list[tuple[str, str]]:
     """M166: planned reels whose last word ends after the next speech begins (plan warning «no room after last word»)."""
     return [(r.id, w) for r in reels if getattr(r, "planned", False)
@@ -5409,6 +5443,7 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
         filler_words=tuple(getattr(getattr(r0_cfg, "filler_removal", None), "filler_words", None) or ()),
         subs_hide_fillers=bool(getattr(r0_cfg, "subtitles_hide_fillers", False)),
         filler_word_cut=bool(getattr(r0_cfg, "filler_word_cut", False)),
+        short_shot_sec=float(getattr(r0_cfg, "short_shot_sec", 0.0) or 0.0),
         **_filler_profile_values(r0_cfg, filler_profile),
     )
 
@@ -6652,6 +6687,14 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         for _rid, _w in _noroom:
             print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another end", file=sys.stderr, flush=True)
         if _noroom:
+            return 1
+        # M173 (owner on 09h33 m163 r01: «чтобы таких скачков кадра не возникало»): a shot under short_shot_sec between
+        # two picture changes — the automatic path drops that shot's sentences (its line check); the owner's own line
+        # keeps the warning (invariant 5)
+        _short_shots = _short_shot_errors(reels)
+        for _rid, _w in _short_shots:
+            print(f"  [ERROR] {_rid}: {_w} — automatic clip needs another cut", file=sys.stderr, flush=True)
+        if _short_shots:
             return 1
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
@@ -8665,6 +8708,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             _short.notes = pr.notes
             pr = _short
             err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        # M173: a shot under short_shot_sec between two picture changes — drop the sentences heard whole in it (the
+        # 0.7 s sentence between the cold open and a cut), up to twice; a short shot inside a sentence refuses the line
+        import re as _re_ss
+        for _ in range(2):
+            if err is None or "short shot" not in err or "whole sentences" not in err:
+                break
+            _t0s = _re_ss.findall(r"s\d+@(\d+(?:\.\d+)?)", err)
+            _less = _drop_sentences(pr, sent_by_ref, _t0s, prm.min_sec)
+            if _less is None:
+                break
+            pr.notes.append(f"скачок кадра: короткий план между двумя сменами картинки — фразы этого плана убраны "
+                            f"({pr.pieces} → {_less.pieces})")
+            _less.notes = pr.notes
+            pr = _less
+            err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
         tried = {pr.hook}
         while err is None and pr.hook and "cold open skipped" in log:
@@ -9517,7 +9575,7 @@ def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str 
         why: list = []
         res = describe_clip(provider, caption, tr.read_text(encoding="utf-8").strip(), smin=pc.sentences_min,
                             smax=pc.sentences_max, max_chars=pc.max_chars, ntags=pc.hashtags,
-                            log=lambda x: print(x, flush=True), why_out=why)
+                            log=lambda x: print(x, flush=True), why_out=why, voice=getattr(pc, "voice", "reader"))
         if res is None:
             skipped.append((clip.stem, f"описание не принято ({why[-1] if why else 'нет ответа модели'})"
                                        " — остаётся подпись рендера"))

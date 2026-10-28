@@ -52,6 +52,9 @@ def test_describe_retries_once_with_the_reason_then_gives_up():
 
 def test_cmd_describe_writes_post_files_and_crosspost_takes_them(tmp_path, capsys):
     _source(tmp_path)
+    _r0 = tmp_path / "config" / "r0.yaml"          # M174: this fixture post is about the reel (voice reader)
+    if _r0.is_file():
+        _r0.write_text(_r0.read_text(encoding="utf-8").replace("voice: author", "voice: reader"), encoding="utf-8")
     g = tmp_path / "reels-out" / "v" / "_gate" / "m88"
     g.mkdir(parents=True)
     for rid in ("r01", "r02", "r03"):
