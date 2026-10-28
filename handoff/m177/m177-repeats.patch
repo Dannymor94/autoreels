@@ -1,0 +1,138 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index fda97c0..a751ef1 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -362,6 +362,8 @@ autocut:
+   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
+   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
+                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
++  combined_overlap_max: 0.3   # M177 (m176: 105 clips — label clips repeating a montage clip): in arl auto a label clip sharing over
++                               # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+   # m120 measurement): generator, seed_roles, target_sec, lean_depth, rhythm, clips_every_min, context_judge below.
+   # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts;
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 5379278..4f93b95 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -1161,6 +1161,36 @@ def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
+                    close=[c for c in pr.close if c not in gone], notes=list(pr.notes))
+ 
+ 
++def _played_spans(reel) -> list[tuple[float, float]]:
++    return [(float(s.start), float(s.end)) for s in reel.effective_segments()]
++
++
++def _auto_repeats(reels, max_share: float) -> list[tuple[str, str]]:
++    """M177 (m176: 105 clips — a label clip of arl auto and a montage clip told the same story, «закрытый шкаф» twice):
++    clips of the combined draft that repeat a kept one. Montage clips (the scenarist's, already distinct, M68) are kept
++    first, then the others in draft order; a clip sharing more than `max_share` of its played seconds with a kept clip
++    is a repeat. max_share 1 = off. Returns (reel id, reason)."""
++    if max_share >= 1.0:
++        return []
++    order = [r for r in reels if "montage" in (r.flags or [])] + [r for r in reels if "montage" not in (r.flags or [])]
++    kept: list = []
++    out: list[tuple[str, str]] = []
++    for r in order:
++        mine = _played_spans(r)
++        own = sum(b - a for a, b in mine) or 1e-6
++        hit = None
++        for k in kept:
++            ov = sum(max(0.0, min(b, d) - max(a, c)) for a, b in mine for c, d in _played_spans(k))
++            if ov / own > max_share:
++                hit = (k, ov / own)
++                break
++        if hit is None:
++            kept.append(r)
++        else:
++            out.append((r.id, f"repeats {hit[0].id}: {hit[1]:.0%} of its seconds"))
++    return out
++
++
+ def _short_shot_errors(reels) -> list[tuple[str, str]]:
+     """M173: planned montage reels (the automatic lines the line check can fix) with a shot under short_shot_sec
+     between two picture changes (plan warning «short shot»)."""
+@@ -6690,6 +6720,16 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+         _short_shots = _short_shot_errors(reels)
+         _refused = [(_rid, _w, "another end") for _rid, _w in _noroom] + \
+                    [(_rid, _w, "another cut") for _rid, _w in _short_shots]
++        if drop_refused:
++            # M177: in arl auto the label clips (not montage, no line check of their own) go by the same rules — a short
++            # shot drops them; and a clip repeating a kept one goes
++            _seen = {_rid for _rid, _w, _ in _refused}
++            _refused += [(r.id, w, "another cut") for r in reels if getattr(r, "planned", False) and r.id not in _seen
++                         and "montage" not in (r.flags or []) for w in (r.warnings or []) if w.startswith("short shot")][:]
++            _seen = {_rid for _rid, _w, _ in _refused}
++            _ac_max = float(getattr(getattr(r0_cfg, "autocut", None), "combined_overlap_max", 1.0) or 1.0)
++            _refused += [(_rid, _w, "other content") for _rid, _w in
++                         _auto_repeats([r for r in reels if r.id not in _seen], _ac_max)]
+         if _refused and drop_refused:
+             # M176 (m175: 5 of 7 sources lost every label clip — one label line with no room after its last word refused
+             # the whole combined draft of arl auto): the refused automatic clip leaves the draft alone, the rest is built
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 9324416..e1b172b 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -282,6 +282,7 @@ class AutocutConfig(BaseModel):
+     use_filtered: bool = False
+     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
+     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
++    combined_overlap_max: float = Field(1.0, ge=0.0, le=1.0)   # M177: arl auto drops a label clip sharing more of its seconds with a kept clip (1 = off)
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
+     generator: str = Field("montage", pattern="^(montage|passage|mixed)$")   # passage: adjacent thoughts around a strong
+diff --git a/tests/test_m177_repeats.py b/tests/test_m177_repeats.py
+new file mode 100644
+index 0000000..4c702cd
+--- /dev/null
++++ b/tests/test_m177_repeats.py
+@@ -0,0 +1,49 @@
++"""M177 (m176: 105 clips — label clips of arl auto repeating montage clips): a clip sharing more than
++autocut.combined_overlap_max of its played seconds with a kept clip (montage first) is a repeat; 1 = off."""
++from pathlib import Path
++from types import SimpleNamespace
++
++from autoreels import __main__ as cli
++from autoreels.core.models import Segment
++
++
++def _r(rid, spans, montage=False):
++    segs = [Segment(start=a, end=b) for a, b in spans]
++    return SimpleNamespace(id=rid, flags=["montage"] if montage else [], effective_segments=lambda segs=segs: segs)
++
++
++def test_off_and_distinct():
++    a, b = _r("r01", [(0, 30)]), _r("r02", [(10, 40)], montage=True)
++    assert cli._auto_repeats([a, b], 1.0) == []
++    assert cli._auto_repeats([_r("r01", [(0, 30)]), _r("r02", [(50, 80)], montage=True)], 0.3) == []
++
++
++def test_label_clip_repeating_a_montage_clip_goes_montage_stays():
++    lab, mon = _r("r01", [(0, 30)]), _r("r05", [(5, 20), (100, 120)], montage=True)
++    out = cli._auto_repeats([lab, mon], 0.3)
++    assert [x[0] for x in out] == ["r01"] and "repeats r05" in out[0][1] and "50%" in out[0][1]
++
++
++def test_two_label_clips_the_first_stays():
++    out = cli._auto_repeats([_r("r01", [(0, 30)]), _r("r02", [(20, 40)])], 0.3)
++    assert [x[0] for x in out] == ["r02"]                      # 10 of 20 s = 50 %
++    assert cli._auto_repeats([_r("r01", [(0, 30)]), _r("r02", [(25, 45)])], 0.3) == []   # 5 of 20 s = 25 %
++
++
++def test_repo_config_on():
++    r0 = cli.load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml")
++    assert 0 < r0.autocut.combined_overlap_max < 1
++
++
++def test_arl_auto_apply_drops_the_repeat(tmp_path, monkeypatch, capsys):
++    from autoreels.core.models import Manifest
++    from tests.test_m176_combined_draft import _draft
++    rpath = _draft(tmp_path, "2 80\nM 85 | 2.2-4 5.1-3\n")
++    monkeypatch.setattr(cli, "_auto_repeats", lambda reels, m: [(r.id, "repeats rX: 90% of its seconds")
++                                                                for r in reels if "montage" not in r.flags])
++    rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto",
++                              drop_refused=True)
++    out = capsys.readouterr()
++    assert rc == 0, out.err[-1500:]
++    man = Manifest.model_validate_json((tmp_path / "reviews" / "v.review.json").read_text())
++    assert [("montage" in r.flags) for r in man.reels] == [True] and "repeats rX" in out.out
