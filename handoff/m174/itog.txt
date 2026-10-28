@@ -1,0 +1,8 @@
+=== auto: итог ===
+  ✓ disko_beach_p1: готово — общий черновик не прошёл (rc=1) — взят только черновик сборок; после листа: arl export disko_beach_p1 --gate m174 --decisions <файл решений>
+  ✓ disko_beach_p2: готово — после листа: arl export disko_beach_p2 --gate m174 --decisions <файл решений>
+  ✓ disko_beach_p3: готово — общий черновик не прошёл (rc=1) — взят только черновик сборок; после листа: arl export disko_beach_p3 --gate m174 --decisions <файл решений>
+  ✓ day_yoga_p1: готово — после листа: arl export day_yoga_p1 --gate m174 --decisions <файл решений>
+  ✓ day_yoga_p2: готово — общий черновик не прошёл (rc=1) — взят только черновик сборок; после листа: arl export day_yoga_p2 --gate m174 --decisions <файл решений>
+  ✓ prew_isaev_anna: готово — общий черновик не прошёл (rc=1) — взят только черновик сборок; после листа: arl export prew_isaev_anna --gate m174 --decisions <файл решений>
+  ✓ prew_isaev_danny: готово — общий черновик не прошёл (rc=1) — взят только черновик сборок; после листа: arl export prew_isaev_danny --gate m174 --decisions <файл решений>

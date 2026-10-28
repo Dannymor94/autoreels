@@ -1,0 +1,7 @@
+crosspost disko_beach_p1 (гейт m174): клипов 10 → /Users/danny/Documents/autoreels/export/crosspost/disko_beach_p1_m174.csv
+crosspost disko_beach_p2 (гейт m174): клипов 8 → /Users/danny/Documents/autoreels/export/crosspost/disko_beach_p2_m174.csv
+crosspost disko_beach_p3 (гейт m174): клипов 9 → /Users/danny/Documents/autoreels/export/crosspost/disko_beach_p3_m174.csv
+crosspost day_yoga_p1 (гейт m174): клипов 5 → /Users/danny/Documents/autoreels/export/crosspost/day_yoga_p1_m174.csv
+crosspost day_yoga_p2 (гейт m174): клипов 9 → /Users/danny/Documents/autoreels/export/crosspost/day_yoga_p2_m174.csv
+crosspost prew_isaev_anna (гейт m174): клипов 9 → /Users/danny/Documents/autoreels/export/crosspost/prew_isaev_anna_m174.csv
+crosspost prew_isaev_danny (гейт m174): клипов 10 → /Users/danny/Documents/autoreels/export/crosspost/prew_isaev_danny_m174.csv

@@ -1,0 +1,18 @@
+== reviews/day_yoga_p1_m174.review.json
+  итого: SLIVER 0, short 0
+== reviews/day_yoga_p2_m174.review.json
+  итого: SLIVER 0, short 0
+== reviews/disko_beach_p1_m174.review.json
+  итого: SLIVER 0, short 0
+== reviews/disko_beach_p2_m174.review.json
+  04 r04: short 1.85s @out 0.00 (src 354.05); short 1.77s @out 33.08 (src 395.96)
+       ! short shot 1.85s between two picture changes (out 0.00–1.85s, src 354.05–355.89): whole sentences s2@354.083
+       ! short shot 1.77s between two picture changes (out 33.08–34.85s, src 395.96–397.73): whole sentences s20@395.923
+  итого: SLIVER 0, short 2
+== reviews/disko_beach_p3_m174.review.json
+  итого: SLIVER 0, short 0
+== reviews/prew_isaev_anna_m174.review.json
+  итого: SLIVER 0, short 0
+== reviews/prew_isaev_danny_m174.review.json
+  итого: SLIVER 0, short 0
+ВСЕГО: SLIVER 0, short 2
