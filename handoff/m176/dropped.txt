@@ -1,0 +1,17 @@
+  ⚠ r01 убран из черновика: no room after last word «становится.» (next speech at 211.567) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r03 убран из черновика: no room after last word «человечек.» (next speech at 563.294) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r06 убран из черновика: no room after last word «посмотрим.» (next speech at 867.961) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r14 убран из черновика: no room after last word «колесе.» (next speech at 862.938) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r01 убран из черновика: no room after last word «присутствует.» (next speech at 170.166) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r02 убран из черновика: no room after last word «ребята.» (next speech at 229.860) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r03 убран из черновика: no room after last word «предназначение.» (next speech at 344.429) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r08 убран из черновика: no room after last word «есть.» (next speech at 917.157) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r13 убран из черновика: no room after last word «обычно.» (next speech at 1768.277) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r14 убран из черновика: no room after last word «секунды.» (next speech at 1964.770) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r18 убран из черновика: no room after last word «лучше.» (next speech at 2690.730) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r19 убран из черновика: no room after last word «секунд.» (next speech at 893.764) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r19 убран из черновика: short shot 1.04s between two picture changes (out 19.71–20.76s, src 107.14–108.18): whole sentences s8@107.200 — automatic clip needs another cut
+  ⚠ r01 убран из черновика: no room after last word «реализовался.» (next speech at 230.585) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r02 убран из черновика: no room after last word «готова.» (next speech at 315.305) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r04 убран из черновика: no room after last word «месте.» (next speech at 718.828) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r02 убран из черновика: no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end — automatic clip needs another end

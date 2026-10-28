@@ -1,0 +1,35 @@
+== reviews/day_yoga_p1_m176.review.json
+  итого: SLIVER 0, short 0
+== reviews/day_yoga_p2_m176.review.json
+  04 r07: short 1.97s @out 4.70 (src 716.39); short 1.71s @out 12.90 (src 728.86)
+       ! short shot 1.97s between two picture changes (out 4.70–6.67s, src 716.39–718.36): whole sentences s5@716.409
+       ! short shot 1.71s between two picture changes (out 12.90–14.60s, src 728.86–730.57): whole sentences s11@728.809
+  05 r09: short 1.31s @out 24.58 (src 1014.82)
+       ! short shot 1.31s between two picture changes (out 24.58–25.89s, src 1014.82–1016.12): whole sentences s8@1014.552
+  итого: SLIVER 0, short 3
+== reviews/disko_beach_p1_m176.review.json
+  01 r02: short 0.51s @out 4.89 (src 478.08)
+       ! short shot 0.51s between two picture changes (out 4.89–5.40s, src 478.08–478.59): whole sentences s7@477.545
+  итого: SLIVER 0, short 1
+== reviews/disko_beach_p2_m176.review.json
+  04 r04: short 1.85s @out 0.00 (src 354.05); short 1.77s @out 33.08 (src 395.96)
+       ! short shot 1.85s between two picture changes (out 0.00–1.85s, src 354.05–355.89): whole sentences s2@354.083
+       ! short shot 1.77s between two picture changes (out 33.08–34.85s, src 395.96–397.73): whole sentences s20@395.923
+  итого: SLIVER 0, short 2
+== reviews/disko_beach_p3_m176.review.json
+  06 r08: short 1.74s @out 11.65 (src 997.14)
+       ! short shot 1.74s between two picture changes (out 11.65–13.39s, src 997.14–998.88): whole sentences s14@997.161
+  07 r09: short 1.16s @out 21.52 (src 1172.98)
+       ! short shot 1.16s between two picture changes (out 21.52–22.68s, src 1172.98–1174.13): whole sentences s10@1172.971
+  08 r10: short 1.23s @out 0.00 (src 1344.32)
+       ! short shot 1.23s between two picture changes (out 0.00–1.23s, src 1344.32–1345.55): whole sentences s6@1344.341
+  09 r11: short 1.81s @out 0.00 (src 1407.19)
+       ! short shot 1.81s between two picture changes (out 0.00–1.81s, src 1407.19–1409.00): whole sentences s6@1407.240
+  итого: SLIVER 0, short 4
+== reviews/prew_isaev_anna_m176.review.json
+  02 r05: short 1.29s @out 0.00 (src 859.39)
+       ! short shot 1.29s between two picture changes (out 0.00–1.29s, src 859.39–860.68): whole sentences s8@859.378
+  итого: SLIVER 0, short 1
+== reviews/prew_isaev_danny_m176.review.json
+  итого: SLIVER 0, short 0
+ВСЕГО: SLIVER 0, short 11
