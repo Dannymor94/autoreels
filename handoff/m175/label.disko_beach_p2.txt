@@ -1,0 +1,58 @@
+sentence check: 70 sentences, 0 differences
+  выравнивание по звуку: 1352/1365 слов (99%), 413 мест речи без текста
+  интонация: 1353 слов
+  движение: 8304 кадров
+  + merged blocks 1+2: 83.9s
+  x: 1+2: excluded 3 sentence(s) (2.3s removed, 3 window(s))
+  plan 1+2:
+    window    s11-12  78.153–89.821  «Ребят, с вами все нормально, вы не поломаны.» … «де-то по привычке сами на себя как-то нажимаете.»
+    window    s15  92.013–96.100  «Потому что в бессознательное доступ ограничен.» … «Потому что в бессознательное доступ ограничен.»
+    window    s17-18  97.397–124.570  «И здесь книжка как бы дает возможность вам погру» … « принципе, книга про психологическое взросление.»
+    shots     wide[11-12] → close[15] → wide[17] → close[18]
+    end       124.570  last word «взросление.» audible end 124.270  air 0.300s  next speech 124.750
+    cuts      5 fillers/pauses removed, 4.6s (clip 42.9s → 38.4s); 1 left in (visible jump); 1 long pause(s) always cut
+  fx 1+2: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 3+4: 80.0s
+  plan 3+4:
+    window    s1-9  125.321–176.379  «Если вы прямо сейчас, у вас есть какая-то проста» … «ребность, но также и про потребность окружающих.»
+    shots     wide[1-8] → close[9]
+    end       176.379  last word «окружающих.» audible end 176.079  air 0.300s  next speech 176.621
+    cuts      8 fillers/pauses removed, 10.2s (clip 51.1s → 40.9s); 3 long pause(s) always cut
+  fx 3+4: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan 7:
+    window    s9-12  312.093–340.936  «Понять, что сейчас, скорее всего, включится что?» … «зрослые выбираете, что вам сейчас выбрать нужно.»
+    shots     wide[9-11] → close[12]
+    end       340.936  last word «нужно.» audible end 340.680  air 0.256s  next speech 340.996
+    cuts      5 fillers/pauses removed, 2.6s (clip 28.8s → 26.2s)
+  fx 7: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 8+9: 95.5s
+  x: 8+9: excluded 3 sentence(s) (3.6s removed, 4 window(s))
+  plan 8+9:
+    window    s2-11  354.048–378.748  «У взрослого как осознанный выбор?» … «лавная структура здесь — по душе или не по душе.»
+    window    s13-15  379.768–386.900  «Потому что взрослому он себя уже не придает.» … «н может себя поставить в угол, чтобы его любили.»
+    window    s17-18  388.795–392.808  «Из этих трех штук он выбирает более точное дейст» … «Действие.»
+    window    s20-25  395.960–425.920  «Берет ответственность и делает все.» … «Ребятки, так это работает.»
+    shots     wide[2-11] → close[13-15] → wide[17-18] → close[20-21] → wide[22-24] → close[25]
+    end       425.920  last word «работает.» audible end 425.869  air 0.051s  next speech 425.980
+    cuts      10 fillers/pauses removed, 7.6s (clip 65.8s → 58.2s); 1 masked by a shot switch; 3 left in (visible jump); 1 long pause(s) always cut
+    ! short shot 1.85s between two picture changes (out 0.00–1.85s, src 354.05–355.89): whole sentences s2@354.083
+    ! short shot 1.77s between two picture changes (out 33.08–34.85s, src 395.96–397.73): whole sentences s20@395.923
+  fx 8+9: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 4 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  two_shot_auto: speech_map активен (1383 слов, 1382 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p2.review.json (4 reels, selection_source=human)
+accounting (every scored line):
+  line 1 (score 95) → reel 1 (merge 1+2)
+  line 3 (score 85) → reel 2 (merge 3+4)
+  line 7 (score 75) → reel 3
+  line 8 (score 65) → reel 4 (merge 8+9)
+title plate (4 clips):
+  reel 1 (r01): «Вы не поломаны»
+  reel 2 (r02): «Вспомните ситуацию и представьте взрослого себя»
+  reel 3 (r03): «Остановись, дыши, выбирай»
+  reel 4 (r04): «Сначала надеть нужно себе маску»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/disko_beach_p2.json)

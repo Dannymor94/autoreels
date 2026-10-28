@@ -1,0 +1,10 @@
+  two_shot_auto: speech_map активен (5465 слов, 5464 границ, threshold=0.35s)
+рендер: crop 608×1080@594,0 в отображаемом кадре 1920×1080 (horizontal, autorotate→crop)
+  лицо источника: x 894.6, в 40 из 40 кадров
+  кадр r11: лицо в 15 из 15 кадров (x 888.6, высота 199.8), лицо ходит по x 761.8…979.2 — в центре рамки, рамка источника
+  крупный план r11: ×1.406 по лицу
+
+клип 1/1: r11 (1:22)…
+  ✓ клип 1/1: r11 (1:22) готово
+  warning: web-safe: video codec is hevc, not h264 — web players may transcode and drop audio
+готово: 1 клипов → /Users/danny/Documents/autoreels/reels-out/prew_isaev_danny/_gate/m174

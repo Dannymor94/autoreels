@@ -1,0 +1,57 @@
+=== disko_beach_p1
+  черновик разметки: есть, строк с оценкой 5, строк M 0, изменён 2026-10-28
+  общий: строк M 10
+  rc=1
+   1   [ERROR] r01: no room after last word «становится.» (next speech at 211.567) — clip ends at its audible end — automatic clip needs another end
+  только разметка: rc=1 клипов 10
+   1   [ERROR] rNN: no room after last word «становится.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+=== disko_beach_p2
+  черновик разметки: есть, строк с оценкой 4, строк M 0, изменён 2026-10-28
+  общий: строк M 4
+  rc=0
+  только разметка: rc=0 клипов 4
+=== disko_beach_p3
+  черновик разметки: есть, строк с оценкой 13, строк M 2, изменён 2026-10-28
+  общий: строк M 11
+  rc=1
+   1   [ERROR] review:73: montage M2: label used twice
+   1   [ERROR] review:61: montage M1: label used twice
+  только разметка: rc=1 клипов 9
+   1   [ERROR] rNN: no room after last word «человечек.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «посмотрим.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «колесе.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+=== day_yoga_p1
+  черновик разметки: есть, строк с оценкой 2, строк M 0, изменён 2026-10-28
+  общий: строк M 3
+  rc=0
+  только разметка: rc=0 клипов 2
+=== day_yoga_p2
+  черновик разметки: есть, строк с оценкой 18, строк M 1, изменён 2026-10-28
+  общий: строк M 10
+  rc=1
+   1   [ERROR] review:80: montage M1: label used twice
+  только разметка: rc=1 клипов 9
+   1   [ERROR] rNN: no room after last word «секунды.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «секунд.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «ребята.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «присутствует.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «предназначение.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «обычно.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+=== prew_isaev_anna
+  черновик разметки: есть, строк с оценкой 10, строк M 0, изменён 2026-10-28
+  общий: строк M 9
+  rc=1
+   1   [ERROR] r04: no room after last word «месте.» (next speech at 718.828) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] r02: no room after last word «готова.» (next speech at 315.305) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] r01: no room after last word «реализовался.» (next speech at 230.585) — clip ends at its audible end — automatic clip needs another end
+  только разметка: rc=1 клипов 9
+   1   [ERROR] rNN: no room after last word «реализовался.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «месте.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+   1   [ERROR] rNN: no room after last word «готова.» (next speech at N) — clip ends at its audible end — automatic clip needs another end
+=== prew_isaev_danny
+  черновик разметки: есть, строк с оценкой 11, строк M 0, изменён 2026-10-28
+  общий: строк M 11
+  rc=1
+   1   [ERROR] r02: no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end — automatic clip needs another end
+  только разметка: rc=1 клипов 11
+   1   [ERROR] rNN: no room after last word «регулярно.» (next speech at N) — clip ends at its audible end — automatic clip needs another end

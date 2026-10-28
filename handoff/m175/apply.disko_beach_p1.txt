@@ -1,0 +1,237 @@
+sentence check: 78 sentences, 0 differences
+  выравнивание по звуку: 3416/3478 слов (98%), 1462 мест речи без текста; не по порядку и без уверенности — по карте речи: 5
+  интонация: 3417 слов
+  движение: 25908 кадров
+  x: 3: excluded 1 sentence(s) (1.4s removed, 2 window(s))
+  plan 3:
+    window    s4-5  164.651–170.710  «Ну вот, примерно как-то так работает эта штука.» … «разом психика выбирает именно эти шесть месяцев.»
+    window    s7-10  172.959–211.547  «Да, и возможно, если мы с тобой дальше пошли в т» … «ся, блин, что-то как-то свободненько становится.»
+    shots     wide[4-5] → close[7] → wide[7-9] → close[10]
+    end       211.547  last word «становится.» audible end 211.547  air 0.000s  next speech 211.567
+    cuts      4 fillers/pauses removed, 2.1s (clip 44.6s → 42.6s); 1 long pause(s) always cut
+    ! no room after last word «становится.» (next speech at 211.567) — clip ends at its audible end
+    ! ending intonation unsure (end pitch 33/100 in the speaker's range): «становится.» intonation unclear; finished sentence ends nearby: s5 «месяцев.», s7 «правильно?», s8 «разрешили.»
+  fx 3: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 10+11: 74.8s
+  x: 10+11: excluded 5 sentence(s) (9.2s removed, 3 window(s))
+  plan 10+11:
+    window    s2  462.310–468.820  «Как бы вы не зарабатывали денег, как бы вы не ро» … «ы не рожали детей, это все прекрасно, все нужно.»
+    window    s7-10  478.082–498.960  «Умрете.» … «Сознание все равно не прекращается и так далее.»
+    window    s12-15  499.861–535.750  «Мне такое ощущение, что именно Будда хотел иметь» … « не хотят делать то, что я хочу, ну и так далее.»
+    shots     wide[2] → close[7-8] → wide[8-10] → close[12] → wide[12-14] → close[15]
+    end       535.750  last word «далее.» audible end 535.450  air 0.300s  next speech 535.960
+    cuts      9 fillers/pauses removed, 11.1s (clip 63.3s → 52.2s); 1 masked by a shot switch; 3 left in (visible jump); 4 long pause(s) always cut
+    ! short shot 0.51s between two picture changes (out 4.89–5.40s, src 478.08–478.59): whole sentences s7@477.545
+  fx 10+11: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 17+18: 91.8s
+  x: 17+18: excluded 3 sentence(s) (4.0s removed, 4 window(s))
+  plan 17+18:
+    window    s9-10  777.417–783.720  «Соблюдение, первое соблюдение нравственных закон» … «Ведет к успокоению ума.»
+    window    s12-16  785.573–821.440  «И второе, говорил Будда, это концентрация ума.» … «чтобы что-то увидеть, нужно на этом что сделать?»
+    window    s18-19  822.935–825.710  «Взять и что?» … «Это рассмотреть.»
+    window    s21-22  827.198–831.780  «Сконцентрироваться.» … «Ух ты, ни хрена себе, правильно же?»
+    shots     wide[9-10] → close[12] → wide[13-16] → close[18-19] → wide[21] → close[22]
+    end       831.780  last word «же?» audible end 831.540  air 0.240s  next speech 831.840
+    cuts      5 fillers/pauses removed, 6.1s (clip 49.5s → 43.4s); 3 masked by a shot switch; 5 left in (visible jump); 3 long pause(s) always cut
+  fx 17+18: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 19+20: 70.4s
+  x: 19+20: excluded 6 sentence(s) (14.4s removed, 4 window(s))
+  plan 19+20:
+    window    s1-3  834.964–841.889  «И без концепции просто смотреть.» … «Это видеть вещи, какие они есть.»
+    window    s7-8  847.733–857.082  «Вы просто смотрите, вы не интерпретируете.» … «, понятно, вы просто находитесь в том, что есть.»
+    window    s10-11  858.423–870.052  «Или вот, ух ты, ни хрена себе!» … «нтерпретации, видите реальность, какая она есть.»
+    window    s14  878.140–882.460  «Но вы никогда не рассматривали ни тело, ни эмоци» … «не рассматривали ни тело, ни эмоции, ни свой ум.»
+    shots     wide[1-3] → close[7] → wide[8] → close[10] → wide[11] → close[14]
+    end       882.460  last word «ум.» audible end 882.160  air 0.300s  next speech 882.570
+    cuts      3 fillers/pauses removed, 7.0s (clip 32.2s → 25.2s); 1 masked by a shot switch; 1 long pause(s) always cut
+  fx 19+20: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan 26:
+    window    s1-8  1168.653–1206.260  «Когда вы познаете реальность, вы понимаете, как » … « Будда говорит, нет, ни хрена, это нереальность.»
+    shots     wide[1-7] → close[8]
+    end       1206.260  last word «нереальность.» audible end 1205.960  air 0.300s  next speech 1206.340
+    cuts      4 fillers/pauses removed, 8.0s (clip 37.6s → 29.6s); 1 long pause(s) always cut
+  fx 26: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M1:
+    cold open s7  1501.522–1504.883  «Ощущение дыхания находится здесь и сейчас.» … «Ощущение дыхания находится здесь и сейчас.»
+    window    s2-8  1470.230–1507.910  «Мы с вами идем в самадхи, в концентрацию ума на » … «И мы знакомим наш ум с реальностью.»
+    shots     close[7] → close[2-3] → wide[3-6] → close[6-8]
+    end       1507.910  last word «реальностью.» audible end 1507.610  air 0.300s  next speech 1509.845
+    hook      s7 replayed in body: yes
+    hook air  +0.46s after the hook, +0.07s before the body (silence only)
+    cuts      2 fillers/pauses removed, 8.6s (clip 41.0s → 32.5s); 6 left in (too close to another change); 2 long pause(s) always cut
+    montage M1: 1 pieces 34.2-8, 0 seam(s), 29.1s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M2:
+    cold open s10  1373.526–1378.930  «Центральная нервная система, спиной головной моз» … «головной мозг, работает на более полную катушку.»
+    window    s2-10  1349.854–1378.930  «Вытягиваемся макушечкой вверх.» … «головной мозг, работает на более полную катушку.»
+    window    s15  1385.514–1392.120  «Глазки ваши закрыты, потому что мы с вами деприв» … «привируем все органы восприятия, кроме ощущений.»
+    shots     close[10] → wide[2-6] → close[6-10] → wide[10] → close[15]
+    end       1392.120  last word «ощущений.» audible end 1391.820  air 0.300s  next speech 1392.442
+    hook      s10 replayed in body: yes
+    hook air  +0.00s after the hook, +0.46s before the body (silence only)
+    cuts      1 fillers/pauses removed, 1.5s (clip 41.1s → 39.6s); 4 left in (too close to another change); 1 long pause(s) always cut
+    montage M2: 2 pieces 30.2-10 31.4, 1 seam(s), 34.2s
+    seam 1  30.2-10→31.4  skips 6.6s, pause 0.20s, picture jump 10.4×, pace 2.3→2.3 w/s, loudness -22→-24 dB, pitch +0.9→+3.6 st, end final
+    ! seam 1 (30.2-10→31.4): picture jump 10.4× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M3: pieces 12-12 + 16.1 go straight on in the source — played as one (no seam)
+    M3: pieces 27-28 + 17.1 go straight on in the source — played as one (no seam)
+  plan M3:
+    cold open s37  777.417–781.780  «Соблюдение, первое соблюдение нравственных закон» … «вое соблюдение нравственных законов, что делает?»
+    window    s12-13  693.350–702.378  «Первое, что говорил Будда, это, конечно же, нам » … «То есть, где ваши эмоции успокаиваются.»
+    window    s18  715.028–719.089  «Те же самые 10 заповедей в христианстве — это то» … «е 10 заповедей в христианстве — это то же самое.»
+    window    s22  724.301–730.779  «Это просто про то, что вы не нарушаете жизненные» … « что вы не нарушаете жизненные природные законы.»
+    window    s24-25  731.620–737.190  «Если вы их нарушаете, то вы себя как чувствуете?» … «Как-то не очень.»
+    window    s27-29  738.565–742.954  «Вам страшно?» … «Вы Вы злитесь на кого-то и так далее.»
+    window    s37-38  777.257–783.980  «Соблюдение, первое соблюдение нравственных закон» … «Ведет к успокоению ума.»
+    shots     close[37] → wide[12] → close[13] → wide[18] → close[22] → wide[24-25] → close[27-29] → close[37-38]
+    end       783.980  last word «ума.» audible end 783.680  air 0.300s  next speech 784.242
+    hook      s37 replayed in body: yes
+    hook air  +0.14s after the hook, +0.22s before the body (silence only)
+    cuts      0 fillers/pauses removed, 0.0s (clip 40.6s → 40.6s); 6 left in (too close to another change)
+    montage M3: 6 pieces 15.12 16.1 16.6 16.10 16.12-13 16.15-16 17.1 17.9-10, 5 seam(s), 36.2s
+    seam 1  15.12→16.1  skips 12.6s, pause 0.12s, picture jump 4.9×, pace 2.3→2.8 w/s, loudness -26→-28 dB, pitch +1.5→-0.6 st, end final
+    seam 2  16.1→16.6  skips 5.2s, pause 0.29s, picture jump 4.6×, pace 2.8→1.7 w/s, loudness -27→-27 dB, pitch -0.7→+0.5 st, end final
+    seam 3  16.6→16.10  skips 0.8s, pause 0.24s, picture jump 2.4×, pace 1.7→2.3 w/s, loudness -25→-28 dB, pitch -1.3→+2.1 st, end final
+    seam 4  16.10→16.12-13  skips 1.4s, pause 0.40s, picture jump 3.7×, pace 2.3→3.4 w/s, loudness -31→-26 dB, pitch +1.9→+0.1 st, end final
+    seam 5  16.12-13→16.15-16  skips 34.3s, pause 0.25s, picture jump 7.9×, pace 3.4→1.8 w/s, loudness -27→-22 dB, pitch -0.2→+2.1 st, end final
+    ! 5 seams in 36s — more than 3 per minute: the clip may feel like constant jumping
+    ! piece 16.1 is 3.9s (< 6s): too short to settle into
+    ! piece 16.10 is 5.2s (< 6s): too short to settle into
+    ! piece 16.12-13 is 4.1s (< 6s): too short to settle into
+    ! seam 1 (15.12→16.1): picture jump 4.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (16.1→16.6): picture jump 4.6× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (16.1→16.6): speech rate 2.8 → 1.7 words/s — the voice changes tempo at the seam
+    ! seam 2 (16.1→16.6): piece 16.6 starts on «Это» — it points back to what was skipped
+    ! seam 3 (16.6→16.10): the voice sits higher by 3.4 semitones (> 3) — a different mood on each side
+    ! seam 4 (16.10→16.12-13): picture jump 3.7× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 4 (16.10→16.12-13): speech rate 2.3 → 3.4 words/s — the voice changes tempo at the seam
+    ! seam 4 (16.10→16.12-13): the voice gets louder by 5.0 dB (> 4) — the jump is heard
+    ! seam 5 (16.12-13→16.15-16): picture jump 7.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 5 (16.12-13→16.15-16): speech rate 3.4 → 1.8 words/s — the voice changes tempo at the seam
+    ! seam 5 (16.12-13→16.15-16): the voice gets louder by 5.2 dB (> 4) — the jump is heard
+    fx: push, karaoke, progress, whoosh, callouts, pop, plate_after_hook | 715.6s «10 заповедей»
+  plan M4:
+    window    s3-4  343.185–350.325  «Будда говорил четыре главные какие-то истины.» … «ое он говорил про то, что жизнь — это страдание.»
+    window    s21-28  411.821–439.024  «Он говорил, что жизнь — это страдание, если мы с» … «И обратно наступает утро.»
+    window    s34  453.253–460.589  «Ребята, он говорит, что мы с вами живем в физиче» … «здесь ни хрена вы не можете быть в безопасности.»
+    window    s36-40  462.150–476.210  «Как бы вы не зарабатывали денег, как бы вы не ро» … «Когда-то вы родились, и когда-то вы что?»
+    shots     wide[3-4] → close[21-23] → wide[24-28] → close[34] → wide[36-40]
+    end       476.210  last word «что?» audible end 475.910  air 0.300s  next speech 477.990
+    cuts      2 fillers/pauses removed, 2.1s (clip 55.7s → 53.6s); 4 left in (too close to another change); 2 long pause(s) always cut
+    ! x: overlaps its neighbours in time (Whisper duplicate) — no silence to cut, played through
+    ! ending intonation unsure (end pitch 40/100 in the speaker's range): «что?» intonation unclear; finished sentence ends nearby: s39 «главное.», s41 «Умрете.», s42 «плохо.»
+    montage M4: 5 pieces 7.3-4 8.7-8 9.1-6 9.12 10.2-6, 4 seam(s), 53.6s
+    seam 1  7.3-4→8.7-8  skips 61.5s, pause 0.18s, picture jump 6.4×, pace 2.2→2.1 w/s, loudness -29→-24 dB, pitch -0.9→+0.3 st, end final
+    seam 2  8.7-8→9.1-6  played through (no silence between them)
+    seam 3  9.1-6→9.12  skips 14.2s, pause 0.18s, picture jump 7.5×, pace 2.6→2.9 w/s, loudness -27→-21 dB, pitch +2.6→+1.5 st, end final
+    seam 4  9.12→10.2-6  skips 1.6s, pause 0.22s, picture jump 6.5×, pace 2.9→2.4 w/s, loudness -19→-23 dB, pitch +2.8→+2.5 st, end open
+    ! 4 seams in 54s — more than 3 per minute: the clip may feel like constant jumping
+    ! seam 1 (7.3-4→8.7-8): picture jump 6.4× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (7.3-4→8.7-8): the voice gets louder by 4.7 dB (> 4) — the jump is heard
+    ! seam 1 (7.3-4→8.7-8): piece 8.7-8 starts on «Он» — it points back to what was skipped
+    ! seam 3 (9.1-6→9.12): picture jump 7.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 3 (9.1-6→9.12): the voice gets louder by 5.8 dB (> 4) — the jump is heard
+    ! seam 4 (9.12→10.2-6): picture jump 6.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 4 (9.12→10.2-6): piece 9.12 ends with the voice up (open (end pitch 100/100 in the speaker's range)) on «безопасности.» — the seam sounds like the speaker was cut off
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M5: pieces 5-8 + 26.1-5 go straight on in the source — played as one (no seam)
+  plan M5:
+    window    s5-13  1140.508–1197.580  «Я нахожусь в мире, я чувствую какую-то небезопас» … « обусловили, рассказали, как нужно, закрыли вас.»
+    window    s15-16  1200.078–1206.260  «Запечатали, еще сказали, вот так правильно.» … « Будда говорит, нет, ни хрена, это нереальность.»
+    shots     close[5-6] → wide[6] → close[7] → wide[7-9] → close[9-10] → wide[10-12] → close[12] → wide[13] → close[15-16]
+    end       1206.260  last word «нереальность.» audible end 1205.960  air 0.300s  next speech 1206.340
+    cuts      2 fillers/pauses removed, 5.4s (clip 63.3s → 57.9s); 8 left in (too close to another change); 1 long pause(s) always cut
+    montage M5: 2 pieces 25.5-8 26.1-5 26.7-8, 1 seam(s), 57.9s
+    seam 1  25.5-8→26.1-5  skips 2.5s, pause 0.40s, picture jump 3.9×, pace 2.2→2.5 w/s, loudness -22→-23 dB, pitch +0.2→+1.7 st, end open
+    ! piece 26.1-5 is 5.7s (< 6s): too short to settle into
+    ! seam 1 (25.5-8→26.1-5): picture jump 3.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (25.5-8→26.1-5): piece 25.5-8 ends with the voice up (open (end pitch 90/100 in the speaker's range)) on «вас.» — the seam sounds like the speaker was cut off
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M6: pieces 12-12 + 11.1-3 go straight on in the source — played as one (no seam)
+    M6: pieces 23-23 + 13.1-5 go straight on in the source — played as one (no seam)
+  plan M6:
+    window    s12-15  499.861–535.650  «Мне такое ощущение, что именно Будда хотел иметь» … « не хотят делать то, что я хочу, ну и так далее.»
+    window    s17-18  538.713–559.080  «Но Будда, когда добрался до реальности, он сказа» … «Потому что есть определенные природные законы.»
+    window    s20  560.091–564.924  «И вы их, пока вы в теле, и пока вы прицеплены к » … «прицеплены к этому телу, обойти никак не можете.»
+    window    s23-28  568.157–591.850  «А третья истина, он говорил, но все-таки есть вы» … «Хотите — пробуйте, хотите — не пробуйте.»
+    shots     wide[12] → close[12] → wide[13-15] → close[17] → wide[17] → close[18] → wide[20] → close[23] → wide[24-26] → close[27-28]
+    end       591.850  last word «пробуйте.» audible end 591.620  air 0.230s  next speech 591.910
+    cuts      5 fillers/pauses removed, 8.9s (clip 84.7s → 75.8s); 1 masked by a shot switch; 12 left in (too close to another change); 4 long pause(s) always cut
+    montage M6: 4 pieces 10.12 11.1-3 12.2-3 12.5 12.8 13.1-5, 3 seam(s), 75.8s
+    seam 1  10.12→11.1-3  skips 3.1s, pause 0.22s, picture jump 3.0×, pace 2.2→1.4 w/s, loudness -25→-22 dB, pitch -3.0→+1.1 st, end final
+    seam 2  11.1-3→12.2-3  skips 1.0s, pause 0.22s, picture jump 2.5×, pace 1.4→3.8 w/s, loudness -25→-22 dB, pitch +0.8→+1.5 st, end final
+    seam 3  12.2-3→12.5  skips 3.2s, pause 0.23s, picture jump 4.0×, pace 3.8→2.1 w/s, loudness -21→-20 dB, pitch +0.7→+0.5 st, end final
+    ! piece 12.2-3 is 4.8s (< 6s): too short to settle into
+    ! seam 1 (10.12→11.1-3): picture jump 3.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (10.12→11.1-3): speech rate 2.2 → 1.4 words/s — the voice changes tempo at the seam
+    ! seam 1 (10.12→11.1-3): the voice sits higher by 4.1 semitones (> 3) — a different mood on each side
+    ! seam 1 (10.12→11.1-3): piece 11.1-3 starts on «Но» — it points back to what was skipped
+    ! seam 2 (11.1-3→12.2-3): speech rate 1.4 → 3.8 words/s — the voice changes tempo at the seam
+    ! seam 2 (11.1-3→12.2-3): piece 12.2-3 starts on «И» — it points back to what was skipped
+    ! seam 3 (12.2-3→12.5): picture jump 4.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 3 (12.2-3→12.5): speech rate 3.8 → 2.1 words/s — the voice changes tempo at the seam
+    ! seam 3 (12.2-3→12.5): piece 12.5 starts on «А» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M7:
+    window    s1-2  1622.924–1656.068  «Если внимание убегает снова в мысли, спокойно, б» … «ание убегает в мысли, но вы снова возвращаетесь.»
+    window    s3-4  1658.809–1678.130  «Эта стадия называется витака, когда вы постоянно» … « будто прилипает к объекту медитации, к дыханию.»
+    shots     wide[1] → close[1] → wide[2] → close[3-4]
+    end       1678.130  last word «дыханию.» audible end 1677.830  air 0.300s  next speech 1678.430
+    cuts      4 fillers/pauses removed, 27.5s (clip 52.5s → 24.9s); 4 long pause(s) always cut
+    montage M7: 2 pieces 37.1-2 38.1-2, 1 seam(s), 24.9s
+    seam 1  37.1-2→38.1-2  skips 2.7s, pause 0.40s, picture jump 2.2×, pace 0.8→1.6 w/s, loudness -26→-28 dB, pitch -4.8→-3.6 st, end unsure
+    ! seam 1 (37.1-2→38.1-2): speech rate 0.8 → 1.6 words/s — the voice changes tempo at the seam
+    ! seam 1 (37.1-2→38.1-2): piece 38.1-2 starts on «Эта» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M8:
+    window    s9-10  2177.002–2187.470  «Сейчас мы с вами концентрированным умом пройдемс» … « ощущения становятся как в детстве очень тонкие.»
+    window    s12-14  2428.139–2449.510  «В випассане у нас с вами есть такая стадия, кото» … «реакции, и вы чувствуете только тонкие ощущения.»
+    shots     wide[9-10] → close[10] → wide[12] → close[12] → wide[13] → close[14]
+    end       2449.510  last word «ощущения.» audible end 2449.210  air 0.300s  next speech 2449.670
+    cuts      2 fillers/pauses removed, 4.7s (clip 31.8s → 27.1s); 2 left in (too close to another change); 2 long pause(s) always cut
+    ! weak start s9: the sentence before it ends with the voice up (open (end pitch 71/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s6 «Глазки ваши закрыты, ум…», s10 «Таким образом мы убираем…», s11 «Теперь почувствуйте сразу все…»
+    montage M8: 2 pieces 44.9-10 51.2-4, 1 seam(s), 27.1s
+    seam 1  44.9-10→51.2-4  skips 240.7s, pause 0.40s, picture jump 11.9×, pace 2.3→1.8 w/s, loudness -29→-25 dB, pitch +1.0→-4.1 st, end final
+    ! seam 1 (44.9-10→51.2-4): picture jump 11.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (44.9-10→51.2-4): the voice sits lower by 5.1 semitones (> 3) — a different mood on each side
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M9:
+    window    s1-4  834.964–843.861  «И без концепции просто смотреть.» … «Охренеть какая штука?»
+    window    s7-8  847.733–857.242  «Вы просто смотрите, вы не интерпретируете.» … «, понятно, вы просто находитесь в том, что есть.»
+    window    s11  865.809–870.146  «Вы начинаете смотреть без интерпретации, видите » … «нтерпретации, видите реальность, какая она есть.»
+    window    s14  878.140–882.460  «Но вы никогда не рассматривали ни тело, ни эмоци» … «не рассматривали ни тело, ни эмоции, ни свой ум.»
+    shots     wide[1-2] → close[2-4] → close[7-8] → wide[8] → close[11] → close[14]
+    end       882.460  last word «ум.» audible end 882.160  air 0.300s  next speech 882.570
+    cuts      0 fillers/pauses removed, 0.0s (clip 27.1s → 27.1s); 6 left in (too close to another change)
+    montage M9: 4 pieces 19.1-4 19.7-8 20.1 20.4, 3 seam(s), 27.1s
+    seam 1  19.1-4→19.7-8  skips 3.9s, pause 0.09s, picture jump 10.6×, pace 1.9→1.7 w/s, loudness -23→-30 dB, pitch +1.4→+2.9 st, end open
+    seam 2  19.7-8→20.1  skips 8.6s, pause 0.22s, picture jump 8.0×, pace 1.7→2.4 w/s, loudness -23→-24 dB, pitch +2.1→+0.0 st, end final
+    seam 3  20.1→20.4  skips 8.0s, pause 0.15s, picture jump 6.9×, pace 2.4→3.0 w/s, loudness -24→-23 dB, pitch -0.9→-0.3 st, end final
+    ! 3 seams in 27s — more than 3 per minute: the clip may feel like constant jumping
+    ! piece 20.1 is 4.2s (< 6s): too short to settle into
+    ! piece 20.4 is 4.0s (< 6s): too short to settle into
+    ! seam 1 (19.1-4→19.7-8): picture jump 10.6× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (19.1-4→19.7-8): the voice gets quieter by 7.2 dB (> 4) — the jump is heard
+    ! seam 1 (19.1-4→19.7-8): piece 19.1-4 ends with the voice up (open (end pitch 100/100 in the speaker's range)) on «штука?» — the seam sounds like the speaker was cut off
+    ! seam 2 (19.7-8→20.1): picture jump 8.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (19.7-8→20.1): speech rate 1.7 → 2.4 words/s — the voice changes tempo at the seam
+    ! seam 3 (20.1→20.4): picture jump 6.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 3 (20.1→20.4): piece 20.4 starts on «Но» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M10:
+    window    s2-5  1258.784–1275.948  «Некоторые даже пугаются.» … «ствие Небесное со своим багажом эго-конструкции.»
+    window    s7-8  1276.850–1292.972  «Как верблюду нельзя пройти в угольное ушко, так » … «Где реальность.»
+    shots     close[2-3] → wide[4-5] → close[5] → close[7-8]
+    end       1292.972  last word «реальность.» audible end 1292.672  air 0.300s  next speech 1293.560
+    cuts      2 fillers/pauses removed, 6.7s (clip 33.3s → 26.6s); 1 masked by a shot switch; 2 long pause(s) always cut
+    montage M10: 2 pieces 28.2-5 28.7-8, 1 seam(s), 26.6s
+    seam 1  28.2-5→28.7-8  skips 0.9s, pause 0.08s, picture jump 2.3×, pace 2.1→1.1 w/s, loudness -26→-20 dB, pitch +0.1→+0.1 st, end final
+    ! seam 1 (28.2-5→28.7-8): speech rate 2.1 → 1.1 words/s — the voice changes tempo at the seam
+    ! seam 1 (28.2-5→28.7-8): the voice gets louder by 5.7 dB (> 4) — the jump is heard
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 15 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  [ERROR] r01: no room after last word «становится.» (next speech at 211.567) — clip ends at its audible end — automatic clip needs another end

@@ -1,0 +1,103 @@
+sentence check: 178 sentences, 0 differences
+  выравнивание по звуку: 3209/3328 слов (96%), 1702 мест речи без текста; не по порядку и без уверенности — по карте речи: 6
+  интонация: 3210 слов
+  движение: 21250 кадров
+  + merged blocks 3+4: 82.7s
+  x: 3+4: excluded 2 sentence(s) (6.4s removed, 2 window(s))
+  plan 3+4:
+    window    s2-9  164.633–201.361  «У меня был такой интересный момент, где я, прожи» … «С тех пор, наверное, что-то началось.»
+    window    s12-13  207.926–230.585  «Я жил в Москве, и там я полностью понял, что зде» … «кая, который, как я думаю, успешно реализовался.»
+    shots     wide[2-9] → close[12] → wide[12] → close[13]
+    end       230.585  last word «реализовался.» audible end 230.585  air 0.000s  next speech 230.585
+    cuts      10 fillers/pauses removed, 10.8s (clip 59.4s → 48.6s); 2 left in (visible jump); 2 long pause(s) always cut
+    ! no room after last word «реализовался.» (next speech at 230.585) — clip ends at its audible end
+    ! ending intonation unsure (end pitch 50/100 in the speaker's range): «реализовался.» intonation unclear; finished sentence ends nearby: s8 «много.», s9 «началось.», s11 «переехать.»
+  fx 3+4: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 5+6: 78.4s
+  x: 5+6: excluded 1 sentence(s) (0.7s removed, 2 window(s))
+  plan 5+6:
+    window    s2-6  240.714–269.037  «И здесь мне стало интересно, какие еще есть мето» … «ругих людей — ты, конечно, лучше понимаешь себя.»
+    window    s8-11  271.475–315.305  «Такие какие-то у меня были лестницы, по которой » … «Которая уже готова.»
+    shots     wide[2-6] → close[8] → wide[9-10] → close[11]
+    end       315.305  last word «готова.» audible end 315.305  air 0.000s  next speech 315.305
+    cuts      10 fillers/pauses removed, 11.1s (clip 72.2s → 61.0s); 1 masked by a shot switch; 9 left in (visible jump); 2 long pause(s) always cut
+    ! no room after last word «готова.» (next speech at 315.305) — clip ends at its audible end
+  fx 5+6: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 8+9: 141.1s
+  x: 8+9: excluded 7 sentence(s) (16.1s removed, 2 window(s))
+  plan 8+9:
+    window    s11-19  373.277–452.270  «У меня был один метод, а потом я понимал, что ме» … «Такой метод, который собрал все методы.»
+    window    s27  469.913–486.320  «Она меня вдохновила на написание методички, а по» … «етода понимания человека, то есть как я работаю.»
+    shots     wide[11-19] → close[27]
+    end       486.320  last word «работаю.» audible end 486.250  air 0.070s  next speech 486.380
+    cuts      6 fillers/pauses removed, 33.7s (clip 95.4s → 61.7s); 2 masked by a shot switch; 1 left in (visible jump); 3 long pause(s) always cut
+  fx 8+9: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 13+14: 83.4s
+  x: 13+14: excluded 3 sentence(s) (6.6s removed, 3 window(s))
+  plan 13+14:
+    window    s2-10  642.406–694.348  «Но я стараюсь идти с человеком на такой скорости» … « это понимание, что ты нужен, что ты это сделал.»
+    window    s12-13  696.645–709.582  «Да, это скорее всего то, что ты что-то сделал та» … « есть ты как бы сам себя похвалил где-то внутри.»
+    window    s16  715.446–718.828  «Но я четко чувствую, что я на своем месте.» … «Но я четко чувствую, что я на своем месте.»
+    shots     wide[2-10] → close[12] → wide[12-13] → close[16]
+    end       718.828  last word «месте.» audible end 718.828  air 0.000s  next speech 718.828
+    cuts      10 fillers/pauses removed, 11.1s (clip 68.3s → 57.1s); 1 masked by a shot switch; 4 left in (visible jump); 3 long pause(s) always cut
+    ! no room after last word «месте.» (next speech at 718.828) — clip ends at its audible end
+  fx 13+14: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 17+18: 105.4s
+  plan 17+18:
+    window    s8-14  859.393–900.890  «А я и не работаю.» … «Для меня это самый лучший отдых.»
+    shots     wide[8-13] → close[14]
+    end       900.890  last word «отдых.» audible end 900.868  air 0.022s  next speech 900.950
+    cuts      7 fillers/pauses removed, 9.4s (clip 41.5s → 32.1s); 1 masked by a shot switch; 4 long pause(s) always cut
+    ! short shot 1.29s between two picture changes (out 0.00–1.29s, src 859.39–860.68): whole sentences s8@859.378
+  fx 17+18: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 19+20: 102.8s
+  x: 19+20: excluded 1 sentence(s) (3.2s removed, 2 window(s))
+  plan 19+20:
+    window    s2-5  940.781–966.522  «А что вдохновляет тебя?» … «ак говорят психологи, нельзя переносить на себя.»
+    window    s7-12  969.945–998.148  «Ты попадаешь в тот случай, а если ты еще эмпатич» … «И это на самом деле не плохо, а хорошо.»
+    shots     wide[2-5] → close[7] → wide[7-11] → close[12]
+    end       998.148  last word «хорошо.» audible end 998.120  air 0.028s  next speech 998.208
+    cuts      7 fillers/pauses removed, 7.5s (clip 53.9s → 46.5s); 1 left in (visible jump); 1 long pause(s) always cut
+  fx 19+20: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 24+25: 86.5s
+  x: 24+25: excluded 1 sentence(s) (1.6s removed, 2 window(s))
+  plan 24+25:
+    window    s3-4  1162.604–1187.025  «Наверное, такая ценность, что ты действительно п» … «остоятельно, но ты все равно опираешься на себя.»
+    window    s6-9  1201.546–1224.380  «Ты всегда стараешься, я стараюсь как-то в послед» … «Вот, наверное, две вещи.»
+    shots     wide[3-4] → close[6] → wide[6-8] → close[9]
+    end       1224.380  last word «вещи.» audible end 1224.270  air 0.110s  next speech 1224.440
+    cuts      7 fillers/pauses removed, 5.8s (clip 47.3s → 41.5s); 1 left in (visible jump); 2 long pause(s) always cut
+  fx 24+25: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 28+29: 85.2s
+  x: 28+29: excluded 6 sentence(s) (26.3s removed, 2 window(s))
+  plan 28+29:
+    window    s2-8  1357.932–1379.110  «То есть ребенок, если у человека, он может быть » … «оворит, и он стоит на этом, ну я же зато не вру.»
+    window    s15-21  1405.687–1441.330  «Но это вранье, оно не за того, что ты врешь, а з» … «он понимает, что он врет сам себе и врет другим.»
+    shots     wide[2-8] → close[15] → wide[15-20] → close[21]
+    end       1441.330  last word «другим.» audible end 1441.030  air 0.300s  next speech 1441.620
+    cuts      4 fillers/pauses removed, 3.5s (clip 56.8s → 53.3s); 1 masked by a shot switch; 4 left in (visible jump); 1 long pause(s) always cut
+  fx 28+29: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 30+31: 86.0s
+  plan 30+31:
+    window    s8-20  1472.222–1522.410  «Ну, допустим, у меня папа, ну, допустим, как был» … «ремя я поступил как взрослый его сын, правильно?»
+    shots     wide[8-19] → close[20]
+    end       1522.410  last word «правильно?» audible end 1522.110  air 0.300s  next speech 1522.740
+    cuts      8 fillers/pauses removed, 8.1s (clip 50.2s → 42.1s); 2 masked by a shot switch; 3 left in (visible jump); 3 long pause(s) always cut
+  fx 30+31: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 36+37: 81.6s
+  x: 36+37: excluded 2 sentence(s) (10.8s removed, 2 window(s))
+  plan 36+37:
+    window    s9-11  1838.624–1852.957  «Ты чувствуешь это в стрессовых ситуациях, Ласанн» … «тают только тогда, когда в стрессовых ситуациях.»
+    window    s14-17  1863.845–1893.800  «Если ты не понимаешь, что дальше делать, и у теб» … «для того, чтобы улучшить качественно свою жизнь.»
+    shots     wide[9-11] → close[14] → wide[14-16] → close[17]
+    end       1893.800  last word «жизнь.» audible end 1893.500  air 0.300s  next speech 1894.180
+    cuts      8 fillers/pauses removed, 6.6s (clip 44.3s → 37.7s); 2 long pause(s) always cut
+  fx 36+37: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 10 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  [ERROR] r01: no room after last word «реализовался.» (next speech at 230.585) — clip ends at its audible end — automatic clip needs another end
+  [ERROR] r02: no room after last word «готова.» (next speech at 315.305) — clip ends at its audible end — automatic clip needs another end
+  [ERROR] r04: no room after last word «месте.» (next speech at 718.828) — clip ends at its audible end — automatic clip needs another end
