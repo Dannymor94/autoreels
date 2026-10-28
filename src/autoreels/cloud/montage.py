@@ -218,7 +218,8 @@ class MontageBuild:
 
 
 def _continues(sentences: list, a: int, gap_sec: float,
-               pause: Callable[[object, object], float | None] | None = None) -> bool:
+               pause: Callable[[object, object], float | None] | None = None,
+               short_gap_sec: float = 0.0) -> bool:
     """Sentence a (1-based) follows sentence a-1 straight on in the source: at most gap_sec between
     them (a filtered block in between, or a skipped sentence, is far longer).
 
@@ -226,18 +227,32 @@ def _continues(sentences: list, a: int, gap_sec: float,
     map / alignment; None = another word stands between them). The Whisper gap is negative on overlapping
     words (IMG_6848: 65 of 345 sentence ends) — such a straight-on piece got a seam."""
     prev, cur = sentences[a - 2], sentences[a - 1]
+    gap_sec = max(gap_sec, short_gap_sec)
     if pause is not None:
         p = pause(prev[-1], cur[0])
         return p is not None and p <= gap_sec
     return 0.0 <= cur[0].t0 - prev[-1].t1 <= gap_sec
 
 
+def _piece_sec(sentences: list, a: int, z: int,
+               span: Callable[[object, object], float] | None = None) -> float:
+    """Seconds a piece (sentences a..z, 1-based) speaks: `span(first_word, last_word)` (heard), else Whisper."""
+    first, last = sentences[a - 1][0], sentences[z - 1][-1]
+    return span(first, last) if span is not None else last.t1 - first.t0
+
+
 def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[object], list], *,
                   join_gap_sec: float = 2.0,
-                  pause: Callable[[object, object], float | None] | None = None) -> MontageBuild:
+                  pause: Callable[[object, object], float | None] | None = None,
+                  join_short_sec: float = 0.0, join_short_gap_sec: float = 0.0,
+                  span: Callable[[object, object], float] | None = None) -> MontageBuild:
     """Map a montage line to one sentence numbering. `blocks`: review number → block (the blocks
     apply may use); `block_sentences(block)` → that block's sentences in the review numbering.
-    `pause`: the heard pause between two words (M134, see _continues); None = the Whisper gap."""
+    `pause`: the heard pause between two words (M134, see _continues); None = the Whisper gap.
+    M172 (owner on 09h33 m163 r01: hook, then 0.7 s of sentence 17.7, then a jump to 18.1 — «такие скачки — плохо»):
+    when the previous piece or this one speaks less than `join_short_sec` (`span`: heard seconds of a piece), a
+    piece going straight on joins it across a pause up to `join_short_gap_sec` — the pause is played (the filler
+    cut may shorten it inside the window) instead of a seam a second after the last one. 0 = off (the M58 rule)."""
     out = MontageBuild(sentences=[], play=[], breaks=[], pieces=[])
     used = {p.block for p in entry.pieces} | ({entry.hook[0]} if entry.hook else set())
     missing = sorted((b for b in used if b not in blocks), key=str)
@@ -275,7 +290,12 @@ def build_montage(entry: MontageEntry, blocks: dict, block_sentences: Callable[[
         if seen & set(rng):
             out.errors.append(f"piece {p} repeats a sentence of an earlier piece")
             continue
-        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec, pause):
+        _short = 0.0
+        if join_short_sec > 0 and out.pieces and (
+                _piece_sec(out.sentences, *out.pieces[-1], span) < join_short_sec
+                or _piece_sec(out.sentences, a, z, span) < join_short_sec):
+            _short = join_short_gap_sec
+        if out.pieces and a == out.pieces[-1][1] + 1 and _continues(out.sentences, a, join_gap_sec, pause, _short):
             # M58: the piece goes straight on from the previous one in the source (the next sentence of
             # the block, or sentence 1 of the next block right after the last one) — no seam
             out.joined.append(f"{out.pieces[-1][0]}-{out.pieces[-1][1]} + {p}")

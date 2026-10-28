@@ -315,6 +315,11 @@ montage:
   # M134 (invariant 9): that gap is the pause HEARD (speech map / alignment), not the Whisper gap — on IMG_6848 65 of
   # 345 sentence ends overlap in Whisper times (gap < 0), so a straight-on piece got a seam. false = the Whisper gap.
   join_heard: true
+  # M172 — owner on 09h33 m163 r01 (hook, 0.7 s of one sentence, then a jump): a piece speaking less than
+  # join_short_sec joins its straight-on neighbour across a pause up to join_short_gap_sec (played, the filler cut may
+  # shorten it) — no seam a second after the last picture change. 0 = off.
+  join_short_sec: 2.0
+  join_short_gap_sec: 4.0
   # M74 — owner: «после крючка сильно резко идёт тело»: up to this much real silence after the cold open and before
   # the body's first word (never into speech) — the hook and the start of the clip are heard as two things. 0 = off.
   hook_air_sec: 0.5

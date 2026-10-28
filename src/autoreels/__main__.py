@@ -5677,14 +5677,19 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
     mc = r0_cfg.montage
     out: list = []
     _join_pause = None
+    _join_span = None
     if getattr(mc, "join_heard", False) and (smap is not None or align is not None):
         # M134 (invariant 9): «goes straight on» by the pause heard, not the Whisper gap
         from autoreels.cloud.plan import SpeechTimes, heard_pause
         _jt = SpeechTimes(tx_words, smap, align)
         _join_pause = lambda a, b: heard_pause(_jt, a, b)  # noqa: E731
+        _join_span = lambda f, l: _jt.audible(l)[1] - _jt.audible(f)[0]  # noqa: E731 — M172: heard piece length
     for me in entries:
         mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words),
-                           join_gap_sec=mc.join_gap_sec, pause=_join_pause)
+                           join_gap_sec=mc.join_gap_sec, pause=_join_pause,
+                           join_short_sec=float(getattr(mc, "join_short_sec", 0.0) or 0.0),
+                           join_short_gap_sec=float(getattr(mc, "join_short_gap_sec", 0.0) or 0.0),
+                           span=_join_span)
         for _e in mb.errors:
             print(f"  [ERROR] {me.label} (review:{me.lineno}): {_e}", file=sys.stderr)
         if mb.errors:
