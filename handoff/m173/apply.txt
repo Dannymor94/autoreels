@@ -1,0 +1,7 @@
+disko_beach_p1: reviews/disko_beach_p1_auto_m163.txt rc=0
+disko_beach_p2: reviews/disko_beach_p2_auto_all_m163.txt rc=0
+disko_beach_p3: reviews/disko_beach_p3_auto_m163.txt rc=0
+day_yoga_p1: reviews/day_yoga_p1_auto_all_m163.txt rc=0
+day_yoga_p2: reviews/day_yoga_p2_auto_m163.txt rc=0
+prew_isaev_anna: reviews/prew_isaev_anna_auto_all_m157.txt rc=0
+prew_isaev_danny: reviews/prew_isaev_danny_auto_all_m157.txt rc=0

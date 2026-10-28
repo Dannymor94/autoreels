@@ -1,0 +1,117 @@
+== reviews/day_yoga_p1_m173.review.json
+  01 r01: short 1.07s @out 23.49 (src 265.02)
+       ! short shot 1.07s between two picture changes (out 23.49–24.56s, src 265.02–266.09): inside a sentence
+  02 r02: short 1.53s @out 11.44 (src 596.79)
+       ! short shot 1.53s between two picture changes (out 11.44–12.97s, src 596.79–598.32): inside a sentence
+  03 r03: short 1.65s @out 32.35 (src 463.72)
+       ! short shot 1.65s between two picture changes (out 32.35–34.00s, src 463.72–465.37): inside a sentence
+  итого: SLIVER 0, short 3
+== reviews/day_yoga_p2_m173.review.json
+  01 r01: short 0.99s @out 8.17 (src 79.37)
+       ! short shot 0.99s between two picture changes (out 8.17–9.16s, src 79.37–80.36): whole sentences s16@79.680
+  03 r03: short 1.87s @out 56.41 (src 1775.08)
+       ! short shot 1.87s between two picture changes (out 56.41–58.28s, src 1775.08–1776.95): whole sentences s25@1775.113
+  12 r12: short 0.61s @out 0.00 (src 830.47)
+       ! short shot 0.61s between two picture changes (out 0.00–0.61s, src 830.47–831.08): whole sentences s1@830.700
+  итого: SLIVER 0, short 3
+== reviews/disko_beach_p1_m173.review.json
+  03 r03: short 1.53s @out 10.90 (src 1123.38); short 1.39s @out 12.44 (src 1126.53); short 1.08s @out 13.83 (src 1133.91)
+       ! short shot 1.53s between two picture changes (out 10.90–12.44s, src 1123.38–1124.91): inside a sentence
+       ! short shot 1.39s between two picture changes (out 12.44–13.83s, src 1126.53–1127.92): inside a sentence
+       ! short shot 1.08s between two picture changes (out 13.83–14.91s, src 1133.91–1134.99): inside a sentence
+  04 r04: short 1.10s @out 4.32 (src 349.22); short 0.49s @out 54.32 (src 478.05)
+       ! short shot 1.10s between two picture changes (out 4.32–5.42s, src 349.22–350.33): inside a sentence
+       ! short shot 0.49s between two picture changes (out 54.32–54.81s, src 478.05–478.54): whole sentences s41@477.545
+  06 r06: short 1.13s @out 0.00 (src 832.06)
+       ! short shot 1.13s between two picture changes (out 0.00–1.13s, src 832.06–833.19): whole sentences s9@832.073
+  08 r08: short 1.85s @out 0.00 (src 1622.92); short 1.78s @out 12.30 (src 1658.81)
+       ! short shot 1.85s between two picture changes (out 0.00–1.85s, src 1622.92–1624.77): inside a sentence
+       ! short shot 1.78s between two picture changes (out 12.30–14.08s, src 1658.81–1660.59): inside a sentence
+  10 r10: short 0.71s @out 4.27 (src 302.03); short 1.90s @out 4.98 (src 305.36)
+       ! short shot 0.71s between two picture changes (out 4.27–4.98s, src 302.03–302.74): inside a sentence
+       ! short shot 1.90s between two picture changes (out 4.98–6.88s, src 305.37–307.27): inside a sentence
+  итого: SLIVER 0, short 10
+== reviews/disko_beach_p2_m173.review.json
+  01 r01: short 1.46s @out 8.15 (src 88.36); short 0.75s @out 11.88 (src 95.35)
+       ! short shot 1.46s between two picture changes (out 8.15–9.61s, src 88.36–89.82): inside a sentence
+       ! short shot 0.75s between two picture changes (out 11.88–12.63s, src 95.35–96.10): inside a sentence
+  04 r04: short 1.85s @out 0.00 (src 354.05); short 1.77s @out 33.08 (src 395.96)
+       ! short shot 1.85s between two picture changes (out 0.00–1.85s, src 354.05–355.89): whole sentences s2@354.083
+       ! short shot 1.77s between two picture changes (out 33.08–34.85s, src 395.96–397.73): whole sentences s20@395.923
+  итого: SLIVER 0, short 4
+== reviews/disko_beach_p3_m173.review.json
+  01 r01: short 0.75s @out 5.20 (src 780.29)
+       ! short shot 0.75s between two picture changes (out 5.20–5.94s, src 780.29–781.04): inside a sentence
+  02 r02: short 1.17s @out 5.01 (src 6.24); short 1.70s @out 6.19 (src 9.06); short 1.90s @out 7.89 (src 13.34)
+       ! short shot 1.17s between two picture changes (out 5.01–6.19s, src 6.24–7.41): inside a sentence
+       ! short shot 1.70s between two picture changes (out 6.19–7.89s, src 9.06–10.76): inside a sentence
+       ! short shot 1.90s between two picture changes (out 7.89–9.79s, src 13.34–15.24): inside a sentence
+  03 r03: short 1.61s @out 33.20 (src 1145.67)
+       ! short shot 1.61s between two picture changes (out 33.20–34.81s, src 1145.67–1147.28): inside a sentence
+  04 r04: short 1.79s @out 0.00 (src 348.86)
+       ! short shot 1.79s between two picture changes (out 0.00–1.79s, src 348.86–350.65): inside a sentence
+  05 r05: short 1.79s @out 36.32 (src 239.98)
+       ! short shot 1.79s between two picture changes (out 36.32–38.12s, src 239.98–241.77): inside a sentence
+  итого: SLIVER 0, short 7
+== reviews/prew_isaev_anna_m173.review.json
+  01 r01: short 1.80s @out 4.51 (src 172.47)
+       ! short shot 1.80s between two picture changes (out 4.51–6.31s, src 172.47–174.27): inside a sentence
+  02 r02: SLIVER 0.13s @out 0.00 (src 240.71); short 1.11s @out 41.18 (src 292.36)
+       ! short shot 0.13s between two picture changes (out 0.00–0.13s, src 240.71–240.84): inside a sentence
+       ! short shot 1.11s between two picture changes (out 41.18–42.29s, src 292.36–293.47): inside a sentence
+  03 r03: short 1.95s @out 47.55 (src 469.91)
+       ! short shot 1.95s between two picture changes (out 47.55–49.50s, src 469.91–471.86): inside a sentence
+  04 r04: short 1.66s @out 0.00 (src 642.41); short 1.56s @out 31.31 (src 681.21); short 0.29s @out 41.09 (src 696.65)
+       ! short shot 1.66s between two picture changes (out 0.00–1.66s, src 642.41–644.07): inside a sentence
+       ! short shot 1.56s between two picture changes (out 31.31–32.87s, src 681.21–682.77): inside a sentence
+       ! short shot 0.29s between two picture changes (out 41.09–41.38s, src 696.65–696.94): inside a sentence
+  05 r05: short 1.29s @out 0.00 (src 859.39); short 1.85s @out 27.80 (src 896.25)
+       ! short shot 1.29s between two picture changes (out 0.00–1.29s, src 859.39–860.68): whole sentences s8@859.378
+       ! short shot 1.85s between two picture changes (out 27.80–29.65s, src 896.25–898.11): inside a sentence
+  06 r06: short 0.85s @out 0.00 (src 940.78); short 1.73s @out 23.22 (src 969.94)
+       ! short shot 0.85s between two picture changes (out 0.00–0.85s, src 940.78–941.63): inside a sentence
+       ! short shot 1.73s between two picture changes (out 23.22–24.95s, src 969.95–971.68): inside a sentence
+  07 r07: short 0.84s @out 0.00 (src 1162.60); short 0.98s @out 26.44 (src 1208.06)
+       ! short shot 0.84s between two picture changes (out 0.00–0.84s, src 1162.60–1163.44): inside a sentence
+       ! short shot 0.98s between two picture changes (out 26.44–27.42s, src 1208.06–1209.04): inside a sentence
+  08 r08: short 0.65s @out 0.00 (src 1357.93); SLIVER 0.15s @out 19.08 (src 1405.69)
+       ! short shot 0.65s between two picture changes (out 0.00–0.65s, src 1357.93–1358.58): inside a sentence
+       ! short shot 0.15s between two picture changes (out 19.08–19.23s, src 1405.69–1405.84): inside a sentence
+  11 r11: short 0.38s @out 37.77 (src 1186.65); short 0.98s @out 43.02 (src 1208.06); short 1.68s @out 60.12 (src 1231.02)
+       ! short shot 0.38s between two picture changes (out 37.77–38.14s, src 1186.65–1187.02): inside a sentence
+       ! short shot 0.98s between two picture changes (out 43.02–44.00s, src 1208.06–1209.04): inside a sentence
+       ! short shot 1.68s between two picture changes (out 60.12–61.79s, src 1231.02–1232.69): inside a sentence
+  16 r16: short 0.55s @out 0.00 (src 840.15)
+       ! short shot 0.55s between two picture changes (out 0.00–0.55s, src 840.15–840.70): inside a sentence
+  18 r18: short 1.63s @out 0.00 (src 1010.56)
+       ! short shot 1.63s between two picture changes (out 0.00–1.63s, src 1010.56–1012.19): whole sentences s8@1010.580
+  20 r20: short 1.92s @out 44.90 (src 2039.54)
+       ! short shot 1.92s between two picture changes (out 44.90–46.82s, src 2039.54–2041.46): inside a sentence
+  итого: SLIVER 2, short 19
+== reviews/prew_isaev_danny_m173.review.json
+  01 r01: short 1.31s @out 0.00 (src 133.75)
+       ! short shot 1.31s between two picture changes (out 0.00–1.31s, src 133.75–135.06): inside a sentence
+  04 r04: short 0.73s @out 0.00 (src 982.89)
+       ! short shot 0.73s between two picture changes (out 0.00–0.73s, src 982.89–983.62): inside a sentence
+  06 r06: short 1.36s @out 0.00 (src 1494.14); short 1.60s @out 6.62 (src 1502.52)
+       ! short shot 1.36s between two picture changes (out 0.00–1.36s, src 1494.14–1495.50): inside a sentence
+       ! short shot 1.60s between two picture changes (out 6.62–8.22s, src 1502.52–1504.12): inside a sentence
+  07 r07: short 0.53s @out 12.23 (src 1690.17); short 1.39s @out 31.02 (src 1718.68); short 1.34s @out 35.78 (src 1727.62)
+       ! short shot 0.53s between two picture changes (out 12.23–12.76s, src 1690.17–1690.70): inside a sentence
+       ! short shot 1.39s between two picture changes (out 31.02–32.41s, src 1718.68–1720.07): inside a sentence
+       ! short shot 1.34s between two picture changes (out 35.78–37.12s, src 1727.62–1728.96): inside a sentence
+  17 r17: short 1.43s @out 16.38 (src 706.17); short 1.90s @out 17.81 (src 710.48)
+       ! short shot 1.43s between two picture changes (out 16.38–17.81s, src 706.17–707.60): inside a sentence
+       ! short shot 1.90s between two picture changes (out 17.81–19.72s, src 710.48–712.38): inside a sentence
+  19 r19: short 1.60s @out 20.29 (src 1062.49)
+       ! short shot 1.60s between two picture changes (out 20.29–21.89s, src 1062.49–1064.09): whole sentences s7@1062.200
+  21 r21: short 0.88s @out 49.59 (src 1464.55)
+       ! short shot 0.88s between two picture changes (out 49.59–50.47s, src 1464.55–1465.43): inside a sentence
+  24 r24: short 0.32s @out 0.00 (src 1678.51); short 0.62s @out 0.32 (src 1682.28); short 0.64s @out 0.94 (src 1690.06)
+       ! short shot 0.32s between two picture changes (out 0.00–0.32s, src 1678.51–1678.83): inside a sentence
+       ! short shot 0.62s between two picture changes (out 0.32–0.94s, src 1682.28–1682.90): inside a sentence
+       ! short shot 0.64s between two picture changes (out 0.94–1.58s, src 1690.06–1690.70): inside a sentence
+  26 r26: short 1.05s @out 36.66 (src 1606.66)
+       ! short shot 1.05s between two picture changes (out 36.66–37.70s, src 1606.66–1607.71): inside a sentence
+  итого: SLIVER 0, short 15
+ВСЕГО: SLIVER 2, short 61

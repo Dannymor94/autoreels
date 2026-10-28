@@ -1,0 +1,84 @@
+== reviews/disko_beach_p1_m163.review.json
+  01 r01: short 1.29s @out 19.05 (src 1494.51)
+  03 r03: short 1.53s @out 10.90 (src 1123.38); short 1.39s @out 12.44 (src 1126.53); short 1.08s @out 13.83 (src 1133.91)
+  04 r04: short 1.10s @out 4.32 (src 349.22); short 0.49s @out 54.32 (src 478.05)
+  06 r06: short 1.13s @out 0.00 (src 832.06)
+  07 r07: short 1.55s @out 25.47 (src 2434.35)
+  08 r08: short 1.85s @out 0.00 (src 1622.92); short 1.62s @out 1.85 (src 1627.02); short 1.78s @out 12.30 (src 1658.81)
+  10 r10: short 0.71s @out 4.27 (src 302.03); short 1.90s @out 4.98 (src 305.36)
+  итого: SLIVER 0, short 13
+== reviews/disko_beach_p2_m163.review.json
+  01 r01: short 1.46s @out 8.15 (src 88.36); short 0.75s @out 11.88 (src 95.35)
+  03 r03: short 1.97s @out 5.66 (src 318.63); short 1.98s @out 7.63 (src 320.60)
+  04 r04: short 1.85s @out 0.00 (src 354.05); short 1.77s @out 33.08 (src 395.96); short 1.20s @out 34.85 (src 398.65); short 1.03s @out 55.95 (src 423.67)
+  05 r05: short 1.79s @out 5.37 (src 126.37)
+  06 r06: short 1.59s @out 37.06 (src 391.78)
+  итого: SLIVER 0, short 10
+== reviews/disko_beach_p3_m163.review.json
+  01 r01: short 0.75s @out 5.20 (src 780.29); short 1.49s @out 44.53 (src 824.52)
+  02 r02: short 1.17s @out 5.01 (src 6.24); short 0.77s @out 6.19 (src 9.06); short 0.94s @out 6.95 (src 9.82); short 1.90s @out 7.89 (src 13.34); short 0.91s @out 19.51 (src 26.95)
+  03 r03: short 1.61s @out 33.20 (src 1145.67); short 1.43s @out 49.72 (src 1169.04)
+  04 r04: short 1.79s @out 0.00 (src 348.86); short 1.21s @out 8.13 (src 362.80)
+  05 r05: short 1.79s @out 36.32 (src 239.98)
+  итого: SLIVER 0, short 12
+== reviews/day_yoga_p1_m163.review.json
+  01 r01: short 1.07s @out 23.49 (src 265.02)
+  02 r02: short 1.53s @out 11.44 (src 596.79)
+  03 r03: short 1.87s @out 6.96 (src 418.96); short 1.65s @out 32.35 (src 463.72); short 0.48s @out 34.00 (src 467.37); short 0.73s @out 37.48 (src 470.85)
+  04 r04: short 1.80s @out 25.44 (src 262.65)
+  05 r05: short 1.78s @out 48.45 (src 391.56)
+  итого: SLIVER 0, short 8
+== reviews/day_yoga_p2_m163.review.json
+  01 r01: short 0.99s @out 8.17 (src 79.37)
+  03 r03: short 1.87s @out 56.41 (src 1775.08)
+  04 r04: short 0.68s @out 11.10 (src 374.50)
+  06 r06: short 1.28s @out 24.35 (src 452.95)
+  07 r07: SLIVER 0.19s @out 28.39 (src 2238.33)
+  11 r11: short 0.65s @out 48.39 (src 2567.48)
+  12 r12: short 0.61s @out 0.00 (src 830.47); short 1.54s @out 45.56 (src 881.68)
+  13 r13: short 1.09s @out 35.77 (src 2668.67)
+  итого: SLIVER 1, short 8
+== reviews/prew_isaev_anna_m157.review.json
+  01 r01: short 1.80s @out 4.51 (src 172.47); short 1.55s @out 34.77 (src 215.46)
+  02 r02: SLIVER 0.13s @out 0.00 (src 240.71); short 1.11s @out 41.18 (src 292.36)
+  03 r03: short 1.95s @out 47.55 (src 469.91)
+  04 r04: short 1.66s @out 0.00 (src 642.41); short 1.56s @out 31.31 (src 681.21); short 0.29s @out 41.09 (src 696.65)
+  05 r05: short 1.29s @out 0.00 (src 859.39); short 1.85s @out 27.80 (src 896.25); short 0.97s @out 29.65 (src 898.56)
+  06 r06: short 0.85s @out 0.00 (src 940.78); short 1.73s @out 23.22 (src 969.94); short 1.82s @out 28.73 (src 975.75); short 0.36s @out 43.12 (src 995.10)
+  07 r07: short 0.84s @out 0.00 (src 1162.60); short 0.57s @out 26.44 (src 1208.06); short 0.41s @out 27.01 (src 1208.63)
+  08 r08: short 0.65s @out 0.00 (src 1357.93); SLIVER 0.15s @out 19.08 (src 1405.69)
+  10 r10: short 0.79s @out 16.66 (src 1869.23)
+  11 r11: short 0.38s @out 37.77 (src 1186.65); short 0.98s @out 43.02 (src 1208.06); short 1.68s @out 60.12 (src 1231.02)
+  13 r13: SLIVER 0.09s @out 33.98 (src 1844.83)
+  15 r15: short 0.70s @out 4.44 (src 169.08)
+  16 r16: short 0.55s @out 0.00 (src 840.15); short 0.68s @out 39.30 (src 893.27)
+  17 r17: short 0.49s @out 14.56 (src 378.99); short 1.13s @out 44.62 (src 409.05); short 1.88s @out 45.76 (src 436.23)
+  18 r18: short 1.63s @out 0.00 (src 1010.56)
+  19 r19: short 1.44s @out 28.81 (src 771.34)
+  20 r20: short 0.38s @out 27.85 (src 1984.74); short 1.92s @out 44.90 (src 2039.54)
+  итого: SLIVER 3, short 32
+== reviews/prew_isaev_danny_m157.review.json
+  01 r01: short 1.31s @out 0.00 (src 133.75)
+  04 r04: short 0.73s @out 0.00 (src 982.89)
+  06 r06: short 1.36s @out 0.00 (src 1494.14); short 1.60s @out 6.62 (src 1502.52)
+  07 r07: short 0.53s @out 12.23 (src 1690.17); short 1.09s @out 14.91 (src 1696.95); short 1.19s @out 21.58 (src 1705.65); short 1.15s @out 22.77 (src 1706.84); short 1.39s @out 31.02 (src 1718.68); short 1.34s @out 35.78 (src 1727.62)
+  08 r08: short 0.89s @out 20.11 (src 2129.43); short 1.23s @out 55.23 (src 2166.70); short 0.88s @out 56.46 (src 2167.93); short 0.85s @out 57.33 (src 2168.80)
+  10 r10: short 1.40s @out 24.92 (src 2460.63)
+  11 r11: short 1.09s @out 30.47 (src 2695.39)
+  13 r13: short 1.47s @out 8.22 (src 144.65)
+  17 r17: short 1.43s @out 16.38 (src 706.17); short 1.90s @out 17.81 (src 710.48)
+  19 r19: short 1.60s @out 20.29 (src 1062.49)
+  21 r21: short 0.93s @out 38.98 (src 1449.66); short 0.50s @out 39.90 (src 1452.16); short 1.85s @out 47.74 (src 1460.00); short 0.88s @out 49.59 (src 1464.55)
+  22 r22: short 0.65s @out 4.72 (src 2420.87); short 0.41s @out 5.37 (src 2423.46)
+  23 r23: short 1.78s @out 28.03 (src 1502.34); short 1.73s @out 35.81 (src 1511.96)
+  24 r24: short 0.32s @out 0.00 (src 1678.51); short 0.62s @out 0.32 (src 1682.28); short 0.64s @out 0.94 (src 1690.06)
+  26 r26: short 1.61s @out 17.90 (src 1581.86); short 1.05s @out 36.66 (src 1606.66)
+  итого: SLIVER 0, short 33
+== reviews/disko_beach_p3_m172.review.json
+  01 r01: short 0.75s @out 5.20 (src 780.29); short 1.49s @out 44.53 (src 824.52)
+  02 r02: short 1.17s @out 5.01 (src 6.24); short 0.77s @out 6.19 (src 9.06); short 0.94s @out 6.95 (src 9.82); short 1.90s @out 7.89 (src 13.34); short 0.91s @out 19.51 (src 26.95)
+  03 r03: short 1.61s @out 33.20 (src 1145.67); short 1.43s @out 49.72 (src 1169.04)
+  04 r04: short 1.79s @out 0.00 (src 348.86); short 1.21s @out 8.13 (src 362.80)
+  05 r05: short 1.79s @out 36.32 (src 239.98)
+  итого: SLIVER 0, short 12
+ВСЕГО: SLIVER 4, short 128

@@ -1,0 +1,6 @@
+  крупный план r01: ×1.601 по лицу
+
+клип 1/1: r01 (0:50)…
+  ✓ клип 1/1: r01 (0:50) готово
+  warning: web-safe: video codec is hevc, not h264 — web players may transcode and drop audio
+готово: 1 клипов → /Users/danny/Documents/autoreels/reels-out/disko_beach_p3/_gate/m173
