@@ -995,9 +995,80 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         keep.append([round(a, 3), round(b, 3)])
         budget -= b - a
     keep.sort()
+    if params.short_shot_sec > 0:
+        keep, flips = _lengthen_short_shots(times, sentences, w, keep, flips, params, set(word_cand))
     w.cut_flips = sorted(flips)
     w.word_cuts = {k for c in keep for k in word_cand.get((c[0], c[1]), set())}
     return keep
+
+
+def _whole_sentences_only(times: SpeechTimes, sentences, w: "PlannedWindow", a: float, b: float) -> bool:
+    """The played stretch [a, b] of window w holds at least one whole sentence and no part of another (M173: such a
+    short shot is the automatic line check's to fix — it drops those sentences)."""
+    whole = part = False
+    for n in w.sentences:
+        heard = [times.audible(x) for x in sentences[n - 1] if any(c.isalnum() for c in x.word)]
+        inside = [a - _EPS <= h0 and h1 <= b + 0.05 for h0, h1 in heard]
+        touch = [min(h1, b) - max(h0, a) > _EPS for h0, h1 in heard]
+        if heard and all(inside):
+            whole = True
+        elif any(touch):
+            part = True
+    return whole and not part
+
+
+def _lengthen_short_shots(times: SpeechTimes, sentences, w: "PlannedWindow", keep: list[list[float]],
+                          flips: list[list[float]], params: "ManualPlanParams", word_keys: set):
+    """M174 (m173: 53 short shots «inside a sentence» — a cut a second after a seam or another cut): a played piece of
+    the window shorter than short_shot_sec between two picture changes (the window edges are seams, every cut is a
+    change) is lengthened with the silence of the cut next to it — the cut keeps more of the pause on that side
+    (only silence: no word, no untranscribed sound), while the cut stays at least min_cut_sec. When the silence is not
+    enough, the shorter neighbouring cut is dropped (the pause is played). A piece holding whole sentences only is left
+    to the automatic line check (it drops them; the owner's clip keeps the warning). A filler-word cut (M126) is
+    never moved — only dropped, so its word comes back to the screen with its sound."""
+    m, mc = params.short_shot_sec, params.min_cut_sec
+    keep = [list(c) for c in keep]
+    flip_set = {(round(a, 3), round(b, 3)) for a, b in flips}
+
+    def silent(a: float, b: float) -> bool:
+        return b - a <= _EPS or (times.heard_between(a, b) is None and not times.untranscribed_between(a, b))
+
+    for _ in range(2 * len(keep) + 2):
+        pieces, prev = [], w.start
+        for c0, c1 in keep:
+            pieces.append((prev, c0))
+            prev = c1
+        pieces.append((prev, w.end))
+        bad = next((i for i, (pa, pb) in enumerate(pieces) if pb - pa < m - _EPS and keep
+                    and not _whole_sentences_only(times, sentences, w, pa, pb)), None)
+        if bad is None:
+            break
+        pa, pb = pieces[bad]
+        need = m - (pb - pa)
+        done = False
+        for side in ("right", "left"):
+            ci = bad if side == "right" else bad - 1
+            if not 0 <= ci < len(keep):
+                continue
+            a, b = keep[ci]
+            if (round(a, 3), round(b, 3)) in word_keys:
+                continue
+            na, nb = (a + need, b) if side == "right" else (a, b - need)
+            if nb - na >= mc - _EPS and silent(min(a, na), max(a, na)) and silent(min(b, nb), max(b, nb)):
+                old = (round(a, 3), round(b, 3))
+                keep[ci] = [round(na, 3), round(nb, 3)]
+                if old in flip_set:
+                    flip_set.discard(old)
+                    flip_set.add((keep[ci][0], keep[ci][1]))
+                done = True
+                break
+        if done:
+            continue
+        near = [ci for ci in (bad - 1, bad) if 0 <= ci < len(keep)]
+        ci = min(near, key=lambda i: keep[i][1] - keep[i][0])
+        flip_set.discard((round(keep[ci][0], 3), round(keep[ci][1], 3)))
+        del keep[ci]
+    return keep, [list(f) for f in sorted(flip_set)]
 
 
 class ForeignSound:
