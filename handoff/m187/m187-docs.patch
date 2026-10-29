@@ -1,0 +1,313 @@
+diff --git a/PLAN.md b/PLAN.md
+index 74ee060..532206f 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -240,7 +240,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ ---
+ 
+-## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M182) 🔄 В РАБОТЕ
++## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M187) 🔄 В РАБОТЕ
+ 
+ Ручная разметка источника — самый медленный шаг. Автомонтаж пишет её черновик сам; владелец решает на листе ревью. Правила клипа — `docs/REEL_SPEC.md`; значения — `config/r0.yaml autocut:` и `config/render.yaml`. Каждый шаг закрывает только просмотр владельца.
+ 
+@@ -276,8 +276,11 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Общий черновик `arl auto` | строки разметки + сборки сценариста: отказ одного клипа (нет места после последнего слова, короткий план) убирает только его, а не весь черновик (m175: у 5 из 7 источников терялись все клипы разметки, 86 → 61); сборки нумеруются после строк разметки («label used twice» исправлен); клип разметки, у которого больше `autocut.combined_overlap_max` секунд звучат в уже оставленном клипе (сначала сборки), убирается как повтор (m177: 32 из 105) | M175–M177 |
+ | Посты от «я» | `post.voice: author` — пост пишет сам автор, от первого лица, род как в речи; проверка отклоняет «автор», «спикер», «рассказчик», «он рассказывает» и пост без «я», повтор с причиной (`reader` — прежний пост о ролике) | M173 |
+ | Сетка публикаций | один ролик в день в порядке смысла (соседние продолжают друг друга, серия не больше трёх дней подряд): `export/crosspost/schedule.csv`, `grid.csv` (Дата; Время; Что; Куда; Заголовок; Текст поста), `plan_by_date.csv` для crosspost; площадки — Telegram, VK Клипы, Instagram Reels, Дзен, MAX, YouTube Shorts (личная аудитория владельца); копия — Google-таблица «Сетка рилсов» | M171, M173, M174, M177 |
+-| Крючки и начала | владелец о prew_isaev_anna m176: «начало пустое», «хуки пустые» — замер m181: крючок у 1 ролика из 12 (и в m157 у 1 из 20), целое предложение ≤ 6 с в интервью редко. Крючок из части длинной фразы между паузами (`h:B.N@i-j`, `autocut.hook_clauses`); ролик сценариста не начинается со ссылки назад («Каждый из них…») или обращения к собеседнику («Ты…», «…, Ласанна») — начало на фразу-две раньше, иначе ролика нет; клип разметки с таким началом убирается (`autocut.start_strict`). Плашка и субтитры — по настоящим ширинам букв шрифта (M181) | M181, M182 |
+-| Продакшн 2026-10-29 | `_gate/m176` всех 7 источников минус повторы и короткие планы (`_excluded/`): 73 клипа, посты от «я», сетка 2026-10-28 … 2027-01-08. Гейт ждёт владельца; после «закрыт» старые `m163`, `m157`, `m174` убираются | M176, M177 |
++| Крючки и начала | владелец о prew_isaev_anna m176: «начало пустое», «хуки пустые» — замер m181: крючок у 1 ролика из 12 (и в m157 у 1 из 20), целое предложение ≤ 6 с в интервью редко. Крючок из части длинной фразы между паузами (`h:B.N@i-j`, `autocut.hook_clauses`), в том числе из фразы на «А…/То есть…» (её поздняя часть, M183); клип разметки получает крючок из своей второй половины без модели (`autocut.label_hooks`, M183); ролик сценариста не начинается со ссылки назад («Каждый из них…») или обращения к собеседнику («Ты…», «…, Ласанна») — начало на фразу-две раньше, иначе ролика нет; клип разметки с таким началом убирается (`autocut.start_strict`). Итог m183: крючок у 32 из 69 (m176 — 14 из 80); у интервью мало — кандидатов отбрасывает модель-судья как непонятные без контекста. Плашка и субтитры — по настоящим ширинам букв шрифта (M181) | M181–M184 |
++| Номера клипов | после отсева в `arl auto` клипы нумеруются заново r01, r02, … — дыры были клипами, ушедшими из черновика (владелец о m183); готовый гейт перенумерован без перерендера | M185 |
++| Каталог публикации | `tools/publish_dir.py <гейт> --do` → `export/publish/NNN_rXX_<источник>.mp4` в порядке сетки (номер = день), пост `.txt` и обложка рядом; видео — жёсткие ссылки на клипы гейта; в `grid.csv` «Что» — эти имена | M186 |
++| Выпуск (инструменты) | `tools/grid.py` (сетка по смыслу после перепрогона: клипы сопоставляются по сыгранным секундам, даты заново), `tools/publish_dir.py`, `tools/measure_shots.py` (короткие планы и вспышки готовых клипов) — порядок в README «Выпуск» | M187 |
++| Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+ 
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index 98cbb76..26fdf8c 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -42,6 +42,10 @@ autoreels/
+ │
+ ├── tools/flash_check.py      # поиск мигания в готовых клипах двух планов (сверка с исходником)
+ ├── tools/diarize.py          # M165: pyannote — разделение голосов (своё окружение с torch, `arl speakers --python`)
++├── tools/font_widths.py      # M181: ширины букв шрифта → config/fonts/*.json (подгонка строк субтитров и плашки)
++├── tools/grid.py             # M174/M187: сетка публикаций по смыслу после перепрогона (export/crosspost/)
++├── tools/publish_dir.py      # M186/M187: общий каталог export/publish/NNN_rXX_<источник>.mp4 в порядке сетки
++├── tools/measure_shots.py    # M173/M187: короткие планы и вспышки готовых клипов по review.json
+ ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
+ │
+ ├── docs/
+diff --git a/README.md b/README.md
+index 741564d..9bf71f9 100644
+--- a/README.md
++++ b/README.md
+@@ -58,6 +58,16 @@
+           лист ревью ◄── describe (посты) ◄── render ◄── --apply (проверки каждого клипа)
+ ```
+ 
++**Выпуск (после `arl auto` и просмотра листов ревью; гейт `<g>`, все команды из корня проекта):**
++
++1. Посты, которых нет: `arl describe <ист> --gate <g> --reels r03,r07 --force`.
++2. Выгрузка для crosspost: `arl crosspost <ист> --gate <g> --reels <все клипы гейта>` → `export/crosspost/<ист>/`, `<ист>_<g>.csv`.
++3. Сетка по смыслу: `python tools/grid.py <g> --from <гейт прежней сетки>` → `export/crosspost/schedule.csv`, `grid.csv` (Дата; Время; Что; Куда; Заголовок; Текст поста), `plan_by_date.csv`. Новые клипы встают в конец — переставить в `schedule.csv` по смыслу, затем `python tools/grid.py <g> --from <g>`.
++4. Общий каталог: `python tools/publish_dir.py <g> --do` → `export/publish/NNN_rXX_<источник>.mp4` + пост и обложка. После каждой пересборки сетки — снова.
++5. Проверка скачков кадра: `python tools/measure_shots.py reviews/*_<g>.review.json` (вспышек должно быть 0).
++
++Публикует владелец (crosspost или руками); `arl` ничего не публикует.
++
+ **Переключатели `arl auto`** (M153; значения по умолчанию — в `config/r0.yaml`, раздел `autocut:`, и `config/render.yaml`):
+ 
+ | что | как переключить |
+@@ -74,6 +84,7 @@
+ | короткие планы (скачки кадра) | `short_shot_sec` в `config/r0.yaml` (0 — выкл.): план короче — предупреждение, автоматический клип выбрасывает его фразы; клип разметки в `arl auto` убирается (M173, M174, M177) |
+ | повторы между разметкой и сборками в `arl auto` | `autocut.combined_overlap_max` (1 — выкл.): клип разметки, чьи секунды больше этой доли звучат в уже оставленном клипе, убирается (M177) |
+ | крючок из части фразы; строгое начало ролика | `autocut.hook_clauses` (холодный старт — кусок длинной фразы между паузами, `h:B.N@i-j`); `autocut.start_strict` (ролик не начинается со ссылки назад или обращения к собеседнику: начало раньше на фразу-две, иначе ролика нет) (M182) |
++| крючок клипам разметки | `autocut.label_hooks` — клип разметки в `arl auto` получает крючок из своей второй половины (M183) |
+ | голос поста | `post.voice: author \| reader` — от «я» (сам автор) или о ролике (M173) |
+ | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+ 
+diff --git a/tools/grid.py b/tools/grid.py
+new file mode 100644
+index 0000000..1d96a54
+--- /dev/null
++++ b/tools/grid.py
+@@ -0,0 +1,98 @@
++"""M174 (tools/ since M187): the publishing grid after a re-run (new gate). Keeps the meaning order of export/crosspost/schedule.csv:
++every old clip is matched to the new clip of the same source that plays the most of the same source seconds
++(overlap ≥ half of the shorter). Matched — same place in the grid with the new file, title and post; an old clip
++with no match leaves the grid; a new clip with no match goes to the end. Dates are laid again from the first date,
++one a day, same time.
++Usage (project root): python tools/grid.py NEW_GATE --from OLD_GATE [--where "…"]
++--from: the gate the clips of export/crosspost/schedule.csv come from (the same as NEW_GATE when the schedule already
++names the new clips — then only dates, titles and posts are laid again). Clips: reviews/<S>_<gate>.review.json.
++Writes export/crosspost/schedule.csv, grid.csv (Дата;Время;Что;Куда;Заголовок;Текст поста), plan_by_date.csv."""
++import csv, datetime as dt, json, re, sys
++from pathlib import Path
++
++new_gate = sys.argv[1]
++where = (sys.argv[sys.argv.index("--where") + 1] if "--where" in sys.argv
++         else "Telegram, VK Клипы, Instagram Reels, Дзен, MAX, YouTube Shorts")
++if "--from" not in sys.argv:
++    sys.exit("нужно --from <гейт>, из которого клипы в schedule.csv (тот же, что NEW_GATE, если сетка уже на новых клипах)")
++FROM = sys.argv[sys.argv.index("--from") + 1]
++root = Path(".")
++sched = root / "export/crosspost/schedule.csv"
++rows = list(csv.DictReader(open(sched, encoding="utf-8-sig", newline=""), delimiter=";"))
++fields = list(rows[0].keys())
++
++
++def spans(r):
++    segs = r.get("segments") or [{"start": r["start"], "end": r["end"]}]
++    return [(s["start"], s["end"]) for s in segs]
++
++
++def overlap(a, b):
++    o = sum(max(0.0, min(y1, y2) - max(x1, x2)) for x1, y1 in a for x2, y2 in b)
++    la, lb = sum(y - x for x, y in a), sum(y - x for x, y in b)
++    return o / max(1e-6, min(la, lb))
++
++
++reels = {}
++for S in sorted({r["серия"] for r in rows}):
++    old = {x["id"]: x for x in json.load(open(root / f"reviews/{S}_{FROM}.review.json"))["reels"]}
++    new = {x["id"]: x for x in json.load(open(root / f"reviews/{S}_{new_gate}.review.json"))["reels"]}
++    vdir = root / "reels-out" / S / "_gate" / new_gate
++    new = {k: v for k, v in new.items() if (vdir / f"{k}.mp4").is_file()}
++    reels[S] = (old, new, vdir)
++
++used, out, gone = set(), [], []
++for r in rows:
++    S = r["серия"]
++    old, new, vdir = reels[S]
++    o = old.get(r["клип"])
++    best = max(((overlap(spans(o), spans(n)), k) for k, n in new.items() if (S, k) not in used),
++               default=(0.0, None)) if o else (0.0, None)
++    if best[1] is None or best[0] < 0.5:
++        gone.append(f"{S}/{r['клип']}")
++        continue
++    used.add((S, best[1]))
++    out.append(dict(r, клип=best[1], файл=f"{S}/{best[1]}.mp4", _was=r["клип"]))
++added = []
++for S, (old, new, vdir) in reels.items():
++    for k in sorted(new):
++        if (S, k) not in used:
++            out.append({f: "" for f in fields} | {"серия": S, "клип": k, "файл": f"{S}/{k}.mp4", "время": rows[0]["время"],
++                                                    "связь": "новый ролик перепрогона — место по смыслу не выбрано",
++                                                    "_was": ""})
++            added.append(f"{S}/{k}")
++
++d0 = dt.date.fromisoformat(rows[0]["дата"])
++for i, r in enumerate(out):
++    S = r["серия"]
++    vdir = reels[S][2]
++    r["№"], r["дата"] = str(i + 1), (d0 + dt.timedelta(days=i)).isoformat()
++    p = vdir / f"{r['клип']}.post.txt"
++    cap = vdir / f"{r['клип']}.txt"
++    r["пост"] = (p if p.is_file() else cap).read_text(encoding="utf-8").strip()
++    t = cap.read_text(encoding="utf-8").strip().split("\n")[0] if cap.is_file() else ""
++    t = " ".join(x for x in t.split() if not x.startswith("#")).strip()
++    r["заголовок"] = t if len(t) <= 100 else t[:99] + "…"
++
++
++def write(path, header, items):
++    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
++        w = csv.writer(fh, delimiter=";")
++        w.writerow(header)
++        w.writerows(items)
++
++
++write(sched, fields, [[r.get(k, "") for k in fields] for r in out])
++write(root / "export/crosspost/grid.csv", ["Дата", "Время", "Что", "Куда", "Заголовок", "Текст поста"],
++      [[r["дата"], r["время"], r["файл"], where, r["заголовок"], r["пост"]] for r in out])
++write(root / "export/crosspost/plan_by_date.csv", ["файл", "текст", "тип"], [[r["файл"], r["пост"], "пост"] for r in out])
++same = sum(1 for r in out if r["_was"] and r["_was"] == r["клип"])
++print(f"grid.csv: {len(out)} строк, {out[0]['дата']} … {out[-1]['дата']}; на месте {len(out) - len(added)} "
++      f"(номер тот же у {same}), выпали {len(gone)}, новые в конце {len(added)}")
++if gone:
++    print("выпали: " + ", ".join(gone))
++if added:
++    print("новые: " + ", ".join(added))
++third = [r["файл"] for r in out if re.search(r"(?i)\b(автор|спикер|рассказчик)", r["пост"])]
++print(f"в третьем лице: {len(third)}" + (f" — {', '.join(third)}" if third else ""))
++print(f"с хэштегом в заголовке: {sum('#' in r['заголовок'] for r in out)}")
+diff --git a/tools/measure_shots.py b/tools/measure_shots.py
+new file mode 100644
+index 0000000..b52086f
+--- /dev/null
++++ b/tools/measure_shots.py
+@@ -0,0 +1,53 @@
++"""M173 (tools/ since M187): shots of every clip of a review.json as rendered — from its segments (cold open first; a shot changes at every
++segment and at every wide/close edge inside one). Usage: python tools/measure_shots.py REVIEW.json [REVIEW2.json …]
++Per clip with a short shot: out time, length, where. Totals: slivers (< 0.2 s — one to a few frames) and short shots
++(< 2.0 s), the cold open and the last shot not counted; plus the plan's «short shot» warnings when present."""
++import json, sys
++
++def shots(r):
++    segs = ([dict(r["cold_open"], _co=True)] if r.get("cold_open") else []) + \
++           (r.get("segments") or [{"start": r["start"], "end": r["end"], "shot": "wide"}])
++    t, bounds, co_end, spans = 0.0, [0.0], 0.0, []
++    for s in segs:
++        dur = s["end"] - s["start"]
++        if dur <= 1e-6:
++            continue
++        if t > 1e-6:
++            bounds.append(t)
++        for c0, c1 in s.get("close_intervals") or []:
++            for e in (c0, c1):
++                if 1e-3 < e < dur - 1e-3:
++                    bounds.append(t + e)
++        spans.append((t, s["start"]))
++        t += dur
++        if s.get("_co"):
++            co_end = t
++    b = sorted(set(round(x, 4) for x in bounds)) + [t]
++    out = []
++    for i, (a, z) in enumerate(zip(b, b[1:])):
++        src = next((s0 + (a - t0) for t0, s0 in reversed(spans) if t0 <= a + 1e-6), None)
++        out.append((a, z, src, z <= co_end + 1e-6, i == len(b) - 2))
++    return out
++
++tot_sl = tot_sh = 0
++for path in sys.argv[1:]:
++    reels = json.load(open(path))["reels"]
++    n_sl = n_sh = 0
++    print(f"== {path}")
++    for i, r in enumerate(reels, 1):
++        bad = []
++        for a, z, src, in_co, last in shots(r):
++            d = z - a
++            if in_co or last or d >= 2.0:
++                continue
++            kind = "SLIVER" if d < 0.2 else "short"
++            n_sl += kind == "SLIVER"; n_sh += kind == "short"
++            bad.append(f"{kind} {d:.2f}s @out {a:.2f} (src {src:.2f})")
++        ww = [w for w in (r.get("warnings") or []) if w.startswith("short shot")]
++        if bad or ww:
++            print(f"  {i:02d} {r['id']}: " + "; ".join(bad))
++            for w in ww:
++                print(f"       ! {w}")
++    print(f"  итого: SLIVER {n_sl}, short {n_sh}")
++    tot_sl += n_sl; tot_sh += n_sh
++print(f"ВСЕГО: SLIVER {tot_sl}, short {tot_sh}")
+diff --git a/tools/publish_dir.py b/tools/publish_dir.py
+new file mode 100644
+index 0000000..b09aeb6
+--- /dev/null
++++ b/tools/publish_dir.py
+@@ -0,0 +1,73 @@
++"""M186 (tools/ since M187): one folder with every clip of the grid, named in publishing order — export/publish/NNN_rXX_<источник>.mp4
++(number of the grid row first, the source last), the post beside it as NNN_rXX_<источник>.txt and the cover
++(.jpg/.png) if crosspost made one. Files are hard links to the gate's clips (no extra disk; a copy where a link is
++impossible). grid.csv (the owner's table) gets the new names in «Что»; schedule.csv and plan_by_date.csv (crosspost
++import, paths inside export/crosspost) stay as they are.
++Dry run by default; --do writes. Usage (project root): python tools/publish_dir.py GATE [--do]"""
++import csv
++import os
++import shutil
++import sys
++from pathlib import Path
++
++gate, do = sys.argv[1], "--do" in sys.argv
++root = Path(".")
++out = root / "export" / "publish"
++sched = root / "export/crosspost/schedule.csv"
++rows = list(csv.DictReader(open(sched, encoding="utf-8-sig", newline=""), delimiter=";"))
++width = max(3, len(str(len(rows))))
++plan = []
++missing = []
++for i, r in enumerate(rows, 1):
++    S, rid = r["серия"], r["клип"]
++    src = root / "reels-out" / S / "_gate" / gate
++    name = f"{i:0{width}d}_{rid}_{S}"
++    mp4 = src / f"{rid}.mp4"
++    if not mp4.is_file():
++        missing.append(f"{S}/{rid}")
++        continue
++    post = src / f"{rid}.post.txt"
++    if not post.is_file():
++        post = src / f"{rid}.txt"
++    plan.append((r, name, mp4, post, [p for p in (root / "export/crosspost" / S).glob(f"{rid}.*")
++                                      if p.suffix.lower() in (".jpg", ".jpeg", ".png")]))
++print(f"строк сетки {len(rows)}, клипов найдено {len(plan)}, нет файла: {len(missing)}" + (f" — {', '.join(missing)}" if missing else ""))
++for r, name, *_ in plan[:3]:
++    print(f"  {name}.mp4  ← {r['серия']}/{r['клип']}.mp4  ({r['дата']})")
++if not do:
++    print("пробный прогон — --do пишет export/publish/")
++    sys.exit(1 if missing else 0)
++if missing:
++    sys.exit("СТОП: у строк сетки нет клипов — сначала сетка и гейт должны совпасть")
++if out.exists():
++    trash = Path.home() / ".Trash" / "autoreels-m186-publish-old"
++    shutil.move(str(out), str(trash))
++out.mkdir(parents=True)
++
++
++def put(src: Path, dst: Path):
++    try:
++        os.link(src, dst)
++    except OSError:
++        shutil.copy2(src, dst)
++
++
++for r, name, mp4, post, covers in plan:
++    put(mp4, out / f"{name}.mp4")
++    if post.is_file():
++        shutil.copyfile(post, out / f"{name}.txt")
++    for c in covers:
++        put(c, out / f"{name}{c.suffix.lower()}")
++for fn, header, key in (("grid.csv", "Что", None),):
++    p = root / "export/crosspost" / fn
++    if not p.exists():
++        continue
++    g = list(csv.DictReader(open(p, encoding="utf-8-sig", newline=""), delimiter=";"))
++    for row, (r, name, *_ ) in zip(g, plan):
++        row[header] = f"{name}.mp4"
++    with open(p, "w", encoding="utf-8-sig", newline="") as fh:
++        w = csv.DictWriter(fh, fieldnames=list(g[0].keys()), delimiter=";")
++        w.writeheader()
++        w.writerows(g)
++n_mp4 = len(list(out.glob("*.mp4")))
++print(f"export/publish: {n_mp4} видео, {len(list(out.glob('*.txt')))} постов, обложек {len([p for p in out.iterdir() if p.suffix in ('.jpg', '.jpeg', '.png')])}")
