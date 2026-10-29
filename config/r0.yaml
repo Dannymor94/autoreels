@@ -368,6 +368,7 @@ autocut:
   start_strict: true      # M182: a reel never opens on a line pointing back («Каждый из них…», «Это…») or at the interviewer
                           # («Ты…», «…, Ласанна.»): up to start_extend_max sentences before are added, else it goes
   start_extend_max: 2
+  label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the

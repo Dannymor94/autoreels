@@ -5500,6 +5500,54 @@ def _filler_profile_values(r0_cfg, name: str | None) -> dict:
     return {k: v for k, v in profiles[name].items() if k in allowed}
 
 
+def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
+    """M182: a cold open for a label clip of arl auto (it never had one) — (sentence no, (i, j) or None, text) or None.
+    The same rules as the montage lines' candidates: from autocut.hook_teaser_pos of the clip on (play order, heard
+    length), not pointing back; a finished sentence of hook_min_words … hook_max_sec, else (hook_clauses) a clause of a
+    long one between pauses; the best by hook_score (a clause loses a tie). Deterministic, no model."""
+    from autoreels.cloud.autocut import clause_spans, hook_score, teaser_pointer
+    from autoreels.cloud.edit import _ends_terminal
+    from autoreels.cloud.plan import SpeechTimes, heard_pause
+    ac = getattr(r0_cfg, "autocut", None)
+    if ac is None:
+        return None
+    play = _manual_play_order(entry, sents, r0_cfg)
+    if len(play) < 2:
+        return None
+    try:
+        times = SpeechTimes(tx_words, smap, align)
+    except Exception:  # noqa: BLE001 — no word times: no cold open
+        return None
+    hmax = float(getattr(r0_cfg, "hook_max_sec", 6.0))
+    hmin, hwords = float(ac.hook_min_sec), int(ac.hook_min_words)
+    pos = float(getattr(ac, "hook_teaser_pos", 0.5))
+    lens = [max(0.0, times.audible(sents[n - 1][-1])[1] - times.audible(sents[n - 1][0])[0]) for n in play]
+    total = sum(lens) or 1.0
+    best, at = None, 0.0
+    for n, ln in zip(play, lens):
+        start, at = at, at + ln
+        if start / total < pos:
+            continue
+        st = sents[n - 1]
+        text = " ".join(w.word for w in st)
+        nw = sum(1 for w in st if any(c.isalnum() for c in w.word))
+        cands = []
+        if _ends_terminal(st[-1]) and nw >= hwords and hmin <= ln <= hmax and not teaser_pointer(text):
+            cands.append((hook_score(text, ln), None, text))
+        elif getattr(ac, "hook_clauses", False):
+            pa = lambda k, st=st: heard_pause(times, st[k - 1], st[k]) if k < len(st) else None  # noqa: E731
+            du = lambda a, z, st=st: times.audible(st[z - 1])[1] - times.audible(st[a - 1])[0]  # noqa: E731
+            for a, z in clause_spans(st, pa, min_words=hwords, min_sec=hmin, max_sec=hmax,
+                                     min_pause=float(getattr(ac, "hook_clause_pause", 0.12)), dur=du):
+                ct = " ".join(w.word for w in st[a - 1:z])
+                if not teaser_pointer(ct):
+                    cands.append((hook_score(ct, du(a, z)) - 0.5, (a, z), ct))
+        for sc, hw, t in cands:
+            if best is None or sc > best[0]:
+                best = (sc, n, hw, t)
+    return None if best is None else (best[1], best[2], best[3])
+
+
 def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
     """Body sentence numbers in play order for a review line: beats, else s..e minus x.
 
@@ -6482,6 +6530,17 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 # Stored so k: resolution can accept original sentence numbers for beat reels.
                 reel._beat_orig_sents = _valid_beats  # [8, 9, 12, 10, 11] → positions 1-5
                 print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
+        if (getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse and labeler == "auto"
+                and getattr(_ae, "hook", None) is None and not getattr(_ae, "beats", ())
+                and getattr(getattr(r0_cfg, "autocut", None), "label_hooks", False)):
+            # M182 (owner: «начало пустое» — the label clips of arl auto never had a cold open): the clip gets one from its
+            # own second half, as the montage lines do — a finished sentence of hook length or a clause of a long one
+            _lh = _label_hook(_ae, _gsents, _tx_words, _blk_smap, _blk_align, r0_cfg)
+            if _lh is not None:
+                from types import SimpleNamespace as _SNlh
+                _ae = _SNlh(**{**_ae._asdict(), "hook": _lh[0], "hook_keep": True, "hook_words": _lh[1]})
+                print(f"  крючок {'+'.join(str(s) for s in g)}: h:{_lh[0]}" + (f"@{_lh[1][0]}-{_lh[1][1]}" if _lh[1] else "")
+                      + f" «{_lh[2][:60]}»")
         if getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse:
             try:
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,

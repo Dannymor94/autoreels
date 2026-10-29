@@ -287,6 +287,7 @@ class AutocutConfig(BaseModel):
     hook_clause_pause: float = Field(0.12, ge=0.0)   # … silence heard at a clause edge inside the sentence
     start_strict: bool = False                # M182: a reel never opens on a line pointing back / at the interviewer
     start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
+    label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
     generator: str = Field("montage", pattern="^(montage|passage|mixed)$")   # passage: adjacent thoughts around a strong

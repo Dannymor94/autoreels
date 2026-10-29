@@ -982,11 +982,14 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams,
                 continue
             if p.hook_teaser and (total <= 0 or start / total < p.hook_teaser_pos):
                 continue                  # M83: in the first part — the clip plays it at once, it teases nothing
-            if p.hook_teaser and p.hook_no_pointer and teaser_pointer(text):
-                continue                  # M92: heard cold, a line pointing back explains nothing
-            if glued_start(ref, p, start_pause):
-                continue                  # M144: a cold open glued to the speech before it loses its first sound
-            if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
+            # M183 (m182: prew_isaev_anna 0 clause hooks — interview sentences open on «А…», «То есть…», «Вот…», and the
+            # sentence was skipped before its clauses were looked at): a sentence that cannot be a cold open itself (it
+            # points back, its start is glued) still gives its later clauses
+            whole_bad = ((p.hook_teaser and p.hook_no_pointer and teaser_pointer(text))
+                         or glued_start(ref, p, start_pause))
+            if whole_bad and not (p.hook_clauses and clauses is not None):
+                continue                  # M92 / M144: as before
+            if not whole_bad and complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
                 if p.context_start and back_reference(text):
                     bonus -= 3.0          # M74: a cold open that points back («как я говорил») explains nothing

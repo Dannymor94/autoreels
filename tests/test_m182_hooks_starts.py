@@ -127,3 +127,38 @@ def test_apply_builds_a_clause_cold_open(tmp_path, capsys):
     s52 = merge_group_sentences([kept[4]], tx.words)[1]
     co = mont.cold_open
     assert co is not None and co.start <= s52[0].t0 and co.end < s52[-1].t1      # the clause only, not the sentence
+
+
+def test_label_hook_picks_a_teaser_from_the_second_half():
+    from types import SimpleNamespace
+    from autoreels import __main__ as cli
+    tail = [("Потом", 8.0, 8.4), ("я", 8.45, 8.55), ("это", 8.6, 8.8), ("понял.", 8.85, 9.6)]
+    first = [("Начало", 0.0, 0.4), ("истории", 0.45, 0.9), ("было", 0.95, 1.2), ("простым", 1.25, 1.7),
+             ("и", 1.75, 1.8), ("понятным.", 1.85, 2.6)]
+    shifted = [(t, a + 3.0, b + 3.0) for t, a, b in W]           # the long sentence after the first one
+    sents, words, smap, align = _setup([first, shifted, [(t, a + 3.0, b + 3.0) for t, a, b in tail]], [])
+    entry = SimpleNamespace(beats=(), s=None, e=3, x=(), hook=None)
+    ac = SimpleNamespace(hook_min_sec=1.5, hook_min_words=4, hook_teaser_pos=0.2, hook_clauses=True,
+                         hook_clause_pause=0.12)
+    r0 = SimpleNamespace(autocut=ac, hook_max_sec=6.0, filler_removal=None, wind_down_phrases=[])
+    got = cli._label_hook(entry, sents, words, smap, align, r0)
+    assert got is not None and got[0] == 2 and got[1] is not None and got[1][0] >= 1
+    ac.hook_clauses = False
+    assert cli._label_hook(entry, sents, words, smap, align, r0) is None or cli._label_hook(
+        entry, sents, words, smap, align, r0)[1] is None
+
+
+def test_m183_a_pointing_sentence_still_gives_its_clauses():
+    """M183 (m182: prew_isaev_anna 0 clause hooks): «А…» / «То есть…» opens most interview sentences; the sentence is
+    no cold open itself, but a later clause of it is."""
+    p = dataclasses.replace(AutoParams(), hook_teaser=True, hook_teaser_pos=0.0, hook_no_pointer=True, min_punch=0,
+                            hook_clauses=True)
+    text = "А когда я ехал домой, я понял главную вещь о себе, и это было больно."
+
+    def rows(refs):
+        return [("1.1", 8.0, 15, True, text)]
+    clip = [{"id": 1, "refs": "1.1", "punch": 4, "role": "thesis"}]
+    cl = lambda ref: [(1, 5, 1.6, "А когда я ехал домой,"), (6, 11, 2.1, "я понял главную вещь о себе,")]  # noqa: E731
+    cands = _hook_cands(clip, rows, p, clauses=cl)
+    assert [c[0] for c in cands] == ["1.1@6-11"]                       # the «А…» clause is still no teaser
+    assert _hook_cands(clip, rows, dataclasses.replace(p, hook_clauses=False), clauses=cl) == []   # off: as before
