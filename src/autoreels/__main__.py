@@ -1161,6 +1161,36 @@ def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
                    close=[c for c in pr.close if c not in gone], notes=list(pr.notes))
 
 
+def _played_spans(reel) -> list[tuple[float, float]]:
+    return [(float(s.start), float(s.end)) for s in reel.effective_segments()]
+
+
+def _auto_repeats(reels, max_share: float) -> list[tuple[str, str]]:
+    """M177 (m176: 105 clips — a label clip of arl auto and a montage clip told the same story, «закрытый шкаф» twice):
+    clips of the combined draft that repeat a kept one. Montage clips (the scenarist's, already distinct, M68) are kept
+    first, then the others in draft order; a clip sharing more than `max_share` of its played seconds with a kept clip
+    is a repeat. max_share 1 = off. Returns (reel id, reason)."""
+    if max_share >= 1.0:
+        return []
+    order = [r for r in reels if "montage" in (r.flags or [])] + [r for r in reels if "montage" not in (r.flags or [])]
+    kept: list = []
+    out: list[tuple[str, str]] = []
+    for r in order:
+        mine = _played_spans(r)
+        own = sum(b - a for a, b in mine) or 1e-6
+        hit = None
+        for k in kept:
+            ov = sum(max(0.0, min(b, d) - max(a, c)) for a, b in mine for c, d in _played_spans(k))
+            if ov / own > max_share:
+                hit = (k, ov / own)
+                break
+        if hit is None:
+            kept.append(r)
+        else:
+            out.append((r.id, f"repeats {hit[0].id}: {hit[1]:.0%} of its seconds"))
+    return out
+
+
 def _short_shot_errors(reels) -> list[tuple[str, str]]:
     """M173: planned montage reels (the automatic lines the line check can fix) with a shot under short_shot_sec
     between two picture changes (plan warning «short shot»)."""
@@ -6690,6 +6720,16 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         _short_shots = _short_shot_errors(reels)
         _refused = [(_rid, _w, "another end") for _rid, _w in _noroom] + \
                    [(_rid, _w, "another cut") for _rid, _w in _short_shots]
+        if drop_refused:
+            # M177: in arl auto the label clips (not montage, no line check of their own) go by the same rules — a short
+            # shot drops them; and a clip repeating a kept one goes
+            _seen = {_rid for _rid, _w, _ in _refused}
+            _refused += [(r.id, w, "another cut") for r in reels if getattr(r, "planned", False) and r.id not in _seen
+                         and "montage" not in (r.flags or []) for w in (r.warnings or []) if w.startswith("short shot")][:]
+            _seen = {_rid for _rid, _w, _ in _refused}
+            _ac_max = float(getattr(getattr(r0_cfg, "autocut", None), "combined_overlap_max", 1.0) or 1.0)
+            _refused += [(_rid, _w, "other content") for _rid, _w in
+                         _auto_repeats([r for r in reels if r.id not in _seen], _ac_max)]
         if _refused and drop_refused:
             # M176 (m175: 5 of 7 sources lost every label clip — one label line with no room after its last word refused
             # the whole combined draft of arl auto): the refused automatic clip leaves the draft alone, the rest is built
