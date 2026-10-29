@@ -362,7 +362,7 @@ autocut:
   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
-  combined_overlap_max: 0.3   # M177 (m176: 105 clips — label clips repeating a montage clip): in arl auto a label clip sharing over
+  combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
   # m120 measurement): generator, seed_roles, target_sec, lean_depth, rhythm, clips_every_min, context_judge below.

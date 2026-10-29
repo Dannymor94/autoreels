@@ -1137,6 +1137,9 @@ class SubtitlesConfig(BaseModel):
     alignment: str             # center | left | right
     char_width_ratio: float    # оценка ширины символа (доля font_size) для подгонки строки
     max_text_width_px: int     # макс. ширина строки в px
+    # M181: advance widths of the font (config/fonts/<font>.json from tools/font_widths.py) for line fitting; "" = the
+    # old len × size × char_width_ratio estimate
+    font_metrics: str = ""
     # Title plate (Part 4): overlay at the TOP for the first seconds, above the subtitle zone.
     # Rendered only when a reel carries title_overlay (review `t:`). Defaults keep old subtitles.yaml
     # valid; title_font_size 0 → reuse font_size.
