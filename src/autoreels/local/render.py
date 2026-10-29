@@ -3806,9 +3806,14 @@ def _render_segments(
                     _clip_errors.append(f"  [ERROR] {reel.id}: {str(_ee)[:300]}")
             _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
             if _integrity_err:
-                print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
-                out.unlink(missing_ok=True)
-                continue
+                # M180 (m179: m165's «missing picture in access unit with size 12» on gamebox could not be examined —
+                # the check deleted every such clip, and 41 clips now do not reproduce it): the clip is kept as
+                # .ERROR.mp4 like every other check's (M47), with ffmpeg's full words beside it, so the file can be probed
+                _clip_errors.append(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}")
+                try:
+                    (out_dir / f"{reel.id}.integrity.txt").write_text(_integrity_err + "\n", encoding="utf-8")
+                except OSError:
+                    pass
             # Invariant: the file must last the length _expected_output_duration derived from the
             # final post-snap windows — the same values fed to the concat graph. Tolerance is 2.5
             # frames at OUTPUT fps (see _duration_within_tolerance); a larger drift means a stage

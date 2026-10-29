@@ -3714,3 +3714,34 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o3", render_cfg=off, subtitles_cfg=subs_cfg)
     plain = " ".join(map(str, fake_ffmpeg[0]))
     assert "crop=1215:2160:1240:0" in plain and "кадр r01" not in capsys.readouterr().out
+
+
+def test_integrity_failure_keeps_the_clip_as_error_file(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
+    """M180 (m179: gamebox's «missing picture in access unit with size 12» deleted 16 of 26 clips in m165, and the
+    files could never be examined): a clip failing the integrity check is kept as .ERROR.mp4 (M47) with ffmpeg's
+    words in <rid>.integrity.txt; the other clips are rendered as before."""
+    real_popen = render.subprocess.Popen
+
+    class _Writes(real_popen):
+        def __init__(self, cmd, **kw):
+            super().__init__(cmd, **kw)
+            last = str(cmd[-1])
+            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
+                Path(last).parent.mkdir(parents=True, exist_ok=True)
+                Path(last).write_bytes(b"x")
+    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
+    monkeypatch.setattr(render, "_check_integrity",
+                        lambda path, *a, **k: "[h264 @ 0x1] missing picture in access unit with size 12"
+                        if Path(path).stem.startswith("r01") else "")
+    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
+    monkeypatch.setattr(render, "_probe_duration_sec", lambda path, *a, **k: None)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"integrity-keeps")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
+    out_dir = tmp_path / "out"
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+    assert [p.name for p in outputs] == ["r02.mp4"]
+    assert (out_dir / "r01.ERROR.mp4").exists() and not (out_dir / "r01.mp4").exists()
+    assert "missing picture" in (out_dir / "r01.integrity.txt").read_text(encoding="utf-8")

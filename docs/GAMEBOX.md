@@ -26,6 +26,9 @@
 
 `arl render --manifest reviews/<копия>.review.json --gate <имя> --remote` или `arl auto <источники> --remote`. Mac отправляет на gamebox (`config/render.yaml remote:`, папка `/mnt/data/autoreels`): отслеживаемый код (`git ls-files`), копию разметки, `transcripts/<источник>.*`, кэшированную расшифровку источника из `data/cache/` (без неё рендер там проверяет швы грубым правилом и печатает ложные «seam inside word» — m158, m160), модель лиц и музыку; исходник — только если gamebox не находит его по содержимому. Рендер идёт там под общим замком с кодером и профилем из `remote:`, папка гейта возвращается на Mac (`tar` по ssh: в именах источников бывают пробелы). Только в гейт: настоящие клипы с другой машины не пишутся. Окружение там: `/mnt/data/autoreels/.venv` (`pip install -e ".[dev]"`, OpenCV обязателен — без него рамка не по лицу).
 
+## Проверка целостности клипа (M179, M180)
+В m165 на gamebox 16 клипов из 26 упали с `integrity check failed — missing picture in access unit with size 12`, и проверка их удаляла, так что разобрать файлы было нельзя. Замер m179: 41 клип `h264_vaapi` и пробное кодирование — ни одного такого сообщения, маленьких пакетов в файлах нет; причина не найдена. С M180 клип, не прошедший проверку, остаётся как `rNN.ERROR.mp4`, слова ffmpeg — в `rNN.integrity.txt` рядом: если сообщение вернётся, файл разбирается (`ffprobe -show_packets`, `-bsf:v trace_headers`), и правка делается по нему.
+
 ## Карта говорящих (M165, M170)
 
 `arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.
