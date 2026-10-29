@@ -1,0 +1,243 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index a751ef1..8539e33 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -362,7 +362,7 @@ autocut:
+   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
+   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
+                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
+-  combined_overlap_max: 0.3   # M177 (m176: 105 clips — label clips repeating a montage clip): in arl auto a label clip sharing over
++  combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+   # m120 measurement): generator, seed_roles, target_sec, lean_depth, rhythm, clips_every_min, context_judge below.
+diff --git a/config/subtitles.yaml b/config/subtitles.yaml
+index 5d28df2..efb43e1 100644
+--- a/config/subtitles.yaml
++++ b/config/subtitles.yaml
+@@ -33,6 +33,7 @@ alignment: center             # center | left | right (нижний ряд ASS \
+ # Детерминированная подгонка по ширине (правило «не влезает в строку → меньше слов»):
+ char_width_ratio: 0.55        # доля font_size на символ (оценка ширины без рендера)
+ max_text_width_px: 1000       # макс. ширина строки в px (< 1080 с боковыми полями)
++font_metrics: config/fonts/Arial-Bold.json   # M181: настоящие ширины букв шрифта (tools/font_widths.py); "" = оценка по char_width_ratio
+ 
+ # Заголовок-плашка (Part 4): рисуется сверху первые секунды, когда у клипа есть title_overlay
+ # (поле t: в разметке). Над зоной субтитров, не пересекается. Длинный заголовок переносится.
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index e1b172b..81a2be4 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -1137,6 +1137,9 @@ class SubtitlesConfig(BaseModel):
+     alignment: str             # center | left | right
+     char_width_ratio: float    # оценка ширины символа (доля font_size) для подгонки строки
+     max_text_width_px: int     # макс. ширина строки в px
++    # M181: advance widths of the font (config/fonts/<font>.json from tools/font_widths.py) for line fitting; "" = the
++    # old len × size × char_width_ratio estimate
++    font_metrics: str = ""
+     # Title plate (Part 4): overlay at the TOP for the first seconds, above the subtitle zone.
+     # Rendered only when a reel carries title_overlay (review `t:`). Defaults keep old subtitles.yaml
+     # valid; title_font_size 0 → reuse font_size.
+diff --git a/src/autoreels/local/subtitles.py b/src/autoreels/local/subtitles.py
+index f811d18..6fbe8df 100644
+--- a/src/autoreels/local/subtitles.py
++++ b/src/autoreels/local/subtitles.py
+@@ -63,12 +63,40 @@ def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
+     return out
+ 
+ 
+-def _estimate_width(text: str, font_size: int, char_width_ratio: float) -> float:
++def _estimate_width(text: str, font_size: int, char_width_ratio: float, metrics: dict | None = None) -> float:
++    """Width of `text` in px. M181: with `metrics` (the font's advance widths, config/fonts/*.json written by
++    tools/font_widths.py from the font file) the sum of the real glyph widths; without — len × size × ratio (the
++    old estimate: 0.55 is too narrow for bold capitals — prew_isaev_anna r11's plate ran off both edges)."""
++    if metrics:
++        w, upm, dflt = metrics["widths"], float(metrics["units_per_em"]), float(metrics["default"])
++        return sum(float(w.get(c, dflt)) for c in text) * font_size / upm
+     return len(text) * font_size * char_width_ratio
+ 
+ 
++_METRICS_CACHE: dict = {}
++
++
++def font_metrics(cfg) -> dict | None:
++    """M181: the advance-width table named by cfg.font_metrics (relative to the project root; "" = off — the old
++    estimate). Missing or unreadable file → None (the old estimate), never an error."""
++    rel = str(getattr(cfg, "font_metrics", "") or "")
++    if not rel:
++        return None
++    if rel not in _METRICS_CACHE:
++        import json
++        from pathlib import Path
++        p = Path(rel) if Path(rel).is_absolute() else Path(__file__).resolve().parents[3] / rel
++        try:
++            m = json.loads(p.read_text(encoding="utf-8"))
++            _METRICS_CACHE[rel] = m if {"widths", "units_per_em", "default"} <= set(m) else None
++        except (OSError, ValueError):
++            _METRICS_CACHE[rel] = None
++    return _METRICS_CACHE[rel]
++
++
+ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: int,
+-                font_size: int, char_width_ratio: float, break_pause_sec: float) -> list[list[Word]]:
++                font_size: int, char_width_ratio: float, break_pause_sec: float,
++                metrics: dict | None = None) -> list[list[Word]]:
+     """Слова → группы по `words_per_line`; группа обрывается раньше, если:
+ 
+     - пауза до следующего слова `(next.t0 − cur.t1) > break_pause_sec` (граница фразы) — слово
+@@ -89,7 +117,7 @@ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: in
+                 if w.t0 - group[-1].t1 > break_pause_sec:
+                     break                   # пауза = граница фразы → закрываем группу
+                 text = " ".join(x.word for x in group + [w])
+-                if _estimate_width(text, font_size, char_width_ratio) > max_text_width_px:
++                if _estimate_width(text, font_size, char_width_ratio, metrics) > max_text_width_px:
+                     break                   # добавление слова переполняет строку → закрываем группу
+             group.append(w)
+         groups.append(group)
+@@ -143,7 +171,8 @@ def _style_line(cfg: SubtitlesConfig) -> str:
+     return "Style: " + ",".join(str(x) for x in fields)
+ 
+ 
+-def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float) -> str:
++def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float,
++              metrics: dict | None = None) -> str:
+     """Greedily wrap `text` into lines that fit `max_px` (estimated width), joined with ASS \\N.
+ 
+     WrapStyle is 2 (no auto-wrap — \\N only), so a long title plate would otherwise run off the
+@@ -152,7 +181,7 @@ def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float
+     out: list[str] = []
+     cur: list[str] = []
+     for w in words:
+-        if cur and _estimate_width(" ".join(cur + [w]), font_size, char_width_ratio) > max_px:
++        if cur and _estimate_width(" ".join(cur + [w]), font_size, char_width_ratio, metrics) > max_px:
+             out.append(" ".join(cur))
+             cur = [w]
+         else:
+@@ -225,7 +254,7 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
+     groups = group_words(
+         words, words_per_line=cfg.words_per_line, max_text_width_px=cfg.max_text_width_px,
+         font_size=cfg.font_size, char_width_ratio=cfg.char_width_ratio,
+-        break_pause_sec=cfg.subtitle_break_pause_sec,
++        break_pause_sec=cfg.subtitle_break_pause_sec, metrics=font_metrics(cfg),
+     )
+     _has_kw = enable_keywords and any(w.emph for w in words)
+     _cont = fx.get("continue") if fx.get("continue") and str(fx["continue"].get("text", "")).strip() else None
+@@ -256,7 +285,8 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
+         ttext = title.upper() if cfg.uppercase else title
+         tsize = cfg.title_font_size or cfg.font_size
+         ttext = _wrap_ass(ttext, max_px=cfg.max_text_width_px, font_size=tsize,
+-                          char_width_ratio=cfg.char_width_ratio)   # wrap so a long title never clips
++                          char_width_ratio=cfg.char_width_ratio,
++                          metrics=font_metrics(cfg))   # wrap so a long title never clips
+         fi = fo = cfg.title_fade_ms
+         ttext = f"{{\\fad({fi},{fo})}}" + ttext
+         _ts = max(0.0, float(title_start or 0.0))
+@@ -319,7 +349,7 @@ def build_cover_ass(title: str, *, cfg: SubtitlesConfig, play_res: tuple[int, in
+     if t:
+         ttext = t.upper() if cfg.uppercase else t
+         ttext = _wrap_ass(ttext, max_px=cfg.max_text_width_px, font_size=cfg.title_font_size or cfg.font_size,
+-                          char_width_ratio=cfg.char_width_ratio)
++                          char_width_ratio=cfg.char_width_ratio, metrics=font_metrics(cfg))
+         lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(3600.0)},Title,,0,0,0,,{ttext}")
+     return "\n".join(lines) + "\n"
+ 
+@@ -388,7 +418,7 @@ def _callout_line(cfg: SubtitlesConfig, t: float, text: str, dur: float) -> str:
+     size = cfg.callout_font_size or int(round(cfg.font_size * 1.5))
+     body = text.upper() if cfg.uppercase else text
+     body = _wrap_ass(body.strip(), max_px=cfg.max_text_width_px, font_size=size,
+-                     char_width_ratio=cfg.char_width_ratio)
++                     char_width_ratio=cfg.char_width_ratio, metrics=font_metrics(cfg))
+     tag = "{\\fad(150,250)\\fscx85\\fscy85\\t(0,200,\\fscx100\\fscy100)}"
+     return f"Dialogue: 2,{_ass_time(t)},{_ass_time(t + dur)},Callout,,0,0,0,,{tag}{body}"
+ 
+diff --git a/tests/test_m181_font_metrics.py b/tests/test_m181_font_metrics.py
+new file mode 100644
+index 0000000..c8a5442
+--- /dev/null
++++ b/tests/test_m181_font_metrics.py
+@@ -0,0 +1,49 @@
++"""M181 (owner on prew_isaev_anna r11: the plate «КАК ПРИВИВАЮТСЯ ЖИЗНЕННЫЕ ЦЕННОСТИ» ran off both edges): lines are
++fitted by the font's real advance widths (config/fonts/*.json) when subtitles.yaml font_metrics names one; "" or a
++missing file = the old len × size × char_width_ratio estimate."""
++import json
++
++from autoreels.local import subtitles as S
++
++# Arial Bold-like capitals are ~0.72 em; the old ratio 0.55 put 25 capitals at 990 px (< 1000) — really ~1300 px
++METRICS = {"units_per_em": 2048, "default": 1479,
++           "widths": {**{c: 1479 for c in "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"}, " ": 569}}
++
++
++def test_old_estimate_without_metrics():
++    assert S._estimate_width("АБВ", 72, 0.55) == 3 * 72 * 0.55
++    assert S._wrap_ass("КАК ПРИВИВАЮТСЯ ЖИЗНЕННЫЕ ЦЕННОСТИ", max_px=1000, font_size=72,
++                       char_width_ratio=0.55) == "КАК ПРИВИВАЮТСЯ ЖИЗНЕННЫЕ\\NЦЕННОСТИ"
++
++
++def test_metrics_wrap_the_plate_inside_the_frame():
++    out = S._wrap_ass("КАК ПРИВИВАЮТСЯ ЖИЗНЕННЫЕ ЦЕННОСТИ", max_px=1000, font_size=72, char_width_ratio=0.55,
++                      metrics=METRICS)
++    assert out.split("\\N") == ["КАК ПРИВИВАЮТСЯ", "ЖИЗНЕННЫЕ ЦЕННОСТИ"]   # 748 px and 956 px, each inside 1000
++
++
++def test_font_metrics_from_config(tmp_path):
++    p = tmp_path / "m.json"
++    p.write_text(json.dumps(METRICS), encoding="utf-8")
++
++    class Cfg:
++        font_metrics = str(p)
++    assert S.font_metrics(Cfg())["units_per_em"] == 2048
++
++    class Off:
++        font_metrics = ""
++    assert S.font_metrics(Off()) is None
++
++    class Missing:
++        font_metrics = str(tmp_path / "nope.json")
++    assert S.font_metrics(Missing()) is None
++
++
++def test_group_words_uses_metrics():
++    from autoreels.core.models import Word
++    ws = [Word(word=w, t0=i * 0.3, t1=i * 0.3 + 0.25) for i, w in enumerate("ПРИВИВАЮТСЯ ЖИЗНЕННЫЕ ЦЕННОСТИ".split())]
++    old = S.group_words(ws, words_per_line=3, max_text_width_px=1000, font_size=72, char_width_ratio=0.55,
++                        break_pause_sec=1.0)
++    new = S.group_words(ws, words_per_line=3, max_text_width_px=1000, font_size=72, char_width_ratio=0.55,
++                        break_pause_sec=1.0, metrics=METRICS)
++    assert [len(g) for g in old] == [2, 1] and [len(g) for g in new] == [1, 2]
+diff --git a/tools/font_widths.py b/tools/font_widths.py
+new file mode 100644
+index 0000000..4b06949
+--- /dev/null
++++ b/tools/font_widths.py
+@@ -0,0 +1,31 @@
++"""M181: advance widths of a font file → config/fonts/<name>.json for subtitle and plate line fitting
++(local/subtitles.py font_metrics). Needs fontTools only here, once (`pip install fonttools` in any venv);
++the project reads the JSON.
++
++Usage: python tools/font_widths.py "/System/Library/Fonts/Supplemental/Arial Bold.ttf" config/fonts/Arial-Bold.json
++"""
++import json
++import sys
++from pathlib import Path
++
++from fontTools.ttLib import TTFont
++
++CHARS = ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
++         "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя"
++         "0123456789 .,:;!?…-–—«»\"'()/%+=№#&*")
++
++src, dst = sys.argv[1], sys.argv[2]
++font = TTFont(src)
++cmap = font.getBestCmap()
++hmtx = font["hmtx"]
++widths = {}
++for c in CHARS:
++    g = cmap.get(ord(c))
++    if g is not None:
++        widths[c] = hmtx[g][0]
++upm = font["head"].unitsPerEm
++caps = [widths[c] for c in "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЩЭЮЯ" if c in widths]
++out = {"source": Path(src).name, "units_per_em": upm, "default": max(caps) if caps else upm, "widths": widths}
++Path(dst).parent.mkdir(parents=True, exist_ok=True)
++Path(dst).write_text(json.dumps(out, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
++print(f"{dst}: {len(widths)} glyphs, units_per_em {upm}, default {out['default']}")
