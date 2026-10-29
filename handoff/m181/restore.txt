@@ -1,0 +1,7 @@
+disko_beach_p1: возвращены —; остались в _excluded: r02, r04, r05
+disko_beach_p2: возвращены —; остались в _excluded: r04
+disko_beach_p3: возвращены r02, r13, r18, r20; остались в _excluded: r01, r08, r09, r10, r11
+day_yoga_p1: возвращены r02; остались в _excluded: r01
+day_yoga_p2: возвращены —; остались в _excluded: r04, r05, r07, r09
+prew_isaev_anna: возвращены r08, r10; остались в _excluded: r05, r06, r07, r09
+prew_isaev_danny: возвращены —; остались в _excluded: r01, r03, r05, r06, r08, r09, r10

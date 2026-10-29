@@ -1,0 +1,4 @@
+клип 1/1: r11 (1:05)…
+  ✓ клип 1/1: r11 (1:05) готово
+  warning: web-safe: video codec is hevc, not h264 — web players may transcode and drop audio
+готово: 1 клипов → /Users/danny/Documents/autoreels/reels-out/prew_isaev_anna/_gate/m181

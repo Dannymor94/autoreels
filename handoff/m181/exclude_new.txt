@@ -1,0 +1,33 @@
+disko_beach_p1: клипов 14, убрать 3
+  r02: short shot 0.51s between two picture changes (out 4.89–5.40s, src 478.08–478.59): whole sentences s7@477.545
+  r04: repeats r14: 91% of its seconds
+  r05: repeats r10: 96% of its seconds
+disko_beach_p2: клипов 8, убрать 1
+  r04: short shot 1.77s between two picture changes (out 33.08–34.85s, src 395.96–397.73): whole sentences s20@395.923
+disko_beach_p3: клипов 21, убрать 5
+  r01: repeats r23: 95% of its seconds
+  r08: short shot 1.74s between two picture changes (out 11.65–13.39s, src 997.14–998.88): whole sentences s14@997.161
+  r09: short shot 1.16s between two picture changes (out 21.52–22.68s, src 1172.98–1174.13): whole sentences s10@1172.971
+  r10: short shot 1.23s between two picture changes (out 0.00–1.23s, src 1344.32–1345.55): whole sentences s6@1344.341
+  r11: short shot 1.81s between two picture changes (out 0.00–1.81s, src 1407.19–1409.00): whole sentences s6@1407.240
+day_yoga_p1: клипов 5, убрать 1
+  r01: repeats r04: 100% of its seconds
+day_yoga_p2: клипов 20, убрать 4
+  r04: repeats r23: 95% of its seconds
+  r05: repeats r21: 99% of its seconds
+  r07: short shot 1.71s between two picture changes (out 12.90–14.60s, src 728.86–730.57): whole sentences s11@728.809
+  r09: short shot 1.31s between two picture changes (out 24.58–25.89s, src 1014.82–1016.12): whole sentences s8@1014.552
+prew_isaev_anna: клипов 16, убрать 4
+  r05: short shot 1.29s between two picture changes (out 0.00–1.29s, src 859.39–860.68): whole sentences s8@859.378
+  r06: repeats r12: 100% of its seconds
+  r07: repeats r11: 97% of its seconds
+  r09: repeats r17: 91% of its seconds
+prew_isaev_danny: клипов 21, убрать 7
+  r01: repeats r13: 100% of its seconds
+  r03: repeats r22: 93% of its seconds
+  r05: repeats r17: 96% of its seconds
+  r06: repeats r21: 99% of its seconds
+  r08: repeats r12: 98% of its seconds
+  r09: repeats r18: 100% of its seconds
+  r10: repeats r20: 82% of its seconds
+ВСЕГО убрать: 25 (пробный прогон, --do переносит)
