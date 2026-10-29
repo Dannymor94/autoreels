@@ -1,0 +1,75 @@
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index 88913e6..7527ddf 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -26,6 +26,9 @@
+ 
+ `arl render --manifest reviews/<копия>.review.json --gate <имя> --remote` или `arl auto <источники> --remote`. Mac отправляет на gamebox (`config/render.yaml remote:`, папка `/mnt/data/autoreels`): отслеживаемый код (`git ls-files`), копию разметки, `transcripts/<источник>.*`, кэшированную расшифровку источника из `data/cache/` (без неё рендер там проверяет швы грубым правилом и печатает ложные «seam inside word» — m158, m160), модель лиц и музыку; исходник — только если gamebox не находит его по содержимому. Рендер идёт там под общим замком с кодером и профилем из `remote:`, папка гейта возвращается на Mac (`tar` по ssh: в именах источников бывают пробелы). Только в гейт: настоящие клипы с другой машины не пишутся. Окружение там: `/mnt/data/autoreels/.venv` (`pip install -e ".[dev]"`, OpenCV обязателен — без него рамка не по лицу).
+ 
++## Проверка целостности клипа (M179, M180)
++В m165 на gamebox 16 клипов из 26 упали с `integrity check failed — missing picture in access unit with size 12`, и проверка их удаляла, так что разобрать файлы было нельзя. Замер m179: 41 клип `h264_vaapi` и пробное кодирование — ни одного такого сообщения, маленьких пакетов в файлах нет; причина не найдена. С M180 клип, не прошедший проверку, остаётся как `rNN.ERROR.mp4`, слова ffmpeg — в `rNN.integrity.txt` рядом: если сообщение вернётся, файл разбирается (`ffprobe -show_packets`, `-bsf:v trace_headers`), и правка делается по нему.
++
+ ## Карта говорящих (M165, M170)
+ 
+ `arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 4b1fa0e..bc4bb21 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -3806,9 +3806,14 @@ def _render_segments(
+                     _clip_errors.append(f"  [ERROR] {reel.id}: {str(_ee)[:300]}")
+             _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
+             if _integrity_err:
+-                print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
+-                out.unlink(missing_ok=True)
+-                continue
++                # M180 (m179: m165's «missing picture in access unit with size 12» on gamebox could not be examined —
++                # the check deleted every such clip, and 41 clips now do not reproduce it): the clip is kept as
++                # .ERROR.mp4 like every other check's (M47), with ffmpeg's full words beside it, so the file can be probed
++                _clip_errors.append(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}")
++                try:
++                    (out_dir / f"{reel.id}.integrity.txt").write_text(_integrity_err + "\n", encoding="utf-8")
++                except OSError:
++                    pass
+             # Invariant: the file must last the length _expected_output_duration derived from the
+             # final post-snap windows — the same values fed to the concat graph. Tolerance is 2.5
+             # frames at OUTPUT fps (see _duration_within_tolerance); a larger drift means a stage
+diff --git a/tests/test_render.py b/tests/test_render.py
+index b74f3f1..80967f8 100644
+--- a/tests/test_render.py
++++ b/tests/test_render.py
+@@ -3714,3 +3714,34 @@ def test_m102_each_reel_gets_its_frame_and_close_shot_from_its_face(tmp_path, re
+     render_crop(m, inputs_dir=inputs, out_dir=tmp_path / "o3", render_cfg=off, subtitles_cfg=subs_cfg)
+     plain = " ".join(map(str, fake_ffmpeg[0]))
+     assert "crop=1215:2160:1240:0" in plain and "кадр r01" not in capsys.readouterr().out
++
++
++def test_integrity_failure_keeps_the_clip_as_error_file(tmp_path, render_cfg, fake_ffmpeg, monkeypatch):
++    """M180 (m179: gamebox's «missing picture in access unit with size 12» deleted 16 of 26 clips in m165, and the
++    files could never be examined): a clip failing the integrity check is kept as .ERROR.mp4 (M47) with ffmpeg's
++    words in <rid>.integrity.txt; the other clips are rendered as before."""
++    real_popen = render.subprocess.Popen
++
++    class _Writes(real_popen):
++        def __init__(self, cmd, **kw):
++            super().__init__(cmd, **kw)
++            last = str(cmd[-1])
++            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
++                Path(last).parent.mkdir(parents=True, exist_ok=True)
++                Path(last).write_bytes(b"x")
++    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
++    monkeypatch.setattr(render, "_check_integrity",
++                        lambda path, *a, **k: "[h264 @ 0x1] missing picture in access unit with size 12"
++                        if Path(path).stem.startswith("r01") else "")
++    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
++    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
++    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
++    monkeypatch.setattr(render, "_probe_duration_sec", lambda path, *a, **k: None)
++    inputs = tmp_path / "inputs"
++    sha = _make_source(inputs, "v.mp4", b"integrity-keeps")
++    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
++    out_dir = tmp_path / "out"
++    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
++    assert [p.name for p in outputs] == ["r02.mp4"]
++    assert (out_dir / "r01.ERROR.mp4").exists() and not (out_dir / "r01.mp4").exists()
++    assert "missing picture" in (out_dir / "r01.integrity.txt").read_text(encoding="utf-8")
