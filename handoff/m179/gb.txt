@@ -1,0 +1,2 @@
+ffmpeg version 8.0.1-3ubuntu2 Copyright (c) 2000-2025 the FFmpeg developers
+ 09:45:05 up 34 min,  3 users,  load average: 0.23, 0.46, 0.43

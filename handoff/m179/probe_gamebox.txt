@@ -1,0 +1,7 @@
+== reels-out/prew_isaev_anna/_gate/m179keep/r03.mp4
+-- ffmpeg 8.0.1-3ubuntu2
+-- integrity (copy):
+-- full decode errors:
+-- small video packets (size < 64):
+-- packets: 3700, frames: 3700,3700
+-- NAL units of packets under 64 bytes (and the packet before):
