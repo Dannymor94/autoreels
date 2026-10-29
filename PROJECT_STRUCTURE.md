@@ -42,6 +42,10 @@ autoreels/
 │
 ├── tools/flash_check.py      # поиск мигания в готовых клипах двух планов (сверка с исходником)
 ├── tools/diarize.py          # M165: pyannote — разделение голосов (своё окружение с torch, `arl speakers --python`)
+├── tools/font_widths.py      # M181: ширины букв шрифта → config/fonts/*.json (подгонка строк субтитров и плашки)
+├── tools/grid.py             # M174/M187: сетка публикаций по смыслу после перепрогона (export/crosspost/)
+├── tools/publish_dir.py      # M186/M187: общий каталог export/publish/NNN_rXX_<источник>.mp4 в порядке сетки
+├── tools/measure_shots.py    # M173/M187: короткие планы и вспышки готовых клипов по review.json
 ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
 │
 ├── docs/
