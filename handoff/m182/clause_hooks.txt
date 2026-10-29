@@ -1,0 +1,7 @@
+reviews/day_yoga_p1_auto_m182.txt:1
+reviews/day_yoga_p2_auto_m182.txt:4
+reviews/disko_beach_p1_auto_m182.txt:6
+reviews/disko_beach_p2_auto_m182.txt:6
+reviews/prew_isaev_anna_auto_m182.txt:0
+reviews/disko_beach_p3_auto_m182.txt:4
+reviews/prew_isaev_danny_auto_m182.txt:1

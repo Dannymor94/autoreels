@@ -1,0 +1,20 @@
+    ! weak start s9: the sentence before it ends with the voice up (open (end pitch 71/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s6 «Глазки ваши закрыты, ум…», s10 «Таким образом мы убираем…», s11 «Теперь почувствуйте сразу все…»
+  ⚠ r01 убран из черновика: no room after last word «становится.» (next speech at 211.567) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r02 убран из черновика: short shot 0.51s between two picture changes (out 4.89–5.40s, src 478.08–478.59): whole sentences s7@477.545 — automatic clip needs another cut
+  ⚠ r04 убран из черновика: weak start «И без концепции просто смотреть.» — «и…» — automatic clip needs another start
+  ⚠ r05 убран из черновика: repeats r07: 96% of its seconds — automatic clip needs other content
+  ⚠ r04 убран из черновика: short shot 1.85s between two picture changes (out 0.00–1.85s, src 354.05–355.89): whole sentences s2@354.083 — automatic clip needs another cut
+  ⚠ r04 убран из черновика: short shot 1.77s between two picture changes (out 33.08–34.85s, src 395.96–397.73): whole sentences s20@395.923 — automatic clip needs another cut
+    ! weak start s1: the sentence before it ends with the voice up (open (end pitch 96/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s5 «Ваши мысли о себе,…», s6 «Саша — это тот…», s8 «Благополучно попадает в одну…»
+  ⚠ r03 убран из черновика: no room after last word «человечек.» (next speech at 563.294) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r06 убран из черновика: no room after last word «посмотрим.» (next speech at 867.961) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r14 убран из черновика: no room after last word «колесе.» (next speech at 862.938) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r08 убран из черновика: short shot 1.74s between two picture changes (out 11.65–13.39s, src 997.14–998.88): whole sentences s14@997.161 — automatic clip needs another cut
+  ⚠ r09 убран из черновика: short shot 1.16s between two picture changes (out 21.52–22.68s, src 1172.98–1174.13): whole sentences s10@1172.971 — automatic clip needs another cut
+  ⚠ r10 убран из черновика: short shot 1.23s between two picture changes (out 0.00–1.23s, src 1344.32–1345.55): whole sentences s6@1344.341 — automatic clip needs another cut
+  ⚠ r11 убран из черновика: short shot 1.81s between two picture changes (out 0.00–1.81s, src 1407.19–1409.00): whole sentences s6@1407.240 — automatic clip needs another cut
+  ⚠ r01 убран из черновика: weak start «И раз вы здесь, раз вы здесь родились в таком теле» — «и…» — automatic clip needs another start
+  ⚠ r02 убран из черновика: weak start «И эта среда не может не изменять эту уникальную не» — «и…» — automatic clip needs another start
+  ⚠ r02 убран из черновика: weak start «И этот взрослый, любящий, часть психики становится» — «и…» — automatic clip needs another start
+  ⚠ r01 убран из черновика: repeats r04: 100% of its seconds — automatic clip needs other content
+  ⚠ r01 убран из черновика: no room after last word «присутствует.» (next speech at 170.166) — clip ends at its audible end — automatic clip needs another end
