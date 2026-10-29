@@ -1,0 +1,5 @@
+строк сетки 69, клипов найдено 69, нет файла: 0
+  001_r06_prew_isaev_danny.mp4  ← prew_isaev_danny/r06.mp4  (2026-10-28)
+  002_r02_day_yoga_p1.mp4  ← day_yoga_p1/r02.mp4  (2026-10-29)
+  003_r02_day_yoga_p2.mp4  ← day_yoga_p2/r02.mp4  (2026-10-30)
+пробный прогон — --do пишет export/publish/
