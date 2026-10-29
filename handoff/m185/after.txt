@@ -1,0 +1,14 @@
+disko_beach_p1: r01.mp4 r02.mp4 r03.mp4 r04.mp4 r05.mp4 r06.mp4 r07.mp4 r08.mp4 r09.mp4 r10.mp4 r11.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/disko_beach_p1/_gate/m183/_review.html"
+disko_beach_p2: r01.mp4 r02.mp4 r03.mp4 r04.mp4 r05.mp4 r06.mp4 r07.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/disko_beach_p2/_gate/m183/_review.html"
+disko_beach_p3: r01.mp4 r02.mp4 r03.mp4 r04.mp4 r05.mp4 r06.mp4 r07.mp4 r08.mp4 r09.mp4 r10.mp4 r11.mp4 r12.mp4 r13.mp4 r14.mp4 r15.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/disko_beach_p3/_gate/m183/_review.html"
+day_yoga_p1: r01.mp4 r02.mp4 r03.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/day_yoga_p1/_gate/m183/_review.html"
+day_yoga_p2: r01.mp4 r02.mp4 r03.mp4 r04.mp4 r05.mp4 r06.mp4 r07.mp4 r08.mp4 r09.mp4 r10.mp4 r11.mp4 r12.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/day_yoga_p2/_gate/m183/_review.html"
+prew_isaev_anna: r01.mp4 r02.mp4 r03.mp4 r04.mp4 r05.mp4 r06.mp4 r07.mp4 r08.mp4 r09.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/prew_isaev_anna/_gate/m183/_review.html"
+prew_isaev_danny: r01.mp4 r02.mp4 r03.mp4 r04.mp4 r05.mp4 r06.mp4 r07.mp4 r08.mp4 r09.mp4 r10.mp4 r11.mp4 r12.mp4
+  открыть: open "/Users/danny/Documents/autoreels/reels-out/prew_isaev_danny/_gate/m183/_review.html"
