@@ -1,4 +1,4 @@
-# TASK M182 (окно MAIN, Mac): крючок из части фразы + строгое начало ролика + перепрогон всего в m182
+# TASK M182 (окно MAIN, Mac): чистовик — крючки, строгое начало, перепрогон всего в m182, старые гейты в Корзину
 
 Файлы — ветка `handoff`, папка `handoff/m182/`: `TASK-M182.md`, `m182-hooks.patch`, `hooks.py`. Долго: перепрогон 7 источников с рендером (в фоне, около 2 ч). Сценарист — из кэша, судьи и посты — Sonnet из промо-кредитов (до 2026-11-02).
 
@@ -20,14 +20,17 @@
   - начало берётся на фразу-две раньше, если они идут подряд;
   - иначе ролика нет;
   - клип разметки с таким началом в `arl auto` убирается.
-- Оба флага выключены по умолчанию (тест), в `config/r0.yaml` включены.
-- Тесты `tests/test_m182_hooks_starts.py` (10). Документы: REEL_SPEC §2 п. 4, README, PLAN.
+- **Крючок для клипов разметки** (`autocut.label_hooks`). У них крючка не было никогда, отсюда «пустые» начала. Теперь клип разметки в `arl auto` получает крючок из своей второй половины по тем же правилам: целое предложение нужной длины или часть длинного, лучший по `hook_score`, без модели.
+- Все три флага выключены по умолчанию (тест), в `config/r0.yaml` включены.
+- Тесты `tests/test_m182_hooks_starts.py` (11). Документы: REEL_SPEC §2 п. 4, README, PLAN.
 
 Перепрогон заодно вносит M181 (ширина плашки и субтитров по шрифту) во все клипы.
 
+**Владелец 2026-10-29: «все видео должны быть готовы — перерендерим, старые удаляем, новые — чистовик».** Гейт `m182` — новый продакшн. Старые гейты уходят в Корзину в шаге 5, только после успешного прогона.
+
 ## Правила
 1. Шаг упал или не совпал с «Ожидается» → **СТОП**: шаг, команда, последние 40 строк.
-2. `--install` не запускать. `reviews/*_answer*.txt`, `manifests/` не трогать. Гейты m176/m163/m157/m174 не трогать.
+2. `--install` не запускать. `reviews/*_answer*.txt`, `manifests/` не трогать. Старые гейты не трогать до шага 5.
 3. Рендер один за раз; pytest — не во время рендера.
 
 ## Шаг 1. Патч, тесты, коммит
@@ -59,7 +62,7 @@ grep -h "раньше начать нельзя\|weak start" handoff/m182/auto.t
 .venv/bin/python handoff/m173/measure_shots.py reviews/*_m182.review.json | tail -1
 ```
 Ожидается:
-- в `hooks.txt` у каждого источника «с крючком» в m182 заметно больше, чем в m176 (у prew_* было 1);
+- в `hooks.txt` у каждого источника «с крючком» в m182 заметно больше, чем в m176 (у prew_* было 1); у клипов разметки — строки «крючок …» в `auto.txt`;
 - в `clause_hooks.txt` — сколько крючков из части фразы;
 - `starts.txt` — примеры поправленных начал;
 - вспышек (SLIVER) 0.
@@ -69,7 +72,16 @@ grep -h "раньше начать нельзя\|weak start" handoff/m182/auto.t
 ## Шаг 4. Посты, выгрузка, сетка
 Как шаг 4 m174, с гейтом `m182`. В конце: `python handoff/m174/grid2.py m182 --from m176`. Новые клипы — по смыслу, затем `grid2.py m182 --from m182`. `cp export/crosspost/grid.csv handoff/m182/grid.csv`.
 
-## Шаг 5. Отчёт (на русском)
+## Шаг 5. Старые гейты — в Корзину (только если шаги 2–4 прошли)
+```bash
+mkdir -p ~/.Trash/autoreels-m182
+for d in reels-out/*/_gate/*; do [ "$(basename "$d")" = m182 ] && continue; S=$(basename "$(dirname "$(dirname "$d")")"); mkdir -p ~/.Trash/autoreels-m182/$S; mv "$d" ~/.Trash/autoreels-m182/$S/; done
+ls reels-out/*/_gate/ | sort | uniq -c | tee handoff/m182/gates_after.txt
+du -sh ~/.Trash/autoreels-m182 | tee -a handoff/m182/gates_after.txt
+```
+Ожидается: в `reels-out/<источник>/_gate/` осталась только `m182` у всех 7. Корзину не очищать — это решает владелец.
+
+## Шаг 6. Отчёт (на русском)
 `handoff/m182/REPORT.md`:
 - коммит, pytest;
 - `itog.txt`;
@@ -79,10 +91,10 @@ grep -h "раньше начать нельзя\|weak start" handoff/m182/auto.t
 - клипов по источникам (m176 → m182);
 - вывод `grid2.py`.
 
-`bash handoff/bin/report.sh m182 itog.txt hooks.txt clause_hooks.txt starts.txt grid.csv`
+`bash handoff/bin/report.sh m182 itog.txt hooks.txt clause_hooks.txt starts.txt gates_after.txt grid.csv`
 
 Владельцу — две строки:
 - «перепрогон: N клипов в _gate/m182, крючок у X из N (в m176 — Y); листы reels-out/<источник>/_gate/m182/_review.html»;
-- «сетка — export/crosspost/grid.csv».
+- «чистовик — reels-out/<источник>/_gate/m182 (старые гейты в Корзине), сетка — export/crosspost/grid.csv».
 
 Статус: IMPLEMENTED, GATE PENDING.
