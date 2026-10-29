@@ -1,0 +1,181 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 9ebf85c..423a96a 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -368,6 +368,7 @@ autocut:
+   start_strict: true      # M182: a reel never opens on a line pointing back («Каждый из них…», «Это…») or at the interviewer
+                           # («Ты…», «…, Ласанна.»): up to start_extend_max sentences before are added, else it goes
+   start_extend_max: 2
++  label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 9035465..55c122e 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -20,7 +20,7 @@
+ 1. Предложение N играет в самом начале клипа.
+ 2. Повтор в теле: если N стоит во второй половине тела клипа — звучит ещё раз на своём месте (зритель узнаёт обещанное). Если в первой половине — из тела убирается (иначе «крючок и сразу та же фраза»).
+ 3. `h:N!` — повторять всегда, `h:N-` — никогда.
+-4. **Крючок из части фразы (M182, флаг `autocut.hook_clauses`).** `h:B.N@i-j` — холодный старт из слов i…j предложения: законченный кусок между паузами внутри фразы (на краю — слово с «,;:—» и тишина не короче `hook_clause_pause`), длина и число слов — как у обычного крючка. В субтитрах крючка только эти слова; предложение целиком всегда звучит в теле. Автоматика предлагает такой крючок, когда целое предложение длиннее `hook_max_sec`.
++4. **Крючок из части фразы (M182, флаг `autocut.hook_clauses`).** `h:B.N@i-j` — холодный старт из слов i…j предложения: законченный кусок между паузами внутри фразы (на краю — слово с «,;:—» и тишина не короче `hook_clause_pause`), длина и число слов — как у обычного крючка. В субтитрах крючка только эти слова; предложение целиком всегда звучит в теле. Автоматика предлагает такой крючок, когда целое предложение длиннее `hook_max_sec`. Клип разметки в `arl auto` (у него крючка не было) получает крючок по тем же правилам из своей второй половины (`autocut.label_hooks`).
+ 
+ ## 3. План кадра (общий / крупный)
+ 
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 0c7dd68..5789a77 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -5500,6 +5500,54 @@ def _filler_profile_values(r0_cfg, name: str | None) -> dict:
+     return {k: v for k, v in profiles[name].items() if k in allowed}
+ 
+ 
++def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
++    """M182: a cold open for a label clip of arl auto (it never had one) — (sentence no, (i, j) or None, text) or None.
++    The same rules as the montage lines' candidates: from autocut.hook_teaser_pos of the clip on (play order, heard
++    length), not pointing back; a finished sentence of hook_min_words … hook_max_sec, else (hook_clauses) a clause of a
++    long one between pauses; the best by hook_score (a clause loses a tie). Deterministic, no model."""
++    from autoreels.cloud.autocut import clause_spans, hook_score, teaser_pointer
++    from autoreels.cloud.edit import _ends_terminal
++    from autoreels.cloud.plan import SpeechTimes, heard_pause
++    ac = getattr(r0_cfg, "autocut", None)
++    if ac is None:
++        return None
++    play = _manual_play_order(entry, sents, r0_cfg)
++    if len(play) < 2:
++        return None
++    try:
++        times = SpeechTimes(tx_words, smap, align)
++    except Exception:  # noqa: BLE001 — no word times: no cold open
++        return None
++    hmax = float(getattr(r0_cfg, "hook_max_sec", 6.0))
++    hmin, hwords = float(ac.hook_min_sec), int(ac.hook_min_words)
++    pos = float(getattr(ac, "hook_teaser_pos", 0.5))
++    lens = [max(0.0, times.audible(sents[n - 1][-1])[1] - times.audible(sents[n - 1][0])[0]) for n in play]
++    total = sum(lens) or 1.0
++    best, at = None, 0.0
++    for n, ln in zip(play, lens):
++        start, at = at, at + ln
++        if start / total < pos:
++            continue
++        st = sents[n - 1]
++        text = " ".join(w.word for w in st)
++        nw = sum(1 for w in st if any(c.isalnum() for c in w.word))
++        cands = []
++        if _ends_terminal(st[-1]) and nw >= hwords and hmin <= ln <= hmax and not teaser_pointer(text):
++            cands.append((hook_score(text, ln), None, text))
++        elif getattr(ac, "hook_clauses", False):
++            pa = lambda k, st=st: heard_pause(times, st[k - 1], st[k]) if k < len(st) else None  # noqa: E731
++            du = lambda a, z, st=st: times.audible(st[z - 1])[1] - times.audible(st[a - 1])[0]  # noqa: E731
++            for a, z in clause_spans(st, pa, min_words=hwords, min_sec=hmin, max_sec=hmax,
++                                     min_pause=float(getattr(ac, "hook_clause_pause", 0.12)), dur=du):
++                ct = " ".join(w.word for w in st[a - 1:z])
++                if not teaser_pointer(ct):
++                    cands.append((hook_score(ct, du(a, z)) - 0.5, (a, z), ct))
++        for sc, hw, t in cands:
++            if best is None or sc > best[0]:
++                best = (sc, n, hw, t)
++    return None if best is None else (best[1], best[2], best[3])
++
++
+ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
+     """Body sentence numbers in play order for a review line: beats, else s..e minus x.
+ 
+@@ -6482,6 +6530,17 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+                 # Stored so k: resolution can accept original sentence numbers for beat reels.
+                 reel._beat_orig_sents = _valid_beats  # [8, 9, 12, 10, 11] → positions 1-5
+                 print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
++        if (getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse and labeler == "auto"
++                and getattr(_ae, "hook", None) is None and not getattr(_ae, "beats", ())
++                and getattr(getattr(r0_cfg, "autocut", None), "label_hooks", False)):
++            # M182 (owner: «начало пустое» — the label clips of arl auto never had a cold open): the clip gets one from its
++            # own second half, as the montage lines do — a finished sentence of hook length or a clause of a long one
++            _lh = _label_hook(_ae, _gsents, _tx_words, _blk_smap, _blk_align, r0_cfg)
++            if _lh is not None:
++                from types import SimpleNamespace as _SNlh
++                _ae = _SNlh(**{**_ae._asdict(), "hook": _lh[0], "hook_keep": True, "hook_words": _lh[1]})
++                print(f"  крючок {'+'.join(str(s) for s in g)}: h:{_lh[0]}" + (f"@{_lh[1][0]}-{_lh[1][1]}" if _lh[1] else "")
++                      + f" «{_lh[2][:60]}»")
+         if getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse:
+             try:
+                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 0b81a7b..9c04dbb 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -982,11 +982,14 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams,
+                 continue
+             if p.hook_teaser and (total <= 0 or start / total < p.hook_teaser_pos):
+                 continue                  # M83: in the first part — the clip plays it at once, it teases nothing
+-            if p.hook_teaser and p.hook_no_pointer and teaser_pointer(text):
+-                continue                  # M92: heard cold, a line pointing back explains nothing
+-            if glued_start(ref, p, start_pause):
+-                continue                  # M144: a cold open glued to the speech before it loses its first sound
+-            if complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
++            # M183 (m182: prew_isaev_anna 0 clause hooks — interview sentences open on «А…», «То есть…», «Вот…», and the
++            # sentence was skipped before its clauses were looked at): a sentence that cannot be a cold open itself (it
++            # points back, its start is glued) still gives its later clauses
++            whole_bad = ((p.hook_teaser and p.hook_no_pointer and teaser_pointer(text))
++                         or glued_start(ref, p, start_pause))
++            if whole_bad and not (p.hook_clauses and clauses is not None):
++                continue                  # M92 / M144: as before
++            if not whole_bad and complete and nwords >= p.hook_min_words and p.hook_min_sec <= sec <= p.hook_max_sec:
+                 bonus = 1.0 if u.get("role") in HOOK_ROLES else 0.0
+                 if p.context_start and back_reference(text):
+                     bonus -= 3.0          # M74: a cold open that points back («как я говорил») explains nothing
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 5512204..9f40b88 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -287,6 +287,7 @@ class AutocutConfig(BaseModel):
+     hook_clause_pause: float = Field(0.12, ge=0.0)   # … silence heard at a clause edge inside the sentence
+     start_strict: bool = False                # M182: a reel never opens on a line pointing back / at the interviewer
+     start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
++    label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
+     generator: str = Field("montage", pattern="^(montage|passage|mixed)$")   # passage: adjacent thoughts around a strong
+diff --git a/tests/test_m182_hooks_starts.py b/tests/test_m182_hooks_starts.py
+index 170cacc..3ae0618 100644
+--- a/tests/test_m182_hooks_starts.py
++++ b/tests/test_m182_hooks_starts.py
+@@ -127,3 +127,38 @@ def test_apply_builds_a_clause_cold_open(tmp_path, capsys):
+     s52 = merge_group_sentences([kept[4]], tx.words)[1]
+     co = mont.cold_open
+     assert co is not None and co.start <= s52[0].t0 and co.end < s52[-1].t1      # the clause only, not the sentence
++
++
++def test_label_hook_picks_a_teaser_from_the_second_half():
++    from types import SimpleNamespace
++    from autoreels import __main__ as cli
++    tail = [("Потом", 8.0, 8.4), ("я", 8.45, 8.55), ("это", 8.6, 8.8), ("понял.", 8.85, 9.6)]
++    first = [("Начало", 0.0, 0.4), ("истории", 0.45, 0.9), ("было", 0.95, 1.2), ("простым", 1.25, 1.7),
++             ("и", 1.75, 1.8), ("понятным.", 1.85, 2.6)]
++    shifted = [(t, a + 3.0, b + 3.0) for t, a, b in W]           # the long sentence after the first one
++    sents, words, smap, align = _setup([first, shifted, [(t, a + 3.0, b + 3.0) for t, a, b in tail]], [])
++    entry = SimpleNamespace(beats=(), s=None, e=3, x=(), hook=None)
++    ac = SimpleNamespace(hook_min_sec=1.5, hook_min_words=4, hook_teaser_pos=0.2, hook_clauses=True,
++                         hook_clause_pause=0.12)
++    r0 = SimpleNamespace(autocut=ac, hook_max_sec=6.0, filler_removal=None, wind_down_phrases=[])
++    got = cli._label_hook(entry, sents, words, smap, align, r0)
++    assert got is not None and got[0] == 2 and got[1] is not None and got[1][0] >= 1
++    ac.hook_clauses = False
++    assert cli._label_hook(entry, sents, words, smap, align, r0) is None or cli._label_hook(
++        entry, sents, words, smap, align, r0)[1] is None
++
++
++def test_m183_a_pointing_sentence_still_gives_its_clauses():
++    """M183 (m182: prew_isaev_anna 0 clause hooks): «А…» / «То есть…» opens most interview sentences; the sentence is
++    no cold open itself, but a later clause of it is."""
++    p = dataclasses.replace(AutoParams(), hook_teaser=True, hook_teaser_pos=0.0, hook_no_pointer=True, min_punch=0,
++                            hook_clauses=True)
++    text = "А когда я ехал домой, я понял главную вещь о себе, и это было больно."
++
++    def rows(refs):
++        return [("1.1", 8.0, 15, True, text)]
++    clip = [{"id": 1, "refs": "1.1", "punch": 4, "role": "thesis"}]
++    cl = lambda ref: [(1, 5, 1.6, "А когда я ехал домой,"), (6, 11, 2.1, "я понял главную вещь о себе,")]  # noqa: E731
++    cands = _hook_cands(clip, rows, p, clauses=cl)
++    assert [c[0] for c in cands] == ["1.1@6-11"]                       # the «А…» clause is still no teaser
++    assert _hook_cands(clip, rows, dataclasses.replace(p, hook_clauses=False), clauses=cl) == []   # off: as before
