@@ -6816,6 +6816,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             for _rid, _w, _why in _refused:
                 print(f"  ⚠ {_rid} убран из черновика: {_w} — automatic clip needs {_why}", flush=True)
             reels = [r for r in reels if r.id not in _gone]
+            # M185 (owner on the m183 gate: «почему они так пронумерованы, нет 1 и т. д.»): the clips left are numbered
+            # again r01, r02, … — the gaps were the clips that left the draft
+            from autoreels.cloud.chunk_transcribe import renumber_reels as _renum
+            reels = _renum(reels)
         elif _refused:
             for _rid, _w, _why in _refused:
                 print(f"  [ERROR] {_rid}: {_w} — automatic clip needs {_why}", file=sys.stderr, flush=True)

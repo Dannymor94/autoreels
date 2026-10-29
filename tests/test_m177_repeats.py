@@ -47,3 +47,17 @@ def test_arl_auto_apply_drops_the_repeat(tmp_path, monkeypatch, capsys):
     assert rc == 0, out.err[-1500:]
     man = Manifest.model_validate_json((tmp_path / "reviews" / "v.review.json").read_text())
     assert [("montage" in r.flags) for r in man.reels] == [True] and "repeats rX" in out.out
+
+
+def test_m185_clips_left_are_numbered_without_gaps(tmp_path, monkeypatch, capsys):
+    """M185 (owner on m183: «почему они так пронумерованы, нет 1»): after clips leave the combined draft of arl auto
+    the rest is r01, r02, … again."""
+    from autoreels.core.models import Manifest
+    from tests.test_m176_combined_draft import _draft
+    rpath = _draft(tmp_path, "2 80\n3 80\nM 85 | 2.2-4 5.1-3\n")
+    monkeypatch.setattr(cli, "_auto_repeats", lambda reels, m: [(reels[0].id, "repeats rX: 90% of its seconds")])
+    rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto",
+                              drop_refused=True)
+    assert rc == 0, capsys.readouterr().err[-1500:]
+    man = Manifest.model_validate_json((tmp_path / "reviews" / "v.review.json").read_text())
+    assert [r.id for r in man.reels] == [f"r{i:02d}" for i in range(1, len(man.reels) + 1)] and len(man.reels) >= 1
