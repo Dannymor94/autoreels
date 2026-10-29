@@ -96,6 +96,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
 
 - Задачи, патчи и скрипты ассистента лежат в ветке `origin/handoff`, в папке `handoff/mNN/`. В `main` ассистент не пишет: в `main` коммитит только агент, после тестов.
 - «Выполни mNN» = `bash handoff/bin/take.sh mNN`, затем выполнить `handoff/mNN/TASK-MNN.md`. Если `handoff/bin` ещё нет: `git fetch -q origin +refs/heads/handoff:refs/remotes/origin/handoff && git restore --source=origin/handoff --worktree -- handoff/bin`.
+- **Язык — только русский**: отчёты, ответы владельцу, сообщения в чат. Не украинский и не английский, даже если в длинной сессии модель начала сбиваться (m179, m180, m181 ушли на украинский).
 - Отчёт по задаче — в `handoff/mNN/REPORT.md` (тот же текст, что владельцу), затем `bash handoff/bin/report.sh mNN [файлы из handoff/mNN …]`: отчёт уходит в ветку `handoff`, и ассистент читает его сам. Владельцу в чат — коротко: статус и что смотреть.
 - `handoff/` в `main` не коммитится (он в `.gitignore`).
 
