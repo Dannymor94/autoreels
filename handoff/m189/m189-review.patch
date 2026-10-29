@@ -1,0 +1,907 @@
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 55c122e..61a72f2 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -20,7 +20,7 @@
+ 1. Предложение N играет в самом начале клипа.
+ 2. Повтор в теле: если N стоит во второй половине тела клипа — звучит ещё раз на своём месте (зритель узнаёт обещанное). Если в первой половине — из тела убирается (иначе «крючок и сразу та же фраза»).
+ 3. `h:N!` — повторять всегда, `h:N-` — никогда.
+-4. **Крючок из части фразы (M182, флаг `autocut.hook_clauses`).** `h:B.N@i-j` — холодный старт из слов i…j предложения: законченный кусок между паузами внутри фразы (на краю — слово с «,;:—» и тишина не короче `hook_clause_pause`), длина и число слов — как у обычного крючка. В субтитрах крючка только эти слова; предложение целиком всегда звучит в теле. Автоматика предлагает такой крючок, когда целое предложение длиннее `hook_max_sec`. Клип разметки в `arl auto` (у него крючка не было) получает крючок по тем же правилам из своей второй половины (`autocut.label_hooks`).
++4. **Крючок из части фразы (M182, флаг `autocut.hook_clauses`).** `h:B.N@i-j` — холодный старт из слов i…j предложения: законченный кусок между паузами внутри фразы (на краю — слово с «,;:—» и тишина не короче `hook_clause_pause`), длина и число слов — как у обычного крючка. В субтитрах крючка только эти слова: слово тела, которое Whisper начал внутри окна крючка, показывается сразу после крючка (или перед ним), там, где может звучать (M189). Предложение целиком всегда звучит в теле, поэтому `h:B.N@i-j-` — ошибка разметки. Конец предложения закрывает кусок, только если предложение там закончено («.!?…»). Длина крючка против `hook_max_sec` меряется по звуку, как у кандидатов; отказ по длине виден в плане, и автоматика берёт следующий крючок (M189). Автоматика предлагает такой крючок, когда целое предложение длиннее `hook_max_sec`, — и сценарист, и бесплатный автомонтаж (M189). Клип разметки в `arl auto` (у него крючка не было) получает крючок по тем же правилам из своей второй половины (`autocut.label_hooks`); начало, склеенное с речью перед ним, крючком не становится.
+ 
+ ## 3. План кадра (общий / крупный)
+ 
+@@ -31,7 +31,7 @@
+ 3. На каждом шве (вырез `x:`, перестановка, переход крючок → тело) план меняется на противоположный предыдущему. Если после шва крупный, он держится только первую фразу (первые предложения, пока не наберётся **3 с**; не дольше **8 с** — длинное первое предложение режется на запятой), дальше кусок идёт общим.
+ 4. Предложение с `c:` — крупное; после него план возвращается к общему.
+ 5. Больше ничего. Короткий кусок не «исправляется» кодом — он виден в плане клипа, и решение принимается разметкой.
+-6. **Короткий план (M173, M174, флаг `short_shot_sec`).** Смена картинки — начало клипа, шов, вырезка, переключение общий↔крупный. План между двумя сменами короче порога — предупреждение «short shot» (крючок и последний план не считаются). Внутри одного куска общего или крупного короче порога не бывает: переключение сдвигается к краю куска или снимается, звук не меняется. Кусок внутри фразы, ставший коротким из-за вырезки паузы, удлиняется тишиной этой вырезки (только тишина, вырезка не короче `min_cut_sec`); тишины мало — вырезки нет, пауза играет. Кусок из целых фраз ручной путь оставляет с предупреждением (инвариант 5), автоматический клип выбрасывает его фразы и проверяется снова.
++6. **Короткий план (M173, M174, флаг `short_shot_sec`).** Смена картинки — начало клипа, шов, вырезка, переключение общий↔крупный. План между двумя сменами короче порога — предупреждение «short shot» (крючок и последний план не считаются). Внутри одного куска общего или крупного короче порога не бывает: переключение сдвигается к краю куска, а слишком короткий крупный план удлиняется до порога (M189: не снимается — он закрывал шов, вырезку или был `c:` владельца), звук не меняется. Планы окна приводятся в порядок до того, как следующий шов смотрит, каким планом окно кончилось, и с учётом вырезок, закрытых сменой плана: на шве и на такой вырезке план всегда меняется (M189). Шов, который должен начаться общим, не начинается крупным из-за этого: переключение ставится не раньше порога от шва; окно короче двух порогов остаётся общим, и `c:` владельца на нём даёт предупреждение. Кусок внутри фразы, ставший коротким из-за вырезки паузы, удлиняется тишиной этой вырезки (только тишина, вырезка не короче `min_cut_sec`); тишины мало — вырезки нет, пауза играет. Кусок из целых фраз ручной путь оставляет с предупреждением (инвариант 5), автоматический клип выбрасывает его фразы и проверяется снова.
+ 
+ ## 4. Конец клипа
+ 
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 8e57bc4..ea2d295 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -1141,9 +1141,15 @@ def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
+     from dataclasses import replace as _dc_rep
+     from autoreels.cloud.scenario import compress_refs, expand_refs
+     refs = expand_refs(pr.pieces) or []
+-    want = {round(float(t) * 1000) for t in t0s}
+-    gone = {r for r in refs if (sent_by_ref.get(r) or [None])[0] is not None
+-            and round(float(sent_by_ref[r][0].t0) * 1000) in want}
++    want = [float(t) for t in t0s]
++
++    def _first_t0(r):
++        # M189 (review B3): the warning names a sentence by its first word WITH a letter or digit (a leading «—»
++        # token has its own start) — the same word here, and 1 ms of print rounding either way
++        st = sent_by_ref.get(r) or []
++        w = next((x for x in st if any(c.isalnum() for c in x.word)), None)
++        return None if w is None else float(w.t0)
++    gone = {r for r in refs if _first_t0(r) is not None and any(abs(_first_t0(r) - t) <= 0.0015 for t in want)}
+     keep = [r for r in refs if r not in gone]
+     if not gone or not keep:
+         return None
+@@ -5507,7 +5513,7 @@ def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
+     long one between pauses; the best by hook_score (a clause loses a tie). Deterministic, no model."""
+     from autoreels.cloud.autocut import clause_spans, hook_score, teaser_pointer
+     from autoreels.cloud.edit import _ends_terminal
+-    from autoreels.cloud.plan import SpeechTimes, heard_pause
++    from autoreels.cloud.plan import SpeechTimes, _speech_before, heard_pause
+     ac = getattr(r0_cfg, "autocut", None)
+     if ac is None:
+         return None
+@@ -5523,6 +5529,16 @@ def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
+     pos = float(getattr(ac, "hook_teaser_pos", 0.5))
+     lens = [max(0.0, times.audible(sents[n - 1][-1])[1] - times.audible(sents[n - 1][0])[0]) for n in play]
+     total = sum(lens) or 1.0
++    spm = float(getattr(ac, "start_pause_min", 0.0) or 0.0)
++
++    def glued(w) -> bool:
++        # M189 (review): as the montage lines' candidates (M144 glued_start) — a first word with no silence before it
++        # loses its first sound when the cold open starts on it
++        if not spm:
++            return False
++        left, onset = _speech_before(times, w)
++        return left is not None and onset - left < spm
++
+     best, at = None, 0.0
+     for n, ln in zip(play, lens):
+         start, at = at, at + ln
+@@ -5532,7 +5548,8 @@ def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
+         text = " ".join(w.word for w in st)
+         nw = sum(1 for w in st if any(c.isalnum() for c in w.word))
+         cands = []
+-        if _ends_terminal(st[-1]) and nw >= hwords and hmin <= ln <= hmax and not teaser_pointer(text):
++        g0 = glued(st[0])
++        if _ends_terminal(st[-1]) and nw >= hwords and hmin <= ln <= hmax and not teaser_pointer(text) and not g0:
+             cands.append((hook_score(text, ln), None, text))
+         elif getattr(ac, "hook_clauses", False):
+             pa = lambda k, st=st: heard_pause(times, st[k - 1], st[k]) if k < len(st) else None  # noqa: E731
+@@ -5540,7 +5557,7 @@ def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
+             for a, z in clause_spans(st, pa, min_words=hwords, min_sec=hmin, max_sec=hmax,
+                                      min_pause=float(getattr(ac, "hook_clause_pause", 0.12)), dur=du):
+                 ct = " ".join(w.word for w in st[a - 1:z])
+-                if not teaser_pointer(ct):
++                if not teaser_pointer(ct) and not (a == 1 and g0):
+                     cands.append((hook_score(ct, du(a, z)) - 0.5, (a, z), ct))
+         for sc, hw, t in cands:
+             if best is None or sc > best[0]:
+@@ -5571,6 +5588,24 @@ def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
+     return [k for k in range(s, e + 1) if k not in xs]
+ 
+ 
++def _hook_cap_warning(hook, hs, tx_words, smap, align, cap: float) -> str | None:
++    """M189 (review B1): the cold open's length against hook_max_sec, measured on the sound, as the hook candidates
++    are (Whisper's t1 − t0 ran over the cap for a clause the selection had measured under it). The text carries
++    «cold open skipped» and goes to the plan lines, so the M61 fallback takes the next hook (before, the refusal was
++    not in the log and the line kept an h: the clip did not play). None = within the cap."""
++    hl = hs[-1].t1 - hs[0].t0
++    if tx_words:
++        try:
++            from autoreels.cloud.plan import SpeechTimes
++            tc = SpeechTimes(tx_words, smap, align)
++            hl = tc.audible(hs[-1])[1] - tc.audible(hs[0])[0]
++        except Exception:  # noqa: BLE001 — no word times: Whisper's length as before
++            pass
++    if hl > cap:
++        return f"cold open: hook sentence {hook} is {hl:.1f}s > cap {cap:.0f}s — refused (cold open skipped)"
++    return None
++
++
+ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, label: str, align=None,
+                        tone=None, filler=None, jump=None, filler_profile=None,
+                        filler_allowed: bool = True, breaks=(), max_static: float | None = None,
+@@ -5584,18 +5619,21 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
+     play = _manual_play_order(entry, sents, r0_cfg)
+     hook = getattr(entry, "hook", None)
+     _hook_words = getattr(entry, "hook_words", None)        # M182: a clause of the hook sentence
++    _pre_warn: list[str] = []
+     if hook is not None:
+         _hs = sents[hook - 1] if 1 <= hook <= len(sents) else None
+         if _hs is not None and _hook_words and 1 <= _hook_words[0] <= _hook_words[1] <= len(_hs):
+             _hs = _hs[_hook_words[0] - 1:_hook_words[1]]
+         _hook_max = getattr(r0_cfg, "hook_max_sec", 6.0)
+         if _hs is None:
+-            reel.warnings.append(f"h:{hook} out of range — cold open skipped")
+-            hook = None
+-        elif _hs[-1].t1 - _hs[0].t0 > _hook_max:
+-            reel.warnings.append(f"cold open: hook sentence {hook} is "
+-                                 f"{_hs[-1].t1 - _hs[0].t0:.1f}s > cap {_hook_max:.0f}s — refused")
++            _pre_warn.append(f"h:{hook} out of range — cold open skipped")
+             hook = None
++        else:
++            _cw = _hook_cap_warning(hook, _hs, tx_words, smap, align, _hook_max)
++            if _cw:
++                _pre_warn.append(_cw)
++                hook = None
++        reel.warnings.extend(_pre_warn)
+     mode = "!" if getattr(entry, "hook_keep", False) else ("-" if getattr(entry, "hook_remove", False) else None)
+     onset_fn = None
+     if smap is not None:
+@@ -5656,7 +5694,7 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
+     for _w in plan.warnings:
+         reel.warnings.append(_w)
+     lines = [f"  plan {label}:"] + [f"    {ln}" for ln in plan.describe(sents)]
+-    lines += [f"    ! {w}" for w in plan.warnings]
++    lines += [f"    ! {w}" for w in _pre_warn + plan.warnings]
+     lines += [f"    [ERROR] {e}" for e in plan.errors]
+     return lines
+ 
+@@ -6276,6 +6314,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+             _blk_jump = _jl(_mframes)
+             print(f"  движение: {len(_mframes)} кадров")
+     seq_pos: dict[int, int] = {}            # scored seq → build-order index of its reel
++    seq_dropped: dict[int, str] = {}        # M189: scored seq → why its automatic clip left the draft
+     seq_group: dict[int, list[int]] = {}    # scored seq → its merge group
+     conflicts: list[str] = []
+     for g in groups:
+@@ -6806,7 +6845,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+                     if _sw:
+                         _refused.append((r.id, f"weak start «{' '.join(_first)[:50]}» — {_sw}", "another start"))
+                 _seen = {_rid for _rid, _w, _ in _refused}
+-            _ac_max = float(getattr(getattr(r0_cfg, "autocut", None), "combined_overlap_max", 1.0) or 1.0)
++            _ac_max = getattr(getattr(r0_cfg, "autocut", None), "combined_overlap_max", 1.0)
++            _ac_max = 1.0 if _ac_max is None else float(_ac_max)     # M189 (review B11): 0 is «no overlap», not off
+             _refused += [(_rid, _w, "other content") for _rid, _w in
+                          _auto_repeats([r for r in reels if r.id not in _seen], _ac_max)]
+         if _refused and drop_refused:
+@@ -6815,7 +6855,23 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+             _gone = {_rid for _rid, _w, _ in _refused}
+             for _rid, _w, _why in _refused:
+                 print(f"  ⚠ {_rid} убран из черновика: {_w} — automatic clip needs {_why}", flush=True)
+-            reels = [r for r in reels if r.id not in _gone]
++            _why_gone = {_rid: _w for _rid, _w, _ in _refused}
++            _keep_ix = [i for i, r in enumerate(reels) if r.id not in _gone]
++            _new_pos = {old: new for new, old in enumerate(_keep_ix)}
++            for _s, _p in list(seq_pos.items()):
++                # M189 (review B4): the accounting names the reel a scored line became by its place in the draft —
++                # after the drop that place moved (or the clip is gone: said so, not «NOT PLACED»)
++                if _p in _new_pos:
++                    seq_pos[_s] = _new_pos[_p]
++                else:
++                    seq_dropped[_s] = _why_gone.get(reels[_p].id, "") if _p < len(reels) else ""
++                    del seq_pos[_s]
++            reels = [reels[i] for i in _keep_ix]
++            if not reels:
++                # M189 (review): every clip left the draft — not a success (invariant 3: zero harvest from a non-empty
++                # transcript); arl auto then tries its fallback draft
++                print("  [ERROR] every clip of the draft was refused — nothing left to build", file=sys.stderr, flush=True)
++                return 1
+             # M185 (owner on the m183 gate: «почему они так пронумерованы, нет 1 и т. д.»): the clips left are numbered
+             # again r01, r02, … — the gaps were the clips that left the draft
+             from autoreels.cloud.chunk_transcribe import renumber_reels as _renum
+@@ -7137,6 +7193,8 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+                     print(f"  line {e.seq} (score {e.score}) → reel {n}, folded into merge {joined}")
+             else:
+                 print(f"  line {e.seq} (score {e.score}) → reel {n}")
++        elif e.seq in seq_dropped:
++            print(f"  line {e.seq} (score {e.score}) → removed from the draft: {seq_dropped[e.seq][:120]}")
+         elif e.seq not in seq_to_block:
+             print(f"  line {e.seq} (score {e.score}) → NOT PLACED: block out of range (1-{len(kept)})")
+         else:
+@@ -8713,14 +8771,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+     else:
+         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
+-                       taste=_taste, start_pause=start_pause)
++                       taste=_taste, start_pause=start_pause, clauses=clauses)
+         _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
+         if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
+             # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
+             from autoreels.cloud.autocut import fill_pool
+             _extra = propose(the_map.get("units") or [],
+                              _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
+-                             judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[], start_pause=start_pause)
++                             judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[], start_pause=start_pause,
++                             clauses=clauses)
+             _n0 = len(pool)
+             pool = fill_pool(pool, _extra)
+             print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
+@@ -8942,7 +9001,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             if pr.variant_of is not None:
+                 continue
+             v = short_variant(pr, _by_id, prm, sentences, short_sec=ac.short_sec, short_min_sec=ac.short_min_sec,
+-                              label=i)
++                              label=i, clauses=clauses)
+             if v is None:
+                 continue
+             err = None
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 9c04dbb..db116cd 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -501,8 +501,15 @@ def strict_start_reason(text: str) -> str | None:
+             return f"«{ph}» — о ком?"
+     if words[0] in _YOU_SG_START:
+         return f"«{words[0]}…» — обращение к собеседнику"
+-    m = _re.search(r",\s+([А-ЯЁ][а-яё]{2,})(?=\s*[,.!?…]|\s*$)", text or "")
+-    if m:
++    t = text or ""
++    for m in _re.finditer(r",\s+([А-ЯЁ][а-яё]{2,})(?=\s*([,.!?…]|$))", t):
++        # M189 (review B10): a list of names or places («в Москве, Казани, Сочи») is no address — the word before the
++        # comma is capitalised too (not as the sentence's first word), or the next item after the comma is
++        before = _re.findall(r"[А-ЯЁа-яёA-Za-z]+", t[:m.start()])
++        prev_cap = len(before) > 1 and before[-1][:1].isupper()
++        nxt = _re.match(r"\s*,\s*([А-ЯЁ][а-яё]+)", t[m.end():])
++        if prev_cap or nxt:
++            continue
+         return f"обращение по имени («{m.group(1)}»)"
+     return None
+ 
+@@ -524,7 +531,10 @@ def clause_spans(words: Sequence, pause_after: Callable[[int], "float | None"],
+ 
+     edges = [k for k in range(1, n) if ends_clause(k) and (pause_after(k) or 0.0) >= min_pause]
+     starts = [1] + [k + 1 for k in edges]
+-    ends = edges + [n]
++    # M189 (review B7): the sentence end closes a clause only when the sentence is finished there (a Whisper sentence
++    # cut off without «.!?…» is no cold open — the thought goes on past it)
++    last = str(getattr(words[n - 1], "word", "")).rstrip().rstrip("»\"')")
++    ends = edges + ([n] if last and last[-1] in ".!?…" else [])
+     out = []
+     for a in starts:
+         for z in ends:
+@@ -1110,7 +1120,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+             no_start: list | None = None, judge: "Judge | None" = None,
+             end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
+             rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None,
+-            start_pause: Callable[[str], "float | None"] | None = None) -> list[Proposal]:
++            start_pause: Callable[[str], "float | None"] | None = None,
++            clauses: Callable[[str], list] | None = None) -> list[Proposal]:
+     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
+     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
+     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
+@@ -1123,7 +1134,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+     M120: p.rhythm — every clip keeps the jump rule (fit_rhythm before its start is fixed, rhythm_why on the final
+     clip); `rhythm_out` collects (pieces, why) of the clips that could not.
+     M138: `taste(clip)` → the owner's taste of the clip (cloud/taste.clip_taste); with p.taste_weight it is added to the
+-    score — the order only (invariant 1); taste_weight 0 or no `taste` = the score as before."""
++    score — the order only (invariant 1); taste_weight 0 or no `taste` = the score as before.
++    M189 (review B8): `clauses` (B.k → clause spans) gives the free path the clause hooks of M182, and p.start_strict
++    drops a clip whose first sentence fails strict_start_reason (the scenarist's rules, M182) — both off = as before."""
+     by_id = {u["id"]: u for u in units}
+     roles = tuple(p.seed_roles) or STORY
+     passage = p.generator in ("passage", "mixed")
+@@ -1198,6 +1211,13 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+             _r0 = list(_sent_rows(sentences, clip[0]["refs"]))
+             if _r0:
+                 extra_notes.append(f"начало: «{(_r0[0][4] or _r0[0][0])[:80]}»")
++        if p.start_strict and sentences:
++            _r0s = list(_sent_rows(sentences, clip[0]["refs"]))
++            _sw = strict_start_reason(_r0s[0][4]) if _r0s and _r0s[0][4] else None
++            if _sw:
++                if no_start is not None:
++                    no_start.append((" ".join(u["refs"] for u in clip), f"строгое начало: {_sw}"))
++                continue
+         if p.end_tone and end_tone is not None and sentences:
+             clip3, enote, ewhy = fix_open_end(clip, sentences, end_tone, p)
+             if clip3 is None:
+@@ -1241,7 +1261,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
+         payoff = next((u for u in reversed(clip) if u.get("role") in PAYOFFS), clip[-1])
+         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
+         notes += extra_notes
+-        cands = _hook_cands(clip, sentences, p, start_pause) if sentences else []
++        cands = _hook_cands(clip, sentences, p, start_pause, clauses=clauses) if sentences else []
+         close: list[str] = []
+         if p.close_last and sentences:                  # M91: the payoff in the close shot
+             rows = [r for u in clip for r in _sent_rows(sentences, u["refs"])]
+@@ -1751,7 +1771,8 @@ def check_seams(pr: "Proposal", pairs: Sequence[tuple[str, str]], provider, *,
+ 
+ 
+ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, short_sec: float = 25.0,
+-                  short_min_sec: float = 15.0, label: int = 0) -> "Proposal | None":
++                  short_min_sec: float = 15.0, label: int = 0,
++                  clauses: Callable[[str], list] | None = None) -> "Proposal | None":
+     """M70: a shorter cut of an accepted clip — the weakest middle thoughts dropped down to short_sec
+     (opener, payoff and what they lean on stay, as in _prune). None when it cannot get within
+     short_sec + 5 s or drops nothing."""
+@@ -1763,7 +1784,7 @@ def short_variant(pr: "Proposal", by_id: dict, p: AutoParams, sentences, *, shor
+     secs = sum(_dur(u) for u in short)
+     if not dropped or secs > short_sec + 5.0 or secs < short_min_sec:
+         return None
+-    cands = _hook_cands(short, sentences, p) if sentences else []
++    cands = _hook_cands(short, sentences, p, clauses=clauses) if sentences else []
+     refs = [r for r, _, _ in cands]
+     hook = pr.hook if pr.hook in refs else (refs[0] if refs else None)
+     return Proposal(units=[u["id"] for u in short], pieces=" ".join(u["refs"] for u in short), hook=hook,
+diff --git a/src/autoreels/cloud/montage.py b/src/autoreels/cloud/montage.py
+index 6280e87..8ae0ff3 100644
+--- a/src/autoreels/cloud/montage.py
++++ b/src/autoreels/cloud/montage.py
+@@ -177,6 +177,10 @@ def parse_montage(text: str) -> tuple[list[MontageEntry], list[tuple[int, str]]]
+                         hw = (int(a_s), int(z_s or a_s))
+                 if r is None or (at and hw is None):
+                     bad.append(f"h:{val} — expected h:B.N or h:B.N@i-j")
++                elif at and mode == "-":
++                    # M189 (review A4): a clause hook is always replayed in the body — «-» was dropped without a
++                    # word, and h:B.N@i- read as the clause i..i with the hook removed
++                    bad.append(f"h:{val} — a clause hook (@i-j) is always replayed: «-» is not allowed")
+                 else:
+                     e.hook, e.hook_keep, e.hook_remove = r, mode == "!", mode == "-"
+                     e.hook_words = hw
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index 9b7587f..a8fe1b7 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -134,6 +134,17 @@ class PlannedWindow:
+             return "close"
+         return "wide"
+ 
++    @property
++    def out_last_shot(self) -> str:
++        """M189: the shot the window really ends on — after its cuts, the shot switches that mask them and the tidy
++        spans (`last_shot` reads the window's spans before the cuts: an odd number of masked cuts inverts the end)."""
++        segs = self.segments()
++        seg = segs[-1]
++        if seg.shot == "close":
++            return "close"
++        ci = seg.close_intervals or []
++        return "close" if ci and ci[-1][1] >= (seg.end - seg.start) - _EPS else "wide"
++
+     def segment(self) -> Segment:
+         shot, ci = self.shot, [list(c) for c in self.close_intervals]
+         if self.min_span_sec > 0 and shot == "wide" and ci:
+@@ -159,8 +170,10 @@ class PlannedWindow:
+         flipped = False
+         flips = {(round(c0, 3), round(c1, 3)) for c0, c1 in self.cut_flips}
+         cuts = sorted(self.cuts)
++        prev_last = None
+         for k, (a, b) in enumerate(self.pieces()):
+-            if k > 0 and (round(cuts[k - 1][0], 3), round(cuts[k - 1][1], 3)) in flips:
++            flip_here = k > 0 and (round(cuts[k - 1][0], 3), round(cuts[k - 1][1], 3)) in flips
++            if flip_here:
+                 flipped = not flipped          # punch-in: the jump is masked by the shot switch
+             if self.shot == "close":
+                 spans = [[0.0, b - a]]
+@@ -173,7 +186,11 @@ class PlannedWindow:
+             if flipped:
+                 spans = _complement(spans, b - a)
+             if self.min_span_sec > 0:
+-                spans = _tidy_spans(spans, b - a, self.min_span_sec)
++                # M189: after a masked cut the piece keeps the other shot (a dropped or snapped span there was an open
++                # jump); the seam's shot is kept by the window's own tidy in build_manual_plan
++                start = ("wide" if prev_last == "close" else "close") if flip_here else None
++                spans = _tidy_spans(spans, b - a, self.min_span_sec, start)
++            prev_last = "close" if spans and spans[-1][1] >= (b - a) - _EPS else "wide"
+             shot, ci = "wide", spans
+             if not spans:
+                 ci = []
+@@ -267,23 +284,42 @@ class ManualPlan:
+         return lines
+ 
+ 
+-def _tidy_spans(spans: list[list[float]], dur: float, m: float) -> list[list[float]]:
++def _tidy_spans(spans: list[list[float]], dur: float, m: float, start: str | None = None) -> list[list[float]]:
+     """M173 (owner on disko_beach_p3 m172 r01: one frame «стреляет» by scale): close spans of one piece with no wide
+     or close stretch under `m` — a gap under m between two spans is closed, an edge under m from the piece edge goes
+-    to the edge, a span still under m is dropped. Seconds of a piece are never moved, only where the switch falls."""
+-    out: list[list[float]] = []
+-    for a, b in sorted([max(0.0, a), min(dur, b)] for a, b in spans):
+-        if b - a <= _EPS:
+-            continue
+-        if a < m:
+-            a = 0.0
+-        if dur - b < m:
+-            b = dur
+-        if out and a - out[-1][1] < m:
+-            out[-1][1] = max(out[-1][1], b)
+-        else:
+-            out.append([a, b])
+-    return [[round(a, 6), round(b, 6)] for a, b in out if b - a >= m - _EPS or (a == 0.0 and b == dur)]
++    to the edge. Seconds of a piece are never moved, only where the switch falls.
++
++    M189 (review): a span still under m is lengthened to m around its middle, never dropped — a dropped span was the
++    close shot that masked a seam or a cut (an open jump) or the owner's c: (gone without a word). `start` is the
++    shot the piece must start on: "close" keeps a span at 0; "wide" keeps the first switch at least m in (snapping it
++    to 0 made a seam close→close). Only a piece too short for that (under 2·m) loses its close span."""
++    out = sorted([max(0.0, a), min(dur, b)] for a, b in spans if min(dur, b) - max(0.0, a) > _EPS)
++    if start == "close" and (not out or out[0][0] > _EPS):
++        out.insert(0, [0.0, min(dur, m)])
++    for _ in range(4 * len(out) + 4):
++        prev = [list(x) for x in out]
++        merged: list[list[float]] = []
++        for a, b in out:
++            if not merged and a < m:
++                if start == "wide":
++                    a, b = m, max(b, m)
++                else:
++                    a = 0.0
++            if dur - b < m:
++                b = dur
++            if b - a < m:                          # lengthen around the middle, inside the piece
++                c = (a + b) / 2
++                lo = max(m if (start == "wide" and not merged) else 0.0, min(c - m / 2, dur - m))
++                a, b = lo, min(dur, lo + m)
++            if merged and a - merged[-1][1] < m:
++                merged[-1][1] = max(merged[-1][1], b)
++            else:
++                merged.append([a, b])
++        out = [[a, b] for a, b in merged if b - a > _EPS and not (start == "wide" and a < m - _EPS)]
++        if out == prev:
++            break
++    out = [[a, b] for a, b in out if b - a >= m - _EPS or (a < _EPS and b > dur - _EPS)]
++    return [[round(a, 6), round(b, 6)] for a, b in out]
+ 
+ 
+ def _shot_of(spans: list[list[float]], dur: float) -> tuple[str, list[list[float]]]:
+@@ -1067,6 +1103,8 @@ def _lengthen_short_shots(times: SpeechTimes, sentences, w: "PlannedWindow", kee
+         near = [ci for ci in (bad - 1, bad) if 0 <= ci < len(keep)]
+         ci = min(near, key=lambda i: keep[i][1] - keep[i][0])
+         flip_set.discard((round(keep[ci][0], 3), round(keep[ci][1], 3)))
++        if params.long_pause_sec and keep[ci][1] - keep[ci][0] >= params.long_pause_sec:
++            w.cuts_long = max(0, w.cuts_long - 1)   # M189 (review): the plan line no longer counts a cut that is gone
+         del keep[ci]
+     return keep, [list(f) for f in sorted(flip_set)]
+ 
+@@ -1423,17 +1461,27 @@ def build_manual_plan(
+             if params.max_static_sec:
+                 w.shot = "wide"
+                 ci = _limit_static(times, sentences, w, ci, params, key_map)
++            if params.short_shot_sec > 0:
++                # M189 (review): the window's spans are tidied HERE, before the next seam reads how this window
++                # ends — tidied later (only in segment()), a snapped end made the next seam close→close or wide→wide
++                ci = _tidy_spans(ci, dur, params.short_shot_sec, flip)
++                for n in w.sentences:
++                    if n in close_set:
++                        r0, r1 = bounds[n]
++                        if not any(a - _EPS <= r0 and r1 <= b + _EPS for a, b in ci) \
++                                and not (len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > dur - _EPS):
++                            warnings.append(f"c:{n} not close in full: the seam before it changes the shot first "
++                                            f"(no shot under {params.short_shot_sec:g}s)")
++                w.min_span_sec = params.short_shot_sec
+             if len(ci) == 1 and ci[0][0] < _EPS and ci[0][1] > dur - _EPS:
+                 w.shot, w.close_intervals = "close", []
+             else:
+                 w.shot, w.close_intervals = "wide", ci
+-        prev_shot = w.last_shot
+-
+-    # §1.4 filler cut: after the shots (accents are measured on the window as spoken).
+-    if params.filler_cut:
+-        for w in windows:
+-            if not w.cold_open:           # the hook is one short sentence played as one piece
++            # §1.4 filler cut: after the window's shots (accents are measured on the window as spoken) and before
++            # the next seam — a cut masked by a shot switch changes the shot the window ends on (M189)
++            if params.filler_cut:
+                 w.cuts = _filler_cuts(times, sentences, w, params, jump)
++        prev_shot = w.out_last_shot
+ 
+     # §1/§6 subtitles: exactly the words of the played sentences, times kept inside their window
+     # (with cuts: inside the played piece that holds the word's audible start).
+@@ -1466,6 +1514,30 @@ def build_manual_plan(
+                 t1 = min(max(word.t1, t0), pb)
+                 subs[key] = word if (t0 == word.t0 and t1 == word.t1) else \
+                     word.model_copy(update={"t0": t0, "t1": t1})
++    co_w = next((w for w in windows if w.cold_open), None)
++    if co_w is not None:
++        # M189 (review A3): the render shows in a window every subtitle that STARTS inside it. A word of the body
++        # whose Whisper start lies inside the cold open (the word after a clause hook: Whisper starts it before
++        # its sound, inside the hook's air) was shown in the hook too. Such a word starts on screen where its
++        # sound can be — after the cold open (a later word) or before it (an earlier one), never inside it.
++        co_shown = hook_part if hook_part is not None else sentences[co_w.sentences[0] - 1]
++        co_keys = {round(x.t0 * 1000) for x in co_shown}
++        flat = [x for s_ in sentences for x in s_]
++        order_ix = {round(x.t0 * 1000): i for i, x in enumerate(flat)}
++        orig = {round(x.t0 * 1000): x for x in flat}
++        first_ix = min((order_ix.get(k, 0) for k in co_keys), default=0)
++        lo, hi = co_w.start - _SUB_MARGIN, co_w.end + _SUB_MARGIN
++        body_pieces = [p_ for w in windows if not w.cold_open for p_ in w.pieces()]
++        for key, word in list(subs.items()):
++            if key in co_keys or not (lo <= word.t0 < hi) or key not in orig:
++                continue
++            t0 = lo if order_ix.get(key, first_ix) < first_ix else hi
++            on = times.audible(orig[key])[0]
++            pa, pb = next(((a, b) for a, b in body_pieces if a - _EPS <= on < b),
++                          min(body_pieces, key=lambda ab: abs((ab[0] + ab[1]) / 2 - on)))
++            m = min(_SUB_MARGIN, (pb - pa) / 2)
++            t0 = min(max(t0, pa + m), pb - m)          # still inside the body piece that plays its sound
++            subs[key] = word.model_copy(update={"t0": t0, "t1": min(max(word.t1, t0), pb)})
+     subtitles = sorted(subs.values(), key=lambda x: x.t0)
+     body_starts = [w.start for w in windows if not w.cold_open]
+     if any(b < a for a, b in zip(body_starts, body_starts[1:])):
+diff --git a/src/autoreels/cloud/postcopy.py b/src/autoreels/cloud/postcopy.py
+index dbf5e57..2558d39 100644
+--- a/src/autoreels/cloud/postcopy.py
++++ b/src/autoreels/cloud/postcopy.py
+@@ -39,12 +39,16 @@ VOICES = {
+                "text; never call the speaker «автор», «спикер», «рассказчик», «он» or «она»; the reader may be «вы»."),
+ }
+ # third-person names of the speaker a first-person post must not use (normalised), unless the reel says them
++# M189 (review B9): «ведущий», «гость» are not on the list — the owner publishes interviews too («мой гость»)
+ THIRD_PERSON = ("автор", "автора", "автору", "спикер", "спикера", "рассказчик", "рассказчика", "лектор", "лектора",
+-                "ведущий", "ведущая", "гость", "гостья", "героиня", "герой ролика", "по его словам", "по ее словам",
++                "героиня", "герой ролика", "по его словам", "по ее словам",
+                 "он рассказывает", "она рассказывает", "он говорит", "она говорит", "он считает", "она считает",
+                 "он делится", "она делится", "он вспоминает", "она вспоминает")
+ FIRST_PERSON = ("я", "мне", "меня", "мной", "мой", "моя", "мое", "мои", "моего", "моей", "моему", "моим", "моих",
+-                "моем", "мою")
++                "моем", "мою",
++                # M189 (review B9): «мы» of an interview or of the speaker with the reader is the first person too
++                "мы", "нам", "нас", "нами", "наш", "наша", "наше", "наши", "нашего", "нашей", "нашему", "нашим",
++                "наших", "нашем", "нашу")
+ 
+ 
+ # M101: stock phrases of post copy that announce the thought instead of saying it (normalised: lower case, ё → е,
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index bc4bb21..a971fc8 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -3861,6 +3861,8 @@ def _render_segments(
+                     out.rename(out.with_name(f"{out.stem}.ERROR.mp4"))
+             else:
+                 out.with_name(f"{out.stem}.ERROR.mp4").unlink(missing_ok=True)
++                # M189 (review B6): the clip passed — an integrity note of an earlier failed render is not about it
++                (out_dir / f"{reel.id}.integrity.txt").unlink(missing_ok=True)
+                 outputs.append(out)
+                 import json as _json
+                 (out_dir / f"{reel.id}.render.json").write_text(
+@@ -3909,10 +3911,20 @@ def _write_sidecar_text(clip_path: Path, reel, render_cfg=None) -> None:
+     if txt_content:
+         clip_path.with_suffix(".txt").write_text(txt_content, encoding="utf-8")
+     transcript = " ".join(w.word for w in reel.subtitles).strip()
++    tr_path = clip_path.with_name(clip_path.stem + ".transcript.txt")
++    try:
++        old_tr = tr_path.read_text(encoding="utf-8").strip() if tr_path.is_file() else None
++    except OSError:
++        old_tr = None
++    if old_tr != transcript:
++        # M189 (review B5): the post (arl describe, <rid>.post.txt) was written from the words of the clip that had
++        # this number before — after a renumbering (M185) or a new cut it describes another clip; it goes, and
++        # describe writes it again (the same words re-rendered keep their post)
++        clip_path.with_name(clip_path.stem + ".post.txt").unlink(missing_ok=True)
+     if transcript:
+-        clip_path.with_name(clip_path.stem + ".transcript.txt").write_text(
+-            transcript + "\n", encoding="utf-8"
+-        )
++        tr_path.write_text(transcript + "\n", encoding="utf-8")
++    else:
++        tr_path.unlink(missing_ok=True)
+ 
+ 
+ def _cover_time(segs, has_cold_open: bool) -> float:
+diff --git a/src/autoreels/local/subtitles.py b/src/autoreels/local/subtitles.py
+index 6fbe8df..6f9832e 100644
+--- a/src/autoreels/local/subtitles.py
++++ b/src/autoreels/local/subtitles.py
+@@ -96,7 +96,7 @@ def font_metrics(cfg) -> dict | None:
+ 
+ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: int,
+                 font_size: int, char_width_ratio: float, break_pause_sec: float,
+-                metrics: dict | None = None) -> list[list[Word]]:
++                metrics: dict | None = None, uppercase: bool = False) -> list[list[Word]]:
+     """Слова → группы по `words_per_line`; группа обрывается раньше, если:
+ 
+     - пауза до следующего слова `(next.t0 − cur.t1) > break_pause_sec` (граница фразы) — слово
+@@ -117,6 +117,8 @@ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: in
+                 if w.t0 - group[-1].t1 > break_pause_sec:
+                     break                   # пауза = граница фразы → закрываем группу
+                 text = " ".join(x.word for x in group + [w])
++                if uppercase:               # M189 (review B2): measured as it is drawn — capitals are wider
++                    text = text.upper()
+                 if _estimate_width(text, font_size, char_width_ratio, metrics) > max_text_width_px:
+                     break                   # добавление слова переполняет строку → закрываем группу
+             group.append(w)
+@@ -255,6 +257,7 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
+         words, words_per_line=cfg.words_per_line, max_text_width_px=cfg.max_text_width_px,
+         font_size=cfg.font_size, char_width_ratio=cfg.char_width_ratio,
+         break_pause_sec=cfg.subtitle_break_pause_sec, metrics=font_metrics(cfg),
++        uppercase=bool(cfg.uppercase),
+     )
+     _has_kw = enable_keywords and any(w.emph for w in words)
+     _cont = fx.get("continue") if fx.get("continue") and str(fx["continue"].get("text", "")).strip() else None
+diff --git a/tests/test_m173_short_shot.py b/tests/test_m173_short_shot.py
+index b2bbad2..ebebee4 100644
+--- a/tests/test_m173_short_shot.py
++++ b/tests/test_m173_short_shot.py
+@@ -52,7 +52,7 @@ def test_tidy_spans_leaves_no_sliver():
+     assert _tidy_spans([[0.03, 1.0]], 3.0, 0.5) == [[0.0, 1.0]]            # 1 frame of wide before the close
+     assert _tidy_spans([[0.5, 2.97]], 3.0, 0.5) == [[0.5, 3.0]]             # … and after it
+     assert _tidy_spans([[0.5, 1.0], [1.1, 2.0]], 3.0, 0.5) == [[0.5, 2.0]]  # a flash of wide between two closes
+-    assert _tidy_spans([[1.0, 1.2]], 3.0, 0.5) == []                        # a flash of close
++    assert _tidy_spans([[1.0, 1.2]], 3.0, 0.5) == [[0.85, 1.35]]            # a flash of close: lengthened (M189)
+     assert _tidy_spans([[0.6, 1.8]], 3.0, 0.5) == [[0.6, 1.8]]              # nothing short: unchanged
+ 
+ 
+diff --git a/tests/test_m189_review.py b/tests/test_m189_review.py
+new file mode 100644
+index 0000000..37f341f
+--- /dev/null
++++ b/tests/test_m189_review.py
+@@ -0,0 +1,277 @@
++"""M189 (code review of M172–M187 before the release run): every confirmed defect has its test here.
++
++A — the picture: a seam or a masked cut never keeps the same shot on both sides (the tidy spans and the cuts are
++settled before the next seam reads how a window ends); a clause hook shows only its own words."""
++from __future__ import annotations
++
++from autoreels.cloud.plan import ManualPlanParams, PlannedWindow, _tidy_spans, build_manual_plan
++from tests.test_filler_cut import SPEC, _setup
++from tests.test_montage import P as MP, _spec_sents
++from dataclasses import replace
++
++_E = 1e-3
++
++
++def _start(seg) -> str:
++    return "close" if seg.shot == "close" or (seg.close_intervals and seg.close_intervals[0][0] < _E) else "wide"
++
++
++def _end(seg) -> str:
++    if seg.shot == "close":
++        return "close"
++    ci = seg.close_intervals or []
++    return "close" if ci and ci[-1][1] >= (seg.end - seg.start) - _E else "wide"
++
++
++def _seam_pairs(plan):
++    """(shot before, shot after) at every seam between windows and at every masked cut inside one."""
++    out = []
++    segs = [(w, s) for w in plan.windows for s in w.segments()]
++    for (w1, a), (w2, b) in zip(segs, segs[1:]):
++        if w1 is not w2:
++            out.append((_end(a), _start(b)))
++        else:
++            k = w1.segments().index(b)
++            cut = sorted(w1.cuts)[k - 1]
++            if [round(cut[0], 3), round(cut[1], 3)] in [[round(x, 3), round(y, 3)] for x, y in w1.cut_flips]:
++                out.append((_end(a), _start(b)))
++    return out
++
++
++# ── A0: a masked cut changes the shot a window ends on; the next seam reads the real end ─────────────────────────
++
++def test_seam_after_an_odd_number_of_masked_cuts_still_changes_the_shot():
++    spec = SPEC + [[("Шесть", 100.0, 100.6), ("семь.", 100.7, 101.4)]]
++    sents, words, smap, align = _setup(spec, [[1.0, 1.6]])
++    big = lambda a, b: 5.0 if a < 2.0 else 0.5            # the filler cut would jump → masked by a switch
++    p = ManualPlanParams(filler_cut=True, jump_mask=True)
++    plan = build_manual_plan(sents, [1, 2, 3], words=words, smap=smap, params=p, align=align, jump=big, breaks=[3])
++    w1, w2 = plan.body
++    assert len(w1.cut_flips) == 1                          # window 1 ends on the other shot than it started
++    pairs = _seam_pairs(plan)
++    assert pairs and all(a != b for a, b in pairs), pairs  # before M189: close → close at the seam
++
++
++# ── A1: the tidy spans are settled before the next seam ─────────────────────────────────────────────────────────
++
++def test_snapped_window_end_flips_the_next_seam():
++    sents, words, smap = _spec_sents()
++    on = replace(MP, short_shot_sec=2.0)
++    # c:2 ends 1.9 s before the end of window 1 → the tidy spans take the close shot to the window end
++    plan = build_manual_plan(sents, [1, 2, 3, 4, 5], words=words, smap=smap, params=on, breaks=[4], close=[2])
++    w1, w2 = plan.body
++    assert w1.segments()[-1].close_intervals[-1][1] >= (w1.end - w1.start) - _E   # snapped to the end
++    assert all(a != b for a, b in _seam_pairs(plan)), _seam_pairs(plan)
++
++
++def test_seam_that_must_start_wide_keeps_the_switch_off_the_seam():
++    assert _tidy_spans([[0.5, 3.0]], 6.0, 2.0, "wide") == [[2.0, 4.0]]   # not snapped to 0 (close→close seam)
++    assert _tidy_spans([[0.0, 0.8]], 6.0, 2.0, "close") == [[0.0, 2.0]]  # the seam accent lengthened, not dropped
++    assert _tidy_spans([], 5.0, 2.0, "close") == [[0.0, 2.0]]
++    assert _tidy_spans([[0.5, 3.0]], 3.0, 2.0, "wide") == []             # too short for two shots: stays wide
++
++
++# ── A2: the close piece that masks a cut is never dropped or snapped away ───────────────────────────────────────
++
++def test_masked_cut_keeps_its_switch_after_the_tidy():
++    w = PlannedWindow(sentences=[1], start=0.0, end=10.0, shot="wide", close_intervals=[[3.5, 6.0]],
++                      cuts=[[5.0, 5.2]], cut_flips=[[5.0, 5.2]], min_span_sec=2.0)
++    a, b = w.segments()
++    assert _end(a) == "close" and _start(b) == "wide", (a.close_intervals, b.close_intervals)
++
++
++# ── A3: a clause hook shows only the clause ─────────────────────────────────────────────────────────────────────
++
++def test_clause_hook_does_not_show_the_next_word():
++    from autoreels.core.models import Word
++    spec = [[("Один", 0.0, 0.5), ("два.", 0.6, 1.2)],
++            [("Раз", 3.0, 3.5), ("два,", 3.6, 4.0), ("три", 4.3, 4.7), ("четыре.", 4.8, 5.4)]]
++    sents, words, smap, align = _setup(spec, [])
++    # Whisper starts «три» 0.25 s before its sound — inside the hook's air
++    early = sents[1][2].model_copy(update={"t0": 4.05})
++    sents[1][2] = early
++    words = [x for s in sents for x in s]
++    smap["words"][4]["t0"] = 4.05
++    align["words"][4]["t0"] = 4.05
++    p = ManualPlanParams(end_air_sec=0.3, seam_pad_sec=0.2)
++    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align, hook=2,
++                             hook_words=(1, 2))
++    co = plan.cold_open
++    assert co is not None
++    in_hook = [w.word for w in plan.subtitles if co.start <= w.t0 < co.end]
++    assert in_hook == ["Раз", "два,"], in_hook
++    assert "три" in [w.word for w in plan.subtitles]          # still shown in the body
++
++
++# ── A4: a clause hook cannot be removed from the body ──────────────────────────────────────────────────────────
++
++def test_clause_hook_with_minus_is_an_error():
++    from autoreels.cloud.montage import parse_montage
++    _, errs = parse_montage("M1 90 | 3.1-4 | h:3.3@4-9-\n")
++    assert errs and "always replayed" in errs[0][1]
++    _, errs = parse_montage("M1 90 | 3.1-4 | h:3.3@4-\n")          # read as @4-4 with «-» before: refused
++    assert errs
++    (e,), errs = parse_montage("M1 90 | 3.1-4 | h:3.3-\n")          # a whole sentence may still be removed
++    assert errs == [] and e.hook_remove
++
++
++# ── B — the checks around the plan ─────────────────────────────────────────────────────────────────────────────
++
++def test_b1_hook_cap_is_measured_on_the_sound_and_named_skipped():
++    from autoreels import __main__ as cli
++    from autoreels.core.models import Word
++    hs = [Word(word="Очень", t0=10.0, t1=10.4), Word(word="долго.", t0=10.5, t1=17.0)]   # Whisper: 7 s
++    smap = {"words": [{"t0": 10.0, "t1": 10.4, "audible_start": 10.1, "audible_end": 10.4},
++                      {"t0": 10.5, "t1": 17.0, "audible_start": 10.5, "audible_end": 15.2}], "boundaries": []}
++    assert cli._hook_cap_warning(5, hs, hs, smap, None, 6.0) is None             # heard 5.1 s
++    w = cli._hook_cap_warning(5, hs, [], None, None, 6.0)                         # no word times: Whisper's 7 s
++    assert w and "cold open skipped" in w                                          # the M61 fallback reads this
++
++
++def test_b2_subtitle_groups_are_measured_in_capitals():
++    from autoreels.core.models import Word
++    from autoreels.local.subtitles import group_words
++    met = {"widths": {**{c: 500 for c in "абвгде "}, **{c: 800 for c in "АБВГДЕ"}, " ": 250},
++           "units_per_em": 1000, "default": 500}
++    ws = [Word(word="абв", t0=0.0, t1=0.3), Word(word="где", t0=0.35, t1=0.7)]
++    kw = dict(words_per_line=3, max_text_width_px=400, font_size=100, char_width_ratio=0.55, break_pause_sec=1.0,
++              metrics=met)
++    assert len(group_words(ws, **kw)) == 1
++    assert len(group_words(ws, **kw, uppercase=True)) == 2                       # 505 px drawn > 400
++
++
++def test_b3_drop_sentences_names_the_first_word_with_a_letter():
++    import dataclasses
++    from autoreels import __main__ as cli
++    from autoreels.core.models import Word
++    sbr = {"1.1": [Word(word="—", t0=10.0, t1=10.1), Word(word="Так.", t0=10.3, t1=11.0)],
++           "1.2": [Word(word="Дальше", t0=12.0, t1=12.5), Word(word="идём.", t0=12.6, t1=30.0)]}
++    PR = dataclasses.make_dataclass("PR", ["pieces", "hook", "hooks", "keys", "close", "notes", "seconds"])
++    pr = PR(pieces="1.1-2", hook=None, hooks=[], keys=[], close=[], notes=[], seconds=20.0)
++    out = cli._drop_sentences(pr, sbr, ["10.300"], 5.0)                           # the warning's s1@10.300
++    assert out is not None and out.pieces == "1.2"
++
++
++def test_b4_accounting_after_a_clip_leaves_the_draft(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_m176_combined_draft import _draft
++    rpath = _draft(tmp_path, "2 80\n3 80\nM 85 | 2.2-4 5.1-3\n")
++    monkeypatch.setattr(cli, "_auto_repeats", lambda reels, m: [(reels[0].id, "repeats rX: 90% of its seconds")])
++    rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto",
++                              drop_refused=True)
++    out = capsys.readouterr().out
++    assert rc == 0
++    assert "line 2 (score 80) → removed from the draft: repeats rX" in out, out[-1500:]
++    assert "line 3 (score 80) → reel 1" in out, out[-1500:]
++
++
++def test_b4_every_clip_refused_is_a_failure(tmp_path, monkeypatch, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_m176_combined_draft import _draft
++    rpath = _draft(tmp_path, "2 80\nM 85 | 2.2-4 5.1-3\n")
++    monkeypatch.setattr(cli, "_auto_repeats", lambda reels, m: [(r.id, "repeats rX") for r in reels])
++    rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto",
++                              drop_refused=True)
++    assert rc == 1 and "every clip of the draft was refused" in capsys.readouterr().err
++
++
++def test_b5_post_of_another_clip_goes_with_new_words(tmp_path):
++    from types import SimpleNamespace
++    from autoreels.core.models import Word
++    from autoreels.local.render import _write_sidecar_text
++    clip = tmp_path / "r05.mp4"
++    clip.write_bytes(b"x")
++    (tmp_path / "r05.transcript.txt").write_text("старые слова\n", encoding="utf-8")
++    (tmp_path / "r05.post.txt").write_text("пост о старом клипе", encoding="utf-8")
++    reel = SimpleNamespace(subtitles=[Word(word="старые", t0=0, t1=1), Word(word="слова", t0=1, t1=2)],
++                           description="d")
++    _write_sidecar_text(clip, reel)
++    assert (tmp_path / "r05.post.txt").is_file()                                 # same words: the post stays
++    reel.subtitles = [Word(word="новые", t0=0, t1=1)]
++    _write_sidecar_text(clip, reel)
++    assert not (tmp_path / "r05.post.txt").exists()                              # another clip under r05
++
++
++def test_b6_successful_render_removes_an_old_integrity_note(tmp_path, monkeypatch):
++    from autoreels.local import render
++    from autoreels.local.render import render_cut
++    from tests.test_render import _make_source, _manifest, _reel
++    from tests.test_render import render_cfg as _rc_fixture
++
++    class _FakeProc:
++        def __init__(self, cmd, **kw):
++            self.args, self.returncode, self.stdout, self.stderr = cmd, 0, iter([]), iter([])
++        def wait(self): return 0
++        def communicate(self, *a, **kw): return ("", "")
++        def poll(self): return 0
++        def __enter__(self): return self
++        def __exit__(self, *a): return False
++
++    monkeypatch.setattr(render.shutil, "which", lambda b: "/fake/ffmpeg")
++    monkeypatch.setattr(render.subprocess, "Popen", _FakeProc)
++    inputs = tmp_path / "inputs"
++    sha = _make_source(inputs, "v.mp4", b"m189-integrity")
++    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0)])
++    out_dir = tmp_path / "out"
++    out_dir.mkdir()
++    (out_dir / "r01.integrity.txt").write_text("missing picture in access unit\n", encoding="utf-8")
++    outputs = render_cut(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=_rc_fixture.__wrapped__())
++    assert len(outputs) == 1 and not (out_dir / "r01.integrity.txt").exists()
++
++
++def test_b7_clause_never_ends_on_an_unfinished_sentence_end():
++    from autoreels.cloud.autocut import clause_spans
++    from autoreels.core.models import Word
++    ws = [Word(word=w, t0=i, t1=i + 0.8) for i, w in enumerate(["Я", "думаю,", "что", "это", "очень", "важно"])]
++    kw = dict(min_words=2, min_sec=0.5, max_sec=10.0, min_pause=0.1, dur=lambda a, z: z - a + 0.8)
++    pa = lambda k: 0.5                                                           # noqa: E731
++    assert all(z != 6 for _, z in clause_spans(ws, pa, **kw))                   # «…очень важно» goes on
++    ws[-1] = ws[-1].model_copy(update={"word": "важно."})
++    assert (3, 6) in clause_spans(ws, pa, **kw)
++
++
++def test_b8_free_autocut_takes_clause_hooks_and_strict_starts():
++    import inspect
++    from autoreels.cloud import autocut
++    assert "clauses" in inspect.signature(autocut.propose).parameters
++    assert "clauses" in inspect.signature(autocut.short_variant).parameters
++    src = inspect.getsource(autocut.propose)
++    assert "strict_start_reason" in src and "_hook_cands(clip, sentences, p, start_pause, clauses=clauses)" in src
++
++
++def test_b9_first_person_accepts_we_and_the_owner_may_say_guest():
++    from autoreels.cloud.postcopy import FIRST_PERSON, THIRD_PERSON
++    assert {"мы", "нам", "наш"} <= set(FIRST_PERSON)
++    assert "гость" not in THIRD_PERSON and "ведущий" not in THIRD_PERSON and "автор" in THIRD_PERSON
++
++
++def test_b10_a_list_of_names_is_no_address():
++    from autoreels.cloud.autocut import strict_start_reason
++    assert strict_start_reason("Мы были в Москве, Казани, Сочи.") is None
++    assert strict_start_reason("Есть Маша, Петя, Ваня.") is None
++    assert "по имени" in strict_start_reason("Я думаю, это важно, Ласанна.")
++    assert "по имени" in strict_start_reason("Понимаешь, Аня, это важно.")
++
++
++def test_b11_zero_overlap_is_strict_not_off():
++    import inspect
++    from autoreels import __main__ as cli
++    src = inspect.getsource(cli._blocks_do_apply)
++    assert '"combined_overlap_max", 1.0) or 1.0' not in src
++    from tests.test_m177_repeats import _r
++    assert cli._auto_repeats([_r("r01", [(0, 30)]), _r("r02", [(29, 40)])], 0.0)  # any shared second: a repeat
++
++
++def test_dropped_long_pause_cut_is_not_counted_any_more():
++    from tests.test_m174_lengthen_short import ON, SPEC as LS
++    sents, words, smap, align = _setup(LS, [[0.9, 4.2]])            # M174: no silence to take — the cut goes
++    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=ON, align=align)
++    w = plan.body[0]
++    assert w.cuts == [] and w.cuts_long == 0
++    assert not any("long pause" in ln for ln in plan.describe(sents))
++
++
++def test_label_hook_skips_a_glued_start():
++    import inspect
++    from autoreels import __main__ as cli
++    assert "glued(" in inspect.getsource(cli._label_hook)
