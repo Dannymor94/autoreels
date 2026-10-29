@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Sequence
 
-from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start,
+from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start, strict_start_reason,
                                       rhythm_pieces, rhythm_why)
 
 SCENARIO_SYSTEM = (
@@ -143,7 +143,8 @@ def tone_rule(tone: str) -> str:
 def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float, str, bool, int]],
                        units: Sequence[dict], p: AutoParams, end_tone: Callable[[str], "str | None"] | None = None,
                        start_pause: Callable[[str], "float | None"] | None = None,
-                       other: "set[str] | None" = None, interviewer: str = ""
+                       other: "set[str] | None" = None, interviewer: str = "",
+                       clauses: "Callable[[str], list] | None" = None
                        ) -> tuple[list[Proposal], list[tuple[str, str]]]:
     """M123: each scenario → a Proposal the automatic path checks and polishes as its own, or a reason it goes.
     `sent` — B.k → (t0, t1, text, finished, words). Checks: length min_sec…max_sec; the jump rule (p.rhythm); the end
@@ -192,6 +193,22 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
             _g = glued_start(refs[0], p, start_pause)
             if _g:                            # M145: the model's start is kept (a later one may not stand alone)
                 notes.append(f"начало: {_g} — исправить нельзя, оставлено")
+        if p.start_strict:
+            # M182 (owner: «r14 начало пустое» — «Каждый из них влияет…»): the reel never opens on a line pointing back or
+            # at the interviewer — up to start_extend_max sentences before it are added (the start of the thought), each
+            # right before in the source; none stands → the reel goes
+            _why = strict_start_reason(sent[refs[0]][2])
+            for _ in range(max(0, int(p.start_extend_max))):
+                prv = prev_ref.get(refs[0])
+                if not _why or prv is None or prv in refs or sent[refs[0]][0] - sent[prv][1] > 3.0 \
+                        or (other and interviewer == "off" and prv in other) or dur([prv] + refs) > p.max_sec:
+                    break
+                notes.append(f"начало: «{sent[refs[0]][2][:40]}» — {_why}; добавлена фраза перед — «{sent[prv][2][:50]}»")
+                refs = [prv] + refs
+                _why = strict_start_reason(sent[refs[0]][2])
+            if _why:
+                gone.append((label, f"начало «{sent[refs[0]][2][:40]}» — {_why}, раньше начать нельзя"))
+                continue
         secs = dur(refs)
         if not p.min_sec <= secs <= p.max_sec:
             gone.append((label, f"длина {secs:.0f} с вне {p.min_sec:g}–{p.max_sec:g} с"))
@@ -220,7 +237,7 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
 
         def rows(rf: str):
             return [(r, sent[r][1] - sent[r][0], sent[r][4], sent[r][3], sent[r][2]) for r in (expand_refs(rf) or [])]
-        cands = _hook_cands(pseudo, rows, p, start_pause)
+        cands = _hook_cands(pseudo, rows, p, start_pause, clauses=clauses)
         hooks = [c[0] for c in cands]
         hook_texts = {r: (t, s) for r, s, t in cands}
         h = sc.get("hook")

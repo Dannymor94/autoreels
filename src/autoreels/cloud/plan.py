@@ -1153,6 +1153,7 @@ def build_manual_plan(
     params: ManualPlanParams = ManualPlanParams(),
     hook: int | None = None,
     hook_mode: str | None = None,          # None | "!" (always replay) | "-" (never replay)
+    hook_words: tuple[int, int] | None = None,   # M182: the cold open is words i..j (1-based) of the hook sentence
     close: Iterable[int] = (),
     next_onset: Callable[[Word], float | None] | None = None,
     source_duration: float | None = None,
@@ -1258,8 +1259,20 @@ def build_manual_plan(
     # IMG_6848 h:22.1: [1065.925, 1065.700]) or is shorter than a fraction of a second cannot be a
     # cold open: it would be an empty window (check_segments refuses the whole apply). Skipped with
     # a warning, as a hook over hook_max_sec is refused (the body is not touched).
+    # M182 (owner: «раньше хуки были лучше, сейчас пустые» — 1 cold open in 12 clips of prew_isaev_anna: a whole sentence
+    # of ≤ hook_max_sec is rare in an interview): the cold open may be a clause of the hook sentence (words i..j, cut in
+    # the pauses around it); the whole sentence is then always replayed in the body, never removed from it.
+    hook_part = None
+    if hook is not None and hook_words is not None:
+        _i, _j = int(hook_words[0]), int(hook_words[1])
+        _sw = sentences[hook - 1]
+        if 1 <= _i <= _j <= len(_sw) and (_i, _j) != (1, len(_sw)):
+            hook_part = list(_sw[_i - 1:_j])
+        elif not (1 <= _i <= _j <= len(_sw)):
+            warnings.append(f"h:{hook}@{_i}-{_j}: the sentence has words 1-{len(_sw)} — cold open skipped")
+            hook = None
     if hook is not None:
-        _hs = sentences[hook - 1]
+        _hs = hook_part or sentences[hook - 1]
         _ha, _ = _clip_start(times, _hs[0], pad, params)
         _hb = _window_end(times, _hs[-1], pad)
         if _hb - _ha < params.hook_min_sec:
@@ -1272,7 +1285,7 @@ def build_manual_plan(
     if hook is not None:
         if hook not in play:
             hook_replayed = False
-        elif hook_mode == "!":
+        elif hook_mode == "!" or hook_part is not None:
             hook_replayed = True
         elif hook_mode == "-":
             hook_replayed = False
@@ -1348,7 +1361,7 @@ def build_manual_plan(
     windows: list[PlannedWindow] = []
     hook_air: tuple[float, float] | None = None
     if hook is not None:
-        hs = sentences[hook - 1]
+        hs = hook_part or sentences[hook - 1]
         co_end = _window_end(times, hs[-1], pad)
         if params.hook_air_sec > 0:
             # M74: air between the hook and the body — the silence after the hook sentence and before the
@@ -1432,7 +1445,7 @@ def build_manual_plan(
         pieces = w.pieces()
         prev_t0 = None
         for n in w.sentences:
-            shown = sentences[n - 1]
+            shown = hook_part if (w.cold_open and hook_part is not None) else sentences[n - 1]   # M182: the clause only
             if params.subs_hide_fillers and params.filler_words:    # M126: the screen without the fillers
                 shown = hide_fillers(shown, params.filler_words)
             for word in shown:

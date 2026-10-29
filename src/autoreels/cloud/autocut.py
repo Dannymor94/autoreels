@@ -102,6 +102,11 @@ class AutoParams:
     taste_weight: float = 0.0
     # M144: a clip's first sound (its start, a cold open) needs this much silence HEARD before it; 0 = off
     start_pause_min: float = 0.0
+    # M182 (owner on prew_isaev_anna m176: «начало пустое», «раньше хуки были лучше, сейчас пустые» — 1 cold open in 12):
+    hook_clauses: bool = False        # a hook may be a clause of a long sentence (words i..j between pauses), h:B.N@i-j
+    hook_clause_pause: float = 0.12   # … the silence heard at a clause edge inside the sentence (s)
+    start_strict: bool = False        # a reel never opens on a line pointing back / at the interviewer: earlier start or none
+    start_extend_max: int = 2         # … up to this many sentences before are added to reach a start that stands
 
 
 @dataclass
@@ -471,6 +476,64 @@ def back_reference(text: str) -> str | None:
     if words[0] in _BACK_START and not (q and words[0] in _Q_OPEN_OK):
         return f"«{words[0]}…»"
     return None
+
+
+# M182: what else makes an opening line lean on the conversation — «каждый из них» (of whom?), the listener addressed
+_STRICT_PHRASES = ("каждый из них", "каждая из них", "каждое из них", "каждый из этих", "каждая из этих",
+                   "каждый из вас", "все они", "оба они", "обе они", "из них")
+_YOU_SG_START = frozenset({"ты", "тебе", "тебя", "тобой", "твой", "твоя", "твое", "твои", "твоих", "твоей"})
+
+
+def strict_start_reason(text: str) -> str | None:
+    """M182 (owner on prew_isaev_anna r14 «Каждый из них влияет…», r10 «Ты чувствуешь это…, Ласанна»): why a reel may not
+    open on this sentence — everything back_reference finds, «каждый из них / все они», a first «ты» (the interviewer is
+    spoken to) or a name addressed between commas (a capitalised word after a comma, not the first word). None = stands."""
+    import re as _re
+    why = back_reference(text)
+    if why:
+        return why
+    words = _plain_words(text)
+    if not words:
+        return None
+    head = " " + " ".join(words[:8]) + " "
+    for ph in _STRICT_PHRASES:
+        if f" {ph} " in head:
+            return f"«{ph}» — о ком?"
+    if words[0] in _YOU_SG_START:
+        return f"«{words[0]}…» — обращение к собеседнику"
+    m = _re.search(r",\s+([А-ЯЁ][а-яё]{2,})(?=\s*[,.!?…]|\s*$)", text or "")
+    if m:
+        return f"обращение по имени («{m.group(1)}»)"
+    return None
+
+
+def clause_spans(words: Sequence, pause_after: Callable[[int], "float | None"], *, min_words: int, min_sec: float,
+                 max_sec: float, min_pause: float, dur: Callable[[int, int], float]) -> list[tuple[int, int]]:
+    """M182: word ranges (1-based, inclusive) of a sentence that can stand as a cold open on their own — a clause: it
+    starts at the sentence start or right after a word ending with «,;:—» followed by at least `min_pause` of silence, and
+    ends on such a word (or a word ending «.!?…») with that silence after it (or the sentence end); `min_words` words or
+    more, `min_sec`…`max_sec` long (`dur(i, j)` heard). `pause_after(k)`: the silence heard after word k (1-based); None
+    = unknown (no edge there). The whole sentence is never returned (it is the ordinary hook)."""
+    n = len(words)
+    if n < 2:
+        return []
+
+    def ends_clause(k: int) -> bool:
+        t = str(getattr(words[k - 1], "word", "")).rstrip()
+        return bool(t) and t[-1] in ",;:—–.!?…"
+
+    edges = [k for k in range(1, n) if ends_clause(k) and (pause_after(k) or 0.0) >= min_pause]
+    starts = [1] + [k + 1 for k in edges]
+    ends = edges + [n]
+    out = []
+    for a in starts:
+        for z in ends:
+            if z < a or (a, z) == (1, n):
+                continue
+            nw = sum(1 for w in words[a - 1:z] if any(c.isalnum() for c in str(getattr(w, "word", ""))))
+            if nw >= min_words and min_sec <= dur(a, z) <= max_sec:
+                out.append((a, z))
+    return out
 
 
 def teaser_pointer(text: str) -> str | None:
@@ -900,7 +963,8 @@ def glued_start(ref: str, p: AutoParams, start_pause: Callable[[str], "float | N
 
 
 def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams,
-                start_pause: Callable[[str], "float | None"] | None = None) -> list[tuple[str, float, str]]:
+                start_pause: Callable[[str], "float | None"] | None = None,
+                clauses: Callable[[str], list] | None = None) -> list[tuple[str, float, str]]:
     """(ref, score, text) of every hook candidate, best first: finished sentences of hook length of the
     clip's thoughts. When a question opens the clip (the loop), its own sentences are left out — the
     cold open then teases the answer instead of repeating the question. M83 (`hook_teaser`): only sentences
@@ -927,6 +991,13 @@ def _hook_cands(clip: Sequence[dict], sentences, p: AutoParams,
                 if p.context_start and back_reference(text):
                     bonus -= 3.0          # M74: a cold open that points back («как я говорил») explains nothing
                 out.append((ref, hook_score(text, sec, u) + bonus, text))
+            elif p.hook_clauses and clauses is not None:
+                # M182: a long sentence gives its clauses (h:B.N@i-j); a clause pointing back is no teaser either
+                for i, j, csec, ctext in clauses(ref):
+                    if teaser_pointer(ctext) or (i == 1 and glued_start(ref, p, start_pause)):
+                        continue
+                    bonus = (1.0 if u.get("role") in HOOK_ROLES else 0.0) - 0.5   # a whole sentence wins a tie
+                    out.append((f"{ref}@{i}-{j}", hook_score(ctext, csec, u) + bonus, ctext))
     return sorted(out, key=lambda x: -x[1])
 
 

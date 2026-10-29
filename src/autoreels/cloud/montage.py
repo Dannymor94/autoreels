@@ -72,6 +72,7 @@ class MontageEntry:
     hook: tuple[int, int] | None = None
     hook_keep: bool = False
     hook_remove: bool = False
+    hook_words: tuple[int, int] | None = None   # M182: h:B.N@i-j — the cold open is words i..j of the sentence
     close: tuple[tuple[int, int], ...] = ()
     keys: tuple[tuple[tuple[int, int], tuple[str, ...]], ...] = ()
     filler: bool | None = None
@@ -166,11 +167,19 @@ def parse_montage(text: str) -> tuple[list[MontageEntry], list[tuple[int, str]]]
             key, _, val = tok.partition(":")
             if key == "h" and val:
                 mode = val[-1] if val[-1] in "!-" else ""
-                r = _ref(val[:-1] if mode else val)
-                if r is None:
-                    bad.append(f"h:{val} — expected h:B.N")
+                body = val[:-1] if mode else val
+                ref_s, at, span = body.partition("@")
+                r = _ref(ref_s)
+                hw = None
+                if at:
+                    a_s, _, z_s = span.partition("-")
+                    if a_s.isdigit() and (z_s or a_s).isdigit() and 1 <= int(a_s) <= int(z_s or a_s):
+                        hw = (int(a_s), int(z_s or a_s))
+                if r is None or (at and hw is None):
+                    bad.append(f"h:{val} — expected h:B.N or h:B.N@i-j")
                 else:
                     e.hook, e.hook_keep, e.hook_remove = r, mode == "!", mode == "-"
+                    e.hook_words = hw
             elif key == "c" and val:
                 refs = [_ref(x) for x in val.split(",") if x]
                 if any(r is None for r in refs):

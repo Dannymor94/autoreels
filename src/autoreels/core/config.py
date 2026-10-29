@@ -283,6 +283,10 @@ class AutocutConfig(BaseModel):
     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
     combined_overlap_max: float = Field(1.0, ge=0.0, le=1.0)   # M177: arl auto drops a label clip sharing more of its seconds with a kept clip (1 = off)
+    hook_clauses: bool = False                # M182: a cold open may be a clause of a long sentence (h:B.N@i-j)
+    hook_clause_pause: float = Field(0.12, ge=0.0)   # … silence heard at a clause edge inside the sentence
+    start_strict: bool = False                # M182: a reel never opens on a line pointing back / at the interviewer
+    start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
     generator: str = Field("montage", pattern="^(montage|passage|mixed)$")   # passage: adjacent thoughts around a strong

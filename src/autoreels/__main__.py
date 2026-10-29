@@ -1128,8 +1128,8 @@ def _drop_last_sentence(pr, sent_by_ref, min_sec: float):
     if secs < min_sec:
         return None
     return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
-                   hook=None if pr.hook == gone else pr.hook,
-                   hooks=[h for h in pr.hooks if h != gone],
+                   hook=None if (pr.hook or "").split("@")[0] == gone else pr.hook,
+                   hooks=[h for h in pr.hooks if h.split("@")[0] != gone],
                    keys=[k for k in pr.keys if k[0] != gone],
                    close=[c for c in pr.close if c != gone], notes=list(pr.notes))
 
@@ -1155,8 +1155,8 @@ def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
     if secs < min_sec:
         return None
     return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
-                   hook=None if pr.hook in gone else pr.hook,
-                   hooks=[h for h in pr.hooks if h not in gone],
+                   hook=None if (pr.hook or "").split("@")[0] in gone else pr.hook,
+                   hooks=[h for h in pr.hooks if h.split("@")[0] not in gone],
                    keys=[k for k in pr.keys if k[0] not in gone],
                    close=[c for c in pr.close if c not in gone], notes=list(pr.notes))
 
@@ -5535,8 +5535,11 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     from autoreels.cloud.plan import build_manual_plan
     play = _manual_play_order(entry, sents, r0_cfg)
     hook = getattr(entry, "hook", None)
+    _hook_words = getattr(entry, "hook_words", None)        # M182: a clause of the hook sentence
     if hook is not None:
         _hs = sents[hook - 1] if 1 <= hook <= len(sents) else None
+        if _hs is not None and _hook_words and 1 <= _hook_words[0] <= _hook_words[1] <= len(_hs):
+            _hs = _hs[_hook_words[0] - 1:_hook_words[1]]
         _hook_max = getattr(r0_cfg, "hook_max_sec", 6.0)
         if _hs is None:
             reel.warnings.append(f"h:{hook} out of range — cold open skipped")
@@ -5568,7 +5571,8 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         _params = _dc_replace(_params, hook_air_sec=float(hook_air))     # M74: montage clips only
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_params,
-        hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
+        hook=hook, hook_mode=mode, hook_words=_hook_words if hook is not None else None,
+        close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
         source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
         weak_start_words=_weak_start_words(r0_cfg), breaks=breaks, keys=keys,
     )
@@ -5779,7 +5783,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
         reel._explicit_start = reel._explicit_end = True
         reel._has_explicit_e = reel.has_explicit_e = True
         reel._explicit_e_val = None
-        entry = SimpleNamespace(beats=tuple(mb.play), hook=mb.hook, hook_keep=me.hook_keep,
+        entry = SimpleNamespace(beats=tuple(mb.play), hook=mb.hook, hook_words=me.hook_words, hook_keep=me.hook_keep,
                                 hook_remove=me.hook_remove, c=tuple(mb.close), filler=me.filler,
                                 s=None, e=None, x=())
         try:
@@ -6727,6 +6731,22 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
             _refused += [(r.id, w, "another cut") for r in reels if getattr(r, "planned", False) and r.id not in _seen
                          and "montage" not in (r.flags or []) for w in (r.warnings or []) if w.startswith("short shot")][:]
             _seen = {_rid for _rid, _w, _ in _refused}
+            if getattr(getattr(r0_cfg, "autocut", None), "start_strict", False):
+                # M182 (owner: «r03, r14 — начало пустое»): a label clip opening on a line that points back or at the
+                # interviewer goes (the scenarist's reels get an earlier start or none, scenario_proposals)
+                from autoreels.cloud.autocut import strict_start_reason as _ssr
+                for r in reels:
+                    if r.id in _seen or "montage" in (r.flags or []) or not r.subtitles:
+                        continue
+                    _first: list = []
+                    for _w in r.subtitles:
+                        _first.append(_w.word)
+                        if _w.word.rstrip().endswith((".", "!", "?", "…")):
+                            break
+                    _sw = _ssr(" ".join(_first))
+                    if _sw:
+                        _refused.append((r.id, f"weak start «{' '.join(_first)[:50]}» — {_sw}", "another start"))
+                _seen = {_rid for _rid, _w, _ in _refused}
             _ac_max = float(getattr(getattr(r0_cfg, "autocut", None), "combined_overlap_max", 1.0) or 1.0)
             _refused += [(_rid, _w, "other content") for _rid, _w in
                          _auto_repeats([r for r in reels if r.id not in _seen], _ac_max)]
@@ -7984,7 +8004,7 @@ def _scenario_examples(root: Path, stem: str, n: int = 3) -> str:
 
 
 def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None,
-                   start_pause=None, other=None):
+                   start_pause=None, other=None, clauses=None):
     """M123: the scenarist's reels as the pool of arl autocut --scenario (None = cannot ask). The model is named
     explicitly (haiku | sonnet: the whole talk in one request); its answer is kept in data/cache/scenario/ by the
     request — the same request is not paid twice."""
@@ -8021,7 +8041,8 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
         cpath.write_text(raw or "", encoding="utf-8")
         _usage_report(provider)
     scens, bad = parse_scenarios(raw, set(sent))
-    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm)
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+                                    clauses=clauses)
     scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
     print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
           + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
@@ -8460,7 +8481,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      jump_sec=ac.rhythm_jump_sec, settle_near_sec=ac.rhythm_settle_near,
                      settle_far_sec=ac.rhythm_settle_far, settle_far_at_sec=ac.rhythm_far_sec,
                      settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0),
-                     start_pause_min=float(getattr(ac, "start_pause_min", 0.0) or 0.0))
+                     start_pause_min=float(getattr(ac, "start_pause_min", 0.0) or 0.0),
+                     hook_clauses=bool(getattr(ac, "hook_clauses", False)),
+                     hook_clause_pause=float(getattr(ac, "hook_clause_pause", 0.12)),
+                     start_strict=bool(getattr(ac, "start_strict", False)),
+                     start_extend_max=int(getattr(ac, "start_extend_max", 2)))
     _taste = None
     if prm.taste_weight:
         # M138: the owner's taste orders the proposals (invariant 1: the order only)
@@ -8497,7 +8522,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         return out_s
 
     start_pause = None                      # M144: the silence heard before a sentence (B.k)
-    if prm.start_pause_min:
+    clauses = None                          # M182: clauses of a sentence that can be a cold open (B.k → spans)
+    if prm.start_pause_min or prm.hook_clauses:
         from autoreels.cloud.plan import SpeechTimes as _ST_sp, _speech_before as _sb_sp, load_alignment as _la_sp
         _al_sp = _la_sp(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
         _sm_sp = None
@@ -8516,12 +8542,28 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         else:
             _times_sp = _ST_sp(tx.words, _sm_sp, _al_sp)
 
-            def start_pause(ref: str):
+            def _start_pause(ref: str):
                 st = sent_by_ref.get(ref)
                 if not st:
                     return None
                 left, onset = _sb_sp(_times_sp, st[0])
                 return 9.9 if left is None else max(0.0, onset - left)
+            if prm.start_pause_min:
+                start_pause = _start_pause
+            if prm.hook_clauses:
+                from autoreels.cloud.autocut import clause_spans as _clause_spans
+                from autoreels.cloud.plan import heard_pause as _hp_cl
+
+                def clauses(ref: str):
+                    st = sent_by_ref.get(ref)
+                    if not st:
+                        return []
+                    _pa = lambda k: _hp_cl(_times_sp, st[k - 1], st[k]) if k < len(st) else None  # noqa: E731
+                    _du = lambda a, z: _times_sp.audible(st[z - 1])[1] - _times_sp.audible(st[a - 1])[0]  # noqa: E731
+                    return [(a, z, round(_du(a, z), 2), " ".join(w.word for w in st[a - 1:z]))
+                            for a, z in _clause_spans(st, _pa, min_words=prm.hook_min_words, min_sec=prm.hook_min_sec,
+                                                      max_sec=prm.hook_max_sec, min_pause=prm.hook_clause_pause,
+                                                      dur=_du)]
 
     end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
     open_end: list = []                     # … clips that ended «→» and could not be shortened
@@ -8601,7 +8643,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
     if scenario:
         pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
-                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other)
+                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
+                              clauses=clauses)
         if pool is None:
             return 1
     else:
