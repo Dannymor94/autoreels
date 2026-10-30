@@ -61,8 +61,28 @@ def test_scenario_answer_word_gets_an_earlier_start():
     from autoreels.cloud.scenario import scenario_proposals
     sent = {"1.1": (0.0, 8.0, "Мне вообще хотелось сделать книгу как самодиагностику.", True, 8),
             "1.2": (8.2, 12.0, "Да, у меня даже как получается.", True, 6),
-            "1.3": (12.3, 40.0, "Нервная система уже привыкла и отключается сама по себе.", True, 9)}
+            "1.3": (12.3, 40.0, "Она уже привыкла и отключается сама по себе.", True, 9)}   # M197: leans back — no later start
     p = dataclasses.replace(AutoParams(), min_sec=10.0, max_sec=90.0, rhythm=False, start_strict=True,
                             answer_start=True)
     pool, gone = scenario_proposals([{"refs": ["1.2", "1.3"]}], sent, [], p)
     assert pool and pool[0].pieces.startswith("1.1") and any("ответ" in n for n in pool[0].notes)
+
+
+def test_m197_an_answer_word_start_moves_one_sentence_later_when_that_one_stands():
+    """m196: «Да, если брать восстановление… Как ты отдыхаешь? А я и не работаю…» — the whole reel went (the host's
+    question before it may not be added); it starts at «Как ты отдыхаешь?» instead."""
+    from autoreels.cloud.scenario import scenario_proposals
+    sent = {"1.1": (0.0, 5.0, "Как ты восстанавливаешь себя в жизни?", True, 6),
+            "1.2": (5.5, 12.0, "Да, если брать восстановление, то есть такая штука интересная.", True, 9),
+            "1.3": (12.3, 14.0, "Как ты отдыхаешь?", True, 3),
+            "1.4": (14.3, 40.0, "А я и не работаю, когда работа мне по душе.", True, 9)}
+    p = dataclasses.replace(AutoParams(), min_sec=10.0, max_sec=90.0, rhythm=False, start_strict=True,
+                            answer_start=True)
+    pool, gone = scenario_proposals([{"refs": ["1.2", "1.3", "1.4"]}], sent, [], p, other={"1.1"}, interviewer="off")
+    assert pool and pool[0].pieces.startswith("1.3") and any("следующей фразы" in n for n in pool[0].notes)
+    pool, gone = scenario_proposals([{"refs": ["1.2", "1.3", "1.4"]}], sent, [],
+                                    dataclasses.replace(p, min_sec=30.0), other={"1.1"}, interviewer="off")
+    assert not pool                                  # later start too short (27.7 s < 30): the reel goes as before
+    pool, gone = scenario_proposals([{"refs": ["1.2", "1.3", "1.4"]}], sent, [],
+                                    dataclasses.replace(p, answer_start=False), other={"1.1"}, interviewer="off")
+    assert pool and pool[0].pieces.startswith("1.2")  # answer_start off: as before

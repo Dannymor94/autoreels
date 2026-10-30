@@ -207,6 +207,13 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
                                          and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
                 return answer_start_reason(sent[r0][2], host)
             _why = _start_why(refs[0])
+            if _why and p.answer_start and len(refs) > 1 and answer_start_reason(sent[refs[0]][2]) \
+                    and _start_why(refs[1]) is None and dur(refs[1:]) >= p.min_sec:
+                # M197 (m196: «Да, если брать восстановление… Как ты отдыхаешь? — А я и не работаю» went whole): an
+                # answer word opens the reel — the reel starts one sentence later when that one stands on its own
+                notes.append(f"начало: «{sent[refs[0]][2][:40]}» — {_why}; убрано, ролик начинается со следующей фразы")
+                refs = refs[1:]
+                _why = None
             for _ in range(max(0, int(p.start_extend_max))):
                 prv = prev_ref.get(refs[0])
                 if not _why or prv is None or prv in refs or sent[refs[0]][0] - sent[prv][1] > 3.0 \
