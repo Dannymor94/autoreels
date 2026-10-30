@@ -1,0 +1,61 @@
+diff --git a/.gitignore b/.gitignore
+index 0b7b128..4136867 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -64,3 +64,5 @@ clips-review/
+ clips_*.txt
+ review-*.md
+ reviews/
++# M194: block-set sidecars of arl blocks (written on every run, read by nobody; older ones stay tracked)
++manifests/*.blocks.json
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index 9b7587f..712a911 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -1468,7 +1468,13 @@ def build_manual_plan(
+                     word.model_copy(update={"t0": t0, "t1": t1})
+     subtitles = sorted(subs.values(), key=lambda x: x.t0)
+     body_starts = [w.start for w in windows if not w.cold_open]
+-    if any(b < a for a, b in zip(body_starts, body_starts[1:])):
++    _bw = [w for w in windows if not w.cold_open]
++    # M194 (m191: a montage hook from another block, h:37.2 after the body — its words sorted after the body's, the
++    # last subtitle was the hook's «силу.» and --apply refused «last subtitle != planned last word»): a cold open
++    # outside the body's span plays first, so its words go first too — the play-order branch below
++    _co_out = bool(_bw) and any(w.cold_open and (w.end <= min(b.start for b in _bw) + _EPS
++                                                 or w.start >= max(b.end for b in _bw) - _EPS) for w in windows)
++    if any(b < a for a, b in zip(body_starts, body_starts[1:])) or _co_out:
+         # M59: pieces out of source order — the subtitles go in PLAY order (window by window), so
+         # the last subtitle is the last word heard; in source order they are sorted by time as before
+         order: dict[int, int] = {}
+diff --git a/tests/test_m194_plan_fixes.py b/tests/test_m194_plan_fixes.py
+new file mode 100644
+index 0000000..10c089b
+--- /dev/null
++++ b/tests/test_m194_plan_fixes.py
+@@ -0,0 +1,26 @@
++"""M194 (m191 → m192: plan and render faults found on the assistant's reference labelling).
++(a) a montage cold open from outside the body (h:37.2 after the body) — its words were sorted after the body's, the
++last subtitle was the hook's word and --apply refused."""
++from __future__ import annotations
++
++
++def test_m194_hook_outside_the_body_plays_first_in_the_subtitles_too():
++    """m191 (prew_isaev_danny M6, h:37.2 after the body): the cold open's words came last in the subtitles."""
++    from autoreels.cloud.plan import ManualPlanParams, build_manual_plan
++    from tests.test_filler_cut import _setup
++    s1 = [("Самое", 0.0, 0.4), ("частое", 0.45, 0.9), ("заблуждение,", 0.95, 1.6), ("что", 1.7, 1.9),
++          ("человек", 1.95, 2.4), ("не", 2.45, 2.6), ("такой.", 2.65, 3.2)]
++    s2 = [("Человек", 4.0, 4.5), ("понимает,", 4.55, 5.2), ("куда", 5.3, 5.6), ("идти.", 5.65, 6.3)]
++    s3 = [("Ты", 20.0, 20.2), ("не", 20.25, 20.4), ("поломан,", 20.45, 21.0), ("ты", 21.3, 21.4),
++          ("забыл", 21.45, 21.8), ("свою", 21.85, 22.1), ("силу.", 22.15, 22.8)]
++    sents, words, smap, align = _setup([s1, s2, s3], [])
++    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=ManualPlanParams(), hook=3,
++                             hook_mode=None, align=align)
++    shown = [w.word for w in plan.subtitles]
++    assert shown[:7] == ["Ты", "не", "поломан,", "ты", "забыл", "свою", "силу."]     # heard first, shown first
++    assert shown[-1] == "идти." and plan.last_word.word == "идти."                   # the last subtitle = last heard
++    s0 = [("Сначала", 10.0, 10.5), ("было", 10.55, 10.9), ("трудно.", 10.95, 11.6)]
++    sents, words, smap, align = _setup([s1, s0], [])                                # a teaser inside the body: as before
++    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=ManualPlanParams(), hook=2,
++                             hook_mode="!", align=align)
++    assert [w.word for w in plan.subtitles][0] == "Самое"
