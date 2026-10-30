@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Sequence
 
-from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start, strict_start_reason,
+from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start, strict_start_reason, answer_start_reason,
                                       rhythm_pieces, rhythm_why)
 
 SCENARIO_SYSTEM = (
@@ -197,7 +197,16 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
             # M182 (owner: «r14 начало пустое» — «Каждый из них влияет…»): the reel never opens on a line pointing back or
             # at the interviewer — up to start_extend_max sentences before it are added (the start of the thought), each
             # right before in the source; none stands → the reel goes
-            _why = strict_start_reason(sent[refs[0]][2])
+            def _start_why(r0: str) -> "str | None":
+                why = strict_start_reason(sent[r0][2])
+                if why or not p.answer_start:
+                    return why
+                # M193: an answer — an answer word, or the reply right after the interviewer's sentence
+                prv0 = prev_ref.get(r0)
+                host = sent[prv0][2] if (other and prv0 in other and prv0 not in refs
+                                         and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
+                return answer_start_reason(sent[r0][2], host)
+            _why = _start_why(refs[0])
             for _ in range(max(0, int(p.start_extend_max))):
                 prv = prev_ref.get(refs[0])
                 if not _why or prv is None or prv in refs or sent[refs[0]][0] - sent[prv][1] > 3.0 \
@@ -205,7 +214,7 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
                     break
                 notes.append(f"начало: «{sent[refs[0]][2][:40]}» — {_why}; добавлена фраза перед — «{sent[prv][2][:50]}»")
                 refs = [prv] + refs
-                _why = strict_start_reason(sent[refs[0]][2])
+                _why = _start_why(refs[0])
             if _why:
                 gone.append((label, f"начало «{sent[refs[0]][2][:40]}» — {_why}, раньше начать нельзя"))
                 continue

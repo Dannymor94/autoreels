@@ -107,6 +107,10 @@ class AutoParams:
     hook_clause_pause: float = 0.12   # … the silence heard at a clause edge inside the sentence (s)
     start_strict: bool = False        # a reel never opens on a line pointing back / at the interviewer: earlier start or none
     start_extend_max: int = 2         # … up to this many sentences before are added to reach a start that stands
+    # M193 (blind judges on ab192: the automatic reels open on answers to a question the viewer never heard —
+    # «Да, у меня даже как…», «Как было, так и было»): with start_strict, a reel also never opens on an answer
+    answer_start: bool = False        # an answer word («Да, …») or a reply right after the interviewer's turn
+    answer_gap_sec: float = 3.0       # … the reply starts within this many seconds after the interviewer's sentence
 
 
 @dataclass
@@ -504,6 +508,34 @@ def strict_start_reason(text: str) -> str | None:
     m = _re.search(r",\s+([А-ЯЁ][а-яё]{2,})(?=\s*[,.!?…]|\s*$)", text or "")
     if m:
         return f"обращение по имени («{m.group(1)}»)"
+    return None
+
+
+# M193: words that open a reply, not a thought («Да, у меня даже как получается.»)
+_ANSWER_WORDS = frozenset({"да", "нет", "конечно", "согласен", "согласна", "ага", "угу", "точно", "верно",
+                           "наверное", "возможно"})
+_ANSWER_ALONE = frozenset({"наверное", "возможно"})      # these only as a reply of their own: «Наверное.», «Возможно, да.»
+
+
+def answer_start_reason(text: str, host_text: str = "") -> str | None:
+    """M193: why a reel may not open on this sentence as on an answer — it starts with an answer word followed by a
+    comma or a stop («Да, …», «Нет.», «Конечно, …»; «наверное/возможно» only as the whole reply), or it follows the
+    interviewer (`host_text` — his sentence right before it in the source; "" = none) and is not a question and does not
+    repeat at least two content words (5+ letters, first 5) of that question. None = it stands as a start."""
+    import re as _re
+    t = (text or "").strip()
+    words = _plain_words(t)
+    if not words:
+        return None
+    m = _re.match(r"^\W*([А-Яа-яЁё]+)\s*([,.!?…])", t)
+    if m and _norm_word(m.group(1)) in _ANSWER_WORDS:
+        w = _norm_word(m.group(1))
+        if w not in _ANSWER_ALONE or len(words) <= 3:
+            return f"«{m.group(1)}{m.group(2)}…» — ответ, а вопроса в ролике нет"
+    if host_text and not t.endswith("?"):
+        stems = lambda x: {w[:5] for w in _plain_words(x) if len(w) >= 5}  # noqa: E731
+        if len(stems(t) & stems(host_text)) < 2:
+            return f"ответ на вопрос ведущего («{host_text.strip()[:40]}»), которого в ролике нет"
     return None
 
 

@@ -6803,6 +6803,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                         if _w.word.rstrip().endswith((".", "!", "?", "…")):
                             break
                     _sw = _ssr(" ".join(_first))
+                    if not _sw and getattr(getattr(r0_cfg, "autocut", None), "answer_start", False):
+                        from autoreels.cloud.autocut import answer_start_reason as _asr   # M193: «Да, …» opens no clip
+                        _sw = _asr(" ".join(_first))
                     if _sw:
                         _refused.append((r.id, f"weak start «{' '.join(_first)[:50]}» — {_sw}", "another start"))
                 _seen = {_rid for _rid, _w, _ in _refused}
@@ -8548,7 +8551,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      hook_clauses=bool(getattr(ac, "hook_clauses", False)),
                      hook_clause_pause=float(getattr(ac, "hook_clause_pause", 0.12)),
                      start_strict=bool(getattr(ac, "start_strict", False)),
-                     start_extend_max=int(getattr(ac, "start_extend_max", 2)))
+                     start_extend_max=int(getattr(ac, "start_extend_max", 2)),
+                     answer_start=bool(getattr(ac, "answer_start", False)),
+                     answer_gap_sec=float(getattr(ac, "answer_gap_sec", 3.0)))
     _taste = None
     if prm.taste_weight:
         # M138: the owner's taste orders the proposals (invariant 1: the order only)

@@ -368,6 +368,9 @@ autocut:
   start_strict: true      # M182: a reel never opens on a line pointing back («Каждый из них…», «Это…») or at the interviewer
                           # («Ты…», «…, Ласанна.»): up to start_extend_max sentences before are added, else it goes
   start_extend_max: 2
+  answer_start: false     # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
+                          # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
+  answer_gap_sec: 3.0
   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
