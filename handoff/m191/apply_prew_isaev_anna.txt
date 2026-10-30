@@ -1,0 +1,163 @@
+sentence check: 0 sentences, 0 differences
+  выравнивание по звуку: 3209/3328 слов (96%), 1702 мест речи без текста; не по порядку и без уверенности — по карте речи: 6
+  интонация: 3210 слов
+  движение: 21250 кадров
+    M1: pieces 2-7 + 4.1-4 go straight on in the source — played as one (no seam)
+    M1: pieces 14-16 + 5.1-2 go straight on in the source — played as one (no seam)
+  plan M1:
+    window    s2-11  164.633–203.785  «У меня был такой интересный момент, где я, прожи» … «Мне пришлось полностью изменить свою жизнь.»
+    window    s14-18  223.900–247.840  «Я уже сюда приехал и открыл свой центр практик-м» … «етоды, как себе помочь, как другим людям помочь.»
+    shots     wide[2-11] → close[14] → wide[15-18]
+    end       247.840  last word «помочь.» audible end 247.790  air 0.050s  next speech 247.900
+    cuts      5 fillers/pauses removed, 6.9s (clip 63.1s → 56.2s); 1 masked by a shot switch; 12 left in (too close to another change); 1 long pause(s) always cut
+    montage M1: 2 pieces 3.2-7 4.1-4 4.7-9 5.1-2, 1 seam(s), 56.2s
+    seam 1  3.2-7→4.1-4  skips 20.1s, pause 0.07s, picture jump 8.1×, pace 1.9→2.1 w/s, loudness -36→-38 dB, pitch -1.3→-0.5 st, end open
+    ! seam 1 (3.2-7→4.1-4): picture jump 8.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (3.2-7→4.1-4): piece 3.2-7 ends with the voice up (open (end pitch 81/100 in the speaker's range)) on «жизнь.» — the seam sounds like the speaker was cut off
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M2:
+    cold open s16  2068.107–2071.009  «Настоящие друзья — это те, которые не говорят, ч» … «ья — это те, которые не говорят, что ты не прав.»
+    window    s4  610.801–619.180  «Знаешь, как даже иногда говорю, представь, что у» … «ь все рассказать, и за это тебе ничего не будет.»
+    window    s9-13  653.716–675.445  «Я не стараюсь забегать, давать советы.» … «Вот же оно, вот же как нужно.»
+    window    s16-19  2068.147–2084.058  «Настоящие друзья — это те, которые не говорят, ч» … «пия — это вот именно такая некая поддерживающая.»
+    shots     close[16] → wide[4] → close[9] → wide[10-13] → close[16] → wide[17-19]
+    end       2084.058  last word «поддерживающая.» audible end 2084.058  air 0.000s  next speech 2084.058
+    hook      s16 replayed in body: yes
+    hook air  +0.00s after the hook, +0.00s before the body (silence only)
+    cuts      2 fillers/pauses removed, 2.5s (clip 48.9s → 46.4s); 2 masked by a shot switch; 6 left in (too close to another change); 1 long pause(s) always cut
+    ! no room after last word «поддерживающая.» (next speech at 2084.058) — clip ends at its audible end
+    montage M2: 3 pieces 12.4 13.3-7 x5.2-5, 2 seam(s), 43.5s
+    seam 1  12.4→13.3-7  skips 34.5s, pause 0.06s, picture jump 3.0×, pace 3.1→2.3 w/s, loudness -34→-39 dB, pitch +0.2→-2.4 st, end final
+    seam 2  13.3-7→x5.2-5  skips 1392.7s, pause 0.08s, picture jump 12.0×, pace 2.3→2.1 w/s, loudness -35→-32 dB, pitch -1.7→+1.4 st, end final
+    ! seam 1 (12.4→13.3-7): speech rate 3.1 → 2.3 words/s — the voice changes tempo at the seam
+    ! seam 1 (12.4→13.3-7): the voice gets quieter by 5.4 dB (> 4) — the jump is heard
+    ! seam 2 (13.3-7→x5.2-5): picture jump 12.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (13.3-7→x5.2-5): the voice sits higher by 3.1 semitones (> 3) — a different mood on each side
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M3: pieces 6-10 + 18.1-4 go straight on in the source — played as one (no seam)
+  plan M3:
+    cold open s14  899.547–900.908  «Для меня это самый лучший отдых.» … «Для меня это самый лучший отдых.»
+    window    s6-14  851.947–900.890  «Как ты отдыхаешь?» … «Для меня это самый лучший отдых.»
+    shots     close[14] → wide[6-14]
+    end       900.890  last word «отдых.» audible end 900.868  air 0.022s  next speech 900.950
+    hook      s14 replayed in body: yes
+    hook air  +0.00s after the hook, +0.00s before the body (silence only)
+    cuts      6 fillers/pauses removed, 11.3s (clip 50.3s → 39.0s); 1 masked by a shot switch; 2 left in (too close to another change); 5 long pause(s) always cut
+    montage M3: 1 pieces 17.6-10 18.1-4, 0 seam(s), 37.6s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M4:
+    cold open s10  987.878–991.383  «Тут меня могут закидать помидорами гнилыми.» … «Тут меня могут закидать помидорами гнилыми.»
+    window    s3-7  944.284–977.510  «Вдохновляет меня то, что на самом деле, когда ты» … «овеком, ты все равно как-то прорабатываешь себя.»
+    window    s9-12  984.278–998.164  «У тебя происходит самотерапия еще.» … «И это на самом деле не плохо, а хорошо.»
+    window    s19-20  1073.631–1097.610  «Алгоритм у тебя все равно, но есть еще такая вещ» … «ему какие-то исцеляющие вещи с другим человеком.»
+    shots     close[10] → wide[3-7] → close[9-10] → wide[11-12] → close[19] → wide[19-20]
+    end       1097.610  last word «человеком.» audible end 1097.310  air 0.300s  next speech 1098.050
+    hook      s10 replayed in body: yes
+    hook air  +0.00s after the hook, +0.00s before the body (silence only)
+    cuts      5 fillers/pauses removed, 5.5s (clip 74.6s → 69.1s); 2 masked by a shot switch; 10 left in (too close to another change); 1 long pause(s) always cut
+    montage M4: 3 pieces 19.3-7 20.2-5 22.2-3, 2 seam(s), 65.6s
+    seam 1  19.3-7→20.2-5  skips 6.8s, pause 0.10s, picture jump 2.8×, pace 2.2→2.0 w/s, loudness -39→-38 dB, pitch -1.8→-0.0 st, end unsure
+    seam 2  20.2-5→22.2-3  skips 75.5s, pause 0.06s, picture jump 8.2×, pace 2.0→1.7 w/s, loudness -40→-32 dB, pitch -0.5→+2.0 st, end final
+    ! seam 2 (20.2-5→22.2-3): picture jump 8.2× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (20.2-5→22.2-3): the voice gets louder by 8.3 dB (> 4) — the jump is heard
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M5: pieces 13-13 + 24.1-3 go straight on in the source — played as one (no seam)
+  plan M5:
+    cold open s20  1211.033–1215.246  «Раз я здесь в этом мире, значит я должен быть зд» … « значит я должен быть здесь таким, какой я есть.»
+    window    s13-16  1150.213–1174.911  «В любом случае ценности — это то, что мама с пап» … «мотря ни на что, что кто-то тебе что-то говорит.»
+    window    s19-22  1201.543–1224.380  «Ты всегда стараешься, я стараюсь как-то в послед» … «Вот, наверное, две вещи.»
+    shots     close[20] → wide[13-16] → close[19] → wide[19-22]
+    end       1224.380  last word «вещи.» audible end 1224.270  air 0.110s  next speech 1224.440
+    hook      s20 replayed in body: yes
+    hook air  +0.00s after the hook, +0.00s before the body (silence only)
+    cuts      5 fillers/pauses removed, 5.8s (clip 51.7s → 46.0s); 2 left in (too close to another change); 3 long pause(s) always cut
+    ! weak start s13: the sentence before it ends with the voice up (open (end pitch 71/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s16 «Наверное, такая ценность, что…», s17 «Ты просто опираешься на…», s19 «Ты всегда стараешься, я…»
+    montage M5: 2 pieces 23.13 24.1-3 25.2-5, 1 seam(s), 41.7s
+    seam 1  23.13→24.1-3  skips 26.6s, pause 0.24s, picture jump 7.2×, pace 2.3→2.2 w/s, loudness -35→-39 dB, pitch -1.8→+0.5 st, end final
+    ! seam 1 (23.13→24.1-3): picture jump 7.2× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M6: pieces 31-32 + 30.1 go straight on in the source — played as one (no seam)
+  plan M6:
+    window    s6-7  1317.979–1327.028  «Во-первых, дети, а у нас есть внутренний ребенок» … «Внутренний подросток вообще не врет.»
+    window    s13-17  1357.971–1374.505  «То есть ребенок, если у человека, он может быть » … «Но зато классно, что он не врет.»
+    window    s31-33  1429.026–1448.903  «Это абсолютно нормально, что он надевает какую-т» … «общество, где он не может здесь говорить правду.»
+    shots     wide[6-7] → close[13] → wide[14-17] → close[31] → wide[32-33]
+    end       1448.903  last word «правду.» audible end 1448.670  air 0.233s  next speech 1448.963
+    cuts      3 fillers/pauses removed, 2.8s (clip 45.5s → 42.7s); 1 masked by a shot switch; 6 left in (too close to another change); 1 long pause(s) always cut
+    montage M6: 3 pieces 27.6-7 28.2-6 29.8-9 30.1, 2 seam(s), 42.7s
+    seam 1  27.6-7→28.2-6  skips 30.9s, pause 0.02s, picture jump 9.3×, pace 2.1→3.3 w/s, loudness -31→-32 dB, pitch +2.2→+3.9 st, end final
+    seam 2  28.2-6→29.8-9  skips 54.5s, pause 0.05s, picture jump 11.5×, pace 3.3→2.1 w/s, loudness -36→-31 dB, pitch +1.6→+4.4 st, end final
+    ! seam 1 (27.6-7→28.2-6): picture jump 9.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (27.6-7→28.2-6): speech rate 2.1 → 3.3 words/s — the voice changes tempo at the seam
+    ! seam 1 (27.6-7→28.2-6): piece 28.2-6 starts on «То» — it points back to what was skipped
+    ! seam 2 (28.2-6→29.8-9): picture jump 11.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (28.2-6→29.8-9): speech rate 3.3 → 2.1 words/s — the voice changes tempo at the seam
+    ! seam 2 (28.2-6→29.8-9): the voice gets louder by 5.0 dB (> 4) — the jump is heard
+    ! seam 2 (28.2-6→29.8-9): piece 29.8-9 starts on «Это» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, callouts, pop, plate_after_hook | 1360.6s «20»
+  plan M7:
+    cold open s27  1569.795–1571.196  «Ты, получается, поступил честно.» … «Ты, получается, поступил честно.»
+    window    s6-21  1463.450–1522.310  «Но взрослый что он делает?» … «ремя я поступил как взрослый его сын, правильно?»
+    window    s26-27  1561.789–1571.196  «Да, ты соврал, но ты тогда честен с собой, здесь» … «Ты, получается, поступил честно.»
+    shots     close[27] → wide[6-21] → close[26] → wide[27]
+    end       1571.196  last word «честно.» audible end 1571.196  air 0.000s  next speech 1571.196
+    hook      s27 replayed in body: yes
+    hook air  +0.00s after the hook, +0.06s before the body (silence only)
+    cuts      6 fillers/pauses removed, 7.6s (clip 69.7s → 62.1s); 3 masked by a shot switch; 10 left in (too close to another change); 3 long pause(s) always cut
+    ! x: overlaps its neighbours in time (Whisper duplicate) — no silence to cut, played through
+    ! no room after last word «честно.» (next speech at 1571.196) — clip ends at its audible end
+    montage M7: 3 pieces 30.6-11 31.1-10 32.3-4, 2 seam(s), 60.7s
+    seam 1  30.6-11→31.1-10  played through (no silence between them)
+    seam 2  31.1-10→32.3-4  skips 39.5s, pause 0.26s, picture jump 6.5×, pace 2.8→2.2 w/s, loudness -43→-31 dB, pitch +1.7→+0.4 st, end final
+    ! seam 2 (31.1-10→32.3-4): picture jump 6.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (31.1-10→32.3-4): the voice gets louder by 12.3 dB (> 4) — the jump is heard
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M8: pieces 9-10 + 36.1-6 go straight on in the source — played as one (no seam)
+  plan M8:
+    cold open s12  1814.808–1817.309  «Подожди, подожди, а что я чувствую?» … «Подожди, подожди, а что я чувствую?»
+    window    s6-7  1789.373–1797.600  «Я там все время на автомате что-то делаю.» … «нимаюсь какой-то деятельностью или в отношениях.»
+    window    s9-16  1802.651–1833.050  «А здесь, что ты делаешь?» … «И ты начинаешь разбираться в себе.»
+    window    s26-28  1873.771–1893.800  «Это и есть доверие к себе, понимание себя.» … «для того, чтобы улучшить качественно свою жизнь.»
+    shots     close[12] → wide[6-7] → close[9] → wide[10-16] → close[26] → wide[27-28]
+    end       1893.800  last word «жизнь.» audible end 1893.500  air 0.300s  next speech 1894.180
+    hook      s12 replayed in body: yes
+    hook air  +0.43s after the hook, +0.00s before the body (silence only)
+    cuts      2 fillers/pauses removed, 2.8s (clip 61.2s → 58.3s); 1 masked by a shot switch; 7 left in (too close to another change); 2 long pause(s) always cut
+    montage M8: 3 pieces 35.6-7 35.9-10 36.1-6 37.4-6, 2 seam(s), 55.8s
+    seam 1  35.6-7→35.9-10  skips 5.1s, pause 0.25s, picture jump 5.4×, pace 2.1→2.2 w/s, loudness -39→-39 dB, pitch -3.7→-1.7 st, end final
+    seam 2  35.9-10→36.1-6  skips 40.7s, pause 0.22s, picture jump 7.1×, pace 2.2→1.9 w/s, loudness -38→-40 dB, pitch -1.4→-1.5 st, end final
+    ! seam 1 (35.6-7→35.9-10): picture jump 5.4× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (35.6-7→35.9-10): piece 35.9-10 starts on «А» — it points back to what was skipped
+    ! seam 2 (35.9-10→36.1-6): picture jump 7.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (35.9-10→36.1-6): piece 36.1-6 starts on «Это» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 8 blocks selected
+подтяжка границ к словам…
+  [ERROR] last word overlaps next speech: ae=248.439 > N-margin=248.279 (N=248.339)
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  [ERROR] last word overlaps next speech: ae=248.439 > N-margin=248.279 (N=248.339)
+  two_shot_auto: speech_map активен (3372 слов, 3371 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/prew_isaev_anna.review.json (8 reels, selection_source=human)
+accounting (every scored line):
+  montage M1 (score 85) → reel 1
+  montage M2 (score 90) → reel 2
+  montage M3 (score 90) → reel 3
+  montage M4 (score 80) → reel 4
+  montage M5 (score 80) → reel 5
+  montage M6 (score 75) → reel 6
+  montage M7 (score 90) → reel 7
+  montage M8 (score 85) → reel 8
+warnings (1 — nothing removed, review manually):
+  reel 7 (r07): dangling start: opens on «Но»
+title plate (8 clips):
+  reel 1 (r01): «Я всё бросил и уехал»
+  reel 2 (r02): «Почему психолог не даёт советов»
+  reel 3 (r03): «Как отдыхает психолог»
+  reel 4 (r04): «Эмпатия лечит»
+  reel 5 (r05): «Две главные ценности»
+  reel 6 (r06): «Почему мы врём»
+  reel 7 (r07): «Когда ложь честнее правды»
+  reel 8 (r08): «С чего начинается принятие себя»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/prew_isaev_anna.json)

@@ -1,0 +1,80 @@
+sentence check: 0 sentences, 0 differences
+  выравнивание по звуку: 923/928 слов (99%), 390 мест речи без текста
+  интонация: 923 слов
+  движение: 7062 кадров
+    M1: pieces 12-13 + 4.1 go straight on in the source — played as one (no seam)
+  plan M1:
+    cold open s12  264.979–267.240  «Прекратите на себя реально давить.» … «Прекратите на себя реально давить.»
+    window    s4-10  228.680–261.110  «Ваши нервные системы уникальны.» … « мы говорили на тренингах, будьте самими собими.»
+    window    s12-14  265.024–271.604  «Прекратите на себя реально давить.» … «Вы в напряжении.»
+    shots     close[12] → wide[4-10] → close[12-14]
+    end       271.604  last word «напряжении.» audible end 271.580  air 0.024s  next speech 271.664
+    hook      s12 replayed in body: yes
+    hook air  +0.04s after the hook, +0.11s before the body (silence only)
+    cuts      4 fillers/pauses removed, 8.6s (clip 41.3s → 32.7s); 1 masked by a shot switch; 3 left in (too close to another change); 1 long pause(s) always cut
+    montage M1: 2 pieces 3.4-10 3.12-13 4.1, 1 seam(s), 30.4s
+    seam 1  3.4-10→3.12-13  skips 3.9s, pause 0.21s, picture jump 7.0×, pace 1.3→2.0 w/s, loudness -27→-28 dB, pitch -1.7→+0.2 st, end final
+    ! seam 1 (3.4-10→3.12-13): picture jump 7.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (3.4-10→3.12-13): speech rate 1.3 → 2.0 words/s — the voice changes tempo at the seam
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M2:
+    cold open s25  480.147–483.730  «Будьте как у больного ребеночка рядом, возле кро» … « как у больного ребеночка рядом, возле кроватки.»
+    window    s3  337.220–341.715  «Посмотрите, что в теле, скорее всего, есть какое» … «рее всего, есть какое-то хроническое напряжение.»
+    window    s7-14  419.847–448.126  «Представьте, что там ребенок, ваш ребенок.» … «И чем на самом деле можно излечить ребенка?»
+    window    s19-20  456.783–468.593  «Вот ваше внимание сейчас пускай туда идет в это » … «Теплое, дружелюбное, любящее присутствие.»
+    window    s23-26  474.503–484.920  «Не ожидайте, что это ощущение сразу пройдет.» … «Просто побудьте.»
+    shots     close[25] → wide[3] → close[7] → wide[8-14] → close[19] → wide[20] → close[23] → wide[24-26]
+    end       484.920  last word «побудьте.» audible end 484.620  air 0.300s  next speech 485.812
+    hook      s25 replayed in body: yes
+    hook air  +0.00s after the hook, +0.22s before the body (silence only)
+    cuts      4 fillers/pauses removed, 6.2s (clip 58.6s → 52.4s); 1 masked by a shot switch; 8 left in (too close to another change); 3 long pause(s) always cut
+    montage M2: 4 pieces 5.3 8.3-10 9.3-4 9.7-10, 3 seam(s), 48.8s
+    seam 1  5.3→8.3-10  skips 78.1s, pause 0.06s, picture jump 16.3×, pace 2.4→1.6 w/s, loudness -35→-41 dB, pitch -0.3→-0.6 st, end final
+    seam 2  8.3-10→9.3-4  skips 8.7s, pause 0.05s, picture jump 12.5×, pace 1.6→1.5 w/s, loudness -33→-31 dB, pitch -1.2→-0.4 st, end final
+    seam 3  9.3-4→9.7-10  skips 5.9s, pause 0.30s, picture jump 6.3×, pace 1.5→2.0 w/s, loudness -36→-34 dB, pitch -2.0→+0.7 st, end unsure
+    ! 3 seams in 49s — more than 3 per minute: the clip may feel like constant jumping
+    ! piece 5.3 is 4.2s (< 6s): too short to settle into
+    ! seam 1 (5.3→8.3-10): picture jump 16.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (5.3→8.3-10): speech rate 2.4 → 1.6 words/s — the voice changes tempo at the seam
+    ! seam 1 (5.3→8.3-10): the voice gets quieter by 5.4 dB (> 4) — the jump is heard
+    ! seam 2 (8.3-10→9.3-4): picture jump 12.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (8.3-10→9.3-4): piece 9.3-4 starts on «Вот» — it points back to what was skipped
+    ! seam 3 (9.3-4→9.7-10): picture jump 6.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M3:
+    window    s4  534.784–542.426  «Если вы не видите ребенка, просто дайте в это ощ» … «в это ощущение любовь, заботу, тепло и внимание.»
+    window    s9  584.509–598.319  «И этот взрослый, любящий, часть психики становит» … «то, что не дала мама, не долюбила, не доласкала.»
+    window    s11-14  599.480–618.295  «Не дали подростку, возможно, что не поддержал гд» … «сь вы даете своему подростку какую-то поддержку.»
+    window    s25-29  655.545–663.200  «А быть что?» … «Тогда у вас появляется выбор.»
+    shots     wide[4] → close[9] → wide[9] → close[11] → wide[12-14] → close[25-29]
+    end       663.200  last word «выбор.» audible end 662.900  air 0.300s  next speech 663.820
+    cuts      0 fillers/pauses removed, 0.0s (clip 47.9s → 47.9s); 7 left in (too close to another change)
+    montage M3: 4 pieces 11.4 12.1 12.3-6 13.10-14, 3 seam(s), 47.9s
+    seam 1  11.4→12.1  skips 42.1s, pause 0.40s, picture jump 24.5×, pace 2.0→1.8 w/s, loudness -40→-33 dB, pitch -3.8→-2.6 st, end final
+    seam 2  12.1→12.3-6  skips 1.2s, pause 0.20s, picture jump 12.9×, pace 1.8→2.0 w/s, loudness -32→-30 dB, pitch -1.3→+0.2 st, end final
+    seam 3  12.3-6→13.10-14  skips 37.2s, pause 0.40s, picture jump 13.9×, pace 2.0→2.8 w/s, loudness -38→-36 dB, pitch -2.3→-2.1 st, end final
+    ! 3 seams in 48s — more than 3 per minute: the clip may feel like constant jumping
+    ! seam 1 (11.4→12.1): picture jump 24.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (11.4→12.1): the voice gets louder by 7.3 dB (> 4) — the jump is heard
+    ! seam 1 (11.4→12.1): piece 12.1 starts on «И» — it points back to what was skipped
+    ! seam 2 (12.1→12.3-6): picture jump 12.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 3 (12.3-6→13.10-14): picture jump 13.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 3 (12.3-6→13.10-14): speech rate 2.0 → 2.8 words/s — the voice changes tempo at the seam
+    ! seam 3 (12.3-6→13.10-14): piece 13.10-14 starts on «А» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 3 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  two_shot_auto: speech_map активен (957 слов, 956 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/day_yoga_p1.review.json (3 reels, selection_source=human)
+accounting (every scored line):
+  montage M1 (score 85) → reel 1
+  montage M2 (score 85) → reel 2
+  montage M3 (score 80) → reel 3
+title plate (3 clips):
+  reel 1 (r01): «Позвольте себе быть»
+  reel 2 (r02): «Как лечить своё напряжение»
+  reel 3 (r03): «Взрослый внутри вас»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/day_yoga_p1.json)

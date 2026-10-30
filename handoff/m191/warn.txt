@@ -1,0 +1,7 @@
+prew_isaev_anna       2 no room after last word;   2 [ERROR] last word overlaps next speech: ae=;   1 weak start;
+prew_isaev_danny      5 no room after last word;   4 weak start;   2 [ERROR] last word overlaps next speech: ae=;   1 short shot;
+day_yoga_p1        
+day_yoga_p2           5 no room after last word;   2 weak start;   1 short shot;
+disko_beach_p1        1 weak start;   1 no room after last word;
+disko_beach_p2        2 weak start;   1 short shot;   1 no room after last word;   1 [ERROR] last word overlaps next speech: ae=;
+disko_beach_p3        1 short shot;

@@ -1,0 +1,162 @@
+sentence check: 0 sentences, 0 differences
+  выравнивание по звуку: 3379/3406 слов (99%), 1238 мест речи без текста; не по порядку и без уверенности — по карте речи: 2
+  интонация: 3382 слов
+  движение: 19681 кадров
+    M1: pieces 1-9 + 1.1-3 go straight on in the source — played as one (no seam)
+  plan M1:
+    window    s1-12  1.441–84.128  «Практика очень глубокая.» … «С настоящим, с настоящей столкнетесь.»
+    shots     wide[1-12]
+    end       84.128  last word «столкнетесь.» audible end 83.828  air 0.300s  next speech 85.509
+    cuts      9 fillers/pauses removed, 12.0s (clip 82.7s → 70.7s); 6 masked by a shot switch; 6 left in (too close to another change); 5 long pause(s) always cut
+    montage M1: 1 pieces x1.1-9 1.1-3, 0 seam(s), 70.7s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M2: pieces 1-7 + 4.1-3 go straight on in the source — played as one (no seam)
+  plan M2:
+    window    s12  302.752–305.060  «Каждая нервная система уникальна.» … «Каждая нервная система уникальна.»
+    window    s1-10  155.255–205.000  «Из миллиардов только одна такая.» … «м им нужно быть хорошими, какими-то правильными.»
+    shots     wide[12] → close[1] → wide[2-10]
+    end       205.000  last word «правильными.» audible end 204.700  air 0.300s  next speech 205.280
+    cuts      4 fillers/pauses removed, 3.5s (clip 52.1s → 48.6s); 4 left in (too close to another change)
+    montage M2: 2 pieces 7.1 3.1-7 4.1-3, 1 seam(s), 48.6s
+    seam 1  7.1→3.1-7  jumps back 149.8s, pause 0.31s, picture jump 23.0×, pace 1.8→2.0 w/s, loudness -25→-26 dB, pitch -1.1→-0.1 st, end final
+    ! piece 7.1 is 2.2s (< 6s): too short to settle into
+    ! seam 1 (7.1→3.1-7): picture jump 23.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M3: pieces 2-11 + 9.1-3 go straight on in the source — played as one (no seam)
+  plan M3:
+    cold open s9  379.447–382.929  «Надевается броня, маска надевается.» … «Надевается броня, маска надевается.»
+    window    s2-14  348.402–397.470  «Сначала нажимают родители, воспитатели в школе и» … «Реакцию на что-то.»
+    shots     close[9] → wide[2-14]
+    end       397.470  last word «что-то.» audible end 397.170  air 0.300s  next speech 397.670
+    hook      s9 replayed in body: yes
+    hook air  +0.46s after the hook, +0.46s before the body (silence only)
+    cuts      6 fillers/pauses removed, 7.9s (clip 52.6s → 44.7s); 1 masked by a shot switch; 1 left in (too close to another change); 3 long pause(s) always cut
+    montage M3: 1 pieces 8.2-11 9.1-3, 0 seam(s), 41.2s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M4: pieces 4-9 + 10.1-5 go straight on in the source — played as one (no seam)
+  plan M4:
+    window    s4-14  397.702–446.970  «Допустим, у человека уникальная нервная система,» … « нервную систему как будто причесывают, понятно?»
+    shots     wide[4-14]
+    end       446.970  last word «понятно?» audible end 446.960  air 0.010s  next speech 447.030
+    cuts      5 fillers/pauses removed, 7.6s (clip 49.3s → 41.7s); 3 masked by a shot switch; 3 left in (too close to another change); 3 long pause(s) always cut
+    ! short shot 1.88s between two picture changes (out 7.59–9.48s, src 406.96–408.84): whole sentences s6@406.700
+    montage M4: 1 pieces 9.4-9 10.1-5, 0 seam(s), 41.7s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M5:
+    cold open s22  688.106–692.470  «Потом в школе говорят, что ты должен быть треуго» … «ворят, что ты должен быть треугольным и зеленым.»
+    window    s9-11  646.736–655.447  «Почему тогда есть ЕГЭ?» … «чему их причесывают под одну систему, понимаете?»
+    window    s14-23  663.948–702.020  «Представьте, вы какой-то уникальный.» … «ой краской, потому что все должны быть зелеными.»
+    window    s12-13  655.447–664.050  «В первую очередь, уникальная нервная система.» … «ьно, для нее нужна уникальная система раскрытия.»
+    shots     close[22] → wide[9-11] → close[14-15] → wide[15-23] → close[12-13] → wide[13]
+    end       664.050  last word «раскрытия.» audible end 663.750  air 0.300s  next speech 664.146
+    hook      s22 replayed in body: yes
+    hook air  +0.00s after the hook, +0.00s before the body (silence only)
+    cuts      2 fillers/pauses removed, 2.5s (clip 59.8s → 57.3s); 2 masked by a shot switch; 7 left in (too close to another change); 1 long pause(s) always cut
+    montage M5: 3 pieces 14.9-11 15.1-10 14.12-13, 2 seam(s), 52.9s
+    seam 1  14.9-11→15.1-10  skips 8.5s, pause 0.21s, picture jump 6.1×, pace 1.7→2.1 w/s, loudness -24→-25 dB, pitch +2.1→+2.4 st, end unsure
+    seam 2  15.1-10→14.12-13  jumps back 46.6s, pause 0.21s, picture jump 7.6×, pace 2.1→1.9 w/s, loudness -24→-23 dB, pitch -0.7→+3.4 st, end final
+    ! seam 1 (14.9-11→15.1-10): picture jump 6.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (15.1-10→14.12-13): picture jump 7.6× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (15.1-10→14.12-13): the voice sits higher by 4.1 semitones (> 3) — a different mood on each side
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M6:
+    cold open s8  820.924–826.120  «Если папа маму бил, бухал, пойдет, берем.» … «Если папа маму бил, бухал, пойдет, берем.»
+    window    s1-9  791.080–838.518  «И потом же ребенок что делает?» … «ких вот этих программ, которые у нас получились.»
+    shots     close[8] → wide[1-9]
+    end       838.518  last word «получились.» audible end 838.218  air 0.300s  next speech 838.599
+    hook      s8 replayed in body: yes
+    hook air  +0.46s after the hook, +0.46s before the body (silence only)
+    cuts      5 fillers/pauses removed, 4.7s (clip 52.6s → 47.9s); 1 masked by a shot switch; 2 left in (too close to another change); 1 long pause(s) always cut
+    montage M6: 1 pieces 18.1-9, 0 seam(s), 42.8s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M7: pieces 17-20 + 24.1 go straight on in the source — played as one (no seam)
+  plan M7:
+    window    s6-12  971.205–994.400  «Вы выходите в большой мир там после института, н» … «Вы просто к нему привыкли.»
+    window    s17-21  1008.967–1034.930  «Закройте глазки.» … «му, что вы долгое время жили в режиме выживания.»
+    shots     wide[6-12] → close[17-18] → wide[19-21]
+    end       1034.930  last word «выживания.» audible end 1034.670  air 0.260s  next speech 1034.990
+    cuts      2 fillers/pauses removed, 1.9s (clip 49.2s → 47.3s); 1 masked by a shot switch; 2 left in (too close to another change)
+    montage M7: 2 pieces 22.6-12 23.5-8 24.1, 1 seam(s), 47.3s
+    seam 1  22.6-12→23.5-8  skips 14.6s, pause 0.40s, picture jump 4.4×, pace 2.4→1.9 w/s, loudness -24→-25 dB, pitch +1.5→+2.8 st, end final
+    ! seam 1 (22.6-12→23.5-8): picture jump 4.4× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M8:
+    cold open s3  1210.628–1212.180  «А кто давит на меня?» … «А кто давит на меня?»
+    window    s1-9  1202.783–1243.615  «Мамы с папой, у меня папы уже давно нет, папа не» … «ся с этим партнером, с этой работой и так далее.»
+    window    s12-13  1245.353–1252.384  «У каждого какой-то защитный механизм свой.» … «И тогда вся жизнь превращается в компенсацию.»
+    shots     close[3] → wide[1-9] → close[12-13]
+    end       1252.384  last word «компенсацию.» audible end 1252.363  air 0.021s  next speech 1252.444
+    hook      s3 replayed in body: yes
+    hook air  +0.46s after the hook, +0.46s before the body (silence only)
+    cuts      4 fillers/pauses removed, 4.3s (clip 49.4s → 45.1s); 1 masked by a shot switch; 1 left in (too close to another change); 1 long pause(s) always cut
+    montage M8: 2 pieces 28.1-9 29.2-3, 1 seam(s), 43.5s
+    seam 1  28.1-9→29.2-3  skips 1.7s, pause 0.18s, picture jump 6.8×, pace 2.4→1.9 w/s, loudness -28→-25 dB, pitch -5.9→-0.0 st, end final
+    ! seam 1 (28.1-9→29.2-3): picture jump 6.8× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (28.1-9→29.2-3): the voice sits higher by 5.9 semitones (> 3) — a different mood on each side
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M9: pieces 10-14 + 33.1-3 go straight on in the source — played as one (no seam)
+    M9: pieces 21-24 + 34.1-7 go straight on in the source — played as one (no seam)
+  plan M9:
+    cold open s31  1507.571–1512.560  «Выходит ваша настоящая душевная конструкция.» … «Выходит ваша настоящая душевная конструкция.»
+    window    s10-17  1420.380–1445.355  «Что такое дыхание?» … «И они между собой взаимосвязаны.»
+    window    s21-31  1464.298–1512.560  «И при том, дыхание, оно настолько связано с бесс» … «Выходит ваша настоящая душевная конструкция.»
+    shots     close[31] → wide[10-17] → close[21] → wide[22-31]
+    end       1512.560  last word «конструкция.» audible end 1512.490  air 0.070s  next speech 1512.620
+    hook      s31 replayed in body: yes
+    hook air  +0.03s after the hook, +0.34s before the body (silence only)
+    cuts      5 fillers/pauses removed, 6.0s (clip 78.2s → 72.2s); 1 masked by a shot switch; 5 left in (too close to another change); 2 long pause(s) always cut
+    montage M9: 2 pieces 32.10-14 33.1-3 33.7-10 34.1-7, 1 seam(s), 67.2s
+    seam 1  32.10-14→33.1-3  skips 18.9s, pause 0.21s, picture jump 11.7×, pace 2.0→2.2 w/s, loudness -22→-25 dB, pitch +0.2→+0.6 st, end final
+    ! seam 1 (32.10-14→33.1-3): picture jump 11.7× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (32.10-14→33.1-3): piece 33.1-3 starts on «И» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M10:
+    cold open s19  1188.935–1190.896  «Ни хрена не безгранична.» … «Ни хрена не безгранична.»
+    window    s1-3  1073.790–1092.090  «Если вы никому-то не расставили границы, это не » … «изненном опыте, в нашем теле, как психосоматика.»
+    window    s7-10  1133.076–1157.940  «Когда у вас уже вдруг болит спина, понятно?» … «росто оттуда сбежать, вам хочется встать и уйти.»
+    window    s16-22  1175.208–1196.358  «Вы должны быть сильным, ваша нервная система, ва» … «Восполнять.»
+    shots     close[19] → wide[1-3] → close[7] → wide[8-10] → close[16] → wide[16-22]
+    end       1196.358  last word «Восполнять.» audible end 1196.058  air 0.300s  next speech 1196.810
+    hook      s19 replayed in body: yes
+    hook air  +0.46s after the hook, +0.46s before the body (silence only)
+    cuts      4 fillers/pauses removed, 5.1s (clip 66.3s → 61.2s); 1 masked by a shot switch; 8 left in (too close to another change); 1 long pause(s) always cut
+    montage M10: 3 pieces 25.1-3 26.2-5 27.6-12, 2 seam(s), 59.2s
+    seam 1  25.1-3→26.2-5  skips 41.0s, pause 0.40s, picture jump 8.3×, pace 2.0→1.8 w/s, loudness -29→-22 dB, pitch -3.6→+1.4 st, end final
+    seam 2  26.2-5→27.6-12  skips 17.3s, pause 0.40s, picture jump 5.9×, pace 1.8→1.7 w/s, loudness -25→-24 dB, pitch -1.5→+1.0 st, end unsure
+    ! seam 1 (25.1-3→26.2-5): picture jump 8.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (25.1-3→26.2-5): the voice gets louder by 7.1 dB (> 4) — the jump is heard
+    ! seam 1 (25.1-3→26.2-5): the voice sits higher by 5.0 semitones (> 3) — a different mood on each side
+    ! seam 2 (26.2-5→27.6-12): picture jump 5.9× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 10 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  two_shot_auto: speech_map активен (3443 слов, 3442 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p3.review.json (10 reels, selection_source=human)
+accounting (every scored line):
+  montage M1 (score 85) → reel 1
+  montage M2 (score 85) → reel 2
+  montage M3 (score 85) → reel 3
+  montage M4 (score 75) → reel 4
+  montage M5 (score 90) → reel 5
+  montage M6 (score 85) → reel 6
+  montage M7 (score 85) → reel 7
+  montage M8 (score 85) → reel 8
+  montage M9 (score 80) → reel 9
+  montage M10 (score 80) → reel 10
+warnings (1 — nothing removed, review manually):
+  reel 6 (r06): dangling start: opens on «И»
+title plate (10 clips):
+  reel 1 (r01): «С кем вы столкнётесь»
+  reel 2 (r02): «Без вас здесь никак»
+  reel 3 (r03): «Откуда берётся маска»
+  reel 4 (r04): «Причёсанная нервная система»
+  reel 5 (r05): «Почему всех делают одинаковыми»
+  reel 6 (r06): «Почему мы выбираем таких партнёров»
+  reel 7 (r07): «Вы привыкли к напряжению»
+  reel 8 (r08): «Кто давит на вас теперь»
+  reel 9 (r09): «Почему дыхание лечит»
+  reel 10 (r10): «Ваш ресурс не безграничен»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/disko_beach_p3.json)

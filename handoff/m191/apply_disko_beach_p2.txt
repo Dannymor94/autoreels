@@ -1,0 +1,127 @@
+sentence check: 0 sentences, 0 differences
+  выравнивание по звуку: 1352/1365 слов (99%), 413 мест речи без текста
+  интонация: 1353 слов
+  движение: 8304 кадров
+    M1: pieces 10-11 + 1.1-2 go straight on in the source — played as one (no seam)
+    M1: pieces 16-23 + 2.1 go straight on in the source — played as one (no seam)
+  plan M1:
+    cold open s22  78.153–81.280  «Ребят, с вами все нормально, вы не поломаны.» … «Ребят, с вами все нормально, вы не поломаны.»
+    window    s10-13  29.990–47.817  «Если вас сейчас поместить в стрессовую ситуацию,» … «это и есть ваш автоматический защитный механизм.»
+    window    s16-24  56.518–89.810  «То есть там у вас был инстинкт, а это энергия, г» … «де-то по привычке сами на себя как-то нажимаете.»
+    shots     close[22] → wide[10-13] → close[16] → wide[17-24]
+    end       89.810  last word «нажимаете.» audible end 89.810  air 0.000s  next speech 89.832
+    hook      s22 replayed in body: yes
+    hook air  +0.00s after the hook, +0.21s before the body (silence only)
+    cuts      3 fillers/pauses removed, 2.2s (clip 54.2s → 52.1s); 3 left in (too close to another change); 1 long pause(s) always cut
+    ! no room after last word «нажимаете.» (next speech at 89.832) — clip ends at its audible end
+    ! weak start s10: the sentence before it ends with the voice up (open (end pitch 98/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s6 «Какой у вас темперамент…», s7 «Потом нажимает мама с…», s9 «Вы все время что-то…»
+    montage M1: 2 pieces x1.10-11 1.1-2 1.5-12 2.1, 1 seam(s), 48.9s
+    seam 1  x1.10-11→1.1-2  skips 8.7s, pause 0.19s, picture jump 4.5×, pace 1.6→2.5 w/s, loudness -26→-19 dB, pitch +2.0→+1.3 st, end final
+    ! seam 1 (x1.10-11→1.1-2): picture jump 4.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (x1.10-11→1.1-2): speech rate 1.6 → 2.5 words/s — the voice changes tempo at the seam
+    ! seam 1 (x1.10-11→1.1-2): the voice gets louder by 6.1 dB (> 4) — the jump is heard
+    ! seam 1 (x1.10-11→1.1-2): piece 1.1-2 starts on «То» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M2: pieces 8-8 + 5.1 go straight on in the source — played as one (no seam)
+    M2: pieces 11-18 + 6.1-4 go straight on in the source — played as one (no seam)
+  plan M2:
+    window    s8-9  194.574–208.280  «Когда с вами происходит какая-то стрессовая ситу» … «У вас тогда что?»
+    window    s11-22  211.870–257.470  «У вас отключается, что осознанный мозг, и выключ» … « в инстинкты, в животные инстинкты вас вырубает.»
+    shots     wide[8-9] → close[11] → wide[12-22]
+    end       257.470  last word «вырубает.» audible end 257.209  air 0.261s  next speech 257.530
+    cuts      3 fillers/pauses removed, 2.7s (clip 59.3s → 56.6s); 2 left in (too close to another change); 1 long pause(s) always cut
+    ! short shot 1.32s between two picture changes (out 10.98–12.30s, src 206.96–208.28): whole sentences s9@205.400
+    montage M2: 2 pieces 4.8 5.1 5.3-10 6.1-4, 1 seam(s), 56.6s
+    seam 1  4.8→5.1  skips 3.6s, pause 0.22s, picture jump 4.6×, pace 1.0→2.4 w/s, loudness -22→-24 dB, pitch +3.1→+0.4 st, end unsure
+    ! seam 1 (4.8→5.1): picture jump 4.6× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (4.8→5.1): speech rate 1.0 → 2.4 words/s — the voice changes tempo at the seam
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M3:
+    window    s2-4  131.486–148.880  «Вот сейчас вспомните какую-то ситуацию, где вы к» … «те такую ситуацию сейчас, не спешите, это важно.»
+    window    s6-10  156.485–184.810  «Пойдите сейчас снова в эту ситуацию.» … «, любящий сначала себя, потом остальных человек?»
+    window    s22-24  400.506–425.920  «Он выбирает тогда.» … «Ребятки, так это работает.»
+    shots     wide[2-4] → close[6-7] → wide[7-10] → close[22-23] → wide[23-24]
+    end       425.920  last word «работает.» audible end 425.869  air 0.051s  next speech 425.980
+    cuts      3 fillers/pauses removed, 4.3s (clip 71.1s → 66.9s); 1 masked by a shot switch; 6 left in (too close to another change); 1 long pause(s) always cut
+    montage M3: 3 pieces 3.2-4 4.2-6 9.10-12, 2 seam(s), 66.9s
+    seam 1  3.2-4→4.2-6  skips 7.6s, pause 0.40s, picture jump 2.4×, pace 2.0→2.1 w/s, loudness -34→-26 dB, pitch -5.9→+1.5 st, end final
+    seam 2  4.2-6→9.10-12  skips 215.7s, pause 0.24s, picture jump 8.3×, pace 2.1→2.1 w/s, loudness -26→-23 dB, pitch -0.2→-2.8 st, end final
+    ! seam 1 (3.2-4→4.2-6): the voice gets louder by 8.8 dB (> 4) — the jump is heard
+    ! seam 1 (3.2-4→4.2-6): the voice sits higher by 7.4 semitones (> 3) — a different mood on each side
+    ! seam 2 (4.2-6→9.10-12): picture jump 8.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (4.2-6→9.10-12): piece 9.10-12 starts on «Он» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M4: pieces 12-13 + 8.1 go straight on in the source — played as one (no seam)
+  plan M4:
+    window    s2-8  289.695–311.730  «Человек идет как железный человек.» … «ю реальность сначала как просто ощущение в теле.»
+    window    s12-14  320.740–353.910  «Но на самом деле, что вы осознаете, и в этом мал» … « потом пауза, потом появляется осознанный выбор.»
+    shots     wide[2-8] → close[12] → wide[12-14]
+    end       353.910  last word «выбор.» audible end 353.610  air 0.300s  next speech 354.060
+    cuts      3 fillers/pauses removed, 2.1s (clip 55.2s → 53.1s); 3 left in (too close to another change)
+    montage M4: 2 pieces 7.2-8 7.12-13 8.1, 1 seam(s), 53.1s
+    seam 1  7.2-8→7.12-13  skips 9.0s, pause 0.40s, picture jump 4.5×, pace 2.4→1.8 w/s, loudness -23→-20 dB, pitch +2.1→+3.1 st, end final
+    ! seam 1 (7.2-8→7.12-13): picture jump 4.5× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (7.2-8→7.12-13): piece 7.12-13 starts on «Но» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M5:
+    cold open s23  543.282–545.650  «Может быть, это не ваши друзья совсем.» … «Может быть, это не ваши друзья совсем.»
+    window    s10-18  492.701–513.780  «Вы же сейчас в какой-то среде находитесь, и эта » … «о вас затрагивают, чтобы вы снова тираном стали.»
+    window    s20  523.126–532.174  «Если вы попробовали как-то поменяться, но среда » … « поменялась, значит вы в какой среде находитесь?»
+    window    s22-23  536.754–545.450  «Может быть, и не надо быть в этих отношениях, мо» … «Может быть, это не ваши друзья совсем.»
+    shots     close[23] → wide[10-18] → close[20] → wide[20] → close[22] → wide[23]
+    end       545.450  last word «совсем.» audible end 545.150  air 0.300s  next speech 545.904
+    hook      s23 replayed in body: yes
+    hook air  +0.46s after the hook, +0.00s before the body (silence only)
+    cuts      2 fillers/pauses removed, 2.3s (clip 41.2s → 38.9s); 2 left in (too close to another change); 1 long pause(s) always cut
+    montage M5: 3 pieces 11.10-18 12.2 13.2-3, 2 seam(s), 36.5s
+    seam 1  11.10-18→12.2  skips 9.3s, pause 0.22s, picture jump 6.3×, pace 2.8→1.7 w/s, loudness -23→-36 dB, pitch -3.8→+1.9 st, end final
+    seam 2  12.2→13.2-3  skips 4.6s, pause 0.36s, picture jump 5.1×, pace 1.7→2.9 w/s, loudness -25→-28 dB, pitch -0.4→-3.4 st, end final
+    ! 2 seams in 37s — more than 3 per minute: the clip may feel like constant jumping
+    ! seam 1 (11.10-18→12.2): picture jump 6.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (11.10-18→12.2): speech rate 2.8 → 1.7 words/s — the voice changes tempo at the seam
+    ! seam 1 (11.10-18→12.2): the voice gets quieter by 12.7 dB (> 4) — the jump is heard
+    ! seam 1 (11.10-18→12.2): the voice sits higher by 5.7 semitones (> 3) — a different mood on each side
+    ! seam 2 (12.2→13.2-3): picture jump 5.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (12.2→13.2-3): speech rate 1.7 → 2.9 words/s — the voice changes tempo at the seam
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M6: pieces 11-12 + 14.1-8 go straight on in the source — played as one (no seam)
+  plan M6:
+    cold open s20  596.707–600.890  «Поздно — это когда уже завтра заказан священник.» … «Поздно — это когда уже завтра заказан священник.»
+    window    s11-20  566.000–600.890  «И там самое главное, что за маской вашей находит» … «Поздно — это когда уже завтра заказан священник.»
+    window    s22-24  602.271–609.035  «И то, скорее всего, не поздно, ребят.» … «Потому что жизнь не останавливает.»
+    shots     close[20] → wide[11-20] → close[22-24]
+    end       609.035  last word «останавливает.» audible end 608.735  air 0.300s  next speech 609.330
+    hook      s20 replayed in body: yes
+    hook air  +0.00s after the hook, +0.28s before the body (silence only)
+    cuts      2 fillers/pauses removed, 1.1s (clip 45.8s → 44.7s); 4 left in (too close to another change)
+    ! weak start s11: the sentence before it ends with the voice up (open (end pitch 84/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s6 «Вся жизнь была компенсацией.…», s12 «Чем ваша нервная система…», s16 «Ты же должна быть,…»
+    montage M6: 2 pieces 13.11-12 14.1-8 14.10-12, 1 seam(s), 40.6s
+    seam 1  13.11-12→14.1-8  skips 1.4s, pause 0.22s, picture jump 2.4×, pace 2.6→2.4 w/s, loudness -25→-25 dB, pitch +1.3→+4.3 st, end final
+    ! seam 1 (13.11-12→14.1-8): piece 14.1-8 starts on «И» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 6 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  [ERROR] last word overlaps next speech: ae=89.950 > N-margin=89.800 (N=89.860)
+  two_shot_auto: speech_map активен (1383 слов, 1382 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p2.review.json (6 reels, selection_source=human)
+accounting (every scored line):
+  montage M1 (score 85) → reel 1
+  montage M2 (score 80) → reel 2
+  montage M3 (score 80) → reel 3
+  montage M4 (score 80) → reel 4
+  montage M5 (score 85) → reel 5
+  montage M6 (score 85) → reel 6
+warnings (2 — nothing removed, review manually):
+  reel 3 (r03): dangling start: opens on «Вот»
+  reel 6 (r06): dangling start: opens on «И»
+title plate (6 clips):
+  reel 1 (r01): «Вы не поломаны»
+  reel 2 (r02): «Почему знание не помогает в стрессе»
+  reel 3 (r03): «Что сделал бы взрослый»
+  reel 4 (r04): «Триггер, пауза, выбор»
+  reel 5 (r05): «Среда держит ваши реакции»
+  reel 6 (r06): «Никогда не поздно»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/disko_beach_p2.json)

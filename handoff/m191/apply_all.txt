@@ -1,0 +1,26 @@
+== prew_isaev_anna
+код 0
+  [ERROR] last word overlaps next speech: ae=248.439 > N-margin=248.279 (N=248.339)
+  [ERROR] last word overlaps next speech: ae=248.439 > N-margin=248.279 (N=248.339)
+manifest → /Users/danny/Documents/autoreels/reviews/prew_isaev_anna.review.json (8 reels, selection_source=human)
+== prew_isaev_danny
+код 1
+  [ERROR] last word overlaps next speech: ae=1406.530 > N-margin=1406.410 (N=1406.470)
+  [ERROR] last word overlaps next speech: ae=1975.180 > N-margin=1975.020 (N=1975.080)
+== day_yoga_p1
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/day_yoga_p1.review.json (3 reels, selection_source=human)
+== day_yoga_p2
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/day_yoga_p2.review.json (16 reels, selection_source=human)
+== disko_beach_p1
+код 1
+[ERROR] r04: seam inside word — cut at 1019.252s splits 'сталкивания' [1018.934, 1019.830] (window 1)
+  [ERROR] planned clip cuts inside a word — refusing
+== disko_beach_p2
+код 0
+  [ERROR] last word overlaps next speech: ae=89.950 > N-margin=89.800 (N=89.860)
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p2.review.json (6 reels, selection_source=human)
+== disko_beach_p3
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p3.review.json (10 reels, selection_source=human)

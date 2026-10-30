@@ -1,0 +1,40 @@
+=== Эталон m183 в ref191: найдено 40 из 69 ===
+
+  day_yoga_p1       3/3
+  day_yoga_p2       8/12
+  disko_beach_p1    7/11
+  disko_beach_p2    4/7
+  disko_beach_p3    8/15
+  prew_isaev_anna   5/9
+  prew_isaev_danny  5/12
+
+Потерянные клипы эталона:
+  day_yoga_p2 r03 «Почему вас задевает то, что другим безразлично» 31с | лучшее: нет перекрытия | роли: explanation(3)→explanation(3)→explanation(3) | нет_вывода
+  day_yoga_p2 r04 «Между триггером и реакцией есть выбор» 62с | лучшее: r12 46% | роли: thesis(4)→conclusion(4)→explanation(3)→example(4) | нет_вывода
+  day_yoga_p2 r10 «Контролёр: тревога и скрытый дар» 42с | лучшее: r05 39% | роли: aside(1)→explanation(3)→explanation(3) | нет_вывода
+  day_yoga_p2 r11 «Маски в паре и что бесит» 29с | лучшее: нет перекрытия | роли: explanation(2) | нет_вывода
+  disko_beach_p1 r01 «Без нравственности не будет концентрации» 49с | лучшее: нет перекрытия | роли: conclusion(3)→explanation(3)→explanation(2) | нет_вывода, тем=3
+  disko_beach_p1 r05 «Почему в медитации важна поза» 40с | лучшее: нет перекрытия | роли: aside(1)→explanation(3)→explanation(2) | обрывок, нет_вывода
+  disko_beach_p1 r08 «Что будет, если внимание убегает снова?» 25с | лучшее: r06 67% | роли: address(3)→explanation(3) | нет_вывода, тем=2
+  disko_beach_p1 r09 «Как убрать психосоматику вниманием?» 27с | лучшее: нет перекрытия | роли: explanation(3)→explanation(3) | нет_вывода
+  disko_beach_p2 r01 «Вы не поломаны» 42с | лучшее: r01 28% | роли: explanation(3)→conclusion(3) | тем=2
+  disko_beach_p2 r05 «Как взрослый делает выбор в стрессе» 55с | лучшее: r03 42% | роли: explanation(3)→explanation(3)→metaphor(5) | нет_вывода, тем=2
+  disko_beach_p2 r06 «Зажим нервной системы» 44с | лучшее: r01 49% | роли: example(3)→explanation(3)→thesis(4) | нет_вывода, тем=2
+  disko_beach_p3 r01 «Почему нужна уникальная система раскрытия?» 39с | лучшее: r05 44% | роли: aside(1)→question(4) | нет_вывода
+  disko_beach_p3 r03 «Раскрыть нервную систему и быть свободным» 27с | лучшее: нет перекрытия | роли: aside(2)→thesis(4) | нет_вывода
+  disko_beach_p3 r04 «злость была не выражена» 58с | лучшее: r09 66% | роли: explanation(3)→thesis(4)→explanation(3)→explanation(3) | нет_вывода
+  disko_beach_p3 r05 «Спуститься чем глубже к корневой проблеме» 44с | лучшее: нет перекрытия | роли: explanation(4)→explanation(3)→conclusion(3) | нет
+  disko_beach_p3 r06 «Психика лечит себя сама» 49с | лучшее: r09 55% | роли: explanation(3)→thesis(4)→explanation(3)→conclusion(3) | тем=2
+  disko_beach_p3 r10 «Как психика сама себя лечит» 68с | лучшее: r09 29% | роли: thesis(4)→explanation(3)→explanation(3)→explanation(4) | нет_вывода
+  disko_beach_p3 r15 «Эго-конструкция и вечные одни и те же грабли» 46с | лучшее: нет перекрытия | роли: explanation(4)→explanation(3)→thesis(4)→aside(2)→aside(2) | нет_вывода, тем=2
+  prew_isaev_anna r01 «Как я собрал свой метод» 65с | лучшее: нет перекрытия | роли: thesis(3)→example(3)→conclusion(4) | обрывок
+  prew_isaev_anna r05 «Кружки или бережное пространство?» 34с | лучшее: нет перекрытия | роли: explanation(3)→thesis(4) | нет_вывода
+  prew_isaev_anna r06 «Откуда берутся маски и вранье» 69с | лучшее: r06 45% | роли: thesis(3)→explanation(4)→example(3)→conclusion(3)→thesis(4) | нет
+  prew_isaev_anna r08 «Алгоритм или эмпатия» 56с | лучшее: r04 36% | роли: example(3)→example(3)→example(3)→thesis(4) | нет_вывода
+  prew_isaev_danny r01 «Моя задача — вернуть человека в баланс» 35с | лучшее: нет перекрытия | роли: explanation(3) | нет_вывода
+  prew_isaev_danny r02 «Сутра моей книги: ты не поломан» 49с | лучшее: нет перекрытия | роли: explanation(3)→question(3)→thesis(5)→explanation(2) | нет_вывода
+  prew_isaev_danny r04 «Вы не сломаны, вы уникальны» 60с | лучшее: нет перекрытия | роли: question(3)→thesis(5)→thesis(4) | ссылка_назад(«а…»), нет_вывода
+  prew_isaev_danny r06 «Не можете заниматься йогой регулярно?» 51с | лучшее: r01 39% | роли: aside(1)→example(5)→example(3) | нет_вывода
+  prew_isaev_danny r08 «Работа через тело, а не ум» 63с | лучшее: нет перекрытия | роли: thesis(3)→explanation(4)→explanation(3)→example(3) | обрывок, нет_вывода
+  prew_isaev_danny r10 «Что вы приобретете, став настоящим?» 51с | лучшее: нет перекрытия | роли: thesis(4)→explanation(3)→explanation(3) | нет_вывода
+  prew_isaev_danny r11 «Иногда клиента нужно зажечь» 51с | лучшее: нет перекрытия | роли: question(3)→example(3)→explanation(3) | нет_вывода
