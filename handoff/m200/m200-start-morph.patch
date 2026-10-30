@@ -1,0 +1,241 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 1bafe04..ddf9e50 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -371,6 +371,8 @@ autocut:
+   answer_start: true      # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
+                           # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
+   answer_gap_sec: 3.0
++  start_morph: false      # M200: with start_strict, a reel never opens on a sentence with nothing to stand on — a verb without a
++                          # subject («Как было, так и было.») or «он/их» before any noun; needs pymorphy3 (pip install -e ".[nlp]")
+   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 3bf2f60..185f1f6 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -6806,6 +6806,10 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+                     if not _sw and getattr(getattr(r0_cfg, "autocut", None), "answer_start", False):
+                         from autoreels.cloud.autocut import answer_start_reason as _asr   # M193: «Да, …» opens no clip
+                         _sw = _asr(" ".join(_first))
++                    if not _sw and getattr(getattr(r0_cfg, "autocut", None), "start_morph", False):
++                        from autoreels.cloud.clipcheck import require_morph as _rqm, start_morph as _stm
++                        _rqm()                                           # M200: nothing to stand on
++                        _sw = _stm(_first)
+                     if _sw:
+                         _refused.append((r.id, f"weak start «{' '.join(_first)[:50]}» — {_sw}", "another start"))
+                 _seen = {_rid for _rid, _w, _ in _refused}
+@@ -8553,7 +8557,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                      start_strict=bool(getattr(ac, "start_strict", False)),
+                      start_extend_max=int(getattr(ac, "start_extend_max", 2)),
+                      answer_start=bool(getattr(ac, "answer_start", False)),
+-                     answer_gap_sec=float(getattr(ac, "answer_gap_sec", 3.0)))
++                     answer_gap_sec=float(getattr(ac, "answer_gap_sec", 3.0)),
++                     start_morph=bool(getattr(ac, "start_morph", False)))
+     _taste = None
+     if prm.taste_weight:
+         # M138: the owner's taste orders the proposals (invariant 1: the order only)
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 41bf16b..88fd221 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -111,6 +111,8 @@ class AutoParams:
+     # «Да, у меня даже как…», «Как было, так и было»): with start_strict, a reel also never opens on an answer
+     answer_start: bool = False        # an answer word («Да, …») or a reply right after the interviewer's turn
+     answer_gap_sec: float = 3.0       # … the reply starts within this many seconds after the interviewer's sentence
++    start_morph: bool = False         # M200: with start_strict, a reel never opens on a sentence with nothing to stand on —
++                                      # a verb without a subject («Как было, так и было.») or «он/их…» before any noun
+ 
+ 
+ @dataclass
+@@ -527,7 +529,8 @@ def answer_start_reason(text: str, host_text: str = "") -> str | None:
+     words = _plain_words(t)
+     if not words:
+         return None
+-    m = _re.match(r"^\W*([А-Яа-яЁё]+)\s*([,.!?…])", t)
++    # M200 (m196: «Ну да, вот я как-то говорил…» opened a reel): fillers before the answer word do not hide it
++    m = _re.match(r"^\W*(?:(?:ну|вот)(?![А-Яа-яЁё])\W*)*([А-Яа-яЁё]+)\s*([,.!?…])", t, _re.IGNORECASE)
+     if m and _norm_word(m.group(1)) in _ANSWER_WORDS:
+         w = _norm_word(m.group(1))
+         if w not in _ANSWER_ALONE or len(words) <= 3:
+diff --git a/src/autoreels/cloud/clipcheck.py b/src/autoreels/cloud/clipcheck.py
+index e690e81..c369898 100644
+--- a/src/autoreels/cloud/clipcheck.py
++++ b/src/autoreels/cloud/clipcheck.py
+@@ -1,5 +1,6 @@
+ """M199 (замер, ничего не решает): четыре проверки готового клипа, которые слепые судьи m192b назвали главными
+-недостатками автоматики, — пока только числа, без влияния на сборку.
++недостатками автоматики, — числа для замера (tools/clip_checks.py). M200: проверка 3 — ещё и правило сборки
++(autocut.start_morph, cloud/scenario.py и клипы разметки arl auto); 1, 2, 4 на сборку не влияют.
+ 
+ 1. hook_hang — холодный старт кончается словом, после которого ждут продолжения (предлог, союз, частица, местоимение):
+    «…вы забыли свою силу, Вы» — судьи: «тизер обрывается на „Вы“».
+@@ -43,6 +44,12 @@ def has_morph() -> bool:
+     return _morph() is not None
+ 
+ 
++def require_morph() -> None:
++    """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
++    if _morph() is None:
++        raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
++
++
+ def _norm(w: str) -> str:
+     return "".join(c for c in (w or "").lower().replace("ё", "е") if c.isalnum())
+ 
+@@ -53,6 +60,12 @@ def _parse(w: str):
+     return m.parse(w)[0] if (m is not None and w) else None
+ 
+ 
++@lru_cache(maxsize=50000)
++def _parses(w: str) -> tuple:
++    m = _morph()
++    return tuple(m.parse(w)) if (m is not None and w) else ()
++
++
+ def _lemma(w: str) -> str | None:
+     """A content word's lemma (pymorphy3) or its first 5 letters; None for a function word / short word."""
+     n = _norm(w)
+@@ -162,8 +175,10 @@ def start_morph(sentence: Sequence[str]) -> str | None:
+             and ("neut" in verb.tag or "3per" in verb.tag) and "plur" not in verb.tag:
+         verb = None                                    # «Было интересно», «Стало легче» — impersonal, stands
+     if verb is not None:
+-        subj = any(p is not None and p.tag.case == "nomn" and p.tag.POS in ("NOUN", "NPRO", "ADJF", "PRTF", "NUMR")
+-                   for _, p in tags)
++        # M200 (m196: «У папы был рак» — «рак» read first as accusative; ref191: «Вдохновляет меня то, что…»): a word
++        # that MAY be in the nominative is a subject — any of its readings, not only the likeliest
++        subj = any(q.tag.case == "nomn" and q.tag.POS in ("NOUN", "NPRO", "ADJF", "PRTF", "NUMR")
++                   for n, _ in tags for q in _parses(n))
+         if not subj and not any(p is not None and p.tag.POS == "VERB" and ("1per" in p.tag or "2per" in p.tag)
+                                 for _, p in tags):
+             return f"глагол «{verb.word}» без подлежащего"
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index 4d4283c..514b1dd 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -194,18 +194,27 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+             if _g:                            # M145: the model's start is kept (a later one may not stand alone)
+                 notes.append(f"начало: {_g} — исправить нельзя, оставлено")
+         if p.start_strict:
++            if p.start_morph:
++                from autoreels.cloud.clipcheck import require_morph
++                require_morph()
+             # M182 (owner: «r14 начало пустое» — «Каждый из них влияет…»): the reel never opens on a line pointing back or
+             # at the interviewer — up to start_extend_max sentences before it are added (the start of the thought), each
+             # right before in the source; none stands → the reel goes
+             def _start_why(r0: str) -> "str | None":
+                 why = strict_start_reason(sent[r0][2])
+-                if why or not p.answer_start:
+-                    return why
+-                # M193: an answer — an answer word, or the reply right after the interviewer's sentence
+-                prv0 = prev_ref.get(r0)
+-                host = sent[prv0][2] if (other and prv0 in other and prv0 not in refs
+-                                         and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
+-                return answer_start_reason(sent[r0][2], host)
++                if why is None and p.answer_start:
++                    # M193: an answer — an answer word, or the reply right after the interviewer's sentence
++                    prv0 = prev_ref.get(r0)
++                    host = sent[prv0][2] if (other and prv0 in other and prv0 not in refs
++                                             and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
++                    why = answer_start_reason(sent[r0][2], host)
++                if why is None and p.start_morph:
++                    # M200 (blind judges on ab192: «Как было, так и было.», «Всем говорит, и он стоит на этом…» — start
++                    # 1 of 5 from both): a verb with no subject, or «он/их» before any noun — the start of the thought
++                    # is before it
++                    from autoreels.cloud.clipcheck import start_morph
++                    why = start_morph(sent[r0][2].split())
++                return why
+             _why = _start_why(refs[0])
+             if _why and p.answer_start and len(refs) > 1 and answer_start_reason(sent[refs[0]][2]) \
+                     and _start_why(refs[1]) is None and dur(refs[1:]) >= p.min_sec:
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index ba8a9bf..b8260bf 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -289,6 +289,8 @@ class AutocutConfig(BaseModel):
+     start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
+     answer_start: bool = False                # M193: with start_strict, a reel never opens on an answer («Да, …», a reply to the host)
+     answer_gap_sec: float = Field(3.0, ge=0.0)   # … a reply: starts within this many seconds after the host's sentence
++    start_morph: bool = False                 # M200: with start_strict, no reel opens on a verb without a subject or «он/их…»
++                                              # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
+     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
+diff --git a/tests/test_m200_start_morph.py b/tests/test_m200_start_morph.py
+new file mode 100644
+index 0000000..9cb176b
+--- /dev/null
++++ b/tests/test_m200_start_morph.py
+@@ -0,0 +1,71 @@
++"""M200 (blind judges on ab192 + clip checks M199): a reel never opens on a sentence with nothing to stand on — a verb
++without a subject («Как было, так и было.», «Всем говорит, и он стоит на этом…», start 1 of 5 from both judges) or
++«он/их» before any noun (`autocut.start_morph`, with start_strict; off by default — the previous proposals). And the
++answer word is found behind a filler («Ну да, вот я как-то говорил…», «Вот, да, у меня…» — m196 kept both)."""
++from __future__ import annotations
++
++import dataclasses
++from pathlib import Path
++
++import pytest
++
++from autoreels.cloud import clipcheck as C
++from autoreels.cloud.autocut import AutoParams, answer_start_reason
++
++
++def test_off_by_default_and_in_repo_config():
++    assert not AutoParams().start_morph
++    from autoreels.core.config import AutocutConfig, load_r0_config
++    assert not AutocutConfig().start_morph
++    ac = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").autocut
++    assert ac.start_morph is False
++
++
++def test_answer_word_behind_a_filler():
++    assert "ответ" in answer_start_reason("Ну да, вот я как-то говорил, что впервые с йогой я познакомился.")
++    assert "ответ" in answer_start_reason("Вот, да, у меня даже как получается.")
++    assert "ответ" in answer_start_reason("Ну, конечно, перенос — вещь неблагодарная.")
++    assert "ответ" in answer_start_reason("Ну наверное.")
++    for ok in ("Ну вот.", "Вот так мы и живём.", "Нужно сказать, да, это сложно.", "Ну, здесь какие-то свои правила.",
++               "Вот это да.", "Ну, наверное, такая ценность, что ты себя по-настоящему уважаешь."):
++        assert answer_start_reason(ok) is None, ok
++
++
++def test_start_morph_a_subject_in_any_reading():
++    pytest.importorskip("pymorphy3")
++    assert C.start_morph("У папы был рак, да, царство ему небесное.".split()) is None       # «рак» may be nominative
++    assert C.start_morph("Вдохновляет меня то, что ты растёшь как профессионал.".split()) is None   # «то, что…»
++    assert "без подлежащего" in C.start_morph("Как было, так и было.".split())
++    assert "без подлежащего" in C.start_morph("Всем говорит, и он стоит на этом, ну я же зато не вру.".split())
++
++
++def test_rule_without_morphology_is_an_error(monkeypatch):
++    monkeypatch.setattr(C, "_morph", lambda: None)
++    with pytest.raises(RuntimeError, match="pymorphy3"):
++        C.require_morph()
++    from autoreels.cloud.scenario import scenario_proposals
++    p = dataclasses.replace(AutoParams(), min_sec=10.0, max_sec=90.0, rhythm=False, start_strict=True, start_morph=True)
++    with pytest.raises(RuntimeError, match="pymorphy3"):
++        scenario_proposals([{"refs": ["1.1"]}], {"1.1": (0.0, 30.0, "Каждая система уникальна.", True, 3)}, [], p)
++
++
++def _sent():
++    return {"1.1": (0.0, 9.0, "Человек врёт всем вокруг, даже самым близким.", True, 7),
++            "1.2": (9.3, 14.0, "Всем говорит, и он стоит на этом, ну я же зато не вру.", True, 12),
++            "1.3": (14.3, 40.0, "А взрослый понимает, что среда не даёт ему говорить правду.", True, 10)}
++
++
++def test_scenario_start_morph_starts_earlier_off_keeps_it():
++    pytest.importorskip("pymorphy3")
++    from autoreels.cloud.scenario import scenario_proposals
++    p = dataclasses.replace(AutoParams(), min_sec=10.0, max_sec=90.0, rhythm=False, start_strict=True)
++    scen = [{"refs": ["1.2", "1.3"]}]
++    pool, gone = scenario_proposals(scen, _sent(), [], p)
++    assert pool and pool[0].pieces.startswith("1.2")                        # start_morph off: as before
++    pm = dataclasses.replace(p, start_morph=True)
++    pool, gone = scenario_proposals(scen, _sent(), [], pm)
++    assert pool and pool[0].pieces.startswith("1.1") and any("без подлежащего" in n for n in pool[0].notes)
++    sent = dict(_sent())
++    sent["1.1"] = (0.0, 5.0, "Было и прошло.", True, 3)                     # nothing before stands either
++    pool, gone = scenario_proposals(scen, sent, [], pm)
++    assert not pool and "раньше начать нельзя" in gone[0][1]
