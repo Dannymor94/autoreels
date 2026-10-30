@@ -1,0 +1,467 @@
+=== auto: карта, судьи и посты — sonnet (до 2026-11-02 включительно) ===
+=== auto: ролики пишет сценарист (sonnet, платно) — переключить: --mode autocut | scenario ===
+
+=== auto prew_isaev_danny ===
+--- подготовка (карта речи, выравнивание, интонация, движение, разметка)
+── prew_isaev_danny: speech-map
+source:   prew_isaev_danny.mp4
+sha256:   e0367626be5ed65f…
+words:    5465
+map out:  /Users/danny/Documents/autoreels/transcripts/prew_isaev_danny.speechmap.json
+
+noise floor:  -75.0 dBFS
+threshold:    -60.0 dBFS
+duration:     2862.6 s
+intervals:    3355
+speech:       2164.9 s (75.6%)
+
+Boundary pauses                        map   whisper
+  > 0.3 s                             8.0%      3.7%
+  > 1.0 s                             1.2%      1.2%
+  negative                            0.0%     14.2%
+  untranscribed speech in gap          150
+  total pairs                         5464      5464
+── prew_isaev_danny: align
+✓ уже есть: /Users/danny/Documents/autoreels/transcripts/prew_isaev_danny.align.json (пересчитать: --force)
+── prew_isaev_danny: prosody
+✓ уже есть: /Users/danny/Documents/autoreels/transcripts/prew_isaev_danny.prosody.json (пересчитать: --force)
+── prew_isaev_danny: motion
+✓ уже есть: /Users/danny/Documents/autoreels/data/cache/prew_isaev_danny.motion.npz (пересчитать: --force)
+── prew_isaev_danny: label
+проверка: строк с нарушениями 0
+→ /Users/danny/Documents/autoreels/reviews/prew_isaev_danny_auto.txt без изменений
+── prew_isaev_danny: plan (пробный --apply черновика)
+sentence check: 144 sentences, 0 differences
+  выравнивание по звуку: 5426/5449 слов (100%), 2546 мест речи без текста; не по порядку и без уверенности — по карте речи: 5
+  интонация: 5426 слов
+  движение: 28626 кадров
+  крючок 3: h:8@28-36 «моя какая-то там личность сформировалась, я начал себя искат»
+  plan 3:
+    cold open s8  175.925–179.047  «Помню до сих пор там какое-то дыхание гниенное, » … «ам личность сформировалась, я начал себя искать.»
+    window    s1-8  133.750–179.127  «Ну да, вот я как-то говорил, что впервые с йогой» … «ам личность сформировалась, я начал себя искать.»
+    shots     close[8] → wide[1-7] → close[8]
+    end       179.127  last word «искать.» audible end 179.007  air 0.120s  next speech 179.187
+    hook      s8 replayed in body: yes
+    cuts      3 fillers/pauses removed, 5.2s (clip 48.5s → 43.3s); 2 masked by a shot switch; 3 left in (visible jump); 2 long pause(s) always cut
+  fx 3: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan 4:
+    window    s1-2  179.147–220.471  «Вот я начал искать себя как раз через какие-то, » … «больше я как тренер по йоге занимаюсь регулярно.»
+    shots     wide[1] → close[2]
+    end       220.471  last word «регулярно.» audible end 220.471  air 0.000s  next speech 220.471
+    cuts      2 fillers/pauses removed, 2.1s (clip 41.3s → 39.3s); 1 masked by a shot switch; 6 left in (visible jump); 1 long pause(s) always cut
+    ! no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end
+    ! ending intonation unsure (end pitch 56/100 in the speaker's range): «регулярно.» intonation unclear; finished sentence ends nearby: none in this block
+  fx 4: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 13+14: 84.4s
+  x: 13+14: excluded 2 sentence(s) (2.2s removed, 2 window(s))
+  plan 13+14:
+    window    s11-16  640.312–661.159  «Вот я, допустим, в психологии наоборот.» … «м, ты спокоен, и вокруг тебя люди успокаиваются.»
+    window    s19-21  663.631–679.417  «Это какой-то взаимообмен настроениями, идеями, с» … « от твоего состояния, такие же люди притягивают.»
+    shots     wide[11-16] → close[19] → wide[20] → close[21]
+    end       679.417  last word «притягивают.» audible end 679.117  air 0.300s  next speech 679.990
+    cuts      2 fillers/pauses removed, 0.6s (clip 36.6s → 36.0s); 7 left in (visible jump)
+  fx 13+14: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan 21:
+    window    s1-2  982.893–1020.765  «Я стараюсь всегда человека успокоить и вернуть е» … «ся еще в более его естественное состояние войти.»
+    shots     wide[1] → close[2]
+    end       1020.765  last word «войти.» audible end 1020.765  air 0.000s  next speech 1020.825
+    cuts      1 fillers/pauses removed, 3.3s (clip 37.9s → 34.5s); 1 masked by a shot switch; 9 left in (visible jump); 1 long pause(s) always cut
+  fx 21: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 22+23: 62.0s
+  x: 22+23: excluded 6 sentence(s) (19.2s removed, 2 window(s))
+  plan 22+23:
+    window    s4-5  1049.488–1055.773  «Я даже иногда, знаешь, как я забываю.» … «ыла какая-то консультация, я раз и переключился.»
+    window    s12-14  1075.609–1092.740  «И очень интересно, знаешь, что интересно?» … « что-то потом при встрече с человеком возникает.»
+    shots     wide[4-5] → close[12-14]
+    end       1092.740  last word «возникает.» audible end 1092.567  air 0.173s  next speech 1092.800
+    cuts      2 fillers/pauses removed, 0.9s (clip 23.4s → 22.5s); 3 left in (visible jump)
+    ! weak start s4: the sentence before it ends with the voice up (open (end pitch 65/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s5 «Была какая-то консультация, я…», s7 «Я стараюсь, наоборот, переключаться.…», s8 «Чтобы не запоминающиеся какие-то…»
+  fx 22+23: push, karaoke, progress, whoosh, pop, plate_after_hook
+  крючок 32: h:10 «У него просто какая-то особая, уникальная нервная система.»
+  plan 32:
+    cold open s10  1510.275–1513.580  «У него просто какая-то особая, уникальная нервна» … «сто какая-то особая, уникальная нервная система.»
+    window    s8-11  1494.143–1517.890  «И всегда мы приходим к тому, как эта книга назыв» … «И мы эту нервную систему раскрываем.»
+    shots     close[10] → wide[8] → close[9] → wide[10] → close[11]
+    end       1517.890  last word «раскрываем.» audible end 1517.590  air 0.300s  next speech 1518.181
+    hook      s10 replayed in body: yes
+    cuts      2 fillers/pauses removed, 3.9s (clip 27.1s → 23.2s); 2 long pause(s) always cut
+  fx 32: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 36+37: 89.8s
+  x: 36+37: excluded 8 sentence(s) (36.1s removed, 4 window(s))
+  крючок 36+37: h:8 ««Ты не поломан, ты просто забыл свою силу».»
+  plan 36+37:
+    cold open s8  1706.800–1710.760  ««Ты не поломан, ты просто забыл свою силу».» … ««Ты не поломан, ты просто забыл свою силу».»
+    window    s1-2  1656.093–1670.510  «Не знаю, метод не метод, как это правильно сказа» … «логии, но я как-то работаю определенным образом.»
+    window    s6-10  1690.173–1720.065  «Вот если собрать всю книгу и сжать до одной, ска» … «т она точно, четко, суть моего какого-то метода.»
+    window    s13  1722.696–1728.958  «Там даже не метод, а объяснение самой системы пс» … «же не метод, а объяснение самой системы психики.»
+    window    s17  1742.414–1745.400  «Вот, наверное, это вот такая сутра.» … «Вот, наверное, это вот такая сутра.»
+    shots     close[8] → wide[1-2] → close[6] → wide[6-7] → close[8] → wide[9-10] → close[13] → close[17]
+    end       1745.400  last word «сутра.» audible end 1745.250  air 0.150s  next speech 1745.460
+    hook      s8 replayed in body: yes
+    cuts      6 fillers/pauses removed, 8.1s (clip 57.5s → 49.4s); 1 masked by a shot switch; 5 left in (visible jump); 5 long pause(s) always cut
+    ! ending intonation unsure (end pitch 37/100 in the speaker's range): «сутра.» intonation unclear; finished sentence ends nearby: s14 «Наверное.», s15 «заметил.», s16 «описывал.»
+  fx 36+37: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 46+47: 80.1s
+  x: 46+47: excluded 1 sentence(s) (1.2s removed, 2 window(s))
+  крючок 46+47: h:13 «Так почему мы или в прошлом, или в будущем?»
+  plan 46+47:
+    cold open s13  2160.205–2162.673  «Так почему мы или в прошлом, или в будущем?» … «Так почему мы или в прошлом, или в будущем?»
+    window    s3-4  2105.219–2120.730  «Знаете, когда ко мне приходит человек, и он очен» … «л, который дает наша нервная система, наше тело.»
+    window    s6-16  2122.813–2171.352  «На самом деле, когда мы с вами не находимся в те» … «Всегда я делаю так.»
+    shots     close[13] → wide[3-4] → close[6] → wide[6-13] → close[14] → wide[15] → close[16]
+    end       2171.352  last word «так.» audible end 2171.052  air 0.300s  next speech 2172.510
+    hook      s13 replayed in body: yes
+    cuts      6 fillers/pauses removed, 4.2s (clip 66.5s → 62.4s); 4 left in (visible jump)
+  fx 46+47: push, karaoke, progress, whoosh, pop, plate_after_hook
+  крючок 50: h:9 «А не в угод там эго-май конструкции, да?»
+  plan 50:
+    cold open s9  2300.638–2303.280  «А не в угод там эго-май конструкции, да?» … «А не в угод там эго-май конструкции, да?»
+    window    s1-9  2266.030–2303.540  «Когда я чувствую себя по-настоящему, настоящим, » … «А не в угод там эго-май конструкции, да?»
+    shots     close[9] → wide[1-8] → close[9]
+    end       2303.540  last word «да?» audible end 2303.240  air 0.300s  next speech 2305.403
+    hook      s9 replayed in body: yes
+    cuts      3 fillers/pauses removed, 3.3s (clip 40.2s → 36.8s); 4 left in (visible jump); 1 long pause(s) always cut
+  fx 50: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 53+54: 82.7s
+  x: 53+54: excluded 4 sentence(s) (16.2s removed, 2 window(s))
+  plan 53+54:
+    window    s7-8  2416.146–2428.312  «Самое главное в турах, это то, что я должен взят» … «обычно это город, социальная среда как-то давит.»
+    window    s13-15  2444.805–2466.640  «То есть это какая-то очень статичная конструкция» … « нет других людей кроме той группы которая наша.»
+    shots     wide[7-8] → close[13-14] → wide[15]
+    end       2466.640  last word «наша.» audible end 2466.420  air 0.220s  next speech 2466.700
+    cuts      3 fillers/pauses removed, 3.1s (clip 34.0s → 30.9s); 1 masked by a shot switch; 4 left in (visible jump); 1 long pause(s) always cut
+  fx 53+54: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 59+60: 97.9s
+  x: 59+60: excluded 5 sentence(s) (25.4s removed, 2 window(s))
+  крючок 59+60: h:13@6-11 «подсвечивать какие-то, может быть, уязвимые места.»
+  plan 59+60:
+    cold open s13  2698.441–2703.290  «Ну и показывать, конечно, какие-то, подсвечивать» … «дсвечивать какие-то, может быть, уязвимые места.»
+    window    s1-4  2635.635–2646.015  «Это не то, что избегание социума, а это просто м» … «Зачем передавливать свою нервную систему?»
+    window    s10-13  2671.244–2703.550  «То есть мы создаем все условия для того, чтобы н» … «дсвечивать какие-то, может быть, уязвимые места.»
+    shots     close[13] → wide[1-4] → close[10] → wide[11-12] → close[13]
+    end       2703.550  last word «места.» audible end 2703.250  air 0.300s  next speech 2704.806
+    hook      s13 replayed in body: yes
+    cuts      5 fillers/pauses removed, 5.7s (clip 47.5s → 41.9s); 2 masked by a shot switch; 1 left in (visible jump); 2 long pause(s) always cut
+  fx 59+60: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 11 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  [ERROR] r02: no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end — automatic clip needs another end
+
+итог arl prepare:
+  ! prew_isaev_danny: клипов в черновике 11, с замечаниями #! 2, окон без ответа 0; план: ошибок 1
+      [ERROR] r02: no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end — automatic clip needs another end
+      черновик: /Users/danny/Documents/autoreels/reviews/prew_isaev_danny_auto.txt
+
+дальше: откройте черновик, поправьте или удалите строки, затем
+  arl blocks --apply "reviews/<stem>_auto.txt" --labeler auto --install
+  arl render --manifest "<stem>"
+--- проверка расшифровки
+== prew_isaev_danny: слов 5465 | известные выдумки 0 | повторы 0 | на речи 0 | звук без слов 0 с в 0 местах → ок
+итого: источников 1, подозрительных 0; подробно — transcripts/<stem>.txcheck.json
+--- карта источника
+✓ карта уже есть: /Users/danny/Documents/autoreels/transcripts/prew_isaev_danny.map.json (пересчитать: --force); страница → /Users/danny/Documents/autoreels/reels-out/prew_isaev_danny/_map.html
+--- карта говорящих
+✓ уже есть: /Users/danny/Documents/autoreels/transcripts/prew_isaev_danny.speakers.json (пересчитать: --force)
+--- сценарист (sonnet)
+  сборок: до 24 (источник 48 мин ÷ 2)
+  модели: Claude · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: фраз 61 из 524, interviewer: off
+  сценарист: ответ из кэша prew_isaev_danny.4f565cc73fee933c.txt
+  сценарист: строк 15, принято кодом 10, не принято 5
+  стыки: у 1 кандидатов модель нашла рваный стык — они после остальных
+  крючки: модель оценила 18, отброшено 16, без ответа 0
+autocut prew_isaev_danny: предложено сборок 9 из 164 мыслей (не прошли проверку: 1) → /Users/danny/Documents/autoreels/reviews/prew_isaev_danny_auto_m196pre.txt
+  M1 91 | 46.1-6 47.1-10 | h:47.8@5-11! | c:47.9,47.10 | k:46.4=тело;46.6=реальность;47.1=дом;47.8=заземление | t: Мини-практики для сложной ситуации | d: Главная практика — заземление в теле
+  M2 95 | 32.4-11 33.1-3 | c:33.3 | k:32.6=заблуждения;32.8=поломан;32.10=уникальная;33.3=маски | t: Социальные маски или вы настоящий? | d: Нужно снять социальные маски, и человек сам поймёт, кто он
+  M3 94 | 12.4-7 12.9 13.1-14 14.1-7 | c:14.7 | k:12.5=любили;13.3=расцветание;13.14=советов;14.2=спокоен | t: Цветок нельзя раскрыть насильно | d: Взаимовлияние: твоё состояние притягивает таких же людей
+  M4 90 | 60.3-9 61.1-6 62.1 | c:62.1 | k:60.6=уникальны;60.9=неповторимые;61.1=нужны;62.1=освободить | t: У вас уникальная нервная система | d: Причины зажатости нервной системы: детство, работа; выход — внимание внутрь и ресурсное со
+  M5 89 | 24.10-14 25.1-10 26.1 | c:26.1 | k:24.13=уровнях;25.3=интеллект;25.7=перевести;26.1=тело | t: Работа через тело, а не ум | d: Сам телесный, практикую хатха-йогу, проработка через тело, потому что всё застаревает в те
+  M6 85 | 22.2-11 23.1-4 | c:23.3,23.4 | k:22.3=экология;22.7=переключаться;22.11=помню;23.3=психики | t: Психика забывает клиентов и возвращает | d: Не могу вспомнить яркий случай, память профессионально сдвинута
+  M7 84 | 49.5-6 50.1-9 | c:50.9 | k:49.6=настоящего;50.1=ответственность;50.2=взросление;50.3=осознанным | t: Что вы приобретёте, став настоящим? | d: Не из угождения эго-конструкции; кому не стоит покупать книгу?
+  M8 81 | 17.9-10 18.1-5 19.1-2 | k:18.1=проводником;18.2=покоя;19.1=зажечь | t: Иногда клиента нужно зажечь | d: Обсуждали срочный пересмотр бизнеса; подход зависит от человека, встречи будут раз в недел
+  M9 87 | 53.7-11 54.1-3 55.5-6 | c:55.6 | k:53.7=среды;53.10=давит;54.3=ретрита;55.6=очищает | t: Почему ретрит в природе работает | d: Природа на 90% делает работу: очищает человека, и он готов принять информацию
+  ✗ 44.8 45.1-8 — [ERROR] r01: no room after last word «жизнедеятельности.» (next speech at 2084.370) — clip ends at its audible end — automatic clip needs another end
+  Claude claude-sonnet-5-5: запросов 22, вход 15150, ответ 3736 токенов ≈ $0.0677
+--- черновик prew_isaev_danny_auto_all_m196pre.txt: строки разметки + сборок 9
+--- план (--apply без --install)
+sentence check: 144 sentences, 0 differences
+  выравнивание по звуку: 5426/5449 слов (100%), 2546 мест речи без текста; не по порядку и без уверенности — по карте речи: 5
+  интонация: 5426 слов
+  движение: 28626 кадров
+  крючок 3: h:8@28-36 «моя какая-то там личность сформировалась, я начал себя искат»
+  plan 3:
+    cold open s8  175.925–179.047  «Помню до сих пор там какое-то дыхание гниенное, » … «ам личность сформировалась, я начал себя искать.»
+    window    s1-8  133.750–179.127  «Ну да, вот я как-то говорил, что впервые с йогой» … «ам личность сформировалась, я начал себя искать.»
+    shots     close[8] → wide[1-7] → close[8]
+    end       179.127  last word «искать.» audible end 179.007  air 0.120s  next speech 179.187
+    hook      s8 replayed in body: yes
+    cuts      3 fillers/pauses removed, 5.2s (clip 48.5s → 43.3s); 2 masked by a shot switch; 3 left in (visible jump); 2 long pause(s) always cut
+  fx 3: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan 4:
+    window    s1-2  179.147–220.471  «Вот я начал искать себя как раз через какие-то, » … «больше я как тренер по йоге занимаюсь регулярно.»
+    shots     wide[1] → close[2]
+    end       220.471  last word «регулярно.» audible end 220.471  air 0.000s  next speech 220.471
+    cuts      2 fillers/pauses removed, 2.1s (clip 41.3s → 39.3s); 1 masked by a shot switch; 6 left in (visible jump); 1 long pause(s) always cut
+    ! no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end
+    ! ending intonation unsure (end pitch 56/100 in the speaker's range): «регулярно.» intonation unclear; finished sentence ends nearby: none in this block
+  fx 4: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 13+14: 84.4s
+  x: 13+14: excluded 2 sentence(s) (2.2s removed, 2 window(s))
+  plan 13+14:
+    window    s11-16  640.312–661.159  «Вот я, допустим, в психологии наоборот.» … «м, ты спокоен, и вокруг тебя люди успокаиваются.»
+    window    s19-21  663.631–679.417  «Это какой-то взаимообмен настроениями, идеями, с» … « от твоего состояния, такие же люди притягивают.»
+    shots     wide[11-16] → close[19] → wide[20] → close[21]
+    end       679.417  last word «притягивают.» audible end 679.117  air 0.300s  next speech 679.990
+    cuts      2 fillers/pauses removed, 0.6s (clip 36.6s → 36.0s); 7 left in (visible jump)
+  fx 13+14: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan 21:
+    window    s1-2  982.893–1020.765  «Я стараюсь всегда человека успокоить и вернуть е» … «ся еще в более его естественное состояние войти.»
+    shots     wide[1] → close[2]
+    end       1020.765  last word «войти.» audible end 1020.765  air 0.000s  next speech 1020.825
+    cuts      1 fillers/pauses removed, 3.3s (clip 37.9s → 34.5s); 1 masked by a shot switch; 9 left in (visible jump); 1 long pause(s) always cut
+  fx 21: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 22+23: 62.0s
+  x: 22+23: excluded 6 sentence(s) (19.2s removed, 2 window(s))
+  plan 22+23:
+    window    s4-5  1049.488–1055.773  «Я даже иногда, знаешь, как я забываю.» … «ыла какая-то консультация, я раз и переключился.»
+    window    s12-14  1075.609–1092.740  «И очень интересно, знаешь, что интересно?» … « что-то потом при встрече с человеком возникает.»
+    shots     wide[4-5] → close[12-14]
+    end       1092.740  last word «возникает.» audible end 1092.567  air 0.173s  next speech 1092.800
+    cuts      2 fillers/pauses removed, 0.9s (clip 23.4s → 22.5s); 3 left in (visible jump)
+    ! weak start s4: the sentence before it ends with the voice up (open (end pitch 65/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s5 «Была какая-то консультация, я…», s7 «Я стараюсь, наоборот, переключаться.…», s8 «Чтобы не запоминающиеся какие-то…»
+  fx 22+23: push, karaoke, progress, whoosh, pop, plate_after_hook
+  крючок 32: h:10 «У него просто какая-то особая, уникальная нервная система.»
+  plan 32:
+    cold open s10  1510.275–1513.580  «У него просто какая-то особая, уникальная нервна» … «сто какая-то особая, уникальная нервная система.»
+    window    s8-11  1494.143–1517.890  «И всегда мы приходим к тому, как эта книга назыв» … «И мы эту нервную систему раскрываем.»
+    shots     close[10] → wide[8] → close[9] → wide[10] → close[11]
+    end       1517.890  last word «раскрываем.» audible end 1517.590  air 0.300s  next speech 1518.181
+    hook      s10 replayed in body: yes
+    cuts      2 fillers/pauses removed, 3.9s (clip 27.1s → 23.2s); 2 long pause(s) always cut
+  fx 32: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 36+37: 89.8s
+  x: 36+37: excluded 8 sentence(s) (36.1s removed, 4 window(s))
+  крючок 36+37: h:8 ««Ты не поломан, ты просто забыл свою силу».»
+  plan 36+37:
+    cold open s8  1706.800–1710.760  ««Ты не поломан, ты просто забыл свою силу».» … ««Ты не поломан, ты просто забыл свою силу».»
+    window    s1-2  1656.093–1670.510  «Не знаю, метод не метод, как это правильно сказа» … «логии, но я как-то работаю определенным образом.»
+    window    s6-10  1690.173–1720.065  «Вот если собрать всю книгу и сжать до одной, ска» … «т она точно, четко, суть моего какого-то метода.»
+    window    s13  1722.696–1728.958  «Там даже не метод, а объяснение самой системы пс» … «же не метод, а объяснение самой системы психики.»
+    window    s17  1742.414–1745.400  «Вот, наверное, это вот такая сутра.» … «Вот, наверное, это вот такая сутра.»
+    shots     close[8] → wide[1-2] → close[6] → wide[6-7] → close[8] → wide[9-10] → close[13] → close[17]
+    end       1745.400  last word «сутра.» audible end 1745.250  air 0.150s  next speech 1745.460
+    hook      s8 replayed in body: yes
+    cuts      6 fillers/pauses removed, 8.1s (clip 57.5s → 49.4s); 1 masked by a shot switch; 5 left in (visible jump); 5 long pause(s) always cut
+    ! ending intonation unsure (end pitch 37/100 in the speaker's range): «сутра.» intonation unclear; finished sentence ends nearby: s14 «Наверное.», s15 «заметил.», s16 «описывал.»
+  fx 36+37: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 46+47: 80.1s
+  x: 46+47: excluded 1 sentence(s) (1.2s removed, 2 window(s))
+  крючок 46+47: h:13 «Так почему мы или в прошлом, или в будущем?»
+  plan 46+47:
+    cold open s13  2160.205–2162.673  «Так почему мы или в прошлом, или в будущем?» … «Так почему мы или в прошлом, или в будущем?»
+    window    s3-4  2105.219–2120.730  «Знаете, когда ко мне приходит человек, и он очен» … «л, который дает наша нервная система, наше тело.»
+    window    s6-16  2122.813–2171.352  «На самом деле, когда мы с вами не находимся в те» … «Всегда я делаю так.»
+    shots     close[13] → wide[3-4] → close[6] → wide[6-13] → close[14] → wide[15] → close[16]
+    end       2171.352  last word «так.» audible end 2171.052  air 0.300s  next speech 2172.510
+    hook      s13 replayed in body: yes
+    cuts      6 fillers/pauses removed, 4.2s (clip 66.5s → 62.4s); 4 left in (visible jump)
+  fx 46+47: push, karaoke, progress, whoosh, pop, plate_after_hook
+  крючок 50: h:9 «А не в угод там эго-май конструкции, да?»
+  plan 50:
+    cold open s9  2300.638–2303.280  «А не в угод там эго-май конструкции, да?» … «А не в угод там эго-май конструкции, да?»
+    window    s1-9  2266.030–2303.540  «Когда я чувствую себя по-настоящему, настоящим, » … «А не в угод там эго-май конструкции, да?»
+    shots     close[9] → wide[1-8] → close[9]
+    end       2303.540  last word «да?» audible end 2303.240  air 0.300s  next speech 2305.403
+    hook      s9 replayed in body: yes
+    cuts      3 fillers/pauses removed, 3.3s (clip 40.2s → 36.8s); 4 left in (visible jump); 1 long pause(s) always cut
+  fx 50: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 53+54: 82.7s
+  x: 53+54: excluded 4 sentence(s) (16.2s removed, 2 window(s))
+  plan 53+54:
+    window    s7-8  2416.146–2428.312  «Самое главное в турах, это то, что я должен взят» … «обычно это город, социальная среда как-то давит.»
+    window    s13-15  2444.805–2466.640  «То есть это какая-то очень статичная конструкция» … « нет других людей кроме той группы которая наша.»
+    shots     wide[7-8] → close[13-14] → wide[15]
+    end       2466.640  last word «наша.» audible end 2466.420  air 0.220s  next speech 2466.700
+    cuts      3 fillers/pauses removed, 3.1s (clip 34.0s → 30.9s); 1 masked by a shot switch; 4 left in (visible jump); 1 long pause(s) always cut
+  fx 53+54: push, karaoke, progress, whoosh, pop, plate_after_hook
+  + merged blocks 59+60: 97.9s
+  x: 59+60: excluded 5 sentence(s) (25.4s removed, 2 window(s))
+  крючок 59+60: h:13@6-11 «подсвечивать какие-то, может быть, уязвимые места.»
+  plan 59+60:
+    cold open s13  2698.441–2703.290  «Ну и показывать, конечно, какие-то, подсвечивать» … «дсвечивать какие-то, может быть, уязвимые места.»
+    window    s1-4  2635.635–2646.015  «Это не то, что избегание социума, а это просто м» … «Зачем передавливать свою нервную систему?»
+    window    s10-13  2671.244–2703.550  «То есть мы создаем все условия для того, чтобы н» … «дсвечивать какие-то, может быть, уязвимые места.»
+    shots     close[13] → wide[1-4] → close[10] → wide[11-12] → close[13]
+    end       2703.550  last word «места.» audible end 2703.250  air 0.300s  next speech 2704.806
+    hook      s13 replayed in body: yes
+    cuts      5 fillers/pauses removed, 5.7s (clip 47.5s → 41.9s); 2 masked by a shot switch; 1 left in (visible jump); 2 long pause(s) always cut
+  fx 59+60: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M1: pieces 1-6 + 47.1-10 go straight on in the source — played as one (no seam)
+  plan M1:
+    cold open s14  2164.328–2168.110  «Первое, что мы делаем, самая главная практика, э» … «, самая главная практика, это заземление в теле.»
+    window    s1-16  2090.754–2171.352  «А какие бы ты мини-практики, это мог бы посовето» … «Всегда я делаю так.»
+    shots     close[14] → wide[1-4] → close[4] → wide[5-6] → close[6-7] → wide[8-14] → close[14-16]
+    end       2171.352  last word «так.» audible end 2171.052  air 0.300s  next speech 2172.510
+    hook      s14 replayed in body: yes
+    hook air  +0.39s after the hook, +0.46s before the body (silence only)
+    cuts      3 fillers/pauses removed, 3.5s (clip 84.4s → 80.8s); 2 masked by a shot switch; 13 left in (too close to another change)
+    montage M1: 1 pieces 46.1-6 47.1-10, 0 seam(s), 77.1s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M2:
+    window    s4-11  1474.306–1517.790  «Вот, а еще такой вопрос.» … «И мы эту нервную систему раскрываем.»
+    window    s12-14  1518.181–1538.080  «Человек сам до этого доходит, а что мне хорошо.» … « человек понимает, кто он и куда ему нужно идти.»
+    shots     wide[4-6] → close[6] → wide[7-8] → close[8] → wide[9-10] → close[10-11] → wide[12-13] → close[14]
+    end       1538.080  last word «идти.» audible end 1537.780  air 0.300s  next speech 1539.040
+    cuts      2 fillers/pauses removed, 3.8s (clip 63.4s → 59.6s); 13 left in (too close to another change); 2 long pause(s) always cut
+    ! weak start s4: the sentence before it ends with the voice up (open (end pitch 63/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s2 «Ну, уже все, тогда,…», s7 «Здесь заблуждений миллион, смотря…», s14 «Убирая вот эти все…»
+    montage M2: 2 pieces 32.4-11 33.1-3, 1 seam(s), 59.6s
+    seam 1  32.4-11→33.1-3  skips 0.4s, pause 0.20s, picture jump 3.1×, pace 2.0→2.1 w/s, loudness -36→-36 dB, pitch +0.6→-1.3 st, end final
+    ! seam 1 (32.4-11→33.1-3): picture jump 3.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M3: pieces 12-25 + 14.1-7 go straight on in the source — played as one (no seam)
+  plan M3:
+    window    s4-7  583.066–600.430  «Что ли, наверное.» … «Само по себе.»
+    window    s9  601.662–604.950  «Но без этого это все какая-то мертвая будет конс» … «того это все какая-то мертвая будет конструкция.»
+    window    s12-32  612.561–679.417  «Наверное, из этого все происходит.» … « от твоего состояния, такие же люди притягивают.»
+    shots     wide[4-5] → close[6-7] → wide[9] → close[12-14] → wide[15-25] → close[26-28] → wide[29-31] → close[32]
+    end       679.417  last word «притягивают.» audible end 679.117  air 0.300s  next speech 679.990
+    cuts      3 fillers/pauses removed, 2.3s (clip 87.5s → 85.2s); 3 masked by a shot switch; 18 left in (too close to another change)
+    montage M3: 3 pieces 12.4-7 12.9 13.1-14 14.1-7, 2 seam(s), 85.2s
+    seam 1  12.4-7→12.9  skips 1.2s, pause 0.10s, picture jump 14.0×, pace 2.5→2.9 w/s, loudness -37→-36 dB, pitch +0.1→-2.3 st, end open
+    seam 2  12.9→13.1-14  skips 7.6s, pause 0.40s, picture jump 15.3×, pace 2.9→2.1 w/s, loudness -36→-38 dB, pitch -2.3→-1.1 st, end final
+    ! piece 12.9 is 3.1s (< 6s): too short to settle into
+    ! seam 1 (12.4-7→12.9): picture jump 14.0× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (12.4-7→12.9): piece 12.4-7 ends with the voice up (open (end pitch 93/100 in the speaker's range)) on «себе.» — the seam sounds like the speaker was cut off
+    ! seam 1 (12.4-7→12.9): piece 12.9 starts on «Но» — it points back to what was skipped
+    ! seam 2 (12.9→13.1-14): picture jump 15.3× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 2 (12.9→13.1-14): speech rate 2.9 → 2.1 words/s — the voice changes tempo at the seam
+    fx: push, karaoke, progress, whoosh, callouts, pop, plate_after_hook | 634.6s «300»
+    M4: pieces 10-15 + 62.1 go straight on in the source — played as one (no seam)
+  plan M4:
+    window    s3-9  2704.886–2733.810  «И по заключению, что бы ты сказал зрителям?» … « миллиардов людей, вы единственные неповторимые.»
+    window    s10-16  2736.045–2788.820  «И если вы с такой уникальной нервной системой зд» … « ввести ее в какое-то более ресурсное состояние.»
+    shots     wide[3-6] → close[6-7] → wide[7-9] → close[10] → wide[10-15] → close[16]
+    end       2788.820  last word «состояние.» audible end 2788.660  air 0.160s  next speech 2788.880
+    cuts      4 fillers/pauses removed, 5.6s (clip 81.7s → 76.1s); 1 masked by a shot switch; 12 left in (too close to another change); 2 long pause(s) always cut
+    montage M4: 2 pieces 60.3-9 61.1-6 62.1, 1 seam(s), 76.1s
+    seam 1  60.3-9→61.1-6  skips 2.2s, pause 0.20s, picture jump 10.1×, pace 1.8→2.0 w/s, loudness -36→-36 dB, pitch -1.8→-1.1 st, end final
+    ! seam 1 (60.3-9→61.1-6): picture jump 10.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (60.3-9→61.1-6): piece 61.1-6 starts on «И» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M5: pieces 10-14 + 25.1-10 go straight on in the source — played as one (no seam)
+    M5: pieces 10-24 + 26.1 go straight on in the source — played as one (no seam)
+  plan M5:
+    window    s10-25  1127.533–1195.130  «Субъективное состояние.» … «отать, потому что застареет оно все-таки в теле.»
+    shots     wide[10-13] → close[14-17] → wide[18-21] → close[21] → wide[22-24] → close[25]
+    end       1195.130  last word «теле.» audible end 1195.060  air 0.070s  next speech 1195.190
+    cuts      2 fillers/pauses removed, 2.1s (clip 67.6s → 65.5s); 1 masked by a shot switch; 12 left in (too close to another change); 1 long pause(s) always cut
+    ! weak start s10: the sentence before it ends with the voice up (open (end pitch 70/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s16 «Во-первых, даже тело, потому…», s18 «Наш рептильный мозг работает.…», s21 «Мне нужно человек который…»
+    montage M5: 1 pieces 24.10-14 25.1-10 26.1, 0 seam(s), 65.5s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M6:
+    window    s2-11  1041.342–1075.120  «Я, наверное, не стараюсь их как-то, чтобы они вы» … « его вообще не помню, а его там не было полгода.»
+    window    s12-15  1075.609–1096.300  «И очень интересно, знаешь, что интересно?» … «Я бы вот это, наверное, как-то больше выделил.»
+    shots     wide[2-3] → close[3-4] → wide[4-7] → close[7-8] → wide[9-11] → close[12-15]
+    end       1096.300  last word «выделил.» audible end 1096.000  air 0.300s  next speech 1097.570
+    cuts      3 fillers/pauses removed, 2.8s (clip 54.5s → 51.6s); 3 masked by a shot switch; 7 left in (too close to another change)
+    montage M6: 2 pieces 22.2-11 23.1-4, 1 seam(s), 51.6s
+    seam 1  22.2-11→23.1-4  skips 0.5s, pause 0.04s, picture jump 11.1×, pace 2.5→2.3 w/s, loudness -38→-33 dB, pitch -0.9→+4.8 st, end final
+    ! seam 1 (22.2-11→23.1-4): picture jump 11.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (22.2-11→23.1-4): the voice gets louder by 5.4 dB (> 4) — the jump is heard
+    ! seam 1 (22.2-11→23.1-4): the voice sits higher by 5.7 semitones (> 3) — a different mood on each side
+    ! seam 1 (22.2-11→23.1-4): piece 23.1-4 starts on «И» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M7: pieces 5-6 + 50.1-9 go straight on in the source — played as one (no seam)
+  plan M7:
+    window    s5-15  2246.794–2303.540  «А какую основную ценность приобретет для себя чи» … «А не в угод там эго-май конструкции, да?»
+    shots     wide[5-6] → close[6-7] → wide[7] → close[8-10] → wide[10-14] → close[15]
+    end       2303.540  last word «да?» audible end 2303.240  air 0.300s  next speech 2305.403
+    cuts      2 fillers/pauses removed, 6.1s (clip 56.7s → 50.6s); 1 masked by a shot switch; 8 left in (too close to another change); 3 long pause(s) always cut
+    montage M7: 1 pieces 49.5-6 50.1-9, 0 seam(s), 50.6s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M8: pieces 11-15 + 19.1-2 go straight on in the source — played as one (no seam)
+  plan M8:
+    window    s9-10  829.798–840.202  «Ну, мы с тобой посидели, и для меня было бы хоро» … «Да, вот, и все, примерно где-то так.»
+    window    s11-17  841.706–889.450  «То есть твоя текущая миссия в том, чтобы быть не» … «Да.»
+    shots     wide[9-10] → close[11] → wide[12] → close[12] → wide[13-16] → close[16-17]
+    end       889.450  last word «Да.» audible end 889.370  air 0.080s  next speech 889.510
+    cuts      1 fillers/pauses removed, 1.2s (clip 58.1s → 56.9s); 1 masked by a shot switch; 18 left in (too close to another change)
+    ! ending intonation unsure (end pitch 50/100 in the speaker's range): «Да.» intonation unclear; finished sentence ends nearby: s14 «консультация.», s16 «днем.», s19 «было.»
+    ! weak start s9: the sentence before it ends with the voice up (open (end pitch 92/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s21 «В зависимости от человека.…», s24 «Не стандартный, неординарный, не…»
+    montage M8: 2 pieces 17.9-10 18.1-5 19.1-2, 1 seam(s), 56.9s
+    seam 1  17.9-10→18.1-5  skips 1.5s, pause 0.16s, picture jump 2.9×, pace 2.3→2.1 w/s, loudness -38→-38 dB, pitch +2.9→+3.0 st, end final
+    ! seam 1 (17.9-10→18.1-5): piece 18.1-5 starts on «То» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+    M9: pieces 7-11 + 54.1-3 go straight on in the source — played as one (no seam)
+  plan M9:
+    window    s7-14  2416.146–2462.024  «Самое главное в турах, это то, что я должен взят» … «ьно чтобы эта среда была это был формат ретрита.»
+    window    s21-22  2509.454–2525.731  «Нет такое ощущение что действительно природа 90 » … «ю-то информацию, если, конечно, она ему заходит.»
+    shots     wide[7] → close[7-8] → wide[8-9] → close[10] → wide[11-14] → close[21-22]
+    end       2525.731  last word «заходит.» audible end 2525.431  air 0.300s  next speech 2526.950
+    cuts      3 fillers/pauses removed, 3.4s (clip 62.2s → 58.7s); 2 masked by a shot switch; 6 left in (too close to another change); 1 long pause(s) always cut
+    ! ending intonation unsure (end pitch 38/100 in the speaker's range): «заходит.» intonation unclear; finished sentence ends nearby: s18 «горы.», s20 «момент.», s21 «делает.»
+    montage M9: 2 pieces 53.7-11 54.1-3 55.5-6, 1 seam(s), 58.7s
+    seam 1  53.7-11→54.1-3  skips 47.4s, pause 0.21s, picture jump 36.4×, pace 2.3→2.3 w/s, loudness -35→-39 dB, pitch +0.7→-1.7 st, end final
+    ! seam 1 (53.7-11→54.1-3): picture jump 36.4× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, callouts, pop, plate_after_hook | 2511.2s «90 процентов»
+review: 20 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  ⚠ r02 убран из черновика: no room after last word «регулярно.» (next speech at 220.471) — clip ends at its audible end — automatic clip needs another end
+  ⚠ r03 убран из черновика: weak start «Вот в психологии наоборот.» — «вот…» — automatic clip needs another start
+  ⚠ r06 убран из черновика: weak start «И всегда мы приходим к тому, как эта книга называе» — «и…» — automatic clip needs another start
+  ⚠ r11 убран из черновика: weak start «Это не то, что избегание социума, а это просто мне» — «это…» — automatic clip needs another start
+  ⚠ r05 убран из черновика: repeats r17: 96% of its seconds — automatic clip needs other content
+  ⚠ r08 убран из черновика: repeats r12: 98% of its seconds — automatic clip needs other content
+  ⚠ r09 убран из черновика: repeats r18: 100% of its seconds — automatic clip needs other content
+  ⚠ r10 убран из черновика: repeats r20: 82% of its seconds — automatic clip needs other content
+  two_shot_auto: speech_map активен (5465 слов, 5464 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/prew_isaev_danny.review.json (12 reels, selection_source=human)
+accounting (every scored line):
+  line 3 (score 83) → reel 1
+  line 4 (score 86) → reel 2
+  line 13 (score 80) → reel 3 (merge 13+14)
+  line 21 (score 77) → reel 4
+  line 22 (score 71) → reel 5 (merge 22+23)
+  line 32 (score 92) → reel 6
+  line 36 (score 95) → reel 7 (merge 36+37)
+  line 46 (score 89) → reel 8 (merge 46+47)
+  line 50 (score 68) → reel 9
+  line 53 (score 65) → reel 10 (merge 53+54)
+  line 59 (score 74) → reel 11 (merge 59+60)
+  montage M1 (score 91) → reel 4
+  montage M2 (score 95) → reel 5
+  montage M3 (score 94) → reel 6
+  montage M4 (score 90) → reel 7
+  montage M5 (score 89) → reel 8
+  montage M6 (score 85) → reel 9
+  montage M7 (score 84) → reel 10
+  montage M8 (score 81) → reel 11
+  montage M9 (score 87) → reel 12
+warnings (4 — nothing removed, review manually):
+  reel 4 (r04): dangling start: opens on «А»
+  reel 5 (r05): dangling start: opens on «А»
+  reel 7 (r07): dangling start: opens on «И»
+  reel 10 (r10): dangling start: opens on «А»
+title plate (12 clips):
+  reel 1 (r01): «Как я начал заниматься йогой: красный шкаф»
+  reel 2 (r02): «Моя задача — вернуть человека в баланс»
+  reel 3 (r03): «Сутра моей книги: ты не поломан»
+  reel 4 (r04): «Мини-практики для сложной ситуации»
+  reel 5 (r05): «Социальные маски или вы настоящий?»
+  reel 6 (r06): «Цветок нельзя раскрыть насильно»
+  reel 7 (r07): «У вас уникальная нервная система»
+  reel 8 (r08): «Работа через тело, а не ум»
+  reel 9 (r09): «Психика забывает клиентов и возвращает»
+  reel 10 (r10): «Что вы приобретёте, став настоящим?»
+  reel 11 (r11): «Иногда клиента нужно зажечь»
+  reel 12 (r12): «Почему ретрит в природе работает»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/prew_isaev_danny.json)
+
+=== auto: итог ===
+  ✓ prew_isaev_danny: готово — черновик prew_isaev_danny_auto_all_m196pre.txt

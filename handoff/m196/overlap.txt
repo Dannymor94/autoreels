@@ -1,0 +1,13 @@
+=== Эталон m183 в m196: найдено 67 из 69 ===
+
+  day_yoga_p1       3/3
+  day_yoga_p2       11/12
+  disko_beach_p1    11/11
+  disko_beach_p2    7/7
+  disko_beach_p3    15/15
+  prew_isaev_anna   8/9
+  prew_isaev_danny  12/12
+
+Потерянные клипы эталона:
+  day_yoga_p2 r05 «Беглец: прежде чем менять работу» 82с | лучшее: нет перекрытия | роли: address(3)→example(3)→aside(1)→question(3)→question(3)→example(3) | нет_вывода
+  prew_isaev_anna r04 «Почему работа психолога — отдых» 46с | лучшее: нет перекрытия | роли: thesis(5)→conclusion(5) | обрывок
