@@ -1,0 +1,216 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 423a96a..49d9117 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -368,6 +368,9 @@ autocut:
+   start_strict: true      # M182: a reel never opens on a line pointing back («Каждый из них…», «Это…») or at the interviewer
+                           # («Ты…», «…, Ласанна.»): up to start_extend_max sentences before are added, else it goes
+   start_extend_max: 2
++  answer_start: false     # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
++                          # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
++  answer_gap_sec: 3.0
+   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 8e57bc4..3bf2f60 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -6803,6 +6803,9 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
+                         if _w.word.rstrip().endswith((".", "!", "?", "…")):
+                             break
+                     _sw = _ssr(" ".join(_first))
++                    if not _sw and getattr(getattr(r0_cfg, "autocut", None), "answer_start", False):
++                        from autoreels.cloud.autocut import answer_start_reason as _asr   # M193: «Да, …» opens no clip
++                        _sw = _asr(" ".join(_first))
+                     if _sw:
+                         _refused.append((r.id, f"weak start «{' '.join(_first)[:50]}» — {_sw}", "another start"))
+                 _seen = {_rid for _rid, _w, _ in _refused}
+@@ -8548,7 +8551,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                      hook_clauses=bool(getattr(ac, "hook_clauses", False)),
+                      hook_clause_pause=float(getattr(ac, "hook_clause_pause", 0.12)),
+                      start_strict=bool(getattr(ac, "start_strict", False)),
+-                     start_extend_max=int(getattr(ac, "start_extend_max", 2)))
++                     start_extend_max=int(getattr(ac, "start_extend_max", 2)),
++                     answer_start=bool(getattr(ac, "answer_start", False)),
++                     answer_gap_sec=float(getattr(ac, "answer_gap_sec", 3.0)))
+     _taste = None
+     if prm.taste_weight:
+         # M138: the owner's taste orders the proposals (invariant 1: the order only)
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 9c04dbb..41bf16b 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -107,6 +107,10 @@ class AutoParams:
+     hook_clause_pause: float = 0.12   # … the silence heard at a clause edge inside the sentence (s)
+     start_strict: bool = False        # a reel never opens on a line pointing back / at the interviewer: earlier start or none
+     start_extend_max: int = 2         # … up to this many sentences before are added to reach a start that stands
++    # M193 (blind judges on ab192: the automatic reels open on answers to a question the viewer never heard —
++    # «Да, у меня даже как…», «Как было, так и было»): with start_strict, a reel also never opens on an answer
++    answer_start: bool = False        # an answer word («Да, …») or a reply right after the interviewer's turn
++    answer_gap_sec: float = 3.0       # … the reply starts within this many seconds after the interviewer's sentence
+ 
+ 
+ @dataclass
+@@ -507,6 +511,34 @@ def strict_start_reason(text: str) -> str | None:
+     return None
+ 
+ 
++# M193: words that open a reply, not a thought («Да, у меня даже как получается.»)
++_ANSWER_WORDS = frozenset({"да", "нет", "конечно", "согласен", "согласна", "ага", "угу", "точно", "верно",
++                           "наверное", "возможно"})
++_ANSWER_ALONE = frozenset({"наверное", "возможно"})      # these only as a reply of their own: «Наверное.», «Возможно, да.»
++
++
++def answer_start_reason(text: str, host_text: str = "") -> str | None:
++    """M193: why a reel may not open on this sentence as on an answer — it starts with an answer word followed by a
++    comma or a stop («Да, …», «Нет.», «Конечно, …»; «наверное/возможно» only as the whole reply), or it follows the
++    interviewer (`host_text` — his sentence right before it in the source; "" = none) and is not a question and does not
++    repeat at least two content words (5+ letters, first 5) of that question. None = it stands as a start."""
++    import re as _re
++    t = (text or "").strip()
++    words = _plain_words(t)
++    if not words:
++        return None
++    m = _re.match(r"^\W*([А-Яа-яЁё]+)\s*([,.!?…])", t)
++    if m and _norm_word(m.group(1)) in _ANSWER_WORDS:
++        w = _norm_word(m.group(1))
++        if w not in _ANSWER_ALONE or len(words) <= 3:
++            return f"«{m.group(1)}{m.group(2)}…» — ответ, а вопроса в ролике нет"
++    if host_text and not t.endswith("?"):
++        stems = lambda x: {w[:5] for w in _plain_words(x) if len(w) >= 5}  # noqa: E731
++        if len(stems(t) & stems(host_text)) < 2:
++            return f"ответ на вопрос ведущего («{host_text.strip()[:40]}»), которого в ролике нет"
++    return None
++
++
+ def clause_spans(words: Sequence, pause_after: Callable[[int], "float | None"], *, min_words: int, min_sec: float,
+                  max_sec: float, min_pause: float, dur: Callable[[int, int], float]) -> list[tuple[int, int]]:
+     """M182: word ranges (1-based, inclusive) of a sentence that can stand as a cold open on their own — a clause: it
+diff --git a/src/autoreels/cloud/scenario.py b/src/autoreels/cloud/scenario.py
+index a3b9570..140bc46 100644
+--- a/src/autoreels/cloud/scenario.py
++++ b/src/autoreels/cloud/scenario.py
+@@ -10,7 +10,7 @@ from __future__ import annotations
+ import re
+ from typing import Callable, Sequence
+ 
+-from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start, strict_start_reason,
++from autoreels.cloud.autocut import (AutoParams, Proposal, _clean, _hook_cands, back_reference, glued_start, strict_start_reason, answer_start_reason,
+                                       rhythm_pieces, rhythm_why)
+ 
+ SCENARIO_SYSTEM = (
+@@ -197,7 +197,16 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+             # M182 (owner: «r14 начало пустое» — «Каждый из них влияет…»): the reel never opens on a line pointing back or
+             # at the interviewer — up to start_extend_max sentences before it are added (the start of the thought), each
+             # right before in the source; none stands → the reel goes
+-            _why = strict_start_reason(sent[refs[0]][2])
++            def _start_why(r0: str) -> "str | None":
++                why = strict_start_reason(sent[r0][2])
++                if why or not p.answer_start:
++                    return why
++                # M193: an answer — an answer word, or the reply right after the interviewer's sentence
++                prv0 = prev_ref.get(r0)
++                host = sent[prv0][2] if (other and prv0 in other and prv0 not in refs
++                                         and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
++                return answer_start_reason(sent[r0][2], host)
++            _why = _start_why(refs[0])
+             for _ in range(max(0, int(p.start_extend_max))):
+                 prv = prev_ref.get(refs[0])
+                 if not _why or prv is None or prv in refs or sent[refs[0]][0] - sent[prv][1] > 3.0 \
+@@ -205,7 +214,7 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
+                     break
+                 notes.append(f"начало: «{sent[refs[0]][2][:40]}» — {_why}; добавлена фраза перед — «{sent[prv][2][:50]}»")
+                 refs = [prv] + refs
+-                _why = strict_start_reason(sent[refs[0]][2])
++                _why = _start_why(refs[0])
+             if _why:
+                 gone.append((label, f"начало «{sent[refs[0]][2][:40]}» — {_why}, раньше начать нельзя"))
+                 continue
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 9f40b88..ba8a9bf 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -287,6 +287,8 @@ class AutocutConfig(BaseModel):
+     hook_clause_pause: float = Field(0.12, ge=0.0)   # … silence heard at a clause edge inside the sentence
+     start_strict: bool = False                # M182: a reel never opens on a line pointing back / at the interviewer
+     start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
++    answer_start: bool = False                # M193: with start_strict, a reel never opens on an answer («Да, …», a reply to the host)
++    answer_gap_sec: float = Field(3.0, ge=0.0)   # … a reply: starts within this many seconds after the host's sentence
+     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
+diff --git a/tests/test_m193_answer_start.py b/tests/test_m193_answer_start.py
+new file mode 100644
+index 0000000..ad2165c
+--- /dev/null
++++ b/tests/test_m193_answer_start.py
+@@ -0,0 +1,68 @@
++"""M193 (blind judges on ab192: automatic reels open on answers to a question the viewer never heard — «Да, у меня даже
++как…»): with start_strict and answer_start, a reel never opens on an answer word or on the reply right after the
++interviewer's sentence (unless it is a question or repeats the question). Off by default: the previous proposals."""
++from __future__ import annotations
++
++import dataclasses
++from pathlib import Path
++
++from autoreels.cloud.autocut import AutoParams, answer_start_reason
++
++
++def test_off_by_default():
++    assert not AutoParams().answer_start
++    from autoreels.core.config import AutocutConfig
++    assert not AutocutConfig().answer_start
++    from autoreels.core.config import load_r0_config
++    ac = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").autocut
++    assert ac.answer_start is False and ac.answer_gap_sec == 3.0
++
++
++def test_answer_words():
++    assert "ответ" in answer_start_reason("Да, у меня даже как получается.")
++    assert "ответ" in answer_start_reason("Нет. Это совсем другое.")
++    assert "ответ" in answer_start_reason("Конечно, перенос — вещь неблагодарная.")
++    assert "ответ" in answer_start_reason("Наверное, да.")
++    assert answer_start_reason("Наверное, такая ценность, что ты по-настоящему себя ценишь, что ты себя уважаешь.") is None
++    assert answer_start_reason("Дайте себе место в этом мире.") is None        # «Да…» inside a word is not «да»
++    assert answer_start_reason("Настоящие друзья не говорят, что ты не прав.") is None
++
++
++def test_reply_to_the_host():
++    q = "А какие бы ты мини-практики мог бы посоветовать зрителям?"
++    assert "ведущего" in answer_start_reason("Знаете, когда ко мне приходит человек, он возбуждён.", q)
++    assert answer_start_reason("Как ты отдыхаешь?", "Как ты восстанавливаешь себя?") is None          # a question
++    assert answer_start_reason("Мини-практики, которые я советую зрителям, очень просты.", q) is None   # repeats it
++    assert answer_start_reason("Знаете, когда ко мне приходит человек, он возбуждён.", "") is None      # no host
++
++
++def _sent():
++    return {"1.1": (0.0, 6.0, "Мы с вами сегодня говорим о стрессе и о теле.", True, 9),
++            "1.2": (6.3, 12.0, "А что ты советуешь зрителям в сложной ситуации?", True, 8),
++            "1.3": (12.8, 40.0, "Знаете, когда ко мне приходит человек, он очень возбуждён.", True, 9),
++            "1.4": (40.3, 60.0, "Первое, что мы делаем, это уходим в тело и чувствуем сигнал.", True, 11)}
++
++
++def test_scenario_drops_a_reply_to_the_host_off_keeps_it():
++    from autoreels.cloud.scenario import scenario_proposals
++    p = dataclasses.replace(AutoParams(), min_sec=10.0, max_sec=90.0, rhythm=False, start_strict=True)
++    scen = [{"refs": ["1.3", "1.4"], "title": "Тело"}]
++    pool, gone = scenario_proposals(scen, _sent(), [], p, other={"1.2"}, interviewer="off")
++    assert pool and pool[0].pieces.startswith("1.3")                       # answer_start off: as before
++    pa = dataclasses.replace(p, answer_start=True)
++    pool, gone = scenario_proposals(scen, _sent(), [], pa, other={"1.2"}, interviewer="off")
++    assert not pool and "ведущего" in gone[0][1]                            # the host's line may not be added (off)
++    pool, gone = scenario_proposals(scen, _sent(), [], dataclasses.replace(pa, answer_gap_sec=0.5),
++                                    other={"1.2"}, interviewer="off")
++    assert pool                                                             # 0.8 s after the host > gap: not a reply
++
++
++def test_scenario_answer_word_gets_an_earlier_start():
++    from autoreels.cloud.scenario import scenario_proposals
++    sent = {"1.1": (0.0, 8.0, "Мне вообще хотелось сделать книгу как самодиагностику.", True, 8),
++            "1.2": (8.2, 12.0, "Да, у меня даже как получается.", True, 6),
++            "1.3": (12.3, 40.0, "Нервная система уже привыкла и отключается сама по себе.", True, 9)}
++    p = dataclasses.replace(AutoParams(), min_sec=10.0, max_sec=90.0, rhythm=False, start_strict=True,
++                            answer_start=True)
++    pool, gone = scenario_proposals([{"refs": ["1.2", "1.3"]}], sent, [], p)
++    assert pool and pool[0].pieces.startswith("1.1") and any("ответ" in n for n in pool[0].notes)
