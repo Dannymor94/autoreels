@@ -1,0 +1,6 @@
+# AutoReels block review
+# source: manifests/disko_beach_p1.json
+# blocks: 53  |  filter_removed: 8
+# fingerprint: 3503a06f6c5ee5e2
+# format: compact
+M1 80 | 21.3-13 22.7-14 23.1 | h:22.13! | t: Ум как у учёного | d: Чтобы что-то увидеть, нужно на этом сконцентрироваться — как астроном, биолог или физик в коллайдере.

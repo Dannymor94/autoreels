@@ -1,0 +1,6 @@
+# AutoReels block review
+# source: manifests/prew_isaev_danny.json
+# blocks: 62  |  filter_removed: 3
+# fingerprint: b2702229cce1f33d
+# format: compact
+M1 90 | 32.6-11 33.1-3 | h:37.2 | t: Вы не поломаны | d: Самое частое заблуждение — что с человеком что-то не так. С ним всё хорошо, просто его нервная система уникальна.

@@ -1,0 +1,27 @@
+sentence check: 0 sentences, 0 differences
+  выравнивание по звуку: 3416/3478 слов (98%), 1462 мест речи без текста; не по порядку и без уверенности — по карте речи: 5
+  интонация: 3417 слов
+  движение: 25908 кадров
+    M1: pieces 24-31 + 23.1 go straight on in the source — played as one (no seam)
+  plan M1:
+    cold open s30  1019.252–1021.055  «И в моменте сталкивания ученые что делают?» … «И в моменте сталкивания ученые что делают?»
+    window    s3-13  928.430–959.344  «Самадхи — это про то, что нужно сконцентрировать» … «Тогда вы поймете, как они устроены.»
+    window    s24-32  994.294–1030.160  «И вот там, на стыке, когда у вас самадхи, вы нач» … «а реальность, что это за материя, что это такое.»
+    shots     close[30] → wide[3-13] → close[24] → wide[25-32]
+    end       1030.160  last word «такое.» audible end 1030.160  air 0.000s  next speech 1030.210
+    hook      s30 replayed in body: yes
+    hook air  +0.00s after the hook, +0.45s before the body (silence only)
+    cuts      4 fillers/pauses removed, 4.5s (clip 68.6s → 64.1s); 1 masked by a shot switch; 8 left in (too close to another change); 1 long pause(s) always cut
+    ! no room after last word «такое.» (next speech at 1030.210) — clip ends at its audible end
+    ! ending intonation unsure (end pitch 33/100 in the speaker's range): «такое.» intonation unclear; finished sentence ends nearby: s28 «делают?», s30 «делают?», s33 «делаем?»
+    montage M1: 2 pieces 21.3-13 22.7-14 23.1, 1 seam(s), 62.3s
+    seam 1  21.3-13→22.7-14  skips 34.9s, pause 0.24s, picture jump 6.4×, pace 2.3→2.2 w/s, loudness -23→-20 dB, pitch +0.6→+1.9 st, end final
+    ! seam 1 (21.3-13→22.7-14): picture jump 6.4× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    ! seam 1 (21.3-13→22.7-14): piece 22.7-14 starts on «И» — it points back to what was skipped
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 1 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+[ERROR] r01: seam inside word — cut at 1019.252s splits 'сталкивания' [1018.934, 1019.830] (window 1)
+  [ERROR] planned clip cuts inside a word — refusing

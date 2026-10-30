@@ -1,0 +1,30 @@
+sentence check: 0 sentences, 0 differences
+  выравнивание по звуку: 5426/5449 слов (100%), 2546 мест речи без текста
+  интонация: 5426 слов
+  движение: 28626 кадров
+  plan M1:
+    cold open s20  1706.800–1710.890  ««Ты не поломан, ты просто забыл свою силу».» … ««Ты не поломан, ты просто забыл свою силу».»
+    window    s6-11  1483.693–1517.790  «Самые главные частые заблуждения, что человек ка» … «И мы эту нервную систему раскрываем.»
+    window    s12-14  1518.181–1538.080  «Человек сам до этого доходит, а что мне хорошо.» … « человек понимает, кто он и куда ему нужно идти.»
+    shots     close[20] → wide[6-11] → close[12-13] → wide[13-14]
+    end       1538.080  last word «идти.» audible end 1537.780  air 0.300s  next speech 1539.040
+    hook      s20 replayed in body: no
+    hook air  +0.13s after the hook, +0.00s before the body (silence only)
+    cuts      4 fillers/pauses removed, 4.9s (clip 58.1s → 53.2s); 6 left in (too close to another change); 2 long pause(s) always cut
+    ! weak start s6: the sentence before it ends with the voice up (open (end pitch 67/100 in the speaker's range)) — the clip joins mid-thought; strong starts nearby: s2 «Ну, уже все, тогда,…», s7 «Здесь заблуждений миллион, смотря…», s14 «Убирая вот эти все…»
+    montage M1: 2 pieces 32.6-11 33.1-3, 1 seam(s), 49.1s
+    seam 1  32.6-11→33.1-3  skips 0.4s, pause 0.20s, picture jump 3.1×, pace 2.1→2.1 w/s, loudness -36→-36 dB, pitch +0.6→-1.3 st, end final
+    ! seam 1 (32.6-11→33.1-3): picture jump 3.1× typical motion (> 3) — pose or light differs; the shot change only partly hides it
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 1 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+  two_shot_auto: speech_map активен (5465 слов, 5464 границ, threshold=0.35s)
+manifest → /Users/danny/Documents/autoreels/reviews/prew_isaev_danny.review.json (1 reels, selection_source=human)
+accounting (every scored line):
+  montage M1 (score 90) → reel 1
+title plate (1 clips):
+  reel 1 (r01): «Вы не поломаны»
+  Чтобы рендерить эту выборку: arl blocks --apply <файл> --install
+    (заменит /Users/danny/Documents/autoreels/manifests/prew_isaev_danny.json)
