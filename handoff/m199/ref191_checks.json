@@ -1,0 +1,1104 @@
+[
+ {
+  "stem": "day_yoga_p1",
+  "rid": "r01",
+  "title": "Позвольте себе быть",
+  "hook": "Прекратите на себя реально давить.",
+  "first": "Ваши нервные системы уникальны.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.2,
+   "core": false,
+   "hits": 2,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   1
+  ]
+ },
+ {
+  "stem": "day_yoga_p1",
+  "rid": "r02",
+  "title": "Как лечить своё напряжение",
+  "hook": "Будьте как у больного ребеночка рядом, возле кроватки. Просто",
+  "first": "Посмотрите, что в теле, скорее всего, есть какое-то хроническое напряжение.",
+  "hook_hang": "кончается на «Просто» (PRCL)",
+  "plate": {
+   "share": 0.13,
+   "core": true,
+   "hits": 2,
+   "sents": 15
+  },
+  "start_morph": null,
+  "seams": [
+   0,
+   2,
+   1
+  ]
+ },
+ {
+  "stem": "day_yoga_p1",
+  "rid": "r03",
+  "title": "Взрослый внутри вас",
+  "hook": "",
+  "first": "Если вы не видите ребенка, просто дайте в это ощущение любовь, заботу, тепло и внимание.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.09,
+   "core": true,
+   "hits": 1,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   2,
+   1,
+   0
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r01",
+  "title": "Маска «беглец»",
+  "hook": "Сбежать и не быть.",
+  "first": "Просто вспомните себя, особенно в стрессовых ситуациях, вы себя, скорее всего, как-то ведете однотипно.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.04,
+   "core": false,
+   "hits": 1,
+   "sents": 24
+  },
+  "start_morph": null,
+  "seams": [
+   3
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r02",
+  "title": "За болью сидит дар",
+  "hook": "",
+  "first": "За вот этой болью, травмой нашей сидит некое предназначение.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.38,
+   "core": true,
+   "hits": 5,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   5
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r03",
+  "title": "Сила зависимого",
+  "hook": "А на самом деле это очень сильный дар таких людей — сила.",
+  "first": "Зависимое, знаете, я себя чувствую хорошо, когда вы себя хорошо чувствуете.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.47,
+   "core": true,
+   "hits": 7,
+   "sents": 15
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r04",
+  "title": "Беглец с рождения",
+  "hook": "",
+  "first": "На инстинкт самосохранения накладывается программа «не живи».",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.15,
+   "core": true,
+   "hits": 2,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r05",
+  "title": "Маска «контролёр»",
+  "hook": "",
+  "first": "Какое-то предательство произошло в детстве, понятно?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.07,
+   "core": false,
+   "hits": 1,
+   "sents": 15
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r06",
+  "title": "Маска «мазохист»",
+  "hook": "",
+  "first": "Мазохист, которого мама с папой в детстве обвиняли в чем-то.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.06,
+   "core": true,
+   "hits": 1,
+   "sents": 16
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r07",
+  "title": "Сценарий из школы",
+  "hook": "После 14-ти все, весь сценарий повторялся. Четко",
+  "first": "Смотрите, вы прямо сейчас вспоминаете.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.31,
+   "core": true,
+   "hits": 5,
+   "sents": 16
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r08",
+  "title": "Вы давите на себя сами",
+  "hook": "",
+  "first": "Мало того, что смотрите, я ребенок, сначала никто не давит, до 5 лет в Японии даже детей не трогают.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.27,
+   "core": true,
+   "hits": 3,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r09",
+  "title": "Как снять с себя давление",
+  "hook": "",
+  "first": "Сначала нужно посмотреть, какая у меня нервная система, понятно?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.07,
+   "core": false,
+   "hits": 1,
+   "sents": 15
+  },
+  "start_morph": null,
+  "seams": [
+   4,
+   2
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r10",
+  "title": "Прежде чем менять работу",
+  "hook": "",
+  "first": "Смотрите, прежде чем искать другую работу, посмотрите, возможно, ваш беглец, что нужно его каким-то образом посмотреть.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.08,
+   "core": true,
+   "hits": 1,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r11",
+  "title": "Подросток, которому 52",
+  "hook": "",
+  "first": "На самом деле я не рассказываю сейчас про ребенка.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.25,
+   "core": true,
+   "hits": 3,
+   "sents": 12
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r12",
+  "title": "Зазор между триггером и реакцией",
+  "hook": "",
+  "first": "Ребенок реагирует.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.31,
+   "core": true,
+   "hits": 4,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   3,
+   3
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r13",
+  "title": "Взрослый уважает свою судьбу",
+  "hook": "Не важно, на канарах он или на нарах.",
+  "first": "Вы завтра можете извиниться и сказать, что вы берете ответственность.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.29,
+   "core": true,
+   "hits": 4,
+   "sents": 14
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r14",
+  "title": "Мудрец без скриншота",
+  "hook": "",
+  "first": "Мудрец — это тоже у нас есть такая часть, и вы ее кто-то когда-то медитировал или был в глубоких трансовых состояниях, где вы можете посмотреть на все как будто сверху вниз.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.33,
+   "core": true,
+   "hits": 4,
+   "sents": 12
+  },
+  "start_morph": null,
+  "seams": [
+   3
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r15",
+  "title": "Лифт вашей психики",
+  "hook": "Не хочу, мне так удобно.",
+  "first": "И прикиньте, есть огромный дом, в котором вы живете.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.22,
+   "core": true,
+   "hits": 4,
+   "sents": 18
+  },
+  "start_morph": null,
+  "seams": [
+   8
+  ]
+ },
+ {
+  "stem": "day_yoga_p2",
+  "rid": "r16",
+  "title": "Сделайте по-другому",
+  "hook": "",
+  "first": "А что бы на вашем месте сейчас сделал взрослый, бесстрашный, любящий сначала себя, а потом остальных человек?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.38,
+   "core": true,
+   "hits": 3,
+   "sents": 8
+  },
+  "start_morph": null,
+  "seams": [
+   1,
+   0
+  ]
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r01",
+  "title": "Жизнь — это страдание?",
+  "hook": "",
+  "first": "Будда говорил четыре главные какие-то истины.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.12,
+   "core": true,
+   "hits": 2,
+   "sents": 17
+  },
+  "start_morph": null,
+  "seams": [
+   3,
+   4
+  ]
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r02",
+  "title": "Выход есть",
+  "hook": "Хотите — пробуйте, хотите — не пробуйте.",
+  "first": "Мне такое ощущение, что именно Будда хотел иметь в виду, что мир физических форм обусловлен, и как бы вы, как я это люблю говорить, не закрывали свою жопу разными способами, правильно же, закрыть ее никак не получается.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.4,
+   "core": true,
+   "hits": 4,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   6
+  ]
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r03",
+  "title": "Что такое випассана",
+  "hook": "Но вы никогда не рассматривали ни тело, ни эмоции, ни свой ум.",
+  "first": "Что такое випассана?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.09,
+   "core": true,
+   "hits": 1,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   5
+  ]
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r04",
+  "title": "Вы умеете летать?",
+  "hook": "А Будда говорит, нет, ни хрена, это нереальность.",
+  "first": "Я нахожусь в мире, я чувствую какую-то небезопасность.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.18,
+   "core": false,
+   "hits": 2,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   1
+  ]
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r05",
+  "title": "Эго не пройдёт",
+  "hook": "",
+  "first": "И наш ум должен стать настолько однонаправленным, что мы с вами можем зацепиться за реальность, такая, какая она есть.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.11,
+   "core": true,
+   "hits": 1,
+   "sents": 9
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r06",
+  "title": "Ум в настоящем",
+  "hook": "",
+  "first": "Мы с вами идем в самадхи, в концентрацию ума на дыхании.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.1,
+   "core": false,
+   "hits": 1,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   0,
+   2
+  ]
+ },
+ {
+  "stem": "disko_beach_p1",
+  "rid": "r07",
+  "title": "Зачем нравственность",
+  "hook": "",
+  "first": "Первое, что говорил Будда, это, конечно же, нам нужна щила, так называемая, это нравственность.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.06,
+   "core": true,
+   "hits": 1,
+   "sents": 18
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "disko_beach_p2",
+  "rid": "r01",
+  "title": "Вы не поломаны",
+  "hook": "Ребят, с вами все нормально, вы не поломаны.",
+  "first": "Если вас сейчас поместить в стрессовую ситуацию, вы обычно в стрессовой ситуации одинаково, однотипно что?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.09,
+   "core": true,
+   "hits": 1,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   2
+  ]
+ },
+ {
+  "stem": "disko_beach_p2",
+  "rid": "r02",
+  "title": "Почему знание не помогает в стрессе",
+  "hook": "",
+  "first": "Когда с вами происходит какая-то стрессовая ситуация, вы теряетесь там.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.0,
+   "core": false,
+   "hits": 0,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   2
+  ]
+ },
+ {
+  "stem": "disko_beach_p2",
+  "rid": "r03",
+  "title": "Что сделал бы взрослый",
+  "hook": "",
+  "first": "Вот сейчас вспомните какую-то ситуацию, где вы как-то не справились, где вы как-то спросили, где вы как-то поступили, а поступили бы, возможно, лучше.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.18,
+   "core": false,
+   "hits": 2,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   3,
+   5
+  ]
+ },
+ {
+  "stem": "disko_beach_p2",
+  "rid": "r04",
+  "title": "Триггер, пауза, выбор",
+  "hook": "",
+  "first": "Человек идет как железный человек.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.11,
+   "core": true,
+   "hits": 1,
+   "sents": 9
+  },
+  "start_morph": null,
+  "seams": [
+   5
+  ]
+ },
+ {
+  "stem": "disko_beach_p2",
+  "rid": "r05",
+  "title": "Среда держит ваши реакции",
+  "hook": "Может быть, это не ваши друзья совсем.",
+  "first": "Вы же сейчас в какой-то среде находитесь, и эта среда поддерживает ваши автоматические реакции.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.5,
+   "core": true,
+   "hits": 6,
+   "sents": 12
+  },
+  "start_morph": null,
+  "seams": [
+   2,
+   0
+  ]
+ },
+ {
+  "stem": "disko_beach_p2",
+  "rid": "r06",
+  "title": "Никогда не поздно",
+  "hook": "поздно. Поздно — это когда уже завтра заказан священник.",
+  "first": "И там самое главное, что за маской вашей находится ваше предназначение, ваш дар.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.23,
+   "core": false,
+   "hits": 3,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   1
+  ]
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r01",
+  "title": "С кем вы столкнётесь",
+  "hook": "",
+  "first": "Практика очень глубокая.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.5,
+   "core": true,
+   "hits": 6,
+   "sents": 12
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r02",
+  "title": "Без вас здесь никак",
+  "hook": "",
+  "first": "Каждая нервная система уникальна.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.18,
+   "core": false,
+   "hits": 2,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   0
+  ]
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r03",
+  "title": "Откуда берётся маска",
+  "hook": "Надевается броня, маска надевается.",
+  "first": "Сначала нажимают родители, воспитатели в школе и так далее.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.23,
+   "core": true,
+   "hits": 3,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r04",
+  "title": "Причёсанная нервная система",
+  "hook": "",
+  "first": "Допустим, у человека уникальная нервная система, где очень тонкая.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.36,
+   "core": true,
+   "hits": 4,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r05",
+  "title": "Почему всех делают одинаковыми",
+  "hook": "Потом в школе говорят, что ты должен быть треугольным и зеленым.",
+  "first": "Почему тогда есть ЕГЭ?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.2,
+   "core": true,
+   "hits": 3,
+   "sents": 15
+  },
+  "start_morph": null,
+  "seams": [
+   0,
+   1
+  ]
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r06",
+  "title": "Почему мы выбираем таких партнёров",
+  "hook": "Если папа маму бил, бухал, пойдет, берем.",
+  "first": "И потом же ребенок что делает?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.33,
+   "core": false,
+   "hits": 3,
+   "sents": 9
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r07",
+  "title": "Вы привыкли к напряжению",
+  "hook": "",
+  "first": "Вы выходите в большой мир там после института, на вас уже никто не нажимает, но вы что делаете, ребятки?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.18,
+   "core": false,
+   "hits": 2,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r08",
+  "title": "Кто давит на вас теперь",
+  "hook": "А кто давит на меня?",
+  "first": "Мамы с папой, у меня папы уже давно нет, папа не давит, а папа давил.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.36,
+   "core": true,
+   "hits": 4,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   0
+  ]
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r09",
+  "title": "Почему дыхание лечит",
+  "hook": "Выходит ваша настоящая душевная конструкция.",
+  "first": "Что такое дыхание?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.35,
+   "core": true,
+   "hits": 6,
+   "sents": 17
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "disko_beach_p3",
+  "rid": "r10",
+  "title": "Ваш ресурс не безграничен",
+  "hook": "Ни хрена не безгранична.",
+  "first": "Если вы никому-то не расставили границы, это не значит, что это нигде не накапливается.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.29,
+   "core": true,
+   "hits": 4,
+   "sents": 14
+  },
+  "start_morph": null,
+  "seams": [
+   0,
+   2
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r01",
+  "title": "Я всё бросил и уехал",
+  "hook": "",
+  "first": "У меня был такой интересный момент, где я, проживая в Ростове, я просто все бросил на том этапе, что я там был, и просто решил уехать в Москву.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.15,
+   "core": true,
+   "hits": 2,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r02",
+  "title": "Почему психолог не даёт советов",
+  "hook": "Настоящие друзья — это те, которые не говорят, что ты не прав.",
+  "first": "Знаешь, как даже иногда говорю, представь, что у тебя есть друг, к которому ты пришел, и можешь все рассказать, и за это тебе ничего не будет.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.1,
+   "core": true,
+   "hits": 1,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   2,
+   2
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r03",
+  "title": "Как отдыхает психолог",
+  "hook": "Для меня это самый лучший отдых.",
+  "first": "Как ты отдыхаешь?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.22,
+   "core": true,
+   "hits": 2,
+   "sents": 9
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r04",
+  "title": "Эмпатия лечит",
+  "hook": "Тут меня могут закидать помидорами гнилыми.",
+  "first": "Вдохновляет меня то, что на самом деле, когда ты еще повышаешь уровень своего профессионализма, ты понимаешь, что это работает на людях, на самом деле очень как-то странно происходит.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.18,
+   "core": true,
+   "hits": 2,
+   "sents": 11
+  },
+  "start_morph": "глагол «вдохновляет» без подлежащего",
+  "seams": [
+   6,
+   2
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r05",
+  "title": "Две главные ценности",
+  "hook": "Раз я здесь в этом мире, значит я должен быть здесь таким, какой я есть.",
+  "first": "В любом случае ценности — это то, что мама с папой привили.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.38,
+   "core": true,
+   "hits": 3,
+   "sents": 8
+  },
+  "start_morph": null,
+  "seams": [
+   3
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r06",
+  "title": "Почему мы врём",
+  "hook": "",
+  "first": "Во-первых, дети, а у нас есть внутренний ребенок, есть внутренний подросток, есть внутренний взрослый.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.5,
+   "core": true,
+   "hits": 5,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   4,
+   5
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r07",
+  "title": "Когда ложь честнее правды",
+  "hook": "Ты, получается, поступил честно.",
+  "first": "Но взрослый что он делает?",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.12,
+   "core": true,
+   "hits": 2,
+   "sents": 16
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "prew_isaev_anna",
+  "rid": "r08",
+  "title": "С чего начинается принятие себя",
+  "hook": "Подожди, подожди, а что я чувствую?",
+  "first": "Я там все время на автомате что-то делаю.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.15,
+   "core": false,
+   "hits": 2,
+   "sents": 13
+  },
+  "start_morph": null,
+  "seams": [
+   1,
+   5
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r01",
+  "title": "Ключ от закрытого шкафа",
+  "hook": "",
+  "first": "У папы и мамы был закрытый шкаф.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.5,
+   "core": true,
+   "hits": 3,
+   "sents": 6
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r02",
+  "title": "Все методы правы",
+  "hook": "",
+  "first": "Вот так постепенно, обрастая разными методами, где-то гипнотерапия, где-то гештальт, ну и так далее, каждый год.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.33,
+   "core": true,
+   "hits": 3,
+   "sents": 9
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r03",
+  "title": "Главная потребность человека",
+  "hook": "",
+  "first": "Человеческий и профессиональный смысл, такой.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.17,
+   "core": true,
+   "hits": 1,
+   "sents": 6
+  },
+  "start_morph": null,
+  "seams": [
+   1
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r04",
+  "title": "Цветок не раскрывают силой",
+  "hook": "",
+  "first": "Вот есть.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.18,
+   "core": true,
+   "hits": 2,
+   "sents": 11
+  },
+  "start_morph": null,
+  "seams": [
+   6
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r05",
+  "title": "Внутренний телефон",
+  "hook": "",
+  "first": "Я уезжаю на дней в ретрит, и когда я закрываю глаза, у меня выключается телефон на 10 дней.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.33,
+   "core": true,
+   "hits": 2,
+   "sents": 6
+  },
+  "start_morph": null,
+  "seams": [
+   0,
+   0
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r06",
+  "title": "Страх — это сигнал",
+  "hook": "Что страх это не страх, это сигнал. Что это",
+  "first": "Если мы с вами эти сигналы не распознаем, то мы как будто находимся в состоянии стресса.",
+  "hook_hang": "кончается на «это» (PRCL)",
+  "plate": {
+   "share": 0.43,
+   "core": true,
+   "hits": 3,
+   "sents": 7
+  },
+  "start_morph": null,
+  "seams": [
+   3
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r07",
+  "title": "Зачем нужен стресс",
+  "hook": "Действительно, тогда по-настоящему вы меняетесь.",
+  "first": "Смотрите, когда все замечательно вокруг, то ваши травмы, они сидят внутри вас, они никуда не деваются.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.11,
+   "core": true,
+   "hits": 1,
+   "sents": 9
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r08",
+  "title": "Ваш дом, где вы не бываете",
+  "hook": "На самом деле это наш дом, в котором мы не бываем.",
+  "first": "Знаете, когда ко мне приходит человек, и он очень возбужден, то есть видно, он в стрессе и так далее.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.17,
+   "core": false,
+   "hits": 2,
+   "sents": 12
+  },
+  "start_morph": null,
+  "seams": []
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r09",
+  "title": "Зачем уезжать из города",
+  "hook": "",
+  "first": "Самое главное в турах, это то, что я должен взять человека из его среды.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.1,
+   "core": true,
+   "hits": 1,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   3
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r10",
+  "title": "Вы нужны именно такие",
+  "hook": "",
+  "first": "Действительно, друзья, мы с вами находимся в невероятной реальности.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.33,
+   "core": true,
+   "hits": 4,
+   "sents": 12
+  },
+  "start_morph": null,
+  "seams": [
+   5
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r11",
+  "title": "Как родилась книга",
+  "hook": "",
+  "first": "Мне стало интересно, а что, как это работает.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.1,
+   "core": true,
+   "hits": 1,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   3
+  ]
+ },
+ {
+  "stem": "prew_isaev_danny",
+  "rid": "r12",
+  "title": "Память психолога",
+  "hook": "",
+  "first": "Я иногда, знаешь, как я Была какая-то консультация, я раз и переключился.",
+  "hook_hang": null,
+  "plate": {
+   "share": 0.0,
+   "core": false,
+   "hits": 0,
+   "sents": 10
+  },
+  "start_morph": null,
+  "seams": [
+   4
+  ]
+ }
+]
