@@ -1,0 +1,73 @@
+== гейты (review.json по гейтам)
+   1 34f06abf
+   1 anna
+   1 danny
+   1 m122
+   1 m123
+   1 m125
+   1 m126
+   2 m134off
+   2 m134on
+   1 m136off
+   1 m136on
+   1 m142
+   1 m146a
+   1 m146b
+   7 m149bbefore
+   7 m149bon
+   3 m150a
+   2 m150b
+   7 m157
+   5 m163
+   2 m165
+   7 m172
+   7 m173
+   1 m173b
+   7 m174
+   7 m174pre
+   7 m176
+   7 m182
+   7 m183
+   1 m183pre
+   2 p1
+   2 p2
+   1 p3
+== m183
+reviews/day_yoga_p1_m183.review.json
+reviews/day_yoga_p2_m183.review.json
+reviews/disko_beach_p1_m183.review.json
+reviews/disko_beach_p2_m183.review.json
+reviews/disko_beach_p3_m183.review.json
+reviews/prew_isaev_anna_m183.review.json
+reviews/prew_isaev_danny_m183.review.json
+== оценки
+wc: reviews/verdicts.jsonl: open: No such file or directory
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'reviews/verdicts.jsonl'
+== карты и интонация
+transcripts/day_yoga_p1.map.json
+transcripts/day_yoga_p1.prosody.json
+transcripts/day_yoga_p2.map.json
+transcripts/day_yoga_p2.prosody.json
+transcripts/disko_beach_p1.map.json
+transcripts/disko_beach_p1.prosody.json
+transcripts/disko_beach_p2.map.json
+transcripts/disko_beach_p2.prosody.json
+transcripts/disko_beach_p3.map.json
+transcripts/disko_beach_p3.prosody.json
+transcripts/prew_isaev_anna.map.json
+transcripts/prew_isaev_anna.prosody.json
+transcripts/prew_isaev_danny.map.json
+transcripts/prew_isaev_danny.prosody.json
+transcripts/PXL_20260729_085910095_34f06abf.map.json
+transcripts/PXL_20260729_085910095_34f06abf.prosody.json
+== разметка владельца (manifests, selection_source=human)
+manifests/day_yoga_p1.json human 2
+manifests/day_yoga_p2.json human 19
+manifests/disko_beach_p1.json human 8
+manifests/disko_beach_p2.json human 4
+manifests/disko_beach_p3.json human 15
+manifests/prew_isaev_anna.json human 8
+manifests/prew_isaev_danny.json auto 12
+manifests/PXL_20260729_085910095_34f06abf.json human 10
