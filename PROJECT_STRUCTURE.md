@@ -46,6 +46,7 @@ autoreels/
 ├── tools/grid.py             # M174/M187: сетка публикаций по смыслу после перепрогона (export/crosspost/)
 ├── tools/publish_dir.py      # M186/M187: общий каталог export/publish/NNN_rXX_<источник>.mp4 в порядке сетки
 ├── tools/measure_shots.py    # M173/M187: короткие планы и вспышки готовых клипов по review.json
+├── tools/score_gate.py       # M188: таблица гейта по источникам (`score_gate.py <гейт> [--compare]`)
 ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
 │
 ├── docs/
@@ -97,6 +98,7 @@ autoreels/
 │   │   ├── snap.py, trim.py, diagnose.py   # границы, висячие хвосты, классы границ
 │   │   ├── postcopy.py       # M94: пост под роликом (`arl describe`)
 │   │   ├── article.py        # M100: лонгрид по теме карты (`arl article`)
+│   │   ├── gatescore.py      # M188: числа гейта — крючки, начала, тон конца, стыки, планы, роли мыслей, покрытие; только замер
 │   │   └── providers.py      # Groq → OpenRouter, Claude (haiku/sonnet), локальная LLM; троттлинг, бэкофф
 │   │
 │   ├── local/                # ЛОКАЛЬНЫЙ ТИР — видео и рендер, исходник не уходит
