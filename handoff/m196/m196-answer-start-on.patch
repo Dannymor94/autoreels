@@ -1,0 +1,33 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 49d9117..1bafe04 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -368,7 +368,7 @@ autocut:
+   start_strict: true      # M182: a reel never opens on a line pointing back («Каждый из них…», «Это…») or at the interviewer
+                           # («Ты…», «…, Ласанна.»): up to start_extend_max sentences before are added, else it goes
+   start_extend_max: 2
+-  answer_start: false     # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
++  answer_start: true      # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
+                           # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
+   answer_gap_sec: 3.0
+   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
+diff --git a/tests/test_m193_answer_start.py b/tests/test_m193_answer_start.py
+index ad2165c..87ca7ec 100644
+--- a/tests/test_m193_answer_start.py
++++ b/tests/test_m193_answer_start.py
+@@ -9,13 +9,13 @@ from pathlib import Path
+ from autoreels.cloud.autocut import AutoParams, answer_start_reason
+ 
+ 
+-def test_off_by_default():
++def test_off_by_default_on_in_repo_config():   # M196: owner 2026-10-30 «давай» — on in config/r0.yaml
+     assert not AutoParams().answer_start
+     from autoreels.core.config import AutocutConfig
+     assert not AutocutConfig().answer_start
+     from autoreels.core.config import load_r0_config
+     ac = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").autocut
+-    assert ac.answer_start is False and ac.answer_gap_sec == 3.0
++    assert ac.answer_start is True and ac.answer_gap_sec == 3.0
+ 
+ 
+ def test_answer_words():
