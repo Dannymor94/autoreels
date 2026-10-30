@@ -64,3 +64,5 @@ clips-review/
 clips_*.txt
 review-*.md
 reviews/
+# M194: block-set sidecars of arl blocks (written on every run, read by nobody; older ones stay tracked)
+manifests/*.blocks.json

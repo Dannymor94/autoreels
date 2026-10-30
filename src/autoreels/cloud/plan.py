@@ -1468,7 +1468,13 @@ def build_manual_plan(
                     word.model_copy(update={"t0": t0, "t1": t1})
     subtitles = sorted(subs.values(), key=lambda x: x.t0)
     body_starts = [w.start for w in windows if not w.cold_open]
-    if any(b < a for a, b in zip(body_starts, body_starts[1:])):
+    _bw = [w for w in windows if not w.cold_open]
+    # M194 (m191: a montage hook from another block, h:37.2 after the body — its words sorted after the body's, the
+    # last subtitle was the hook's «силу.» and --apply refused «last subtitle != planned last word»): a cold open
+    # outside the body's span plays first, so its words go first too — the play-order branch below
+    _co_out = bool(_bw) and any(w.cold_open and (w.end <= min(b.start for b in _bw) + _EPS
+                                                 or w.start >= max(b.end for b in _bw) - _EPS) for w in windows)
+    if any(b < a for a, b in zip(body_starts, body_starts[1:])) or _co_out:
         # M59: pieces out of source order — the subtitles go in PLAY order (window by window), so
         # the last subtitle is the last word heard; in source order they are sorted by time as before
         order: dict[int, int] = {}
