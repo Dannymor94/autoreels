@@ -9,13 +9,13 @@ from pathlib import Path
 from autoreels.cloud.autocut import AutoParams, answer_start_reason
 
 
-def test_off_by_default():
+def test_off_by_default_on_in_repo_config():   # M196: owner 2026-10-30 «давай» — on in config/r0.yaml
     assert not AutoParams().answer_start
     from autoreels.core.config import AutocutConfig
     assert not AutocutConfig().answer_start
     from autoreels.core.config import load_r0_config
     ac = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").autocut
-    assert ac.answer_start is False and ac.answer_gap_sec == 3.0
+    assert ac.answer_start is True and ac.answer_gap_sec == 3.0
 
 
 def test_answer_words():
