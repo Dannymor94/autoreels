@@ -111,6 +111,8 @@ class AutoParams:
     # «Да, у меня даже как…», «Как было, так и было»): with start_strict, a reel also never opens on an answer
     answer_start: bool = False        # an answer word («Да, …») or a reply right after the interviewer's turn
     answer_gap_sec: float = 3.0       # … the reply starts within this many seconds after the interviewer's sentence
+    start_morph: bool = False         # M200: with start_strict, a reel never opens on a sentence with nothing to stand on —
+                                      # a verb without a subject («Как было, так и было.») or «он/их…» before any noun
 
 
 @dataclass
@@ -527,7 +529,8 @@ def answer_start_reason(text: str, host_text: str = "") -> str | None:
     words = _plain_words(t)
     if not words:
         return None
-    m = _re.match(r"^\W*([А-Яа-яЁё]+)\s*([,.!?…])", t)
+    # M200 (m196: «Ну да, вот я как-то говорил…» opened a reel): fillers before the answer word do not hide it
+    m = _re.match(r"^\W*(?:(?:ну|вот)(?![А-Яа-яЁё])\W*)*([А-Яа-яЁё]+)\s*([,.!?…])", t, _re.IGNORECASE)
     if m and _norm_word(m.group(1)) in _ANSWER_WORDS:
         w = _norm_word(m.group(1))
         if w not in _ANSWER_ALONE or len(words) <= 3:

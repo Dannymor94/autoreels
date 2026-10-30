@@ -194,18 +194,27 @@ def scenario_proposals(scens: Sequence[dict], sent: dict[str, tuple[float, float
             if _g:                            # M145: the model's start is kept (a later one may not stand alone)
                 notes.append(f"начало: {_g} — исправить нельзя, оставлено")
         if p.start_strict:
+            if p.start_morph:
+                from autoreels.cloud.clipcheck import require_morph
+                require_morph()
             # M182 (owner: «r14 начало пустое» — «Каждый из них влияет…»): the reel never opens on a line pointing back or
             # at the interviewer — up to start_extend_max sentences before it are added (the start of the thought), each
             # right before in the source; none stands → the reel goes
             def _start_why(r0: str) -> "str | None":
                 why = strict_start_reason(sent[r0][2])
-                if why or not p.answer_start:
-                    return why
-                # M193: an answer — an answer word, or the reply right after the interviewer's sentence
-                prv0 = prev_ref.get(r0)
-                host = sent[prv0][2] if (other and prv0 in other and prv0 not in refs
-                                         and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
-                return answer_start_reason(sent[r0][2], host)
+                if why is None and p.answer_start:
+                    # M193: an answer — an answer word, or the reply right after the interviewer's sentence
+                    prv0 = prev_ref.get(r0)
+                    host = sent[prv0][2] if (other and prv0 in other and prv0 not in refs
+                                             and sent[r0][0] - sent[prv0][1] <= p.answer_gap_sec) else ""
+                    why = answer_start_reason(sent[r0][2], host)
+                if why is None and p.start_morph:
+                    # M200 (blind judges on ab192: «Как было, так и было.», «Всем говорит, и он стоит на этом…» — start
+                    # 1 of 5 from both): a verb with no subject, or «он/их» before any noun — the start of the thought
+                    # is before it
+                    from autoreels.cloud.clipcheck import start_morph
+                    why = start_morph(sent[r0][2].split())
+                return why
             _why = _start_why(refs[0])
             if _why and p.answer_start and len(refs) > 1 and answer_start_reason(sent[refs[0]][2]) \
                     and _start_why(refs[1]) is None and dur(refs[1:]) >= p.min_sec:

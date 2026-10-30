@@ -1,5 +1,6 @@
 """M199 (замер, ничего не решает): четыре проверки готового клипа, которые слепые судьи m192b назвали главными
-недостатками автоматики, — пока только числа, без влияния на сборку.
+недостатками автоматики, — числа для замера (tools/clip_checks.py). M200: проверка 3 — ещё и правило сборки
+(autocut.start_morph, cloud/scenario.py и клипы разметки arl auto); 1, 2, 4 на сборку не влияют.
 
 1. hook_hang — холодный старт кончается словом, после которого ждут продолжения (предлог, союз, частица, местоимение):
    «…вы забыли свою силу, Вы» — судьи: «тизер обрывается на „Вы“».
@@ -43,6 +44,12 @@ def has_morph() -> bool:
     return _morph() is not None
 
 
+def require_morph() -> None:
+    """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+    if _morph() is None:
+        raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+
+
 def _norm(w: str) -> str:
     return "".join(c for c in (w or "").lower().replace("ё", "е") if c.isalnum())
 
@@ -51,6 +58,12 @@ def _norm(w: str) -> str:
 def _parse(w: str):
     m = _morph()
     return m.parse(w)[0] if (m is not None and w) else None
+
+
+@lru_cache(maxsize=50000)
+def _parses(w: str) -> tuple:
+    m = _morph()
+    return tuple(m.parse(w)) if (m is not None and w) else ()
 
 
 def _lemma(w: str) -> str | None:
@@ -162,8 +175,10 @@ def start_morph(sentence: Sequence[str]) -> str | None:
             and ("neut" in verb.tag or "3per" in verb.tag) and "plur" not in verb.tag:
         verb = None                                    # «Было интересно», «Стало легче» — impersonal, stands
     if verb is not None:
-        subj = any(p is not None and p.tag.case == "nomn" and p.tag.POS in ("NOUN", "NPRO", "ADJF", "PRTF", "NUMR")
-                   for _, p in tags)
+        # M200 (m196: «У папы был рак» — «рак» read first as accusative; ref191: «Вдохновляет меня то, что…»): a word
+        # that MAY be in the nominative is a subject — any of its readings, not only the likeliest
+        subj = any(q.tag.case == "nomn" and q.tag.POS in ("NOUN", "NPRO", "ADJF", "PRTF", "NUMR")
+                   for n, _ in tags for q in _parses(n))
         if not subj and not any(p is not None and p.tag.POS == "VERB" and ("1per" in p.tag or "2per" in p.tag)
                                 for _, p in tags):
             return f"глагол «{verb.word}» без подлежащего"

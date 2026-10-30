@@ -289,6 +289,8 @@ class AutocutConfig(BaseModel):
     start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
     answer_start: bool = False                # M193: with start_strict, a reel never opens on an answer («Да, …», a reply to the host)
     answer_gap_sec: float = Field(3.0, ge=0.0)   # … a reply: starts within this many seconds after the host's sentence
+    start_morph: bool = False                 # M200: with start_strict, no reel opens on a verb without a subject or «он/их…»
+                                              # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
     # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
