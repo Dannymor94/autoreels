@@ -232,6 +232,49 @@ def test_coverage_gate_clip_not_counted_twice():
     assert result["total"] == 2
 
 
+def test_coverage_reports_missed_and_best():
+    # owner[0] found at 60%, owner[1] best 30% (not found)
+    # gate[0] covers owner[0] at 60%, gate[1] covers owner[1] at 30%
+    owner = [_owner_reel("o1", 0.0, 5.0), _owner_reel("o2", 10.0, 20.0)]
+    gate = [_gate_reel("g0", 2.0, 8.0), _gate_reel("g1", 13.0, 16.0)]
+    # o1 [0,5]=5s, g0 [2,8]=6s, overlap [2,5]=3s → 3/5=60% → found
+    # o2 [10,20]=10s, g1 [13,16]=3s, overlap [13,16]=3s → 3/3=100%... wait
+    # Let me recalculate: g1 [13,16]=3s, o2 [10,20]=10s, overlap=3s, shorter=3 → 100% found
+    # Need to adjust: o2=[10,20]=10s, g1=[15,18]=3s, overlap=3s, shorter=3 → 100% found
+    # Use: o2=[10,20]=10s, g1=[17,20]=3s, overlap=3s, shorter=3 → 100% found
+    # Let me just test the structure with a clear 30% case:
+    # o1=[0,10]=10s, g0=[0,3]=3s overlap=3, shorter=3 → 100% found; o2=[20,30]=10s, g1=[23,26]=3s → 100% found
+    # For 30%: owner=[0,10]=10s, gate=[7,10]=3s, overlap=3, shorter=3 → 100%
+    # I need: overlap < 50% of shorter. E.g. owner=[0,10], gate=[8,11]=3s, overlap=2s, shorter=3s → 67% found.
+    # For 30%: owner=[0,10], gate=[9,12]=3s, overlap=1s, shorter=3s → 33% < 50% → not found, best=33%
+    owner2 = [_owner_reel("o1", 0.0, 5.0), _owner_reel("o2", 0.0, 10.0)]
+    gate2 = [_gate_reel("g0", 2.0, 8.0), _gate_reel("g1", 7.0, 10.0)]
+    # o1=[0,5]=5s, g0=[2,8]=6s, overlap=[2,5]=3s, shorter=5 → 60% found
+    # o2=[0,10]=10s, g1=[7,10]=3s, overlap=[7,10]=3s, shorter=3 → 100% found... g0 already used
+    # Actually g0 shorter=5 → 3/5=60% → found; g1 for o2: 3/3=100% → also found
+    # This doesn't test missed. Let me use a simple case:
+    owner3 = [_owner_reel("o1", 0.0, 5.0), _owner_reel("o2", 20.0, 30.0)]
+    gate3 = [_gate_reel("g0", 2.0, 8.0), _gate_reel("g1", 29.0, 33.0)]
+    # o1=[0,5]=5s, g0=[2,8]=6s, overlap=3s, shorter=5 → 60% → found
+    # o2=[20,30]=10s, g1=[29,33]=4s, overlap=1s, shorter=4 → 25% → NOT found
+    result3 = coverage(owner3, gate3)
+    assert result3["found"] == 1
+    assert result3["total"] == 2
+    assert 1 in result3["missed"]
+    assert result3["matched"][0][0] == 0   # owner index 0 found
+    # best for owner[1]: g1 gave 25% overlap
+    assert result3["best"][1][0] is not None
+    assert abs(result3["best"][1][1] - 0.25) < 0.05
+
+
+def test_coverage_best_none_without_overlap():
+    owner = [_owner_reel("o1", 0.0, 5.0)]
+    gate = [_gate_reel("g1", 10.0, 15.0)]  # no overlap
+    result = coverage(owner, gate)
+    assert result["best"][0] == [None, 0.0]
+    assert 0 in result["missed"]
+
+
 # ── 6. units ─────────────────────────────────────────────────────────────────
 
 def _unit(t0, t1, role="thesis", punch=3, topic=1):

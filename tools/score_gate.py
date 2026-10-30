@@ -1,7 +1,8 @@
-"""M188: one table per gate. Usage:
-    python tools/score_gate.py <gate> [--compare <gate2>] [--stems a,b]
+"""M188/M191: one table per gate. Usage:
+    python tools/score_gate.py <gate> [--compare <gate2>] [--ref <ref_gate>] [--stems a,b]
 Reads reviews/, manifests/, transcripts/, config/r0.yaml, reviews/verdicts.jsonl.
 Writes reels-out/_score/<gate>.json (and <gate2>.json for --compare).
+--ref: show which ref_gate clips a gate finds (and which it misses).
 """
 from __future__ import annotations
 
@@ -243,6 +244,99 @@ def _diff_row(label: str, s1: dict, s2: dict) -> tuple[str, list[str], list[str]
     return label, v1, v2, diff
 
 
+def _load_ref_reels(root: Path, stem: str, ref_gate: str) -> list[dict] | None:
+    """Load reels from a ref gate review file for a stem, or None if missing."""
+    p = root / "reviews" / f"{stem}_{ref_gate}.review.json"
+    if not p.exists():
+        return None
+    return json.loads(p.read_text(encoding="utf-8")).get("reels") or []
+
+
+def _score_ref(root: Path, main_result: dict, ref_gate: str, cfg: dict) -> dict:
+    """For each stem: how many ref clips does the main gate find?"""
+    from autoreels.cloud.gatescore import coverage as _cov, score_clip, summarize
+
+    per_stem: dict[str, dict] = {}
+    missed_clips: list[dict] = []
+    total_found = total_ref = 0
+
+    for stem, s_data in sorted(main_result["per_stem"].items()):
+        ref_reels = _load_ref_reels(root, stem, ref_gate)
+        gate_reels = [r for r in _get_reels(root, stem, main_result["gate"])]
+
+        if ref_reels is None:
+            per_stem[stem] = {"found": None, "total": None}
+            continue
+
+        cov = _cov(ref_reels, gate_reels)
+        per_stem[stem] = {"found": cov["found"], "total": cov["total"]}
+        total_found += cov["found"]
+        total_ref += cov["total"]
+
+        # collect missed clips with their score_clip data
+        map_ = s_data["clips"][0]["units"] and s_data  # just use already-loaded map
+        # reload map/prosody via load_gate for ref clips
+        from autoreels.cloud.gatescore import load_gate as _lg
+        ref_data = _lg(root, ref_gate)
+        ref_stem_data = ref_data.get(stem, {})
+        ref_map = ref_stem_data.get("map", {})
+        ref_prosody = ref_stem_data.get("prosody", {})
+
+        for oi in cov["missed"]:
+            r = ref_reels[oi]
+            clip = score_clip(r, ref_map, ref_prosody, cfg)
+            best_gi, best_frac = cov["best"][oi]
+            best_id = gate_reels[best_gi]["id"] if best_gi is not None else None
+            missed_clips.append({
+                "stem": stem,
+                "id": r.get("id"),
+                "title": r.get("title_overlay") or r.get("title") or "",
+                "dur": clip["dur"],
+                "best_gate_id": best_id,
+                "best_frac": best_frac,
+                "units": clip["units"],
+                "problems": _explain(clip),
+            })
+
+    return {
+        "ref_gate": ref_gate,
+        "per_stem": per_stem,
+        "total": {"found": total_found, "total": total_ref},
+        "missed_clips": missed_clips,
+    }
+
+
+def _get_reels(root: Path, stem: str, gate: str) -> list[dict]:
+    p = root / "reviews" / f"{stem}_{gate}.review.json"
+    if not p.exists():
+        return []
+    return json.loads(p.read_text(encoding="utf-8")).get("reels") or []
+
+
+def _print_ref(ref_result: dict, main_gate: str):
+    ref_gate = ref_result["ref_gate"]
+    total = ref_result["total"]
+    print(f"\n=== Эталон {ref_gate} в {main_gate}: найдено {total['found']} из {total['total']} ===\n")
+
+    rows = [(stem, d.get("found"), d.get("total")) for stem, d in sorted(ref_result["per_stem"].items())]
+    lw = max(len(s) for s, _, _ in rows)
+    for stem, found, tot in rows:
+        if found is None:
+            print(f"  {stem:{lw}}  нет файла {ref_gate}")
+        else:
+            print(f"  {stem:{lw}}  {found}/{tot}")
+
+    print(f"\nПотерянные клипы эталона:")
+    for m in ref_result["missed_clips"]:
+        roles = "→".join(
+            f"{u.get('role','?')}({u.get('punch','?')})" for u in m["units"]
+        ) or "нет мыслей"
+        best_str = f"{m['best_gate_id']} {int(m['best_frac']*100)}%" if m["best_gate_id"] else "нет перекрытия"
+        problems = ", ".join(m["problems"]) or "нет"
+        dur_s = f"{m['dur']:.0f}с"
+        print(f"  {m['stem']} {m['id']} «{m['title']}» {dur_s} | лучшее: {best_str} | роли: {roles} | {problems}")
+
+
 def _print_comparison(r1: dict, r2: dict):
     headers = [c[0] for c in _COLS]
     g1, g2 = r1["gate"], r2["gate"]
@@ -267,6 +361,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("gate")
     ap.add_argument("--compare", metavar="GATE2")
+    ap.add_argument("--ref", metavar="REF_GATE")
     ap.add_argument("--stems", metavar="a,b")
     args = ap.parse_args()
 
@@ -275,6 +370,8 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stems = args.stems.split(",") if args.stems else None
+
+    cfg = _cfg_dict(load_r0_config(root / "config" / "r0.yaml"))
 
     def _ensure(gate: str) -> dict:
         out_path = out_dir / f"{gate}.json"
@@ -294,6 +391,24 @@ def main():
         r2 = _ensure(args.compare)
         _print_result(r2)
         _print_comparison(r1, r2)
+
+    if args.ref:
+        r_ref = _ensure(args.ref)
+        ref_result = _score_ref(root, r1, args.ref, cfg)
+        _print_ref(ref_result, args.gate)
+        # persist ref section into gate json
+        out_path = out_dir / f"{args.gate}.json"
+        if out_path.exists():
+            stored = json.loads(out_path.read_text(encoding="utf-8"))
+        else:
+            stored = r1
+        stored["ref"] = {
+            "gate": args.ref,
+            "per_stem": ref_result["per_stem"],
+            "total": ref_result["total"],
+            "missed": ref_result["missed_clips"],
+        }
+        out_path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

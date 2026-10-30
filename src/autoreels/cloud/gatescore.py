@@ -295,6 +295,12 @@ def coverage(owner_reels: list[dict], gate_reels: list[dict]) -> dict:
 
     A clip is 'found' when a gate reel's body windows overlap with the owner's body windows
     by >= 50% of the shorter clip's total body length.  Each gate reel counts at most once.
+
+    Returns keys: found, total, matched, missed, best.
+    - matched: list of [owner_idx, gate_idx, frac] for found pairs
+    - missed:  list of owner_idx not found
+    - best:    for every owner_idx, [gate_idx, frac] of the gate clip with highest overlap
+               (even below 50%); [None, 0.0] if no gate clip overlaps at all
     """
     def _body_len(r):
         return sum(s["end"] - s["start"] for s in _body(r))
@@ -306,8 +312,10 @@ def coverage(owner_reels: list[dict], gate_reels: list[dict]) -> dict:
                 total += max(0.0, min(s1["end"], s2["end"]) - max(s1["start"], s2["start"]))
         return total
 
-    # Build candidates: (owner_idx, gate_idx, overlap_fraction)
-    candidates = []
+    n_owner = len(owner_reels)
+
+    # All (owner_idx, gate_idx, frac) pairs — even below 0.5
+    all_pairs: list[tuple[float, int, int]] = []
     for oi, ow in enumerate(owner_reels):
         ow_len = _body_len(ow)
         for gi, gr in enumerate(gate_reels):
@@ -317,20 +325,38 @@ def coverage(owner_reels: list[dict], gate_reels: list[dict]) -> dict:
                 continue
             ov = _overlap_len(ow, gr)
             frac = ov / shorter
-            if frac >= 0.5:
-                candidates.append((frac, oi, gi))
+            all_pairs.append((frac, oi, gi))
 
-    # greedy: best overlap first, each gate clip at most once
-    candidates.sort(reverse=True)
+    # best per owner (highest frac regardless of threshold)
+    best: list[list] = [[None, 0.0] for _ in range(n_owner)]
+    for frac, oi, gi in all_pairs:
+        if frac > best[oi][1]:
+            best[oi] = [gi, round(frac, 4)]
+
+    # greedy match: only pairs >= 0.5, each gate clip at most once
+    candidates = sorted(
+        ((frac, oi, gi) for frac, oi, gi in all_pairs if frac >= 0.5),
+        reverse=True,
+    )
     used_gate: set[int] = set()
     found_owner: set[int] = set()
+    matched: list[list] = []
     for frac, oi, gi in candidates:
-        if gi in used_gate:
+        if gi in used_gate or oi in found_owner:
             continue
         used_gate.add(gi)
         found_owner.add(oi)
+        matched.append([oi, gi, round(frac, 4)])
 
-    return {"found": len(found_owner), "total": len(owner_reels)}
+    missed = [oi for oi in range(n_owner) if oi not in found_owner]
+
+    return {
+        "found": len(found_owner),
+        "total": n_owner,
+        "matched": matched,
+        "missed": missed,
+        "best": best,
+    }
 
 
 # ── verdicts ──────────────────────────────────────────────────────────────────
