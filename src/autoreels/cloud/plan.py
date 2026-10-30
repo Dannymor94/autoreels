@@ -357,6 +357,18 @@ def _ends_with_stop(word: str) -> bool:
 
 ALIGN_MIN_SCORE = 0.05     # below this the aligner guessed (09h33 «Первый»: 0.004)
 _ALIGN_ORDER_EPS = 0.02
+# M195 (m191 disko_beach_p1 1018–1019 s: «И в моменте сталкивания» — the aligner put «И», «в» at 1019.29/1019.35 with
+# score 0.94/0.89 but 20 ms each, inside «сталкивания» and 1.3 s after their Whisper time; the cold open started there and
+# cut the word): a confident out-of-order word is still a guess when it is a stub (≤ _ALIGN_STUB_SEC) placed more than
+# _ALIGN_DISPLACED_SEC from its Whisper time while its neighbour sits at its own
+_ALIGN_STUB_SEC = 0.045
+_ALIGN_DISPLACED_SEC = 0.5
+
+
+def _align_guess(e: dict) -> bool:
+    """M195: a stub of the aligner far from the word's Whisper time."""
+    return (e["end"] - e["start"] <= _ALIGN_STUB_SEC
+            and abs(float(e["start"]) - float(e.get("t0", e["start"]))) > _ALIGN_DISPLACED_SEC)
 
 
 def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
@@ -368,7 +380,8 @@ def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
     previous word). A word that lands before the end of the previous aligned word (out of order)
     AND has an almost-zero score is dropped — its time then comes from the speech map. An
     out-of-order pair where both are confident is kept as before (Whisper's own text order can
-    disagree with time; the filler-cut guards handle it)."""
+    disagree with time; the filler-cut guards handle it) — M195: unless one of them is a stub of the aligner far from
+    its Whisper time (_align_guess) and the other is not; the stub is dropped."""
     kept: list[dict] = []
     rejected: list[float] = []
     for e in entries:
@@ -383,6 +396,11 @@ def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
                 cur = None
             elif sc_prev < ALIGN_MIN_SCORE:
                 rejected.append(float(kept.pop()["t0"]))
+            elif _align_guess(prev) and not _align_guess(cur):
+                rejected.append(float(kept.pop()["t0"]))      # M195: the stub before goes, the word keeps its time
+            elif _align_guess(cur) and not _align_guess(prev):
+                rejected.append(float(cur["t0"]))
+                cur = None
             else:
                 break
         if cur is not None:
