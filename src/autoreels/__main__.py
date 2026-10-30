@@ -72,7 +72,6 @@ from autoreels.core.models import Manifest, Transcript
 from autoreels.local.calibrate import (
     CalibrateError, InputInvalid, cmd_calibrate, validate_input,
 )
-from autoreels.local.archive import borrow_from_archive
 from autoreels.local.render import (
     RenderError, SourceNotFoundError, load_manifest, probe_encoder, render_crop,
     render_preview, resolve_source,
@@ -673,6 +672,9 @@ def _stage_transcribe(audio, *, transcribe_cfg, cache_dir, r0_cfg=None, audio_cf
                       ffmpeg="ffmpeg", force=False):
     print("транскрипция…" + (" (--force-transcribe)" if force else ""), flush=True)
     backend = get_backend(transcribe_cfg)
+    if r0_cfg is not None and getattr(backend, "lock", "absent") is None:     # M108: whisper.cpp on gamebox
+        from autoreels.core.heavy_lock import shared_lock
+        backend.lock = shared_lock(getattr(r0_cfg, "heavy_lock", None), log=lambda m: print(m, flush=True))
     chunking_cfg = r0_cfg.chunking if r0_cfg is not None else None
     return transcribe(
         audio, cache_dir,
@@ -1109,6 +1111,99 @@ def _check_first_subtitle_word(reel, tx_words) -> None:
         )
 
 
+def _drop_last_sentence(pr, sent_by_ref, min_sec: float):
+    """M167: the proposal without its last sentence (None when it would fall under min_sec or keep nothing). A hook,
+    keys or close shot on the dropped sentence go with it."""
+    from dataclasses import replace as _dc_rep
+    from autoreels.cloud.scenario import compress_refs, expand_refs
+    refs = expand_refs(pr.pieces) or []
+    if len(refs) < 2:
+        return None
+    keep, gone = refs[:-1], refs[-1]
+
+    def _dur(r):
+        st = sent_by_ref.get(r) or []
+        return float(st[-1].t1) - float(st[0].t0) if st else 0.0
+    secs = sum(_dur(r) for r in keep)
+    if secs < min_sec:
+        return None
+    return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
+                   hook=None if (pr.hook or "").split("@")[0] == gone else pr.hook,
+                   hooks=[h for h in pr.hooks if h.split("@")[0] != gone],
+                   keys=[k for k in pr.keys if k[0] != gone],
+                   close=[c for c in pr.close if c != gone], notes=list(pr.notes))
+
+
+def _drop_sentences(pr, sent_by_ref, t0s, min_sec: float):
+    """M173: the proposal without the sentences whose first word starts at `t0s` (Whisper seconds, from a «short
+    shot» warning) — None when none of them is in the proposal, or the rest would fall under min_sec or be empty.
+    A hook, keys or close shot on a dropped sentence go with it."""
+    from dataclasses import replace as _dc_rep
+    from autoreels.cloud.scenario import compress_refs, expand_refs
+    refs = expand_refs(pr.pieces) or []
+    want = {round(float(t) * 1000) for t in t0s}
+    gone = {r for r in refs if (sent_by_ref.get(r) or [None])[0] is not None
+            and round(float(sent_by_ref[r][0].t0) * 1000) in want}
+    keep = [r for r in refs if r not in gone]
+    if not gone or not keep:
+        return None
+
+    def _dur(r):
+        st = sent_by_ref.get(r) or []
+        return float(st[-1].t1) - float(st[0].t0) if st else 0.0
+    secs = sum(_dur(r) for r in keep)
+    if secs < min_sec:
+        return None
+    return _dc_rep(pr, pieces=compress_refs(keep), seconds=secs,
+                   hook=None if (pr.hook or "").split("@")[0] in gone else pr.hook,
+                   hooks=[h for h in pr.hooks if h.split("@")[0] not in gone],
+                   keys=[k for k in pr.keys if k[0] not in gone],
+                   close=[c for c in pr.close if c not in gone], notes=list(pr.notes))
+
+
+def _played_spans(reel) -> list[tuple[float, float]]:
+    return [(float(s.start), float(s.end)) for s in reel.effective_segments()]
+
+
+def _auto_repeats(reels, max_share: float) -> list[tuple[str, str]]:
+    """M177 (m176: 105 clips — a label clip of arl auto and a montage clip told the same story, «закрытый шкаф» twice):
+    clips of the combined draft that repeat a kept one. Montage clips (the scenarist's, already distinct, M68) are kept
+    first, then the others in draft order; a clip sharing more than `max_share` of its played seconds with a kept clip
+    is a repeat. max_share 1 = off. Returns (reel id, reason)."""
+    if max_share >= 1.0:
+        return []
+    order = [r for r in reels if "montage" in (r.flags or [])] + [r for r in reels if "montage" not in (r.flags or [])]
+    kept: list = []
+    out: list[tuple[str, str]] = []
+    for r in order:
+        mine = _played_spans(r)
+        own = sum(b - a for a, b in mine) or 1e-6
+        hit = None
+        for k in kept:
+            ov = sum(max(0.0, min(b, d) - max(a, c)) for a, b in mine for c, d in _played_spans(k))
+            if ov / own > max_share:
+                hit = (k, ov / own)
+                break
+        if hit is None:
+            kept.append(r)
+        else:
+            out.append((r.id, f"repeats {hit[0].id}: {hit[1]:.0%} of its seconds"))
+    return out
+
+
+def _short_shot_errors(reels) -> list[tuple[str, str]]:
+    """M173: planned montage reels (the automatic lines the line check can fix) with a shot under short_shot_sec
+    between two picture changes (plan warning «short shot»)."""
+    return [(r.id, w) for r in reels if getattr(r, "planned", False) and "montage" in (r.flags or [])
+            for w in (r.warnings or []) if w.startswith("short shot")]
+
+
+def _no_room_errors(reels) -> list[tuple[str, str]]:
+    """M166: planned reels whose last word ends after the next speech begins (plan warning «no room after last word»)."""
+    return [(r.id, w) for r in reels if getattr(r, "planned", False)
+            for w in (r.warnings or []) if w.startswith("no room after last word")]
+
+
 def _check_seam_inside_word(reel, smap: "dict | None", words=None, align=None) -> list[str]:
     """Return list of violation messages (empty = clean) for internal seam cuts inside words.
 
@@ -1122,6 +1217,9 @@ def _check_seam_inside_word(reel, smap: "dict | None", words=None, align=None) -
         _out: list[str] = []
         for _wi, _win in enumerate(reel.playback_windows()):
             for _t in (_win.start, _win.end):
+                # M146: prerolled windows intentionally start inside the previous word's tail
+                if _t == _win.start and getattr(_win, "prerolled", False):
+                    continue
                 _hit = _times.word_cut_by(_t)
                 if _hit is not None:
                     _a, _b = _times.span(_hit)
@@ -2679,7 +2777,6 @@ def _apply_tail_air(reels, words, *, tail_pad_sec: float, video_duration: float 
     to last_word_end + tail_pad_sec, clamped to the video length. The word used is stashed on the
     reel so the invariant checks against the same value (extension must not redefine "last word").
     A short audio fade at render masks any next-phrase speech pulled into the tail."""
-    from autoreels.core.models import Segment as _Seg
     for r in reels:
         segs = r.effective_segments()
         last = segs[-1]
@@ -3623,6 +3720,8 @@ def _cmd_run_impl(
     setup = load_or_auto_calibrate(
         calibrations_dir, sha, Path(video).name,
         get_frame_size=lambda: _probe_frame_size_for_auto(video, ffprobe=ffprobe),
+        get_faces=_faces_getter(video, sha, Path(cache_dir) if cache_dir else Path(calibrations_dir).parent / "data" / "cache",
+                                ffmpeg=ffmpeg, ffprobe=ffprobe),
     )
 
     # Жёсткая валидация при сборке манифеста: кроп проверяется против ОТОБРАЖАЕМЫХ (display,
@@ -3908,6 +4007,132 @@ def cmd_transcribe(
                                  out_dir=out_dir, r0_cfg=r0_cfg)
     print(f"транскрипт готов ({len(transcript.words)} слов) → {out}", flush=True)
     return out
+
+
+def _clean_media_path(text: str) -> Path | None:
+    """M109: a path typed or dragged into the terminal — quotes and «\\ » escapes (macOS drag-and-drop) undone, ~
+    expanded. None for an empty answer."""
+    import shlex as _shlex
+    t = (text or "").strip()
+    if not t:
+        return None
+    try:
+        parts = _shlex.split(t)
+    except ValueError:
+        parts = [t.strip("'\"")]
+    return Path(os.path.expanduser(" ".join(parts) if len(parts) > 1 and not Path(parts[0]).exists() else parts[0]))
+
+
+def cmd_dictate(files=None, *, groq: bool = False, fmt: str = "text", root=None, cache_dir=None,
+                ffmpeg: str = "ffmpeg", ask=input, run=None, backend=None, copy: bool = True) -> int:
+    """M109 (owner: «постоянно нужно транскрибировать аудио с диктофона… указываю файл, а далее сам идёт на
+    gamebox и транскрибирует, проверяя, запущен ли сервер»): `arl dictate [файл …]` — без файла спрашивает путь
+    (можно перетащить файл в окно терминала). Расшифровка — whisper.cpp на gamebox (config/transcribe.yaml
+    whispercpp): проверяет, что gamebox отвечает, берёт общий замок (M108; идёт озвучка — ждёт, не мешает ей),
+    результат кэшируется по содержимому файла. Текст (абзацы по паузам) — рядом с аудио, <имя>.txt (--format
+    srt|vtt|json — другие форматы), и в буфер обмена на Mac. gamebox не отвечает — предлагает Groq (--groq — сразу
+    Groq)."""
+    import shutil as _shutil
+    import subprocess as _sp
+    from autoreels.cloud.transcribe import WhisperCppBackend, get_backend
+    from autoreels.core.heavy_lock import shared_lock
+    _root = Path(root) if root else _project_root()
+    cfg = _root / "config"
+    r0_cfg = load_r0_config(cfg / "r0.yaml")
+    render_cfg = load_render_config(cfg / "render.yaml")
+    tcfg = load_transcribe_config(cfg / "transcribe.yaml")
+    _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
+    _run = run or (lambda argv: _sp.run(argv, capture_output=True, text=True))
+    paths = [Path(os.path.expanduser(str(f))) for f in (files or [])]
+    if not paths:
+        while True:
+            try:
+                ans = ask("Аудио для расшифровки (путь или перетащите файл сюда; Enter — выход): ")
+            except EOFError:
+                ans = ""
+            p = _clean_media_path(ans)
+            if p is None:
+                break
+            if p.is_file():
+                paths.append(p)
+                break
+            print(f"  нет такого файла: {p}")
+    if not paths:
+        print("нечего расшифровывать")
+        return 1
+    be = backend
+    if be is None and not groq:
+        host = tcfg.whispercpp.host
+        if host and _run(["ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", host, "true"]).returncode != 0:
+            print(f"gamebox ({host}) не отвечает — выключен, спит или нет сети")
+            try:
+                yes = ask("Расшифровать через Groq? [y/N] ").strip().lower() in ("y", "yes", "д", "да")
+            except EOFError:
+                yes = False
+            if not yes:
+                return 1
+            groq = True
+        if not groq:
+            be = WhisperCppBackend(tcfg.whispercpp, ffmpeg=ffmpeg,
+                                   lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
+    if be is None:
+        be = get_backend(tcfg.model_copy(update={"backend": "groq"}))
+    rc = 0
+    for src in paths:
+        if not src.is_file():
+            print(f"нет такого файла: {src}", file=sys.stderr)
+            rc = 1
+            continue
+        where = "Groq" if groq else f"whisper.cpp на {tcfg.whispercpp.host or 'этой машине'}"
+        print(f"=== dictate: {src.name} → {where} ===", flush=True)
+        try:
+            tr = transcribe(src, _cache, backend=be, language=tcfg.language,
+                            chunking_cfg=r0_cfg.chunking if groq else None,
+                            audio_cfg=render_cfg.audio_extract, ffmpeg=ffmpeg)
+        except Exception as exc:  # noqa: BLE001 — one file failed: say why, go on with the rest
+            print(f"  ошибка: {type(exc).__name__}: {str(exc)[:300]}", file=sys.stderr)
+            rc = 1
+            continue
+        out = _write_transcript_file(tr, stem=src.stem, fmt=fmt, out_dir=src.parent, r0_cfg=r0_cfg)
+        mins = (tr.words[-1].t1 / 60.0) if tr.words else 0.0
+        print(f"  готово: {len(tr.words)} слов, ~{mins:.0f} мин → {out}", flush=True)
+        if copy and len(paths) == 1 and _shutil.which("pbcopy"):
+            try:
+                _sp.run(["pbcopy"], input=out.read_text(encoding="utf-8"), text=True, check=True)
+                print("  текст скопирован в буфер обмена", flush=True)
+            except Exception:  # noqa: BLE001
+                pass
+    return rc
+
+
+def cmd_gamebox(action: str = "status", *, root=None, run=None, lock=None) -> int:
+    """M108: `arl gamebox` — свободен ли общий замок тяжёлых задач, работает ли llama-server, сколько свободно
+    памяти; `arl gamebox take` — взять замок (дождаться) и сразу отпустить: проверка, что замок работает."""
+    import subprocess as _sp
+    import time as _time
+    from autoreels.core.heavy_lock import HeavyLock
+    _root = Path(root) if root else _project_root()
+    cfg = load_r0_config(_root / "config" / "r0.yaml").heavy_lock
+    if not cfg.host:
+        print("общий замок выключен (config/r0.yaml heavy_lock.host пуст)")
+        return 0
+    _run = run or (lambda argv: _sp.run(argv, capture_output=True, text=True))
+    lk = lock or HeavyLock(cfg, run=_run, log=lambda m: print(m, flush=True))
+    if action == "take":
+        t0 = _time.monotonic()
+        lk.acquire(wait=True, llama=False)
+        lk.release()
+        print(f"замок {cfg.host}:{cfg.path} работает (взят и отпущен за {_time.monotonic() - t0:.0f} с)")
+        return 0
+    busy = lk.busy()
+    st = _run(["ssh", "-o", "ConnectTimeout=5", cfg.host,
+               f"systemctl is-active {cfg.llama_unit}; free -g | awk '/Mem:/{{print $7}}'"])
+    lines = (st.stdout or "").split()
+    unit = lines[0] if lines else "?"
+    mem = lines[1] if len(lines) > 1 else "?"
+    print(f"gamebox: замок {'ЗАНЯТ (идёт тяжёлая задача)' if busy else 'свободен'}; "
+          f"{cfg.llama_unit}: {unit}; свободно памяти: {mem} ГБ")
+    return 0
 
 
 def cmd_run_batch(
@@ -4307,6 +4532,7 @@ def cmd_render(
     manifest_name: str | None = None,
     reels_filter: str | None = None,
     gate_name: str | None = None,
+    transition: str | None = None,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -4322,6 +4548,8 @@ def cmd_render(
     if pull_first:
         _git_pull(root, what="манифесты")       # свежие манифесты с Mac (после run)
     render_cfg = load_render_config(root / "config" / "render.yaml")
+    if transition:                      # M103: arl render --transition cut|punch (A/B on a gate)
+        render_cfg = render_cfg.model_copy(update={"shot_transition": transition})
     if render_cfg.role == "analyze":
         print(
             '⊘ рендер недоступен на этой машине: role = "analyze" '
@@ -4338,8 +4566,9 @@ def cmd_render(
             import yaml as _yaml_r
             _r0_raw_r = _yaml_r.safe_load(_r0_yaml_r.read_text(encoding="utf-8")) or {}
             _credit_pats_render = _r0_raw_r.get("credit_word_patterns", []) or []
-        except Exception:
-            pass
+        except Exception as _e_r0:  # noqa: BLE001 — M135: no longer silent
+            print(f"  warning: config/r0.yaml not read for credit_word_patterns ({_e_r0}) — credits are not cut",
+                  file=sys.stderr)
     manifests_dir = Path(manifests_dir) if manifests_dir else root / "manifests"
     inputs_dir = Path(inputs_dir) if inputs_dir else root / "inputs"
     out_dir = Path(out_dir) if out_dir else root / "reels-out"
@@ -4581,6 +4810,42 @@ def cmd_render(
     return all_outputs
 
 
+def cmd_render_remote(manifest_name: str, *, root=None, reels_filter: str | None = None, gate_name: str | None = None,
+                      music: str | None = None, run=None) -> int:
+    """M161: render a review copy on the remote machine (config/render.yaml `remote:`) into a gate folder and bring
+    the clips back (local/remote.py). Only gate renders: the real clips are never written from another machine."""
+    from autoreels.local.remote import RemoteRenderError, render_remote
+    _root = Path(root) if root else _project_root()
+    rcfg = load_render_config(_root / "config" / "render.yaml").remote
+    if not rcfg.host or not rcfg.root:
+        print("ошибка: удалённый рендер не настроен — config/render.yaml remote: host, root", file=sys.stderr)
+        return 2
+    if not gate_name:
+        print("ошибка: удалённый рендер — только в гейт (--gate <имя>)", file=sys.stderr)
+        return 2
+    review = Path(manifest_name)
+    if not review.is_absolute():
+        review = (Path.cwd() / review) if (Path.cwd() / review).is_file() else _root / review
+    try:
+        review.resolve().relative_to(_root.resolve())
+        m = Manifest.model_validate_json(review.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"ошибка: {manifest_name}: {type(exc).__name__}: {str(exc)[:160]}", file=sys.stderr)
+        return 2
+    try:
+        local_src = resolve_source(m, _root / "inputs")
+    except Exception:  # noqa: BLE001 — the remote may still have it
+        local_src = None
+    try:
+        render_remote(rcfg, root=_root, review=review, stem=Path(m.source).stem, source_sha256=m.source_sha256,
+                      local_source=local_src, reels=reels_filter or f"1-{len(m.reels)}", gate=gate_name,
+                      music=music, run=run, log=lambda s: print(s, flush=True))
+    except RemoteRenderError as exc:
+        print(f"ошибка: удалённый рендер — {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_preview(
     manifest_arg=None,
     *,
@@ -4683,11 +4948,32 @@ def _recrop_setup(manifest, *, calibrations_dir, inputs_dir, archive_dir, ffprob
             )
         return _probe_frame_size_for_auto(video, ffprobe=ffprobe)
 
+    def _faces():
+        try:
+            video = resolve_source(manifest, inputs_dir)
+        except SourceNotFoundError:
+            return None
+        _fp = str(ffprobe)
+        _ffm = _fp[: -len("ffprobe")] + "ffmpeg" if _fp.endswith("ffprobe") else "ffmpeg"
+        return _faces_getter(video, manifest.source_sha256, Path(calibrations_dir).parent / "data" / "cache",
+                             ffmpeg=_ffm, ffprobe=_fp)()
+
     setup = load_or_auto_calibrate(
-        calibrations_dir, manifest.source_sha256, manifest.source, get_frame_size=_frame_size
+        calibrations_dir, manifest.source_sha256, manifest.source, get_frame_size=_frame_size,
+        get_faces=_faces,
     )
     validate_crop_in_frame(setup.crop, setup.frame[0], setup.frame[1])
     return setup
+
+
+def _faces_getter(video, sha: str, cache_dir: Path, *, ffmpeg="ffmpeg", ffprobe="ffprobe"):
+    """M78: a callable for load_or_auto_calibrate — face boxes of the source (local/autocrop.py, cached)."""
+    def get():
+        from autoreels.local.autocrop import detect_faces
+        return detect_faces(video, _probe_frame_size_for_auto(video, ffprobe=ffprobe), ffmpeg=str(ffmpeg),
+                            ffprobe=str(ffprobe), cache_path=Path(cache_dir) / f"{sha[:16]}.faces.json",
+                            log=lambda m: print(m, flush=True))
+    return get
 
 
 def cmd_recrop(
@@ -5088,7 +5374,9 @@ def cmd_dump_clips(manifests, *, out, root=None) -> int:
         mf = Path(mf)
         try:
             manifest = Manifest.model_validate_json(mf.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as _e_mf:  # noqa: BLE001 — M135: its fixtures are left alone, but say so
+            print(f"  warning: {mf.name} unreadable ({_e_mf}) — its fixtures are not checked for orphans",
+                  file=sys.stderr)
             continue
         stem_reel_counts[Path(manifest.source).stem] = len(manifest.reels)
     deleted_orphans = 0
@@ -5172,6 +5460,8 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
     _sm = getattr(render_cfg, "speech_map_cfg", None) if render_cfg else None
     return ManualPlanParams(
         seam_pad_sec=getattr(r0_cfg, "seam_pad_sec", 0.04),
+        start_pad_sec=float(getattr(r0_cfg, "start_pad_sec", 0.0) or 0.0),
+        start_preroll_sec=float(getattr(r0_cfg, "start_preroll_sec", 0.0) or 0.0),
         end_air_sec=getattr(_ap, "end_air_sec", 0.30) if _ap is not None else 0.30,
         onset_margin_sec=getattr(_sm, "onset_margin_sec", 0.06) if _sm is not None else 0.06,
         hook_replay_min_pos=getattr(r0_cfg, "hook_replay_min_pos", 0.5),
@@ -5179,6 +5469,11 @@ def _manual_plan_params(r0_cfg, render_cfg, filler_cut: bool | None = None, fill
         accent_max_sec=getattr(r0_cfg, "accent_max_sec", 8.0),
         filler_cut=bool(getattr(r0_cfg, "manual_filler_cut", False) if filler_cut is None else filler_cut),
         break_pad_sec=getattr(getattr(r0_cfg, "montage", None), "seam_pad_sec", 0.20),
+        long_pause_sec=float(getattr(r0_cfg, "long_pause_sec", 0.0) or 0.0),
+        filler_words=tuple(getattr(getattr(r0_cfg, "filler_removal", None), "filler_words", None) or ()),
+        subs_hide_fillers=bool(getattr(r0_cfg, "subtitles_hide_fillers", False)),
+        filler_word_cut=bool(getattr(r0_cfg, "filler_word_cut", False)),
+        short_shot_sec=float(getattr(r0_cfg, "short_shot_sec", 0.0) or 0.0),
         **_filler_profile_values(r0_cfg, filler_profile),
     )
 
@@ -5203,6 +5498,54 @@ def _filler_profile_values(r0_cfg, name: str | None) -> dict:
                "keep_sentence_sec", "pause_max_sec", "filler_min_sec", "max_removed_share",
                "mask_min_gap_sec", "mask_filler_only", "change_gap_sec"}
     return {k: v for k, v in profiles[name].items() if k in allowed}
+
+
+def _label_hook(entry, sents, tx_words, smap, align, r0_cfg):
+    """M182: a cold open for a label clip of arl auto (it never had one) — (sentence no, (i, j) or None, text) or None.
+    The same rules as the montage lines' candidates: from autocut.hook_teaser_pos of the clip on (play order, heard
+    length), not pointing back; a finished sentence of hook_min_words … hook_max_sec, else (hook_clauses) a clause of a
+    long one between pauses; the best by hook_score (a clause loses a tie). Deterministic, no model."""
+    from autoreels.cloud.autocut import clause_spans, hook_score, teaser_pointer
+    from autoreels.cloud.edit import _ends_terminal
+    from autoreels.cloud.plan import SpeechTimes, heard_pause
+    ac = getattr(r0_cfg, "autocut", None)
+    if ac is None:
+        return None
+    play = _manual_play_order(entry, sents, r0_cfg)
+    if len(play) < 2:
+        return None
+    try:
+        times = SpeechTimes(tx_words, smap, align)
+    except Exception:  # noqa: BLE001 — no word times: no cold open
+        return None
+    hmax = float(getattr(r0_cfg, "hook_max_sec", 6.0))
+    hmin, hwords = float(ac.hook_min_sec), int(ac.hook_min_words)
+    pos = float(getattr(ac, "hook_teaser_pos", 0.5))
+    lens = [max(0.0, times.audible(sents[n - 1][-1])[1] - times.audible(sents[n - 1][0])[0]) for n in play]
+    total = sum(lens) or 1.0
+    best, at = None, 0.0
+    for n, ln in zip(play, lens):
+        start, at = at, at + ln
+        if start / total < pos:
+            continue
+        st = sents[n - 1]
+        text = " ".join(w.word for w in st)
+        nw = sum(1 for w in st if any(c.isalnum() for c in w.word))
+        cands = []
+        if _ends_terminal(st[-1]) and nw >= hwords and hmin <= ln <= hmax and not teaser_pointer(text):
+            cands.append((hook_score(text, ln), None, text))
+        elif getattr(ac, "hook_clauses", False):
+            pa = lambda k, st=st: heard_pause(times, st[k - 1], st[k]) if k < len(st) else None  # noqa: E731
+            du = lambda a, z, st=st: times.audible(st[z - 1])[1] - times.audible(st[a - 1])[0]  # noqa: E731
+            for a, z in clause_spans(st, pa, min_words=hwords, min_sec=hmin, max_sec=hmax,
+                                     min_pause=float(getattr(ac, "hook_clause_pause", 0.12)), dur=du):
+                ct = " ".join(w.word for w in st[a - 1:z])
+                if not teaser_pointer(ct):
+                    cands.append((hook_score(ct, du(a, z)) - 0.5, (a, z), ct))
+        for sc, hw, t in cands:
+            if best is None or sc > best[0]:
+                best = (sc, n, hw, t)
+    return None if best is None else (best[1], best[2], best[3])
 
 
 def _manual_play_order(entry, sents, r0_cfg) -> list[int]:
@@ -5240,8 +5583,11 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     from autoreels.cloud.plan import build_manual_plan
     play = _manual_play_order(entry, sents, r0_cfg)
     hook = getattr(entry, "hook", None)
+    _hook_words = getattr(entry, "hook_words", None)        # M182: a clause of the hook sentence
     if hook is not None:
         _hs = sents[hook - 1] if 1 <= hook <= len(sents) else None
+        if _hs is not None and _hook_words and 1 <= _hook_words[0] <= _hook_words[1] <= len(_hs):
+            _hs = _hs[_hook_words[0] - 1:_hook_words[1]]
         _hook_max = getattr(r0_cfg, "hook_max_sec", 6.0)
         if _hs is None:
             reel.warnings.append(f"h:{hook} out of range — cold open skipped")
@@ -5273,7 +5619,8 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
         _params = _dc_replace(_params, hook_air_sec=float(hook_air))     # M74: montage clips only
     plan = build_manual_plan(
         sents, play, words=tx_words, smap=smap, params=_params,
-        hook=hook, hook_mode=mode, close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
+        hook=hook, hook_mode=mode, hook_words=_hook_words if hook is not None else None,
+        close=getattr(entry, "c", ()) or (), next_onset=onset_fn,
         source_duration=(tx_words[-1].t1 if tx_words else None), align=align, tone=tone, jump=jump,
         weak_start_words=_weak_start_words(r0_cfg), breaks=breaks, keys=keys,
     )
@@ -5292,6 +5639,15 @@ def _apply_manual_plan(reel, entry, sents, tx_words, smap, r0_cfg, render_cfg, l
     reel.planned = True
     reel.tail_last_word_end = plan.last_audible_end
     reel.tail_next_word_start = plan.next_onset
+    # M166: the render checks the first word against the plan's own word span (alignment first), not the raw map
+    # onset — m163 11h42 r02: map 125.180 (glued to the word before) vs alignment 125.381, a prerolled start between
+    try:
+        from autoreels.cloud.plan import SpeechTimes as _ST
+        _fw = next((w for w in plan.subtitles if any(c.isalnum() for c in w.word)), None)
+        reel.head_first_word_start = (_ST(tx_words, smap, align).span(_fw)[0]
+                                      if _fw is not None and tx_words else None)
+    except Exception:  # noqa: BLE001 — no word times: the render keeps the map onset
+        reel.head_first_word_start = None
     reel.subtitle_gate = plan.end
     reel._hook_keep = bool(plan.hook_replayed)
     reel._hook_window = None
@@ -5437,9 +5793,20 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
     from autoreels.core.models import Reel
     mc = r0_cfg.montage
     out: list = []
+    _join_pause = None
+    _join_span = None
+    if getattr(mc, "join_heard", False) and (smap is not None or align is not None):
+        # M134 (invariant 9): «goes straight on» by the pause heard, not the Whisper gap
+        from autoreels.cloud.plan import SpeechTimes, heard_pause
+        _jt = SpeechTimes(tx_words, smap, align)
+        _join_pause = lambda a, b: heard_pause(_jt, a, b)  # noqa: E731
+        _join_span = lambda f, l: _jt.audible(l)[1] - _jt.audible(f)[0]  # noqa: E731 — M172: heard piece length
     for me in entries:
         mb = build_montage(me, active, lambda b: merge_group_sentences([b], tx_words),
-                           join_gap_sec=mc.join_gap_sec)
+                           join_gap_sec=mc.join_gap_sec, pause=_join_pause,
+                           join_short_sec=float(getattr(mc, "join_short_sec", 0.0) or 0.0),
+                           join_short_gap_sec=float(getattr(mc, "join_short_gap_sec", 0.0) or 0.0),
+                           span=_join_span)
         for _e in mb.errors:
             print(f"  [ERROR] {me.label} (review:{me.lineno}): {_e}", file=sys.stderr)
         if mb.errors:
@@ -5464,7 +5831,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
         reel._explicit_start = reel._explicit_end = True
         reel._has_explicit_e = reel.has_explicit_e = True
         reel._explicit_e_val = None
-        entry = SimpleNamespace(beats=tuple(mb.play), hook=mb.hook, hook_keep=me.hook_keep,
+        entry = SimpleNamespace(beats=tuple(mb.play), hook=mb.hook, hook_words=me.hook_words, hook_keep=me.hook_keep,
                                 hook_remove=me.hook_remove, c=tuple(mb.close), filler=me.filler,
                                 s=None, e=None, x=())
         try:
@@ -5513,7 +5880,7 @@ def _build_montage_reels(entries, active, tx_words, smap, r0_cfg, render_cfg, *,
 
 
 def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_dir=None, source: str | None = None, install: bool = False, render: bool = False, speed: float | None = None, filler: bool | None = None, labeler: str = "owner",
-                     filler_profile: str | None = None) -> int:
+                     filler_profile: str | None = None, drop_refused: bool = False) -> int:
     """Build a manifest from a scored review file (M1.6 stage 4-alt).
 
     A human selection is FORMATTED, never second-guessed: this path runs the formatting stages
@@ -5563,7 +5930,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
         parse_review, parse_compact_answer, merge_blocks, resolve_merge_groups, make_dataset_row,
     )
     from autoreels.cloud.edit import sentence_bounds, remove_fillers, split_sentences, words_in_span, exclude_sentences, _refine_seams, merge_group_sentences
-    from autoreels.core.models import Segment as _Segment, make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
+    from autoreels.core.models import make_cold_open_segment as _make_cold_open_segment, make_segment as _make_segment
     from autoreels.cloud.compress import compress_transcript
     from autoreels.cloud.snap import trim_hanging_subtitles
     from autoreels.cloud.chunk_transcribe import renumber_reels
@@ -5787,7 +6154,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     # blocks they are identical.  A non-zero difference count flags a code regression where the
     # two paths diverge.  Out-of-range s:/e: references are reported as warnings (sentence_bounds
     # already clamps them silently, so they don't break clips; this just surfaces the staleness).
-    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss, words_in_span as _wis
+    from autoreels.cloud.edit import merge_group_sentences as _mgs, split_sentences as _ss
     _sn_compared = 0
     _sn_diffs = 0
     for _g in groups:
@@ -6163,6 +6530,17 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                 # Stored so k: resolution can accept original sentence numbers for beat reels.
                 reel._beat_orig_sents = _valid_beats  # [8, 9, 12, 10, 11] → positions 1-5
                 print(f"  beats {_grp}: {len(_valid_beats)} sentence(s) in custom order")
+        if (getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse and labeler == "auto"
+                and getattr(_ae, "hook", None) is None and not getattr(_ae, "beats", ())
+                and getattr(getattr(r0_cfg, "autocut", None), "label_hooks", False)):
+            # M182 (owner: «начало пустое» — the label clips of arl auto never had a cold open): the clip gets one from its
+            # own second half, as the montage lines do — a finished sentence of hook length or a clause of a long one
+            _lh = _label_hook(_ae, _gsents, _tx_words, _blk_smap, _blk_align, r0_cfg)
+            if _lh is not None:
+                from types import SimpleNamespace as _SNlh
+                _ae = _SNlh(**{**_ae._asdict(), "hook": _lh[0], "hook_keep": True, "hook_words": _lh[1]})
+                print(f"  крючок {'+'.join(str(s) for s in g)}: h:{_lh[0]}" + (f"@{_lh[1][0]}-{_lh[1][1]}" if _lh[1] else "")
+                      + f" «{_lh[2][:60]}»")
         if getattr(r0_cfg, "manual_plan", False) and _ae is not None and not _x_refuse:
             try:
                 for _pl in _apply_manual_plan(reel, _ae, _gsents, _tx_words, _blk_smap, r0_cfg,
@@ -6367,7 +6745,7 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
                   f"cannot restore planned reels by position", file=sys.stderr)
             return 1
         _restore = ("start", "end", "segments", "cold_open", "subtitles", "beat_gap_sec", "planned",
-                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings")
+                    "tail_last_word_end", "tail_next_word_start", "subtitle_gate", "warnings", "head_first_word_start")
         for _i, (_snap, _hk_keep_snap, _plan_snap) in _planned_snap.items():
             for _f in _restore:
                 setattr(reels[_i], _f, getattr(_snap, _f))
@@ -6394,6 +6772,61 @@ def _blocks_do_apply(review_path: str, *, root=None, cache_dir=None, manifests_d
     if _planned_seam_err:
         print("  [ERROR] planned clip cuts inside a word — refusing", file=sys.stderr)
         return 1
+    if labeler == "auto":
+        # M166 (m163 10h59 r13, r15): the last word's audible end lies past the start of the next speech — the clip
+        # cannot both play its last word whole and stop before the next words (invariant 10). The owner's own line is
+        # kept with the warning (invariant 5); the automatic path takes another end (its line check replaces it).
+        _noroom = _no_room_errors(reels)
+        # M173 (owner on 09h33 m163 r01: «чтобы таких скачков кадра не возникало»): a shot under short_shot_sec between
+        # two picture changes — the automatic path drops that shot's sentences (its line check); the owner's own line
+        # keeps the warning (invariant 5)
+        _short_shots = _short_shot_errors(reels)
+        _refused = [(_rid, _w, "another end") for _rid, _w in _noroom] + \
+                   [(_rid, _w, "another cut") for _rid, _w in _short_shots]
+        if drop_refused:
+            # M177: in arl auto the label clips (not montage, no line check of their own) go by the same rules — a short
+            # shot drops them; and a clip repeating a kept one goes
+            _seen = {_rid for _rid, _w, _ in _refused}
+            _refused += [(r.id, w, "another cut") for r in reels if getattr(r, "planned", False) and r.id not in _seen
+                         and "montage" not in (r.flags or []) for w in (r.warnings or []) if w.startswith("short shot")][:]
+            _seen = {_rid for _rid, _w, _ in _refused}
+            if getattr(getattr(r0_cfg, "autocut", None), "start_strict", False):
+                # M182 (owner: «r03, r14 — начало пустое»): a label clip opening on a line that points back or at the
+                # interviewer goes (the scenarist's reels get an earlier start or none, scenario_proposals)
+                from autoreels.cloud.autocut import strict_start_reason as _ssr
+                for r in reels:
+                    if r.id in _seen or "montage" in (r.flags or []) or not r.subtitles:
+                        continue
+                    _first: list = []
+                    for _w in r.subtitles:
+                        _first.append(_w.word)
+                        if _w.word.rstrip().endswith((".", "!", "?", "…")):
+                            break
+                    _sw = _ssr(" ".join(_first))
+                    if not _sw and getattr(getattr(r0_cfg, "autocut", None), "answer_start", False):
+                        from autoreels.cloud.autocut import answer_start_reason as _asr   # M193: «Да, …» opens no clip
+                        _sw = _asr(" ".join(_first))
+                    if _sw:
+                        _refused.append((r.id, f"weak start «{' '.join(_first)[:50]}» — {_sw}", "another start"))
+                _seen = {_rid for _rid, _w, _ in _refused}
+            _ac_max = float(getattr(getattr(r0_cfg, "autocut", None), "combined_overlap_max", 1.0) or 1.0)
+            _refused += [(_rid, _w, "other content") for _rid, _w in
+                         _auto_repeats([r for r in reels if r.id not in _seen], _ac_max)]
+        if _refused and drop_refused:
+            # M176 (m175: 5 of 7 sources lost every label clip — one label line with no room after its last word refused
+            # the whole combined draft of arl auto): the refused automatic clip leaves the draft alone, the rest is built
+            _gone = {_rid for _rid, _w, _ in _refused}
+            for _rid, _w, _why in _refused:
+                print(f"  ⚠ {_rid} убран из черновика: {_w} — automatic clip needs {_why}", flush=True)
+            reels = [r for r in reels if r.id not in _gone]
+            # M185 (owner on the m183 gate: «почему они так пронумерованы, нет 1 и т. д.»): the clips left are numbered
+            # again r01, r02, … — the gaps were the clips that left the draft
+            from autoreels.cloud.chunk_transcribe import renumber_reels as _renum
+            reels = _renum(reels)
+        elif _refused:
+            for _rid, _w, _why in _refused:
+                print(f"  [ERROR] {_rid}: {_w} — automatic clip needs {_why}", file=sys.stderr, flush=True)
+            return 1
 
     # Warn when the last subtitle word is not the last transcript word before r0_end.
     # A word excluded by the audible_end criterion drops silently; this surfaces it.
@@ -7010,19 +7443,39 @@ def cmd_blocks(
             _al_exp = _la_exp(root / "transcripts" / f"{_stem_exp}.align.json", manifest.source_sha256)
             _exp_tone = _tl_exp(_lp_exp(root / "transcripts" / f"{_stem_exp}.prosody.json",
                                         manifest.source_sha256, _al_exp) if _al_exp else None)
+        _exp_gap = None
+        if manifest is not None and getattr(r0_cfg, "review_pause_from_map", False):
+            # M98 (M1.8 consumer 7): ⏸ after a sentence by the pause as heard (speech map / alignment), not by the
+            # Whisper gap — on part of the material those are zero, negative or overlap (invariant 9)
+            _stem_g = manifest_path.stem if manifest_path else target_path.stem
+            _smp_g = root / "transcripts" / f"{_stem_g}.speechmap.json"
+            _smap_g = None
+            if _smp_g.is_file():
+                try:
+                    from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV_g
+                    _dg = _json.loads(_smp_g.read_text(encoding="utf-8"))
+                    if _dg.get("version") == _SMV_g and _dg.get("source_sha256") == manifest.source_sha256:
+                        _smap_g = _dg
+                except (OSError, ValueError):
+                    _smap_g = None
+            from autoreels.cloud.plan import SpeechTimes as _ST_g, load_alignment as _la_g
+            _al_g = _la_g(root / "transcripts" / f"{_stem_g}.align.json", manifest.source_sha256)
+            if _smap_g is not None or _al_g is not None:
+                _times_g = _ST_g(_export_words, _smap_g, _al_g)
+                _exp_gap = lambda a, b: max(0.0, _times_g.audible(b)[0] - _times_g.audible(a)[1])  # noqa: E731
         if compact:
             review_content = export_compact_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
                 words=_export_words, tone=_exp_tone,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
-                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end, gap=_exp_gap,
             )
         else:
             review_content = export_review(
                 kept, source_ref=str(target_path), filter_removed_count=len(dropped),
                 words=_export_words, tone=_exp_tone,
                 pause_show_sec=getattr(r0_cfg, "review_pause_show_sec", 0.3),
-                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end,
+                min_pause_for_phrase_end=r0_cfg.min_pause_for_phrase_end, gap=_exp_gap,
             )
         out_path.write_text(review_content, encoding="utf-8")
         print(f"\nreview: {len(kept)} блоков → {out_path}  ({len(review_content)} chars)")
@@ -7440,6 +7893,30 @@ def cmd_align(
     return 0
 
 
+class _JudgeStore(dict):
+    """M86: the model's judgments of starts and cold opens kept between runs (data/cache/autocut_judge.json, local,
+    not in git; delete it to ask the model again). Keyed by the hash of the prompt and the request, so a changed
+    prompt or new owner examples ask again."""
+
+    def __init__(self, path: Path):
+        super().__init__()
+        self.path = Path(path)
+        try:
+            import json as _json
+            self.update(_json.loads(self.path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        try:
+            import json as _json
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            _write_atomic(self.path, _json.dumps(self, ensure_ascii=False))
+        except OSError:
+            pass
+
+
 def _write_atomic(path: Path, text: str) -> None:
     """Write via a temporary file and rename: a kill mid-write never leaves half a draft."""
     tmp = path.with_name(path.name + ".tmp")
@@ -7540,6 +8017,108 @@ def _label_context(mpath: Path, manifest, r0_cfg, *, root: Path, cache_dir=None,
 # M47: auto = the cloud first, the local model as a reserve when the cloud is out for long
 # (M40b/M40c: Qwen3-8B found 3 of 8 owner clips, 30B-A3B 1, the cloud 6).
 _LOCAL_MODE = {"auto": "last", "local": "only", "cloud": "off"}
+_LLM_MODES = ("auto", "local", "cloud", "haiku", "sonnet", "local-think")   # M116: + Claude and the reasoning local model
+
+
+def _make_pool(r0_cfg, mode: str):
+    """M116: the model a command asks. auto / local / cloud — as before (build_pool); haiku / sonnet — Claude alone
+    (config/r0.yaml anthropic, the owner's ANTHROPIC_API_KEY); local-think — the gamebox model with its reasoning on
+    (slower; the shared gamebox lock as for local)."""
+    from autoreels.cloud.providers import AnthropicLLM, ProviderError, ProviderPool
+    if mode in ("haiku", "sonnet"):
+        ac = r0_cfg.anthropic
+        model = ac.models.get(mode)
+        if not model:
+            raise ProviderError(f"нет модели Claude «{mode}» в config/r0.yaml anthropic.models")
+        prices = tuple(ac.prices.get(model) or (0.0, 0.0))
+        return ProviderPool([AnthropicLLM(model=model, max_output_tokens=ac.max_output_tokens,
+                                          timeout_sec=ac.timeout_sec, prices=(float(prices[0]), float(prices[1])))])
+    if mode == "local-think":
+        lc = r0_cfg.local_llm.model_copy(update={"no_think": False,
+                                                 "max_output_tokens": r0_cfg.local_llm.think_max_output_tokens})
+        return build_pool(r0_cfg.model_copy(update={"local_llm": lc}), local="only")
+    return build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+
+
+def _scenario_examples(root: Path, stem: str, n: int = 3) -> str:
+    """M123: up to n clips the owner made himself from OTHER talks (manifests with selection_source: human) — their
+    text, for the style (invariant 11: real data with provenance; never the talk being cut)."""
+    import glob as _glob
+    import json as _json
+    out = []
+    for mp in sorted(_glob.glob(str(root / "manifests" / "*.json"))):
+        if Path(mp).stem == stem or len(out) >= n:
+            continue
+        try:
+            m = _json.loads(Path(mp).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(m, dict) or m.get("selection_source") != "human":
+            continue
+        for r in m.get("reels") or []:
+            co = r.get("cold_open") or {}
+            subs = [w for w in (r.get("subtitles") or []) if not co or (w["t0"] + w["t1"]) / 2 > co.get("end", -1)]
+            secs = sum(float(s["end"]) - float(s["start"]) for s in (r.get("segments") or []))
+            if subs and 25 <= secs <= 75 and (r.get("title_overlay") or r.get("title")):
+                text = " ".join(w["word"].strip() for w in subs[:140])
+                out.append(f"— {Path(mp).stem} {r.get('id')} «{r.get('title_overlay') or r.get('title')}» ({secs:.0f} с): {text}")
+                break
+    if not out:
+        return ""
+    return ("\n\nReels the owner made himself from other talks (real, for the style only — do not copy them):\n"
+            + "\n".join(out))
+
+
+def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units, end_tone, scen_out, provider=None,
+                   start_pause=None, other=None, clauses=None):
+    """M123: the scenarist's reels as the pool of arl autocut --scenario (None = cannot ask). The model is named
+    explicitly (haiku | sonnet: the whole talk in one request); its answer is kept in data/cache/scenario/ by the
+    request — the same request is not paid twice."""
+    import hashlib
+    from autoreels.cloud.edit import _ends_terminal
+    from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
+                                          scenario_proposals, tone_rule)
+    from autoreels.cloud.speakers import interviewer_rule
+    if provider is None and mode not in ("haiku", "sonnet"):
+        print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
+              file=sys.stderr)
+        return None
+    sent = {ref: (float(st[0].t0), float(st[-1].t1), " ".join(w.word.strip() for w in st), bool(_ends_terminal(st[-1])),
+                  sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
+    system = SCENARIO_SYSTEM.format(jumps=jumps_rule(prm), min_s=f"{prm.min_sec:g}", max_s=f"{prm.max_sec:g}",
+                                    n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
+    _ivm = getattr(ac, "interviewer", "") if other else ""     # M165: the interviewer's sentences marked
+    system += interviewer_rule(_ivm)
+    user = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
+                          for r, v in sent.items()]) + _scenario_examples(root, stem)
+    if provider is None:
+        provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
+            update={"max_output_tokens": ac.scenario_max_tokens, "timeout_sec": ac.scenario_timeout_sec})}), mode)
+    mid = getattr(provider, "model_id", "") or mode
+    key = hashlib.sha256(f"{mid}\n{system}\n{user}".encode("utf-8")).hexdigest()[:16]
+    cpath = Path(cache) / "scenario" / f"{stem}.{key}.txt"
+    if cpath.is_file():
+        raw = cpath.read_text(encoding="utf-8")
+        print(f"  сценарист: ответ из кэша {cpath.name}", flush=True)
+    else:
+        print(f"  сценарист: {mid}, фраз {len(sent)}, до {prm.clips} роликов …", flush=True)
+        raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}])
+        cpath.parent.mkdir(parents=True, exist_ok=True)
+        cpath.write_text(raw or "", encoding="utf-8")
+        _usage_report(provider)
+    scens, bad = parse_scenarios(raw, set(sent))
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+                                    clauses=clauses)
+    scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
+    print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
+          + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
+    return pool
+
+
+def _usage_report(prov) -> None:
+    """M116: what the paid models cost this run (one line per provider; nothing for the free ones)."""
+    for ln in (getattr(prov, "usage_lines", lambda: [])() if prov is not None else []):
+        print(f"  {ln}", flush=True)
 
 
 def cmd_label(
@@ -7625,7 +8204,7 @@ def cmd_label(
         bak = out_path.with_name(out_path.name + ".bak")
         if retry:
             if provider is None:
-                provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+                provider = _make_pool(r0_cfg, llm)
                 provider.preflight()
                 _pool_banner(provider)
             bak.write_text(old_text, encoding="utf-8")   # before the first checkpoint touches the draft
@@ -7641,7 +8220,7 @@ def cmd_label(
             from autoreels.cloud.label import is_ranked as _is_ranked
             if not _is_ranked(new_text):
                 if provider is None:
-                    provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+                    provider = _make_pool(r0_cfg, llm)
                     provider.preflight()
                     _pool_banner(provider)
                 new_text, _ = rank_draft(new_text, wblocks, words, provider, system=_rank_system(),
@@ -7656,7 +8235,7 @@ def cmd_label(
             print(f"→ {out_path} без изменений")
         return 0
     if provider is None:
-        provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+        provider = _make_pool(r0_cfg, llm)
         provider.preflight()
         _pool_banner(provider)
     from autoreels.cloud.label import windows as _label_windows
@@ -7730,6 +8309,77 @@ def _txcheck_params(r0_cfg, root=None):
                          on_speech_sec=tc.on_speech_sec, sparse_suspicious_sec=tc.sparse_suspicious_sec)
 
 
+def cmd_speakers(target: str, *, root=None, inputs_dir: str | None = None, from_json: str | None = None,
+                 python: str | None = None, force: bool = False, run=None) -> int:
+    """M165: the speaker map of a source → transcripts/<stem>.speakers.json (cloud/speakers.py).
+    --from <diar.json>: import a ready diarization (m141 data/cache/m141/<stem>.diar.json; the turns are times in the
+    source, so a re-encoded copy with the same timeline takes them too). Otherwise pyannote runs tools/diarize.py in
+    the environment of --python (or env SPEAKERS_PYTHON; torch is not a project dependency) with HF_TOKEN from the
+    environment or .env. An existing map of this source is kept unless --force."""
+    import json as _json
+    import os as _os
+    import subprocess
+    import tempfile as _tf
+    from autoreels.cloud.speakers import build as _sp_build, load as _sp_load, write as _sp_write
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 2
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    out = _root / "transcripts" / f"{mpath.stem}.speakers.json"
+    if not force and _sp_load(out, manifest.source_sha256) is not None:
+        print(f"✓ уже есть: {out} (пересчитать: --force)")
+        return 0
+    run = run or (lambda argv, **kw: subprocess.run(argv, **kw))
+    if from_json:
+        try:
+            turns = _json.loads(Path(from_json).read_text(encoding="utf-8"))["turns"]
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"ошибка: {from_json}: {type(exc).__name__}", file=sys.stderr)
+            return 2
+        origin = f"import:{Path(from_json).name}"
+    else:
+        py = _os.path.expanduser(python or _os.environ.get("SPEAKERS_PYTHON") or sys.executable)
+        tok = _os.environ.get("HF_TOKEN")
+        env_file = _root / ".env"
+        if not tok and env_file.is_file():
+            for ln in env_file.read_text(encoding="utf-8").splitlines():
+                if ln.strip().startswith("HF_TOKEN="):
+                    tok = ln.split("=", 1)[1].strip().strip("'\"")
+        if not tok:
+            print("ошибка: нет HF_TOKEN (окружение или .env)", file=sys.stderr)
+            return 2
+        try:
+            src = resolve_source(manifest, Path(inputs_dir) if inputs_dir else _root / "inputs")
+        except Exception as exc:  # noqa: BLE001
+            print(f"ошибка: исходник не найден: {exc}", file=sys.stderr)
+            return 2
+        with _tf.TemporaryDirectory() as td:
+            wav, js = Path(td) / "a.wav", Path(td) / "d.json"
+            r = run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+            if getattr(r, "returncode", 1) != 0:
+                print("ошибка: ffmpeg не извлёк звук", file=sys.stderr)
+                return 1
+            r = run([py, str(_root / "tools" / "diarize.py"), str(wav), str(js)], env={**_os.environ, "HF_TOKEN": tok})
+            if getattr(r, "returncode", 1) != 0 or not js.is_file():
+                print(f"ошибка: разделение голосов не прошло ({py}); нужен pyannote.audio в этом окружении "
+                      f"(--python <venv>/bin/python)", file=sys.stderr)
+                return 1
+            turns = _json.loads(js.read_text(encoding="utf-8"))["turns"]
+        origin = "pyannote/speaker-diarization-3.1"
+    data = _sp_build(turns, manifest.source_sha256, origin)
+    _sp_write(out, data)
+    talk: dict = {}
+    for a, b, s in data["turns"]:
+        talk[s] = talk.get(s, 0.0) + b - a
+    tot = sum(talk.values()) or 1.0
+    print(f"✓ {out.name}: реплик {len(data['turns'])}, говорящих {len(talk)} — "
+          + ", ".join(f"{s} {v / tot:.0%}" for s, v in sorted(talk.items(), key=lambda kv: -kv[1]))
+          + f"; главный {data['main']}")
+    return 0
+
+
 def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
                  show: int = 8) -> int:
     """M57: Whisper inventions and holes in each source's transcript (cloud/txcheck.py) →
@@ -7797,8 +8447,34 @@ def cmd_tx_check(targets: list[str], *, root=None, cache_dir=None, all_sources: 
     return rc
 
 
+def _autocut_overrides(base, pairs) -> "object":
+    """M119: `--ac key=value` → a copy of the autocut config with those fields (names and types checked by the model;
+    a list field takes comma-separated values, an empty value is an empty list). Raises ValueError."""
+    import typing as _typing
+    from autoreels.core.config import AutocutConfig
+    upd: dict = {}
+    for pr in pairs or ():
+        k, sep, v = str(pr).partition("=")
+        k = k.strip()
+        if not sep or not k:
+            raise ValueError(f"--ac ждёт ключ=значение, получено «{pr}»")
+        if k not in AutocutConfig.model_fields:
+            raise ValueError(f"--ac: нет поля «{k}» в autocut (config/r0.yaml)")
+        v = v.strip()
+        if _typing.get_origin(AutocutConfig.model_fields[k].annotation) in (list, tuple):
+            upd[k] = [x.strip() for x in v.split(",") if x.strip()]
+        else:
+            upd[k] = v
+    try:
+        return AutocutConfig.model_validate(base.model_dump() | upd)
+    except Exception as exc:  # noqa: BLE001 — pydantic message, short
+        raise ValueError("--ac: " + " | ".join(str(exc).splitlines()[:3])) from None
+
+
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
-                out: str | None = None, check: bool = True, llm: str | None = None, provider=None) -> int:
+                out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
+                judge_log: str | None = None, voice_keys: bool = True, ac_over=None, scenario: bool = False,
+                scenario_provider=None) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -7838,7 +8514,20 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
               f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
         return 1
     ac = r0_cfg.autocut
-    prm = AutoParams(clips=clips or ac.clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
+    if ac_over:                             # M119: --ac key=value for this run only (config/r0.yaml unchanged)
+        try:
+            ac = _autocut_overrides(ac, ac_over)
+        except ValueError as exc:
+            print(f"ошибка: {exc}", file=sys.stderr)
+            return 1
+        r0_cfg = r0_cfg.model_copy(update={"autocut": ac})
+        print("  autocut для этого запуска: " + ", ".join(str(x).strip() for x in ac_over), flush=True)
+    n_clips = clips or ac.clips
+    if not clips and ac.clips_every_min > 0:    # M119: the owner takes one clip per ~3.5 min of a talk
+        _src_min = max((float(w.t1) for w in tx.words), default=0.0) / 60.0
+        n_clips = max(ac.clips, round(_src_min / ac.clips_every_min))
+        print(f"  сборок: до {n_clips} (источник {_src_min:.0f} мин ÷ {ac.clips_every_min:g})", flush=True)
+    prm = AutoParams(clips=n_clips, min_sec=ac.min_sec, target_sec=ac.target_sec, max_sec=ac.max_sec,
                      max_pieces=ac.max_pieces, min_punch=ac.min_punch, seed_punch=ac.seed_punch,
                      hook_max_sec=getattr(r0_cfg, "hook_max_sec", 6.0), hook_min_words=ac.hook_min_words,
                      overlap_max=ac.overlap_max, use_filtered=ac.use_filtered, loop=ac.loop,
@@ -7848,7 +8537,37 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      context_start=ac.context_start, context_max_sec=ac.context_max_sec,
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
-                     context_later_min_sec=ac.context_later_min_sec)
+                     context_later_min_sec=ac.context_later_min_sec,
+                     hook_teaser=ac.hook_teaser, hook_teaser_pos=ac.hook_teaser_pos,
+                     hook_no_pointer=ac.hook_no_pointer,
+                     close_last=ac.close_last, close_last_sec=ac.close_last_sec,
+                     end_tone=getattr(ac, "end_tone", False), generator=ac.generator,
+                     seed_roles=tuple(ac.seed_roles), passage_gap_sec=ac.passage_gap_sec, start_judge=ac.start_judge,
+                     lean_depth=ac.lean_depth, rhythm=ac.rhythm, max_jumps=ac.rhythm_max_jumps,
+                     jump_sec=ac.rhythm_jump_sec, settle_near_sec=ac.rhythm_settle_near,
+                     settle_far_sec=ac.rhythm_settle_far, settle_far_at_sec=ac.rhythm_far_sec,
+                     settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0),
+                     start_pause_min=float(getattr(ac, "start_pause_min", 0.0) or 0.0),
+                     hook_clauses=bool(getattr(ac, "hook_clauses", False)),
+                     hook_clause_pause=float(getattr(ac, "hook_clause_pause", 0.12)),
+                     start_strict=bool(getattr(ac, "start_strict", False)),
+                     start_extend_max=int(getattr(ac, "start_extend_max", 2)),
+                     answer_start=bool(getattr(ac, "answer_start", False)),
+                     answer_gap_sec=float(getattr(ac, "answer_gap_sec", 3.0)))
+    _taste = None
+    if prm.taste_weight:
+        # M138: the owner's taste orders the proposals (invariant 1: the order only)
+        from autoreels.cloud.taste import clip_taste as _clip_taste, load as _taste_load
+        _tm_path = _root / ac.taste_model
+        try:
+            _tm = _taste_load(_tm_path)
+        except (OSError, ValueError) as _e_t:
+            print(f"ошибка: модель вкуса не прочитана ({_tm_path}: {_e_t}) — taste_weight требует её "
+                  f"(handoff/m138/fit_eval.py), или taste_weight: 0", file=sys.stderr)
+            return 1
+        _src_dur = max((float(u["t1"]) for u in the_map.get("units") or []), default=1.0)
+        _taste = lambda clip: _clip_taste(clip, _tm, _src_dur)  # noqa: E731
+        print(f"  вкус владельца: {ac.taste_model} (строк {_tm.get('rows')}), вес {prm.taste_weight:g}", flush=True)
     all_blocks, kept, dropped = _review_block_set(tx, r0_cfg, manifest.source_kind or r0_cfg.source_kind)
     words = tx.words
     if getattr(r0_cfg, "credit_word_patterns", None):
@@ -7870,49 +8589,234 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                                   _ends_terminal(st[-1]), " ".join(w.word for w in st)))
         return out_s
 
+    start_pause = None                      # M144: the silence heard before a sentence (B.k)
+    clauses = None                          # M182: clauses of a sentence that can be a cold open (B.k → spans)
+    if prm.start_pause_min or prm.hook_clauses:
+        from autoreels.cloud.plan import SpeechTimes as _ST_sp, _speech_before as _sb_sp, load_alignment as _la_sp
+        _al_sp = _la_sp(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+        _sm_sp = None
+        _smp = _root / "transcripts" / f"{stem}.speechmap.json"
+        if _smp.is_file():
+            try:
+                from autoreels.cloud.speechmap import SPEECHMAP_VERSION as _SMV_sp
+                _d_sp = _json.loads(_smp.read_text(encoding="utf-8"))
+                if _d_sp.get("version") == _SMV_sp and _d_sp.get("source_sha256") == manifest.source_sha256:
+                    _sm_sp = _d_sp
+            except (OSError, ValueError):
+                _sm_sp = None
+        if _al_sp is None and _sm_sp is None:
+            print(f"  warning: нет карты речи и выравнивания для {stem} — правило паузы перед началом "
+                  f"(start_pause_min) не работает", file=sys.stderr)
+        else:
+            _times_sp = _ST_sp(tx.words, _sm_sp, _al_sp)
+
+            def _start_pause(ref: str):
+                st = sent_by_ref.get(ref)
+                if not st:
+                    return None
+                left, onset = _sb_sp(_times_sp, st[0])
+                return 9.9 if left is None else max(0.0, onset - left)
+            if prm.start_pause_min:
+                start_pause = _start_pause
+            if prm.hook_clauses:
+                from autoreels.cloud.autocut import clause_spans as _clause_spans
+                from autoreels.cloud.plan import heard_pause as _hp_cl
+
+                def clauses(ref: str):
+                    st = sent_by_ref.get(ref)
+                    if not st:
+                        return []
+                    _pa = lambda k: _hp_cl(_times_sp, st[k - 1], st[k]) if k < len(st) else None  # noqa: E731
+                    _du = lambda a, z: _times_sp.audible(st[z - 1])[1] - _times_sp.audible(st[a - 1])[0]  # noqa: E731
+                    return [(a, z, round(_du(a, z), 2), " ".join(w.word for w in st[a - 1:z]))
+                            for a, z in _clause_spans(st, _pa, min_words=prm.hook_min_words, min_sec=prm.hook_min_sec,
+                                                      max_sec=prm.hook_max_sec, min_pause=prm.hook_clause_pause,
+                                                      dur=_du)]
+
+    end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
+    open_end: list = []                     # … clips that ended «→» and could not be shortened
+    dur_of = None                           # M116 (M1.9 D): the aligned duration of a word, intonation map
+    _want_voice = bool(getattr(ac, "keywords", False) and getattr(ac, "keywords_voice", False) and voice_keys)
+    if prm.end_tone or _want_voice:
+        from autoreels.cloud.plan import load_alignment as _la_et
+        from autoreels.local.prosody import load_prosody as _lp_et, tone_lookup as _tl_et
+        _al_et = _la_et(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
+        _pros_et = _lp_et(_root / "transcripts" / f"{stem}.prosody.json", manifest.source_sha256, _al_et) if _al_et else None
+        _tone_et = _tl_et(_pros_et)
+        if _tone_et is None:
+            print(f"  warning: нет интонации transcripts/{stem}.prosody.json — концы сборок по голосу («→») и "
+                  f"подсказки голоса для k: не работают; сначала: arl align {stem} && arl prosody {stem}", file=sys.stderr)
+        else:
+            if prm.end_tone:
+                def end_tone(ref: str):
+                    st = sent_by_ref.get(ref)
+                    r = _tone_et(st[-1]) if st else None
+                    return r[0] if r else None
+            if _want_voice:
+                _dur_idx = {round(float(w["t0"]) * 1000): w.get("dur") for w in (_pros_et or {}).get("words") or []}
+
+                def dur_of(word):
+                    return _dur_idx.get(round(float(word.t0) * 1000))
     from dataclasses import replace as _dc_replace
     no_start: list = []                     # M74: clips whose start leans on what was cut, with no fix
     mode = llm or ac.hook_llm
     prov, judge = None, None
     if mode != "none":
         try:
-            prov = provider or build_pool(r0_cfg, local=_LOCAL_MODE[mode])
+            prov = provider or _make_pool(r0_cfg, mode)
             _pool_banner(prov)
         except Exception as exc:  # noqa: BLE001 — no model: the code's choices stay
             print(f"  модель: недоступна ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
             prov = None
+    # M86: the model's judgments kept between runs, and the owner's verdicts as examples for the judges
+    _jstore = _JudgeStore(_cache / "autocut_judge.json") if ac.judge_cache else None
+    _jlog = None
+    if judge_log:                           # M116: every judgment of this run, for arl judge-bench and the report
+        _jl_path = Path(judge_log)
+        _jl_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _jlog(row: dict) -> None:
+            with _jl_path.open("a", encoding="utf-8") as fh:
+                fh.write(_json.dumps({"stem": stem, **row}, ensure_ascii=False) + "\n")
+    _ex = {"start": ([], []), "hook": ([], [])}
+    if ac.owner_examples > 0:
+        from autoreels.cloud.autocut import owner_examples as _owner_examples
+        _vrows: list = []
+        _vp = _root / "reviews" / "verdicts.jsonl"
+        if _vp.is_file():
+            for _ln in _vp.read_text(encoding="utf-8").splitlines():
+                try:
+                    _vrows.append(_json.loads(_ln))
+                except ValueError:
+                    continue
+        _ex = {k: _owner_examples(_vrows, k, ac.owner_examples) for k in ("start", "hook")}
+        print(f"  оценки владельца: примеры для начала −{len(_ex['start'][0])}/+{len(_ex['start'][1])}, "
+              f"для крючка −{len(_ex['hook'][0])}/+{len(_ex['hook'][1])} (из {len(_vrows)} оценок)", flush=True)
     if prov is not None and ac.context_start and ac.context_judge:
         from autoreels.cloud.autocut import make_judge   # M75: the model's yes/no on a first sentence
-        judge = make_judge(prov, log=lambda x: print(x, flush=True))
-    pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
-                   no_start=no_start, judge=judge)
+        from autoreels.cloud.autocut import STANDALONE_SYSTEM as _SS, with_examples as _with_ex
+        _ssys = _with_ex(_SS, *_ex["start"], "first sentence") if any(_ex["start"]) else None
+        judge = make_judge(prov, log=lambda x: print(x, flush=True), system=_ssys, store=_jstore, jlog=_jlog)
+    rhythm_out: list = []                   # M120: clips that could not keep the jump rule
+    scen_out: list = []                     # M123: the scenarist's lines the code did not take, with the reason
+    _ivmode = getattr(ac, "interviewer", "")             # M165: the speaker map → the interviewer's sentences
+    _other = None
+    if _ivmode:
+        from autoreels.cloud.speakers import load as _sp_load, other_refs as _sp_other
+        _spm = _sp_load(_root / "transcripts" / f"{stem}.speakers.json", manifest.source_sha256)
+        if _spm is None:
+            print(f"  ведущий: карты говорящих нет (arl speakers {stem}) — реплики ведущего не различаются", flush=True)
+        else:
+            _other = _sp_other({r: (float(st[0].t0), float(st[-1].t1)) for r, st in sent_by_ref.items() if st}, _spm)
+            print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
+    if scenario:
+        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
+                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
+                              clauses=clauses)
+        if pool is None:
+            return 1
+    else:
+        pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                       no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
+                       taste=_taste, start_pause=start_pause)
+        _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
+        if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
+            # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
+            from autoreels.cloud.autocut import fill_pool
+            _extra = propose(the_map.get("units") or [],
+                             _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
+                             judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[], start_pause=start_pause)
+            _n0 = len(pool)
+            pool = fill_pool(pool, _extra)
+            print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} вокруг мыслей "
+                  f"силы {_fsp}", flush=True)
+    if _other and _ivmode == "off" and not scenario:  # M165: no clip of the montage plays the interviewer
+        from autoreels.cloud.scenario import expand_refs as _xr
+        _n0 = len(pool)
+        pool = [pr for pr in pool if not (set(_xr(pr.pieces) or []) & _other)]
+        if len(pool) < _n0:
+            print(f"  ведущий: убрано сборок с его репликами {_n0 - len(pool)} (interviewer: off)", flush=True)
+    _doubt = sum(1 for pr in pool if pr.start_doubt)
+    if _doubt:                              # M119 (start_judge: rank): the model's «no» only orders
+        pool.sort(key=lambda pr: bool(pr.start_doubt))
+        print(f"  начало: у {_doubt} кандидатов модель против начала, правила за — они после остальных", flush=True)
     if judge is not None:
         _jc = getattr(judge, "cache", {})
         _no = sum(1 for v in _jc.values() if v is not None and not v[0])
         _na = sum(1 for v in _jc.values() if v is None)
         print(f"  начало: модель оценила {len(_jc)} первых фраз, непонятных без предыдущего {_no}"
               + (f", без ответа {_na} (решили правила)" if _na else ""), flush=True)
-    # M65: the model ranks the code's hook candidates (only the first clips are worth a call)
+    # M65: the model ranks the code's hook candidates. M86: each candidate is polished (cold open judged and ranked,
+    # plate headline) when the selection below reaches it — before, only pool[:clips+2] was, so a later candidate
+    # that took a rejected one's place (or moved up after the seam sort) went out with unjudged hooks.
+    _polish = None
+    _plate = None
+    _hjudge = None
+
+    def _plate_mode(pr) -> str:
+        # M112 (owner: a clip without a cold open opens on its plate — the plate has to pull, not only name the subject)
+        hl = getattr(ac, "plate_hookless", "")
+        return hl if hl and not pr.hook else ac.plate
+    _log = lambda x: print(x, flush=True)  # noqa: E731
     if prov is not None and pool:
         try:
             from autoreels.cloud.autocut import rank_hooks
             from autoreels.cloud.autocut import check_seams, headline, seam_pairs
-            _log = lambda x: print(x, flush=True)  # noqa: E731
             _forms: list = []                       # M73: headline shapes chosen so far in this source
-            for pr in pool[:prm.clips + 2]:
+            _byid_h = {u["id"]: u for u in (the_map.get("units") or [])}
+            if ac.hook_judge:                       # M81: the cold open must lead into the clip, like its start
+                from autoreels.cloud.autocut import (HOOK_JUDGE_SYSTEM, HOOK_TEASER_SYSTEM, judge_hooks,
+                                                     make_judge as _mk_judge, with_examples as _with_ex2)
+                _teaser = ac.hook_judge_mode == "teaser"
+                _hsys = HOOK_TEASER_SYSTEM if _teaser else HOOK_JUDGE_SYSTEM
+                if any(_ex["hook"]):
+                    _hsys = _with_ex2(_hsys, *_ex["hook"], "teaser line" if _teaser else "opening line")
+                _hjudge = _mk_judge(prov, log=_log, system=_hsys, label="Teaser line" if _teaser else "First sentence",
+                                    store=_jstore, jlog=_jlog)
+
+            def _hook_core(pr) -> str:
+                base = " ".join(dict.fromkeys(str(_byid_h[i].get("summary") or "")
+                                              for i in (pr.opener, pr.units[-1]) if i in _byid_h)).strip()
+                if ac.hook_judge_mode != "teaser" or pr.units[-1] not in _byid_h:
+                    return base
+                rows = [r[4] for r in sentences(pr.unit_refs.get(pr.units[-1]) or _byid_h[pr.units[-1]]["refs"])]
+                tail: list = []
+                for t in reversed(rows):             # M86: the words of the ending (what the teaser promises)
+                    if tail and len(t) + sum(len(x) for x in tail) > 300:
+                        break
+                    tail.insert(0, t)
+                return f"{base}. Конец ролика: «{' '.join(tail)}»" if tail else base
+
+            def _plate(pr) -> None:                 # M70/M71: a curiosity headline for the plate t:
+                _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
+                                 if uid in _byid_h for r in sentences(pr.unit_refs.get(uid) or _byid_h[uid]["refs"]))
+                pr.plate_mode = _plate_mode(pr)
+                headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
+                         used_forms=_forms, log=_log, mode=pr.plate_mode)
+
+            def _polish(pr) -> None:
+                if _hjudge is not None and pr.hooks:
+                    judge_hooks(pr, _hjudge, _hook_core(pr), top=ac.hook_judge_top, log=_log)
                 rank_hooks(pr, prov, log=_log)
-                if ac.hook_title:                   # M70/M71: a curiosity headline for the plate t:
-                    _byid_t = {u["id"]: u for u in (the_map.get("units") or [])}
-                    _core = " ".join(r[4] for uid in {pr.units[0], pr.opener or pr.units[0], pr.units[-1]}
-                                     if uid in _byid_t for r in sentences(pr.unit_refs.get(uid) or _byid_t[uid]["refs"]))
-                    headline(pr, prov, " ".join(r[4] for r in sentences(pr.pieces)), core_text=_core,
-                             used_forms=_forms, log=_log, mode=ac.plate)
+                if ac.hook_title:
+                    _plate(pr)
+                if ac.keywords:                     # M88: key words of the subtitles (k:)
+                    from autoreels.cloud.autocut import pick_keywords, voice_stressed
+                    _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
+                    _krows = [(r[0], r[4]) for r in sentences(pr.pieces)]
+                    _voiced = None
+                    if dur_of is not None:          # M116 (M1.9 D): the words the voice draws out — a hint
+                        _voiced = [voice_stressed(sent_by_ref.get(ref) or [], dur_of,
+                                                  ratio=ac.keywords_voice_ratio) for ref, _t in _krows]
+                        _vn = [f"{ref} «{v[0]}»" for (ref, _t), v in zip(_krows, _voiced) if v]
+                        if _vn:
+                            pr.notes.append("голос выделяет: " + ", ".join(_vn))
+                    pr.keys = pick_keywords(_krows, prov, n=_n, log=_log, voiced=_voiced)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
-                _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
                 for pr in pool[:prm.clips * 2]:
-                    check_seams(pr, seam_pairs(pr, _by_id, sentences), prov, log=_log)
+                    check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
                 _bad = sum(1 for pr in pool if pr.bad_seams)
-                pool.sort(key=lambda pr: bool(pr.bad_seams))
+                pool.sort(key=lambda pr: bool(pr.bad_seams) + bool(pr.start_doubt))   # M119: doubts add up
                 if _bad:
                     print(f"  стыки: у {_bad} кандидатов модель нашла рваный стык — они после остальных", flush=True)
         except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
@@ -7936,17 +8840,45 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     # kept only as a commented line with the reason, and the next candidate takes its place.
     from autoreels.cloud.autocut import too_close
     accepted, rejected, close = [], [], []
-    for pr in pool:
-        if len(accepted) >= prm.clips:
-            break
+    hookless: list = []           # M107: candidates left without a cold open — taken only when the hooked run out
+
+    def _try_accept(pr) -> None:
         why_close = too_close(pr, accepted, ac.max_shared)          # M68: distinct reels, checked for free first
         if why_close:
             close.append((pr, why_close))
-            continue
+            return
         if not check:
             accepted.append(pr)
-            continue
+            return
         err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        # M167 (m167: 10h59 13 → 8 clips): no room after the last word — end one sentence earlier, up to twice, while
+        # the clip keeps min_sec (the rule of the ends: a clip lands on a finished sentence the next speech leaves room for)
+        for _ in range(2):
+            if err is None or "no room after last word" not in err:
+                break
+            _short = _drop_last_sentence(pr, sent_by_ref, prm.min_sec)
+            if _short is None:
+                break
+            pr.notes.append(f"конец: после последнего слова нет места до следующей речи — клип кончается фразой раньше "
+                            f"({pr.pieces} → {_short.pieces})")
+            _short.notes = pr.notes
+            pr = _short
+            err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+        # M173: a shot under short_shot_sec between two picture changes — drop the sentences heard whole in it (the
+        # 0.7 s sentence between the cold open and a cut), up to twice; a short shot inside a sentence refuses the line
+        import re as _re_ss
+        for _ in range(2):
+            if err is None or "short shot" not in err or "whole sentences" not in err:
+                break
+            _t0s = _re_ss.findall(r"s\d+@(\d+(?:\.\d+)?)", err)
+            _less = _drop_sentences(pr, sent_by_ref, _t0s, prm.min_sec)
+            if _less is None:
+                break
+            pr.notes.append(f"скачок кадра: короткий план между двумя сменами картинки — фразы этого плана убраны "
+                            f"({pr.pieces} → {_less.pieces})")
+            _less.notes = pr.notes
+            pr = _less
+            err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
         tried = {pr.hook}
         while err is None and pr.hook and "cold open skipped" in log:
@@ -7979,6 +8911,34 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             accepted.append(pr)
         else:
             rejected.append((pr, err))
+
+    for pr in pool:
+        if len(accepted) >= prm.clips:
+            break
+        if _polish is not None:
+            try:
+                _polish(pr)
+            except Exception as exc:  # noqa: BLE001 — no model: the code's hook order and plate stay
+                print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+        if getattr(ac, "hookless_last", False) and ac.hook_teaser and not pr.hook:
+            hookless.append(pr)       # M107 (m106: 6 of 15 clips had no cold open): the hooked ones go first
+            continue
+        _try_accept(pr)
+    hookless_left: list = []
+    for pr in hookless:
+        if len(accepted) >= prm.clips:
+            hookless_left.append(pr)
+            continue
+        pr.notes.append("без крючка — взята, когда сборки с крючком кончились (M107)")
+        _try_accept(pr)
+    if _plate is not None and ac.hook_title and getattr(ac, "plate_hookless", ""):
+        for pr in accepted:                 # M112: the checks dropped the cold open after the plate was written
+            if pr.plate_mode and pr.plate_mode != _plate_mode(pr):
+                pr.notes.append(f"крючок снят проверкой — плашка заново ({_plate_mode(pr)})")
+                try:
+                    _plate(pr)
+                except Exception as exc:  # noqa: BLE001 — no model: the plate stays
+                    print(f"  плашка: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
     # M70: a short version of every accepted clip (weakest middle thoughts dropped), checked the same way
     if ac.short_variant and accepted:
         from autoreels.cloud.autocut import short_variant
@@ -7997,11 +8957,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 accepted.append(v)
             else:
                 rejected.append((v, err))
+    if _hjudge is not None:
+        _hc = getattr(_hjudge, "cache", {})
+        print(f"  крючки: модель оценила {len(_hc)}, отброшено {sum(1 for v in _hc.values() if v and not v[0])}"
+              + f", без ответа {sum(1 for v in _hc.values() if v is None)}", flush=True)
     body: list[str] = []
     for i, pr in enumerate(accepted, 1):
         body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}"
                     + (f" — короткая версия M{pr.variant_of}" if pr.variant_of else ""))
         body += [f"#   {n}" for n in pr.notes]
+        if pr.hook and (pr.hook_texts.get(pr.hook) or ("", 0))[0]:
+            body.append(f"#   крючок: «{pr.hook_texts[pr.hook][0]}»")   # M86: the owner's verdict learns from it
         body.append(pr.line(str(i)))
         body.append("")
     if rejected:
@@ -8015,20 +8981,44 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         for pieces, why in no_start:
             body.append(f"#   {why}: {pieces}")
         body.append("")
+    if open_end:
+        body.append("# --- конец звучит с продолжением («→», голос не опустился), укоротить нельзя (M115):")
+        for pieces, why in open_end:
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
+    if scen_out:
+        body.append("# --- сценарист: строки, которые код не принял (M123: те же правила, что у автосборки):")
+        for pieces, why in scen_out:
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
+    if rhythm_out:
+        body.append("# --- скачки: ритм не держится, поправить не вышло (M120: не больше 2 скачков, кусок успевает «осесть»):")
+        for pieces, why in dict.fromkeys(rhythm_out):
+            body.append(f"#   {why}: {pieces}")
+        body.append("")
     if close:
         body.append("# --- слишком похожи на принятые (M68: своё начало и свои мысли у каждой сборки):")
         for pr, why in close:
             body.append(f"#   {why}: {pr.pieces}")
         body.append("")
+    if hookless_left:
+        body.append("# --- без холодного старта — не взяты, хватило сборок с крючком (M107; можно раскомментировать):")
+        for pr in hookless_left:
+            body.append(f"#! {pr.line('')}")
+        body.append("")
     out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
     print(f"autocut {stem}: предложено сборок {len(accepted)} из {len(the_map.get('units') or [])} мыслей"
           + (f" (не прошли проверку: {len(rejected)})" if rejected else "")
           + (f" (похожи на принятые: {len(close)})" if close else "")
-          + (f" (без понятного начала: {len(no_start)})" if no_start else "") + f" → {out_path}")
+          + (f" (без понятного начала: {len(no_start)})" if no_start else "")
+          + (f" (конец «→», не укоротить: {len(open_end)})" if open_end else "")
+          + (f" (скачки, не поправить: {len(dict.fromkeys(rhythm_out))})" if rhythm_out else "")
+          + (f" (без крючка не взяты: {len(hookless_left)})" if hookless_left else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")
     for pr, err in rejected:
         print(f"  ✗ {pr.pieces} — {err}")
+    _usage_report(prov)
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0
@@ -8069,8 +9059,28 @@ def _autocut_check(head: list[str], line: str, root: Path, cache_dir) -> tuple[s
         return (hit or (lines[-1] if lines else f"rc={rc}"))[:200], buf.getvalue()
 
 
+def _whispercpp_overrides(base, pairs) -> "object":
+    """M111: `--wc key=value` → a copy of the whispercpp params with those fields (names and types checked by
+    the model; an empty value is an empty string — `vad_model=` turns VAD off). Raises ValueError."""
+    from autoreels.core.config import WhisperCppParams
+    upd: dict = {}
+    for pr in pairs or ():
+        k, sep, v = str(pr).partition("=")
+        k = k.strip()
+        if not sep or not k:
+            raise ValueError(f"--wc ждёт ключ=значение, получено «{pr}»")
+        if k not in WhisperCppParams.model_fields:
+            raise ValueError(f"--wc: нет поля «{k}» (есть: {', '.join(WhisperCppParams.model_fields)})")
+        upd[k] = v.strip()
+    try:
+        return WhisperCppParams.model_validate(base.model_dump() | upd)
+    except Exception as exc:  # noqa: BLE001 — pydantic message, one line
+        raise ValueError(f"--wc: {str(exc).splitlines()[0]}") from None
+
+
 def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources: bool = False,
-                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "") -> int:
+                   force: bool = False, backend=None, prompt: str | None = None, tag: str = "",
+                   wc=None, groq_prompt: str | None = None, groq_dual: bool = False) -> int:
     """M62: each source transcribed again by whisper.cpp on gamebox (config/transcribe.yaml
     whispercpp) → transcripts/<stem>.local.transcript.json (NOT the cache: the manifests keep their
     Groq transcript), compared word by word with the Groq one, both run through tx-check →
@@ -8094,8 +9104,41 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
     prm = _txcheck_params(r0_cfg, _root)
     _cache = Path(cache_dir) if cache_dir else _root / "data" / "cache"
     wcfg = tcfg.whispercpp if prompt is None else tcfg.whispercpp.model_copy(update={"prompt": prompt})
-    be = backend or WhisperCppBackend(wcfg)
+    if groq_dual and groq_prompt is None:   # M124: the dual Groq variant takes the configured prompt for its ends
+        groq_prompt = tcfg.groq.initial_prompt
+    if groq_prompt is not None:             # M116: a Groq variant — the same audio with another initial_prompt
+        if not tag:
+            print("ошибка: с --groq-prompt нужен --tag (вариант не должен смешаться с расшифровкой манифеста)",
+                  file=sys.stderr)
+            return 1
+        from autoreels.cloud.transcribe import GroqBackend, transcribe as _tx_groq
+        from autoreels.cloud.txcheck import prompt_patterns as _pp_g
+        if backend is None and groq_dual:
+            from autoreels.cloud.transcribe import GroqDualBackend
+            backend = GroqDualBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
+        if backend is None:
+            backend = GroqBackend(model=tcfg.groq.model, initial_prompt=groq_prompt)
+        from dataclasses import replace as _dc_rep_g
+        prm = _dc_rep_g(prm, known=tuple(prm.known) + tuple(_pp_g(groq_prompt)))
+        print(f"Groq: initial_prompt {'пустой' if not groq_prompt else repr(groq_prompt[:60])}", flush=True)
+    if wc:
+        if not tag:
+            print("ошибка: с --wc нужен --tag (вариант не должен заменить .local)", file=sys.stderr)
+            return 1
+        try:
+            wcfg = _whispercpp_overrides(wcfg, wc)
+        except ValueError as exc:
+            print(f"ошибка: {exc}", file=sys.stderr)
+            return 1
+        print("whisper.cpp: " + ", ".join(f"{k}={getattr(wcfg, k)!r}" for k in
+                                          dict.fromkeys(str(x).partition("=")[0].strip() for x in wc)), flush=True)
+    if backend is None:
+        from autoreels.core.heavy_lock import shared_lock
+        backend = WhisperCppBackend(wcfg, lock=shared_lock(r0_cfg.heavy_lock, log=lambda m: print(m, flush=True)))
+    be = backend
     suffix = f".local-{tag}" if tag else ".local"            # M64: variants side by side
+    if groq_prompt is not None:
+        suffix = f".groq-{tag}"
     rc = 0
     for mpath in paths:
         try:
@@ -8128,9 +9171,15 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
                     continue
             t0 = time.monotonic()
             try:
-                local = be.transcribe(Path(audio), language=tcfg.whispercpp.language)
+                if groq_prompt is not None:   # chunked as in production; chunks and the result in a side cache
+                    local = _tx_groq(Path(audio), _cache / "_variants", backend=be, language=tcfg.language,
+                                     chunking_cfg=r0_cfg.chunking,
+                                     audio_cfg=load_render_config(_root / "config" / "render.yaml").audio_extract)
+                else:
+                    local = be.transcribe(Path(audio), language=tcfg.whispercpp.language)
             except Exception as exc:  # noqa: BLE001 — one source must not stop the rest
-                print(f"== {stem}: whisper.cpp не отработал ({type(exc).__name__}: {str(exc)[:200]})", file=sys.stderr)
+                print(f"== {stem}: {'Groq' if groq_prompt is not None else 'whisper.cpp'} не отработал "
+                      f"({type(exc).__name__}: {str(exc)[:200]})", file=sys.stderr)
                 rc = 1
                 continue
             meta = be.describe()
@@ -8153,20 +9202,96 @@ def cmd_tx_compare(targets: list[str], *, root=None, cache_dir=None, all_sources
         rep = {"stem": stem, "compare": cmp_,
                "groq": {k: cg[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cg["known"]), "repeat": len(cg["repeat"])},
                "local": {k: cl[k] for k in ("words", "serious", "sparse_sec", "suspicious")} | {"known": len(cl["known"]), "repeat": len(cl["repeat"])}}
-        (_root / "transcripts" / f"{stem}{suffix.replace('.local', '.txcompare')}.json").write_text(_json.dumps(rep, ensure_ascii=False, indent=1),
-                                                                   encoding="utf-8")
+        _rep_name = (f"{stem}.txcompare-groq-{tag}.json" if groq_prompt is not None
+                     else f"{stem}{suffix.replace('.local', '.txcompare')}.json")
+        (_root / "transcripts" / _rep_name).write_text(_json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
         g, l_ = rep["groq"], rep["local"]
         print(f"== {stem} (локально: {took}): слов Groq {cmp_['ref_words']}, локально {cmp_['other_words']}, "
               f"совпало {cmp_['matched']}, различается {cmp_['differ']}%")
         _avg = lambda e: f"{100 / e:.0f}" if e else "∞"
         print(f"   конец предложения на 100 слов: Groq {cmp_['ref_sent_ends']}, локально {cmp_['other_sent_ends']}"
               f" (слов в предложении: Groq {_avg(cmp_['ref_sent_ends'])}, локально {_avg(cmp_['other_sent_ends'])})")
+        _sa = cmp_["sent_agree"]
+        print(f"   концы Groq на совпавших словах: {_sa['ref']}, локально там же {_sa['both']} ({_sa['recall']}%); "
+              f"своих концов локально {_sa['other']}, из них у Groq тоже {_sa['precision']}%")
         print(f"   выдумки на речи: Groq {g['serious']} (известных {g['known']}, повторов {g['repeat']}), "
               f"локально {l_['serious']} (известных {l_['known']}, повторов {l_['repeat']}); "
               f"звук без слов: Groq {g['sparse_sec']:.0f} с, локально {l_['sparse_sec']:.0f} с")
         for z in cmp_["longest"][:5]:
             print(f"   {_mmss_long(z['t'])} Groq: «{z['ref'][:70]}» | локально: «{z['other'][:70]}»")
     return rc
+
+
+def cmd_judge_bench(log_path: str, *, llm: str = "cloud", root=None, out: str | None = None,
+                    limit: int | None = None, provider=None) -> int:
+    """M116 (owner: «выяснить разницу между Haiku, Sonnet, Qwen на Groq и Qwen с размышлениями и без»): the judgments
+    one run asked (arl autocut --judge-log: starts and cold opens, each with its exact prompt) asked again of another
+    model — the same requests for every model. Writes <log>.<llm>.jsonl (one line per request, as it comes: a long run
+    keeps what it has) and prints, per kind: answered, «yes» share, agreement with the logged model, seconds per
+    request, and the price of a paid model. Changes nothing else."""
+    import json as _json
+    from autoreels.cloud.autocut import parse_judge
+    _root = Path(root) if root else _project_root()
+    lp = Path(log_path)
+    if not lp.is_file():
+        print(f"ошибка: нет журнала {lp} — сначала arl autocut … --judge-log {lp}", file=sys.stderr)
+        return 1
+    uniq: dict = {}
+    for ln in lp.read_text(encoding="utf-8").splitlines():
+        try:
+            r = _json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and r.get("system") and r.get("msg"):
+            uniq.setdefault((r["system"], r["msg"]), r)
+    reqs = list(uniq.values())[:limit] if limit else list(uniq.values())
+    if not reqs:
+        print(f"ошибка: в {lp.name} нет суждений", file=sys.stderr)
+        return 1
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    prov = provider or _make_pool(r0_cfg, llm)
+    _pool_banner(prov)
+    mid = str(getattr(prov, "model_id", llm))
+    op = Path(out) if out else lp.with_name(f"{lp.stem}.{llm}.jsonl")
+    op.write_text("", encoding="utf-8")
+    stats: dict = {}
+    for k, r in enumerate(reqs, 1):
+        t0 = time.monotonic()
+        got, err = None, ""
+        for _try in range(2):
+            try:
+                raw = prov.complete([{"role": "system", "content": r["system"]},
+                                     {"role": "user", "content": r["msg"]}], temperature=0.0)
+            except Exception as exc:  # noqa: BLE001 — one request failed: recorded, the rest go on
+                err = f"{type(exc).__name__}: {str(exc)[:120]}"
+                break
+            got = parse_judge(raw)
+            if got is not None:
+                break
+        sec = round(time.monotonic() - t0, 2)
+        row = {"stem": r.get("stem"), "label": r.get("label"), "msg": r["msg"], "ref_model": r.get("model"),
+               "ref_ok": r.get("ok"), "model": mid, "ok": None if got is None else got[0],
+               "why": None if got is None else got[1], "sec": sec, "error": err}
+        with op.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(row, ensure_ascii=False) + "\n")
+        st = stats.setdefault(r.get("label") or "?", {"n": 0, "ans": 0, "yes": 0, "cmp": 0, "agree": 0, "sec": 0.0})
+        st["n"] += 1
+        st["sec"] += sec
+        if got is not None:
+            st["ans"] += 1
+            st["yes"] += bool(got[0])
+            if r.get("ok") is not None:
+                st["cmp"] += 1
+                st["agree"] += bool(got[0]) == bool(r["ok"])
+        if k % 10 == 0:
+            print(f"  … {k}/{len(reqs)}", flush=True)
+    print(f"judge-bench {lp.name} → {mid}: запросов {len(reqs)} → {op}")
+    for lab, st in sorted(stats.items()):
+        print(f"  {lab}: ответов {st['ans']}/{st['n']}, «да» {100 * st['yes'] / max(1, st['ans']):.0f}%, "
+              f"совпало с журналом {st['agree']}/{st['cmp']} ({100 * st['agree'] / max(1, st['cmp']):.0f}%), "
+              f"{st['sec'] / max(1, st['n']):.1f} с на запрос")
+    _usage_report(prov)
+    return 0
 
 
 def _mmss_long(t: float) -> str:
@@ -8274,7 +9399,7 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     tkey = manifest.transcript_params_key or ""
     if llm != "none":
         if provider is None:
-            provider = build_pool(r0_cfg, local=_LOCAL_MODE[llm])
+            provider = _make_pool(r0_cfg, llm)
             provider.preflight()
             _pool_banner(provider)
         model = getattr(provider, "name", None) or type(provider).__name__
@@ -8298,7 +9423,8 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
         done, missing = describe_units(units, provider, system=system, p=prm, log=lambda x: print(x, flush=True),
                                        known=known, checkpoint=_checkpoint)
         print(f"  паспорта: {done} мыслей, без ответа {missing}")
-        topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True))
+        topics = topic_units(units, provider, system=system, log=lambda x: print(x, flush=True),
+                             chunk=mc.topic_chunk)
     similar_units(units, prm)
     m = build_map(units, stem=stem, source_sha256=manifest.source_sha256, topics=topics, model=model,
                   transcript_key=tkey)
@@ -8347,6 +9473,9 @@ def _map_gaps(m: dict, max_missing: float = 0.0, topics: bool = True) -> list[st
         out.append(f"без паспорта {miss} из {len(units)} мыслей")
     if topics and units and not any(t.get("id") for t in m.get("topics") or []):
         out.append("темы не получены")
+    nmiss = sum(len(t.get("units") or []) for t in m.get("topics") or [] if t.get("missing"))
+    if topics and nmiss:                       # M84: a part of the source got no topics answer
+        out.append(f"темы: без ответа для {nmiss} мыслей")
     return out
 
 
@@ -8544,6 +9673,293 @@ def cmd_label_stats(*, root=None) -> int:
     return 0
 
 
+def _clip_dir(target: str, root: Path, gate: str | None, out_dir: str | None):
+    """(manifest path, source stem, clip folder) of a source — reels-out/<source>[/_gate/<gate>]; None when no manifest."""
+    mpath = _resolve_manifest_arg(target, root)
+    if mpath is None:
+        return None
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    src_stem = Path(manifest.source).stem
+    vdir = (Path(out_dir) if out_dir else root / "reels-out") / src_stem
+    return mpath, src_stem, (vdir / "_gate" / gate if gate else vdir)
+
+
+def cmd_describe(target: str, *, root=None, gate: str | None = None, reels: str | None = None,
+                 out_dir: str | None = None, llm: str = "auto", force: bool = False, provider=None) -> int:
+    """M94 (owner: «нужно делать подробное описание видео для постинга»): <rid>.post.txt next to every rendered clip —
+    the model's post of 3–5 sentences in the reel's words and hashtags said in the reel (cloud/postcopy.py checks
+    both; one retry), after render.yaml hashtags_always. Reads <rid>.transcript.txt and <rid>.txt (the caption)
+    written at render; an existing .post.txt is kept unless --force. No usable answer = no file (arl crosspost
+    then takes <rid>.txt). Writes only the .post.txt files."""
+    import re as _re
+    from autoreels.cloud.postcopy import describe_clip, post_text
+    _root = Path(root) if root else _project_root()
+    found = _clip_dir(target, _root, gate, out_dir)
+    if found is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    _mp, src_stem, vdir = found
+    if not vdir.is_dir():
+        print(f"ошибка: папки клипов нет: {vdir}", file=sys.stderr)
+        return 1
+    want = {r.strip() for r in (reels or "").split(",") if r.strip()}
+    nat = lambda p: [int(x) if x.isdigit() else x for x in _re.split(r"(\d+)", p.stem)]  # noqa: E731
+    clips = [p for p in sorted(vdir.glob("r*.mp4"), key=nat) if _re.fullmatch(r"r\d+", p.stem)
+             and (not want or p.stem in want)]
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    pc = r0_cfg.post
+    try:
+        rcfg = load_render_config(_root / "config" / "render.yaml")
+        always = list(getattr(rcfg, "hashtags_always", []) or [])
+    except Exception:  # noqa: BLE001 — no render config: no fixed hashtags
+        always = []
+    if provider is None:
+        provider = _make_pool(r0_cfg, llm)
+        _pool_banner(provider)
+    done, skipped = 0, []
+    for clip in clips:
+        out = clip.with_name(clip.stem + ".post.txt")
+        if out.is_file() and not force:
+            skipped.append((clip.stem, "уже есть (--force — заново)"))
+            continue
+        tr = clip.with_name(clip.stem + ".transcript.txt")
+        if not tr.is_file():
+            skipped.append((clip.stem, f"нет {tr.name} (рендер его пишет)"))
+            continue
+        cap = clip.with_suffix(".txt")
+        caption = cap.read_text(encoding="utf-8").strip().split("\n\n")[0] if cap.is_file() else ""
+        why: list = []
+        res = describe_clip(provider, caption, tr.read_text(encoding="utf-8").strip(), smin=pc.sentences_min,
+                            smax=pc.sentences_max, max_chars=pc.max_chars, ntags=pc.hashtags,
+                            log=lambda x: print(x, flush=True), why_out=why, voice=getattr(pc, "voice", "reader"))
+        if res is None:
+            skipped.append((clip.stem, f"описание не принято ({why[-1] if why else 'нет ответа модели'})"
+                                       " — остаётся подпись рендера"))
+            continue
+        out.write_text(post_text(res[0], res[1], always), encoding="utf-8")
+        done += 1
+        print(f"  {clip.stem}: {res[0][:90]}… {' '.join('#' + t for t in res[1])}", flush=True)
+    print(f"describe {src_stem}{' (гейт ' + gate + ')' if gate else ''}: описаний {done} из {len(clips)} → <клип>.post.txt")
+    for rid, why in skipped:
+        print(f"  пропущен {rid}: {why}")
+    return 0
+
+
+def cmd_article(target: str, *, root=None, topics: int | None = None, llm: str = "auto",
+                export_dir: str | None = None, provider=None) -> int:
+    """M100: longreads from the source map's largest topics (cloud/article.py: a plan, then each section from its
+    thoughts' words, both checked to stay in the talk) → export/articles/<source>/NN.md and a crosspost plan
+    export/crosspost/<source>_articles.csv («файл;текст;тип;заголовок», тип «статья»: Telegraph). Needs
+    transcripts/<stem>.map.json (arl map). Writes only the export files."""
+    import csv as _csv
+    import io as _io
+    import json as _json
+    from autoreels.cloud.article import pick_topics, write_article
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    mjson = _root / "transcripts" / f"{mpath.stem}.map.json"
+    if not mjson.is_file():
+        print(f"ошибка: карты нет ({mjson}) — сначала arl map \"{mpath.stem}\"", file=sys.stderr)
+        return 1
+    the_map = _json.loads(mjson.read_text(encoding="utf-8"))
+    r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+    ac = r0_cfg.article
+    picks = pick_topics(the_map, topics or ac.topics)
+    if not picks:
+        print(f"article {mpath.stem}: в карте нет тем с тремя описанными мыслями — статей нет")
+        return 0
+    if provider is None:
+        provider = _make_pool(r0_cfg, llm)
+        _pool_banner(provider)
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    slug = Path(manifest.source).stem.replace(" ", "_")
+    base = Path(export_dir) if export_dir else _root / "export"
+    adir = base / "articles" / slug
+    adir.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for k, (t, us) in enumerate(picks, 1):
+        art = write_article(provider, str(t.get("name") or ""), us, smin=ac.sections_min, smax=ac.sections_max,
+                            pmin=ac.section_sentences_min, pmax=ac.section_sentences_max, max_chars=ac.section_chars,
+                            log=lambda x: print(x, flush=True))
+        if art is None:
+            print(f"  тема «{t.get('name')}»: статьи нет")
+            continue
+        (adir / f"{k:02d}.md").write_text(art.markdown(), encoding="utf-8")
+        rows.append(["", art.body(), "статья", art.title])
+        print(f"  {k:02d}. «{art.title}» — разделов {len(art.sections)}, {len(art.body())} знаков")
+    buf = _io.StringIO()
+    w = _csv.writer(buf, delimiter=";", lineterminator="\n")
+    w.writerow(["файл", "текст", "тип", "заголовок"])
+    w.writerows(rows)
+    cdir = base / "crosspost"
+    cdir.mkdir(parents=True, exist_ok=True)
+    csv_path = cdir / f"{slug}_articles.csv"
+    csv_path.write_text(buf.getvalue(), encoding="utf-8-sig")
+    print(f"article {mpath.stem}: статей {len(rows)} из {len(picks)} тем → {adir}, {csv_path}")
+    return 0
+
+
+def cmd_crosspost(target: str, *, root=None, gate: str | None = None, reels: str | None = None,
+                  out_dir: str | None = None, export_dir: str | None = None) -> int:
+    """M90: the rendered clips of a source → a content plan for crosspost (github.com/Dannymor94/crosspost, tab «Импорт
+    плана»). Writes export/crosspost/<source>/<rid>.mp4 (+ <rid>.cover.jpg when there is one; hard links where the disk
+    allows, else copies) and export/crosspost/<source>.csv — columns «файл;текст;тип» (UTF-8 with BOM, «;»: the table
+    crosspost reads), «файл» relative to export/crosspost (its media folder), «текст» = <rid>.txt written at render
+    (caption + hashtags), «тип» = пост. A clip with [ERROR] (only <rid>.ERROR.mp4) or without its text is skipped and
+    named. Only reads the clips; writes nothing outside the export folder."""
+    import csv as _csv
+    import io as _io
+    import os as _os
+    import re as _re
+    import shutil as _shutil
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
+    src_stem = Path(manifest.source).stem
+    vdir = (Path(out_dir) if out_dir else _root / "reels-out") / src_stem
+    if gate:
+        vdir = vdir / "_gate" / gate
+    if not vdir.is_dir():
+        print(f"ошибка: папки клипов нет: {vdir}", file=sys.stderr)
+        return 1
+    want = {r.strip() for r in (reels or "").split(",") if r.strip()}
+    nat = lambda p: [int(x) if x.isdigit() else x for x in _re.split(r"(\d+)", p.stem)]  # noqa: E731
+    clips = sorted((p for p in vdir.glob("r*.mp4") if _re.fullmatch(r"r\d+", p.stem)), key=nat)
+    errors = sorted(p.name.split(".")[0] for p in vdir.glob("r*.ERROR.mp4"))
+    if want:
+        clips = [p for p in clips if p.stem in want]
+        errors = [e for e in errors if e in want]
+    slug = src_stem.replace(" ", "_")
+    base = Path(export_dir) if export_dir else _root / "export" / "crosspost"
+    dest = base / slug
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def _put(src: Path, dst: Path) -> None:
+        if dst.exists():
+            dst.unlink()
+        try:
+            _os.link(src, dst)
+        except OSError:
+            _shutil.copy2(src, dst)
+
+    rows, skipped = [], [(e, "[ERROR] при рендере — только .ERROR.mp4") for e in errors
+                         if not (vdir / f"{e}.mp4").is_file()]
+    for clip in clips:
+        txt = clip.with_name(clip.stem + ".post.txt")          # M94: the detailed post, when arl describe wrote one
+        if not txt.is_file():
+            txt = clip.with_suffix(".txt")
+        text = txt.read_text(encoding="utf-8").strip() if txt.is_file() else ""
+        if not text:
+            skipped.append((clip.stem, f"нет подписи ({clip.stem}.txt) — crosspost не примет пост без текста"))
+            continue
+        _put(clip, dest / clip.name)
+        cover = clip.with_name(clip.stem + ".cover.jpg")
+        if cover.is_file():
+            _put(cover, dest / cover.name)
+        rows.append([f"{slug}/{clip.name}", text, "пост"])
+    buf = _io.StringIO()
+    w = _csv.writer(buf, delimiter=";", lineterminator="\n")
+    w.writerow(["файл", "текст", "тип"])
+    w.writerows(rows)
+    csv_path = base / f"{slug}{'_' + gate if gate else ''}.csv"
+    csv_path.write_text(buf.getvalue(), encoding="utf-8-sig")
+    print(f"crosspost {src_stem}{' (гейт ' + gate + ')' if gate else ''}: клипов {len(rows)} → {csv_path}")
+    for rid, why in skipped:
+        print(f"  пропущен {rid}: {why}")
+    print(f"  в crosspost: «Импорт плана» → папка-источник {base.resolve()} (один раз), таблица {csv_path.name}")
+    return 0 if rows or not (clips or errors) else 2
+
+
+def _gate_verdicts(root: Path, stem: str, gate: str) -> dict:
+    """M112: the owner's latest verdict per clip of one gate (reviews/verdicts.jsonl, arl review-apply writes it):
+    {rid: "ok" | "drop" | "fix" | "edit"}; a later row on the same clip wins."""
+    import json as _json
+    path = root / "reviews" / "verdicts.jsonl"
+    out: dict = {}
+    if not path.is_file():
+        return out
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        try:
+            r = _json.loads(ln)
+        except ValueError:
+            continue
+        if r.get("stem") == stem and (r.get("gate") or "") == gate and r.get("rid"):
+            out[str(r["rid"])] = str(r.get("verdict") or "")
+    return out
+
+
+def cmd_export(target: str, *, root=None, gate: str | None = None, decisions: str | None = None,
+               out_dir: str | None = None, export_dir: str | None = None, cache_dir=None) -> int:
+    """M112 (owner: «одна команда от видео до публикации»; invariant 6 — the clips leave only after the owner's
+    approval): phase 2 of `arl auto`. --decisions <the file the review sheet downloads> first records the verdicts
+    (arl review-apply); then only the gate's clips marked «оставить» go to the crosspost plan (arl crosspost
+    --reels …: video, cover, the post of arl describe). No approved clip = nothing exported. Never publishes —
+    crosspost imports the plan."""
+    _root = Path(root) if root else _project_root()
+    mpath = _resolve_manifest_arg(target, _root)
+    if mpath is None:
+        print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    if decisions:
+        from autoreels.cloud.label import parse_decisions
+        dp = Path(decisions).expanduser()
+        if not dp.is_file():
+            print(f"ошибка: файла решений нет: {decisions}", file=sys.stderr)
+            return 1
+        head, _d, _e = parse_decisions(dp.read_text(encoding="utf-8"))
+        if head.get("stem") and head["stem"] != mpath.stem:
+            print(f"ошибка: решения для «{head['stem']}», а не для «{mpath.stem}»", file=sys.stderr)
+            return 1
+        if gate and head.get("gate") and head["gate"] != gate:
+            print(f"ошибка: решения для гейта «{head['gate']}», а не «{gate}»", file=sys.stderr)
+            return 1
+        gate = gate or head.get("gate") or None
+        rc = cmd_review_apply(str(dp), root=_root, cache_dir=cache_dir)
+        if rc:
+            print("ошибка: решения не записаны — выгрузки нет", file=sys.stderr)
+            return rc
+    gate = gate or "auto"
+    verdicts = _gate_verdicts(_root, mpath.stem, gate)
+    ok = sorted(r for r, v in verdicts.items() if v == "ok")
+    tally = {v: sum(1 for x in verdicts.values() if x == v) for v in ("ok", "drop", "fix", "edit")}
+    print(f"export {mpath.stem} (гейт {gate}): оценки — оставить {tally['ok']}, убрать {tally['drop']}, "
+          f"переделать {tally['fix']}, правка {tally['edit']}", flush=True)
+    if not ok:
+        print("ошибка: одобренных клипов нет — сначала оценки на листе ревью (кнопка «скачать решения»), "
+              "потом arl export … --decisions <файл>", file=sys.stderr)
+        return 1
+    return cmd_crosspost(str(mpath), root=_root, gate=gate, reels=",".join(ok), out_dir=out_dir,
+                         export_dir=export_dir)
+
+
+def _card_extras(reel, vdir: Path) -> dict:
+    """M95: what the owner judges besides the video, on the same card — the cover, the post text crosspost gets,
+    the cold open's words and the k: words."""
+    out: dict = {}
+    if (vdir / f"{reel.id}.cover.jpg").is_file():
+        out["cover"] = f"{reel.id}.cover.jpg"
+    for name, kind in ((f"{reel.id}.post.txt", "описание"), (f"{reel.id}.txt", "подпись рендера")):
+        if (vdir / name).is_file():
+            out["post"], out["post_kind"] = (vdir / name).read_text(encoding="utf-8").strip(), kind
+            break
+    co = getattr(reel, "cold_open", None)
+    if co is not None:
+        hook = [w.word for w in reel.subtitles if co.start <= (w.t0 + w.t1) / 2 <= co.end]
+        if hook:
+            out["hook"] = " ".join(hook)
+    kws = list(dict.fromkeys(w.word.strip(".,!?;:…—–«»\"'()").lower() for w in reel.subtitles
+                             if getattr(w, "emph", False)))
+    if kws:
+        out["keywords"] = kws
+    return out
+
+
 def cmd_review_sheet(
     target: str,
     *,
@@ -8619,7 +10035,7 @@ def cmd_review_sheet(
             text=" ".join(w.word for w in r.subtitles), warnings=list(r.warnings),
             seq=ln.seq if ln else None, line=ln.raw if ln else "", preview=ln.preview if ln else "",
             marks=list(ln.marks) if ln else [], score=r.score, montage=r.montage or "",
-            edit=edits.get(r.id), attention=attention_marks(r),
+            edit=edits.get(r.id), attention=attention_marks(r), **_card_extras(r, vdir),
         ))
     notes = []
     n_unused = len(lines) - sum(1 for v in match.values() if v is not None)
@@ -8630,7 +10046,8 @@ def cmd_review_sheet(
         notes.append(f"Ни одного клипа нет в {vdir} — сначала рендер (или укажите --gate).")
     html_text = build_sheet(stem, cards, review_ref=_rel_ref(review_path, _root),
                             manifest_ref=_rel_ref(show_path, _root),
-                            key=hashlib.sha1(review_text.encode("utf-8")).hexdigest()[:12], notes=notes)
+                            key=hashlib.sha1(review_text.encode("utf-8")).hexdigest()[:12], notes=notes,
+                            gate=gate or "")
     vdir.mkdir(parents=True, exist_ok=True)
     out = vdir / "_review.html"
     out.write_text(html_text, encoding="utf-8")
@@ -8747,7 +10164,11 @@ def cmd_review_apply(
     if not dpath.exists():
         print(f"ошибка: файла решений нет: {decisions_path}", file=sys.stderr)
         return 1
-    head, decisions, errors = parse_decisions(dpath.read_text(encoding="utf-8"))
+    _dtext = dpath.read_text(encoding="utf-8")
+    head, decisions, errors = parse_decisions(_dtext)
+    from autoreels.cloud.label import parse_montage_decisions
+    mdecisions, _merr = parse_montage_decisions(_dtext)
+    errors = list(errors) + list(_merr)
     for e in errors:
         print(f"  ошибка в решениях: {e}", file=sys.stderr)
     if errors:
@@ -8764,6 +10185,14 @@ def cmd_review_apply(
         print(f"ошибка: черновика {review_path} нет", file=sys.stderr)
         return 1
     old_text = review_path.read_text(encoding="utf-8")
+    # M82: every verdict (with its reasons) is kept for learning — reviews/verdicts.jsonl, the owner's data
+    _nrec = _record_verdicts(_root, head, decisions, mdecisions, old_text, _rel_ref(review_path, _root),
+                             date=head.get("decided") or _dt.date.today().isoformat())
+    if mdecisions:
+        _mn = {v: sum(1 for d in mdecisions if d.verdict == v) for v in ("ok", "drop", "fix")}
+        print(f"сборки: оставить {_mn['ok']}, убрать {_mn['drop']}, переделать {_mn['fix']} "
+              f"(записаны в оценки; строки сборок в черновике не меняются)")
+    print(f"оценки: записано {_nrec} → reviews/verdicts.jsonl")
     new_text, msgs = apply_decisions(old_text, decisions, date=_dt.date.today().isoformat())
     for m in msgs:
         print(f"  {m}")
@@ -8814,6 +10243,60 @@ def cmd_review_apply(
     _q = f'"{_q}"' if " " in _q else _q
     print(f"  проверить план: arl blocks --apply {_q} --labeler auto")
     return rc
+
+
+def _record_verdicts(root: Path, head: dict, decisions, mdecisions, review_text: str, review_ref: str, *,
+                     date: str) -> int:
+    """M82: the owner's verdicts → reviews/verdicts.jsonl (one row per clip and draft; a later decision on the same
+    clip of the same draft replaces the earlier one). Each row keeps the draft line and, for a montage clip, the
+    autocut notes above it (hook, start, plate, scores) — what the formulas will learn from. Returns rows written."""
+    import json as _json
+    from autoreels.cloud.label import split_reasons
+    lines = review_text.splitlines()
+
+    def montage_block(label: str) -> tuple[str, list[str]]:
+        for i, ln in enumerate(lines):
+            if ln.startswith(label + " "):
+                notes, j = [], i - 1
+                while j >= 0 and lines[j].startswith("#   "):
+                    notes.insert(0, lines[j][4:].strip())
+                    j -= 1
+                return ln.strip(), notes
+        return "", []
+
+    def draft_line(seq: int) -> str:
+        for ln in lines:
+            t = ln.strip()
+            if t[:1].isdigit() and t.split()[0] == str(seq):
+                return t
+        return ""
+
+    rows = []
+    base = {"date": date, "stem": head.get("stem", ""), "review": review_ref, "gate": head.get("gate", "")}
+    for d in decisions:
+        reasons, note = split_reasons(d.note)
+        rows.append({**base, "rid": d.reel, "kind": "line", "ref": str(d.seq), "verdict": d.verdict,
+                     "reasons": reasons, "note": note, "line": draft_line(d.seq), "draft_notes": []})
+    for d in mdecisions:
+        line, notes = montage_block(d.label)
+        rows.append({**base, "rid": d.reel, "kind": "montage", "ref": d.label, "verdict": d.verdict,
+                     "reasons": list(d.reasons), "note": d.note, "line": line, "draft_notes": notes})
+    if not rows:
+        return 0
+    path = root / "reviews" / "verdicts.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = lambda r: (r.get("stem"), r.get("review"), r.get("gate"), r.get("kind"), r.get("ref"), r.get("line"))
+    old: list[dict] = []
+    if path.is_file():
+        for ln in path.read_text(encoding="utf-8").splitlines():
+            try:
+                old.append(_json.loads(ln))
+            except ValueError:
+                continue
+    new_keys = {key(r) for r in rows}
+    kept = [r for r in old if key(r) not in new_keys]
+    path.write_text("".join(_json.dumps(r, ensure_ascii=False) + "\n" for r in kept + rows), encoding="utf-8")
+    return len(rows)
 
 
 def cmd_prepare(
@@ -8872,15 +10355,22 @@ _TX_DRAFTS = ("_auto.txt", "_auto_m56.txt", "_auto_all.txt")
 
 
 def cmd_tx_punct(target: str, *, src: str = "local", out_tag: str | None = None, root=None,
-                 cache_dir=None) -> int:
+                 cache_dir=None, by: str = "groq", llm: str = "cloud", provider=None) -> int:
     """M64c: a local transcript with Groq's sentence ends on the same words → transcripts/<stem>.<out>.
     transcript.json (default <src>-gp), ready for `arl tx-use <stem> <out>`. Prints the sentence ends
-    per 100 words before / after. The cache and the manifest are not touched."""
-    from autoreels.cloud.txcheck import _sent_ends, transfer_punctuation
+    per 100 words before / after. The cache and the manifest are not touched.
+    M113 --by llm: the ends come from a model instead (txcheck.restore_sentence_ends — the model names the words that
+    end a sentence, the code puts the marks, words and times stay) → <src>-lp; --llm local keeps it on gamebox. Groq's
+    transcript, when the cache has it, is only the yardstick: the same agreement lines as arl tx-compare."""
+    import time as _time
+    from autoreels.cloud.txcheck import _sent_ends, compare_words, restore_sentence_ends, transfer_punctuation
     _root = Path(root) if root else _project_root()
     mpath = _resolve_manifest_arg(target, _root)
     if mpath is None:
         print(f"ошибка: манифест не найден: {target}", file=sys.stderr)
+        return 1
+    if by not in ("groq", "llm"):
+        print(f"ошибка: --by groq | llm, а не «{by}»", file=sys.stderr)
         return 1
     manifest = Manifest.model_validate_json(mpath.read_text(encoding="utf-8"))
     stem = mpath.stem
@@ -8897,18 +10387,44 @@ def cmd_tx_punct(target: str, *, src: str = "local", out_tag: str | None = None,
             continue
         if t.source_sha256 == manifest.source_sha256 and t.provider == "groq":
             groq = t
-    if groq is None:
+    if groq is None and by == "groq":
         print(f"ошибка: расшифровки Groq для {stem} в кэше нет", file=sys.stderr)
         return 1
     local = Transcript.model_validate_json(sp.read_text(encoding="utf-8"))
-    words, added = transfer_punctuation(local.words, groq.words)
-    out = out_tag or f"{src}-gp"
+    if by == "groq":
+        words, added = transfer_punctuation(local.words, groq.words)
+        out = out_tag or f"{src}-gp"
+        how = "+groqpunct"
+    else:
+        r0_cfg = load_r0_config(_root / "config" / "r0.yaml")
+        if provider is None:
+            provider = _make_pool(r0_cfg, llm)
+            _pool_banner(provider)
+        t0 = _time.monotonic()
+        raws: list = []
+        words, st = restore_sentence_ends(local.words, lambda msgs: provider.complete(msgs, temperature=0.0),
+                                          chunk_words=r0_cfg.tx_check.punct_chunk_words,
+                                          log=lambda x: print(x, flush=True), raw_out=raws)
+        added = st["added"]
+        out = out_tag or f"{src}-lp"
+        import json as _json
+        (_root / "transcripts" / f"{stem}.{out}.punct_raw.json").write_text(       # the model's answers as they came
+            _json.dumps({"llm": llm, "answers": raws}, ensure_ascii=False, indent=1), encoding="utf-8")
+        how = f"+llmpunct-{llm}"
+        print(f"  точки моделью ({llm}): кусков {st['chunks']}, без ответа {st['missing']}, добавлено {added} "
+              f"(вопросов {st['question']}, восклицаний {st['exclaim']}) за {_time.monotonic() - t0:.0f} с", flush=True)
     res = local.model_copy(update={"words": words, "provider": local.provider or "whispercpp",
-                                   "model": (local.model or src) + "+groqpunct", "source_sha256": manifest.source_sha256})
+                                   "model": (local.model or src) + how, "source_sha256": manifest.source_sha256})
     op = _root / "transcripts" / f"{stem}.{out}.transcript.json"
     op.write_text(res.model_dump_json(), encoding="utf-8")
-    print(f"{stem}: точки Groq → {src}: добавлено {added}; концы предложения на 100 слов: "
-          f"{src} {_sent_ends(local.words)} → {out} {_sent_ends(words)} (Groq {_sent_ends(groq.words)})")
+    ref = f" (Groq {_sent_ends(groq.words)})" if groq is not None else ""
+    print(f"{stem}: точки {'Groq' if by == 'groq' else 'модели'} → {src}: добавлено {added}; концы предложения на 100 слов: "
+          f"{src} {_sent_ends(local.words)} → {out} {_sent_ends(words)}{ref}")
+    if groq is not None and by == "llm":
+        for name, ws in ((src, local.words), (out, words)):
+            sa = compare_words(groq.words, ws)["sent_agree"]
+            print(f"   {name}: концы Groq на совпавших словах {sa['ref']}, там же {sa['both']} ({sa['recall']}%); "
+                  f"своих {sa['other']}, из них у Groq тоже {sa['precision']}%")
     print(f"  → {op.name} · перевести источник: arl tx-use \"{stem}\" {out}")
     return 0
 
@@ -9011,6 +10527,29 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
     base = label_draft.read_text(encoding="utf-8").rstrip("\n") if label_draft.is_file() else ""
     auto = auto_draft.read_text(encoding="utf-8") if auto_draft.is_file() else ""
     body = auto.split("\n\n", 1)[1] if "\n\n" in auto else ""
+    if base:
+        # M176 (m175: «montage M1: label used twice» — the label draft has montage lines of its own): the autocut lines
+        # are numbered after the label draft's, so every montage label of the combined draft is one of a kind
+        from autoreels.cloud.montage import _LINE_RE
+        _n = 0
+        _used: set = set()
+        for ln in base.splitlines():
+            mm = _LINE_RE.match(ln.strip())
+            if mm:
+                _n += 1
+                _used.add(int(mm.group(1) or _n))
+        if _used:
+            _off = max(_used)
+            _k = 0
+
+            def _renum(ln: str) -> str:
+                nonlocal _k
+                mm = _LINE_RE.match(ln.strip()) if ln.startswith("M") else None
+                if not mm:
+                    return ln
+                _k += 1
+                return f"M{_off + int(mm.group(1) or _k)} " + ln.strip()[len("M" + (mm.group(1) or "")):].lstrip()
+            body = "\n".join(_renum(ln) for ln in body.split("\n"))
     if not base:                                   # no label draft: the autocut draft as it is
         out.write_text(auto, encoding="utf-8")
     else:
@@ -9020,22 +10559,58 @@ def _merge_drafts(label_draft: Path, auto_draft: Path, out: Path) -> int:
 
 def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, cache_dir: str | None = None,
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
-             encoder: str | None = None, music: str | None = None, tx: str | None = None) -> int:
+             encoder: str | None = None, music: str | None = None, tx: str | None = None,
+             mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
+             today=None, remote: bool = False, interviewer: str | None = None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
     1. arl prepare: speech map → alignment → intonation → motion → label draft → dry plan;
     2. arl tx-check (report → transcripts/<stem>.txcheck.json);
     3. arl map (LLM; an existing map is kept);
-    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply);
+    4. arl autocut → reviews/<stem>_auto_m56.txt (every line checked by --apply). M153: who writes the reels —
+       r0.yaml autocut.auto_mode (scenario = the scenarist, paid model autocut.scenario_llm; autocut = the free
+       montage), --mode / --scenario-llm per run; a scenarist that cannot answer falls back to the free autocut.
+       M157: until autocut.paid_until, --llm auto (map, judges, posts) becomes autocut.paid_llm; after it arl auto
+       is free (the scenarist only with --mode scenario). --tag: the run's drafts and review.json under their own
+       names (<stem>_auto_<tag>.txt, <stem>_auto_all_<tag>.txt, <stem>_<tag>.review.json) — an earlier sheet's
+       drafts, which its decisions file names, stay as they were;
     5. one draft reviews/<stem>_auto_all.txt (label lines + montage lines) → --apply (never --install);
        if it fails, the autocut draft alone (its lines passed the checks);
-    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music) and the review sheet.
+    6. render into reels-out/<stem>/_gate/<gate>/ (+ --music), M112: the posts (arl describe, post.auto) and the
+       review sheet. Phase 2 after the owner's verdicts: arl export (only the approved clips → crosspost plan).
     Finished stages skip themselves; a failed stage stops that source with its reason, the next goes on."""
     _root = Path(root) if root else _project_root()
     if tx:                                             # M64: transcription backend of a new video's arl run
         os.environ["TRANSCRIBE_BACKEND"] = {"local": "whispercpp"}.get(tx, tx)
     results: list[tuple[str, str, str]] = []           # (stem, "ok" | failed stage, note)
+    try:                                               # M112: posts in auto, then arl export (config/r0.yaml post.auto)
+        _post_auto = bool(load_r0_config(_root / "config" / "r0.yaml").post.auto)
+    except Exception:  # noqa: BLE001 — no config: as before
+        _post_auto = False
+    try:                                               # M153: who writes the reels (config, then --mode)
+        _ac = load_r0_config(_root / "config" / "r0.yaml").autocut
+        _mode, _scen_llm = _ac.auto_mode, _ac.scenario_llm
+        _paid_llm, _paid_until = _ac.paid_llm, _ac.paid_until
+        _spk_auto, _spk_py = bool(getattr(_ac, "speakers_auto", False)), getattr(_ac, "speakers_python", "")
+    except Exception:  # noqa: BLE001 — no config: the free autocut, as before
+        _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
+        _spk_auto, _spk_py = False, ""
+    import datetime as _dt                             # M157: the paid models while the promo credit lasts
+    _today = today or _dt.date.today()
+    _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
+    if _paid_llm and not _expired and llm == "auto":
+        llm = _paid_llm
+        print(f"=== auto: карта, судьи и посты — {llm}" + (f" (до {_paid_until} включительно)" if _paid_until else "")
+              + " ===", flush=True)
+    if _expired and _paid_llm and mode is None and _mode == "scenario":
+        _mode = "autocut"
+        print(f"=== auto: срок платных моделей прошёл ({_paid_until}) — автомонтаж бесплатно; сценарист: --mode scenario"
+              f" ===", flush=True)
+    _mode = mode or _mode
+    _scen_llm = scenario_llm or _scen_llm
+    print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
+          f" — переключить: --mode autocut | scenario ===", flush=True)
     for target in targets:
         tp = Path(target)
         mpath = None
@@ -9078,29 +10653,54 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         if err:
             results.append((stem, "map", err))
             continue
-        err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm))
+        if _spk_auto:                                  # M170: who speaks when — once per source, non-fatal
+            _spk_err = stage("карта говорящих", lambda: cmd_speakers(m, root=_root, python=_spk_py or None))
+            if _spk_err:
+                print(f"  ⚠ карта говорящих не построена ({_spk_err}) — дальше без неё", flush=True)
+        _scen_note = ""
+        auto_draft = _root / "reviews" / f"{stem}_auto_{tag or 'm56'}.txt"
+        _out = {"out": str(auto_draft)} if tag else {}   # M157: --tag — the run's own draft
+        if interviewer:                                  # M165: --interviewer on|off for this run
+            _out["ac_over"] = [f"interviewer={interviewer}"]
+        if _mode == "scenario":
+            err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+                                                                        llm=_scen_llm, scenario=True, **_out))
+            if err:
+                _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
+                print(f"  ⚠ {_scen_note}", flush=True)
+                err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+                                                               llm=llm, **_out))
+        else:
+            err = stage("автосборщик", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips, llm=llm,
+                                                           **_out))
         if err:
             results.append((stem, "autocut", err))
             continue
         label_draft = _root / "reviews" / f"{stem}_auto.txt"
-        auto_draft = _root / "reviews" / f"{stem}_auto_m56.txt"
-        combined = _root / "reviews" / f"{stem}_auto_all.txt"
+        combined = _root / "reviews" / (f"{stem}_auto_all_{tag}.txt" if tag else f"{stem}_auto_all.txt")
         n_m = _merge_drafts(label_draft, auto_draft, combined)
         print(f"--- черновик {combined.name}: строки разметки + сборок {n_m}", flush=True)
         used = combined
         err = stage("план (--apply без --install)",
-                    lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto"))
-        note = ""
+                    lambda: _blocks_do_apply(str(combined), root=_root, cache_dir=cache_dir, labeler="auto",
+                                             drop_refused=True))
+        note = _scen_note
         if err:
-            note = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
-            print(f"  ⚠ {note}", flush=True)
+            _fb = f"общий черновик не прошёл ({err}) — взят только черновик сборок"
+            note = (note + "; " if note else "") + _fb
+            print(f"  ⚠ {_fb}", flush=True)
             used = auto_draft
             err = stage("план по черновику сборок",
-                        lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto"))
+                        lambda: _blocks_do_apply(str(auto_draft), root=_root, cache_dir=cache_dir, labeler="auto",
+                                                 drop_refused=True))
             if err:
                 results.append((stem, "apply", err))
                 continue
         review_json = _root / "reviews" / f"{stem}.review.json"
+        if tag and review_json.is_file():              # M157: the run's own copy for render, sheet and export
+            _tagged = _root / "reviews" / f"{stem}_{tag}.review.json"
+            shutil.copyfile(review_json, _tagged)
+            review_json = _tagged
         if render:
             try:
                 n = len(Manifest.model_validate_json(review_json.read_text(encoding="utf-8")).reels)
@@ -9108,15 +10708,26 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
                 results.append((stem, "apply", f"нет {review_json.name}: {type(exc).__name__}"))
                 continue
             if n:
-                err = stage(f"рендер {n} клипов → _gate/{gate}",
-                            lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
-                                               gate_name=gate, encoder=encoder, music=music, _raise_on_failure=False))
+                if remote:                     # M161: on the remote machine, clips back into the same gate
+                    err = stage(f"рендер {n} клипов на удалённой машине → _gate/{gate}",
+                                lambda: cmd_render_remote(str(review_json), root=_root, reels_filter=f"1-{n}",
+                                                          gate_name=gate, music=music))
+                else:
+                    err = stage(f"рендер {n} клипов → _gate/{gate}",
+                                lambda: cmd_render(root=_root, manifest_name=str(review_json), reels_filter=f"1-{n}",
+                                                   gate_name=gate, encoder=encoder, music=music,
+                                                   _raise_on_failure=False))
                 if err:
                     results.append((stem, "render", err))
                     continue
+                if _post_auto and llm != "none":     # M112: the post of every clip, on its card and for crosspost
+                    stage("описания постов", lambda: cmd_describe(m, root=_root, gate=gate, llm=llm))
                 stage("лист ревью", lambda: cmd_review_sheet(stem, root=_root, cache_dir=cache_dir, review=str(used),
                                                              manifest_file=str(review_json), gate=gate,
                                                              preview="none"))
+                if _post_auto:
+                    note = (note + "; " if note else "") + (f"после листа: arl export {stem} --gate {gate} "
+                                                            f"--decisions <файл решений>")
         results.append((stem, "ok", note or f"черновик {used.name}"))
     print("\n=== auto: итог ===", flush=True)
     for stem, st, note in results:
@@ -11186,6 +12797,12 @@ def _build_parser():
     pd.add_argument("--gate", default=None, dest="gate",
                     help="название гейт-прогона; вывод идёт в reels-out/<источник>/_gate/<имя>/, "
                          "никогда не перезаписывает реальные клипы")
+    pd.add_argument("--remote", action="store_true",
+                    help="M161: рендер на машине из render.yaml remote: (gamebox, видеокарта, H.264) и клипы обратно; "
+                         "нужны --manifest и --gate")
+    pd.add_argument("--transition", choices=["cut", "punch"], default=None,
+                    help="переход на крупный план внутри окна: cut — склейка, punch — быстрый наезд "
+                         "(переопределяет render.yaml shot_transition; M103)")
 
     ppv = sub.add_parser(
         "preview",
@@ -11543,7 +13160,7 @@ def _build_parser():
     pmp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     pmp.add_argument("--root", default=None)
     pmp.add_argument("--cache-dir", default=None, dest="cache_dir")
-    pmp.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default="auto",
+    pmp.add_argument("--llm", choices=_LLM_MODES + ("none",), default="auto",
                      help="модель паспортов и тем: auto (облако, локальная в запасе) | local | cloud | none")
     pmp.add_argument("--force", action="store_true", help="пересчитать карту (иначе только страница)")
 
@@ -11553,7 +13170,11 @@ def _build_parser():
     )
     ptp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     ptp.add_argument("--src", default="local", help="какая локальная расшифровка: local | local-<tag>")
-    ptp.add_argument("--out-tag", default=None, dest="out_tag", help="имя результата (по умолчанию <src>-gp)")
+    ptp.add_argument("--out-tag", default=None, dest="out_tag", help="имя результата (по умолчанию <src>-gp / <src>-lp)")
+    ptp.add_argument("--by", choices=("groq", "llm"), default="groq",
+                     help="M113: откуда точки — groq (перенос с расшифровки Groq) | llm (модель расставляет концы предложений)")
+    ptp.add_argument("--llm", choices=_LLM_MODES, default="cloud",
+                     help="M113: модель для --by llm: cloud | local (gamebox, общий замок) | auto")
     ptp.add_argument("--root", default=None)
     ptp.add_argument("--cache-dir", default=None, dest="cache_dir")
 
@@ -11572,15 +13193,38 @@ def _build_parser():
     )
     pau.add_argument("targets", metavar="видео_или_манифест", nargs="+",
                      help="видеофайл (сначала arl run) или манифест/имя в manifests/")
-    pau.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default="auto", help="модель карты")
+    pau.add_argument("--llm", choices=_LLM_MODES + ("none",), default="auto", help="модель карты")
     pau.add_argument("--clips", type=int, default=None, help="сколько сборок предложить")
     pau.add_argument("--no-render", action="store_false", dest="render", help="без рендера и листа")
     pau.add_argument("--gate", default="auto", help="папка рендера reels-out/<stem>/_gate/<имя>/")
     pau.add_argument("--encoder", default=None)
     pau.add_argument("--music", default=None, help="фоновая музыка (файл в music/)")
     pau.add_argument("--tx", default=None, help="M64: расшифровка нового видео: groq | local (whisper.cpp на gamebox)")
+    pau.add_argument("--mode", choices=["autocut", "scenario"], default=None,
+                     help="M153: кто пишет ролики — scenario (сценарист, платно) | autocut (автомонтаж, бесплатно); "
+                          "по умолчанию r0.yaml autocut.auto_mode")
+    pau.add_argument("--interviewer", choices=["on", "off"], default=None,
+                     help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
+                          "по умолчанию r0.yaml autocut.interviewer")
+    pau.add_argument("--remote", action="store_true",
+                     help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
+    pau.add_argument("--tag", default=None,
+                     help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
+                          "черновики прежнего листа и его файл решений не трогаются")
+    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
+                     help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
     pau.add_argument("--root", default=None)
     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    pjb = sub.add_parser(
+        "judge-bench",
+        help="M116: суждения прогона autocut (--judge-log) заново другой моделью — сравнение моделей",
+    )
+    pjb.add_argument("log", metavar="журнал", help="файл arl autocut --judge-log")
+    pjb.add_argument("--llm", choices=_LLM_MODES, default="cloud")
+    pjb.add_argument("--out", default=None, help="куда писать ответы (по умолчанию <журнал>.<llm>.jsonl)")
+    pjb.add_argument("--limit", type=int, default=None, help="только первые N запросов")
+    pjb.add_argument("--root", default=None)
 
     pxc = sub.add_parser(
         "tx-compare",
@@ -11591,8 +13235,33 @@ def _build_parser():
     pxc.add_argument("--force", action="store_true", help="расшифровать заново, даже если файл уже есть")
     pxc.add_argument("--prompt", default=None, help="M64: подсказка стиля пунктуации для whisper.cpp (иначе из конфига)")
     pxc.add_argument("--tag", default="", help="M64: имя варианта → transcripts/<stem>.local-<tag>.transcript.json")
+    pxc.add_argument("--groq-prompt", default=None, dest="groq_prompt", metavar="текст",
+                     help="M116: вариант Groq с этим initial_prompt (\"\" — без подсказки) → transcripts/<stem>.groq-<tag>; нужен --tag")
+    pxc.add_argument("--groq-dual", action="store_true", dest="groq_dual",
+                     help="M124: вариант Groq в два прохода (слова без подсказки, концы с подсказкой) → transcripts/<stem>.groq-<tag>")
+    pxc.add_argument("--wc", action="append", default=None, metavar="ключ=значение",
+                     help="M111: параметр whisper.cpp для варианта (поле whispercpp в transcribe.yaml), можно несколько: "
+                          "--wc model='$W/ggml-large-v3.bin' --wc vad_model= --wc max_context=-1; нужен --tag")
     pxc.add_argument("--root", default=None)
     pxc.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    pdi = sub.add_parser(
+        "dictate",
+        help="M109: аудио с диктофона → текст: whisper.cpp на gamebox (без файла — спросит путь)",
+    )
+    pdi.add_argument("files", metavar="аудио", nargs="*", help="файлы (без них — спросит; можно перетащить в терминал)")
+    pdi.add_argument("--groq", action="store_true", help="сразу через Groq, не через gamebox")
+    pdi.add_argument("--format", choices=["text", "srt", "vtt", "json"], default="text", dest="fmt")
+    pdi.add_argument("--no-copy", action="store_false", dest="copy", help="не копировать текст в буфер обмена")
+    pdi.add_argument("--root", default=None)
+    pdi.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    pgb = sub.add_parser(
+        "gamebox",
+        help="M108: общий замок тяжёлых задач gamebox — статус (по умолчанию) или take (проверка)",
+    )
+    pgb.add_argument("action", nargs="?", choices=["status", "take"], default="status")
+    pgb.add_argument("--root", default=None)
 
     pac = sub.add_parser(
         "autocut",
@@ -11601,12 +13270,27 @@ def _build_parser():
     pac.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
     pac.add_argument("--clips", type=int, default=None, help="сколько сборок предложить (по умолчанию из r0.yaml)")
     pac.add_argument("--out", default=None, help="файл черновика (по умолчанию reviews/<stem>_auto_m56.txt)")
-    pac.add_argument("--llm", choices=("auto", "local", "cloud", "none"), default=None,
+    pac.add_argument("--llm", choices=_LLM_MODES + ("none",), default=None,
                      help="M65: модель выбирает крючок из кандидатов кода (по умолчанию autocut.hook_llm)")
+    pac.add_argument("--judge-log", default=None, dest="judge_log",
+                     help="M116: каждое суждение модели (начало, крючок) — строкой JSON в этот файл (для arl judge-bench)")
+    pac.add_argument("--no-voice-keys", action="store_false", dest="voice_keys",
+                     help="M116: без подсказок голоса для k: (сравнение с подсказками)")
     pac.add_argument("--no-check", action="store_false", dest="check",
                      help="не прогонять каждое предложение через проверки --apply (M60)")
+    pac.add_argument("--scenario", action="store_true",
+                     help="M123: ролики пишет сценарист (модель читает весь текст; --llm sonnet|haiku), код проверяет")
+    pac.add_argument("--ac", action="append", default=None, dest="ac_over", metavar="ключ=значение",
+                     help="M119: поле autocut из config/r0.yaml на этот запуск (можно несколько раз; список — через запятую)")
     pac.add_argument("--root", default=None)
     pac.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    psp = sub.add_parser("speakers", help="M165: карта говорящих источника (pyannote) → transcripts/<stem>.speakers.json")
+    psp.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    psp.add_argument("--from", dest="from_json", default=None, help="готовое разделение голосов (JSON с turns)")
+    psp.add_argument("--python", default=None, help="Python окружения с pyannote.audio (иначе env SPEAKERS_PYTHON)")
+    psp.add_argument("--force", action="store_true")
+    psp.add_argument("--root", default=None)
 
     ptc = sub.add_parser(
         "tx-check",
@@ -11645,6 +13329,65 @@ def _build_parser():
     prs.add_argument("--preview", choices=("audio", "video", "none"), default="audio",
                      help="M52: файл предпросмотра для правки по тексту — звук (по умолчанию), "
                           "видео 480 px со звуком или без файла")
+
+    pcx = sub.add_parser(
+        "crosspost",
+        help="выгрузка отрендеренных клипов в план crosspost (папка видео + таблица «файл;текст;тип»)",
+        description="M90: export/crosspost/<source>/<rid>.mp4 (+ cover) and export/crosspost/<source>.csv for "
+                    "crosspost «Импорт плана» (media folder = export/crosspost). Text = <rid>.txt from the render.",
+    )
+    pcx.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pcx.add_argument("--root", default=None, help="корень проекта")
+    pcx.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
+    pcx.add_argument("--reels", default=None, help="только эти клипы: r01,r03")
+    pcx.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    pcx.add_argument("--export-dir", default=None, dest="export_dir",
+                     help="куда выгружать (по умолчанию export/crosspost)")
+
+    pex = sub.add_parser(
+        "export",
+        help="M112: одобренные на листе клипы гейта → план crosspost (вторая фаза arl auto)",
+        description="M112: --decisions <файл с листа ревью> записывает оценки (arl review-apply), затем в план crosspost "
+                    "идут только клипы с оценкой «оставить». Ничего не публикует.",
+    )
+    pex.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pex.add_argument("--gate", default=None, help="гейт (по умолчанию из файла решений, иначе auto)")
+    pex.add_argument("--decisions", default=None, help="файл решений, скачанный с листа ревью")
+    pex.add_argument("--root", default=None, help="корень проекта")
+    pex.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    pex.add_argument("--export-dir", default=None, dest="export_dir",
+                     help="куда выгружать (по умолчанию export/crosspost)")
+    pex.add_argument("--cache-dir", default=None, dest="cache_dir")
+
+    par = sub.add_parser(
+        "article",
+        help="лонгриды по темам карты источника → export/articles/ и план crosspost (статьи для Telegraph)",
+        description="M100: one article per largest topic of transcripts/<stem>.map.json: a plan, then each section "
+                    "from its thoughts' words (checked to stay in the talk) → export/articles/<source>/NN.md and "
+                    "export/crosspost/<source>_articles.csv (тип «статья»).",
+    )
+    par.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    par.add_argument("--root", default=None, help="корень проекта")
+    par.add_argument("--topics", type=int, default=None, help="сколько тем (по умолчанию article.topics)")
+    par.add_argument("--llm", choices=_LLM_MODES, default="auto",
+                     help="кто пишет: auto — облако, локальная в запасе")
+    par.add_argument("--export-dir", default=None, dest="export_dir", help="куда (по умолчанию export/)")
+
+    pds = sub.add_parser(
+        "describe",
+        help="подробное описание клипов для постинга (модель, слова ролика) → <клип>.post.txt",
+        description="M94: the model writes a 3–5 sentence post and hashtags from each rendered clip's text "
+                    "(<rid>.transcript.txt), checked to stay in the reel's words → <rid>.post.txt; arl crosspost "
+                    "takes it instead of <rid>.txt.",
+    )
+    pds.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    pds.add_argument("--root", default=None, help="корень проекта")
+    pds.add_argument("--gate", default=None, help="клипы из reels-out/<stem>/_gate/<имя>/")
+    pds.add_argument("--reels", default=None, help="только эти клипы: r01,r03")
+    pds.add_argument("--out-dir", default=None, dest="out_dir", help="папка рендера (по умолчанию reels-out)")
+    pds.add_argument("--llm", choices=_LLM_MODES, default="auto",
+                     help="кто пишет: auto — облако, локальная в запасе (как arl map)")
+    pds.add_argument("--force", action="store_true", default=False, help="переписать готовые .post.txt")
 
     pra = sub.add_parser(
         "review-apply",
@@ -11897,13 +13640,19 @@ def main(argv=None) -> int:
                     src = _validate_media(Path(args.source), exts=_MEDIA_EXTS)
                 cmd_transcribe(src, fmt=args.format, ffmpeg=ffmpeg)
         elif args.cmd == "render":
+            if getattr(args, "remote", False):                    # M161
+                if not args.manifest_name:
+                    print("ошибка: --remote нужен с --manifest", file=sys.stderr)
+                    return 2
+                return cmd_render_remote(args.manifest_name, reels_filter=args.reels_filter, gate_name=args.gate,
+                                         music=args.music)
             zoom_flag = {"on": True, "off": False}.get(args.zoom)   # None = из конфига
             cmd_render(encoder=args.encoder, ffmpeg=args.ffmpeg, profile=args.profile,
                        palette=args.palette, zoom=zoom_flag, music=args.music,
                        fallback=not args.no_fallback, allow_stale=args.allow_stale,
                        auto_recrop=not args.no_auto_recrop,
                        reels_filter=args.reels_filter, manifest_name=args.manifest_name,
-                       gate_name=args.gate)
+                       gate_name=args.gate, transition=getattr(args, "transition", None))
         elif args.cmd == "preview":
             pals = [p.strip() for p in args.palettes.split(",") if p.strip()] if args.palettes else None
             return cmd_preview(args.manifest, palettes=pals, seconds=args.seconds,
@@ -11994,21 +13743,37 @@ def main(argv=None) -> int:
         elif args.cmd == "auto":
             return cmd_auto(args.targets, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
                             llm=args.llm, clips=args.clips, render=args.render, gate=args.gate,
-                            encoder=args.encoder, music=args.music, tx=args.tx)
+                            encoder=args.encoder, music=args.music, tx=args.tx,
+                            mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
+                            tag=getattr(args, "tag", None), remote=getattr(args, "remote", False),
+                            interviewer=getattr(args, "interviewer", None))
+        elif args.cmd == "dictate":
+            return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                               cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+        elif args.cmd == "gamebox":
+            return cmd_gamebox(args.action, root=getattr(args, "root", None))
+        elif args.cmd == "judge-bench":
+            return cmd_judge_bench(args.log, llm=args.llm, root=getattr(args, "root", None), out=args.out,
+                                   limit=args.limit)
         elif args.cmd == "tx-compare":
             return cmd_tx_compare(args.manifest, root=getattr(args, "root", None),
                                   cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources,
-                                  force=args.force, prompt=args.prompt, tag=args.tag)
+                                  force=args.force, prompt=args.prompt, tag=args.tag, wc=args.wc,
+                                  groq_prompt=args.groq_prompt, groq_dual=args.groq_dual)
         elif args.cmd == "tx-punct":
             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
-                                cache_dir=getattr(args, "cache_dir", None))
+                                cache_dir=getattr(args, "cache_dir", None), by=args.by, llm=args.llm)
         elif args.cmd == "tx-use":
             return cmd_tx_use(args.manifest, args.which, root=getattr(args, "root", None),
                               cache_dir=getattr(args, "cache_dir", None))
         elif args.cmd == "autocut":
             return cmd_autocut(args.manifest, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), clips=args.clips, out=args.out,
-                               check=args.check, llm=args.llm)
+                               check=args.check, llm=args.llm, judge_log=args.judge_log, voice_keys=args.voice_keys,
+                               ac_over=args.ac_over, scenario=args.scenario)
+        elif args.cmd == "speakers":
+            return cmd_speakers(args.manifest, root=getattr(args, "root", None), from_json=args.from_json,
+                                python=args.python, force=args.force)
         elif args.cmd == "tx-check":
             return cmd_tx_check(args.manifest, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), all_sources=args.all_sources)
@@ -12027,6 +13792,21 @@ def main(argv=None) -> int:
                 out_dir=getattr(args, "out_dir", None),
                 preview=getattr(args, "preview", "audio"),
             )
+        elif args.cmd == "article":
+            return cmd_article(args.manifest, root=getattr(args, "root", None), topics=getattr(args, "topics", None),
+                               llm=getattr(args, "llm", "auto"), export_dir=getattr(args, "export_dir", None))
+        elif args.cmd == "describe":
+            return cmd_describe(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
+                                reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),
+                                llm=getattr(args, "llm", "auto"), force=getattr(args, "force", False))
+        elif args.cmd == "crosspost":
+            return cmd_crosspost(args.manifest, root=getattr(args, "root", None), gate=getattr(args, "gate", None),
+                                 reels=getattr(args, "reels", None), out_dir=getattr(args, "out_dir", None),
+                                 export_dir=getattr(args, "export_dir", None))
+        elif args.cmd == "export":
+            return cmd_export(args.manifest, root=getattr(args, "root", None), gate=args.gate,
+                              decisions=args.decisions, out_dir=getattr(args, "out_dir", None),
+                              export_dir=getattr(args, "export_dir", None), cache_dir=getattr(args, "cache_dir", None))
         elif args.cmd == "review-apply":
             return cmd_review_apply(
                 args.decisions,

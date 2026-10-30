@@ -14,6 +14,9 @@ lecture needs to know the whole lecture. The map, built once per source:
    without what came before?), refers (the earlier unit it leans on — the «сноска») and a short
    summary. Every unit gets an answer or is retried once, then marked missing (invariant 11).
 4. TOPICS (LLM, one request over all summaries): 5–15 themes of the source, each unit in one.
+   M84 (`map.topic_chunk`): a long source is asked in parts of consecutive units (each answered or
+   retried once), then one more request merges the same theme found in several parts; a part left
+   without an answer is marked (topic −1 «без ответа», the map is incomplete).
 5. SIMILAR (deterministic): character n-gram TF-IDF cosine of unit texts; for every unit the most
    similar units far away in time — pieces of one thought said in different places.
 
@@ -308,42 +311,134 @@ def describe_units(units: Sequence[Unit], provider, *, system: str, p: MapParams
     return len(units) - n_missing, n_missing
 
 
-def topic_units(units: Sequence[Unit], provider, *, system: str,
-                log: Callable[[str], None] = print) -> list[dict]:
-    """5–15 topics of the source from the unit summaries; unit.info["topic"] = topic id (0 = other).
-    Units the answer leaves out go to topic 0; an id in two topics stays in the first."""
+def _ask_topics(units: Sequence[Unit], provider, system: str, header: str, log: Callable[[str], None],
+                tries: int = 1) -> list[tuple[str, list[int]]] | None:
+    """One TOPICS request over the units' summaries → [(name, member ids)] (ids of these units only, an id
+    in two topics stays in the first); None when no try gave a usable answer."""
     rows = [f"#{u.id} [{_mmss(u.t0)}] {u.info.get('summary') or u.text[:120]}" for u in units]
-    msgs = [{"role": "system", "content": system},
-            {"role": "user", "content": "TOPICS of the whole source. Units:\n" + "\n".join(rows)}]
-    try:
-        obj = _parse_json(provider.complete(msgs, temperature=0.0)) or {}
-    except Exception as exc:  # noqa: BLE001
-        log(f"  темы: нет ответа ({type(exc).__name__}: {exc})")
-        obj = {}
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": header + "\n".join(rows)}]
     ids = {u.id for u in units}
+    for _ in range(tries):
+        try:
+            obj = _parse_json(provider.complete(msgs, temperature=0.0)) or {}
+        except Exception as exc:  # noqa: BLE001
+            log(f"  темы: нет ответа ({type(exc).__name__}: {exc})")
+            obj = {}
+        groups: list[tuple[str, list[int]]] = []
+        seen: set[int] = set()
+        for t in obj.get("topics") or []:
+            if not isinstance(t, dict) or not str(t.get("name") or "").strip():
+                continue
+            members = []
+            for x in t.get("units") or []:
+                try:
+                    uid = int(str(x).lstrip("#"))
+                except ValueError:
+                    continue
+                if uid in ids and uid not in seen:
+                    members.append(uid)
+                    seen.add(uid)
+            if members:
+                groups.append((str(t["name"]).strip()[:60], members))
+        if groups:
+            return groups
+    return None
+
+
+MERGE_TOPICS = (
+    "MERGE TOPICS. These topics were found separately in consecutive parts of one talk (T = a topic of one "
+    "part). The same theme found in several parts becomes one topic; different themes stay apart. Aim for "
+    "5–15 topics in the end. Every T goes to exactly one topic. Topic names in Russian, 2–5 words. Answer only "
+    "with JSON: {\"topics\": [{\"name\": \"…\", \"parts\": [\"T1\", \"T4\"]}]}\nTopics:\n"
+)
+
+
+def _merge_topics(found: list[tuple[int, str, list[int]]], by_id: dict, provider, system: str,
+                  log: Callable[[str], None]) -> list[tuple[str, list[int]]]:
+    """M84: the model groups the topics of the parts (each T in one group, retried once); a T it leaves out
+    stays a topic of its own; no answer = the parts' topics stay apart."""
+    rows = []
+    for i, (k, name, mem) in enumerate(found, 1):
+        ex = "; ".join(str(by_id[x].info.get("summary") or by_id[x].text)[:80] for x in mem[:3] if x in by_id)
+        rows.append(f"T{i} [part {k}] {name}: {ex}")
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": MERGE_TOPICS + "\n".join(rows)}]
+    for _ in range(2):
+        try:
+            obj = _parse_json(provider.complete(msgs, temperature=0.0)) or {}
+        except Exception as exc:  # noqa: BLE001
+            log(f"  темы: слияние — нет ответа ({type(exc).__name__}: {exc})")
+            obj = {}
+        out: list[tuple[str, list[int]]] = []
+        used: set[int] = set()
+        for t in obj.get("topics") or []:
+            if not isinstance(t, dict) or not str(t.get("name") or "").strip():
+                continue
+            idx = []
+            for x in t.get("parts") or []:
+                try:
+                    j = int(str(x).strip().lstrip("Tt#"))
+                except ValueError:
+                    continue
+                if 1 <= j <= len(found) and j not in used:
+                    idx.append(j)
+                    used.add(j)
+            if idx:
+                out.append((str(t["name"]).strip()[:60], sorted(x for j in idx for x in found[j - 1][2])))
+        if out:
+            out += [(found[j - 1][1], found[j - 1][2]) for j in range(1, len(found) + 1) if j not in used]
+            log(f"  темы: слияние — {len(out)} тем из {len(found)}")
+            return out
+    log(f"  темы: слияние не получено — {len(found)} тем частей остаются раздельными")
+    return [(name, mem) for _, name, mem in found]
+
+
+def topic_units(units: Sequence[Unit], provider, *, system: str,
+                log: Callable[[str], None] = print, chunk: int = 0) -> list[dict]:
+    """5–15 topics of the source from the unit summaries; unit.info["topic"] = topic id (0 = other).
+    Units the answer leaves out go to topic 0; an id in two topics stays in the first. M84: more than
+    `chunk` units (chunk > 0) — asked in parts of consecutive units, each retried once, then merged; the
+    units of a part with no answer go to topic −1 «без ответа» (missing: the map is incomplete)."""
+    missing: list[int] = []
+    if chunk <= 0 or len(units) <= chunk:
+        groups = _ask_topics(units, provider, system, "TOPICS of the whole source. Units:\n", log) or []
+    else:
+        n = math.ceil(len(units) / chunk)
+        size = math.ceil(len(units) / n)
+        parts = [list(units[i:i + size]) for i in range(0, len(units), size)]
+        found: list[tuple[int, str, list[int]]] = []
+        for k, part in enumerate(parts, 1):
+            hdr = (f"TOPICS of part {k} of {len(parts)} of the source (consecutive units, "
+                   f"{_mmss(part[0].t0)}–{_mmss(part[-1].t1)}). Group this part into 2–8 topics. Units:\n")
+            g = _ask_topics(part, provider, system, hdr, log, tries=2)
+            if g is None:
+                log(f"  темы: часть {k} из {len(parts)} — нет ответа после повтора ({len(part)} мыслей)")
+                missing += [u.id for u in part]
+            else:
+                found += [(k, name, mem) for name, mem in g]
+        log(f"  темы по частям: {len(parts)} по ~{size} мыслей, найдено {len(found)} тем")
+        if len({k for k, _, _ in found}) > 1:
+            groups = _merge_topics(found, {u.id: u for u in units}, provider, system, log)
+        else:
+            groups = [(name, mem) for _, name, mem in found]
     topics: list[dict] = []
     seen: set[int] = set()
-    for t in obj.get("topics") or []:
-        if not isinstance(t, dict) or not str(t.get("name") or "").strip():
-            continue
-        members = []
-        for x in t.get("units") or []:
-            try:
-                uid = int(str(x).lstrip("#"))
-            except ValueError:
-                continue
-            if uid in ids and uid not in seen:
-                members.append(uid)
-                seen.add(uid)
-        if members:
-            topics.append({"id": len(topics) + 1, "name": str(t["name"]).strip()[:60], "units": members})
+    for name, mem in groups:
+        mem = [x for x in mem if x not in seen]
+        seen.update(mem)
+        if mem:
+            topics.append({"id": len(topics) + 1, "name": name, "units": mem})
+    miss = [x for x in missing if x not in seen] if topics else []     # nothing found at all = «темы не получены»
+    seen.update(miss)
     rest = [u.id for u in units if u.id not in seen]
+    if miss:
+        topics.append({"id": -1, "name": "без ответа", "units": miss, "missing": True})
     if rest:
         topics.append({"id": 0, "name": "прочее", "units": rest})
     tid = {uid: t["id"] for t in topics for uid in t["units"]}
     for u in units:
         u.info["topic"] = tid.get(u.id, 0)
-    log(f"  темы: {sum(1 for t in topics if t['id'])}, без темы {len(rest)} мыслей")
+    log(f"  темы: {sum(1 for t in topics if t['id'] > 0)}, без темы {len(rest)} мыслей"
+        + (f", без ответа {len(miss)}" if miss else ""))
     return topics
 
 

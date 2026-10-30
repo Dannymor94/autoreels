@@ -12,6 +12,8 @@ encoder:
   # перекодируют → выбирать явно --profile hevc. Профиль — env-параметр (RENDER_PROFILE) или флаг
   # --profile. Кодеки — AMF (системник Windows AMD); Mac-дев без AMF переопределяет кодек через
   # RENDER_ENCODER (h264_videotoolbox/libx264), битрейт профиля остаётся.
+  # M156: Linux с AMD/Intel GPU (gamebox, RX 580) — --encoder hevc_vaapi | h264_vaapi (VAAPI через Mesa); устройство
+  # /dev/dri/renderD128, другое — env RENDER_VAAPI_DEVICE. Не прошёл пробный кадр — рендер берёт запасной кодер.
   profile: h264               # DELIVERY-дефолт: H.264 High — универсально совместим, web-плееры
                               #   (включая Yandex Disk) не перекодируют его, звук не теряется.
                               #   HEVC компактнее, но web-плееры его перекодируют → выбирать явно
@@ -70,6 +72,9 @@ audio_processing:
   loudnorm_enabled: true
   target_lufs: -14.0
   true_peak: -1.5             # потолок истинного пика, дБ
+  # M147 (m143: one-pass loudnorm settles in the first second — −2.4 dB in the first 0.3 s of IMG_6848 clips; the owner:
+  # «первая фраза плохо слышна»): dynamic = as before; source = one gain for the whole source + a peak limiter.
+  loudnorm_mode: dynamic
   loudness_range: 11.0
   # Шумоподавление (afftdn) для фонового гула/шипения — ВЫКЛ по умолчанию (агрессивно съедает голос).
   denoise_enabled: false
@@ -80,9 +85,7 @@ audio_processing:
   fade_duration: 0.25
   # Аудио-фейд в конце клипа (ТОЛЬКО звук). Два режима по word-таймингам манифеста:
   # CLEAN (нет следующего слова в хвосте): fade только последних tail_fade_sec — дыхание слышно.
-  # INTRUDED (следующее слово в хвосте): fade от (nw_start − intrusion_guard_sec), гасит вторжение.
   tail_fade_sec: 0.35
-  intrusion_guard_sec: 0.12
   # Видео-фейд в чёрное в конце клипа (только legacy-путь, dynamic_ending выкл).
   tail_video_fade: false
   tail_video_fade_min_sec: 0.25
@@ -99,6 +102,9 @@ audio_processing:
   # Микро-фейд на краях аудиосегментов многосегментного клипа (гасит щелчок склейки, без
   # перекрытия — длина звука = длине видео). Только клипы с >1 сегментом. 0 → встык без фейдов.
   audio_edge_fade_sec: 0.01
+  # M146: the clip's sound fades in over this, so the pre-rolled tail of the word before (r0.yaml start_preroll_sec) is
+  # not heard as a word. 0 = off.
+  start_fade_in_sec: 0.03    # M146 on (owner on m146b: «ровнее, плавнее»)
 
 # Извлечение аудиодорожки под Whisper (cloud/extract_audio.py, ffmpeg -vn).
 # mp3 64k mono 16kHz: 8 000 байт/с → 46 мин = ~22 МБ (под лимит Groq 25 МБ).
@@ -170,8 +176,8 @@ zoom:
 hashtags_always: []
 hashtags_max: 0
 
-# M1.8: energy-based speech map — off by default (Stage A). Stage B consumers behind this flag.
-speech_map: false
+# M1.8: energy-based speech map — on since M149 (built at --apply/render when missing; consumers in plan, beats, two-shot).
+speech_map: true
 # M1.8 speech map parameters. These feed the cache key; changing any param rebuilds the map.
 # cut_pause_min_sec: consumer threshold only (does not affect stored map). Regression #568: 0.29s
 # gap from voiceless stop closure must be below this threshold so it is never treated as a cut.
@@ -223,18 +229,61 @@ beat_clip_shots_only_at_seams: true
 # Used when transcript words are absent (legacy manifests). Never a literal in code.
 jump_seam_gap_sec: 2.0
 # M1.7 step 1d: transitions at ci shot-changes and same-shot seams. Off by default.
-shot_transition: cut         # "cut" only; punch (crop-animation) is a future task
+shot_transition: cut         # cut | punch (M103: a fast zoom into a close shot inside a window; arl render --transition)
+punch_sec: 0.3
 same_shot_dissolve_frames: 4 # dissolve on same-shot seams (0 = disabled; uses video_xfade_sec fallback)
 
 # M1.7 step 2: sentence-scoped keyword highlighting in subtitles. Off by default.
 # When off, render is byte-identical to pre-M1.7-step-2 output even if k: fields present.
 subtitle_keywords: false
 
-subtitles:
-  # ASS-стиль из PROJECT_GUIDE §визуальная часть. Белый, жирный, CAPS, нижняя треть.
-  font: Montserrat
-  font_size: 72
-  margin_v: 300               # сажает текст в нижнюю треть (зона над UI платформы)
-  words_per_line: [2, 4]      # группировка поп-апа по словам (\k)
-  # font_dir — путь к шрифтам для ffmpeg (fontsdir). Заполняется под машину рендера.
-  font_dir: null
+# M89: a cover for publishing — <reel>.cover.jpg next to every rendered clip: the middle of the clip's longest body
+# window in the reel's crop and colour, with its plate title. The clip itself does not change.
+cover: true
+# M96: … at the moment (of 7 spread over the body) whose frame shows the largest face with open eyes (OpenCV,
+# pip install -e ".[faces]"); no OpenCV or no face = the middle of the longest body window.
+cover_face: true
+
+# M97 (ending package): a clip whose last thought goes on past its end (the open_thought warning) shows the plate
+# «Продолжение →» over its last 2.5 s — the viewer looks for the next part instead of feeling the cut.
+continue_plate: true
+# M151 (ending package, PLAN M1.7 B; owner: «просто чтобы была такая опция») — every option off by default:
+# ending_loop — a planned clip with a cold open ends without the fade to black (it loops into its teaser);
+# end_freeze_sec — the last frame is held this long after the clip (silence, or the sting under it), then black;
+# end_sting_path — a sound (your file) after the clip's last word, at end_sting_volume; the clip grows by its length.
+ending_loop: false
+end_freeze_sec: 0
+end_sting_path: ""
+end_sting_volume: 0.8
+
+# M161: render on gamebox over ssh — `arl render --manifest … --remote`, `arl auto … --remote`. The code, the review copy,
+# the transcripts and the cached transcript go there, the source only when it is missing there (by content); the
+# render runs under the shared lock; the gate folder comes back. HEVC on the RX 580 breaks long clips (m160: CABAC
+# errors, green blocks) — H.264 on the GPU is clean.
+remote:
+  host: gamebox
+  root: /mnt/data/autoreels
+  encoder: h264_vaapi
+  profile: h264
+  lock: /mnt/data/locks/heavy.lock
+continue_sec: 2.5
+continue_text: "Продолжение →"
+
+# M102: frames chosen by the face in each reel (OpenCV, pip install -e ".[faces]"; static within a reel — no tracking).
+# reel_framing: the reel's own wide frame — moved sideways when its face is off the middle of the source's crop.
+# close_from_face: the close shot from the face size and place (not a fixed ×close_shot_scale at the centre),
+# capped so the picture does not go soft. Off = as before. Numbers: core/config.py RenderConfig (M102).
+reel_framing: true
+close_from_face: true
+# M127 (owner on Pxl 112938952: «фокус взят на чайник, человек левее» — the face finder sees this speaker in about half
+# the frames, 12 of 16 reels kept the source's middle frame): a reel that finds no face of its own is framed on the
+# speaker's place in the whole source (40 frames over it; numbers: core/config.py RenderConfig M127).
+framing_source_fallback: true
+# M129 (m128: on Pxl 112938952 the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye; YuNet found the
+# speaker in 12 of 12, score ≥ 0.84): the reel framing looks for faces with YuNet. The file is fetched once (opencv_zoo,
+# ~230 KB): curl -L -o data/models/face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+# — no file = the Haar cascade, as before.
+face_model: data/models/face_detection_yunet_2023mar.onnx
+# M130 (owner on Pxl r06: «в этом кадре нет фокуса на человеке» — he leaned out of the close shot): the frames of a
+# reel keep the whole way its face goes (the close shot zooms out to hold it); more frames looked at to see it.
+framing_samples: 15

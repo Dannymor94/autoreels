@@ -35,9 +35,11 @@ from autoreels.core.config import (
     AudioProcessing, Music, Palette, RenderConfig, SubtitlesConfig, Zoom, validate_profile,
 )
 from autoreels.core.progress import is_tty, render_bar
+from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.local.subtitles import build_ass, remap_to_output
-from autoreels.local.fx import output_time as fx_output_time, plate_start, push_vf, timeline as fx_timeline
+from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
+from autoreels.local.fx import timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
 
 # Имя файла манифеста в папке manifests/ (приходит по Syncthing с машины облака).
@@ -50,6 +52,62 @@ _MIN_CLIP_RENDER_SEC = 2.0
 # Кодеки, для которых -preset — родной параметр (софтверные x26x). Для аппаратных
 # энкодеров (h264_amf/hevc_amf/av1_amf/nvenc) -preset невалиден (у AMF свой пресет).
 _SOFTWARE_X26X = {"libx264", "libx265"}
+
+# M156: VAAPI encoders (Linux, AMD/Intel GPU via Mesa: gamebox RX 580 → hevc_vaapi / h264_vaapi). The encoder takes
+# GPU surfaces: every command whose -c:v is *_vaapi gets the device, an upload at the end of its video filter and no
+# output -pix_fmt (_hw_argv). Any other encoder: the command is returned unchanged (invariant 8).
+_VAAPI_DEVICE_ENV = "RENDER_VAAPI_DEVICE"
+_VAAPI_DEVICE_DEFAULT = "/dev/dri/renderD128"
+_VAAPI_UPLOAD = "format=nv12,hwupload"
+
+
+def _first_word_reference(reel, map_onset: float) -> float:
+    """M166: where the render checks the first word starts — a planned reel by the plan's own span of the word (the
+    alignment first; m163 11h42 r02: the map onset 125.180 was glued to the word before, the alignment 125.381, and a
+    prerolled start between them was refused); any other reel by the speech map."""
+    if getattr(reel, "planned", False) and getattr(reel, "head_first_word_start", None) is not None:
+        return float(reel.head_first_word_start)
+    return map_onset
+
+
+def _is_vaapi(codec: str) -> bool:
+    return codec.endswith("_vaapi")
+
+
+def _hw_argv(cmd: list[str]) -> list[str]:
+    """M156: an ffmpeg command for a VAAPI encoder — `-vaapi_device` first, the frames uploaded to the GPU at the end of
+    the video filter (`-filter_complex` with `-map [v]` → a `[v]…[vhw]` chain; `-vf` → appended; none → added) and
+    the output `-pix_fmt` dropped (the surface format is nv12). Not a VAAPI command → the same list."""
+    try:
+        i = cmd.index("-c:v")
+    except ValueError:
+        return cmd
+    if i + 1 >= len(cmd) or not _is_vaapi(str(cmd[i + 1])):
+        return cmd
+    dev = os.environ.get(_VAAPI_DEVICE_ENV) or _VAAPI_DEVICE_DEFAULT
+    last_in = max((k for k, a in enumerate(cmd) if a == "-i"), default=0)
+    out = list(cmd[: last_in + 1])
+    k = last_in + 1
+    while k < len(cmd):
+        if cmd[k] == "-pix_fmt" and k + 1 < len(cmd):
+            k += 2
+            continue
+        out.append(cmd[k])
+        k += 1
+    if "-filter_complex" in out:
+        f = out.index("-filter_complex")
+        m = next((j for j in range(len(out) - 1) if out[j] == "-map" and out[j + 1] == "[v]"), None)
+        if m is None:
+            raise RenderError("VAAPI: в -filter_complex нет выхода [v] — некуда добавить загрузку в GPU")
+        out[f + 1] = f"{out[f + 1]};[v]{_VAAPI_UPLOAD}[vhw]"
+        out[m + 1] = "[vhw]"
+    elif "-vf" in out:
+        f = out.index("-vf")
+        out[f + 1] = f"{out[f + 1]},{_VAAPI_UPLOAD}"
+    else:
+        c = out.index("-c:v")
+        out[c:c] = ["-vf", _VAAPI_UPLOAD]
+    return [out[0], "-vaapi_device", dev] + out[1:]
 
 
 def probe_encoder(codec: str, *, ffmpeg: str = "ffmpeg", run=None) -> bool:
@@ -69,8 +127,8 @@ def probe_encoder(codec: str, *, ffmpeg: str = "ffmpeg", run=None) -> bool:
     ]
     runner = run or (lambda c: subprocess.run(c, capture_output=True, text=True, timeout=30))
     try:
-        return runner(cmd).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+        return runner(_hw_argv(cmd)).returncode == 0
+    except (OSError, subprocess.SubprocessError, RenderError):
         return False
 
 # env-переопределение энкодера/профиля (рантайм-конфиг машины рендера поверх render.yaml).
@@ -112,6 +170,7 @@ def _run_ffmpeg_with_progress(
     """
     _CLEAR_EOL = "\033[K"
     _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    cmd = _hw_argv(cmd)                      # M156: VAAPI encoder → device + GPU upload; any other → unchanged
 
     header = f"клип {idx}/{total}: {reel_id} ({_fmt_time(duration_sec)})"
     tty = is_tty() and not background
@@ -393,6 +452,10 @@ def _video_quality_args(codec: str, preset: str, video_bitrate: str, pix_fmt: st
         args += ["-preset", preset, "-g", "30"]
     if _is_amf(codec) and quality:
         args += ["-quality", quality]
+    if _is_vaapi(codec):
+        # M158: VAAPI without a rate-control mode picks its own (RX 580: constant QP) and ignores -b:v / -maxrate —
+        # m156 clips came out at 7.0 Mbit/s against 4.9 from videotoolbox at the same profile.
+        args += ["-rc_mode", "VBR"]
     if _is_amf(codec) and rate_control == "cqp" and qp is not None:
         # Постоянный QP: качество приоритетно, размер плавает (для hevc_hq).
         args += ["-rc", "cqp", "-qp_i", str(qp), "-qp_p", str(qp + 2), "-pix_fmt", pix_fmt]
@@ -681,9 +744,11 @@ def _check_synth_tail_seam(
             ssim = float(m.group(1))
             if ssim < 0.85:
                 return f"tail-seam SSIM {ssim:.3f} < 0.85 — tail may bypass body crop"
-    except Exception:
-        pass
-    return None
+            return None
+        # M135: a check that could not measure says so instead of passing silently
+        return f"tail-seam SSIM not measured (ffmpeg printed no value, rc {result.returncode})"
+    except Exception as e:  # noqa: BLE001
+        return f"tail-seam SSIM not measured ({e})"
 
 
 def _check_freezedetect(path: Path, ffmpeg_bin: str) -> list[tuple[float, float, float]]:
@@ -969,6 +1034,37 @@ def _snap_windows_to_frames(segments, fps: float):
     return [s.model_copy(update={"start": round(s.start * fps) / fps,
                                  "end":   round(s.end   * fps) / fps})
             for s in segments]
+
+
+def _planned_end_on_grid(segs, last_ae: float | None, next_onset: float | None, fps: float):
+    """The final end of a planned reel on the frame grid (REEL_SPEC §4.2), after _snap_windows_to_frames.
+
+    * Nearest-frame rounding must never cut the last word: an end that fell before the word's audible end
+      goes UP to the next frame — unless that frame is past the next speech.
+    * M80 (PXL_20260729_copy r02, local transcript: «регулярно.» ends at 220.471 exactly where the next word
+      starts; at 29.97 fps the plan's end rounded UP to 220.487 — 16 ms of the next word in the clip, render
+      [ERROR] «next speech before clip end»): nearest-frame rounding must never cross the next speech either —
+      such an end goes DOWN to the last frame at least 10 ms before it (at most one frame of the fading tail).
+    * M83b (IMG_6848 r02/r05 at 60 fps: the last word ends exactly where the next speech starts; the 10 ms
+      margin plus the frame floor cut 20–22 ms of the word — render [ERROR] «last word cut», which allows one
+      frame): when the margin would cut more than one frame of the last word, the end is the last frame not
+      after the next speech instead (the next-speech checks allow 10 ms; the word loses at most one frame).
+    """
+    if not segs:
+        return segs
+    end = segs[-1].end
+    if last_ae is not None and end < last_ae - 1e-6:
+        up = math.ceil(last_ae * fps - 1e-6) / fps
+        if next_onset is None or up <= next_onset:
+            end = up
+    if next_onset is not None and end > next_onset - 0.01 + 1e-9:
+        down = math.floor((next_onset - 0.01) * fps + 1e-6) / fps
+        if last_ae is not None and down < last_ae - 1.0 / fps - 1e-6:
+            down = math.floor(next_onset * fps + 1e-6) / fps     # M83b: words touch — never more than a frame of the word
+        end = max(down, segs[-1].start + 1.0 / fps)
+    if end == segs[-1].end:
+        return segs
+    return list(segs[:-1]) + [segs[-1].model_copy(update={"end": end})]
 
 
 def _expected_output_duration(windows, *, xfade_sec: float = 0.0, speed: float = 1.0,
@@ -1404,8 +1500,45 @@ def _loudnorm_str(ap: AudioProcessing) -> str:
     меток по числу сэмплов (asetpts=N/SR/TB) на Яндекс Диске дала чистый старт.
     Звук после склейки непрерывен по построению, поэтому его время = номер сэмпла / частота.
     """
+    g = getattr(ap, "static_gain_db", None)
+    if getattr(ap, "loudnorm_mode", "dynamic") == "source" and g is not None:
+        # M147: one gain for the whole source + a true-peak limiter (latency compensated) — nothing settles at the start
+        return (f"volume={_num(round(g, 2))}dB,alimiter=limit={10 ** (ap.true_peak / 20):.4f}:level=disabled:latency=1,"
+                f"aresample=48000,asetpts=N/SR/TB")
     return (f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)},"
             f"aresample=48000,asetpts=N/SR/TB")
+
+
+def _parse_loudnorm_json(text: str) -> dict | None:
+    """The JSON block ffmpeg's loudnorm prints with print_format=json (the last {...} of stderr)."""
+    import json as _json
+    i, j = text.rfind("{"), text.rfind("}")
+    if i < 0 or j < i:
+        return None
+    try:
+        return _json.loads(text[i:j + 1])
+    except ValueError:
+        return None
+
+
+_SOURCE_GAIN: dict[str, float] = {}
+
+
+def _source_gain(source: Path, ffmpeg_bin: str, ap: AudioProcessing) -> float:
+    """M147: the gain that brings the whole source to target_lufs (loudnorm measuring pass over its audio, once per
+    source per process). Raises RenderError when ffmpeg prints no measurement — never a silent default."""
+    key = str(source)
+    if key not in _SOURCE_GAIN:
+        r = subprocess.run([ffmpeg_bin, "-hide_banner", "-nostats", "-i", str(source), "-vn", "-af",
+                            f"loudnorm=I={_num(ap.target_lufs)}:TP={_num(ap.true_peak)}:LRA={_num(ap.loudness_range)}"
+                            f":print_format=json", "-f", "null", "-"], capture_output=True, text=True, check=False)
+        m = _parse_loudnorm_json(r.stderr)
+        if not m or "input_i" not in m:
+            raise RenderError(f"loudness of {source.name} not measured (loudnorm_mode: source): rc {r.returncode}")
+        _SOURCE_GAIN[key] = float(ap.target_lufs) - float(m["input_i"])
+        print(f"  громкость источника: {float(m['input_i']):.1f} LUFS → усиление {_SOURCE_GAIN[key]:+.1f} dB "
+              f"(пик {float(m.get('input_tp', 0)):.1f} dBTP, ограничитель {ap.true_peak:g})", flush=True)
+    return _SOURCE_GAIN[key]
 
 
 def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:
@@ -1416,6 +1549,13 @@ def _audio_denoise_norm(ap: AudioProcessing) -> list[str]:
     if ap.loudnorm_enabled:
         parts.append(_loudnorm_str(ap))
     return parts
+
+
+def _start_fade_in(ap: AudioProcessing, planned: bool) -> str:
+    """M146: a planned clip's sound fades in over start_fade_in_sec — the pre-rolled tail of the word before its first
+    word (r0.yaml start_preroll_sec) is not heard as a word. "" = off (the chain as before)."""
+    d = float(getattr(ap, "start_fade_in_sec", 0.0) or 0.0)
+    return f"afade=t=in:st=0:d={_num(d)}" if d > 0 and planned else ""
 
 
 def _audio_fade_parts(ap: AudioProcessing, clip_duration: float) -> list[str]:
@@ -2021,7 +2161,7 @@ def _build_synth_tail_clip(
         "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
         str(tmp_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(_hw_argv(cmd), capture_output=True, text=True)
     if result.returncode != 0:
         raise RenderError(f"synth tail clip render failed (exit {result.returncode})\n{result.stderr[:600]}")
 
@@ -2081,11 +2221,70 @@ def _append_synth_tail_to_rendered(
             *_web_safe_out_args(faststart),
             str(tmp_path),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(_hw_argv(cmd), capture_output=True, text=True)
         if result.returncode != 0:
             raise RenderError(f"synthetic tail append failed (exit {result.returncode})\n{result.stderr[:600]}")
     finally:
         tail_file.unlink(missing_ok=True)
+
+
+def _ending_flags(render_cfg, reel, planned: bool) -> tuple[bool, bool]:
+    """M151: (extend, loop) of a clip's ending. loop — a planned clip with a cold open and ending_loop: no fade to
+    black; extend — a planned clip with end_freeze_sec or end_sting_path (not a looping one): no fade to black in the
+    main pass, the held frame / the sting are appended after it (_extend_ending)."""
+    if not planned:
+        return False, False
+    loop = bool(getattr(render_cfg, "ending_loop", False)) and getattr(reel, "cold_open", None) is not None
+    extend = (float(getattr(render_cfg, "end_freeze_sec", 0.0) or 0.0) > 0
+              or bool(str(getattr(render_cfg, "end_sting_path", "") or "").strip()))
+    return extend and not loop, loop
+
+
+def _extend_ending(ffmpeg_bin: str, clip: Path, *, freeze_sec: float, sting_path: str, sting_volume: float,
+                   fade_sec: float, codec: str, quality_args: list, audio_codec: str, audio_bitrate: str,
+                   faststart: bool) -> float:
+    """M151: hold the clip's last frame for max(freeze_sec, the sting's length) seconds — silence under it, or the
+    sting (from the clip's end) — then fade to black. Re-encodes the clip in place; returns the seconds added."""
+    ffprobe = _sibling_ffprobe(ffmpeg_bin)
+    dur = _probe_duration_sec(clip, ffprobe)
+    if dur is None:
+        raise RenderError(f"ending: duration of {clip.name} not read")
+    sting = Path(sting_path).expanduser() if str(sting_path or "").strip() else None
+    if sting is not None and not sting.is_file():
+        raise RenderError(f"ending: end_sting_path not found: {sting}")
+    sdur = 0.0
+    if sting is not None:
+        _o = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(sting)],
+                            capture_output=True, text=True, check=False).stdout.strip()
+        try:
+            sdur = float(_o)
+        except ValueError:
+            raise RenderError(f"ending: length of the sting {sting.name} not read") from None
+    ext = max(float(freeze_sec or 0.0), sdur)
+    if ext <= 0:
+        return 0.0
+    fade = min(float(fade_sec or 0.25), ext)
+    st = max(0.0, dur + ext - fade)
+    fc = (f"[0:v]tpad=stop_mode=clone:stop_duration={_num(round(ext, 3))},"
+          f"fade=t=out:st={_num(round(st, 3))}:d={_num(round(fade, 3))}[v];"
+          f"[0:a]apad=pad_dur={_num(round(ext, 3))}[a0];")
+    if sting is not None:
+        fc += (f"[1:a]volume={_num(sting_volume)},adelay={int(round(dur * 1000))}:all=1[s];"
+               f"[a0][s]amix=inputs=2:duration=first:normalize=0[a]")
+    else:
+        fc += "[a0]anull[a]"
+    tmp = clip.with_suffix(".ending.mp4")
+    cmd = [str(ffmpeg_bin), "-y", "-loglevel", "error", "-i", str(clip)] + (["-i", str(sting)] if sting else []) + [
+        "-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+        "-c:v", codec, *quality_args, "-bf", "0",
+        "-c:a", audio_codec, "-b:a", audio_bitrate, "-ar", "48000",
+        *_web_safe_out_args(faststart), str(tmp)]
+    r = subprocess.run(_hw_argv(cmd), capture_output=True, text=True)
+    if r.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        raise RenderError(f"ending pass failed (exit {r.returncode})\n{r.stderr[:600]}")
+    tmp.replace(clip)
+    return ext
 
 
 _BEAT_CAP_MARGIN = 0.04    # gap left before next speech onset when capping beat end
@@ -2155,57 +2354,6 @@ def _beat_segs_from_smap(
         else:
             result.append(seg)
     return result
-
-
-def _tail_find_word_end(
-    ffmpeg_bin: str | Path,
-    source: str | Path,
-    t0: float,
-    t1: float,
-    *,
-    margin: float = 0.2,
-    noise_db: float = -40.0,
-    min_sil: float = 0.08,
-) -> tuple[float, float | None]:
-    """Locate where the last subtitle word ends and where next speech begins.
-
-    Searches [t0-0.1, t1+margin+0.1] with silencedetect.  Returns:
-      word_end   – first silence_start after t0 (fallback: t1)
-      next_onset – first silence_end after word_end (fallback: None)
-
-    min_sil=0.08 is intentional: smaller values detect tight inter-word gaps
-    (e.g. 99 ms between "понятно?" and "Когда").  Raising to >=0.15 misses those
-    gaps and computes wrong next_onset, causing the fallback to overshoot into the
-    next sentence.  Stop-consonant false positives (50–100 ms closures that put
-    word_end too early) are instead rejected by the 0.6*(t1-t0) sanity floor in
-    the caller.
-
-    volumedetect/silencedetect log at INFO; loglevel must not be 'error'.
-    """
-    import re as _re
-    ws = max(0.0, t0 - 0.1)
-    wlen = t1 + margin + 0.1 - ws
-    if wlen < 0.02:
-        return t1, None
-    cmd = [
-        str(ffmpeg_bin), "-hide_banner", "-loglevel", "info",
-        "-ss", f"{ws:.6f}", "-i", str(source),
-        "-t", f"{wlen:.6f}", "-ac", "1",
-        "-af", f"silencedetect=noise={noise_db}dB:duration={min_sil:.3f}",
-        "-f", "null", "-",
-    ]
-    try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stderr
-    except Exception:
-        return t1, None
-    sil_starts = [float(m) + ws for m in _re.findall(r"silence_start:\s*([\d.]+)", out)]
-    sil_ends   = [float(m) + ws for m in _re.findall(r"silence_end:\s*([\d.]+)", out)]
-    word_end = next((s for s in sil_starts if s > t0), None)
-    we = word_end if word_end is not None else t1
-    next_onset = next((e for e in sil_ends if e > we), None)
-    return we, next_onset
-
-
 
 
 def _assert_end_covers_last_word(reel, segs, fps: float = 30.0) -> None:
@@ -2425,6 +2573,81 @@ def _crop_vf(setup: SetupProfile, zoom: Zoom | None = None, fps: float = 30.0,
     crop_scale = f"crop={c.w}:{c.h}:{c.x}:{c.y},{tail}"
     return f"{rot},{crop_scale}" if rot else crop_scale
 
+
+
+def _face_model(render_cfg):
+    """M129: the YuNet model file of render.yaml face_model (relative to the project), or None — the Haar cascade."""
+    name = getattr(render_cfg, "face_model", "") or ""
+    if not name:
+        return None
+    p = Path(name)
+    return p if p.is_absolute() else Path(__file__).resolve().parents[3] / p
+
+
+def _source_face(setup: SetupProfile, source: Path, ffmpeg: str, render_cfg):
+    """M127 (owner on Pxl 20260621 112938952 m125: «фокус взят на чайник, кроме 15, 14, 6 и 4 — человек левее»; the
+    frontal-face finder sees this speaker in about half the frames, so 12 of 16 reels found no face of their own
+    and kept the source's frame — the middle, on the shelves): where the face is in the WHOLE source —
+    framing_source_samples frames spread over it, the dominant place (dominant_faces) when seen in at least
+    framing_source_min_faces of them. A reel without its own face is framed on it. None = not found."""
+    from autoreels.core.calibration import _median, dominant_faces
+    from autoreels.local.autocrop import _duration, reel_faces
+    n = int(getattr(render_cfg, "framing_source_samples", 40))
+    try:
+        dur = _duration(Path(source), "ffprobe")
+    except Exception:  # noqa: BLE001 — no duration: no source face
+        return None
+    found = reel_faces(source, [dur * (i + 0.5) / n for i in range(n)], (int(setup.frame[0]), int(setup.frame[1])),
+                       ffmpeg=ffmpeg, pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
+                       model=_face_model(render_cfg))
+    if not found:
+        return None
+    dom = dominant_faces(found[0], setup.crop.w / 2)
+    if len(dom) < int(getattr(render_cfg, "framing_source_min_faces", 4)):
+        return None
+    return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4)) + (len(dom), n)
+
+
+def _reel_framing(setup: SetupProfile, reel, segs, source: Path, ffmpeg: str, render_cfg, source_face=None):
+    """M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания»): where the face is in
+    THIS reel — framing_samples frames spread over its body (the cold open, a teaser from its end, left out), the
+    source rotated as render rotates it — and the reel's frame from it (core/calibration.reel_crop, when
+    reel_framing). Returns (setup for this reel, face or None, a line for the log). Static within the reel: one
+    rectangle for the wide shot, one for the close shot — no tracking. No OpenCV / no face: the source's frame."""
+    from autoreels.core.calibration import reel_crop, reel_face, reel_face_span
+    from autoreels.local.autocrop import cover_candidates, reel_faces
+    n = int(getattr(render_cfg, "framing_samples", 7))
+    times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+    found = reel_faces(source, times, (int(setup.frame[0]), int(setup.frame[1])), ffmpeg=ffmpeg,
+                       pre_vf=_rotate_vf(getattr(setup, "rotation_deg", 0.0) or 0.0),
+                       model=_face_model(render_cfg),
+                       near_x=float(source_face[0]) if source_face is not None else None) if times else None
+    if found is None:
+        return setup, None, "лицо не искалось (нет OpenCV или кадров) — рамка источника"
+    faces, looked = found
+    face = reel_face(faces, looked, setup.crop.w / 2, min_share=float(getattr(render_cfg, "framing_min_share", 0.4)))
+    if face is None and source_face is not None:
+        face = tuple(source_face[:4])     # M127: the speaker's place in the whole source
+        note = (f"лицо в {len(faces)} из {looked} кадров ролика — по лицу источника ({source_face[4]} из "
+                f"{source_face[5]} кадров, x {face[0]:g}, высота {face[3]:g})")
+    elif face is None:
+        return setup, None, f"лицо в {len(faces)} из {looked} кадров — рамка источника, крупный план по центру"
+    else:
+        note = f"лицо в {len(faces)} из {looked} кадров (x {face[0]:g}, высота {face[3]:g})"
+        span = reel_face_span(faces, setup.crop.w / 2)
+        if span is not None:              # M130: how far the face goes in this reel — the frames keep all of it
+            face = tuple(face[:4]) + span
+            note += f", лицо ходит по x {span[0]:g}…{span[1]:g}"
+    if not getattr(render_cfg, "reel_framing", False):
+        return setup, face, note
+    zone = float(getattr(render_cfg, "framing_center_zone", 0.15))
+    crop = reel_crop(setup.crop, (int(setup.frame[0]), int(setup.frame[1])), face, center_zone=zone)
+    if crop == setup.crop:
+        centred = abs(float(face[0]) - (setup.crop.x + setup.crop.w / 2)) <= zone * setup.crop.w
+        return setup, face, note + (" — в центре рамки" if centred else " — рамка уже у края кадра") + \
+            ", рамка источника"
+    return (setup.model_copy(update={"crop": crop}), face,
+            note + f" — рамка x {setup.crop.x} → {crop.x}")
 
 
 def _close_crop(setup: SetupProfile, scale: float = 1.25, anchor_y: float = 0.35) -> Crop:
@@ -2684,6 +2907,8 @@ def _render_segments(
     enc = render_cfg.encoder
     aud = render_cfg.audio
     ap = render_cfg.audio_processing
+    if ap.loudnorm_enabled and getattr(ap, "loudnorm_mode", "dynamic") == "source":
+        ap = ap.model_copy(update={"static_gain_db": _source_gain(source, ffmpeg_bin, ap)})
     music = render_cfg.music
     # Профиль: явный аргумент > env RENDER_PROFILE > активный из конфига. Кодек+битрейт —
     # из профиля; но явный encoder (флаг/env) может переопределить только кодек (Mac-дев:
@@ -2721,7 +2946,12 @@ def _render_segments(
         )
         batch_encoded_secs = 0.0
         batch_start_wall = time.time()
+        _vf_base = vf          # M102: a reel may get its own frame (vf, setup) — reset for every reel
+        _src_face_cache: dict = {}   # M127: the speaker's place in the whole source, looked for once
         for idx, reel in enumerate(manifest.reels, 1):
+            vf = _vf_base
+            _reel_setup = manifest.setup
+            _reel_face = None
             try:
                 reel.check_segments()   # never render a reel whose segments desynced from its bounds
             except ValueError as e:
@@ -2732,15 +2962,9 @@ def _render_segments(
                 # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
                 segs = _snap_windows_to_frames(segs, _fps())
-                # Planned reels (REEL_SPEC §4.2): nearest-frame rounding must never cut the last
-                # word — round the final end UP to the next frame when it fell before the word's
-                # audible end (the plan keeps ≥ onset margin before the next speech).
-                _p_ae = getattr(reel, "tail_last_word_end", None) if getattr(reel, "planned", False) else None
-                if _p_ae is not None and segs[-1].end < _p_ae - 1e-6:
-                    _p_up = math.ceil(_p_ae * _fps() - 1e-6) / _fps()
-                    _p_next = getattr(reel, "tail_next_word_start", None)
-                    if _p_next is None or _p_up <= _p_next:
-                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _p_up})]
+                if getattr(reel, "planned", False):
+                    segs = _planned_end_on_grid(segs, getattr(reel, "tail_last_word_end", None),
+                                                getattr(reel, "tail_next_word_start", None), _fps())
             # Snap close_intervals to the same frame grid so overlay enable= expressions land on
             # decoded frames. Done for both multi-window and single-window close paths.
             if any(getattr(s, "close_intervals", []) for s in segs):
@@ -2772,7 +2996,7 @@ def _render_segments(
                 _fsub_lk = _smap_word_lookup(smap)
                 _fse = _fsub_lk.get(round(reel.subtitles[0].t0 * 1000))
                 if _fse is not None:
-                    _first_sub_as = _fse[1].get("audible_start", reel.subtitles[0].t0)
+                    _first_sub_as = _first_word_reference(reel, _fse[1].get("audible_start", reel.subtitles[0].t0))
                     # Skip when segs[0] is the cold-open hook: its start is in hook time,
                     # not body time; the first subtitle word lives in the body (segs[1]+).
                     _is_cold_open_first = reel.cold_open is not None and len(segs) > 1
@@ -2793,6 +3017,21 @@ def _render_segments(
                             segs = _snap_close_intervals(segs, _fps())
                         clip_dur = sum(s.end - s.start for s in segs)
 
+            # --- M102: the reel's own frame and close shot from the face in its body (static, no tracking) ---
+            if (emit_text and vf and manifest.setup is not None
+                    and (getattr(render_cfg, "reel_framing", False) or getattr(render_cfg, "close_from_face", False))):
+                if getattr(render_cfg, "framing_source_fallback", False) and str(source) not in _src_face_cache:
+                    _src_face_cache[str(source)] = _source_face(manifest.setup, source, ffmpeg_bin, render_cfg)
+                    _sf = _src_face_cache[str(source)]
+                    print("  лицо источника: " + (f"x {_sf[0]:g}, в {_sf[4]} из {_sf[5]} кадров" if _sf
+                                                  else "не найдено"), flush=True)
+                _reel_setup, _reel_face, _fr_note = _reel_framing(
+                    manifest.setup, reel, segs, source, ffmpeg_bin, render_cfg,
+                    source_face=_src_face_cache.get(str(source)) or None)
+                if _reel_setup is not manifest.setup:
+                    vf = _crop_vf(_reel_setup)
+                print(f"  кадр {reel.id}: {_fr_note}", flush=True)
+
             # --- M1.7 step 1: two-shot path (feature-off → no change to vf or segs) ---
             # Planned reels (REEL_SPEC §3) carry their shots in the plan — rendered whatever the
             # two_shot flag says (the flag gates the automatic path's shot machinery only).
@@ -2806,8 +3045,16 @@ def _render_segments(
             if _ts_on:
                 _cscale = getattr(render_cfg, "close_shot_scale", 1.25)
                 _canchy = getattr(render_cfg, "close_shot_anchor_y", 0.35)
-                _ccrop = _close_crop(manifest.setup, scale=_cscale, anchor_y=_canchy)
-                _close_vf_str = _crop_vf_for_crop(manifest.setup, _ccrop)
+                if _reel_face is not None and getattr(render_cfg, "close_from_face", False):
+                    _ccrop, _cz = face_close_crop(
+                        _reel_setup.crop, _reel_face, out_h=int(_reel_setup.scale[1]),
+                        face_h=render_cfg.close_face_h, face_y=render_cfg.close_face_y,
+                        max_upscale=render_cfg.close_max_upscale, max_scale=render_cfg.close_max_scale,
+                        min_scale=render_cfg.close_min_scale)
+                    print(f"  крупный план {reel.id}: ×{_cz:g} по лицу", flush=True)
+                else:
+                    _ccrop = _close_crop(_reel_setup, scale=_cscale, anchor_y=_canchy)
+                _close_vf_str = _crop_vf_for_crop(_reel_setup, _ccrop)
                 if len(segs) > 1:
                     # Per-segment crops go into the prefix; vtail gets palette+ass+vfade only.
                     _ts_seg_vfs = [_close_vf_str if s.shot == "close" else vf for s in segs]  # type: ignore[list-item]
@@ -2870,7 +3117,7 @@ def _render_segments(
                         _z_acc += _zs.end - _zs.start
                         if _xfade_actual > 0 and _zi < len(segs) - 1:
                             _z_acc -= _xfade_actual
-                _effective_vf = _crop_vf(manifest.setup, zoom_cfg, _fps(), _z_offset)
+                _effective_vf = _crop_vf(_reel_setup, zoom_cfg, _fps(), _z_offset)
 
             if clip_dur < _MIN_CLIP_RENDER_SEC:
                 print(
@@ -2898,14 +3145,23 @@ def _render_segments(
                         else [_xfade_actual] * (len(_s) - 1))
             _reel_speed = getattr(reel, "speed", 1.0)
             _push_vf = ""
-            if _fx.get("push") or _fx.get("pop"):
+            # M103 (shot_transition: punch): a fast zoom leads into every close shot that comes inside a window
+            _punches: list = []
+            if (_ts_on and getattr(render_cfg, "shot_transition", "cut") == "punch"
+                    and any(getattr(s, "close_intervals", None) for s in segs)):
+                _pp = punch_point(_reel_setup.crop, _ccrop)
+                if _pp is not None:
+                    _punches = [(t, *_pp) for t in punch_times(segs, speed=_reel_speed, xfades=_fx_xfades(segs))]
+            if _fx.get("push") or _fx.get("pop") or _punches:
                 _, _fx_changes, _fx_total = fx_timeline(segs, speed=_reel_speed, xfades=_fx_xfades(segs))
                 _push_vf = push_vf(_fx_changes, _fx_total,
                                    pct=float(_fx.get("push_pct", 4.0)) if _fx.get("push") else 0.0,
                                    min_sec=float(_fx.get("push_min_sec", 6.0)),
                                    size=tuple(render_cfg.scale),
                                    pop_pct=float(_fx.get("pop_pct", 0.0)) if _fx.get("pop") else 0.0,
-                                   pop_sec=float(_fx.get("pop_sec", 0.6)))
+                                   pop_sec=float(_fx.get("pop_sec", 0.6)),
+                                   punches=_punches, punch_sec=float(getattr(render_cfg, "punch_sec", 0.3)),
+                                   fps=_fps() if _punches else 30.0)
             base_vf = ",".join(x for x in (_effective_vf, _push_vf, palette_vf) if x) or None  # type: ignore[assignment]
             reel_vf = base_vf
             # Speed-up via setpts (video) + atempo (audio); both applied before other filters.
@@ -2929,6 +3185,13 @@ def _render_segments(
                         if (_t := fx_output_time(segs, float(c["t"]), speed=_reel_speed, body0=_body0)) is not None
                     ],
                 }
+            if getattr(render_cfg, "continue_plate", False) and getattr(reel, "open_thought", False):
+                # M97 (ending package): the thought goes on past the clip — say so over its last seconds
+                _end_out = round(_expected_output_duration(segs, xfade_sec=_xfade_actual, speed=_reel_speed or 1.0,
+                                                           seam_xfades=_ts_seam_xfades), 3)
+                _fx_ass = dict(_fx_ass or {})
+                _fx_ass["continue"] = {"t": max(0.0, _end_out - render_cfg.continue_sec), "end": _end_out,
+                                       "text": render_cfg.continue_text}
             if subtitles_cfg is not None and (reel.subtitles or _title or _fx_ass):
                 # Remap word times onto the concatenated, speed-adjusted output timeline (gap words
                 # dropped). For a single span at speed 1 this equals a shift by reel.start, so the
@@ -2972,6 +3235,7 @@ def _render_segments(
             _smap_fade_len: float | None = None    # fade_len from _tail_from_smap result
             # Planned reels (REEL_SPEC) arrive with their final ending — executed as-is.
             _planned = bool(getattr(reel, "planned", False))
+            _end_ext, _end_loop = _ending_flags(render_cfg, reel, _planned)     # M151
             _use_smap_tail = (smap is not None
                               and getattr(render_cfg, "speech_map", False)
                               and reel.subtitles and segs and not _planned)
@@ -3111,58 +3375,11 @@ def _render_segments(
                                     f"but no room tone found (nearest silence too short), skipping",
                                     flush=True,
                                 )
-            elif not _planned:
-                _nw_start = getattr(reel, "tail_next_word_start", None)
-                if _nw_start is not None and segs and _nw_start < segs[-1].end and reel.subtitles:
-                    # Intruded tail: next phrase starts before segment end.
-                    # Cut to word_end + pad, strictly before the intruder — video and audio end together.
-                    _last = reel.subtitles[-1]
-                    _word_end, _ = _tail_find_word_end(
-                        ffmpeg_bin, source, _last.t0, _last.t1, margin=_lw_margin)
-                    _pad = 0.10
-                    _new_end = min(_word_end + _pad, _nw_start - _pad)
-                    _new_end = max(_new_end, _last.t0 + 0.04)
-                    _new_end = min(_new_end, _nw_start)  # hard cap when gap <= pad
-                    if len(segs) > 1:
-                        _new_end = round(_new_end * _fps()) / _fps()
-                    if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
-                        segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
-                        clip_dur = sum(s.end - s.start for s in segs)
-                elif reel.subtitles:
-                    # Audio-based tail placement: detect where the last word actually ends and where
-                    # the next sentence begins, then place the clip end between them.
-                    # Only runs when clip end is within the tail adjustment window (end ≤ t1+margin+ε);
-                    # if the clip extends far beyond the last subtitle word the gap is intentional.
-                    _last = reel.subtitles[-1]
-                    _last_t1 = _last.t1
-                    if segs[-1].end <= _last_t1 + _lw_margin + 0.05:
-                        _word_end, _next_onset = _tail_find_word_end(  # type: ignore[assignment]
-                            ffmpeg_bin, source, _last.t0, _last_t1, margin=_lw_margin
-                        )
-                        _pad = 0.10
-                        # Sanity floor: word_end must be >= t0 + 0.6*(t1-t0).
-                        # A shorter detected end is likely a stop-consonant closure (п/т/к),
-                        # not the actual word boundary.  Exception: when next_onset < floor
-                        # the gap is too tight to reach the floor without crossing into the
-                        # next sentence — "next onset forces earlier", accept word_end as-is.
-                        _floor = _last.t0 + 0.6 * (_last_t1 - _last.t0)
-                        _onset_forces = _next_onset is not None and _next_onset < _floor
-                        if not _onset_forces and _word_end < _floor:
-                            # stop-consonant false positive → fall back to timestamp-based end
-                            _new_end = _last_t1 + _lw_margin
-                            if _next_onset is not None:
-                                _new_end = min(_new_end, _next_onset - _pad)
-                        else:
-                            _new_end = _word_end + _pad
-                            if _next_onset is not None:
-                                _cap = max(_word_end + 0.04, _next_onset - _pad)
-                                _new_end = min(_new_end, _cap)
-                        _new_end = max(_new_end, _last.t0 + 0.04)
-                        if len(segs) > 1:
-                            _new_end = round(_new_end * _fps()) / _fps()
-                        if abs(_new_end - segs[-1].end) > 1.0 / max(_fps(), 1.0):
-                            segs = list(segs[:-1]) + [segs[-1].model_copy(update={"end": _new_end})]
-                            clip_dur = sum(s.end - s.start for s in segs)
+            elif not _planned and reel.subtitles:
+                # M164 (M1.8 stage C): where the last word ends and the next speech begins comes from the speech
+                # map only (invariant 9). The point audio probe of the tail is gone (M164): without a
+                # map (flag off, build failed) the clip keeps the end its markup gave it — nothing is guessed.
+                print(f"  ⚠ {reel.id}: нет карты речи — конец клипа как в разметке (без звуковой пробы)", flush=True)
             # Convert audio word-end to output timeline for fade parameter computation.
             _word_end_out: float | None
             if _word_end is not None:
@@ -3264,7 +3481,7 @@ def _render_segments(
                     ap, _out_dur, _word_end_out,
                     min_sec_floor=_evf if _de else _smap_fade_floor,
                     force=_use_smap_tail or (_de and _evf > 0),
-                )
+                ) if not (_end_ext or _end_loop) else ""     # M151: the loop / the appended ending fade instead
                 if tvfade:
                     reel_vf = f"{reel_vf},{tvfade}" if reel_vf else tvfade
             if _speed_frames is not None:
@@ -3281,6 +3498,9 @@ def _render_segments(
                 # atempo goes FIRST; the fade st (in _out_dur / post-speed time) then lands correctly.
                 reel_af = _audio_filter_chain(ap, clip_duration, out_duration=_out_dur,
                                               tail_fade=_tail_fade, word_end_out=_word_end_out) or None
+                _afi = _start_fade_in(ap, _planned)
+                if _afi:
+                    reel_af = f"{_afi},{reel_af}" if reel_af else _afi
                 if _reel_speed != 1.0:
                     _tempo = f"atempo={_reel_speed:.4g}"
                     reel_af = f"{_tempo},{reel_af}" if reel_af else _tempo
@@ -3310,7 +3530,7 @@ def _render_segments(
                         ap, _out_dur, _word_end_out,
                         min_sec_floor=_evf1 if _de1 else _smap_fade_floor,
                         force=_de1 and _evf1 > 0,
-                    )
+                    ) if not (_end_ext or _end_loop) else ""     # M151
                     if _tvfade1:
                         _post_parts1.append(_tvfade1)
                     _post1 = ",".join(_post_parts1)
@@ -3568,11 +3788,32 @@ def _render_segments(
                     finally:
                         _wwav.unlink(missing_ok=True)
                         _wout.unlink(missing_ok=True)
+            _ending_added = 0.0
+            if _end_ext and out.exists():
+                # M151: the held last frame and / or the sting, appended after the main pass
+                try:
+                    _ending_added = _extend_ending(
+                        ffmpeg_bin, out, freeze_sec=float(getattr(render_cfg, "end_freeze_sec", 0.0) or 0.0),
+                        sting_path=str(getattr(render_cfg, "end_sting_path", "") or ""),
+                        sting_volume=float(getattr(render_cfg, "end_sting_volume", 0.8)),
+                        fade_sec=float(getattr(ap, "end_video_fade_sec", 0.25) or 0.25), codec=codec,
+                        quality_args=_video_quality_args(codec, enc.preset, video_bitrate, enc.pix_fmt,
+                                                         quality=active.quality, rate_control=active.rate_control,
+                                                         qp=active.qp),
+                        audio_codec=aud.codec, audio_bitrate=aud.bitrate, faststart=enc.faststart)
+                    _out_dur += _ending_added
+                except RenderError as _ee:
+                    _clip_errors.append(f"  [ERROR] {reel.id}: {str(_ee)[:300]}")
             _integrity_err = _check_integrity(out, ffmpeg_bin) if out.exists() else ""
             if _integrity_err:
-                print(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}", flush=True)
-                out.unlink(missing_ok=True)
-                continue
+                # M180 (m179: m165's «missing picture in access unit with size 12» on gamebox could not be examined —
+                # the check deleted every such clip, and 41 clips now do not reproduce it): the clip is kept as
+                # .ERROR.mp4 like every other check's (M47), with ffmpeg's full words beside it, so the file can be probed
+                _clip_errors.append(f"  [ERROR] {reel.id}: integrity check failed — {_integrity_err[:200]}")
+                try:
+                    (out_dir / f"{reel.id}.integrity.txt").write_text(_integrity_err + "\n", encoding="utf-8")
+                except OSError:
+                    pass
             # Invariant: the file must last the length _expected_output_duration derived from the
             # final post-snap windows — the same values fed to the concat graph. Tolerance is 2.5
             # frames at OUTPUT fps (see _duration_within_tolerance); a larger drift means a stage
@@ -3598,6 +3839,8 @@ def _render_segments(
             # Skip freeze detect for synthetic tail clips: the frozen/slowed tail is intentional.
             if not _synth_active:
                 for _fs, _fe, _fd in _check_freezedetect(out, ffmpeg_bin):
+                    if _ending_added and _actual is not None and _fs >= _actual - _ending_added - 0.5:
+                        continue          # M151: the held last frame is the ending asked for, not a freeze
                     _clip_errors.append(
                         f"  [ERROR] {reel.id}: video freeze detected {_fs:.1f}s–{_fe:.1f}s ({_fd:.1f}s)"
                     )
@@ -3633,6 +3876,10 @@ def _render_segments(
                 )
                 if emit_text:
                     _write_sidecar_text(out, reel, render_cfg)
+                if emit_text and getattr(render_cfg, "cover", False):     # M89: a cover for publishing
+                    _write_cover(out, reel, segs, _reel_setup, source, ffmpeg_bin, palette_vf=palette_vf,
+                                 subtitles_cfg=subtitles_cfg, tmp_dir=tmp_ass_dir,
+                                 by_face=getattr(render_cfg, "cover_face", False))
         _unlock_dir(_lock_fd)
         return outputs
 
@@ -3666,6 +3913,70 @@ def _write_sidecar_text(clip_path: Path, reel, render_cfg=None) -> None:
         clip_path.with_name(clip_path.stem + ".transcript.txt").write_text(
             transcript + "\n", encoding="utf-8"
         )
+
+
+def _cover_time(segs, has_cold_open: bool) -> float:
+    """M89: the cover frame's source second — the middle of the longest body window (the speaker mid-thought;
+    the cold open is a teaser from later and is skipped)."""
+    body = list(segs[1:]) if has_cold_open and len(segs) > 1 else list(segs)
+    w = max(body, key=lambda s: s.end - s.start)
+    return w.start + (w.end - w.start) / 2
+
+
+def _cover_cmd(ffmpeg: str, source: Path, t: float, vf: str, out: Path) -> list[str]:
+    """M89: one frame of the source at `t`, through the reel's crop/scale/colour (and the plate) → JPEG."""
+    return [ffmpeg, "-v", "error", "-y", "-ss", f"{t:.3f}", "-i", str(source), "-frames:v", "1", "-an",
+            "-vf", vf, "-q:v", "2", str(out)]
+
+
+def _cover_face_time(segs, reel, setup, source: Path, ffmpeg: str, *, n: int = 7) -> float | None:
+    """M96: among n moments of the body, the one whose frame (in the reel's crop) shows the largest face with open
+    eyes; None without OpenCV or without a face (the middle of the longest window is used then)."""
+    import subprocess as _sp
+    from autoreels.local.autocrop import best_face_time, cover_candidates, opencv_face_eyes
+    detect = opencv_face_eyes()
+    if detect is None:
+        return None
+    times = cover_candidates(segs, getattr(reel, "cold_open", None) is not None, n=n)
+    vf = _crop_vf_for_crop(setup, setup.crop) + ",scale=270:480,format=gray"
+
+    def grab(t):
+        import numpy as np
+        try:
+            raw = _sp.run([ffmpeg, "-v", "error", "-ss", f"{t:.3f}", "-i", str(source), "-frames:v", "1", "-an",
+                           "-vf", vf, "-f", "rawvideo", "pipe:1"], capture_output=True, check=True).stdout
+        except (OSError, _sp.CalledProcessError):
+            return None
+        return np.frombuffer(raw[: 270 * 480], dtype=np.uint8).reshape(480, 270) if len(raw) >= 270 * 480 else None
+    return best_face_time(times, grab, detect)
+
+
+def _write_cover(clip_path: Path, reel, segs, setup, source: Path, ffmpeg: str, *, palette_vf: str = "",
+                 subtitles_cfg=None, tmp_dir: Path, by_face: bool = False) -> Path | None:
+    """M89: <reel>.cover.jpg next to the clip — the frame of _cover_time in the reel's crop and colour, with its
+    plate title (title_overlay). Static, no tracking. A failure is a warning: the clip itself stays."""
+    import subprocess as _sp
+    out = clip_path.with_name(clip_path.stem + ".cover.jpg")
+    vf = ",".join(x for x in (_crop_vf_for_crop(setup, setup.crop), palette_vf) if x)
+    title = (getattr(reel, "title_overlay", "") or "").strip()
+    if title and subtitles_cfg is not None:
+        from autoreels.local.subtitles import build_cover_ass
+        name = f"{reel.id}.cover.ass"
+        (tmp_dir / name).write_text(build_cover_ass(title, cfg=subtitles_cfg, play_res=tuple(setup.scale)),
+                                    encoding="utf-8")
+        vf = f"{vf},ass={name}"
+    t = _cover_face_time(segs, reel, setup, Path(source), ffmpeg) if by_face else None
+    if t is None:
+        t = _cover_time(segs, getattr(reel, "cold_open", None) is not None)
+    try:
+        r = _sp.run(_cover_cmd(ffmpeg, Path(source), t, vf, out), cwd=str(tmp_dir), capture_output=True, text=True)
+    except OSError as exc:
+        print(f"  warning ({reel.id}): обложка не записана ({exc})", flush=True)
+        return None
+    if r.returncode != 0 or not out.is_file():
+        print(f"  warning ({reel.id}): обложка не записана ({(r.stderr or '').strip()[:160]})", flush=True)
+        return None
+    return out
 
 
 def _write_index_md(manifest: Manifest, out_dir: Path, render_cfg=None) -> None:

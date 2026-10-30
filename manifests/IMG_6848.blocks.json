@@ -65,11 +65,11 @@
   },
   {
     "id": "4aa1d603bec8a391",
-    "start": 323.1,
+    "start": 323.09744,
     "end": 345.6,
     "boundary_reason": "pause",
     "verdict": "KEPT",
-    "heuristic_score": 60.48
+    "heuristic_score": 60.49
   },
   {
     "id": "3787450eadda70f2",
@@ -97,15 +97,15 @@
   },
   {
     "id": "065eea072a36b3e0",
-    "start": 555.2,
+    "start": 555.16614,
     "end": 584.7,
     "boundary_reason": "pause",
     "verdict": "KEPT",
-    "heuristic_score": 68.85
+    "heuristic_score": 68.93
   },
   {
     "id": "15128f971330d5ee",
-    "start": 596.2,
+    "start": 596.1948755,
     "end": 638.5,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -121,7 +121,7 @@
   },
   {
     "id": "b3f8240f4dff39d1",
-    "start": 681.3,
+    "start": 681.2948755,
     "end": 721.9,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -185,7 +185,7 @@
   },
   {
     "id": "c0810e0ec97b74e0",
-    "start": 1065.0,
+    "start": 1064.9630754999998,
     "end": 1097.3,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -281,11 +281,11 @@
   },
   {
     "id": "7d260f6d21d30fd0",
-    "start": 1653.6,
+    "start": 1653.567161,
     "end": 1681.3,
     "boundary_reason": "pause",
     "verdict": "KEPT",
-    "heuristic_score": 71.83
+    "heuristic_score": 71.91
   },
   {
     "id": "35cdcf518568502a",
@@ -297,7 +297,7 @@
   },
   {
     "id": "8b5d78728260085d",
-    "start": 1770.9,
+    "start": 1770.898731,
     "end": 1811.9,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -321,7 +321,7 @@
   },
   {
     "id": "2ea21b834679b0db",
-    "start": 1894.5,
+    "start": 1894.4751939999999,
     "end": 1939.6,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
@@ -329,7 +329,7 @@
   },
   {
     "id": "6d64a1ac9111d8ad",
-    "start": 1955.3,
+    "start": 1955.2752,
     "end": 1994.8,
     "boundary_reason": "pause",
     "verdict": "KEPT",

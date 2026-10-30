@@ -33,6 +33,8 @@ class ManualPlanParams:
     """Numbers from config (r0.yaml / render.yaml). Defaults mirror the shipped config."""
 
     seam_pad_sec: float = 0.04        # air kept at an internal seam, inside the silence between words
+    start_pad_sec: float = 0.0        # M142: air before the clip's FIRST sound (body start, cold open); 0 = seam_pad_sec
+    start_preroll_sec: float = 0.0    # M146: a glued first word starts this much earlier, in the tail of the word before
     end_air_sec: float = 0.30         # air after the last word (REEL_SPEC §4)
     hook_min_sec: float = 0.30        # M60: a cold open shorter than this (or reversed) is skipped
     onset_margin_sec: float = 0.06    # never closer than this to the next speech onset
@@ -69,6 +71,20 @@ class ManualPlanParams:
     # every cut, masked or not, stays at least this far from any other picture change (a seam, a shot
     # switch, another cut) — no bursts of jumps. 0 = off (the previous cuts).
     change_gap_sec: float = 0.0
+    # M126 (owner: «много вводных слов у человека, который говорит»; «2 можно делать не часто, иначе вернётся
+    # дёрганье»): standalone filler words (filler_words, a phrase between punctuation or sentence edges — never one
+    # that carries the clause) — hidden from the subtitles (subs_hide_fillers; the sound keeps them) and/or cut from
+    # the sound (filler_word_cut: a candidate of the filler cut, under its spacing, jump, mask and share rules, so
+    # rarely). Both off = the previous output.
+    filler_words: tuple = ()
+    subs_hide_fillers: bool = False
+    filler_word_cut: bool = False
+    # M79 (owner on PXL_20260729_copy r07: the interviewer «зависает на несколько секунд между слов» — a thinking
+    # pause the profile left in because the face moved during it): a pause at least this long is always shortened —
+    # a visible jump is masked by a wide↔close switch, the spacing rules (min_cut_spacing_sec, change_gap_sec,
+    # mask_min_gap_sec) and the max_removed_share cap do not hold it back; seconds of dead air are worse than one
+    # switch. 0 = off.
+    long_pause_sec: float = 0.0
     # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
@@ -86,6 +102,11 @@ class ManualPlanParams:
     # first word — only real silence (never into the next speech, onset_margin_sec away from it), so the hook and
     # the start of the clip are heard as two things. 0 = off (the previous windows).
     hook_air_sec: float = 0.0
+    # M173 (owner on 09h33 m163 r01: hook, 0.7 s of one sentence, then a cut — «нужно отталкиваться от алгоритма, чтобы
+    # таких скачков кадра не возникало»): a shot between two picture changes (the clip start, a seam, a cut, a
+    # wide↔close switch) shorter than this is reported («short shot»); an automatic clip with one is refused at --apply
+    # and its line check drops the sentences of that shot. The cold open and the last shot are not counted. 0 = off.
+    short_shot_sec: float = 0.0
 
 
 @dataclass
@@ -99,7 +120,11 @@ class PlannedWindow:
     cuts: list[list[float]] = field(default_factory=list)  # source-time stretches removed (§1.4)
     cuts_skipped: int = 0             # candidate cuts left in: the face would visibly jump
     cuts_spaced: int = 0              # M72: candidate cuts left in: too close to another picture change
+    cuts_long: int = 0                # M79: long pauses cut whatever the spacing / jump rules said
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
+    word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
+    prerolled: bool = False                        # M146: start was pushed into the previous word's tail
+    min_span_sec: float = 0.0                      # M173: no wide/close span inside a piece shorter than this (0 = off)
 
     @property
     def last_shot(self) -> str:
@@ -110,8 +135,11 @@ class PlannedWindow:
         return "wide"
 
     def segment(self) -> Segment:
+        shot, ci = self.shot, [list(c) for c in self.close_intervals]
+        if self.min_span_sec > 0 and shot == "wide" and ci:
+            shot, ci = _shot_of(_tidy_spans(ci, self.end - self.start, self.min_span_sec), self.end - self.start)
         return make_segment(self.start, self.end).model_copy(update={
-            "shot": self.shot, "close_intervals": [list(ci) for ci in self.close_intervals]})
+            "shot": shot, "close_intervals": ci, "prerolled": self.prerolled})
 
     def pieces(self) -> list[tuple[float, float]]:
         """Played stretches of the window (source time): the window minus its cuts."""
@@ -144,13 +172,16 @@ class PlannedWindow:
                         spans.append([round(s0 - a, 6), round(s1 - a, 6)])
             if flipped:
                 spans = _complement(spans, b - a)
+            if self.min_span_sec > 0:
+                spans = _tidy_spans(spans, b - a, self.min_span_sec)
             shot, ci = "wide", spans
             if not spans:
                 ci = []
             elif len(spans) == 1 and spans[0][0] < _EPS and spans[0][1] > (b - a) - _EPS:
                 shot, ci = "close", []
             out.append(make_segment(a, b).model_copy(update={"shot": shot, "close_intervals": ci,
-                                                             "window_cut": bool(out)}))
+                                                             "window_cut": bool(out),
+                                                             "prerolled": self.prerolled if k == 0 else False}))
         return out
 
     @property
@@ -222,6 +253,7 @@ class ManualPlan:
         cuts = [c for w in self.windows for c in w.cuts]
         skipped = sum(w.cuts_skipped for w in self.windows)
         spaced = sum(w.cuts_spaced for w in self.windows)
+        longp = sum(w.cuts_long for w in self.windows)
         masked = sum(len(w.cut_flips) for w in self.windows)
         if cuts or skipped or spaced:
             removed = sum(c1 - c0 for c0, c1 in cuts)
@@ -230,8 +262,34 @@ class ManualPlan:
                          f"(clip {total:.1f}s → {total - removed:.1f}s)"
                          + (f"; {masked} masked by a shot switch" if masked else "")
                          + (f"; {skipped} left in (visible jump)" if skipped else "")
-                         + (f"; {spaced} left in (too close to another change)" if spaced else ""))
+                         + (f"; {spaced} left in (too close to another change)" if spaced else "")
+                         + (f"; {longp} long pause(s) always cut" if longp else ""))
         return lines
+
+
+def _tidy_spans(spans: list[list[float]], dur: float, m: float) -> list[list[float]]:
+    """M173 (owner on disko_beach_p3 m172 r01: one frame «стреляет» by scale): close spans of one piece with no wide
+    or close stretch under `m` — a gap under m between two spans is closed, an edge under m from the piece edge goes
+    to the edge, a span still under m is dropped. Seconds of a piece are never moved, only where the switch falls."""
+    out: list[list[float]] = []
+    for a, b in sorted([max(0.0, a), min(dur, b)] for a, b in spans):
+        if b - a <= _EPS:
+            continue
+        if a < m:
+            a = 0.0
+        if dur - b < m:
+            b = dur
+        if out and a - out[-1][1] < m:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [[round(a, 6), round(b, 6)] for a, b in out if b - a >= m - _EPS or (a == 0.0 and b == dur)]
+
+
+def _shot_of(spans: list[list[float]], dur: float) -> tuple[str, list[list[float]]]:
+    if len(spans) == 1 and spans[0][0] < _EPS and spans[0][1] > dur - _EPS:
+        return "close", []
+    return "wide", spans
 
 
 def _complement(spans: list[list[float]], dur: float) -> list[list[float]]:
@@ -577,6 +635,16 @@ def _speech_before(times: SpeechTimes, first: Word) -> tuple[float | None, float
     return left, as_f
 
 
+def heard_pause(times: SpeechTimes, last: Word, first: Word) -> float | None:
+    """M134: the silence heard between `last` and `first` when `first` is the very next transcript word
+    (untranscribed speech between them counts as speech); None when another word stands between them."""
+    prev = times.prev(first)
+    if prev is None or round(prev.t0 * 1000) != round(last.t0 * 1000):
+        return None
+    left, onset = _speech_before(times, first)
+    return max(0.0, onset - left) if left is not None else None
+
+
 def _speech_after(times: SpeechTimes, last: Word) -> tuple[float, float | None]:
     """(end of `last`, onset of the next speech: next word or untranscribed speech)."""
     nxt = times.next(last)
@@ -597,6 +665,20 @@ def _window_start(times: SpeechTimes, first: Word, pad: float) -> float:
     if left is not None:
         start = max(start, _cut_between(left, as_f))
     return min(start, as_f)
+
+
+def _clip_start(times: SpeechTimes, first: Word, pad: float, params: "ManualPlanParams") -> "tuple[float, bool]":
+    """The start of a clip's FIRST sound (the body's first window, a cold open). Returns (start, prerolled).
+    M142: start_pad_sec of air (never into the speech before). M146 (owner: «давай» — exception to invariant 10):
+    a first word GLUED to the word before it starts start_preroll_sec earlier, in that word's tail; prerolled=True
+    tells _check_seam_inside_word to skip the start (intentional overlap)."""
+    start = _window_start(times, first, max(pad, params.start_pad_sec))
+    if params.start_preroll_sec:
+        left, as_f = _speech_before(times, first)
+        if left is not None and as_f - left < params.start_preroll_sec:
+            start = min(start, as_f - params.start_preroll_sec)
+            return start, True
+    return start, False
 
 
 def _window_end(times: SpeechTimes, last: Word, pad: float) -> float:
@@ -741,6 +823,65 @@ def _limit_static(times: SpeechTimes, sentences, w: "PlannedWindow", ci: list[li
     return out
 
 
+_PUNCT_END = (",", ".", "!", "?", ";", ":", "…", "—", "–")
+
+
+def _fold(word: str) -> str:
+    return "".join(c for c in word.lower().replace("ё", "е") if c.isalnum() or c == "-")
+
+
+def standalone_fillers(sentence: Sequence[Word], filler_words) -> list[tuple[int, int]]:
+    """M126: (first, last) word indexes of the standalone filler phrases of a sentence — a phrase of filler_words that
+    starts the sentence or follows a punctuation mark, and ends the sentence or carries one («Ну, …», «…, вот, …»,
+    «…, как бы, …»). «Вот этот дом», «как бы ни было» are not standalone and stay."""
+    phrases = sorted({tuple(_fold(x) for x in str(p).split()) for p in filler_words if str(p).strip()},
+                     key=len, reverse=True)
+    words = list(sentence)
+    folded = [_fold(w.word) for w in words]
+    out, i = [], 0
+    while i < len(words):
+        hit = None
+        for ph in phrases:
+            j = i + len(ph) - 1
+            if j < len(words) and tuple(folded[i:j + 1]) == ph \
+                    and (i == 0 or words[i - 1].word.rstrip().endswith(_PUNCT_END)) \
+                    and (j == len(words) - 1 or words[j].word.rstrip().endswith(_PUNCT_END)):
+                hit = (i, j)
+                break
+        if hit and hit != (0, len(words) - 1):       # a sentence that is only a filler stays (it is the sentence)
+            out.append(hit)
+            i = hit[1] + 1
+        else:
+            i += 1
+    return out
+
+
+def hide_fillers(sentence: Sequence[Word], filler_words) -> list[Word]:
+    """M126: the sentence's words for the subtitles without its standalone fillers — a sentence-ending mark moves to
+    the word before, the word after a hidden sentence start gets a capital («Ну, я думаю.» → «Я думаю.»)."""
+    words = list(sentence)
+    spans = standalone_fillers(words, filler_words)
+    if not spans:
+        return words
+    drop = {k for a, b in spans for k in range(a, b + 1)}
+    out: list[Word] = []
+    cap_next = False
+    for k, w in enumerate(words):
+        if k in drop:
+            end = w.word.rstrip()
+            if k == len(words) - 1 and out and end.endswith((".", "!", "?", "…")):
+                prev = out[-1]
+                out[-1] = prev.model_copy(update={"word": prev.word.rstrip().rstrip(",;:—–") + end[-1]})
+            if k == 0 or (k > 0 and (k - 1) not in drop and words[k - 1].word.rstrip().endswith((".", "!", "?"))):
+                cap_next = cap_next or (w.word[:1].isupper())
+            continue
+        if cap_next and w.word[:1].islower():
+            w = w.model_copy(update={"word": w.word[:1].upper() + w.word[1:]})
+        cap_next = False
+        out.append(w)
+    return out
+
+
 def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "ManualPlanParams",
                  jump: Callable[[float, float], float] | None = None) -> list[list[float]]:
     """Cuts of the window (sorted); masked ones are also recorded in w.cut_flips."""
@@ -785,6 +926,32 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         if times.heard_between(a, b) is not None:
             continue
         cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, u_len))
+    # M126: standalone filler words — the stretch from the word before to the word after goes (their sound only)
+    word_cand: dict[tuple[float, float], set[int]] = {}
+    if params.filler_word_cut and params.filler_words:
+        for n in w.sentences:
+            s = sentences[n - 1]
+            for i, j in standalone_fillers(s, params.filler_words):
+                prev_w = s[i - 1] if i > 0 else (sentences[n - 2][-1] if n - 2 >= 0 and (n - 1) in w.sentences
+                                                 else None)
+                next_w = s[j + 1] if j + 1 < len(s) else (sentences[n][0] if n < len(sentences) and (n + 1) in
+                                                          w.sentences else None)
+                if prev_w is None or next_w is None:
+                    continue              # never at a window edge: the window's start and end stay where they are
+                ae = times.pair(prev_w, s[i])[0]
+                as_ = times.pair(s[j], next_w)[1]
+                f0, f1 = times.span(s[i])[0], times.span(s[j])[1]
+                end_of_sentence = s[j].word.rstrip().endswith((".", "!", "?", "…"))
+                half = (params.keep_sentence_sec if end_of_sentence else params.keep_word_sec) / 2
+                a = ae + max(params.edge_min_sec, min(half, max(0.0, f0 - ae)))
+                b = as_ - max(params.edge_min_sec, min(half, max(0.0, as_ - f1)))
+                if b - a < params.min_cut_sec or a > f0 + _EPS or b < f1 - _EPS:
+                    continue
+                if times.heard_between(a, f0) is not None or times.heard_between(f1, b) is not None:
+                    continue              # another word's sound is in the stretch: the filler stays
+                key = (round(a, 3), round(b, 3))
+                word_cand[key] = {round(x.t0 * 1000) for x in s[i:j + 1]}
+                cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, f1 - f0))
     # shot changes already in the window (its start is a seam; close spans switch in and out)
     changes = [w.start] + [w.start + x for ci in w.close_intervals for x in ci]
     budget = params.max_removed_share * (w.end - w.start)
@@ -792,7 +959,22 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
     flips: list[list[float]] = []
     for a, b, visible, u_len in sorted(cands, key=lambda c: c[1] - c[0], reverse=True):
         mid = (a + b) / 2
-        if b - a > budget:
+        if any(a < k1 - _EPS and b > k0 + _EPS for k0, k1 in keep):
+            # M136: a filler-word cut (M126) and the pause next to the filler cover the same silence; a long pause
+            # skips the spacing rules (M79), so both were kept and the piece between them came out reversed
+            continue
+        long_pause = bool(params.long_pause_sec) and b - a >= params.long_pause_sec
+        if b - a > budget and not long_pause:
+            continue
+        if long_pause:
+            # M79: seconds of dead air go whatever the spacing rules and the share cap say; a jump is masked by
+            # a shot switch (longest first, so a long pause is placed before the cuts that would crowd it out)
+            w.cuts_long += 1
+            if visible:
+                flips.append([round(a, 3), round(b, 3)])
+            changes.append(mid)
+            keep.append([round(a, 3), round(b, 3)])
+            budget -= b - a
             continue
         if any(abs(mid - (k0 + k1) / 2) < params.min_cut_spacing_sec for k0, k1 in keep):
             continue
@@ -813,8 +995,80 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         keep.append([round(a, 3), round(b, 3)])
         budget -= b - a
     keep.sort()
+    if params.short_shot_sec > 0:
+        keep, flips = _lengthen_short_shots(times, sentences, w, keep, flips, params, set(word_cand))
     w.cut_flips = sorted(flips)
+    w.word_cuts = {k for c in keep for k in word_cand.get((c[0], c[1]), set())}
     return keep
+
+
+def _whole_sentences_only(times: SpeechTimes, sentences, w: "PlannedWindow", a: float, b: float) -> bool:
+    """The played stretch [a, b] of window w holds at least one whole sentence and no part of another (M173: such a
+    short shot is the automatic line check's to fix — it drops those sentences)."""
+    whole = part = False
+    for n in w.sentences:
+        heard = [times.audible(x) for x in sentences[n - 1] if any(c.isalnum() for c in x.word)]
+        inside = [a - _EPS <= h0 and h1 <= b + 0.05 for h0, h1 in heard]
+        touch = [min(h1, b) - max(h0, a) > _EPS for h0, h1 in heard]
+        if heard and all(inside):
+            whole = True
+        elif any(touch):
+            part = True
+    return whole and not part
+
+
+def _lengthen_short_shots(times: SpeechTimes, sentences, w: "PlannedWindow", keep: list[list[float]],
+                          flips: list[list[float]], params: "ManualPlanParams", word_keys: set):
+    """M174 (m173: 53 short shots «inside a sentence» — a cut a second after a seam or another cut): a played piece of
+    the window shorter than short_shot_sec between two picture changes (the window edges are seams, every cut is a
+    change) is lengthened with the silence of the cut next to it — the cut keeps more of the pause on that side
+    (only silence: no word, no untranscribed sound), while the cut stays at least min_cut_sec. When the silence is not
+    enough, the shorter neighbouring cut is dropped (the pause is played). A piece holding whole sentences only is left
+    to the automatic line check (it drops them; the owner's clip keeps the warning). A filler-word cut (M126) is
+    never moved — only dropped, so its word comes back to the screen with its sound."""
+    m, mc = params.short_shot_sec, params.min_cut_sec
+    keep = [list(c) for c in keep]
+    flip_set = {(round(a, 3), round(b, 3)) for a, b in flips}
+
+    def silent(a: float, b: float) -> bool:
+        return b - a <= _EPS or (times.heard_between(a, b) is None and not times.untranscribed_between(a, b))
+
+    for _ in range(2 * len(keep) + 2):
+        pieces, prev = [], w.start
+        for c0, c1 in keep:
+            pieces.append((prev, c0))
+            prev = c1
+        pieces.append((prev, w.end))
+        bad = next((i for i, (pa, pb) in enumerate(pieces) if pb - pa < m - _EPS and keep
+                    and not _whole_sentences_only(times, sentences, w, pa, pb)), None)
+        if bad is None:
+            break
+        pa, pb = pieces[bad]
+        need = m - (pb - pa)
+        done = False
+        for side in ("right", "left"):
+            ci = bad if side == "right" else bad - 1
+            if not 0 <= ci < len(keep):
+                continue
+            a, b = keep[ci]
+            if (round(a, 3), round(b, 3)) in word_keys:
+                continue
+            na, nb = (a + need, b) if side == "right" else (a, b - need)
+            if nb - na >= mc - _EPS and silent(min(a, na), max(a, na)) and silent(min(b, nb), max(b, nb)):
+                old = (round(a, 3), round(b, 3))
+                keep[ci] = [round(na, 3), round(nb, 3)]
+                if old in flip_set:
+                    flip_set.discard(old)
+                    flip_set.add((keep[ci][0], keep[ci][1]))
+                done = True
+                break
+        if done:
+            continue
+        near = [ci for ci in (bad - 1, bad) if 0 <= ci < len(keep)]
+        ci = min(near, key=lambda i: keep[i][1] - keep[i][0])
+        flip_set.discard((round(keep[ci][0], 3), round(keep[ci][1], 3)))
+        del keep[ci]
+    return keep, [list(f) for f in sorted(flip_set)]
 
 
 class ForeignSound:
@@ -899,6 +1153,7 @@ def build_manual_plan(
     params: ManualPlanParams = ManualPlanParams(),
     hook: int | None = None,
     hook_mode: str | None = None,          # None | "!" (always replay) | "-" (never replay)
+    hook_words: tuple[int, int] | None = None,   # M182: the cold open is words i..j (1-based) of the hook sentence
     close: Iterable[int] = (),
     next_onset: Callable[[Word], float | None] | None = None,
     source_duration: float | None = None,
@@ -977,8 +1232,13 @@ def build_manual_plan(
             last = sentences[run[-1] - 1][-1]
             pad_a = params.break_pad_sec if run[0] in brk else pad
             pad_b = params.break_pad_sec if k + 1 < len(runs) and runs[k + 1][0] in brk else pad
-            w = PlannedWindow(sentences=list(run), start=_window_start(times, first, pad_a),
-                              end=_window_end(times, last, pad_b), shot="wide")
+            # M142/M146: the clip's first sound — more air, and a glued first word pre-rolled (_clip_start)
+            if k == 0:
+                w_start, _pr = _clip_start(times, first, pad_a, params)
+            else:
+                w_start, _pr = _window_start(times, first, pad_a), False
+            w = PlannedWindow(sentences=list(run), start=w_start,
+                              end=_window_end(times, last, pad_b), shot="wide", prerolled=_pr)
             prev = out[-1] if out else None
             # A forward seam whose next window starts before the previous one ends has no silence
             # to cut in: the skipped sentence is a Whisper duplicate overlapping its neighbours.
@@ -999,9 +1259,22 @@ def build_manual_plan(
     # IMG_6848 h:22.1: [1065.925, 1065.700]) or is shorter than a fraction of a second cannot be a
     # cold open: it would be an empty window (check_segments refuses the whole apply). Skipped with
     # a warning, as a hook over hook_max_sec is refused (the body is not touched).
+    # M182 (owner: «раньше хуки были лучше, сейчас пустые» — 1 cold open in 12 clips of prew_isaev_anna: a whole sentence
+    # of ≤ hook_max_sec is rare in an interview): the cold open may be a clause of the hook sentence (words i..j, cut in
+    # the pauses around it); the whole sentence is then always replayed in the body, never removed from it.
+    hook_part = None
+    if hook is not None and hook_words is not None:
+        _i, _j = int(hook_words[0]), int(hook_words[1])
+        _sw = sentences[hook - 1]
+        if 1 <= _i <= _j <= len(_sw) and (_i, _j) != (1, len(_sw)):
+            hook_part = list(_sw[_i - 1:_j])
+        elif not (1 <= _i <= _j <= len(_sw)):
+            warnings.append(f"h:{hook}@{_i}-{_j}: the sentence has words 1-{len(_sw)} — cold open skipped")
+            hook = None
     if hook is not None:
-        _hs = sentences[hook - 1]
-        _ha, _hb = _window_start(times, _hs[0], pad), _window_end(times, _hs[-1], pad)
+        _hs = hook_part or sentences[hook - 1]
+        _ha, _ = _clip_start(times, _hs[0], pad, params)
+        _hb = _window_end(times, _hs[-1], pad)
         if _hb - _ha < params.hook_min_sec:
             warnings.append(f"h:{hook} «{_txt(_hs)[:40]}» has no sound of its own ({_ha:.3f}–{_hb:.3f}: "
                             f"the alignment runs backwards or the sentence is too short) — cold open skipped")
@@ -1012,7 +1285,7 @@ def build_manual_plan(
     if hook is not None:
         if hook not in play:
             hook_replayed = False
-        elif hook_mode == "!":
+        elif hook_mode == "!" or hook_part is not None:
             hook_replayed = True
         elif hook_mode == "-":
             hook_replayed = False
@@ -1088,7 +1361,7 @@ def build_manual_plan(
     windows: list[PlannedWindow] = []
     hook_air: tuple[float, float] | None = None
     if hook is not None:
-        hs = sentences[hook - 1]
+        hs = hook_part or sentences[hook - 1]
         co_end = _window_end(times, hs[-1], pad)
         if params.hook_air_sec > 0:
             # M74: air between the hook and the body — the silence after the hook sentence and before the
@@ -1104,7 +1377,7 @@ def build_manual_plan(
             if left_b is not None:
                 air_start = max(air_start, left_b + params.onset_margin_sec)
             air_start = max(0.0, air_start)
-            co_start = _window_start(times, hs[0], pad)
+            co_start, _ = _clip_start(times, hs[0], pad, params)
             if co_start < air_start < air_end:
                 # M77 (owner: «где-то повторение — кадр двоится»): the body starts right after the hook in the
                 # source — both airs are the SAME silence, played twice. The silence is shared once, cut in its
@@ -1115,8 +1388,9 @@ def build_manual_plan(
             co_end += add_a
             body[0].start -= add_b
             hook_air = (round(add_a, 3), round(add_b, 3))
-        windows.append(PlannedWindow(sentences=[hook], start=_window_start(times, hs[0], pad),
-                                     end=co_end, shot="close", cold_open=True))
+        _co_s, _co_pr = _clip_start(times, hs[0], pad, params)
+        windows.append(PlannedWindow(sentences=[hook], start=_co_s,
+                                     end=co_end, shot="close", cold_open=True, prerolled=_co_pr))
     windows.extend(body)
 
     # §3 shots: cold open close; body starts wide; every seam flips; c: close; nothing else.
@@ -1171,9 +1445,12 @@ def build_manual_plan(
         pieces = w.pieces()
         prev_t0 = None
         for n in w.sentences:
-            for word in sentences[n - 1]:
+            shown = hook_part if (w.cold_open and hook_part is not None) else sentences[n - 1]   # M182: the clause only
+            if params.subs_hide_fillers and params.filler_words:    # M126: the screen without the fillers
+                shown = hide_fillers(shown, params.filler_words)
+            for word in shown:
                 key = round(word.t0 * 1000)
-                if key in subs:
+                if key in subs or key in w.word_cuts:              # M126: a filler whose sound is cut is not shown
                     continue
                 if prev_t0 is not None and word.t0 < prev_t0:
                     word = word.model_copy(update={"t0": prev_t0, "t1": max(word.t1, prev_t0)})
@@ -1210,7 +1487,74 @@ def build_manual_plan(
                       hook_replayed=hook_replayed, warnings=warnings, errors=errors, hook_air=hook_air)
     plan._sent_bounds = sent_bounds
     plan._times = times
+    if params.short_shot_sec > 0:
+        for w in windows:
+            w.min_span_sec = params.short_shot_sec
+        warnings.extend(short_shot_warnings(plan, sentences, params.short_shot_sec))
     return plan
+
+
+def picture_shots(windows: Sequence["PlannedWindow"]) -> list[tuple[float, float, list[tuple[float, float, float]]]]:
+    """M173: the shots of a clip in output time, in play order: (out_start, out_end, [(out_a, out_b, src_a)…]).
+
+    A new shot begins at every played piece (a seam between windows, a cut inside one) and at every wide↔close
+    switch inside a piece. The third item maps the shot back to source time (src = src_a + out − out_a)."""
+    bounds: list[float] = [0.0]
+    spans: list[tuple[float, float, float]] = []
+    t = 0.0
+    for w in windows:
+        for seg in w.segments():
+            dur = seg.end - seg.start
+            if dur <= _EPS:
+                continue
+            if t > _EPS:
+                bounds.append(t)
+            for c0, c1 in (seg.close_intervals or []):
+                for e in (c0, c1):
+                    if _EPS < e < dur - _EPS:
+                        bounds.append(t + e)
+            spans.append((t, t + dur, seg.start))
+            t += dur
+    bounds = sorted(set(round(b, 6) for b in bounds)) + [t]
+    out = []
+    for a, b in zip(bounds, bounds[1:]):
+        if b - a <= _EPS:
+            continue
+        m = [(max(a, sa), min(b, sb), src + (max(a, sa) - sa)) for sa, sb, src in spans if min(b, sb) - max(a, sa) > _EPS]
+        out.append((a, b, m))
+    return out
+
+
+def short_shot_warnings(plan: "ManualPlan", sentences: Sequence[Sequence[Word]], min_sec: float) -> list[str]:
+    """M173: «short shot» for every shot under `min_sec` between two picture changes. Not counted: shots inside the
+    cold open (the hook is its own unit, hook_min_sec) and the last shot (nothing cuts after it). The sentences heard
+    whole inside the shot are named by their first word's Whisper start (`s<n>@<t0>`), so the automatic line check can
+    drop exactly them; a shot inside a sentence is «inside a sentence» (no sentence to drop)."""
+    times = plan._times
+    co = plan.cold_open
+    co_len = (co.end - co.start - sum(c1 - c0 for c0, c1 in co.cuts)) if co is not None else 0.0
+    shots = picture_shots(plan.windows)
+    body_sents = [n for w in plan.body for n in w.sentences]
+    out: list[str] = []
+    for i, (a, b, m) in enumerate(shots):
+        if i == len(shots) - 1 or b - a >= min_sec - _EPS or b <= co_len + _EPS:
+            continue
+        src = [(sa, sa + (ob - oa)) for oa, ob, sa in m]
+        whole, partial = [], False
+        for n in body_sents:
+            ws = [w for w in sentences[n - 1] if any(c.isalnum() for c in w.word)]
+            heard = [times.audible(w) for w in ws] if times is not None else [(w.t0, w.t1) for w in ws]
+            inside = [any(x0 - _EPS <= h0 and h1 <= x1 + 0.05 for x0, x1 in src) for h0, h1 in heard]
+            touch = [any(min(h1, x1) - max(h0, x0) > _EPS for x0, x1 in src) for h0, h1 in heard]
+            if ws and all(inside):
+                whole.append((n, ws[0].t0))
+            elif any(touch):
+                partial = True
+        what = ("whole sentences " + ", ".join(f"s{n}@{t0:.3f}" for n, t0 in whole)
+                if whole and not partial else "inside a sentence")
+        out.append(f"short shot {b - a:.2f}s between two picture changes (out {a:.2f}–{b:.2f}s, "
+                   f"src {src[0][0]:.2f}–{src[-1][1]:.2f}): {what}")
+    return out
 
 
 def _ending_tone_warnings(sentences: Sequence[Sequence[Word]], last: int,

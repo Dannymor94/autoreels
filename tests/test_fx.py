@@ -54,7 +54,7 @@ def test_push_only_on_long_shots():
     assert fx.push_vf([10.0], 20.0, pct=0.0) == ""
     vf = fx.push_vf([4.0, 12.0], 15.0, pct=4.0, min_sec=6.0)
     assert "between(t\\,4.000\\,12.000)" in vf and "0.000\\,4.000" not in vf and "12.000\\,15.000" not in vf
-    assert "eval=frame" in vf and vf.endswith("crop=1080:1920:(iw-1080)/2:(ih-1920)/2")
+    assert "eval=frame" in vf and "crop=1080:1920:'(2*trunc(1080*(1+" in vf and vf.endswith("-1920)*(0.5)'")
 
 
 @needs_ffmpeg
@@ -284,7 +284,7 @@ def test_render_wires_push_before_the_subtitles(tmp_path, render_cfg, fake_ffmpe
     # two shots, the second starting where the seam's short dissolve puts it (10 s − 2 frames)
     assert "between(t\\,0.000\\,9.933)" in cmd and "between(t\\,9.933\\,24.933)" in cmd
     assert cmd.index("eval=frame") < cmd.index("ass=r01.ass")
-    assert re.sub(r"scale=w='[^ ]*?\(ih-1920\)/2,", "", cmd) == plain    # nothing else changes
+    assert re.sub(r"scale=w='[^ ]*?-1920\)\*\(0\.5\)',", "", cmd) == plain    # nothing else changes
 
 
 def test_sped_up_clip_is_a_whole_number_of_frames(tmp_path, render_cfg, fake_ffmpeg):
@@ -328,7 +328,7 @@ def test_montage_tempo_profile_is_shipped_and_used_for_montage_clips():
     assert r0.montage.filler_profile == "montage_tempo" and r0.montage.filler_cut is True    # M72: on
     v = cli._filler_profile_values(r0, r0.montage.filler_profile)
     assert v["pause_max_sec"] == 0.6 and v["jump_mask"] is True and v["mask_min_gap_sec"] == 3.0
-    assert r0.montage.fx.pop and r0.autocut.hook_title and r0.autocut.seam_check and r0.autocut.short_variant
+    assert r0.montage.fx.pop and r0.autocut.hook_title and r0.autocut.seam_check and not r0.autocut.short_variant   # M78: off
 
 
 def test_plate_after_hook_starts_with_the_body():
@@ -363,3 +363,79 @@ def test_fx_on_auto_clips_is_a_switch_and_never_touches_owner_clips(tmp_path):
     cfg.write_text(cfg.read_text(encoding="utf-8").replace("  fx_auto_clips: false", "  fx_auto_clips: true"), encoding="utf-8")
     assert cli._blocks_do_apply(str(rpath), root=tmp_path / "off", cache_dir=str(tmp_path / "off" / "cache"), labeler="owner") == 0
     assert _M.model_validate_json((tmp_path / "off" / "reviews" / "v.review.json").read_text()).reels[0].fx == {}
+
+
+# ------------------------------------------------------------------ M103: punch-in into a close shot
+
+def test_m103_punch_times_are_the_close_shots_inside_windows_only():
+    from autoreels.local.fx import punch_point, punch_times
+    from autoreels.core.models import Crop
+    wins = [Segment(start=10.0, end=20.0, close_intervals=[[3.0, 7.0], [9.98, 10.0]]),
+            Segment(start=30.0, end=45.0, shot="close"), Segment(start=50.0, end=60.0, close_intervals=[[2.0, 5.0]])]
+    assert punch_times(wins, xfades=[0.1, 0.1]) == [3.0, 26.8]       # not the seams, not an edge at the window end
+    assert punch_times(wins, speed=2.0, xfades=[0.1, 0.1]) == [1.5, 13.4]
+    assert punch_point(Crop(x=400, y=0, w=1215, h=2160), Crop(x=628, y=160, w=760, h=1350)) == \
+        (round(228 / 455, 4), round(160 / 810, 4), round(1215 / 760, 4))
+    assert punch_point(Crop(x=0, y=0, w=600, h=1000), Crop(x=500, y=0, w=300, h=500)) is None   # sticks out
+    assert punch_point(Crop(x=0, y=0, w=600, h=1000), Crop(x=0, y=0, w=600, h=1000)) is None    # not tighter
+
+
+def test_m103_punch_zooms_into_the_close_frame_and_hands_over_at_the_switch():
+    from autoreels.local.fx import push_vf
+    plain = push_vf([2.0, 8.0], 14.0, pct=4, min_sec=1, pop_pct=8, pop_sec=0.6)
+    assert push_vf([2.0, 8.0], 14.0, pct=4, min_sec=1, pop_pct=8, pop_sec=0.6, punches=[]) == plain   # invariant 8
+    vf = push_vf([2.0, 8.0], 14.0, pct=4, min_sec=1, punches=[(8.0, 0.3, 0.2, 1.4)], punch_sec=0.3, fps=30)
+    assert "between(t\\,2.000\\,7.700)" in vf                         # the push of that shot stops at the punch
+    assert "gt(t\\,7.700)*lt(t\\,7.983)*(0.0400+0.3600*pow((t-7.700)/0.300\\,2))" in vf   # from the push it reached
+    assert "-1080)*(0.5+gt(t\\,7.700)*lt(t\\,7.983)*(-0.2000)*pow((t-7.700)/0.300\\,2))'" in vf
+    assert "-1920)*(0.5+gt(t\\,7.700)*lt(t\\,7.983)*(-0.3000)*pow((t-7.700)/0.300\\,2))'" in vf
+    nopush = push_vf([8.0], 14.0, pct=0, punches=[(8.0, 0.3, 0.2, 1.4)], punch_sec=0.3, fps=30)
+    assert "(0.0000+0.4000*pow" in nopush and "between" not in nopush
+    early = push_vf([0.5], 3.0, pct=0, pop_pct=8, pop_sec=0.6, punches=[(0.7, 0.3, 0.2, 1.4)], punch_sec=0.3)
+    assert "gt(t" not in early                                        # would overlap the pop: left out
+    assert push_vf([], 5.0, pct=0, punches=[(2.0, 0.5, 0.5, 1.0)]) == ""        # Z = 1: nothing to punch into
+
+
+def test_m103_render_punches_into_close_shots_only_with_the_flag(tmp_path, render_cfg, fake_ffmpeg):
+    reel = _two_window_reel(segments=[Segment(start=10.0, end=20.0, close_intervals=[[3.0, 7.0]]),
+                                      Segment(start=30.0, end=45.0)])
+    base = render_cfg.model_copy(update={"two_shot": True, "reel_framing": False, "close_from_face": False})
+    (cut,) = _render_argv(tmp_path, base, fake_ffmpeg, reel)
+    fake_ffmpeg.clear()
+    (punch,) = _render_argv(tmp_path, base.model_copy(update={"shot_transition": "punch"}), fake_ffmpeg, reel)
+    assert "eval=frame" not in cut and "gt(t\\,2.700)*lt(t\\,2.983)" in punch
+    assert punch.index("eval=frame") < punch.index("ass=r01.ass")
+
+
+def test_m103_transition_config_and_cli_flag(monkeypatch, render_cfg):
+    from autoreels import __main__ as cli
+    from autoreels.core.config import RenderConfig
+    assert render_cfg.shot_transition == "cut" and render_cfg.punch_sec == 0.3           # shipped: cut; A/B by flag
+    ok = RenderConfig.model_validate({**render_cfg.model_dump(), "shot_transition": "punch"})
+    assert ok.shot_transition == "punch"
+    with pytest.raises(ValueError, match="shot_transition must be 'cut' or 'punch'"):
+        RenderConfig.model_validate({**render_cfg.model_dump(), "shot_transition": "zoom"})
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_render", lambda **k: seen.update(k) or [])
+    monkeypatch.setattr(cli.sys, "argv", ["autoreels", "render", "--transition", "punch", "--gate", "g"])
+    cli.main()
+    assert seen["transition"] == "punch" and seen["gate_name"] == "g"
+
+
+@needs_ffmpeg
+def test_m103_push_and_pop_zoom_about_the_centre(tmp_path):
+    """The crop kept the first frame's iw/ih: the push zoomed towards the top-left corner and the pop slid up-left.
+    A red square in the middle of the frame stays in the middle all through a strong pop."""
+    import numpy as np
+    src = tmp_path / "m.mp4"
+    subprocess.run([FFMPEG, "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=gray:s=1080x1920:r=30:d=1.5,drawbox=x=520:y=940:w=40:h=40:c=red:t=fill",
+                    "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", str(src)],
+                   check=True)
+    for vf in (fx.push_vf([], 1.5, pct=0, pop_pct=30, pop_sec=1.0), fx.push_vf([], 1.5, pct=30, min_sec=1.0)):
+        raw = subprocess.run([FFMPEG, "-v", "error", "-i", str(src), "-vf", vf + ",select=eq(n\\,20)",
+                              "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                             capture_output=True, check=True).stdout
+        img = np.frombuffer(raw, dtype=np.uint8).reshape(1920, 1080, 3).astype(int)
+        ys, xs = np.nonzero((img[..., 0] > 180) & (img[..., 1] < 90))
+        assert abs(xs.mean() - 540) < 4 and abs(ys.mean() - 960) < 4, (xs.mean(), ys.mean())

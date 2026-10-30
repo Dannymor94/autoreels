@@ -1,0 +1,514 @@
+[
+  {
+    "id": "48c85ffb944102aa",
+    "start": 0.0,
+    "end": 41.1,
+    "boundary_reason": "sentence",
+    "verdict": "head",
+    "heuristic_score": 65.84
+  },
+  {
+    "id": "daecfe7bc46aa402",
+    "start": 42.2,
+    "end": 90.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 51.96
+  },
+  {
+    "id": "26a687a88dea9db3",
+    "start": 90.4,
+    "end": 133.2,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.66
+  },
+  {
+    "id": "7d6903fd4811b4b5",
+    "start": 133.2,
+    "end": 179.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 78.26
+  },
+  {
+    "id": "ba8c4648b47c7724",
+    "start": 179.3,
+    "end": 221.0,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 66.75
+  },
+  {
+    "id": "35b4665752a7c085",
+    "start": 221.0,
+    "end": 266.5,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 67.74
+  },
+  {
+    "id": "391f8e12b88c1138",
+    "start": 266.5,
+    "end": 312.5,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 66.72
+  },
+  {
+    "id": "ffb93e433d1abaa0",
+    "start": 312.6,
+    "end": 353.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 66.56
+  },
+  {
+    "id": "1f96b80d2431029a",
+    "start": 353.4,
+    "end": 397.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 84.72
+  },
+  {
+    "id": "19413a31ba0f48d8",
+    "start": 397.5,
+    "end": 448.8,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 65.66
+  },
+  {
+    "id": "eceb95efcc2c13ad",
+    "start": 451.19,
+    "end": 498.6,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 84.83
+  },
+  {
+    "id": "d6404ffa4b68ab6b",
+    "start": 498.6,
+    "end": 558.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 78.99
+  },
+  {
+    "id": "0bdaa2b22ddf28db",
+    "start": 560.8,
+    "end": 611.2,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 84.51
+  },
+  {
+    "id": "365e4b71853d8b82",
+    "start": 611.7,
+    "end": 654.2,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 96.2
+  },
+  {
+    "id": "54f46427c6248806",
+    "start": 654.28,
+    "end": 696.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.45
+  },
+  {
+    "id": "02c310d46147d951",
+    "start": 697.8,
+    "end": 749.7,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 78.13
+  },
+  {
+    "id": "efb38a419e50a5e0",
+    "start": 749.75,
+    "end": 798.6,
+    "boundary_reason": "speaker_turn",
+    "verdict": "KEPT",
+    "heuristic_score": 78.21
+  },
+  {
+    "id": "9de412fbcebcf49d",
+    "start": 798.6,
+    "end": 840.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 77.84
+  },
+  {
+    "id": "4ec5ec49a107549d",
+    "start": 841.0,
+    "end": 883.6,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 97.73
+  },
+  {
+    "id": "2a7ae8efc1d6d376",
+    "start": 883.6,
+    "end": 934.2,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.26
+  },
+  {
+    "id": "cbae878fd1986dcd",
+    "start": 934.2,
+    "end": 982.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 78.04
+  },
+  {
+    "id": "c921acc8dedc20bd",
+    "start": 982.8,
+    "end": 1032.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 84.61
+  },
+  {
+    "id": "4755ed095626c934",
+    "start": 1033.89,
+    "end": 1075.0,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 81.19
+  },
+  {
+    "id": "a212e7314c333379",
+    "start": 1075.49,
+    "end": 1095.9,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 58.79
+  },
+  {
+    "id": "93ceb24c68e0ed65",
+    "start": 1097.56,
+    "end": 1138.5,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 80.46
+  },
+  {
+    "id": "accee60434175b4f",
+    "start": 1138.5,
+    "end": 1183.2,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 78.36
+  },
+  {
+    "id": "845f45a5ac44e21f",
+    "start": 1183.2,
+    "end": 1225.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 66.04
+  },
+  {
+    "id": "bbb3b944bcf4af12",
+    "start": 1225.3,
+    "end": 1268.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 96.76
+  },
+  {
+    "id": "8f66b4db06dd21f5",
+    "start": 1268.1,
+    "end": 1310.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 67.09
+  },
+  {
+    "id": "b38129146ab6e7d5",
+    "start": 1310.4,
+    "end": 1370.9,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 77.73
+  },
+  {
+    "id": "e8666d1c4602fe56",
+    "start": 1370.9,
+    "end": 1413.8,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.13
+  },
+  {
+    "id": "cdefd37fc1e87b97",
+    "start": 1414.0,
+    "end": 1459.6,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 97.74
+  },
+  {
+    "id": "dcee9d523e8c4c2b",
+    "start": 1460.3,
+    "end": 1517.0,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.65
+  },
+  {
+    "id": "5d4980af244f9e9f",
+    "start": 1517.8,
+    "end": 1573.8,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 78.7
+  },
+  {
+    "id": "77e13c28d927fa9f",
+    "start": 1573.8,
+    "end": 1614.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 63.59
+  },
+  {
+    "id": "f996b75891ba9d0b",
+    "start": 1614.4,
+    "end": 1655.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 66.25
+  },
+  {
+    "id": "7b1ae5920df6b526",
+    "start": 1655.3,
+    "end": 1705.5,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.6
+  },
+  {
+    "id": "5590b9d3c68b5f7d",
+    "start": 1705.5,
+    "end": 1745.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 67.01
+  },
+  {
+    "id": "ee17ae14200cc518",
+    "start": 1747.0,
+    "end": 1787.4,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 78.78
+  },
+  {
+    "id": "d59dcf63c89f24b5",
+    "start": 1787.4,
+    "end": 1829.7,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 67.27
+  },
+  {
+    "id": "771f507ea79419df",
+    "start": 1829.7,
+    "end": 1871.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.76
+  },
+  {
+    "id": "701a4526e102c6c9",
+    "start": 1871.3,
+    "end": 1912.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 67.35
+  },
+  {
+    "id": "cb750816c174bfeb",
+    "start": 1912.4,
+    "end": 1956.0,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 52.45
+  },
+  {
+    "id": "22e2afd00c4dbb61",
+    "start": 1956.36,
+    "end": 1999.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 96.56
+  },
+  {
+    "id": "640a10a7fc00b88d",
+    "start": 1999.3,
+    "end": 2046.2,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 63.83
+  },
+  {
+    "id": "b9deae1c9b7fefcf",
+    "start": 2046.86,
+    "end": 2089.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 96.6
+  },
+  {
+    "id": "a3c316cce64460ea",
+    "start": 2091.0,
+    "end": 2135.6,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 95.78
+  },
+  {
+    "id": "315f91b070002634",
+    "start": 2135.97,
+    "end": 2171.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 96.31
+  },
+  {
+    "id": "8ecf3a3acccda432",
+    "start": 2174.4,
+    "end": 2217.5,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 78.68
+  },
+  {
+    "id": "d9da5648598970dc",
+    "start": 2217.5,
+    "end": 2265.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 78.75
+  },
+  {
+    "id": "42ce1a6a513f8361",
+    "start": 2265.1,
+    "end": 2308.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.11
+  },
+  {
+    "id": "60b5c6e02e9904b9",
+    "start": 2309.39,
+    "end": 2359.7,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 77.99
+  },
+  {
+    "id": "7c5815265d7d2358",
+    "start": 2360.1,
+    "end": 2393.1,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 68.14
+  },
+  {
+    "id": "e148d3e4d15398a0",
+    "start": 2395.18,
+    "end": 2435.4,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 78.99
+  },
+  {
+    "id": "5b91afca08b697db",
+    "start": 2435.4,
+    "end": 2477.9,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 67.71
+  },
+  {
+    "id": "4d33ed97e908f2bb",
+    "start": 2477.9,
+    "end": 2525.4,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 66.98
+  },
+  {
+    "id": "897ca27bd95ac9ef",
+    "start": 2525.4,
+    "end": 2569.5,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 64.29
+  },
+  {
+    "id": "6eb7774b050f644f",
+    "start": 2569.65,
+    "end": 2611.3,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 79.28
+  },
+  {
+    "id": "7e928ca6f30e4711",
+    "start": 2611.3,
+    "end": 2633.8,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 48.98
+  },
+  {
+    "id": "a625e33e690e96ed",
+    "start": 2635.65,
+    "end": 2693.2,
+    "boundary_reason": "pause",
+    "verdict": "KEPT",
+    "heuristic_score": 79.29
+  },
+  {
+    "id": "ac1c7742497299bf",
+    "start": 2693.4,
+    "end": 2733.6,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 80.2
+  },
+  {
+    "id": "aa6619b20701b9c2",
+    "start": 2734.49,
+    "end": 2774.9,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 68.65
+  },
+  {
+    "id": "5583c61f30637fef",
+    "start": 2775.4,
+    "end": 2824.0,
+    "boundary_reason": "sentence",
+    "verdict": "KEPT",
+    "heuristic_score": 65.08
+  },
+  {
+    "id": "0acec246855e807e",
+    "start": 2825.76,
+    "end": 2853.1,
+    "boundary_reason": "pause",
+    "verdict": "tail",
+    "heuristic_score": 47.18
+  }
+]

@@ -43,7 +43,6 @@ candidate_multiplier: 1.75     # over-generation: цель кандидатов 
                                # Копим с запасом, ранжируем по score, режем top-N; отсев — в
                                # <манифест>.discarded.json рядом с манифестом.
 chunk_tokens: 3500
-chunk_overlap_sec: 60
 dedup_overlap_threshold: 0.6
 dangling_words:                # блоклист ПЕРВОГО слова клипа (проверка dangling-start, post-snap;
                                # регистр не важен). К слову, стоящему сразу после терминального
@@ -62,6 +61,14 @@ sentence_pause_sec: 0.35        # склейка предложений: пау�
 tail_sec: 0.3                   # хвост при snap к границе слова (технический, не трогать)
 tail_pad_sec: 1.5               # «воздух» после последнего слова клипа (apply_padding, post-snap)
 lead_pad_sec: 0.3               # заход перед первым словом клипа (apply_padding, post-snap)
+# M142 (owner on IMG_6848 m126: «часто не слышно первой буквы слова»): air before the FIRST sound of a planned clip (body
+# start and cold open) instead of the inner seam_pad_sec (0.04 s); never into the speech before it. 0 = as before.
+start_pad_sec: 0
+# M146 (owner: «давай» — an exception to invariant 10 by his decision): a planned clip's first word GLUED to the word
+# before it (heard pause under this) starts this much before its onset, in that word's tail, so its first consonant is
+# not lost (m143/m145: 46 of 59 draft starts have no pause to cut in). Goes with render.yaml start_fade_in_sec. 0 = off.
+start_preroll_sec: 0.06     # M146 on (owner on m146b: «ровнее, плавнее»)
+short_shot_sec: 2.0         # M173: shot between two picture changes shorter → warning; automatic clip drops its sentences (0 = off)
 snap_window_sec: 1.5            # окно поиска границы слова/паузы при snap (±сек от LLM-границы)
 max_start_repair_sec: 10.0      # окно поиска вперёд при ремонте висящего начала: сначала первое
                                 # слово после терминального знака (.?!), иначе слово с заглавной.
@@ -83,6 +90,8 @@ min_pause_for_phrase_end: 1.5   # пауза > порога = конец мыс�
                                 # паузах (спикер подбирает слово: «и это.. [0.7-1.2с] ..самая»).
                                 # 1.5 = между худшим обрывом (1.12с) и лучшим верным (2.06с).
                                 # Крутить под спикера: быстрее речь → меньше; медленнее → больше.
+review_pause_from_map: true   # M98 (M1.8 потребитель 7): ⏸N.N в выгрузке для разметки — пауза на слух (карта речи /
+                              # выравнивание), а не зазор Whisper (нулевой, отрицательный, перекрытый на части материала)
 max_micro_pause: 0.4            # пауза < порога = микропауза (никогда не конец мысли)
 max_end_search_sec: 12.0        # окно поиска конца предложения от r0_end (сек); за окном →
                                 # пауза-фолбэк в том же окне; не найдено — r0_end + tail.
@@ -136,7 +145,6 @@ too_long_policy: trim              # trim | drop | keep (что делать с 
                                    # завязку зритель догоняет по контексту.
 title_style: clickbait_ru      # рамка кликбейт-заголовка (R0_SPEC §4)
 language: ru                   # язык вывода LLM
-prompt_language: en            # system-промпт на английском (крепче grounding)
 
 # Пресеты длины (сек) — PROJECT_GUIDE / R0_SPEC §3. Код-валидатор ставит too_long/too_short.
 # 90с: площадки допускают до 180с (Shorts и Reels — 3 мин), но вовлечённость падает раньше,
@@ -200,6 +208,15 @@ manual_filler_cut: true
 # typical motion is left in (or, with jump_mask, kept and masked by a wide↔close switch);
 # min_cut_spacing_sec: cuts at least this far apart. Pick per run: arl blocks --apply … --filler-profile NAME.
 manual_filler_profile: balance
+# M79 — owner on PXL_20260729_copy r07: «интервьюер зависает между слов на несколько секунд (думает), можно сократить».
+# A pause at least this long is always shortened (to the profile's kept pause); a visible face jump is masked by a
+# wide↔close switch, and the spacing rules do not hold it back. 0 = off.
+long_pause_sec: 1.5
+# M126 — owner: «много вводных слов у человека, который говорит» (all three: subtitles, sound, the scenarist):
+# a standalone filler (filler_removal.filler_words between punctuation or at a sentence edge — «Ну, …», «…, вот, …»)
+subtitles_hide_fillers: true    # … is not shown in the subtitles (the sound keeps it)
+filler_word_cut: true           # … is cut from the sound — a filler-cut candidate under its profile's spacing, jump
+                                # mask and share rules (owner: «не часто, иначе вернётся дёрганье»); needs the filler cut on
 manual_filler_profiles:
   careful: {jump_max: 3.5, min_cut_spacing_sec: 4.0, jump_mask: false}
   balance: {jump_max: 5.0, min_cut_spacing_sec: 3.0, jump_mask: false}
@@ -242,6 +259,27 @@ local_llm:
   timeout_sec: 540        # one window takes minutes on an RX 580 (must stay under the pool's 600 s)
   max_output_tokens: 1500
   no_think: true          # Qwen3: no reasoning block (faster, same JSON)
+  think_max_output_tokens: 3000   # M116: --llm local-think — Qwen3 reasons first; the reasoning counts toward the limit (longer
+                                  # than local_llm.timeout_sec on an RX 580 = no answer; the bench counts it)
+
+# M116: Claude (paid; the owner's ANTHROPIC_API_KEY in .env) — --llm haiku | sonnet. Prices: USD per 1M tokens (in, out),
+# from the Claude pricing page (2026-10); they only feed the cost line printed at the end of a run.
+anthropic:
+  models: {haiku: claude-haiku-5-5, sonnet: claude-sonnet-5-5}
+  prices: {claude-haiku-5-5: [0.10, 0.50], claude-sonnet-5-5: [2.0, 10.0]}
+  max_output_tokens: 2048
+  timeout_sec: 120
+
+# M108: one lock for every heavy job of gamebox (the audiobook's synthesis and checks, llama-server use, whisper.cpp):
+# flock on one file there, the second comer waits — nobody kills the other's work. Taken when the local model or
+# whisper.cpp on gamebox is used; llama-server is started when it is down and stopped again when autoreels started it.
+heavy_lock:
+  host: gamebox           # "" = off
+  path: /mnt/data/locks/heavy.lock
+  llama_unit: llama-server
+  start_llama: true
+  stop_if_started: true
+  ready_timeout_sec: 600
 
 # M50: montage — one clip from pieces of different blocks of a source (docs/REEL_SPEC.md §8).
 # A draft line «M 85 | 13.2-6 41.1-4 | h:41.3 | t: …» plays block 13 sentences 2–6, then block 41
@@ -275,6 +313,14 @@ montage:
   # M58: a piece that goes straight on from the previous one in the source (next sentence, or sentence 1 of the
   # next block right after the last one) is played as one piece — no seam. x1, x2… name the filtered blocks.
   join_gap_sec: 2.0
+  # M134 (invariant 9): that gap is the pause HEARD (speech map / alignment), not the Whisper gap — on IMG_6848 65 of
+  # 345 sentence ends overlap in Whisper times (gap < 0), so a straight-on piece got a seam. false = the Whisper gap.
+  join_heard: true
+  # M172 — owner on 09h33 m163 r01 (hook, 0.7 s of one sentence, then a jump): a piece speaking less than
+  # join_short_sec joins its straight-on neighbour across a pause up to join_short_gap_sec (played, the filler cut may
+  # shorten it) — no seam a second after the last picture change. 0 = off.
+  join_short_sec: 2.0
+  join_short_gap_sec: 4.0
   # M74 — owner: «после крючка сильно резко идёт тело»: up to this much real silence after the cold open and before
   # the body's first word (never into speech) — the hook and the start of the clip are heard as two things. 0 = off.
   hook_air_sec: 0.5
@@ -305,8 +351,8 @@ montage:
 autocut:
   clips: 5
   min_sec: 25             # shorter clips are not proposed
-  target_sec: 45          # a clip stops growing here … (M65: 60 → 45 — reels that hold attention are short)
-  max_sec: 65             # … and never goes past this (M65: 90 → 65)
+  target_sec: 55          # a clip stops growing here … (M65: 60 → 45; M121: 35; M123: 55 — owner: «коротко, можно длиннее»)
+  max_sec: 90             # … and never goes past this (M65: 90 → 65; M123: 90)
   max_pieces: 4           # at most this many pieces (adjacent thoughts join without a seam)
   min_punch: 3            # weaker thoughts are never used
   seed_punch: 4           # a clip grows only around a thought at least this strong
@@ -316,11 +362,93 @@ autocut:
   check_pool: 3           # M60: up to clips × 3 candidates, each run through the --apply checks; failures are replaced
   max_shared: 0           # M68: accepted clips share no thought and never open on the same one (11h42: two reels
                           # opened on «Вы не сломаны…»); a candidate too close to an accepted one is skipped unchecked
+  hook_clauses: true      # M182 (owner: «раньше хуки были лучше, сейчас пустые»): a cold open may be a clause of a long sentence
+                          # between pauses (h:B.N@i-j), hook_min_words … hook_max_sec; the whole sentence plays in the body
+  hook_clause_pause: 0.12
+  start_strict: true      # M182: a reel never opens on a line pointing back («Каждый из них…», «Это…») or at the interviewer
+                          # («Ты…», «…, Ласанна.»): up to start_extend_max sentences before are added, else it goes
+  start_extend_max: 2
+  answer_start: false     # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
+                          # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
+  answer_gap_sec: 3.0
+  label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
+  combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                               # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+  # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+  # m120 measurement): generator, seed_roles, target_sec, lean_depth, rhythm, clips_every_min, context_judge below.
+  # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic, 1–5 neighbouring thoughts;
+  # the montage builder failed on half its seeds; the start judge rejected 54–78% of the owner's starts):
+  generator: mixed       # montage — thoughts of one topic from anywhere | passage — adjacent thoughts around a strong one
+                          # | mixed (M120) — passage + a loop question from elsewhere + a later conclusion when it has none
+  seed_roles: [thesis, conclusion, example, metaphor, question, explanation, address]          # roles a clip may grow around (with seed_punch); [] = thesis, conclusion, example, metaphor, question
+  passage_gap_sec: 30     # passage: a neighbour joins when at most this far from the run (owner clips jump ≤ 30 s)
+  start_judge: veto       # veto — a start the model rejects drops the clip | rank — rules decide, the model only sorts it last
+  clips_every_min: 2      # clips = max(clips, source minutes ÷ this); 0 = clips. M122: the owner keeps one per
+                          # 3.5 min (66 in 231 min) — the draft offers about twice that, he chooses on the sheet
+  lean_depth: 1           # montage: a thought brings this many links of what it leans on (its «сноски»); 0 = the whole
+                          # chain (m119: IMG_6848 — 10 of 20 seeds built nothing, chains ran over 16 thoughts)
+  # M120 — the jump rule (owner: «перестановки можно, но без частых быстрых скачков»; his 66 clips: 48 one stretch,
+  # 12 one jump, 6 two, none three; after a far jump the next piece ≥ 12 s, a last piece — the punchline — down to 6 s):
+  rhythm: true            # every clip keeps it; a piece at fault grows by its neighbours or goes, else the clip goes
+  rhythm_max_jumps: 2
+  rhythm_jump_sec: 10     # a gap in the source longer than this (or going back) is a jump
+  rhythm_settle_near: 6   # the piece after a jump lasts ≥ 6 s after a short skip …
+  rhythm_settle_far: 12   # … up to ≥ 12 s after a jump of rhythm_far_sec or more (or back in the source)
+  rhythm_far_sec: 120
+  rhythm_tail: 0.5        # the last piece (the payoff) needs half of that
+  # M138 (m137: the owner starts on a longer finished thought, takes strong ones from the first half; «viral» hook
+  # features carry nothing): a logistic model of his choice (cloud/taste.py, fitted on his clips) adds
+  # taste_weight × its logit to a proposal's score — the order only. 0 = off; the model file from handoff/m138/fit_eval.py.
+  taste_weight: 0
+  taste_model: config/taste.json
+  # M140 (m138: the pool was smaller than the draft — 13 proposals for 16 places on 09h33 — so the order did not
+  # decide anything): when it is, clips grown around seeds of this punch join it (no shared thought), ordered by score
+  # with the taste. 0 = off.
+  fill_seed_punch: 3
+  # M144 (m143: 11 of 12 IMG_6848 m126 clips started glued to the speech before them — no pause, the first consonant
+  # lost — «не слышно первой буквы»; the owner's own clips: 27 of 66): a clip's first sound (its start, a cold open)
+  # needs this much silence heard before it (speech map / alignment). A glued start is repaired like one that does not
+  # stand alone (context before, a later sentence, another thought); the scenarist's reel starts earlier or later.
+  # 0 = off.
+  # M145 (m145: glued starts 59 → 46 with the owner's clips covered as before, 40 of 66; owner: «давай»)
+  start_pause_min: 0.15
+  # M123 (owner on m122: «наоборот — коротко, можно длиннее»; target_sec 35 → 55, max_sec 65 → 90 above):
+  scenario_max_tokens: 16000  # arl autocut --scenario: the scenarist's answer (m123: 6000 cut Sonnet off after 11–18 reels)
+  # M142 (owner: «можно задавать тон сценаристу — строгий или фановый»): one line of tone in the scenarist's prompt,
+  # in Russian words; "" = none. Per run: --ac scenario_tone=фановый
+  scenario_tone: ""
+  scenario_timeout_sec: 300   # … the whole talk in one request
+  # M170 (owner 2026-10-27: «карта говорящих для новых видео — не отдельной командой»): arl auto builds the speaker map
+  # (arl speakers: pyannote, tools/diarize.py) when the source has none; the environment with pyannote and torch is
+  # speakers_python (on the Mac: ~/.venvs/m141), HF_TOKEN in .env. Fails or no environment — the run goes on without it.
+  speakers_auto: true
+  speakers_python: "~/.venvs/m141/bin/python"
+  # M153 — who writes the reels in `arl auto` (owner 2026-10-26: «сценарист по умолчанию для текущей работы»):
+  #   scenario — the scenarist (paid Claude, scenario_llm; the answer is cached per request in data/cache/scenario/);
+  #              if it cannot answer (no key, API error), arl auto falls back to the free autocut and says so;
+  #   autocut  — the free code-built montage (map → clips).
+  # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
+  auto_mode: scenario
+  scenario_llm: sonnet
+  # M157 (owner 2026-10-26: «все прогоним через промо-кредиты» — 96 $ of promo credit expire 2026-11-03 UTC):
+  # until paid_until (inclusive) `arl auto` without --llm runs the map, the judges and the posts on paid_llm too.
+  # After it arl auto is free again: --llm auto = the free models, and the scenarist only with --mode scenario
+  # (after the promo, the paid model is charged to the card through auto top-up). "" = off.
+  paid_llm: sonnet
+  paid_until: "2026-11-02"
+  # M165 (owner 2026-10-27: «распознавать голос интервьюера — там бывают смешные моменты или контекст; нужен
+  # переключатель»). Reads transcripts/<stem>.speakers.json (arl speakers); without the map nothing changes.
+  #   on  — the interviewer's sentences may stay as context (a question that opens the clip) or a real exchange (a joke,
+  #         a laugh); the speaker carries the clip (more than half of its time); the scenarist sees «[ведущий]»;
+  #   off — no clip contains the interviewer;   "" — the map is not read (as before M165).
+  # Per run: arl auto … --interviewer off|on   (arl autocut … --ac interviewer=off)
+  interviewer: "off"
   # M70 — owner: «берём 2, 4, 6» (first 3 seconds, seams, tempo):
   hook_title: true        # the model proposes a curiosity headline for the plate t: — kept only when it stays in the
                           # clip's words (≤ 60 chars, ≤ 9 words, no new numbers, content words from the clip)
   seam_check: true        # the model judges every seam (B continues A?); a clip with a jarring seam goes behind clean ones
-  short_variant: true     # every accepted clip also gets a short version: weakest middle thoughts dropped down to short_sec
+  short_variant: false    # M78 off (owner: IMG r03 and r06 open on the same phrase — a short version keeps the start)
+                          # — on: every accepted clip also gets a short version (weakest middle thoughts dropped)
   short_sec: 25
   short_min_sec: 15
   # M74 — owner: «начала дают мало контекста ("и второй момент, как я уже говорил…")»:
@@ -329,15 +457,50 @@ autocut:
   context_max_sec: 15     # … the added context thought at most this long
   context_drop_words: 5   # … a leaning first sentence of at most this many words may be dropped
   plate: context          # the plate t: says what the clip is about (the hook already pulls) — hook = M71/M73 headline
+  plate_hookless: hook    # M112: a clip with no cold open opens on its plate — there it is the M71/M73 curiosity headline
+                          # (a question to the viewer, a claim to «вы», a contrast — in the clip's words); "" = as plate
   # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips with no pause after the hook):
   context_min_words: 4    # a start shorter than this (not a question) is a fragment — fixed like a leaning one
-  context_judge: true     # the model says whether a first sentence stands on its own (rules first; no answer = rules)
+  context_judge: false     # the model says whether a first sentence stands on its own (rules first; no answer = rules)
   hook_pause_sec: 0.25    # the hook has no silence after it in the recording → the next of the model's top hooks that has
   hook_pause_top: 3       # at least this much (montage.hook_air_sec), among its first hook_pause_top; else the first stays
   # M76 (M75 report: 11h42 4 → 2 clips, Pxl 5 → 3 — starts that could be repaired were dropped):
   context_back: 2         # the context may be the two thoughts right before (when the nearest leans back itself)
   context_later: false    # M77 off (owner: «"перенос — вещь неблагодарная" — непонятно»: the dropped sentences carried
   context_later_min_sec: 8   # the context) — else the clip would start at a later sentence of its first thought
+  # M81 — owner: IMG r03/r06 «начинаются с фразы про кресло, она малоинформативна» (the cold open, heard before the start):
+  hook_judge: true        # the cold open passes the start's model check (subject, makes sense alone, leads into the clip)
+  hook_judge_top: 6       # … the first 6 candidates are judged; a rejected one goes before ranking; none passes = no cold open
+  # M83 — m80 hooks: all 5 cold opens were the clip's own first sentence (no teaser; the body went on «В инстинкты.»):
+  hook_teaser: true       # the cold open is a line from the second half of the clip (a teaser), replayed in its place (h:B.N!)
+  hook_teaser_pos: 0.5    # … it starts at least this far into the clip's sentences; none there = no cold open
+  hook_no_pointer: true   # M92 (m86: the model passed «Это и есть доверие к себе», «Но опять…», «Он как-то хочет…»): a teaser
+                          # that points back — a first «Это/Но/Он/Вот…», «это» among the first 3 words — is left out by the code
+  hookless_last: true     # M107 (m106: 6 of 15 clips had no cold open — few sentences in the second half, most pointing
+                          # back): a clip left without one goes after every clip with one; taken only when those run out
+  # M86 — M85: strong lines («И никогда, ребятки, не поздно.») rejected for leaving a question open; 11h42 lost a clip when
+  # the model answered a borderline start differently than in m78:
+  hook_judge_mode: teaser # the cold open is judged as a teaser: an open question or a punchline is fine, a pointer back is not;
+                          # the model sees the words of the clip's ending (what the teaser promises)
+  owner_examples: 6       # the latest 6 cold opens / starts the owner rejected (reason крючок / начало) and kept — examples
+                          # in the judges' prompts (reviews/verdicts.jsonl, M82)
+  judge_cache: true       # the judges' answers kept between runs (data/cache/autocut_judge.json; delete it to ask again)
+  # M88 — owner: «у копии PXL не хватает динамики»; k: words were only in the owner's own lines:
+  keywords: true          # the model marks key words (k:): highlighted in the subtitles, the close shot comes on them
+  keywords_every_sec: 12  # one per 12 s of the clip …
+  keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
+  # M116 — M1.9 stage D (owner: «давай»; M99: the owner's k: word is drawn out by the voice in 81 % of sentences):
+  keywords_voice: false   # M118 off (m116: with the hints Haiku picked «потом», «месте», «школу» where without them it took
+                          # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
+                          # words the voice draws out (intonation map: duration per letter) are shown to the model as a
+  keywords_voice_ratio: 1.25   # hint («[voice: …]»); the model still picks the word, the same checks; no map = no hint
+  # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
+  close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
+  close_last_sec: 3
+  # M115 — M1.9 stage C (owner: «давай»; M99: 62 of 65 endings of the owner's clips are «↘», one «→»):
+  end_tone: true          # a clip does not end on a sentence spoken with the voice up («→», the speaker goes on): the last
+                          # thought loses trailing sentences back to one that is not «→» (clip stays ≥ min_sec), else the clip
+                          # goes; needs transcripts/<stem>.prosody.json (arl prosody); the manual path only warns, as before
   # M65 — owner: «наша цель — интересные, цепляющие ролики»:
   loop: true              # a question the clip answers opens it (from anywhere; the answer is the payoff at the end)
   loop_max_sec: 20        # … a question thought at most this long
@@ -364,6 +527,7 @@ tx_check:
   on_speech_sec: 2.0        # M60: a flagged place with ≥ 2 s of speech in [t−1, t+4] is «на речи» (hides what was said);
                             # one in silence is Whisper filling a pause — it only matters if a clip plays that pause
   sparse_suspicious_sec: 60 # M60: a transcript is suspicious with an invention on speech or ≥ 60 s of «sound without words»
+  punct_chunk_words: 120    # M113: arl tx-punct --by llm — words the model sees at once (it answers with numbers: small output)
 
 # M54: arl map <stem> — the map of a whole source (transcripts/<stem>.map.json + reels-out/<stem>/_map.html):
 # thoughts (1–4 sentences), voice energy, role / strength / references / topic (LLM), similar thoughts far apart.
@@ -379,6 +543,8 @@ map:
   max_missing: 0.1        # M66: more than this share of thoughts without a passport (or no topics) → the map is
                           # incomplete: arl map returns 3, auto stops on «map», autocut refuses; arl map again
                           # asks only what is missing (10h59 local-gp: Groq out of tokens, 144 of 152 → 0 clips)
+  topic_chunk: 50         # M84 (G7: the topics request over a whole long source timed out): more thoughts → topics are
+                          # asked in parts of consecutive thoughts (≤ 50 each, retried once), then one merge request
 
 # M1.6 stage 2: deterministic pre-filter — drops obviously-not-a-clip blocks before LLM sees them.
 # Every dropped block goes to a .blocks.dropped.json sidecar with its reason and first 8 words.
@@ -525,3 +691,26 @@ chunking:
                                        # по заголовкам x-ratelimit-*
   dedup_overlap_ratio: 0.6             # порог дедупа рилов из разных R0-чанков
   fail_fast: false                     # false → продолжать при провале одного чанка
+
+# M94 — owner: «нужно делать подробное описание видео (для постинга)». arl describe <source> [--gate имя] writes
+# <rid>.post.txt next to each rendered clip: the model's post (grounded in the reel's words — cloud/postcopy.py) and
+# hashtags said in the reel, after render.yaml hashtags_always; arl crosspost takes it instead of <rid>.txt.
+post:
+  sentences_min: 3
+  sentences_max: 5
+  max_chars: 700
+  hashtags: 3
+  voice: author           # M174 (owner: «от „я“ — видео публикует сам автор на своём канале»); reader = about the reel, «вы»
+  auto: true              # M112: arl auto writes the posts before the review sheet (they show on the cards); after the
+                          # owner's verdicts arl export <source> --decisions <file> sends only the approved clips to crosspost
+
+# M100 — longreads (v1.0 text content): arl article <source> → export/articles/<source>/NN.md and a crosspost plan
+# export/crosspost/<source>_articles.csv (тип «статья», заголовок) for Telegraph. One article per topic of the map
+# (the largest real topics); a plan, then every section written from its thoughts' words (cloud/article.py checks it).
+article:
+  topics: 3
+  sections_min: 3
+  sections_max: 5
+  section_sentences_min: 2
+  section_sentences_max: 8
+  section_chars: 900

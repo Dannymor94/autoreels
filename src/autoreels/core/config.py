@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -214,6 +215,9 @@ class MontageConfig(BaseModel):
     filler_profile: str | None = None                      # M70: manual_filler_profiles entry for montage clips (--filler-profile wins)
     fx: "MontageFx" = Field(default_factory=lambda: MontageFx())   # M55: attention effects of montage clips
     join_gap_sec: float = Field(2.0, ge=0.0)               # M58: a piece that goes straight on (≤ this gap) joins the previous one
+    join_heard: bool = False                                # M134: that gap is the pause heard (speech map / alignment), not Whisper's
+    join_short_sec: float = Field(0.0, ge=0.0)             # M172: a piece speaking less than this joins its straight-on neighbour …
+    join_short_gap_sec: float = Field(0.0, ge=0.0)         # … across a pause up to this (0 = off, the M58 rule)
     hook_air_sec: float = Field(0.0, ge=0.0, le=1.5)       # M74: silence kept after the cold open and before the body (0 = off)
     fx_auto_clips: bool = False                            # M77: the fx (not callouts) also on ordinary clips of an auto draft
 
@@ -278,6 +282,49 @@ class AutocutConfig(BaseModel):
     use_filtered: bool = False
     check_pool: int = Field(3, ge=1)       # M60: candidates = clips × this; each checked by --apply, failures replaced
     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
+    combined_overlap_max: float = Field(1.0, ge=0.0, le=1.0)   # M177: arl auto drops a label clip sharing more of its seconds with a kept clip (1 = off)
+    hook_clauses: bool = False                # M182: a cold open may be a clause of a long sentence (h:B.N@i-j)
+    hook_clause_pause: float = Field(0.12, ge=0.0)   # … silence heard at a clause edge inside the sentence
+    start_strict: bool = False                # M182: a reel never opens on a line pointing back / at the interviewer
+    start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands
+    answer_start: bool = False                # M193: with start_strict, a reel never opens on an answer («Да, …», a reply to the host)
+    answer_gap_sec: float = Field(3.0, ge=0.0)   # … a reply: starts within this many seconds after the host's sentence
+    label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+    # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+    # seeds — a thought that leans back brings its whole chain; the start judge rejected 54–78% of the owner's starts)
+    generator: str = Field("montage", pattern="^(montage|passage|mixed)$")   # passage: adjacent thoughts around a strong
+    # one; mixed (M120): passage + a loop question from elsewhere + a later conclusion when the run has none
+    seed_roles: list[Literal["thesis", "conclusion", "example", "metaphor", "question", "explanation", "address"]] = \
+        Field(default_factory=list)                # roles a clip may grow around (punch ≥ seed_punch); [] = STORY
+    passage_gap_sec: float = Field(30.0, gt=0)     # passage: a neighbour joins when at most this far from the run
+    start_judge: str = Field("veto", pattern="^(veto|rank)$")   # rank: a start only the model rejects sorts the clip last
+    clips_every_min: float = Field(0.0, ge=0)      # clips = max(clips, source minutes ÷ this); 0 = clips
+    lean_depth: int = Field(0, ge=0)               # montage: links of what a thought leans on it brings; 0 = the chain
+    # M120 (owner: «перестановки можно, без частых быстрых скачков; гибкий алгоритм кусков»): the jump rule
+    rhythm: bool = False                           # every clip keeps it (cloud/autocut.py rhythm_why); False = as before
+    rhythm_max_jumps: int = Field(2, ge=0)
+    rhythm_jump_sec: float = Field(10.0, gt=0)     # a gap in the source longer than this (or going back) is a jump
+    rhythm_settle_near: float = Field(6.0, ge=0)   # the piece after a jump: at least this after a short skip …
+    rhythm_settle_far: float = Field(12.0, ge=0)   # … up to this after a far jump (rhythm_far_sec or more, or back)
+    rhythm_far_sec: float = Field(120.0, gt=0)
+    rhythm_tail: float = Field(0.5, ge=0, le=1)    # the last piece (the payoff) needs only this share
+    # M138: the owner's taste learned from his clips (cloud/taste.py) orders the proposals; 0 = off
+    taste_weight: float = Field(0.0, ge=0)
+    taste_model: str = "config/taste.json"
+    # M140: a pool smaller than the draft can take is filled with clips grown around seeds this strong; 0 = off
+    fill_seed_punch: int = Field(0, ge=0, le=5)
+    # M144: a clip's first sound needs this much silence heard before it (start, cold open); 0 = off
+    start_pause_min: float = Field(0.0, ge=0.0, le=1.0)
+    scenario_max_tokens: int = Field(6000, ge=500)   # M123: the scenarist's answer (arl autocut --scenario)
+    scenario_timeout_sec: float = Field(300.0, gt=0)  # … the whole talk in one request takes longer than a judge
+    scenario_tone: str = ""                # M142: the tone the scenarist keeps («строгий», «фановый», …); "" = none
+    auto_mode: Literal["autocut", "scenario"] = "autocut"   # M153: who writes the reels in arl auto
+    scenario_llm: Literal["haiku", "sonnet"] = "sonnet"     # M153: the scenarist's model in arl auto (paid)
+    paid_llm: Literal["", "haiku", "sonnet"] = ""   # M157: arl auto --llm auto (map, judges, posts) → this model
+    paid_until: str = ""                    # M157: …until this date (YYYY-MM-DD, inclusive); after it arl auto is free
+    interviewer: Literal["", "off", "on"] = ""   # M165: the interviewer's sentences (speaker map): ""=ignored, off, on
+    speakers_auto: bool = False             # M170: arl auto builds the speaker map (arl speakers) when it is missing
+    speakers_python: str = ""               # M170: the Python of an environment with pyannote.audio ("" = env SPEAKERS_PYTHON)
     # M70 (owner: «берём 2, 4, 6»): the first 3 seconds, seams that hold, tempo
     hook_title: bool = True                # the model proposes a curiosity headline for the plate t: (grounded or not used)
     seam_check: bool = True                # the model judges every seam; a clip with a jarring seam goes behind clean ones
@@ -289,6 +336,7 @@ class AutocutConfig(BaseModel):
     context_max_sec: float = Field(15.0, gt=0)   # … the thought right before may be added as context, this long at most
     context_drop_words: int = Field(5, ge=0)     # … a leaning first sentence this short may be dropped
     plate: str = Field("hook", pattern="^(hook|context)$")   # the model's plate t:: a curiosity headline | what the clip is about
+    plate_hookless: str = Field("", pattern="^(|hook|context)$")   # M112: the plate of a clip with no cold open; "" = as plate
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Хоть это…»; 6 of 15 clips had no pause after the hook)
     context_min_words: int = Field(0, ge=0)      # a start (not a question) shorter than this is a fragment; 0 = off
     context_judge: bool = False                  # the model says whether a first sentence stands on its own
@@ -298,6 +346,29 @@ class AutocutConfig(BaseModel):
     context_back: int = Field(1, ge=1, le=4)     # up to this many thoughts right before may be added as context
     context_later: bool = False                  # the clip may start at a later sentence of its first thought that stands
     context_later_min_sec: float = Field(8.0, gt=0)   # … when at least this much of that thought is left
+    # M81 (owner: IMG r03 «начинается с фразы про кресло»): the cold open passes the same model check as the start
+    hook_judge: bool = False                     # subject named, makes sense alone, leads into the clip — or it goes
+    hook_judge_top: int = Field(6, ge=1)         # … among the first this many hook candidates; none passes = no cold open
+    # M86 (M85: «И никогда, ребятки, не поздно.» rejected for leaving a question open — the teaser's job)
+    hook_judge_mode: str = Field("start", pattern="^(start|teaser)$")   # teaser: an open question is fine, a pointer back is not
+    owner_examples: int = Field(0, ge=0)         # the owner's verdicts (reviews/verdicts.jsonl) as examples for the judges
+    judge_cache: bool = False                    # the judges' answers kept between runs (data/cache/autocut_judge.json)
+    # M88: the model marks key words (k:) — highlighted in the subtitles, the close shot comes on them (montage.emphasis)
+    keywords: bool = False
+    keywords_every_sec: float = Field(12.0, gt=0)   # one key word per this many seconds of the clip …
+    keywords_max: int = Field(4, ge=0)              # … at most this many
+    keywords_voice: bool = False                    # M116 (M1.9 D): words the voice draws out are shown to the model
+    keywords_voice_ratio: float = Field(1.25, ge=1.0)   # … duration per letter ≥ this × the sentence's median
+    # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
+    close_last: bool = False
+    close_last_sec: float = Field(3.0, ge=0)
+    # M115 (M1.9 C): a clip does not end on a sentence spoken with the voice up («→»; the intonation map, arl prosody)
+    end_tone: bool = False
+    # M83 (m80: every cold open was the clip's own first sentence — no teaser): the cold open comes from later, replayed
+    hook_teaser: bool = False                    # hook candidates only from hook_teaser_pos of the clip on, h:B.N!
+    hookless_last: bool = False                  # M107: a clip left without a cold open is taken only when the hooked run out
+    hook_teaser_pos: float = Field(0.5, ge=0.0, le=0.95)   # … fraction of the clip's sentences before the candidate
+    hook_no_pointer: bool = False                # M92: a teaser pointing back («Это и есть…», «Но…», «Он…») is left out by the code
     # M65: interesting, hooky reels (cloud/autocut.py)
     loop: bool = True
     loop_max_sec: float = Field(20.0, gt=0)
@@ -326,6 +397,33 @@ class TxCheckConfig(BaseModel):
     known: list[str] = Field(default_factory=list)         # extra known inventions (added to the built-in list)
     on_speech_sec: float = Field(2.0, ge=0.0)              # M60: speech heard around a flagged place → «на речи»
     sparse_suspicious_sec: float = Field(60.0, ge=0.0)     # M60: this much «sound without words» → suspicious
+    punct_chunk_words: int = Field(120, ge=20)             # M113: arl tx-punct --by llm — words the model sees at once
+
+
+class PostConfig(BaseModel):
+    """M94: arl describe — the post under a reel (cloud/postcopy.py). Numbers: config/r0.yaml post:."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sentences_min: int = Field(3, ge=1)
+    sentences_max: int = Field(5, ge=1)
+    max_chars: int = Field(700, ge=100)
+    hashtags: int = Field(3, ge=0)            # the model's hashtags (said in the reel), after render.yaml hashtags_always
+    auto: bool = False                        # M112: arl auto writes the posts (arl describe) before the review sheet
+    voice: Literal["reader", "author"] = "reader"   # M174: "author" = the speaker's own first-person post («я»)
+
+
+class ArticleConfig(BaseModel):
+    """M100: arl article — longreads from the map's topics (cloud/article.py). Numbers: config/r0.yaml article:."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    topics: int = Field(3, ge=1)               # articles per source: the largest real topics
+    sections_min: int = Field(3, ge=2)
+    sections_max: int = Field(5, ge=2)
+    section_sentences_min: int = Field(2, ge=1)
+    section_sentences_max: int = Field(8, ge=1)
+    section_chars: int = Field(900, ge=200)
 
 
 class MapConfig(BaseModel):
@@ -342,6 +440,33 @@ class MapConfig(BaseModel):
     similar_min: float = Field(0.30, ge=0, le=1)
     similar_far_sec: float = Field(60.0, ge=0)
     max_missing: float = Field(0.1, ge=0, le=1)     # M66: more thoughts without a passport → the map is incomplete
+    topic_chunk: int = Field(0, ge=0)               # M84: more thoughts → topics asked in parts of this many, merged; 0 = one request
+
+
+class HeavyLockConfig(BaseModel):
+    """M108: one lock for every heavy job of gamebox — the audiobook's synthesis, llama-server use, whisper.cpp
+    (core/heavy_lock.py). Both sides take `flock` on `path` there; the second comer waits. Numbers: config/r0.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = ""                                  # ssh host of the lock; "" = off (no lock, as before)
+    path: str = "/mnt/data/locks/heavy.lock"
+    llama_unit: str = "llama-server"                # systemd unit of the local model
+    start_llama: bool = True                        # start it (sudo -n systemctl start) when it is down
+    stop_if_started: bool = True                    # … and stop it again at the end when this side started it
+    ready_timeout_sec: float = Field(600.0, ge=10)  # a 27B model takes minutes to load
+
+
+class AnthropicConfig(BaseModel):
+    """M116: Claude through the Messages API — `--llm haiku | sonnet` (paid: the owner's ANTHROPIC_API_KEY in .env).
+    Model ids and prices (USD per 1M tokens, input/output) live here, not in the code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    models: dict[str, str] = Field(default_factory=lambda: {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5"})
+    prices: dict[str, list[float]] = Field(default_factory=dict)
+    max_output_tokens: int = Field(2048, ge=100)
+    timeout_sec: float = Field(120.0, ge=10, le=590)
 
 
 class LocalLLMConfig(BaseModel):
@@ -353,6 +478,7 @@ class LocalLLMConfig(BaseModel):
     model: str = "local"                           # llama-server serves one model; the name is a label
     timeout_sec: float = Field(540.0, ge=10, le=590)  # a window on an RX 580 takes minutes; < pool budget 600 s
     max_output_tokens: int = Field(1500, ge=100)
+    think_max_output_tokens: int = Field(3000, ge=500)   # M116: --llm local-think — the reasoning block counts too
     no_think: bool = True                          # Qwen3: answer without a reasoning block
 
 
@@ -387,7 +513,6 @@ class R0Config(BaseModel):
     candidate_multiplier: float = 1.75   # over-generation: цель кандидатов = max_reels * это.
                                          # Копим больше, ранжируем по score, режем top-N.
     chunk_tokens: int
-    chunk_overlap_sec: int
     dedup_overlap_threshold: float
     sentence_pause_sec: float
     max_sentence_buffer_sec: float
@@ -401,6 +526,7 @@ class R0Config(BaseModel):
                                             # спикера 0.7-1.2с (подбирает слово) — НЕ конец;
                                             # реальные разрывы ≥2с — конец. Крутить под спикера.
     review_pause_show_sec: float = 0.3      # пауза ≥ порога → показывать ⏸N.N в компактном ревью.
+    review_pause_from_map: bool = False     # M98: ⏸ по паузе на слух (карта речи / выравнивание), не по зазору Whisper
     # Целевая длина блока сегментации (M1.6). Блок НЕ закрывается на «мягкой» границе (конец
     # предложения без паузы — спикер продолжил), пока не набрал этой длины; на «жёсткой» границе
     # (пауза/абзац/смена говорящего) закрывается всегда. Аудит: медиана блоков была 22с при
@@ -450,7 +576,6 @@ class R0Config(BaseModel):
     too_long_policy: str = "trim"   # trim | drop | keep (что делать с флагом too_long)
     title_style: str
     language: str
-    prompt_language: str
     presets: dict[str, Preset]
     prompts: PromptPaths
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
@@ -459,6 +584,9 @@ class R0Config(BaseModel):
     manual_max_duration_sec: float = 180.0  # ceiling for human-review merges (source span)
     beat_gap_sec: float = 0.25  # silence gap appended to each beat segment at --apply time
     seam_pad_sec: float = 0.04  # gap added/removed at internal seam cuts (smap audible boundary ± pad)
+    start_pad_sec: float = Field(0.0, ge=0.0, le=0.5)   # M142: air before a clip's first sound; 0 = seam_pad_sec
+    start_preroll_sec: float = Field(0.0, ge=0.0, le=0.2)  # M146: a glued first word starts this much earlier; 0 = off
+    short_shot_sec: float = Field(0.0, ge=0.0)             # M173: a shot between two picture changes shorter than this is reported (auto: refused); 0 = off
     speed: float = 1.0                       # default playback speed for all clips
     filler_removal: FillerRemovalConfig = Field(default_factory=FillerRemovalConfig)
     # Trailing "pure wind-down" sentences dropped when the review gives no explicit end (e:).
@@ -503,13 +631,24 @@ class R0Config(BaseModel):
     # Balance presets for the filler cut (jump_max, min_cut_spacing_sec, jump_mask, …) and the default.
     manual_filler_profile: str | None = None
     manual_filler_profiles: dict[str, dict[str, float | bool]] = Field(default_factory=dict)
+    # M79: a pause at least this long inside a planned clip is always shortened (a visible jump masked by a shot
+    # switch; the profile's spacing rules do not hold it back). 0 = off.
+    long_pause_sec: float = Field(0.0, ge=0.0)
+    # M126 (owner: «много вводных слов у человека, который говорит»; «2 можно делать не часто»): standalone filler words
+    # (filler_removal.filler_words) hidden from the subtitles / cut from the sound under the filler cut's rules
+    subtitles_hide_fillers: bool = False
+    filler_word_cut: bool = False
     # arl label: draft review lines by the LLM, checked by code (defaults in LabelConfig).
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
+    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    heavy_lock: HeavyLockConfig = Field(default_factory=HeavyLockConfig)
     montage: MontageConfig = Field(default_factory=MontageConfig)
     map: MapConfig = Field(default_factory=MapConfig)
     tx_check: TxCheckConfig = Field(default_factory=TxCheckConfig)
     autocut: AutocutConfig = Field(default_factory=AutocutConfig)
+    post: PostConfig = Field(default_factory=PostConfig)
+    article: ArticleConfig = Field(default_factory=ArticleConfig)
 
     @property
     def min_duration(self) -> int:
@@ -640,6 +779,10 @@ class AudioProcessing(BaseModel):
     loudnorm_enabled: bool = True
     target_lufs: float = -14.0     # I=  (целевая интегральная громкость, LUFS)
     true_peak: float = -1.5        # TP= (потолок истинного пика, дБ)
+    # M147: dynamic = one-pass loudnorm per clip (its gain settles in the first second: −2.4 dB in the first 0.3 s, m143);
+    # source = one gain for the whole source (measured once), a peak limiter — no settling, clips of a source equally loud
+    loudnorm_mode: str = "dynamic"
+    static_gain_db: float | None = None   # set by the render for loudnorm_mode: source (not in yaml)
     loudness_range: float = 11.0   # LRA=
     # Шумоподавление (afftdn) — ВЫКЛ по умолчанию: агрессивно может съедать голос.
     denoise_enabled: bool = False
@@ -650,16 +793,15 @@ class AudioProcessing(BaseModel):
     fade_duration: float = 0.25      # секунды (0.2-0.3 обычно)
     # Аудио-фейд в САМОМ конце клипа (только звук, БЕЗ видео-фейда в чёрное). Два режима:
     # CLEAN — чистый хвост (нет следующего слова): fade только последних tail_fade_sec, дыхание слышно.
-    # INTRUDED — следующее слово в хвосте: fade от (nw_start − intrusion_guard_sec), гасит вторжение.
     # Оба случая вычисляются из tail_last_word_end/tail_next_word_start манифеста при рендере.
     tail_fade_sec: float = 0.35          # clean tail: длина fade в конце клипа
-    intrusion_guard_sec: float = 0.12   # intruded tail: начало fade за это время до следующего слова
     last_word_margin_sec: float = 0.2   # safety margin added after last subtitle word's t1 on every path
     # Микро-фейд на КРАЯХ каждого аудиосегмента многосегментного клипа (гасит щелчок на склейке).
     # НЕ кроссфейд: fade-out в конце сегмента + fade-in в начале следующего, затем обычный concat —
     # без перекрытия, поэтому длина звука в ТОЧНОСТИ равна длине видео (нет дрейфа губ-синка). Только
     # клипы с >1 сегментом; одиночный span не затрагивается. 0 → встык без фейдов.
     audio_edge_fade_sec: float = 0.01
+    start_fade_in_sec: float = Field(0.0, ge=0.0, le=0.2)   # M146: the clip's sound fades in over this (pre-roll); 0 = off
     # Видео-кроссфейд на каждом внутреннем шве многосегментного клипа (xfade-фильтр). Сглаживает
     # «прыжок» при смене позы (холодный старт, склейки). Аудио НЕ кроссфейдируется — остаётся concat,
     # иначе укорочение аудио вернуло бы дрейф. Выход короче суммы сегментов на (N−1)×xfade_sec.
@@ -723,16 +865,6 @@ class Zoom(BaseModel):
     scheme: str = "hook"        # hook (лёгкий зум в начале + возврат) | none
     hook_seconds: float = 2.5   # длина hook-жеста от начала клипа (наезд+удержание+возврат)
     fps: int = 30               # ignored: renderer follows source fps to prevent A/V drift
-
-
-class SubtitleStyle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    font: str
-    font_size: int
-    margin_v: int
-    words_per_line: list[int]
-    font_dir: str | None
 
 
 class PaletteEq(BaseModel):
@@ -844,6 +976,15 @@ class SpeechMapConfig(BaseModel):
     own_tail_t1_margin_sec: float = 0.15  # iv_e <= last_t1 + margin → own tail (Whisper hint)
 
 
+class RemoteRender(BaseModel):
+    """M161: render on another machine over ssh (local/remote.py)."""
+    host: str = ""                        # ssh name; "" = off
+    root: str = ""                        # project folder there
+    encoder: str = "h264_vaapi"           # RX 580: HEVC breaks long clips (m160), H.264 is clean
+    profile: str = "h264"
+    lock: str = ""                        # flock file of the shared heavy lock there ("" = none)
+
+
 class RenderConfig(BaseModel):
     """Типизированный config/render.yaml."""
 
@@ -853,7 +994,6 @@ class RenderConfig(BaseModel):
     encoder: Encoder
     audio: Audio
     audio_extract: AudioExtract
-    subtitles: SubtitleStyle
     ffmpeg: str = "ffmpeg"   # путь к ffmpeg-бинарю; Windows: D:\ffmpeg\bin\ffmpeg.exe
     audio_processing: AudioProcessing = Field(default_factory=AudioProcessing)
     music: Music = Field(default_factory=Music)
@@ -888,8 +1028,10 @@ class RenderConfig(BaseModel):
     # Fallback gap threshold for is_jump_seam when sentence words are not available.
     jump_seam_gap_sec: float = 2.0
     # M1.7 step 1d: shot-change transitions inside close_intervals windows. Off by default.
-    # Flag off → identical cmd. ("punch" crop-animation: future task, deferred.)
-    shot_transition: str = "cut"         # "cut" only; punch deferred
+    # Flag off → identical cmd. M103: "punch" — over punch_sec before a close shot that comes inside a window the
+    # wide frame zooms into it (local/fx.push_vf), the switch lands on it; seams and filler cuts stay hard cuts.
+    shot_transition: str = "cut"         # "cut" | "punch" (arl render --transition)
+    punch_sec: float = Field(0.3, gt=0, le=1.0)
     # M1.7 step 1d: dissolve on same-shot seams (filler/splice without shot change). Off by default.
     # 0 = disabled (falls back to video_xfade_sec). Flag off → identical cmd.
     same_shot_dissolve_frames: int = 0   # dissolve duration in frames (0 = disabled)
@@ -908,6 +1050,56 @@ class RenderConfig(BaseModel):
     # M1.7 step 2: per-word keyword highlighting in subtitles. Off by default — feature-off
     # renders are byte-identical. k: review field specifies words per sentence.
     subtitle_keywords: bool = False
+    # M89: <reel>.cover.jpg next to every rendered clip (a frame in the reel's crop and colour + its plate). The clip
+    # itself is unchanged; off = no file.
+    cover: bool = False
+    # M96: the cover frame is the moment (of 7 in the body) with the largest face and open eyes (OpenCV); off or no
+    # OpenCV = the middle of the longest body window (M89).
+    cover_face: bool = False
+    # M97 (ending package, PLAN M1.7 B): a clip whose last thought goes on past its end (open_thought) shows
+    # continue_text in the title plate over its last continue_sec seconds. Off = the clip as before.
+    continue_plate: bool = False
+    # M151 (ending package, PLAN M1.7 B — owner: «просто чтобы была такая опция»): options, all off
+    ending_loop: bool = False             # a clip with a cold open does not fade to black — it loops into its teaser
+    end_freeze_sec: float = Field(0.0, ge=0.0, le=5.0)   # hold the last frame this long after the clip, then black
+    end_sting_path: str = ""              # a sound played after the clip ends (under the held frame); "" = none
+    end_sting_volume: float = Field(0.8, ge=0.0, le=2.0)
+    remote: RemoteRender = Field(default_factory=RemoteRender)   # M161: arl render --remote, arl auto --remote
+    continue_sec: float = Field(2.5, gt=0)
+    continue_text: str = "Продолжение →"
+    # M102 (owner: «чтобы кадры подбирались автоматически… динамика кадра для удержания внимания»): where the face
+    # is in each reel — framing_samples frames over its body (OpenCV); the place seen in at least framing_min_share
+    # of them counts. reel_framing: the reel's own frame — the source's crop moved sideways so this reel's face is
+    # in its middle when it is more than framing_center_zone of the crop width away (static within the reel, no
+    # tracking). close_from_face: the close shot from the face — the face box close_face_h of the frame height,
+    # its centre at close_face_y from the top; the scale within close_min_scale…close_max_scale and an upscale to
+    # the output height of at most close_max_upscale. No face / no OpenCV — as before. Both off = as before.
+    reel_framing: bool = False
+    close_from_face: bool = False
+    framing_samples: int = Field(7, ge=1)
+    framing_min_share: float = Field(0.4, gt=0, le=1)
+    framing_center_zone: float = Field(0.15, ge=0, le=0.5)
+    close_face_h: float = Field(0.28, gt=0, lt=1)
+    close_face_y: float = Field(0.40, gt=0, lt=1)
+    close_max_upscale: float = Field(2.5, ge=1)
+    close_max_scale: float = Field(1.6, ge=1)
+    close_min_scale: float = Field(1.15, ge=1)
+    # M127 (owner on Pxl 112938952 m125: «фокус взят на чайник» — 12 of 16 reels found no face of their own and kept
+    # the source's frame, the middle): a reel without its own face is framed on the speaker's place in the whole
+    # source (framing_source_samples frames, the dominant place seen in ≥ framing_source_min_faces). Off = as before.
+    framing_source_fallback: bool = False
+    framing_source_samples: int = Field(40, ge=1)
+    framing_source_min_faces: int = Field(4, ge=1)
+    # M129 (m128 on Pxl 112938952: the Haar cascade framed the reels on a shelf of teapots, YuNet found the face in 12 of
+    # 12 frames): the YuNet face model (OpenCV FaceDetectorYN) for the reel framing; "" or no file = the Haar cascade
+    face_model: str = ""
+
+    @field_validator("shot_transition")
+    @classmethod
+    def _validate_transition(cls, v: str) -> str:
+        if v not in ("cut", "punch"):
+            raise ValueError(f"shot_transition must be 'cut' or 'punch'; got '{v}'")
+        return v
 
     @field_validator("role")
     @classmethod
@@ -952,6 +1144,9 @@ class SubtitlesConfig(BaseModel):
     alignment: str             # center | left | right
     char_width_ratio: float    # оценка ширины символа (доля font_size) для подгонки строки
     max_text_width_px: int     # макс. ширина строки в px
+    # M181: advance widths of the font (config/fonts/<font>.json from tools/font_widths.py) for line fitting; "" = the
+    # old len × size × char_width_ratio estimate
+    font_metrics: str = ""
     # Title plate (Part 4): overlay at the TOP for the first seconds, above the subtitle zone.
     # Rendered only when a reel carries title_overlay (review `t:`). Defaults keep old subtitles.yaml
     # valid; title_font_size 0 → reuse font_size.
@@ -993,6 +1188,8 @@ class GroqWhisper(BaseModel):
         "Специалисты выделяют несколько ключевых факторов. "
         "Каждый из них влияет на результат по-своему."
     )
+    # M124: two passes — words without the prompt, sentence ends with it (cloud/transcribe.py GroqDualBackend)
+    dual: bool = False
 
 
 class FasterWhisperParams(BaseModel):

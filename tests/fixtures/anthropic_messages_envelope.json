@@ -1,0 +1,41 @@
+{
+ "provenance": "A real Messages API answer of claude-haiku-5-5, recorded by the m116 run (the id replaced)",
+ "response": {
+  "model": "claude-haiku-5-5",
+  "id": "msg_recorded",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+   {
+    "type": "thinking",
+    "thinking": "",
+    "signature": "CAQSgQYKEAgSGAI4AUIIdGhpbmtpbmcSDCLlPAZbF0LTHdnFTBoMHIYaCCSaRSv1PTOlIjDUd8bDz64NP7uTugvEiXIDVIcYXWkiJowBCwaz9khsOhxkYKG4duT6sTnNl+GevGIqngVnG5ZgyhHMKgrnLo6ldYiSy/XRSPPR8iCK6EvjtdtaczH3NjHX4TPCzSBeK6SlTGhxm+U8fVxM5r9+/ljQRVgDTR0m64fXHtUJq3plm20ma97sTEk5UxqbCKnVRpNXASYoPVyehjo/qdNYItTE0cP8iQMvjQU0UNqimyHIeq+LxNN0yqqRkBsFBp/tIgu/ak4XW/Ov0qWUj7PO26WYFpYlbmcIDlKzNBHzPpjMrCE36FBJaxLILcPSve8Ln4nHTN3RLy8t+yyYFiBnZC7pZ2fqFUrE7ntHoAFIZnyixNraO3toTyqXbmoi/YaazUQroLqb6MyRDFgnk2hMjrEwc5olnco6bgTju36WuoDMei73AaTw21J0xoIwcooJH4lMzQ4dpGM+S82vG2BXyDgLX3el8TcUXV6wxrkpJgRgQViX96hKrcLVZgPEOVkYsUJLmFlI4EWhFSaaGTGQfeEcgFoMD+I82Kb8fbZFO4P/LtLGOKi0O1cDKRY29bVS9r8hao1UOo+HIWZ1OdZxgXQ8jC2lKxfCWtANB4o62MEzxR2zimtypGKCwkn+Rj/P9PugtQdDhCP5pi1O1D943NRdCsVjUOTOdVF6z7zBM6hySDPNruTfZ0IYOpma4I2KVCJSgY/CgfPwWFAEt2ixdj0oXAtADnxwApoOL9yN47qc+buTpJUmYggPQCMtXwpGQy3eHhfs5gINT3sK4wPO5C+gXEiWrbPkFBALQdM4ZR7sEJBQeMEcuzvjD49HssjVq1Kae3OoHc9tuQfIJgaliPk+n2WdgX/9vdrS1kcq8DLFpt2uo9FPCp4PdFeR9U1tJaEhl+Y+MWMsFpZj3ygzEu+9qwR5k0vWgW4IpE41zW6kJkl++1D7dWKtm2GwW69NSDgjGAE="
+   },
+   {
+    "type": "text",
+    "text": "{\"ok\": true, \"why\": \"Complete meaningful\"}"
+   }
+  ],
+  "container": null,
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+   "input_tokens": 67,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "cache_creation": {
+    "ephemeral_5m_input_tokens": 0,
+    "ephemeral_1h_input_tokens": 0
+   },
+   "output_tokens": 93,
+   "output_tokens_details": {
+    "thinking_tokens": 71
+   },
+   "service_tier": "standard",
+   "inference_geo": "global",
+   "speed": "standard"
+  },
+  "diagnostics": null
+ }
+}

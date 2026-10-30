@@ -330,3 +330,83 @@ def test_cuts_never_burst_change_gap_keeps_them_apart_from_every_picture_change(
     plan = build_manual_plan(sents, [1, 2, 3, 4, 5], words=words, smap=smap,
                              params=replace(P, change_gap_sec=5.0), align=align)
     assert "left in (too close to another change)" in " ".join(plan.describe(sents))
+
+
+def test_a_long_thinking_pause_is_always_shortened():
+    """M79 (owner on PXL_20260729_copy r07: the interviewer «зависает между слов на несколько секунд»): the balance
+    profile left such a pause in — the face moves while he thinks, the jump shows. A pause ≥ long_pause_sec is cut
+    anyway and the jump masked by a shot switch; the spacing rules do not hold it back. 0 = as before."""
+    from dataclasses import replace
+    spec = [[("Как", 0.0, 0.4), ("вы", 0.5, 0.8), ("считаете", 4.3, 5.0), ("это", 5.1, 5.4), ("важно?", 5.5, 6.0)],
+            [("Да.", 6.4, 6.8)]]
+    sents, words, smap, align = _setup(spec, [])
+    jumpy = lambda a, b: 9.0                                   # every cut would show a jump
+    bal = ManualPlanParams(filler_cut=True, jump_max=5.0, min_cut_spacing_sec=3.0, jump_mask=False)
+    before = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=bal, align=align, jump=jumpy).body[0]
+    assert before.cuts == []                                   # 3.5 s of silence stayed in (jump / share cap)
+    on = replace(bal, long_pause_sec=1.5, change_gap_sec=6.0)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=on, align=align, jump=jumpy)
+    w = plan.body[0]
+    assert len(w.cuts) == 1 and w.cuts[0][0] > 0.8 and w.cuts[0][1] < 4.3 and w.cuts[0][1] - w.cuts[0][0] > 3.0
+    assert w.cut_flips == w.cuts and w.cuts_long == 1          # masked by a shot switch
+    assert "1 long pause(s) always cut" in " ".join(plan.describe(sents))
+
+
+# M126 (owner: «много вводных слов у человека, который говорит»; «можно не часто, иначе вернётся дёрганье»)
+FW = ("ну", "вот", "как бы", "значит")
+SPEC_FW = [[("Ну,", 0.0, 0.3), ("я", 0.6, 0.8), ("думаю,", 0.8, 1.3), ("как", 1.6, 1.8), ("бы,", 1.8, 2.1),
+            ("это", 2.4, 2.7), ("важно.", 2.7, 3.4)],
+           [("Вот", 4.0, 4.3), ("этот", 4.3, 4.6), ("дом", 4.6, 5.0), ("стоит,", 5.0, 5.6), ("вот.", 5.9, 6.3)]]
+
+
+def test_m126_standalone_fillers_only():
+    from autoreels.cloud.plan import hide_fillers, standalone_fillers
+    sents, *_ = _setup(SPEC_FW, [])
+    assert standalone_fillers(sents[0], FW) == [(0, 0), (3, 4)]          # «Ну,» opens, «как бы,» between commas
+    assert standalone_fillers(sents[1], FW) == [(4, 4)]                  # «Вот этот дом» carries the clause
+    assert [w.word for w in hide_fillers(sents[0], FW)] == ["Я", "думаю,", "это", "важно."]
+    assert [w.word for w in hide_fillers(sents[1], FW)] == ["Вот", "этот", "дом", "стоит."]
+    only = [Word(word="Вот.", t0=0.0, t1=0.3)]
+    assert hide_fillers(only, FW) == only                                # a sentence that is only a filler stays
+
+
+def test_m126_subtitles_hide_fillers_and_the_sound_keeps_them():
+    sents, words, smap, align = _setup(SPEC_FW, [])
+    p = ManualPlanParams(filler_words=FW, subs_hide_fillers=True)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align)
+    assert [s.word for s in plan.subtitles] == ["Я", "думаю,", "это", "важно.", "Вот", "этот", "дом", "стоит."]
+    assert plan.body[0].cuts == []                                       # nothing cut from the sound
+    off = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=ManualPlanParams(filler_words=FW),
+                            align=align)
+    assert len(off.subtitles) == len(words)                              # off = as before
+
+
+def test_m126_filler_words_cut_from_the_sound_rarely_and_not_at_the_edges():
+    sents, words, smap, align = _setup(SPEC_FW, [])
+    p = ManualPlanParams(filler_cut=True, filler_words=FW, filler_word_cut=True, pause_max_sec=10.0)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align).body[0]
+    # «Ну,» opens the window and «вот.» ends it — never cut; «как бы,» goes, from «думаю,» to «это»
+    assert len(w.cuts) == 1 and 1.3 <= w.cuts[0][0] <= 1.6 and 2.1 <= w.cuts[0][1] <= 2.4
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align)
+    assert "как" not in [s.word for s in plan.subtitles] and "бы," not in [s.word for s in plan.subtitles]
+    rare = ManualPlanParams(filler_cut=True, filler_words=FW, filler_word_cut=True, pause_max_sec=10.0,
+                            change_gap_sec=6.0)
+    assert build_manual_plan(sents, [1, 2], words=words, smap=smap, params=rare, align=align).body[0].cuts == []
+    keep = ManualPlanParams(filler_cut=True, filler_words=FW, pause_max_sec=10.0)
+    assert build_manual_plan(sents, [1, 2], words=words, smap=smap, params=keep, align=align).body[0].cuts == []
+
+
+def test_m136_cuts_never_overlap_long_pause_next_to_a_filler():
+    """M136 (m134: Pxl 112938952 r13 «segment 1 empty/reversed [1690.978, 1688.880]»): a long pause (M79) right before a
+    standalone filler (M126) gave two candidates over the same silence — the pause, and «word before → filler → word
+    after». Both are ≥ long_pause_sec, and a long pause skips the spacing rules, so both were kept and the piece between
+    them came out reversed. A cut that overlaps a kept one is never kept."""
+    spec = [[("Я", 0.0, 0.3), ("думаю,", 0.4, 0.9), ("ну,", 3.9, 4.2), ("это", 4.4, 4.7), ("важно.", 4.7, 5.3)],
+            [("Да.", 5.8, 6.2)]]
+    sents, words, smap, align = _setup(spec, [])
+    p = ManualPlanParams(filler_cut=True, filler_words=FW, filler_word_cut=True, long_pause_sec=1.5,
+                         pause_max_sec=1.0)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align).body[0]
+    cuts = sorted(w.cuts)
+    assert cuts and all(b0 >= a1 for (a0, a1), (b0, b1) in zip(cuts, cuts[1:]))
+    assert all(s.end > s.start for s in w.segments())

@@ -299,6 +299,114 @@ def auto_crop(frame_size: tuple[int, int]) -> Crop:
     return Crop(x=x, y=0, w=w, h=H)
 
 
+def face_crop(frame_size: tuple[int, int], faces, *, samples: int = 0,
+              min_share: float = 0.3) -> Crop | None:
+    """M78 (owner on PXL_20260729_copy: «ракурс сбит» — no manual calibration, the centre crop cut the speaker
+    sitting left of centre): the 9:16 crop of auto_crop (full height) moved so the median face centre is in
+    its middle. `faces` — (cx, cy, w, h) in DISPLAY px, one per sampled frame where a face was found;
+    `samples` — frames looked at. None when a face was found in fewer than min_share of them (then the
+    centre crop stays). Static — one rectangle for the whole source, no tracking (CLAUDE.md). M87: faces in
+    different places of the frame are grouped; only the group seen most often counts."""
+    faces = list(faces or [])
+    if not faces or (samples and len(faces) < min_share * samples):
+        return None
+    W, _H = frame_size
+    base = auto_crop(frame_size)
+    faces = dominant_faces(faces, base.w / 2)
+    if samples and len(faces) < min_share * samples:
+        return None
+    cx = _median([float(f[0]) for f in faces])
+    x = int(round(cx - base.w / 2))
+    x = max(0, min(W - base.w, x))
+    return Crop(x=x, y=base.y, w=base.w, h=base.h)
+
+
+def _median(xs) -> float:
+    xs = sorted(xs)
+    mid = len(xs) // 2
+    return xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) / 2
+
+
+def dominant_faces(faces, gap: float) -> list:
+    """M87 (Pxl 20260621: faces in 10–11 of 20 frames, the median put the frame 68–85 % of its width aside): faces
+    far apart are different people or false finds — the median of all of them can land between them, on nobody.
+    Faces closer than `gap` (half the crop width) form one group (one place in the frame); the group seen in the
+    most frames wins (equal: the larger faces). Returns its faces ([] for none)."""
+    groups: list[list] = []
+    for f in sorted(faces or [], key=lambda f: float(f[0])):
+        if groups and float(f[0]) - float(groups[-1][-1][0]) <= gap:
+            groups[-1].append(f)
+        else:
+            groups.append([f])
+    if not groups:
+        return []
+
+    def _area(g):
+        a = sorted(float(f[2]) * float(f[3]) for f in g)
+        return a[len(a) // 2]
+    return max(groups, key=lambda g: (len(g), _area(g)))
+
+
+def reel_face(faces, samples: int, gap: float, *, min_share: float = 0.4) -> tuple | None:
+    """M102: the speaker's face in one reel — the median (cx, cy, w, h) of the dominant place (dominant_faces) over
+    the frames looked at; None when that place was seen in fewer than min_share of `samples` frames."""
+    dom = dominant_faces(faces, gap)
+    if not dom or len(dom) < min_share * max(1, samples):
+        return None
+    return tuple(round(_median([float(f[i]) for f in dom]), 1) for i in range(4))
+
+
+def reel_face_span(faces, gap: float) -> tuple[float, float] | None:
+    """M130: how far the speaker's face goes across in one reel — (leftmost, rightmost edge) of the face boxes of the
+    dominant place (dominant_faces); None for no face."""
+    dom = dominant_faces(faces, gap)
+    if not dom:
+        return None
+    return (round(min(float(f[0]) - float(f[2]) / 2 for f in dom), 1),
+            round(max(float(f[0]) + float(f[2]) / 2 for f in dom), 1))
+
+
+def reel_crop(base: Crop, frame_size: tuple[int, int], face, *, center_zone: float = 0.15) -> Crop:
+    """M102 (owner: «чтобы кадры подбирались автоматически»): the reel's own frame — the source's crop (calibration,
+    manual or by face) moved sideways so the face of THIS reel is in its middle, when the face is more than
+    center_zone of the crop width away from the middle. Static within the reel — no tracking (CLAUDE.md). No face
+    (None) or a face near the middle — the source's crop as is (a manual calibration stays unless it misses)."""
+    if face is None:
+        return base
+    span = (float(face[4]), float(face[5])) if len(face) >= 6 else None
+    inside = span is None or (base.x <= span[0] and span[1] <= base.x + base.w)
+    if abs(float(face[0]) - (base.x + base.w / 2)) <= center_zone * base.w and inside:
+        return base
+    x = int(round(float(face[0]) - base.w / 2))
+    if span is not None and span[1] - span[0] <= base.w:      # M130: the whole way the face goes stays in the frame
+        x = int(min(max(x, span[1] - base.w), span[0]))
+    x = max(0, min(int(frame_size[0]) - base.w, x))
+    return base if x == base.x else Crop(x=x, y=base.y, w=base.w, h=base.h)
+
+
+def face_close_crop(wide: Crop, face, *, out_h: int, face_h: float = 0.28, face_y: float = 0.40,
+                    max_upscale: float = 2.5, max_scale: float = 1.6, min_scale: float = 1.15) -> tuple[Crop, float]:
+    """M102: the close shot from the face, not a fixed ×1.25 at the centre — (rectangle, scale). Tight enough that
+    the face box is face_h of the frame height, its centre at face_y from the top and in the middle across; the
+    scale (wide height / close height) at most max_scale and at most what keeps the upscale to out_h within
+    max_upscale (the picture would go soft), at least min_scale (else the switch is not seen). The rectangle stays
+    inside the wide one — what the close shot shows, the wide shot shows too."""
+    z = wide.h * face_h / max(1.0, float(face[3]))
+    z = min(z, max_scale, wide.h * max_upscale / max(1, out_h))
+    span = (float(face[4]), float(face[5])) if len(face) >= 6 else None
+    if span is not None:                  # M130 (owner, Pxl r06: the speaker leaned out of the close shot): the
+        z = min(z, wide.w / max(1.0, (span[1] - span[0]) * 1.2))   # close shot holds the whole way his face goes
+    z = max(z, min_scale)
+    ch = max(2, int(wide.h / z)) & ~1
+    cw = max(2, round(ch * wide.w / wide.h / 2) * 2)
+    cx = float(face[0]) if span is None else (span[0] + span[1]) / 2
+    x = int(round(cx - cw / 2))
+    y = int(round(float(face[1]) - face_y * ch))
+    x = max(wide.x, min(x, wide.x + wide.w - cw))
+    y = max(wide.y, min(y, wide.y + wide.h - ch))
+    return Crop(x=x, y=y, w=cw, h=ch), round(wide.h / ch, 3)
+
+
 def _rotation_from_stream(stream: dict) -> int:
     """Угол поворота из ffprobe-стрима: display-matrix side_data (совр. ffmpeg) или tag rotate
     (старые файлы). Нормализуется в целые градусы; направление знака не важно (берём abs%180)."""
@@ -359,6 +467,7 @@ def load_or_auto_calibrate(
     source_name: str,
     *,
     get_frame_size: Callable[[], tuple[int, int]],
+    get_faces: "Callable[[], tuple[list, int] | None] | None" = None,
 ) -> SetupProfile:
     """Вернуть SetupProfile: ручная калибровка (если есть по ключу) или авто-кроп по центру.
 
@@ -400,6 +509,22 @@ def load_or_auto_calibrate(
             )
 
     frame_size = get_frame_size()
+    if get_faces is not None:
+        # M78: «умное распознавание» — the same in-memory auto crop, placed on the speaker's face (static).
+        found = None
+        try:
+            found = get_faces()
+        except Exception as exc:  # noqa: BLE001 — face search is a bonus; the centre crop is the fallback
+            print(f"поиск лица не удался ({type(exc).__name__}: {str(exc)[:120]}) — кроп по центру", flush=True)
+        if found:
+            faces, n = found
+            fc = face_crop(frame_size, faces, samples=n)
+            if fc is not None:
+                print(f"кроп не откалиброван → авто-кроп 9:16 ПО ЛИЦУ: лицо найдено в {len(faces)} из {n} кадров, "
+                      f"кроп {fc.w}×{fc.h}@{fc.x},{fc.y} в кадре {frame_size[0]}×{frame_size[1]} "
+                      f"(по центру было бы x={auto_crop(frame_size).x}; в памяти, файл не пишется)", flush=True)
+                return SetupProfile(setup_id="auto-face", crop=fc, scale=TARGET_SCALE, frame=list(frame_size))
+            print(f"лицо найдено только в {len(faces)} из {n} кадров — кроп по центру", flush=True)
     print(
         f"кроп не откалиброван → авто-кроп 9:16 по центру в ОТОБРАЖАЕМОМ кадре "
         f"{frame_size[0]}×{frame_size[1]} (в памяти, файл не пишется; "

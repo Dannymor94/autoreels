@@ -218,6 +218,9 @@ def prompt_patterns(prompt: str, n: int = 5) -> list[str]:
     return list(dict.fromkeys(out))
 
 
+_TERMINAL = (".", "!", "?", "…")
+
+
 def _sent_ends(words) -> float:
     """Sentence-ending marks per 100 words (punctuation the sentence split relies on)."""
     if not words:
@@ -229,7 +232,8 @@ def _sent_ends(words) -> float:
 def compare_words(ref, other, *, show: int = 8) -> dict:
     """Two transcripts of one audio, word by word (case, ё and punctuation folded): matched words,
     words only in one of them, the share that differs (of the reference) and the longest
-    disagreements with their times."""
+    disagreements with their times. M111: `sent_agree` — on the matched words, how many sentence ends
+    of `ref` the other one has too (recall) and how many of its own are also in `ref` (precision)."""
     import difflib
     a = [(_norm(w.word).strip("."), w) for w in ref]
     b = [(_norm(w.word).strip("."), w) for w in other]
@@ -237,9 +241,16 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
     b = [x for x in b if x[0]]
     sm = difflib.SequenceMatcher(None, [x[0] for x in a], [x[0] for x in b], autojunk=False)
     matched, only_a, only_b, spans = 0, 0, 0, []
+    ends_ref = ends_other = ends_both = 0          # M111: sentence ends on the matched words
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             matched += i2 - i1
+            for k in range(i2 - i1):
+                er = a[i1 + k][1].word.rstrip().endswith(_TERMINAL)
+                eo = b[j1 + k][1].word.rstrip().endswith(_TERMINAL)
+                ends_ref += er
+                ends_other += eo
+                ends_both += er and eo
             continue
         only_a += i2 - i1
         only_b += j2 - j1
@@ -250,12 +261,14 @@ def compare_words(ref, other, *, show: int = 8) -> dict:
     spans.sort(key=lambda s: -s["size"])
     return {"ref_words": len(a), "other_words": len(b), "matched": matched, "only_ref": only_a,
             "only_other": only_b, "differ": round(100.0 * (only_a + only_b) / max(1, len(a)), 1),
-            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other), "longest": spans[:show]}
+            "ref_sent_ends": _sent_ends(ref), "other_sent_ends": _sent_ends(other),
+            "sent_agree": {"ref": ends_ref, "other": ends_other, "both": ends_both,
+                           "recall": round(100.0 * ends_both / ends_ref, 1) if ends_ref else 0.0,
+                           "precision": round(100.0 * ends_both / ends_other, 1) if ends_other else 0.0},
+            "longest": spans[:show]}
 
 
 # ── M64c: Groq's punctuation onto the local words ──────────────────────────────────────────────
-
-_TERMINAL = (".", "!", "?", "…")
 
 
 def transfer_punctuation(target, ref) -> tuple[list, int]:
@@ -292,3 +305,114 @@ def transfer_punctuation(target, ref) -> tuple[list, int]:
             if lead < len(w) and w[lead].islower():
                 out[ti] = out[ti].model_copy(update={"word": w[:lead] + w[lead].upper() + w[lead + 1:]})
     return out, added
+
+
+# ── M113: sentence ends restored by a model (whisper.cpp keeps ~half of Groq's) ─────────────────────────────────
+
+PUNCT_SYSTEM = (
+    "You restore sentence boundaries in a transcript of Russian speech (a talk or a voice note). The speech "
+    "recognizer dropped most of the punctuation, so sentences run together. The words are numbered: word[n]. Return "
+    "the numbers of the words that END a sentence — a finished thought, after which the next words start a new one — "
+    "with its mark: \".\" for a statement, \"?\" for a question, \"!\" for an exclamation. Words that already end with "
+    "a mark keep it; you add the missing ends. Never end a sentence inside a phrase (between a preposition and its "
+    "noun, before a clause that continues the thought: «что», «который», «потому что», «если», «чтобы»). A spoken "
+    "filler («ну», «вот», «то есть», «да») is not a sentence by itself. The words after «Context after» are not "
+    "numbered: they only show how the speech goes on. Answer only with JSON: {\"ends\": [[n, \".\"], [n, \"?\"]]}."
+)
+
+
+def punct_chunks(words, size: int) -> list[tuple[int, int]]:
+    """[start, end) word ranges of at most `size` words; a chunk ends after a word that already ends a sentence when
+    one is in its second half (the model then never sees a sentence cut in two at a chunk border it cannot see past)."""
+    n, out, i = len(words), [], 0
+    size = max(4, int(size))
+    while i < n:
+        j = min(i + size, n)
+        if j < n:
+            k = next((k for k in range(j - 1, i + size // 2 - 1, -1)
+                      if words[k].word.rstrip().endswith(_TERMINAL)), None)
+            if k is not None:
+                j = k + 1
+        out.append((i, j))
+        i = j
+    return out
+
+
+def parse_ends(raw: str, k: int) -> list[tuple[int, str]] | None:
+    """The model's {"ends": [[n, mark], …]} for a chunk of k words → [(index 0..k-1, mark)]; None = not usable
+    (not JSON, an index outside the chunk, or more ends than one per three words — not sentences)."""
+    import json as _json
+    import re as _re
+    text = _re.sub(r"<think>.*?</think>", " ", raw or "", flags=_re.S)     # a reasoning block may hold braces too
+    obj, dec = None, _json.JSONDecoder()
+    for m in _re.finditer(r'\{\s*"ends"', text):                          # the last {"ends": …} that decodes
+        try:
+            obj, _ = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+    if not isinstance(obj, dict) or not isinstance(obj.get("ends"), list):
+        return None
+    out: dict[int, str] = {}
+    for e in obj["ends"]:
+        n, mark = (e[0], e[1] if len(e) > 1 else ".") if isinstance(e, (list, tuple)) and e else (e, ".")
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return None
+        if not 1 <= n <= k:
+            return None
+        out[n - 1] = mark if mark in ("?", "!") else "."
+    if len(out) > k // 3 + 1:
+        return None
+    return sorted(out.items())
+
+
+def restore_sentence_ends(words, ask, *, chunk_words: int = 120, context_words: int = 10,
+                          log=print, raw_out: list | None = None) -> tuple[list, dict]:
+    """M113: whisper.cpp keeps ~half of the sentence ends (m111: 5.5 per 100 words against Groq's 10.3; no whisper flag
+    brings them back). The model sees each chunk with numbered words and names the words that end a sentence; the
+    code puts the marks — words, times and the marks already there stay as they are (the model only adds), the next
+    word gets a capital. A chunk whose answer is not usable is asked once more, then left as it is and counted as
+    missing (invariant 11). `ask(messages) -> str`. Returns (words, {chunks, missing, added, ...}). `raw_out` collects
+    every answer as {"k": chunk words, "raw": text, "ok": usable} — real answers for test fixtures."""
+    out = list(words)
+    stats = {"chunks": 0, "missing": 0, "added": 0, "question": 0, "exclaim": 0}
+    cap: set[int] = set()
+    for a, b in punct_chunks(out, chunk_words):
+        stats["chunks"] += 1
+        text = " ".join(f"{w.word.strip()}[{i - a + 1}]" for i, w in enumerate(out[a:b], start=a))
+        after = " ".join(w.word.strip() for w in out[b:b + context_words])
+        msg = f"Text:\n{text}" + (f"\n\nContext after (not numbered): {after} …" if after else "")
+        ends = None
+        for _try in range(2):
+            try:
+                raw = ask([{"role": "system", "content": PUNCT_SYSTEM}, {"role": "user", "content": msg}])
+            except Exception as exc:  # noqa: BLE001 — one chunk failed: asked again, then missing
+                log(f"  точки: кусок {stats['chunks']} — модель не ответила ({type(exc).__name__})")
+                continue
+            ends = parse_ends(raw, b - a)
+            if raw_out is not None:
+                raw_out.append({"k": b - a, "raw": raw, "ok": ends is not None})
+            if ends is not None:
+                break
+        if ends is None:
+            stats["missing"] += 1
+            log(f"  точки: кусок {stats['chunks']} (слова {a + 1}–{b}) — ответ не принят дважды, оставлен как был")
+            continue
+        for off, mark in ends:
+            i = a + off
+            w = out[i].word.rstrip()
+            if w.endswith(_TERMINAL):
+                continue
+            out[i] = out[i].model_copy(update={"word": w.rstrip(",;:—–-") + mark})
+            stats["added"] += 1
+            stats["question"] += mark == "?"
+            stats["exclaim"] += mark == "!"
+            cap.add(i + 1)
+    for i in cap:
+        if i < len(out):
+            w = out[i].word
+            lead = len(w) - len(w.lstrip("«\"'( "))
+            if lead < len(w) and w[lead].islower():
+                out[i] = out[i].model_copy(update={"word": w[:lead] + w[lead].upper() + w[lead + 1:]})
+    return out, stats

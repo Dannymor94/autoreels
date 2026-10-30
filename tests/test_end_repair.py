@@ -556,3 +556,20 @@ def test_deflate_stump_explicit_e_no_deflate_cap():
     assert r.end_snap_reason == "repaired_to_sentence"
     assert not hasattr(r, "_deflate_end_cap"), "explicit_e must not set _deflate_end_cap"
     assert r._next_speech_t0 == pytest.approx(2.1)
+
+
+def test_pause_markers_use_the_pause_as_heard_when_given():
+    """M98 (M1.8 consumer 7): ⏸ after a sentence by the heard pause (speech map / alignment) — the Whisper gap is
+    zero, negative or overlapping on part of the material (invariant 9)."""
+    from autoreels.cloud.blocks import CandidateBlock, _numbered_sentences
+    from autoreels.core.models import Word
+    words = [Word(word="Маска", t0=0.0, t1=0.5), Word(word="защищает.", t0=0.5, t1=1.0),
+             Word(word="Снять", t0=1.0, t1=1.4), Word(word="можно.", t0=1.4, t1=2.0)]   # Whisper: no gap at all
+    block = CandidateBlock(id="b1", start=0.0, end=2.0, text="Маска защищает. Снять можно.", boundary_reason="pause",
+                           duration=2.0)
+    assert "⏸" not in _numbered_sentences(block, words, pause_show_sec=0.3, pause_strong_sec=1.5)
+    heard = {"защищает.": (0.5, 0.82), "Снять": (1.9, 2.2)}
+    gap = lambda a, b: heard[b.word][0] - heard[a.word][1]        # noqa: E731
+    assert "[1] Маска защищает. ⏸1.1 [2] Снять можно." == _numbered_sentences(
+        block, words, pause_show_sec=0.3, pause_strong_sec=1.5, gap=gap)
+    assert "⏸⏸1.1" in _numbered_sentences(block, words, pause_show_sec=0.3, pause_strong_sec=1.0, gap=gap)

@@ -63,12 +63,40 @@ def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
     return out
 
 
-def _estimate_width(text: str, font_size: int, char_width_ratio: float) -> float:
+def _estimate_width(text: str, font_size: int, char_width_ratio: float, metrics: dict | None = None) -> float:
+    """Width of `text` in px. M181: with `metrics` (the font's advance widths, config/fonts/*.json written by
+    tools/font_widths.py from the font file) the sum of the real glyph widths; without — len × size × ratio (the
+    old estimate: 0.55 is too narrow for bold capitals — prew_isaev_anna r11's plate ran off both edges)."""
+    if metrics:
+        w, upm, dflt = metrics["widths"], float(metrics["units_per_em"]), float(metrics["default"])
+        return sum(float(w.get(c, dflt)) for c in text) * font_size / upm
     return len(text) * font_size * char_width_ratio
 
 
+_METRICS_CACHE: dict = {}
+
+
+def font_metrics(cfg) -> dict | None:
+    """M181: the advance-width table named by cfg.font_metrics (relative to the project root; "" = off — the old
+    estimate). Missing or unreadable file → None (the old estimate), never an error."""
+    rel = str(getattr(cfg, "font_metrics", "") or "")
+    if not rel:
+        return None
+    if rel not in _METRICS_CACHE:
+        import json
+        from pathlib import Path
+        p = Path(rel) if Path(rel).is_absolute() else Path(__file__).resolve().parents[3] / rel
+        try:
+            m = json.loads(p.read_text(encoding="utf-8"))
+            _METRICS_CACHE[rel] = m if {"widths", "units_per_em", "default"} <= set(m) else None
+        except (OSError, ValueError):
+            _METRICS_CACHE[rel] = None
+    return _METRICS_CACHE[rel]
+
+
 def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: int,
-                font_size: int, char_width_ratio: float, break_pause_sec: float) -> list[list[Word]]:
+                font_size: int, char_width_ratio: float, break_pause_sec: float,
+                metrics: dict | None = None) -> list[list[Word]]:
     """Слова → группы по `words_per_line`; группа обрывается раньше, если:
 
     - пауза до следующего слова `(next.t0 − cur.t1) > break_pause_sec` (граница фразы) — слово
@@ -89,7 +117,7 @@ def group_words(words: list[Word], *, words_per_line: int, max_text_width_px: in
                 if w.t0 - group[-1].t1 > break_pause_sec:
                     break                   # пауза = граница фразы → закрываем группу
                 text = " ".join(x.word for x in group + [w])
-                if _estimate_width(text, font_size, char_width_ratio) > max_text_width_px:
+                if _estimate_width(text, font_size, char_width_ratio, metrics) > max_text_width_px:
                     break                   # добавление слова переполняет строку → закрываем группу
             group.append(w)
         groups.append(group)
@@ -143,7 +171,8 @@ def _style_line(cfg: SubtitlesConfig) -> str:
     return "Style: " + ",".join(str(x) for x in fields)
 
 
-def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float) -> str:
+def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float,
+              metrics: dict | None = None) -> str:
     """Greedily wrap `text` into lines that fit `max_px` (estimated width), joined with ASS \\N.
 
     WrapStyle is 2 (no auto-wrap — \\N only), so a long title plate would otherwise run off the
@@ -152,7 +181,7 @@ def _wrap_ass(text: str, *, max_px: int, font_size: int, char_width_ratio: float
     out: list[str] = []
     cur: list[str] = []
     for w in words:
-        if cur and _estimate_width(" ".join(cur + [w]), font_size, char_width_ratio) > max_px:
+        if cur and _estimate_width(" ".join(cur + [w]), font_size, char_width_ratio, metrics) > max_px:
             out.append(" ".join(cur))
             cur = [w]
         else:
@@ -225,11 +254,12 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
     groups = group_words(
         words, words_per_line=cfg.words_per_line, max_text_width_px=cfg.max_text_width_px,
         font_size=cfg.font_size, char_width_ratio=cfg.char_width_ratio,
-        break_pause_sec=cfg.subtitle_break_pause_sec,
+        break_pause_sec=cfg.subtitle_break_pause_sec, metrics=font_metrics(cfg),
     )
     _has_kw = enable_keywords and any(w.emph for w in words)
+    _cont = fx.get("continue") if fx.get("continue") and str(fx["continue"].get("text", "")).strip() else None
     styles = [_style_line(cfg)]
-    if title:
+    if title or _cont:
         styles.append(_title_style_line(cfg))
     if _has_kw:
         styles.append(_keyword_style_line(cfg))
@@ -255,11 +285,17 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         ttext = title.upper() if cfg.uppercase else title
         tsize = cfg.title_font_size or cfg.font_size
         ttext = _wrap_ass(ttext, max_px=cfg.max_text_width_px, font_size=tsize,
-                          char_width_ratio=cfg.char_width_ratio)   # wrap so a long title never clips
+                          char_width_ratio=cfg.char_width_ratio,
+                          metrics=font_metrics(cfg))   # wrap so a long title never clips
         fi = fo = cfg.title_fade_ms
         ttext = f"{{\\fad({fi},{fo})}}" + ttext
         _ts = max(0.0, float(title_start or 0.0))
         lines.append(f"Dialogue: 0,{_ass_time(_ts)},{_ass_time(_ts + cfg.title_lead_sec)},Title,,0,0,0,,{ttext}")
+    if _cont:     # M97: «Продолжение →» over the last seconds of a clip whose thought goes on (open_thought)
+        ctext = str(_cont["text"]).strip()
+        ctext = ctext.upper() if cfg.uppercase else ctext
+        lines.append(f"Dialogue: 1,{_ass_time(float(_cont['t']))},{_ass_time(float(_cont['end']))},Title,,0,0,0,,"
+                     f"{{\\fad({cfg.title_fade_ms},0)}}{ctext}")
     if _progress > 0:
         lines.append(_progress_line(cfg, _progress, pw, ph))
     for c in _callouts:
@@ -292,6 +328,29 @@ def build_ass(words: list[Word], *, cfg: SubtitlesConfig, clip_start: float,
         if fade_in or fade_out:
             text = f"{{\\fad({fade_in},{fade_out})}}" + text   # override-блок перед текстом группы
         lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}")
+    return "\n".join(lines) + "\n"
+
+
+def build_cover_ass(title: str, *, cfg: SubtitlesConfig, play_res: tuple[int, int] = (1080, 1920)) -> str:
+    """M89: the cover's plate — the reel's title in the Title style, shown from the first frame without a fade (a
+    cover is one frame: the reel's fade-in would leave it invisible). Empty title → no Dialogue."""
+    pw, ph = play_res
+    lines = [
+        "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {pw}", f"PlayResY: {ph}", "WrapStyle: 2", "",
+        "[V4+ Styles]",
+        ("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"),
+        _title_style_line(cfg), "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    t = " ".join((title or "").split())
+    if t:
+        ttext = t.upper() if cfg.uppercase else t
+        ttext = _wrap_ass(ttext, max_px=cfg.max_text_width_px, font_size=cfg.title_font_size or cfg.font_size,
+                          char_width_ratio=cfg.char_width_ratio, metrics=font_metrics(cfg))
+        lines.append(f"Dialogue: 0,{_ass_time(0.0)},{_ass_time(3600.0)},Title,,0,0,0,,{ttext}")
     return "\n".join(lines) + "\n"
 
 
@@ -359,7 +418,7 @@ def _callout_line(cfg: SubtitlesConfig, t: float, text: str, dur: float) -> str:
     size = cfg.callout_font_size or int(round(cfg.font_size * 1.5))
     body = text.upper() if cfg.uppercase else text
     body = _wrap_ass(body.strip(), max_px=cfg.max_text_width_px, font_size=size,
-                     char_width_ratio=cfg.char_width_ratio)
+                     char_width_ratio=cfg.char_width_ratio, metrics=font_metrics(cfg))
     tag = "{\\fad(150,250)\\fscx85\\fscy85\\t(0,200,\\fscx100\\fscy100)}"
     return f"Dialogue: 2,{_ass_time(t)},{_ass_time(t + dur)},Callout,,0,0,0,,{tag}{body}"
 

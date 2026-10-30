@@ -61,7 +61,7 @@ def test_load_render_config_returns_typed_object():
     cfg = load_render_config(RENDER_YAML)
     assert isinstance(cfg, RenderConfig)
     assert cfg.scale == [1080, 1920]
-    assert cfg.subtitles.font == "Montserrat"
+    assert not hasattr(cfg, "subtitles")    # M135: the dead copy of the subtitle style is gone (config/subtitles.yaml rules)
 
 
 # ---- render.local.yaml: машинный override поверх общего render.yaml (в .gitignore) ----
@@ -95,12 +95,12 @@ def test_render_no_local_yaml_uses_base(tmp_path):
 
 
 def test_render_local_yaml_partial_keeps_other_sections(tmp_path):
-    """Частичный override (только ffmpeg) сохраняет прочие секции базы (subtitles, audio)."""
+    """Частичный override (только ffmpeg) сохраняет прочие секции базы (audio, encoder)."""
     base = _write(tmp_path, "render.yaml", RENDER_YAML.read_text(encoding="utf-8"))
     _write(tmp_path, "render.local.yaml", "ffmpeg: /opt/ffmpeg\n")
     cfg = load_render_config(base)
     assert cfg.ffmpeg == "/opt/ffmpeg"
-    assert cfg.subtitles.font == "Montserrat"               # секция subtitles цела
+    assert cfg.encoder.codec                               # секция encoder цела
     assert cfg.audio.codec == "aac"
 
 

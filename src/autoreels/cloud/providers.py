@@ -14,8 +14,8 @@ Groq и OpenRouter увеличивает пропускную способно�
 - ProviderPool — quota-aware роутер: держит провайдеров с состоянием кулдауна, льёт каждый
   запрос на лучший СВОБОДНЫЙ провайдер по стратегии (adaptive|round_robin), пропускает тех,
   кто в лимите, и спит только когда ВСЕ в лимите — с внятной оценкой, кто когда освободится.
-- FallbackLLM — простая последовательная цепочка (устаревшая, оставлена для совместимости);
-  ProviderPool её обобщает (failover = adaptive с кулдауном во всю квоту).
+- (FallbackLLM, простая последовательная цепочка, удалена в M135: нигде не создавалась;
+  ProviderPool её обобщает — failover = adaptive с кулдауном во всю квоту.)
 
 Стратегии распределения:
 - adaptive (дефолт): предпочитать Groq (модель сильнее → качество выборки), сливать на
@@ -42,6 +42,7 @@ import httpx
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"   # M116: Claude (paid; owner's key in .env)
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 # Актуальная Qwen на Groq. Модель конфигурируема через config/r0.yaml (model:).
@@ -96,6 +97,15 @@ _GROQ_CHAT_TEMPLATE_OVERHEAD = 400  # conservative: 200 template + 200 buffer
 # each successful request and persisted to _TOKEN_SCALE_FILE, keyed by model name.
 _TOKEN_SCALE_DEFAULT = 1.45   # start conservative; calibrates down to observed 1.37-1.40
 _TOKEN_SCALE_EMA_ALPHA = 0.3  # EMA weight for new observations (fast-ish convergence)
+# M113: calibration subtracts the REAL chat-template cost of a request (Qwen «<|im_start|>role\n…<|im_end|>\n» ≈ 5 tokens
+# per message + 3 for the assistant prefix), not the conservative pacing overhead above. Subtracting the 400-token pacing
+# buffer from short prompts (autocut judges and headlines, 130–540 tokens) gave negative factors and drove the persisted
+# scale of qwen/qwen3.8-27b to −0.04 in the m112 run: the next R0 request would have been paced as if its text cost nothing.
+_GROQ_TEMPLATE_PER_MESSAGE = 5
+_GROQ_TEMPLATE_PER_REQUEST = 3
+# A tokenizer ratio outside this range means the estimate itself failed for that request (or a persisted value was
+# written by the bug above) — it is not learned / not loaded; the default is used instead.
+_TOKEN_SCALE_RANGE = (0.5, 3.0)
 # Machine-local calibration state (not in git). Path is env-overridable so tests never write to
 # the real repo copy (env AUTOREELS_TOKEN_SCALE_FILE); default = <repo>/data/token_scale.json.
 _TOKEN_SCALE_FILE_DEFAULT = Path(__file__).resolve().parents[3] / "data" / "token_scale.json"
@@ -118,9 +128,17 @@ def _load_token_scale(model: str) -> float | None:
     try:
         data = json.loads(_token_scale_file().read_text())
         v = data.get(model)
-        return float(v) if v is not None else None
+        if v is None:
+            return None
+        v = float(v)
     except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError):
         return None
+    lo, hi = _TOKEN_SCALE_RANGE
+    if not lo <= v <= hi:                 # M113: a value the old calibration wrote (m112: −0.04) — not a ratio
+        print(f"  ⚠ Groq token scale {v:.3f} для {model} вне {lo}–{hi} — не принят, беру {_TOKEN_SCALE_DEFAULT}",
+              flush=True)
+        return None
+    return v
 
 
 def _save_token_scale(model: str, factor: float) -> None:
@@ -263,7 +281,6 @@ class ProviderExhausted(ProviderError):
 
     Пул трактует это как ДЛИННЫЙ кулдаун (не как вечную смерть провайдера): по истечении
     retry_after провайдер снова опрашивается — так реализуется «вернуться когда остынет».
-    FallbackLLM же ловит это исключение и переключается на следующий провайдер навсегда.
     """
 
     def __init__(self, message: str, *, retry_after: float = 0.0):
@@ -531,6 +548,10 @@ class GroqLLM:
             self._scale_loaded = True
         return self._token_scale
 
+    @property
+    def model_id(self) -> str:
+        return f"groq:{self._model}"
+
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         """Вернуть текст ответа модели (content первого choice). Пустой → ProviderEmptyResponse."""
         request = self._request_fn or self._default_request
@@ -667,18 +688,27 @@ class GroqLLM:
         # Learn underestimation factor from usage.prompt_tokens and persist via EMA.
         actual_prompt_tokens = data.get("usage", {}).get("prompt_tokens") if isinstance(data, dict) else None
         if actual_prompt_tokens is not None and estimated > 0:
-            # text_real ≈ actual_prompt_tokens minus fixed template overhead
-            text_real = actual_prompt_tokens - _template_tok
+            # text_real ≈ actual_prompt_tokens minus the real template cost (M113: not the pacing buffer)
+            template_real = _GROQ_TEMPLATE_PER_MESSAGE * len(messages) + _GROQ_TEMPLATE_PER_REQUEST
+            text_real = actual_prompt_tokens - template_real
             observed_factor = text_real / estimated
-            new_scale = (1 - _TOKEN_SCALE_EMA_ALPHA) * self._token_scale + _TOKEN_SCALE_EMA_ALPHA * observed_factor
-            delta = actual_prompt_tokens - (estimated + _template_tok)
-            print(
-                f"  ℹ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
-                f"delta={delta:+d} observed_factor={observed_factor:.3f} → scale={new_scale:.3f}",
-                flush=True,
-            )
-            self._token_scale = new_scale
-            _save_token_scale(self._model, new_scale)
+            delta = actual_prompt_tokens - (estimated + template_real)
+            lo, hi = _TOKEN_SCALE_RANGE
+            if lo <= observed_factor <= hi:
+                new_scale = (1 - _TOKEN_SCALE_EMA_ALPHA) * self._token_scale + _TOKEN_SCALE_EMA_ALPHA * observed_factor
+                print(
+                    f"  ℹ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
+                    f"delta={delta:+d} observed_factor={observed_factor:.3f} → scale={new_scale:.3f}",
+                    flush=True,
+                )
+                self._token_scale = new_scale
+                _save_token_scale(self._model, new_scale)
+            else:
+                print(
+                    f"  ⚠ Groq token calibration: est_text={estimated} actual_prompt={actual_prompt_tokens} "
+                    f"observed_factor={observed_factor:.3f} вне {lo}–{hi} — не учтён (scale {self._token_scale:.3f})",
+                    flush=True,
+                )
         return data
 
 
@@ -714,6 +744,10 @@ class OpenRouterLLM:
         request = self._request_fn or self._default_request
         data = request(messages, temperature)
         return _extract_content(data, self.name)
+
+    @property
+    def model_id(self) -> str:
+        return f"openrouter:{self._model}"
 
     def _model_404_hint(self, model: str) -> str:
         return (
@@ -798,6 +832,10 @@ class LocalLLM:
         self._no_think = no_think
         self._post = post_fn or httpx.post
 
+    @property
+    def model_id(self) -> str:
+        return f"local:{self._model}" + ("" if self._no_think else "+think")
+
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         msgs = [dict(m) for m in messages]
         if self._no_think and msgs and msgs[-1].get("role") == "user":
@@ -819,10 +857,123 @@ class LocalLLM:
             resp.raise_for_status()
         except httpx.HTTPError as e:
             raise ProviderError(f"локальная модель: {e}") from e
-        return _extract_content(resp.json(), self.name)
+        text = _extract_content(resp.json(), self.name)
+        if not self._no_think:           # M116: with reasoning on, the answer comes after the reasoning block
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip() or text
+        return text
 
     def available_models(self) -> set[str] | None:
         return None   # llama-server lists its file name, not our label; reachability is probed at build
+
+
+class AnthropicLLM:
+    """M116: Claude through the Messages API (paid — the owner's ANTHROPIC_API_KEY in .env). Same interface as the
+    other providers: complete(messages) -> text. The system messages go to `system`; the answer is the text blocks.
+    Counts requests and tokens; `prices` (USD per 1M tokens, input/output) give the cost line of a run."""
+
+    name = "Claude"
+
+    def __init__(self, *, model: str, api_key: str | None = None, max_output_tokens: int = 2048,
+                 timeout_sec: float = 120.0, prices: tuple[float, float] = (0.0, 0.0),
+                 post_fn: Callable | None = None):
+        self._model = model
+        self._api_key = api_key
+        self._max_tokens = max_output_tokens
+        self._timeout = timeout_sec
+        self._prices = prices
+        self._post = post_fn or httpx.post
+        self._temperature_ok = True
+        self.calls = 0
+        self.tokens_in = 0
+        self.tokens_out = 0
+
+    @property
+    def model_id(self) -> str:
+        return f"anthropic:{self._model}"
+
+    def cost(self) -> float:
+        return (self.tokens_in * self._prices[0] + self.tokens_out * self._prices[1]) / 1_000_000
+
+    def usage_line(self) -> str:
+        if not self.calls:
+            return ""
+        return (f"{self.name} {self._model}: запросов {self.calls}, вход {self.tokens_in}, ответ {self.tokens_out} "
+                f"токенов ≈ ${self.cost():.4f}")
+
+    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+        key = (self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")).strip()
+        if not key:
+            raise ProviderError("нет ANTHROPIC_API_KEY — добавьте ключ Claude в .env")
+        system = "\n\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+        msgs = [{"role": m["role"], "content": str(m.get("content") or "")} for m in messages
+                if m.get("role") in ("user", "assistant")]
+        payload: dict = {"model": self._model, "max_tokens": self._max_tokens, "messages": msgs}
+        if system:
+            payload["system"] = system
+        if self._temperature_ok:
+            payload["temperature"] = temperature
+        headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        for _attempt in range(2):
+            try:
+                resp = self._post(ANTHROPIC_MESSAGES_URL, json=payload, headers=headers,
+                                  timeout=httpx.Timeout(self._timeout, connect=10.0))
+            except httpx.ConnectError as e:
+                raise ProviderTimeout(f"Claude недоступен: {e}", provider=self.name, is_connect_error=True) from e
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                raise ProviderTimeout(f"Claude не ответил за {self._timeout:.0f} с: {e}", provider=self.name) from e
+            code = resp.status_code
+            if code == 400 and "temperature" in (resp.text or "") and "temperature" in payload:
+                self._temperature_ok = False          # a model that takes no temperature: ask again without it
+                payload.pop("temperature")
+                continue
+            break
+        if code in (401, 403):
+            raise ProviderError(f"Claude отклонил ключ (HTTP {code}): проверь ANTHROPIC_API_KEY в .env")
+        if code == 404:
+            raise ProviderModelNotFound(f"модель Claude '{self._model}' не найдена (404) — обнови anthropic.models "
+                                        f"в config/r0.yaml", model=self._model, provider=self.name)
+        if code in (429, 529):
+            try:
+                wait = float(resp.headers.get("retry-after") or 20)
+            except ValueError:
+                wait = 20.0
+            raise ProviderThrottled(f"Claude: HTTP {code} (лимит/перегрузка), retry-after={wait:.0f}с", retry_after=wait)
+        if code >= 500:
+            raise ProviderTimeout(f"Claude: HTTP {code}", provider=self.name)
+        if code != 200:
+            raise ProviderError(f"Claude: HTTP {code}: {(resp.text or '')[:300]}")
+        data = resp.json()
+        usage = data.get("usage") or {}
+        self.calls += 1
+        self.tokens_in += int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
+        self.tokens_out += int(usage.get("output_tokens") or 0)
+        text = "".join(b.get("text", "") for b in data.get("content") or [] if b.get("type") == "text")
+        if not text.strip():
+            raise ProviderEmptyResponse(f"Claude вернул пустой ответ (stop_reason={data.get('stop_reason')})",
+                                        provider=self.name)
+        return text
+
+
+class _LockedLocal:
+    """M108: the local model as the pool's reserve — it takes the shared gamebox lock on its first call without
+    waiting; busy (the audiobook runs) = a connect error, so the pool stays on the cloud."""
+
+    def __init__(self, inner, lock):
+        self._inner, self._lock = inner, lock
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    @property
+    def model_id(self) -> str:
+        return getattr(self._inner, "model_id", "local")
+
+    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+        if not self._lock.held and not self._lock.acquire(wait=False):
+            raise ProviderTimeout("gamebox занят (общий замок: озвучка или другая тяжёлая задача) — локальная "
+                                  "модель не берётся", provider=getattr(self._inner, "name", "Local"),
+                                  is_connect_error=True)
+        return self._inner.complete(messages, temperature=temperature)
 
 
 def local_llm_from_env(r0_cfg, *, probe: bool = True) -> "LocalLLM | None":
@@ -907,6 +1058,16 @@ class ProviderPool:
     @property
     def name(self) -> str:
         return "pool(" + ",".join(m.name for m in self._members) + ")"
+
+    @property
+    def model_id(self) -> str:
+        """M116: who answers — the regular providers' models in order (a cache keyed by it never hands one model's
+        answer to another)."""
+        return "+".join(getattr(m.provider, "model_id", m.model) for m in self._members if not m.reserve) or "?"
+
+    def usage_lines(self) -> list[str]:
+        """M116: requests, tokens and the price of the paid providers (Claude), one line each."""
+        return [ln for m in self._members for ln in [getattr(m.provider, "usage_line", lambda: "")()] if ln]
 
     def describe(self) -> str:
         """M67: who answers, in order — printed first by map / label / autocut, so a run on the wrong
@@ -1162,35 +1323,6 @@ class ProviderPool:
             )
 
 
-class FallbackLLM:
-    """Цепочка провайдеров: при ProviderExhausted переключается на следующий (навсегда).
-
-    Устаревшая простая стратегия; ProviderPool её обобщает (распределение + возврат после
-    кулдауна). Оставлена для обратной совместимости. Пример: FallbackLLM([GroqLLM(), OpenRouterLLM()]).
-    """
-
-    def __init__(self, providers: list) -> None:
-        self._providers = list(providers)
-        self._current = 0
-
-    def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
-        while self._current < len(self._providers):
-            try:
-                return self._providers[self._current].complete(
-                    messages, temperature=temperature
-                )
-            except ProviderExhausted as e:
-                self._current += 1
-                if self._current < len(self._providers):
-                    print(
-                        f"\n  ℹ {e} — переключаюсь на следующий провайдер "
-                        f"(OpenRouter #{self._current})",
-                        flush=True,
-                    )
-                    continue
-        raise ProviderError("все провайдеры исчерпаны — добавьте ключи или подождите сброса квоты")
-
-
 def _openrouter_shared_pool_blocked(model: str, api_key: str) -> str | None:
     """Minimal chat-completion ping to OpenRouter. Returns reason string if the model is
     blocked by the upstream shared pool (is_byok:false), else None.
@@ -1240,7 +1372,19 @@ def build_pool(r0_cfg, *, strategy: str | None = None, local: str = "off") -> Pr
     max_out = getattr(r0_cfg, "max_output_tokens", 900)
     # M40 local: "off" (R0 path, unchanged) | "first" (local, then the cloud) | "only" (local alone)
     # M47: "last" — the cloud first; the local model only when the cloud is out for long (a reserve)
+    lock = None
+    url = os.environ.get("LOCAL_LLM_URL", "").strip()
+    if local in ("first", "only", "last") and url:
+        # M108: the audiobook on gamebox and llama-server never run together — one shared lock. Asked for the
+        # local model: wait for the lock (it also starts llama-server when the audiobook's wrapper left it off).
+        from autoreels.core.heavy_lock import shared_lock
+        lock = shared_lock(getattr(r0_cfg, "heavy_lock", None),
+                           probe=lambda: probe_provider(f"{url.rstrip('/')}/models", api_key=None, timeout=5.0) == 200)
+        if lock is not None and local in ("first", "only"):
+            lock.acquire(wait=True)
     loc = local_llm_from_env(r0_cfg) if local in ("first", "only", "last") else None
+    if loc is not None and lock is not None and local == "last":
+        loc = _LockedLocal(loc, lock)            # the reserve: only when gamebox is free, never waiting for it
     if local == "only":
         if loc is None:
             raise ProviderError("локальная модель не задана или не отвечает: LOCAL_LLM_URL в .env "

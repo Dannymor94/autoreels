@@ -33,11 +33,11 @@
   },
   {
     "id": "258ae2aa6f771f08",
-    "start": 253.9,
+    "start": 253.86322,
     "end": 315.9,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
-    "heuristic_score": 64.62
+    "heuristic_score": 64.59
   },
   {
     "id": "b4a3b9b284967a8b",
@@ -65,11 +65,11 @@
   },
   {
     "id": "3ddc6fc0f7fa581e",
-    "start": 501.2,
+    "start": 501.18967,
     "end": 529.5,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
-    "heuristic_score": 64.23
+    "heuristic_score": 64.26
   },
   {
     "id": "8a0ec188517aaf11",
@@ -81,7 +81,7 @@
   },
   {
     "id": "3964279a70a053aa",
-    "start": 570.1,
+    "start": 570.08966,
     "end": 612.6,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -97,7 +97,7 @@
   },
   {
     "id": "81ea40a2ce6c06d9",
-    "start": 655.7,
+    "start": 655.6728439999999,
     "end": 696.1,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
@@ -121,7 +121,7 @@
   },
   {
     "id": "0f77b91abca8ba56",
-    "start": 746.1,
+    "start": 746.0528439999999,
     "end": 803.2,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -177,7 +177,7 @@
   },
   {
     "id": "0e0112aa14028a12",
-    "start": 1056.9,
+    "start": 1056.863294,
     "end": 1096.0,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
@@ -185,7 +185,7 @@
   },
   {
     "id": "794b52eebcd35a09",
-    "start": 1097.6,
+    "start": 1097.563304,
     "end": 1148.9,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -233,11 +233,11 @@
   },
   {
     "id": "b1898efa49b20b0f",
-    "start": 1374.2,
+    "start": 1374.167648,
     "end": 1395.1,
     "boundary_reason": "pause",
     "verdict": "KEPT",
-    "heuristic_score": 45.53
+    "heuristic_score": 45.61
   },
   {
     "id": "a19a38ea02f27225",
@@ -249,7 +249,7 @@
   },
   {
     "id": "c50d25e2acebcf09",
-    "start": 1432.2,
+    "start": 1432.187638,
     "end": 1469.3,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -257,7 +257,7 @@
   },
   {
     "id": "454582568a41ed9d",
-    "start": 1474.3,
+    "start": 1474.287638,
     "end": 1529.4,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -273,7 +273,7 @@
   },
   {
     "id": "b67f81fbf6a9324b",
-    "start": 1580.9,
+    "start": 1580.881858,
     "end": 1627.2,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -281,7 +281,7 @@
   },
   {
     "id": "55117f6dc9209a31",
-    "start": 1627.3,
+    "start": 1627.281878,
     "end": 1670.2,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
@@ -305,7 +305,7 @@
   },
   {
     "id": "a9e7dd345ba17e30",
-    "start": 1748.1,
+    "start": 1748.076138,
     "end": 1787.8,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -313,7 +313,7 @@
   },
   {
     "id": "ee5ec0c82b40027a",
-    "start": 1789.5,
+    "start": 1789.476088,
     "end": 1829.7,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -353,7 +353,7 @@
   },
   {
     "id": "e9306ce589c75520",
-    "start": 1975.3,
+    "start": 1975.2524225,
     "end": 2022.4,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
@@ -361,7 +361,7 @@
   },
   {
     "id": "a5f17bb4b1731af3",
-    "start": 2023.3,
+    "start": 2023.2724225,
     "end": 2066.5,
     "boundary_reason": "sentence",
     "verdict": "KEPT",
@@ -393,7 +393,7 @@
   },
   {
     "id": "1396fc11eca2948c",
-    "start": 2173.8,
+    "start": 2173.7945325,
     "end": 2215.5,
     "boundary_reason": "pause",
     "verdict": "KEPT",
@@ -497,7 +497,7 @@
   },
   {
     "id": "a99076d920a5153f",
-    "start": 2774.8,
+    "start": 2774.781689,
     "end": 2821.5,
     "boundary_reason": "pause",
     "verdict": "KEPT",

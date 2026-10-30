@@ -6,7 +6,7 @@
 import pytest
 
 from autoreels.cloud.providers import (
-    FallbackLLM, GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
+    GroqLLM, OpenRouterLLM, ProviderEmptyResponse, ProviderError,
     ProviderExhausted, ProviderRequestTooLarge,
 )
 
@@ -231,40 +231,6 @@ def test_openrouter_llm_missing_key_raises(monkeypatch):
     with pytest.raises(ProviderError) as exc:
         llm.complete([{"role": "user", "content": "hi"}])
     assert "OPENROUTER_API_KEY" in str(exc.value)
-
-
-def test_fallback_llm_returns_first_provider_result():
-    """FallbackLLM возвращает ответ первого провайдера если он работает."""
-    primary = GroqLLM(request_fn=lambda m, t: _good_envelope())
-    secondary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(AssertionError("не должно вызываться")))
-    fb = FallbackLLM([primary, secondary])
-    assert fb.complete([]) == '{"segments": []}'
-
-
-def test_fallback_llm_switches_on_exhausted():
-    """FallbackLLM переключается на второй провайдер при ProviderExhausted первого."""
-    primary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(ProviderExhausted("Groq исчерпан")))
-    secondary = GroqLLM(request_fn=lambda m, t: _good_envelope())
-    fb = FallbackLLM([primary, secondary])
-    assert fb.complete([]) == '{"segments": []}'
-
-
-def test_fallback_llm_raises_when_all_exhausted():
-    """FallbackLLM поднимает ProviderError когда все провайдеры исчерпаны."""
-    def _exhausted(m, t):
-        raise ProviderExhausted("лимит")
-    fb = FallbackLLM([GroqLLM(request_fn=_exhausted), GroqLLM(request_fn=_exhausted)])
-    with pytest.raises(ProviderError, match="все провайдеры"):
-        fb.complete([])
-
-
-def test_fallback_llm_prints_switch_message(capsys):
-    """FallbackLLM печатает сообщение о переключении провайдера."""
-    primary = GroqLLM(request_fn=lambda m, t: (_ for _ in ()).throw(ProviderExhausted("Groq исчерпан")))
-    secondary = GroqLLM(request_fn=lambda m, t: _good_envelope())
-    FallbackLLM([primary, secondary]).complete([])
-    out = capsys.readouterr().out
-    assert "OpenRouter" in out or "провайдер" in out.lower()
 
 
 # ========================================================= ProviderThrottled (defer)
@@ -1700,3 +1666,50 @@ def test_reserve_provider_only_when_the_cloud_is_out_for_long():
     clock2 = _Clock()
     pool2 = ProviderPool([groq2], reserve=[local2], clock=clock2, sleep=_sleeper(clock2))
     assert pool2.complete([]) == "from-local" and pool2.last_provider == "Local"
+
+
+def test_m113_token_calibration_learns_from_short_prompts(monkeypatch, tmp_path, capsys):
+    """M113: calibration subtracts the real chat-template cost, not the 400-token pacing buffer. Real pairs
+    (est_text, actual_prompt) from the m112 autocut run on IMG_6848 (qwen/qwen3.8-27b, two messages each): the old
+    formula drove the scale to −0.04; now it settles at a tokenizer ratio. A persisted value outside 0.5–3.0 (what the
+    old formula wrote) is not loaded."""
+    import json as _json
+    from autoreels.cloud import providers as P
+    scale_file = tmp_path / "token_scale.json"
+    monkeypatch.setenv("AUTOREELS_TOKEN_SCALE_FILE", str(scale_file))
+    scale_file.write_text(_json.dumps({"qwen/qwen3.8-27b": -0.038}))
+    pairs = [(143, 172), (132, 161), (176, 214), (493, 522), (278, 307), (527, 549), (292, 323), (259, 291),
+             (464, 488), (277, 311), (494, 516), (314, 359), (256, 299), (539, 623), (361, 454)]
+    queue = list(pairs)
+
+    def fake_chat(url, *, headers, payload, provider_name, defer_throttle, not_found_hint=None, out_headers=None):
+        return {"choices": [{"message": {"content": "{}"}}], "usage": {"prompt_tokens": cur[1]}}
+    monkeypatch.setattr(P, "_chat_request", fake_chat)
+    llm = P.GroqLLM(model="qwen/qwen3.8-27b", api_key="k")
+    llm._got_budget_headers, llm._budget_remaining, llm._budget_limit = True, 10 ** 6, 10 ** 6
+    scales = []
+    while queue:
+        cur = queue.pop(0)
+        sys_text = "s" * 4 * (cur[0] - 10)
+        user_text = "u" * 4 * 10
+        llm._default_request([{"role": "system", "content": sys_text}, {"role": "user", "content": user_text}], 0.0)
+        scales.append(llm.token_scale_factor)
+    out = capsys.readouterr().out
+    assert "вне 0.5–3.0 — не принят" in out                       # the −0.038 on disk was ignored
+    assert all(0.9 < s < 1.5 for s in scales), scales             # old formula: 0.42, −0.25, −0.49, …
+    assert 1.0 < scales[-1] < 1.25
+    assert 1.0 < _json.loads(scale_file.read_text())["qwen/qwen3.8-27b"] < 1.25
+
+
+def test_m113_token_calibration_skips_an_absurd_observation(monkeypatch, tmp_path, capsys):
+    import json as _json
+    from autoreels.cloud import providers as P
+    monkeypatch.setenv("AUTOREELS_TOKEN_SCALE_FILE", str(tmp_path / "token_scale.json"))
+    monkeypatch.setattr(P, "_chat_request", lambda url, **k: {"choices": [{"message": {"content": "{}"}}],
+                                                              "usage": {"prompt_tokens": 20}})
+    llm = P.GroqLLM(model="m", api_key="k")
+    llm._got_budget_headers, llm._budget_remaining, llm._budget_limit = True, 10 ** 6, 10 ** 6
+    llm._default_request([{"role": "system", "content": "s" * 4000}, {"role": "user", "content": "u"}], 0.0)
+    assert llm.token_scale_factor == P._TOKEN_SCALE_DEFAULT
+    assert "не учтён" in capsys.readouterr().out
+    assert not (tmp_path / "token_scale.json").exists()

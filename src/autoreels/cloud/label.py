@@ -842,6 +842,45 @@ def retry_draft(text: str, wblocks: Sequence[WBlock], words: list, provider, *, 
 
 #     r03 | line 9 | edit | s:2 e:7 x:4 h:6 | note   (M52: the owner's own edit on the sheet's text)
 _DECISION_RE = re.compile(r"^\s*(r\d+)\s*\|\s*line\s+(\d+)\s*\|\s*(ok|drop|fix|edit)\s*(?:\|\s*(.*))?$", re.IGNORECASE)
+#     r04 | montage M3 | drop | причины: крючок, плашка | note   (M82: a montage clip — recorded, the draft unchanged)
+_MONTAGE_DECISION_RE = re.compile(r"^\s*(r\d+)\s*\|\s*montage\s+(M\w*)\s*\|\s*(ok|drop|fix)\s*(?:\|\s*(.*))?$",
+                                  re.IGNORECASE)
+_REASONS_RE = re.compile(r"^\s*причины:\s*([^|]*?)\s*(?:\|\s*(.*))?$")
+
+
+def split_reasons(note: str) -> tuple[list[str], str]:
+    """M82: «причины: крючок, плашка | текст» → (["крючок", "плашка"], "текст"); no reasons → ([], note)."""
+    m = _REASONS_RE.match(note or "")
+    if not m:
+        return [], (note or "").strip()
+    return [r.strip() for r in m.group(1).split(",") if r.strip()], (m.group(2) or "").strip()
+
+
+@dataclass
+class MontageDecision:
+    reel: str
+    label: str            # the montage line's label, «M3»
+    verdict: str          # ok | drop | fix
+    reasons: list = field(default_factory=list)
+    note: str = ""
+
+
+def parse_montage_decisions(text: str) -> tuple[list["MontageDecision"], list[str]]:
+    """M82: the montage verdicts of a decisions file (parse_decisions skips these lines). A «fix» needs a note or
+    a reason."""
+    out: list[MontageDecision] = []
+    errors: list[str] = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        m = _MONTAGE_DECISION_RE.match(raw.strip())
+        if not m:
+            continue
+        reasons, note = split_reasons((m.group(4) or "").strip())
+        d = MontageDecision(m.group(1).lower(), m.group(2), m.group(3).lower(), reasons, note)
+        if d.verdict == "fix" and not (d.note or d.reasons):
+            errors.append(f"строка {n}: {d.reel} — «fix» сборки без замечания и причины")
+            continue
+        out.append(d)
+    return out, errors
 _EDIT_FIELDS_RE = re.compile(r"^(?:\s*(?:s|e|h):\d+|\s*x:\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)+\s*$")
 _FIX_RE = re.compile(r"^# ✎ владелец \((r\d+)([^)]*)\):\s*(.*)$")
 
@@ -873,6 +912,8 @@ def parse_decisions(text: str) -> tuple[dict[str, str], list[Decision], list[str
             continue
         m = _DECISION_RE.match(line)
         if not m:
+            if _MONTAGE_DECISION_RE.match(line):
+                continue                  # M82: a montage verdict — parse_montage_decisions reads it
             errors.append(f"строка {n}: не понял «{line[:60]}»")
             continue
         d = Decision(m.group(1).lower(), int(m.group(2)), m.group(3).lower(), (m.group(4) or "").strip())
