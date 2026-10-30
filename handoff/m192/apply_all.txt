@@ -1,0 +1,21 @@
+== day_yoga_p2
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/day_yoga_p2.review.json (3 reels, selection_source=human)
+== disko_beach_p1
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p1.review.json (1 reels, selection_source=human)
+== disko_beach_p2
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p2.review.json (3 reels, selection_source=human)
+== disko_beach_p3
+код 0
+manifest → /Users/danny/Documents/autoreels/reviews/disko_beach_p3.review.json (3 reels, selection_source=human)
+== prew_isaev_anna
+код 0
+  [ERROR] last word overlaps next speech: ae=248.439 > N-margin=248.279 (N=248.339)
+  [ERROR] last word overlaps next speech: ae=248.439 > N-margin=248.279 (N=248.339)
+manifest → /Users/danny/Documents/autoreels/reviews/prew_isaev_anna.review.json (5 reels, selection_source=human)
+== prew_isaev_danny
+код 0
+  [ERROR] last word overlaps next speech: ae=1975.180 > N-margin=1975.020 (N=1975.080)
+manifest → /Users/danny/Documents/autoreels/reviews/prew_isaev_danny.review.json (5 reels, selection_source=human)

@@ -1,0 +1,8 @@
+кандидатов: только в эталоне 22, только в m183 (строки M) 18
+  prew_isaev_anna: 5 клипов → handoff/m192/prew_isaev_anna_ab192.txt
+  prew_isaev_danny: 5 клипов → handoff/m192/prew_isaev_danny_ab192.txt
+  day_yoga_p2: 3 клипов → handoff/m192/day_yoga_p2_ab192.txt
+  disko_beach_p1: 1 клипов → handoff/m192/disko_beach_p1_ab192.txt
+  disko_beach_p2: 3 клипов → handoff/m192/disko_beach_p2_ab192.txt
+  disko_beach_p3: 3 клипов → handoff/m192/disko_beach_p3_ab192.txt
+выбрано: 20 (сторона A 10, сторона B 10); ключ → handoff/m192/key.csv
