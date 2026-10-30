@@ -46,7 +46,7 @@ autoreels/
 ├── tools/grid.py             # M174/M187: сетка публикаций по смыслу после перепрогона (export/crosspost/)
 ├── tools/publish_dir.py      # M186/M187: общий каталог export/publish/NNN_rXX_<источник>.mp4 в порядке сетки
 ├── tools/measure_shots.py    # M173/M187: короткие планы и вспышки готовых клипов по review.json
-├── tools/score_gate.py       # M188: таблица гейта по источникам (`score_gate.py <гейт> [--compare]`)
+├── tools/score_gate.py       # M188: таблица гейта по источникам (`score_gate.py <гейт> [--compare] [--ref <эталон>]`, M191)
 ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
 │
 ├── docs/
