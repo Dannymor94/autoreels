@@ -1,0 +1,89 @@
+diff --git a/src/autoreels/cloud/plan.py b/src/autoreels/cloud/plan.py
+index 712a911..fad02cd 100644
+--- a/src/autoreels/cloud/plan.py
++++ b/src/autoreels/cloud/plan.py
+@@ -357,6 +357,18 @@ def _ends_with_stop(word: str) -> bool:
+ 
+ ALIGN_MIN_SCORE = 0.05     # below this the aligner guessed (09h33 «Первый»: 0.004)
+ _ALIGN_ORDER_EPS = 0.02
++# M195 (m191 disko_beach_p1 1018–1019 s: «И в моменте сталкивания» — the aligner put «И», «в» at 1019.29/1019.35 with
++# score 0.94/0.89 but 20 ms each, inside «сталкивания» and 1.3 s after their Whisper time; the cold open started there and
++# cut the word): a confident out-of-order word is still a guess when it is a stub (≤ _ALIGN_STUB_SEC) placed more than
++# _ALIGN_DISPLACED_SEC from its Whisper time while its neighbour sits at its own
++_ALIGN_STUB_SEC = 0.045
++_ALIGN_DISPLACED_SEC = 0.5
++
++
++def _align_guess(e: dict) -> bool:
++    """M195: a stub of the aligner far from the word's Whisper time."""
++    return (e["end"] - e["start"] <= _ALIGN_STUB_SEC
++            and abs(float(e["start"]) - float(e.get("t0", e["start"]))) > _ALIGN_DISPLACED_SEC)
+ 
+ 
+ def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
+@@ -368,7 +380,8 @@ def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
+     previous word). A word that lands before the end of the previous aligned word (out of order)
+     AND has an almost-zero score is dropped — its time then comes from the speech map. An
+     out-of-order pair where both are confident is kept as before (Whisper's own text order can
+-    disagree with time; the filler-cut guards handle it)."""
++    disagree with time; the filler-cut guards handle it) — M195: unless one of them is a stub of the aligner far from
++    its Whisper time (_align_guess) and the other is not; the stub is dropped."""
+     kept: list[dict] = []
+     rejected: list[float] = []
+     for e in entries:
+@@ -383,6 +396,11 @@ def clean_alignment(entries: Sequence[dict]) -> tuple[list[dict], list[float]]:
+                 cur = None
+             elif sc_prev < ALIGN_MIN_SCORE:
+                 rejected.append(float(kept.pop()["t0"]))
++            elif _align_guess(prev) and not _align_guess(cur):
++                rejected.append(float(kept.pop()["t0"]))      # M195: the stub before goes, the word keeps its time
++            elif _align_guess(cur) and not _align_guess(prev):
++                rejected.append(float(cur["t0"]))
++                cur = None
+             else:
+                 break
+         if cur is not None:
+diff --git a/tests/test_m195_align_stub.py b/tests/test_m195_align_stub.py
+new file mode 100644
+index 0000000..59e9fb7
+--- /dev/null
++++ b/tests/test_m195_align_stub.py
+@@ -0,0 +1,38 @@
++"""M195 (m191 disko_beach_p1 M4, m194 measurement): the aligner put «И», «в» of «И в моменте сталкивания» at 1019.29 /
++1019.35 s — confident (0.94 / 0.89) but 20 ms each, inside «сталкивания» and 1.3 s after their Whisper time; the cold
++open started there and the plan refused «seam inside word». Such stubs are dropped from the alignment (the word's time
++comes from the speech map); a confident out-of-order word of normal length stays as before."""
++from __future__ import annotations
++
++from autoreels.cloud.plan import clean_alignment
++
++REAL = [  # handoff/m194/diag_seam.txt (Whisper t0, aligned start/end, score)
++    {"t0": 1017.752, "start": 1017.751, "end": 1018.051, "score": 0.89},    # другом.
++    {"t0": 1018.032, "start": 1019.292, "end": 1019.312, "score": 0.937},   # И
++    {"t0": 1018.432, "start": 1019.352, "end": 1019.372, "score": 0.893},   # в
++    {"t0": 1018.532, "start": 1018.513, "end": 1018.874, "score": 0.988},   # моменте
++    {"t0": 1018.952, "start": 1018.934, "end": 1019.654, "score": 0.963},   # сталкивания
++    {"t0": 1019.672, "start": 1019.954, "end": 1020.355, "score": 0.81},    # ученые
++]
++
++
++def test_aligner_stubs_far_from_their_word_are_dropped():
++    kept, rejected = clean_alignment(REAL)
++    assert sorted(rejected) == [1018.032, 1018.432]
++    assert [e["t0"] for e in kept] == [1017.752, 1018.532, 1018.952, 1019.672]
++
++
++def test_confident_out_of_order_words_of_normal_length_stay():
++    # Whisper wrote a phrase later than it sounds (M42): both words long and confident — kept as before
++    e = [{"t0": 10.0, "start": 10.0, "end": 11.0, "score": 0.9},
++         {"t0": 14.0, "start": 9.0, "end": 9.6, "score": 0.9}]
++    kept, rejected = clean_alignment(e)
++    assert rejected == [] and len(kept) == 2
++
++
++def test_a_stub_near_its_whisper_time_stays():
++    e = [{"t0": 10.0, "start": 10.0, "end": 11.0, "score": 0.9},
++         {"t0": 10.9, "start": 10.9, "end": 10.92, "score": 0.9},     # «и» 20 ms, at its place
++         {"t0": 10.95, "start": 10.95, "end": 11.4, "score": 0.9}]
++    kept, rejected = clean_alignment(e)
++    assert rejected == [] and len(kept) == 3
