@@ -1,0 +1,42 @@
+== prew_isaev_anna
+review: 40 блоков → handoff/m190/prew_isaev_anna.review.md  (26329 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (4 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть
+== prew_isaev_danny
+review: 62 блоков → handoff/m190/prew_isaev_danny.review.md  (42170 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (3 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть
+== day_yoga_p1
+review: 13 блоков → handoff/m190/day_yoga_p1.review.md  (10577 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (3 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть
+== day_yoga_p2
+review: 62 блоков → handoff/m190/day_yoga_p2.review.md  (40262 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (2 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть
+== disko_beach_p1
+review: 53 блоков → handoff/m190/disko_beach_p1.review.md  (29581 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (8 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть
+== disko_beach_p2
+review: 15 блоков → handoff/m190/disko_beach_p2.review.md  (13591 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (3 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть
+== disko_beach_p3
+review: 43 блоков → handoff/m190/disko_beach_p3.review.md  (29084 chars)
+  ↑ вставьте файл целиком в любой чат (промпт включён); ответ сохраните и передайте: arl blocks --apply <файл>
+  (4 блоков удалено фильтрами — используйте arl blocks без --review для деталей)
+blocks-text: код 0
+speakers: есть

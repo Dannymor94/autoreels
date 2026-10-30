@@ -1,0 +1,7 @@
+day_yoga_p1.review.md                    fp:1  блоков:13  ↗:7  строк текста:179
+day_yoga_p2.review.md                    fp:1  блоков:62  ↗:83  строк текста:876
+disko_beach_p1.review.md                 fp:1  блоков:53  ↗:66  строк текста:603
+disko_beach_p2.review.md                 fp:1  блоков:15  ↗:20  строк текста:213
+disko_beach_p3.review.md                 fp:1  блоков:43  ↗:39  строк текста:540
+prew_isaev_anna.review.md                fp:1  блоков:40  ↗:55  строк текста:447
+prew_isaev_danny.review.md               fp:1  блоков:62  ↗:83  строк текста:653
