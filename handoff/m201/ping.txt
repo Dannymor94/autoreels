@@ -1,0 +1,6 @@
+ключ ANTHROPIC_API_KEY: есть, длина 106, начинается с sk-ant-: да
+модели в config/r0.yaml: {'haiku': 'claude-haiku-5-5', 'sonnet': 'claude-sonnet-5-5'}
+sonnet: НЕ ОТВЕТИЛ — ProviderError: Claude отклонил ключ (HTTP 403): проверь ANTHROPIC_API_KEY в .env
+  Claude claude-sonnet-5-5: запросов 0, вход 0, ответ 0 токенов ≈ $0.0000; ⚠ отказов 1, последний: ProviderError: Claude отклонил ключ (HTTP 403): проверь ANTHROPIC_API_KEY в .env
+haiku: НЕ ОТВЕТИЛ — ProviderError: Claude отклонил ключ (HTTP 403): проверь ANTHROPIC_API_KEY в .env
+  Claude claude-haiku-5-5: запросов 0, вход 0, ответ 0 токенов ≈ $0.0000; ⚠ отказов 1, последний: ProviderError: Claude отклонил ключ (HTTP 403): проверь ANTHROPIC_API_KEY в .env
