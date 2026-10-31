@@ -1,0 +1,268 @@
+diff --git a/src/autoreels/cloud/article.py b/src/autoreels/cloud/article.py
+index 7a1d4f9..ecba354 100644
+--- a/src/autoreels/cloud/article.py
++++ b/src/autoreels/cloud/article.py
+@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
+ from typing import Callable, Sequence
+ 
+ from autoreels.cloud.postcopy import check_post, fit_post
++from autoreels.cloud.providers import brief_error
+ 
+ PLAN_SYSTEM = (
+     "You plan a longread article for Telegraph from one topic of a Russian talk. You get the topic and its thoughts "
+@@ -55,7 +56,7 @@ def _ask(provider, system: str, user: str, log: Callable[[str], None]) -> dict |
+         raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                 temperature=0.0)
+     except Exception as exc:  # noqa: BLE001 — no model: no article
+-        log(f"  статья: модель не ответила ({type(exc).__name__})")
++        log(f"  статья: модель не ответила ({brief_error(exc)})")
+         return None
+     m = re.search(r"\{.*\}", raw or "", re.S)
+     try:
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 88fd221..e879cfb 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -28,6 +28,8 @@ from __future__ import annotations
+ from dataclasses import dataclass, field, replace
+ from typing import Callable, Sequence
+ 
++from autoreels.cloud.providers import brief_error
++
+ STORY = ("thesis", "conclusion", "example", "metaphor", "question")
+ OPENERS = ("thesis", "question")
+ PAYOFFS = ("conclusion",)
+@@ -907,7 +909,7 @@ def make_judge(provider, *, log: Callable[[str], None] = print, system: str | No
+                 raw = provider.complete([{"role": "system", "content": sys_text},
+                                          {"role": "user", "content": msg}], temperature=0.0)
+             except Exception as exc:  # noqa: BLE001 — no model: the rules decide
+-                log(f"  начало: модель не ответила ({type(exc).__name__})")
++                log(f"  начало: модель не ответила ({brief_error(exc)})")
+                 break
+             out = parse_judge(raw)
+             if out is not None:
+@@ -1374,7 +1376,7 @@ def rank_hooks(pr: "Proposal", provider, *, top: int = 6, log: Callable[[str], N
+             raw = provider.complete([{"role": "system", "content": HOOK_SYSTEM}, {"role": "user", "content": msg}],
+                                     temperature=0.0)
+         except Exception as exc:  # noqa: BLE001 — no model: the code's order stays
+-            log(f"  крючок: модель не ответила ({type(exc).__name__})")
++            log(f"  крючок: модель не ответила ({brief_error(exc)})")
+             return False
+         m = _re.search(r"\{.*\}", raw or "", _re.S)
+         try:
+@@ -1472,7 +1474,7 @@ def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
+             raw = provider.complete([{"role": "system", "content": system},
+                                      {"role": "user", "content": msg}], temperature=0.0)
+         except Exception as exc:  # noqa: BLE001 — no model: no k:
+-            log(f"  ключевые слова: модель не ответила ({type(exc).__name__})")
++            log(f"  ключевые слова: модель не ответила ({brief_error(exc)})")
+             return []
+         m = _re.search(r"\{.*\}", raw or "", _re.S)
+         try:
+@@ -1684,7 +1686,7 @@ def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
+         raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": msg}],
+                                 temperature=0.0)
+     except Exception as exc:  # noqa: BLE001 — no model: the summary stays
+-        log(f"  заголовок: модель не ответила ({type(exc).__name__})")
++        log(f"  заголовок: модель не ответила ({brief_error(exc)})")
+         return False
+     m = _re.search(r"\{.*\}", raw or "", _re.S)
+     try:
+@@ -1759,7 +1761,7 @@ def check_seams(pr: "Proposal", pairs: Sequence[tuple[str, str]], provider, *,
+             raw = provider.complete([{"role": "system", "content": SEAM_SYSTEM},
+                                      {"role": "user", "content": f"Seams:\n{rows}"}], temperature=0.0)
+         except Exception as exc:  # noqa: BLE001
+-            log(f"  стыки: модель не ответила ({type(exc).__name__})")
++            log(f"  стыки: модель не ответила ({brief_error(exc)})")
+             return None
+         m = _re.search(r"\{.*\}", raw or "", _re.S)
+         try:
+diff --git a/src/autoreels/cloud/postcopy.py b/src/autoreels/cloud/postcopy.py
+index dbf5e57..3f2fb50 100644
+--- a/src/autoreels/cloud/postcopy.py
++++ b/src/autoreels/cloud/postcopy.py
+@@ -17,6 +17,8 @@ import json
+ import re
+ from typing import Callable, Sequence
+ 
++from autoreels.cloud.providers import brief_error
++
+ DESCRIBE_SYSTEM = (
+     "You write the post published under a short vertical video (a reel) cut from a Russian talk. You get the reel's "
+     "caption (its point) and its full spoken text. Write in Russian. The post: {smin}–{smax} sentences, at most "
+@@ -151,7 +153,7 @@ def describe_clip(provider, caption: str, transcript: str, *, smin: int = 3, sma
+             raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                     temperature=0.0)
+         except Exception as exc:  # noqa: BLE001 — no model: no description
+-            log(f"  описание: модель не ответила ({type(exc).__name__})")
++            log(f"  описание: модель не ответила ({brief_error(exc)})")
+             return None
+         m = re.search(r"\{.*\}", raw or "", re.S)
+         try:
+diff --git a/src/autoreels/cloud/providers.py b/src/autoreels/cloud/providers.py
+index 687ac6a..31a5a0a 100644
+--- a/src/autoreels/cloud/providers.py
++++ b/src/autoreels/cloud/providers.py
+@@ -228,6 +228,15 @@ class ProviderError(Exception):
+     """Проблема LLM-провайдера (нет ключа, троттлинг, неожиданный формат ответа)."""
+ 
+ 
++def brief_error(exc: BaseException, limit: int = 160) -> str:
++    """M201 (m197–m200: 63 «заголовок: модель не ответила (ProviderError)» за прогон — причины в логе нет): класс и
++    текст ошибки одной строкой, не длиннее limit знаков, — то, что печатает строка «модель не ответила»."""
++    msg = " ".join(str(exc).split())
++    if len(msg) > limit:
++        msg = msg[:limit - 1] + "…"
++    return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
++
++
+ class ProviderEmptyResponse(ProviderError):
+     """Провайдер вернул HTTP 200, но пустое/None тело вместо JSON (перегрузка/исчерпанная квота).
+ 
+@@ -886,6 +895,8 @@ class AnthropicLLM:
+         self.calls = 0
+         self.tokens_in = 0
+         self.tokens_out = 0
++        self.failures = 0                 # M201: requests that raised — the cost line names them and the last error
++        self.last_error = ""
+ 
+     @property
+     def model_id(self) -> str:
+@@ -895,12 +906,24 @@ class AnthropicLLM:
+         return (self.tokens_in * self._prices[0] + self.tokens_out * self._prices[1]) / 1_000_000
+ 
+     def usage_line(self) -> str:
+-        if not self.calls:
++        if not self.calls and not self.failures:
+             return ""
+-        return (f"{self.name} {self._model}: запросов {self.calls}, вход {self.tokens_in}, ответ {self.tokens_out} "
++        line = (f"{self.name} {self._model}: запросов {self.calls}, вход {self.tokens_in}, ответ {self.tokens_out} "
+                 f"токенов ≈ ${self.cost():.4f}")
++        if self.failures:
++            # M201 (m197–m200: every new request failed, the run printed no cost line and read as «из кэша, $0»)
++            line += f"; ⚠ отказов {self.failures}, последний: {self.last_error}"
++        return line
+ 
+     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
++        try:
++            return self._complete(messages, temperature=temperature)
++        except Exception as exc:
++            self.failures += 1
++            self.last_error = brief_error(exc)
++            raise
++
++    def _complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+         key = (self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")).strip()
+         if not key:
+             raise ProviderError("нет ANTHROPIC_API_KEY — добавьте ключ Claude в .env")
+diff --git a/src/autoreels/cloud/txcheck.py b/src/autoreels/cloud/txcheck.py
+index 72bec25..46be82e 100644
+--- a/src/autoreels/cloud/txcheck.py
++++ b/src/autoreels/cloud/txcheck.py
+@@ -18,6 +18,8 @@ from __future__ import annotations
+ from dataclasses import dataclass, field
+ from typing import Sequence
+ 
++from autoreels.cloud.providers import brief_error
++
+ KNOWN = (
+     "субтитры создавал", "субтитры сделал", "субтитры делал", "субтитры подготовил", "редактор субтитров",
+     "корректор а.", "продолжение следует", "спасибо за просмотр", "спасибо за внимание друзья",
+@@ -388,7 +390,7 @@ def restore_sentence_ends(words, ask, *, chunk_words: int = 120, context_words:
+             try:
+                 raw = ask([{"role": "system", "content": PUNCT_SYSTEM}, {"role": "user", "content": msg}])
+             except Exception as exc:  # noqa: BLE001 — one chunk failed: asked again, then missing
+-                log(f"  точки: кусок {stats['chunks']} — модель не ответила ({type(exc).__name__})")
++                log(f"  точки: кусок {stats['chunks']} — модель не ответила ({brief_error(exc)})")
+                 continue
+             ends = parse_ends(raw, b - a)
+             if raw_out is not None:
+diff --git a/tests/test_m201_provider_errors.py b/tests/test_m201_provider_errors.py
+new file mode 100644
+index 0000000..1176a95
+--- /dev/null
++++ b/tests/test_m201_provider_errors.py
+@@ -0,0 +1,83 @@
++"""M201: a model that does not answer says why. m197–m200: every new paid request failed — 63 «заголовок: модель не
++ответила (ProviderError)» in one run, no cost line, and the report read «из кэша, $0». The log line now carries the
++error's text and Claude's cost line names the failed requests and the last error."""
++from __future__ import annotations
++
++import json
++
++from autoreels.cloud import providers as P
++from autoreels.cloud.autocut import pick_keywords
++from autoreels.cloud.postcopy import describe_clip
++
++# The error envelope of the Messages API as its documentation gives it (type error → error.type, error.message);
++# not a recorded answer — the test is about what the code keeps of a non-200 answer, not about parsing it.
++_LOW_CREDIT = {"type": "error", "error": {"type": "invalid_request_error",
++                                          "message": "Your credit balance is too low to access the Anthropic API."}}
++
++
++class _Resp:
++    def __init__(self, code=200, body=None):
++        self.status_code, self._body, self.headers = code, body, {}
++        self.text = json.dumps(body) if body is not None else ""
++
++    def json(self):
++        return self._body
++
++
++def _ok(text="{\"ok\": true}"):
++    return {"id": "msg_x", "type": "message", "role": "assistant", "model": "m",
++            "content": [{"type": "text", "text": text}], "stop_reason": "end_turn",
++            "usage": {"input_tokens": 100, "output_tokens": 10}}
++
++
++class _Fails:
++    def complete(self, messages, *, temperature=0.0):
++        raise P.ProviderError("Claude: HTTP 400: Your credit balance is too low to access the Anthropic API.")
++
++
++def test_brief_error_is_one_line_with_class_and_text():
++    assert P.brief_error(P.ProviderError("a\n  b")) == "ProviderError: a b"
++    assert P.brief_error(ValueError()) == "ValueError"
++    long = P.brief_error(P.ProviderError("x" * 500), limit=40)
++    assert len(long) <= len("ProviderError: ") + 40 and long.endswith("…")
++
++
++def test_claude_cost_line_names_failed_requests_and_the_last_error(monkeypatch):
++    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
++    llm = P.AnthropicLLM(model="m", prices=(2.0, 10.0), post_fn=lambda *a, **k: _Resp(400, _LOW_CREDIT))
++    for _ in range(2):
++        try:
++            llm.complete([{"role": "user", "content": "q"}])
++        except P.ProviderError:
++            pass
++    line = llm.usage_line()
++    assert llm.calls == 0 and llm.failures == 2
++    assert line.startswith("Claude m: запросов 0") and "отказов 2" in line and "credit balance is too low" in line
++
++
++def test_claude_cost_line_without_failures_is_as_before(monkeypatch):
++    # flag-off rule (invariant 8) for the console: a run with no failure prints the same cost line as before M201
++    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
++    llm = P.AnthropicLLM(model="m", prices=(2.0, 10.0), post_fn=lambda *a, **k: _Resp(200, _ok()))
++    assert llm.usage_line() == ""
++    llm.complete([{"role": "user", "content": "q"}])
++    assert llm.usage_line() == "Claude m: запросов 1, вход 100, ответ 10 токенов ≈ $0.0003"
++
++
++def test_pool_of_claude_keeps_the_failure_in_its_usage_lines(monkeypatch):
++    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
++    llm = P.AnthropicLLM(model="m", post_fn=lambda *a, **k: _Resp(400, _LOW_CREDIT))
++    pool = P.ProviderPool([llm])
++    try:
++        pool.complete([{"role": "user", "content": "q"}])
++    except P.ProviderError:
++        pass
++    assert any("отказов" in ln and "credit balance" in ln for ln in pool.usage_lines())
++
++
++def test_keywords_and_post_log_the_reason_the_model_did_not_answer():
++    logs: list[str] = []
++    assert pick_keywords([("1.1", "Слово за словом.")], _Fails(), n=1, log=logs.append) == []
++    assert describe_clip(_Fails(), "подпись", "текст ролика", log=logs.append) is None
++    bad = [ln for ln in logs if "модель не ответила" in ln]
++    assert len(bad) == 2 and all("credit balance is too low" in ln for ln in bad), logs
