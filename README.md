@@ -135,6 +135,8 @@ python3.13 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
+Правило `autocut.start_morph` (начало без опоры, M200) и частотные хэштеги требуют `pymorphy3` — группа `.[nlp]`: `.venv/bin/pip install -e ".[nlp]"`. Без неё правило при включённом флаге падает явной ошибкой.
+
 ## Запуск (цель M0)
 
 ```bash
