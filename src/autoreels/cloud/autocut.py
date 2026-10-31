@@ -28,6 +28,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
+from autoreels.cloud.providers import brief_error
+
 STORY = ("thesis", "conclusion", "example", "metaphor", "question")
 OPENERS = ("thesis", "question")
 PAYOFFS = ("conclusion",)
@@ -907,7 +909,7 @@ def make_judge(provider, *, log: Callable[[str], None] = print, system: str | No
                 raw = provider.complete([{"role": "system", "content": sys_text},
                                          {"role": "user", "content": msg}], temperature=0.0)
             except Exception as exc:  # noqa: BLE001 — no model: the rules decide
-                log(f"  начало: модель не ответила ({type(exc).__name__})")
+                log(f"  начало: модель не ответила ({brief_error(exc)})")
                 break
             out = parse_judge(raw)
             if out is not None:
@@ -1374,7 +1376,7 @@ def rank_hooks(pr: "Proposal", provider, *, top: int = 6, log: Callable[[str], N
             raw = provider.complete([{"role": "system", "content": HOOK_SYSTEM}, {"role": "user", "content": msg}],
                                     temperature=0.0)
         except Exception as exc:  # noqa: BLE001 — no model: the code's order stays
-            log(f"  крючок: модель не ответила ({type(exc).__name__})")
+            log(f"  крючок: модель не ответила ({brief_error(exc)})")
             return False
         m = _re.search(r"\{.*\}", raw or "", _re.S)
         try:
@@ -1472,7 +1474,7 @@ def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
             raw = provider.complete([{"role": "system", "content": system},
                                      {"role": "user", "content": msg}], temperature=0.0)
         except Exception as exc:  # noqa: BLE001 — no model: no k:
-            log(f"  ключевые слова: модель не ответила ({type(exc).__name__})")
+            log(f"  ключевые слова: модель не ответила ({brief_error(exc)})")
             return []
         m = _re.search(r"\{.*\}", raw or "", _re.S)
         try:
@@ -1684,7 +1686,7 @@ def headline(pr: "Proposal", provider, clip_text: str, *, core_text: str = "",
         raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": msg}],
                                 temperature=0.0)
     except Exception as exc:  # noqa: BLE001 — no model: the summary stays
-        log(f"  заголовок: модель не ответила ({type(exc).__name__})")
+        log(f"  заголовок: модель не ответила ({brief_error(exc)})")
         return False
     m = _re.search(r"\{.*\}", raw or "", _re.S)
     try:
@@ -1759,7 +1761,7 @@ def check_seams(pr: "Proposal", pairs: Sequence[tuple[str, str]], provider, *,
             raw = provider.complete([{"role": "system", "content": SEAM_SYSTEM},
                                      {"role": "user", "content": f"Seams:\n{rows}"}], temperature=0.0)
         except Exception as exc:  # noqa: BLE001
-            log(f"  стыки: модель не ответила ({type(exc).__name__})")
+            log(f"  стыки: модель не ответила ({brief_error(exc)})")
             return None
         m = _re.search(r"\{.*\}", raw or "", _re.S)
         try:

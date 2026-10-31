@@ -228,6 +228,15 @@ class ProviderError(Exception):
     """Проблема LLM-провайдера (нет ключа, троттлинг, неожиданный формат ответа)."""
 
 
+def brief_error(exc: BaseException, limit: int = 160) -> str:
+    """M201 (m197–m200: 63 «заголовок: модель не ответила (ProviderError)» за прогон — причины в логе нет): класс и
+    текст ошибки одной строкой, не длиннее limit знаков, — то, что печатает строка «модель не ответила»."""
+    msg = " ".join(str(exc).split())
+    if len(msg) > limit:
+        msg = msg[:limit - 1] + "…"
+    return f"{type(exc).__name__}: {msg}" if msg else type(exc).__name__
+
+
 class ProviderEmptyResponse(ProviderError):
     """Провайдер вернул HTTP 200, но пустое/None тело вместо JSON (перегрузка/исчерпанная квота).
 
@@ -886,6 +895,8 @@ class AnthropicLLM:
         self.calls = 0
         self.tokens_in = 0
         self.tokens_out = 0
+        self.failures = 0                 # M201: requests that raised — the cost line names them and the last error
+        self.last_error = ""
 
     @property
     def model_id(self) -> str:
@@ -895,12 +906,24 @@ class AnthropicLLM:
         return (self.tokens_in * self._prices[0] + self.tokens_out * self._prices[1]) / 1_000_000
 
     def usage_line(self) -> str:
-        if not self.calls:
+        if not self.calls and not self.failures:
             return ""
-        return (f"{self.name} {self._model}: запросов {self.calls}, вход {self.tokens_in}, ответ {self.tokens_out} "
+        line = (f"{self.name} {self._model}: запросов {self.calls}, вход {self.tokens_in}, ответ {self.tokens_out} "
                 f"токенов ≈ ${self.cost():.4f}")
+        if self.failures:
+            # M201 (m197–m200: every new request failed, the run printed no cost line and read as «из кэша, $0»)
+            line += f"; ⚠ отказов {self.failures}, последний: {self.last_error}"
+        return line
 
     def complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+        try:
+            return self._complete(messages, temperature=temperature)
+        except Exception as exc:
+            self.failures += 1
+            self.last_error = brief_error(exc)
+            raise
+
+    def _complete(self, messages: list[dict], *, temperature: float = 0.0) -> str:
         key = (self._api_key or os.environ.get("ANTHROPIC_API_KEY", "")).strip()
         if not key:
             raise ProviderError("нет ANTHROPIC_API_KEY — добавьте ключ Claude в .env")

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from autoreels.cloud.postcopy import check_post, fit_post
+from autoreels.cloud.providers import brief_error
 
 PLAN_SYSTEM = (
     "You plan a longread article for Telegraph from one topic of a Russian talk. You get the topic and its thoughts "
@@ -55,7 +56,7 @@ def _ask(provider, system: str, user: str, log: Callable[[str], None]) -> dict |
         raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                 temperature=0.0)
     except Exception as exc:  # noqa: BLE001 — no model: no article
-        log(f"  статья: модель не ответила ({type(exc).__name__})")
+        log(f"  статья: модель не ответила ({brief_error(exc)})")
         return None
     m = re.search(r"\{.*\}", raw or "", re.S)
     try:

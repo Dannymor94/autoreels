@@ -17,6 +17,8 @@ import json
 import re
 from typing import Callable, Sequence
 
+from autoreels.cloud.providers import brief_error
+
 DESCRIBE_SYSTEM = (
     "You write the post published under a short vertical video (a reel) cut from a Russian talk. You get the reel's "
     "caption (its point) and its full spoken text. Write in Russian. The post: {smin}–{smax} sentences, at most "
@@ -151,7 +153,7 @@ def describe_clip(provider, caption: str, transcript: str, *, smin: int = 3, sma
             raw = provider.complete([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                     temperature=0.0)
         except Exception as exc:  # noqa: BLE001 — no model: no description
-            log(f"  описание: модель не ответила ({type(exc).__name__})")
+            log(f"  описание: модель не ответила ({brief_error(exc)})")
             return None
         m = re.search(r"\{.*\}", raw or "", re.S)
         try:

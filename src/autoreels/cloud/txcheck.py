@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from autoreels.cloud.providers import brief_error
+
 KNOWN = (
     "субтитры создавал", "субтитры сделал", "субтитры делал", "субтитры подготовил", "редактор субтитров",
     "корректор а.", "продолжение следует", "спасибо за просмотр", "спасибо за внимание друзья",
@@ -388,7 +390,7 @@ def restore_sentence_ends(words, ask, *, chunk_words: int = 120, context_words: 
             try:
                 raw = ask([{"role": "system", "content": PUNCT_SYSTEM}, {"role": "user", "content": msg}])
             except Exception as exc:  # noqa: BLE001 — one chunk failed: asked again, then missing
-                log(f"  точки: кусок {stats['chunks']} — модель не ответила ({type(exc).__name__})")
+                log(f"  точки: кусок {stats['chunks']} — модель не ответила ({brief_error(exc)})")
                 continue
             ends = parse_ends(raw, b - a)
             if raw_out is not None:
