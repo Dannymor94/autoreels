@@ -1,0 +1,7 @@
+disko_beach_p1         черновик одинаковый; review.json одинаковый
+disko_beach_p2         черновик одинаковый; review.json одинаковый
+disko_beach_p3         черновик одинаковый; review.json одинаковый
+day_yoga_p1            черновик одинаковый; review.json одинаковый
+day_yoga_p2            черновик одинаковый; review.json одинаковый
+prew_isaev_anna        черновик одинаковый; review.json одинаковый
+prew_isaev_danny       черновик одинаковый; review.json одинаковый
