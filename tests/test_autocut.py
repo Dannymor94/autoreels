@@ -1165,9 +1165,10 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
         cfg = root / "config" / "r0.yaml"
         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
                        .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ")
-                       .replace("  keywords_voice: false ", "  keywords_voice: true "), encoding="utf-8")   # M118: off by default
+                       .replace("  keywords_voice: false ", "  keywords_voice: true ")   # M118: off by default
+                       .replace("  keywords_source: rule ", "  keywords_source: model "), encoding="utf-8")  # M204: k: by the model here
         r0 = cli.load_r0_config(cfg)
-        assert r0.autocut.keywords and r0.autocut.keywords_voice
+        assert r0.autocut.keywords and r0.autocut.keywords_voice and r0.autocut.keywords_source == "model"
         tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
         _, kept, _ = cli._review_block_set(tx, r0, "lecture")
         ss = merge_group_sentences([kept[1]], tx.words)

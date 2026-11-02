@@ -365,6 +365,9 @@ class AutocutConfig(BaseModel):
     # rule when it gave none); keywords_rule_voice — the rule takes the word the voice draws out (intonation map)
     keywords_source: Literal["model", "rule", "fallback"] = "model"
     keywords_rule_voice: bool = False
+    # M204: in scenario mode who polishes the scenarist's reels (hooks, plates, k:, seams): scenarist — its model, as
+    # before; run — the run's --llm (the free models when the paid API is not there)
+    scenario_polish: Literal["scenarist", "run"] = "scenarist"
     # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
     close_last: bool = False
     close_last_sec: float = Field(3.0, ge=0)

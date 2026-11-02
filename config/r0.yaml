@@ -440,6 +440,9 @@ autocut:
   # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
   auto_mode: scenario
   scenario_llm: sonnet
+  # M204 (owner 2026-11-02, no paid API): in scenario mode the scenarist answers from its cache / on scenario_llm, the
+  # hooks, plates, k: and seams on the run's --llm (scenarist = all on scenario_llm, as before M204)
+  scenario_polish: run
   # M157 (owner 2026-10-26: «все прогоним через промо-кредиты» — 96 $ of promo credit expire 2026-11-03 UTC):
   # until paid_until (inclusive) `arl auto` without --llm runs the map, the judges and the posts on paid_llm too.
   # After it arl auto is free again: --llm auto = the free models, and the scenarist only with --mode scenario
@@ -498,7 +501,7 @@ autocut:
   # M88 — owner: «у копии PXL не хватает динамики»; k: words were only in the owner's own lines:
   keywords: true          # the model marks key words (k:): highlighted in the subtitles, the close shot comes on them
   keywords_every_sec: 12  # one per 12 s of the clip …
-  keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
+  keywords_max: 2         # … at most 2 (M204, owner 2026-11-02: the rule hits 31 % at 2, 21 % at up to 4; each one is also a shot change)
   # M116 — M1.9 stage D (owner: «давай»; M99: the owner's k: word is drawn out by the voice in 81 % of sentences):
   keywords_voice: false   # M118 off (m116: with the hints Haiku picked «потом», «месте», «школу» where without them it took
                           # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
@@ -507,7 +510,7 @@ autocut:
   # M203 (owner 2026-11-02: no paid API — «детерминированно»): who marks k:. model — as before; rule — no model: the
   # last sentence, then the first, then the middle (no questions), its last content word (owner's 68 clips: 31 % exact
   # words at 2 per clip, random 7 %); fallback — the model, the rule when the model gave none.
-  keywords_source: model
+  keywords_source: rule   # M204: owner 2026-11-02 — the rule (m203: 31 % exact words, k: on 54 of 54 reels)
   keywords_rule_voice: false   # rule: the word the voice draws out instead of the last one (M99: 65 % vs ~50 %)
   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)

@@ -8489,7 +8489,7 @@ def _autocut_overrides(base, pairs) -> "object":
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
                 judge_log: str | None = None, voice_keys: bool = True, ac_over=None, scenario: bool = False,
-                scenario_provider=None) -> int:
+                scenario_provider=None, scenario_llm: str | None = None) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -8729,7 +8729,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             _other = _sp_other({r: (float(st[0].t0), float(st[-1].t1)) for r, st in sent_by_ref.items() if st}, _spm)
             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
     if scenario:
-        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
+        # M204: scenario_llm — the scenarist's own model; `mode` (--llm) then polishes (hooks, plates, k:, seams)
+        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+                              the_map.get("units") or [],
                               end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
                               clauses=clauses)
         if pool is None:
@@ -10653,6 +10655,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     except Exception:  # noqa: BLE001 — no config: the free autocut, as before
         _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
         _spk_auto, _spk_py = False, ""
+        _ac = None
     import datetime as _dt                             # M157: the paid models while the promo credit lasts
     _today = today or _dt.date.today()
     _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
@@ -10720,8 +10723,9 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         if interviewer:                                  # M165: --interviewer on|off for this run
             _out["ac_over"] = [f"interviewer={interviewer}"]
         if _mode == "scenario":
+            _skw = _scenario_autocut_llms(_ac, llm, _scen_llm)   # M204: who polishes the scenarist's reels
             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
-                                                                        llm=_scen_llm, scenario=True, **_out))
+                                                                        scenario=True, **_skw, **_out))
             if err:
                 _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
                 print(f"  ⚠ {_scen_note}", flush=True)
@@ -10793,6 +10797,15 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     if _llm_cache_verdict():                          # M202: replay misses = the run was not reproduced
         return 1
     return 0 if all(st == "ok" for _, st, _ in results) else 1
+
+
+def _scenario_autocut_llms(ac, llm: str, scen_llm: str) -> dict:
+    """M204 (owner 2026-11-02: no paid API — m202/m203: in scenario mode the hooks, plates, k: and seams went to the
+    scenarist's paid model whatever --llm said, 151 refusals): autocut.scenario_polish «scenarist» — as before, all on
+    the scenarist's model; «run» — the scenarist on its model, the rest on the run's --llm."""
+    if getattr(ac, "scenario_polish", "scenarist") == "run":
+        return {"llm": llm, "scenario_llm": scen_llm}
+    return {"llm": scen_llm}
 
 
 def _llm_cache_verdict() -> bool:

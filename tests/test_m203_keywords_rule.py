@@ -45,9 +45,10 @@ def _project(tmp_path, source: str):
     from tests.test_m202_replay_accounting import _scenario_project
     cli, Fake, first, second = _scenario_project(tmp_path)
     cfg = tmp_path / "config" / "r0.yaml"
+    import re
     text = cfg.read_text(encoding="utf-8")
-    assert text.count("  keywords_source: model") == 1
-    cfg.write_text(text.replace("  keywords_source: model", f"  keywords_source: {source}"), encoding="utf-8")
+    assert len(re.findall(r"(?m)^  keywords_source: \w+", text)) == 1
+    cfg.write_text(re.sub(r"(?m)^  keywords_source: \w+", f"  keywords_source: {source}", text), encoding="utf-8")
     return cli, Fake
 
 
@@ -64,10 +65,12 @@ def test_autocut_marks_k_without_a_model_only_when_asked(tmp_path, capsys, sourc
     assert ("k: по правилу (без модели)" in text) is has_k
 
 
-def test_default_is_the_model_as_before():
+def test_code_default_is_the_model_and_the_repo_config_is_the_owners_rule():
     from autoreels import __main__ as cli
-    ac = cli.load_r0_config("config/r0.yaml").autocut
-    assert ac.keywords_source == "model" and ac.keywords_rule_voice is False
+    from autoreels.core.config import AutocutConfig
+    assert AutocutConfig().keywords_source == "model" and AutocutConfig().keywords_rule_voice is False
+    ac = cli.load_r0_config("config/r0.yaml").autocut      # M204: owner 2026-11-02 — the rule, at most 2 words
+    assert ac.keywords_source == "rule" and ac.keywords_max == 2 and ac.keywords_rule_voice is False
 
 
 def test_the_measurement_tool_beats_the_random_floor(capsys):
