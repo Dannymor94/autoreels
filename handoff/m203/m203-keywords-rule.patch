@@ -1,0 +1,404 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index c0bedf1..98a2b9e 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -504,6 +504,11 @@ autocut:
+                           # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
+                           # words the voice draws out (intonation map: duration per letter) are shown to the model as a
+   keywords_voice_ratio: 1.25   # hint («[voice: …]»); the model still picks the word, the same checks; no map = no hint
++  # M203 (owner 2026-11-02: no paid API — «детерминированно»): who marks k:. model — as before; rule — no model: the
++  # last sentence, then the first, then the middle (no questions), its last content word (owner's 68 clips: 31 % exact
++  # words at 2 per clip, random 7 %); fallback — the model, the rule when the model gave none.
++  keywords_source: model
++  keywords_rule_voice: false   # rule: the word the voice draws out instead of the last one (M99: 65 % vs ~50 %)
+   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
+   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
+   close_last_sec: 3
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 1b892ef..1bed7a9 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8652,7 +8652,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+     end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
+     open_end: list = []                     # … clips that ended «→» and could not be shortened
+     dur_of = None                           # M116 (M1.9 D): the aligned duration of a word, intonation map
+-    _want_voice = bool(getattr(ac, "keywords", False) and getattr(ac, "keywords_voice", False) and voice_keys)
++    _ksrc = getattr(ac, "keywords_source", "model")   # M203: model | rule | fallback
++    _want_voice = bool(getattr(ac, "keywords", False) and voice_keys
++                       and ((getattr(ac, "keywords_voice", False) and _ksrc != "rule")
++                            or (getattr(ac, "keywords_rule_voice", False) and _ksrc != "model")))
+     if prm.end_tone or _want_voice:
+         from autoreels.cloud.plan import load_alignment as _la_et
+         from autoreels.local.prosody import load_prosody as _lp_et, tone_lookup as _tl_et
+@@ -8816,7 +8819,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                 rank_hooks(pr, prov, log=_log)
+                 if ac.hook_title:
+                     _plate(pr)
+-                if ac.keywords:                     # M88: key words of the subtitles (k:)
++                if ac.keywords and _ksrc != "rule":  # M88: key words of the subtitles (k:); M203: not with the rule
+                     from autoreels.cloud.autocut import pick_keywords, voice_stressed
+                     _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
+                     _krows = [(r[0], r[4]) for r in sentences(pr.pieces)]
+@@ -8827,7 +8830,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                         _vn = [f"{ref} «{v[0]}»" for (ref, _t), v in zip(_krows, _voiced) if v]
+                         if _vn:
+                             pr.notes.append("голос выделяет: " + ", ".join(_vn))
+-                    pr.keys = pick_keywords(_krows, prov, n=_n, log=_log, voiced=_voiced)
++                    pr.keys = pick_keywords(_krows, prov, n=_n, log=_log,     # M203: voice hints only with keywords_voice
++                                            voiced=_voiced if getattr(ac, "keywords_voice", False) else None)
+             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
+                 for pr in pool[:prm.clips * 2]:
+                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
+@@ -8928,6 +8932,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+         else:
+             rejected.append((pr, err))
+ 
++    def _keys_rule(pr) -> None:
++        """M203: k: by cloud/autocut.keywords_rule — the last sentence, then the first, then the middle; no model."""
++        from autoreels.cloud.autocut import keywords_rule, voice_stressed
++        _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
++        _rows = [(r[0], r[4]) for r in sentences(pr.pieces)]
++        _v = None
++        if dur_of is not None and getattr(ac, "keywords_rule_voice", False):
++            _v = [voice_stressed(sent_by_ref.get(ref) or [], dur_of, ratio=ac.keywords_voice_ratio) for ref, _t in _rows]
++        pr.keys = keywords_rule(_rows, n=_n, voiced=_v)
++        if pr.keys:
++            pr.notes.append("k: по правилу (без модели): " + ", ".join(f"{r}={w}" for r, w in pr.keys)
++                            + (" — голос" if _v and any(_v) else ""))
++
+     not_reached: list = []        # M202: candidates the loop never tried — prm.clips were already taken
+     for _k, pr in enumerate(pool):
+         if len(accepted) >= prm.clips:
+@@ -8938,6 +8955,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+                 _polish(pr)
+             except Exception as exc:  # noqa: BLE001 — no model: the code's hook order and plate stay
+                 print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
++        if ac.keywords and _ksrc != "model" and not pr.keys:
++            _keys_rule(pr)            # M203: k: without a model (rule), or when the model gave none (fallback)
+         if getattr(ac, "hookless_last", False) and ac.hook_teaser and not pr.hook:
+             hookless.append(pr)       # M107 (m106: 6 of 15 clips had no cold open): the hooked ones go first
+             continue
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index e879cfb..4051b6e 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -1505,6 +1505,76 @@ def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
+     return []
+ 
+ 
++
++# M203: the key words without a model. Measured on the owner's own marks (manifests of the 7 sources, words with emph:
++# 68 clips, 135 k: words): the owner marks the clip's last sentence in 82 % of clips, the first in 48 %, a sentence of
++# the middle in 13 %, a question in 7 %; inside the marked sentence the owner's word is its last content word in 47 %
++# (rarity, a part of speech, a repeat added nothing). The rule: the last sentence, then the first, then the middle ones
++# in play order; no questions; in each the last content word — or, with `voiced`, the word the voice draws out
++# (M99: the owner's k: word is drawn out in 65 % against ~50 %). Exact owner words at n=2: 35 of 112 (31 %), a random
++# content word 7 %.
++_KW_POS = frozenset({"NOUN", "ADJF", "ADJS", "COMP", "VERB", "INFN", "PRTF", "PRTS", "GRND", "NUMR", "ADVB"})
++_kw_morph_cache: list = []
++
++
++def _kw_morph():
++    """pymorphy3's analyzer, or None when the .[nlp] extra is not installed (then: every word that passes the stop list)."""
++    if not _kw_morph_cache:
++        try:
++            import pymorphy3
++            _kw_morph_cache.append(pymorphy3.MorphAnalyzer())
++        except Exception:  # noqa: BLE001 — no package: no part-of-speech filter
++            _kw_morph_cache.append(None)
++    return _kw_morph_cache[0]
++
++
++def keywords_rule(rows: Sequence[tuple[str, str]], *, n: int,
++                  voiced: Sequence[Sequence[str]] | None = None) -> list[tuple[str, str]]:
++    """M203: at most `n` key words — one per sentence — in the clip's sentences [(B.N, text)] (play order), without a
++    model. The same grounding as pick_keywords: a word of that very sentence, ≥ 3 letters, not in the stop list; with
++    pymorphy3 only a content part of speech; one word per lemma. Sorted back into play order."""
++    if n <= 0 or not rows:
++        return []
++    morph = _kw_morph()
++
++    def info(word: str) -> tuple[str, bool]:
++        if morph is None:
++            return word, True
++        p = morph.parse(word)[0]
++        return p.normal_form, p.tag.POS in _KW_POS
++
++    last = len(rows) - 1
++    order = [last] + ([0] if last > 0 else []) + list(range(1, last))
++    out: dict[int, str] = {}
++    used: set[str] = set()
++    for i in order:
++        if len(out) >= n:
++            break
++        text = rows[i][1].strip()
++        if text.rstrip("»\"'").endswith("?"):
++            continue
++        cands: list[tuple[str, str]] = []
++        for tok in text.split():
++            word = _kw_norm(tok)
++            if (sum(c.isalpha() for c in word) < 3 or word in _KEY_STOP
++                    or not all(c.isalnum() or c == "-" for c in word)):
++                continue
++            lem, content = info(word)
++            if content and lem not in used:
++                cands.append((word, lem))
++        if not cands:
++            continue
++        pick = cands[-1]
++        if voiced is not None and i < len(voiced):
++            for v in voiced[i]:
++                hit = next((c for c in cands if c[0] == _kw_norm(v)), None)
++                if hit is not None:
++                    pick = hit
++                    break
++        out[i] = pick[0]
++        used.add(pick[1])
++    return [(rows[i][0], out[i]) for i in sorted(out)]
++
+ # ── M70: hook headline, seam coherence, short versions ─────────────────────────────────────────────
+ 
+ def _norm_word(w: str) -> str:
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index b07ef96..9a55a41 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -361,6 +361,10 @@ class AutocutConfig(BaseModel):
+     keywords_max: int = Field(4, ge=0)              # … at most this many
+     keywords_voice: bool = False                    # M116 (M1.9 D): words the voice draws out are shown to the model
+     keywords_voice_ratio: float = Field(1.25, ge=1.0)   # … duration per letter ≥ this × the sentence's median
++    # M203: who marks k: — model (as before) | rule (cloud/autocut.keywords_rule, no model) | fallback (the model, the
++    # rule when it gave none); keywords_rule_voice — the rule takes the word the voice draws out (intonation map)
++    keywords_source: Literal["model", "rule", "fallback"] = "model"
++    keywords_rule_voice: bool = False
+     # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
+     close_last: bool = False
+     close_last_sec: float = Field(3.0, ge=0)
+diff --git a/tests/test_m203_keywords_rule.py b/tests/test_m203_keywords_rule.py
+new file mode 100644
+index 0000000..39938af
+--- /dev/null
++++ b/tests/test_m203_keywords_rule.py
+@@ -0,0 +1,83 @@
++"""M203: k: without a model — the last sentence, then the first, then the middle; no questions; the last content word
++(or the word the voice draws out). Measured on the owner's own marks (manifests: 68 clips, 135 words)."""
++from __future__ import annotations
++
++import pytest
++
++from autoreels.cloud import autocut as A
++from autoreels.cloud.autocut import keywords_rule
++
++ROWS = [("1.1", "Первая фраза про страдание."), ("1.2", "Зачем это всё?"),
++        ("1.3", "Средняя мысль о дыхании."), ("1.4", "И вот это главное открытие!")]
++
++
++def test_last_then_first_then_middle_in_play_order():
++    assert keywords_rule(ROWS, n=1) == [("1.4", "открытие")]
++    assert keywords_rule(ROWS, n=2) == [("1.1", "страдание"), ("1.4", "открытие")]
++    assert keywords_rule(ROWS, n=9) == [("1.1", "страдание"), ("1.3", "дыхании"), ("1.4", "открытие")]  # «?» skipped
++    assert keywords_rule(ROWS, n=0) == [] and keywords_rule([], n=3) == []
++
++
++def test_grounded_words_only_and_one_word_per_lemma():
++    rows = [("2.1", "Расслабьте свои ноги, расслабьте руки."), ("2.2", "Это всё так, вот."),
++            ("2.3", "Просто расслабьте.")]
++    out = keywords_rule(rows, n=3)
++    # last sentence first: «расслабьте»; then the first sentence: its last content word «руки»; 2.2 is stop words only
++    assert out == [("2.1", "руки"), ("2.3", "расслабьте")]
++    rows2 = [("3.1", "Дышите и расслабьте."), ("3.2", "Просто расслабьте.")]
++    assert keywords_rule(rows2, n=2) == [("3.1", "дышите"), ("3.2", "расслабьте")]   # the lemma is taken: the word before
++    for ref, w in out:                                             # every word is a word of its own sentence
++        assert w in {A._kw_norm(x) for x in dict(rows)[ref].split()}
++
++
++def test_the_voice_wins_only_with_a_word_of_the_sentence():
++    assert keywords_rule(ROWS, n=1, voiced=[[], [], [], ["главное"]]) == [("1.4", "главное")]
++    assert keywords_rule(ROWS, n=1, voiced=[[], [], [], ["нет-такого"]]) == [("1.4", "открытие")]
++
++
++def test_without_pymorphy_the_stop_list_still_holds(monkeypatch):
++    monkeypatch.setattr(A, "_kw_morph_cache", [None])
++    out = keywords_rule([("1.1", "Мы идём туда, где есть свет."), ("1.2", "А они там.")], n=2)
++    assert out == [("1.1", "свет")]                                 # «они там» — stop words, nothing left
++
++
++def _project(tmp_path, source: str):
++    from tests.test_m202_replay_accounting import _scenario_project
++    cli, Fake, first, second = _scenario_project(tmp_path)
++    cfg = tmp_path / "config" / "r0.yaml"
++    text = cfg.read_text(encoding="utf-8")
++    assert text.count("  keywords_source: model") == 1
++    cfg.write_text(text.replace("  keywords_source: model", f"  keywords_source: {source}"), encoding="utf-8")
++    return cli, Fake
++
++
++@pytest.mark.parametrize("source,has_k", [("model", False), ("rule", True), ("fallback", True)])
++def test_autocut_marks_k_without_a_model_only_when_asked(tmp_path, capsys, source, has_k):
++    cli, Fake = _project(tmp_path, source)
++    out = tmp_path / "reviews" / "v_k.txt"
++    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
++                         scenario_provider=Fake(), out=str(out))       # hook_llm: none — no model for the rest
++    text = out.read_text(encoding="utf-8")
++    lines = [ln for ln in text.splitlines() if ln.startswith("M")]
++    assert rc == 0 and lines
++    assert any(" | k:" in ln for ln in lines) is has_k
++    assert ("k: по правилу (без модели)" in text) is has_k
++
++
++def test_default_is_the_model_as_before():
++    from autoreels import __main__ as cli
++    ac = cli.load_r0_config("config/r0.yaml").autocut
++    assert ac.keywords_source == "model" and ac.keywords_rule_voice is False
++
++
++def test_the_measurement_tool_beats_the_random_floor(capsys):
++    import importlib.util
++    spec = importlib.util.spec_from_file_location("kw_rule_check", "tools/kw_rule_check.py")
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    assert mod.main(["--n", "2"]) == 0
++    out = capsys.readouterr().out
++    rule = next(ln for ln in out.splitlines() if ln.strip().startswith("rule "))
++    rnd = next(ln for ln in out.splitlines() if ln.strip().startswith("random"))
++    pct = lambda ln: int(ln.rsplit("—", 1)[1].strip().split()[0])  # noqa: E731
++    assert "клипов с k: 56, слов владельца 135" in out and pct(rule) >= 2 * pct(rnd)
+diff --git a/tools/kw_rule_check.py b/tools/kw_rule_check.py
+new file mode 100644
+index 0000000..4199568
+--- /dev/null
++++ b/tools/kw_rule_check.py
+@@ -0,0 +1,133 @@
++"""M203: how often the key-word rule (cloud/autocut.keywords_rule) hits the owner's own k: words.
++
++The reference is the owner's marks in manifests/<source>.json: the subtitle words with emph (68 clips, 135 words of the 7
++sources). A clip's sentences are its subtitle words cut at . ! ? …. Three pickers, n words per clip:
++  rule        — the rule on the text (what keywords_source: rule does without the intonation map);
++  rule+voice  — the rule with the words the voice draws out (keywords_rule_voice), when transcripts/<source>.prosody.json
++                is there (the Mac); a subtitle word takes the duration of the intonation word starting within 0.2 s;
++  random      — a random content word per clip (20 seeds), the floor.
++A hit is the owner's very word (the same subtitle word). Read only.
++Run from the project root: .venv/bin/python tools/kw_rule_check.py [--n 2|owner|config]"""
++from __future__ import annotations
++
++import argparse
++import bisect
++import json
++import random
++import re
++import sys
++from pathlib import Path
++from types import SimpleNamespace
++
++ROOT = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(ROOT / "src"))
++
++from autoreels.cloud.autocut import _KEY_STOP, _KW_POS, _kw_morph, _kw_norm, keywords_rule, voice_stressed  # noqa: E402
++
++SOURCES = ("disko_beach_p1", "disko_beach_p2", "disko_beach_p3", "day_yoga_p1", "day_yoga_p2",
++           "prew_isaev_anna", "prew_isaev_danny")
++_END = re.compile(r"[.!?…][»\"')]*$")
++
++
++def clip_sentences(words: list[dict]) -> list[list[dict]]:
++    out, cur = [], []
++    for w in words:
++        cur.append(w)
++        if _END.search(w["word"]):
++            out.append(cur)
++            cur = []
++    if cur:
++        out.append(cur)
++    return out
++
++
++def _dur_lookup(stem: str):
++    p = ROOT / "transcripts" / f"{stem}.prosody.json"
++    if not p.is_file():
++        return None
++    words = sorted((float(w["t0"]), w.get("dur")) for w in json.loads(p.read_text(encoding="utf-8")).get("words") or [])
++    t0s = [t for t, _ in words]
++
++    def dur_of(word):
++        i = bisect.bisect_left(t0s, float(word.t0))
++        best = min((j for j in (i - 1, i) if 0 <= j < len(words)), key=lambda j: abs(t0s[j] - word.t0), default=None)
++        return words[best][1] if best is not None and abs(t0s[best] - word.t0) <= 0.2 else None
++    return dur_of
++
++
++def _n_for(mode: str, owner: int, sec: float) -> int:
++    if mode == "owner":
++        return owner
++    if mode == "config":
++        return min(4, max(1, round(sec / 12)))
++    return int(mode)
++
++
++def _content(word: str) -> bool:
++    if sum(c.isalpha() for c in word) < 3 or word in _KEY_STOP or not all(c.isalnum() or c == "-" for c in word):
++        return False
++    m = _kw_morph()
++    return m is None or m.parse(word)[0].tag.POS in _KW_POS
++
++
++def _hits(sents: list[list[dict]], picks: list[tuple[str, str]]) -> int:
++    """Picks are (sentence index as ref, normalized word): a hit is an owner emph word of that sentence and that form."""
++    h = 0
++    for ref, word in picks:
++        se = sents[int(ref)]
++        h += any(w.get("emph") and _kw_norm(w["word"]) == word for w in se)
++    return h
++
++
++def main(argv=None) -> int:
++    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    ap.add_argument("--n", default="2", help="words per clip: a number, owner (as many as the owner marked), config")
++    a = ap.parse_args(argv)
++    tot = {"rule": [0, 0], "rule+voice": [0, 0], "random": [0.0, 0]}
++    owner_words = clips = 0
++    voice_sources = []
++    for stem in SOURCES:
++        mf = ROOT / "manifests" / f"{stem}.json"
++        if not mf.is_file():
++            print(f"  {stem}: нет манифеста")
++            continue
++        dur_of = _dur_lookup(stem)
++        if dur_of is not None:
++            voice_sources.append(stem)
++        for reel in json.loads(mf.read_text(encoding="utf-8")).get("reels") or []:
++            words = reel.get("subtitles") or []
++            own = sum(1 for w in words if w.get("emph"))
++            if not own:
++                continue
++            clips += 1
++            owner_words += own
++            sents = clip_sentences(words)
++            rows = [(str(i), " ".join(w["word"] for w in se)) for i, se in enumerate(sents)]
++            n = _n_for(a.n, own, words[-1]["t1"] - words[0]["t0"])
++            p = keywords_rule(rows, n=n)
++            tot["rule"][0] += _hits(sents, p)
++            tot["rule"][1] += len(p)
++            if dur_of is not None:
++                objs = [[SimpleNamespace(word=w["word"], t0=w["t0"]) for w in se] for se in sents]
++                v = [voice_stressed(o, dur_of) for o in objs]
++                pv = keywords_rule(rows, n=n, voiced=v)
++                tot["rule+voice"][0] += _hits(sents, pv)
++                tot["rule+voice"][1] += len(pv)
++            pool = [(str(i), _kw_norm(w["word"])) for i, se in enumerate(sents) for w in se if _content(_kw_norm(w["word"]))]
++            for seed in range(20):
++                pr = random.Random(seed).sample(pool, min(n, len(pool)))
++                tot["random"][0] += _hits(sents, pr) / 20
++                tot["random"][1] += len(pr) / 20
++    print(f"эталон: клипов с k: {clips}, слов владельца {owner_words}; n = {a.n}")
++    for k, (h, t) in tot.items():
++        if t:
++            print(f"  {k:11} выбрано {t:.0f}, попало в слово владельца {h:.0f} — {100 * h / t:.0f} %")
++        elif k == "rule+voice":
++            print("  rule+voice  нет transcripts/<источник>.prosody.json — замер голоса на этой машине невозможен")
++    if voice_sources and len(voice_sources) < len(SOURCES):
++        print(f"  голос замерен только для: {', '.join(voice_sources)}")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
