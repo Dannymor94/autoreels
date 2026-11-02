@@ -504,6 +504,11 @@ autocut:
                           # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
                           # words the voice draws out (intonation map: duration per letter) are shown to the model as a
   keywords_voice_ratio: 1.25   # hint («[voice: …]»); the model still picks the word, the same checks; no map = no hint
+  # M203 (owner 2026-11-02: no paid API — «детерминированно»): who marks k:. model — as before; rule — no model: the
+  # last sentence, then the first, then the middle (no questions), its last content word (owner's 68 clips: 31 % exact
+  # words at 2 per clip, random 7 %); fallback — the model, the rule when the model gave none.
+  keywords_source: model
+  keywords_rule_voice: false   # rule: the word the voice draws out instead of the last one (M99: 65 % vs ~50 %)
   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
   close_last_sec: 3

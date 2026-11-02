@@ -8652,7 +8652,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     end_tone = None                         # M115: the voice at the end of a sentence (B.k), intonation map
     open_end: list = []                     # … clips that ended «→» and could not be shortened
     dur_of = None                           # M116 (M1.9 D): the aligned duration of a word, intonation map
-    _want_voice = bool(getattr(ac, "keywords", False) and getattr(ac, "keywords_voice", False) and voice_keys)
+    _ksrc = getattr(ac, "keywords_source", "model")   # M203: model | rule | fallback
+    _want_voice = bool(getattr(ac, "keywords", False) and voice_keys
+                       and ((getattr(ac, "keywords_voice", False) and _ksrc != "rule")
+                            or (getattr(ac, "keywords_rule_voice", False) and _ksrc != "model")))
     if prm.end_tone or _want_voice:
         from autoreels.cloud.plan import load_alignment as _la_et
         from autoreels.local.prosody import load_prosody as _lp_et, tone_lookup as _tl_et
@@ -8816,7 +8819,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 rank_hooks(pr, prov, log=_log)
                 if ac.hook_title:
                     _plate(pr)
-                if ac.keywords:                     # M88: key words of the subtitles (k:)
+                if ac.keywords and _ksrc != "rule":  # M88: key words of the subtitles (k:); M203: not with the rule
                     from autoreels.cloud.autocut import pick_keywords, voice_stressed
                     _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
                     _krows = [(r[0], r[4]) for r in sentences(pr.pieces)]
@@ -8827,7 +8830,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                         _vn = [f"{ref} «{v[0]}»" for (ref, _t), v in zip(_krows, _voiced) if v]
                         if _vn:
                             pr.notes.append("голос выделяет: " + ", ".join(_vn))
-                    pr.keys = pick_keywords(_krows, prov, n=_n, log=_log, voiced=_voiced)
+                    pr.keys = pick_keywords(_krows, prov, n=_n, log=_log,     # M203: voice hints only with keywords_voice
+                                            voiced=_voiced if getattr(ac, "keywords_voice", False) else None)
             if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
                 for pr in pool[:prm.clips * 2]:
                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
@@ -8928,6 +8932,19 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         else:
             rejected.append((pr, err))
 
+    def _keys_rule(pr) -> None:
+        """M203: k: by cloud/autocut.keywords_rule — the last sentence, then the first, then the middle; no model."""
+        from autoreels.cloud.autocut import keywords_rule, voice_stressed
+        _n = min(ac.keywords_max, max(1, round(pr.seconds / ac.keywords_every_sec)))
+        _rows = [(r[0], r[4]) for r in sentences(pr.pieces)]
+        _v = None
+        if dur_of is not None and getattr(ac, "keywords_rule_voice", False):
+            _v = [voice_stressed(sent_by_ref.get(ref) or [], dur_of, ratio=ac.keywords_voice_ratio) for ref, _t in _rows]
+        pr.keys = keywords_rule(_rows, n=_n, voiced=_v)
+        if pr.keys:
+            pr.notes.append("k: по правилу (без модели): " + ", ".join(f"{r}={w}" for r, w in pr.keys)
+                            + (" — голос" if _v and any(_v) else ""))
+
     not_reached: list = []        # M202: candidates the loop never tried — prm.clips were already taken
     for _k, pr in enumerate(pool):
         if len(accepted) >= prm.clips:
@@ -8938,6 +8955,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 _polish(pr)
             except Exception as exc:  # noqa: BLE001 — no model: the code's hook order and plate stay
                 print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+        if ac.keywords and _ksrc != "model" and not pr.keys:
+            _keys_rule(pr)            # M203: k: without a model (rule), or when the model gave none (fallback)
         if getattr(ac, "hookless_last", False) and ac.hook_teaser and not pr.hook:
             hookless.append(pr)       # M107 (m106: 6 of 15 clips had no cold open): the hooked ones go first
             continue

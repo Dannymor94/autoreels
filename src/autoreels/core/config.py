@@ -361,6 +361,10 @@ class AutocutConfig(BaseModel):
     keywords_max: int = Field(4, ge=0)              # … at most this many
     keywords_voice: bool = False                    # M116 (M1.9 D): words the voice draws out are shown to the model
     keywords_voice_ratio: float = Field(1.25, ge=1.0)   # … duration per letter ≥ this × the sentence's median
+    # M203: who marks k: — model (as before) | rule (cloud/autocut.keywords_rule, no model) | fallback (the model, the
+    # rule when it gave none); keywords_rule_voice — the rule takes the word the voice draws out (intonation map)
+    keywords_source: Literal["model", "rule", "fallback"] = "model"
+    keywords_rule_voice: bool = False
     # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
     close_last: bool = False
     close_last_sec: float = Field(3.0, ge=0)

@@ -1505,6 +1505,76 @@ def pick_keywords(rows: Sequence[tuple[str, str]], provider, *, n: int,
     return []
 
 
+
+# M203: the key words without a model. Measured on the owner's own marks (manifests of the 7 sources, words with emph:
+# 68 clips, 135 k: words): the owner marks the clip's last sentence in 82 % of clips, the first in 48 %, a sentence of
+# the middle in 13 %, a question in 7 %; inside the marked sentence the owner's word is its last content word in 47 %
+# (rarity, a part of speech, a repeat added nothing). The rule: the last sentence, then the first, then the middle ones
+# in play order; no questions; in each the last content word — or, with `voiced`, the word the voice draws out
+# (M99: the owner's k: word is drawn out in 65 % against ~50 %). Exact owner words at n=2: 35 of 112 (31 %), a random
+# content word 7 %.
+_KW_POS = frozenset({"NOUN", "ADJF", "ADJS", "COMP", "VERB", "INFN", "PRTF", "PRTS", "GRND", "NUMR", "ADVB"})
+_kw_morph_cache: list = []
+
+
+def _kw_morph():
+    """pymorphy3's analyzer, or None when the .[nlp] extra is not installed (then: every word that passes the stop list)."""
+    if not _kw_morph_cache:
+        try:
+            import pymorphy3
+            _kw_morph_cache.append(pymorphy3.MorphAnalyzer())
+        except Exception:  # noqa: BLE001 — no package: no part-of-speech filter
+            _kw_morph_cache.append(None)
+    return _kw_morph_cache[0]
+
+
+def keywords_rule(rows: Sequence[tuple[str, str]], *, n: int,
+                  voiced: Sequence[Sequence[str]] | None = None) -> list[tuple[str, str]]:
+    """M203: at most `n` key words — one per sentence — in the clip's sentences [(B.N, text)] (play order), without a
+    model. The same grounding as pick_keywords: a word of that very sentence, ≥ 3 letters, not in the stop list; with
+    pymorphy3 only a content part of speech; one word per lemma. Sorted back into play order."""
+    if n <= 0 or not rows:
+        return []
+    morph = _kw_morph()
+
+    def info(word: str) -> tuple[str, bool]:
+        if morph is None:
+            return word, True
+        p = morph.parse(word)[0]
+        return p.normal_form, p.tag.POS in _KW_POS
+
+    last = len(rows) - 1
+    order = [last] + ([0] if last > 0 else []) + list(range(1, last))
+    out: dict[int, str] = {}
+    used: set[str] = set()
+    for i in order:
+        if len(out) >= n:
+            break
+        text = rows[i][1].strip()
+        if text.rstrip("»\"'").endswith("?"):
+            continue
+        cands: list[tuple[str, str]] = []
+        for tok in text.split():
+            word = _kw_norm(tok)
+            if (sum(c.isalpha() for c in word) < 3 or word in _KEY_STOP
+                    or not all(c.isalnum() or c == "-" for c in word)):
+                continue
+            lem, content = info(word)
+            if content and lem not in used:
+                cands.append((word, lem))
+        if not cands:
+            continue
+        pick = cands[-1]
+        if voiced is not None and i < len(voiced):
+            for v in voiced[i]:
+                hit = next((c for c in cands if c[0] == _kw_norm(v)), None)
+                if hit is not None:
+                    pick = hit
+                    break
+        out[i] = pick[0]
+        used.add(pick[1])
+    return [(rows[i][0], out[i]) for i in sorted(out)]
+
 # ── M70: hook headline, seam coherence, short versions ─────────────────────────────────────────────
 
 def _norm_word(w: str) -> str:
