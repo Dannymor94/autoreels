@@ -290,6 +290,13 @@ class AutocutConfig(BaseModel):
     answer_start: bool = False                # M193: with start_strict, a reel never opens on an answer («Да, …», a reply to the host)
     answer_gap_sec: float = Field(3.0, ge=0.0)   # … a reply: starts within this many seconds after the host's sentence
     start_morph: bool = False                 # M200: with start_strict, no reel opens on a verb without a subject or «он/их…»
+    # M205: when two reels are too close — units: the map's thoughts (as before); sound: the sentences heard in both
+    # (more than close_share_max of the shorter one's seconds), the same first sentence or title
+    close_by: Literal["units", "sound"] = "units"
+    close_share_max: float = Field(0.0, ge=0.0, le=1.0)
+    # M205: which candidates are taken — greedy: in the pool's order (as before); global: the set with the largest total
+    # score and no two too close, walked first
+    select: Literal["greedy", "global"] = "greedy"
                                               # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the

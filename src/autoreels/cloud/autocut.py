@@ -1340,6 +1340,68 @@ def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int = 
     return None
 
 
+
+def sound_close(pr: "Proposal", accepted: Sequence["Proposal"], secs_of: Callable[["Proposal"], dict],
+                max_share: float = 0.0) -> str | None:
+    """M205 (m200: «Алгоритм или эмпатия» refused as «общие мысли с M3: #52» — not one sentence heard in both; the
+    thoughts are the map's, made by a model): two reels are too close when they open on the same sentence, carry the
+    same title, or share more than `max_share` of the shorter one's seconds — the sentences played in both.
+    `secs_of(pr)` → {sentence ref: seconds} in play order. None = distinct enough."""
+    a = secs_of(pr)
+    first_a = next(iter(a), None)
+    for i, o in enumerate(accepted, 1):
+        b = secs_of(o)
+        if first_a is not None and first_a == next(iter(b), None):
+            return f"то же начало, что у M{i} (фраза {first_a})"
+        if pr.title and _norm_title(pr.title) == _norm_title(o.title):
+            return f"тот же заголовок, что у M{i}"
+        common = [r for r in a if r in b]
+        if common:
+            shared = sum(float(a[r] or 0.0) for r in common)
+            short = min(sum(float(v or 0.0) for v in a.values()), sum(float(v or 0.0) for v in b.values()))
+            if short <= 0 or shared / short > max_share:
+                return f"общие фразы с M{i}: {' '.join(common[:6])}" + (" …" if len(common) > 6 else "") \
+                    + (f" ({shared:.0f} с, {100 * shared / short:.0f} %)" if short > 0 else "")
+    return None
+
+
+def select_global(weights: Sequence[float], conflict: Callable[[int, int], bool], k: int,
+                  exact_max: int = 30) -> list[int]:
+    """M205: the candidates to take — at most `k`, no two in conflict, the largest total weight (the order the pool
+    is walked in no longer decides: a strong candidate that would block two good ones is left). Exact (branch and
+    bound over candidates by weight) up to `exact_max` candidates, greedy by weight above. Equal totals: the set
+    found first, heaviest candidates first (then the earlier index).
+    Returns indices in the pool's order."""
+    n = len(weights)
+    if n == 0 or k <= 0:
+        return []
+    order = sorted(range(n), key=lambda i: (-float(weights[i]), i))
+    if n > exact_max:
+        got: list[int] = []
+        for i in order:
+            if len(got) < k and not any(conflict(i, j) for j in got):
+                got.append(i)
+        return sorted(got)
+    clash = {i: {j for j in range(n) if j != i and (conflict(i, j) or conflict(j, i))} for i in range(n)}
+    best: list = [-1.0, []]
+
+    def walk(pos: int, chosen: list[int], total: float) -> None:
+        if total > best[0] + 1e-9:
+            best[0], best[1] = total, list(chosen)
+        if len(chosen) >= k or pos >= n:
+            return
+        room = k - len(chosen)
+        bound = total + sum(float(weights[i]) for i in order[pos:pos + room])
+        if bound <= best[0] + 1e-9:
+            return
+        i = order[pos]
+        if not (clash[i] & set(chosen)):
+            walk(pos + 1, chosen + [i], total + float(weights[i]))
+        walk(pos + 1, chosen, total)
+
+    walk(0, [], 0.0)
+    return sorted(best[1])
+
 def _norm_title(t) -> str:
     return " ".join(_plain_words(str(t or "")))
 

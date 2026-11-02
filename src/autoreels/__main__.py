@@ -8864,8 +8864,18 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     accepted, rejected, close = [], [], []
     hookless: list = []           # M107: candidates left without a cold open — taken only when the hooked run out
 
+    def _secs_of(pr) -> dict:
+        """M205: {sentence ref: seconds} of a reel's body in play order."""
+        return {r[0]: float(r[1] or 0.0) for r in sentences(pr.pieces)}
+
+    def _close(pr, others):
+        if getattr(ac, "close_by", "units") == "sound":
+            from autoreels.cloud.autocut import sound_close
+            return sound_close(pr, others, _secs_of, getattr(ac, "close_share_max", 0.0))
+        return too_close(pr, others, ac.max_shared)
+
     def _try_accept(pr) -> None:
-        why_close = too_close(pr, accepted, ac.max_shared)          # M68: distinct reels, checked for free first
+        why_close = _close(pr, accepted)          # M68: distinct reels, checked for free first; M205: or by sound
         if why_close:
             close.append((pr, why_close))
             return
@@ -8947,6 +8957,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             pr.notes.append("k: по правилу (без модели): " + ", ".join(f"{r}={w}" for r, w in pr.keys)
                             + (" — голос" if _v and any(_v) else ""))
 
+    if getattr(ac, "select", "greedy") == "global" and len(pool) > 1:
+        # M205: the set with the largest total score and no two too close goes first (the checks below may still refuse
+        # one — then the next candidate takes its place, as before)
+        from autoreels.cloud.autocut import select_global
+        _cf = lambda i, j: _close(pool[i], [pool[j]]) is not None  # noqa: E731
+        _pick = select_global([float(p_.score) for p_ in pool], _cf, prm.clips)
+        _greedy: list[int] = []
+        for _i in range(len(pool)):
+            if len(_greedy) < prm.clips and not any(_cf(_i, _j) for _j in _greedy):
+                _greedy.append(_i)
+        if _pick != _greedy:
+            print(f"  отбор: глобальный — {len(_pick)} без пересечений (сумма {sum(pool[i].score for i in _pick)}), "
+                  f"по порядку было бы {len(_greedy)} (сумма {sum(pool[i].score for i in _greedy)})", flush=True)
+        _set = set(_pick)
+        pool = [pool[i] for i in _pick] + [p_ for i, p_ in enumerate(pool) if i not in _set]
     not_reached: list = []        # M202: candidates the loop never tried — prm.clips were already taken
     for _k, pr in enumerate(pool):
         if len(accepted) >= prm.clips:
