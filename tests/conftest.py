@@ -30,6 +30,9 @@ def _isolate_machine_local_state(tmp_path, monkeypatch):
     репо на каждом прогоне тестов. Тесты могут переопределить env своим путём."""
     monkeypatch.setenv("AUTOREELS_HISTORY_PATH", str(tmp_path / "history.jsonl"))
     monkeypatch.setenv("AUTOREELS_TOKEN_SCALE_FILE", str(tmp_path / "token_scale.json"))
+    # M206: config/r0.yaml llm_cache is record — a test never writes or reads the project's answer cache (the cache's
+    # own tests set ARL_LLM_CACHE themselves)
+    monkeypatch.setenv("ARL_LLM_CACHE", "off")
 
 
 # --------------------------------------------------------------------------- repo write guard

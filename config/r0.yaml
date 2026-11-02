@@ -275,7 +275,7 @@ anthropic:
 # replay — only kept answers, a miss fails `arl auto` (code 1): an A/B of code on replay differs only by the code.
 # ARL_LLM_CACHE=off|record|replay overrides mode for one run.
 llm_cache:
-  mode: "off"
+  mode: record   # M206 (owner 2026-11-02): every run keeps its answers — the same request, the same answer
   dir: data/cache/llm
 
 # M108: one lock for every heavy job of gamebox (the audiobook's synthesis and checks, llama-server use, whisper.cpp):
@@ -379,13 +379,13 @@ autocut:
   answer_start: true      # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
                           # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
   answer_gap_sec: 3.0
-  start_morph: false      # M200: with start_strict, a reel never opens on a sentence with nothing to stand on — a verb without a
+  start_morph: true       # M206: on (owner 2026-11-02). M200: with start_strict, a reel never opens on a sentence with nothing to stand on — a verb without a
                           # subject («Как было, так и было.») or «он/их» before any noun; needs pymorphy3 (pip install -e ".[nlp]")
   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
   # M205 (m200: «Алгоритм или эмпатия» refused as sharing map thought #52 with M3 — no sentence heard in both):
-  close_by: units         # units — two reels too close by the map's thoughts (as before); sound — by the sentences heard in both
+  close_by: sound         # M206: on (owner 2026-11-02; m205: 51 → 54 reels, «Алгоритм» kept). units — two reels too close by the map's thoughts (as before); sound — by the sentences heard in both
   close_share_max: 0.0    # sound: share of the shorter reel's seconds two reels may both play (0 = not one sentence)
-  select: greedy          # greedy — take candidates in the pool's order (as before); global — the set with the largest total
+  select: global          # M206: on (owner 2026-11-02; m205: same set as greedy on the 7 sources). greedy — take candidates in the pool's order (as before); global — the set with the largest total
                           # score and no two too close is walked first (one strong candidate no longer blocks two good ones)
   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off

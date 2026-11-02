@@ -101,8 +101,10 @@ def test_sound_keeps_reels_that_share_a_thought_but_no_sentence(tmp_path, capsys
     assert "≈" not in con and "учёт кандидатов" not in con
 
 
-def test_defaults_are_the_behaviour_before_m205():
+def test_code_defaults_are_the_behaviour_before_m205_and_the_repo_config_is_on():
     from autoreels import __main__ as cli
     from autoreels.core.config import AutocutConfig
-    for ac in (AutocutConfig(), cli.load_r0_config("config/r0.yaml").autocut):
-        assert ac.close_by == "units" and ac.select == "greedy" and ac.close_share_max == 0.0
+    ac = AutocutConfig()
+    assert ac.close_by == "units" and ac.select == "greedy" and ac.close_share_max == 0.0
+    rc = cli.load_r0_config("config/r0.yaml").autocut   # M206: on (owner 2026-11-02)
+    assert rc.close_by == "sound" and rc.select == "global" and rc.close_share_max == 0.0

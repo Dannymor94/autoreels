@@ -13,12 +13,12 @@ from autoreels.cloud import clipcheck as C
 from autoreels.cloud.autocut import AutoParams, answer_start_reason
 
 
-def test_off_by_default_and_in_repo_config():
+def test_off_in_code_on_in_repo_config():
     assert not AutoParams().start_morph
     from autoreels.core.config import AutocutConfig, load_r0_config
     assert not AutocutConfig().start_morph
     ac = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").autocut
-    assert ac.start_morph is False
+    assert ac.start_morph is True                     # M206: on (owner 2026-11-02, after m205 kept «Алгоритм»)
 
 
 def test_answer_word_behind_a_filler():
