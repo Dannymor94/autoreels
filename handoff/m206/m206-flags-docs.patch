@@ -1,0 +1,183 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index ee77bab..ba62861 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -81,6 +81,7 @@ python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # установ
+ - **Инкрементально, со стоп-чеками.** Структурное изменение сначала доказывает, что старые данные дают тот же результат, — потом надстройка.
+ - **Минимализм.** Простейшее, что работает.
+ - **Правка устраняет причину, а не прячет симптом.** Подогнанная константа, выброшенный сегмент, обрезка одних субтитров, прижатый к началу конец слова — каждый раз проблема возвращалась в другом виде. Если причина не найдена — так и написать.
++- **Текущая фаза (владелец, 2026-11): только механики.** Нового рендера и пересборки клипов нет; рендер — только для проверки механики. Платного API нет (Claude 403 с 2026-10-30): модели — бесплатные (`--llm cloud`), сценарист — из кэша, новые источники — через «Сценарист через чат» (PLAN, M207).
+ - **A/B кода — на одних и тех же ответах моделей.** Замер «до/после» правки кода идёт с `ARL_LLM_CACHE=replay` (кэш ответов `data/cache/llm/`, M202): разница тогда только от кода. Промах кэша — прогон не воспроизведён (`arl auto` → код 1), а не тихая замена. Новые ответы дописывает `ARL_LLM_CACHE=record`.
+ - **Каждый ушедший кандидат виден с причиной.** Черновик и консоль показывают, куда ушёл каждый кандидат пула: принят, `✗` не прошёл проверку, `≈` похож на принятый, `○` без крючка, `…` не дошла очередь. Сумма сверяется с пулом.
+ - **Проверка не пропускает проблемный случай.** Никаких `skip`/`continue` для «особых» клипов, ради которых проверка написана. Замер не исключает изменившиеся элементы по построению (например, сравнение только общих элементов двух списков).
+diff --git a/PLAN.md b/PLAN.md
+index f8abd58..8e329eb 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -240,7 +240,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ ---
+ 
+-## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M200) 🔄 В РАБОТЕ
++## Автомонтаж: от источника до листа ревью без ручной разметки (M52–M206) 🔄 В РАБОТЕ
+ 
+ Ручная разметка источника — самый медленный шаг. Автомонтаж пишет её черновик сам; владелец решает на листе ревью. Правила клипа — `docs/REEL_SPEC.md`; значения — `config/r0.yaml autocut:` и `config/render.yaml`. Каждый шаг закрывает только просмотр владельца.
+ 
+@@ -256,7 +256,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Генераторы и ритм | генераторы montage / passage / mixed (по умолчанию mixed); правило прыжков — не больше двух, кусок после дальнего прыжка держится дольше, последний — половину; глубина опор `lean_depth`; судья начала вне отбора; число клипов по длине источника (`clips_every_min`); `--ac ключ=значение` меняет любое поле `autocut:` на один прогон | M119–M122 |
+ | Сценарист | `arl autocut <src> --scenario --llm sonnet` или `haiku`: названная модель пишет ролики по всему тексту, код проверяет каждую строку правилами автоматического пути; few-shot — клипы владельца из других источников; ответ кэшируется | M123, M123b |
+ | Ведущий (интервьюер) | карта говорящих `transcripts/<ист>.speakers.json` (`arl speakers`: pyannote или импорт m141); `autocut.interviewer`: `on` — реплики ведущего можно брать как контекст (вопрос, открывающий ролик) или живую реплику (шутка, смех), спикер — больше половины ролика, сценарист видит «[ведущий]»; `off` — без них; на прогон `arl auto --interviewer on|off`. m141: правило «пауза + вы/ты» ловило 6 из 55 вопросов ведущего. По умолчанию `off` — владелец 2026-10-27: в продакшн ролики без ведущего (M169). Карту `arl auto` строит сам, если её нет (`autocut.speakers_auto`, окружение с pyannote — `speakers_python`; не вышло — прогон идёт без неё, M170) | M141, M165, M169, M170 |
+-| Платное окно `arl auto` | до `autocut.paid_until` (2026-11-02: промо-кредиты истекают 03.11) карта, судьи и посты — `autocut.paid_llm` (sonnet); после — бесплатно, сценарист только по `--mode scenario`. `--tag` — черновики прогона под своими именами | M157 |
++| Платное окно `arl auto` | до `autocut.paid_until` (2026-11-02) карта, судьи и посты — `autocut.paid_llm` (sonnet); после — бесплатно, сценарист только по `--mode scenario`. `--tag` — черновики прогона под своими именами. С 2026-10-30 Claude отвечает 403 (ключ отклонён, m201) — платного API нет | M157, M201 |
+ | Кто пишет в `arl auto` | `autocut.auto_mode` (`scenario` — решение владельца 2026-10-26 для текущей работы; `autocut` — бесплатно), модель `autocut.scenario_llm`; на прогон `--mode`, `--scenario-llm`; сценарист не ответил — автомонтаж с пометкой в итоге. Переключатели — README | M153 |
+ | Посты и экспорт | `arl describe`: пост 3–5 предложений словами ролика, хэштеги только из сказанного (местоимения и служебные — никогда) → `<rid>.post.txt`; `arl article` — лонгриды из тем карты; `arl crosspost` / `arl export` — клипы, обложки и тексты в `export/` для импорта. Публикации нет | M90, M93, M94, M100, M101, M104 |
+ | Транскрипция | whisper.cpp на gamebox и `arl tx-compare`; `arl tx-use` переключает транскрипт источника; `arl tx-punct` переносит концы предложений Groq (или модели) на слова локального транскрипта; Groq в два прохода — слова без промпта, концы предложений с промптом (`groq.dual`, включён) | M62, M64, M111, M113, M124 |
+@@ -285,7 +285,15 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Начало — не ответ | `autocut.answer_start` (с `start_strict`): ролик не открывается словом-ответом («Да, …», «Нет.») и ответом сразу после фразы ведущего, не повторяющим вопрос; при слове-ответе сначала начало со следующей фразы, затем раньше, иначе ролика нет (M197). Включено владельцем 2026-10-30. m196: 68 клипов против 69 у m183 (ушёл «Беглец» day_yoga_p2, у «Как ты отдыхаешь?» убрано «Да, …») | M193, M196, M197 |
+ | План и выравнивание | холодный старт вне тела клипа — субтитры по порядку проигрывания (M194); заглушка выравнивателя (≤ 45 мс, дальше 0,5 с от времени Whisper, не по порядку) не даёт время слову — 16 однобуквенных слов во всех источниках, шов больше не режет слово (M195). «last word cut» ручного клипа, где следующая речь начинается внутри последнего слова, — не ошибка: клип размечается на фразу раньше | M194, M195 |
+ | Проверки клипа (замер) | `cloud/clipcheck.py` + `tools/clip_checks.py <гейт>`: четыре недостатка, названные слепыми судьями, — крючок обрывается, плашка мимо клипа, начало без опоры (`pymorphy3`, группа `.[nlp]`), стык из разных мыслей; только замер, конвейер не трогают. Сверка с ab192 и эталоном: включаем лишь «начало без опоры» (M200) — у «крючок обрывается» слова звучат в теле (hooks_diag), остальные бьют по клипам, оценённым «ok» | M199 |
+-| Начало без опоры | `autocut.start_morph` (с `start_strict`, **выключено**): ролик не открывается глаголом без подлежащего («Как было, так и было.») или местоимением 3-го лица раньше любого существительного («он/их…»); подлежащее — слово в любом прочтении в именительном падеже (безличные и вопросы пропускаются). Начало на фразу-две раньше, иначе ролика нет; клип разметки убирается. В ab192 ловит два худших начала из 20, 0 ложных; m200: начало без опоры 3 → 0, 66 клипов против 68 у m196. Заодно `answer_start` находит слово-ответ за «ну/вот» («Ну да, …», «Да, вот, …») | M200 |
++| Начало без опоры | `autocut.start_morph` (с `start_strict`, **включено** владельцем 2026-11-02, M206): ролик не открывается глаголом без подлежащего («Как было, так и было.») или местоимением 3-го лица раньше любого существительного («он/их…»); подлежащее — слово в любом прочтении в именительном падеже (безличные и вопросы пропускаются). Начало на фразу-две раньше, иначе ролика нет; клип разметки убирается. В ab192 ловит два худших начала из 20, 0 ложных; m200: начало без опоры 3 → 0, 66 клипов против 68 у m196. Заодно `answer_start` находит слово-ответ за «ну/вот» («Ну да, …», «Да, вот, …») | M200 |
++| Ошибки моделей видны | строка «модель не ответила» с текстом ошибки; строка расхода Claude считает отказы (m197–m200: все новые платные запросы падали, отчёты читались как «из кэша, $0») | M201 |
++| Кэш ответов моделей | `llm_cache: off \| record \| replay` (`ARL_LLM_CACHE` на прогон), `data/cache/llm/`: ключ — модель + сообщения + температура. `record` (по умолчанию с M206) — тот же запрос, тот же ответ; `replay` — только из кэша, промах = `arl auto` код 1. A/B кода — на replay. m204: record → replay 7/7 черновиков байт в байт. Учёт кандидатов autocut: `✗` проверка, `≈` похож, `○` без крючка, `…` не дошла очередь; сумма сверяется с пулом | M202, M204, M206 |
++| `k:` без модели | `autocut.keywords_source: rule` (решение владельца 2026-11-02, `keywords_max: 2`): последняя фраза → первая → середина, без вопросов, последнее содержательное слово. Эталон — `emph` в манифестах (68 клипов, 135 слов): правило 31 % слово в слово, случайно 6 %, с голосом хуже (21 %). `tools/kw_rule_check.py` | M203, M204 |
++| Модель прогона в режиме сценариста | `autocut.scenario_polish: run` — сценарист на своей модели (или из кэша), крючки, плашки, `k:` и стыки на `--llm` (бесплатные Groq → OpenRouter); m204: плашки и `k:` у 54 из 54, отказов 0 | M204 |
++| Проверено и не делаем | стыки без модели — правила начала клипа помечают 33 % и плохих (12 вердиктов модели), и хороших (42 стыка владельца); крючки — `hook_score` уже детерминирован, эталона нет (холодный старт у владельца в 3 клипах из 68); плашки из слов клипа — 20 % совпадения с плашками владельца (случайно 8 %), плашки владельца — пересказ | M204 |
++| Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
++| **Сценарист через чат** (план, M207) | без платного API: `arl auto <ист> --scenario-llm chat` кладёт в `exchange/<ист>.scenario.md` одним файлом инструкцию владельцу, задание сценаристу (тот же промпт, что у API) и пронумерованный текст, прогон останавливается; владелец отдаёт файл любому чату и кладёт ответ в `exchange/<ист>.scenario.answer.txt`; `arl scenario-check <ист>` — какие строки приняты, какие нет и почему (отклонённые можно вернуть чату); повторный `arl auto` берёт ответ из файла как ответ модели, дальше обычный путь. Тот же файл — тот же результат | M207 |
++| **Карта без модели** (план, M208) | мысли источника по паузам и смене лексики (TextTiling по леммам): новый источник проходит `arl auto` без API; замер — границы против нынешних карт 7 источников | M208 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+diff --git a/README.md b/README.md
+index c10c4a0..5d6ec0d 100644
+--- a/README.md
++++ b/README.md
+@@ -86,6 +86,10 @@
+ | крючок из части фразы; строгое начало ролика | `autocut.hook_clauses` (холодный старт — кусок длинной фразы между паузами, `h:B.N@i-j`); `autocut.start_strict` (ролик не начинается со ссылки назад или обращения к собеседнику: начало раньше на фразу-две, иначе ролика нет) (M182) |
+ | крючок клипам разметки | `autocut.label_hooks` — клип разметки в `arl auto` получает крючок из своей второй половины (M183) |
+ | голос поста | `post.voice: author \| reader` — от «я» (сам автор) или о ролике (M173) |
++| кэш ответов моделей | `llm_cache.mode: record` (по умолчанию: тот же запрос — тот же ответ); на прогон `ARL_LLM_CACHE=off \| record \| replay`. `replay` — только из кэша, промах = код 1; A/B кода — на replay (M202, M206) |
++| ключевые слова `k:` | `autocut.keywords_source: rule \| model \| fallback` (по умолчанию `rule` — без модели), `keywords_max` (M203, M204) |
++| модель плашек, `k:`, стыков в режиме сценариста | `autocut.scenario_polish: run` (модель прогона `--llm`) \| `scenarist` (модель сценариста) (M204) |
++| похожесть клипов и отбор | `autocut.close_by: sound \| units`, `close_share_max`; `autocut.select: global \| greedy` (M205, M206) |
+ | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+ 
+ Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
+diff --git a/config/r0.yaml b/config/r0.yaml
+index d066f77..37da9e5 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -275,7 +275,7 @@ anthropic:
+ # replay — only kept answers, a miss fails `arl auto` (code 1): an A/B of code on replay differs only by the code.
+ # ARL_LLM_CACHE=off|record|replay overrides mode for one run.
+ llm_cache:
+-  mode: "off"
++  mode: record   # M206 (owner 2026-11-02): every run keeps its answers — the same request, the same answer
+   dir: data/cache/llm
+ 
+ # M108: one lock for every heavy job of gamebox (the audiobook's synthesis and checks, llama-server use, whisper.cpp):
+@@ -379,13 +379,13 @@ autocut:
+   answer_start: true      # M193: with start_strict, a reel never opens on an answer — «Да, …», «Нет.», or the reply right after
+                           # the interviewer's sentence that does not repeat his question (the start goes earlier, else the reel goes)
+   answer_gap_sec: 3.0
+-  start_morph: false      # M200: with start_strict, a reel never opens on a sentence with nothing to stand on — a verb without a
++  start_morph: true       # M206: on (owner 2026-11-02). M200: with start_strict, a reel never opens on a sentence with nothing to stand on — a verb without a
+                           # subject («Как было, так и было.») or «он/их» before any noun; needs pymorphy3 (pip install -e ".[nlp]")
+   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
+   # M205 (m200: «Алгоритм или эмпатия» refused as sharing map thought #52 with M3 — no sentence heard in both):
+-  close_by: units         # units — two reels too close by the map's thoughts (as before); sound — by the sentences heard in both
++  close_by: sound         # M206: on (owner 2026-11-02; m205: 51 → 54 reels, «Алгоритм» kept). units — two reels too close by the map's thoughts (as before); sound — by the sentences heard in both
+   close_share_max: 0.0    # sound: share of the shorter reel's seconds two reels may both play (0 = not one sentence)
+-  select: greedy          # greedy — take candidates in the pool's order (as before); global — the set with the largest total
++  select: global          # M206: on (owner 2026-11-02; m205: same set as greedy on the 7 sources). greedy — take candidates in the pool's order (as before); global — the set with the largest total
+                           # score and no two too close is walked first (one strong candidate no longer blocks two good ones)
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+diff --git a/pyproject.toml b/pyproject.toml
+index 637a170..b7a1819 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -11,6 +11,7 @@ dependencies = [
+     "pydantic>=2.6",
+     "pyyaml>=6.0",
+     "httpx>=0.27",           # Groq Whisper + провайдер-слой R0 (Groq → OpenRouter)
++    "numpy>=1.26",           # карта речи (cloud/speechmap.py), голос/просодия/движение (local/) — M206: была только в ветке dev
+ ]
+ # .env читаем своим устойчивым загрузчиком (core/env.py): чистит CRLF/кавычки, ищет от корня,
+ # ловит .env.txt. python-dotenv убран — на Windows молча оставлял \r в ключе → 401.
+diff --git a/tests/conftest.py b/tests/conftest.py
+index dafdcb5..c0a7654 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -30,6 +30,9 @@ def _isolate_machine_local_state(tmp_path, monkeypatch):
+     репо на каждом прогоне тестов. Тесты могут переопределить env своим путём."""
+     monkeypatch.setenv("AUTOREELS_HISTORY_PATH", str(tmp_path / "history.jsonl"))
+     monkeypatch.setenv("AUTOREELS_TOKEN_SCALE_FILE", str(tmp_path / "token_scale.json"))
++    # M206: config/r0.yaml llm_cache is record — a test never writes or reads the project's answer cache (the cache's
++    # own tests set ARL_LLM_CACHE themselves)
++    monkeypatch.setenv("ARL_LLM_CACHE", "off")
+ 
+ 
+ # --------------------------------------------------------------------------- repo write guard
+diff --git a/tests/test_m200_start_morph.py b/tests/test_m200_start_morph.py
+index 9cb176b..ef193d6 100644
+--- a/tests/test_m200_start_morph.py
++++ b/tests/test_m200_start_morph.py
+@@ -13,12 +13,12 @@ from autoreels.cloud import clipcheck as C
+ from autoreels.cloud.autocut import AutoParams, answer_start_reason
+ 
+ 
+-def test_off_by_default_and_in_repo_config():
++def test_off_in_code_on_in_repo_config():
+     assert not AutoParams().start_morph
+     from autoreels.core.config import AutocutConfig, load_r0_config
+     assert not AutocutConfig().start_morph
+     ac = load_r0_config(Path(__file__).resolve().parents[1] / "config" / "r0.yaml").autocut
+-    assert ac.start_morph is False
++    assert ac.start_morph is True                     # M206: on (owner 2026-11-02, after m205 kept «Алгоритм»)
+ 
+ 
+ def test_answer_word_behind_a_filler():
+diff --git a/tests/test_m202_replay_accounting.py b/tests/test_m202_replay_accounting.py
+index 8c55baa..492a29c 100644
+--- a/tests/test_m202_replay_accounting.py
++++ b/tests/test_m202_replay_accounting.py
+@@ -89,7 +89,8 @@ def test_the_environment_overrides_the_config_and_a_typo_is_an_error(monkeypatch
+ def test_make_pool_is_wrapped_only_when_the_cache_is_on(tmp_path, monkeypatch):
+     from autoreels import __main__ as cli
+     r0 = cli.load_r0_config("config/r0.yaml")
+-    assert r0.llm_cache.mode == "off"
++    assert r0.llm_cache.mode == "record"                                         # M206: the repo config keeps answers
++    monkeypatch.setenv(llmcache.ENV, "off")
+     assert isinstance(cli._make_pool(r0, "sonnet"), ProviderPool)               # off: exactly as before M202
+     monkeypatch.setenv(llmcache.ENV, "replay")
+     p = cli._make_pool(r0.model_copy(update={"llm_cache": r0.llm_cache.model_copy(update={"dir": str(tmp_path)})}),
+@@ -142,6 +143,9 @@ def _scenario_project(tmp_path):
+ 
+ def test_autocut_shows_a_too_close_candidate_with_its_reason(tmp_path, capsys):
+     cli, Fake, first, second = _scenario_project(tmp_path)
++    cfg = tmp_path / "config" / "r0.yaml"                 # M206: the repo config closes by sound — here by the map
++    import re
++    cfg.write_text(re.sub(r"(?m)^  close_by: \w+", "  close_by: units", cfg.read_text(encoding="utf-8")), encoding="utf-8")
+     rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                          scenario_provider=Fake(), out=str(tmp_path / "reviews" / "v_close.txt"))
+     out = capsys.readouterr().out
+diff --git a/tests/test_m205_selection.py b/tests/test_m205_selection.py
+index 3ebbb61..294ce44 100644
+--- a/tests/test_m205_selection.py
++++ b/tests/test_m205_selection.py
+@@ -101,8 +101,10 @@ def test_sound_keeps_reels_that_share_a_thought_but_no_sentence(tmp_path, capsys
+     assert "≈" not in con and "учёт кандидатов" not in con
+ 
+ 
+-def test_defaults_are_the_behaviour_before_m205():
++def test_code_defaults_are_the_behaviour_before_m205_and_the_repo_config_is_on():
+     from autoreels import __main__ as cli
+     from autoreels.core.config import AutocutConfig
+-    for ac in (AutocutConfig(), cli.load_r0_config("config/r0.yaml").autocut):
+-        assert ac.close_by == "units" and ac.select == "greedy" and ac.close_share_max == 0.0
++    ac = AutocutConfig()
++    assert ac.close_by == "units" and ac.select == "greedy" and ac.close_share_max == 0.0
++    rc = cli.load_r0_config("config/r0.yaml").autocut   # M206: on (owner 2026-11-02)
++    assert rc.close_by == "sound" and rc.select == "global" and rc.close_share_max == 0.0
