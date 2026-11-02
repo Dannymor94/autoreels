@@ -1,0 +1,235 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 98a2b9e..78122cc 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -440,6 +440,9 @@ autocut:
+   # Per run: arl auto <видео> --mode autocut | scenario  [--scenario-llm haiku | sonnet]
+   auto_mode: scenario
+   scenario_llm: sonnet
++  # M204 (owner 2026-11-02, no paid API): in scenario mode the scenarist answers from its cache / on scenario_llm, the
++  # hooks, plates, k: and seams on the run's --llm (scenarist = all on scenario_llm, as before M204)
++  scenario_polish: run
+   # M157 (owner 2026-10-26: «все прогоним через промо-кредиты» — 96 $ of promo credit expire 2026-11-03 UTC):
+   # until paid_until (inclusive) `arl auto` without --llm runs the map, the judges and the posts on paid_llm too.
+   # After it arl auto is free again: --llm auto = the free models, and the scenarist only with --mode scenario
+@@ -498,7 +501,7 @@ autocut:
+   # M88 — owner: «у копии PXL не хватает динамики»; k: words were only in the owner's own lines:
+   keywords: true          # the model marks key words (k:): highlighted in the subtitles, the close shot comes on them
+   keywords_every_sec: 12  # one per 12 s of the clip …
+-  keywords_max: 4         # … at most 4 (each one is also a shot change — «наплыв только на важном»)
++  keywords_max: 2         # … at most 2 (M204, owner 2026-11-02: the rule hits 31 % at 2, 21 % at up to 4; each one is also a shot change)
+   # M116 — M1.9 stage D (owner: «давай»; M99: the owner's k: word is drawn out by the voice in 81 % of sentences):
+   keywords_voice: false   # M118 off (m116: with the hints Haiku picked «потом», «месте», «школу» where without them it took
+                           # «инструменты», «отклик», «буллинг» — the voice draws out hedges as much as the point); on: the
+@@ -507,7 +510,7 @@ autocut:
+   # M203 (owner 2026-11-02: no paid API — «детерминированно»): who marks k:. model — as before; rule — no model: the
+   # last sentence, then the first, then the middle (no questions), its last content word (owner's 68 clips: 31 % exact
+   # words at 2 per clip, random 7 %); fallback — the model, the rule when the model gave none.
+-  keywords_source: model
++  keywords_source: rule   # M204: owner 2026-11-02 — the rule (m203: 31 % exact words, k: on 54 of 54 reels)
+   keywords_rule_voice: false   # rule: the word the voice draws out instead of the last one (M99: 65 % vs ~50 %)
+   # M91 — ending package (PLAN M1.7 B), the part that fits the owner's rules (no frozen frame, quick ending):
+   close_last: true        # the payoff — the clip's last sentences (≥ 3 s, at most two) — in the close shot (c:)
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 1bed7a9..e89bd61 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8489,7 +8489,7 @@ def _autocut_overrides(base, pairs) -> "object":
+ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
+                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
+                 judge_log: str | None = None, voice_keys: bool = True, ac_over=None, scenario: bool = False,
+-                scenario_provider=None) -> int:
++                scenario_provider=None, scenario_llm: str | None = None) -> int:
+     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
+     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
+     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
+@@ -8729,7 +8729,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             _other = _sp_other({r: (float(st[0].t0), float(st[-1].t1)) for r, st in sent_by_ref.items() if st}, _spm)
+             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
+     if scenario:
+-        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, mode, sent_by_ref, the_map.get("units") or [],
++        # M204: scenario_llm — the scenarist's own model; `mode` (--llm) then polishes (hooks, plates, k:, seams)
++        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
++                              the_map.get("units") or [],
+                               end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
+                               clauses=clauses)
+         if pool is None:
+@@ -10653,6 +10655,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     except Exception:  # noqa: BLE001 — no config: the free autocut, as before
+         _mode, _scen_llm, _paid_llm, _paid_until = "autocut", "sonnet", "", ""
+         _spk_auto, _spk_py = False, ""
++        _ac = None
+     import datetime as _dt                             # M157: the paid models while the promo credit lasts
+     _today = today or _dt.date.today()
+     _expired = bool(_paid_until) and _today > _dt.date.fromisoformat(_paid_until)
+@@ -10720,8 +10723,9 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         if interviewer:                                  # M165: --interviewer on|off for this run
+             _out["ac_over"] = [f"interviewer={interviewer}"]
+         if _mode == "scenario":
++            _skw = _scenario_autocut_llms(_ac, llm, _scen_llm)   # M204: who polishes the scenarist's reels
+             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+-                                                                        llm=_scen_llm, scenario=True, **_out))
++                                                                        scenario=True, **_skw, **_out))
+             if err:
+                 _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
+                 print(f"  ⚠ {_scen_note}", flush=True)
+@@ -10795,6 +10799,15 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     return 0 if all(st == "ok" for _, st, _ in results) else 1
+ 
+ 
++def _scenario_autocut_llms(ac, llm: str, scen_llm: str) -> dict:
++    """M204 (owner 2026-11-02: no paid API — m202/m203: in scenario mode the hooks, plates, k: and seams went to the
++    scenarist's paid model whatever --llm said, 151 refusals): autocut.scenario_polish «scenarist» — as before, all on
++    the scenarist's model; «run» — the scenarist on its model, the rest on the run's --llm."""
++    if getattr(ac, "scenario_polish", "scenarist") == "run":
++        return {"llm": llm, "scenario_llm": scen_llm}
++    return {"llm": scen_llm}
++
++
+ def _llm_cache_verdict() -> bool:
+     """M202: the answer cache's line of the run's summary; True when replay missed answers (the run fails)."""
+     from autoreels.cloud import llmcache as _llmc
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 9a55a41..0d63c88 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -365,6 +365,9 @@ class AutocutConfig(BaseModel):
+     # rule when it gave none); keywords_rule_voice — the rule takes the word the voice draws out (intonation map)
+     keywords_source: Literal["model", "rule", "fallback"] = "model"
+     keywords_rule_voice: bool = False
++    # M204: in scenario mode who polishes the scenarist's reels (hooks, plates, k:, seams): scenarist — its model, as
++    # before; run — the run's --llm (the free models when the paid API is not there)
++    scenario_polish: Literal["scenarist", "run"] = "scenarist"
+     # M91 (ending package): the payoff in the close shot — the last sentences (≥ close_last_sec, at most two) c:
+     close_last: bool = False
+     close_last_sec: float = Field(3.0, ge=0)
+diff --git a/tests/test_autocut.py b/tests/test_autocut.py
+index e4a5262..00c89ef 100644
+--- a/tests/test_autocut.py
++++ b/tests/test_autocut.py
+@@ -1165,9 +1165,10 @@ def test_m116_autocut_shows_the_words_the_voice_draws_out_to_the_keyword_model(t
+         cfg = root / "config" / "r0.yaml"
+         cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 10 ")
+                        .replace("  clips: 5\n", "  clips: 1\n").replace("  clips_every_min: ", "  clips_every_min: 0  # ")
+-                       .replace("  keywords_voice: false ", "  keywords_voice: true "), encoding="utf-8")   # M118: off by default
++                       .replace("  keywords_voice: false ", "  keywords_voice: true ")   # M118: off by default
++                       .replace("  keywords_source: rule ", "  keywords_source: model "), encoding="utf-8")  # M204: k: by the model here
+         r0 = cli.load_r0_config(cfg)
+-        assert r0.autocut.keywords and r0.autocut.keywords_voice
++        assert r0.autocut.keywords and r0.autocut.keywords_voice and r0.autocut.keywords_source == "model"
+         tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), root / "cache")
+         _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+         ss = merge_group_sentences([kept[1]], tx.words)
+diff --git a/tests/test_m153_auto_mode.py b/tests/test_m153_auto_mode.py
+index 6b7cb25..b1a10c9 100644
+--- a/tests/test_m153_auto_mode.py
++++ b/tests/test_m153_auto_mode.py
+@@ -31,8 +31,10 @@ def test_m153_auto_uses_the_scenarist_with_its_named_model(tmp_path, monkeypatch
+     calls = _stub(monkeypatch, tmp_path)
+     assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
+     kw = _autocut_kw(calls)
+-    assert len(kw) == 1 and kw[0]["scenario"] is True and kw[0]["llm"] == "sonnet"
+-    assert next(c for c in calls if c[0] == "map")[2]["llm"] == "auto"     # the map stays on the free models
++    run_llm = next(c for c in calls if c[0] == "map")[2]["llm"]
++    assert run_llm == "auto"                                               # the map stays on the free models
++    # M204 (repo config scenario_polish: run): the scenarist on its model, the rest of autocut on the run's model
++    assert len(kw) == 1 and kw[0]["scenario"] is True and kw[0]["scenario_llm"] == "sonnet" and kw[0]["llm"] == run_llm
+     assert "сценарист (sonnet)" in capsys.readouterr().out
+ 
+ 
+@@ -58,7 +60,7 @@ def test_m153_cli_mode_overrides_the_config(tmp_path, monkeypatch):
+     _set_mode(tmp_path, "autocut")
+     assert cli.cmd_auto([str(mpath)], root=tmp_path, mode="scenario", scenario_llm="haiku") == 0
+     kw = _autocut_kw(calls)[0]
+-    assert kw["scenario"] is True and kw["llm"] == "haiku"
++    assert kw["scenario"] is True and kw["scenario_llm"] == "haiku"
+ 
+ 
+ def test_m153_scenarist_failure_falls_back_to_the_free_autocut(tmp_path, monkeypatch, capsys):
+@@ -87,3 +89,53 @@ def test_m153_cli_parser_has_mode_and_scenario_llm():
+     assert a.mode == "autocut" and a.scenario_llm == "haiku"
+     a = build_parser().parse_args(["auto", "x.mp4"])
+     assert a.mode is None and a.scenario_llm is None
++
++
++def test_m204_scenario_polish_scenarist_is_the_behaviour_before_m204(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    cfg = tmp_path / "config" / "r0.yaml"
++    text = cfg.read_text(encoding="utf-8")
++    assert text.count("  scenario_polish: run") == 1
++    cfg.write_text(text.replace("  scenario_polish: run", "  scenario_polish: scenarist"), encoding="utf-8")
++    calls = _stub(monkeypatch, tmp_path)
++    assert cli.cmd_auto([str(mpath)], root=tmp_path) == 0
++    kw = _autocut_kw(calls)[0]
++    assert kw["scenario"] is True and kw["llm"] == "sonnet" and "scenario_llm" not in kw
++
++
++def test_m204_code_default_is_the_scenarist_and_the_split_is_explicit():
++    from autoreels import __main__ as cli
++    from autoreels.core.config import AutocutConfig
++    assert AutocutConfig().scenario_polish == "scenarist"
++    assert cli._scenario_autocut_llms(AutocutConfig(), "cloud", "sonnet") == {"llm": "sonnet"}
++    assert cli._scenario_autocut_llms(None, "cloud", "sonnet") == {"llm": "sonnet"}
++    run = AutocutConfig(scenario_polish="run")
++    assert cli._scenario_autocut_llms(run, "cloud", "sonnet") == {"llm": "cloud", "scenario_llm": "sonnet"}
++
++
++def test_m204_autocut_asks_the_scenarist_on_its_model_and_polishes_on_llm(tmp_path, monkeypatch):
++    from autoreels import __main__ as cli
++    from tests.test_m202_replay_accounting import _scenario_project
++    cli_, Fake, first, second = _scenario_project(tmp_path)
++    seen = {}
++    real_pool, real_make = cli._scenario_pool, cli._make_pool
++
++    def spy_pool(stem, root, cache, r0_cfg, ac, prm, mode, *a, **k):
++        seen["scenarist"] = mode
++        return real_pool(stem, root, cache, r0_cfg, ac, prm, mode, *a, **k)
++
++    def spy_make(r0_cfg, mode):
++        seen.setdefault("polish", []).append(mode)
++        return real_make(r0_cfg, mode)
++    monkeypatch.setattr(cli, "_scenario_pool", spy_pool)
++    monkeypatch.setattr(cli, "_make_pool", spy_make)
++    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
++                         scenario_provider=Fake(), llm="cloud", scenario_llm="sonnet",
++                         out=str(tmp_path / "reviews" / "v_split.txt"))
++    assert rc == 0 and seen["scenarist"] == "sonnet" and seen["polish"][0] == "cloud"
++    seen.clear()
++    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
++                         scenario_provider=Fake(), llm="cloud", out=str(tmp_path / "reviews" / "v_same.txt"))
++    assert rc == 0 and seen["scenarist"] == "cloud"           # no scenario_llm: one model for all, as before M204
+diff --git a/tests/test_m203_keywords_rule.py b/tests/test_m203_keywords_rule.py
+index 39938af..1720def 100644
+--- a/tests/test_m203_keywords_rule.py
++++ b/tests/test_m203_keywords_rule.py
+@@ -45,9 +45,10 @@ def _project(tmp_path, source: str):
+     from tests.test_m202_replay_accounting import _scenario_project
+     cli, Fake, first, second = _scenario_project(tmp_path)
+     cfg = tmp_path / "config" / "r0.yaml"
++    import re
+     text = cfg.read_text(encoding="utf-8")
+-    assert text.count("  keywords_source: model") == 1
+-    cfg.write_text(text.replace("  keywords_source: model", f"  keywords_source: {source}"), encoding="utf-8")
++    assert len(re.findall(r"(?m)^  keywords_source: \w+", text)) == 1
++    cfg.write_text(re.sub(r"(?m)^  keywords_source: \w+", f"  keywords_source: {source}", text), encoding="utf-8")
+     return cli, Fake
+ 
+ 
+@@ -64,10 +65,12 @@ def test_autocut_marks_k_without_a_model_only_when_asked(tmp_path, capsys, sourc
+     assert ("k: по правилу (без модели)" in text) is has_k
+ 
+ 
+-def test_default_is_the_model_as_before():
++def test_code_default_is_the_model_and_the_repo_config_is_the_owners_rule():
+     from autoreels import __main__ as cli
+-    ac = cli.load_r0_config("config/r0.yaml").autocut
+-    assert ac.keywords_source == "model" and ac.keywords_rule_voice is False
++    from autoreels.core.config import AutocutConfig
++    assert AutocutConfig().keywords_source == "model" and AutocutConfig().keywords_rule_voice is False
++    ac = cli.load_r0_config("config/r0.yaml").autocut      # M204: owner 2026-11-02 — the rule, at most 2 words
++    assert ac.keywords_source == "rule" and ac.keywords_max == 2 and ac.keywords_rule_voice is False
+ 
+ 
+ def test_the_measurement_tool_beats_the_random_floor(capsys):
