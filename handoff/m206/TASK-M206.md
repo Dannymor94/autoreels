@@ -56,14 +56,14 @@ grep -n "^  mode:\|  start_morph:\|  close_by:\|  select:" config/r0.yaml; grep 
 .venv/bin/python -m pytest tests/test_m200_start_morph.py tests/test_m202_replay_accounting.py tests/test_m205_selection.py -q 2>&1 | tail -1
 .venv/bin/python -m pytest -q 2>&1 | tail -3
 git add CLAUDE.md PLAN.md README.md R0_SPEC.md PROJECT_STRUCTURE.md PROJECT_GUIDE.md docs/REEL_SPEC.md config/r0.yaml pyproject.toml tests/conftest.py tests/test_m200_start_morph.py tests/test_m202_replay_accounting.py tests/test_m205_selection.py
-git status -s | grep -v "^?? handoff" || echo "всё закоммичено"
 git commit -m "Flags and docs (M206): owner 2026-11-02 — start_morph, close_by sound, select global on; llm_cache record by default (tests isolated); numpy declared; docs for M201–M206 in PLAN, README, CLAUDE.md, REEL_SPEC, R0_SPEC, PROJECT_STRUCTURE, PROJECT_GUIDE; PLAN: the planned chat scenarist (M207) and model-free map (M208); CLAUDE.md: the mechanics-only phase"
 git push; git log --oneline -1
+git status -s | grep -v "handoff/" || echo "всё закоммичено"
 ```
 Ожидается:
 - `applied`;
 - `mode: record`, `start_morph: true`, `close_by: sound`, `select: global`; строка `numpy`;
-- после `git add` — «всё закоммичено» (вне `handoff/` ничего не висит);
+- после коммита — «всё закоммичено» (вне `handoff/` ничего не висит);
 - первая строка pytest — все прошли;
 - весь набор — прежнее число (новых тестов нет), упавших не больше прежних (флейк `test_menu_bash::…profile_picker…` — перезапустить отдельно);
 - коммит запушен.
