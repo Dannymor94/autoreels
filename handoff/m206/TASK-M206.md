@@ -19,6 +19,9 @@
 - `PLAN.md` — строки M201–M206; плановые строки «**Сценарист через чат** (M207)» и «**Карта без модели** (M208)»; «Начало без опоры» — включено; платного API нет (403).
 - `README.md` — переключатели: кэш ответов, `k:`, модель прогона в режиме сценариста, похожесть и отбор.
 - `CLAUDE.md` — правило текущей фазы (только механики, платного API нет).
+- `docs/REEL_SPEC.md` — `k:` по правилу; похожесть по звуку, глобальный отбор и учёт ушедших кандидатов; «начало без опоры» включено; модель прогона для роликов сценариста.
+- `R0_SPEC.md` — сценарист: модели при `scenario_polish`, «Сценарист через чат» (план).
+- `PROJECT_STRUCTURE.md` — `cloud/llmcache.py`, `tools/kw_rule_check.py`, число тестов; `PROJECT_GUIDE.md` — `data/cache/llm/`.
 
 Ассистент прогнал весь набор: 2661 прошли, упали прежние 7 (ffmpeg, praat, `data/runs/`).
 
@@ -52,13 +55,15 @@ git apply --check handoff/m206/m206-flags-docs.patch && git apply handoff/m206/m
 grep -n "^  mode:\|  start_morph:\|  close_by:\|  select:" config/r0.yaml; grep -n numpy pyproject.toml
 .venv/bin/python -m pytest tests/test_m200_start_morph.py tests/test_m202_replay_accounting.py tests/test_m205_selection.py -q 2>&1 | tail -1
 .venv/bin/python -m pytest -q 2>&1 | tail -3
-git add CLAUDE.md PLAN.md README.md config/r0.yaml pyproject.toml tests/conftest.py tests/test_m200_start_morph.py tests/test_m202_replay_accounting.py tests/test_m205_selection.py
-git commit -m "Flags and docs (M206): owner 2026-11-02 — start_morph, close_by sound, select global on; llm_cache record by default (tests isolated); numpy declared; PLAN: M201–M206 and the planned chat scenarist (M207) and model-free map (M208); README switches; CLAUDE.md: the mechanics-only phase"
+git add CLAUDE.md PLAN.md README.md R0_SPEC.md PROJECT_STRUCTURE.md PROJECT_GUIDE.md docs/REEL_SPEC.md config/r0.yaml pyproject.toml tests/conftest.py tests/test_m200_start_morph.py tests/test_m202_replay_accounting.py tests/test_m205_selection.py
+git status -s | grep -v "^?? handoff" || echo "всё закоммичено"
+git commit -m "Flags and docs (M206): owner 2026-11-02 — start_morph, close_by sound, select global on; llm_cache record by default (tests isolated); numpy declared; docs for M201–M206 in PLAN, README, CLAUDE.md, REEL_SPEC, R0_SPEC, PROJECT_STRUCTURE, PROJECT_GUIDE; PLAN: the planned chat scenarist (M207) and model-free map (M208); CLAUDE.md: the mechanics-only phase"
 git push; git log --oneline -1
 ```
 Ожидается:
 - `applied`;
 - `mode: record`, `start_morph: true`, `close_by: sound`, `select: global`; строка `numpy`;
+- после `git add` — «всё закоммичено» (вне `handoff/` ничего не висит);
 - первая строка pytest — все прошли;
 - весь набор — прежнее число (новых тестов нет), упавших не больше прежних (флейк `test_menu_bash::…profile_picker…` — перезапустить отдельно);
 - коммит запушен.
