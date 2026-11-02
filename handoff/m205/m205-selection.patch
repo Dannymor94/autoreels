@@ -1,0 +1,267 @@
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 78122cc..d066f77 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -382,6 +382,11 @@ autocut:
+   start_morph: false      # M200: with start_strict, a reel never opens on a sentence with nothing to stand on — a verb without a
+                           # subject («Как было, так и было.») or «он/их» before any noun; needs pymorphy3 (pip install -e ".[nlp]")
+   label_hooks: true       # M182: a label clip of arl auto (it never had a cold open) gets one from its own second half, same rules
++  # M205 (m200: «Алгоритм или эмпатия» refused as sharing map thought #52 with M3 — no sentence heard in both):
++  close_by: units         # units — two reels too close by the map's thoughts (as before); sound — by the sentences heard in both
++  close_share_max: 0.0    # sound: share of the shorter reel's seconds two reels may both play (0 = not one sentence)
++  select: greedy          # greedy — take candidates in the pool's order (as before); global — the set with the largest total
++                          # score and no two too close is walked first (one strong candidate no longer blocks two good ones)
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index e89bd61..f2e7806 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8864,8 +8864,18 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+     accepted, rejected, close = [], [], []
+     hookless: list = []           # M107: candidates left without a cold open — taken only when the hooked run out
+ 
++    def _secs_of(pr) -> dict:
++        """M205: {sentence ref: seconds} of a reel's body in play order."""
++        return {r[0]: float(r[1] or 0.0) for r in sentences(pr.pieces)}
++
++    def _close(pr, others):
++        if getattr(ac, "close_by", "units") == "sound":
++            from autoreels.cloud.autocut import sound_close
++            return sound_close(pr, others, _secs_of, getattr(ac, "close_share_max", 0.0))
++        return too_close(pr, others, ac.max_shared)
++
+     def _try_accept(pr) -> None:
+-        why_close = too_close(pr, accepted, ac.max_shared)          # M68: distinct reels, checked for free first
++        why_close = _close(pr, accepted)          # M68: distinct reels, checked for free first; M205: or by sound
+         if why_close:
+             close.append((pr, why_close))
+             return
+@@ -8947,6 +8957,21 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             pr.notes.append("k: по правилу (без модели): " + ", ".join(f"{r}={w}" for r, w in pr.keys)
+                             + (" — голос" if _v and any(_v) else ""))
+ 
++    if getattr(ac, "select", "greedy") == "global" and len(pool) > 1:
++        # M205: the set with the largest total score and no two too close goes first (the checks below may still refuse
++        # one — then the next candidate takes its place, as before)
++        from autoreels.cloud.autocut import select_global
++        _cf = lambda i, j: _close(pool[i], [pool[j]]) is not None  # noqa: E731
++        _pick = select_global([float(p_.score) for p_ in pool], _cf, prm.clips)
++        _greedy: list[int] = []
++        for _i in range(len(pool)):
++            if len(_greedy) < prm.clips and not any(_cf(_i, _j) for _j in _greedy):
++                _greedy.append(_i)
++        if _pick != _greedy:
++            print(f"  отбор: глобальный — {len(_pick)} без пересечений (сумма {sum(pool[i].score for i in _pick)}), "
++                  f"по порядку было бы {len(_greedy)} (сумма {sum(pool[i].score for i in _greedy)})", flush=True)
++        _set = set(_pick)
++        pool = [pool[i] for i in _pick] + [p_ for i, p_ in enumerate(pool) if i not in _set]
+     not_reached: list = []        # M202: candidates the loop never tried — prm.clips were already taken
+     for _k, pr in enumerate(pool):
+         if len(accepted) >= prm.clips:
+diff --git a/src/autoreels/cloud/autocut.py b/src/autoreels/cloud/autocut.py
+index 4051b6e..908919b 100644
+--- a/src/autoreels/cloud/autocut.py
++++ b/src/autoreels/cloud/autocut.py
+@@ -1340,6 +1340,68 @@ def too_close(pr: "Proposal", accepted: Sequence["Proposal"], max_shared: int =
+     return None
+ 
+ 
++
++def sound_close(pr: "Proposal", accepted: Sequence["Proposal"], secs_of: Callable[["Proposal"], dict],
++                max_share: float = 0.0) -> str | None:
++    """M205 (m200: «Алгоритм или эмпатия» refused as «общие мысли с M3: #52» — not one sentence heard in both; the
++    thoughts are the map's, made by a model): two reels are too close when they open on the same sentence, carry the
++    same title, or share more than `max_share` of the shorter one's seconds — the sentences played in both.
++    `secs_of(pr)` → {sentence ref: seconds} in play order. None = distinct enough."""
++    a = secs_of(pr)
++    first_a = next(iter(a), None)
++    for i, o in enumerate(accepted, 1):
++        b = secs_of(o)
++        if first_a is not None and first_a == next(iter(b), None):
++            return f"то же начало, что у M{i} (фраза {first_a})"
++        if pr.title and _norm_title(pr.title) == _norm_title(o.title):
++            return f"тот же заголовок, что у M{i}"
++        common = [r for r in a if r in b]
++        if common:
++            shared = sum(float(a[r] or 0.0) for r in common)
++            short = min(sum(float(v or 0.0) for v in a.values()), sum(float(v or 0.0) for v in b.values()))
++            if short <= 0 or shared / short > max_share:
++                return f"общие фразы с M{i}: {' '.join(common[:6])}" + (" …" if len(common) > 6 else "") \
++                    + (f" ({shared:.0f} с, {100 * shared / short:.0f} %)" if short > 0 else "")
++    return None
++
++
++def select_global(weights: Sequence[float], conflict: Callable[[int, int], bool], k: int,
++                  exact_max: int = 30) -> list[int]:
++    """M205: the candidates to take — at most `k`, no two in conflict, the largest total weight (the order the pool
++    is walked in no longer decides: a strong candidate that would block two good ones is left). Exact (branch and
++    bound over candidates by weight) up to `exact_max` candidates, greedy by weight above. Equal totals: the set
++    found first, heaviest candidates first (then the earlier index).
++    Returns indices in the pool's order."""
++    n = len(weights)
++    if n == 0 or k <= 0:
++        return []
++    order = sorted(range(n), key=lambda i: (-float(weights[i]), i))
++    if n > exact_max:
++        got: list[int] = []
++        for i in order:
++            if len(got) < k and not any(conflict(i, j) for j in got):
++                got.append(i)
++        return sorted(got)
++    clash = {i: {j for j in range(n) if j != i and (conflict(i, j) or conflict(j, i))} for i in range(n)}
++    best: list = [-1.0, []]
++
++    def walk(pos: int, chosen: list[int], total: float) -> None:
++        if total > best[0] + 1e-9:
++            best[0], best[1] = total, list(chosen)
++        if len(chosen) >= k or pos >= n:
++            return
++        room = k - len(chosen)
++        bound = total + sum(float(weights[i]) for i in order[pos:pos + room])
++        if bound <= best[0] + 1e-9:
++            return
++        i = order[pos]
++        if not (clash[i] & set(chosen)):
++            walk(pos + 1, chosen + [i], total + float(weights[i]))
++        walk(pos + 1, chosen, total)
++
++    walk(0, [], 0.0)
++    return sorted(best[1])
++
+ def _norm_title(t) -> str:
+     return " ".join(_plain_words(str(t or "")))
+ 
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 0d63c88..4fab89c 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -290,6 +290,13 @@ class AutocutConfig(BaseModel):
+     answer_start: bool = False                # M193: with start_strict, a reel never opens on an answer («Да, …», a reply to the host)
+     answer_gap_sec: float = Field(3.0, ge=0.0)   # … a reply: starts within this many seconds after the host's sentence
+     start_morph: bool = False                 # M200: with start_strict, no reel opens on a verb without a subject or «он/их…»
++    # M205: when two reels are too close — units: the map's thoughts (as before); sound: the sentences heard in both
++    # (more than close_share_max of the shorter one's seconds), the same first sentence or title
++    close_by: Literal["units", "sound"] = "units"
++    close_share_max: float = Field(0.0, ge=0.0, le=1.0)
++    # M205: which candidates are taken — greedy: in the pool's order (as before); global: the set with the largest total
++    # score and no two too close, walked first
++    select: Literal["greedy", "global"] = "greedy"
+                                               # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
+     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+diff --git a/tests/test_m205_selection.py b/tests/test_m205_selection.py
+new file mode 100644
+index 0000000..3ebbb61
+--- /dev/null
++++ b/tests/test_m205_selection.py
+@@ -0,0 +1,108 @@
++"""M205: two reels are too close by the sentences heard in both (close_by: sound), not by the map's thoughts; the set
++with the largest total score and no two too close is taken first (select: global). m200: «Алгоритм или эмпатия» was
++refused as sharing map thought #52 with M3 while no sentence was heard in both."""
++from __future__ import annotations
++
++import json
++import re
++
++from autoreels.cloud.autocut import Proposal, select_global, sound_close
++
++
++def _pr(pieces: str, title: str = "") -> Proposal:
++    return Proposal(score=90, pieces=pieces, units=[1], hook=None, title=title, caption="", seconds=0.0)
++
++
++SECS = {"a": {"1.1": 3.0, "1.2": 4.0}, "b": {"1.2": 4.0, "1.3": 6.0}, "c": {"2.1": 5.0}, "d": {"1.1": 2.0, "3.1": 9.0},
++        "e": {"4.1": 2.0, "1.2": 4.0, "4.2": 30.0}}
++
++
++def _secs(pr):
++    return SECS[pr.pieces]
++
++
++def test_sound_close_shared_sentences_first_sentence_and_title():
++    a, b, c, d = _pr("a"), _pr("b"), _pr("c", "Тема"), _pr("d")
++    assert sound_close(c, [a], _secs) is None                                   # nothing heard in both
++    assert sound_close(b, [a], _secs).startswith("общие фразы с M1: 1.2")       # 1.2 is played in both
++    assert sound_close(d, [a], _secs) == "то же начало, что у M1 (фраза 1.1)"
++    assert sound_close(_pr("b", "Тема"), [c], _secs) == "тот же заголовок, что у M1"
++
++
++def test_sound_close_share_threshold_is_of_the_shorter_reel():
++    a, e = _pr("a"), _pr("e")
++    assert sound_close(e, [a], _secs, max_share=0.0) is not None                # 4 s of a's 7 s heard in both
++    assert sound_close(e, [a], _secs, max_share=0.5) is not None                # 57 % > 50 %
++    assert sound_close(e, [a], _secs, max_share=0.6) is None
++
++
++def test_select_global_takes_the_best_set_not_the_first():
++    clash = {(0, 1), (0, 2)}
++    conflict = lambda i, j: (i, j) in clash or (j, i) in clash                 # noqa: E731
++    assert select_global([10, 7, 6, 3], conflict, 3) == [1, 2, 3]               # greedy: 0, 3 (13) — global: 16
++    assert select_global([10, 7, 6, 3], conflict, 2) == [0, 3]                  # 13 = 13: the heaviest found first
++    assert select_global([10, 7, 6, 3], conflict, 1) == [0]
++    assert select_global([], conflict, 3) == [] and select_global([5], conflict, 0) == []
++    assert select_global([10, 7, 6, 3], conflict, 3, exact_max=2) == [0, 3]     # above exact_max: greedy by weight
++
++
++def _project(tmp_path, close_by: str, select: str):
++    """The fake source of test_scenario (8 sentences 2.1-8), a map of two thoughts (2.1-4, 2.5-8) and a scenarist
++    writing R1 = 2.4-5 (both thoughts), R2 = 2.1-3, R3 = 2.6-8 in that order."""
++    from tests.test_m202_replay_accounting import _scenario_project
++    cli, _Fake, first, second = _scenario_project(tmp_path)
++    assert (first, second) == ("2.1-4", "2.5-8")
++    mp = tmp_path / "transcripts" / "v.map.json"
++    m = json.loads(mp.read_text(encoding="utf-8"))
++    u = m["units"][0]
++    m["units"] = [dict(u, id=1, refs="2.1-4", summary="первая"), dict(u, id=2, refs="2.5-8", summary="вторая")]
++    mp.write_text(json.dumps(m), encoding="utf-8")
++    cfg = tmp_path / "config" / "r0.yaml"
++    text = cfg.read_text(encoding="utf-8")
++    for key, val in (("close_by", close_by), ("select", select)):
++        assert len(re.findall(rf"(?m)^  {key}: \w+", text)) == 1
++        text = re.sub(rf"(?m)^  {key}: \w+", f"  {key}: {val}", text)
++    cfg.write_text(text, encoding="utf-8")
++
++    class Fake:
++        model_id = "fake:scenarist"
++
++        def complete(self, messages, temperature=0.0):
++            return ("M | 2.4-5 | t: Обе мысли | why: a\nM | 2.1-3 | t: Первая мысль | why: b\n"
++                    "M | 2.6-8 | t: Вторая мысль | why: c")
++    return cli, Fake
++
++
++def _run(tmp_path, capsys, close_by, select):
++    cli, Fake = _project(tmp_path, close_by, select)
++    out = tmp_path / "reviews" / f"v_{close_by}_{select}.txt"
++    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
++                         scenario_provider=Fake(), out=str(out))
++    con = capsys.readouterr().out
++    body = [ln.split(" | ")[1] for ln in out.read_text(encoding="utf-8").splitlines() if re.match(r"^M\d* \d", ln)]
++    return rc, body, con
++
++
++def test_units_greedy_is_as_before(tmp_path, capsys):
++    rc, body, con = _run(tmp_path, capsys, "units", "greedy")
++    assert rc == 0 and body == ["2.4-5"]                       # R1 blocks both: they share its thoughts
++    assert "отбор: глобальный" not in con and "общие мысли с M1" in con
++
++
++def test_units_global_takes_the_two_that_do_not_clash(tmp_path, capsys):
++    rc, body, con = _run(tmp_path, capsys, "units", "global")
++    assert rc == 0 and sorted(body) == ["2.1-3", "2.6-8"]
++    assert "отбор: глобальный — 2 без пересечений" in con and "по порядку было бы 1" in con
++
++
++def test_sound_keeps_reels_that_share_a_thought_but_no_sentence(tmp_path, capsys):
++    rc, body, con = _run(tmp_path, capsys, "sound", "greedy")
++    assert rc == 0 and sorted(body) == ["2.1-3", "2.4-5", "2.6-8"]  # the «Алгоритм» case: same thought, other sentences
++    assert "≈" not in con and "учёт кандидатов" not in con
++
++
++def test_defaults_are_the_behaviour_before_m205():
++    from autoreels import __main__ as cli
++    from autoreels.core.config import AutocutConfig
++    for ac in (AutocutConfig(), cli.load_r0_config("config/r0.yaml").autocut):
++        assert ac.close_by == "units" and ac.select == "greedy" and ac.close_share_max == 0.0
