@@ -459,6 +459,17 @@ class HeavyLockConfig(BaseModel):
     ready_timeout_sec: float = Field(600.0, ge=10)  # a 27B model takes minutes to load
 
 
+class LLMCacheConfig(BaseModel):
+    """M202: the models' answers kept per request (cloud/llmcache.py). off — as before; record — kept answers are
+    returned, new ones asked and kept; replay — only kept answers, a miss fails `arl auto`. The environment variable
+    ARL_LLM_CACHE overrides `mode` for one run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["off", "record", "replay"] = "off"
+    dir: str = "data/cache/llm"
+
+
 class AnthropicConfig(BaseModel):
     """M116: Claude through the Messages API — `--llm haiku | sonnet` (paid: the owner's ANTHROPIC_API_KEY in .env).
     Model ids and prices (USD per 1M tokens, input/output) live here, not in the code."""
@@ -644,6 +655,7 @@ class R0Config(BaseModel):
     label: LabelConfig = Field(default_factory=LabelConfig)
     local_llm: LocalLLMConfig = Field(default_factory=LocalLLMConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    llm_cache: LLMCacheConfig = Field(default_factory=LLMCacheConfig)
     heavy_lock: HeavyLockConfig = Field(default_factory=HeavyLockConfig)
     montage: MontageConfig = Field(default_factory=MontageConfig)
     map: MapConfig = Field(default_factory=MapConfig)

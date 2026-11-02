@@ -270,6 +270,14 @@ anthropic:
   max_output_tokens: 2048
   timeout_sec: 120
 
+# M202: the models' answers kept per request (cloud/llmcache.py) — a run can be replayed byte for byte.
+# off — as before; record — a kept answer is returned without a request, a new one is asked and kept;
+# replay — only kept answers, a miss fails `arl auto` (code 1): an A/B of code on replay differs only by the code.
+# ARL_LLM_CACHE=off|record|replay overrides mode for one run.
+llm_cache:
+  mode: "off"
+  dir: data/cache/llm
+
 # M108: one lock for every heavy job of gamebox (the audiobook's synthesis and checks, llama-server use, whisper.cpp):
 # flock on one file there, the second comer waits — nobody kills the other's work. Taken when the local model or
 # whisper.cpp on gamebox is used; llama-server is started when it is down and stopped again when autoreels started it.

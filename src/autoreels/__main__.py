@@ -8027,7 +8027,18 @@ _LLM_MODES = ("auto", "local", "cloud", "haiku", "sonnet", "local-think")   # M1
 def _make_pool(r0_cfg, mode: str):
     """M116: the model a command asks. auto / local / cloud — as before (build_pool); haiku / sonnet — Claude alone
     (config/r0.yaml anthropic, the owner's ANTHROPIC_API_KEY); local-think — the gamebox model with its reasoning on
-    (slower; the shared gamebox lock as for local)."""
+    (slower; the shared gamebox lock as for local). M202: wrapped by the answer cache (llm_cache / ARL_LLM_CACHE)."""
+    from autoreels.cloud import llmcache
+    lc = getattr(r0_cfg, "llm_cache", None)
+    cmode = llmcache.mode_of(getattr(lc, "mode", "off"))
+    pool = _make_pool_raw(r0_cfg, mode)
+    if cmode == "off":
+        return pool
+    cdir = Path(getattr(lc, "dir", "data/cache/llm"))
+    return llmcache.wrap(pool, mode=cmode, cache_dir=cdir if cdir.is_absolute() else _project_root() / cdir)
+
+
+def _make_pool_raw(r0_cfg, mode: str):
     from autoreels.cloud.providers import AnthropicLLM, ProviderError, ProviderPool
     if mode in ("haiku", "sonnet"):
         ac = r0_cfg.anthropic
@@ -8917,8 +8928,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         else:
             rejected.append((pr, err))
 
-    for pr in pool:
+    not_reached: list = []        # M202: candidates the loop never tried — prm.clips were already taken
+    for _k, pr in enumerate(pool):
         if len(accepted) >= prm.clips:
+            not_reached = list(pool[_k:])
             break
         if _polish is not None:
             try:
@@ -8945,6 +8958,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 except Exception as exc:  # noqa: BLE001 — no model: the plate stays
                     print(f"  плашка: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
     # M70: a short version of every accepted clip (weakest middle thoughts dropped), checked the same way
+    _var_rejected = 0                 # M202: short variants are not pool candidates — kept apart in the count
     if ac.short_variant and accepted:
         from autoreels.cloud.autocut import short_variant
         _by_id = {u["id"]: u for u in (the_map.get("units") or [])}
@@ -8962,6 +8976,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 accepted.append(v)
             else:
                 rejected.append((v, err))
+                _var_rejected += 1
     if _hjudge is not None:
         _hc = getattr(_hjudge, "cache", {})
         print(f"  крючки: модель оценила {len(_hc)}, отброшено {sum(1 for v in _hc.values() if v and not v[0])}"
@@ -9011,6 +9026,17 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         for pr in hookless_left:
             body.append(f"#! {pr.line('')}")
         body.append("")
+    if not_reached:
+        body.append(f"# --- не дошла очередь: уже принято {prm.clips} (M202; можно раскомментировать):")
+        for pr in not_reached:
+            body.append(f"#! {pr.line('')}")
+        body.append("")
+    # M202 (m200: «Алгоритм или эмпатия» left as «похожи», seen in the console only as a number): every candidate of
+    # the pool is in exactly one place — taken, refused by the checks, too close, hookless left, or not reached
+    _counted = (sum(1 for a in accepted if a.variant_of is None) + len(rejected) - _var_rejected + len(close)
+                + len(hookless_left) + len(not_reached))
+    if _counted != len(pool):
+        print(f"  ⚠ учёт кандидатов: в пуле {len(pool)}, разложено {_counted}", flush=True)
     out_path.write_text("\n".join(head + body) + "\n", encoding="utf-8")
     print(f"autocut {stem}: предложено сборок {len(accepted)} из {len(the_map.get('units') or [])} мыслей"
           + (f" (не прошли проверку: {len(rejected)})" if rejected else "")
@@ -9018,11 +9044,18 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
           + (f" (без понятного начала: {len(no_start)})" if no_start else "")
           + (f" (конец «→», не укоротить: {len(open_end)})" if open_end else "")
           + (f" (скачки, не поправить: {len(dict.fromkeys(rhythm_out))})" if rhythm_out else "")
-          + (f" (без крючка не взяты: {len(hookless_left)})" if hookless_left else "") + f" → {out_path}")
+          + (f" (без крючка не взяты: {len(hookless_left)})" if hookless_left else "")
+          + (f" (не дошла очередь: {len(not_reached)})" if not_reached else "") + f" → {out_path}")
     for i, pr in enumerate(accepted, 1):
         print(f"  {pr.line(str(i))}")
     for pr, err in rejected:
         print(f"  ✗ {pr.pieces} — {err}")
+    for pr, why in close:                     # M202: the console shows every candidate that went, with its reason
+        print(f"  ≈ {pr.pieces} — {why}")
+    for pr in hookless_left:
+        print(f"  ○ {pr.pieces} — без крючка, не взята (хватило сборок с крючком)")
+    for pr in not_reached:
+        print(f"  … {pr.pieces} — не дошла очередь (уже принято {prm.clips})")
     _usage_report(prov)
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
@@ -10738,7 +10771,21 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     for stem, st, note in results:
         print(f"  {'✓' if st == 'ok' else '✗'} {stem}: " + ("готово" if st == "ok" else f"остановлен на «{st}»")
               + (f" — {note}" if note else ""), flush=True)
+    if _llm_cache_verdict():                          # M202: replay misses = the run was not reproduced
+        return 1
     return 0 if all(st == "ok" for _, st, _ in results) else 1
+
+
+def _llm_cache_verdict() -> bool:
+    """M202: the answer cache's line of the run's summary; True when replay missed answers (the run fails)."""
+    from autoreels.cloud import llmcache as _llmc
+    _h, _w, _miss = _llmc.totals()
+    if _h or _w or _miss:
+        print(f"  кэш моделей: из кэша {_h}, записано {_w}, промахов {_miss}", flush=True)
+    if _miss:
+        print(f"  ✗ replay: в кэше нет {_miss} ответов моделей — прогон НЕ воспроизведён "
+              f"(дозаписать: {_llmc.ENV}=record)", flush=True)
+    return bool(_miss)
 
 
 def cmd_prosody(
