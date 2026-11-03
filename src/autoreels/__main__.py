@@ -466,7 +466,8 @@ def _yandex_filename(name: str, url: str) -> str:
     return f"{base}{ext}"
 
 
-def _yandex_api_get(suffix: str, public_key: str, *, token: str | None = None) -> dict:
+def _yandex_api_get(suffix: str, public_key: str, *, token: str | None = None, path: str | None = None,
+                    extra: dict | None = None) -> dict:
     """GET JSON с public API Я.Диска. suffix='' — метаданные, '/download' — ссылка.
 
     Публичным ресурсам токен не нужен; token (OAuth) — только для приватных (не MVP).
@@ -478,7 +479,7 @@ def _yandex_api_get(suffix: str, public_key: str, *, token: str | None = None) -
     try:
         resp = httpx.get(
             _YANDEX_PUBLIC_API + suffix,
-            params={"public_key": public_key},
+            params={"public_key": public_key, **({"path": path} if path else {}), **(extra or {})},
             headers=headers, timeout=30, follow_redirects=True,
         )
     except httpx.HTTPError as e:
@@ -490,16 +491,35 @@ def _yandex_api_get(suffix: str, public_key: str, *, token: str | None = None) -
     return resp.json()
 
 
-def _yandex_public_meta(url: str, *, get_json=None, token: str | None = None) -> dict:
-    """Метаданные публичного ресурса: name / type (file|dir) / mime_type / size."""
+def _yandex_public_meta(url: str, *, get_json=None, token: str | None = None, path: str | None = None) -> dict:
+    """Метаданные публичного ресурса: name / type (file|dir) / mime_type / size. path — файл внутри папки (M214a)."""
     get_json = get_json or _yandex_api_get
-    return get_json("", url, token=token)
+    return get_json("", url, token=token, **({"path": path} if path else {}))
 
 
-def _yandex_download_href(url: str, *, get_json=None, token: str | None = None) -> str:
+def _yandex_folder_videos(url: str, *, get_json=None, token: str | None = None, page: int = 200) -> list[dict]:
+    """M214a: the videos of a public Yandex Disk folder (this level), by name — [{path, name, size}]."""
+    get_json = get_json or _yandex_api_get
+    out, offset = [], 0
+    while True:
+        meta = get_json("", url, token=token, extra={"limit": page, "offset": offset, "sort": "name"})
+        items = ((meta.get("_embedded") or {}).get("items")) or []
+        for it in items:
+            name = it.get("name") or ""
+            if it.get("type") == "file" and ((it.get("mime_type") or "").startswith("video/")
+                                             or Path(name).suffix.lower() in _VIDEO_EXTS):
+                out.append({"path": it.get("path") or f"/{name}", "name": name,
+                            "size": it.get("size") if isinstance(it.get("size"), int) else None})
+        total = (meta.get("_embedded") or {}).get("total")
+        offset += len(items)
+        if not items or (isinstance(total, int) and offset >= total):
+            return sorted(out, key=lambda x: x["name"])
+
+
+def _yandex_download_href(url: str, *, get_json=None, token: str | None = None, path: str | None = None) -> str:
     """Свежая ВРЕМЕННАЯ ссылка на скачивание (истекает за минуты — не кэшировать)."""
     get_json = get_json or _yandex_api_get
-    href = get_json("/download", url, token=token).get("href")
+    href = get_json("/download", url, token=token, **({"path": path} if path else {})).get("href")
     if not href:
         raise RunError(f"Я.Диск не вернул ссылку на скачивание для {url}")
     return href
@@ -550,8 +570,10 @@ def _download_yandex_disk(
     token: str | None = None,
     max_stalls: int = 8,
     retry_pause_sec: float = 3.0,
+    path: str | None = None,
 ) -> Path:
     """Скачать файл с публичной ссылки Я.Диска в `inputs/` (httpx-стрим) → путь для конвейера.
+    M214a: path — файл внутри публичной папки (ссылка /d/… + путь из _yandex_folder_videos).
 
     Поток: метаданные (тип/видео/размер, дёшево до гигабайтов) → цикл докачки, где на
     КАЖДОЙ попытке берётся СВЕЖИЙ временный download URL (старый протухает на 31 ГБ) и
@@ -576,7 +598,7 @@ def _download_yandex_disk(
     download = download or _httpx_stream_download
     token = token or os.environ.get("YANDEX_DISK_TOKEN")
 
-    meta = _yandex_public_meta(url, get_json=get_json, token=token)
+    meta = _yandex_public_meta(url, get_json=get_json, token=token, path=path)
     rtype = meta.get("type")
     if rtype == "dir":
         raise RunError(
@@ -593,7 +615,7 @@ def _download_yandex_disk(
 
     inputs_dir = Path(inputs_dir)
     inputs_dir.mkdir(parents=True, exist_ok=True)
-    dest = inputs_dir / _yandex_filename(name, url)
+    dest = inputs_dir / _yandex_filename(name, url + (path or ""))
     if dest.exists():
         print(f"уже скачано → inputs/{dest.name}", flush=True)
         return dest
@@ -610,7 +632,7 @@ def _download_yandex_disk(
     started = time.monotonic()
     stalls = 0
     while True:
-        href = _yandex_download_href(url, get_json=get_json, token=token)   # свежий каждый раз
+        href = _yandex_download_href(url, get_json=get_json, token=token, path=path)   # свежий каждый раз
         resume_from = part.stat().st_size if part.exists() else 0
         if resume_from:
             pct = f" ({100 * resume_from // size}%)" if size else ""
@@ -10705,7 +10727,7 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
              encoder: str | None = None, music: str | None = None, tx: str | None = None,
              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
              today=None, remote: bool = False, interviewer: str | None = None, delete_source: str = "ask",
-             ask=None, download=None) -> int:
+             ask=None, download=None, yandex_api=None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
 
     M213: a target may be a public Yandex Disk link — the file is downloaded into inputs/ and goes on as a video file;
@@ -10762,15 +10784,26 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     print(f"=== auto: ролики пишет {_who if _mode == 'scenario' else 'автомонтаж'}"
           f" — переключить: --mode autocut | scenario ===", flush=True)
     fetched: dict[str, Path] = {}                 # M213: downloaded by this run — stem → file
-    for target in targets:
-        if _is_url(target) and _is_yandex_disk(target):
-            print(f"\n=== auto: скачиваю с Я.Диска {target} ===", flush=True)
+    plan, batch = _expand_yandex_targets(targets, results, delete_source, ask, yandex_api)   # M214a: folders
+    from_folder: set[str] = set()                 # M214a: their deletion was decided once, for the batch
+    pending: list[str] = []
+    for target, ypath in plan:
+        for s in pending:                         # the previous folder video is done — its file goes before the next
+            _offer_source_delete({s: fetched[s]}, results, batch)
+        pending = []
+        if ypath is not None:
+            print(f"\n=== auto: скачиваю с Я.Диска {target}{ypath or ''} ===", flush=True)
+            _dl = download or _download_yandex_disk
+            _inp = Path(inputs_dir) if inputs_dir else _root / "inputs"
             try:
-                got = (download or _download_yandex_disk)(target, Path(inputs_dir) if inputs_dir else _root / "inputs")
+                got = _dl(target, _inp, path=ypath) if ypath else _dl(target, _inp)
             except Exception as exc:  # noqa: BLE001 — a dead link, no space: the next target goes on
-                results.append((target, "скачивание", f"{type(exc).__name__}: {str(exc)[:200]}"))
+                results.append((target + (ypath or ""), "скачивание", f"{type(exc).__name__}: {str(exc)[:200]}"))
                 continue
             fetched[Path(got).stem] = Path(got)
+            if ypath:
+                from_folder.add(Path(got).stem)
+                pending.append(Path(got).stem)
             target = str(got)
         tp = Path(target)
         mpath = None
@@ -10898,10 +10931,60 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     for stem, st, note in results:
         print(f"  {'✓' if st == 'ok' else '✗'} {stem}: " + ("готово" if st == "ok" else f"остановлен на «{st}»")
               + (f" — {note}" if note else ""), flush=True)
-    _offer_source_delete(fetched, results, delete_source, ask)    # M213
+    for s in pending:                                              # M214a: the last folder video
+        _offer_source_delete({s: fetched[s]}, results, batch)
+    _offer_source_delete({s: f for s, f in fetched.items() if s not in from_folder},   # M213: single links, at the end
+                         results, delete_source, ask)
     if _llm_cache_verdict():                          # M202: replay misses = the run was not reproduced
         return 1
     return 0 if all(st == "ok" for _, st, _ in results) else 1
+
+
+def _yandex_link_is_folder_kind(url: str) -> bool:
+    """M214a: /d/… may be a folder (or a shared file) — asked through the API; /i/… is a file."""
+    from urllib.parse import urlparse
+    return "/d/" in (urlparse(url).path or "")
+
+
+def _expand_yandex_targets(targets, results, delete_source: str, ask, yandex_api) -> tuple[list, str]:
+    """M214a: targets → [(target, ypath)]: ypath None — a local path or manifest; "" — a single Yandex Disk file;
+    "/name.mp4" — a video of a public folder (by name). A folder asks ONCE (y/N; no terminal = keep) whether each source
+    goes right after it is processed well; the answer is the batch's mode (keep | yes)."""
+    plan, batch = [], ("keep" if delete_source == "ask" else delete_source)
+    for target in targets:
+        if not (_is_url(target) and _is_yandex_disk(target)):
+            plan.append((target, None))
+            continue
+        if not _yandex_link_is_folder_kind(target):
+            plan.append((target, ""))
+            continue
+        try:
+            meta = _yandex_public_meta(target, get_json=yandex_api)
+            if meta.get("type") != "dir":
+                plan.append((target, ""))
+                continue
+            vids = _yandex_folder_videos(target, get_json=yandex_api)
+        except Exception as exc:  # noqa: BLE001
+            results.append((target, "скачивание", f"{type(exc).__name__}: {str(exc)[:200]}"))
+            continue
+        size = sum(v["size"] or 0 for v in vids)
+        print(f"\n=== auto: папка Я.Диска «{meta.get('name') or target}» — видео {len(vids)}, {size / 1e9:.1f} ГБ ===",
+              flush=True)
+        if not vids:
+            results.append((target, "скачивание", "в папке нет видео"))
+            continue
+        if delete_source == "ask":
+            if ask is None and not sys.stdin.isatty():
+                print("  исходники будут оставлены (нет терминала, чтобы спросить)", flush=True)
+            else:
+                try:
+                    answer = (ask or input)(f"В папке {len(vids)} видео ({size / 1e9:.1f} ГБ). Удалять каждый исходник "
+                                            "сразу после удачной обработки? [y/N] ")
+                except EOFError:
+                    answer = ""
+                batch = "yes" if str(answer).strip().lower() in ("y", "yes", "д", "да") else "keep"
+        plan += [(target, v["path"]) for v in vids]
+    return plan, batch
 
 
 def _offer_source_delete(fetched: dict, results: list, mode: str, ask=None) -> list:
