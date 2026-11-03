@@ -66,7 +66,7 @@ MAC ИЛИ СИСТЕМНИК (весь поток):
 | `reviews/` | файлы ручной разметки | нет |
 | `reels-out/` | готовые клипы, обложки, посты, `_review.html`, `_map.html`; `reels-out/<stem>/_gate/<имя>/` — проверочные рендеры, отдельно от настоящих | нет |
 | `export/` | `arl crosspost` / `arl export` / `arl article`: клипы, обложки, тексты для импорта (не публикация) | нет |
-| `data/cache/` | транскрипты по хэшу аудио + параметрам; ответы судей (`autocut_judge.json`); сценарии (`scenario/`) | нет |
+| `data/cache/` | транскрипты по хэшу аудио + параметрам; ответы судей (`autocut_judge.json`); сценарии (`scenario/`); ответы моделей по запросу (`llm/`, M202: `llm_cache` record — тот же запрос, тот же ответ; replay — только из кэша) | нет |
 | `data/models/` | файл детектора лиц YuNet (`render.yaml face_model`, качается один раз) | нет |
 | `data/blocks_dataset/` | эталонные оценки человека | **да** |
 | `data/history.jsonl` | история прогонов (`arl history`), включая неудачи | нет |

@@ -48,6 +48,7 @@ autoreels/
 ├── tools/measure_shots.py    # M173/M187: короткие планы и вспышки готовых клипов по review.json
 ├── tools/score_gate.py       # M188: таблица гейта по источникам (`score_gate.py <гейт> [--compare] [--ref <эталон>]`, M191)
 ├── tools/clip_checks.py      # M199: четыре проверки клипа по готовому гейту (крючок, плашка, начало без опоры, стыки) → _score/<гейт>_checks.json
+├── tools/kw_rule_check.py    # M203: правило `k:` против слов владельца (`emph` в манифестах): по тексту, с голосом, случайно
 ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
 │
 ├── docs/
@@ -100,7 +101,8 @@ autoreels/
 │   │   ├── postcopy.py       # M94: пост под роликом (`arl describe`)
 │   │   ├── article.py        # M100: лонгрид по теме карты (`arl article`)
 │   │   ├── gatescore.py      # M188: числа гейта — крючки, начала, тон конца, стыки, планы, роли мыслей, покрытие; только замер
-│   │   └── providers.py      # Groq → OpenRouter, Claude (haiku/sonnet), локальная LLM; троттлинг, бэкофф
+│   │   ├── llmcache.py       # M202: кэш ответов моделей (off / record / replay, `ARL_LLM_CACHE`) — прогон воспроизводим
+│   │   └── providers.py      # Groq → OpenRouter, Claude (haiku/sonnet), локальная LLM; троттлинг, бэкофф; отказы в строке расхода (M201)
 │   │
 │   ├── local/                # ЛОКАЛЬНЫЙ ТИР — видео и рендер, исходник не уходит
 │   │   ├── calibrate.py, crop.py           # калибровка кропа, статичный прямоугольник
@@ -120,7 +122,7 @@ autoreels/
 │   │
 │   └── orchestr/             # заглушки: api.py (FastAPI), queue.py, ingest.py (M2)
 │
-├── tests/                    # TDD: ~100 файлов, ~2470 тестов; LLM мокается реальными ответами
+├── tests/                    # TDD: ~135 файлов, ~2670 тестов; LLM мокается реальными ответами
 │   │                         #   гварды: запись в репо, голые конструкторы Segment/Word,
 │   │                         #   список стадий ручного пути, суффиксы sidecar, пути от _project_root
 │   │                         #   не запускать во время рендера (гвард следит за reels-out/)
