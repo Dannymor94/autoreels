@@ -1,0 +1,472 @@
+diff --git a/.gitignore b/.gitignore
+index 4136867..ef064b6 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -66,3 +66,5 @@ review-*.md
+ reviews/
+ # M194: block-set sidecars of arl blocks (written on every run, read by nobody; older ones stay tracked)
+ manifests/*.blocks.json
++# M207: задания и ответы чата-сценариста (текст источника — как transcripts/)
++exchange/
+diff --git a/PLAN.md b/PLAN.md
+index 8e329eb..d5f263e 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -292,7 +292,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Модель прогона в режиме сценариста | `autocut.scenario_polish: run` — сценарист на своей модели (или из кэша), крючки, плашки, `k:` и стыки на `--llm` (бесплатные Groq → OpenRouter); m204: плашки и `k:` у 54 из 54, отказов 0 | M204 |
+ | Проверено и не делаем | стыки без модели — правила начала клипа помечают 33 % и плохих (12 вердиктов модели), и хороших (42 стыка владельца); крючки — `hook_score` уже детерминирован, эталона нет (холодный старт у владельца в 3 клипах из 68); плашки из слов клипа — 20 % совпадения с плашками владельца (случайно 8 %), плашки владельца — пересказ | M204 |
+ | Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
+-| **Сценарист через чат** (план, M207) | без платного API: `arl auto <ист> --scenario-llm chat` кладёт в `exchange/<ист>.scenario.md` одним файлом инструкцию владельцу, задание сценаристу (тот же промпт, что у API) и пронумерованный текст, прогон останавливается; владелец отдаёт файл любому чату и кладёт ответ в `exchange/<ист>.scenario.answer.txt`; `arl scenario-check <ист>` — какие строки приняты, какие нет и почему (отклонённые можно вернуть чату); повторный `arl auto` берёт ответ из файла как ответ модели, дальше обычный путь. Тот же файл — тот же результат | M207 |
++| Сценарист через чат | без платного API: `arl auto <ист> --scenario-llm chat` (режим сценариста включается сам, и после платного окна) кладёт в `exchange/<ист>.scenario.md` одним файлом шаги владельцу, задание сценаристу (тот же промпт, что у API, с примерами владельца) и пронумерованный текст; источник останавливается «ждёт ответа чата», автомонтаж вместо него не идёт. Ответ чата — в `exchange/<ист>.scenario.answer.txt` (обёртка ``` и `**` допустимы); `arl scenario-check <ист>` — что принято, что нет и почему, отклонённое — сообщением для того же чата в `exchange/<ист>.scenario.fix.md`; повторный `arl auto` берёт ответ из файла, дальше обычный путь (плашки, `k:`, стыки — на `--llm`). Задание несёт отпечаток пронумерованного текста: ответ к другому тексту не берётся, задание пишется заново. Тот же файл — тот же результат. `exchange/` не в git | M207 |
+ | **Карта без модели** (план, M208) | мысли источника по паузам и смене лексики (TextTiling по леммам): новый источник проходит `arl auto` без API; замер — границы против нынешних карт 7 источников | M208 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index af6611c..f95f288 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -92,6 +92,7 @@ autoreels/
+ │   │   ├── thoughtmap.py     # M54: карта мыслей источника (`arl map`)
+ │   │   ├── autocut.py        # M56+: автомонтаж — генераторы, ритм прыжков, крючок, плашка, судьи
+ │   │   ├── scenario.py       # M123: сценарист — промпт, разбор строк, предложения
++│   │   ├── chatscenario.py   # M207: сценарист через чат — задание и ответ файлами exchange/, сообщение об отклонённом
+ │   │   ├── speakers.py       # M165: карта говорящих (кто когда говорит), реплики ведущего
+ │   │   ├── taste.py          # M138: вкус владельца — модель по его клипам, только порядок предложений
+ │   │   ├── montage.py        # M50: клип из кусков разных блоков
+@@ -131,6 +132,7 @@ autoreels/
+ │   └── test_*.py
+ │
+ ├── handoff/                  # задачи ассистента из ветки `handoff` (в .gitignore main)
++├── exchange/                 # M207: задания и ответы чата-сценариста (gitignored)
+ ├── inputs/                   # исходные видео (gitignored)
+ ├── inputs-archive/           # обработанные видео
+ ├── manifests/                # JSON-манифесты (в git — контракт между машинами)
+diff --git a/R0_SPEC.md b/R0_SPEC.md
+index 70f1106..642df62 100644
+--- a/R0_SPEC.md
++++ b/R0_SPEC.md
+@@ -253,7 +253,7 @@ Word-level нужен **коду** (для snap границ при нарезк
+ 
+ **Вкус владельца (M138, `cloud/taste.py`).** Две логистические головы по признакам мысли карты (длина, сила, громкость, положение, роль, первые слова): «мысль взята в клип владельца» и «клип владельца начат с неё». Модель подбирается по клипам владельца (`config/taste.json`, происхождение внутри) и добавляет `taste_weight × вкус` к оценке предложения — меняется только порядок (инвариант 1). Замер m137: «вирусные» признаки крючка (число, вопрос, «вы») сигнала не несут; проверка на отложенном источнике — начало 0.65, выбор мысли 0.59.
+ 
+-**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Ведущий (M165): по карте говорящих (`transcripts/<ист>.speakers.json`) фразы не главного говорящего помечены «[ведущий]»; `autocut.interviewer: off` — ролик с ними код не берёт, `on` — берёт, если спикер говорит больше половины ролика (заметка «ведущий: …»). Без карты ничего не меняется. Промпт (M152): не открывать на отсылке назад («То есть», «Но», «И»…), не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера; ролик, открытый отсылкой, код ставит в конец пула (`start_doubt`). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же. Модели (M204): при `autocut.scenario_polish: run` сценарист отвечает на своей модели (или из кэша), а крючки, плашки, `k:` и стыки его роликов — на модели прогона `--llm` (бесплатные, когда платного API нет); `scenarist` — всё на модели сценариста, как до M204. **Сценарист через чат** (план, M207): то же задание одним файлом `exchange/<ист>.scenario.md` для любого чата, ответ обратно в `exchange/<ист>.scenario.answer.txt`, проверка строк та же.
++**Сценарист (`--scenario --llm sonnet|haiku`, `cloud/scenario.py`).** Названная модель Claude получает весь текст с мыслями карты и few-shot из клипов владельца **других** источников и пишет ролики строками `N | диапазоны | …`. Разбор терпим к форме, в которой модель пишет диапазоны; каждая строка проходит те же проверки, что у автомонтажа. Ответ кэшируется в `data/cache/scenario/` по хэшу входа. Только при явно названной модели (платный провайдер). Ведущий (M165): по карте говорящих (`transcripts/<ист>.speakers.json`) фразы не главного говорящего помечены «[ведущий]»; `autocut.interviewer: off` — ролик с ними код не берёт, `on` — берёт, если спикер говорит больше половины ролика (заметка «ведущий: …»). Без карты ничего не меняется. Промпт (M152): не открывать на отсылке назад («То есть», «Но», «И»…), не выбрасывать из середины фразу, называющую следующий пункт, не кончать реакцией интервьюера; ролик, открытый отсылкой, код ставит в конец пула (`start_doubt`). Тон набора роликов задаётся словами владельца (`scenario_tone`, напр. `--ac scenario_tone=фановый`, M142) — одна строка в промпте; проверки строк те же. Модели (M204): при `autocut.scenario_polish: run` сценарист отвечает на своей модели (или из кэша), а крючки, плашки, `k:` и стыки его роликов — на модели прогона `--llm` (бесплатные, когда платного API нет); `scenarist` — всё на модели сценариста, как до M204. **Сценарист через чат** (M207, `--scenario-llm chat`, `cloud/chatscenario.py`): то же задание одним файлом `exchange/<ист>.scenario.md` для любого чата, ответ обратно в `exchange/<ист>.scenario.answer.txt`, разбор и проверки строк те же; `arl scenario-check` — отклонённое сообщением для чата; ответ к другому тексту (отпечаток пронумерованного текста) не берётся.
+ 
+ **Посты (`arl describe`, `cloud/postcopy.py`).** Пост говорит мысль, а не анонсирует её: 3–5 предложений словами ролика; стандартная фраза, которой нет в ролике, отвергается; сверх размера код отрезает последние предложения. Хэштеги — только слова, сказанные в ролике; местоимения и служебные — никогда.
+ 
+diff --git a/README.md b/README.md
+index 5d6ec0d..2f3c05d 100644
+--- a/README.md
++++ b/README.md
+@@ -73,7 +73,7 @@
+ | что | как переключить |
+ |---|---|
+ | кто пишет ролики: сценарист (платный Claude) или автомонтаж (бесплатно) | `autocut.auto_mode`; на один прогон `arl auto … --mode scenario \| autocut`. Сценарист не ответил (нет ключа, ошибка API) — источник идёт автомонтажом, итог это называет |
+-| модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
++| модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet \| chat` — `chat`: сценарист через любой чат без API (M207, ниже) |
+ | тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
+ | модель карты, судей и постов | `--llm auto \| cloud \| local \| none \| sonnet`; до `autocut.paid_until` `auto` = `autocut.paid_llm` (M157: промо-кредиты), после — бесплатные модели, а сценарист только с `--mode scenario` |
+ | реплики ведущего (интервью) | `autocut.interviewer: on \| off`; на прогон `arl auto … --interviewer on \| off`; карта говорящих — `arl speakers <ист>` (M165) |
+@@ -92,6 +92,13 @@
+ | похожесть клипов и отбор | `autocut.close_by: sound \| units`, `close_share_max`; `autocut.select: global \| greedy` (M205, M206) |
+ | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+ 
++**Сценарист через чат (без платного API, M207):**
++
++1. `arl auto <ист> --scenario-llm chat` → задание `exchange/<ист>.scenario.md` (источник «ждёт ответа чата»).
++2. Файл — в любой чат; ответ чата — в `exchange/<ист>.scenario.answer.txt`.
++3. `arl scenario-check <ист>` — что принято; отклонённое — `exchange/<ист>.scenario.fix.md`, отдать тому же чату.
++4. `arl auto <ист> --scenario-llm chat` ещё раз — сборка по ответу, дальше обычный путь.
++
+ Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
+ 
+ **Determinism-first:** LLM только предлагает и ранжирует кандидатов; финальные границы,
+@@ -186,6 +193,7 @@ source /путь/к/autoreels/aliases.sh
+ | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
+ | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
+ | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
++| `arl scenario-check <ист>` | ответ чата-сценариста (`exchange/<ист>.scenario.answer.txt`): что принято, что нет и почему; отклонённое — сообщением для чата в `exchange/<ист>.scenario.fix.md` (M207) |
+ | `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
+ | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
+ | `arl autocut <ист>` | черновик монтажа из карты; `--ac ключ=значение` — поле `autocut:` на один прогон |
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index f7d7f98..adab6d8 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -159,7 +159,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ - **M194: крючок вне тела.** Холодный старт из места вне отрезка тела (`h:` из другого блока) — первым и в субтитрах (порядок проигрывания, как у перестановки M59).
+ - **M195: заглушки выравнивателя.** Слово выравнивания не длиннее 45 мс, стоящее не по порядку и дальше 0,5 с от своего времени у Whisper, когда соседнее на месте, выбрасывается (`cloud/plan.clean_alignment`); его время — по карте речи.
+ - **M126: слова-паразиты** (владелец: «много вводных слов у человека, который говорит»; «вырезать не часто, иначе вернётся дёрганье»). Отдельно стоящее слово из `filler_removal.filler_words` («Ну, …», «…, как бы, …», «…, вот.» — между знаками препинания или на краю предложения; «Вот этот дом» не трогается, предложение из одного такого слова тоже): `subtitles_hide_fillers` — не показывается в субтитрах, звук целиком (знак конца предложения переходит на предыдущее слово, следующее после убранного начала — с заглавной); `filler_word_cut` — вырезается и из звука, как кандидат обычного выреза пауз (не на краю окна; только если в вырезаемом нет звука других слов; по правилам профиля: расстояние до других смен картинки, маска сменой плана, доля вырезанного), поэтому редко; вырезанное слово не показывается в субтитрах. Сценарист предпочитает фразы с малым числом таких слов и не начинает и не кончает ими ролик. На экране без паразитов — решение владельца о субтитрах (звук не меняется), а не о границах клипа.
+-- **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Крючки, плашки, `k:` и стыки роликов сценариста — на модели прогона `--llm` при `autocut.scenario_polish: run` (M204). Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
++- **M123: сценарист** — `arl autocut <манифест> --scenario --llm sonnet|haiku`. Модель (названа явно) читает весь текст видео пронумерованными фразами и пишет ролики строками разметки: о чём ролик, где вопрос или крючок, где вывод; перестановки и тизер разрешены. Код проверяет каждую строку теми же правилами, что автосборку (фразы только из нумерации и не повторяются; длина `min_sec`…`max_sec`; правило скачков; конец законченный и не «→» — хвостовые фразы убираются, пока ролик не короче `min_sec`; затем проверки `--apply`), оформляет как свои (крючок сценариста первым среди кандидатов, плашка, `k:`, `c:`) и пишет в черновик, что не принял и почему. В примеры модели идут клипы владельца из других видео (настоящие, с указанием источника). Ответ модели хранится в `data/cache/scenario/` по запросу — тот же запрос второй раз не оплачивается. Крючки, плашки, `k:` и стыки роликов сценариста — на модели прогона `--llm` при `autocut.scenario_polish: run` (M204). Сценарист может быть любым чатом без API (M207, `--scenario-llm chat`): задание и ответ — файлы `exchange/`, проверки строк те же. Длина роликов автосборки — `target_sec`/`max_sec` (владелец о m122: «коротко, можно длиннее»).
+ - порядок: вопрос открывает клип (откуда бы ни был — вопрос-петля, M59), остальное — по порядку источника; соседние мысли склеиваются без стыка (M58);
+ - крючок `h:` — законченное предложение (≥ `hook_min_words` слов, ≤ `hook_max_sec`) самой сильной мысли-вывода, вопроса или образа; плашка `t:` — итог начальной мысли, подпись `d:` — итог вывода;
+ - сборки, у которых больше `overlap_max` мыслей общих с лучшей или тот же вывод в конце (M61), отбрасываются; остаются `clips` лучших. Если план пропустил крючок (нет своего звука), проверка берёт следующий кандидат крючка, а если их нет — строка идёт без `h:` (M61; в комментарии над строкой — какой крючок заменён). Над каждой строкой — комментарий: мысли, роли, сила, итоги. Каждое предложение сразу проходит настоящие проверки `--apply` по отдельности, во временном корне (M60; кандидатов до `clips × autocut.check_pool`): не прошедшее остаётся в конце черновика закомментированным (`#! M …`) с причиной, его место занимает следующий кандидат; `--no-check` выключает. Черновик проверяется и обычным `arl blocks --apply <файл> --labeler auto`, без `--install` ничего не ставится.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index f2e7806..972f01d 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8094,9 +8094,9 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+     from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
+                                           scenario_proposals, tone_rule)
+     from autoreels.cloud.speakers import interviewer_rule
+-    if provider is None and mode not in ("haiku", "sonnet"):
+-        print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
+-              file=sys.stderr)
++    if provider is None and mode not in ("haiku", "sonnet", "chat"):
++        print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku "
++              "(или чат: --scenario-llm chat)", file=sys.stderr)
+         return None
+     sent = {ref: (float(st[0].t0), float(st[-1].t1), " ".join(w.word.strip() for w in st), bool(_ends_terminal(st[-1])),
+                   sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
+@@ -8104,8 +8104,18 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+                                     n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
+     _ivm = getattr(ac, "interviewer", "") if other else ""     # M165: the interviewer's sentences marked
+     system += interviewer_rule(_ivm)
+-    user = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
+-                          for r, v in sent.items()]) + _scenario_examples(root, stem)
++    _numbered = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
++                               for r, v in sent.items()])
++    user = _numbered + _scenario_examples(root, stem)
++    if provider is None and mode == "chat":
++        raw = _chat_scenario_answer(root, stem, system, user, _numbered)   # M207: raises ChatScenarioPending
++        scens, bad = parse_scenarios(raw, set(sent))
++        pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
++                                        clauses=clauses)
++        scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
++        print(f"  сценарист (чат): строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
++              + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
++        return pool
+     if provider is None:
+         provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
+             update={"max_output_tokens": ac.scenario_max_tokens, "timeout_sec": ac.scenario_timeout_sec})}), mode)
+@@ -8130,6 +8140,26 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
+     return pool
+ 
+ 
++def _chat_scenario_answer(root, stem: str, system: str, user: str, numbered: str) -> str:
++    """M207: the chat's answer for this talk (exchange/<stem>.scenario.answer.txt). No answer, or an answer written for
++    another talk (the numbered text changed) — the task exchange/<stem>.scenario.md is (re)written and the run stops."""
++    from autoreels.cloud.chatscenario import ChatScenarioPending, paths, read_answer, render_task, task_key, text_key
++    task, answer, _fix = paths(Path(root), stem)
++    key = text_key(numbered)
++    old = task_key(task.read_text(encoding="utf-8")) if task.is_file() else None
++    raw = read_answer(answer)
++    if raw is not None and old == (stem, key):
++        print(f"  сценарист (чат): ответ из {answer.relative_to(root)}", flush=True)
++        return raw
++    task.parent.mkdir(parents=True, exist_ok=True)
++    task.write_text(render_task(stem, key, system, user), encoding="utf-8")
++    if raw is not None:
++        why = f"ответ {answer.name} написан к другому тексту (расшифровка изменилась) — новое задание"
++    else:
++        why = "ответа чата ещё нет"
++    raise ChatScenarioPending(f"{why}: {task.relative_to(root)} → любой чат → ответ в {answer.relative_to(root)}")
++
++
+ def _usage_report(prov) -> None:
+     """M116: what the paid models cost this run (one line per provider; nothing for the free ones)."""
+     for ln in (getattr(prov, "usage_lines", lambda: [])() if prov is not None else []):
+@@ -8489,7 +8519,7 @@ def _autocut_overrides(base, pairs) -> "object":
+ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
+                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
+                 judge_log: str | None = None, voice_keys: bool = True, ac_over=None, scenario: bool = False,
+-                scenario_provider=None, scenario_llm: str | None = None) -> int:
++                scenario_provider=None, scenario_llm: str | None = None, chat_check: bool = False) -> int:
+     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
+     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
+     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
+@@ -8730,12 +8760,26 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
+     if scenario:
+         # M204: scenario_llm — the scenarist's own model; `mode` (--llm) then polishes (hooks, plates, k:, seams)
+-        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+-                              the_map.get("units") or [],
+-                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
+-                              clauses=clauses)
++        from autoreels.cloud.chatscenario import ChatScenarioPending
++        try:
++            pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
++                                  the_map.get("units") or [],
++                                  end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
++                                  clauses=clauses)
++        except ChatScenarioPending as exc:           # M207: the task is written; the owner takes it to a chat
++            print(f"  сценарист (чат): {exc}", flush=True)
++            return 3
+         if pool is None:
+             return 1
++        if chat_check:                               # M207: arl scenario-check — the refused lines → a message for the chat
++            from autoreels.cloud.chatscenario import paths, render_fix
++            fix = paths(_root, stem)[2]
++            fix.write_text(render_fix(stem, len(pool), scen_out), encoding="utf-8")
++            for pieces, why in scen_out:
++                print(f"  ✗ {why}" + (f": {pieces}" if pieces else ""), flush=True)
++            print(f"scenario-check {stem}: принято {len(pool)}, не принято {len(scen_out)} → {fix.relative_to(_root)}",
++                  flush=True)
++            return 0
+     else:
+         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
+@@ -10688,13 +10732,14 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+         llm = _paid_llm
+         print(f"=== auto: карта, судьи и посты — {llm}" + (f" (до {_paid_until} включительно)" if _paid_until else "")
+               + " ===", flush=True)
+-    if _expired and _paid_llm and mode is None and _mode == "scenario":
++    if _expired and _paid_llm and mode is None and _mode == "scenario" and scenario_llm != "chat":
+         _mode = "autocut"
+         print(f"=== auto: срок платных моделей прошёл ({_paid_until}) — автомонтаж бесплатно; сценарист: --mode scenario"
+               f" ===", flush=True)
+-    _mode = mode or _mode
++    _mode = mode or ("scenario" if scenario_llm == "chat" else _mode)   # M207: the chat is a scenarist
+     _scen_llm = scenario_llm or _scen_llm
+-    print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
++    _who = ("сценарист через чат (exchange/, без API)" if _scen_llm == "chat" else f"сценарист ({_scen_llm}, платно)")
++    print(f"=== auto: ролики пишет {_who if _mode == 'scenario' else 'автомонтаж'}"
+           f" — переключить: --mode autocut | scenario ===", flush=True)
+     for target in targets:
+         tp = Path(target)
+@@ -10751,6 +10796,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+             _skw = _scenario_autocut_llms(_ac, llm, _scen_llm)   # M204: who polishes the scenarist's reels
+             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
+                                                                         scenario=True, **_skw, **_out))
++            if err and _scen_llm == "chat":         # M207: the chat answers later — no autocut in its place
++                _wait = f"ждёт ответа чата: exchange/{stem}.scenario.md → exchange/{stem}.scenario.answer.txt"
++                results.append((stem, "сценарист через чат", _wait if err == "rc=3" else err))
++                continue
+             if err:
+                 _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
+                 print(f"  ⚠ {_scen_note}", flush=True)
+@@ -10828,7 +10877,7 @@ def _scenario_autocut_llms(ac, llm: str, scen_llm: str) -> dict:
+     """M204 (owner 2026-11-02: no paid API — m202/m203: in scenario mode the hooks, plates, k: and seams went to the
+     scenarist's paid model whatever --llm said, 151 refusals): autocut.scenario_polish «scenarist» — as before, all on
+     the scenarist's model; «run» — the scenarist on its model, the rest on the run's --llm."""
+-    if getattr(ac, "scenario_polish", "scenarist") == "run":
++    if getattr(ac, "scenario_polish", "scenarist") == "run" or scen_llm == "chat":   # M207: a chat cannot polish
+         return {"llm": llm, "scenario_llm": scen_llm}
+     return {"llm": scen_llm}
+ 
+@@ -13296,6 +13345,15 @@ def _build_parser():
+     ptu.add_argument("--root", default=None)
+     ptu.add_argument("--cache-dir", default=None, dest="cache_dir")
+ 
++    psc = sub.add_parser(
++        "scenario-check",
++        help="M207: ответ чата-сценариста (exchange/<ист>.scenario.answer.txt) — что принято, что нет и почему; "
++             "отклонённое — сообщением для чата в exchange/<ист>.scenario.fix.md",
++    )
++    psc.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
++    psc.add_argument("--root", default=None)
++    psc.add_argument("--cache-dir", default=None, dest="cache_dir")
++
+     pau = sub.add_parser(
+         "auto",
+         help="M63: источник целиком до листа ревью — подготовка, проверка расшифровки, карта, автосборщик, план, рендер",
+@@ -13320,7 +13378,7 @@ def _build_parser():
+     pau.add_argument("--tag", default=None,
+                      help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
+                           "черновики прежнего листа и его файл решений не трогаются")
+-    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
++    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet", "chat"], default=None, dest="scenario_llm",
+                      help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
+     pau.add_argument("--root", default=None)
+     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
+@@ -13872,6 +13930,9 @@ def main(argv=None) -> int:
+         elif args.cmd == "tx-punct":
+             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
+                                 cache_dir=getattr(args, "cache_dir", None), by=args.by, llm=args.llm)
++        elif args.cmd == "scenario-check":                # M207
++            return cmd_autocut(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
++                               check=False, llm="none", scenario=True, scenario_llm="chat", chat_check=True)
+         elif args.cmd == "tx-use":
+             return cmd_tx_use(args.manifest, args.which, root=getattr(args, "root", None),
+                               cache_dir=getattr(args, "cache_dir", None))
+diff --git a/src/autoreels/cloud/chatscenario.py b/src/autoreels/cloud/chatscenario.py
+new file mode 100644
+index 0000000..5421750
+--- /dev/null
++++ b/src/autoreels/cloud/chatscenario.py
+@@ -0,0 +1,78 @@
++"""M207: the scenarist through any chat — no paid API.
++
++Owner (2026-11-02): «готовый экспорт с заготовленным промтом и инструкцией для чата: я беру текстовый файл, закидываю в
++чат, чат работает сценаристом, я скидываю ответ обратно — и по нему идёт сборка». The task is the very request the API
++scenarist gets (cloud/scenario.py: the rules + the numbered talk + the owner's examples); the answer goes through the same
++parse and the same checks. Files, exchange/<source>.*:
++  scenario.md          — the task: a short instruction for the owner, then everything for the chat;
++  scenario.answer.txt  — the chat's answer, saved by the owner (only the reel lines; markdown and ``` are tolerated);
++  scenario.fix.md      — `arl scenario-check`: the lines the code did not take, with the reason — a message for the chat.
++The task carries the fingerprint of the numbered talk: an answer to another talk (the transcript changed) is not used —
++a new task is written. The same answer file always gives the same reels."""
++from __future__ import annotations
++
++import hashlib
++import re
++from pathlib import Path
++
++EXCHANGE = "exchange"
++MODEL_ID = "chat"
++_KEY = re.compile(r"<!-- autoreels: сценарист через чат; источник (\S+); текст ([0-9a-f]{16}) -->")
++
++
++class ChatScenarioPending(Exception):
++    """The chat has not answered yet (or the answer belongs to another talk): the task is written, the run stops."""
++
++
++def paths(root: Path, stem: str) -> tuple[Path, Path, Path]:
++    d = Path(root) / EXCHANGE
++    return d / f"{stem}.scenario.md", d / f"{stem}.scenario.answer.txt", d / f"{stem}.scenario.fix.md"
++
++
++def text_key(numbered: str) -> str:
++    """The fingerprint of the numbered talk — what the answer's sentence numbers refer to."""
++    return hashlib.sha256(numbered.encode("utf-8")).hexdigest()[:16]
++
++
++def task_key(task_text: str) -> tuple[str, str] | None:
++    m = _KEY.search(task_text or "")
++    return (m.group(1), m.group(2)) if m else None
++
++
++def render_task(stem: str, key: str, system: str, user: str) -> str:
++    md, ans, fix = (f"exchange/{stem}.scenario.md", f"exchange/{stem}.scenario.answer.txt",
++                    f"exchange/{stem}.scenario.fix.md")
++    return (f"<!-- autoreels: сценарист через чат; источник {stem}; текст {key} -->\n"
++            f"# Сценарист через чат — {stem}\n\n"
++            "**Владельцу** (эта часть чату не нужна):\n"
++            f"1. Отдайте чату всё ниже линии «ЗАДАНИЕ» — вставкой или приложив этот файл ({md}).\n"
++            f"2. Ответ чата сохраните в `{ans}` — только строки роликов (обёртку ``` можно оставить).\n"
++            f"3. Проверка: `arl scenario-check {stem}` — что принято, что нет и почему; отклонённое — в `{fix}`, "
++            "его можно отдать тому же чату.\n"
++            f"4. Сборка: `arl auto {stem} --mode scenario --scenario-llm chat` — дальше обычный путь.\n\n"
++            "======== ЗАДАНИЕ ДЛЯ ЧАТА ========\n\n"
++            "Ты — сценарист коротких вертикальных роликов. Ниже правила, затем пронумерованный текст видео.\n\n"
++            f"{system.strip()}\n\n---\n\n{user.strip()}\n\n---\n\n"
++            "Ответь только строками роликов в формате из правил — по одной строке на ролик, без пояснений.\n")
++
++
++def read_answer(path: Path) -> str | None:
++    """The saved answer, or None when there is none (or it is empty)."""
++    p = Path(path)
++    if not p.is_file():
++        return None
++    raw = p.read_text(encoding="utf-8", errors="replace")
++    return raw if raw.strip() else None
++
++
++def render_fix(stem: str, taken: int, refused: list[tuple[str, str]]) -> str:
++    """A message for the same chat: which lines the code did not take and why."""
++    if not refused:
++        return (f"# {stem}: все строки приняты ({taken})\n\nИсправлять нечего — `arl auto {stem} --mode scenario "
++                "--scenario-llm chat`.\n")
++    lines = "\n".join(f"- {why}" + (f": `{pieces}`" if pieces else "") for pieces, why in refused)
++    return (f"# {stem}: принято {taken}, не принято {len(refused)}\n\n"
++            "Сообщение для чата (скопируйте целиком):\n\n---\n\n"
++            "Эти строки не прошли проверку — исправь их по тем же правилам и пришли заново ВСЕ строки роликов "
++            "(и принятые, и исправленные), по одной на ролик, без пояснений:\n\n"
++            f"{lines}\n")
+diff --git a/tests/test_m207_chat_scenarist.py b/tests/test_m207_chat_scenarist.py
+new file mode 100644
+index 0000000..496f61a
+--- /dev/null
++++ b/tests/test_m207_chat_scenarist.py
+@@ -0,0 +1,100 @@
++"""M207: the scenarist through any chat — the task one file (exchange/<src>.scenario.md), the chat's answer back
++(exchange/<src>.scenario.answer.txt), the same parse and checks; no paid API."""
++from __future__ import annotations
++
++from autoreels.cloud import chatscenario as C
++
++
++def test_task_carries_the_owner_steps_the_rules_the_text_and_its_fingerprint():
++    md = C.render_task("v", "0123456789abcdef", "ПРАВИЛА СЦЕНАРИСТА", "[2.1] Текст.")
++    assert C.task_key(md) == ("v", "0123456789abcdef")
++    assert md.index("Владельцу") < md.index("ЗАДАНИЕ ДЛЯ ЧАТА") < md.index("ПРАВИЛА СЦЕНАРИСТА") < md.index("[2.1] Текст.")
++    assert "exchange/v.scenario.answer.txt" in md and "arl scenario-check v" in md
++    assert "--scenario-llm chat" in md and C.task_key("нет ключа") is None
++    assert C.text_key("a") == C.text_key("a") != C.text_key("b") and len(C.text_key("a")) == 16
++
++
++def test_answer_and_fix_message(tmp_path):
++    assert C.read_answer(tmp_path / "none.txt") is None
++    (tmp_path / "e.txt").write_text("  \n", encoding="utf-8")
++    assert C.read_answer(tmp_path / "e.txt") is None
++    ok = C.render_fix("v", 3, [])
++    assert "все строки приняты (3)" in ok
++    fix = C.render_fix("v", 2, [("", "нет таких фраз 99.1: 99.1-3"), ("2.5-8", "короче min_sec")])
++    assert "принято 2, не принято 2" in fix and "пришли заново ВСЕ строки" in fix
++    assert "- нет таких фраз 99.1: 99.1-3" in fix and "- короче min_sec: `2.5-8`" in fix
++
++
++def _project(tmp_path):
++    from tests.test_m202_replay_accounting import _scenario_project
++    cli, _Fake, first, second = _scenario_project(tmp_path)
++    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, llm="none", scenario=True,
++              scenario_llm="chat")
++    return cli, kw, first, second
++
++
++def test_no_answer_writes_the_task_and_stops(tmp_path, capsys):
++    cli, kw, first, second = _project(tmp_path)
++    out = tmp_path / "reviews" / "v_chat.txt"
++    assert cli.cmd_autocut("v", out=str(out), **kw) == 3
++    task, answer, _fix = C.paths(tmp_path, "v")
++    md = task.read_text(encoding="utf-8")
++    stem, key = C.task_key(md)
++    assert stem == "v" and len(key) == 16 and "\n2.1 [" in md and not out.exists()
++    assert "ответа чата ещё нет" in capsys.readouterr().out
++
++
++def test_the_answer_goes_through_the_same_checks_and_the_check_writes_a_message(tmp_path, capsys):
++    cli, kw, first, second = _project(tmp_path)
++    assert cli.cmd_autocut("v", **kw) == 3
++    task, answer, fix = C.paths(tmp_path, "v")
++    answer.write_text(f"```\nM | {first} | t: Первая | why: a\nM | 99.1-3 | t: Чужая | why: b\n"
++                      f"**M | {second} | t: Вторая | why: c**\n```\n", encoding="utf-8")
++    assert cli.cmd_autocut("v", chat_check=True, **kw) == 0
++    text = fix.read_text(encoding="utf-8")
++    assert "принято 2, не принято 1" in text and "нет таких фраз 99.1" in text
++    out = tmp_path / "reviews" / "v_chat.txt"
++    capsys.readouterr()
++    assert cli.cmd_autocut("v", out=str(out), **kw) == 0
++    reels = [ln.split(" | ")[1] for ln in out.read_text(encoding="utf-8").splitlines() if ln.startswith("M")]
++    assert reels == [first, second] and "ответ из exchange/v.scenario.answer.txt" in capsys.readouterr().out
++
++
++def test_an_answer_to_another_text_is_not_used(tmp_path, capsys):
++    cli, kw, first, second = _project(tmp_path)
++    assert cli.cmd_autocut("v", **kw) == 3
++    task, answer, _fix = C.paths(tmp_path, "v")
++    md = task.read_text(encoding="utf-8")
++    stem, key = C.task_key(md)
++    task.write_text(md.replace(key, "f" * 16), encoding="utf-8")     # the task of another (older) text
++    answer.write_text(f"M | {first} | t: Первая | why: a\n", encoding="utf-8")
++    assert cli.cmd_autocut("v", **kw) == 3
++    assert C.task_key(task.read_text(encoding="utf-8")) == ("v", key)    # the task is written again for this text
++    assert "написан к другому тексту" in capsys.readouterr().out
++
++
++def test_auto_with_the_chat_waits_and_does_not_fall_back_to_autocut(tmp_path, monkeypatch, capsys):
++    import datetime as dt
++    from autoreels import __main__ as cli
++    from tests.test_auto import _stub
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    calls = _stub(monkeypatch, tmp_path)
++
++    def waiting(m, **k):
++        calls.append(("autocut", (m,), k))
++        return 3
++    monkeypatch.setattr(cli, "cmd_autocut", waiting)
++    rc = cli.cmd_auto([str(mpath)], root=tmp_path, scenario_llm="chat", today=dt.date(2027, 1, 1))  # paid window over
++    out = capsys.readouterr().out
++    kws = [c[2] for c in calls if c[0] == "autocut"]
++    assert rc == 1 and len(kws) == 1                                   # the chat only — no autocut in its place
++    assert kws[0]["scenario"] is True and kws[0]["scenario_llm"] == "chat" and kws[0]["llm"] != "chat"
++    assert "сценарист через чат" in out and "ждёт ответа чата: exchange/" in out and "взят автомонтаж" not in out
++    assert not any(c[0] == "apply" for c in calls)
++
++
++def test_the_chat_never_polishes():
++    from autoreels import __main__ as cli
++    from autoreels.core.config import AutocutConfig
++    assert cli._scenario_autocut_llms(AutocutConfig(), "cloud", "chat") == {"llm": "cloud", "scenario_llm": "chat"}
