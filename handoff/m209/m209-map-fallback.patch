@@ -1,0 +1,305 @@
+diff --git a/PLAN.md b/PLAN.md
+index c434a97..abd96a4 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -293,7 +293,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Проверено и не делаем | стыки без модели — правила начала клипа помечают 33 % и плохих (12 вердиктов модели), и хороших (42 стыка владельца); крючки — `hook_score` уже детерминирован, эталона нет (холодный старт у владельца в 3 клипах из 68); плашки из слов клипа — 20 % совпадения с плашками владельца (случайно 8 %), плашки владельца — пересказ | M204 |
+ | Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
+ | Сценарист через чат | без платного API: `arl auto <ист> --scenario-llm chat` (режим сценариста включается сам, и после платного окна) кладёт в `exchange/<ист>.scenario.md` одним файлом шаги владельцу, задание сценаристу (тот же промпт, что у API, с примерами владельца) и пронумерованный текст; источник останавливается «ждёт ответа чата», автомонтаж вместо него не идёт. Ответ чата — в `exchange/<ист>.scenario.answer.txt` (обёртка ``` и `**` допустимы); `arl scenario-check <ист>` — что принято, что нет и почему, отклонённое — сообщением для того же чата в `exchange/<ист>.scenario.fix.md`; повторный `arl auto` берёт ответ из файла, дальше обычный путь (плашки, `k:`, стыки — на `--llm`). Задание несёт отпечаток пронумерованного текста: ответ к другому тексту не берётся, задание пишется заново. Тот же файл — тот же результат. `exchange/` не в git | M207 |
+-| Паспорт карты без модели | нарезка на мысли, голос и похожие места и так считает код; модель давала только паспорт (роль, сила, понятна ли без предыдущего, опора, краткое) и темы. `autocut.map_passport: rules` (**выключено**) пересчитывает их правилами `cloud/textmap.py` при чтении карты, файл карты не меняется: роль — по маркерам («?», «например», «как будто», «поэтому», «потому что»…), сила — сырой балл (краткость, «не…, а…», обобщения, энергия голоса, роль) и ранг внутри источника (5 — верхние 10 %, 4 — 20 %, 3 — 30 %, 2 — 25 %), понятна ли — правила начала клипа, краткое — самая содержательная фраза, темы — TextTiling по леммам. Замер: `tools/map_rules_check.py` (совпадение с паспортом модели) и A/B автомонтажа — покрытие клипов владельца | M208 |
++| Паспорт карты без модели | нарезка на мысли, голос и похожие места и так считает код; модель давала только паспорт (роль, сила, понятна ли без предыдущего, опора, краткое) и темы. `autocut.map_passport: rules` пересчитывает их правилами `cloud/textmap.py` при чтении карты, файл карты не меняется: роль — по маркерам («?», «например», «как будто», «поэтому», «потому что»…), сила — сырой балл (краткость, «не…, а…», обобщения, энергия голоса, роль) и ранг внутри источника (5 — верхние 10 %, 4 — 20 %, 3 — 30 %, 2 — 25 %), понятна ли — правила начала клипа, краткое — самая содержательная фраза, темы — TextTiling по леммам. m208: роль совпадает с моделью в 21 % (правила почти всё зовут тезисом), сила ±1 — 71 %; A/B автомонтажа — покрытие клипов владельца: модель 36 из 56, правила 33 — правила модель не заменяют. **`map_passport: fallback`** (включено владельцем 2026-11-02, M209): паспорт модели, правила — только для мыслей без ответа модели (и тема — для части источника, где запрос тем остался без ответа, номера тем правил от 1000; карта совсем без тем — как раньше, каждая мысль своя тема); полная карта не меняется, неполная больше не останавливает `arl auto` (`arl map` — предупреждение, код 0) | M208, M209 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index 15da482..4fdb7b8 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -91,7 +91,7 @@ autoreels/
+ │   │   ├── blocks.py         # M1.6: блоки-кандидаты, отсев, выгрузка/разбор разметки
+ │   │   ├── label.py          # `arl label`: авторазметка блоков бесплатной LLM, проверка кодом
+ │   │   ├── thoughtmap.py     # M54: карта мыслей источника (`arl map`)
+-│   │   ├── textmap.py        # M208: паспорт и темы карты по правилам (без модели), `autocut.map_passport: rules`
++│   │   ├── textmap.py        # M208/M209: паспорт и темы карты по правилам; `map_passport: fallback` — только где модель не ответила
+ │   │   ├── autocut.py        # M56+: автомонтаж — генераторы, ритм прыжков, крючок, плашка, судьи
+ │   │   ├── scenario.py       # M123: сценарист — промпт, разбор строк, предложения
+ │   │   ├── chatscenario.py   # M207: сценарист через чат — задание и ответ файлами exchange/, сообщение об отклонённом
+diff --git a/README.md b/README.md
+index cd31b7f..50de4b4 100644
+--- a/README.md
++++ b/README.md
+@@ -89,7 +89,7 @@
+ | кэш ответов моделей | `llm_cache.mode: record` (по умолчанию: тот же запрос — тот же ответ); на прогон `ARL_LLM_CACHE=off \| record \| replay`. `replay` — только из кэша, промах = код 1; A/B кода — на replay (M202, M206) |
+ | ключевые слова `k:` | `autocut.keywords_source: rule \| model \| fallback` (по умолчанию `rule` — без модели), `keywords_max` (M203, M204) |
+ | модель плашек, `k:`, стыков в режиме сценариста | `autocut.scenario_polish: run` (модель прогона `--llm`) \| `scenarist` (модель сценариста) (M204) |
+-| паспорт карты (роль, сила, темы) | `autocut.map_passport: model \| rules` — `rules`: без модели, правилами при чтении карты (M208, по умолчанию `model`) |
++| паспорт карты (роль, сила, темы) | `autocut.map_passport: fallback \| model \| rules` — `fallback` (по умолчанию): паспорт модели, правила только там, где модель не ответила, неполная карта не останавливает прогон (M209); `model` — неполная карта останавливает; `rules` — всё правилами (M208: хуже модели, 33 против 36 из 56) |
+ | похожесть клипов и отбор | `autocut.close_by: sound \| units`, `close_share_max`; `autocut.select: global \| greedy` (M205, M206) |
+ | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+ 
+diff --git a/config/r0.yaml b/config/r0.yaml
+index ed60ffc..344ca68 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -387,8 +387,9 @@ autocut:
+   close_share_max: 0.0    # sound: share of the shorter reel's seconds two reels may both play (0 = not one sentence)
+   select: global          # M206: on (owner 2026-11-02; m205: same set as greedy on the 7 sources). greedy — take candidates in the pool's order (as before); global — the set with the largest total
+                           # score and no two too close is walked first (one strong candidate no longer blocks two good ones)
+-  map_passport: model     # M208: the map's passport and topics — model (the map file, as before) | rules (cloud/textmap.py,
+-                          # no model: markers for the role, rank for the strength, the start rules, TextTiling topics)
++  map_passport: fallback  # M209 (owner 2026-11-02): the model's passport, the rules (cloud/textmap.py) only where the model
++                          # gave nothing — an incomplete map no longer stops arl auto. model — as before M209 (an incomplete map
++                          # stops the run); rules — all by rules (m208: 33 of 56 owner clips against the model's 36)
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index 0dc30d9..f197c95 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -136,7 +136,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ 
+ **Первые секунды, стыки, темп** (M70). Автосборщик (`autocut:` в `config/r0.yaml`): `hook_title` — модель предлагает заголовок-крючок для плашки `t:` (вопрос или напряжение из слов ролика); код берёт его, только если он не длиннее 60 знаков и 9 слов, без чисел, которых ролик не говорит, и не меньше 60 % содержательных слов совпадают с ролика (иначе остаётся краткое содержание мысли); `seam_check` — модель судит каждый стык сборки («Б продолжает А?»), ответ обязателен для каждого стыка; сборки с рваным стыком идут после чистых (модель только упорядочивает, решает проверка `--apply`); `short_variant` — к каждой принятой сборке короткая версия (слабые мысли из середины убраны до `short_sec`), проверяется так же, в черновике помечена «короткая версия Mn». Монтаж: `montage.fx.pop` — клип открывается на `pop_pct` % ближе и за `pop_sec` возвращается к кадру (резкий старт); `montage.filler_profile: montage_tempo` — профиль вырезки пауз для сборок, когда она включена (`f:1` / `--filler`): только паузы длиннее 0,6 с и «э/мм», заметный скачок лица закрывается сменой плана не чаще раза в 3 с (по умолчанию вырезка в сборках выключена — M53b; сравнение A/B — `--filler`).
+ 
+-**Автосборщик** (M56). `arl autocut <манифест> [--clips N]` предлагает строки сборки по карте источника (`transcripts/<stem>.map.json`, `arl map`) → черновик `reviews/<stem>_auto_m56.txt` с заголовком разметки (`cloud/autocut.py`, числа — `autocut:` в `config/r0.yaml`). Решает код, не модель (модель только описала мысли в карте; с `autocut.map_passport: rules`, M208, и это делают правила `cloud/textmap.py`): **M68:** принятые сборки одного источника не начинаются с одной мысли, не повторяют заголовок и не делят мыслей (`autocut.max_shared`, по умолчанию 0) — кандидат, слишком похожий на принятый, пропускается без проверки и записывается в конец черновика с причиной (11h42: два ролика из четырёх открывались «Вы не сломаны, просто не изучали себя»). **M205/M206:** похожесть — по звуку (`autocut.close_by: sound`, включено): у двух роликов нет общих сыгранных фраз больше `close_share_max` секунд более короткого (0 — ни одной), разной первой фразы и разного заголовка; мысли карты (разметка модели) больше не решают — m200: «Алгоритм или эмпатия» уходил как «общая мысль #52» без единой общей фразы. Отбор — глобальный (`autocut.select: global`, включено): первым обходится набор кандидатов с наибольшей суммой оценок без похожих пар; проверки ниже по-прежнему могут отказать, тогда место занимает следующий. Каждый ушедший кандидат виден в консоли и черновике с причиной: `✗` не прошёл проверку, `≈` похож, `○` без крючка, `…` не дошла очередь (M202). Карта другого исходника (другой `source_sha256`) — отказ, как карта другой расшифровки (M67).
++**Автосборщик** (M56). `arl autocut <манифест> [--clips N]` предлагает строки сборки по карте источника (`transcripts/<stem>.map.json`, `arl map`) → черновик `reviews/<stem>_auto_m56.txt` с заголовком разметки (`cloud/autocut.py`, числа — `autocut:` в `config/r0.yaml`). Решает код, не модель (модель только описала мысли в карте; мысли без ответа модели описывают правила `cloud/textmap.py` — `autocut.map_passport: fallback`, M209; `rules` — все мысли правилами, M208): **M68:** принятые сборки одного источника не начинаются с одной мысли, не повторяют заголовок и не делят мыслей (`autocut.max_shared`, по умолчанию 0) — кандидат, слишком похожий на принятый, пропускается без проверки и записывается в конец черновика с причиной (11h42: два ролика из четырёх открывались «Вы не сломаны, просто не изучали себя»). **M205/M206:** похожесть — по звуку (`autocut.close_by: sound`, включено): у двух роликов нет общих сыгранных фраз больше `close_share_max` секунд более короткого (0 — ни одной), разной первой фразы и разного заголовка; мысли карты (разметка модели) больше не решают — m200: «Алгоритм или эмпатия» уходил как «общая мысль #52» без единой общей фразы. Отбор — глобальный (`autocut.select: global`, включено): первым обходится набор кандидатов с наибольшей суммой оценок без похожих пар; проверки ниже по-прежнему могут отказать, тогда место занимает следующий. Каждый ушедший кандидат виден в консоли и черновике с причиной: `✗` не прошёл проверку, `≈` похож, `○` без крючка, `…` не дошла очередь (M202). Карта другого исходника (другой `source_sha256`) — отказ, как карта другой расшифровки (M67).
+ - клип растёт вокруг сильной мысли (сила ≥ `autocut.seed_punch`, роль — тезис, вывод, пример, образ или вопрос): берёт мысли, на которые она опирается (сноски — по цепочке), затем мысли той же темы и её «похожие» из других мест — по силе, энергии голоса и недостающей роли (начало, пример, вывод), пока клип не дорос до `target_sec`, не длиннее `max_sec`, не больше `max_pieces` кусков; служебные, слабые (< `min_punch`) и неописанные мысли не берутся; мысль, опору которой взять нельзя, не берётся;
+ - предлагается, только если не короче `min_sec`, есть начало (тезис или вопрос) или вывод, и клип не кончается вопросом;
+ - **M119 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** `autocut.generator: passage` — клип — отрезок подряд идущих мыслей одной темы вокруг сильной (m118: 60 из 66 клипов владельца — один отрезок разговора внутри одной темы, 1–5 соседних мыслей; сборка из разных мест не строилась у половины зёрен — мысль со сноской тянула всю цепочку). Отрезок растёт по одной соседней мысли: после вопроса — вперёд, пока первая мысль опирается на предыдущую — назад, иначе к более сильной соседней; соседняя мысль той же темы, не дальше `passage_gap_sec`, не в другом клипе; слабая мысль может стоять внутри, не на краю. Вопроса-петли из другого места и выбрасывания мыслей из середины нет, клипы не делят мыслей. `autocut.lean_depth: 1` — в сборке из разных мест мысль берёт с собой только ту, на которую опирается, а не всю цепочку сносок (карта помечает 71% мыслей IMG_6848 как опирающиеся на предыдущую — цепочки шли через 16 мыслей или через слабую; начало первой мысли по-прежнему проверяют правила начала). `autocut.seed_roles` — роли, вокруг которых растёт клип (пусто — тезис, вывод, пример, образ, вопрос). `autocut.start_judge: rank` — если начало принимают правила, а модель против, клип остаётся и идёт после чистых (инвариант 1: модель только ранжирует; m118: судьи принимали 22–46% начал самого владельца). `autocut.clips_every_min` — сборок не меньше, чем минут источника ÷ это число. `arl autocut … --ac ключ=значение` — любое поле `autocut:` на один запуск, файл конфига не меняется.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 143aad9..72d1d8d 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8566,6 +8566,12 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+         from autoreels.cloud.textmap import apply_rules
+         the_map = apply_rules(the_map)
+         print("  карта: паспорт и темы по правилам (без модели, M208)", flush=True)
++    elif getattr(ac, "map_passport", "model") == "fallback":  # M209: the rules only where the model gave nothing
++        from autoreels.cloud.textmap import apply_fallback
++        the_map, _nfill, _ntop = apply_fallback(the_map)
++        if _nfill or _ntop:
++            print(f"  карта: модель не ответила для части мыслей — по правилам паспорт {_nfill}, тема {_ntop} (M209)",
++                  flush=True)
+     gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
+     if gaps:
+         print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
+@@ -9568,6 +9574,11 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
+     n_sim = sum(1 for u in m["units"] if u.get("similar"))
+     print(f"→ {out_json}\n→ {vdir / '_map.html'}\n  сильных (★4–5): {n_strong}, с похожими далеко: {n_sim}")
+     gaps = _map_gaps(m, mc.max_missing) if llm != "none" else []
++    if gaps and getattr(r0_cfg.autocut, "map_passport", "model") in ("fallback", "rules"):
++        # M209: the assembly takes what the model did not give from the rules — the run goes on
++        print(f"⚠ карта неполна: {'; '.join(gaps)} — сборка возьмёт недостающее по правилам "
++              f"(autocut.map_passport: {r0_cfg.autocut.map_passport}); arl map \"{stem}\" дозапросит у модели", flush=True)
++        return 0
+     if gaps:
+         print(f"✗ карта неполна: {'; '.join(gaps)} — модель не отвечала (лимит облака? локальный сервер?). "
+               f"Повтори arl map \"{stem}\": дозапросит только недостающее", flush=True)
+diff --git a/src/autoreels/cloud/textmap.py b/src/autoreels/cloud/textmap.py
+index f2a79a0..ab684a1 100644
+--- a/src/autoreels/cloud/textmap.py
++++ b/src/autoreels/cloud/textmap.py
+@@ -220,3 +220,43 @@ def apply_rules(the_map: dict) -> dict:
+         name = ", ".join(w for w, _ in bag.most_common(3)) or f"тема {t}"
+         topics.append({"id": t, "name": name, "units": [u["id"] for u in mem]})
+     return {**the_map, "units": units, "topics": topics, "passport": "rules"}
++
++
++# M209: the rules stand in only where the model gave nothing — topic ids of the rules start here (no clash with the model's)
++FALLBACK_TOPIC_BASE = 1000
++
++
++def apply_fallback(the_map: dict) -> tuple[dict, int, int]:
++    """M209 (m208: rules 33 of 56 owner clips, the model 36 — the rules do not replace the model): a copy of the map
++    where only the thoughts without the model's passport take it from the rules, and only the thoughts of a part of the
++    source the topics request did not answer (topic −1) take the rules' topic. A complete map
++    comes back as it is. Returns (map, thoughts filled, thoughts given a topic)."""
++    units = the_map.get("units") or []
++    gap = {u.get("id") for u in units if u.get("missing") or not u.get("role")}
++    topics = the_map.get("topics") or []
++    # only a part the topics request left unanswered (topic −1): a map with no topics at all keeps «every thought its own
++    # topic» as before (autocut works that way)
++    lost = {x for tp in topics if tp.get("missing") for x in tp.get("units") or []}
++    need_topic = {u.get("id") for u in units if u.get("id") in lost or u.get("topic") == -1}
++    if not gap and not need_topic:
++        return the_map, 0, 0
++    ruled = {u["id"]: u for u in apply_rules(the_map)["units"]}
++    out = []
++    for u in units:
++        v = dict(u)
++        r = ruled[u["id"]]
++        if u.get("id") in gap:
++            v.update({k: r[k] for k in ("role", "punch", "standalone", "refers", "summary")})
++            v.pop("missing", None)
++            v["passport"] = "rules"
++        if u.get("id") in need_topic:
++            v["topic"] = FALLBACK_TOPIC_BASE + int(r["topic"])
++        out.append(v)
++    kept = [tp for tp in topics if not tp.get("missing")]
++    added: dict[int, list] = {}
++    for v in out:
++        if v.get("id") in need_topic:
++            added.setdefault(v["topic"], []).append(v["id"])
++    for tid, mem in sorted(added.items()):
++        kept.append({"id": tid, "name": f"тема по правилам {tid - FALLBACK_TOPIC_BASE}", "units": mem, "rules": True})
++    return {**the_map, "units": out, "topics": kept}, len(gap), len(need_topic)
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 033e6a5..b379957 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -299,7 +299,9 @@ class AutocutConfig(BaseModel):
+     select: Literal["greedy", "global"] = "greedy"
+     # M208: the map's passport (role, strength, standalone, refers, summary) and topics — model: as the map file has them
+     # (as before); rules: recomputed by cloud/textmap.py when autocut reads the map (the file stays)
+-    map_passport: Literal["model", "rules"] = "model"
++    # M209: fallback — the model's passport, the rules only for the thoughts the model gave nothing (an incomplete map
++    # does not stop arl auto)
++    map_passport: Literal["model", "rules", "fallback"] = "model"
+                                               # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
+     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+diff --git a/tests/test_m208_textmap.py b/tests/test_m208_textmap.py
+index a801034..1b4dfc7 100644
+--- a/tests/test_m208_textmap.py
++++ b/tests/test_m208_textmap.py
+@@ -75,7 +75,7 @@ def _map():
+             "topics": [{"id": 1, "name": "страх", "units": [1, 2, 3, 4]}],
+             "units": [{"id": i + 1, "t0": float(i * 10), "t1": float(i * 10 + 9), "refs": f"2.{i + 1}", "filtered": "",
+                        "text": t, "voice": {"energy": 20 * i}, "similar": [9], "role": "thesis", "punch": 3,
+-                       "standalone": True, "refers": None, "summary": "модель"} for i, t in enumerate(texts)]}
++                       "standalone": True, "refers": None, "summary": "модель", "topic": 1} for i, t in enumerate(texts)]}
+ 
+ 
+ def test_apply_rules_keeps_the_cut_and_replaces_the_passport():
+@@ -101,9 +101,11 @@ def test_autocut_reads_the_map_with_the_rules_passport_only_when_asked(tmp_path,
+         u.update(role=None, punch=None, standalone=None, refers=None, summary="", missing=True)
+     mp.write_text(json.dumps(m), encoding="utf-8")
+     kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True, scenario_provider=Fake())
++    cfg = tmp_path / "config" / "r0.yaml"
++    cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: model", cfg.read_text(encoding="utf-8")),
++                   encoding="utf-8")
+     assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "a.txt"), **kw) == 1           # model: incomplete
+     assert "карта неполна" in capsys.readouterr().err
+-    cfg = tmp_path / "config" / "r0.yaml"
+     cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: rules", cfg.read_text(encoding="utf-8")),
+                    encoding="utf-8")
+     assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "b.txt"), **kw) == 0
+@@ -111,11 +113,11 @@ def test_autocut_reads_the_map_with_the_rules_passport_only_when_asked(tmp_path,
+     assert json.loads(mp.read_text(encoding="utf-8"))["units"][0]["missing"] is True          # the map file stays
+ 
+ 
+-def test_default_is_the_model_passport():
++def test_code_default_is_the_model_passport_the_repo_config_the_fallback():
+     from autoreels import __main__ as cli
+     from autoreels.core.config import AutocutConfig
+     assert AutocutConfig().map_passport == "model"
+-    assert cli.load_r0_config("config/r0.yaml").autocut.map_passport == "model"
++    assert cli.load_r0_config("config/r0.yaml").autocut.map_passport == "fallback"      # M209: owner 2026-11-02
+ 
+ 
+ def test_the_comparison_tool(tmp_path, monkeypatch, capsys):
+diff --git a/tests/test_m209_map_fallback.py b/tests/test_m209_map_fallback.py
+new file mode 100644
+index 0000000..f6e2402
+--- /dev/null
++++ b/tests/test_m209_map_fallback.py
+@@ -0,0 +1,83 @@
++"""M209: the map's passport — the model's; the rules (cloud/textmap.py) only for the thoughts the model gave nothing.
++m208: all by rules 33 of 56 owner clips, the model 36 — the rules stand in, they do not replace."""
++from __future__ import annotations
++
++import json
++import re
++
++from autoreels.cloud import textmap as T
++from tests.test_m208_textmap import _map
++
++
++def test_a_complete_map_comes_back_as_it_is():
++    m = _map()
++    out, nfill, ntop = T.apply_fallback(m)
++    assert out is m and (nfill, ntop) == (0, 0)
++
++
++def test_only_the_thoughts_without_a_passport_take_the_rules():
++    m = _map()
++    for u in m["units"][2:]:
++        u.update(role=None, punch=None, standalone=None, refers=None, summary="", missing=True)
++    out, nfill, ntop = T.apply_fallback(m)
++    assert (nfill, ntop) == (2, 0)
++    assert out["units"][:2] == m["units"][:2]                                     # the model's passport kept
++    assert [u["role"] for u in out["units"][2:]] == ["example", "conclusion"]     # the rules where it was missing
++    assert all(u["passport"] == "rules" and "missing" not in u for u in out["units"][2:])
++    assert m["units"][2]["missing"] is True                                       # the input map is not changed
++
++
++def test_thoughts_without_a_topic_take_the_rules_topic_without_a_clash():
++    m = _map()
++    m["topics"] = [{"id": 1, "name": "страх", "units": [1, 2]}, {"id": -1, "name": "без ответа", "units": [3, 4],
++                                                                 "missing": True}]
++    for u in m["units"][2:]:
++        u["topic"] = -1
++    out, nfill, ntop = T.apply_fallback(m)
++    assert (nfill, ntop) == (0, 2)
++    assert [u["topic"] for u in out["units"][:2]] == [1, 1]
++    assert all(u["topic"] > T.FALLBACK_TOPIC_BASE for u in out["units"][2:])
++    ids = {tp["id"] for tp in out["topics"]}
++    assert -1 not in ids and 1 in ids and all(u["topic"] in ids for u in out["units"])
++    m2 = _map()
++    m2["topics"] = []                                       # no topics at all: «every thought its own topic», as before
++    for u in m2["units"]:
++        u.pop("topic")
++    out2, nfill2, ntop2 = T.apply_fallback(m2)
++    assert out2 is m2 and (nfill2, ntop2) == (0, 0)
++
++
++def test_arl_map_goes_on_and_autocut_fills_what_the_model_did_not_give(tmp_path, capsys):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    from tests.test_map import _pp
++    mpath = _source(tmp_path)
++    (tmp_path / "prompts").mkdir()
++    (tmp_path / "prompts" / "map_system.md").write_text("S", encoding="utf-8")
++
++    class Model:
++        name = "scripted"
++
++        def __init__(self):
++            self.budget = 1
++
++        def complete(self, messages, temperature=0.0):
++            if self.budget <= 0:
++                raise RuntimeError("rate limit")
++            self.budget -= 1
++            part = messages[-1]["content"].split("Describe EVERY one of these units:")[1]
++            ids = [int(x[1:]) for x in part.split() if x.startswith("#") and x[1:].isdigit()]
++            return json.dumps({"units": [_pp(i) for i in ids]})
++
++    cfg = tmp_path / "config" / "r0.yaml"
++    text = cfg.read_text(encoding="utf-8")
++    assert re.search(r"(?m)^  map_passport: fallback", text)                       # the repo config
++    cfg.write_text(re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", text), encoding="utf-8")
++    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
++    assert cli.cmd_map(str(mpath), provider=Model(), **kw) == 0                     # incomplete, the run goes on
++    out = capsys.readouterr().out
++    assert "⚠ карта неполна" in out and "по правилам" in out and "✗ карта неполна" not in out
++    m = json.loads((tmp_path / "transcripts" / "v.map.json").read_text(encoding="utf-8"))
++    assert any(u.get("missing") for u in m["units"])                               # the file keeps what is missing
++    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, llm="none")
++    assert rc == 0 and "по правилам паспорт" in capsys.readouterr().out
+diff --git a/tests/test_map.py b/tests/test_map.py
+index 8964f36..54fda80 100644
+--- a/tests/test_map.py
++++ b/tests/test_map.py
+@@ -285,8 +285,9 @@ def test_cmd_map_incomplete_returns_3_and_the_next_run_asks_only_what_is_missing
+ 
+     import re
+     cfg = tmp_path / "config" / "r0.yaml"
+-    cfg.write_text(re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", cfg.read_text(encoding="utf-8")),
+-                   encoding="utf-8")
++    text = re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", cfg.read_text(encoding="utf-8"))
++    text = re.sub(r"(?m)^  map_passport: \w+", "  map_passport: model", text)   # M209: the strict mode is tested here
++    cfg.write_text(text, encoding="utf-8")
+     kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
+     first = Model(budget=1)                                     # one window answered, then the limit
+     assert cli.cmd_map(str(mpath), provider=first, **kw) == 3
