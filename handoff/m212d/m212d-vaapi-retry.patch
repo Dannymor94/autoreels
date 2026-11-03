@@ -1,0 +1,197 @@
+diff --git a/PLAN.md b/PLAN.md
+index 3a9da5f..9dd6103 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -294,14 +294,14 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
+ | Сценарист через чат | без платного API: `arl auto <ист> --scenario-llm chat` (режим сценариста включается сам, и после платного окна) кладёт в `exchange/<ист>.scenario.md` одним файлом шаги владельцу, задание сценаристу (тот же промпт, что у API, с примерами владельца) и пронумерованный текст; источник останавливается «ждёт ответа чата», автомонтаж вместо него не идёт. Ответ чата — в `exchange/<ист>.scenario.answer.txt` (обёртка ``` и `**` допустимы); `arl scenario-check <ист>` — что принято, что нет и почему, отклонённое — сообщением для того же чата в `exchange/<ист>.scenario.fix.md`; повторный `arl auto` берёт ответ из файла, дальше обычный путь (плашки, `k:`, стыки — на `--llm`). Задание несёт отпечаток пронумерованного текста: ответ к другому тексту не берётся, задание пишется заново. Тот же файл — тот же результат. `exchange/` не в git | M207 |
+ | Паспорт карты без модели | нарезка на мысли, голос и похожие места и так считает код; модель давала только паспорт (роль, сила, понятна ли без предыдущего, опора, краткое) и темы. `autocut.map_passport: rules` пересчитывает их правилами `cloud/textmap.py` при чтении карты, файл карты не меняется: роль — по маркерам («?», «например», «как будто», «поэтому», «потому что»…), сила — сырой балл (краткость, «не…, а…», обобщения, энергия голоса, роль) и ранг внутри источника (5 — верхние 10 %, 4 — 20 %, 3 — 30 %, 2 — 25 %), понятна ли — правила начала клипа, краткое — самая содержательная фраза, темы — TextTiling по леммам. m208: роль совпадает с моделью в 21 % (правила почти всё зовут тезисом), сила ±1 — 71 %; A/B автомонтажа — покрытие клипов владельца: модель 36 из 56, правила 33 — правила модель не заменяют. **`map_passport: fallback`** (включено владельцем 2026-11-02, M209): паспорт модели, правила — только для мыслей без ответа модели (и тема — для части источника, где запрос тем остался без ответа, номера тем правил от 1000; карта совсем без тем — как раньше, каждая мысль своя тема); полная карта не меняется, неполная больше не останавливает `arl auto` (`arl map` — предупреждение, код 0) | M208, M209 |
+-| Порядок механик (владелец 2026-11-02) | M210 уборка плана → M211 голос в оценке клипа (замер: не отличает, AUC 0,47–0,55; сила по модели 0,68) → M212 тревога целостности на gamebox (m212b: `ab192/r03.integrity.txt` — от h264-рендера на gamebox, рядом лежал чистый hevc-перерендер с Mac; M212c: у ошибки клипа — `rNN.error.txt`, прежние ошибки — в `_errors/`) → M213 приём по ссылке Я.Диска на gamebox с вопросом об удалении. Нумерация блоков по карте речи (M1.8) — только для новых источников. Счёт клипа формулой и вкус — после решений владельца на листах ревью m183 | M210 |
++| Порядок механик (владелец 2026-11-02) | M210 уборка плана → M211 голос в оценке клипа (замер: не отличает, AUC 0,47–0,55; сила по модели 0,68) → M212 тревога целостности на gamebox (m212b: `ab192/r03.integrity.txt` — от h264-рендера на gamebox, рядом лежал чистый hevc-перерендер с Mac; M212c: у ошибки клипа — `rNN.error.txt`, прежние ошибки — в `_errors/`; разбор на gamebox: `h264_vaapi` теряет кадр — 12-байтовый пакет только с SEI; M212d: такой клип перерендеривается `libx264`, `render.yaml vaapi_soft_retry`) → M213 приём по ссылке Я.Диска на gamebox с вопросом об удалении. Нумерация блоков по карте речи (M1.8) — только для новых источников. Счёт клипа формулой и вкус — после решений владельца на листах ревью m183 | M210 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+ 
+ **Замеры.** Урожай черновиков на трёх источниках вырос с 7 до 40; покрытие клипов владельца (кандидат накрывает ≥ 50 % клипа) — 9 из 31 при `clips_every_min: 2`; на семи источниках с добором (M140) — 40 из 66. Стиль владельца на 66 клипах семи источников: 48 без прыжков, 12 с одним, 6 с двумя, ни одного с тремя. Судьи начала (Haiku, Groq) принимают начала владельца так же часто, как случайные, — сигнала вкуса владельца в них нет, поэтому они вне отбора.
+ 
+-**Ждут владельца:** решения кнопками на листе ревью (для вкуса и автоправок «переделать»). Закрыто 2026-10-26/27: `HF_TOKEN` и замер говорящих (m141), громкость (m147 — разницы нет, `dynamic`), «переделать» r06 (m150: IMG r06 уже закрыт, PXL r06 — исходник заменён сжатой копией, оставлен как есть), старые гейты удалены. **Техдолг:** ложная жалоба проверки целостности на gamebox для H.264 (клипы целые) — M212. (Повторные номера `M` в общем черновике `arl auto` исправлены в M175.)
++**Ждут владельца:** решения кнопками на листе ревью (для вкуса и автоправок «переделать»). Закрыто 2026-10-26/27: `HF_TOKEN` и замер говорящих (m141), громкость (m147 — разницы нет, `dynamic`), «переделать» r06 (m150: IMG r06 уже закрыт, PXL r06 — исходник заменён сжатой копией, оставлен как есть), старые гейты удалены. **Техдолг:** нет. Жалоба целостности на gamebox для H.264 оказалась не ложной: `h264_vaapi` изредка теряет кадр (m212c), M212d перерендеривает такой клип программным кодеком. (Повторные номера `M` в общем черновике `arl auto` исправлены в M175.)
+ 
+ ---
+ 
+diff --git a/config/render.yaml b/config/render.yaml
+index 2434f68..fb4c638 100644
+--- a/config/render.yaml
++++ b/config/render.yaml
+@@ -243,6 +243,11 @@ cover: true
+ # M96: … at the moment (of 7 spread over the body) whose frame shows the largest face with open eyes (OpenCV,
+ # pip install -e ".[faces]"); no OpenCV or no face = the middle of the longest body window.
+ cover_face: true
++# M212d (owner 2026-11-03; m212c: gamebox h264_vaapi dropped one frame of ab192/r03 — a 12-byte access unit with only
++# SEI at 54.9 s, 4120 packets / 4119 frames, «missing picture in access unit with size 12»): such a clip is rendered
++# once more by the software encoder (h264_vaapi → libx264, hevc_vaapi → libx265); the failed file goes to _errors/
++# (M212c), <rid>.render.json says why
++vaapi_soft_retry: true
+ 
+ # M97 (ending package): a clip whose last thought goes on past its end (the open_thought warning) shows the plate
+ # «Продолжение →» over its last 2.5 s — the viewer looks for the next part instead of feeling the cut.
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index 5fa9351..6195bda 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -31,6 +31,8 @@
+ 
+ **M212c.** m212 нашла `prew_isaev_anna/_gate/ab192/r03.integrity.txt` (h264, gamebox, 30.10 11:22) рядом с чистым `r03.mp4` (hevc, Mac, 11:40): успешный перерендер удалял старый `.ERROR.mp4`, но оставлял его `.integrity.txt` — и сам сбойный файл снова потерялся. Теперь у каждого `rNN.ERROR.mp4` есть `rNN.error.txt` (когда, на какой машине, каким кодеком, все причины), а чистый перерендер переносит прежние `rNN.ERROR.mp4`, `.error.txt`, `.integrity.txt` в `_errors/rNN.<время>.*`: в папке гейта — только текущее, улики целы. Разбор файла: `sh handoff/m179/probe_au.sh <клип>`.
+ 
++**M212d — причина найдена и лечится.** m212c разобрала сохранённый на gamebox `ab192/r03.ERROR.mp4`: `h264_vaapi` поставил на место одного кадра пакет в 12 байт только со служебным SEI (NAL 6), на 54,9 с из ~68,7 — 4120 пакетов, 4119 кадров, полный декод: «missing picture», «no frame!». Тревога не ложная — кадр потерян. Сбой плавающий (m165: 16 из 26, m179: 0 из 41, ab192: 1). `render.yaml vaapi_soft_retry: true`: такой клип (`.ERROR.mp4` + «missing picture in access unit» в `.integrity.txt` + `*_vaapi` в `.error.txt`) рендерится ещё раз программным кодеком (`h264_vaapi` → `libx264`, `hevc_vaapi` → `libx265`), сбойный файл уходит в `_errors/`, в `rNN.render.json` — `encoder_retry`. Другие ошибки и другие кодеки — как раньше.
++
+ ## SSH до gamebox: «No route to host»
+ До SSH дело не дошло — Mac не видит адрес в локальной сети. По порядку: (1) VPN на Mac перехватывает локальную сеть (2026-11-02: перезапуск VPN вернул доступ) — в VPN включить «Allow LAN access» или исключить `192.168.3.0/24`; (2) macOS 15 не дал приложению (Terminal / iTerm / Claude / VS Code) доступ к «Локальной сети» — Настройки → Конфиденциальность → Локальная сеть; (3) gamebox получил другой IP — `ip -4 addr` на gamebox, закрепить адрес в роутере; (4) Mac в другой сети — `ipconfig getifaddr en0` должен быть `192.168.3.x`.
+ 
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index b379957..708417a 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -1089,6 +1089,10 @@ class RenderConfig(BaseModel):
+     # M96: the cover frame is the moment (of 7 in the body) with the largest face and open eyes (OpenCV); off or no
+     # OpenCV = the middle of the longest body window (M89).
+     cover_face: bool = False
++    # M212d (m212c: h264_vaapi on gamebox put a 12-byte SEI-only access unit in place of one frame — 4120 packets, 4119
++    # frames): a clip failing the integrity check with «missing picture in access unit» on a *_vaapi encoder is rendered
++    # once more by the software encoder (h264_vaapi → libx264, hevc_vaapi → libx265)
++    vaapi_soft_retry: bool = False
+     # M97 (ending package, PLAN M1.7 B): a clip whose last thought goes on past its end (open_thought) shows
+     # continue_text in the title plate over its last continue_sec seconds. Off = the clip as before.
+     continue_plate: bool = False
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index 16890ef..288508c 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -4104,10 +4104,60 @@ def render_crop(
+         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
+         background=background, zoom_cfg=zoom_cfg, smap=smap,
+     )
++    retry = _vaapi_dropped_frame(Path(out_dir), manifest) if getattr(render_cfg, "vaapi_soft_retry", False) else {}
++    for soft, rids in sorted({v: [r for r, s in retry.items() if s == v] for v in set(retry.values())}.items()):
++        for rid in rids:
++            print(f"  ↻ {rid}: аппаратный кодек потерял кадр (missing picture in access unit) — заново {soft}",
++                  flush=True)
++        again = _render_segments(
++            manifest.model_copy(update={"reels": [r for r in manifest.reels if r.id in rids]}),
++            inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
++            ffmpeg=ffmpeg, encoder=soft, vf=_crop_vf(manifest.setup), suffix="",
++            palette_vf=palette_vf, music_path=music_path,
++            profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
++            background=background, zoom_cfg=zoom_cfg, smap=smap,
++        )
++        for out in again:
++            _note_soft_retry(Path(out_dir), out.stem, soft)
++        outputs = sorted(outputs + again, key=lambda p: p.name)
+     _write_index_md(manifest, Path(out_dir).resolve(), render_cfg)
+     return outputs
+ 
+ 
++_VAAPI_SOFT = {"h264_vaapi": "libx264", "hevc_vaapi": "libx265"}
++
++
++def _vaapi_dropped_frame(out_dir: Path, manifest: Manifest) -> dict[str, str]:
++    """M212d: the clips of this render that failed only as m212c's ab192/r03 did — .ERROR.mp4, «missing picture in access
++    unit» in <rid>.integrity.txt, a *_vaapi codec in <rid>.error.txt — → {rid: the software encoder to render it with}."""
++    out = {}
++    for reel in manifest.reels:
++        err, integ, note = (out_dir / f"{reel.id}.{s}" for s in ("ERROR.mp4", "integrity.txt", "error.txt"))
++        if not (err.exists() and integ.exists() and note.exists()):
++            continue
++        try:
++            head = note.read_text(encoding="utf-8").splitlines()[0].split()
++            words = integ.read_text(encoding="utf-8")
++        except (OSError, IndexError):
++            continue
++        codec = head[-1] if head else ""
++        if "missing picture in access unit" in words and codec in _VAAPI_SOFT:
++            out[reel.id] = _VAAPI_SOFT[codec]
++    return out
++
++
++def _note_soft_retry(out_dir: Path, rid: str, soft: str) -> None:
++    """M212d: <rid>.render.json says the clip was rendered again by the software encoder and why."""
++    import json as _json
++    p = out_dir / f"{rid}.render.json"
++    try:
++        data = _json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
++        data["encoder_retry"] = {"encoder": soft, "why": "missing picture in access unit (vaapi dropped a frame)"}
++        p.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
++    except (OSError, ValueError):
++        pass
++
++
+ def render_preview(
+     manifest: Manifest,
+     *,
+diff --git a/tests/test_render.py b/tests/test_render.py
+index 0af0f8d..0927e23 100644
+--- a/tests/test_render.py
++++ b/tests/test_render.py
+@@ -8,6 +8,7 @@
+ - все пути через pathlib, кроссплатформенно (basename Mac/Windows-строки извлекается верно);
+ - несколько reel → несколько вызовов ffmpeg.
+ """
++import json
+ import math
+ import re
+ import subprocess
+@@ -3786,3 +3787,54 @@ def test_m212c_a_failed_clip_says_why_and_a_clean_rerender_parks_the_old_error(t
+     parked = sorted(p.name for p in (out_dir / "_errors").iterdir())
+     assert len(parked) == 3 and all(re.match(r"r01\.\d{8}-\d{6}\.(ERROR\.mp4|error\.txt|integrity\.txt)$", n)
+                                     for n in parked)
++
++
++def test_m212d_a_vaapi_dropped_frame_is_rendered_again_by_the_software_encoder(tmp_path, render_cfg, fake_ffmpeg,
++                                                                               monkeypatch):
++    """M212d (m212c: gamebox h264_vaapi put a 12-byte SEI-only access unit in place of one frame of ab192/r03): a clip
++    failing the integrity check with «missing picture in access unit» on *_vaapi is rendered once more by libx264; the
++    failed file goes to _errors/ (M212c), <rid>.render.json says why; other errors and other encoders are left as they are."""
++    real_popen = render.subprocess.Popen
++    encoders: list[str] = []
++
++    class _Writes(real_popen):
++        def __init__(self, cmd, **kw):
++            super().__init__(cmd, **kw)
++            last = str(cmd[-1])
++            if "-c:v" in cmd:
++                encoders.append(str(cmd[cmd.index("-c:v") + 1]))
++            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
++                Path(last).parent.mkdir(parents=True, exist_ok=True)
++                Path(last).write_bytes(b"x")
++    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
++    calls = {"r01": 0}
++
++    def integrity(path, *a, **k):
++        if Path(path).stem.startswith("r01"):
++            calls["r01"] += 1
++            return "[h264 @ 0x1] missing picture in access unit with size 12" if calls["r01"] == 1 else ""
++        return ""
++    monkeypatch.setattr(render, "_check_integrity", integrity)
++    real_note = render._write_error_note
++    monkeypatch.setattr(render, "_write_error_note",                   # the first pass ran on gamebox's h264_vaapi
++                        lambda out_dir, rid, errors, codec: real_note(out_dir, rid, errors, "h264_vaapi"))
++    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
++    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
++    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
++    monkeypatch.setattr(render, "_probe_duration_sec", lambda path, *a, **k: None)
++    inputs = tmp_path / "inputs"
++    sha = _make_source(inputs, "v.mp4", b"m212d-soft-retry")
++    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
++    out_dir = tmp_path / "out"
++    cfg = render_cfg.model_copy(update={"vaapi_soft_retry": True})
++    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=cfg)
++    assert [p.name for p in outputs] == ["r01.mp4", "r02.mp4"] and calls["r01"] == 2
++    assert "libx264" in encoders
++    assert json.loads((out_dir / "r01.render.json").read_text(encoding="utf-8"))["encoder_retry"]["encoder"] == "libx264"
++    assert not (out_dir / "r01.ERROR.mp4").exists()
++    assert len([p for p in (out_dir / "_errors").iterdir() if p.name.startswith("r01.")]) == 3
++    # off: the clip stays failed, as before M212d
++    calls["r01"] = 0
++    out2 = tmp_path / "out2"
++    outputs = render_crop(m, inputs_dir=inputs, out_dir=out2, render_cfg=cfg.model_copy(update={"vaapi_soft_retry": False}))
++    assert [p.name for p in outputs] == ["r02.mp4"] and (out2 / "r01.ERROR.mp4").exists() and calls["r01"] == 1
