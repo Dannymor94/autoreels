@@ -1,0 +1,601 @@
+diff --git a/PLAN.md b/PLAN.md
+index d5f263e..c434a97 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -293,7 +293,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Проверено и не делаем | стыки без модели — правила начала клипа помечают 33 % и плохих (12 вердиктов модели), и хороших (42 стыка владельца); крючки — `hook_score` уже детерминирован, эталона нет (холодный старт у владельца в 3 клипах из 68); плашки из слов клипа — 20 % совпадения с плашками владельца (случайно 8 %), плашки владельца — пересказ | M204 |
+ | Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
+ | Сценарист через чат | без платного API: `arl auto <ист> --scenario-llm chat` (режим сценариста включается сам, и после платного окна) кладёт в `exchange/<ист>.scenario.md` одним файлом шаги владельцу, задание сценаристу (тот же промпт, что у API, с примерами владельца) и пронумерованный текст; источник останавливается «ждёт ответа чата», автомонтаж вместо него не идёт. Ответ чата — в `exchange/<ист>.scenario.answer.txt` (обёртка ``` и `**` допустимы); `arl scenario-check <ист>` — что принято, что нет и почему, отклонённое — сообщением для того же чата в `exchange/<ист>.scenario.fix.md`; повторный `arl auto` берёт ответ из файла, дальше обычный путь (плашки, `k:`, стыки — на `--llm`). Задание несёт отпечаток пронумерованного текста: ответ к другому тексту не берётся, задание пишется заново. Тот же файл — тот же результат. `exchange/` не в git | M207 |
+-| **Карта без модели** (план, M208) | мысли источника по паузам и смене лексики (TextTiling по леммам): новый источник проходит `arl auto` без API; замер — границы против нынешних карт 7 источников | M208 |
++| Паспорт карты без модели | нарезка на мысли, голос и похожие места и так считает код; модель давала только паспорт (роль, сила, понятна ли без предыдущего, опора, краткое) и темы. `autocut.map_passport: rules` (**выключено**) пересчитывает их правилами `cloud/textmap.py` при чтении карты, файл карты не меняется: роль — по маркерам («?», «например», «как будто», «поэтому», «потому что»…), сила — сырой балл (краткость, «не…, а…», обобщения, энергия голоса, роль) и ранг внутри источника (5 — верхние 10 %, 4 — 20 %, 3 — 30 %, 2 — 25 %), понятна ли — правила начала клипа, краткое — самая содержательная фраза, темы — TextTiling по леммам. Замер: `tools/map_rules_check.py` (совпадение с паспортом модели) и A/B автомонтажа — покрытие клипов владельца | M208 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index f95f288..15da482 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -49,6 +49,7 @@ autoreels/
+ ├── tools/score_gate.py       # M188: таблица гейта по источникам (`score_gate.py <гейт> [--compare] [--ref <эталон>]`, M191)
+ ├── tools/clip_checks.py      # M199: четыре проверки клипа по готовому гейту (крючок, плашка, начало без опоры, стыки) → _score/<гейт>_checks.json
+ ├── tools/kw_rule_check.py    # M203: правило `k:` против слов владельца (`emph` в манифестах): по тексту, с голосом, случайно
++├── tools/map_rules_check.py  # M208: паспорт карты по правилам против паспорта модели (роль, сила, понятность, границы тем)
+ ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
+ │
+ ├── docs/
+@@ -90,6 +91,7 @@ autoreels/
+ │   │   ├── blocks.py         # M1.6: блоки-кандидаты, отсев, выгрузка/разбор разметки
+ │   │   ├── label.py          # `arl label`: авторазметка блоков бесплатной LLM, проверка кодом
+ │   │   ├── thoughtmap.py     # M54: карта мыслей источника (`arl map`)
++│   │   ├── textmap.py        # M208: паспорт и темы карты по правилам (без модели), `autocut.map_passport: rules`
+ │   │   ├── autocut.py        # M56+: автомонтаж — генераторы, ритм прыжков, крючок, плашка, судьи
+ │   │   ├── scenario.py       # M123: сценарист — промпт, разбор строк, предложения
+ │   │   ├── chatscenario.py   # M207: сценарист через чат — задание и ответ файлами exchange/, сообщение об отклонённом
+diff --git a/README.md b/README.md
+index 2f3c05d..cd31b7f 100644
+--- a/README.md
++++ b/README.md
+@@ -89,6 +89,7 @@
+ | кэш ответов моделей | `llm_cache.mode: record` (по умолчанию: тот же запрос — тот же ответ); на прогон `ARL_LLM_CACHE=off \| record \| replay`. `replay` — только из кэша, промах = код 1; A/B кода — на replay (M202, M206) |
+ | ключевые слова `k:` | `autocut.keywords_source: rule \| model \| fallback` (по умолчанию `rule` — без модели), `keywords_max` (M203, M204) |
+ | модель плашек, `k:`, стыков в режиме сценариста | `autocut.scenario_polish: run` (модель прогона `--llm`) \| `scenarist` (модель сценариста) (M204) |
++| паспорт карты (роль, сила, темы) | `autocut.map_passport: model \| rules` — `rules`: без модели, правилами при чтении карты (M208, по умолчанию `model`) |
+ | похожесть клипов и отбор | `autocut.close_by: sound \| units`, `close_share_max`; `autocut.select: global \| greedy` (M205, M206) |
+ | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+ 
+diff --git a/config/r0.yaml b/config/r0.yaml
+index 37da9e5..ed60ffc 100644
+--- a/config/r0.yaml
++++ b/config/r0.yaml
+@@ -387,6 +387,8 @@ autocut:
+   close_share_max: 0.0    # sound: share of the shorter reel's seconds two reels may both play (0 = not one sentence)
+   select: global          # M206: on (owner 2026-11-02; m205: same set as greedy on the 7 sources). greedy — take candidates in the pool's order (as before); global — the set with the largest total
+                           # score and no two too close is walked first (one strong candidate no longer blocks two good ones)
++  map_passport: model     # M208: the map's passport and topics — model (the map file, as before) | rules (cloud/textmap.py,
++                          # no model: markers for the role, rank for the strength, the start rules, TextTiling topics)
+   combined_overlap_max: 0.8   # M177/M181 (owner: «похожи, но идея другая» — 0.3 dropped those too; ≥ 0.8 = the same footage): a label clip sharing over
+                                # this share of its played seconds with a kept clip (montage first) is dropped; short shots too. 1 = off
+   # M121 (owner 2026-10-20: «собери» — the M119/M120 flags on by default, before viewing; the generator chosen by the
+diff --git a/docs/REEL_SPEC.md b/docs/REEL_SPEC.md
+index adab6d8..0dc30d9 100644
+--- a/docs/REEL_SPEC.md
++++ b/docs/REEL_SPEC.md
+@@ -136,7 +136,7 @@ H.264 High, yuv420p, постоянная частота кадров = номи
+ 
+ **Первые секунды, стыки, темп** (M70). Автосборщик (`autocut:` в `config/r0.yaml`): `hook_title` — модель предлагает заголовок-крючок для плашки `t:` (вопрос или напряжение из слов ролика); код берёт его, только если он не длиннее 60 знаков и 9 слов, без чисел, которых ролик не говорит, и не меньше 60 % содержательных слов совпадают с ролика (иначе остаётся краткое содержание мысли); `seam_check` — модель судит каждый стык сборки («Б продолжает А?»), ответ обязателен для каждого стыка; сборки с рваным стыком идут после чистых (модель только упорядочивает, решает проверка `--apply`); `short_variant` — к каждой принятой сборке короткая версия (слабые мысли из середины убраны до `short_sec`), проверяется так же, в черновике помечена «короткая версия Mn». Монтаж: `montage.fx.pop` — клип открывается на `pop_pct` % ближе и за `pop_sec` возвращается к кадру (резкий старт); `montage.filler_profile: montage_tempo` — профиль вырезки пауз для сборок, когда она включена (`f:1` / `--filler`): только паузы длиннее 0,6 с и «э/мм», заметный скачок лица закрывается сменой плана не чаще раза в 3 с (по умолчанию вырезка в сборках выключена — M53b; сравнение A/B — `--filler`).
+ 
+-**Автосборщик** (M56). `arl autocut <манифест> [--clips N]` предлагает строки сборки по карте источника (`transcripts/<stem>.map.json`, `arl map`) → черновик `reviews/<stem>_auto_m56.txt` с заголовком разметки (`cloud/autocut.py`, числа — `autocut:` в `config/r0.yaml`). Решает код, не модель (модель только описала мысли в карте): **M68:** принятые сборки одного источника не начинаются с одной мысли, не повторяют заголовок и не делят мыслей (`autocut.max_shared`, по умолчанию 0) — кандидат, слишком похожий на принятый, пропускается без проверки и записывается в конец черновика с причиной (11h42: два ролика из четырёх открывались «Вы не сломаны, просто не изучали себя»). **M205/M206:** похожесть — по звуку (`autocut.close_by: sound`, включено): у двух роликов нет общих сыгранных фраз больше `close_share_max` секунд более короткого (0 — ни одной), разной первой фразы и разного заголовка; мысли карты (разметка модели) больше не решают — m200: «Алгоритм или эмпатия» уходил как «общая мысль #52» без единой общей фразы. Отбор — глобальный (`autocut.select: global`, включено): первым обходится набор кандидатов с наибольшей суммой оценок без похожих пар; проверки ниже по-прежнему могут отказать, тогда место занимает следующий. Каждый ушедший кандидат виден в консоли и черновике с причиной: `✗` не прошёл проверку, `≈` похож, `○` без крючка, `…` не дошла очередь (M202). Карта другого исходника (другой `source_sha256`) — отказ, как карта другой расшифровки (M67).
++**Автосборщик** (M56). `arl autocut <манифест> [--clips N]` предлагает строки сборки по карте источника (`transcripts/<stem>.map.json`, `arl map`) → черновик `reviews/<stem>_auto_m56.txt` с заголовком разметки (`cloud/autocut.py`, числа — `autocut:` в `config/r0.yaml`). Решает код, не модель (модель только описала мысли в карте; с `autocut.map_passport: rules`, M208, и это делают правила `cloud/textmap.py`): **M68:** принятые сборки одного источника не начинаются с одной мысли, не повторяют заголовок и не делят мыслей (`autocut.max_shared`, по умолчанию 0) — кандидат, слишком похожий на принятый, пропускается без проверки и записывается в конец черновика с причиной (11h42: два ролика из четырёх открывались «Вы не сломаны, просто не изучали себя»). **M205/M206:** похожесть — по звуку (`autocut.close_by: sound`, включено): у двух роликов нет общих сыгранных фраз больше `close_share_max` секунд более короткого (0 — ни одной), разной первой фразы и разного заголовка; мысли карты (разметка модели) больше не решают — m200: «Алгоритм или эмпатия» уходил как «общая мысль #52» без единой общей фразы. Отбор — глобальный (`autocut.select: global`, включено): первым обходится набор кандидатов с наибольшей суммой оценок без похожих пар; проверки ниже по-прежнему могут отказать, тогда место занимает следующий. Каждый ушедший кандидат виден в консоли и черновике с причиной: `✗` не прошёл проверку, `≈` похож, `○` без крючка, `…` не дошла очередь (M202). Карта другого исходника (другой `source_sha256`) — отказ, как карта другой расшифровки (M67).
+ - клип растёт вокруг сильной мысли (сила ≥ `autocut.seed_punch`, роль — тезис, вывод, пример, образ или вопрос): берёт мысли, на которые она опирается (сноски — по цепочке), затем мысли той же темы и её «похожие» из других мест — по силе, энергии голоса и недостающей роли (начало, пример, вывод), пока клип не дорос до `target_sec`, не длиннее `max_sec`, не больше `max_pieces` кусков; служебные, слабые (< `min_punch`) и неописанные мысли не берутся; мысль, опору которой взять нельзя, не берётся;
+ - предлагается, только если не короче `min_sec`, есть начало (тезис или вопрос) или вывод, и клип не кончается вопросом;
+ - **M119 (флаги; что включено по умолчанию — `config/r0.yaml`, с M121):** `autocut.generator: passage` — клип — отрезок подряд идущих мыслей одной темы вокруг сильной (m118: 60 из 66 клипов владельца — один отрезок разговора внутри одной темы, 1–5 соседних мыслей; сборка из разных мест не строилась у половины зёрен — мысль со сноской тянула всю цепочку). Отрезок растёт по одной соседней мысли: после вопроса — вперёд, пока первая мысль опирается на предыдущую — назад, иначе к более сильной соседней; соседняя мысль той же темы, не дальше `passage_gap_sec`, не в другом клипе; слабая мысль может стоять внутри, не на краю. Вопроса-петли из другого места и выбрасывания мыслей из середины нет, клипы не делят мыслей. `autocut.lean_depth: 1` — в сборке из разных мест мысль берёт с собой только ту, на которую опирается, а не всю цепочку сносок (карта помечает 71% мыслей IMG_6848 как опирающиеся на предыдущую — цепочки шли через 16 мыслей или через слабую; начало первой мысли по-прежнему проверяют правила начала). `autocut.seed_roles` — роли, вокруг которых растёт клип (пусто — тезис, вывод, пример, образ, вопрос). `autocut.start_judge: rank` — если начало принимают правила, а модель против, клип остаётся и идёт после чистых (инвариант 1: модель только ранжирует; m118: судьи принимали 22–46% начал самого владельца). `autocut.clips_every_min` — сборок не меньше, чем минут источника ÷ это число. `arl autocut … --ac ключ=значение` — любое поле `autocut:` на один запуск, файл конфига не меняется.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 972f01d..143aad9 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -8553,11 +8553,6 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+     if foreign:
+         print(f"ошибка: {foreign} — сборки по ней разойдутся с блоками; arl map \"{stem}\" --force", file=sys.stderr)
+         return 1
+-    gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
+-    if gaps:
+-        print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
+-              f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
+-        return 1
+     ac = r0_cfg.autocut
+     if ac_over:                             # M119: --ac key=value for this run only (config/r0.yaml unchanged)
+         try:
+@@ -8567,6 +8562,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
+             return 1
+         r0_cfg = r0_cfg.model_copy(update={"autocut": ac})
+         print("  autocut для этого запуска: " + ", ".join(str(x).strip() for x in ac_over), flush=True)
++    if getattr(ac, "map_passport", "model") == "rules":     # M208: the passport and topics by rules, the map file stays
++        from autoreels.cloud.textmap import apply_rules
++        the_map = apply_rules(the_map)
++        print("  карта: паспорт и темы по правилам (без модели, M208)", flush=True)
++    gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
++    if gaps:
++        print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
++              f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
++        return 1
+     n_clips = clips or ac.clips
+     if not clips and ac.clips_every_min > 0:    # M119: the owner takes one clip per ~3.5 min of a talk
+         _src_min = max((float(w.t1) for w in tx.words), default=0.0) / 60.0
+diff --git a/src/autoreels/cloud/textmap.py b/src/autoreels/cloud/textmap.py
+new file mode 100644
+index 0000000..f2a79a0
+--- /dev/null
++++ b/src/autoreels/cloud/textmap.py
+@@ -0,0 +1,222 @@
++"""M208: the map's passport and topics without a model.
++
++The thoughts of a map (cloud/thoughtmap.py) are already cut by code — runs of 1–4 sentences at pauses — and their
++voice energy and the similar places are measured by code. A model gave only the PASSPORT (role, strength 1–5, standalone,
++refers, summary) and the TOPICS. Owner, 2026-11-02: deterministic mechanics, no paid API. Here both by rules:
++
++- role: question («?»), example («например», «однажды», «помню», «был случай» …), metaphor («как будто», «словно»,
++  «представьте» …), conclusion («поэтому», «итак», «в итоге», «получается» …), explanation («потому что», «то есть»,
++  «дело в том» …), aside (fewer than 3 content words), otherwise thesis — the first marker found in this order wins;
++- strength 1–5: a raw score — short sentences (median ≤ 12 words), a contrast («не …, а …»), a generalization
++  («всегда», «никогда», «главное», «самое» …), the voice's energy, the role — then by rank within the source: 5 for the
++  top 10 %, 4 the next 20 %, 3 the next 30 %, 2 the next 25 %, 1 the rest (PUNCH_SHARES); an aside is 1;
++- standalone: the first sentence opens as a reel may open (the start rules of autocut: no reference back, no verb
++  without a subject); refers — the previous thought when not standalone;
++- summary: the thought's sentence with the most of its content words, fillers dropped, ≤ 160 characters;
++- topics: TextTiling over lemmas — the cohesion of the thoughts before and after each gap; the deepest valleys are the
++  topic borders, about one topic per 8 thoughts (3 … 15), none shorter than 3 thoughts.
++
++Pure: a map dict in, a new map dict out (`passport: rules`); the cut, the times, the voice and `similar` stay."""
++from __future__ import annotations
++
++import math
++import re
++from collections import Counter
++from typing import Sequence
++
++_WORD = re.compile(r"[а-яёa-z0-9-]+", re.IGNORECASE)
++_SENT = re.compile(r"(?<=[.!?…])\s+")
++_CONTENT = frozenset({"NOUN", "ADJF", "ADJS", "COMP", "VERB", "INFN", "PRTF", "PRTS", "GRND", "NUMR", "ADVB"})
++_STOP = frozenset("это вот так как что там тут уже еще ещё очень просто ну да нет вообще быть есть был была было были "
++                  "который которая которое которые свой своя свое своё весь вся всё все тот та то те этот эта эти "
++                  "такой такая такое такие себя мочь сказать говорить делать".split())
++# the order is the precedence: the first role whose marker is in the thought wins
++_ROLE_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
++    ("example", ("например", "однажды", "помню", "был случай", "как-то раз", "вот у меня", "у меня была",
++                 "у меня был", "приходит ко мне", "пришла ко мне", "пришёл ко мне", "пришел ко мне", "история")),
++    ("metaphor", ("как будто", "словно", "будто", "представьте", "представь", "это как", "как если бы")),
++    ("conclusion", ("поэтому", "итак", "в итоге", "получается", "в общем", "в результате", "вывод", "таким образом",
++                    "и вот поэтому", "значит,")),
++    ("explanation", ("потому что", "так как", "то есть", "дело в том", "это значит", "это потому", "из-за того")),
++)
++_GENERAL = ("всегда", "никогда", "главное", "самое", "каждый", "любой", "никто", "все люди", "на самом деле",
++            "важно", "нельзя", "нужно")
++# not «как бы», «значит», «то есть»: they carry meaning too («как бы вы ни …», «это значит …»)
++_FILLERS = ("в общем", "в принципе", "собственно", "буквально", "просто", "вот", "ну", "короче", "понимаете",
++            "смотрите", "знаете", "кстати", "типа")
++
++_morph_cache: list = []
++
++
++def _morph():
++    if not _morph_cache:
++        try:
++            import pymorphy3
++            _morph_cache.append(pymorphy3.MorphAnalyzer())
++        except Exception:  # noqa: BLE001 — no package: words as they are, every word counts as content
++            _morph_cache.append(None)
++    return _morph_cache[0]
++
++
++def _lemmas(text: str) -> list[str]:
++    m = _morph()
++    out = []
++    for w in _WORD.findall(text.lower().replace("ё", "е")):
++        if len(w) < 3 or w in _STOP:
++            continue
++        if m is None:
++            out.append(w)
++            continue
++        p = m.parse(w)[0]
++        if p.tag.POS in _CONTENT and p.normal_form not in _STOP:
++            out.append(p.normal_form)
++    return out
++
++
++def _sentences(text: str) -> list[str]:
++    return [s.strip() for s in _SENT.split(text or "") if s.strip()]
++
++
++def _has(text: str, marker: str) -> bool:
++    return re.search(r"(?<![а-яё])" + re.escape(marker) + r"(?![а-яё])", text) is not None
++
++
++def rule_role(text: str) -> str:
++    low = " " + (text or "").lower().replace("ё", "е") + " "
++    sents = _sentences(text)
++    if sents and sents[-1].rstrip("»\"') ").endswith("?"):
++        return "question"
++    for role, markers in _ROLE_MARKERS:
++        if any(_has(low, m.replace("ё", "е")) for m in markers):
++            return role
++    if len(_lemmas(text)) < 3:
++        return "aside"
++    return "thesis"
++
++
++def punch_raw(text: str, role: str, energy) -> float:
++    """The strength before ranking: short sentences, a contrast, a generalization, the voice's energy, the role."""
++    low = (text or "").lower().replace("ё", "е")
++    sents = _sentences(text) or [text or ""]
++    lens = sorted(len(_WORD.findall(s)) for s in sents)
++    s = 0.0
++    s += lens[len(lens) // 2] <= 12
++    s += re.search(r"(?<![а-я])не\s[^.!?]{1,60}?,\s*а\s", low) is not None
++    s += any(_has(low, g) for g in _GENERAL)
++    if isinstance(energy, (int, float)):
++        s += (float(energy) - 50.0) / 25.0
++    s += 0.5 if role in ("conclusion", "thesis", "question", "metaphor") else 0.0
++    return s - (3.0 if role == "aside" else 0.0)
++
++
++# the strength by rank within the source — the share of thoughts with 5, 4, 3, 2 (the rest 1); seed_punch 4 = the top 30 %
++PUNCH_SHARES = (0.10, 0.20, 0.30, 0.25)
++
++
++def rank_punch(raws: Sequence[float], roles: Sequence[str]) -> list[int]:
++    n = len(raws)
++    order = sorted(range(n), key=lambda i: (-raws[i], i))
++    out = [1] * n
++    edges, acc = [], 0.0
++    for share in PUNCH_SHARES:
++        acc += share
++        edges.append(round(acc * n))
++    for rank, i in enumerate(order):
++        out[i] = 5 - next((k for k, e in enumerate(edges) if rank < e), len(edges))
++    return [1 if roles[i] == "aside" else max(1, out[i]) for i in range(n)]
++
++
++def rule_standalone(text: str) -> bool:
++    from autoreels.cloud.autocut import back_reference
++    first = (_sentences(text) or [""])[0]
++    if back_reference(first):
++        return False
++    try:
++        from autoreels.cloud.clipcheck import start_morph
++        return start_morph(first.split()) is None
++    except Exception:  # noqa: BLE001 — no pymorphy3: the lexical rule alone
++        return True
++
++
++def rule_summary(text: str, limit: int = 160) -> str:
++    sents = _sentences(text) or [text or ""]
++    best = max(sents, key=lambda s: (len(set(_lemmas(s))), -sents.index(s)))
++    s = " " + best + " "
++    for f in _FILLERS:
++        s = re.sub(r"(?i)(?<=[\s,—])" + re.escape(f) + r"(?=[\s,.!?—])", "", s)
++    s = re.sub(r"\s*,\s*(,\s*)+", ", ", s)
++    s = re.sub(r"\s+", " ", s).strip(" ,—")
++    s = s[:1].upper() + s[1:]
++    return s if len(s) <= limit else s[:limit - 1].rstrip() + "…"
++
++
++def _cos(a: Counter, b: Counter) -> float:
++    if not a or not b:
++        return 0.0
++    num = sum(a[k] * b[k] for k in a.keys() & b.keys())
++    return num / (math.sqrt(sum(v * v for v in a.values())) * math.sqrt(sum(v * v for v in b.values())))
++
++
++def rule_topics(texts: Sequence[str], *, per_topic: int = 8, min_len: int = 3, window: int = 3,
++                lo: int = 3, hi: int = 15) -> list[int]:
++    """TextTiling: topic ids 1..T, contiguous, one per thought."""
++    n = len(texts)
++    if n == 0:
++        return []
++    want = max(lo, min(hi, round(n / per_topic))) if n >= lo * min_len else 1
++    bags = [Counter(_lemmas(t)) for t in texts]
++    gaps = []                                 # gap i = between thought i-1 and i
++    for i in range(1, n):
++        left = sum((bags[j] for j in range(max(0, i - window), i)), Counter())
++        right = sum((bags[j] for j in range(i, min(n, i + window))), Counter())
++        gaps.append((i, _cos(left, right)))
++    sims = [s for _, s in gaps]
++    depth = []
++    for k, (i, s) in enumerate(gaps):
++        lpeak = max(sims[:k + 1])
++        rpeak = max(sims[k:])
++        depth.append((lpeak - s) + (rpeak - s))
++    order = sorted(range(len(gaps)), key=lambda k: (-depth[k], gaps[k][0]))
++    cuts: list[int] = []
++    for k in order:
++        if len(cuts) >= want - 1:
++            break
++        i = gaps[k][0]
++        if i < min_len or n - i < min_len or any(abs(i - c) < min_len for c in cuts):
++            continue
++        cuts.append(i)
++    cuts.sort()
++    out, tid, nxt = [], 1, 0
++    for i in range(n):
++        if nxt < len(cuts) and i == cuts[nxt]:
++            tid += 1
++            nxt += 1
++        out.append(tid)
++    return out
++
++
++def apply_rules(the_map: dict) -> dict:
++    """A copy of the map with the passport and the topics by rules (`passport: rules`)."""
++    units = [dict(u) for u in the_map.get("units") or []]
++    prev_id = None
++    raws = []
++    for u in units:
++        text = str(u.get("text") or "")
++        role = rule_role(text)
++        standalone = rule_standalone(text)
++        raws.append(punch_raw(text, role, (u.get("voice") or {}).get("energy")))
++        u.update(role=role, standalone=standalone, refers=None if standalone else prev_id, summary=rule_summary(text))
++        u.pop("missing", None)
++        prev_id = u.get("id")
++    for u, pn in zip(units, rank_punch(raws, [u["role"] for u in units])):
++        u["punch"] = pn
++    tids = rule_topics([str(u.get("text") or "") for u in units])
++    for u, t in zip(units, tids):
++        u["topic"] = t
++    topics = []
++    for t in sorted(set(tids)):
++        mem = [u for u in units if u["topic"] == t]
++        bag = Counter(l for u in mem for l in _lemmas(str(u.get("text") or "")))
++        name = ", ".join(w for w, _ in bag.most_common(3)) or f"тема {t}"
++        topics.append({"id": t, "name": name, "units": [u["id"] for u in mem]})
++    return {**the_map, "units": units, "topics": topics, "passport": "rules"}
+diff --git a/src/autoreels/core/config.py b/src/autoreels/core/config.py
+index 4fab89c..033e6a5 100644
+--- a/src/autoreels/core/config.py
++++ b/src/autoreels/core/config.py
+@@ -297,6 +297,9 @@ class AutocutConfig(BaseModel):
+     # M205: which candidates are taken — greedy: in the pool's order (as before); global: the set with the largest total
+     # score and no two too close, walked first
+     select: Literal["greedy", "global"] = "greedy"
++    # M208: the map's passport (role, strength, standalone, refers, summary) and topics — model: as the map file has them
++    # (as before); rules: recomputed by cloud/textmap.py when autocut reads the map (the file stays)
++    map_passport: Literal["model", "rules"] = "model"
+                                               # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
+     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
+     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the
+diff --git a/tests/test_m208_textmap.py b/tests/test_m208_textmap.py
+new file mode 100644
+index 0000000..a801034
+--- /dev/null
++++ b/tests/test_m208_textmap.py
+@@ -0,0 +1,132 @@
++"""M208: the map's passport and topics by rules — no model. The cut, times, voice and similar places stay the map's."""
++from __future__ import annotations
++
++import json
++import re
++
++import pytest
++
++from autoreels.cloud import textmap as T
++
++
++@pytest.mark.parametrize("text,role", [
++    ("Что такое страх? Откуда он берётся?", "question"),
++    ("Например, приходит ко мне женщина и говорит о сыне.", "example"),
++    ("Это как будто вы идёте по тонкому льду над рекой.", "metaphor"),
++    ("Поэтому дышать нужно спокойно и медленно, всегда.", "conclusion"),
++    ("Потому что тело помнит всё, что с ним было раньше.", "explanation"),
++    ("Ну вот, да.", "aside"),
++    ("Страх — это сигнал тела о границе возможностей.", "thesis"),
++])
++def test_role_by_markers(text, role):
++    assert T.rule_role(text) == role
++
++
++def test_strength_is_ranked_within_the_source():
++    raws = [float(x) for x in range(10)]                     # 9 is the strongest
++    roles = ["thesis"] * 10
++    pn = T.rank_punch(raws, roles)
++    assert pn[9] == 5 and sorted(pn, reverse=True)[:3] == [5, 4, 4] and Counter_(pn) == {5: 1, 4: 2, 3: 3, 2: 2, 1: 2}
++    roles[9] = "aside"
++    assert T.rank_punch(raws, roles)[9] == 1                  # an aside is 1 whatever its rank
++    assert T.rank_punch([1.0, 1.0, 1.0], ["thesis"] * 3) == T.rank_punch([1.0, 1.0, 1.0], ["thesis"] * 3)
++
++
++def Counter_(xs):
++    from collections import Counter
++    return dict(Counter(xs))
++
++
++def test_raw_strength_features():
++    base = T.punch_raw("Мы долго обсуждали разные варианты этого очень длинного и сложного вопроса сегодня утром.",
++                       "explanation", 50)
++    assert T.punch_raw("Не страх мешает, а привычка. Всегда так.", "thesis", 50) > base
++    assert T.punch_raw("Страх мешает.", "thesis", 90) > T.punch_raw("Страх мешает.", "thesis", 10)
++
++
++def test_standalone_uses_the_start_rules():
++    assert T.rule_standalone("Страх — это сигнал тела. Он помогает.") is True
++    assert T.rule_standalone("То есть это так и работает.") is False
++    assert T.rule_standalone("Он надевает маски каждый день.") is False
++
++
++def test_summary_is_the_richest_sentence_without_fillers_but_with_meaning():
++    s = T.rule_summary("Ну да. Вот просто тело помнит каждую обиду и каждый страх детства. Так.")
++    assert s == "Тело помнит каждую обиду и каждый страх детства."
++    assert T.rule_summary("Как бы вы ни старались, привычка сильнее воли.").startswith("Как бы вы ни старались")
++    assert len(T.rule_summary("слово " * 80)) <= 160
++
++
++def test_topics_by_lexical_cohesion():
++    a = ["Дыхание успокаивает нервную систему и тело.", "Медленное дыхание снижает пульс и тревогу.",
++         "Дыхание животом помогает телу расслабиться.", "Считайте дыхание до четырёх, тело отпустит."] * 2
++    b = ["Деньги приходят к тем, кто ценит своё время.", "Заработок растёт, когда время стоит дорого.",
++         "Деньги любят счёт и порядок в расходах.", "Время и деньги связаны напрямую у предпринимателя."] * 2
++    assert T.rule_topics(a + b, per_topic=8, lo=2) == [1] * 8 + [2] * 8
++    tids = T.rule_topics(a + b, per_topic=8)                  # at least 3 topics: the deepest border is still 8|9
++    assert len(set(tids)) == 3 and tids[7] != tids[8] and tids == sorted(tids)
++    assert T.rule_topics([]) == [] and T.rule_topics(["одна мысль"]) == [1]
++
++
++def _map():
++    texts = ["Страх — это сигнал тела о границе.", "Он помогает выжить в опасности.",
++             "Например, приходит ко мне клиент с паникой.", "Поэтому дышать нужно медленно, всегда."]
++    return {"version": 1, "stem": "v", "source_sha256": "f" * 64, "model": "groq:x", "transcript_key": "k",
++            "topics": [{"id": 1, "name": "страх", "units": [1, 2, 3, 4]}],
++            "units": [{"id": i + 1, "t0": float(i * 10), "t1": float(i * 10 + 9), "refs": f"2.{i + 1}", "filtered": "",
++                       "text": t, "voice": {"energy": 20 * i}, "similar": [9], "role": "thesis", "punch": 3,
++                       "standalone": True, "refers": None, "summary": "модель"} for i, t in enumerate(texts)]}
++
++
++def test_apply_rules_keeps_the_cut_and_replaces_the_passport():
++    m = _map()
++    r = T.apply_rules(m)
++    assert r["passport"] == "rules" and m["units"][0]["summary"] == "модель"          # the input map is not changed
++    for a, b in zip(m["units"], r["units"]):
++        assert (a["id"], a["t0"], a["t1"], a["refs"], a["text"], a["voice"], a["similar"]) == \
++               (b["id"], b["t0"], b["t1"], b["refs"], b["text"], b["voice"], b["similar"])
++    roles = [u["role"] for u in r["units"]]
++    assert roles[2] == "example" and roles[3] == "conclusion"
++    assert r["units"][1]["standalone"] is False and r["units"][1]["refers"] == 1      # «Он помогает…» leans on #1
++    assert {t["id"] for t in r["topics"]} == {u["topic"] for u in r["units"]}
++    assert all(1 <= u["punch"] <= 5 for u in r["units"])
++
++
++def test_autocut_reads_the_map_with_the_rules_passport_only_when_asked(tmp_path, capsys):
++    from tests.test_m202_replay_accounting import _scenario_project
++    cli, Fake, first, second = _scenario_project(tmp_path)
++    mp = tmp_path / "transcripts" / "v.map.json"
++    m = json.loads(mp.read_text(encoding="utf-8"))
++    for u in m["units"]:                                       # a map whose passport the model never gave
++        u.update(role=None, punch=None, standalone=None, refers=None, summary="", missing=True)
++    mp.write_text(json.dumps(m), encoding="utf-8")
++    kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True, scenario_provider=Fake())
++    assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "a.txt"), **kw) == 1           # model: incomplete
++    assert "карта неполна" in capsys.readouterr().err
++    cfg = tmp_path / "config" / "r0.yaml"
++    cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: rules", cfg.read_text(encoding="utf-8")),
++                   encoding="utf-8")
++    assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "b.txt"), **kw) == 0
++    assert "паспорт и темы по правилам" in capsys.readouterr().out
++    assert json.loads(mp.read_text(encoding="utf-8"))["units"][0]["missing"] is True          # the map file stays
++
++
++def test_default_is_the_model_passport():
++    from autoreels import __main__ as cli
++    from autoreels.core.config import AutocutConfig
++    assert AutocutConfig().map_passport == "model"
++    assert cli.load_r0_config("config/r0.yaml").autocut.map_passport == "model"
++
++
++def test_the_comparison_tool(tmp_path, monkeypatch, capsys):
++    import importlib.util
++    spec = importlib.util.spec_from_file_location("map_rules_check", "tools/map_rules_check.py")
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    (tmp_path / "transcripts").mkdir()
++    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(_map()), encoding="utf-8")
++    monkeypatch.setattr(mod, "ROOT", tmp_path)
++    assert mod.main(["v", "нет"]) == 0
++    out = capsys.readouterr().out
++    assert re.search(r"^v\s+4\s+\d+%", out, re.M) and "нет                нет карты" in out
++    assert "роли (модель → правила)" in out and "сила (модель → правила)" in out
+diff --git a/tools/map_rules_check.py b/tools/map_rules_check.py
+new file mode 100644
+index 0000000..e12a1ba
+--- /dev/null
++++ b/tools/map_rules_check.py
+@@ -0,0 +1,112 @@
++"""M208: the map's passport by rules (cloud/textmap.py) against the model's, on the maps the sources have.
++
++For each transcripts/<source>.map.json: the rules recompute role, strength, standalone and topics from the thoughts'
++text and voice; the table says how often they agree with the model and how both are spread. The model is not the
++truth — what counts is the clips (score_gate coverage of the owner's clips in an A/B of arl auto); this shows where the
++rules and the model part. Read only.
++Run from the project root: .venv/bin/python tools/map_rules_check.py [source …]"""
++from __future__ import annotations
++
++import json
++import sys
++from collections import Counter
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parent.parent
++sys.path.insert(0, str(ROOT / "src"))
++
++from autoreels.cloud.textmap import apply_rules  # noqa: E402
++
++SOURCES = ("disko_beach_p1", "disko_beach_p2", "disko_beach_p3", "day_yoga_p1", "day_yoga_p2",
++           "prew_isaev_anna", "prew_isaev_danny")
++
++
++def _spearman(a: list[float], b: list[float]) -> float | None:
++    n = len(a)
++    if n < 3:
++        return None
++
++    def ranks(x):
++        order = sorted(range(n), key=lambda i: x[i])
++        r = [0.0] * n
++        i = 0
++        while i < n:
++            j = i
++            while j + 1 < n and x[order[j + 1]] == x[order[i]]:
++                j += 1
++            for k in range(i, j + 1):
++                r[order[k]] = (i + j) / 2.0
++            i = j + 1
++        return r
++    ra, rb = ranks(a), ranks(b)
++    ma, mb = sum(ra) / n, sum(rb) / n
++    num = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
++    den = (sum((x - ma) ** 2 for x in ra) * sum((y - mb) ** 2 for y in rb)) ** 0.5
++    return num / den if den else None
++
++
++def _borders(topics: list) -> set[int]:
++    return {i for i in range(1, len(topics)) if topics[i] != topics[i - 1]}
++
++
++def _border_f1(model: set[int], rules: set[int], tol: int = 1) -> tuple[int, int, int]:
++    hit = sum(1 for b in rules if any(abs(b - m) <= tol for m in model))
++    return hit, len(rules), len(model)
++
++
++def main(argv=None) -> int:
++    stems = list(argv if argv is not None else sys.argv[1:]) or list(SOURCES)
++    T = Counter()
++    roles_m, roles_r, punch_m, punch_r, confusion = Counter(), Counter(), Counter(), Counter(), Counter()
++    all_pm, all_pr = [], []
++    print(f"{'источник':18} {'мыслей':>6} {'роль':>6} {'сила±1':>7} {'ρ силы':>7} {'самост.':>8} {'границы тем':>14}")
++    for stem in stems:
++        mp = ROOT / "transcripts" / f"{stem}.map.json"
++        if not mp.is_file():
++            print(f"{stem:18} нет карты")
++            continue
++        m = json.loads(mp.read_text(encoding="utf-8"))
++        r = apply_rules(m)
++        mu = [u for u in m.get("units") or [] if u.get("role")]
++        ru = {u["id"]: u for u in r["units"]}
++        n = len(mu)
++        if not n:
++            print(f"{stem:18} нет паспорта модели")
++            continue
++        same_role = sum(1 for u in mu if ru[u["id"]]["role"] == u["role"])
++        pm = [int(u.get("punch") or 0) for u in mu]
++        pr = [int(ru[u["id"]]["punch"]) for u in mu]
++        near = sum(1 for a, b in zip(pm, pr) if abs(a - b) <= 1)
++        same_st = sum(1 for u in mu if bool(ru[u["id"]]["standalone"]) == bool(u.get("standalone", True)))
++        units_all = m.get("units") or []
++        hit, nr, nm = _border_f1(_borders([u.get("topic") for u in units_all]),
++                                 _borders([ru[u["id"]]["topic"] for u in units_all]))
++        rho = _spearman([float(x) for x in pm], [float(x) for x in pr])
++        print(f"{stem:18} {n:6} {100 * same_role / n:5.0f}% {100 * near / n:6.0f}% "
++              f"{(f'{rho:.2f}' if rho is not None else '—'):>7} {100 * same_st / n:7.0f}% "
++              f"{hit:>4}/{nr} ({nm} у модели)")
++        T.update(n=n, role=same_role, near=near, st=same_st, hit=hit, nr=nr, nm=nm)
++        for u in mu:
++            roles_m[u["role"]] += 1
++            roles_r[ru[u["id"]]["role"]] += 1
++            punch_m[int(u.get("punch") or 0)] += 1
++            punch_r[int(ru[u["id"]]["punch"])] += 1
++            if ru[u["id"]]["role"] != u["role"]:
++                confusion[(u["role"], ru[u["id"]]["role"])] += 1
++        all_pm += pm
++        all_pr += pr
++    if T["n"]:
++        rho = _spearman([float(x) for x in all_pm], [float(x) for x in all_pr])
++        print(f"{'ИТОГО':18} {T['n']:6} {100 * T['role'] / T['n']:5.0f}% {100 * T['near'] / T['n']:6.0f}% "
++              f"{(f'{rho:.2f}' if rho is not None else '—'):>7} {100 * T['st'] / T['n']:7.0f}% "
++              f"{T['hit']:>4}/{T['nr']} ({T['nm']} у модели)")
++        print("\nроли (модель → правила): " + ", ".join(f"{k} {roles_m[k]}→{roles_r[k]}"
++                                                       for k in sorted(set(roles_m) | set(roles_r))))
++        print("сила (модель → правила): " + ", ".join(f"{k}: {punch_m[k]}→{punch_r[k]}" for k in range(1, 6)))
++        print("частые расхождения ролей (модель → правила): "
++              + ", ".join(f"{a}→{b} {c}" for (a, b), c in confusion.most_common(6)))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
