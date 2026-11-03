@@ -10704,8 +10704,13 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
              encoder: str | None = None, music: str | None = None, tx: str | None = None,
              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
-             today=None, remote: bool = False, interviewer: str | None = None) -> int:
+             today=None, remote: bool = False, interviewer: str | None = None, delete_source: str = "ask",
+             ask=None, download=None) -> int:
     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+
+    M213: a target may be a public Yandex Disk link — the file is downloaded into inputs/ and goes on as a video file;
+    after the summary each downloaded source whose run ended well is offered for deletion (`delete_source`: ask — a
+    y/N question, never without a terminal; keep; yes).
 
     0. a video file → arl run (transcript + manifest; the video stays where it is);
     1. arl prepare: speech map → alignment → intonation → motion → label draft → dry plan;
@@ -10756,7 +10761,17 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     _who = ("сценарист через чат (exchange/, без API)" if _scen_llm == "chat" else f"сценарист ({_scen_llm}, платно)")
     print(f"=== auto: ролики пишет {_who if _mode == 'scenario' else 'автомонтаж'}"
           f" — переключить: --mode autocut | scenario ===", flush=True)
+    fetched: dict[str, Path] = {}                 # M213: downloaded by this run — stem → file
     for target in targets:
+        if _is_url(target) and _is_yandex_disk(target):
+            print(f"\n=== auto: скачиваю с Я.Диска {target} ===", flush=True)
+            try:
+                got = (download or _download_yandex_disk)(target, Path(inputs_dir) if inputs_dir else _root / "inputs")
+            except Exception as exc:  # noqa: BLE001 — a dead link, no space: the next target goes on
+                results.append((target, "скачивание", f"{type(exc).__name__}: {str(exc)[:200]}"))
+                continue
+            fetched[Path(got).stem] = Path(got)
+            target = str(got)
         tp = Path(target)
         mpath = None
         if tp.is_file() and tp.suffix.lower() in _VIDEO_EXTS:
@@ -10883,9 +10898,45 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     for stem, st, note in results:
         print(f"  {'✓' if st == 'ok' else '✗'} {stem}: " + ("готово" if st == "ok" else f"остановлен на «{st}»")
               + (f" — {note}" if note else ""), flush=True)
+    _offer_source_delete(fetched, results, delete_source, ask)    # M213
     if _llm_cache_verdict():                          # M202: replay misses = the run was not reproduced
         return 1
     return 0 if all(st == "ok" for _, st, _ in results) else 1
+
+
+def _offer_source_delete(fetched: dict, results: list, mode: str, ask=None) -> list:
+    """M213 (owner 2026-11-02: «после окончания работ удалялся — перед удалением спросить»): the sources this run
+    downloaded and processed well — ask before deleting each (y/N; no terminal = keep). A failed run keeps its file.
+    Returns the deleted paths."""
+    if not fetched:
+        return []
+    ok = {stem for stem, st, _ in results if st == "ok"}
+    gone = []
+    for stem, path in fetched.items():
+        if not path.exists():
+            continue
+        size = f"{path.stat().st_size / 1e9:.1f} ГБ"
+        if stem not in ok:
+            print(f"  исходник {path.name} ({size}) оставлен: прогон не дошёл до конца", flush=True)
+            continue
+        if mode == "keep":
+            print(f"  исходник оставлен: {path}", flush=True)
+            continue
+        if mode != "yes":
+            if ask is None and not sys.stdin.isatty():
+                print(f"  исходник оставлен (нет терминала, чтобы спросить): {path}", flush=True)
+                continue
+            try:
+                answer = (ask or input)(f"Удалить исходник {path.name} ({size})? Повторный рендер его не найдёт. [y/N] ")
+            except EOFError:
+                answer = ""
+            if str(answer).strip().lower() not in ("y", "yes", "д", "да"):
+                print(f"  исходник оставлен: {path}", flush=True)
+                continue
+        path.unlink()
+        gone.append(path)
+        print(f"  исходник удалён: {path}", flush=True)
+    return gone
 
 
 def _scenario_autocut_llms(ac, llm: str, scen_llm: str) -> dict:
@@ -13374,7 +13425,7 @@ def _build_parser():
         help="M63: источник целиком до листа ревью — подготовка, проверка расшифровки, карта, автосборщик, план, рендер",
     )
     pau.add_argument("targets", metavar="видео_или_манифест", nargs="+",
-                     help="видеофайл (сначала arl run) или манифест/имя в manifests/")
+                     help="видеофайл (сначала arl run), публичная ссылка Я.Диска (M213: скачивается в inputs/) или манифест/имя в manifests/")
     pau.add_argument("--llm", choices=_LLM_MODES + ("none",), default="auto", help="модель карты")
     pau.add_argument("--clips", type=int, default=None, help="сколько сборок предложить")
     pau.add_argument("--no-render", action="store_false", dest="render", help="без рендера и листа")
@@ -13388,6 +13439,9 @@ def _build_parser():
     pau.add_argument("--interviewer", choices=["on", "off"], default=None,
                      help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
                           "по умолчанию r0.yaml autocut.interviewer")
+    pau.add_argument("--delete-source", choices=["ask", "keep", "yes"], default="ask", dest="delete_source",
+                     help="M213: исходник, скачанный по ссылке Я.Диска, после удачного прогона — спросить (по умолчанию; "
+                          "без терминала не удаляется) | оставить | удалить")
     pau.add_argument("--remote", action="store_true",
                      help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
     pau.add_argument("--tag", default=None,
@@ -13928,7 +13982,8 @@ def main(argv=None) -> int:
                             encoder=args.encoder, music=args.music, tx=args.tx,
                             mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
                             tag=getattr(args, "tag", None), remote=getattr(args, "remote", False),
-                            interviewer=getattr(args, "interviewer", None))
+                            interviewer=getattr(args, "interviewer", None),
+                            delete_source=getattr(args, "delete_source", "ask"))
         elif args.cmd == "dictate":
             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)

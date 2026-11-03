@@ -194,6 +194,7 @@ source /путь/к/autoreels/aliases.sh
 | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
 | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
 | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
+| `arl auto <ссылка Я.Диска>` | M213: файл скачивается в `inputs/`, дальше как с видео; после итога — вопрос «Удалить исходник? [y/N]» (без терминала и при сбое не удаляется; `--delete-source ask \| keep \| yes`) |
 | `arl scenario-check <ист>` | ответ чата-сценариста (`exchange/<ист>.scenario.answer.txt`): что принято, что нет и почему; отклонённое — сообщением для чата в `exchange/<ист>.scenario.fix.md` (M207) |
 | `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
 | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
