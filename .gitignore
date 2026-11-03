@@ -66,3 +66,5 @@ review-*.md
 reviews/
 # M194: block-set sidecars of arl blocks (written on every run, read by nobody; older ones stay tracked)
 manifests/*.blocks.json
+# M207: задания и ответы чата-сценариста (текст источника — как transcripts/)
+exchange/

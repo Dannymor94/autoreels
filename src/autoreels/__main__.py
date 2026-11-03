@@ -8094,9 +8094,9 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
     from autoreels.cloud.scenario import (SCENARIO_SYSTEM, jumps_rule, numbered_text, parse_scenarios,
                                           scenario_proposals, tone_rule)
     from autoreels.cloud.speakers import interviewer_rule
-    if provider is None and mode not in ("haiku", "sonnet"):
-        print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku",
-              file=sys.stderr)
+    if provider is None and mode not in ("haiku", "sonnet", "chat"):
+        print("ошибка: сценаристу нужна модель с длинным контекстом, названная явно: --llm sonnet | haiku "
+              "(или чат: --scenario-llm chat)", file=sys.stderr)
         return None
     sent = {ref: (float(st[0].t0), float(st[-1].t1), " ".join(w.word.strip() for w in st), bool(_ends_terminal(st[-1])),
                   sum(1 for w in st if any(c.isalnum() for c in w.word))) for ref, st in sent_by_ref.items() if st}
@@ -8104,8 +8104,18 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
                                     n=prm.clips) + tone_rule(getattr(ac, "scenario_tone", ""))
     _ivm = getattr(ac, "interviewer", "") if other else ""     # M165: the interviewer's sentences marked
     system += interviewer_rule(_ivm)
-    user = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
-                          for r, v in sent.items()]) + _scenario_examples(root, stem)
+    _numbered = numbered_text([(r, v[1] - v[0], ("[ведущий] " if _ivm and r in other else "") + v[2])
+                               for r, v in sent.items()])
+    user = _numbered + _scenario_examples(root, stem)
+    if provider is None and mode == "chat":
+        raw = _chat_scenario_answer(root, stem, system, user, _numbered)   # M207: raises ChatScenarioPending
+        scens, bad = parse_scenarios(raw, set(sent))
+        pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+                                        clauses=clauses)
+        scen_out += [("", b) for b in bad] + [(lab, why) for lab, why in gone]
+        print(f"  сценарист (чат): строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
+              + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
+        return pool
     if provider is None:
         provider = _make_pool(r0_cfg.model_copy(update={"anthropic": r0_cfg.anthropic.model_copy(
             update={"max_output_tokens": ac.scenario_max_tokens, "timeout_sec": ac.scenario_timeout_sec})}), mode)
@@ -8128,6 +8138,26 @@ def _scenario_pool(stem, root, cache, r0_cfg, ac, prm, mode, sent_by_ref, units,
     print(f"  сценарист: строк {len(scens) + len(bad)}, принято кодом {len(pool)}"
           + (f", не принято {len(bad) + len(gone)}" if bad or gone else ""), flush=True)
     return pool
+
+
+def _chat_scenario_answer(root, stem: str, system: str, user: str, numbered: str) -> str:
+    """M207: the chat's answer for this talk (exchange/<stem>.scenario.answer.txt). No answer, or an answer written for
+    another talk (the numbered text changed) — the task exchange/<stem>.scenario.md is (re)written and the run stops."""
+    from autoreels.cloud.chatscenario import ChatScenarioPending, paths, read_answer, render_task, task_key, text_key
+    task, answer, _fix = paths(Path(root), stem)
+    key = text_key(numbered)
+    old = task_key(task.read_text(encoding="utf-8")) if task.is_file() else None
+    raw = read_answer(answer)
+    if raw is not None and old == (stem, key):
+        print(f"  сценарист (чат): ответ из {answer.relative_to(root)}", flush=True)
+        return raw
+    task.parent.mkdir(parents=True, exist_ok=True)
+    task.write_text(render_task(stem, key, system, user), encoding="utf-8")
+    if raw is not None:
+        why = f"ответ {answer.name} написан к другому тексту (расшифровка изменилась) — новое задание"
+    else:
+        why = "ответа чата ещё нет"
+    raise ChatScenarioPending(f"{why}: {task.relative_to(root)} → любой чат → ответ в {answer.relative_to(root)}")
 
 
 def _usage_report(prov) -> None:
@@ -8489,7 +8519,7 @@ def _autocut_overrides(base, pairs) -> "object":
 def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = None,
                 out: str | None = None, check: bool = True, llm: str | None = None, provider=None,
                 judge_log: str | None = None, voice_keys: bool = True, ac_over=None, scenario: bool = False,
-                scenario_provider=None, scenario_llm: str | None = None) -> int:
+                scenario_provider=None, scenario_llm: str | None = None, chat_check: bool = False) -> int:
     """M56: montage lines proposed from the map (cloud/autocut.py) → reviews/<stem>_auto_m56.txt
     (a draft with the review header: check it with arl blocks --apply <file> --labeler auto).
     Needs transcripts/<stem>.map.json (arl map). Writes only the draft."""
@@ -8730,12 +8760,26 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
     if scenario:
         # M204: scenario_llm — the scenarist's own model; `mode` (--llm) then polishes (hooks, plates, k:, seams)
-        pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
-                              the_map.get("units") or [],
-                              end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
-                              clauses=clauses)
+        from autoreels.cloud.chatscenario import ChatScenarioPending
+        try:
+            pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+                                  the_map.get("units") or [],
+                                  end_tone, scen_out, scenario_provider, start_pause=start_pause, other=_other,
+                                  clauses=clauses)
+        except ChatScenarioPending as exc:           # M207: the task is written; the owner takes it to a chat
+            print(f"  сценарист (чат): {exc}", flush=True)
+            return 3
         if pool is None:
             return 1
+        if chat_check:                               # M207: arl scenario-check — the refused lines → a message for the chat
+            from autoreels.cloud.chatscenario import paths, render_fix
+            fix = paths(_root, stem)[2]
+            fix.write_text(render_fix(stem, len(pool), scen_out), encoding="utf-8")
+            for pieces, why in scen_out:
+                print(f"  ✗ {why}" + (f": {pieces}" if pieces else ""), flush=True)
+            print(f"scenario-check {stem}: принято {len(pool)}, не принято {len(scen_out)} → {fix.relative_to(_root)}",
+                  flush=True)
+            return 0
     else:
         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
@@ -10688,13 +10732,14 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
         llm = _paid_llm
         print(f"=== auto: карта, судьи и посты — {llm}" + (f" (до {_paid_until} включительно)" if _paid_until else "")
               + " ===", flush=True)
-    if _expired and _paid_llm and mode is None and _mode == "scenario":
+    if _expired and _paid_llm and mode is None and _mode == "scenario" and scenario_llm != "chat":
         _mode = "autocut"
         print(f"=== auto: срок платных моделей прошёл ({_paid_until}) — автомонтаж бесплатно; сценарист: --mode scenario"
               f" ===", flush=True)
-    _mode = mode or _mode
+    _mode = mode or ("scenario" if scenario_llm == "chat" else _mode)   # M207: the chat is a scenarist
     _scen_llm = scenario_llm or _scen_llm
-    print(f"=== auto: ролики пишет {'сценарист (' + _scen_llm + ', платно)' if _mode == 'scenario' else 'автомонтаж'}"
+    _who = ("сценарист через чат (exchange/, без API)" if _scen_llm == "chat" else f"сценарист ({_scen_llm}, платно)")
+    print(f"=== auto: ролики пишет {_who if _mode == 'scenario' else 'автомонтаж'}"
           f" — переключить: --mode autocut | scenario ===", flush=True)
     for target in targets:
         tp = Path(target)
@@ -10751,6 +10796,10 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
             _skw = _scenario_autocut_llms(_ac, llm, _scen_llm)   # M204: who polishes the scenarist's reels
             err = stage(f"сценарист ({_scen_llm})", lambda: cmd_autocut(m, root=_root, cache_dir=cache_dir, clips=clips,
                                                                         scenario=True, **_skw, **_out))
+            if err and _scen_llm == "chat":         # M207: the chat answers later — no autocut in its place
+                _wait = f"ждёт ответа чата: exchange/{stem}.scenario.md → exchange/{stem}.scenario.answer.txt"
+                results.append((stem, "сценарист через чат", _wait if err == "rc=3" else err))
+                continue
             if err:
                 _scen_note = f"сценарист не ответил ({err}) — взят автомонтаж"
                 print(f"  ⚠ {_scen_note}", flush=True)
@@ -10828,7 +10877,7 @@ def _scenario_autocut_llms(ac, llm: str, scen_llm: str) -> dict:
     """M204 (owner 2026-11-02: no paid API — m202/m203: in scenario mode the hooks, plates, k: and seams went to the
     scenarist's paid model whatever --llm said, 151 refusals): autocut.scenario_polish «scenarist» — as before, all on
     the scenarist's model; «run» — the scenarist on its model, the rest on the run's --llm."""
-    if getattr(ac, "scenario_polish", "scenarist") == "run":
+    if getattr(ac, "scenario_polish", "scenarist") == "run" or scen_llm == "chat":   # M207: a chat cannot polish
         return {"llm": llm, "scenario_llm": scen_llm}
     return {"llm": scen_llm}
 
@@ -13296,6 +13345,15 @@ def _build_parser():
     ptu.add_argument("--root", default=None)
     ptu.add_argument("--cache-dir", default=None, dest="cache_dir")
 
+    psc = sub.add_parser(
+        "scenario-check",
+        help="M207: ответ чата-сценариста (exchange/<ист>.scenario.answer.txt) — что принято, что нет и почему; "
+             "отклонённое — сообщением для чата в exchange/<ист>.scenario.fix.md",
+    )
+    psc.add_argument("manifest", metavar="манифест", help="путь к манифесту или имя (в manifests/)")
+    psc.add_argument("--root", default=None)
+    psc.add_argument("--cache-dir", default=None, dest="cache_dir")
+
     pau = sub.add_parser(
         "auto",
         help="M63: источник целиком до листа ревью — подготовка, проверка расшифровки, карта, автосборщик, план, рендер",
@@ -13320,7 +13378,7 @@ def _build_parser():
     pau.add_argument("--tag", default=None,
                      help="M157: черновики и review.json прогона под своими именами (<stem>_auto_<tag>.txt …) — "
                           "черновики прежнего листа и его файл решений не трогаются")
-    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet"], default=None, dest="scenario_llm",
+    pau.add_argument("--scenario-llm", choices=["haiku", "sonnet", "chat"], default=None, dest="scenario_llm",
                      help="M153: модель сценариста (по умолчанию r0.yaml autocut.scenario_llm)")
     pau.add_argument("--root", default=None)
     pau.add_argument("--cache-dir", default=None, dest="cache_dir")
@@ -13872,6 +13930,9 @@ def main(argv=None) -> int:
         elif args.cmd == "tx-punct":
             return cmd_tx_punct(args.manifest, src=args.src, out_tag=args.out_tag, root=getattr(args, "root", None),
                                 cache_dir=getattr(args, "cache_dir", None), by=args.by, llm=args.llm)
+        elif args.cmd == "scenario-check":                # M207
+            return cmd_autocut(args.manifest, root=getattr(args, "root", None), cache_dir=getattr(args, "cache_dir", None),
+                               check=False, llm="none", scenario=True, scenario_llm="chat", chat_check=True)
         elif args.cmd == "tx-use":
             return cmd_tx_use(args.manifest, args.which, root=getattr(args, "root", None),
                               cache_dir=getattr(args, "cache_dir", None))

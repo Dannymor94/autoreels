@@ -73,7 +73,7 @@
 | что | как переключить |
 |---|---|
 | кто пишет ролики: сценарист (платный Claude) или автомонтаж (бесплатно) | `autocut.auto_mode`; на один прогон `arl auto … --mode scenario \| autocut`. Сценарист не ответил (нет ключа, ошибка API) — источник идёт автомонтажом, итог это называет |
-| модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet` |
+| модель сценариста | `autocut.scenario_llm`; на прогон `--scenario-llm haiku \| sonnet \| chat` — `chat`: сценарист через любой чат без API (M207, ниже) |
 | тон сценариста | `autocut.scenario_tone`; на прогон отдельно: `arl autocut <ист> --scenario --llm sonnet --ac scenario_tone=фановый` |
 | модель карты, судей и постов | `--llm auto \| cloud \| local \| none \| sonnet`; до `autocut.paid_until` `auto` = `autocut.paid_llm` (M157: промо-кредиты), после — бесплатные модели, а сценарист только с `--mode scenario` |
 | реплики ведущего (интервью) | `autocut.interviewer: on \| off`; на прогон `arl auto … --interviewer on \| off`; карта говорящих — `arl speakers <ист>` (M165) |
@@ -91,6 +91,13 @@
 | модель плашек, `k:`, стыков в режиме сценариста | `autocut.scenario_polish: run` (модель прогона `--llm`) \| `scenarist` (модель сценариста) (M204) |
 | похожесть клипов и отбор | `autocut.close_by: sound \| units`, `close_share_max`; `autocut.select: global \| greedy` (M205, M206) |
 | остальные приёмы клипа (пред-ролл, громкость, концовки, карта речи…) | флаги `config/render.yaml` и `config/r0.yaml`, каждый с комментарием; выключенный флаг = прежний выход |
+
+**Сценарист через чат (без платного API, M207):**
+
+1. `arl auto <ист> --scenario-llm chat` → задание `exchange/<ист>.scenario.md` (источник «ждёт ответа чата»).
+2. Файл — в любой чат; ответ чата — в `exchange/<ист>.scenario.answer.txt`.
+3. `arl scenario-check <ист>` — что принято; отклонённое — `exchange/<ист>.scenario.fix.md`, отдать тому же чату.
+4. `arl auto <ист> --scenario-llm chat` ещё раз — сборка по ответу, дальше обычный путь.
 
 Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
 
@@ -186,6 +193,7 @@ source /путь/к/autoreels/aliases.sh
 | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
 | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
 | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
+| `arl scenario-check <ист>` | ответ чата-сценариста (`exchange/<ист>.scenario.answer.txt`): что принято, что нет и почему; отклонённое — сообщением для чата в `exchange/<ист>.scenario.fix.md` (M207) |
 | `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
 | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
 | `arl autocut <ист>` | черновик монтажа из карты; `--ac ключ=значение` — поле `autocut:` на один прогон |
