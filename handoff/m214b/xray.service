@@ -1,0 +1,11 @@
+[Unit]
+Description=Xray — локальный прокси autoreels (M214b)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/xray/xray run -c %h/.config/xray/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

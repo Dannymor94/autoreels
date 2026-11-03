@@ -1,0 +1,220 @@
+diff --git a/PLAN.md b/PLAN.md
+index e245fca..b10c627 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -309,7 +309,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ 1. **Слой приёма (`ingest.py`)** — взаимозаменяемые доставщики (yt-dlp / HTTP / Tailscale / Syncthing). Загрузка с Я.Диска уже есть (`arl run`, `prepare`: докачка с обрывов, свежая ссылка на каждой попытке).
+ 2. **Хранение — выбор владельца 2026-11-02: gamebox — дом видео.** gamebox сам качает исходник по ссылке в `/mnt/data/autoreels/inputs`, на Mac приезжают только звук и тексты (манифест, расшифровки, карты, разметка), рендер — там же (`--remote`). Видео не идёт через Mac. По необходимости позже: Tailscale (gamebox вне дома), rclone (папки Я.Диска целиком), Syncthing (готовые клипы сами на Mac). sshfs для видео не берём — медленно.
+-3. **`arl auto <ссылка Я.Диска>` (M213, сделано):** файл скачивается в `inputs/` (докачка с обрывов, свежая ссылка на каждой попытке) → весь конвейер → после итога для каждого скачанного источника с удачным прогоном вопрос «Удалить исходник <имя> (N ГБ)? [y/N]»; без терминала, без ответа или при сбое прогона — не удаляется (`--delete-source ask | keep | yes`). Локальный файл удалить не предлагается. **Папка (M214a, `/d/…`):** видео папки (этот уровень, по имени) обрабатываются по одному: скачать → весь путь → следующее; вопрос об удалении — **один раз в начале** («В папке N видео (M ГБ). Удалять каждый исходник сразу после удачной обработки? [y/N]»), при «да» на диске одновременно одно видео. **Дальше (M214b–c):** скачивание сразу на gamebox — разобрать, каким шагам подготовки нужно само видео (калибровка кропа по кадрам, автокроп), а каким хватит звука.
++3. **`arl auto <ссылка Я.Диска>` (M213, сделано):** файл скачивается в `inputs/` (докачка с обрывов, свежая ссылка на каждой попытке) → весь конвейер → после итога для каждого скачанного источника с удачным прогоном вопрос «Удалить исходник <имя> (N ГБ)? [y/N]»; без терминала, без ответа или при сбое прогона — не удаляется (`--delete-source ask | keep | yes`). Локальный файл удалить не предлагается. **Папка (M214a, `/d/…`):** видео папки (этот уровень, по имени) обрабатываются по одному: скачать → весь путь → следующее; вопрос об удалении — **один раз в начале** («В папке N видео (M ГБ). Удалять каждый исходник сразу после удачной обработки? [y/N]»), при «да» на диске одновременно одно видео. **M214b:** на gamebox — VPN для autoreels (Xray, локальный прокси, `docs/GAMEBOX.md`), `pymorphy3`, `torch`/`torchaudio` CPU, модель выравнивания, ключи моделей. **Дальше (M214c):** скачивание сразу на gamebox — разобрать, каким шагам подготовки нужно само видео (калибровка кропа по кадрам, автокроп), а каким хватит звука.
+ 4. **Контракт с SMM-постером** — манифест + mp4 → формат кросс-постера. Экспорт готов (`arl crosspost`, M90: клипы, обложки, посты и план импорта «файл;текст;тип»); публикация остаётся ручной.
+ 
+ ---
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index 9f3b4f4..b794b45 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -50,6 +50,7 @@ autoreels/
+ ├── tools/clip_checks.py      # M199: четыре проверки клипа по готовому гейту (крючок, плашка, начало без опоры, стыки) → _score/<гейт>_checks.json
+ ├── tools/kw_rule_check.py    # M203: правило `k:` против слов владельца (`emph` в манифестах): по тексту, с голосом, случайно
+ ├── tools/map_rules_check.py  # M208: паспорт карты по правилам против паспорта модели (роль, сила, понятность, границы тем)
++├── tools/vless2xray.py       # M214b: строка vless://… → конфиг Xray (локальный прокси на gamebox, РФ и локальная сеть — напрямую)
+ ├── tools/voice_owner_check.py # M211: отличает ли голос (громкость, тон, размах, темп, энергия) мысли из клипов владельца — AUC
+ ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
+ │
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index 6195bda..d0aa0da 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -39,3 +39,10 @@
+ ## Карта говорящих (M165, M170)
+ 
+ `arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.
++
++## VPN для autoreels на gamebox (M214b)
++На gamebox нет системного VPN, а облачным моделям (Groq, OpenRouter, Hugging Face) он нужен. Xray (VLESS, закреплён 26.10.31, `~/.local/xray/`) работает как служба пользователя `systemd --user` (`xray.service`, linger включён — живёт без входа) и даёт локальный прокси: http `127.0.0.1:10809`, socks `127.0.0.1:10808`. Система через него не ходит — только autoreels: в `.env` gamebox `HTTPS_PROXY`/`HTTP_PROXY=http://127.0.0.1:10809`, а `NO_PROXY` — Яндекс (Диск качается напрямую) и localhost. Маршруты повторяют клиент владельца: `domain:ru`, `domain:su`, `domain:xn--p1ai`, `geosite:category-ru`, `geoip:ru`, `geoip:private` — напрямую.
++
++- Ключ — `~/.config/xray/vless.txt` (chmod 600), в git и в задачи не попадает. Конфиг — `python tools/vless2xray.py ~/.config/xray/vless.txt --out ~/.config/xray/config.json` (chmod 600), проверка `~/.local/xray/xray run -test -c ~/.config/xray/config.json`.
++- Сменить ключ: заменить строку в `vless.txt`, пересобрать конфиг, `systemctl --user restart xray`.
++- Проверка: `curl -s -o /dev/null -w "%{http_code}" -x http://127.0.0.1:10809 https://api.groq.com/openai/v1/models` → 401 (дошли, ключа в запросе нет); без прокси — нет ответа или 403.
+diff --git a/tests/test_m214b_vless2xray.py b/tests/test_m214b_vless2xray.py
+new file mode 100644
+index 0000000..f9792e0
+--- /dev/null
++++ b/tests/test_m214b_vless2xray.py
+@@ -0,0 +1,62 @@
++"""M214b: a vless:// line → an Xray config (a local proxy for gamebox); the key is read from a file, never printed."""
++from __future__ import annotations
++
++import importlib.util
++import json
++
++import pytest
++
++URI = ("vless://11111111-2222-3333-4444-555555555555@example.org:443?encryption=none&security=reality"
++       "&sni=example.org&fp=chrome&pbk=PUBLICKEY&sid=abcd1234&type=xhttp&path=%2Fsecret&mode=auto#TEST")
++
++
++def _tool():
++    spec = importlib.util.spec_from_file_location("vless2xray", "tools/vless2xray.py")
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++    return mod
++
++
++def test_reality_xhttp_with_the_owners_direct_rules():
++    t = _tool()
++    c = t.config(URI)
++    out = c["outbounds"][0]
++    assert out["protocol"] == "vless" and out["settings"]["vnext"][0]["address"] == "example.org"
++    assert out["settings"]["vnext"][0]["users"][0] == {"id": "11111111-2222-3333-4444-555555555555", "encryption": "none"}
++    s = out["streamSettings"]
++    assert s["network"] == "xhttp" and s["security"] == "reality"
++    assert s["realitySettings"] == {"serverName": "example.org", "fingerprint": "chrome", "publicKey": "PUBLICKEY",
++                                    "shortId": "abcd1234", "spiderX": ""}
++    assert s["xhttpSettings"] == {"path": "/secret", "mode": "auto"}
++    assert [i["port"] for i in c["inbounds"]] == [10808, 10809] and all(i["listen"] == "127.0.0.1" for i in c["inbounds"])
++    rules = c["routing"]["rules"]
++    assert rules[0]["domain"] == ["domain:ru", "domain:su", "domain:xn--p1ai", "geosite:category-ru"]
++    assert rules[1]["ip"] == ["geoip:ru", "geoip:private"] and all(r["outboundTag"] == "direct" for r in rules)
++
++
++def test_other_transports_and_errors():
++    t = _tool()
++    ws = t.config("vless://id@h:8443?security=tls&sni=s&type=ws&path=%2Fw&host=hh")
++    assert ws["outbounds"][0]["streamSettings"]["wsSettings"] == {"path": "/w", "headers": {"Host": "hh"}}
++    assert ws["outbounds"][0]["settings"]["vnext"][0]["port"] == 8443
++    assert t.config("vless://id@h?type=tcp")["outbounds"][0]["streamSettings"]["network"] == "tcp"
++    with pytest.raises(ValueError):
++        t.parse("vmess://x")
++    with pytest.raises(ValueError):
++        t.config("vless://id@h?type=quic")
++    assert t.config(URI, direct_ru=False)["routing"]["rules"] == []
++
++
++def test_the_key_file_to_a_private_config_without_printing_the_key(tmp_path, capsys):
++    t = _tool()
++    key = tmp_path / "vless.txt"
++    key.write_text("# мой ключ\n" + URI + "\n", encoding="utf-8")
++    out = tmp_path / "x" / "config.json"
++    assert t.main([str(key), "--out", str(out)]) == 0
++    printed = capsys.readouterr().out
++    assert "11111111" not in printed and "PUBLICKEY" not in printed and "конфиг:" in printed
++    assert json.loads(out.read_text(encoding="utf-8"))["outbounds"][0]["streamSettings"]["network"] == "xhttp"
++    assert (out.stat().st_mode & 0o777) == 0o600
++    bad = tmp_path / "bad.txt"
++    bad.write_text("nothing\n", encoding="utf-8")
++    assert t.main([str(bad)]) == 1
+diff --git a/tools/vless2xray.py b/tools/vless2xray.py
+new file mode 100644
+index 0000000..3ed0dab
+--- /dev/null
++++ b/tools/vless2xray.py
+@@ -0,0 +1,106 @@
++"""M214b: a `vless://…` line → an Xray config — a local proxy for gamebox (no VPN there; the models need one).
++
++Owner, 2026-11-03: gamebox has no VPN; Groq / OpenRouter / Hugging Face need it, Yandex Disk and the LAN do not.
++The config: inbounds socks 127.0.0.1:10808 and http 127.0.0.1:10809 (autoreels uses the http one through HTTPS_PROXY in
++.env — the system itself is not routed); one VLESS outbound (security reality | tls | none; network xhttp | tcp | ws |
++grpc); routing as the owner's client has it: .ru / .su / .рф / geosite:category-ru and geoip:ru / geoip:private go
++direct. The key is read from a file and never printed; the config goes to stdout or --out (chmod 600).
++Run: python tools/vless2xray.py ~/.config/xray/vless.txt --out ~/.config/xray/config.json"""
++from __future__ import annotations
++
++import argparse
++import json
++import os
++import sys
++from pathlib import Path
++from urllib.parse import parse_qs, unquote, urlparse
++
++DIRECT_DOMAINS = ["domain:ru", "domain:su", "domain:xn--p1ai", "geosite:category-ru"]
++DIRECT_IPS = ["geoip:ru", "geoip:private"]
++
++
++def parse(uri: str) -> dict:
++    """The parts of a vless:// line (id, host, port and the query) — ValueError when it is not one."""
++    u = urlparse(uri.strip())
++    if u.scheme != "vless" or not u.username or not u.hostname:
++        raise ValueError("не строка vless://id@host:port?…")
++    q = {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
++    return {"id": unquote(u.username), "host": u.hostname, "port": int(u.port or 443), "q": q,
++            "name": unquote(u.fragment or "")}
++
++
++def config(uri: str, *, socks_port: int = 10808, http_port: int = 10809, direct_ru: bool = True) -> dict:
++    p = parse(uri)
++    q = p["q"]
++    net = q.get("type", "tcp") or "tcp"
++    sec = q.get("security", "none") or "none"
++    user = {"id": p["id"], "encryption": q.get("encryption", "none") or "none"}
++    if q.get("flow"):
++        user["flow"] = q["flow"]
++    stream: dict = {"network": net, "security": sec}
++    if sec == "reality":
++        stream["realitySettings"] = {"serverName": q.get("sni", ""), "fingerprint": q.get("fp", "chrome"),
++                                     "publicKey": q.get("pbk", ""), "shortId": q.get("sid", ""),
++                                     "spiderX": unquote(q.get("spx", "") or "")}
++    elif sec == "tls":
++        stream["tlsSettings"] = {"serverName": q.get("sni", p["host"]), "fingerprint": q.get("fp", "chrome"),
++                                 **({"alpn": q["alpn"].split(",")} if q.get("alpn") else {})}
++    if net == "xhttp":
++        stream["xhttpSettings"] = {"path": unquote(q.get("path", "/") or "/"), "mode": q.get("mode", "auto") or "auto",
++                                   **({"host": q["host"]} if q.get("host") else {})}
++    elif net == "ws":
++        stream["wsSettings"] = {"path": unquote(q.get("path", "/") or "/"),
++                                **({"headers": {"Host": q["host"]}} if q.get("host") else {})}
++    elif net == "grpc":
++        stream["grpcSettings"] = {"serviceName": q.get("serviceName", "")}
++    elif net != "tcp":
++        raise ValueError(f"транспорт {net!r} не поддержан (xhttp, tcp, ws, grpc)")
++    rules = []
++    if direct_ru:
++        rules = [{"type": "field", "outboundTag": "direct", "domain": DIRECT_DOMAINS},
++                 {"type": "field", "outboundTag": "direct", "ip": DIRECT_IPS}]
++    return {
++        "log": {"loglevel": "warning"},
++        "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": socks_port, "protocol": "socks",
++                      "settings": {"udp": True}},
++                     {"tag": "http", "listen": "127.0.0.1", "port": http_port, "protocol": "http"}],
++        "outbounds": [{"tag": "proxy", "protocol": "vless",
++                       "settings": {"vnext": [{"address": p["host"], "port": p["port"], "users": [user]}]},
++                       "streamSettings": stream},
++                      {"tag": "direct", "protocol": "freedom"},
++                      {"tag": "block", "protocol": "blackhole"}],
++        "routing": {"domainStrategy": "IPIfNonMatch", "rules": rules},
++    }
++
++
++def main(argv=None) -> int:
++    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    ap.add_argument("key_file", help="файл со строкой vless://… (ключ не печатается)")
++    ap.add_argument("--out", default=None, help="куда записать конфиг (иначе — в stdout)")
++    ap.add_argument("--socks-port", type=int, default=10808)
++    ap.add_argument("--http-port", type=int, default=10809)
++    ap.add_argument("--no-direct-ru", action="store_true", help="без правил «РФ и локальная сеть — напрямую»")
++    a = ap.parse_args(argv)
++    line = next((ln.strip() for ln in Path(a.key_file).expanduser().read_text(encoding="utf-8").splitlines()
++                 if ln.strip().startswith("vless://")), "")
++    try:
++        cfg = config(line, socks_port=a.socks_port, http_port=a.http_port, direct_ru=not a.no_direct_ru)
++    except ValueError as exc:
++        print(f"ошибка: {exc}", file=sys.stderr)
++        return 1
++    text = json.dumps(cfg, ensure_ascii=False, indent=2)
++    if a.out:
++        out = Path(a.out).expanduser()
++        out.parent.mkdir(parents=True, exist_ok=True)
++        out.write_text(text + "\n", encoding="utf-8")
++        os.chmod(out, 0o600)
++        o = cfg["outbounds"][0]["streamSettings"]
++        print(f"конфиг: {out} (vless → {cfg['outbounds'][0]['settings']['vnext'][0]['address']}, "
++              f"{o['network']}/{o['security']}, http 127.0.0.1:{a.http_port}, socks 127.0.0.1:{a.socks_port})")
++    else:
++        print(text)
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
