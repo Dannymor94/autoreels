@@ -1,0 +1,33 @@
+== /mnt/data/autoreels/reels-out/prew_isaev_danny/_gate/m179diag/r14.ERROR.mp4
+-- ffmpeg 8.0.1-3ubuntu2
+-- integrity (copy):
+-- full decode errors:
+-- small video packets (size < 64):
+-- packets: 1825, frames: 1825,1825
+-- NAL units of packets under 64 bytes (and the packet before):
+== /mnt/data/autoreels/reels-out/prew_isaev_anna/_gate/ab192/r03.ERROR.mp4
+-- ffmpeg 8.0.1-3ubuntu2
+-- integrity (copy):
+[h264 @ 0x58074a5d7b40] missing picture in access unit with size 12
+-- full decode errors:
+[h264 @ 0x559cd66e7b00] missing picture in access unit with size 12
+[h264 @ 0x559cd70ef580] no frame!
+[vist#0:0/h264 @ 0x559cd6610940] [dec:h264 @ 0x559cd66e8ec0] Error submitting packet to decoder: Invalid data found when processing input
+-- small video packets (size < 64):
+[h264 @ 0x6084b1b66e40] missing picture in access unit with size 12
+54.921533,54.921533,12,___
+[h264 @ 0x5efb6d147d00] missing picture in access unit with size 12
+[h264 @ 0x5b7ab0584ec0] missing picture in access unit with size 12
+[h264 @ 0x5b7ab0459980] no frame!
+-- packets: 4120, frames: 4120,4119
+-- NAL units of packets under 64 bytes (and the packet before):
+[trace_headers @ 0x6112fdcb5900] Packet: 13185 bytes, pts 3294291, dts 3294291, duration 1001.
+[trace_headers @ 0x6112fdcb5900] Packet: 12 bytes, pts 3295292, dts 3295292, duration 1001.
+[trace_headers @ 0x6112fdcb5900] 3           nal_unit_type                                           00110 = 6
+== /mnt/data/autoreels/reels-out/prew_isaev_danny/_gate/ab192/r01.ERROR.mp4
+-- ffmpeg 8.0.1-3ubuntu2
+-- integrity (copy):
+-- full decode errors:
+-- small video packets (size < 64):
+-- packets: 1327, frames: 1327,1327
+-- NAL units of packets under 64 bytes (and the packet before):
