@@ -1,0 +1,12 @@
+источник              p208m    p208r
+disko_beach_p1           13       15
+disko_beach_p2            4        6
+disko_beach_p3           15       13
+day_yoga_p1               3        1
+day_yoga_p2              22       22
+prew_isaev_anna           9        8
+prew_isaev_danny         16       14
+ИТОГО                    82       79
+
+== p208m → p208r
+  disko_beach_p1: − 23.6-9 23.10-13 24.1-2 24.3-5  «Самадхи: реальное переживание»
