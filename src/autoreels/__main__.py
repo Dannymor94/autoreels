@@ -8566,6 +8566,12 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         from autoreels.cloud.textmap import apply_rules
         the_map = apply_rules(the_map)
         print("  карта: паспорт и темы по правилам (без модели, M208)", flush=True)
+    elif getattr(ac, "map_passport", "model") == "fallback":  # M209: the rules only where the model gave nothing
+        from autoreels.cloud.textmap import apply_fallback
+        the_map, _nfill, _ntop = apply_fallback(the_map)
+        if _nfill or _ntop:
+            print(f"  карта: модель не ответила для части мыслей — по правилам паспорт {_nfill}, тема {_ntop} (M209)",
+                  flush=True)
     gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
     if gaps:
         print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
@@ -9568,6 +9574,11 @@ def cmd_map(target: str, *, root=None, cache_dir=None, llm: str = "auto", force:
     n_sim = sum(1 for u in m["units"] if u.get("similar"))
     print(f"→ {out_json}\n→ {vdir / '_map.html'}\n  сильных (★4–5): {n_strong}, с похожими далеко: {n_sim}")
     gaps = _map_gaps(m, mc.max_missing) if llm != "none" else []
+    if gaps and getattr(r0_cfg.autocut, "map_passport", "model") in ("fallback", "rules"):
+        # M209: the assembly takes what the model did not give from the rules — the run goes on
+        print(f"⚠ карта неполна: {'; '.join(gaps)} — сборка возьмёт недостающее по правилам "
+              f"(autocut.map_passport: {r0_cfg.autocut.map_passport}); arl map \"{stem}\" дозапросит у модели", flush=True)
+        return 0
     if gaps:
         print(f"✗ карта неполна: {'; '.join(gaps)} — модель не отвечала (лимит облака? локальный сервер?). "
               f"Повтори arl map \"{stem}\": дозапросит только недостающее", flush=True)

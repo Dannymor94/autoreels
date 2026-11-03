@@ -75,7 +75,7 @@ def _map():
             "topics": [{"id": 1, "name": "страх", "units": [1, 2, 3, 4]}],
             "units": [{"id": i + 1, "t0": float(i * 10), "t1": float(i * 10 + 9), "refs": f"2.{i + 1}", "filtered": "",
                        "text": t, "voice": {"energy": 20 * i}, "similar": [9], "role": "thesis", "punch": 3,
-                       "standalone": True, "refers": None, "summary": "модель"} for i, t in enumerate(texts)]}
+                       "standalone": True, "refers": None, "summary": "модель", "topic": 1} for i, t in enumerate(texts)]}
 
 
 def test_apply_rules_keeps_the_cut_and_replaces_the_passport():
@@ -101,9 +101,11 @@ def test_autocut_reads_the_map_with_the_rules_passport_only_when_asked(tmp_path,
         u.update(role=None, punch=None, standalone=None, refers=None, summary="", missing=True)
     mp.write_text(json.dumps(m), encoding="utf-8")
     kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True, scenario_provider=Fake())
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: model", cfg.read_text(encoding="utf-8")),
+                   encoding="utf-8")
     assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "a.txt"), **kw) == 1           # model: incomplete
     assert "карта неполна" in capsys.readouterr().err
-    cfg = tmp_path / "config" / "r0.yaml"
     cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: rules", cfg.read_text(encoding="utf-8")),
                    encoding="utf-8")
     assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "b.txt"), **kw) == 0
@@ -111,11 +113,11 @@ def test_autocut_reads_the_map_with_the_rules_passport_only_when_asked(tmp_path,
     assert json.loads(mp.read_text(encoding="utf-8"))["units"][0]["missing"] is True          # the map file stays
 
 
-def test_default_is_the_model_passport():
+def test_code_default_is_the_model_passport_the_repo_config_the_fallback():
     from autoreels import __main__ as cli
     from autoreels.core.config import AutocutConfig
     assert AutocutConfig().map_passport == "model"
-    assert cli.load_r0_config("config/r0.yaml").autocut.map_passport == "model"
+    assert cli.load_r0_config("config/r0.yaml").autocut.map_passport == "fallback"      # M209: owner 2026-11-02
 
 
 def test_the_comparison_tool(tmp_path, monkeypatch, capsys):

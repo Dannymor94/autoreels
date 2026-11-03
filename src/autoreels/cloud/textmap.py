@@ -220,3 +220,43 @@ def apply_rules(the_map: dict) -> dict:
         name = ", ".join(w for w, _ in bag.most_common(3)) or f"тема {t}"
         topics.append({"id": t, "name": name, "units": [u["id"] for u in mem]})
     return {**the_map, "units": units, "topics": topics, "passport": "rules"}
+
+
+# M209: the rules stand in only where the model gave nothing — topic ids of the rules start here (no clash with the model's)
+FALLBACK_TOPIC_BASE = 1000
+
+
+def apply_fallback(the_map: dict) -> tuple[dict, int, int]:
+    """M209 (m208: rules 33 of 56 owner clips, the model 36 — the rules do not replace the model): a copy of the map
+    where only the thoughts without the model's passport take it from the rules, and only the thoughts of a part of the
+    source the topics request did not answer (topic −1) take the rules' topic. A complete map
+    comes back as it is. Returns (map, thoughts filled, thoughts given a topic)."""
+    units = the_map.get("units") or []
+    gap = {u.get("id") for u in units if u.get("missing") or not u.get("role")}
+    topics = the_map.get("topics") or []
+    # only a part the topics request left unanswered (topic −1): a map with no topics at all keeps «every thought its own
+    # topic» as before (autocut works that way)
+    lost = {x for tp in topics if tp.get("missing") for x in tp.get("units") or []}
+    need_topic = {u.get("id") for u in units if u.get("id") in lost or u.get("topic") == -1}
+    if not gap and not need_topic:
+        return the_map, 0, 0
+    ruled = {u["id"]: u for u in apply_rules(the_map)["units"]}
+    out = []
+    for u in units:
+        v = dict(u)
+        r = ruled[u["id"]]
+        if u.get("id") in gap:
+            v.update({k: r[k] for k in ("role", "punch", "standalone", "refers", "summary")})
+            v.pop("missing", None)
+            v["passport"] = "rules"
+        if u.get("id") in need_topic:
+            v["topic"] = FALLBACK_TOPIC_BASE + int(r["topic"])
+        out.append(v)
+    kept = [tp for tp in topics if not tp.get("missing")]
+    added: dict[int, list] = {}
+    for v in out:
+        if v.get("id") in need_topic:
+            added.setdefault(v["topic"], []).append(v["id"])
+    for tid, mem in sorted(added.items()):
+        kept.append({"id": tid, "name": f"тема по правилам {tid - FALLBACK_TOPIC_BASE}", "units": mem, "rules": True})
+    return {**the_map, "units": out, "topics": kept}, len(gap), len(need_topic)

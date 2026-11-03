@@ -285,8 +285,9 @@ def test_cmd_map_incomplete_returns_3_and_the_next_run_asks_only_what_is_missing
 
     import re
     cfg = tmp_path / "config" / "r0.yaml"
-    cfg.write_text(re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", cfg.read_text(encoding="utf-8")),
-                   encoding="utf-8")
+    text = re.sub(r"(?m)^  window_units: \d+", "  window_units: 4", cfg.read_text(encoding="utf-8"))
+    text = re.sub(r"(?m)^  map_passport: \w+", "  map_passport: model", text)   # M209: the strict mode is tested here
+    cfg.write_text(text, encoding="utf-8")
     kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), out_dir=str(tmp_path / "out"))
     first = Model(budget=1)                                     # one window answered, then the limit
     assert cli.cmd_map(str(mpath), provider=first, **kw) == 3
