@@ -297,6 +297,9 @@ class AutocutConfig(BaseModel):
     # M205: which candidates are taken — greedy: in the pool's order (as before); global: the set with the largest total
     # score and no two too close, walked first
     select: Literal["greedy", "global"] = "greedy"
+    # M208: the map's passport (role, strength, standalone, refers, summary) and topics — model: as the map file has them
+    # (as before); rules: recomputed by cloud/textmap.py when autocut reads the map (the file stays)
+    map_passport: Literal["model", "rules"] = "model"
                                               # before any noun (pymorphy3, extra .[nlp]; on without it = an error)
     label_hooks: bool = False                 # M182: a label clip of arl auto gets a cold open from its own second half
     # M119 (m118: 60 of the owner's 66 clips are one stretch of the talk inside one topic; build_clip failed on half the

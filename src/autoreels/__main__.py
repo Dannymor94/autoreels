@@ -8553,11 +8553,6 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     if foreign:
         print(f"ошибка: {foreign} — сборки по ней разойдутся с блоками; arl map \"{stem}\" --force", file=sys.stderr)
         return 1
-    gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
-    if gaps:
-        print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
-              f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
-        return 1
     ac = r0_cfg.autocut
     if ac_over:                             # M119: --ac key=value for this run only (config/r0.yaml unchanged)
         try:
@@ -8567,6 +8562,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             return 1
         r0_cfg = r0_cfg.model_copy(update={"autocut": ac})
         print("  autocut для этого запуска: " + ", ".join(str(x).strip() for x in ac_over), flush=True)
+    if getattr(ac, "map_passport", "model") == "rules":     # M208: the passport and topics by rules, the map file stays
+        from autoreels.cloud.textmap import apply_rules
+        the_map = apply_rules(the_map)
+        print("  карта: паспорт и темы по правилам (без модели, M208)", flush=True)
+    gaps = _map_gaps(the_map, r0_cfg.map.max_missing, topics=False)
+    if gaps:
+        print(f"ошибка: карта неполна ({'; '.join(gaps)}) — сборки по ней были бы пустыми или случайными; "
+              f"arl map \"{stem}\" дозапросит недостающее", file=sys.stderr)
+        return 1
     n_clips = clips or ac.clips
     if not clips and ac.clips_every_min > 0:    # M119: the owner takes one clip per ~3.5 min of a talk
         _src_min = max((float(w.t1) for w in tx.words), default=0.0) / 60.0
