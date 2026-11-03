@@ -1,0 +1,156 @@
+diff --git a/PLAN.md b/PLAN.md
+index 21bba33..3a9da5f 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -294,7 +294,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
+ | Сценарист через чат | без платного API: `arl auto <ист> --scenario-llm chat` (режим сценариста включается сам, и после платного окна) кладёт в `exchange/<ист>.scenario.md` одним файлом шаги владельцу, задание сценаристу (тот же промпт, что у API, с примерами владельца) и пронумерованный текст; источник останавливается «ждёт ответа чата», автомонтаж вместо него не идёт. Ответ чата — в `exchange/<ист>.scenario.answer.txt` (обёртка ``` и `**` допустимы); `arl scenario-check <ист>` — что принято, что нет и почему, отклонённое — сообщением для того же чата в `exchange/<ист>.scenario.fix.md`; повторный `arl auto` берёт ответ из файла, дальше обычный путь (плашки, `k:`, стыки — на `--llm`). Задание несёт отпечаток пронумерованного текста: ответ к другому тексту не берётся, задание пишется заново. Тот же файл — тот же результат. `exchange/` не в git | M207 |
+ | Паспорт карты без модели | нарезка на мысли, голос и похожие места и так считает код; модель давала только паспорт (роль, сила, понятна ли без предыдущего, опора, краткое) и темы. `autocut.map_passport: rules` пересчитывает их правилами `cloud/textmap.py` при чтении карты, файл карты не меняется: роль — по маркерам («?», «например», «как будто», «поэтому», «потому что»…), сила — сырой балл (краткость, «не…, а…», обобщения, энергия голоса, роль) и ранг внутри источника (5 — верхние 10 %, 4 — 20 %, 3 — 30 %, 2 — 25 %), понятна ли — правила начала клипа, краткое — самая содержательная фраза, темы — TextTiling по леммам. m208: роль совпадает с моделью в 21 % (правила почти всё зовут тезисом), сила ±1 — 71 %; A/B автомонтажа — покрытие клипов владельца: модель 36 из 56, правила 33 — правила модель не заменяют. **`map_passport: fallback`** (включено владельцем 2026-11-02, M209): паспорт модели, правила — только для мыслей без ответа модели (и тема — для части источника, где запрос тем остался без ответа, номера тем правил от 1000; карта совсем без тем — как раньше, каждая мысль своя тема); полная карта не меняется, неполная больше не останавливает `arl auto` (`arl map` — предупреждение, код 0) | M208, M209 |
+-| Порядок механик (владелец 2026-11-02) | M210 уборка плана → M211 голос в оценке клипа (замер: не отличает, AUC 0,47–0,55; сила по модели 0,68) → M212 тревога целостности на gamebox (m212: вернулась — `ab192/r03`, «size 12»; разбор M212b) → M213 приём по ссылке Я.Диска на gamebox с вопросом об удалении. Нумерация блоков по карте речи (M1.8) — только для новых источников. Счёт клипа формулой и вкус — после решений владельца на листах ревью m183 | M210 |
++| Порядок механик (владелец 2026-11-02) | M210 уборка плана → M211 голос в оценке клипа (замер: не отличает, AUC 0,47–0,55; сила по модели 0,68) → M212 тревога целостности на gamebox (m212b: `ab192/r03.integrity.txt` — от h264-рендера на gamebox, рядом лежал чистый hevc-перерендер с Mac; M212c: у ошибки клипа — `rNN.error.txt`, прежние ошибки — в `_errors/`) → M213 приём по ссылке Я.Диска на gamebox с вопросом об удалении. Нумерация блоков по карте речи (M1.8) — только для новых источников. Счёт клипа формулой и вкус — после решений владельца на листах ревью m183 | M210 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index 7527ddf..5fa9351 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -29,6 +29,11 @@
+ ## Проверка целостности клипа (M179, M180)
+ В m165 на gamebox 16 клипов из 26 упали с `integrity check failed — missing picture in access unit with size 12`, и проверка их удаляла, так что разобрать файлы было нельзя. Замер m179: 41 клип `h264_vaapi` и пробное кодирование — ни одного такого сообщения, маленьких пакетов в файлах нет; причина не найдена. С M180 клип, не прошедший проверку, остаётся как `rNN.ERROR.mp4`, слова ffmpeg — в `rNN.integrity.txt` рядом: если сообщение вернётся, файл разбирается (`ffprobe -show_packets`, `-bsf:v trace_headers`), и правка делается по нему.
+ 
++**M212c.** m212 нашла `prew_isaev_anna/_gate/ab192/r03.integrity.txt` (h264, gamebox, 30.10 11:22) рядом с чистым `r03.mp4` (hevc, Mac, 11:40): успешный перерендер удалял старый `.ERROR.mp4`, но оставлял его `.integrity.txt` — и сам сбойный файл снова потерялся. Теперь у каждого `rNN.ERROR.mp4` есть `rNN.error.txt` (когда, на какой машине, каким кодеком, все причины), а чистый перерендер переносит прежние `rNN.ERROR.mp4`, `.error.txt`, `.integrity.txt` в `_errors/rNN.<время>.*`: в папке гейта — только текущее, улики целы. Разбор файла: `sh handoff/m179/probe_au.sh <клип>`.
++
++## SSH до gamebox: «No route to host»
++До SSH дело не дошло — Mac не видит адрес в локальной сети. По порядку: (1) VPN на Mac перехватывает локальную сеть (2026-11-02: перезапуск VPN вернул доступ) — в VPN включить «Allow LAN access» или исключить `192.168.3.0/24`; (2) macOS 15 не дал приложению (Terminal / iTerm / Claude / VS Code) доступ к «Локальной сети» — Настройки → Конфиденциальность → Локальная сеть; (3) gamebox получил другой IP — `ip -4 addr` на gamebox, закрепить адрес в роутере; (4) Mac в другой сети — `ipconfig getifaddr en0` должен быть `192.168.3.x`.
++
+ ## Карта говорящих (M165, M170)
+ 
+ `arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.
+diff --git a/src/autoreels/local/render.py b/src/autoreels/local/render.py
+index bc4bb21..16890ef 100644
+--- a/src/autoreels/local/render.py
++++ b/src/autoreels/local/render.py
+@@ -26,7 +26,7 @@ import tempfile
+ import threading
+ import time
+ from pathlib import Path, PurePosixPath, PureWindowsPath
+-from typing import Callable, NamedTuple
++from typing import Callable, NamedTuple, Sequence
+ 
+ from pydantic import ValidationError
+ 
+@@ -813,6 +813,45 @@ def _unlock_dir(fd) -> None:
+         pass
+ 
+ 
++_ERROR_FILES = ("ERROR.mp4", "error.txt", "integrity.txt")
++
++
++def _write_error_note(out_dir: Path, rid: str, errors: Sequence[str], codec: str) -> None:
++    """M212c (m212: r01.ERROR.mp4 of prew_isaev_danny with no reason anywhere — it went to the console only): the reasons
++    of a failed clip beside its .ERROR.mp4, with when, where and with which codec it was rendered."""
++    import datetime as _dt
++    import socket as _socket
++    head = f"# {_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {_socket.gethostname()} {codec}"
++    try:
++        (out_dir / f"{rid}.error.txt").write_text(
++            head + "\n" + "\n".join(e.strip() for e in errors) + "\n", encoding="utf-8")
++    except OSError:
++        pass
++
++
++def _park_stale_errors(out_dir: Path, rid: str) -> list[Path]:
++    """M212c (m212: r03.integrity.txt of an h264 render on gamebox lay beside a clean hevc r03.mp4 rendered on the Mac
++    18 minutes later; the failing file itself was deleted, so it could not be probed — M180's aim lost): a clip that
++    renders clean moves its previous error files (<rid>.ERROR.mp4, .error.txt, .integrity.txt) to _errors/ with the
++    time of the failed render, so the gate folder describes the current clip and the evidence stays."""
++    import datetime as _dt
++    found = [out_dir / f"{rid}.{suffix}" for suffix in _ERROR_FILES if (out_dir / f"{rid}.{suffix}").exists()]
++    if not found:
++        return []
++    stamp = _dt.datetime.fromtimestamp(min(f.stat().st_mtime for f in found)).strftime("%Y%m%d-%H%M%S")
++    dest = out_dir / "_errors"
++    moved = []
++    try:
++        dest.mkdir(exist_ok=True)
++        for f in found:
++            target = dest / f"{rid}.{stamp}.{f.name[len(rid) + 1:]}"
++            f.replace(target)
++            moved.append(target)
++    except OSError:
++        pass
++    return moved
++
++
+ def _check_integrity(path: Path, ffmpeg_bin: str) -> str:
+     """Run ffmpeg container-level check on `path`. Returns stderr text or '' if clean.
+     Uses -codec copy to skip decode: VideoToolbox HEVC + concat filtergraph produces benign
+@@ -3859,8 +3898,10 @@ def _render_segments(
+                     print(_ce, flush=True)
+                 if out.exists():
+                     out.rename(out.with_name(f"{out.stem}.ERROR.mp4"))
++                _write_error_note(out_dir, reel.id, _clip_errors, codec)
+             else:
+-                out.with_name(f"{out.stem}.ERROR.mp4").unlink(missing_ok=True)
++                for _moved in _park_stale_errors(out_dir, reel.id):
++                    print(f"  ↪ {reel.id}: прежняя ошибка клипа → {_moved.relative_to(out_dir)}", flush=True)
+                 outputs.append(out)
+                 import json as _json
+                 (out_dir / f"{reel.id}.render.json").write_text(
+diff --git a/tests/test_render.py b/tests/test_render.py
+index 80967f8..0af0f8d 100644
+--- a/tests/test_render.py
++++ b/tests/test_render.py
+@@ -9,6 +9,7 @@
+ - несколько reel → несколько вызовов ffmpeg.
+ """
+ import math
++import re
+ import subprocess
+ from pathlib import Path, PureWindowsPath
+ 
+@@ -3745,3 +3746,43 @@ def test_integrity_failure_keeps_the_clip_as_error_file(tmp_path, render_cfg, fa
+     assert [p.name for p in outputs] == ["r02.mp4"]
+     assert (out_dir / "r01.ERROR.mp4").exists() and not (out_dir / "r01.mp4").exists()
+     assert "missing picture" in (out_dir / "r01.integrity.txt").read_text(encoding="utf-8")
++
++
++def test_m212c_a_failed_clip_says_why_and_a_clean_rerender_parks_the_old_error(tmp_path, render_cfg, fake_ffmpeg,
++                                                                               monkeypatch):
++    """M212c (m212: r03.integrity.txt of an h264 gamebox render lay beside a clean hevc r03.mp4 rendered later on the Mac,
++    the failing file gone; r01.ERROR.mp4 of danny had no reason anywhere): a failed clip writes <rid>.error.txt (when,
++    where, codec, reasons); a clean re-render moves the old ERROR.mp4 / error.txt / integrity.txt to _errors/<rid>.<time>.*"""
++    real_popen = render.subprocess.Popen
++
++    class _Writes(real_popen):
++        def __init__(self, cmd, **kw):
++            super().__init__(cmd, **kw)
++            last = str(cmd[-1])
++            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
++                Path(last).parent.mkdir(parents=True, exist_ok=True)
++                Path(last).write_bytes(b"x")
++    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
++    broken = {"on": True}
++    monkeypatch.setattr(render, "_check_integrity",
++                        lambda path, *a, **k: "[h264 @ 0x1] missing picture in access unit with size 12"
++                        if broken["on"] and Path(path).stem.startswith("r01") else "")
++    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
++    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
++    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
++    monkeypatch.setattr(render, "_probe_duration_sec", lambda path, *a, **k: None)
++    inputs = tmp_path / "inputs"
++    sha = _make_source(inputs, "v.mp4", b"m212c-error-notes")
++    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
++    out_dir = tmp_path / "out"
++    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
++    note = (out_dir / "r01.error.txt").read_text(encoding="utf-8")
++    assert note.startswith("# ") and "integrity check failed" in note and "missing picture" in note
++    assert not (out_dir / "r02.error.txt").exists()
++    broken["on"] = False                                     # the same clip renders clean now (another machine)
++    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
++    assert sorted(p.name for p in outputs) == ["r01.mp4", "r02.mp4"]
++    assert not any((out_dir / f"r01.{s}").exists() for s in ("ERROR.mp4", "error.txt", "integrity.txt"))
++    parked = sorted(p.name for p in (out_dir / "_errors").iterdir())
++    assert len(parked) == 3 and all(re.match(r"r01\.\d{8}-\d{6}\.(ERROR\.mp4|error\.txt|integrity\.txt)$", n)
++                                    for n in parked)
