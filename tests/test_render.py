@@ -9,6 +9,7 @@
 - несколько reel → несколько вызовов ffmpeg.
 """
 import math
+import re
 import subprocess
 from pathlib import Path, PureWindowsPath
 
@@ -3745,3 +3746,43 @@ def test_integrity_failure_keeps_the_clip_as_error_file(tmp_path, render_cfg, fa
     assert [p.name for p in outputs] == ["r02.mp4"]
     assert (out_dir / "r01.ERROR.mp4").exists() and not (out_dir / "r01.mp4").exists()
     assert "missing picture" in (out_dir / "r01.integrity.txt").read_text(encoding="utf-8")
+
+
+def test_m212c_a_failed_clip_says_why_and_a_clean_rerender_parks_the_old_error(tmp_path, render_cfg, fake_ffmpeg,
+                                                                               monkeypatch):
+    """M212c (m212: r03.integrity.txt of an h264 gamebox render lay beside a clean hevc r03.mp4 rendered later on the Mac,
+    the failing file gone; r01.ERROR.mp4 of danny had no reason anywhere): a failed clip writes <rid>.error.txt (when,
+    where, codec, reasons); a clean re-render moves the old ERROR.mp4 / error.txt / integrity.txt to _errors/<rid>.<time>.*"""
+    real_popen = render.subprocess.Popen
+
+    class _Writes(real_popen):
+        def __init__(self, cmd, **kw):
+            super().__init__(cmd, **kw)
+            last = str(cmd[-1])
+            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
+                Path(last).parent.mkdir(parents=True, exist_ok=True)
+                Path(last).write_bytes(b"x")
+    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
+    broken = {"on": True}
+    monkeypatch.setattr(render, "_check_integrity",
+                        lambda path, *a, **k: "[h264 @ 0x1] missing picture in access unit with size 12"
+                        if broken["on"] and Path(path).stem.startswith("r01") else "")
+    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
+    monkeypatch.setattr(render, "_probe_duration_sec", lambda path, *a, **k: None)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"m212c-error-notes")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
+    out_dir = tmp_path / "out"
+    render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+    note = (out_dir / "r01.error.txt").read_text(encoding="utf-8")
+    assert note.startswith("# ") and "integrity check failed" in note and "missing picture" in note
+    assert not (out_dir / "r02.error.txt").exists()
+    broken["on"] = False                                     # the same clip renders clean now (another machine)
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=render_cfg)
+    assert sorted(p.name for p in outputs) == ["r01.mp4", "r02.mp4"]
+    assert not any((out_dir / f"r01.{s}").exists() for s in ("ERROR.mp4", "error.txt", "integrity.txt"))
+    parked = sorted(p.name for p in (out_dir / "_errors").iterdir())
+    assert len(parked) == 3 and all(re.match(r"r01\.\d{8}-\d{6}\.(ERROR\.mp4|error\.txt|integrity\.txt)$", n)
+                                    for n in parked)

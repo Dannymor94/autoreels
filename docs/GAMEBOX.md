@@ -29,6 +29,11 @@
 ## Проверка целостности клипа (M179, M180)
 В m165 на gamebox 16 клипов из 26 упали с `integrity check failed — missing picture in access unit with size 12`, и проверка их удаляла, так что разобрать файлы было нельзя. Замер m179: 41 клип `h264_vaapi` и пробное кодирование — ни одного такого сообщения, маленьких пакетов в файлах нет; причина не найдена. С M180 клип, не прошедший проверку, остаётся как `rNN.ERROR.mp4`, слова ffmpeg — в `rNN.integrity.txt` рядом: если сообщение вернётся, файл разбирается (`ffprobe -show_packets`, `-bsf:v trace_headers`), и правка делается по нему.
 
+**M212c.** m212 нашла `prew_isaev_anna/_gate/ab192/r03.integrity.txt` (h264, gamebox, 30.10 11:22) рядом с чистым `r03.mp4` (hevc, Mac, 11:40): успешный перерендер удалял старый `.ERROR.mp4`, но оставлял его `.integrity.txt` — и сам сбойный файл снова потерялся. Теперь у каждого `rNN.ERROR.mp4` есть `rNN.error.txt` (когда, на какой машине, каким кодеком, все причины), а чистый перерендер переносит прежние `rNN.ERROR.mp4`, `.error.txt`, `.integrity.txt` в `_errors/rNN.<время>.*`: в папке гейта — только текущее, улики целы. Разбор файла: `sh handoff/m179/probe_au.sh <клип>`.
+
+## SSH до gamebox: «No route to host»
+До SSH дело не дошло — Mac не видит адрес в локальной сети. По порядку: (1) VPN на Mac перехватывает локальную сеть (2026-11-02: перезапуск VPN вернул доступ) — в VPN включить «Allow LAN access» или исключить `192.168.3.0/24`; (2) macOS 15 не дал приложению (Terminal / iTerm / Claude / VS Code) доступ к «Локальной сети» — Настройки → Конфиденциальность → Локальная сеть; (3) gamebox получил другой IP — `ip -4 addr` на gamebox, закрепить адрес в роутере; (4) Mac в другой сети — `ipconfig getifaddr en0` должен быть `192.168.3.x`.
+
 ## Карта говорящих (M165, M170)
 
 `arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.

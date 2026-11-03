@@ -26,7 +26,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Callable, NamedTuple
+from typing import Callable, NamedTuple, Sequence
 
 from pydantic import ValidationError
 
@@ -811,6 +811,45 @@ def _unlock_dir(fd) -> None:
         fd.close()
     except OSError:
         pass
+
+
+_ERROR_FILES = ("ERROR.mp4", "error.txt", "integrity.txt")
+
+
+def _write_error_note(out_dir: Path, rid: str, errors: Sequence[str], codec: str) -> None:
+    """M212c (m212: r01.ERROR.mp4 of prew_isaev_danny with no reason anywhere — it went to the console only): the reasons
+    of a failed clip beside its .ERROR.mp4, with when, where and with which codec it was rendered."""
+    import datetime as _dt
+    import socket as _socket
+    head = f"# {_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {_socket.gethostname()} {codec}"
+    try:
+        (out_dir / f"{rid}.error.txt").write_text(
+            head + "\n" + "\n".join(e.strip() for e in errors) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _park_stale_errors(out_dir: Path, rid: str) -> list[Path]:
+    """M212c (m212: r03.integrity.txt of an h264 render on gamebox lay beside a clean hevc r03.mp4 rendered on the Mac
+    18 minutes later; the failing file itself was deleted, so it could not be probed — M180's aim lost): a clip that
+    renders clean moves its previous error files (<rid>.ERROR.mp4, .error.txt, .integrity.txt) to _errors/ with the
+    time of the failed render, so the gate folder describes the current clip and the evidence stays."""
+    import datetime as _dt
+    found = [out_dir / f"{rid}.{suffix}" for suffix in _ERROR_FILES if (out_dir / f"{rid}.{suffix}").exists()]
+    if not found:
+        return []
+    stamp = _dt.datetime.fromtimestamp(min(f.stat().st_mtime for f in found)).strftime("%Y%m%d-%H%M%S")
+    dest = out_dir / "_errors"
+    moved = []
+    try:
+        dest.mkdir(exist_ok=True)
+        for f in found:
+            target = dest / f"{rid}.{stamp}.{f.name[len(rid) + 1:]}"
+            f.replace(target)
+            moved.append(target)
+    except OSError:
+        pass
+    return moved
 
 
 def _check_integrity(path: Path, ffmpeg_bin: str) -> str:
@@ -3859,8 +3898,10 @@ def _render_segments(
                     print(_ce, flush=True)
                 if out.exists():
                     out.rename(out.with_name(f"{out.stem}.ERROR.mp4"))
+                _write_error_note(out_dir, reel.id, _clip_errors, codec)
             else:
-                out.with_name(f"{out.stem}.ERROR.mp4").unlink(missing_ok=True)
+                for _moved in _park_stale_errors(out_dir, reel.id):
+                    print(f"  ↪ {reel.id}: прежняя ошибка клипа → {_moved.relative_to(out_dir)}", flush=True)
                 outputs.append(out)
                 import json as _json
                 (out_dir / f"{reel.id}.render.json").write_text(
