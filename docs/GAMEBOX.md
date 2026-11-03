@@ -39,3 +39,10 @@
 ## Карта говорящих (M165, M170)
 
 `arl speakers <источник>` — кто когда говорит (pyannote, `tools/diarize.py`) → `transcripts/<источник>.speakers.json`. Модель — в отдельном окружении с torch (на Mac `~/.venvs/m141`, `config/r0.yaml autocut.speakers_python`), токен Hugging Face — `HF_TOKEN` в `.env` (условия моделей `pyannote/speaker-diarization-3.1` и `pyannote/segmentation-3.0` приняты). `arl auto` строит карту сам, если её нет (`autocut.speakers_auto`); не вышло — прогон идёт без неё.
+
+## VPN для autoreels на gamebox (M214b)
+На gamebox нет системного VPN, а облачным моделям (Groq, OpenRouter, Hugging Face) он нужен. Xray (VLESS, закреплён 26.10.31, `~/.local/xray/`) работает как служба пользователя `systemd --user` (`xray.service`, linger включён — живёт без входа) и даёт локальный прокси: http `127.0.0.1:10809`, socks `127.0.0.1:10808`. Система через него не ходит — только autoreels: в `.env` gamebox `HTTPS_PROXY`/`HTTP_PROXY=http://127.0.0.1:10809`, а `NO_PROXY` — Яндекс (Диск качается напрямую) и localhost. Маршруты повторяют клиент владельца: `domain:ru`, `domain:su`, `domain:xn--p1ai`, `geosite:category-ru`, `geoip:ru`, `geoip:private` — напрямую.
+
+- Ключ — `~/.config/xray/vless.txt` (chmod 600), в git и в задачи не попадает. Конфиг — `python tools/vless2xray.py ~/.config/xray/vless.txt --out ~/.config/xray/config.json` (chmod 600), проверка `~/.local/xray/xray run -test -c ~/.config/xray/config.json`.
+- Сменить ключ: заменить строку в `vless.txt`, пересобрать конфиг, `systemctl --user restart xray`.
+- Проверка: `curl -s -o /dev/null -w "%{http_code}" -x http://127.0.0.1:10809 https://api.groq.com/openai/v1/models` → 401 (дошли, ключа в запросе нет); без прокси — нет ответа или 403.
