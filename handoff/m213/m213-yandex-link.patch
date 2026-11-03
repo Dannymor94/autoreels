@@ -1,0 +1,228 @@
+diff --git a/PLAN.md b/PLAN.md
+index 9dd6103..56604c2 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -294,7 +294,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ | Похожесть и отбор | `autocut.close_by: sound` — похожи по общим сыгранным фразам (`close_share_max`), первой фразе, заголовку, а не по мыслям карты; `select: global` — набор с наибольшей суммой оценок без похожих пар. m205 (с `start_morph`): 51 → 54 клипа, «Алгоритм или эмпатия» вернулся; глобальный набор совпал с жадным. Включено вместе со `start_morph` владельцем 2026-11-02 | M205, M206 |
+ | Сценарист через чат | без платного API: `arl auto <ист> --scenario-llm chat` (режим сценариста включается сам, и после платного окна) кладёт в `exchange/<ист>.scenario.md` одним файлом шаги владельцу, задание сценаристу (тот же промпт, что у API, с примерами владельца) и пронумерованный текст; источник останавливается «ждёт ответа чата», автомонтаж вместо него не идёт. Ответ чата — в `exchange/<ист>.scenario.answer.txt` (обёртка ``` и `**` допустимы); `arl scenario-check <ист>` — что принято, что нет и почему, отклонённое — сообщением для того же чата в `exchange/<ист>.scenario.fix.md`; повторный `arl auto` берёт ответ из файла, дальше обычный путь (плашки, `k:`, стыки — на `--llm`). Задание несёт отпечаток пронумерованного текста: ответ к другому тексту не берётся, задание пишется заново. Тот же файл — тот же результат. `exchange/` не в git | M207 |
+ | Паспорт карты без модели | нарезка на мысли, голос и похожие места и так считает код; модель давала только паспорт (роль, сила, понятна ли без предыдущего, опора, краткое) и темы. `autocut.map_passport: rules` пересчитывает их правилами `cloud/textmap.py` при чтении карты, файл карты не меняется: роль — по маркерам («?», «например», «как будто», «поэтому», «потому что»…), сила — сырой балл (краткость, «не…, а…», обобщения, энергия голоса, роль) и ранг внутри источника (5 — верхние 10 %, 4 — 20 %, 3 — 30 %, 2 — 25 %), понятна ли — правила начала клипа, краткое — самая содержательная фраза, темы — TextTiling по леммам. m208: роль совпадает с моделью в 21 % (правила почти всё зовут тезисом), сила ±1 — 71 %; A/B автомонтажа — покрытие клипов владельца: модель 36 из 56, правила 33 — правила модель не заменяют. **`map_passport: fallback`** (включено владельцем 2026-11-02, M209): паспорт модели, правила — только для мыслей без ответа модели (и тема — для части источника, где запрос тем остался без ответа, номера тем правил от 1000; карта совсем без тем — как раньше, каждая мысль своя тема); полная карта не меняется, неполная больше не останавливает `arl auto` (`arl map` — предупреждение, код 0) | M208, M209 |
+-| Порядок механик (владелец 2026-11-02) | M210 уборка плана → M211 голос в оценке клипа (замер: не отличает, AUC 0,47–0,55; сила по модели 0,68) → M212 тревога целостности на gamebox (m212b: `ab192/r03.integrity.txt` — от h264-рендера на gamebox, рядом лежал чистый hevc-перерендер с Mac; M212c: у ошибки клипа — `rNN.error.txt`, прежние ошибки — в `_errors/`; разбор на gamebox: `h264_vaapi` теряет кадр — 12-байтовый пакет только с SEI; M212d: такой клип перерендеривается `libx264`, `render.yaml vaapi_soft_retry`) → M213 приём по ссылке Я.Диска на gamebox с вопросом об удалении. Нумерация блоков по карте речи (M1.8) — только для новых источников. Счёт клипа формулой и вкус — после решений владельца на листах ревью m183 | M210 |
++| Порядок механик (владелец 2026-11-02) | M210 уборка плана → M211 голос в оценке клипа (замер: не отличает, AUC 0,47–0,55; сила по модели 0,68) → M212 тревога целостности на gamebox (m212b: `ab192/r03.integrity.txt` — от h264-рендера на gamebox, рядом лежал чистый hevc-перерендер с Mac; M212c: у ошибки клипа — `rNN.error.txt`, прежние ошибки — в `_errors/`; разбор на gamebox: `h264_vaapi` теряет кадр — 12-байтовый пакет только с SEI; M212d: такой клип перерендеривается `libx264`, `render.yaml vaapi_soft_retry`) → M213 приём по ссылке Я.Диска с вопросом об удалении (сделано, видео пока на Mac) → M214 видео — на gamebox. Нумерация блоков по карте речи (M1.8) — только для новых источников. Счёт клипа формулой и вкус — после решений владельца на листах ревью m183 | M210 |
+ | Продакшн 2026-10-29 | чистовик `_gate/m183` всех 7 источников: 69 клипов, без скачков кадра, крючок у 32, посты от «я», номера подряд, общий каталог `export/publish/`, сетка 2026-10-28 … 2027-01-04 (копия — Google-таблица «Сетка рилсов»). Старые гейты — в Корзине (`~/.Trash/autoreels-m183`). Гейт ждёт владельца | M183, M185, M186 |
+ | Обслуживание | ревью кода и папки (m133), уборка: мёртвые настройки, молчаливые `except`, `FallbackLLM`, правило `.gitignore` для `transcripts/` (M135), удалён неиспользуемый `local/archive.py` (архивация — `_archive_video` в CLI) | M133, M135, M148 |
+ | Модели | Claude как провайдер (`--llm haiku` или `sonnet`, строка стоимости), локальная модель gamebox (`local-think`); кэш судей по отвечающей модели; `arl judge-bench`; один замок `flock` на тяжёлые задачи gamebox | M108, M116 |
+@@ -309,7 +309,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ 1. **Слой приёма (`ingest.py`)** — взаимозаменяемые доставщики (yt-dlp / HTTP / Tailscale / Syncthing). Загрузка с Я.Диска уже есть (`arl run`, `prepare`: докачка с обрывов, свежая ссылка на каждой попытке).
+ 2. **Хранение — выбор владельца 2026-11-02: gamebox — дом видео.** gamebox сам качает исходник по ссылке в `/mnt/data/autoreels/inputs`, на Mac приезжают только звук и тексты (манифест, расшифровки, карты, разметка), рендер — там же (`--remote`). Видео не идёт через Mac. По необходимости позже: Tailscale (gamebox вне дома), rclone (папки Я.Диска целиком), Syncthing (готовые клипы сами на Mac). sshfs для видео не берём — медленно.
+-3. **`arl auto <ссылка Я.Диска>` (план, M213):** gamebox скачивает → весь конвейер → в конце вопрос «Удалить исходник <имя> (N ГБ) на gamebox? [y/N]»; без ответа или не в терминале — не удалять.
++3. **`arl auto <ссылка Я.Диска>` (M213, сделано):** файл скачивается в `inputs/` (докачка с обрывов, свежая ссылка на каждой попытке) → весь конвейер → после итога для каждого скачанного источника с удачным прогоном вопрос «Удалить исходник <имя> (N ГБ)? [y/N]»; без терминала, без ответа или при сбое прогона — не удаляется (`--delete-source ask | keep | yes`). Локальный файл удалить не предлагается. **Дальше (M214):** скачивание сразу на gamebox — разобрать, каким шагам подготовки нужно само видео (калибровка кропа по кадрам, автокроп), а каким хватит звука.
+ 4. **Контракт с SMM-постером** — манифест + mp4 → формат кросс-постера. Экспорт готов (`arl crosspost`, M90: клипы, обложки, посты и план импорта «файл;текст;тип»); публикация остаётся ручной.
+ 
+ ---
+diff --git a/README.md b/README.md
+index 50de4b4..dce9784 100644
+--- a/README.md
++++ b/README.md
+@@ -194,6 +194,7 @@ source /путь/к/autoreels/aliases.sh
+ | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
+ | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
+ | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
++| `arl auto <ссылка Я.Диска>` | M213: файл скачивается в `inputs/`, дальше как с видео; после итога — вопрос «Удалить исходник? [y/N]» (без терминала и при сбое не удаляется; `--delete-source ask \| keep \| yes`) |
+ | `arl scenario-check <ист>` | ответ чата-сценариста (`exchange/<ист>.scenario.answer.txt`): что принято, что нет и почему; отклонённое — сообщением для чата в `exchange/<ист>.scenario.fix.md` (M207) |
+ | `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
+ | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 72d1d8d..079b2b2 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -10704,9 +10704,14 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+              llm: str = "auto", clips: int | None = None, render: bool = True, gate: str = "auto",
+              encoder: str | None = None, music: str | None = None, tx: str | None = None,
+              mode: str | None = None, scenario_llm: str | None = None, tag: str | None = None,
+-             today=None, remote: bool = False, interviewer: str | None = None) -> int:
++             today=None, remote: bool = False, interviewer: str | None = None, delete_source: str = "ask",
++             ask=None, download=None) -> int:
+     """M63: a source end to end, up to the review sheet — one command instead of a dozen.
+ 
++    M213: a target may be a public Yandex Disk link — the file is downloaded into inputs/ and goes on as a video file;
++    after the summary each downloaded source whose run ended well is offered for deletion (`delete_source`: ask — a
++    y/N question, never without a terminal; keep; yes).
++
+     0. a video file → arl run (transcript + manifest; the video stays where it is);
+     1. arl prepare: speech map → alignment → intonation → motion → label draft → dry plan;
+     2. arl tx-check (report → transcripts/<stem>.txcheck.json);
+@@ -10756,7 +10761,17 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     _who = ("сценарист через чат (exchange/, без API)" if _scen_llm == "chat" else f"сценарист ({_scen_llm}, платно)")
+     print(f"=== auto: ролики пишет {_who if _mode == 'scenario' else 'автомонтаж'}"
+           f" — переключить: --mode autocut | scenario ===", flush=True)
++    fetched: dict[str, Path] = {}                 # M213: downloaded by this run — stem → file
+     for target in targets:
++        if _is_url(target) and _is_yandex_disk(target):
++            print(f"\n=== auto: скачиваю с Я.Диска {target} ===", flush=True)
++            try:
++                got = (download or _download_yandex_disk)(target, Path(inputs_dir) if inputs_dir else _root / "inputs")
++            except Exception as exc:  # noqa: BLE001 — a dead link, no space: the next target goes on
++                results.append((target, "скачивание", f"{type(exc).__name__}: {str(exc)[:200]}"))
++                continue
++            fetched[Path(got).stem] = Path(got)
++            target = str(got)
+         tp = Path(target)
+         mpath = None
+         if tp.is_file() and tp.suffix.lower() in _VIDEO_EXTS:
+@@ -10883,11 +10898,47 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     for stem, st, note in results:
+         print(f"  {'✓' if st == 'ok' else '✗'} {stem}: " + ("готово" if st == "ok" else f"остановлен на «{st}»")
+               + (f" — {note}" if note else ""), flush=True)
++    _offer_source_delete(fetched, results, delete_source, ask)    # M213
+     if _llm_cache_verdict():                          # M202: replay misses = the run was not reproduced
+         return 1
+     return 0 if all(st == "ok" for _, st, _ in results) else 1
+ 
+ 
++def _offer_source_delete(fetched: dict, results: list, mode: str, ask=None) -> list:
++    """M213 (owner 2026-11-02: «после окончания работ удалялся — перед удалением спросить»): the sources this run
++    downloaded and processed well — ask before deleting each (y/N; no terminal = keep). A failed run keeps its file.
++    Returns the deleted paths."""
++    if not fetched:
++        return []
++    ok = {stem for stem, st, _ in results if st == "ok"}
++    gone = []
++    for stem, path in fetched.items():
++        if not path.exists():
++            continue
++        size = f"{path.stat().st_size / 1e9:.1f} ГБ"
++        if stem not in ok:
++            print(f"  исходник {path.name} ({size}) оставлен: прогон не дошёл до конца", flush=True)
++            continue
++        if mode == "keep":
++            print(f"  исходник оставлен: {path}", flush=True)
++            continue
++        if mode != "yes":
++            if ask is None and not sys.stdin.isatty():
++                print(f"  исходник оставлен (нет терминала, чтобы спросить): {path}", flush=True)
++                continue
++            try:
++                answer = (ask or input)(f"Удалить исходник {path.name} ({size})? Повторный рендер его не найдёт. [y/N] ")
++            except EOFError:
++                answer = ""
++            if str(answer).strip().lower() not in ("y", "yes", "д", "да"):
++                print(f"  исходник оставлен: {path}", flush=True)
++                continue
++        path.unlink()
++        gone.append(path)
++        print(f"  исходник удалён: {path}", flush=True)
++    return gone
++
++
+ def _scenario_autocut_llms(ac, llm: str, scen_llm: str) -> dict:
+     """M204 (owner 2026-11-02: no paid API — m202/m203: in scenario mode the hooks, plates, k: and seams went to the
+     scenarist's paid model whatever --llm said, 151 refusals): autocut.scenario_polish «scenarist» — as before, all on
+@@ -13374,7 +13425,7 @@ def _build_parser():
+         help="M63: источник целиком до листа ревью — подготовка, проверка расшифровки, карта, автосборщик, план, рендер",
+     )
+     pau.add_argument("targets", metavar="видео_или_манифест", nargs="+",
+-                     help="видеофайл (сначала arl run) или манифест/имя в manifests/")
++                     help="видеофайл (сначала arl run), публичная ссылка Я.Диска (M213: скачивается в inputs/) или манифест/имя в manifests/")
+     pau.add_argument("--llm", choices=_LLM_MODES + ("none",), default="auto", help="модель карты")
+     pau.add_argument("--clips", type=int, default=None, help="сколько сборок предложить")
+     pau.add_argument("--no-render", action="store_false", dest="render", help="без рендера и листа")
+@@ -13388,6 +13439,9 @@ def _build_parser():
+     pau.add_argument("--interviewer", choices=["on", "off"], default=None,
+                      help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
+                           "по умолчанию r0.yaml autocut.interviewer")
++    pau.add_argument("--delete-source", choices=["ask", "keep", "yes"], default="ask", dest="delete_source",
++                     help="M213: исходник, скачанный по ссылке Я.Диска, после удачного прогона — спросить (по умолчанию; "
++                          "без терминала не удаляется) | оставить | удалить")
+     pau.add_argument("--remote", action="store_true",
+                      help="M161: рендер на машине из render.yaml remote: (gamebox), клипы обратно в тот же гейт")
+     pau.add_argument("--tag", default=None,
+@@ -13928,7 +13982,8 @@ def main(argv=None) -> int:
+                             encoder=args.encoder, music=args.music, tx=args.tx,
+                             mode=getattr(args, "mode", None), scenario_llm=getattr(args, "scenario_llm", None),
+                             tag=getattr(args, "tag", None), remote=getattr(args, "remote", False),
+-                            interviewer=getattr(args, "interviewer", None))
++                            interviewer=getattr(args, "interviewer", None),
++                            delete_source=getattr(args, "delete_source", "ask"))
+         elif args.cmd == "dictate":
+             return cmd_dictate(args.files, groq=args.groq, fmt=args.fmt, root=getattr(args, "root", None),
+                                cache_dir=getattr(args, "cache_dir", None), copy=args.copy)
+diff --git a/tests/test_m213_yandex_link.py b/tests/test_m213_yandex_link.py
+new file mode 100644
+index 0000000..6f14cdd
+--- /dev/null
++++ b/tests/test_m213_yandex_link.py
+@@ -0,0 +1,73 @@
++"""M213: arl auto <public Yandex Disk link> — the file downloads into inputs/, goes on as a video file, and after the
++summary the owner is asked before the source is deleted (no terminal — kept; a failed run — kept)."""
++from __future__ import annotations
++
++import pytest
++
++from tests.test_auto import _stub
++
++LINK = "https://disk.yandex.ru/i/AbCdEf123"
++
++
++def _setup(tmp_path, monkeypatch, *, run_ok=True):
++    from autoreels import __main__ as cli
++    from tests.test_montage import _source
++    mpath = _source(tmp_path)
++    got = tmp_path / "inputs" / "v.mp4"
++
++    def download(url, inputs_dir):
++        assert url == LINK and inputs_dir == tmp_path / "inputs"
++        got.parent.mkdir(parents=True, exist_ok=True)
++        got.write_bytes(b"V" * 2048)
++        return got
++    seen = []
++    monkeypatch.setattr(cli, "cmd_run", lambda v, **k: seen.append(v) or mpath)
++    calls = _stub(monkeypatch, tmp_path, fail=None if run_ok else "prepare")
++    return cli, download, got, seen, calls
++
++
++@pytest.mark.parametrize("answer,deleted", [("y", True), ("да", True), ("", False), ("n", False)])
++def test_the_link_downloads_runs_and_asks_before_deleting(tmp_path, monkeypatch, capsys, answer, deleted):
++    cli, download, got, seen, calls = _setup(tmp_path, monkeypatch)
++    asked = []
++    rc = cli.cmd_auto([LINK], root=tmp_path, render=False, download=download,
++                      ask=lambda q: asked.append(q) or answer)
++    out = capsys.readouterr().out
++    assert rc == 0 and seen == [got] and [c[0] for c in calls][:1] == ["prepare"]
++    assert len(asked) == 1 and "Удалить исходник v.mp4" in asked[0] and "[y/N]" in asked[0]
++    assert got.exists() is (not deleted)
++    assert ("исходник удалён" in out) is deleted and ("исходник оставлен" in out) is (not deleted)
++
++
++def test_keep_and_yes_and_no_terminal(tmp_path, monkeypatch, capsys):
++    cli, download, got, seen, calls = _setup(tmp_path, monkeypatch)
++    assert cli.cmd_auto([LINK], root=tmp_path, render=False, download=download, delete_source="keep") == 0
++    assert got.exists()
++    assert cli.cmd_auto([LINK], root=tmp_path, render=False, download=download, delete_source="yes") == 0
++    assert not got.exists()
++    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
++    assert cli.cmd_auto([LINK], root=tmp_path, render=False, download=download) == 0      # ask, no terminal
++    assert got.exists() and "нет терминала" in capsys.readouterr().out
++
++
++def test_a_failed_run_keeps_its_source_and_a_dead_link_goes_on(tmp_path, monkeypatch, capsys):
++    cli, download, got, seen, calls = _setup(tmp_path, monkeypatch, run_ok=False)
++    asked = []
++    rc = cli.cmd_auto([LINK], root=tmp_path, render=False, download=download, ask=lambda q: asked.append(q) or "y")
++    assert rc == 1 and got.exists() and not asked
++    assert "прогон не дошёл до конца" in capsys.readouterr().out
++
++    def dead(url, inputs_dir):
++        raise RuntimeError("ссылка не открывается")
++    rc = cli.cmd_auto([LINK], root=tmp_path, render=False, download=dead, ask=lambda q: "y")
++    out = capsys.readouterr().out
++    assert rc == 1 and "скачивание" in out and "ссылка не открывается" in out
++
++
++def test_a_local_file_is_never_offered_for_deletion(tmp_path, monkeypatch):
++    cli, download, got, seen, calls = _setup(tmp_path, monkeypatch)
++    video = tmp_path / "own.mp4"
++    video.write_bytes(b"VIDEO")
++    asked = []
++    assert cli.cmd_auto([str(video)], root=tmp_path, render=False, ask=lambda q: asked.append(q) or "y") == 0
++    assert video.exists() and not asked
