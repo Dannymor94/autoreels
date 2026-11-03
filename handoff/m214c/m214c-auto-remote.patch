@@ -1,0 +1,242 @@
+diff --git a/PLAN.md b/PLAN.md
+index b10c627..6c6514a 100644
+--- a/PLAN.md
++++ b/PLAN.md
+@@ -309,7 +309,7 @@ arl blocks <манифест> --apply <файл> --install [--render]  # пун
+ 
+ 1. **Слой приёма (`ingest.py`)** — взаимозаменяемые доставщики (yt-dlp / HTTP / Tailscale / Syncthing). Загрузка с Я.Диска уже есть (`arl run`, `prepare`: докачка с обрывов, свежая ссылка на каждой попытке).
+ 2. **Хранение — выбор владельца 2026-11-02: gamebox — дом видео.** gamebox сам качает исходник по ссылке в `/mnt/data/autoreels/inputs`, на Mac приезжают только звук и тексты (манифест, расшифровки, карты, разметка), рендер — там же (`--remote`). Видео не идёт через Mac. По необходимости позже: Tailscale (gamebox вне дома), rclone (папки Я.Диска целиком), Syncthing (готовые клипы сами на Mac). sshfs для видео не берём — медленно.
+-3. **`arl auto <ссылка Я.Диска>` (M213, сделано):** файл скачивается в `inputs/` (докачка с обрывов, свежая ссылка на каждой попытке) → весь конвейер → после итога для каждого скачанного источника с удачным прогоном вопрос «Удалить исходник <имя> (N ГБ)? [y/N]»; без терминала, без ответа или при сбое прогона — не удаляется (`--delete-source ask | keep | yes`). Локальный файл удалить не предлагается. **Папка (M214a, `/d/…`):** видео папки (этот уровень, по имени) обрабатываются по одному: скачать → весь путь → следующее; вопрос об удалении — **один раз в начале** («В папке N видео (M ГБ). Удалять каждый исходник сразу после удачной обработки? [y/N]»), при «да» на диске одновременно одно видео. **M214b:** на gamebox — VPN для autoreels (Xray, локальный прокси, `docs/GAMEBOX.md`), `pymorphy3`, `torch`/`torchaudio` CPU, модель выравнивания, ключи моделей. **Дальше (M214c):** скачивание сразу на gamebox — разобрать, каким шагам подготовки нужно само видео (калибровка кропа по кадрам, автокроп), а каким хватит звука.
++3. **`arl auto <ссылка Я.Диска>` (M213, сделано):** файл скачивается в `inputs/` (докачка с обрывов, свежая ссылка на каждой попытке) → весь конвейер → после итога для каждого скачанного источника с удачным прогоном вопрос «Удалить исходник <имя> (N ГБ)? [y/N]»; без терминала, без ответа или при сбое прогона — не удаляется (`--delete-source ask | keep | yes`). Локальный файл удалить не предлагается. **Папка (M214a, `/d/…`):** видео папки (этот уровень, по имени) обрабатываются по одному: скачать → весь путь → следующее; вопрос об удалении — **один раз в начале** («В папке N видео (M ГБ). Удалять каждый исходник сразу после удачной обработки? [y/N]»), при «да» на диске одновременно одно видео. **M214b:** на gamebox — VPN для autoreels (Xray, локальный прокси, `docs/GAMEBOX.md`), `pymorphy3`, `torch`/`torchaudio` CPU, модель выравнивания, ключи моделей. **M214c:** `arl auto <ссылка> --on-remote` — весь прогон на gamebox через `ssh -t` (вопросы — в терминале Mac), видео остаётся там, на Mac возвращаются тексты (`manifests`, `transcripts`, `reviews`, `exchange`); выравнивание там на `torch 2.15` (Python 3.14), источник — целиком на одной машине.
+ 4. **Контракт с SMM-постером** — манифест + mp4 → формат кросс-постера. Экспорт готов (`arl crosspost`, M90: клипы, обложки, посты и план импорта «файл;текст;тип»); публикация остаётся ручной.
+ 
+ ---
+diff --git a/README.md b/README.md
+index 712c12a..3709193 100644
+--- a/README.md
++++ b/README.md
+@@ -194,7 +194,7 @@ source /путь/к/autoreels/aliases.sh
+ | `arl blocks <манифест> --review --compact` | компактный файл ревью (одна строка на блок + промпт) → вставить в любой чат |
+ | `arl blocks --apply <файл> --install` | применить ответ (оба формата) → `manifests/`; файлы ответов — `reviews/*_answer.txt` |
+ | `arl speech-map <манифест>` | построить/загрузить карту речи по звуку, статистика пауз |
+-| `arl auto <ссылка Я.Диска>` | M213: файл скачивается в `inputs/`, дальше как с видео; ссылка на папку (M214a) — все видео папки по одному, вопрос об удалении один раз в начале; после итога — вопрос «Удалить исходник? [y/N]» (без терминала и при сбое не удаляется; `--delete-source ask \| keep \| yes`) |
++| `arl auto <ссылка Я.Диска>` | M213: файл скачивается в `inputs/`, дальше как с видео; ссылка на папку (M214a) — все видео папки по одному, вопрос об удалении один раз в начале; `--on-remote` (M214c) — весь прогон на gamebox (видео там, сюда — тексты; `docs/GAMEBOX.md`); после итога — вопрос «Удалить исходник? [y/N]» (без терминала и при сбое не удаляется; `--delete-source ask \| keep \| yes`) |
+ | `arl scenario-check <ист>` | ответ чата-сценариста (`exchange/<ист>.scenario.answer.txt`): что принято, что нет и почему; отклонённое — сообщением для чата в `exchange/<ист>.scenario.fix.md` (M207) |
+ | `arl auto <ист>` | источник целиком до листа ревью: prepare → tx-check → map → сценарист или автомонтаж (`--mode`, по умолчанию `autocut.auto_mode`) → --apply → рендер → посты |
+ | `arl map <ист>` | карта мыслей источника (`transcripts/<stem>.map.json`, `_map.html`) |
+diff --git a/docs/GAMEBOX.md b/docs/GAMEBOX.md
+index d0aa0da..5ae47da 100644
+--- a/docs/GAMEBOX.md
++++ b/docs/GAMEBOX.md
+@@ -46,3 +46,6 @@
+ - Ключ — `~/.config/xray/vless.txt` (chmod 600), в git и в задачи не попадает. Конфиг — `python tools/vless2xray.py ~/.config/xray/vless.txt --out ~/.config/xray/config.json` (chmod 600), проверка `~/.local/xray/xray run -test -c ~/.config/xray/config.json`.
+ - Сменить ключ: заменить строку в `vless.txt`, пересобрать конфиг, `systemctl --user restart xray`.
+ - Проверка: `curl -s -o /dev/null -w "%{http_code}" -x http://127.0.0.1:10809 https://api.groq.com/openai/v1/models` → 401 (дошли, ключа в запросе нет); без прокси — нет ответа или 403.
++
++## Весь прогон на gamebox (M214c)
++`arl auto <ссылка Я.Диска или папки> --on-remote --no-render` — Mac проверяет gamebox, отправляет код (`git ls-files`, как M161), ставит метку `.arl/auto-mark` и выполняет ту же команду там через `ssh -t`: вопросы об удалении исходников — в терминале Mac. Видео скачивается и живёт на gamebox (`/mnt/data/autoreels/inputs`), модели идут через прокси (раздел выше), Яндекс — напрямую. После прогона на Mac возвращаются только тексты, изменённые прогоном: `manifests/`, `transcripts/`, `reviews/`, `exchange/` (tar по ssh). Пути Mac (`--root`, `--cache-dir`, `--inputs-dir`) на gamebox не передаются. Выравнивание на gamebox — `torch 2.15` / `torchaudio 2.11` (под Python 3.14 закреплённой 2.8.0 нет), на Mac — 2.8.0: источник обрабатывается целиком на одной машине. Кэш ответов моделей (`data/cache/llm/`) у каждой машины свой. Рендер там — по конфигу рендера gamebox; в текущей фазе — `--no-render`.
+diff --git a/src/autoreels/__main__.py b/src/autoreels/__main__.py
+index 8c71f2b..c542f3f 100644
+--- a/src/autoreels/__main__.py
++++ b/src/autoreels/__main__.py
+@@ -10940,6 +10940,22 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
+     return 0 if all(st == "ok" for _, st, _ in results) else 1
+ 
+ 
++def cmd_auto_remote(argv: list[str], *, root=None, run=None) -> int:
++    """M214c: `arl auto … --on-remote` — the same command on the remote machine (config/render.yaml remote:), the texts
++    back here (local/remote.py auto_remote)."""
++    from autoreels.local.remote import RemoteRenderError, auto_remote
++    _root = Path(root) if root else _project_root()
++    rcfg = load_render_config(_root / "config" / "render.yaml").remote
++    if not rcfg.host or not rcfg.root:
++        print("ошибка: удалённая машина не настроена — config/render.yaml remote: host, root", file=sys.stderr)
++        return 2
++    try:
++        return auto_remote(rcfg, root=_root, argv=argv, run=run)
++    except RemoteRenderError as exc:
++        print(f"ошибка: прогон на {rcfg.host} — {exc}", file=sys.stderr)
++        return 1
++
++
+ def _yandex_link_is_folder_kind(url: str) -> bool:
+     """M214a: /d/… may be a folder (or a shared file) — asked through the API; /i/… is a file."""
+     from urllib.parse import urlparse
+@@ -13522,6 +13538,9 @@ def _build_parser():
+     pau.add_argument("--interviewer", choices=["on", "off"], default=None,
+                      help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
+                           "по умолчанию r0.yaml autocut.interviewer")
++    pau.add_argument("--on-remote", action="store_true", dest="on_remote",
++                     help="M214c: весь прогон на машине из config/render.yaml remote: (gamebox) — видео остаётся там, "
++                          "сюда приходят тексты (manifests, transcripts, reviews, exchange); вопросы — в этом терминале")
+     pau.add_argument("--delete-source", choices=["ask", "keep", "yes"], default="ask", dest="delete_source",
+                      help="M213: исходник, скачанный по ссылке Я.Диска, после удачного прогона — спросить (по умолчанию; "
+                           "без терминала не удаляется) | оставить | удалить")
+@@ -13790,6 +13809,8 @@ def main(argv=None) -> int:
+ 
+     _load_env()
+     args = _build_parser().parse_args(argv)
++    if getattr(args, "cmd", None) == "auto" and getattr(args, "on_remote", False):     # M214c
++        return cmd_auto_remote(list(argv if argv is not None else sys.argv[1:]), root=getattr(args, "root", None))
+ 
+     # Resolve --root once at the CLI boundary so all dispatch paths get a Path.
+     if hasattr(args, "root"):
+diff --git a/src/autoreels/local/remote.py b/src/autoreels/local/remote.py
+index 71a417b..59ffb3d 100644
+--- a/src/autoreels/local/remote.py
++++ b/src/autoreels/local/remote.py
+@@ -120,3 +120,68 @@ def render_remote(cfg, *, root: Path, review: Path, stem: str, source_sha256: st
+     step("назад", ["sh", "-c", pull], capture_output=True, text=True)
+     log(f"  клипы здесь: {local_gate}")
+     return local_gate
++
++
++# M214c: the whole `arl auto` on the remote machine (owner 2026-11-02: gamebox is the home of the video) — the Mac
++# only starts it and takes back the texts; the video and the clips stay there.
++TEXT_DIRS = ("manifests", "transcripts", "reviews", "exchange")
++_MARK = ".arl/auto-mark"
++
++
++def remote_argv(argv: list[str]) -> list[str]:
++    """The run's own command for the remote: --on-remote dropped, and the Mac's paths (--root, --cache-dir, --inputs-dir)
++    too — the remote has its own project folder."""
++    out, skip = [], False
++    for a in argv:
++        if skip:
++            skip = False
++            continue
++        if a == "--on-remote":
++            continue
++        if a in ("--root", "--cache-dir", "--inputs-dir"):
++            skip = True
++            continue
++        if a.split("=", 1)[0] in ("--root", "--cache-dir", "--inputs-dir"):
++            continue
++        out.append(a)
++    return out
++
++
++def auto_remote(cfg, *, root: Path, argv: list[str], run: Callable | None = None,
++                log: Callable[[str], None] = print) -> int:
++    """Send the code, run `python -m autoreels <argv>` there in this terminal (ssh -t: the delete questions come here),
++    then copy back the files of TEXT_DIRS changed by the run. Returns the remote run's exit code."""
++    run = run or (lambda a, **kw: subprocess.run(a, **kw))
++    host, rroot = cfg.host, cfg.root.rstrip("/")
++    root = Path(root)
++    q = shlex.quote
++
++    def step(name: str, a: list[str], **kw):
++        r = run(a, **kw)
++        if getattr(r, "returncode", 1) != 0:
++            err = (getattr(r, "stderr", "") or "").strip().splitlines()[-3:]
++            raise RemoteRenderError(f"{name}: код {getattr(r, 'returncode', '?')}" + (f" — {' | '.join(err)}" if err else ""))
++        return r
++
++    log(f"=== auto на {host}:{rroot} — видео остаётся там, сюда — тексты ({', '.join(TEXT_DIRS)}) ===")
++    step("ssh", ["ssh", host, f"test -x {q(rroot)}/.venv/bin/python && echo ok"], capture_output=True, text=True)
++    files = step("git ls-files", ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True).stdout
++    with tempfile.NamedTemporaryFile("w", suffix=".files", delete=False, encoding="utf-8") as fh:
++        fh.write(files.replace("\0", "\n"))
++        flist = fh.name
++    step("код", ["rsync", "-a", f"--files-from={flist}", f"{root}/", f"{host}:{rroot}/"], capture_output=True, text=True)
++    step("метка", ["ssh", host, f"cd {q(rroot)} && mkdir -p .arl && touch {_MARK}"], capture_output=True, text=True)
++    cmd = f"cd {q(rroot)} && .venv/bin/python -m autoreels " + " ".join(q(a) for a in remote_argv(argv))
++    rc = getattr(run(["ssh", "-t", host, cmd]), "returncode", 1)
++    find = f"cd {q(rroot)} && find {' '.join(TEXT_DIRS)} -type f -newer {_MARK} 2>/dev/null"
++    changed = [ln for ln in (getattr(run(["ssh", host, find], capture_output=True, text=True), "stdout", "") or "")
++               .splitlines() if ln.strip()]
++    if changed:
++        pull = (f"ssh {q(host)} " + q(f"cd {q(rroot)} && find {' '.join(TEXT_DIRS)} -type f -newer {_MARK} -print0 "
++                                       f"2>/dev/null | tar --null -cf - -T -")
++                + f" | tar -xf - -C {q(str(root))}")
++        step("назад", ["sh", "-c", pull], capture_output=True, text=True)
++    by_dir = {d: sum(1 for c in changed if c.startswith(d + "/")) for d in TEXT_DIRS}
++    log(f"  назад на Mac: {len(changed)} файлов — " + ", ".join(f"{d} {n}" for d, n in by_dir.items() if n)
++        if changed else "  назад на Mac: изменённых текстов нет")
++    return rc
+diff --git a/tests/test_m214c_auto_remote.py b/tests/test_m214c_auto_remote.py
+new file mode 100644
+index 0000000..434e25e
+--- /dev/null
++++ b/tests/test_m214c_auto_remote.py
+@@ -0,0 +1,80 @@
++"""M214c: `arl auto … --on-remote` — the same command on gamebox (the video stays there), the texts back to the Mac."""
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++import pytest
++
++from autoreels.local import remote as R
++
++LINK = "https://disk.yandex.ru/d/Folder123"
++CFG = SimpleNamespace(host="gamebox", root="/mnt/data/autoreels/", encoder="h264_vaapi", profile="h264", lock="")
++
++
++def test_remote_argv_drops_the_flag_and_the_macs_paths():
++    argv = ["auto", LINK, "--root", "/Users/x/ar", "--no-render", "--on-remote", "--cache-dir=/tmp/c", "--mode", "autocut"]
++    assert R.remote_argv(argv) == ["auto", LINK, "--no-render", "--mode", "autocut"]
++
++
++class _Run:
++    def __init__(self, changed="", fail=None, rc=0):
++        self.calls, self.changed, self.fail, self.rc = [], changed, fail, rc
++
++    def __call__(self, argv, **kw):
++        self.calls.append(argv)
++        joined = " ".join(map(str, argv))
++        if self.fail and self.fail in joined:
++            return SimpleNamespace(returncode=255, stdout="", stderr="ssh: connect to host gamebox: No route to host")
++        if argv[:2] == ["ssh", "-t"]:
++            return SimpleNamespace(returncode=self.rc, stdout="", stderr="")
++        if argv[0] == "ssh" and "find" in joined and "tar" not in joined:
++            return SimpleNamespace(returncode=0, stdout=self.changed, stderr="")
++        return SimpleNamespace(returncode=0, stdout="a\0b\0" if argv[0] == "git" else "ok", stderr="")
++
++
++def test_the_run_goes_there_in_this_terminal_and_the_texts_come_back(tmp_path):
++    run = _Run(changed="manifests/v.json\ntranscripts/v.map.json\nreviews/v_auto_all_t.txt\n", rc=0)
++    logs = []
++    rc = R.auto_remote(CFG, root=tmp_path, argv=["auto", LINK, "--no-render", "--on-remote"], run=run, log=logs.append)
++    assert rc == 0
++    names = [c[0] if c[0] != "ssh" else " ".join(c[:2]) for c in run.calls]
++    assert names[:4] == ["ssh gamebox", "git", "rsync", "ssh gamebox"]          # check, code list, code, mark
++    remote = next(c for c in run.calls if c[:2] == ["ssh", "-t"])
++    assert remote[2] == "gamebox" and "cd /mnt/data/autoreels && .venv/bin/python -m autoreels auto" in remote[3]
++    assert LINK in remote[3] and "--no-render" in remote[3] and "--on-remote" not in remote[3]
++    pull = run.calls[-1]
++    assert pull[:2] == ["sh", "-c"] and "tar --null -cf - -T -" in pull[2] and str(tmp_path) in pull[2]
++    assert "назад на Mac: 3 файлов — manifests 1, transcripts 1, reviews 1" in logs[-1]
++
++
++def test_no_changed_texts_no_pull_and_the_remote_code_is_returned(tmp_path):
++    run = _Run(changed="", rc=1)
++    logs = []
++    assert R.auto_remote(CFG, root=tmp_path, argv=["auto", LINK], run=run, log=logs.append) == 1
++    assert not any(c[0] == "sh" for c in run.calls) and "изменённых текстов нет" in logs[-1]
++
++
++def test_an_unreachable_remote_is_one_clear_error(tmp_path, capsys):
++    from autoreels import __main__ as cli
++    (tmp_path / "config").mkdir()
++    import shutil
++    shutil.copyfile("config/render.yaml", tmp_path / "config" / "render.yaml")
++    rc = cli.cmd_auto_remote(["auto", LINK, "--on-remote"], root=tmp_path, run=_Run(fail="test -x"))
++    assert rc == 1 and "No route to host" in capsys.readouterr().err
++
++
++def test_main_hands_the_whole_command_over(monkeypatch):
++    from autoreels import __main__ as cli
++    seen = {}
++    monkeypatch.setattr(cli, "cmd_auto_remote", lambda argv, root=None: seen.update(argv=argv) or 0)
++    assert cli.main(["auto", LINK, "--no-render", "--on-remote"]) == 0
++    assert seen["argv"] == ["auto", LINK, "--no-render", "--on-remote"]
++
++
++def test_not_configured(tmp_path, capsys):
++    from autoreels import __main__ as cli
++    (tmp_path / "config").mkdir()
++    text = open("config/render.yaml", encoding="utf-8").read().replace("  host: gamebox", '  host: ""')
++    (tmp_path / "config" / "render.yaml").write_text(text, encoding="utf-8")
++    assert cli.cmd_auto_remote(["auto", LINK], root=tmp_path) == 2
++    assert "не настроена" in capsys.readouterr().err
