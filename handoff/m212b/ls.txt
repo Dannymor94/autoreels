@@ -1,0 +1,17 @@
+== anna ab192
+-rw-r--r--@  1 danny  staff    322304 30 окт 11:40 r03.cover.jpg
+-rw-r--r--@  1 danny  staff        68 30 окт 11:22 r03.integrity.txt
+-rw-r--r--@  1 danny  staff  43624786 30 окт 11:40 r03.mp4
+-rw-r--r--@  1 danny  staff       156 30 окт 11:40 r03.render.json
+-rw-r--r--@  1 danny  staff      1821 30 окт 11:40 r03.transcript.txt
+-rw-r--r--@  1 danny  staff       165 30 окт 11:40 r03.txt
+== danny ab192
+-rw-r--r--@  1 danny  staff  28254907 30 окт 11:41 r01.ERROR.mp4
+== integrity.txt
+[h264 @ 0x57951f568b40] missing picture in access unit with size 12
+== что ещё есть про r01 danny
+r01.ERROR.mp4
+(eval):4: no matches found: reels-out/prew_isaev_danny/_gate/ab192/*.log
+== ffmpeg, кодек клипов
+reels-out/prew_isaev_anna/_gate/ab192/r03.mp4: hevc,Main,4120 68.752000,43624786 
+reels-out/prew_isaev_danny/_gate/ab192/r01.ERROR.mp4: hevc,Main,1327 44.310000,28254907 

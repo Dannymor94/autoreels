@@ -1,0 +1,14 @@
+== reels-out/prew_isaev_anna/_gate/ab192/r03.mp4
+-- ffmpeg 9.0.2
+-- integrity (copy):
+-- full decode errors:
+-- small video packets (size < 64):
+-- packets:     4120, frames: 4120,4120
+-- NAL units of packets under 64 bytes (and the packet before):
+== reels-out/prew_isaev_danny/_gate/ab192/r01.ERROR.mp4
+-- ffmpeg 9.0.2
+-- integrity (copy):
+-- full decode errors:
+-- small video packets (size < 64):
+-- packets:     1327, frames: 1327,1327
+-- NAL units of packets under 64 bytes (and the packet before):
