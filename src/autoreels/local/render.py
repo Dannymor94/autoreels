@@ -4104,8 +4104,58 @@ def render_crop(
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
         background=background, zoom_cfg=zoom_cfg, smap=smap,
     )
+    retry = _vaapi_dropped_frame(Path(out_dir), manifest) if getattr(render_cfg, "vaapi_soft_retry", False) else {}
+    for soft, rids in sorted({v: [r for r, s in retry.items() if s == v] for v in set(retry.values())}.items()):
+        for rid in rids:
+            print(f"  ↻ {rid}: аппаратный кодек потерял кадр (missing picture in access unit) — заново {soft}",
+                  flush=True)
+        again = _render_segments(
+            manifest.model_copy(update={"reels": [r for r in manifest.reels if r.id in rids]}),
+            inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
+            ffmpeg=ffmpeg, encoder=soft, vf=_crop_vf(manifest.setup), suffix="",
+            palette_vf=palette_vf, music_path=music_path,
+            profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
+            background=background, zoom_cfg=zoom_cfg, smap=smap,
+        )
+        for out in again:
+            _note_soft_retry(Path(out_dir), out.stem, soft)
+        outputs = sorted(outputs + again, key=lambda p: p.name)
     _write_index_md(manifest, Path(out_dir).resolve(), render_cfg)
     return outputs
+
+
+_VAAPI_SOFT = {"h264_vaapi": "libx264", "hevc_vaapi": "libx265"}
+
+
+def _vaapi_dropped_frame(out_dir: Path, manifest: Manifest) -> dict[str, str]:
+    """M212d: the clips of this render that failed only as m212c's ab192/r03 did — .ERROR.mp4, «missing picture in access
+    unit» in <rid>.integrity.txt, a *_vaapi codec in <rid>.error.txt — → {rid: the software encoder to render it with}."""
+    out = {}
+    for reel in manifest.reels:
+        err, integ, note = (out_dir / f"{reel.id}.{s}" for s in ("ERROR.mp4", "integrity.txt", "error.txt"))
+        if not (err.exists() and integ.exists() and note.exists()):
+            continue
+        try:
+            head = note.read_text(encoding="utf-8").splitlines()[0].split()
+            words = integ.read_text(encoding="utf-8")
+        except (OSError, IndexError):
+            continue
+        codec = head[-1] if head else ""
+        if "missing picture in access unit" in words and codec in _VAAPI_SOFT:
+            out[reel.id] = _VAAPI_SOFT[codec]
+    return out
+
+
+def _note_soft_retry(out_dir: Path, rid: str, soft: str) -> None:
+    """M212d: <rid>.render.json says the clip was rendered again by the software encoder and why."""
+    import json as _json
+    p = out_dir / f"{rid}.render.json"
+    try:
+        data = _json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        data["encoder_retry"] = {"encoder": soft, "why": "missing picture in access unit (vaapi dropped a frame)"}
+        p.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
 
 
 def render_preview(

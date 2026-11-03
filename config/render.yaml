@@ -243,6 +243,11 @@ cover: true
 # M96: … at the moment (of 7 spread over the body) whose frame shows the largest face with open eyes (OpenCV,
 # pip install -e ".[faces]"); no OpenCV or no face = the middle of the longest body window.
 cover_face: true
+# M212d (owner 2026-11-03; m212c: gamebox h264_vaapi dropped one frame of ab192/r03 — a 12-byte access unit with only
+# SEI at 54.9 s, 4120 packets / 4119 frames, «missing picture in access unit with size 12»): such a clip is rendered
+# once more by the software encoder (h264_vaapi → libx264, hevc_vaapi → libx265); the failed file goes to _errors/
+# (M212c), <rid>.render.json says why
+vaapi_soft_retry: true
 
 # M97 (ending package): a clip whose last thought goes on past its end (the open_thought warning) shows the plate
 # «Продолжение →» over its last 2.5 s — the viewer looks for the next part instead of feeling the cut.

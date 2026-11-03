@@ -1089,6 +1089,10 @@ class RenderConfig(BaseModel):
     # M96: the cover frame is the moment (of 7 in the body) with the largest face and open eyes (OpenCV); off or no
     # OpenCV = the middle of the longest body window (M89).
     cover_face: bool = False
+    # M212d (m212c: h264_vaapi on gamebox put a 12-byte SEI-only access unit in place of one frame — 4120 packets, 4119
+    # frames): a clip failing the integrity check with «missing picture in access unit» on a *_vaapi encoder is rendered
+    # once more by the software encoder (h264_vaapi → libx264, hevc_vaapi → libx265)
+    vaapi_soft_retry: bool = False
     # M97 (ending package, PLAN M1.7 B): a clip whose last thought goes on past its end (open_thought) shows
     # continue_text in the title plate over its last continue_sec seconds. Off = the clip as before.
     continue_plate: bool = False

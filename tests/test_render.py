@@ -8,6 +8,7 @@
 - все пути через pathlib, кроссплатформенно (basename Mac/Windows-строки извлекается верно);
 - несколько reel → несколько вызовов ffmpeg.
 """
+import json
 import math
 import re
 import subprocess
@@ -3786,3 +3787,54 @@ def test_m212c_a_failed_clip_says_why_and_a_clean_rerender_parks_the_old_error(t
     parked = sorted(p.name for p in (out_dir / "_errors").iterdir())
     assert len(parked) == 3 and all(re.match(r"r01\.\d{8}-\d{6}\.(ERROR\.mp4|error\.txt|integrity\.txt)$", n)
                                     for n in parked)
+
+
+def test_m212d_a_vaapi_dropped_frame_is_rendered_again_by_the_software_encoder(tmp_path, render_cfg, fake_ffmpeg,
+                                                                               monkeypatch):
+    """M212d (m212c: gamebox h264_vaapi put a 12-byte SEI-only access unit in place of one frame of ab192/r03): a clip
+    failing the integrity check with «missing picture in access unit» on *_vaapi is rendered once more by libx264; the
+    failed file goes to _errors/ (M212c), <rid>.render.json says why; other errors and other encoders are left as they are."""
+    real_popen = render.subprocess.Popen
+    encoders: list[str] = []
+
+    class _Writes(real_popen):
+        def __init__(self, cmd, **kw):
+            super().__init__(cmd, **kw)
+            last = str(cmd[-1])
+            if "-c:v" in cmd:
+                encoders.append(str(cmd[cmd.index("-c:v") + 1]))
+            if last.endswith(".mp4") and "ffprobe" not in str(cmd[0]):
+                Path(last).parent.mkdir(parents=True, exist_ok=True)
+                Path(last).write_bytes(b"x")
+    monkeypatch.setattr(render.subprocess, "Popen", _Writes)
+    calls = {"r01": 0}
+
+    def integrity(path, *a, **k):
+        if Path(path).stem.startswith("r01"):
+            calls["r01"] += 1
+            return "[h264 @ 0x1] missing picture in access unit with size 12" if calls["r01"] == 1 else ""
+        return ""
+    monkeypatch.setattr(render, "_check_integrity", integrity)
+    real_note = render._write_error_note
+    monkeypatch.setattr(render, "_write_error_note",                   # the first pass ran on gamebox's h264_vaapi
+                        lambda out_dir, rid, errors, codec: real_note(out_dir, rid, errors, "h264_vaapi"))
+    monkeypatch.setattr(render, "_check_web_safe", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_check_freezedetect", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_probe_source_fps", lambda *a, **k: 30.0)
+    monkeypatch.setattr(render, "_probe_duration_sec", lambda path, *a, **k: None)
+    inputs = tmp_path / "inputs"
+    sha = _make_source(inputs, "v.mp4", b"m212d-soft-retry")
+    m = _manifest("v.mp4", sha, [_reel("r01", 10.0, 40.0), _reel("r02", 50.0, 80.0)])
+    out_dir = tmp_path / "out"
+    cfg = render_cfg.model_copy(update={"vaapi_soft_retry": True})
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out_dir, render_cfg=cfg)
+    assert [p.name for p in outputs] == ["r01.mp4", "r02.mp4"] and calls["r01"] == 2
+    assert "libx264" in encoders
+    assert json.loads((out_dir / "r01.render.json").read_text(encoding="utf-8"))["encoder_retry"]["encoder"] == "libx264"
+    assert not (out_dir / "r01.ERROR.mp4").exists()
+    assert len([p for p in (out_dir / "_errors").iterdir() if p.name.startswith("r01.")]) == 3
+    # off: the clip stays failed, as before M212d
+    calls["r01"] = 0
+    out2 = tmp_path / "out2"
+    outputs = render_crop(m, inputs_dir=inputs, out_dir=out2, render_cfg=cfg.model_copy(update={"vaapi_soft_retry": False}))
+    assert [p.name for p in outputs] == ["r02.mp4"] and (out2 / "r01.ERROR.mp4").exists() and calls["r01"] == 1
