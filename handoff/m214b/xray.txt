@@ -1,0 +1,10 @@
+Xray 26.10.31 (Xray, Penetrates Everything.) a4a3dff (go1.27.3 linux/amd64)
+конфиг: /home/danavrata/.config/xray/config.json (vless → trendsketch.com, xhttp/reality, http 127.0.0.1:10809, socks 127.0.0.1:10808)
+Configuration OK.
+Created symlink '/home/danavrata/.config/systemd/user/default.target.wants/xray.service' → '/home/danavrata/.config/systemd/user/xray.service'.
+active
+Linger=yes
+Linger=yes
+через прокси: 401
+напрямую:    403
+Я.Диск напрямую: 404
