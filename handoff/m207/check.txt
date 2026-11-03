@@ -1,0 +1,7 @@
+scenario-check disko_beach_p1: принято 11, не принято 0 → exchange/disko_beach_p1.scenario.fix.md
+scenario-check disko_beach_p2: принято 7, не принято 0 → exchange/disko_beach_p2.scenario.fix.md
+scenario-check disko_beach_p3: принято 9, не принято 1 → exchange/disko_beach_p3.scenario.fix.md
+scenario-check day_yoga_p1: принято 3, не принято 0 → exchange/day_yoga_p1.scenario.fix.md
+scenario-check day_yoga_p2: принято 10, не принято 5 → exchange/day_yoga_p2.scenario.fix.md
+scenario-check prew_isaev_anna: принято 13, не принято 2 → exchange/prew_isaev_anna.scenario.fix.md
+scenario-check prew_isaev_danny: принято 10, не принято 5 → exchange/prew_isaev_danny.scenario.fix.md

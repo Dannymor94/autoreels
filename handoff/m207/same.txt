@@ -1,0 +1,7 @@
+disko_beach_p1     одинаковый
+disko_beach_p2     одинаковый
+disko_beach_p3     одинаковый
+day_yoga_p1        одинаковый
+day_yoga_p2        одинаковый
+prew_isaev_anna    одинаковый
+prew_isaev_danny   одинаковый
