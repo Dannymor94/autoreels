@@ -669,6 +669,9 @@ class R0Config(BaseModel):
     # M215 (M79: on m126 long pauses skipping the rules gave bursts of cuts in r03/r08/r09/r12): such a pause is still
     # cut, but never closer than this to another picture change. 0 = as before M215.
     long_pause_gap_sec: float = Field(0.0, ge=0.0)
+    # M217 (разбор Codex, подтверждено прогоном планировщика): интервалы меряются по сыгранному времени, а не по
+    # исходному (после вырезов куски съезжают вплотную), и конец окна считается сменой картинки. False = как до M217.
+    gaps_after_cuts: bool = False
     # M126 (owner: «много вводных слов у человека, который говорит»; «2 можно делать не часто»): standalone filler words
     # (filler_removal.filler_words) hidden from the subtitles / cut from the sound under the filler cut's rules
     subtitles_hide_fillers: bool = False

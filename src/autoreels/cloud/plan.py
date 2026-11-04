@@ -89,6 +89,11 @@ class ManualPlanParams:
     # pause still skips min_cut_spacing_sec and the share cap, but never comes closer than this to another picture
     # change. 0 = as before M215 (no limit).
     long_pause_gap_sec: float = 0.0
+    # M217 (Codex review of M215, confirmed by running the planner): the gaps above are measured in source time, but
+    # after the cuts the pieces move together — two long pauses 0.7 s apart left 0.67 s of speech between two jumps.
+    # True: a cut is kept only when the piece it would leave beside another change is at least the gap long in PLAYED
+    # time; the window's end counts as a change too (a seam with the next piece). False = as before M217.
+    gaps_after_cuts: bool = False
     # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
@@ -126,6 +131,10 @@ class PlannedWindow:
     cuts_spaced: int = 0              # M72: candidate cuts left in: too close to another picture change
     cuts_long: int = 0                # M79: long pauses cut whatever the spacing / jump rules said
     cuts_long_spaced: int = 0         # M215: long pauses left in: closer than long_pause_gap_sec to another change
+    cuts_overlap: int = 0             # M217: left in — would overlap a cut already taken (M136)
+    cuts_budget: int = 0              # M217: left in — over max_removed_share of the window
+    cuts_crowded: int = 0             # M217: left in — closer than min_cut_spacing_sec to another cut
+    cuts_relaxed: int = 0             # M217: taken, then moved or dropped by the short-shot fix (M174)
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
     word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
     prerolled: bool = False                        # M146: start was pushed into the previous word's tail
@@ -147,12 +156,16 @@ class PlannedWindow:
             "shot": shot, "close_intervals": ci, "prerolled": self.prerolled})
 
     def pieces(self) -> list[tuple[float, float]]:
-        """Played stretches of the window (source time): the window minus its cuts."""
+        """Played stretches of the window (source time): the window minus its cuts. M217 (Codex review): a piece whose
+        end is not after its start is dropped — two cuts overlapping within _EPS, or a cut reaching the window's edge,
+        used to give a reversed piece and `--apply` failed on the whole draft (M136)."""
         out, a = [], self.start
         for c0, c1 in sorted(self.cuts):
-            out.append((a, c0))
-            a = c1
-        out.append((a, self.end))
+            if c0 - a > _EPS:
+                out.append((a, c0))
+            a = max(a, c1)
+        if self.end - a > _EPS:
+            out.append((a, self.end))
         return out
 
     def segments(self) -> list[Segment]:
@@ -260,8 +273,12 @@ class ManualPlan:
         spaced = sum(w.cuts_spaced for w in self.windows)
         longp = sum(w.cuts_long for w in self.windows)
         longsp = sum(w.cuts_long_spaced for w in self.windows)
+        other = {"перекрытие": sum(w.cuts_overlap for w in self.windows),      # M217: every refusal is visible
+                 "доля выреза": sum(w.cuts_budget for w in self.windows),
+                 "интервал между резами": sum(w.cuts_crowded for w in self.windows)}
+        relaxed = sum(w.cuts_relaxed for w in self.windows)
         masked = sum(len(w.cut_flips) for w in self.windows)
-        if cuts or skipped or spaced or longsp:
+        if cuts or skipped or spaced or longsp or any(other.values()) or relaxed:
             removed = sum(c1 - c0 for c0, c1 in cuts)
             total = sum(w.end - w.start for w in self.windows)
             lines.append(f"cuts      {len(cuts)} fillers/pauses removed, {removed:.1f}s "
@@ -270,7 +287,9 @@ class ManualPlan:
                          + (f"; {skipped} left in (visible jump)" if skipped else "")
                          + (f"; {spaced} left in (too close to another change)" if spaced else "")
                          + (f"; {longp} long pause(s) always cut" if longp else "")
-                         + (f"; {longsp} long pause(s) left in (too close to another change)" if longsp else ""))
+                         + (f"; {longsp} long pause(s) left in (too close to another change)" if longsp else "")
+                         + ("".join(f"; {n} left in ({why})" for why, n in other.items() if n))
+                         + (f"; {relaxed} moved or dropped by the short-shot fix" if relaxed else ""))
         return lines
 
 
@@ -979,6 +998,8 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
                 cands.append((a, b, jump is not None and jump(a, b) > params.jump_max, f1 - f0))
     # shot changes already in the window (its start is a seam; close spans switch in and out)
     changes = [w.start] + [w.start + x for ci in w.close_intervals for x in ci]
+    if params.gaps_after_cuts:
+        changes.append(w.end)             # M217: the window's end is a seam with the next piece, as its start is
     budget = params.max_removed_share * (w.end - w.start)
     keep: list[list[float]] = []
     flips: list[list[float]] = []
@@ -987,12 +1008,13 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         if any(a < k1 - _EPS and b > k0 + _EPS for k0, k1 in keep):
             # M136: a filler-word cut (M126) and the pause next to the filler cover the same silence; a long pause
             # skips the spacing rules (M79), so both were kept and the piece between them came out reversed
+            w.cuts_overlap += 1       # M217: every refusal is counted — M79 lived a month because none of these were
             continue
         long_pause = bool(params.long_pause_sec) and b - a >= params.long_pause_sec
         if b - a > budget and not long_pause:
+            w.cuts_budget += 1        # M217
             continue
-        if long_pause and params.long_pause_gap_sec and any(
-                abs(mid - ch) < params.long_pause_gap_sec for ch in changes):
+        if long_pause and params.long_pause_gap_sec and _too_close(a, b, changes, keep, params):
             w.cuts_long_spaced += 1       # M215: a long pause too close to another change — the pause stays
             continue
         if long_pause:
@@ -1006,6 +1028,7 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
             budget -= b - a
             continue
         if any(abs(mid - (k0 + k1) / 2) < params.min_cut_spacing_sec for k0, k1 in keep):
+            w.cuts_crowded += 1       # M217
             continue
         if params.change_gap_sec and any(abs(mid - ch) < params.change_gap_sec for ch in changes):
             w.cuts_spaced += 1            # M72: no burst of jumps — the pause stays
@@ -1025,10 +1048,40 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
         budget -= b - a
     keep.sort()
     if params.short_shot_sec > 0:
+        before = [list(c) for c in keep]
         keep, flips = _lengthen_short_shots(times, sentences, w, keep, flips, params, set(word_cand))
+        # M217: M174 may move or drop a cut already decided (a long pause among them) — the counters above said it was
+        # taken, so the summary claimed a cut that is not there
+        w.cuts_relaxed = sum(1 for c in before if list(c) not in [list(k) for k in keep])
     w.cut_flips = sorted(flips)
     w.word_cuts = {k for c in keep for k in word_cand.get((c[0], c[1]), set())}
     return keep
+
+
+def _played_gap(x: float, y: float, cuts: list) -> float:
+    """M217: the seconds actually heard between two moments — the stretch minus the cuts already taken."""
+    a, b = (x, y) if x <= y else (y, x)
+    out = b - a
+    for c0, c1 in cuts:
+        out -= max(0.0, min(b, c1) - max(a, c0))
+    return max(0.0, out)
+
+
+def _too_close(a: float, b: float, changes: list, keep: list, params: "ManualPlanParams") -> bool:
+    """M217: would this cut sit closer than long_pause_gap_sec to another picture change? Before M217 (and with
+    gaps_after_cuts off) the distance is from the cut's middle in source time; with it on — the speech really left
+    between the cut's edge and the change, which is what the viewer sees."""
+    gap = params.long_pause_gap_sec
+    if not params.gaps_after_cuts:
+        mid = (a + b) / 2
+        return any(abs(mid - ch) < gap for ch in changes)
+    taken = [c for c in keep] + [[a, b]]
+    for ch in changes:
+        if ch <= a + _EPS and _played_gap(ch, a, taken) < gap - _EPS:
+            return True
+        if ch >= b - _EPS and _played_gap(b, ch, taken) < gap - _EPS:
+            return True
+    return False
 
 
 def _whole_sentences_only(times: SpeechTimes, sentences, w: "PlannedWindow", a: float, b: float) -> bool:

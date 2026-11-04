@@ -438,3 +438,72 @@ def test_m215_the_limit_is_off_by_default_in_code_and_on_in_the_repo_config():
     assert ManualPlanParams().long_pause_gap_sec == 0.0
     r0 = cli.load_r0_config("config/r0.yaml")
     assert r0.long_pause_sec == 1.5 and r0.long_pause_gap_sec == 2.0
+
+
+def test_m217_the_gap_is_measured_in_played_time_and_the_window_end_is_a_change():
+    """M217 (Codex review of M215, both reproduced by running the planner): long_pause_gap_sec was measured in source
+    time, but after the cuts the pieces move together — two long pauses left 0.67 s of speech between two jumps (2.0 s
+    once M174 patched it); and the window's end was not among the changes, so a cut landed 1.03 s before the seam with
+    the next piece. gaps_after_cuts: the gap is the speech really left, and the window's end is a change. Off = as before."""
+    from dataclasses import replace
+    spec = [[("Как", 0.0, 2.0), ("вы", 6.0, 6.2), ("считаете", 6.3, 6.5)], [("Это", 10.2, 10.6), ("важно.", 10.7, 11.2)]]
+    sents, words, smap, align = _setup(spec, [])
+    base = ManualPlanParams(filler_cut=True, long_pause_sec=1.5, long_pause_gap_sec=2.0, change_gap_sec=6.0,
+                            jump_mask=False, short_shot_sec=2.0)
+    off = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=base, align=align).body[0]
+    assert len(off.cuts) == 2 and off.cuts_long_spaced == 0
+    assert round(off.pieces()[1][1] - off.pieces()[1][0], 2) == 2.0      # 2 s of speech between two jumps
+    on = build_manual_plan(sents, [1, 2], words=words, smap=smap, align=align,
+                           params=replace(base, gaps_after_cuts=True)).body[0]
+    assert len(on.cuts) == 1 and on.cuts_long_spaced == 1
+    assert all(b - a >= 2.0 - 0.01 for a, b in on.pieces())
+    spec2 = [[("Раз", 0.0, 0.4), ("два", 0.5, 0.9), ("три", 1.0, 1.4)], [("Четыре", 5.6, 6.2)]]
+    s2, w2, sm2, al2 = _setup(spec2, [])
+    e_off = build_manual_plan(s2, [1, 2], words=w2, smap=sm2, params=base, align=al2).body[0]
+    assert len(e_off.cuts) == 1 and round(e_off.end - e_off.cuts[-1][1], 2) == 1.03
+    e_on = build_manual_plan(s2, [1, 2], words=w2, smap=sm2, align=al2,
+                             params=replace(base, gaps_after_cuts=True)).body[0]
+    assert e_on.cuts == [] and e_on.cuts_long_spaced == 1
+
+
+def test_m217_every_refusal_is_counted_and_shown():
+    """M217: refusals by overlap, by the share cap and by min_cut_spacing_sec went to a bare `continue` — M79 lived a
+    month because no counter showed what the planner had decided."""
+    spec = [[("Раз", 0.0, 0.4), ("два", 3.0, 3.4), ("три", 6.0, 6.4), ("четыре", 9.0, 9.4), ("пять.", 12.0, 12.6)]]
+    sents, words, smap, align = _setup(spec, [])
+    p = ManualPlanParams(filler_cut=True, min_cut_spacing_sec=10.0, change_gap_sec=0.0, jump_mask=False)
+    plan = build_manual_plan(sents, [1], words=words, smap=smap, params=p, align=align)
+    w = plan.body[0]
+    assert w.cuts_crowded > 0 and w.cuts_budget == 0 and w.cuts_overlap == 0
+    line = " ".join(plan.describe(sents))
+    assert "left in (интервал между резами)" in line
+    tight = ManualPlanParams(filler_cut=True, max_removed_share=0.01, change_gap_sec=0.0, jump_mask=False)
+    plan2 = build_manual_plan(sents, [1], words=words, smap=smap, params=tight, align=align)
+    assert plan2.body[0].cuts_budget > 0 and "left in (доля выреза)" in " ".join(plan2.describe(sents))
+
+
+def test_m217_a_cut_the_short_shot_fix_undid_is_counted():
+    """M217: M174 may move or drop a cut already taken (a long pause among them) — cuts_long still said it was cut."""
+    from dataclasses import replace
+    spec = [[("Как", 0.0, 2.0), ("вы", 6.0, 6.2), ("считаете", 6.3, 6.5)], [("Это", 10.2, 10.6), ("важно.", 10.7, 11.2)]]
+    sents, words, smap, align = _setup(spec, [])
+    p = ManualPlanParams(filler_cut=True, long_pause_sec=1.5, change_gap_sec=6.0, jump_mask=False, short_shot_sec=4.0)
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=p, align=align)
+    w = plan.body[0]
+    assert w.cuts_long == 2 and w.cuts_relaxed >= 1 and len(w.cuts) < 2
+    assert "moved or dropped by the short-shot fix" in " ".join(plan.describe(sents))
+    off = build_manual_plan(sents, [1, 2], words=words, smap=smap, align=align,
+                            params=replace(p, short_shot_sec=0.0)).body[0]
+    assert off.cuts_relaxed == 0
+
+
+def test_m217_a_reversed_piece_never_leaves_the_window():
+    """M217 (Codex review): two cuts overlapping within _EPS, or a cut reaching the window's edge, used to give a piece
+    whose end is before its start — `--apply` then failed on the whole draft (M136)."""
+    from autoreels.cloud.plan import PlannedWindow
+    w = PlannedWindow(sentences=[1], start=0.0, end=10.0, shot="wide", close_intervals=[], cold_open=False,
+                      cuts=[[2.0, 5.0], [4.999, 8.0]])
+    assert all(b > a for a, b in w.pieces()) and w.pieces() == [(0.0, 2.0), (8.0, 10.0)]
+    edge = PlannedWindow(sentences=[1], start=0.0, end=10.0, shot="wide", close_intervals=[], cold_open=False,
+                         cuts=[[0.0, 3.0], [7.0, 10.0]])
+    assert edge.pieces() == [(3.0, 7.0)]

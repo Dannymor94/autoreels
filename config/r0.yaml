@@ -216,6 +216,10 @@ long_pause_sec: 1.5
 # но не ближе этого к другой смене картинки. 0 — как до M215 (без предела). 2.0 ≈ треть change_gap_sec: dead air уходит,
 # очередь резов не собирается.
 long_pause_gap_sec: 2.0
+# M217 (разбор Codex ветки правил резов, обе находки воспроизведены прогоном планировщика): интервалы между резами
+# меряются по сыгранному времени — после вырезов куски съезжают, и две длинные паузы оставляли между двумя скачками
+# 0.67 с речи (2.0 с после правки M174); конец окна — такая же смена картинки, как его начало. false = как до M217.
+gaps_after_cuts: false
 # M126 — owner: «много вводных слов у человека, который говорит» (all three: subtitles, sound, the scenarist):
 # a standalone filler (filler_removal.filler_words between punctuation or at a sentence edge — «Ну, …», «…, вот, …»)
 subtitles_hide_fillers: true    # … is not shown in the subtitles (the sound keeps it)
