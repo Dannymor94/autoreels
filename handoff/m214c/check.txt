@@ -1,0 +1,8 @@
+Pseudo-terminal will not be allocated because stdin is not a terminal.
+=== auto: срок платных моделей прошёл (2026-11-02) — автомонтаж бесплатно; сценарист: --mode scenario ===
+=== auto: ролики пишет автомонтаж — переключить: --mode autocut | scenario ===
+
+=== auto: итог ===
+  ✗ __m214c_check__: остановлен на «manifest» — манифест не найден
+=== auto на gamebox:/mnt/data/autoreels — видео остаётся там, сюда — тексты (manifests, transcripts, reviews, exchange) ===
+  назад на Mac: изменённых текстов нет
