@@ -78,3 +78,29 @@ def test_not_configured(tmp_path, capsys):
     (tmp_path / "config" / "render.yaml").write_text(text, encoding="utf-8")
     assert cli.cmd_auto_remote(["auto", LINK], root=tmp_path) == 2
     assert "не настроена" in capsys.readouterr().err
+
+
+def test_m215_the_chat_answers_go_there_and_the_task_comes_back_with_its_next_step(tmp_path):
+    """M215: the scenarist through a chat with --on-remote, without scp: the answers written on the Mac go to the remote
+    before the run; a task the run wrote comes back and the log says what to do with it."""
+    (tmp_path / "exchange").mkdir()
+    (tmp_path / "exchange" / "v.scenario.answer.txt").write_text("M | 2.1-4 | t: Первая\n", encoding="utf-8")
+    run = _Run(changed="exchange/w.scenario.md\nreviews/v_auto_all.txt\n")
+    logs = []
+    rc = R.auto_remote(CFG, root=tmp_path, argv=["auto", "w", "--scenario-llm", "chat"], run=run, log=logs.append)
+    assert rc == 0
+    push = [c for c in run.calls if c[0] == "rsync"]
+    assert len(push) == 2 and "--include=*.scenario.answer.txt" in push[1] and "--exclude=*" in push[1]
+    assert push[1][-2:] == [f"{tmp_path}/exchange/", "gamebox:/mnt/data/autoreels/exchange/"]
+    assert push[1][1] == "-a" and run.calls.index(push[1]) < next(i for i, c in enumerate(run.calls) if c[:2] == ["ssh", "-t"])
+    assert any("ответы чата — v.scenario.answer.txt" in m for m in logs)
+    nxt = next(m for m in logs if "сценарист через чат" in m)
+    assert str(tmp_path / "exchange" / "w.scenario.md") in nxt and "w.scenario.answer.txt" in nxt
+
+
+def test_m215_nothing_to_send_no_rsync_of_answers(tmp_path):
+    run = _Run(changed="reviews/v_auto_all.txt\n")
+    logs = []
+    assert R.auto_remote(CFG, root=tmp_path, argv=["auto", "v"], run=run, log=logs.append) == 0
+    assert len([c for c in run.calls if c[0] == "rsync"]) == 1
+    assert not any("ответы чата" in m or "сценарист через чат" in m for m in logs)

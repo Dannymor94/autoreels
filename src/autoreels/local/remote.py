@@ -124,7 +124,8 @@ def render_remote(cfg, *, root: Path, review: Path, stem: str, source_sha256: st
 
 # M214c: the whole `arl auto` on the remote machine (owner 2026-11-02: gamebox is the home of the video) — the Mac
 # only starts it and takes back the texts; the video and the clips stay there.
-TEXT_DIRS = ("manifests", "transcripts", "reviews", "exchange")
+EXCHANGE = "exchange"
+TEXT_DIRS = ("manifests", "transcripts", "reviews", EXCHANGE)
 _MARK = ".arl/auto-mark"
 
 
@@ -170,6 +171,11 @@ def auto_remote(cfg, *, root: Path, argv: list[str], run: Callable | None = None
         fh.write(files.replace("\0", "\n"))
         flist = fh.name
     step("код", ["rsync", "-a", f"--files-from={flist}", f"{root}/", f"{host}:{rroot}/"], capture_output=True, text=True)
+    sent = sorted(p.name for p in (root / EXCHANGE).glob("*.scenario.answer.txt")) if (root / EXCHANGE).is_dir() else []
+    if sent:   # M215: the chat's answers written here go to the remote — the scenarist through a chat without scp
+        step("ответы чата", ["rsync", "-a", "--include=*.scenario.answer.txt", "--include=*/", "--exclude=*",
+                             f"{root}/{EXCHANGE}/", f"{host}:{rroot}/{EXCHANGE}/"], capture_output=True, text=True)
+        log(f"  на {host}: ответы чата — {', '.join(sent)}")
     step("метка", ["ssh", host, f"cd {q(rroot)} && mkdir -p .arl && touch {_MARK}"], capture_output=True, text=True)
     cmd = f"cd {q(rroot)} && .venv/bin/python -m autoreels " + " ".join(q(a) for a in remote_argv(argv))
     rc = getattr(run(["ssh", "-t", host, cmd]), "returncode", 1)
@@ -184,4 +190,8 @@ def auto_remote(cfg, *, root: Path, argv: list[str], run: Callable | None = None
     by_dir = {d: sum(1 for c in changed if c.startswith(d + "/")) for d in TEXT_DIRS}
     log(f"  назад на Mac: {len(changed)} файлов — " + ", ".join(f"{d} {n}" for d, n in by_dir.items() if n)
         if changed else "  назад на Mac: изменённых текстов нет")
+    for task in sorted(c for c in changed if c.startswith(f"{EXCHANGE}/") and c.endswith(".scenario.md")):
+        stem = Path(task).name[: -len(".scenario.md")]       # M215: what the owner does next, with the paths at hand
+        log(f"  сценарист через чат: {root / task} → любой чат → ответ в "
+            f"{root / EXCHANGE / (stem + '.scenario.answer.txt')}, затем та же команда ещё раз")
     return rc

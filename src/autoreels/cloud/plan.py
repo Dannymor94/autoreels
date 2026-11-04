@@ -85,6 +85,10 @@ class ManualPlanParams:
     # mask_min_gap_sec) and the max_removed_share cap do not hold it back; seconds of dead air are worse than one
     # switch. 0 = off.
     long_pause_sec: float = 0.0
+    # M215 (M79 open defect, m126: long pauses skipping the spacing rules gave bursts of cuts in r03/r08/r12): a long
+    # pause still skips min_cut_spacing_sec and the share cap, but never comes closer than this to another picture
+    # change. 0 = as before M215 (no limit).
+    long_pause_gap_sec: float = 0.0
     # M50 montage: air kept on each side of a seam between two PIECES (parts of the source far
     # apart), inside the silence around the boundary words — a natural pause instead of a jump.
     # Only used where build_manual_plan gets `breaks`; without them the plan is unchanged.
@@ -121,6 +125,7 @@ class PlannedWindow:
     cuts_skipped: int = 0             # candidate cuts left in: the face would visibly jump
     cuts_spaced: int = 0              # M72: candidate cuts left in: too close to another picture change
     cuts_long: int = 0                # M79: long pauses cut whatever the spacing / jump rules said
+    cuts_long_spaced: int = 0         # M215: long pauses left in: closer than long_pause_gap_sec to another change
     cut_flips: list[list[float]] = field(default_factory=list)  # cuts masked by a shot switch
     word_cuts: set = field(default_factory=set)   # M126: keys of filler words whose sound a cut removed
     prerolled: bool = False                        # M146: start was pushed into the previous word's tail
@@ -254,8 +259,9 @@ class ManualPlan:
         skipped = sum(w.cuts_skipped for w in self.windows)
         spaced = sum(w.cuts_spaced for w in self.windows)
         longp = sum(w.cuts_long for w in self.windows)
+        longsp = sum(w.cuts_long_spaced for w in self.windows)
         masked = sum(len(w.cut_flips) for w in self.windows)
-        if cuts or skipped or spaced:
+        if cuts or skipped or spaced or longsp:
             removed = sum(c1 - c0 for c0, c1 in cuts)
             total = sum(w.end - w.start for w in self.windows)
             lines.append(f"cuts      {len(cuts)} fillers/pauses removed, {removed:.1f}s "
@@ -263,7 +269,8 @@ class ManualPlan:
                          + (f"; {masked} masked by a shot switch" if masked else "")
                          + (f"; {skipped} left in (visible jump)" if skipped else "")
                          + (f"; {spaced} left in (too close to another change)" if spaced else "")
-                         + (f"; {longp} long pause(s) always cut" if longp else ""))
+                         + (f"; {longp} long pause(s) always cut" if longp else "")
+                         + (f"; {longsp} long pause(s) left in (too close to another change)" if longsp else ""))
         return lines
 
 
@@ -983,6 +990,10 @@ def _filler_cuts(times: SpeechTimes, sentences, w: "PlannedWindow", params: "Man
             continue
         long_pause = bool(params.long_pause_sec) and b - a >= params.long_pause_sec
         if b - a > budget and not long_pause:
+            continue
+        if long_pause and params.long_pause_gap_sec and any(
+                abs(mid - ch) < params.long_pause_gap_sec for ch in changes):
+            w.cuts_long_spaced += 1       # M215: a long pause too close to another change — the pause stays
             continue
         if long_pause:
             # M79: seconds of dead air go whatever the spacing rules and the share cap say; a jump is masked by

@@ -410,3 +410,31 @@ def test_m136_cuts_never_overlap_long_pause_next_to_a_filler():
     cuts = sorted(w.cuts)
     assert cuts and all(b0 >= a1 for (a0, a1), (b0, b1) in zip(cuts, cuts[1:]))
     assert all(s.end > s.start for s in w.segments())
+
+
+def test_m215_a_long_pause_is_still_cut_but_not_right_next_to_another_change():
+    """M215 (M79 open defect, m126: long pauses skipping the spacing rules gave bursts of cuts in r03/r08/r09/r12):
+    long_pause_gap_sec — such a pause is still cut whatever the share cap and min_cut_spacing_sec say, but never closer
+    than that to another picture change. 0 = as before M215."""
+    from dataclasses import replace
+    # two long pauses: the first right after the window's start (a seam — a change at 0.0), the second far from it
+    spec = [[("Как", 0.0, 0.4), ("вы", 4.0, 4.4), ("считаете", 4.5, 5.2)],
+            [("Это", 9.6, 10.0), ("важно.", 10.1, 10.6)]]
+    sents, words, smap, align = _setup(spec, [])
+    base = ManualPlanParams(filler_cut=True, long_pause_sec=1.5, change_gap_sec=6.0, min_cut_spacing_sec=3.0,
+                            jump_mask=False)
+    w = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=base, align=align).body[0]
+    assert len(w.cuts) == 2 and w.cuts_long == 2 and w.cuts_long_spaced == 0      # as before M215: both cut
+    on = replace(base, long_pause_gap_sec=3.0)     # the first cut's middle is 2.2 s from the seam at 0.0
+    plan = build_manual_plan(sents, [1, 2], words=words, smap=smap, params=on, align=align)
+    w = plan.body[0]
+    assert len(w.cuts) == 1 and w.cuts_long == 1 and w.cuts_long_spaced == 1      # the one by the seam stays
+    assert w.cuts[0][0] > 5.2 and "1 long pause(s) left in (too close to another change)" in " ".join(
+        plan.describe(sents))
+
+
+def test_m215_the_limit_is_off_by_default_in_code_and_on_in_the_repo_config():
+    from autoreels import __main__ as cli
+    assert ManualPlanParams().long_pause_gap_sec == 0.0
+    r0 = cli.load_r0_config("config/r0.yaml")
+    assert r0.long_pause_sec == 1.5 and r0.long_pause_gap_sec == 2.0

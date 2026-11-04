@@ -212,6 +212,10 @@ manual_filler_profile: balance
 # A pause at least this long is always shortened (to the profile's kept pause); a visible face jump is masked by a
 # wide↔close switch, and the spacing rules do not hold it back. 0 = off.
 long_pause_sec: 1.5
+# M215 (M79, m126: длинные паузы в обход правил дали частые резы в r03/r08/r09/r12): длинная пауза всё равно режется,
+# но не ближе этого к другой смене картинки. 0 — как до M215 (без предела). 2.0 ≈ треть change_gap_sec: dead air уходит,
+# очередь резов не собирается.
+long_pause_gap_sec: 2.0
 # M126 — owner: «много вводных слов у человека, который говорит» (all three: subtitles, sound, the scenarist):
 # a standalone filler (filler_removal.filler_words between punctuation or at a sentence edge — «Ну, …», «…, вот, …»)
 subtitles_hide_fillers: true    # … is not shown in the subtitles (the sound keeps it)
