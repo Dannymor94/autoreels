@@ -10940,6 +10940,22 @@ def cmd_auto(targets: list[str], *, root=None, inputs_dir: str | None = None, ca
     return 0 if all(st == "ok" for _, st, _ in results) else 1
 
 
+def cmd_auto_remote(argv: list[str], *, root=None, run=None) -> int:
+    """M214c: `arl auto … --on-remote` — the same command on the remote machine (config/render.yaml remote:), the texts
+    back here (local/remote.py auto_remote)."""
+    from autoreels.local.remote import RemoteRenderError, auto_remote
+    _root = Path(root) if root else _project_root()
+    rcfg = load_render_config(_root / "config" / "render.yaml").remote
+    if not rcfg.host or not rcfg.root:
+        print("ошибка: удалённая машина не настроена — config/render.yaml remote: host, root", file=sys.stderr)
+        return 2
+    try:
+        return auto_remote(rcfg, root=_root, argv=argv, run=run)
+    except RemoteRenderError as exc:
+        print(f"ошибка: прогон на {rcfg.host} — {exc}", file=sys.stderr)
+        return 1
+
+
 def _yandex_link_is_folder_kind(url: str) -> bool:
     """M214a: /d/… may be a folder (or a shared file) — asked through the API; /i/… is a file."""
     from urllib.parse import urlparse
@@ -13522,6 +13538,9 @@ def _build_parser():
     pau.add_argument("--interviewer", choices=["on", "off"], default=None,
                      help="M165: реплики ведущего (карта говорящих): on — можно как контекст/шутку, off — без них; "
                           "по умолчанию r0.yaml autocut.interviewer")
+    pau.add_argument("--on-remote", action="store_true", dest="on_remote",
+                     help="M214c: весь прогон на машине из config/render.yaml remote: (gamebox) — видео остаётся там, "
+                          "сюда приходят тексты (manifests, transcripts, reviews, exchange); вопросы — в этом терминале")
     pau.add_argument("--delete-source", choices=["ask", "keep", "yes"], default="ask", dest="delete_source",
                      help="M213: исходник, скачанный по ссылке Я.Диска, после удачного прогона — спросить (по умолчанию; "
                           "без терминала не удаляется) | оставить | удалить")
@@ -13790,6 +13809,8 @@ def main(argv=None) -> int:
 
     _load_env()
     args = _build_parser().parse_args(argv)
+    if getattr(args, "cmd", None) == "auto" and getattr(args, "on_remote", False):     # M214c
+        return cmd_auto_remote(list(argv if argv is not None else sys.argv[1:]), root=getattr(args, "root", None))
 
     # Resolve --root once at the CLI boundary so all dispatch paths get a Path.
     if hasattr(args, "root"):

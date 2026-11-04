@@ -120,3 +120,68 @@ def render_remote(cfg, *, root: Path, review: Path, stem: str, source_sha256: st
     step("назад", ["sh", "-c", pull], capture_output=True, text=True)
     log(f"  клипы здесь: {local_gate}")
     return local_gate
+
+
+# M214c: the whole `arl auto` on the remote machine (owner 2026-11-02: gamebox is the home of the video) — the Mac
+# only starts it and takes back the texts; the video and the clips stay there.
+TEXT_DIRS = ("manifests", "transcripts", "reviews", "exchange")
+_MARK = ".arl/auto-mark"
+
+
+def remote_argv(argv: list[str]) -> list[str]:
+    """The run's own command for the remote: --on-remote dropped, and the Mac's paths (--root, --cache-dir, --inputs-dir)
+    too — the remote has its own project folder."""
+    out, skip = [], False
+    for a in argv:
+        if skip:
+            skip = False
+            continue
+        if a == "--on-remote":
+            continue
+        if a in ("--root", "--cache-dir", "--inputs-dir"):
+            skip = True
+            continue
+        if a.split("=", 1)[0] in ("--root", "--cache-dir", "--inputs-dir"):
+            continue
+        out.append(a)
+    return out
+
+
+def auto_remote(cfg, *, root: Path, argv: list[str], run: Callable | None = None,
+                log: Callable[[str], None] = print) -> int:
+    """Send the code, run `python -m autoreels <argv>` there in this terminal (ssh -t: the delete questions come here),
+    then copy back the files of TEXT_DIRS changed by the run. Returns the remote run's exit code."""
+    run = run or (lambda a, **kw: subprocess.run(a, **kw))
+    host, rroot = cfg.host, cfg.root.rstrip("/")
+    root = Path(root)
+    q = shlex.quote
+
+    def step(name: str, a: list[str], **kw):
+        r = run(a, **kw)
+        if getattr(r, "returncode", 1) != 0:
+            err = (getattr(r, "stderr", "") or "").strip().splitlines()[-3:]
+            raise RemoteRenderError(f"{name}: код {getattr(r, 'returncode', '?')}" + (f" — {' | '.join(err)}" if err else ""))
+        return r
+
+    log(f"=== auto на {host}:{rroot} — видео остаётся там, сюда — тексты ({', '.join(TEXT_DIRS)}) ===")
+    step("ssh", ["ssh", host, f"test -x {q(rroot)}/.venv/bin/python && echo ok"], capture_output=True, text=True)
+    files = step("git ls-files", ["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True).stdout
+    with tempfile.NamedTemporaryFile("w", suffix=".files", delete=False, encoding="utf-8") as fh:
+        fh.write(files.replace("\0", "\n"))
+        flist = fh.name
+    step("код", ["rsync", "-a", f"--files-from={flist}", f"{root}/", f"{host}:{rroot}/"], capture_output=True, text=True)
+    step("метка", ["ssh", host, f"cd {q(rroot)} && mkdir -p .arl && touch {_MARK}"], capture_output=True, text=True)
+    cmd = f"cd {q(rroot)} && .venv/bin/python -m autoreels " + " ".join(q(a) for a in remote_argv(argv))
+    rc = getattr(run(["ssh", "-t", host, cmd]), "returncode", 1)
+    find = f"cd {q(rroot)} && find {' '.join(TEXT_DIRS)} -type f -newer {_MARK} 2>/dev/null"
+    changed = [ln for ln in (getattr(run(["ssh", host, find], capture_output=True, text=True), "stdout", "") or "")
+               .splitlines() if ln.strip()]
+    if changed:
+        pull = (f"ssh {q(host)} " + q(f"cd {q(rroot)} && find {' '.join(TEXT_DIRS)} -type f -newer {_MARK} -print0 "
+                                       f"2>/dev/null | tar --null -cf - -T -")
+                + f" | tar -xf - -C {q(str(root))}")
+        step("назад", ["sh", "-c", pull], capture_output=True, text=True)
+    by_dir = {d: sum(1 for c in changed if c.startswith(d + "/")) for d in TEXT_DIRS}
+    log(f"  назад на Mac: {len(changed)} файлов — " + ", ".join(f"{d} {n}" for d, n in by_dir.items() if n)
+        if changed else "  назад на Mac: изменённых текстов нет")
+    return rc
