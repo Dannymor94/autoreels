@@ -100,7 +100,7 @@
 3. `arl scenario-check <ист>` — что принято; отклонённое — `exchange/<ист>.scenario.fix.md`, отдать тому же чату.
 4. `arl auto <ист> --scenario-llm chat` ещё раз — сборка по ответу, дальше обычный путь.
 
-Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
+Как работает каждый шаг и почему он так устроен — [`docs/PIPELINE.md`](docs/PIPELINE.md). Правила самого клипа — [`docs/REEL_SPEC.md`](docs/REEL_SPEC.md).
 
 **Determinism-first:** LLM только предлагает и ранжирует кандидатов; финальные границы,
 отбор, чек-флаги (`too_long`/`too_short`/…) ставит код. Пустой результат — валиден.
