@@ -1,3 +1,15 @@
+diff --git a/PROJECT_STRUCTURE.md b/PROJECT_STRUCTURE.md
+index bc5b137..c9a9a0b 100644
+--- a/PROJECT_STRUCTURE.md
++++ b/PROJECT_STRUCTURE.md
+@@ -55,6 +55,7 @@ autoreels/
+ ├── benchmarks/golden/        # эталонные ожидания гейт-рендеров для scripts/verify_gate.py (в git)
+ │
+ ├── docs/
++│   ├── PIPELINE.md           # M220: весь путь по шагам — что делает каждый, зачем так устроен, где в коде
+ │   ├── REEL_SPEC.md          # как собирается клип: звук, крючок, план, конец, файл, субтитры, рамка;
+ │   │                         #   §8 «где это в коде» с заметками по вехам
+ │   ├── PLAN-M1.7.md          # подача: два плана, авторитм, перестановка, ключевые слова…
 diff --git a/README.md b/README.md
 index 3709193..d19bde9 100644
 --- a/README.md
