@@ -1,0 +1,1483 @@
+........................................................................ [  2%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+...............................F....FFF................................. [ 10%]
+...F.F.................................................................. [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 18%]
+..........................................................F............. [ 20%]
+........................................................................ [ 23%]
+........................FF..................F........................... [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 31%]
+........................................................................ [ 34%]
+..................................................................F..... [ 36%]
+....F................................................................... [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 44%]
+.......................F................................................ [ 47%]
+............................FF..............................s..s.s...... [ 49%]
+.......FF....FFF.....FFF....F................F.......................... [ 52%]
+..................................ssssssssssssssss...................... [ 55%]
+...F.................................................................... [ 57%]
+........................................................................ [ 60%]
+.................F...................................................... [ 62%]
+........................................s............................... [ 65%]
+...............................................F........................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+...........................................................F............ [ 78%]
+........................................................................ [ 81%]
+........................................................................ [ 83%]
+........................................................................ [ 86%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 94%]
+........................................................................ [ 97%]
+........................................................................ [ 99%]
+..........                                                               [100%]
+=================================== FAILURES ===================================
+____________ test_server_serves_html_and_post_save_saves_then_stops ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_server_serves_html_and_po0')
+
+    def test_server_serves_html_and_post_save_saves_then_stops(tmp_path):
+        calib = tmp_path / "calibrations"
+        frame_png = tmp_path / "f.png"
+        frame_png.write_bytes(b"\x89PNG fake")
+        cal_obj = ManualCalibrator(
+            sha="b" * 64, source_name="v.mp4", calib_dir=calib, setup_label="lbl",
+            host="127.0.0.1", port=0, timeout_sec=5, open_browser=False,
+        )
+    
+        result = {}
+        th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+        th.start()
+        try:
+>           base = _wait_for_server(cal_obj)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_calibrate.py:409: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_calibrate.py:602: in _wait_for_server
+    httpx.get(base + "/", timeout=1)
+.venv/lib/python3.13/site-packages/httpx/_api.py:195: in get
+    return request(
+.venv/lib/python3.13/site-packages/httpx/_api.py:102: in request
+    with Client(
+.venv/lib/python3.13/site-packages/httpx/_client.py:700: in __init__
+    else self._init_proxy_transport(
+.venv/lib/python3.13/site-packages/httpx/_client.py:750: in _init_proxy_transport
+    return HTTPTransport(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <httpx.HTTPTransport object at 0x7fc8a79ecd60>, verify = True
+cert = None, trust_env = True, http1 = True, http2 = False
+limits = Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=5.0)
+proxy = Proxy('socks5h://127.0.0.1:45635'), uds = None, local_address = None
+retries = 0, socket_options = None
+
+    def __init__(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
+    ) -> None:
+        import httpcore
+    
+        proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
+        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+    
+        if proxy is None:
+            self._pool = httpcore.ConnectionPool(
+                ssl_context=ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                uds=uds,
+                local_address=local_address,
+                retries=retries,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("http", "https"):
+            self._pool = httpcore.HTTPProxy(
+                proxy_url=httpcore.URL(
+                    scheme=proxy.url.raw_scheme,
+                    host=proxy.url.raw_host,
+                    port=proxy.url.port,
+                    target=proxy.url.raw_path,
+                ),
+                proxy_auth=proxy.raw_auth,
+                proxy_headers=proxy.headers.raw,
+                ssl_context=ssl_context,
+                proxy_ssl_context=proxy.ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("socks5", "socks5h"):
+            try:
+                import socksio  # noqa
+            except ImportError:  # pragma: no cover
+>               raise ImportError(
+                    "Using SOCKS proxy, but the 'socksio' package is not installed. "
+                    "Make sure to install httpx using `pip install httpx[socks]`."
+                ) from None
+E               ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:191: ImportError
+----------------------------- Captured stdout call -----------------------------
+
+>>> Открой в браузере: http://127.0.0.1:42027/
+
+(Save в браузере сохранит кроп; Ctrl-C — отмена)
+_______ test_propose_prints_url_prominently_even_when_webbrowser_raises ________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_propose_prints_url_promin0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a623f050>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8c1df64a0>
+
+    def test_propose_prints_url_prominently_even_when_webbrowser_raises(tmp_path, capsys, monkeypatch):
+        """URL должен появиться в stdout с маркером >>> — даже если webbrowser.open() падает."""
+        import autoreels.local.calibrate as _cal_mod
+    
+        frame_png = tmp_path / "f.png"
+        frame_png.write_bytes(b"\x89PNG fake")
+        cal_obj = ManualCalibrator(
+            sha="d" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
+            host="127.0.0.1", port=0, timeout_sec=5, open_browser=True,
+        )
+        monkeypatch.setattr(_cal_mod.webbrowser, "open", lambda url: (_ for _ in ()).throw(OSError("no browser")))
+    
+        result = {}
+        th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+        th.start()
+        try:
+>           base = _wait_for_server(cal_obj)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_calibrate.py:539: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_calibrate.py:602: in _wait_for_server
+    httpx.get(base + "/", timeout=1)
+.venv/lib/python3.13/site-packages/httpx/_api.py:195: in get
+    return request(
+.venv/lib/python3.13/site-packages/httpx/_api.py:102: in request
+    with Client(
+.venv/lib/python3.13/site-packages/httpx/_client.py:700: in __init__
+    else self._init_proxy_transport(
+.venv/lib/python3.13/site-packages/httpx/_client.py:750: in _init_proxy_transport
+    return HTTPTransport(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <httpx.HTTPTransport object at 0x7fc8a7938160>, verify = True
+cert = None, trust_env = True, http1 = True, http2 = False
+limits = Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=5.0)
+proxy = Proxy('socks5h://127.0.0.1:45635'), uds = None, local_address = None
+retries = 0, socket_options = None
+
+    def __init__(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
+    ) -> None:
+        import httpcore
+    
+        proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
+        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+    
+        if proxy is None:
+            self._pool = httpcore.ConnectionPool(
+                ssl_context=ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                uds=uds,
+                local_address=local_address,
+                retries=retries,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("http", "https"):
+            self._pool = httpcore.HTTPProxy(
+                proxy_url=httpcore.URL(
+                    scheme=proxy.url.raw_scheme,
+                    host=proxy.url.raw_host,
+                    port=proxy.url.port,
+                    target=proxy.url.raw_path,
+                ),
+                proxy_auth=proxy.raw_auth,
+                proxy_headers=proxy.headers.raw,
+                ssl_context=ssl_context,
+                proxy_ssl_context=proxy.ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("socks5", "socks5h"):
+            try:
+                import socksio  # noqa
+            except ImportError:  # pragma: no cover
+>               raise ImportError(
+                    "Using SOCKS proxy, but the 'socksio' package is not installed. "
+                    "Make sure to install httpx using `pip install httpx[socks]`."
+                ) from None
+E               ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:191: ImportError
+----------------------------- Captured stdout call -----------------------------
+
+>>> Открой в браузере: http://127.0.0.1:43795/
+
+(Save в браузере сохранит кроп; Ctrl-C — отмена)
+_____________________ test_propose_url_contains_real_port ______________________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_propose_url_contains_real0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7988850>
+
+    def test_propose_url_contains_real_port(tmp_path, capsys):
+        """URL в stdout должен содержать РЕАЛЬНЫЙ порт (не хардкод 8765)."""
+        frame_png = tmp_path / "f.png"
+        frame_png.write_bytes(b"\x89PNG fake")
+        cal_obj = ManualCalibrator(
+            sha="f" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
+            host="127.0.0.1", port=0,          # port=0 → ОС выдаст случайный порт, точно не 8765
+            timeout_sec=5, open_browser=False,
+        )
+    
+        result = {}
+        th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+        th.start()
+        try:
+>           base = _wait_for_server(cal_obj)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_calibrate.py:563: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_calibrate.py:602: in _wait_for_server
+    httpx.get(base + "/", timeout=1)
+.venv/lib/python3.13/site-packages/httpx/_api.py:195: in get
+    return request(
+.venv/lib/python3.13/site-packages/httpx/_api.py:102: in request
+    with Client(
+.venv/lib/python3.13/site-packages/httpx/_client.py:700: in __init__
+    else self._init_proxy_transport(
+.venv/lib/python3.13/site-packages/httpx/_client.py:750: in _init_proxy_transport
+    return HTTPTransport(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <httpx.HTTPTransport object at 0x7fc8a79bf200>, verify = True
+cert = None, trust_env = True, http1 = True, http2 = False
+limits = Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=5.0)
+proxy = Proxy('socks5h://127.0.0.1:45635'), uds = None, local_address = None
+retries = 0, socket_options = None
+
+    def __init__(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
+    ) -> None:
+        import httpcore
+    
+        proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
+        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+    
+        if proxy is None:
+            self._pool = httpcore.ConnectionPool(
+                ssl_context=ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                uds=uds,
+                local_address=local_address,
+                retries=retries,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("http", "https"):
+            self._pool = httpcore.HTTPProxy(
+                proxy_url=httpcore.URL(
+                    scheme=proxy.url.raw_scheme,
+                    host=proxy.url.raw_host,
+                    port=proxy.url.port,
+                    target=proxy.url.raw_path,
+                ),
+                proxy_auth=proxy.raw_auth,
+                proxy_headers=proxy.headers.raw,
+                ssl_context=ssl_context,
+                proxy_ssl_context=proxy.ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("socks5", "socks5h"):
+            try:
+                import socksio  # noqa
+            except ImportError:  # pragma: no cover
+>               raise ImportError(
+                    "Using SOCKS proxy, but the 'socksio' package is not installed. "
+                    "Make sure to install httpx using `pip install httpx[socks]`."
+                ) from None
+E               ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:191: ImportError
+----------------------------- Captured stdout call -----------------------------
+
+>>> Открой в браузере: http://127.0.0.1:36475/
+
+(Save в браузере сохранит кроп; Ctrl-C — отмена)
+_________________ test_propose_prints_url_without_browser_open _________________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_propose_prints_url_withou0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a6c46450>
+
+    def test_propose_prints_url_without_browser_open(tmp_path, capsys):
+        """URL напечатан явно при open_browser=False — не зависит от webbrowser."""
+        frame_png = tmp_path / "f.png"
+        frame_png.write_bytes(b"\x89PNG fake")
+        cal_obj = ManualCalibrator(
+            sha="e" * 64, source_name="v.mp4", calib_dir=tmp_path / "calibrations",
+            host="127.0.0.1", port=0, timeout_sec=5, open_browser=False,
+        )
+    
+        result = {}
+        th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+        th.start()
+        try:
+>           base = _wait_for_server(cal_obj)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_calibrate.py:586: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_calibrate.py:602: in _wait_for_server
+    httpx.get(base + "/", timeout=1)
+.venv/lib/python3.13/site-packages/httpx/_api.py:195: in get
+    return request(
+.venv/lib/python3.13/site-packages/httpx/_api.py:102: in request
+    with Client(
+.venv/lib/python3.13/site-packages/httpx/_client.py:700: in __init__
+    else self._init_proxy_transport(
+.venv/lib/python3.13/site-packages/httpx/_client.py:750: in _init_proxy_transport
+    return HTTPTransport(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <httpx.HTTPTransport object at 0x7fc8a7415850>, verify = True
+cert = None, trust_env = True, http1 = True, http2 = False
+limits = Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=5.0)
+proxy = Proxy('socks5h://127.0.0.1:45635'), uds = None, local_address = None
+retries = 0, socket_options = None
+
+    def __init__(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
+    ) -> None:
+        import httpcore
+    
+        proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
+        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+    
+        if proxy is None:
+            self._pool = httpcore.ConnectionPool(
+                ssl_context=ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                uds=uds,
+                local_address=local_address,
+                retries=retries,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("http", "https"):
+            self._pool = httpcore.HTTPProxy(
+                proxy_url=httpcore.URL(
+                    scheme=proxy.url.raw_scheme,
+                    host=proxy.url.raw_host,
+                    port=proxy.url.port,
+                    target=proxy.url.raw_path,
+                ),
+                proxy_auth=proxy.raw_auth,
+                proxy_headers=proxy.headers.raw,
+                ssl_context=ssl_context,
+                proxy_ssl_context=proxy.ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("socks5", "socks5h"):
+            try:
+                import socksio  # noqa
+            except ImportError:  # pragma: no cover
+>               raise ImportError(
+                    "Using SOCKS proxy, but the 'socksio' package is not installed. "
+                    "Make sure to install httpx using `pip install httpx[socks]`."
+                ) from None
+E               ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.
+
+.venv/lib/python3.13/site-packages/httpx/_transports/default.py:191: ImportError
+----------------------------- Captured stdout call -----------------------------
+
+>>> Открой в браузере: http://127.0.0.1:43311/
+
+(Save в браузере сохранит кроп; Ctrl-C — отмена)
+_______ test_m129_framing_finds_faces_with_yunet_when_its_model_is_there _______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_m129_framing_finds_faces_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a77e35b0>
+
+    def test_m129_framing_finds_faces_with_yunet_when_its_model_is_there(tmp_path, monkeypatch):
+        """M129 (m128 on Pxl 112938952: the Haar cascade's «face» was a shelf of teapots — 5 of 12 frames, no eye —
+        YuNet found the speaker in 12 of 12): reel_faces uses YuNet with a model file, the Haar cascade without one."""
+        from types import SimpleNamespace
+        from autoreels.local import autocrop, render
+        used = []
+        monkeypatch.setattr(autocrop, "_yunet_faces_at", lambda m, v, ts, fs, ff, pv="", near_x=None: used.append("yunet") or
+                            [(1850.0, 700.0, 210.0, 210.0)] * len(ts))
+        monkeypatch.setattr(autocrop, "_faces_at", lambda c, v, ts, fs, ff, pv="": used.append("haar") or [])
+        model = tmp_path / "yunet.onnx"
+>       assert autocrop.reel_faces("v.mp4", [1.0, 2.0], (3840, 2160), model=model) == ([], 2)          # no file yet
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert None == ([], 2)
+E        +  where None = <function reel_faces at 0x7fc8a79a4040>('v.mp4', [1.0, 2.0], (3840, 2160), model=PosixPath('/tmp/pytest-of-agent/pytest-0/test_m129_framing_finds_faces_0/yunet.onnx'))
+E        +    where <function reel_faces at 0x7fc8a79a4040> = <module 'autoreels.local.autocrop' from '/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/src/autoreels/local/autocrop.py'>.reel_faces
+
+tests/test_calibration_face.py:143: AssertionError
+_____ test_m131_the_speaker_is_the_face_nearest_his_place_not_the_largest ______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_m131_the_speaker_is_the_f0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8c1df7a80>
+
+    def test_m131_the_speaker_is_the_face_nearest_his_place_not_the_largest(tmp_path, monkeypatch):
+        """M131 (owner on Pxl 112938952 m130 r14: «камера поплыла» — a listener near the camera, x ≈ 70, had a larger face
+        than the speaker in every frame of that reel, and the largest face won)."""
+>       import cv2
+E       ModuleNotFoundError: No module named 'cv2'
+
+tests/test_calibration_face.py:172: ModuleNotFoundError
+___________________ test_run_dispatch_bad_path_returns_error ___________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a7789e10>
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_run_dispatch_bad_path_ret0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7791350>
+
+    def test_run_dispatch_bad_path_returns_error(monkeypatch, tmp_path, capsys):
+        """main('run <несуществующий>') → код 1 + внятное сообщение, не traceback."""
+        monkeypatch.chdir(tmp_path)
+        rc = cli.main(["run", str(tmp_path / "nope.mp4")])
+        assert rc == 1
+        err = capsys.readouterr().err
+>       assert "nope.mp4" in err
+E       AssertionError: assert 'nope.mp4' in 'ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.\n'
+
+/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_cli.py:3831: AssertionError
+_____________________ test_run_dispatch_url_calls_download _____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a7788130>
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_run_dispatch_url_calls_do0')
+
+    def test_run_dispatch_url_calls_download(monkeypatch, tmp_path):
+        """main('run <url>') идёт по ветке скачивания, не _ingest_source."""
+        monkeypatch.chdir(tmp_path)
+        calls = {}
+    
+        def fake_download(url, inputs_dir, **kwargs):
+            calls["url"] = url
+            p = tmp_path / "inputs" / "dl.mp4"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"v")
+            return p
+    
+        def fake_cmd_run(video, **kwargs):
+            calls["video"] = Path(video)
+            return tmp_path / "manifests" / "dl.json"
+    
+        monkeypatch.setattr(cli, "_download_url", fake_download)
+        monkeypatch.setattr(cli, "cmd_run", fake_cmd_run)
+        monkeypatch.setattr(cli, "_ingest_source",
+                            lambda *a, **k: pytest.fail("ingest не должен вызываться для url"))
+    
+        rc = cli.main(["run", "https://youtu.be/dl"])
+    
+>       assert rc == 0
+E       assert 1 == 0
+
+/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_cli.py:4516: AssertionError
+----------------------------- Captured stderr call -----------------------------
+ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.
+________________ test_run_dispatch_url_download_error_returns_1 ________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a79f1780>
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_run_dispatch_url_download0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a679a9d0>
+
+    def test_run_dispatch_url_download_error_returns_1(monkeypatch, tmp_path, capsys):
+        """Ошибка скачивания → код 1 + внятное сообщение."""
+        monkeypatch.chdir(tmp_path)
+    
+        def fake_download(url, inputs_dir, **kwargs):
+            raise cli.RunError("yt-dlp не смог скачать https://youtu.be/bad")
+    
+        monkeypatch.setattr(cli, "_download_url", fake_download)
+        rc = cli.main(["run", "https://youtu.be/bad"])
+        assert rc == 1
+>       assert "bad" in capsys.readouterr().err
+E       AssertionError: assert 'bad' in 'ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.\n'
+E        +  where 'ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.\n' = CaptureResult(out='', err='ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.\n').err
+E        +    where CaptureResult(out='', err='ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.\n') = readouterr()
+E        +      where readouterr = <_pytest.capture.CaptureFixture object at 0x7fc8a679a9d0>.readouterr
+
+/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_cli.py:4531: AssertionError
+_______________ test_run_dispatch_yandex_calls_yandex_downloader _______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a79f34d0>
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_run_dispatch_yandex_calls0')
+
+    def test_run_dispatch_yandex_calls_yandex_downloader(monkeypatch, tmp_path):
+        """main('run <я.диск-url>') → _download_yandex_disk, не yt-dlp и не _ingest_source."""
+        monkeypatch.chdir(tmp_path)
+        calls = {}
+    
+        def fake_yd(url, inputs_dir, **k):
+            calls["url"] = url
+            p = tmp_path / "inputs" / "y.mp4"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"v")
+            return p
+    
+        monkeypatch.setattr(cli, "_download_yandex_disk", fake_yd)
+        monkeypatch.setattr(cli, "cmd_run",
+                            lambda video, **k: calls.setdefault("video", Path(video)))
+        monkeypatch.setattr(cli, "_download_url",
+                            lambda *a, **k: pytest.fail("yt-dlp не для Я.Диска"))
+    
+        rc = cli.main(["run", "https://disk.yandex.ru/i/abc"])
+>       assert rc == 0
+E       assert 1 == 0
+
+/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_cli.py:4818: AssertionError
+----------------------------- Captured stderr call -----------------------------
+ошибка: GROQ_API_KEY не найден (.env: не найден). Запусти `arl doctor` — покажет, где .env, какие ключи видны и доступны ли провайдеры.
+________________ test_grouped_render_has_exact_piece_durations _________________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_grouped_render_has_exact_0')
+
+    @pytest.mark.skipif(not (ffmpeg and ffprobe), reason="ffmpeg/ffprobe not installed")
+    def test_grouped_render_has_exact_piece_durations(tmp_path):
+        src = tmp_path / "src.mp4"
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30:duration=12",
+                        "-f", "lavfi", "-i", "sine=f=440:d=12:sample_rate=48000", "-shortest",
+                        "-c:v", "libx264", "-g", "30", "-c:a", "aac", str(src)], check=True)
+        segs = [_seg(1.0, 3.0), _seg(4.0, 6.0, True), _seg(7.0, 8.0, True)]
+        fc, v, a = _concat_segments_graph(segs, 0.01, pre_roll=0.0, segment_vfs=[None] * 3, seam_xfades=[0.0, 0.0])
+        groups = _input_groups(segs, [0.0, 0.0])
+        windows = [(segs[g[0]].start, segs[g[-1]].end - segs[g[0]].start) for g in groups]
+        out = tmp_path / "o.mp4"
+        cmd = build_concat_cmd(ffmpeg, src, out, windows=windows, filter_complex=f"{fc};{v}null[v];{a}anull[a]",
+                               codec="libx264", preset="ultrafast", audio_codec="aac", audio_bitrate="128k")
+        subprocess.run(cmd, check=True)
+        r = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=codec_type,nb_frames,duration",
+                            "-of", "csv=p=0", str(out)], capture_output=True, text=True, check=True).stdout.split()
+        vrow = next(x for x in r if x.startswith("video"))
+        arow = next(x for x in r if x.startswith("audio"))
+        assert int(vrow.split(",")[2]) == 150                    # 5 s × 30 fps: 60 + 60 + 30 frames
+>       assert abs(float(arow.split(",")[1]) - 5.0) < 0.03
+E       AssertionError: assert 0.051000000000000156 < 0.03
+E        +  where 0.051000000000000156 = abs((4.949 - 5.0))
+E        +    where 4.949 = float('4.949000')
+
+tests/test_filler_cut.py:156: AssertionError
+__________ test_variable_rate_source_renders_whole_frames_per_window ___________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_variable_rate_source_rend0')
+
+    @pytest.mark.skipif(not (ffmpeg and ffprobe), reason="ffmpeg/ffprobe not installed")
+    def test_variable_rate_source_renders_whole_frames_per_window(tmp_path):
+        """M48, Pxl 1129: a phone file with uneven frame intervals (here 33 and 42 ms, avg ≈27 fps). With
+        the cfr chain every window is exactly its frames at 30 fps: the clip's video lasts the sum of
+        its windows, within one frame of the audio."""
+        from autoreels.local.render import _probe_source_fps, _probe_source_vfr
+        src = tmp_path / "vfr.mp4"
+        subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=30",
+                        "-f", "lavfi", "-i", "sine=f=440:sample_rate=48000", "-t", "40",
+                        "-vf", "setpts='(N*4+floor(N*0.4))/120/TB'", "-fps_mode", "vfr",
+                        "-video_track_timescale", "90000", "-c:v", "libx264", "-g", "30", "-c:a", "aac",
+                        "-t", "30", str(src)], check=True)
+        assert _probe_source_vfr(src, ffprobe) and _probe_source_fps(src, ffprobe) == pytest.approx(30.0)
+        fps = 30.0
+        segs = [_seg(round(a * fps) / fps, round(b * fps) / fps) for a, b in ((2.0, 5.0), (9.0, 12.4), (15.1, 19.0))]
+        frames = [round((s.end - s.start) * fps) for s in segs]
+        fc, v, a = _concat_segments_graph(segs, 0.01, pre_roll=2.0, cfr=(fps, frames))
+        out = tmp_path / "o.mp4"
+        cmd = build_concat_cmd(ffmpeg, src, out, windows=[(s.start, s.end - s.start) for s in segs],
+                               filter_complex=f"{fc};{v}null[v];{a}anull[a]", codec="libx264", preset="ultrafast",
+                               audio_codec="aac", audio_bitrate="128k", pre_roll=2.0)
+        subprocess.run(cmd, check=True, capture_output=True)
+        info = subprocess.run([ffprobe, "-v", "error", "-count_frames", "-show_entries",
+                               "stream=codec_type,duration,nb_read_frames", "-of", "csv=p=0", str(out)],
+                              capture_output=True, text=True).stdout.split()
+        vrow = next(r for r in info if r.startswith("video"))
+        arow = next(r for r in info if r.startswith("audio"))
+        vdur, vframes = float(vrow.split(",")[1]), int(vrow.split(",")[2])
+        adur = float(arow.split(",")[1])
+        assert vframes == sum(frames)
+>       assert abs(vdur - sum(frames) / fps) < 1e-3 and abs(adur - vdur) < 1 / fps
+E       assert (0.03333300000000072 < 0.001)
+E        +  where 0.03333300000000072 = abs((10.266667 - (309 / 30.0)))
+E        +    where 309 = sum([90, 102, 117])
+
+tests/test_filler_cut.py:309: AssertionError
+____ test_m204_autocut_asks_the_scenarist_on_its_model_and_polishes_on_llm _____
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_m204_autocut_asks_the_sce0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a7699940>
+
+    def test_m204_autocut_asks_the_scenarist_on_its_model_and_polishes_on_llm(tmp_path, monkeypatch):
+        from autoreels import __main__ as cli
+        from tests.test_m202_replay_accounting import _scenario_project
+        cli_, Fake, first, second = _scenario_project(tmp_path)
+        seen = {}
+        real_pool, real_make = cli._scenario_pool, cli._make_pool
+    
+        def spy_pool(stem, root, cache, r0_cfg, ac, prm, mode, *a, **k):
+            seen["scenarist"] = mode
+            return real_pool(stem, root, cache, r0_cfg, ac, prm, mode, *a, **k)
+    
+        def spy_make(r0_cfg, mode):
+            seen.setdefault("polish", []).append(mode)
+            return real_make(r0_cfg, mode)
+        monkeypatch.setattr(cli, "_scenario_pool", spy_pool)
+        monkeypatch.setattr(cli, "_make_pool", spy_make)
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                             scenario_provider=Fake(), llm="cloud", scenario_llm="sonnet",
+                             out=str(tmp_path / "reviews" / "v_split.txt"))
+
+tests/test_m153_auto_mode.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+tests/test_m153_auto_mode.py:127: in spy_pool
+    return real_pool(stem, root, cache, r0_cfg, ac, prm, mode, *a, **k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  модели: Groq · запас: нет (LOCAL_LLM_URL не задан или не отвечает)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+_____________________ test_arl_auto_apply_drops_the_repeat _____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_arl_auto_apply_drops_the_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a76db7e0>
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7c765d0>
+
+    def test_arl_auto_apply_drops_the_repeat(tmp_path, monkeypatch, capsys):
+        from autoreels.core.models import Manifest
+        from tests.test_m176_combined_draft import _draft
+        rpath = _draft(tmp_path, "2 80\nM 85 | 2.2-4 5.1-3\n")
+        monkeypatch.setattr(cli, "_auto_repeats", lambda reels, m: [(r.id, "repeats rX: 90% of its seconds")
+                                                                    for r in reels if "montage" not in r.flags])
+>       rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto",
+                                  drop_refused=True)
+
+tests/test_m177_repeats.py:44: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:6835: in _blocks_do_apply
+    _rqm()                                           # M200: nothing to stand on
+    ^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+sentence check: 8 sentences, 0 differences
+  крючок 2: h:5 «Надада жумивоту вово сиси каво жуданаси.»
+  plan 2:
+    cold open s5  92.060–95.040  «Надада жумивоту вово сиси каво жуданаси.» … «Надада жумивоту вово сиси каво жуданаси.»
+    window    s1-8  76.160–107.600  «Навожу сисида дада лежу сика роси силекана.» … «уси вода дака вокадака водажуро ромиро сивоволе.»
+    shots     close[5] → wide[1-8]
+    end       107.600  last word «сивоволе.» audible end 107.300  air 0.300s  next speech 109.400
+    hook      s5 replayed in body: yes
+  fx 2: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M1:
+    window    s2-4  80.260–91.600  «Жуту минасиси наво летувоту воту натумими накаро» … «Ситука тумика росирода наротуту лемика даками.»
+    window    s9-11  177.600–188.200  «Вотутуси насивона намиси дарожу вона.» … « силе ролемими сика сиканаро мина жуту сижудату.»
+    shots     wide[2-4] → close[9-10] → wide[11]
+    end       188.200  last word «сижудату.» audible end 187.900  air 0.300s  next speech 188.600
+    montage M1: 2 pieces 2.2-4 5.1-3, 1 seam(s), 21.9s
+    seam 1  2.2-4→5.1-3  skips 86.0s, pause 0.40s, pace 1.8→1.8 w/s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 2 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+----------------------------- Captured stderr call -----------------------------
+  warning: нет дорожки движения data/cache/v.motion.npz — чистка «э/ммм» выключена (склейки нельзя проверить на скачок лица); сначала: arl motion v
+  warning: громкость и высота голоса на стыках не измерены — исходник не найден: исходник не найден по sha256=ffffffffffff…: ни по записанному пути (/v.mp4), ни в /tmp/pytest-of-agent/pytest-0/test_arl_auto_apply_drops_the_0/inputs, ни в /tmp/pytest-of-agent/pytest-0/test_arl_auto_apply_drops_the_0/inputs-archive (имя-подсказка: 'v.mp4')
+________________ test_m185_clips_left_are_numbered_without_gaps ________________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_m185_clips_left_are_numbe0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fc8a76da4a0>
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc89f224950>
+
+    def test_m185_clips_left_are_numbered_without_gaps(tmp_path, monkeypatch, capsys):
+        """M185 (owner on m183: «почему они так пронумерованы, нет 1»): after clips leave the combined draft of arl auto
+        the rest is r01, r02, … again."""
+        from autoreels.core.models import Manifest
+        from tests.test_m176_combined_draft import _draft
+        rpath = _draft(tmp_path, "2 80\n3 80\nM 85 | 2.2-4 5.1-3\n")
+        monkeypatch.setattr(cli, "_auto_repeats", lambda reels, m: [(reels[0].id, "repeats rX: 90% of its seconds")])
+>       rc = cli._blocks_do_apply(str(rpath), root=tmp_path, cache_dir=str(tmp_path / "cache"), labeler="auto",
+                                  drop_refused=True)
+
+tests/test_m177_repeats.py:59: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:6835: in _blocks_do_apply
+    _rqm()                                           # M200: nothing to stand on
+    ^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+sentence check: 16 sentences, 0 differences
+  крючок 2: h:5 «Надада жумивоту вово сиси каво жуданаси.»
+  plan 2:
+    cold open s5  92.060–95.040  «Надада жумивоту вово сиси каво жуданаси.» … «Надада жумивоту вово сиси каво жуданаси.»
+    window    s1-8  76.160–107.600  «Навожу сисида дада лежу сика роси силекана.» … «уси вода дака вокадака водажуро ромиро сивоволе.»
+    shots     close[5] → wide[1-8]
+    end       107.600  last word «сивоволе.» audible end 107.300  air 0.300s  next speech 109.400
+    hook      s5 replayed in body: yes
+  fx 2: push, karaoke, progress, whoosh, pop, plate_after_hook
+  крючок 3: h:6 «Рода наро вожужуту жуналеле миво нада навомиво миро лесиро.»
+  plan 3:
+    cold open s6  129.360–133.840  «Рода наро вожужуту жуналеле миво нада навомиво м» … «ожужуту жуналеле миво нада навомиво миро лесиро.»
+    window    s1-8  109.360–142.300  «Симина сидана туво калемика туми кале.» … «ака вока леле надада водажуро сиродажу кавомиво.»
+    shots     close[6] → wide[1-8]
+    end       142.300  last word «кавомиво.» audible end 142.000  air 0.300s  next speech 144.100
+    hook      s6 replayed in body: yes
+  fx 3: push, karaoke, progress, whoosh, pop, plate_after_hook
+  plan M1:
+    window    s2-4  80.260–91.600  «Жуту минасиси наво летувоту воту натумими накаро» … «Ситука тумика росирода наротуту лемика даками.»
+    window    s9-11  177.600–188.200  «Вотутуси насивона намиси дарожу вона.» … « силе ролемими сика сиканаро мина жуту сижудату.»
+    shots     wide[2-4] → close[9-10] → wide[11]
+    end       188.200  last word «сижудату.» audible end 187.900  air 0.300s  next speech 188.600
+    montage M1: 2 pieces 2.2-4 5.1-3, 1 seam(s), 21.9s
+    seam 1  2.2-4→5.1-3  skips 86.0s, pause 0.40s, pace 1.8→1.8 w/s
+    fx: push, karaoke, progress, whoosh, pop, plate_after_hook
+review: 3 blocks selected
+подтяжка границ к словам…
+паддинг границ…
+субтитры: привязка слов к сегментам…
+----------------------------- Captured stderr call -----------------------------
+  warning: нет дорожки движения data/cache/v.motion.npz — чистка «э/ммм» выключена (склейки нельзя проверить на скачок лица); сначала: arl motion v
+  warning: громкость и высота голоса на стыках не измерены — исходник не найден: исходник не найден по sha256=ffffffffffff…: ни по записанному пути (/v.mp4), ни в /tmp/pytest-of-agent/pytest-0/test_m185_clips_left_are_numbe0/inputs, ни в /tmp/pytest-of-agent/pytest-0/test_m185_clips_left_are_numbe0/inputs-archive (имя-подсказка: 'v.mp4')
+___________ test_autocut_shows_a_too_close_candidate_with_its_reason ___________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_autocut_shows_a_too_close0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc89f154d50>
+
+    def test_autocut_shows_a_too_close_candidate_with_its_reason(tmp_path, capsys):
+        cli, Fake, first, second = _scenario_project(tmp_path)
+        cfg = tmp_path / "config" / "r0.yaml"                 # M206: the repo config closes by sound — here by the map
+        import re
+        cfg.write_text(re.sub(r"(?m)^  close_by: \w+", "  close_by: units", cfg.read_text(encoding="utf-8")), encoding="utf-8")
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                             scenario_provider=Fake(), out=str(tmp_path / "reviews" / "v_close.txt"))
+
+tests/test_m202_replay_accounting.py:149: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+______________ test_autocut_lists_the_candidates_it_never_reached ______________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_autocut_lists_the_candida0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a762e2d0>
+
+    def test_autocut_lists_the_candidates_it_never_reached(tmp_path, capsys):
+        cli, Fake, first, second = _scenario_project(tmp_path)
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True, clips=1,
+                             scenario_provider=Fake(), out=str(tmp_path / "reviews" / "v_one.txt"))
+
+tests/test_m202_replay_accounting.py:158: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 1 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+______ test_autocut_marks_k_without_a_model_only_when_asked[model-False] _______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_autocut_marks_k_without_a0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7c59550>
+source = 'model', has_k = False
+
+    @pytest.mark.parametrize("source,has_k", [("model", False), ("rule", True), ("fallback", True)])
+    def test_autocut_marks_k_without_a_model_only_when_asked(tmp_path, capsys, source, has_k):
+        cli, Fake = _project(tmp_path, source)
+        out = tmp_path / "reviews" / "v_k.txt"
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                             scenario_provider=Fake(), out=str(out))       # hook_llm: none — no model for the rest
+
+tests/test_m203_keywords_rule.py:59: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+_______ test_autocut_marks_k_without_a_model_only_when_asked[rule-True] ________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_autocut_marks_k_without_a1')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc89fb60d50>
+source = 'rule', has_k = True
+
+    @pytest.mark.parametrize("source,has_k", [("model", False), ("rule", True), ("fallback", True)])
+    def test_autocut_marks_k_without_a_model_only_when_asked(tmp_path, capsys, source, has_k):
+        cli, Fake = _project(tmp_path, source)
+        out = tmp_path / "reviews" / "v_k.txt"
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                             scenario_provider=Fake(), out=str(out))       # hook_llm: none — no model for the rest
+
+tests/test_m203_keywords_rule.py:59: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+_____ test_autocut_marks_k_without_a_model_only_when_asked[fallback-True] ______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_autocut_marks_k_without_a2')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc89fb60950>
+source = 'fallback', has_k = True
+
+    @pytest.mark.parametrize("source,has_k", [("model", False), ("rule", True), ("fallback", True)])
+    def test_autocut_marks_k_without_a_model_only_when_asked(tmp_path, capsys, source, has_k):
+        cli, Fake = _project(tmp_path, source)
+        out = tmp_path / "reviews" / "v_k.txt"
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                             scenario_provider=Fake(), out=str(out))       # hook_llm: none — no model for the rest
+
+tests/test_m203_keywords_rule.py:59: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+________________________ test_units_greedy_is_as_before ________________________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_units_greedy_is_as_before0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc89fd61350>
+
+    def test_units_greedy_is_as_before(tmp_path, capsys):
+>       rc, body, con = _run(tmp_path, capsys, "units", "greedy")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_m205_selection.py:87: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_m205_selection.py:79: in _run
+    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+______________ test_units_global_takes_the_two_that_do_not_clash _______________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_units_global_takes_the_tw0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7cfc950>
+
+    def test_units_global_takes_the_two_that_do_not_clash(tmp_path, capsys):
+>       rc, body, con = _run(tmp_path, capsys, "units", "global")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_m205_selection.py:93: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_m205_selection.py:79: in _run
+    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+_________ test_sound_keeps_reels_that_share_a_thought_but_no_sentence __________
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_sound_keeps_reels_that_sh0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a76bc550>
+
+    def test_sound_keeps_reels_that_share_a_thought_but_no_sentence(tmp_path, capsys):
+>       rc, body, con = _run(tmp_path, capsys, "sound", "greedy")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_m205_selection.py:99: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_m205_selection.py:79: in _run
+    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+_ test_the_answer_goes_through_the_same_checks_and_the_check_writes_a_message __
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_the_answer_goes_through_t0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7883b50>
+
+    def test_the_answer_goes_through_the_same_checks_and_the_check_writes_a_message(tmp_path, capsys):
+        cli, kw, first, second = _project(tmp_path)
+        assert cli.cmd_autocut("v", **kw) == 3
+        task, answer, fix = C.paths(tmp_path, "v")
+        answer.write_text(f"```\nM | {first} | t: Первая | why: a\nM | 99.1-3 | t: Чужая | why: b\n"
+                          f"**M | {second} | t: Вторая | why: c**\n```\n", encoding="utf-8")
+>       assert cli.cmd_autocut("v", chat_check=True, **kw) == 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_m207_chat_scenarist.py:53: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8137: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист (чат): ответа чата ещё нет: exchange/v.scenario.md → любой чат → ответ в exchange/v.scenario.answer.txt
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист (чат): ответ из exchange/v.scenario.answer.txt
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+______ test_autocut_reads_the_map_with_the_rules_passport_only_when_asked ______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_autocut_reads_the_map_wit0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc8a7ceac50>
+
+    def test_autocut_reads_the_map_with_the_rules_passport_only_when_asked(tmp_path, capsys):
+        from tests.test_m202_replay_accounting import _scenario_project
+        cli, Fake, first, second = _scenario_project(tmp_path)
+        mp = tmp_path / "transcripts" / "v.map.json"
+        m = json.loads(mp.read_text(encoding="utf-8"))
+        for u in m["units"]:                                       # a map whose passport the model never gave
+            u.update(role=None, punch=None, standalone=None, refers=None, summary="", missing=True)
+        mp.write_text(json.dumps(m), encoding="utf-8")
+        kw = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True, scenario_provider=Fake())
+        cfg = tmp_path / "config" / "r0.yaml"
+        cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: model", cfg.read_text(encoding="utf-8")),
+                       encoding="utf-8")
+        assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "a.txt"), **kw) == 1           # model: incomplete
+        assert "карта неполна" in capsys.readouterr().err
+        cfg.write_text(re.sub(r"(?m)^  map_passport: \w+", "  map_passport: rules", cfg.read_text(encoding="utf-8")),
+                       encoding="utf-8")
+>       assert cli.cmd_autocut("v", out=str(tmp_path / "reviews" / "b.txt"), **kw) == 0
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_m208_textmap.py:111: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  карта: паспорт и темы по правилам (без модели, M208)
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+______________ test_voice_profile_measures_level_pitch_and_range _______________
+
+    def test_voice_profile_measures_level_pitch_and_range():
+        import numpy as np
+        from autoreels.local.voice import SR, profile
+        t = np.arange(int(SR * 3.0)) / SR
+        f = 150 * 2 ** (np.linspace(0, 6, t.size) / 12)                 # a glide over 6 semitones
+        x = 0.3 * np.sin(2 * np.pi * np.cumsum(f) / SR)
+        prof = profile(lambda a, d: x[int(a * SR):int((a + d) * SR)], ref_f0=150.0, threshold_db=-50.0)
+        v = prof(0.0, 3.0)
+        assert v["level_db"] == pytest.approx(-13.5, abs=1.0)
+>       assert v["pitch_st"] == pytest.approx(3.0, abs=0.6) and v["range_st"] == pytest.approx(4.8, abs=0.8)
+E       assert (None == 3.0 ± 0.6
+E         
+E         comparison failed
+E         Obtained: None
+E         Expected: 3.0 ± 0.6)
+
+tests/test_map.py:241: AssertionError
+___________________ test_voice_level_and_pitch_of_a_stretch ____________________
+
+    def test_voice_level_and_pitch_of_a_stretch():
+        import numpy as np
+        from autoreels.local.voice import SR, measure
+        t = np.arange(int(SR * 2.0)) / SR
+        gate = (np.sin(2 * np.pi * 2 * t) > 0)                      # speech half the time, silence between
+        loud = 0.5 * np.sin(2 * np.pi * 150 * t) * gate
+        quiet = 0.125 * np.sin(2 * np.pi * 200 * t) * gate
+        a = measure(loud, ref_f0=150.0, threshold_db=-40.0)
+        b = measure(quiet, ref_f0=150.0, threshold_db=-40.0)
+        assert a.level_db - b.level_db == pytest.approx(12.0, abs=0.5)  # ×4 amplitude; silences not counted
+>       assert a.pitch_st == pytest.approx(0.0, abs=0.3)
+E       assert None == 0.0 ± 0.3
+E         
+E         comparison failed
+E         Obtained: None
+E         Expected: 0.0 ± 0.3
+
+tests/test_montage.py:329: AssertionError
+_______________ test_r0_output_parsing_survives_lower_max_tokens _______________
+
+    def test_r0_output_parsing_survives_lower_max_tokens():
+        """parse_segments works on the largest real R0 response from data/runs/r0_live_response.json.
+    
+        Lower max_tokens only affects the generation cap, not the parse path. This regression test
+        verifies that the real cached output (5 segments, 483 tokens) still parses correctly.
+        """
+        import json, os
+        from autoreels.cloud.select import parse_segments
+    
+        live_path = os.path.join(
+            os.path.dirname(__file__), "..", "data", "runs", "r0_live_response.json"
+        )
+>       with open(live_path) as f:
+             ^^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/../data/runs/r0_live_response.json'
+
+tests/test_providers.py:1279: FileNotFoundError
+_____ test_cmd_autocut_scenario_takes_the_models_lines_and_lists_the_rest ______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-0/test_cmd_autocut_scenario_take0')
+capsys = <_pytest.capture.CaptureFixture object at 0x7fc89fff1ad0>
+
+    def test_cmd_autocut_scenario_takes_the_models_lines_and_lists_the_rest(tmp_path, capsys):
+        from autoreels import __main__ as cli
+        from autoreels.cloud.edit import merge_group_sentences
+        from autoreels.core.models import Manifest
+        from tests.test_montage import _source
+        mpath = _source(tmp_path)
+        cfg = tmp_path / "config" / "r0.yaml"
+        cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 5 ")
+                       .replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
+        r0 = cli.load_r0_config(cfg)
+        tx = cli._resolve_cached_transcript(Manifest.model_validate_json(mpath.read_text()), tmp_path / "cache")
+        _, kept, _ = cli._review_block_set(tx, r0, "lecture")
+        ss = merge_group_sentences([kept[1]], tx.words)
+        (tmp_path / "transcripts").mkdir(exist_ok=True)
+        (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps({"version": 1, "stem": "v", "source_sha256": "f" * 64,
+            "units": [{"id": 1, "t0": ss[0][0].t0, "t1": ss[-1][-1].t1, "role": "thesis", "punch": 4,
+                       "refs": f"2.1-{len(ss)}", "topic": 1, "standalone": True, "summary": "тезис"}]}), encoding="utf-8")
+        asked = []
+    
+        class Fake:
+            model_id = "fake:scenarist"
+    
+            def complete(self, messages, temperature=0.0):
+                asked.append(messages)
+                return f"M | 2.1-{len(ss)} | t: Тезис ролика | why: вопрос → ответ\nM | 99.1 | t: нет такой"
+>       rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, scenario=True,
+                             scenario_provider=Fake(), out=str(tmp_path / "reviews" / "v_scen.txt"))
+
+tests/test_scenario.py:80: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/autoreels/__main__.py:8799: in cmd_autocut
+    pool = _scenario_pool(stem, _root, _cache, r0_cfg, ac, prm, scenario_llm or mode, sent_by_ref,
+src/autoreels/__main__.py:8159: in _scenario_pool
+    pool, gone = scenario_proposals(scens, sent, units, prm, end_tone, start_pause, other=other, interviewer=_ivm,
+src/autoreels/cloud/scenario.py:199: in scenario_proposals
+    require_morph()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def require_morph() -> None:
+        """M200: a rule that needs the morphology (autocut.start_morph) refuses to run without it — never silently off."""
+        if _morph() is None:
+>           raise RuntimeError("autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'")
+E           RuntimeError: autocut.start_morph: нужен pymorphy3 — .venv/bin/python -m pip install -e '.[nlp]'
+
+src/autoreels/cloud/clipcheck.py:50: RuntimeError
+----------------------------- Captured stdout call -----------------------------
+  сборок: до 5 (источник 6 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers v) — реплики ведущего не различаются
+  сценарист: fake:scenarist, фраз 80, до 5 роликов …
+----------------------------- Captured stderr call -----------------------------
+  warning: нет карты речи и выравнивания для v — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/v.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align v && arl prosody v
+=============================== warnings summary ===============================
+tests/test_calibrate.py::test_server_serves_html_and_post_save_saves_then_stops
+  /workspace/scratch/5b9935a8bef7/autoreels-task-m222a/.venv/lib/python3.13/site-packages/_pytest/threadexception.py:54: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-1 (<lambda>)
+  
+  Traceback (most recent call last):
+    File "/usr/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+      self.run()
+      ~~~~~~~~^^
+    File "/usr/lib/python3.13/threading.py", line 994, in run
+      self._target(*self._args, **self._kwargs)
+      ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_calibrate.py", line 406, in <lambda>
+      th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+                                                             ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/src/autoreels/local/calibrate.py", line 444, in propose
+      raise CalibrateError(
+          f"калибровка не завершена за {self.timeout_sec:.0f}с (не было Save)"
+      )
+  autoreels.local.calibrate.CalibrateError: калибровка не завершена за 5с (не было Save)
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+tests/test_calibrate.py::test_propose_prints_url_prominently_even_when_webbrowser_raises
+  /workspace/scratch/5b9935a8bef7/autoreels-task-m222a/.venv/lib/python3.13/site-packages/_pytest/threadexception.py:54: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-4 (<lambda>)
+  
+  Traceback (most recent call last):
+    File "/usr/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+      self.run()
+      ~~~~~~~~^^
+    File "/usr/lib/python3.13/threading.py", line 994, in run
+      self._target(*self._args, **self._kwargs)
+      ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_calibrate.py", line 536, in <lambda>
+      th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+                                                             ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/src/autoreels/local/calibrate.py", line 444, in propose
+      raise CalibrateError(
+          f"калибровка не завершена за {self.timeout_sec:.0f}с (не было Save)"
+      )
+  autoreels.local.calibrate.CalibrateError: калибровка не завершена за 5с (не было Save)
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+tests/test_calibrate.py::test_propose_url_contains_real_port
+  /workspace/scratch/5b9935a8bef7/autoreels-task-m222a/.venv/lib/python3.13/site-packages/_pytest/threadexception.py:54: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-6 (<lambda>)
+  
+  Traceback (most recent call last):
+    File "/usr/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+      self.run()
+      ~~~~~~~~^^
+    File "/usr/lib/python3.13/threading.py", line 994, in run
+      self._target(*self._args, **self._kwargs)
+      ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_calibrate.py", line 560, in <lambda>
+      th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+                                                             ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/src/autoreels/local/calibrate.py", line 444, in propose
+      raise CalibrateError(
+          f"калибровка не завершена за {self.timeout_sec:.0f}с (не было Save)"
+      )
+  autoreels.local.calibrate.CalibrateError: калибровка не завершена за 5с (не было Save)
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+tests/test_calibrate.py::test_propose_prints_url_without_browser_open
+  /workspace/scratch/5b9935a8bef7/autoreels-task-m222a/.venv/lib/python3.13/site-packages/_pytest/threadexception.py:54: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-8 (<lambda>)
+  
+  Traceback (most recent call last):
+    File "/usr/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+      self.run()
+      ~~~~~~~~^^
+    File "/usr/lib/python3.13/threading.py", line 994, in run
+      self._target(*self._args, **self._kwargs)
+      ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/tests/test_calibrate.py", line 583, in <lambda>
+      th = threading.Thread(target=lambda: result.update(sel=cal_obj.propose(frame_png, (3840, 2160))))
+                                                             ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/workspace/scratch/5b9935a8bef7/autoreels-task-m222a/src/autoreels/local/calibrate.py", line 444, in propose
+      raise CalibrateError(
+          f"калибровка не завершена за {self.timeout_sec:.0f}с (не было Save)"
+      )
+  autoreels.local.calibrate.CalibrateError: калибровка не завершена за 5с (не было Save)
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_calibrate.py::test_server_serves_html_and_post_save_saves_then_stops
+FAILED tests/test_calibrate.py::test_propose_prints_url_prominently_even_when_webbrowser_raises
+FAILED tests/test_calibrate.py::test_propose_url_contains_real_port - ImportE...
+FAILED tests/test_calibrate.py::test_propose_prints_url_without_browser_open
+FAILED tests/test_calibration_face.py::test_m129_framing_finds_faces_with_yunet_when_its_model_is_there
+FAILED tests/test_calibration_face.py::test_m131_the_speaker_is_the_face_nearest_his_place_not_the_largest
+FAILED tests/test_cli.py::test_run_dispatch_bad_path_returns_error - Assertio...
+FAILED tests/test_cli.py::test_run_dispatch_url_calls_download - assert 1 == 0
+FAILED tests/test_cli.py::test_run_dispatch_url_download_error_returns_1 - As...
+FAILED tests/test_cli.py::test_run_dispatch_yandex_calls_yandex_downloader - ...
+FAILED tests/test_filler_cut.py::test_grouped_render_has_exact_piece_durations
+FAILED tests/test_filler_cut.py::test_variable_rate_source_renders_whole_frames_per_window
+FAILED tests/test_m153_auto_mode.py::test_m204_autocut_asks_the_scenarist_on_its_model_and_polishes_on_llm
+FAILED tests/test_m177_repeats.py::test_arl_auto_apply_drops_the_repeat - Run...
+FAILED tests/test_m177_repeats.py::test_m185_clips_left_are_numbered_without_gaps
+FAILED tests/test_m202_replay_accounting.py::test_autocut_shows_a_too_close_candidate_with_its_reason
+FAILED tests/test_m202_replay_accounting.py::test_autocut_lists_the_candidates_it_never_reached
+FAILED tests/test_m203_keywords_rule.py::test_autocut_marks_k_without_a_model_only_when_asked[model-False]
+FAILED tests/test_m203_keywords_rule.py::test_autocut_marks_k_without_a_model_only_when_asked[rule-True]
+FAILED tests/test_m203_keywords_rule.py::test_autocut_marks_k_without_a_model_only_when_asked[fallback-True]
+FAILED tests/test_m205_selection.py::test_units_greedy_is_as_before - Runtime...
+FAILED tests/test_m205_selection.py::test_units_global_takes_the_two_that_do_not_clash
+FAILED tests/test_m205_selection.py::test_sound_keeps_reels_that_share_a_thought_but_no_sentence
+FAILED tests/test_m207_chat_scenarist.py::test_the_answer_goes_through_the_same_checks_and_the_check_writes_a_message
+FAILED tests/test_m208_textmap.py::test_autocut_reads_the_map_with_the_rules_passport_only_when_asked
+FAILED tests/test_map.py::test_voice_profile_measures_level_pitch_and_range
+FAILED tests/test_montage.py::test_voice_level_and_pitch_of_a_stretch - asser...
+FAILED tests/test_providers.py::test_r0_output_parsing_survives_lower_max_tokens
+FAILED tests/test_scenario.py::test_cmd_autocut_scenario_takes_the_models_lines_and_lists_the_rest
+29 failed, 2697 passed, 24 skipped, 9 deselected, 4 warnings in 138.36s (0:02:18)
