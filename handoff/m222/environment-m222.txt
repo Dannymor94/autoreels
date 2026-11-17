@@ -1,0 +1,35 @@
+M222A BASELINE ENVIRONMENT NOTE — 2026-11-17
+
+Original baseline: Python 3.13.5 / Linux; installed initially via uv pip install -e '.[dev]'.
+FFmpeg/ffprobe: 7.1.5-0+deb13u1.
+No GROQ_API_KEY was provided to the completed baseline.
+IMPORTANT: the original complete package inventory was NOT captured at baseline time.
+The following is a POST-BASELINE SNAPSHOT after optional packages were installed;
+it MUST NOT be represented as the exact original environment or a frozen lock.
+
+annotated-types 0.8.0
+anyio 4.16.0
+autoreels 0.0.0 (editable)
+certifi 2026.10.23
+dawg2-python 0.9.0 (added post-baseline)
+h11 0.16.0
+httpcore 1.0.9
+httpx 0.28.1
+idna 3.20
+iniconfig 2.3.1
+numpy 2.5.5
+opencv-python-headless 4.14.0.94 (added post-baseline)
+packaging 26.3
+pluggy 1.7.0
+praat-parselmouth 0.4.7 (added post-baseline)
+pydantic 2.14.3
+pydantic-core 2.50.4
+pygments 2.21.0
+pymorphy3 2.0.6 (added post-baseline)
+pymorphy3-dicts-ru 2.4.417150.4580142 (added post-baseline)
+pytest 9.2.0
+pyyaml 6.0.3
+setuptools 84.2.1 (added post-baseline)
+socksio 1.0.0 (added post-baseline)
+typing-extensions 4.16.0
+typing-inspection 0.4.5
