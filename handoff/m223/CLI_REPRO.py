@@ -1,4 +1,4 @@
-"""M223-R2 — CLI-based evidence for three P1 findings in cloud/autocut.py.
+"""M223-R3 — CLI-based evidence for three P1 findings in cloud/autocut.py.
 
 Exercises the REAL cmd_autocut() path through __main__.py:
   - load_r0_config(root/config/r0.yaml) → AutoParams → propose() → global selector → validation
@@ -55,8 +55,10 @@ REQUIRED_CONFIG = {
 }
 
 FAILURES: list[str] = []
+CHECK_COUNTER = [0]  # explicit counter of check() calls
 
 def check(label: str, condition: bool, detail: str = "") -> None:
+    CHECK_COUNTER[0] += 1
     status = "OK" if condition else "FAIL"
     msg = f"  {status} {label}" + (f": {detail}" if detail else "")
     print(msg)
@@ -387,8 +389,13 @@ def _run_cmd_autocut(tmp: Path, out_name: str, **kwargs) -> dict:
 
 
 def _run_cmd_autocut_with_check(tmp: Path, out_name: str) -> dict:
-    """Run cmd_autocut with check=True, patching _autocut_check to simulate rejection of clip1."""
-    from autoreels.__main__ import cmd_autocut
+    """Run cmd_autocut with check=True, using real _autocut_check spy (not mock).
+
+    The real validator calls _blocks_do_apply, which requires media files.
+    Without media in the synthetic root it returns an exception string (not None).
+    The spy records exact candidate lines submitted and the real validator response.
+    """
+    from autoreels.__main__ import cmd_autocut, _autocut_check as _real_check
     propose_calls: list[tuple] = []
     autocut_check_calls: list[dict] = []
 
@@ -396,17 +403,19 @@ def _run_cmd_autocut_with_check(tmp: Path, out_name: str) -> dict:
         propose_calls.append((args, kw))
         return _real_propose(*args, **kw)
 
-    def mock_check(head, line, root, cache_dir):
-        # Simulate: the first candidate (u1+u2 merged clip) fails validation
-        autocut_check_calls.append({"line": line})
-        if "1.1" in line and "2.1" in line:
-            return "mock-rejection: clip with u1+u2 fails start-strict check", "mock log"
-        return None, "ok"
+    def spy_check(head, line, root, cache_dir):
+        # Calls REAL validator; records args and actual result
+        result_err, result_log = _real_check(head, line, root, cache_dir)
+        autocut_check_calls.append({
+            "line": line,
+            "error": result_err,  # None = pass, str = real error/exception
+        })
+        return result_err, result_log
 
     buf_out, buf_err = io.StringIO(), io.StringIO()
     with (
         patch("autoreels.cloud.autocut.propose", spy_propose),
-        patch("autoreels.__main__._autocut_check", mock_check),
+        patch("autoreels.__main__._autocut_check", spy_check),
         contextlib.redirect_stdout(buf_out),
         contextlib.redirect_stderr(buf_err),
     ):
@@ -437,7 +446,7 @@ def main() -> int:
     log_dir = script_dir  # logs published flat per handoff convention
 
     print("=" * 60)
-    print("M223-R2 CLI Evidence Harness")
+    print("M223-R3 CLI Evidence Harness")
     print("=" * 60)
     print(f"ROOT: {ROOT}")
     print(f"r0.yaml SHA256: {sha256_file(ROOT / 'config' / 'r0.yaml')}")
@@ -536,35 +545,52 @@ def main() -> int:
         check("§4-c: u1+u2 объединены propose() в один клип через passage (оба в used_seeds)",
               u2_in_passage, f"clip compositions={all_units}")
 
-        # u2-alone is viable without u1
-        props_u2_only = _real_propose([u for u in cli_units if u["id"] == 2], cli_prm)
-        check("§4-d: u2 отдельно строит жизнеспособный клип", len(props_u2_only) >= 1,
-              f"clips={len(props_u2_only)}")
-        u2_alone_viable = len(props_u2_only) >= 1
+        # 4d. Same-callback counterfactual: u2-alone with SAME CLI-constructed callbacks
+        # Capture callbacks from first propose() call (units, prm, sentences, [no_start, ...], kw)
+        args0_full, kw0_full = ev["propose_calls"][0]
+        # args0_full = (units, prm, sentences) — first 3 positional args
+        cli_sentences_cb = args0_full[2] if len(args0_full) >= 3 else kw0_full.get("sentences")
+        u2_only = [u for u in cli_units if u["id"] == 2]
+        # Pass ALL captured kwargs (no_start, judge, end_tone, rhythm_out, taste, start_pause, ...)
+        props_u2_same_cbs = _real_propose(u2_only, cli_prm, cli_sentences_cb,
+                                          **{k: v for k, v in kw0_full.items()})
+        check("§4-d: u2 отдельно строит жизнеспособный клип (same CLI callbacks)",
+              len(props_u2_same_cbs) >= 1,
+              f"clips={len(props_u2_same_cbs)}")
+        u2_alone_viable = len(props_u2_same_cbs) >= 1
 
-        # 4d. Validation path: check=True + mock _autocut_check simulates rejection of clip1
-        print("\n  --- Validation path (check=True, mock _autocut_check) ---")
+        # 4e. Validation path: check=True + REAL _autocut_check spy
+        print("\n  --- Validation path (check=True, real _autocut_check spy) ---")
         ev_check = _run_cmd_autocut_with_check(tmp, "synth_draft_check.txt")
         print(f"  rc={ev_check['rc']}, _autocut_check calls={len(ev_check['autocut_check_calls'])}")
         for call in ev_check["autocut_check_calls"]:
-            print(f"    checked: {call['line'][:80]!r}")
+            # error=None means passed, error=str means real validator error (likely no-media exception)
+            verdict = "PASS" if call["error"] is None else f"ERROR: {call['error'][:60]}"
+            print(f"    checked ({verdict}): {call['line'][:70]!r}")
 
-        check("§4-e: _autocut_check вызван через реальный CLI-путь (check=True)",
+        check("§4-e: _autocut_check вызван через реальный CLI-путь (check=True, real spy)",
               len(ev_check["autocut_check_calls"]) >= 1)
-        # Clip1 (u1+u2) rejected; u2-alone never proposed → program falls back to clip2 (u3)
-        clip1_rejected = any(
+        # Both clips get submitted; real validator fails (no media) → error is str, not None
+        clip_u12_line_sent = any(
             "1.1" in c["line"] and "2.1" in c["line"]
             for c in ev_check["autocut_check_calls"]
         )
-        check("§4-f: clip1 [u1,u2] подан в _autocut_check (проверен реальным путём)", clip1_rejected)
-        # u2-alone never tried: it was not in propose() output pool at all
+        check("§4-f: clip [u1,u2] передан реальному _autocut_check (CLI-путь вызывает его)",
+              clip_u12_line_sent)
+        # Real validator result with synthetic data
+        all_errors = [c["error"] for c in ev_check["autocut_check_calls"]]
+        any_real_error = any(e is not None for e in all_errors)
+        print(f"  Реальный валидатор для синтетических данных: {'FAIL' if any_real_error else 'PASS (текстовая часть проходит)'}")
+        print(f"  → Реальный late-rejection (когда клип M1 отклоняется) требует медиафайла → NOT_REPRODUCED")
+
+        # u2-alone never tried: not in propose() pool (used_seeds)
         all_lines_checked = {c["line"] for c in ev_check["autocut_check_calls"]}
         u2_alone_tried = any("2.1" in ln and "1.1" not in ln for ln in all_lines_checked)
-        check("§4-g (P1 PROOF): u2-alone НЕ подан в _autocut_check — не было в пуле (used_seeds)",
+        check("§4-g (P1 PROOF): u2-alone НЕ в пуле — не подан в _autocut_check (used_seeds)",
               not u2_alone_tried,
-              f"u2-alone checked={u2_alone_tried}, u2_alone_viable={u2_alone_viable}")
+              f"u2-alone checked={u2_alone_tried}, u2_alone_viable(same-cbs)={u2_alone_viable}")
         print(f"  Вывод: u2 попал в used_seeds через clip1; u2-alone жизнеспособен={u2_alone_viable} "
-              f"но никогда не предлагался")
+              f"но не в пуле предложений")
         print()
 
         # §5 Finding #2: answer_start bypass — teaser vs no-teaser
@@ -609,11 +635,29 @@ def main() -> int:
                     hook_ref_nt = m.group(1).rstrip("!")
 
         print(f"  No-teaser run: hook_ref={hook_ref_nt!r}")
-        # Without teaser restriction, hooks from Block A (first half) are allowed
-        # hook_ref_nt='1.2' means S2 from Block A (~25% of clip) is selected as hook
-        check("§5-b: no-teaser run → hook з Block A (першої половини) можливий",
+        # With hook_teaser=False, all sentences eligible → hook 1.2 from Block A (25% of clip)
+        # First PLANNED SOUND is the hook (not body opener 1.1)
+        check("§5-b: no-teaser run → hook из Block A (первой половины клипа) найден",
               hook_ref_nt is not None and str(hook_ref_nt).startswith("1."),
               f"hook_ref={hook_ref_nt!r}")
+
+        # Exact hook texts — use hook_ref (teaser) and hook_ref_nt (no-teaser) from §5-a/b
+        # hook_ref = last '| h:' line found (line-by-line, last wins) in teaser draft
+        # hook_ref_nt = last '| h:' line found in no-teaser draft
+        HOOK_TEXTS = {
+            "2.1": "Принятие тревоги снижает её интенсивность.",
+            "1.2": "Страх сигнализирует об изменениях.",
+            "3.2": "Страх перемен присутствует у каждого.",
+        }
+        check("§5-b2: с teaser → хук из Block B (после 50%)",
+              hook_ref is not None and str(hook_ref).startswith("2."),
+              f"ref={hook_ref!r}")
+        # Without teaser: some hook found from any part of either clip (u3 or u1+u2)
+        # §5-b already confirmed hook_ref_nt exists and starts with "1." (from u1+u2 clip last h: line)
+        teaser_hook_text = HOOK_TEXTS.get(str(hook_ref), f"ref={hook_ref}")
+        noteaser_hook_text = HOOK_TEXTS.get(str(hook_ref_nt), f"ref={hook_ref_nt}")
+        print(f"  Teaser:    первый звук (хук) = h:{hook_ref} → '{teaser_hook_text}'")
+        print(f"  Без teaser: один из хуков = h:{hook_ref_nt} → '{noteaser_hook_text}' (u1+u2 клип)")
 
         # First planned audible words
         from autoreels.cloud.autocut import answer_start_reason, back_reference as _br, stands_alone
@@ -636,10 +680,12 @@ def main() -> int:
               "1.1" in draft_text,
               "1.1 в черновике" if "1.1" in draft_text else "1.1 не найдено")
 
-        print(f"\n  С teaser:    первый звук = h:2.1 → '{TEASER_TEXT}'")
-        print(f"  Без teaser:  первый звук = тело → '{ANSWER_TEXT}'")
-        print(f"  CLI prm: answer_start={cli_prm.answer_start if cli_prm else '?'!r}, "
+        # NOTE: с teaser=True первый звук = хук 2.1 (Block B, после 50%)
+        #       без teaser первый звук = хук 1.2 (Block A, до 50%), body opener 1.1 — не первый звук
+        #       но body opener 1.1 "Да, тревога..." ВСЁ РАВНО в клипе; stands_alone() его не поймает
+        print(f"\n  CLI prm: answer_start={cli_prm.answer_start if cli_prm else '?'!r}, "
               f"start_strict={cli_prm.start_strict if cli_prm else '?'!r}")
+        print(f"  Тело клипа содержит: 1.1 «{ANSWER_TEXT}» — ответное начало, принято stands_alone()")
         print(f"  STATIC: stands_alone() не вызывает answer_start_reason() — проверяет только back_reference()")
         print()
 
@@ -751,6 +797,17 @@ def main() -> int:
             print(f"    span={span4}, dur={dur4:.2f}s, hook_score={score4:.2f}")
             check("§6-g: клоза (4,7) имеет допустимую длину [1.5, 6.0]s",
                   s4_hook_min_sec <= dur4 <= s4_hook_max_sec, f"dur={dur4:.2f}s")
+            # Assert exact values from ALIGN_OVERRIDES
+            EXPECTED_SPAN = (61.6, 65.0)
+            EXPECTED_DUR  = 3.40
+            EXPECTED_SCORE = 4.80
+            check("§6-g2: span точно (61.6, 65.0) из ALIGN_OVERRIDES",
+                  abs(span4[0] - EXPECTED_SPAN[0]) < 0.01 and abs(span4[1] - EXPECTED_SPAN[1]) < 0.01,
+                  f"span={span4}")
+            check("§6-g3: dur точно 3.40s (±0.01)",
+                  abs(dur4 - EXPECTED_DUR) < 0.01, f"dur={dur4:.2f}s")
+            check("§6-g4: hook_score точно 4.80 (±0.05)",
+                  abs(score4 - EXPECTED_SCORE) < 0.05, f"score={score4:.2f}")
 
         # 6d. Clause threshold test: S4 starts BEFORE 50% threshold → clause never found in _hook_cands
         # Clip [u1,u2] total = S1(5.5)+S2(5.0)+S3(5.0)+S4(11.0)+S5(6.0)+S6(6.0)+S7(6.0)+S8(8.5) = 53.0s
@@ -831,8 +888,47 @@ def main() -> int:
                   not s4_clause_found_with,
                   f"cands_with={[(r, t[:30]) for r, _, t in cands_with_clauses[:3]]}")
             print(f"  Вывод: hook_clauses=True не помогает для предложений до 50% порога")
-            print(f"         Клоза 1.4@4-7 (après 50% порога не начинается — начало 32%) тоже пропущена")
+            print(f"         Клоза 1.4@4-7 (начало 32% < 50%) тоже пропущена (threshold на начало предложения)")
             print(f"         S5 (50.0% ≥ порога) найдена: {any('2.1' in r for r,_,_ in cands_with_clauses)}")
+
+            # R3.2: After-threshold long sentence — real candidate loss from missing clauses forwarding
+            # S2.5: starts at ~38s = 71.7% > 50%, duration=9s > hook_max_sec=6.0s
+            # → whole sentence too long → not added as whole hook
+            # → needs clauses callback to find clause hook
+            # With clauses=None (production path): elif (hook_clauses and clauses is not None) → False → skipped
+            # With clauses=callback: elif True → clause found → candidate generated
+            def demo_sentences_with_long_after(refs: str) -> list:
+                base = demo_sentences_threshold(refs)
+                if refs == "2.1-4":
+                    # Insert a long sentence AFTER S6 (after threshold), duration=9s > hook_max_sec
+                    base.insert(2, ("2.5", 9.0, 8, True,
+                                    "Когда принимаешь тревогу изменяется качество жизни навсегда."))
+                return base
+
+            def demo_clauses_full(ref: str) -> list:
+                if ref == "2.5":
+                    # Clause at words 5-8: "изменяется качество жизни навсегда.", dur=4.5s ∈ [1.5,6.0]
+                    return [(5, 8, 4.5, "изменяется качество жизни навсегда.")]
+                return demo_clauses(ref)
+
+            cands_long_no_cl = _hook_cands(demo_clip, demo_sentences_with_long_after,
+                                           demo_prm_teaser, clauses=None)
+            cands_long_with_cl = _hook_cands(demo_clip, demo_sentences_with_long_after,
+                                             demo_prm_teaser, clauses=demo_clauses_full)
+
+            s25_found_no = any("2.5" in r for r, _, _ in cands_long_no_cl)
+            s25_found_with = any("2.5" in r for r, _, _ in cands_long_with_cl)
+
+            print(f"\n  Тест R3.2 — длинное предложение 2.5 (после 50%, 9s > hook_max_sec=6):")
+            print(f"    _hook_cands(clauses=None): 2.5 найдено = {s25_found_no}")
+            print(f"    _hook_cands(clauses=demo): 2.5 найдено = {s25_found_with}")
+            check("§6-k: без clauses=None длинное предложение 2.5 (71.7% > 50%) пропускается",
+                  not s25_found_no,
+                  f"cands={[r for r, _, _ in cands_long_no_cl[:3]]}")
+            check("§6-l: с clauses=callback длинное предложение 2.5 → клоза найдена (candidate loss proof)",
+                  s25_found_with,
+                  f"cands={[r for r, _, _ in cands_long_with_cl[:3]]}")
+            print(f"  Вывод P1_3: без forwarding clauses→propose(), длинные предложения после 50% теряют кандидатов")
         print()
 
         # §7 Negative subprocess test: harness exits nonzero with wrong config
@@ -872,16 +968,20 @@ def main() -> int:
     # §9 Summary
     print()
     print("=" * 60)
-    n_checks = sum(1 for ln in FAILURES) + (sum(1 for _ in FAILURES) == 0 and True)
     print("=== ИТОГ ===")
+    total_checks = CHECK_COUNTER[0]
+    failed_checks = len(FAILURES)
+    passed_checks = total_checks - failed_checks
+    print(f"  check() вызовов выполнено: {total_checks} (passed={passed_checks}, failed={failed_checks})")
     if not FAILURES:
-        print("PASS: все проверки прошли, три находки CONFIRMED/NOT_REPRODUCED по CLI.")
+        print(f"PASS: все {total_checks} проверок прошли.")
         print()
         print("Запись для финального отчёта:")
+        print(f"  CHECKS_EXECUTED={total_checks}")
         print(f"  CONFIG_SHA256: {sha256_file(ROOT / 'config' / 'r0.yaml')}")
         return 0
     else:
-        print(f"FAIL: не прошли {len(FAILURES)} проверок:")
+        print(f"FAIL: не прошли {failed_checks} из {total_checks} проверок:")
         for f in FAILURES:
             print(f"  - {f}")
         return 1

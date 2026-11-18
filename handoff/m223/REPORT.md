@@ -1,38 +1,40 @@
-# REPORT M223-R2 — CLI-доказательство трёх P1-находок в `cloud/autocut.py`
+# REPORT M223-R3 — CLI-доказательство трёх P1-находок в `cloud/autocut.py`
 
 **Ветка:** `task/m223`  
 **База:** `origin/main` → `3c011e94263e16e5780936b4769d3490cd03b682`  
-**HEAD задачи:** `3c011e9` (код не менялся; только `handoff/m223/`)  
+**HEAD задачи:** worktree `task/m223` (только `handoff/m223/` изменён)  
 **Дата:** 2026-11-18  
-**Инструмент:** Python 3.13, `.venv` в `autoreels-m223`  
 **Статус:** `IMPLEMENTED, GATE PENDING` — ожидает PASS Sol 6.1
 
 ---
 
-## Финальный отчёт (R2)
+## Финальный отчёт (R3)
 
 ```
-TASK=M223-R2
+TASK=M223-R3
 BASE_SHA=3c011e94263e16e5780936b4769d3490cd03b682
-HANDOFF_HEAD_SHA=task/m223 worktree (handoff/m223/ only)
+HANDOFF_HEAD_SHA=<заполняется после report.sh>
 STATUS=READY_FOR_QA
-CLI_ENTRY_COMMAND=cmd_autocut('synth', root=<tmp>, llm='none', check=False)
-CLI_CONFIG_SHA256=efdef3adb0396e7e282553a8e3bfb0c690df015abdb8398cea1db5e642aeabba
-CONFIG_NEGATIVE_TEST=subprocess --check-config r0_bad.yaml (select=greedy) → exit 1
-P1_1_CLI=CONFIRMED — select_global() вызван (pool=2+); u1+u2 merged passage; u2-alone viable but not in pool
-P1_2_CLI=CONFIRMED — CLI prm.answer_start=True; stands_alone не проверяет answer_start_reason; teaser h:2.1; no-teaser h:1.2
-P1_3_CLI=CONFIRMED — propose() нет параметра clauses; align.json загружен; _hook_cands(clauses=None) для всех 6 вызовов
-TEASER_VARIANTS=h:2.1 (после 50%, Block B); no-teaser h:1.2 (до 50%, Block A)
-CLAUSE_THRESHOLD_CASE=S4@29.2%<50% → continue до клоз; _hook_cands пропускает S4 и с clauses=None и с clauses=demo
-ASSERTIONS_PASSED=35 (все OK)
-LOG_SHA_BASELINE_STDOUT=d1ff087ada7819bbbf9c101b27332d117ff1dc1417401f0227c84c36a62d0d26
-LOG_SHA_BASELINE_STDERR=95c8bff6a6649ab1b57a5199627eb12b9ec500e79d438bfea79340d7b125f306
-LOG_SHA_NOTEASER_STDOUT=2b0cccddcd235362132eb9640397556001ef326fbb3a1c0c9700980dc94f8a9e
-LOG_SHA_NEGATIVE_STDOUT=b6ed48a3422a0c9e0f113524434c933e9fe46e6be877ac540ce170124c7d46fb
-LOG_PATHS=handoff/m223/baseline_stdout.txt, handoff/m223/baseline_stderr.txt, handoff/m223/noteaser_stdout.txt, handoff/m223/negative_stdout.txt
-CHANGED_PATHS=handoff/m223/CLI_REPRO.py, handoff/m223/REPORT.md, handoff/m223/cli_logs/*
+REPRO_EXIT=0
+CHECKS_EXECUTED=33
+P1_1_CLI=CONFIRMED/NOT_REPRODUCED — pool=2, select_global вызван, u1+u2 merged,
+         u2-alone viable (same CLI callbacks); real _autocut_check spy прошёл (synthetic PASS);
+         late-rejection с реальным медиа = NOT_REPRODUCED
+P1_2_CLI=CONFIRMED — CLI prm.answer_start=True; stands_alone не проверяет answer_start_reason;
+         teaser h:2.1 (Block B, после 50%); no-teaser h:1.2 (Block A, до 50%);
+         тело 1.1 «Да, тревога…» в клипе и принято stands_alone()
+P1_3_CLI=CONFIRMED/STATIC_ONLY — _hook_cands() 6 вызовов, все clauses=None; align.json загружен
+         (нет warning); clauses(ref) построен CLI но не передан в propose();
+         threshold-spanning case (§6-k/l): длинное предложение после 50% теряет кандидатов без clauses
+REAL_VALIDATOR_EVIDENCE=spy вызывает _real_check нативно; синтетика проходит (нет медиа = нет отклонения)
+GLOBAL_SELECTOR_AND_CANDIDATE_PARITY=select_global(weights=[89.0,81.0],k=5)=[0,1]; u2-alone viable с теми же callbacks
+CLAUSE_CLOSURE_AND_THRESHOLD_EVIDENCE=clause (4,7) найдена clause_spans(); span=(61.6,65.0), dur=3.40s, score=4.80
+TEASER_AND_NO_TEASER_FIRST_SOUND=teaser h:2.1→"Принятие тревоги..."; no-teaser h:1.2→"Страх сигнализирует..."
+NEGATIVE_TEST_EXIT=1 (subprocess, select=greedy)
+PUBLISHED_LOG_PATH_SHA256_AND_BLOB_SHA=см. §8
+PRODUCTION_DIFF=нет (ни одного файла production не изменено)
+OWNER_ARTIFACT_PARITY=нет изменений manifests/transcripts/reviews/reels-out/
 WORKTREE_CLEAN=task/m223 (только handoff/m223/ изменён)
-PR_URL=NONE
 BLOCKERS=нет
 ```
 
@@ -40,200 +42,178 @@ BLOCKERS=нет
 
 ## §0 Гейт M222A — подтверждение
 
-```
-$ git show origin/main:CLAUDE.md | grep -c "M222–M237"
-2   → ОК: контракт интегрирован
-```
-
 - `main` = `3c011e9` (PR #9 «docs: apply M222-M237 agent workflow contract» merged)
 - PR #10 «ci: establish deterministic offline smoke gate» merged
 - 163 теста пройдено на CI
 
 ---
 
-## §1 Метод воспроизведения (R2)
+## §1 Метод воспроизведения (R3)
 
-**R0 (отклонён Sol):** прямой вызов `propose()` — производственный CLI-путь не проходился.  
-**R1 (отклонён Sol):** `cmd_autocut()` вызван, но: 1 кандидат в пуле (global selector не срабатывал), нет align.json (clauses статически), неверный SHA256 конфига.  
-**R2 (текущий):**
-- 3 синтетических мысли: u1(id=1, t=40-69.5s), u2(id=2, t=80-108s), u3(id=3, t=150-178s) — u1+u2 merge в passage, u3 отдельный клип → pool=2 → select_global срабатывает
-- Block C переработан: все предложения 5+ слов, нет `_BACK_START` → `context_start()` принимает u3
-- `synth.align.json` создаётся в изолированном корне → CLI загружает выравнивание без предупреждений
-- S4 "Эволюция создала тревогу, как важный сигнал опасности." — запятая + пауза ≥ 0.12s → `clause_spans()` находит клозу (4,7)
-- Subprocess `--check-config` режим: `sys.argv[1]=='--check-config'` → проверяет REQUIRED_CONFIG → exit 0/1
-- Spy захватывает `select_global` ДО патчинга (не рекурсивный)
+**R3 изменения по сравнению с R2:**
+
+| Проблема Sol | Решение R3 |
+|---|---|
+| Мок `_autocut_check` | Spy вызывает `_real_check` нативно; результат записан |
+| u2-alone без CLI callbacks | `_real_propose(u2, prm, cli_sentences_cb, **kw0)` — те же callbacks из spy |
+| Нет after-threshold clause demo | §6-k/l: S2.5 (9s, 71.7% > 50%), clauses=None → пропуск; clauses=cb → найдена |
+| Первый звук no-teaser неверный | Исправлено: без teaser первый звук = хук h:1.2, не тело 1.1 |
+| Счётчик check() неверный | `CHECK_COUNTER[0]` инкрементируется в каждом `check()` → 33 |
+| Span/dur/score не утверждены | §6-g2/g3/g4 проверяют точные значения |
+
+**Общая схема:**
+- `cmd_autocut("synth", root=tmp, llm="none")` → spy захватывает `propose_calls`, `select_global_calls`
+- `_run_cmd_autocut_with_check(tmp, ...)` → spy захватывает `_autocut_check` calls (real, not mock)
+- Изолированный tmpfs-корень, нет API, нет рендера, нет записи в репозиторий
 
 ---
 
-## §2 Конфигурация (config/r0.yaml — фактические значения)
+## §2 Конфигурация (config/r0.yaml)
 
 | Ключ | Значение | Значимость |
 |---|---|---|
 | `hook_clauses` | `true` | #3: клозы должны работать |
-| `start_strict` | `true` | #2: строгое начало включено |
+| `start_strict` | `true` | #2: строгое начало |
 | `answer_start` | `true` | #2: ответный старт запрещён |
-| `start_morph` | `true` | #2: морфологическая проверка включена |
-| `generator` | `mixed` | #1: смешанный генератор с `used_seeds` |
-| `select` | `global` | #1: global selector активен |
-
-Все 6 ключей проверены через `load_r0_config(root/config/r0.yaml)` в §0.  
-`ProposalParams` (p) передаётся в `propose()` без поля `select` (оно на `AutoCutParams`); §3 проверяет 5 полей ProposalParams.
+| `start_morph` | `true` | #2: морфологическая проверка |
+| `generator` | `mixed` | #1: used_seeds |
+| `select` | `global` | #1: global selector |
 
 **r0.yaml SHA256:** `efdef3adb0396e7e282553a8e3bfb0c690df015abdb8398cea1db5e642aeabba`
 
 ---
 
-## §3 Доказательство CLI-пути
+## §3 CLI-путь подтверждён
 
 ```
-stdout (baseline_stdout.txt):
-  сборок: до 5 (источник 4 мин ÷ 2)
-  пул: 2 сборок < 15 — добавлено 0 вокруг мыслей силы 3
-autocut synth: предложено сборок 2 из 3 мыслей →
+stdout: предложено сборок 2 из 3 мыслей → ...
   M1 81@1.05 | 1.1-4 2.1-4 | h:2.1! | c:2.4 | k:1.1=переменами;2.4=сегодня | ...
   M2 89@1.08 | 3.1-4 | c:3.4 | k:3.1=сильнее;3.4=сегодня | ...
-
-stderr (baseline_stderr.txt):
-  warning: нет интонации transcripts/synth.prosody.json — ...
-  (align.json загружен — предупреждения об отсутствии карты речи нет)
 ```
 
-Выход: `0`. `propose()` вызван 2 раза (основной + fill_pool). AutoParams из первого вызова:
-- `generator='mixed'`, `hook_clauses=True`, `start_strict=True`, `answer_start=True`, `start_morph=True`
-- `passage_gap_sec=30.0`, `min_sec=25.0`, `target_sec=55.0`, `max_sec=90.0`
+propose() вызван 2 раза (основной + fill_pool). ProposalParams: `generator='mixed'`, `hook_clauses=True`, `start_strict=True`, `answer_start=True`, `start_morph=True`.
 
 ---
 
-## §4 Находка #1 — CONFIRMED: `used_seeds` скрывает альтернативы (CLI-путь)
+## §4 Находка #1 — CONFIRMED/NOT_REPRODUCED
 
-**Место:** `autocut.py:1174-1179` (проверка `used_seeds`), `:1262` (обновление `used_seeds`)
+**Механизм:** `used_seeds` предотвращает `u2-alone` из пула
 
-**Синтетические данные:**
-- Block A (40.0–69.5s): S1-S4, refs="1.1-4", u1(id=1, punch=5)
-- Block B (80.0–108.0s): S5-S8, refs="2.1-4", u2(id=2, punch=4)  
-- Block C (150.0–178.0s): S9-S12, refs="3.1-4", u3(id=3, punch=5) — gap 42s > passage_gap_sec=30s
-
-**CLI stdout подтверждает:** `предложено сборок 2 из 3 мыслей` → pool=2
-
-**Global selector:**
 ```
-select_global: weights=[89.0, 81.0], k=5, result=[0, 1]
-→ select_global() вызван (pool >= 2, select=global из config) ✓
-```
+Pool:
+  clip-idx-0: units={3}, score=89.00, 28.0s
+  clip-idx-1: units={1,2}, score=81.00, 57.5s
 
-**used_seeds механизм:**
-1. `propose()` возвращает: clip-A `{3}` (score=89), clip-B `{1,2}` (score=81)
-2. `{1,2}` — оба thesis → `used_seeds.update({1,2})`
-3. При попытке seed=u2: `seed["id"]=2 in used_seeds` → skip
-4. Альтернативный клип `{2}` (28s, жизнеспособный) **никогда не строится**
+select_global(weights=[89.0, 81.0], k=5) → [0,1]  ← вызван реально ✓
 
-**Доказательство через CLI:**
-```
-propose([u1,u2,u3]): 2 клипа, составы=[{3}, {1,2}]  → u1+u2 merged ✓
-propose([u2 only]):  1 клип, состав=[{2}]            → u2 alone viable ✓
-_autocut_check получил "1.1" ∧ "2.1" → clip [u1,u2] в check path ✓
-_autocut_check НЕ получил "2.1" без "1.1" → u2-alone не в пуле ✓
+Контрфактуал (same callbacks):
+  _real_propose([u2], prm, cli_sentences_cb, **kw0) → 1 клип {2}  ← viable ✓
+
+Real _autocut_check spy:
+  → clip "1.1-4 2.1-4": PASS (synthetic data, no media)
+  → clip "3.1-4": PASS (synthetic data, no media)
+  → u2-alone НЕ подан: не был в pool ✓
+
+Late-rejection consequence: NOT_REPRODUCED (требует медиафайла)
 ```
 
-**Последствие:** если клип [u1,u2] не проходит проверку монтажа, жизнеспособная замена [u2] не предлагается.
+**Итог:** `u2-alone` жизнеспособен с теми же CLI callbacks, но never proposed — blocked by `used_seeds`.
 
 ---
 
-## §5 Находка #2 — CONFIRMED: `start_strict`/`answer_start`/`start_morph` обход в montage (CLI-путь)
+## §5 Находка #2 — CONFIRMED (STATIC+CLI)
 
-**Места:**
-- `autocut.py:657-673` — `stands_alone()` проверяет только `back_reference()`, НЕ `answer_start_reason()`
-- `autocut.py:676-713` — `context_start()` вызывает `stands_alone(first_sent, ...)`
-- `__main__.py:8632-8636` — `answer_start=True` попадает в `AutoParams`
+**Механизм:** `stands_alone()` не вызывает `answer_start_reason()`
 
-**CLI-путь:**
-- `cmd_autocut()` → `load_r0_config()` → `AutoParams(answer_start=True, start_strict=True)`
-- Клип u1 (тело-открывалка: "Да, тревога часто возникает перед переменами.") принят
-
-**Динамические проверки:**
 ```
-answer_start_reason("Да, тревога...") = '«Да,…» — ответ, а вопроса в ролике нет'  → отвергает
-back_reference("Да, тревога...")      = None                                         → не поймает
-stands_alone("Да, тревога...", ..., prm) = None                                      → пропускает!
+CLI prm.answer_start=True, start_strict=True  ← из CLI config ✓
+
+Первый звук:
+  С teaser:    h:2.1 → "Принятие тревоги снижает её интенсивность." (Block B, 50%)
+  Без teaser:  h:1.2 → "Страх сигнализирует об изменениях." (Block A, 25%)
+
+Тело клипа содержит 1.1 «Да, тревога часто возникает перед переменами.» — ответное начало:
+  answer_start_reason("Да, тревога...") = '«Да,…» — ответ, а вопроса в ролике нет'  ← ОТВЕРГАЕТ
+  back_reference("Да, тревога...")      = None                                        ← НЕ ловит
+  stands_alone("Да, тревога...", ..., prm) = None                                    ← пропускает!
 ```
 
-**Первые слышимые слова (оба варианта):**
-- **С teaser (hook_teaser=True):** `h:2.1` → "Принятие тревоги снижает её интенсивность." (Block B, 58% клипа)
-- **Без teaser (hook_teaser=False):** `h:1.2` → Block A S2, 25% клипа (хуки из первой половины разрешены)
-- **Тело клипа в обоих случаях:** u1 "Да, тревога..." — ответное начало в клипе, `stands_alone()` не ловит
-
-**Статически:** `stands_alone()` не вызывает `answer_start_reason()` — это подтверждает CLI-прогон.
+Клип `1.1` принят CLI (`cli_draft` содержит `1.1`) при активном `answer_start=True`.
 
 ---
 
-## §6 Находка #3 — CONFIRMED: `hook_clauses=true` не действует в `propose()` (CLI-путь)
+## §6 Находка #3 — CONFIRMED/STATIC_ONLY
 
-**Места:**
-- `autocut.py:1145-1150` — сигнатура `propose()` — параметра `clauses` **нет**
-- `__main__.py:8674-8714` — CLI пытается построить `clauses()`, нужен align.json
-- `__main__.py:8818-8820` — `propose(..., start_pause=start_pause)` — `clauses=` **не передаётся**
-- `autocut.py:1281` — `_hook_cands(clip, sentences, p, start_pause)` — без `clauses`
+**Механизм 1 (CLI):** `propose()` не имеет параметра `clauses` → `_hook_cands` всегда получает `clauses=None`
 
-**R2: align.json загружен → `clause_spans()` реально вызывается:**
 ```
-S4 words: ['Эволюция', 'создала', 'тревогу,', 'как', 'важный', 'сигнал', 'опасности.']
-clause_spans(S4, via align.json): [(4, 7)]
-Клоза 1.4@4-7: text='как важный сигнал опасности.', dur=3.40s ✓ (1.5-6.0s)
-```
+propose() params: ['end_tone', 'judge', 'no_start', 'open_end', 'p', 'rhythm_out',
+                   'sentences', 'start_pause', 'taste', 'units']  ← нет 'clauses' ✓
 
-**CLI подтверждает (§6-b):** align.json загружен — предупреждения об отсутствии карты речи нет в stderr ✓  
-**CLI подтверждает (§6-c,d):** `_hook_cands()` вызван 6 раз; во всех вызовах `clauses=None` ✓
+CLI loadAlignment:  align.json загружен, warning НЕ выдаётся  ✓
+_hook_cands spy:    6 вызовов, все clauses=None  ✓
 
-**Тест порога тизера (clause threshold gap):**
-```
-S4 начинается в 15.5s / 53.0s = 29.2% < 50%
-→ _hook_cands: S4 → continue (пропускается до проверки клоз)
-→ клоза (4,7) никогда не проверяется — ни с clauses=None, ни с clauses=demo_clauses
-S5 (начало 50.0% ≥ порога) → найдена ✓ (хуки из второй половины работают)
+CLI builds clauses() closure at __main__.py:8705-8714 — но в propose() НЕ передаёт (строка 8818)
 ```
 
-**Статически:** `propose_params = ['end_tone', 'judge', 'no_start', 'open_end', 'p', 'rhythm_out', 'sentences', 'start_pause', 'taste', 'units']` — `clauses` отсутствует.
+**Механизм 2 (threshold):** Clause threshold gap — S4 (29.2% < 50%) пропускается до проверки клоз
+
+```
+S4 "Эволюция создала тревогу, как важный сигнал опасности."
+  clause (4,7) via real align.json: span=(61.6, 65.0), dur=3.40s, score=4.80  ✓
+  sentence start = 29.2% < 50% → _hook_cands: continue (до проверки клоз)
+  даже с clauses=callback → S4 пропускается (threshold на начало предложения)
+```
+
+**Механизм 3 (after-threshold candidate loss, R3.2):**
+
+```
+S2.5: starts 71.7% > 50%, duration=9s > hook_max_sec=6.0s
+  _hook_cands(clauses=None):  S2.5 → elif(hook_clauses and None) → False → пропущен  ✓
+  _hook_cands(clauses=demo):  S2.5 → elif(hook_clauses and demo) → True → клоза найдена  ✓
+
+cands_no = ['2.2']
+cands_with = ['2.5@5-8', '2.2']  ← S2.5's clause recovered if clauses forwarded
+```
+
+**Итог:** Без forwarding `clauses→propose()`, длинные предложения после 50% теряют кандидатов.
 
 ---
 
-## §7 Fail-closed конфиг и отрицательный тест
-
-**Метод:** subprocess вызывает тот же `CLI_REPRO.py --check-config r0_bad.yaml`, где `select=greedy`.
+## §7 Fail-closed конфиг
 
 ```
-subprocess exit code: 1
-subprocess stdout: "MISMATCH select: 'greedy' != 'global'\n"
+subprocess --check-config r0_bad.yaml (select=greedy):
+  stdout: "MISMATCH select: 'greedy' != 'global'"
+  exit code: 1  ✓
 ```
-
-Код возврата `!= 0` верифицирован subprocess — не через парсинг stdout.
 
 ---
 
-## §8 Лог-файлы
+## §8 Лог-файлы и хэши
 
 | Файл | SHA256 (пример запуска) | Примечание |
 |---|---|---|
-| `handoff/m223/baseline_stdout.txt` | `a257e53ed2a7908dd593fc618e7ee82b4ba84c5cb26d8ccd43b48c91adc43f86` | **нестабилен**: содержит tmpfs-путь |
+| `handoff/m223/baseline_stdout.txt` | нестабилен (tmpfs-путь) | stable key: stderr sha |
 | `handoff/m223/baseline_stderr.txt` | `95c8bff6a6649ab1b57a5199627eb12b9ec500e79d438bfea79340d7b125f306` | **детерминирован** |
-| `handoff/m223/noteaser_stdout.txt` | `d0f927394d9825cf468dc4f1cab88d643f02521b89cf76209ec76b07fac8574a` | **нестабилен**: tmpfs-путь |
+| `handoff/m223/noteaser_stdout.txt` | нестабилен (tmpfs-путь) | hook_teaser=False |
 | `handoff/m223/negative_stdout.txt` | `b6ed48a3422a0c9e0f113524434c933e9fe46e6be877ac540ce170124c7d46fb` | **детерминирован** |
 | `config/r0.yaml` | `efdef3adb0396e7e282553a8e3bfb0c690df015abdb8398cea1db5e642aeabba` | production |
 
-**R1→R2 исправления (согласно SOL-REVIEW-R2.md):**
-- Добавлен u3 (Block C) → pool=2 → select_global реально срабатывает
-- Block C переработан (5+ слов, нет BACK_START) → context_start() принимает u3
-- `synth.align.json` создаётся → clause_spans() реально работает; §6-b проверяет отсутствие warning
-- Subprocess `--check-config` режим → rc реально проверяется (не парсинг stdout)
-- SHA256 конфига исправлен: `efdef3...abba` (был `790006...47`)
-- Пути логов: `handoff/m223/cli_logs/` (были в резюме как `cli_logs/*`)
-- `select` проверяется на `AutoCutParams` (§0), не на `ProposalParams` (§3)
-- Spy `select_global` захватывается до патча → нет рекурсии
+**R3 исправления по SOL-REVIEW-R3.md:**
+- `_autocut_check`: spy → real call (не mock); результат: synthetic PASS, late-rejection NOT_REPRODUCED
+- Same-callback counterfactual: `_real_propose([u2], prm, cli_sentences_cb, **kw0)` — viable ✓
+- After-threshold clause demo: §6-k/l — реальная потеря кандидата без forwarding
+- §5 первый звук: с teaser = h:2.1; без teaser = h:1.2 (хук, не тело 1.1)
+- CHECK_COUNTER: 33 (точный счёт)
+- §6-g2/g3/g4: span, dur, score точно утверждены
+- SHA256 детерминированных файлов проверены
 
 **Запуск:**
 ```bash
 cd /path/to/autoreels-m223
 .venv/bin/python handoff/m223/CLI_REPRO.py
-# → PASS: 35 проверок, три находки CONFIRMED VIA CLI.
+# → PASS: 33 проверок, три находки CONFIRMED/NOT_REPRODUCED по CLI.
 echo $?   # → 0
 ```
 
@@ -243,21 +223,20 @@ echo $?   # → 0
 
 | # | Статус | Метод | Доказательство |
 |---|---|---|---|
-| #1 P1 | **CONFIRMED VIA CLI** | dynamic + CLI | `cmd_autocut()` → spy → pool=2 → select_global вызван → u1+u2 merged → u2-alone viable но не в пуле |
-| #2 P1 | **CONFIRMED VIA CLI** | dynamic + CLI + static | CLI `prm.answer_start=True`; клип с "Да,..." принят; `stands_alone` не проверяет `answer_start_reason`; teaser h:2.1; no-teaser h:1.2 |
-| #3 P1 | **CONFIRMED VIA CLI** | dynamic + CLI + static | `propose()` нет `clauses`; align.json загружен; `_hook_cands` 6 вызовов, все `clauses=None`; clause (4,7) реально найдена через align.json |
+| #1 P1 | **CONFIRMED/NOT_REPRODUCED** | dynamic + CLI + real spy | pool=2, select_global вызван; u1+u2 merged; u2-alone viable (same cbs); real check spy; u2-alone не в пуле (used_seeds) |
+| #2 P1 | **CONFIRMED** | dynamic + CLI + static | CLI prm.answer_start=True; h:2.1 teaser, h:1.2 no-teaser; тело 1.1 принято; stands_alone ≠ answer_start_reason |
+| #3 P1 | **CONFIRMED/STATIC_ONLY** | dynamic + CLI + static | 6× _hook_cands(clauses=None); align.json загружен; clause (4,7) реально найдена; §6-k/l: candidate loss from missing forwarding |
 
-Выход `CLI_REPRO.py`: `exit 0`, 35 проверок пройдено.
+Выход `CLI_REPRO.py`: `exit 0`, 33 `check()` вызовов пройдено.
 
 ---
 
 ## §10 Целостность
 
-Производственный код не изменён. `manifests/`, `transcripts/`, `reviews/`, `reels-out/` — не затронуты.  
-Все синтетические I/O — в изолированном tmpfs вне репозитория.
+Производственный код не изменён. `manifests/`, `transcripts/`, `reviews/`, `reels-out/` — не затронуты.
 
 ---
 
 ## Следующий шаг
 
-Запрос на независимое ревью Sol 6.1. M223-R2 не мержится без PASS. Код алгоритма не менялся.
+Запрос на независимое ревью Sol 6.1 на текущем SHA handoff HEAD. M224 не начинается без PASS.
