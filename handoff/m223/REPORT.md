@@ -1,15 +1,40 @@
-# REPORT M223 — Воспроизведение трёх P1-находок в `cloud/autocut.py`
+# REPORT M223-R1 — CLI-доказательство трёх P1-находок в `cloud/autocut.py`
 
 **Ветка:** `task/m223`  
-**База:** `origin/main` → `3c011e94263e16e5780936b4769d3490cd03b682` (docs: apply M222-M237 agent workflow contract)  
-**HEAD задачи:** `3c011e9` (кода не менялось, только `handoff/m223/`)  
+**База:** `origin/main` → `3c011e94263e16e5780936b4769d3490cd03b682`  
+**HEAD задачи:** `3c011e9` (код не менялся; только `handoff/m223/`)  
 **Дата:** 2026-11-18  
 **Инструмент:** Python 3.13, `.venv` в `autoreels-m223`  
-**Статус:** `IMPLEMENTED, GATE PENDING` — ожидает PASS Sol 6.1  
+**Статус:** `IMPLEMENTED, GATE PENDING` — ожидает PASS Sol 6.1
 
 ---
 
-## Гейт M222A — подтверждение
+## Финальный отчёт (R1)
+
+```
+TASK=M223-R1
+BASE_SHA=3c011e94263e16e5780936b4769d3490cd03b682
+HANDOFF_HEAD_SHA=<будет после report.sh>
+STATUS=READY_FOR_QA
+CLI_ENTRY_COMMAND=cmd_autocut('synth', root=<tmp>, llm='none', check=False)
+CLI_CONFIG_SHA256=790006cf123dd010a86db4c7fa2996b698236d25b3d28bb7d8553d76e2968b47
+CONFIG_NEGATIVE_TEST=select=greedy → FAIL обнаружен (select≠global)
+P1_1_CLI=CONFIRMED — used_seeds={1,2} после первого клипа; u2 пропущен как семя
+P1_2_CLI=CONFIRMED — CLI prm.answer_start=True, stands_alone не проверяет answer_start_reason
+P1_3_CLI=CONFIRMED — propose() нет параметра clauses; CLI предупреждает об align.json
+TEASER_VARIANTS=block A s1 (ответ), block B s1 (не ответ); обе попадают в клип
+CLAUSE_THRESHOLD_CASE=_hook_cands(clauses=None) не находит clause; _hook_cands(clauses=mock) находит
+ASSERTIONS_PASSED=29 (23 check() + 6 config verify_config)
+COMMAND_LOGS_AND_SHA256=см. §8 ниже
+CHANGED_PATHS=handoff/m223/CLI_REPRO.py, handoff/m223/REPORT.md, handoff/m223/cli_logs/*
+WORKTREE_CLEAN=task/m223 (только handoff/m223/ изменён)
+PR_URL=NONE
+BLOCKERS=нет
+```
+
+---
+
+## §0 Гейт M222A — подтверждение
 
 ```
 $ git show origin/main:CLAUDE.md | grep -c "M222–M237"
@@ -22,9 +47,23 @@ $ git show origin/main:CLAUDE.md | grep -c "M222–M237"
 
 ---
 
-## Конфигурация (`config/r0.yaml` — фактические значения)
+## §1 Метод воспроизведения (R1)
 
-| Ключ | Значение | Значение для находок |
+**Предыдущий метод (R0, отклонён Sol):** прямой вызов `propose()` — производственный CLI-путь не проходился.
+
+**Текущий метод (R1):** `CLI_REPRO.py` вызывает `cmd_autocut()` из `autoreels/__main__.py` напрямую с:
+- `root=<isolated temp dir>` — все файлы вне репозитория
+- `llm="none"` — без сетевых вызовов
+- `check=False` — без полного `--apply` check
+- Spy-обёртка на `autoreels.cloud.autocut.propose` (через `unittest.mock.patch`) — фиксирует аргументы
+
+**Путь CLI:** `cmd_autocut()` → `load_r0_config(root/config/r0.yaml)` → `AutoParams(...)` → `propose()`.
+
+---
+
+## §2 Конфигурация (config/r0.yaml — фактические значения)
+
+| Ключ | Значение | Значимость |
 |---|---|---|
 | `hook_clauses` | `true` | #3: клозы должны работать |
 | `start_strict` | `true` | #2: строгое начало включено |
@@ -32,112 +71,190 @@ $ git show origin/main:CLAUDE.md | grep -c "M222–M237"
 | `start_morph` | `true` | #2: морфологическая проверка включена |
 | `generator` | `mixed` | #1: смешанный генератор с `used_seeds` |
 | `select` | `global` | подтверждён |
-| `auto_mode` | `scenario` | `arl auto` → сценарист; для монтажного пути нужен `arl autocut` |
 
-Команда: `arl autocut <манифест>` (без `--scenario`) — производственный путь через `propose()`.
+Все 6 ключей проверены через `load_r0_config(root/config/r0.yaml)`.
+
+**Намеренные переопределения в тестах:** `--ac select=greedy` ТОЛЬКО в §7 (отрицательный тест). Во всех остальных разделах конфиг — производственный.
 
 ---
 
-## Находка #1 — CONFIRMED: `used_seeds` скрывает альтернативы до глобального отбора
+## §3 Доказательство CLI-пути
+
+```
+CLI stdout (baseline_stdout.txt, SHA256: 6bd070eb4931de2a9194d7d0dbe5026b734650dea6f4d59fc082c501c2f3bee1):
+  сборок: до 5 (источник 3 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers synth) — реплики ведущего не различаются
+  пул: 1 сборок < 15 — добавлено 0 вокруг мыслей силы 3
+autocut synth: предложено сборок 1 из 2 мыслей → ...
+  M1 81@1.05 | 1.1-4 2.1-4 | h:2.1! | c:2.4 | k:1.1=переменами;2.4=сегодня | ...
+
+CLI stderr (baseline_stderr.txt, SHA256: ebd22ab9669bb52099fe6378f20b02b03be6efc2d88cbe47cb252c3d77e3a473):
+  warning: нет карты речи и выравнивания для synth — правило паузы перед началом
+           (start_pause_min) не работает
+  warning: нет интонации transcripts/synth.prosody.json — ...
+```
+
+Выход: `0`. `propose()` вызван 2 раза (основной + fill_pool). AutoParams из первого вызова:
+- `generator='mixed'`, `hook_clauses=True`, `start_strict=True`, `answer_start=True`, `start_morph=True`
+- `passage_gap_sec=30.0`, `min_sec=25.0`, `target_sec=55.0`, `max_sec=90.0`
+
+---
+
+## §4 Находка #1 — CONFIRMED: `used_seeds` скрывает альтернативы (CLI-путь)
 
 **Место:** `autocut.py:1174-1179` (проверка `used_seeds`), `:1262` (обновление `used_seeds`)
 
-**Механизм:**
-1. Семена сортируются по убыванию `punch`: `#1 (★5)`, `#2 (★4)`, `#3 (★4)`.
-2. `build_passage(seed=#1)` строит клип `[#1, #2, #3]` (соседние мысли одной темы, 80.5 с).
-3. Строка 1262: `used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)` → `{1, 2, 3}`.
-4. Дойдя до семени `#2`, строка 1175: `if seed["id"] in used_seeds` → `True` → `continue`.
-5. Альтернативный клип `[#2, #3]` (50 с, жизнеспособный, проходит `min_sec=25..max_sec=90`) **никогда не строится**.
+**Синтетические данные:**
+- Block A (40.0–69.5s): "Да, тревога часто..." → S1-S4, refs="1.1-4"
+- Block B (80.0–108.0s): "Принятие тревоги..." → S5-S8, refs="2.1-4"
+- u1: id=1, thesis, punch=5, refs="1.1-4", topic="тревога"
+- u2: id=2, thesis, punch=4, refs="2.1-4", topic="тревога"
 
-**Доказательство (`REPRO.py`):**
+**CLI stdout подтверждает:** `M1 81@1.05 | 1.1-4 2.1-4` → клип содержит обе мысли [u1, u2].
+
+**Механизм через CLI AutoParams (generator='mixed', passage_gap_sec=30):**
+1. Seeds отсортированы: [u1(★5), u2(★4)]
+2. `build_passage(u1)`: u2 соседний (gap=10.5s < 30s), та же тема → клип [u1, u2] = 57.5s
+3. Строка 1262: `used_seeds.update({1, 2})` (оба thesis — STORY роли)
+4. При seed=u2: `seed["id"] in used_seeds` → True → `continue`
+5. Альтернативный клип [u2] (28s, жизнеспособный) **никогда не строится**
+
+**Доказательство:**
 ```
-Полный набор ([#1,#2,#3]): 1 клипов, составы: [{1, 2, 3}]
-Без #1 ([#2,#3]): 1 клипов, составы: [{2, 3}]
-#1-f PASS: #2 попал в used_seeds → как семя пропускается
+propose([u1,u2]): 1 клипов, составы: [{1, 2}]
+propose([u2 only]): 1 клипов, составы: [{2}]
+→ u2 жизнеспособен как самостоятельное семя, но blocked через used_seeds
 ```
 
-Команда воспроизведения:
-```bash
-cd /path/to/autoreels-m223
-python handoff/m223/REPRO.py   # exit 0, все OK
-```
-
-**Последствие для владельца:** если клип `[#1, #2, #3]` позже проваливает проверку монтажа, жизнеспособная замена `[#2, #3]` не предлагается. Причины отсутствия альтернативы не видны ни в счётчиках, ни в черновике.
+**Последствие:** если клип [u1, u2] не проходит проверку монтажа, жизнеспособная замена [u2] не предлагается.
 
 ---
 
-## Находка #2 — CONFIRMED: `start_strict`/`answer_start`/`start_morph` обходятся в montage
+## §5 Находка #2 — CONFIRMED: `start_strict`/`answer_start`/`start_morph` обход в montage (CLI-путь)
 
 **Места:**
-- `__main__.py:6822` — явный пропуск montage-клипов: `if r.id in _seen or "montage" in (r.flags or []) or not r.subtitles: continue`
-- `autocut.py:657-673` — `stands_alone()` читает только `back_reference()` + `context_min_words`; не вызывает `strict_start_reason()`, `answer_start_reason()`
-- `__main__.py:8632-8636` — поля `start_strict`, `answer_start`, `start_morph` копируются в `AutoParams.prm` — но `propose()` / `context_start()` / `stands_alone()` их **не используют**
+- `autocut.py:657-673` — `stands_alone()` проверяет только `back_reference()`, НЕ `answer_start_reason()`
+- `autocut.py:676-713` — `context_start()` вызывает `stands_alone(first_sent, ...)`
+- `__main__.py:8632-8636` — `answer_start=True` попадает в `AutoParams`
+- `__main__.py:6822` — строгая проверка явно пропускает `montage`-клипы (в другой команде)
 
-**Механизм:**
-1. `propose()` с `context_start=True` вызывает `context_start()` → `stands_alone()`.
-2. `stands_alone()` вызывает `back_reference(text)` — проверяет лишь ссылки назад («как я говорил», «и…», «это…»). Не вызывает `answer_start_reason()`.
-3. Текст «Да, тревога часто возникает перед переменами.» — `back_reference` возвращает `None` (нет ссылки назад), `stands_alone` → `None` (ок).
-4. Строгая проверка в `__main__.py:6817-6839` — работает только после `propose()`, и явно пропускает `"montage"` клипы.
+**CLI-путь доказывает:**
+- CLI AutoParams: `prm.answer_start=True`, `prm.start_strict=True` (из config)
+- `cmd_autocut()` вызвал `propose()` с этими параметрами
+- Клип с `u1` (первое предложение "Да, тревога часто возникает перед переменами.") принят
+- CLI draft ссылается на `1.1-4` → `u1` с ответным началом принят
 
-**Доказательство (`REPRO.py`):**
+**Динамические проверки:**
 ```
 answer_start_reason("Да, тревога...") = '«Да,…» — ответ, а вопроса в ролике нет'
-back_reference("Да, тревога...")     = None   (stands_alone не поймает)
-propose() с answer_start=True: клип принят, notes=['начало: «Да, тревога часто...»']
+back_reference("Да, тревога...")      = None   (stands_alone не поймает)
+stands_alone("Да, тревога...", ..., prm) = None  → клип принят
 ```
 
-**Последствие:** клип монтажа открывается на ответе без вопроса («Да, тревога возникает…») при включённом `answer_start: true`. Причины обхода правила в черновике нет.
+**Первые слышимые слова:** "Да, тревога часто возникает перед переменами." (Block A, S1).  
+**Вариант без teaser:** u1 первое предложение — ответ. Принят через propose().  
+**Вариант с teaser:** hook `h:2.1!` — из Block B (после teaser_pos=0.5); ответное начало u1 остаётся в теле.
 
 ---
 
-## Находка #3 — CONFIRMED: `hook_clauses=true` не действует в `propose()`
+## §6 Находка #3 — CONFIRMED: `hook_clauses=true` не действует в `propose()` (CLI-путь)
 
 **Места:**
-- `__main__.py:8701-8714` — CLI строит `clauses()` при `hook_clauses=True`
-- `__main__.py:8818-8820` — `propose(…, start_pause=start_pause)` — `clauses=` **не передаётся**
 - `autocut.py:1145-1150` — сигнатура `propose()` — параметра `clauses` **нет**
+- `__main__.py:8674-8714` — CLI пытается построить `clauses()`, но требует `align.json`
+- `__main__.py:8687-8688` — без align.json: предупреждение → `clauses` остаётся `None`
+- `__main__.py:8818-8820` — `propose(..., start_pause=start_pause)` — `clauses=` **не передаётся**
 - `autocut.py:1281` — `_hook_cands(clip, sentences, p, start_pause)` — без `clauses`
-- `autocut.py:1027` — `if whole_bad and not (p.hook_clauses and clauses is not None): continue` — с `clauses=None` ветка клозов **никогда не выполняется**
+- `autocut.py:1027` — `if whole_bad and not (p.hook_clauses and clauses is not None): continue` → недостижимо
 
-**Механизм:**
-1. CLI строит `clauses()` (строки 8701-8714): правильная функция, возвращает `(a, z, sec, text)`.
-2. `propose()` принимает до 10 параметров — `clauses` среди них нет.
-3. Вызов на строке 8818 не передаёт `clauses`.
-4. Внутри `_hook_cands`: `clauses=None` → строка 1027 принудительно пропускает длинные предложения целиком; строка 1034 `elif p.hook_clauses and clauses is not None` → никогда не достигается.
-
-**Доказательство (`REPRO.py`):**
+**CLI stderr подтверждает (SHA256: ebd22...473):**
 ```
-# propose() без clauses: кандидаты ['B20.1.6', 'B20.1.8']
-# _hook_cands напрямую с clauses=mock: [('B20.1.7@1-6', 6.2), ('B20.1.6', 5.7), ...]
-# Первым идёт clause-крючок B20.1.7@1-6 — который propose() не видит вовсе
-параметры propose()=['end_tone', 'judge', 'no_start', 'open_end', 'p', 'rhythm_out',
-                     'sentences', 'start_pause', 'taste', 'units']  # нет clauses
+warning: нет карты речи и выравнивания для synth — правило паузы перед началом
+(start_pause_min) не работает
+```
+→ `clauses=None` для данного запуска. Даже если align.json присутствует, `propose()` всё равно не имеет параметра `clauses` и не может его принять.
+
+**Порог teaser:**
+- Клип [u1(40-69.5s), u2(80-108s)], teaser_pos=0.5, итог 57.5s
+- Предложения до 50%: Block A s1-s4 (~29.5s / 57.5s = 51% → граница ≈ s3)
+- `h:2.1!` — hook из Block B s1 (после порога) ✓
+
+**Clause threshold case:**
+```
+_hook_cands(clauses=None): кандидаты=['20.6', '20.8'] — длинное предложение 20.7 (9s) пропущено
+_hook_cands(clauses=mock): кандидаты=['20.7@1-6', '20.6', '20.8'] — clause-крючок найден
+                            если бы propose() передавал clauses
 ```
 
-**Последствие:** клипы остаются без крючка при включённом `hook_clauses: true`. Владелец видит «крючок не найден», хотя подходящая клауза длинного предложения существует.
+**Статически:** `propose_params = ['end_tone', 'judge', 'no_start', 'open_end', 'p', 'rhythm_out', 'sentences', 'start_pause', 'taste', 'units']` — `clauses` отсутствует.
 
 ---
 
-## Итоговая таблица
+## §7 Fail-closed конфиг и отрицательный тест
+
+**Отрицательный тест:** `--ac select=greedy`
+
+CLI stdout для neg-теста (SHA256 neg_log: b69fa5dd82c60418a34a99e1a886f2bb4da9ee323ee8d8eeac5de297e0fb0f8f):
+```
+autocut для этого запуска: select=greedy
+...
+```
+
+Харнесс обнаруживает: `ac_neg.select = 'greedy'` ≠ `'global'` → выводит `FAIL select` → добавляет в FAILURES.
+
+Итог: при несоответствии конфига харнесс завершается с exit 1.
+
+---
+
+## §8 Лог-файлы и хэши
+
+| Файл | SHA256 | Примечание |
+|---|---|---|
+| `cli_logs/baseline_stdout.txt` | `021225d41799af71d2dd84dd6297c462c0956ba1e1cf98b9582c243703bd9274` | содержит path tmpfs — не детерминирован между запусками |
+| `cli_logs/baseline_stderr.txt` | `ebd22ab9669bb52099fe6378f20b02b03be6efc2d88cbe47cb252c3d77e3a473` | детерминирован |
+| `cli_logs/negative_stdout.txt` | `ad8bafce2d398a161b80093fba1f0af53a09575da3b7da73fad4a1a9006e9860` | содержит path tmpfs |
+| Черновик draft (контент)       | `8de872d4d6c7a0b8d1377a05eb0fc22c87ef6a8631077c8428d391c6d4444dfd` | детерминирован |
+| `CLI_REPRO.py` (выход: 0)      | sha256 в отчёте из report.sh | |
+
+**Детерминированные артефакты** (стабильны между запусками): `baseline_stderr.txt`, содержимое черновика.  
+`baseline_stdout.txt` содержит `tmpfs`-путь (меняется при каждом запуске): ключевые строки `OK/FAIL` и SHA256 stderr/draft остаются постоянными.
+
+**Запуск:**
+```bash
+cd /path/to/autoreels-m223
+.venv/bin/python handoff/m223/CLI_REPRO.py
+# → PASS: все проверки прошли, три находки CONFIRMED VIA CLI.
+echo $?   # → 0
+```
+
+---
+
+## §9 Итоговая таблица
 
 | # | Статус | Метод | Доказательство |
 |---|---|---|---|
-| #1 P1 | **CONFIRMED** | динамический | `propose([u1,u2,u3])` → 1 клип `{1,2,3}`; без u1 → клип `{2,3}` строится |
-| #2 P1 | **CONFIRMED** | динамический + статический | `propose()` принимает «Да, тревога…»; `answer_start_reason` отвергает; `__main__.py:6822` явно исключает montage |
-| #3 P1 | **CONFIRMED** | динамический + статический | `propose()` не имеет `clauses` в сигнатуре; `_hook_cands(clauses=mock)` находит clause-крючок; `propose()` — нет |
+| #1 P1 | **CONFIRMED VIA CLI** | dynamic + CLI | `cmd_autocut()` → spy → `propose([u1,u2])` → 1 клип `{1,2}`; `propose([u2])` → `{2}` |
+| #2 P1 | **CONFIRMED VIA CLI** | dynamic + CLI + static | CLI `prm.answer_start=True`; клип с "Да,..." принят; `stands_alone` не проверяет `answer_start_reason` |
+| #3 P1 | **CONFIRMED VIA CLI** | dynamic + CLI + static | `propose()` нет `clauses`; CLI stderr: "нет карты речи"; `_hook_cands(clauses=None)` ≠ `_hook_cands(clauses=mock)` |
 
-Выход `REPRO.py`: `exit 0`, все 11 проверок пройдены.
+Выход `CLI_REPRO.py`: `exit 0`, 29 проверок пройдено (23 check() + 6 config).
 
 ---
 
-## Артефакты
+## §10 Целостность
 
-- `handoff/m223/REPRO.py` — детерминированный воспроизводитель (exit 0)
-- `handoff/m223/REPORT.md` — этот файл
-- Ветка: `task/m223` на базе `3c011e9`
+```
+$ git status --short  # в task/m223 worktree
+ M handoff/m223/REPORT.md
+?? handoff/m223/CLI_REPRO.py
+?? handoff/m223/cli_logs/
+```
+
+Производственный код не изменён. `manifests/`, `transcripts/`, `reviews/`, `reels-out/` — не затронуты.
 
 ---
 
 ## Следующий шаг
 
-Запрос на независимое ревью Sol 6.1. M223 не мержится без PASS. Код алгоритма не менялся.
+Запрос на независимое ревью Sol 6.1. M223-R1 не мержится без PASS. Код алгоритма не менялся.

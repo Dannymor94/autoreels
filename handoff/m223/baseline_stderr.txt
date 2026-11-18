@@ -1,0 +1,2 @@
+  warning: нет карты речи и выравнивания для synth — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/synth.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align synth && arl prosody synth
