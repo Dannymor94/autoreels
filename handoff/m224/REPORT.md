@@ -1,37 +1,36 @@
-# REPORT M224 Stage A — Доказательство находок #5 и #6
+# REPORT M224 Stage A R2 — CLI-доказательство находок #5 и #6
 
 **Ветка:** `task/m224`  
 **База:** `origin/main` → `3c011e94263e16e5780936b4769d3490cd03b682`  
-**Дата:** 2026-11-18  
+**Дата:** 2026-11-19  
 **Статус:** `IMPLEMENTED, GATE PENDING` — ожидает PASS Sol 6.1
 
 ---
 
-## Финальный отчёт
+## Финальный отчёт (R2)
 
 ```
-TASK=M224-STAGE-A
+TASK=M224-STAGE-A-R2
 BASE_SHA=3c011e94263e16e5780936b4769d3490cd03b682
 STATUS=READY_FOR_QA
 REPRO_EXIT=0
-CHECKS_EXECUTED=44
+CHECKS_EXECUTED=40
 
 FINDING_5_CLI=CONFIRMED
-  — context_start short-drop (autocut.py:718): t0 += rows[0][1] = длительность только предложения
-  — ветка context_later (строки 749) имеет проверку min_sec; short-drop — нет
-  — propose() испускает клип с seconds=23.0 при min_sec=25.0 (нет повторной проверки)
-  — прямой вызов context_start() с production AutoParams через load_r0_config
-
-FINDING_6_END_CLI=CONFIRMED
-  — fix_open_end (autocut.py:640): cut += rows[k][1] = только длительность предложения
-  — пауза 24–28s не включена в cut: new_last.t1 = 31.0 - 3.0 = 28.0
-  — фактический конец последнего слова: 24.0s; дрейф = 4.0s тишины в t1
-  — total - cut = 28.0 ≥ min_sec=25.0 → guard min_sec проходит, дрейф не фильтруется
+  — cmd_autocut("synth", root=isolated_tmp, llm="none") вызван реально
+  — spy на context_start захватил: refs '1.1-2'→'1.2', t0 100.0→102.0, dur 25.0→23.0
+  — dur_after=23.0 < min_sec=25.0; клип выпущен propose() без min_sec-проверки
+  — generator=mixed из production r0.yaml; AutoParams из CLI ✓
 
 FINDING_6_START_CLI=CONFIRMED
-  — context_start short-drop (autocut.py:718): t0 += rows[0][1] = только 2.0s (длительность 1.1)
-  — пауза 2–6s не включена: t0 = 2.0, а фактически 1.2 начинается в 6.0s
-  — дрейф = 4.0s тишины атрибутируется началу клипа
+  — spy на context_start: t0_after=102.0, S1.2 начинается в 102.4s → drift=0.4s
+  — 0.4s = пауза 102.0→102.4 не включена в rows[0][1] = sec("Уйти.") = 2.0
+
+FINDING_6_END_CLI=CONFIRMED
+  — prosody.json загружен (нет предупреждения об интонации)
+  — spy на fix_open_end: refs '2.1-2'→'2.1', t1 232.0→229.0
+  — drift=1.0s = пауза 228.0→229.0 не включена в cut=sec("Завтра.")=3.0
+  — total-cut=29.0 ≥ min_sec=25.0 → guard проходит, клип выпущен с дрейфом
 
 PRODUCTION_DIFF=нет (ни одного файла production не изменено)
 OWNER_ARTIFACT_PARITY=нет изменений manifests/transcripts/reviews/reels-out/
@@ -48,17 +47,22 @@ M223 прошёл независимое ревью Sol 6.1 (PASS) с SHA `9bb56
 
 ---
 
-## §1 Метод
+## §1 Метод R2 (изменения по сравнению с R1)
 
-**Путь CLI-конфига:**
-- `load_r0_config(ROOT / "config/r0.yaml")` → `r0_cfg.autocut`
-- `AutoParams(...)` собран зеркально `cmd_autocut` (`__main__.py:8609–8634`)
-- Вызовы `context_start()` и `fix_open_end()` из `cloud/autocut.py` напрямую с этим `prm`
-- `propose()` вызван для подтверждения end-to-end испускания
+| Проблема Sol QA R1 | Решение R2 |
+|---|---|
+| A1: нет вызова cmd_autocut | `cmd_autocut("synth", root=isolated_tmp, llm="none")` вызывается в §1 |
+| A2: изменён generator="passage" и другие поля | AutoParams берётся из первого propose()-spy-вызова (CLI-конфиг), generator=mixed ✓ |
+| A3: хардкод audio timings | Используются реальные временны́е метки слов из синтетического транскрипта |
+| A4: нет доказательства CLI-пути | Spy на context_start и fix_open_end перехватывает реальные before/after значения |
 
-**Изолированная синтетика:**
-- Нет API, нет рендера, нет записи в owner-артефакты
-- Временный корень не используется (только in-memory данные)
+**Общая схема:**
+- Изолированный tmpdir: config/ manifests/ transcripts/ data/cache/ reviews/ out/
+- `config/r0.yaml` скопирован из production (SHA неизменён)
+- Синтетический транскрипт с 11 словами в двух блоках + tail-слова (340-360s)
+- `transcripts/synth.prosody.json` — синтетическая карта интонаций для block 2
+- `cmd_autocut("synth", root=tmp, llm="none")` вызывается с patch на context_start, fix_open_end, propose
+- Прямые вызовы помечены `HELPER_CONFIRMED`
 
 ---
 
@@ -72,117 +76,100 @@ M223 прошёл независимое ревью Sol 6.1 (PASS) с SHA `9bb56
 | `autocut.context_min_words` | 4 | <4 слов → `stands_alone` → "обрывок" |
 | `autocut.context_later` | false | ветка с проверкой min_sec ВЫКЛЮЧЕНА |
 | `autocut.end_tone` | true | активирует `fix_open_end` |
+| `autocut.generator` | mixed | режим генератора (не passage) |
+| `sentence_pause_sec` | 0.35 | граница границ предложений |
+| `min_pause_for_phrase_end` | 1.5 | граница разрыва блоков |
 
 **r0.yaml SHA256:** `efdef3adb0396e7e282553a8e3bfb0c690df015abdb8398cea1db5e642aeabba`
 
 ---
 
-## §3 Находка #5 — CONFIRMED
+## §3 Синтетический транскрипт
 
-**Механизм:** `context_start` short-drop (autocut.py строка 718) не проверяет min_sec.
-
+**Block 1 (finding #5 + #6-start):** t0=100.0, t1=125.0, refs="1.1-2"
 ```
-context_later (строки 749):
+S1.1: "Уйти."     100.0–102.0  (1 слово; stands_alone → "обрывок (1 сл.)")
+      gap 0.4s (> sentence_pause_sec=0.35 → граница предложения;
+                < min_pause_for_phrase_end=1.5 → тот же блок)
+S1.2: "Принятие тревоги снижает интенсивность переживаний навсегда."
+                   102.4–125.0  (6 слов; stands_alone → None)
+```
+
+**Block 2 (finding #6-end):** t0=200.0, t1=232.0, refs="2.1-2"
+```
+S2.1: "Принятие тревоги снижает интенсивность переживаний."
+                   200.0–228.0  (5 слов; prosody t0=205.0, end_pct=15 → "final")
+      gap 1.0s (< min_pause_for_phrase_end=1.5 → тот же блок)
+S2.2: "Завтра."   229.0–232.0  (1 слово; prosody t0=229.0, end_pct=75 → "open")
+```
+
+**Tail block (340-360s):** midpoint=350 > 360-30=330 → tail-filtered → total_duration=360.0
+
+Tail-filter для block 1 midpoint=112.5 < 330 → kept ✓  
+Tail-filter для block 2 midpoint=216.0 < 330 → kept ✓
+
+---
+
+## §4 Находка #5 — CONFIRMED via CLI
+
+**Доказательство:**
+```
+context_start spy (вызван из cmd_autocut):
+  unit_id=1
+  refs_before='1.1-2', refs_after='1.2'
+  t0_before=100.0, t0_after=102.0
+  dur_before=25.0, dur_after=23.0
+
+dur_after=23.0 < min_sec=25.0 — no min_sec recheck in short-drop (autocut.py:718)
+propose() испустил Proposal(refs='1.2', seconds=23.0) [stdout: M1 90@1.05 | 1.2]
+
+Для сравнения — ветка context_later (строка 749) имеет guard:
   if left < p.context_later_min_sec or sum(_dur(c) for c in clip) - (total - left) < p.min_sec:
       break  ← есть проверка min_sec
+context_later=False в production config → эта ветка выключена.
+```
 
-short-drop (строка 718):
+---
+
+## §5 Находка #6 (начало) — CONFIRMED via CLI
+
+**Доказательство:**
+```
+context_start spy:
+  t0_after=102.0 (конец S1.1 "Уйти.")
+  S1.2 первое слово "Принятие" начинается в 102.4s
+  drift = 102.4 - 102.0 = 0.4s
+
+Строка 718 (autocut.py):
   clip = [{**u, "refs": refs, "t0": float(u["t0"]) + float(rows[0][1])}] + clip[1:]
-           ↑ нет проверки нового _dur против min_sec
-```
-
-**Синтетический сценарий:**
-```
-Мысль: id=1, t0=0.0, t1=25.0, _dur=25.0 = min_sec (проходит initial gate)
-  1.1: sec=2.0, 1 слово "Уйти." → stands_alone → "обрывок (1 сл.)"
-       nwords=1 ≤ context_drop_words=5 → short-drop применяется
-  1.2: sec=23.0, 6 слов → stands_alone → None (проходит)
-
-После short-drop:
-  clip[0].t0 = 0.0 + 2.0 = 2.0
-  clip[0].t1 = 25.0 (не изменился)
-  _dur(clip[0]) = 23.0 < min_sec=25.0 — no check!
-
-propose(): secs = 23.0 → Proposal(seconds=23.0) испущен
-  "M1 88 | 1.2 | t: ... | seconds=23.0"
-```
-
-**Ключевые параметры:**
-- `refs` до: `"1.1-2"` → после: `"1.2"` (_drop_first_ref)
-- `seconds` в предложении: **23.0** при `min_sec=25.0`
-- `no_start` список: **пуст** (клип не отброшен)
-
----
-
-## §4 Находка #6 (конец) — CONFIRMED
-
-**Механизм:** `fix_open_end` вычитает только длительность предложения из `t1`, не включая паузу перед ним.
-
-```python
-# autocut.py строки 639-647:
-for k in range(len(rows) - 1, 0, -1):
-    cut += float(rows[k][1] or 0.0)   # ← только sec предложения
-    if total - cut < p.min_sec:
-        break
-    ...
-    new_last = {**last, "refs": refs, "t1": float(last["t1"]) - cut}
-```
-
-**Синтетический сценарий:**
-```
-Мысль: id=1, t0=0.0, t1=31.0
-  1.1: sec=24.0, аудио 0–24s → end_tone "final"
-  [пауза 4s: 24–28s — не отражена в sec]
-  1.2: sec=3.0, аудио 28–31s → end_tone "open" («→»)
-
-fix_open_end:
-  total = 31.0, cut += 3.0 = 3.0
-  total - cut = 28.0 ≥ min_sec=25.0 → guard проходит
-  new_last.t1 = 31.0 - 3.0 = 28.0
-
-Фактическое последнее слово 1.1: 24.0s
-Дрейф: 28.0 - 24.0 = 4.0s тишины включено в t1
-```
-
-**Итог:** Манифест заявляет `t1=28.0`, но слышимое аудио заканчивается в `24.0s`. Клип включает 4s пост-речевой тишины (пауза перед отброшенным 1.2).
-
----
-
-## §5 Находка #6 (начало) — CONFIRMED
-
-**Механизм:** `context_start` short-drop прибавляет только `rows[0][1]` (длительность первого предложения) к `t0`, не учитывая паузу до следующего.
-
-**Синтетический сценарий:**
-```
-Мысль: id=1, t0=0.0, t1=29.0
-  1.1: sec=2.0, аудио 0–2s → stands_alone → "обрывок"
-  [пауза 4s: 2–6s — не отражена в sec]
-  1.2: sec=23.0, аудио 6–29s → stands_alone → None
-
-Строка 718:
-  clip[0].t0 = 0.0 + rows[0][1] = 0.0 + 2.0 = 2.0
-
-Фактическое начало 1.2: 6.0s
-Дрейф: 6.0 - 2.0 = 4.0s — первые 4s клипа содержат только тишину
+           ↑ t0 += rows[0][1] = sec("Уйти.") = 2.0 (только длительность предложения)
+  Пауза 102.0→102.4 не включена → клип начинается с 0.4s тишины
 ```
 
 ---
 
-## §6 Комбинированный сценарий (#5 + #6 вместе)
+## §6 Находка #6 (конец) — CONFIRMED via CLI
 
-При достаточно длинной паузе оба дефекта проявляются одновременно:
-
+**Доказательство:**
 ```
-Мысль: t0=0.0, t1=26.0 (только что ≥ min_sec=25.0)
-  1.1: sec=2.0 (аудио 0–2s)
-  [пауза 4s: 2–6s]
-  1.2: sec=20.0 (аудио 6–26s)
+fix_open_end spy (вызван из cmd_autocut):
+  unit_id=2
+  refs_before='2.1-2', refs_after='2.1'
+  t1_before=232.0, t1_after=229.0
 
-После short-drop:
-  t0=2.0 (дрейф 4s, аудио с 6s)       ← FINDING #6 start
-  _dur = 24.0 < min_sec=25.0           ← FINDING #5 (no recheck)
+Механизм:
+  end_tone("2.2") = "open" (prosody: t0=229.0, end_pct=75 ≥ 60)
+  end_tone("2.1") = "final" (prosody: t0=205.0, end_pct=15 ≤ 30)
+  cut = sec("Завтра.") = 232.0 - 229.0 = 3.0 (только длительность предложения)
+  total - cut = 32.0 - 3.0 = 29.0 ≥ min_sec=25.0 → guard проходит
+  new_last.t1 = 232.0 - 3.0 = 229.0
 
-propose(): seconds=24.0 при min_sec=25.0 → испущен
+Фактическое последнее слово S2.1 ("переживаний.") заканчивается в 228.0s.
+Дрейф: 229.0 - 228.0 = 1.0s тишины включено в t1 (пауза 228.0→229.0 перед S2.2).
+
+Строка 640 (autocut.py):
+  cut += float(rows[k][1] or 0.0)   # только sec предложения, не пауза до него
+  new_last = {**last, "refs": refs, "t1": float(last["t1"]) - cut}
 ```
 
 ---
@@ -192,8 +179,15 @@ propose(): seconds=24.0 при min_sec=25.0 → испущен
 ```bash
 cd /path/to/autoreels-m223
 .venv/bin/python handoff/m224/REPRO.py
-# → PASS: 44 проверок, 0 сбоев
+# → PASS: 40 проверок, 0 сбоев
 echo $?  # → 0
+```
+
+**Вывод CLI:**
+```
+autocut synth: предложено сборок 2 из 2 мыслей → ...
+  M1 90@1.05 | 1.2 | ...    ← refs="1.2" (не "1.1-2"), dur=23s < min_sec
+  M2 89@1.05 | 2.1 | ...    ← refs="2.1" (не "2.1-2"), t1=229.0
 ```
 
 ---
@@ -202,16 +196,28 @@ echo $?  # → 0
 
 | Находка | Статус | Метод | Доказательство |
 |---|---|---|---|
-| #5 min_sec no-recheck | **CONFIRMED** | CLI-config + direct call + propose() | §1: seconds=23.0 при min_sec=25.0; no_start=[]; propose emits |
-| #6 end (fix_open_end) | **CONFIRMED** | CLI-config + direct call | §2: t1=28.0, last_word=24.0, drift=4.0s |
-| #6 start (context_start) | **CONFIRMED** | CLI-config + direct call | §3: t0=2.0, audio_start=6.0, drift=4.0s |
+| #5 min_sec no-recheck | **CONFIRMED** | CLI spy + HELPER_CONFIRMED | §4: dur_after=23.0 < min_sec=25.0; propose emits; spy intercepts real call |
+| #6 start (context_start) | **CONFIRMED** | CLI spy + HELPER_CONFIRMED | §5: t0=102.0, S1.2 starts at 102.4, drift=0.4s |
+| #6 end (fix_open_end) | **CONFIRMED** | CLI spy + prosody + HELPER_CONFIRMED | §6: t1=229.0, last S2.1 word ends at 228.0, drift=1.0s |
 
 ---
 
 ## §9 Целостность
 
 Производственный код не изменён. `manifests/`, `transcripts/`, `reviews/`, `reels-out/` — не затронуты.  
-Тесты не изменены.
+Тесты не изменены. `config/r0.yaml` скопирован, не изменён.
+
+---
+
+## §10 R2 vs R1
+
+| Критерий Sol QA | R1 | R2 |
+|---|---|---|
+| cmd_autocut вызван | ✗ Нет | ✓ Да (`llm="none"`) |
+| generator=mixed (production) | ✗ generator="passage" | ✓ Из CLI spy, generator='mixed' |
+| Временны́е метки из транскрипта | ✗ Хардкод | ✓ Реальные слова с метками |
+| Prosody для end_tone | ✗ Мок | ✓ synth.prosody.json загружен |
+| Прямые вызовы | только эти | HELPER_CONFIRMED (доп. к CLI) |
 
 ---
 
