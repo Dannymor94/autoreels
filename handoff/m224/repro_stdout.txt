@@ -1,0 +1,89 @@
+
+§0 — Production config (config/r0.yaml)
+
+  PASS [01] §0-a  r0.yaml loaded (autocut block present)
+  PASS [02] §0-b  min_sec=25
+  PASS [03] §0-c  context_start=True
+  PASS [04] §0-d  context_drop_words=5
+  PASS [05] §0-e  context_min_words=4
+  PASS [06] §0-f  context_later=False
+  PASS [07] §0-g  end_tone=True
+  PASS [08] §0-h  prm.min_sec=25
+  PASS [09] §0-i  prm.context_start=True
+  PASS [10] §0-j  prm.context_drop_words=5
+  PASS [11] §0-k  prm.context_min_words=4
+  PASS [12] §0-l  prm.context_later=False
+  PASS [13] §0-m  prm.end_tone=True
+
+§1 — Finding #5: min_sec not rechecked after context_start short-drop
+
+  PASS [14] §1-a  clip before context_start: _dur=25.0 ≥ min_sec=25
+  PASS [15] §1-b  context_start returned a clip (not None)
+  PASS [16] §1-c  new t0 = 0.0 + 2.0 = 2.0 (shifted by sentence-1 duration only)
+  PASS [17] §1-d  new t1 unchanged = 25.0
+  PASS [18] §1-e  new _dur = 23.0 < min_sec=25.0 (FINDING #5: no recheck)
+  PASS [19] §1-f  refs updated to '1.2' (first sentence dropped)
+  PASS [20] §1-g  context_start note confirms first sentence dropped
+  INFO  notes: ['начало: убрана фраза «Уйти.» (обрывок (1 сл.))']
+  PASS [21] §1-h  propose() emitted ≥ 1 clip despite _dur < min_sec after context_start
+  PASS [22] §1-i  emitted clip seconds = 23.0 (< min_sec=25.0 — CONFIRMED: no recheck)
+  PASS [23] §1-j  emitted clip units contains unit id=1
+  INFO  proposal: M1 88 | 1.2 | t: Принятие тревоги снижает её интенсивность. | d: Принятие тревоги снижает её интенсивность. | seconds=23.0
+  PASS [24] §1-k  no_start list is empty (clip was not rejected by context_start)
+
+§2 — Finding #6 (end case): fix_open_end includes pause gap in t1
+
+  PASS [25] §2-a  unit _dur=31.0, min_sec=25.0 → ≥ min_sec
+  PASS [26] §2-b  total_clip - cut = 31.0 - 3.0 = 28.0 ≥ min_sec=25.0 (guard passes)
+  PASS [27] §2-c  fix_open_end returned a clip (not None — min_sec guard passed)
+  PASS [28] §2-d  note is not None (sentence 1.2 was removed)
+  PASS [29] §2-e  new_last.t1 = 28.0 (31.0 - sec_1.2=3.0, pause NOT deducted)
+  PASS [30] §2-f  FINDING #6: drift = t1 - last_audible_word_end = 4.0 s (silence included)
+  PASS [31] §2-g  new refs end at 1.1 (sentence 1.2 removed)
+  INFO  t1 set to 28.0s; actual last audio ends at 24.0s; drift=4.0s of silence included in t1
+  INFO  note: конец: «Нас ждёт новый опыт постоянного роста.» звучит с продолжением («→») — клип кончается на 1.1 «ринятие тревоги снижает интенсивность переживаний.» (убрано фраз: 1)
+
+§3 — Finding #6 (start case): context_start t0 set to end-of-dropped-sentence, skips pause
+
+  PASS [32] §3-a  unit _dur=29.0 ≥ min_sec=25.0
+  PASS [33] §3-b  context_start returned a clip
+  PASS [34] §3-c  new t0 = 2.0 (end of sentence 1.1 duration only, pause not included)
+  PASS [35] §3-d  FINDING #6 (start): actual audio of 1.2 starts at 6.0s, t0=2.0 → drift=4.0s
+  PASS [36] §3-e  new _dur = 29.0 - 2.0 = 27.0 (passes min_sec=25.0 — no FINDING #5 here)
+  PASS [37] §3-f  refs updated to '1.2'
+  INFO  t0 set to 2.0s; actual 1.2 audio starts at 6.0s; drift=4.0s of silence attributed to clip start
+
+§4 — Combined: #5 + #6 (start): t0 drift AND resulting dur < min_sec
+
+  PASS [38] §4-a  pre-context _dur=26.0 ≥ min_sec=25.0 (passes initial build gate)
+  PASS [39] §4-b  context_start succeeded (clip returned)
+  PASS [40] §4-c  new t0=2.0 (end-of-sentence-1 only, pause 2–6s omitted)
+  PASS [41] §4-d  new _dur = 24.0 < min_sec=25.0 (FINDING #5 — no recheck)
+  PASS [42] §4-e  FINDING #6 start: actual 1.2 audio at 6.0s, t0=2.0 → 4.0s drift
+  INFO  combined: t0=2.0s (drift=4.0s) AND _dur=24.0s < min_sec=25.0
+  PASS [43] §4-f  propose() emits clip with dur<min_sec (finding #5 confirmed in propose path)
+  INFO  proposal seconds=24.0 (expected ~24.0, min_sec=25.0)
+  PASS [44] §4-g  emitted seconds ≈ 24.0 (< min_sec=25.0 — CONFIRMED in propose)
+
+§5 — Summary
+
+  config: config/r0.yaml (SHA256 efdef3adb0396e7e282553a8e3bfb0c690df015abdb8398cea1db5e642aeabba)
+  total check() calls: 44
+  failures: 0
+
+  Finding #5 (CONFIRMED via CLI-config path):
+    context_start short-drop (line 718): t0 += rows[0][1] = sentence duration only.
+    No min_sec recheck in short-drop branch (unlike context_later at line 749).
+    propose() emits clip with seconds < min_sec without rejection.
+
+  Finding #6 end (CONFIRMED via CLI-config path):
+    fix_open_end (line 640): cut += rows[k][1] = sentence duration only.
+    With pause between sentences: t1 set to end-of-dropped-sentence, not end-of-kept-sentence.
+    Example: 1.1 ends at 24s, pause 24–28s, 1.2 at 28–31s → new_last.t1=28.0 (4s drift).
+
+  Finding #6 start (CONFIRMED via CLI-config path):
+    context_start short-drop (line 718): t0 += rows[0][1] = sentence duration only.
+    With pause before next sentence: t0 set to end-of-dropped-sentence, not start-of-kept-sentence.
+    Example: 1.1 ends at 2s, pause 2–6s, 1.2 starts at 6s → new t0=2.0 (4s drift).
+
+PASS: 44 checks, 0 failures — three evidence items CONFIRMED.
