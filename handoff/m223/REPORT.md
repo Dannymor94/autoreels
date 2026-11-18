@@ -46,7 +46,7 @@ PUBLISHED_LOG_PATH_SHA256_AND_BLOB_SHA=см. §8 (published bytes pinned to HAND
 PRODUCTION_DIFF=нет (ни одного файла production не изменено)
 OWNER_ARTIFACT_PARITY=нет изменений manifests/transcripts/reviews/reels-out/
 WORKTREE_CLEAN=task/m223 (только handoff/m223/ изменён)
-BLOCKERS=нет
+BLOCKERS=production clause-impact and crossing-threshold evidence NOT_REPRODUCED (documented scope)
 ```
 
 ---
@@ -217,7 +217,7 @@ subprocess --check-config r0_bad.yaml (select=greedy):
 **R3 исправления по SOL-REVIEW-R3.md:**
 - `_autocut_check`: spy → real call (не mock); результат: synthetic PASS, late-rejection NOT_REPRODUCED
 - Same-callback counterfactual: `_real_propose([u2], prm, cli_sentences_cb, **kw0)` — viable ✓
-- After-threshold clause demo: §6-k/l — реальная потеря кандидата без forwarding
+- After-threshold clause demo: §6-k/l — **HELPER_ONLY** difference; actual CLI production impact NOT_REPRODUCED
 - §5 первый звук: с teaser = h:2.1; без teaser = h:1.2 (хук, не тело 1.1)
 - CHECK_COUNTER: 33 (точный счёт)
 - §6-g2/g3/g4: span, dur, score точно утверждены
@@ -227,7 +227,7 @@ subprocess --check-config r0_bad.yaml (select=greedy):
 ```bash
 cd /path/to/autoreels-m223
 .venv/bin/python handoff/m223/CLI_REPRO.py
-# → PASS: 33 проверок, три находки CONFIRMED/NOT_REPRODUCED по CLI.
+# → exit 0: 33 проверки стенда; объём доказательств строго ограничен статусами выше.
 echo $?   # → 0
 ```
 
@@ -239,7 +239,7 @@ echo $?   # → 0
 |---|---|---|---|
 | #1 P1 | **SEED CONFIRMED; LATE REJECTION NOT_REPRODUCED** | dynamic + CLI + real spy | pool=2, select_global вызван; u1+u2 merged; u2-alone viable (same cbs); real check spy; u2-alone не в пуле (used_seeds) |
 | #2 P1 | **CONFIRMED** | dynamic + CLI + static | CLI prm.answer_start=True; h:2.1 teaser, h:1.2 no-teaser; тело 1.1 принято; stands_alone ≠ answer_start_reason |
-| #3 P1 | **FORWARDING CONFIRMED; IMPACT HELPER_ONLY** | dynamic + CLI + static | 6× _hook_cands(clauses=None); align.json загружен; clause (4,7) реально найдена; §6-k/l: candidate loss from missing forwarding |
+| #3 P1 | **FORWARDING CONFIRMED; IMPACT HELPER_ONLY** | dynamic + CLI + static | 6× _hook_cands(clauses=None); align.json загружен; clause (4,7) реально найдена; §6-k/l: candidate difference demonstrated only with demo callback, production impact NOT_REPRODUCED |
 
 Выход `CLI_REPRO.py`: `exit 0`, 33 `check()` вызовов пройдено. Ограниченные доказательства §4/§6 остаются.
 
