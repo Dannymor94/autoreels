@@ -94,14 +94,27 @@ def sentences_loop(refs):
     return []
 ```
 
-**Assertions (fail-before):**
+**Baseline oracle (SPECIFIED — FX-2 NOT EXECUTED; M223 mechanism CLI-confirmed separately):**
 ```python
-# Body opener: context_start может принять, несмотря на "не стоит alone" — наблюдено M223
-# Pass-after (pending M230): context_start REJECTED with reason
-assert clip_A_result is None or reason_A == "body_opener"
-# Question-loop: НЕ блокируется
-assert clip_B_result is not None  # question-first loop preserved
+# Config exactly as M223 bounded CLI: context_start=True, start_strict=True,
+# answer_start=True, start_morph=True, generator="mixed".
+# Original M223 CLI: body sentence 1.1 "Да, тревога..." remained in clip,
+# although answer_start_reason() rejected it; the first planned audio was HOOK
+# 2.1 (teaser on) or 1.2 (teaser off), never the body opener 1.1.
+# For this new synthetic FX-2, baseline expected stands_alone to omit
+# answer_start_reason; assert only after a real replay.
+assert baseline_body_1_1_retained  # EXPECTED, NOT_EXECUTED on FX-2
 ```
+
+**Pass-after oracle (PENDING M230 architecture; NOT EXECUTED):**
+```python
+# Strict body-opener policy rejects/trims unsupported answer-start in BODY.
+assert not fixed_body_1_1_retained or fixed_rejection_reason == "body_opener"
+# Legitimate question-first loop is protected, regardless of body opener policy.
+assert fixed_question_first_loop_accepted
+```
+
+**Feature-off parity (PENDING):** `context_start=false` keeps the previous path; no unrelated changes.
 
 ---
 
