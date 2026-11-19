@@ -1,0 +1,2 @@
+  warning: нет карты речи и выравнивания для synthetic_m226 — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/synthetic_m226.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align synthetic_m226 && arl prosody synthetic_m226

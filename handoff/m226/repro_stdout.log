@@ -1,0 +1,140 @@
+PRODUCTION_DIFF=none
+SOURCE_SHA=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+repo=/private/tmp/m225/repo
+
+============================================================
+§1 PREFLIGHT — cmd_autocut on synthetic data
+============================================================
+  сборок: до 5 (источник 2 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers synthetic_m226) — реплики ведущего не различаются
+  пул: 1 сборок < 15 — добавлено 0 вокруг мыслей силы 3
+autocut synthetic_m226: предложено сборок 1 из 2 мыслей → /var/folders/17/8l12gn251q7_cq1mwz951j1w0000gn/T/tmp494ra8ii/reviews/synthetic_m226_auto_m56.txt
+  M1 88 | 1.1-2 | c:1.2 | t: Synthetic conclusion. | d: Synthetic conclusion.
+  rc=0
+  PASS  cmd_autocut returns rc=0
+  PASS  review file written by cmd_autocut
+  review file content (809 chars):
+    # AutoReels block review — DRAFT by arl autocut (M56: montage lines from the map)
+    # source: manifests/synthetic_m226.json
+    # blocks: 1  |  filter_removed: 1
+    # fingerprint: cec9bad0fef7a11e
+    # format: compact
+    # map: transcripts/synthetic_m226.map.json (2 thoughts). Every line is a proposal.
+    #   plan only:  arl blocks --apply reviews/synthetic_m226_auto_m56.txt --labeler auto
+    
+    # --- M1: 40 с, мыслей 1
+    #   #1 conclusion★5 1.1-2 — Synthetic conclusion.
+    #   начало: «P0 P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20 P21 P2»
+    #   крючок: во второй части клипа (с 50%) нет фразы для тизера — сборка без крючка (фраз там 0; с 33% клипа нашлось бы 0)
+    #   без крючка — взята, когда сборки с крючком кончились (M107)
+    M1 88 | 1.1-2 | c:1.2 | t: Synthetic conclusion. | d: Synthetic conclusion.
+    
+  PASS  at least 1 accepted line (['M1 88 | 1.1-2 | c:1.2 | t: Synthetic conclusion. | d: Synthetic conclusion.'])
+
+  review SHA256=95350aa04a173a9c1d81d767c04c6e29a035905c6b1fe5f908c165cf7c1ff60f
+  PREFLIGHT_SHA256=95350aa04a173a9c1d81d767c04c6e29a035905c6b1fe5f908c165cf7c1ff60f
+
+============================================================
+F4 — select_global: strong-but-conflicting vs two weaker-compatible
+============================================================
+  select_global([95,60,60], A_conflicts_BC, k=2) → indices [1, 2]
+  PASS  select_global picks B+C (indices [1,2]) over A alone
+  PASS  B+C score 120.0 > A score 95.0
+  B+C total=120.0 > A total=95.0 ✓ (global optimum)
+
+  too_close(A, [B], max_shared=0) = 'то же начало, что у M1 (#1)'
+  too_close(A, [C], max_shared=0) = 'общие мысли с M1: #2'
+  too_close(B, [C], max_shared=0) = None
+  PASS  A conflicts with B (shared opener #1 + unit #1)
+  PASS  A conflicts with C (shared unit #2)
+  PASS  B and C are compatible (no shared units/opener)
+
+  FINDING F4:
+    select_global=SELECTOR_HELPER_CONFIRMED
+    A(95) is globally suboptimal; B+C(120) wins.  select_global returns [1,2].
+    too_close confirms A vs B: shared unit #1 → conflict at max_shared=0.
+    LATE_REJECTION_NOT_REPRODUCED: verifying C via _autocut_check requires
+    real audio for subtitle timing checks (no portable synthetic path).
+
+============================================================
+F9 — build_passage early stops
+============================================================
+
+============================================================
+  F9A — preferred nxt overshoots max_sec; prv (which fits) is never tried
+============================================================
+  nxt_a dur=50s (45+50=95 > max_sec=90.0)
+  prv_a dur=25s (45+25=70 ≤ max_sec=90.0)
+  result_a ids = [1]
+  PASS  F9A: build_passage returns a result (seed alone)
+  PASS  F9A: only seed returned (prv missed)
+  control (nxt=25s): result ids = [1, 2]
+  PASS  F9A control: nxt included when it fits
+
+  FINDING F9A:
+    When preferred nxt exceeds max_sec, algorithm breaks without trying prv.
+    autocut.py line ~404: `if total + _dur(pick) > p.max_sec: break`
+    prv (which fits: 45+25=70 ≤ 90) is never attempted.
+    STATUS: HELPER_CONFIRMED
+
+============================================================
+  F9B — question added at target_sec; pruned post-loop; answer unreachable
+============================================================
+  seed=45s, question=13s → total_with_q=58s ≥ target_sec=55.0
+  answer_b dur=15s is adjacent (id=3 = question_id+1)
+  result_b ids = [1]
+  PASS  F9B: returns seed alone (not None)
+  PASS  F9B: only seed; question pruned, answer not reached
+  control (nxt=answer, 15s): result ids = [1, 2]
+  PASS  F9B control: answer included when question absent
+
+  FINDING F9B:
+    Loop exits when total≥target_sec (after adding question: 45+13=58≥55).
+    Post-loop pruning drops the question at run[-1].
+    The answer (id=3, would have extended the clip) was never visited.
+    After pruning, loop is not re-entered — available room not reconsidered.
+    STATUS: HELPER_CONFIRMED
+
+============================================================
+F12 — select_global tie-break determinism
+============================================================
+  10× select_global([70,70,70], no_conflict, k=2) → [0, 1]
+  all equal: True
+  PASS  F12: identical input produces identical result every call
+
+  conflict=(0↔1,1↔2): select_global([70,70,70], k=2) → [0, 2]
+  PASS  best set is [0,2] (A+C=140, B incompatible with both)
+
+  select_global([60,60,60], no_conflict, k=2)         → [0, 1]
+  select_global([60,60,60] reversed, no_conflict, k=2) → [0, 1]
+  (reversed indices: a pick of [0,1] in reversed == original [1,2])
+  PASS  F12: call 1 matches first result [0, 1]
+  PASS  F12: call 2 matches first result [0, 1]
+  PASS  F12: call 3 matches first result [0, 1]
+  PASS  F12: call 4 matches first result [0, 1]
+  PASS  F12: call 5 matches first result [0, 1]
+  PASS  F12: call 6 matches first result [0, 1]
+  PASS  F12: call 7 matches first result [0, 1]
+  PASS  F12: call 8 matches first result [0, 1]
+  PASS  F12: call 9 matches first result [0, 1]
+  PASS  F12: call 10 matches first result [0, 1]
+
+  FINDING F12:
+    DETERMINISTIC_SAME_INPUT: identical weights+conflict produces byte-for-byte
+    identical result on every call (branch-and-bound is deterministic).
+    ORDER_SENSITIVE: equal-weight inputs with same graph structure but permuted
+    index order may produce different chosen sets (the algorithm walks in
+    descending-weight order; ties broken by earlier index).
+    STATUS: HELPER_CONFIRMED, DETERMINISTIC_SAME_INPUT, ORDER_SENSITIVE
+
+============================================================
+SUMMARY
+============================================================
+  §1 PREFLIGHT       : CLI_CONFIRMED (cmd_autocut rc=0, review written)
+  F4 select_global   : SELECTOR_HELPER_CONFIRMED; LATE_REJECTION_NOT_REPRODUCED
+  F9A build_passage  : HELPER_CONFIRMED (prv missed when nxt overshoots)
+  F9B build_passage  : HELPER_CONFIRMED (answer missed after question pruned)
+  F12 determinism    : HELPER_CONFIRMED; DETERMINISTIC_SAME_INPUT; ORDER_SENSITIVE
+
+All checks passed.
