@@ -190,10 +190,9 @@ Sol M228 PASS + явный GO-координатора
         ├─► M230 (Arch review — ДО ЛЮБОГО propose body/signature кода)
         │     ├── Covers: #1, #2, #3, #5, #7, #8a, #8b, #9a, #9b
         │     ├── Owner approval semantic decisions
-        │     └─► M231 (Implementation FIX_NOW + observability-only)
-        │           ├── FIX_NOW impl: #1, #2, #3, #5, #7, #8a, #8b, #9a, #9b
-        │           ├── Observability: counters #11, delta-log #6 (synthetic only)
-        │           └─► M232 (Post-instr. fixes #4; arch-confirmed #6)
+        │     └─► M231 (Observability ONLY: counters #11, delta-log #6)
+        │           └─► Sol M231 PASS + recorded coordinator GO
+        │                 └─► M232 (separately gated FIX_NOW impl; conditional #4/#6 fixes)
         │                 └─► M233 (Regression suite)
         │                       └─► M236 (Final QA + merge)
         │                             └─► M237 (A/B, отд. разрешение)
@@ -201,7 +200,7 @@ Sol M228 PASS + явный GO-координатора
 ```
 
 **Правило:** никакой `propose` body/signature code до M230 arch review.  
-Код M231 только после M230 approval + явного coordinator GO для каждого пакета изменений.
+Код M232 только после M230 arch approval, независимого Sol M231 PASS и отдельного явного coordinator GO для каждого source-changing пакета. M231 — исключительно additive observability.
 
 ---
 
