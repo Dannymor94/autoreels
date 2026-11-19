@@ -46,9 +46,9 @@
 | **Функция** | `propose()` → `context_start()` · `autocut.py:1208–1231`; `context_start:676` |
 | **Уровень доказательства** | CLI_CONFIRMED (bounded synthetic CLI, M223) · M223 Sol R5 `9bb5667386b70ac93f041b8abb9f22359dbca286` |
 | **Отличие от user impact** | Доказан в synthetic CLI-пути; реальный audio impact NOT_REPRODUCED |
-| **Config keys** | `context_start=true`, `min_punch=3`, `generator=mixed` |
-| **Синтетические единицы** | clip=[u1(role=thesis), u2(role=conclusion)]; sentences: u1.refs="1.1" → [("1.1", 25.0, 10, True, "Да, конечно.")]  (body opener — не стоит самостоятельно); u2.refs="2.1" → [("2.1", 4.0, 6, True, "Главная мысль здесь.")] |
-| **Fail-before** | context_start возвращает clip с body opener «Да, конечно.»; stands_alone не блокирует — наблюдено как первый планируемый звук body opener в принятом M223 |
+| **Config keys** | `context_start=true`, `min_punch=3`, `generator=mixed`, `start_strict=true`, `answer_start=true`, `start_morph=true`; M223 bounded CLI used this strict triplet |
+| **Синтетические единицы** | FX-2 is a new NOT_EXECUTED blueprint: clip A u1.refs="1.1-3" → [("1.1",3.0,...,"Да, конечно."), ("1.2",11.0,...), ("1.3",11.0,...)]; negative clip B question-first. The *accepted M223 CLI witness* used body 1.1 "Да, тревога..." and a hook 2.1 (teaser on) or 1.2 (teaser off); do not equate the proposed FX-2 callback with the executed M223 witness. |
+| **Fail-before** | M223 bounded CLI observed body 1.1 "Да, тревога..." retained despite strict flags and answer_start_reason rejecting it: stands_alone checks back_reference but not answer_start_reason. The FIRST planned audible item was hook 2.1 (teaser on) or hook 1.2 (teaser off), **not** the body opener. FX-2 replay remains SPECIFIED_NOT_EXECUTED. |
 | **Pass-after** | (Pending M230) context_start отклоняет body opener; clip начинается с независимой фразы или отклонён |
 | **Негативный тест** | Supported question-led loop НЕ должен блокироваться: clip=[q(role=question), u(role=conclusion)], q.refs→question sentence → passes context_start |
 | **Feature-off parity** | `context_start=false` → no change |
@@ -88,7 +88,7 @@
 | **Уровень доказательства** | CLI_HELPER_BOUNDARY (M224 R2) · `d18627fb0fff56c4735b3c0462b1796337989715`, erratum `78511b42887b5be7070b8241d30e6d7556e20568` |
 | **Отличие от user impact** | 25→23 s наблюдено при реальном `cmd_autocut, generator=mixed`; итоговые `Proposal.seconds` и рендер NOT_VERIFIED |
 | **Config keys** | `min_sec=25`, `context_start=true`, `generator=mixed` |
-| **Синтетические единицы** | clip=[u1(t0=100, t1=125, refs="1.1-5")]; sentences: "1.1"→(sec=10, complete, standalone=False), "1.2"→(sec=15, complete, standalone=True); context_start drops sentence 1.1 → clip.t0=100+10=110 → dur=25-10=15 < 25; или более точная фикстура из M224 |
+| **Синтетические единицы** | FX-5 blueprint (NOT_EXECUTED): u1 [100,125] refs="1.1-2"; sentence 1.1 length=2.0s, context_drop_words=5, 1.2 length=23.0s; after dropping 1.1: t0=102, duration 25→23. Accepted M224 bounded CLI-helper observed 25→23; exact newly specified FX-5 has not been replayed. |
 | **Fail-before** | context_start возвращает clip с dur=23.0 < min_sec=25.0; check после context_start отсутствует; наблюдено в M224 CLI-helper boundary |
 | **Pass-after** | (Pending M230) После context_start: re-check `dur >= min_sec`; если нет — REJECTED с reason `dur_below_min_sec` |
 | **Негативный тест** | Если context_start удаляет фразу и dur ≥ min_sec → NOT rejected (правильно пропускает) |
@@ -207,8 +207,8 @@
 | TC-3 | propose→_hook_cands | 1281; main:8818 | CLI_HB+STATIC | STATIC (sig) | Pending M230 | Да (clause rescue) |
 | TC-5 | propose→context_start | 1209; cs:699+ | CLI_HB | Наблюдено (M224) | Pending M230 | Да (re-check location) |
 | TC-7 | propose→fit_rhythm | 1200; fr:331 | HELPER | Наблюдено (M225) | Pending M230 | Да (refers validator) |
-| TC-8a | build_passage/propose | 408; p:1177 | HELPER | Наблюдено (M225) | Pending M230 | Да (trim vs reject) |
-| TC-8b | propose→fit_rhythm | 1200; fr:333 | HELPER | Наблюдено (M225) | Pending M230 | Да (neighbor contract) |
+| TC-8a | propose→fit_rhythm | 1200; fr:297–326 | HELPER | Наблюдено (M225) | Pending M230 | Да (question-last repair) |
+| TC-8b | propose→fix_open_end→rhythm_why | 1239; fo:625; ry:273/1250 | HELPER | Наблюдено (M225, rhythm_out logged) | Pending M230 | Да (post-trim recovery) |
 | TC-9a | build_passage | 405 | HELPER | Наблюдено (M226) | Pending M230 | Да (break vs continue) |
 | TC-9b | build_passage | 408–413 | HELPER | Наблюдено (M226) | Pending M230 | Да (answer extension) |
 
