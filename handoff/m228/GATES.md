@@ -65,9 +65,9 @@
 
 ---
 
-### M231 — Observability-only (#4, #6, #11) + Implementation FIX_NOW
+### M231 — Observability-only (#4, #6, #11); no behavior changes
 
-**Задача часть A — observability (только additive counters, без мутаций алгоритма):**
+**Задача — observability (только additive counters, без мутаций алгоритма):**
 - Per-stage счётчики: eligible/attempted/none_reasons/pool_added/selected/accepted.
 - t0/t1 delta-лог (только вывод, не rejection): `{"t0_delta": 0.4, "t1_delta": 1.0}`.
 - Вывод JSON-line в stderr.
@@ -80,30 +80,37 @@
 - Post-select fallback (#4) — только counter.
 - t0/t1 rejection validator (#6) — только delta-лог.
 
-**Задача часть B — реализация FIX_NOW (условие: M230 arch approval получен):**
-- #1, #2, #3, #5, #7, #8a, #8b, #9a + (если одобрено arch) #9b.
-- Каждый с fail-before/pass-after тестом.
-- Feature-off parity для новых параметров.
-- Реализация только одобренных в M230 designs.
-
-**Критерий SUCCESS M231:** synthetic тест демонстрирует per-stage счётчики; failing regression pass-after каждого FIX_NOW. Нет требования на owner-видео.  
-**Senior QA:** Sol 6.1 review на synthetic outputs.
+**Критерий SUCCESS M231:** synthetic тесты демонстрируют per-stage счётчики и t0/t1 delta-лог, при этом output/selection/acceptance сохраняют baseline parity. Нет требования на owner-видео; no algorithm mutation, no render, no paid API.  
+**Senior QA:** независимый Sol 6.1 review наблюдательного пакета. **Отдельный coordinator GO** после PASS M231 требуется перед M232. FIX_NOW pass-after не является критерием M231.
 
 ---
 
-### M232 — Пост-M231 behavior fixes (#4 fallback, #6 boundary)
+### M232 — Post-M231 implementation packages (отдельный code gate)
 
-**Условие запуска:** M231 instrumentation показывает реальный failing case на синтетике.  
-**#4:** post-select fallback реализация (если M231 counter показывает gap).  
-**#6:** t0/t1 boundary enforcement (если M231 delta-лог показывает реальный mismatch).  
-**Feature flags:** `fix_select_fallback=false` по умолчанию; `fix_timing_boundary=false`.
+**Предусловия:** Sol M228 PASS_SCOPED + coordinator GO for preparation; Sol M230 arch review PASS + owner semantic decisions (если применимы); Sol M231 observational PASS + отдельный recorded coordinator GO для каждого code package. **M231 сам не содержит алгоритмических исправлений.**
+
+**Пакет M232-A — FIX_NOW после архитектуры (#1, #2, #3, #5, #7, #8a, #8b, #9a, #9b):**
+- Только конкретные, одобренные в M230 исправления; защищены question-led loop, overlap/dedup, manual selection и feature-off parity.
+- Для каждого дефекта: frozen helper/CLI scope, deterministic fail-before / pass-after test, boundary-level QA; недоказанная возможность repair #8b не превращается в обещание.
+- Изменения `propose` body/signature/callees допускаются только по отдельному exact-path permission и coordinator GO **после** M230.
+- Независимый Sol QA перед merge каждого source-changing пакета.
+
+**Условный пакет M232-B — post-instrument fixes (#4 fallback, #6 timing):**
+- Запускать только если M231 instrumentation на безопасных synthetic fixtures показала соответствующее нарушение и Sol подтверждает её достаточность.
+- #4 post-select fallback и #6 boundary enforcement — отдельные gated changes, не часть observability.
+- Новый механизм выключен по умолчанию: `fix_select_fallback=false`, `fix_timing_boundary=false` до отдельного разрешения и A/B.
+
+**Другие отложенные изменения:** `teaser_misses` signatures, weak-seed `no_start/open_end` wiring и `rhythm_out` сохраняются в отдельном post-M230 approval scope; не добавлять под видом метрик.
+
+**CI gates:** существующий baseline suite PASS; новые defect regression fail-before/pass-after, негативные fail-closed tests PASS; без real owner media, моделей и рендера.  
+**Senior QA:** Sol 6.1 + recorded coordinator decision для каждого source-changing пакета.
 
 ---
 
 ### M233 — Regression suite hardening
 
 **Задача:** формализовать M229-M231 тесты в CI, добавить edge cases.  
-**CI gates:** все тесты проходят на base_sha; ни один не обращается к owner-data; negatives PASS.
+**CI gates:** существующий suite PASS на нетронутом base_sha; новые дефектные регрессии FAIL-before на baseline и PASS-after на исправленном SHA; ожидаемые fail-closed negative tests PASS; owner-data не используются.
 
 ---
 
@@ -168,9 +175,9 @@ Sol M228 PASS + явный coordinator GO
         └─► M230 (Arch review ВСЕХ FIX_NOW)
               ├── owner approval semantic decisions
               └─► Sol M230 PASS + явный coordinator GO
-                    └─► M231 (observability + FIX_NOW impl)
-                          └─► Sol M231 PASS
-                                └─► M232 (post-instr. fixes)
+                    └─► M231 (observability ONLY)
+                          └─► Sol M231 PASS + recorded coordinator GO
+                                └─► M232 (separately gated FIX_NOW + conditional #4/#6)
                                       └─► M233 (regression)
                                             └─► M236 (final QA)
                                                   └─► M237 (A/B, отд. разрешение)
