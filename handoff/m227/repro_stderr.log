@@ -1,0 +1,2 @@
+  warning: нет карты речи и выравнивания для syn_m227 — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/syn_m227.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align syn_m227 && arl prosody syn_m227

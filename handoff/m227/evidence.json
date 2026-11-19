@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "task": "M227",
+  "base_sha": "3c011e94263e16e5780936b4769d3490cd03b682",
+  "artifacts": [
+    {"path": "repro_stdout.log", "sha256": "e9a7bdf64d4984f87a7267a585e41429160c5394cd4bc8217ecdb9e57e6faf08"},
+    {"path": "repro_stderr.log", "sha256": "dc36f1c8d97fd0680af6d12348507badf832426514e43fc79ac5a52bb4bf64c6"},
+    {"path": "repro.exit",       "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"}
+  ],
+  "runs": [
+    {
+      "name": "repro",
+      "expected_exit": 0,
+      "stdout": "repro_stdout.log",
+      "stderr": "repro_stderr.log",
+      "exit_file": "repro.exit",
+      "checks": 27
+    }
+  ],
+  "claims": [
+    {
+      "id": "finding11-part1-static-gates",
+      "level": "STATIC",
+      "status": "CONFIRMED",
+      "evidence": ["repro_stdout.log"]
+    },
+    {
+      "id": "finding11-part2-map-b-gap",
+      "level": "CLI",
+      "status": "CONFIRMED",
+      "evidence": ["repro_stdout.log"]
+    },
+    {
+      "id": "finding11-part2-weak-seed-static",
+      "level": "STATIC",
+      "status": "CONFIRMED",
+      "evidence": ["repro_stdout.log"]
+    },
+    {
+      "id": "finding11-part3-teaser-misses-discrepancy",
+      "level": "HELPER",
+      "status": "CONFIRMED",
+      "evidence": ["repro_stdout.log"]
+    },
+    {
+      "id": "finding11-part3-signature-gap",
+      "level": "STATIC",
+      "status": "CONFIRMED",
+      "evidence": ["repro_stdout.log"]
+    }
+  ]
+}

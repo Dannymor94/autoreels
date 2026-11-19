@@ -1,0 +1,196 @@
+PRODUCTION_DIFF=none
+SOURCE_SHA=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+BASE_SHA=3c011e94263e16e5780936b4769d3490cd03b682
+repo=/private/tmp/m225/repo
+
+============================================================
+§0 PREFLIGHT — cmd_autocut on synthetic data (M226 fixture)
+============================================================
+  сборок: до 5 (источник 3 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers syn_m227) — реплики ведущего не различаются
+  пул: 1 сборок < 15 — добавлено 0 вокруг мыслей силы 3
+autocut syn_m227: предложено сборок 1 из 2 мыслей → /var/folders/17/8l12gn251q7_cq1mwz951j1w0000gn/T/tmp46uyryd2/reviews/syn_m227_auto_m56.txt
+  M1 88 | 1.1-2 | c:1.2 | t: Synthetic conclusion. | d: Synthetic conclusion.
+  PASS [01]  cmd_autocut returns rc=0
+  PASS [02]  review file written
+  PASS [03]  at least 1 accepted line (['M1 88 | 1.1-2 | c:1.2 | t: Synthetic conclusion. | d: Synthetic conclusion.'])
+  review SHA256=d91605b99d90d191a85698a03a063d255d041abe2b0215cecbcd451a3a3cf0c3
+
+============================================================
+§1 PART 1 — Static gate inventory (STATIC_ONLY)
+============================================================
+
+  Pre-pool gates (invisible in CLI output unless noted):
+  ┌─────────────────────────┬──────────────────────────────────────┬─────────────────────────────┐
+  │ Location                │ Condition                            │ Owner sees                  │
+  ├─────────────────────────┼──────────────────────────────────────┼─────────────────────────────┤
+  │ eligible:164-169        │ punch<min_punch; aside; no refs;     │ unit absent; no counter     │
+  │                         │ filtered; role not in seed_roles     │                             │
+  │ seeds filter:1168-1170  │ punch < seed_punch                   │ absent; no counter          │
+  │ build_clip/passage None │ too short; no eligible neighbours;   │ absent; no counter          │
+  │   :231-247, :407-413    │ question at end; below min_sec       │                             │
+  │ propose loop:1175-1179  │ seed in used_seeds or taken          │ absent; no counter          │
+  │ _loop_question:1101-109 │ best q too long; shorter q not tried │ no loop; no counter         │
+  │ add_payoff:350-355      │ payoff weak/too far/external lean    │ no payoff; no counter       │
+  │ overlap check:1257-1261 │ shared last unit; too many shared    │ absent; no counter          │
+  │ pool truncation:1309-10 │ candidates > clips*check_pool        │ "not reached" in pool output│
+  │ fill_pool:1321-1322     │ weak-seed shares unit with pool      │ only count added            │
+  │ _hook_cands:1018-1038   │ weak/early/glued/no-clauses          │ no individual reason        │
+  │ short_variant:1929-1934 │ units not found; too short/long      │ variant absent              │
+  ├─────────────────────────┼──────────────────────────────────────┼─────────────────────────────┤
+  │ Visible in pool output  │ no_start (context_start failures)    │ "без понятного начала: N"   │
+  │                         │ open_end (fix_open_end failures)     │ "конец «→», не укоротить: N"│
+  │                         │ rhythm_out (fit_rhythm failures)     │ "скачки, не поправить: N"   │
+  │                         │ close (too_close rejections)         │ "похожи на принятые: N"     │
+  │                         │ rejected (_autocut_check fails)      │ "не прошли проверку: N"     │
+  │                         │ hookless_left                        │ "без крючка не взяты: N"    │
+  │                         │ not_reached                          │ "не дошла очередь: N"       │
+  └─────────────────────────┴──────────────────────────────────────┴─────────────────────────────┘
+
+  Normal None semantics (not a loss): return None from build_clip/build_passage means the
+  clip was attempted and disqualified by the algorithm's own correctness rules (too short,
+  question at end). These are design decisions but are still invisible in diagnostics.
+
+  Weak-seed fill_pool path (__main__.py ~8821-8830):
+    - Second propose() call does NOT receive no_start, open_end
+    - rhythm_out passed as [] (new list) — discarded after
+    - Losses in weak-seed path are doubly invisible
+
+
+============================================================
+§2 PART 2 — Exact accounting: pre-pool losses not in CLI output
+============================================================
+
+============================================================
+  Map A — clean: 1 eligible seed → 1 clip, fully accounted
+============================================================
+  сборок: до 5 (источник 3 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers syn_mapa) — реплики ведущего не различаются
+  пул: 1 сборок < 15 — добавлено 0 вокруг мыслей силы 3
+autocut syn_mapa: предложено сборок 1 из 2 мыслей → /var/folders/17/8l12gn251q7_cq1mwz951j1w0000gn/T/tmp2pbhsz7u/reviews/syn_mapa_auto_m56.txt
+  M1 88 | 1.1-2 | c:1.2 | t: Clean seed. | d: Clean seed.
+  warning: нет карты речи и выравнивания для syn_mapa — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/syn_mapa.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align syn_mapa && arl prosody syn_mapa
+
+  Map A accounting:
+    total units       = 2
+    eligible seeds    = 1 (punch>=4, role in STORY)
+    pool accepted     = 1
+    gap = eligible_seeds - accepted = 0
+  PASS [04]  Map A: cmd_autocut rc=0
+  PASS [05]  Map A: 1 eligible seed
+  PASS [06]  Map A: 1 accepted clip
+  PASS [07]  Map A: gap=0 (clean map, no pre-pool losses)
+  Map A review SHA256=7d8226b8ffbbfaae318835a551893a4eacd7ef2ef898c4c909dd8a5f0cd31243
+
+============================================================
+  Map B — lossy: 1 attempted seed → build_passage None; invisible in output
+============================================================
+  сборок: до 5 (источник 3 мин ÷ 2)
+  оценки владельца: примеры для начала −0/+0, для крючка −0/+0 (из 0 оценок)
+  ведущий: карты говорящих нет (arl speakers syn_mapb) — реплики ведущего не различаются
+  пул: 1 сборок < 15 — добавлено 0 вокруг мыслей силы 3
+autocut syn_mapb: предложено сборок 1 из 3 мыслей → /var/folders/17/8l12gn251q7_cq1mwz951j1w0000gn/T/tmpuyp2m65q/reviews/syn_mapb_auto_m56.txt
+  M1 88 | 1.1-2 | c:1.2 | t: Good seed. | d: Good seed.
+  warning: нет карты речи и выравнивания для syn_mapb — правило паузы перед началом (start_pause_min) не работает
+  warning: нет интонации transcripts/syn_mapb.prosody.json — концы сборок по голосу («→») и подсказки голоса для k: не работают; сначала: arl align syn_mapb && arl prosody syn_mapb
+
+  Map B accounting:
+    total units        = 3
+    eligible seeds     = 2 (ids [1, 2])
+    seed_punch         = 4, min_punch = 3
+      id=1: dur=40s (min_sec=25.0) → build_passage OK
+      id=2: dur=10s (min_sec=25.0) → build_passage None (too short)
+    pool accepted      = 1
+    gap = eligible_seeds(2) - accepted(1) = 1
+    CLI output explains the gap? → NO — build_passage None attempts are never counted
+  PASS [08]  Map B: cmd_autocut rc=0
+  PASS [09]  Map B: 2 eligible seeds (both punch>=seed_punch=4)
+  PASS [10]  Map B: 1 accepted clip (short seed returned None)
+  PASS [11]  Map B: gap=1 > 0 (pre-pool loss invisible in CLI output)
+  PASS [12]  Map B unit2 (dur=10s): build_passage returns None (too short, min_sec=25.0)
+  Map B review SHA256=24a8bee1d0b108e56d2c0ac85e6b990b09655a113c5e9bc75581f0452d6549fa
+
+============================================================
+  Weak-seed path: no_start/open_end not passed to fill propose
+============================================================
+  PASS [13]  M140 fill_pool comment found in __main__.py
+  PASS [14]  Weak-seed fill propose does NOT pass no_start= (STATIC_ONLY)
+  PASS [15]  Weak-seed fill propose does NOT pass open_end= (STATIC_ONLY)
+  PASS [16]  Weak-seed fill propose passes rhythm_out=[] (losses discarded)
+
+  Relevant code snippet (~__main__.py:8823):
+    M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
+                from autoreels.cloud.autocut import fill_pool
+                _extra = propose(the_map.get("units") or [],
+                                 _dc_replace(prm, clips=prm.clips * ac.check_pool, seed_punch=_fsp), sentences,
+                                 judge=judge, end_tone=end_tone, taste=_taste, rhythm_out=[], start_pause=start_pause)
+                _n0 = len(pool)
+                pool = fill_pool(pool, _extra)
+                print(f"  пул: {_n0} сборок < {prm.clips * ac.check_pool} — добавлено {len(pool) - _n0} 
+
+  FINDING P2 SUMMARY:
+    CLI output: предложено N сборок из M мыслей
+    Missing: attempted seeds (N attempted, K returned None) → NOT in output
+    Weak-seed fill propose: no_start/open_end/rhythm_out failures → NOT tracked
+
+============================================================
+§3 PART 3 — teaser_misses claims 'прошла' when _hook_cands rejects (HELPER_CONFIRMED)
+============================================================
+
+  Config params (from r0.yaml via load_r0_config):
+    start_pause_min  = 0.15
+    hook_teaser      = True
+    hook_teaser_pos  = 0.5
+    hook_clauses     = True
+    hook_min_sec     = 1.5
+    hook_max_sec     = 6.0
+    hook_min_words   = 4
+    min_punch        = 3
+  PASS [17]  start_pause_min=0.15 > 0 (glued_start active when callback given)
+  PASS [18]  hook_teaser=True (teaser_misses is called on hookless clips)
+  PASS [19]  hook_clauses=True (clauses callback expected by _hook_cands)
+
+  teaser_misses(clip, sentences, p):  n=1, why={'прошла': 1}
+  _hook_cands(clip, sentences, p, start_pause=callback): 0 candidates
+    → [] (rejected all)
+  _hook_cands(clip, sentences, p, start_pause=None):    1 candidates
+    '2.1': score=6.50 text='Главная мысль теста здесь.'
+  PASS [20]  teaser_misses sees 1 sentence(s) in second half
+  PASS [21]  teaser_misses says 'прошла' for sentence 2.1 (why={'прошла': 1})
+  PASS [22]  _hook_cands with start_pause rejects 2.1 (glued: 0.05 < 0.15)
+  PASS [23]  _hook_cands without start_pause accepts 2.1 (confirms discrepancy is start_pause-dependent)
+
+  teaser_misses signature: (clip: 'Sequence[dict]', sentences, p: 'AutoParams') -> 'tuple[int, dict[str, int]]'
+  _hook_cands signature:   (clip: 'Sequence[dict]', sentences, p: 'AutoParams', start_pause: "Callable[[str], 'float | None'] | None" = None, clauses: 'Callable[[str], list] | None' = None) -> 'list[tuple[str, float, str]]'
+  PASS [24]  teaser_misses signature has NO start_pause param (STATIC_ONLY)
+  PASS [25]  teaser_misses signature has NO clauses param (STATIC_ONLY)
+  PASS [26]  _hook_cands signature HAS start_pause param
+  PASS [27]  _hook_cands signature HAS clauses param
+
+  FINDING P3 SUMMARY:
+    teaser_misses(ref "2.1", text="Главная мысль теста здесь.") → "прошла"  (lacks glued_start check)
+    _hook_cands(ref "2.1", start_pause=0.05s) → []  (rejects: 0.05 < 0.15)
+    teaser_misses is missing 'start_pause' and 'clauses' parameters.
+    No model call needed: glued_start is a deterministic rule.
+    When start_pause data is unavailable (no alignment file, our CLI case):
+      - Both functions agree (no rejection) — no discrepancy at runtime
+      - But the diagnostic is structurally incomplete for cases WITH data.
+    STATUS: HELPER_CONFIRMED (discrepancy with synthetic callback),
+            STATIC_ONLY (structural signature gap)
+
+============================================================
+SUMMARY
+============================================================
+  §0 Preflight     : CLI_CONFIRMED (rc=0, review SHA256=d91605b99d90d191…)
+  §1 Part 1 (gates): STATIC_ONLY (enumerated 12 pre-pool gates)
+  §2 Part 2 (acct) : CLI_CONFIRMED (Map B gap=1 invisible)
+                     STATIC_ONLY   (weak-seed no_start/open_end absent)
+  §3 Part 3 (hook) : HELPER_CONFIRMED (teaser_misses 'прошла' vs _hook_cands [])
+                     STATIC_ONLY   (signature gap: no start_pause/clauses params)
+
+  Total PASS assertions: 27
+
+All checks passed.
