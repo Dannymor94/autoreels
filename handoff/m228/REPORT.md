@@ -62,7 +62,7 @@ handoff/m228/REPORT.md         — этот документ (R2)
 
 | Действие | Родительские находки | Подслучаев | Веха |
 |----------|---------------------|-----------|------|
-| FIX_NOW | #1, #2, #3, #5, #7, #8, #9 | 9 (#1,#2,#3,#5,#7,#8a,#8b,#9a,#9b) | M230→impl |
+| FIX_NOW | #1, #2, #3, #5, #7, #8, #9 | 9 (#1,#2,#3,#5,#7,#8a,#8b,#9a,#9b) | M230 arch→M232 code gate |
 | INSTRUMENT_FIRST | #4, #6, #11 | 3 | M231 |
 | NO_FIX_INTENTIONAL | #10 | 1 | — |
 | DEFER | #12 | 1 | — до runtime proof |
@@ -79,7 +79,7 @@ handoff/m228/REPORT.md         — этот документ (R2)
 | P1-A: неверная классификация доказательств (#7/#8/#9 как CLI) | GATES.md §1; FINDINGS.md таблица | CLOSED — #7/#8/#9 помечены HELPER_CONFIRMED; GO_SCOPED rationale скорректирован |
 | P1-B: противоречие M229/M230 ворот | GATES.md §2; ARCHITECTURE.md §8 | CLOSED — M229_CODE_GO=NO; все FIX_NOW требуют M230 arch review; единственная последовательность задокументирована |
 | P1-C: #1 механизм не адресует подавление | ARCHITECTURE.md §2; FINDINGS.md #1 | CLOSED — bounded enumeration vs selection различены; stable IDs, dedup at selection, stopping condition, overlap preservation описаны; test contract NOT breach overlap |
-| P1-D: M231 смешивает наблюдение и мутацию | ARCHITECTURE.md §5; GATES.md M231 | CLOSED — M231 ограничен additive counters + delta-log; teaser_misses/weak-seed/no_start/rhythm_out мутации явно перенесены в post-M230 |
+| P1-D: M231 смешивает наблюдение и мутацию | ARCHITECTURE.md §5,§8; GATES.md M231/M232 | CLOSED (coordinator scoped correction): M231 только additive counters и delta-log, без FIX_NOW; все behavior changes, включая teaser_misses/weak-seed, находятся за отдельным post-M231 gate и recorded coordinator GO |
 | P1-E: запрет question-first; unconditional answer extension; build_passage tuple как API | ARCHITECTURE.md §1,§2 | CLOSED — принцип 8 защищает question-led loop; answer extension → гипотеза за arch gate; (clip,reason) tuple → гипотеза; #8b fail-closed |
 | P1-F: M231 требует owner-видео | GATES.md M231 §success | CLOSED — success criterion = synthetic fixtures only; owner-данные требуют отдельного explicit authorization |
 
@@ -120,7 +120,7 @@ M229_CODE_GO=NO
 P1_A=CLOSED (GATES.md §1 + FINDINGS.md доказательные уровни скорректированы)
 P1_B=CLOSED (M229_CODE_GO=NO; единственная последовательность M229→M230 arch→M231 impl)
 P1_C=CLOSED (ARCHITECTURE.md §2: bounded enumeration vs selection, overlap preserved)
-P1_D=CLOSED (ARCHITECTURE.md §5 + GATES.md M231: observability-only, мутации отложены)
+P1_D=CLOSED (ARCHITECTURE.md §5/§8 + GATES.md M231/M232: M231 observability-only; M232 gated mutations, separate Sol+GO)
 P1_E=CLOSED (question-first защищён; answer extension за arch gate; build_passage tuple гипотеза; #8b fail-closed)
 P1_F=CLOSED (GATES.md M231: synthetic only; owner-данные требуют explicit auth)
 CHANGED_PATHS=handoff/m228/FINDINGS.md, handoff/m228/ARCHITECTURE.md,
