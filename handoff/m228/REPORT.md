@@ -118,7 +118,7 @@ EVIDENCE_BASE_SHA=44086710a04af83ccbef41b8c491096349003e5a
 PRODUCTION_DIFF=NONE
 M229_CODE_GO=NO
 P1_A=CLOSED (GATES.md §1 + FINDINGS.md доказательные уровни скорректированы)
-P1_B=CLOSED (M229_CODE_GO=NO; единственная последовательность M229→M230 arch→M231 impl)
+P1_B=CLOSED (M229_CODE_GO=NO; последовательность M229 prep→M230 arch→M231 observability→Sol M231 PASS+coordinator GO→M232 gated implementation)
 P1_C=CLOSED (ARCHITECTURE.md §2: bounded enumeration vs selection, overlap preserved)
 P1_D=CLOSED (ARCHITECTURE.md §5/§8 + GATES.md M231/M232: M231 observability-only; M232 gated mutations, separate Sol+GO)
 P1_E=CLOSED (question-first защищён; answer extension за arch gate; build_passage tuple гипотеза; #8b fail-closed)
