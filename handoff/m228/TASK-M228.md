@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-11-19.** The authoritative execution specification is [`TASK-M228-R1.md`](TASK-M228-R1.md). The below historical task contains an obsolete baseline `f92b4d2` and must not be executed. Use frozen `main@3c011e94263e16e5780936b4769d3490cd03b682` and the independent M227 acceptance. Retained only for audit history.
+
 # TASK M228 — Consolidate 12 findings and gate the change set
 
 **Assigned:** Sonnet 4.6. **Review:** Sol 6.1. **Baseline:** `main f92b4d2` algorithm with M222a policy integrated. **Language:** task in English, report and replies in Russian.
