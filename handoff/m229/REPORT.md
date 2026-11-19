@@ -34,8 +34,8 @@ handoff/m229/REPORT.md                 — этот документ (R2)
 | `context_start → t0 shift` | `autocut.py:699+` | #5 — no min_sec re-check | CLI_HELPER_BOUNDARY |
 | `context_start → t0 offset` | `autocut.py:699+` | #6 — t0/t1 offset | CLI_HELPER_BOUNDARY |
 | `fit_rhythm → refers removal` | `autocut.py:331` | #7 — refers unsatisfied | HELPER_CONFIRMED |
-| `build_passage → post-loop pop` | `autocut.py:408` | #8a — question-last | HELPER_CONFIRMED |
-| `fit_rhythm → silent removal` | `autocut.py:333` | #8b — short piece | HELPER_CONFIRMED |
+| `propose → fit_rhythm` | `autocut.py:1200; fit_rhythm:297–326` | #8a — late question appended | HELPER_CONFIRMED |
+| `fix_open_end → final rhythm_why` | `autocut.py:625; propose:1239,1250` | #8b — trim 2.5s then rhythm_out reject | HELPER_CONFIRMED |
 | `build_passage → overlong break` | `autocut.py:405` | #9a — overlong nxt break | HELPER_CONFIRMED |
 | `build_passage → no answer visit` | `autocut.py:408–413` | #9b — answer not visited | HELPER_CONFIRMED |
 | `teaser_misses` / `_hook_cands` | `autocut.py:1047` / `:1002` | #11 — param mismatch | CLI_OUTPUT_GAP + HELPER |
@@ -53,8 +53,8 @@ handoff/m229/REPORT.md                 — этот документ (R2)
 | TC-3 | #3 clauses | `propose → _hook_cands` | `autocut.py:1281` | SPECIFIED — не запущен |
 | TC-5 | #5 context_start shortens | `context_start` | `autocut.py:699+` | SPECIFIED — не запущен |
 | TC-7 | #7 fit_rhythm refers | `fit_rhythm` | `autocut.py:331` | SPECIFIED — не запущен |
-| TC-8a | #8a question-last | `build_passage` | `autocut.py:408` | SPECIFIED — не запущен |
-| TC-8b | #8b short piece | `fit_rhythm` | `autocut.py:333` | SPECIFIED — не запущен |
+| TC-8a | #8a question-last | `fit_rhythm` | `autocut.py:297–326; propose:1200` | SPECIFIED — не запущен |
+| TC-8b | #8b post-trim rejection | `fix_open_end → rhythm_why` | `autocut.py:625,273; propose:1239,1250` | SPECIFIED — не запущен |
 | TC-9a | #9a overlong nxt | `build_passage` | `autocut.py:405` | SPECIFIED — не запущен |
 | TC-9b | #9b answer not visited | `build_passage` | `autocut.py:408–413` | SPECIFIED — не запущен |
 
@@ -104,8 +104,8 @@ handoff/m229/REPORT.md                 — этот документ (R2)
 | TC-3 | `_hook_cands` вызывается без `clauses=` → может вернуть подмножество кандидатов |
 | TC-5 | После drop: dur может упасть ниже min_sec без отброса |
 | TC-7 | Refers unit удаляется → clip содержит refers к отсутствующему id |
-| TC-8a | Passage кончается на question без следующего payoff |
-| TC-8b | Short piece убирается без диагностики |
+| TC-8a | fit_rhythm appends question after build_passage; proposal ends question-last (M225 helper) |
+| TC-8b | fix_open_end trims to 2.5s; final rhythm_why rejects and records rhythm_out (M225 helper) |
 | TC-9a | При overlong nxt: break без попытки prv |
 | TC-9b | После pop question-last: answer не добавляется |
 
@@ -126,7 +126,7 @@ handoff/m229/REPORT.md                 — этот документ (R2)
 | Q7 | #9b | REQUIRED | **Owner decision** |
 | Q8 | #11 | REQUIRED | Arch decision |
 
-Owner decisions (Q3, Q6, Q7) блокируют конкретные impl в M231.
+Owner decisions (Q3, Q6, Q7) constrain prospective behavior fixes **only in separately gated M232+**, after M230 architecture review and M231 observability-only independent Sol PASS + coordinator GO. M231 contains no behavior implementation.
 
 ---
 
@@ -178,3 +178,9 @@ P1_E=RESOLVED
 P1_F=RESOLVED
 READY_FOR_SOL_QA=YES
 ```
+
+---
+
+## Coordinator post-R2 documentation alignment (after independent Sol CHANGES_REQUIRED)
+
+This alignment corrects stale cross-references and proof claims only: TC-2 actual first planned sound is a hook, not the body opener; FX-2 baseline vs pending post-fix assertions are separate and strict flags explicit; TC-5 25→23 consistent with FX-5; TC-8a fit_rhythm question append; TC-8b fix_open_end trim → rhythm_why reject with rhythm_out; integer refers; Q6 posttrim recovery; no M231 semantic fixes. The QA verdict on the original R2 SHA remains CHANGES_REQUIRED. These editorial changes are **NOT** a Sol PASS or authorization of M230/M231/M232; require a narrow independent check of the post-alignment commit. Tests remain SPECIFIED_NOT_EXECUTED and production untouched.
