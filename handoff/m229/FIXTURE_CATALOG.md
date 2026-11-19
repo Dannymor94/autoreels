@@ -19,37 +19,41 @@
 ## FX-1 — TC-1: `used_seeds` suppression
 
 ```python
-# Два eligible seed-unit одной темы, без пересечения по времени
+# u1 и u2 — одна тема, gap=10.5s < passage_gap_sec=30 → build_passage объединяет
+# в один clip [u1,u2]. После принятия: used_seeds.update({1,2}). u2-alone никогда
+# не пробуется. Принято из M223 §4-c, §4-d, §4-g.
 units = [
-    {"id": 1, "t0": 0.0,  "t1": 30.0, "role": "conclusion", "punch": 5,
-     "topic": "main", "refs": "1.1-2", "standalone": True, "similar": []},
-    {"id": 2, "t0": 35.0, "t1": 65.0, "role": "conclusion", "punch": 5,
-     "topic": "other",  # разная тема → build_passage не объединяет u1 и u2
-     "refs": "2.1-2", "standalone": True, "similar": []},
-    # Dummy для total_duration
-    {"id": 3, "t0": 100.0, "t1": 160.0, "role": "thesis", "punch": 3,
-     "topic": "ext", "refs": "3.1", "standalone": True, "similar": []},
+    {"id": 1, "t0": 40.0, "t1": 69.5, "role": "thesis",     "punch": 5,
+     "topic": "A", "refs": "1.1-4", "standalone": True, "similar": []},
+    {"id": 2, "t0": 80.0, "t1": 108.0,"role": "conclusion",  "punch": 4,
+     "topic": "A", "refs": "2.1-4", "standalone": True, "similar": []},
 ]
-# Config: seed_punch=4, min_punch=3, generator=passage, passage_gap_sec=30
-# Expected fail-before: u1 попадает в pool; u2 (seed_id=2) пропускается,
-#   т.к. id=2 ∈ used_seeds после u1 clip (u2 не включён в u1 passage но
-#   NOTE: в baseline используется passage_gap_sec — проверить что u2 ≠ u1 passage member)
-# Уточнение: u2 должен быть seed-eligible alone но подавляться через used_seeds
-# После принятия M230: u2 должен быть в pool как отдельный candidate
+# Config: generator=passage, passage_gap_sec=30, min_sec=25, target_sec=55
+# build_passage(seed=u1): total=29.5 < target=55; nxt=u2 (gap=10.5 < 30, same topic)
+#   → adds u2; total=57.5 ≈ target → loop exits; run=[u1,u2]
+# После принятия clip=[u1,u2]:
+#   used_seeds.update(i for i in [1,2] if role in STORY)
+#   → both thesis and conclusion ∈ STORY → used_seeds={1,2}
+# При следующей итерации seeds: seed=u2 → seed["id"]=2 ∈ used_seeds → continue
+# u2-alone viable (доказано в M223 §4-d с теми же callbacks)
 ```
 
 **Assertions (fail-before):**
 ```python
-assert len(pool_a) >= 1       # u1 clip accepted
-assert 2 not in {u for p in pool_a for u in p.units}  # u2 NOT in pool as seed
+pool = propose(units, params, sentences)
+# u1+u2 объединены в один accepted clip
+assert any(1 in pr.units and 2 in pr.units for pr in pool)   # merged clip
+# u2-alone proposal НИКОГДА не в pool (подавлён через used_seeds)
+assert not any(pr.units == [2] for pr in pool)
 ```
 
 **Assertions (pass-after, pending M230):**
 ```python
-assert any(2 in pr.units for pr in pool_b)  # u2 clip in pool
+# Proposal.units — list[int]
+assert any(2 in pr.units and 1 not in pr.units for pr in pool_b)  # u2 clip standalone
 assert not any(                              # overlap dedup preserved
     set(a.units) & set(b.units)
-    for a, b in combinations(accepted, 2)
+    for a, b in combinations(accepted_b, 2)
 )
 ```
 
@@ -104,6 +108,8 @@ assert clip_B_result is not None  # question-first loop preserved
 ## FX-3 — TC-3: Clauses hook rescue
 
 ```python
+# hook_teaser=False устраняет fraction-фильтр в _hook_cands:1020-1021 до clause-ветки,
+# делая clause-eligible кандидата доступным для прямого сравнения.
 units = [
     {"id": 1, "t0": 0.0, "t1": 60.0, "role": "conclusion", "punch": 5,
      "topic": "main", "refs": "1.1", "standalone": True, "similar": []},
@@ -118,24 +124,30 @@ def clauses_cb(ref):
         # Clause i=2..3 — короткая standalone часть
         return [(2, 3, 3.0, "важную тему")]
     return []
-# Config: hook_clauses=true, hook_teaser=true, hook_teaser_pos=0.5
-# hook_min_sec=1.5, hook_max_sec=6.0
+# Config: hook_clauses=true, hook_teaser=false, hook_min_sec=1.5, hook_max_sec=6.0
+# hook_teaser=False: fraction-фильтр (:1020-1021) не применяется → clause branch reachable
 ```
 
-**Assertions (fail-before — STATIC):**
+**Assertions (fail-before — STATIC + HELPER):**
 ```python
-# propose() вызывает _hook_cands без clauses= → clause-hook не найден
+# STATIC: source autocut.py:1281 — propose() вызывает _hook_cands без clauses=
+# (подтверждено чтением production source; __main__.py:8818-8820 также не передаёт)
+
+# HELPER: прямое сравнение _hook_cands с/без clauses (clause branch reachable с hook_teaser=False)
 from autoreels.cloud.autocut import _hook_cands
-cands_no_clauses = _hook_cands(clip, sentences_long, p, start_pause=None, clauses=None)
-cands_with_clauses = _hook_cands(clip, sentences_long, p, start_pause=None, clauses=clauses_cb)
-assert len(cands_no_clauses) == 0   # без clauses — нет hook
-assert len(cands_with_clauses) >= 1  # с clauses — есть clause-hook
+clip = [units[0]]
+cands_no_clauses   = _hook_cands(clip, sentences_long, p_no_teaser, start_pause=None, clauses=None)
+cands_with_clauses = _hook_cands(clip, sentences_long, p_no_teaser, start_pause=None, clauses=clauses_cb)
+# Fail-before HELPER: без clauses= clause-hook недостижим
+assert len(cands_no_clauses) == 0    # без clauses — нет hook (HELPER_ONLY)
+assert len(cands_with_clauses) >= 1  # с clauses — есть clause-hook (HELPER_ONLY)
+# NB: это HELPER-уровень; full CLI impact NOT_REPRODUCED
 ```
 
-**Assertions (pass-after, pending M230):**
+**Assertions (pass-after, pending M230 + owner decision):**
 ```python
-# После fix: propose передаёт clauses → proposal имеет hook
-assert proposal.hook is not None and "@" in proposal.hook  # clause ref формат h:B.N@i-j
+# После fix (если owner approves clause rescue): propose передаёт clauses → proposal имеет hook
+assert proposal.hook is not None  # clause ref формат h:B.N@i-j
 ```
 
 ---
@@ -179,105 +191,152 @@ assert why is not None and "min_sec" in why
 ## FX-7 — TC-7: `fit_rhythm` removes refers dependency
 
 ```python
+# M225 Case A: точные timing и integer refers. Принято как HELPER_CONFIRMED.
 units = [
-    {"id": 1, "t0": 0.0,  "t1": 30.0, "role": "thesis",     "punch": 5,
-     "topic": "main", "refs": "1.1", "standalone": True, "similar": []},
-    {"id": 2, "t0": 35.0, "t1": 60.0, "role": "conclusion",  "punch": 4,
-     "topic": "main", "refs": "2.1", "standalone": True, "similar": []},
-    {"id": 3, "t0": 65.0, "t1": 95.0, "role": "conclusion",  "punch": 4,
-     "topic": "main", "refs": "3.1", "refers": "2",   # зависит от u2
-     "standalone": False, "similar": []},
+    {"id": 1, "t0": 50.0,  "t1": 76.0,  "role": "thesis",      "punch": 5,
+     "topic": "A", "refs": "1.1",  "standalone": True, "similar": []},
+    {"id": 2, "t0": 90.0,  "t1": 95.0,  "role": "explanation",  "punch": 4,
+     "topic": "A", "refs": "1.1",  "standalone": False,
+     "refers": 1,  # INTEGER — зависит от u1 (добавлен add_payoff, т.к. seed=u1)
+     "similar": []},
+    {"id": 3, "t0": 160.0, "t1": 193.0, "role": "conclusion",   "punch": 5,
+     "topic": "A", "refs": "1.1",  "standalone": False,
+     "refers": 2,  # INTEGER — зависит от u2 (add_payoff: u3.refers=2 ∈ ids ∋ u2)
+     "similar": []},
 ]
-# u2 — короткий isolated piece, fit_rhythm удаляет его
-# после удаления: clip=[u1,u3]; u3.refers=2 — u2 уже не в clip
+# Config: production params (r0.yaml SHA efdef3adb...); start_pause_min=0.0, end_tone=False
+# Механизм:
+#   build_passage(seed=u1): grows to [u1,u2] (gap=14s usable, topic match)
+#   add_payoff: u3.refers=2 ∈ clip-ids → appends u3 → [u1,u2,u3]
+#   fit_rhythm: u2 dur=5s, gap(u1→u2)=14s → settle_need(14)×1.0≈6.22; 5<6.22 → drops u2
+#   result: clip=[u1,u3]; u3.refers=2 (u2) unsatisfied
+# HELPER_CONFIRMED M225 Case A: propose([u1,u2,u3]) → proposals with units=[1,3]
 ```
 
-**Assertions (fail-before):**
+**Assertions (fail-before — HELPER_CONFIRMED M225):**
 ```python
-clip_r, _ = fit_rhythm([u1, u2, u3], by_id, p, keep={u1["id"], u3["id"]})
-assert clip_r is not None           # текущий код принимает [u1,u3]
-assert any(u["id"] == 3 for u in clip_r)  # u3 (refers=2) остаётся
-# refers=2 (u2) не в clip → unsatisfied
+proposals = propose(units, prm_m225, sentences=None, start_pause_min=0.0, end_tone=False)
+# Proposal.units — list[int]
+assert len(proposals) >= 1
+accepted_units = proposals[0].units  # expected: [1, 3]
+assert 1 in accepted_units and 3 in accepted_units
+assert 2 not in accepted_units       # u2 (refers depended-on) dropped by fit_rhythm
+# u3.refers=2 not satisfied — HELPER_CONFIRMED
 ```
 
 **Assertions (pass-after, pending M230):**
 ```python
-result = validate_refers(clip_r)    # новая проверка
-assert result is None  # REJECTED: unsatisfied refers
+# После fix: refers-validator отклоняет clip с unsatisfied refers
+assert len(proposals_fixed) == 0   # REJECTED: refers=2 unsatisfied
 ```
 
 ---
 
-## FX-8a — TC-8a: Question-last clip
+## FX-8a — TC-8a: Question-last (добавлен `fit_rhythm`)
 
 ```python
+# M225 Case B: fit_rhythm растит short piece u2 добавляя question u3 как сосед.
+# build_passage возвращает [u1,u2]; fit_rhythm → clip=[u1,u2,u3] (question-last).
+# НЕ build_passage loop — fit_rhythm-механизм. Question-first (loop-pattern) законен.
 units = [
-    {"id": 1, "t0": 0.0,  "t1": 30.0, "role": "thesis",    "punch": 5, "topic": "main",
+    {"id": 1, "t0": 50.0, "t1": 76.0,  "role": "thesis",     "punch": 5, "topic": "A",
      "refs": "1.1", "standalone": True, "similar": []},
-    {"id": 2, "t0": 30.0, "t1": 55.0, "role": "conclusion", "punch": 4, "topic": "main",
-     "refs": "2.1", "standalone": True, "similar": []},
-    {"id": 3, "t0": 55.0, "t1": 85.0, "role": "question",   "punch": 3, "topic": "main",
-     "refs": "3.1", "standalone": True, "similar": []},
+    {"id": 2, "t0": 90.0, "t1": 93.0,  "role": "conclusion",  "punch": 4, "topic": "A",
+     "refs": "2.1", "standalone": True, "similar": []},  # dur=3s — short piece
+    {"id": 3, "t0": 94.0, "t1": 119.0, "role": "question",    "punch": 5, "topic": "A",
+     "refs": "3.1", "standalone": True, "similar": []},  # dur=25s > loop_max_sec → loop skips
 ]
-# seed=u1; build_passage grows: [u1,u2] total=55s=target_sec=55 → next iteration tries nxt=u3(question)
-# строка 396: nxt not None и prv None → pick=nxt; total+30=85 ≤ max_sec=90 → adds u3
-# строка 408: while run[-1] is not seed and (not eligible(run[-1]) or role==question):
-#   u3.role==question AND u3 is not seed → pop → run=[u1,u2]
-# WAIT: это уже делает pop... но наблюдено в M225 что question остаётся последним
+# Config: production params из M225; start_pause_min=0.0, end_tone=False
+# Механизм:
+#   build_passage(seed=u1): [u1]; grow: adds u2 (gap=14s, topic=A, dur=3s usable)
+#     → [u1,u2]; u3.dur=25 > loop_max_sec → loop_question skips u3 → returns [u1,u2]
+#   fit_rhythm([u1,u2]): piece1=[u2] dur=3s < settle_need threshold → grow by neighbor
+#     u3 at gap=1s ≤ jump_sec, same topic → appends u3 → clip=[u1,u2,u3]
+#   clip[-1].role == "question" → question-last defect
+# HELPER_CONFIRMED M225 Case B
 ```
 
-**Примечание:** build_passage действительно выполняет pop на строке 408 для non-seed question. Fail-before наблюдён в M225 через `propose` helper с другой конфигурацией units/timing. Точная фикстура требует синтетических units, где u3 является seed-eligible question (может быть seed) или trim не срабатывает.
-
+**Assertions (fail-before — HELPER_CONFIRMED M225):**
 ```python
-# Альтернатива: seed = u3 (question как seed)
-# build_passage с seed=question → возвращает None (строка 412 else: seed is question)
-# Или: более короткий run где u3 входит и pop не срабатывает (u3 is seed)
-```
-
-**Assertions (fail-before):**
-```python
-# Как наблюдено в M225: propose выдаёт proposal с question-last unit
-assert proposals[0].units[-1] == question_id
+proposals = propose(units, prm_m225, sentences=None, start_pause_min=0.0, end_tone=False)
+assert len(proposals) >= 1
+# Proposal.units — list[int]; last unit is question
+assert proposals[0].units[-1] == 3   # u3 (question) is last
 ```
 
 **Assertions (pass-after, pending M230):**
 ```python
-# Trim или reject при question-last
-assert proposals[0].units[-1] != question_id  # trimmed
+# После fix: question-last rejected or trimmed
+assert len(proposals_fixed) == 0 or proposals_fixed[0].units[-1] != 3
+```
+
+**Negatives (не блокировать question-first loop):**
+```python
+# clip=[q(role=question), u(role=conclusion)] — question ПЕРВЫМ — законен
+units_loop = [
+    {"id": 10, "t0": 0.0,  "t1": 25.0, "role": "question",   "punch": 3, "topic": "A", ...},
+    {"id": 11, "t0": 30.0, "t1": 60.0, "role": "conclusion",  "punch": 5, "topic": "A", ...},
+]
+proposals_loop = propose(units_loop, prm_m225, ...)
+assert len(proposals_loop) >= 1  # question-first loop НЕ блокируется
 ```
 
 ---
 
-## FX-8b — TC-8b: Post-trim short piece
+## FX-8b — TC-8b: `fix_open_end` обрезает → `rhythm_why` отклоняет
 
 ```python
-# Три unit, средний — short isolated piece
+# M225 Case C: fix_open_end обрезает open-tone sentence → dur=2.5s → rhythm_why rejects.
+# НЕ fit_rhythm middle-piece deletion — это отдельный механизм.
 units = [
-    {"id": 1, "t0": 0.0,  "t1": 30.0, "role": "thesis",    "punch": 5, "topic": "main",
-     "refs": "1.1", "standalone": True, "similar": []},
-    {"id": 2, "t0": 35.0, "t1": 37.5, "role": "thesis",    "punch": 3, "topic": "main",
-     "refs": "2.1", "standalone": True, "similar": []},  # 2.5s piece
-    {"id": 3, "t0": 42.0, "t1": 72.0, "role": "conclusion","punch": 5, "topic": "main",
-     "refs": "3.1", "standalone": True, "similar": []},
+    {"id": 1, "t0": 50.0, "t1": 76.0,  "role": "thesis",     "punch": 5,
+     "topic": "A", "refs": "1.1",  "standalone": True, "similar": []},
+    {"id": 2, "t0": 126.0,"t1": 157.0, "role": "conclusion",  "punch": 5,
+     "topic": "A", "refs": "2.1-2", "standalone": True, "similar": []},
 ]
-# Config: rhythm=true, jump_sec=4.0, min_sec=25, seed=u1
-# fit_rhythm: u2 is piece of 2.5s < jump_sec; grow: id=1 in ids, id=3 in ids, prev(id=1) in ids
-# fit_rhythm удаляет u2 (not in keep={u1.id, u3.id})
-# dur([u1,u3]) = 60.5 ≥ min_sec → NOT None — но short piece наблюдался в другом контексте
+# Sentences u2:
+#   ("2.1", 1.5s, final-tone)  — fix_open_end сохраняет
+#   ("2.2", 28.5s, open-tone)  — fix_open_end обрезает
+# После fix_open_end: u2.t1 → 128.5; dur=2.5s
+# Gap(u1→u2)=50s → settle_need(50)×tail ≈ 4.09s; dur=2.5 < 4.09 → rhythm_why REJECTS
+# Rejection записывается в rhythm_out (не в open_end)
+# HELPER_CONFIRMED M225 Case C
+def sentences_8b(refs):
+    _SENTS = {
+        "1.1":  ("1.1",  26.0, 5, True,  "Мозг человека работает иначе."),
+        "2.1":  ("2.1",   1.5, 2, True,  "Результат снижается."),   # final tone
+        "2.2":  ("2.2",  28.5, 3, True,  "Навсегда останется там."),# open tone → trimmed
+    }
+    # parse "2.1-2" → ["2.1", "2.2"]
+    out = []
+    for piece in refs.split():
+        blk, _, rng = piece.partition(".")
+        a, _, z = rng.partition("-")
+        for k in range(int(a), int(z or a) + 1):
+            row = _SENTS.get(f"{blk}.{k}")
+            if row: out.append(row)
+    return out
+
+_TONE_8b = {"2.1": "final", "2.2": "open"}
+def end_tone_8b(ref): return _TONE_8b.get(ref)
+# Config: end_tone=true, rhythm=true, start_pause_min=0.0; production params из M225
 ```
 
-**Assertions (fail-before):**
+**Assertions (fail-before — HELPER_CONFIRMED M225 Case C):**
 ```python
-clip_r, _ = fit_rhythm([u1, u2, u3], by_id, p, keep={u1["id"], u3["id"]})
-# Текущий код: может вернуть clip без u2 (silent drop) OR None если dur < min_sec
-# Fail: нет logged reason при silent drop
+open_end_c, rhythm_out_c = [], []
+proposals_c = propose(units, prm_m225_end_tone,
+                      sentences=sentences_8b, end_tone=end_tone_8b,
+                      open_end=open_end_c, rhythm_out=rhythm_out_c)
+assert len(proposals_c) == 0           # clip отклонён после fix_open_end+rhythm
+assert bool(rhythm_out_c)              # rejection в rhythm_out (после fix_open_end)
+assert not bool(open_end_c)            # fix_open_end trimmed (не gave up)
 ```
 
-**Assertions (pass-after, pending M230):**
+**Assertions (pass-after, pending M230 arch decision):**
 ```python
-# После fix: fail-closed с reason если нет доказанного соседа
-assert clip_r is None  # rejected
-assert "no_repair_neighbor" in reason
+# ARCH_QUESTION: нужен ли recovery path (re-attempt или repair neighbor) после trim?
+# Без M230 arch approval — fail-closed; fail-before остаётся наблюдаемым поведением
 ```
 
 ---
@@ -305,12 +364,14 @@ result = build_passage(u5, by_id, p)
 assert result is None  # overlong nxt → break → too short → None
 ```
 
-**Assertions (pass-after, pending M230):**
+**Assertions (pass-after — ARCH_QUESTION, pending M230):**
 ```python
-# После fix: continue вместо break → prv=u4 добавляется
-result = build_passage(u5, by_id, p_fixed)
-assert result is not None
-assert 4 in [u["id"] for u in result]  # u4 (prv) включён
+# break→continue НЕБЕЗОПАСЕН без bounded termination и альтернативной стратегии:
+# при множестве overlong nxt может зациклиться.
+# pass-after design — ARCH_QUESTION для M230. До arch approval — не реализовывать.
+# result = build_passage(u5, by_id, p_arch_approved)
+# assert result is not None
+# assert 4 in [u["id"] for u in result]  # u4 (prv) включён — pending arch spec
 ```
 
 ---

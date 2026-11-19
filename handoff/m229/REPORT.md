@@ -1,8 +1,9 @@
-# M229-PREP-R1 — Отчёт
+# M229-PREP-R2 — Отчёт (R2 — исправлено после Sol R1)
 
 **Дата:** 2026-11-19  
 **Исполнитель:** Claude Code Sonnet 4.6  
-**Задача:** `handoff/m229/TASK-M229-PREP-R1.md`  
+**Задача:** `handoff/m229/TASK-M229-PREP-R2.md`  
+**R1 review pin:** `9fcb8159a217f517c1e141b96ea4c9ebbdc5712d`  
 **PRODUCTION_DIFF=NONE · M229_CODE_GO=NO**  
 **BASE_SHA:** `3c011e94263e16e5780936b4769d3490cd03b682`  
 **EVIDENCE_BASE (M228-R2):** `handoff/m228/REPORT.md` · M228 P1-A через P1-F = CLOSED
@@ -12,10 +13,10 @@
 ## 1. Изменённые пути
 
 ```
-handoff/m229/REGRESSION_CONTRACTS.md   — 9 regression contracts
-handoff/m229/FIXTURE_CATALOG.md        — синтетические fixture blueprints
-handoff/m229/CALLGRAPH_AND_ARCH_QUESTIONS.md — граф вызовов + 8 M230 questions
-handoff/m229/REPORT.md                 — этот документ
+handoff/m229/REGRESSION_CONTRACTS.md   — 9 regression contracts (R2: TC-1,3,7,8a,8b,9a исправлены)
+handoff/m229/FIXTURE_CATALOG.md        — синтетические fixture blueprints (R2: FX-1,3,7,8a,8b,9a исправлены)
+handoff/m229/CALLGRAPH_AND_ARCH_QUESTIONS.md — граф вызовов + arch questions (R2: строки 625/657 исправлены)
+handoff/m229/REPORT.md                 — этот документ (R2)
 ```
 
 Никаких изменений в `src/`, `tests/`, `config/`, `manifests/`, `transcripts/`, `reels-out/`, `reviews/`, `CLAUDE.md`, или `main`.
@@ -140,12 +141,26 @@ Owner decisions (Q3, Q6, Q7) блокируют конкретные impl в M23
 
 ---
 
+## 7. P1 закрытие (Sol R1 → R2)
+
+| Блокер | Секция | Статус |
+|--------|--------|--------|
+| P1-A: TC-1/FX-1 — u2 не в accepted clip, invalid set assertion | REGRESSION_CONTRACTS TC-1; FIXTURE_CATALOG FX-1 | RESOLVED — u1+u2 одна тема, gap=10.5s<30 → merged; accepted M223 §4-c/§4-d/§4-g; `not any(pr.units == [2] for pr in pool)` |
+| P1-B: TC-3/FX-3 — clause branch недоступна с hook_teaser=true + одна фраза | REGRESSION_CONTRACTS TC-3; FIXTURE_CATALOG FX-3 | RESOLVED — hook_teaser=false; clause branch reachable; HELPER vs STATIC уровни разделены явно |
+| P1-C: TC-7/FX-7 — неверные timing и string refers | REGRESSION_CONTRACTS TC-7; FIXTURE_CATALOG FX-7 | RESOLVED — M225 Case A: u1[50,76], u2[90,95], u3[160,193]; refers=1 и refers=2 (integer) |
+| P1-D: TC-8a/FX-8a — инвертированный механизм (build_passage vs fit_rhythm) | REGRESSION_CONTRACTS TC-8a; FIXTURE_CATALOG FX-8a | RESOLVED — fit_rhythm appends question u3 (не build_passage loop); M225 Case B: u1[50,76], u2[90,93], u3[94,119] |
+| P1-E: TC-8b/FX-8b — неверная стадия (fit_rhythm middle-piece vs fix_open_end) | REGRESSION_CONTRACTS TC-8b; FIXTURE_CATALOG FX-8b | RESOLVED — fix_open_end:625 trim → rhythm_why:273 rejects; rhythm_out записывает; M225 Case C |
+| P1-F: Строки fix_open_end ~1080, stands_alone ~800; STATIC/OBSERVED не различены; break→continue без bounded termination | CALLGRAPH_AND_ARCH_QUESTIONS §1,§2,§3; Q7 | RESOLVED — fix_open_end STATIC-verified:625; stands_alone STATIC-verified:657; STATIC/OBSERVED метки в графе; Q7 помечен ARCH_QUESTION с bounded termination requirement |
+
+---
+
 ## READY_FOR_SOL_QA
 
 ```
-TASK=M229-PREP-R1
+TASK=M229-PREP-R2
 BASE_SHA=3c011e94263e16e5780936b4769d3490cd03b682
 EVIDENCE_BASE=handoff/m228/REPORT.md (M228-R2, все P1 CLOSED)
+R1_PIN=9fcb8159a217f517c1e141b96ea4c9ebbdc5712d
 PRODUCTION_DIFF=NONE
 M229_CODE_GO=NO
 CHANGED_PATHS=handoff/m229/REGRESSION_CONTRACTS.md,
@@ -153,7 +168,13 @@ CHANGED_PATHS=handoff/m229/REGRESSION_CONTRACTS.md,
               handoff/m229/CALLGRAPH_AND_ARCH_QUESTIONS.md,
               handoff/m229/REPORT.md
 TEST_IDS=TC-1,TC-2,TC-3,TC-5,TC-7,TC-8a,TC-8b,TC-9a,TC-9b
-TEST_STATUS=SPECIFIED (не запущены — M229_CODE_GO=NO)
-ARCH_QUESTIONS=Q1–Q8 (3 требуют owner decision: Q3,Q6,Q7)
+TEST_STATUS=SPECIFIED_NOT_EXECUTED
+ARCH_QUESTIONS=Q1–Q7-b (Q3,Q6,Q7-b owner decision; Q7-a ARCH_QUESTION bounded termination)
+P1_A=RESOLVED
+P1_B=RESOLVED
+P1_C=RESOLVED
+P1_D=RESOLVED
+P1_E=RESOLVED
+P1_F=RESOLVED
 READY_FOR_SOL_QA=YES
 ```

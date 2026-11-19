@@ -8,39 +8,42 @@
 
 ## 1. Граф вызовов CLI-пути
 
-Легенда: `→` наблюдённый вызов (OBSERVED из M223–M227); `⇢` статически подтверждённый вызов (STATIC).
+Легенда: `→` наблюдённый вызов (OBSERVED — выполнен в M223–M227 принятых reprо); `⇢` статически подтверждённый вызов (STATIC — read-only source inspection, не выполнялось). Незаполненные пути помечены UNKNOWN.
 
 ```
-cmd_autocut(stem, root, llm)                             [__main__.py:~8600]
-  ⇢ load_r0_config(root/"config/r0.yaml")               [__main__.py:8609]
-  ⇢ AutoParams (из AutocutConfig)                        [__main__.py:8630]
-  ⇢ build clauses callback (если hook_clauses)           [__main__.py:8673–8710]
-  ⇢ build start_pause callback (если start_pause_min)   [__main__.py:8672–8710]
-  ⇢ propose(units, params, sentences, ...)               [__main__.py:8818]  ← ФАЗА 1
-      ⇢ eligible(u, p)                                   [autocut.py:164]
-      ⇢ build_passage(seed, by_id, p, taken)            [autocut.py:365]  ← #1 #9
-          ⇢ usable(u)                                    [autocut.py:375]
-          ⇢ rhythm checks (jump_sec, max_jumps)          [autocut.py:390–395]
+cmd_autocut(stem, root, llm)                             [__main__.py:~8600]  STATIC
+  ⇢ load_r0_config(root/"config/r0.yaml")               [__main__.py:8609]  STATIC
+  ⇢ AutoParams (из AutocutConfig)                        [__main__.py:8630]  STATIC
+  ⇢ build clauses callback (если hook_clauses)           [__main__.py:8673–8710]  STATIC
+  ⇢ build start_pause callback (если start_pause_min)   [__main__.py:8672–8710]  STATIC
+  → propose(units, params, sentences, ...)               [__main__.py:8818]  OBSERVED (M223)
+      ⇢ eligible(u, p)                                   [autocut.py:164]  STATIC
+      ⇢ build_passage(seed, by_id, p, taken)            [autocut.py:365]  ← #1 #9  STATIC
+          ⇢ usable(u)                                    [autocut.py:375]  STATIC
+          ⇢ rhythm checks (jump_sec, max_jumps)          [autocut.py:390–395]  STATIC
           → ВОЗВРАЩАЕТ: list[unit] | None
-      ⇢ build_clip(seed, units, by_id, p)               [autocut.py:213]
-      ⇢ add_payoff(clip, seed, units, p, taken)         [autocut.py:338]
-      ⇢ fit_rhythm(clip, by_id, p, keep, taken)         [autocut.py:297]  ← #7 #8b
+      ⇢ build_clip(seed, units, by_id, p)               [autocut.py:213]  STATIC
+      ⇢ add_payoff(clip, seed, units, p, taken)         [autocut.py:338]  STATIC
+      → fit_rhythm(clip, by_id, p, keep, taken)         [autocut.py:297]  ← #7 #8a #8b  OBSERVED (M225)
+          ⇢ rhythm_why(spans, p, is_loop)               [autocut.py:273]  STATIC
           → ВОЗВРАЩАЕТ: (list[unit] | None, notes)
-      ⇢ context_start(clip, by_id, p, sentences, ...)   [autocut.py:676]  ← #2 #5
-          ⇢ glued_start(ref, p, start_pause)            [autocut.py:990]
-          ⇢ stands_alone(text, nxt, p, judge, core)     [autocut.py:~800]
+      → context_start(clip, by_id, p, sentences, ...)   [autocut.py:676]  ← #2 #5  OBSERVED (M223,M224)
+          ⇢ glued_start(ref, p, start_pause)            [autocut.py:990]  STATIC
+          ⇢ stands_alone(text, nxt, p, judge, core)     [autocut.py:657]  STATIC (строка STATIC-verified)
           → ВОЗВРАЩАЕТ: (list[unit] | None, notes, why)
-      ⇢ fix_open_end(clip, sentences, end_tone, p)      [autocut.py:~1080]
-      ⇢ rhythm_why(spans, p, is_loop)                   [autocut.py:~270]
-      ⇢ _hook_cands(clip, sentences, p, start_pause)    [autocut.py:1281]  ← #3
-          # NOTE: clauses=None здесь (не передаётся) — статически подтверждено
+      ⇢ fix_open_end(clip, sentences, end_tone, p)      [autocut.py:625]  ← #8b  STATIC (строка STATIC-verified)
+          # вызов из propose:1239; обрезает open-tone ending → может укорачивать clip
+      ⇢ rhythm_why(spans, p, is_loop)                   [autocut.py:273]  ← финальная проверка  STATIC
+          # финальный вызов из propose:1250 (после fix_open_end, если p.rhythm=true)
+      → _hook_cands(clip, sentences, p, start_pause)    [autocut.py:1281]  ← #3  OBSERVED (M223)
+          # NOTE: clauses=None — STATIC: propose:1281 не передаёт clauses=
           → ВОЗВРАЩАЕТ: [(ref, score, text)]
-      ⇢ teaser_misses(clip, sentences, p)               [autocut.py:1292]  ← #11
-      → ВОЗВРАЩАЕТ: Proposal(units, hook, score, ...)
-  ⇢ fill_pool / weak-seed propose                        [__main__.py:8821–8831]  ← #11
-      # NOTE: без no_start, open_end, clauses — статически подтверждено
-  ⇢ select_global(weights, conflict, k, ...)            [autocut.py:1368]  ← #4
-  → review writer                                        [__main__.py:~9100]
+      ⇢ teaser_misses(clip, sentences, p)               [autocut.py:1292]  ← #11  STATIC
+      → ВОЗВРАЩАЕТ: Proposal(units=list[int], hook, score, ...)
+  ⇢ fill_pool / weak-seed propose                        [__main__.py:8821–8831]  ← #11  STATIC
+      # NOTE: без no_start, open_end, clauses — STATIC
+  ⇢ select_global(weights, conflict, k, ...)            [autocut.py:1368]  ← #4  STATIC
+  → review writer                                        [__main__.py:~9100]  UNKNOWN
 ```
 
 ---
@@ -52,11 +55,11 @@ cmd_autocut(stem, root, llm)                             [__main__.py:~8600]
 | Символ | Файл:строка | Находки | Permitted изменение (pending arch) |
 |--------|------------|---------|-----------------------------------|
 | `propose()` | `autocut.py:1145` | #1, #2, #3, #5 | Signature: добавить `clauses=None`; body: bounded reattempt #1, check dur #5 |
-| `build_passage()` | `autocut.py:365` | #9a, #9b | `break→continue` при overlong nxt; answer extension (arch decision) |
+| `build_passage()` | `autocut.py:365` | #9a, #9b | ARCH_QUESTION: `break→continue` небезопасен без bounded termination; answer extension (arch decision) |
 | `context_start()` | `autocut.py:676` | #2, #5 | Re-check min_sec после drop; body opener detection |
 | `fit_rhythm()` | `autocut.py:297` | #7, #8b | Refers-check после removal; fail-closed neighbor-contract |
 | `_hook_cands()` | `autocut.py:1002` | #3 | Принимает `clauses=` (уже принимает); propose должен передавать |
-| `teaser_misses()` | `autocut.py:1047` | #11 | (observability — arch decision M230) |
+| `teaser_misses()` | `autocut.py:1047` | #11 | (observability — arch decision M230); `fix_open_end` STATIC-verified line 625; `stands_alone` STATIC-verified line 657 |
 | `used_seeds/taken` | `autocut.py:1172–1264` | #1 | Bounded enumeration design |
 | `select_global()` | `autocut.py:1368` | #4 | (observational counter M231) |
 | `fill_pool() / weak propose` | `__main__.py:8821` | #11 | (observational M231) |
@@ -179,15 +182,21 @@ if rows[0] drop condition:
 
 ---
 
-### Q7 — #9b: Answer extension после question (REQUIRED — owner decision)
+### Q7 — #9a/#9b: `break→continue` и answer extension (REQUIRED — arch + owner decision)
 
+**Q7-a (#9a) — break→continue ARCH_QUESTION:**
+**Вопрос:** Как безопасно пробовать prv при overlong nxt без риска цикла?  
+**Контекст:** `build_passage:405` break при overlong nxt. Простой `break→continue` небезопасен без спецификации stopping condition: при множестве overlong nxt возможен infinite loop или O(N²) pass. Нужна bounded termination стратегия перед реализацией.  
+**Решение:** ARCH_QUESTION. Pending M230 arch spec: (1) stopping condition при overlong, (2) альтернативный neighbor strategy, (3) max_attempts limit.
+
+**Q7-b (#9b) — answer extension:**
 **Вопрос:** Всегда ли добавлять answer unit после удаления question post-loop trim?  
 **Контекст:** `build_passage` строки 408-413: после post-loop pop question-last, run[-1] проверяется. Answer unit (следующий в source) может быть доступен.  
 **Варианты:**
 1. Всегда добавлять answer (если usable, topic match, dur ≤ max_sec).
 2. Только если answer.role in PAYOFFS.
 3. Не добавлять — trim и возвращать run без question.  
-**Owner decision required.**
+**Owner decision required. ГИПОТЕЗА — не mandated.**
 
 ---
 
@@ -225,11 +234,19 @@ if rows[0] drop condition:
 
 ## 6. M231 → M232 граница
 
-| Компонент | M231 (observability) | M232 (behavior fix, после M230 arch) |
-|-----------|---------------------|--------------------------------------|
-| Seed counters | ✓ | — |
-| build_passage None reason | ✓ (logging) | #9a fix (break→continue) |
-| teaser_misses параметры | — | После arch decision Q8 |
-| weak-seed no_start/open_end | — | После arch decision |
+**M231 = OBSERVABILITY ONLY.** Никаких изменений поведения алгоритма или signature.  
+**M232 = behavior fixes.** Только после M230 arch approval и M231 counter data.
+
+| Компонент | M231 (observability ONLY) | M232 (behavior fix, после M230 arch) |
+|-----------|--------------------------|--------------------------------------|
+| Seed counters (eligible/attempted/none_reasons/pool/accepted) | ✓ additive counters | — |
+| build_passage None reason logging | ✓ logging only | #9a fix (arch design pending — НЕ просто break→continue) |
+| teaser_misses параметры | — (arch decision Q8) | После arch decision Q8 |
+| weak-seed no_start/open_end/clauses | — (arch decision) | После arch decision |
 | post-select fallback #4 | counter only | fix после M231 observation |
 | t0/t1 boundary enforcement | delta-log only | fix после M231 observation |
+| fit_rhythm refers validator | — | #7 fix после M230 arch |
+| fit_rhythm question-last | — | #8a fix после M230 arch |
+| fix_open_end recovery path | — | #8b arch decision pending |
+
+**Граница жёсткая:** изменения signature, поведения propose, build_passage, fit_rhythm, context_start, _hook_cands → ТОЛЬКО M232+, после явного M230 arch approval и M231 observational data.
