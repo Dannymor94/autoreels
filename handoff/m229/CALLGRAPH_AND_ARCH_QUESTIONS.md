@@ -24,7 +24,7 @@ cmd_autocut(stem, root, llm)                             [__main__.py:~8600]  ST
           → ВОЗВРАЩАЕТ: list[unit] | None
       ⇢ build_clip(seed, units, by_id, p)               [autocut.py:213]  STATIC
       ⇢ add_payoff(clip, seed, units, p, taken)         [autocut.py:338]  STATIC
-      → fit_rhythm(clip, by_id, p, keep, taken)         [autocut.py:297]  ← #7 #8a #8b  OBSERVED (M225)
+      → fit_rhythm(clip, by_id, p, keep, taken)         [autocut.py:297]  ← #7 #8a  OBSERVED (M225)
           ⇢ rhythm_why(spans, p, is_loop)               [autocut.py:273]  STATIC
           → ВОЗВРАЩАЕТ: (list[unit] | None, notes)
       → context_start(clip, by_id, p, sentences, ...)   [autocut.py:676]  ← #2 #5  OBSERVED (M223,M224)
@@ -57,7 +57,7 @@ cmd_autocut(stem, root, llm)                             [__main__.py:~8600]  ST
 | `propose()` | `autocut.py:1145` | #1, #2, #3, #5 | Signature: добавить `clauses=None`; body: bounded reattempt #1, check dur #5 |
 | `build_passage()` | `autocut.py:365` | #9a, #9b | ARCH_QUESTION: `break→continue` небезопасен без bounded termination; answer extension (arch decision) |
 | `context_start()` | `autocut.py:676` | #2, #5 | Re-check min_sec после drop; body opener detection |
-| `fit_rhythm()` | `autocut.py:297` | #7, #8b | Refers-check после removal; fail-closed neighbor-contract |
+| `fit_rhythm()` | `autocut.py:297` | #7, #8a | Refers-check после removal; question-last protection (arch pending) |
 | `_hook_cands()` | `autocut.py:1002` | #3 | Принимает `clauses=` (уже принимает); propose должен передавать |
 | `teaser_misses()` | `autocut.py:1047` | #11 | (observability — arch decision M230); `fix_open_end` STATIC-verified line 625; `stands_alone` STATIC-verified line 657 |
 | `used_seeds/taken` | `autocut.py:1172–1264` | #1 | Bounded enumeration design |
@@ -166,7 +166,7 @@ if rows[0] drop condition:
 ### Q5 — #7: Refers validator location (REQUIRED)
 
 **Вопрос:** Где проверять что все `refers` clip'а удовлетворены?  
-**Контекст:** `fit_rhythm` может удалить unit с which другие units refers. Поле `u["refers"]` = строка типа "2" = зависимость от unit id=2.  
+**Контекст:** `fit_rhythm` может удалить unit, на который ссылаются другие units. В принятом M225 Case A и в TC-7/FX-7 `u["refers"]` — integer ID, например `2`, а не строка `"2"`; проверка должна сравнивать с integer unit IDs.  
 **Варианты:**
 1. В `fit_rhythm` перед removal: проверять dependents.
 2. В `propose` после `fit_rhythm`: post-check refers.
@@ -174,11 +174,11 @@ if rows[0] drop condition:
 
 ---
 
-### Q6 — #8b: Legal repair neighbor для short piece (REQUIRED — owner decision)
+### Q6 — #8b: Recovery after fix_open_end trim (REQUIRED — owner decision)
 
-**Вопрос:** Какой сосед является легальным для repair short piece?  
-**Контекст:** `fit_rhythm` пробует grow piece соседом (строки 312-326). Если нет eligible соседа — silent removal (строка 331). NOT_VERIFIED: есть ли cases, где законный сосед доступен и мог бы repair.  
-**Вопрос:** Fail-closed всегда? Или repair с конкретным neighbor-contract? Owner decision required.
+**Вопрос:** Должен ли быть recovery после `fix_open_end` trim, если заключительная проверка `rhythm_why` отвергает получившийся короткий фрагмент?  
+**Контекст:** Accepted M225 Case C: `fix_open_end` (autocut.py:625; propose:1239) обрезал ending до 2.5s, затем финальный `rhythm_why` (propose:1250) отверг его как <≈4.09s, зарегистрировав `rhythm_out`. Это **не** silent middle-piece removal в `fit_rhythm`. Доказательства, что доступен допустимый сосед и repair успешен, отсутствуют (NOT_VERIFIED).  
+**Варианты для owner+architect:** (1) fail-closed и явно логировать причину; (2) один детерминированный bounded recovery с точно заданным eligible neighbor и повторной финальной проверкой; (3) иной согласованный законный fallback, не нарушающий max_sec/refers и question ordering. Никаких изменений без M230 arch approval и отдельного M232 code gate.
 
 ---
 
