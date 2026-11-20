@@ -8828,36 +8828,6 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             for _ev in _trace:
                 if _ev.get("event") != "seed":
                     continue
-                # dep_broken (M231.2): a non-standalone unit whose referent was present in a reached
-                # snapshot but is absent from the final clip; stage = the reached stage where it dropped.
-                # Computed once here (not per-exit in propose) so ordering is deterministic and the stage
-                # is a real label even when optional stages (S2/S4/S5) were skipped (None snapshot).
-                _snap = _ev["snap"]
-                _reached = [(_st, _snap[_st]) for _st in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
-                            if _snap[_st] is not None]
-                _dep: list = []
-                if _reached:
-                    _final_ids = set(_reached[-1][1])
-                    _pairs: set = set()
-                    for _st_d, _sids_d in _reached:
-                        _sset_d = set(_sids_d)
-                        for _ui_d in _sids_d:
-                            _u_d = _ubid.get(_ui_d)
-                            if (_u_d and not _u_d.get("standalone", True)
-                                    and _u_d.get("refers") in _ubid and _u_d.get("refers") in _sset_d):
-                                _pairs.add((_ui_d, _u_d["refers"]))
-                    for _ui_d, _ti_d in sorted(_pairs):
-                        if _ui_d in _final_ids and _ti_d not in _final_ids:
-                            _stage_d = None
-                            _prev_d = None
-                            for _st_w, _sids_w in _reached:          # first reached stage: present → absent
-                                _here_d = _ti_d in _sids_w
-                                if _prev_d is True and not _here_d:
-                                    _stage_d = _st_w
-                                    break
-                                _prev_d = _here_d
-                            _dep.append([_ui_d, _ti_d, _stage_d])
-                _ev["dep_broken"] = _dep
                 if not _ev.get("spans_final"):
                     continue
                 _spans_e: list = []
@@ -9324,30 +9294,37 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             if isinstance(o, list):
                 return [_rflt(v) for v in o]
             return o
-        # fail-closed output boundary (M231 P1.4): never write inside the repository or through a
-        # symlink. O_NOFOLLOW makes the symlink refusal atomic; any OSError is a silent skip so a bad
-        # ARL_AUTOCUT_TRACE path can never crash the run or alter OFF-parity stdout/stderr.
-        _repo_r = _project_root().resolve()
-        _tp_r = Path(_trace_path)
-        _write_ok = True
+        # Fail closed: resolve the PARENT only, then open its canonical components through
+        # directory fds without following another symlink. The final O_EXCL prevents both
+        # symlink following and overwriting existing files. Once a parent fd is held, a
+        # symlink swap of the original parent path cannot redirect the write into the repo.
+        _parent_fd_r = None
+        _file_fd_r = None
         try:
-            _rp_r = _tp_r.resolve()
-            _par_r = _tp_r.parent.resolve()
-            if (_rp_r == _repo_r or _repo_r in _rp_r.parents
-                    or _par_r == _repo_r or _repo_r in _par_r.parents):
-                _write_ok = False
-            elif _tp_r.is_symlink():
-                _write_ok = False
-        except OSError:
-            _write_ok = False
-        if _write_ok:
-            try:
-                _fd_r = os.open(_trace_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
-                with os.fdopen(_fd_r, "w", encoding="utf-8") as _tf:
+            _repo_r = _project_root().resolve(strict=True)
+            _tp_r = Path(_trace_path)
+            _par_r = _tp_r.parent.resolve(strict=True)
+            if _par_r != _repo_r and _repo_r not in _par_r.parents and _tp_r.name not in ("", ".", ".."):
+                _flags_d_r = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                _parent_fd_r = os.open(_par_r.anchor, _flags_d_r)
+                for _part_r in _par_r.parts[1:]:
+                    _next_fd_r = os.open(_part_r, _flags_d_r, dir_fd=_parent_fd_r)
+                    os.close(_parent_fd_r)
+                    _parent_fd_r = _next_fd_r
+                _file_fd_r = os.open(_tp_r.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                     0o600, dir_fd=_parent_fd_r)
+                _tf_r = os.fdopen(_file_fd_r, "w", encoding="utf-8")
+                _file_fd_r = None
+                with _tf_r:
                     for _ev_w in _trace:
-                        _tf.write(json.dumps(_rflt(_ev_w), sort_keys=True, ensure_ascii=False) + "\n")
-            except OSError:
-                pass
+                        _tf_r.write(json.dumps(_rflt(_ev_w), sort_keys=True, ensure_ascii=False) + "\n")
+        except (OSError, RuntimeError, ValueError):
+            pass  # optional trace failure never changes CLI outputs
+        finally:
+            if _file_fd_r is not None:
+                os.close(_file_fd_r)
+            if _parent_fd_r is not None:
+                os.close(_parent_fd_r)
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0

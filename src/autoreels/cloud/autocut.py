@@ -1220,6 +1220,22 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             if trace is not None:
                 _tr["snap"]["S2"] = [u["id"] for u in clip]
                 _tr["secs"]["S2"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.prune and not passage:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
@@ -1227,6 +1243,22 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             if trace is not None:
                 _tr["snap"]["S3"] = [u["id"] for u in clip]
                 _tr["secs"]["S3"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.rhythm:
             clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]}, taken if passage else frozenset())
             if clip_r is None:
@@ -1242,6 +1274,22 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             if trace is not None:
                 _tr["snap"]["S4"] = [u["id"] for u in clip]
                 _tr["secs"]["S4"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         unit_refs: dict = {}
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
@@ -1280,6 +1328,22 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             if trace is not None:
                 _tr["snap"]["S5"] = [u["id"] for u in clip]
                 _tr["secs"]["S5"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.end_tone and end_tone is not None and sentences:
             clip3, enote, ewhy = fix_open_end(clip, sentences, end_tone, p)
             if clip3 is None:
@@ -1299,6 +1363,22 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             if trace is not None:
                 _tr["snap"]["S6"] = [u["id"] for u in clip]
                 _tr["secs"]["S6"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.rhythm:                      # M120: the final clip (after its start and its end) keeps the rhythm
             rwhy, _k = rhythm_why([(float(u["t0"]), float(u["t1"])) for u in clip], p,
                                   clip[0].get("role") == "question")

@@ -148,6 +148,72 @@ def test_p5_no_extra_callback_calls():
     assert off == on and len(off) > 0
 
 
+def test_p5_all_callback_kinds_have_identical_arguments():
+    units = [U(1, 0, 30, "thesis", 5, "1.1")]
+    p = AutoParams(clips=1, generator="montage", rhythm=False, prune=False,
+                   context_start=True, context_min_words=1, min_sec=1,
+                   end_tone=True, taste_weight=1.0)
+
+    def run(trace):
+        calls = {"sentences": [], "judge": [], "end_tone": [], "taste": []}
+
+        def sentences(refs):
+            calls["sentences"].append(refs)
+            return [("1.1", 30.0, 4, True, "Практика помогает каждому человеку")]
+
+        def judge(text, following, core):
+            calls["judge"].append((text, following, core))
+            return (True, "")
+
+        def end_tone(ref):
+            calls["end_tone"].append(ref)
+            return "final"
+
+        def taste(clip):
+            calls["taste"].append(tuple(u["id"] for u in clip))
+            return 0.0
+
+        result = propose(units, p, sentences, judge=judge, end_tone=end_tone,
+                         taste=taste, trace=trace)
+        return result, calls
+
+    off, off_calls = run(None)
+    trace: list = []
+    on, on_calls = run(trace)
+    assert off == on
+    assert all(off_calls[k] for k in off_calls), off_calls
+    assert off_calls == on_calls
+    assert [e["outcome"] for e in trace if e["event"] == "seed"] == ["pooled"]
+
+
+def test_p7_frozen_production_golden_for_off_proposals_and_callback_logs():
+    """Golden generated on 3c011e9, with a real proposal and all four callbacks."""
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    spec = json.loads((repo / "tests" / "fixtures" / "m231" /
+                       "frozen_production_off_golden.json").read_text(encoding="utf-8"))
+    result = subprocess.run([sys.executable, str(repo / "tests" / "fixtures" / "m231" /
+                                                 "compare_off_golden.py")],
+                            env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
+                            cwd=str(repo), capture_output=True, text=True, check=True)
+    assert spec["provenance"]["source_sha"] == "3c011e94263e16e5780936b4769d3490cd03b682"
+    assert json.loads(result.stdout) == spec["expected"]
+
+
+def test_p7_frozen_production_golden_for_cli_review_and_console():
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    spec = json.loads((repo / "tests" / "fixtures" / "m231" /
+                       "frozen_production_off_golden.json").read_text(encoding="utf-8"))
+    result = subprocess.run([sys.executable, str(repo / "tests" / "fixtures" / "m231" /
+                                                 "compare_cli_off_golden.py")],
+                            env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
+                            cwd=str(repo), capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == spec["cli_expected"]
+
+
 # ===========================================================================
 # P11 — the nine seed exits, each forced and asserted by its specific outcome
 # ===========================================================================
@@ -370,6 +436,64 @@ def test_p6_does_not_follow_symlink(tmp_path, monkeypatch):
     assert real.read_text(encoding="utf-8") == "PRESERVE\n"  # the symlink target is untouched
 
 
+def test_p6_refuses_preexisting_regular_file(tmp_path, monkeypatch):
+    proj = _montage_project(tmp_path)
+    existing = tmp_path / "existing.jsonl"
+    existing.write_text("DO NOT OVERWRITE\n", encoding="utf-8")
+    monkeypatch.setenv("ARL_AUTOCUT_TRACE", str(existing))
+    rc = proj["cli"].cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                                 check=False, clips=2)
+    assert rc == 0
+    assert existing.read_text(encoding="utf-8") == "DO NOT OVERWRITE\n"
+
+
+def test_p6_parent_symlink_swap_cannot_redirect_write(tmp_path, monkeypatch):
+    """A parent replacement immediately before final open cannot redirect writes.
+
+    All destinations are synthetic tmp directories; no real repository path is a target.
+    """
+    proj = _montage_project(tmp_path)
+    original = tmp_path / "stage"
+    relocated = tmp_path / "stage_renamed"
+    fake_repo = tmp_path / "fake_repository"
+    original.mkdir()
+    fake_repo.mkdir()
+    sentinel = fake_repo / "trace.jsonl"
+    sentinel.write_text("PROTECTED\n", encoding="utf-8")
+    monkeypatch.setenv("ARL_AUTOCUT_TRACE", str(original / "trace.jsonl"))
+    original_open = os.open
+    switched = []
+
+    def swap_on_final_open(path, flags, *args, **kwargs):
+        if not switched and (
+            (path == "trace.jsonl" and kwargs.get("dir_fd") is not None)
+            or os.fspath(path) == str(original / "trace.jsonl")
+        ):
+            original.rename(relocated)
+            original.symlink_to(fake_repo, target_is_directory=True)
+            switched.append(True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_on_final_open)
+    rc = proj["cli"].cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                                 check=False, clips=2)
+    assert rc == 0 and switched
+    assert sentinel.read_text(encoding="utf-8") == "PROTECTED\n"
+    assert (relocated / "trace.jsonl").exists()
+
+
+def test_p6_parent_symlink_loop_fails_closed(tmp_path, monkeypatch, capsys):
+    proj = _montage_project(tmp_path)
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop, target_is_directory=True)
+    monkeypatch.setenv("ARL_AUTOCUT_TRACE", str(loop / "trace.jsonl"))
+    rc = proj["cli"].cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                                 check=False, clips=2)
+    assert rc == 0
+    assert not (tmp_path / "trace.jsonl").exists()
+    assert "Traceback" not in capsys.readouterr().err
+
+
 # ===========================================================================
 # P2 — env unset vs set: identical stdout and review draft (byte-for-byte)
 # ===========================================================================
@@ -476,6 +600,41 @@ def test_p8_dep_broken_when_support_dropped_at_s5(tmp_path, monkeypatch):
     seed11 = [e for e in events if e["event"] == "seed" and e["dep_broken"]]
     assert seed11, "expected a dep_broken observation"
     assert seed11[0]["dep_broken"] == [[11, 10, "S5"]]
+
+
+def test_p8_direct_propose_reports_dep_broken_before_cli_enrichment(monkeypatch):
+    units = _fx7l_units()
+
+    def drop_ten(clip, *args, **kwargs):
+        kept = [u for u in clip if u["id"] != 10]
+        return (kept or clip), [], ""
+
+    monkeypatch.setattr(ac, "context_start", drop_ten)
+    tr: list = []
+    propose(units, AutoParams(clips=2, generator="montage", rhythm=False,
+            prune=False, context_start=True, min_sec=1.0, target_sec=30.0),
+            sentences=lambda refs: [("1.1", 5.0, 3, True)], trace=tr)
+    seed_events = [e for e in tr if e["event"] == "seed"]
+    assert seed_events
+    assert any(e["dep_broken"] == [[11, 10, "S5"]] for e in seed_events)
+
+
+@pytest.mark.parametrize("stage", ("S3", "S4"))
+def test_p8_direct_propose_uses_reached_drop_stage(monkeypatch, stage):
+    units = _fx7l_units()
+    if stage == "S3":
+        monkeypatch.setattr(ac, "_prune", lambda clip, *args: (
+            [u for u in clip if u["id"] != 10], [10]))
+    else:
+        monkeypatch.setattr(ac, "fit_rhythm", lambda clip, *args: (
+            [u for u in clip if u["id"] != 10], []))
+        monkeypatch.setattr(ac, "rhythm_why", lambda *args: (None, None))
+    tr: list = []
+    propose(units, AutoParams(clips=2, generator="montage", rhythm=stage == "S4",
+            prune=stage == "S3", context_start=False, min_sec=1.0, target_sec=30.0),
+            trace=tr)
+    seed_events = [e for e in tr if e["event"] == "seed"]
+    assert any(e["dep_broken"] == [[11, 10, stage]] for e in seed_events)
 
 
 def test_p8_no_dep_broken_when_support_preserved(tmp_path, monkeypatch):
