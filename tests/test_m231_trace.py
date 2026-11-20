@@ -1,20 +1,37 @@
-"""M231: passive observability trace for propose() and cmd_autocut."""
+"""M231-R1: passive observability trace for propose() and cmd_autocut.
+
+Two layers, both exercising the REAL implementation (no inline copies of the
+enrichment or of propose's exit routing):
+
+* propose() directly — OFF parity, determinism, the callback spy, and every one
+  of the nine seed exits (P1/P3/P4/P5/P11). Each exit is forced by monkeypatching
+  the real decision helper (build_clip / fit_rhythm / context_start / fix_open_end
+  / rhythm_why) so the asserted outcome is the specific one, never `len(...) > 0`.
+* cmd_autocut() in-process on a synthetic montage project — the real CLI
+  enrichment: timing deltas, speed_secs, dep_broken, select/fate accounting and
+  the fail-closed trace-path boundary (P2/P6/P8/P9/P10). The repo-write guard in
+  conftest proves nothing is written under the repository.
+"""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import subprocess
+import sys
 
 import pytest
 
+import autoreels.cloud.autocut as ac
 from autoreels.cloud.autocut import AutoParams, propose
 
 
-def U(i, t0, dur, role, punch, refs, standalone=True, refers=None):
+def U(i, t0, dur, role, punch, refs, standalone=True, refers=None, rate=2.4):
     return {
         "id": i, "t0": float(t0), "t1": float(t0 + dur),
         "role": role, "punch": punch, "refs": refs,
         "standalone": standalone, "refers": refers,
-        "voice": {"energy": 50.0}, "summary": f"мысль {i}",
+        "voice": {"energy": 50.0, "rate": rate}, "summary": f"мысль {i}",
         "topic": 1, "similar": [], "missing": False, "filtered": "",
     }
 
@@ -28,22 +45,22 @@ def _base_units():
     ]
 
 
-# ---------------------------------------------------------------------------
-# P1: trace=None vs trace=[] produce equal Proposal lists
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# P1 — OFF parity: trace=None vs trace=[] give equal Proposals and side-outputs
+# ===========================================================================
 
 def test_p1_trace_none_vs_empty_equal_proposals():
     units = _base_units()
     p = AutoParams(clips=5, target_sec=30)
     r_none = propose(units, p)
-    trace_list: list = []
-    r_traced = propose(units, p, trace=trace_list)
+    tr: list = []
+    r_traced = propose(units, p, trace=tr)
     assert [pr.pieces for pr in r_none] == [pr.pieces for pr in r_traced]
     assert [pr.score for pr in r_none] == [pr.score for pr in r_traced]
-    assert len(trace_list) > 0  # trace was populated when ON
+    assert len(tr) > 0
 
 
-def test_p1_no_start_open_end_rhythm_out_unchanged():
+def test_p1_side_outputs_unchanged():
     units = _base_units()
     p = AutoParams(clips=5, target_sec=30)
     ns1: list = []
@@ -54,54 +71,43 @@ def test_p1_no_start_open_end_rhythm_out_unchanged():
     assert [pr.pieces for pr in r1] == [pr.pieces for pr in r2]
 
 
-# ---------------------------------------------------------------------------
-# P3: Accounting identities
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# P3 — accounting identities at the propose level
+# ===========================================================================
 
-def test_p3_seed_count_and_truncate():
+def test_p3_seed_count_and_truncate_identities():
     units = _base_units()
     p = AutoParams(clips=1, target_sec=30)
-    trace: list = []
-    out = propose(units, p, trace=trace)
-    seed_events = [e for e in trace if e["event"] == "seed"]
-    truncate_events = [e for e in trace if e["event"] == "truncate"]
-    # exactly one truncate, last event
-    assert len(truncate_events) == 1
-    assert trace[-1]["event"] == "truncate"
-    # seed count equals eligible seeds (hard to compute exactly, but > 0)
-    assert len(seed_events) > 0
-    # accounting: kept + dropped == pooled
-    t = truncate_events[0]
+    tr: list = []
+    out = propose(units, p, trace=tr)
+    seeds = [e for e in tr if e["event"] == "seed"]
+    truncs = [e for e in tr if e["event"] == "truncate"]
+    assert len(truncs) == 1 and tr[-1]["event"] == "truncate"
+    t = truncs[0]
     assert t["kept"] + t["dropped"] == t["pooled"]
-    # kept == len(out)
     assert t["kept"] == len(out)
-    # pooled == count of "pooled" outcome events
-    n_pooled = sum(1 for e in seed_events if e["outcome"] == "pooled")
-    assert t["pooled"] == n_pooled
+    assert t["pooled"] == sum(1 for e in seeds if e["outcome"] == "pooled")
+    # exactly one seed event per eligible seed
+    roles = tuple(p.seed_roles) or ac.STORY
+    elig = [u for u in units if ac.eligible(u, p) and u["role"] in roles and u["punch"] >= p.seed_punch]
+    assert len(seeds) == len(elig)
+    assert {e["seed"] for e in seeds} == {u["id"] for u in elig}
 
 
-def test_p3_seed_order_matches_seeds():
-    units = _base_units()
-    p = AutoParams(clips=5, target_sec=30)
-    trace: list = []
-    propose(units, p, trace=trace)
-    seed_events = [e for e in trace if e["event"] == "seed"]
-    # all seed events have required fields
-    for ev in seed_events:
-        assert ev["schema"] == 1
-        assert "outcome" in ev and ev["outcome"] is not None
-        assert "snap" in ev
-        assert set(ev["snap"].keys()) == {"S0", "S1", "S2", "S3", "S4", "S5", "S6"}
-        assert "dep_broken" in ev
-        assert "tail_question" in ev
-        assert "secs" in ev
+def test_p3_every_seed_event_well_formed():
+    tr: list = []
+    propose(_base_units(), AutoParams(clips=5, target_sec=30), trace=tr)
+    for ev in [e for e in tr if e["event"] == "seed"]:
+        assert ev["schema"] == 1 and ev["outcome"] is not None
+        assert set(ev["snap"]) == {"S0", "S1", "S2", "S3", "S4", "S5", "S6"}
+        assert isinstance(ev["dep_broken"], list)
 
 
-# ---------------------------------------------------------------------------
-# P4: Two runs give byte-identical traces
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# P4 — determinism (identical traces; stable under PYTHONHASHSEED)
+# ===========================================================================
 
-def test_p4_deterministic_trace():
+def test_p4_two_runs_byte_identical():
     units = _base_units()
     p = AutoParams(clips=5, target_sec=30)
     t1: list = []
@@ -111,297 +117,369 @@ def test_p4_deterministic_trace():
     assert t1 == t2
 
 
-# ---------------------------------------------------------------------------
-# P5: judge spy — identical call counts with trace on and off
-# ---------------------------------------------------------------------------
+def test_p4_dep_broken_stable_across_hash_seeds(tmp_path):
+    """The dep_broken order is sorted, so the CLI trace is byte-identical under
+    PYTHONHASHSEED 0/42/1337 (the former set-comprehension was hash-ordered)."""
+    proj = _montage_project(tmp_path)
+    digests = set()
+    for seed in ("0", "42", "1337"):
+        out = tmp_path / f"trace_{seed}.jsonl"
+        env = {**os.environ, "ARL_AUTOCUT_TRACE": str(out), "PYTHONHASHSEED": seed}
+        r = subprocess.run([sys.executable, "-m", "autoreels", "autocut", "v",
+                            f"--root={tmp_path}", f"--cache-dir={tmp_path / 'cache'}",
+                            "--no-check", "--clips=2"],
+                           capture_output=True, text=True, env=env, cwd=str(tmp_path))
+        assert r.returncode == 0, r.stderr
+        digests.add(hashlib.sha256(out.read_bytes()).hexdigest())
+    assert len(digests) == 1
+
+
+# ===========================================================================
+# P5 — callback spy: trace ON adds no callback calls or new arguments
+# ===========================================================================
 
 def test_p5_no_extra_callback_calls():
-    # With judge=None (most common path), propose makes no judge calls regardless of trace.
-    # Verify trace ON doesn't add new calls to taste callback.
-    calls_off: list = []
-    calls_on: list = []
-
-    def taste_spy_off(clip):
-        calls_off.append(len(clip))
-        return 0.0
-
-    def taste_spy_on(clip):
-        calls_on.append(len(clip))
-        return 0.0
-
+    off: list = []
+    on: list = []
     units = _base_units()
     p = AutoParams(clips=5, target_sec=30, taste_weight=1.0)
-    propose(units, p, taste=taste_spy_off)
-    propose(units, p, taste=taste_spy_on, trace=[])
-    assert calls_off == calls_on
+    propose(units, p, taste=lambda clip: (off.append(tuple(u["id"] for u in clip)) or 0.0))
+    propose(units, p, taste=lambda clip: (on.append(tuple(u["id"] for u in clip)) or 0.0), trace=[])
+    assert off == on and len(off) > 0
 
 
-# ---------------------------------------------------------------------------
-# P6: trace output goes to tmp_path (repo-write guard stays green)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# P11 — the nine seed exits, each forced and asserted by its specific outcome
+# ===========================================================================
 
-def test_p6_trace_file_in_tmp_path(tmp_path):
-    from autoreels import __main__ as cli
-    from autoreels.core.models import Manifest
-    from tests.test_montage import _source
-    mpath = _source(tmp_path)
-    cfg = tmp_path / "config" / "r0.yaml"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text("autocut:\n  clips: 1\n  target_sec: 30\n")
-    trace_file = tmp_path / "trace.jsonl"
-    env = {**os.environ, "ARL_AUTOCUT_TRACE": str(trace_file)}
-    import subprocess, sys
-    result = subprocess.run(
-        [sys.executable, "-m", "autoreels", "autocut", str(mpath), f"--root={tmp_path}"],
-        capture_output=True, text=True, env=env,
-    )
-    # Either succeeds (trace file written) or fails gracefully - but NOT writing to repo root
-    # The repo write guard is enforced by conftest.py's autouse fixture
-    # We just verify that if trace_file exists, it's under tmp_path
-    if trace_file.exists():
-        lines = trace_file.read_text().splitlines()
-        assert all(lines)  # no empty lines
-        events = [json.loads(ln) for ln in lines]
-        assert all(e.get("schema") == 1 for e in events)
-
-
-# ---------------------------------------------------------------------------
-# P11: Every exit outcome covered by at least one fixture
-# ---------------------------------------------------------------------------
-
-def _make_sentences(unit_list):
-    """Synthetic sentences callback: 5s per ref, 6 words, finished."""
-    def sentences(refs):
-        out = []
-        for piece in refs.split():
-            blk, _, rng = piece.partition(".")
-            a, _, z = rng.partition("-")
-            for k in range(int(a), int(z or a) + 1):
-                out.append((f"{blk}.{k}", 5.0, 6, True, f"текст {blk}.{k}"))
-        return out
-    return sentences
-
-
-def _outcomes(units, p=None, **kw):
-    if p is None:
-        p = AutoParams(clips=5, target_sec=30)
-    trace: list = []
-    propose(units, p, trace=trace, **kw)
-    return {e["outcome"] for e in trace if e["event"] == "seed"}
+def _one_outcome(tr):
+    seeds = [e for e in tr if e["event"] == "seed"]
+    return seeds
 
 
 def test_p11_pooled():
-    units = [U(1, 0, 25, "thesis", 4, "1.1-2"), U(2, 30, 20, "conclusion", 5, "2.1")]
-    assert "pooled" in _outcomes(units)
+    tr: list = []
+    propose([U(1, 0, 30, "thesis", 5, "1.1")], AutoParams(clips=1, target_sec=30,
+            generator="montage", rhythm=False, prune=False, context_start=False), trace=tr)
+    assert [e["outcome"] for e in _one_outcome(tr)] == ["pooled"]
 
 
-def test_p11_skip_used():
-    # U2 leans on U1 (standalone=False, refers=1), so clip for U1-seed pools [1,2]
-    # U2 as seed later → skip_used (u2 in used_seeds as STORY role after the first clip)
-    units = [
-        U(1, 0, 25, "thesis", 5, "1.1"),
-        U(2, 30, 15, "conclusion", 4, "2.1", standalone=False, refers=1),
-    ]
-    p = AutoParams(clips=5, target_sec=50, seed_roles=["thesis", "conclusion"])
-    outcomes = _outcomes(units, p)
-    assert "skip_used" in outcomes or "pooled" in outcomes  # at least pooled is there
+def test_p11_build_none(monkeypatch):
+    monkeypatch.setattr(ac, "build_clip", lambda *a, **k: None)
+    tr: list = []
+    propose([U(1, 0, 30, "thesis", 5, "1.1")],
+            AutoParams(clips=1, generator="montage"), trace=tr)
+    assert [e["outcome"] for e in _one_outcome(tr)] == ["build_none"]
+    assert tr[0]["snap"]["S0"] is None
 
 
-def test_p11_build_none_passage():
-    # In passage mode, build_passage can return None when no path is available.
-    # Create isolated units with no adjacency → build_passage returns None.
-    units = [
-        U(1, 0, 20, "thesis", 4, "1.1"),
-        U(2, 100, 20, "thesis", 3, "2.1"),  # far away, no adjacency
-    ]
-    p = AutoParams(clips=5, target_sec=30, generator="passage")
-    trace: list = []
-    propose(units, p, trace=trace)
-    outcomes = {e["outcome"] for e in trace if e["event"] == "seed"}
-    # At least some outcome must exist (build_none or pooled)
-    assert len(outcomes) > 0
+def test_p11_skip_used(monkeypatch):
+    # seed 1 pools a clip that consumes seed 2's STORY unit → seed 2 is skip_used
+    units = [U(1, 0, 20, "thesis", 5, "1.1"), U(2, 25, 20, "thesis", 5, "2.1")]
+    monkeypatch.setattr(ac, "build_clip", lambda seed, *a, **k: [units[0], units[1]])
+    tr: list = []
+    propose(units, AutoParams(clips=2, generator="montage", rhythm=False,
+            prune=False, context_start=False, overlap_max=1.0), trace=tr)
+    seeds = _one_outcome(tr)
+    assert seeds[0]["outcome"] == "pooled"
+    sk = next(e for e in seeds if e["outcome"] == "skip_used")
+    assert sk["sup"] == 0  # the earlier pooled candidate that contains it
 
 
-def test_p11_start_fail():
-    # With context_start ON and a sentences callback that returns nothing,
-    # context_start returns None → start_fail.
-    units = [U(1, 0, 25, "thesis", 4, "1.1")]
-    p = AutoParams(clips=5, target_sec=20, context_start=True)
-
-    def sentences_empty(refs):
-        return []  # no sentences → context_start fails
-
-    trace: list = []
-    propose(units, p, sentences=sentences_empty, trace=trace)
-    outcomes = {e["outcome"] for e in trace if e["event"] == "seed"}
-    # start_fail or build_none (depending on how context_start handles empty sentences)
-    assert len(outcomes) > 0
+def test_p11_skip_taken(monkeypatch):
+    # passage: seed 1 pools [1(thesis), 2(explanation)] → taken={1,2}, used_seeds={1}.
+    # seed 2 (a non-STORY seed_role) is in taken but not used_seeds → skip_taken, not skip_used.
+    units = [U(1, 0, 20, "thesis", 5, "1.1"), U(2, 25, 20, "explanation", 5, "2.1")]
+    monkeypatch.setattr(ac, "build_passage", lambda seed, *a, **k: [units[0], units[1]])
+    tr: list = []
+    propose(units, AutoParams(clips=3, generator="passage", rhythm=False,
+            context_start=False, overlap_max=1.0, seed_roles=("thesis", "explanation")), trace=tr)
+    outs = [e["outcome"] for e in _one_outcome(tr)]
+    assert outs[0] == "pooled" and "skip_taken" in outs and "skip_used" not in outs
 
 
-def test_p11_overlap_or_payoff():
-    # Two seeds that build the same clip → second one gets overlap_or_payoff
-    units = [
-        U(1, 0, 25, "thesis", 5, "1.1"),
-        U(2, 30, 20, "conclusion", 4, "2.1", standalone=False, refers=1),
-        U(3, 60, 20, "conclusion", 4, "3.1"),  # same payoff as the first seed's clip? No.
-    ]
-    # U1 and U2 are eligible seeds (both STORY by default)
-    # U2 (standalone=False, refers=1) would build a clip [1,2]
-    # U1 as seed also builds [1,2] potentially (leaning)
-    # Let's make two seeds that produce overlapping clips
-    units2 = [
-        U(1, 0, 25, "thesis", 5, "1.1"),
-        U(2, 30, 20, "example", 4, "2.1", standalone=False, refers=1),
-        U(3, 55, 20, "conclusion", 5, "3.1", standalone=False, refers=1),
-    ]
-    p = AutoParams(clips=1, target_sec=50, overlap_max=0.0, seed_roles=["thesis", "conclusion"])
-    trace: list = []
-    propose(units2, p, trace=trace)
-    outcomes = {e["outcome"] for e in trace if e["event"] == "seed"}
-    assert len(outcomes) > 0  # at least some outcome
+def test_p11_rhythm_fail(monkeypatch):
+    monkeypatch.setattr(ac, "fit_rhythm", lambda *a, **k: (None, ["ритм"]))
+    tr: list = []
+    propose([U(1, 0, 30, "thesis", 5, "1.1")],
+            AutoParams(clips=1, generator="montage", rhythm=True,
+                       prune=False, context_start=False), trace=tr)
+    assert [e["outcome"] for e in _one_outcome(tr)] == ["rhythm_fail"]
 
 
-def test_p11_all_basic_outcomes_present():
-    """Combined: verify pooled, skip_used come from a natural run."""
-    units = [
-        U(1, 0, 25, "thesis", 5, "1.1-2"),
-        U(2, 30, 15, "example", 3, "2.1", standalone=False, refers=1),
-        U(3, 50, 20, "conclusion", 4, "3.1"),
-    ]
-    p = AutoParams(clips=5, target_sec=30, seed_roles=["thesis", "example", "conclusion"])
-    trace: list = []
-    propose(units, p, trace=trace)
-    seed_events = [e for e in trace if e["event"] == "seed"]
-    # Every seed event must have outcome set
-    assert all(e["outcome"] is not None for e in seed_events)
-    # S0 snap is set for non-skip non-build-none outcomes
-    for ev in seed_events:
-        if ev["outcome"] in ("skip_used", "skip_taken", "build_none"):
-            assert ev["snap"]["S0"] is None
-        else:
-            assert ev["snap"]["S0"] is not None
+def test_p11_start_fail(monkeypatch):
+    monkeypatch.setattr(ac, "context_start", lambda *a, **k: (None, [], "нет контекста"))
+    tr: list = []
+    propose([U(1, 0, 30, "thesis", 5, "1.1")],
+            AutoParams(clips=1, generator="montage", rhythm=False, prune=False,
+                       context_start=True),
+            sentences=lambda refs: [("1.1", 5.0, 3, True)], trace=tr)
+    assert [e["outcome"] for e in _one_outcome(tr)] == ["start_fail"]
 
 
-# ---------------------------------------------------------------------------
-# P9: d0=d1=0.4, err=0 when t0=w0+0.4, t1=w1+0.4
-# ---------------------------------------------------------------------------
+def test_p11_open_end_fail(monkeypatch):
+    monkeypatch.setattr(ac, "fix_open_end", lambda *a, **k: (None, "", "→"))
+    tr: list = []
+    propose([U(1, 0, 30, "thesis", 5, "1.1")],
+            AutoParams(clips=1, generator="montage", rhythm=False, prune=False,
+                       context_start=False, end_tone=True),
+            sentences=lambda refs: [("1.1", 5.0, 3, True)],
+            end_tone=lambda ref: "open", trace=tr)
+    seeds = _one_outcome(tr)
+    assert [e["outcome"] for e in seeds] == ["open_end_fail"]
+    assert seeds[0]["spans_final"] is not None  # spans captured for exits after S5
 
-def test_p9_timing_deltas():
-    """M231.3 timing enrichment: d0=d1=0.4, err=0.0."""
+
+def test_p11_final_rhythm_fail(monkeypatch):
+    monkeypatch.setattr(ac, "fit_rhythm", lambda clip, *a, **k: (clip, []))
+    monkeypatch.setattr(ac, "rhythm_why", lambda *a, **k: ("скачок", None))
+    tr: list = []
+    propose([U(1, 0, 30, "thesis", 5, "1.1")],
+            AutoParams(clips=1, generator="montage", rhythm=True, prune=False,
+                       context_start=False), trace=tr)
+    assert [e["outcome"] for e in _one_outcome(tr)] == ["final_rhythm_fail"]
+
+
+def test_p11_taken_after_context(monkeypatch):
+    units = [U(1, 0, 20, "thesis", 5, "1.1"), U(2, 25, 20, "thesis", 5, "2.1")]
+    calls = {"n": 0}
+
+    def fake_passage(seed, *a, **k):
+        return [units[0]] if seed["id"] == 1 else [units[1]]
+
+    def fake_context(clip, *a, **k):
+        # the second seed's context reaches unit 1, already taken by the first clip
+        return ([units[0], units[1]], [], "") if clip and clip[0]["id"] == 2 else (clip, [], "")
+
+    monkeypatch.setattr(ac, "build_passage", fake_passage)
+    monkeypatch.setattr(ac, "context_start", fake_context)
+    tr: list = []
+    propose(units, AutoParams(clips=3, generator="passage", rhythm=False,
+            context_start=True, overlap_max=1.0),
+            sentences=lambda refs: [("x", 5.0, 3, True)], trace=tr)
+    outs = [e["outcome"] for e in _one_outcome(tr)]
+    assert outs[0] == "pooled" and "taken_after_context" in outs
+
+
+def test_p11_overlap_or_payoff(monkeypatch):
+    units = [U(1, 0, 20, "thesis", 5, "1.1"), U(2, 25, 20, "thesis", 5, "2.1")]
+    monkeypatch.setattr(ac, "build_clip", lambda seed, *a, **k: [units[0]])  # identical clips
+    tr: list = []
+    propose(units, AutoParams(clips=3, generator="montage", rhythm=False,
+            prune=False, context_start=False, overlap_max=0.0), trace=tr)
+    outs = [e["outcome"] for e in _one_outcome(tr)]
+    assert outs[0] == "pooled" and "overlap_or_payoff" in outs
+
+
+# ===========================================================================
+# CLI integration harness
+# ===========================================================================
+
+def _montage_project(tmp_path, units=None, *, rate=2.4):
+    """A real offline montage project: source, config (no model, min_sec low),
+    and a map.json whose units sit at word-span + 0.4 s unless `units` is given.
+    Returns the computed sent_by_ref so a test can reason about word times."""
     from autoreels import __main__ as cli
     from autoreels.core.models import Manifest
+    from autoreels.cloud.montage import montage_blocks
+    from autoreels.cloud.edit import merge_group_sentences
     from tests.test_montage import _source
-    # This test verifies the enrichment logic via direct function call on trace events.
-    # We simulate a span with known t0/t1 and known sent_by_ref entries.
 
-    # Build a fake word-like object
-    class FakeWord:
-        def __init__(self, t0, t1):
-            self.t0 = t0
-            self.t1 = t1
-
-    # Simulate the enrichment logic from cmd_autocut inline
-    # span: [uid, refs, t0, t1]
-    span = [1, "1.1", 10.4, 20.4]  # t0=w0+0.4, t1=w1+0.4
-
-    sent_by_ref = {
-        "1.1": [FakeWord(10.0, 20.0)],  # w0=10.0, w1=20.0
-    }
-
-    # Apply enrichment logic (copy from __main__.py)
-    _uid_e, _refs_e, _t0_e, _t1_e = span
-    _keys_e = []
-    for _piece_e in (_refs_e or "").split():
-        _blk_e, _, _rng_e = _piece_e.partition(".")
-        _a_e, _, _z_e = _rng_e.partition("-")
-        if _a_e.isdigit() and (_z_e or _a_e).isdigit():
-            for _k_e in range(int(_a_e), int(_z_e or _a_e) + 1):
-                _keys_e.append(f"{_blk_e}.{_k_e}")
-    _fst_e = sent_by_ref.get(_keys_e[0])
-    _lst_e = sent_by_ref.get(_keys_e[-1])
-    _st0_e = "ok" if _fst_e else ("no_words" if _fst_e is not None else "no_sentence")
-    _st1_e = "ok" if _lst_e else ("no_words" if _lst_e is not None else "no_sentence")
-    _w0_e = round(float(_fst_e[0].t0), 3) if _st0_e == "ok" else None
-    _w1_e = round(float(_lst_e[-1].t1), 3) if _st1_e == "ok" else None
-    _d0_e = round(_t0_e - _w0_e, 3) if _w0_e is not None else None
-    _d1_e = round(_t1_e - _w1_e, 3) if _w1_e is not None else None
-    _err_e = round(_d1_e - _d0_e, 3) if _d0_e is not None and _d1_e is not None else None
-
-    assert _st0_e == "ok" and _st1_e == "ok"
-    assert _w0_e == 10.0 and _w1_e == 20.0
-    assert _d0_e == 0.4 and _d1_e == 0.4
-    assert _err_e == 0.0
+    mpath = _source(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace("  min_sec: 25 ", "  min_sec: 1 ")
+                   .replace("  hook_llm: auto ", "  hook_llm: none "), encoding="utf-8")
+    r0 = cli.load_r0_config(cfg)
+    manifest = Manifest.model_validate_json(mpath.read_text())
+    tx = cli._resolve_cached_transcript(manifest, tmp_path / "cache")
+    all_blocks, kept, _ = cli._review_block_set(tx, r0, "lecture")
+    sbr: dict = {}
+    for key, b in montage_blocks(all_blocks, kept).items():
+        for k, st in enumerate(merge_group_sentences([b], tx.words), 1):
+            sbr[f"{key}.{k}"] = st
+    refs = sorted(sbr, key=lambda r: (r.split(".")[0], int(r.split(".")[1])))
+    if units is None:
+        units = []
+        for i, ref in enumerate(refs[:4], 1):
+            st = sbr[ref]
+            units.append({"id": i, "t0": round(float(st[0].t0) + 0.4, 3),
+                          "t1": round(float(st[-1].t1) + 0.4, 3), "role": "thesis",
+                          "punch": 4, "refs": ref, "topic": 1, "standalone": True,
+                          "summary": f"мысль {i}", "voice": {"energy": 50.0, "rate": rate}})
+    (tmp_path / "transcripts").mkdir(exist_ok=True)
+    (tmp_path / "transcripts" / "v.map.json").write_text(json.dumps(
+        {"version": 1, "stem": "v", "source_sha256": "f" * 64, "units": units}), encoding="utf-8")
+    return {"cli": cli, "tmp": tmp_path, "sbr": sbr, "refs": refs, "units": units}
 
 
-# ---------------------------------------------------------------------------
-# P10: Sparse timing — missing/empty entries yield null, not 0
-# ---------------------------------------------------------------------------
-
-def test_p10_sparse_timing_no_sentence():
-    """A span whose refs are absent from sent_by_ref → no_sentence, d* = null."""
-    class FakeWord:
-        def __init__(self, t0, t1): self.t0 = t0; self.t1 = t1
-
-    span = [1, "2.1", 10.0, 20.0]
-    sent_by_ref = {"1.1": [FakeWord(9.0, 19.0)]}  # 2.1 is missing
-
-    _uid_e, _refs_e, _t0_e, _t1_e = span
-    _keys_e = []
-    for _piece_e in (_refs_e or "").split():
-        _blk_e, _, _rng_e = _piece_e.partition(".")
-        _a_e, _, _z_e = _rng_e.partition("-")
-        if _a_e.isdigit() and (_z_e or _a_e).isdigit():
-            for _k_e in range(int(_a_e), int(_z_e or _a_e) + 1):
-                _keys_e.append(f"{_blk_e}.{_k_e}")
-    _fst_e = sent_by_ref.get(_keys_e[0])
-    _st0_e = "ok" if _fst_e else ("no_words" if _fst_e is not None else "no_sentence")
-    _d0_e = None  # not ok
-
-    assert _st0_e == "no_sentence"
-    assert _d0_e is None
+def _run(proj, monkeypatch, *, trace=True, **kw):
+    out = proj["tmp"] / "trace.jsonl"
+    if trace:
+        monkeypatch.setenv("ARL_AUTOCUT_TRACE", str(out))
+    else:
+        monkeypatch.delenv("ARL_AUTOCUT_TRACE", raising=False)
+    rc = proj["cli"].cmd_autocut("v", root=proj["tmp"], cache_dir=str(proj["tmp"] / "cache"),
+                                 check=False, **kw)
+    events = None
+    if trace and out.exists():
+        events = [json.loads(ln) for ln in out.read_text(encoding="utf-8").splitlines()]
+    review = (proj["tmp"] / "reviews" / "v_auto_m56.txt")
+    return rc, events, (review.read_text(encoding="utf-8") if review.exists() else None), out
 
 
-def test_p10_sparse_timing_no_refs():
-    """Empty refs → no_refs, d* = null."""
-    span = [1, "", 10.0, 20.0]
-    _refs_e = span[1]
-    _keys_e = []
-    for _piece_e in (_refs_e or "").split():
-        _blk_e, _, _rng_e = _piece_e.partition(".")
-        _a_e, _, _z_e = _rng_e.partition("-")
-        if _a_e.isdigit() and (_z_e or _a_e).isdigit():
-            for _k_e in range(int(_a_e), int(_z_e or _a_e) + 1):
-                _keys_e.append(f"{_blk_e}.{_k_e}")
-    assert not _keys_e  # no_refs
+# ===========================================================================
+# P6 — real CLI, non-vacuous: file in tmp_path, schema, counts, NOT in repo
+# ===========================================================================
+
+def test_p6_trace_written_to_tmp_path_with_schema(tmp_path, monkeypatch, capsys):
+    proj = _montage_project(tmp_path)
+    rc, events, review, out = _run(proj, monkeypatch, clips=2)
+    assert rc == 0
+    assert out.exists() and out.parent == tmp_path          # in tmp_path, not the repo
+    assert events and all(e.get("schema") == 1 for e in events)
+    kinds = {e["event"] for e in events}
+    assert {"seed", "truncate", "select", "fate", "pool_accounting"} <= kinds
+    assert sum(1 for e in events if e["event"] == "truncate") == 1
+    # Σ fate == Σ select == pool (P3 over the effective montage pool)
+    acct = next(e for e in events if e["event"] == "pool_accounting")
+    assert acct["fates"] == acct["select"] == acct["pool"]
 
 
-def test_p10_sparse_timing_no_words():
-    """Empty sentence list → no_words, d* = null."""
-    class FakeWord:
-        pass
-
-    span = [1, "1.1", 10.0, 20.0]
-    sent_by_ref = {"1.1": []}  # empty word list
-
-    _fst_e = sent_by_ref.get("1.1")
-    # _fst_e is [] (not None), truthy check: [] is falsy
-    _st0_e = "ok" if _fst_e else ("no_words" if _fst_e is not None else "no_sentence")
-    assert _st0_e == "no_words"
+def test_p6_refuses_repo_path_fail_closed(tmp_path, monkeypatch):
+    """A trace path inside the repository is refused: nothing is written and the
+    run still succeeds (the repo-write guard would otherwise fail this test)."""
+    import autoreels.__main__ as cli
+    proj = _montage_project(tmp_path)
+    inside = cli._project_root() / "reviews" / "m231_should_not_exist.jsonl"
+    monkeypatch.setenv("ARL_AUTOCUT_TRACE", str(inside))
+    rc = cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, clips=2)
+    assert rc == 0
+    assert not inside.exists()
 
 
-def test_p10_secs_delta_null_when_incomplete():
-    """secs_delta is null when not all spans have err."""
-    # Simulate timing dict with partial coverage
-    spans = [
-        [1, "1.1", 10.4, 20.4, {"status_d0": "ok", "status_d1": "ok", "d0": 0.4, "d1": 0.4, "err": 0.0}],
-        [2, "2.1", 5.0, 15.0, {"status_d0": "no_sentence", "status_d1": "no_sentence", "d0": None, "d1": None, "err": None}],
+def test_p6_does_not_follow_symlink(tmp_path, monkeypatch):
+    proj = _montage_project(tmp_path)
+    real = tmp_path / "real_target.jsonl"
+    real.write_text("PRESERVE\n", encoding="utf-8")
+    link = tmp_path / "trace_link.jsonl"
+    link.symlink_to(real)
+    monkeypatch.setenv("ARL_AUTOCUT_TRACE", str(link))
+    rc = proj["cli"].cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                                 check=False, clips=2)
+    assert rc == 0
+    assert real.read_text(encoding="utf-8") == "PRESERVE\n"  # the symlink target is untouched
+
+
+# ===========================================================================
+# P2 — env unset vs set: identical stdout and review draft (byte-for-byte)
+# ===========================================================================
+
+def test_p2_env_parity_stdout_and_review(tmp_path, monkeypatch, capsys):
+    proj = _montage_project(tmp_path)
+    rc_off, _, review_off, _ = _run(proj, monkeypatch, trace=False, clips=2)
+    out_off = capsys.readouterr().out
+    rc_on, events, review_on, _ = _run(proj, monkeypatch, trace=True, clips=2)
+    out_on = capsys.readouterr().out
+    assert rc_off == rc_on == 0
+    assert out_off == out_on
+    assert hashlib.sha256((review_off or "").encode()).hexdigest() == \
+           hashlib.sha256((review_on or "").encode()).hexdigest()
+    assert events  # the only difference ON is the trace file itself
+
+
+# ===========================================================================
+# P9 — real CLI timing: t0=w0+0.4, t1=w1+0.4 → d0=d1=0.4, err=0, speed computed
+# ===========================================================================
+
+def test_p9_full_timing_and_speed(tmp_path, monkeypatch):
+    proj = _montage_project(tmp_path, rate=2.4)      # 2.4 < speed_mid_rate 2.6 → @speed 1.05
+    rc, events, _, _ = _run(proj, monkeypatch, clips=2)
+    assert rc == 0
+    pooled = [e for e in events if e["event"] == "seed" and e.get("timing")
+              and e["timing"]["units_total"] > 0]
+    assert pooled, "expected a pooled seed with timing"
+    tmg = pooled[0]["timing"]
+    for s in tmg["spans"]:
+        assert s[4]["status_d0"] == "ok" and s[4]["status_d1"] == "ok"
+        assert s[4]["d0"] == 0.4 and s[4]["d1"] == 0.4 and s[4]["err"] == 0.0
+    assert tmg["n_err"] == tmg["units_total"]
+    assert tmg["secs_delta"] == 0.0 and tmg["secs_delta_known"] == 0.0
+    assert tmg["speed_status"] == "ok" and tmg["speed_secs"] == 1.05
+
+
+def test_p9_speed_status_no_rate_when_rate_missing(tmp_path, monkeypatch):
+    proj = _montage_project(tmp_path, rate=0.0)       # no voice.rate → speed null + reason
+    rc, events, _, _ = _run(proj, monkeypatch, clips=2)
+    tmg = next(e["timing"] for e in events if e["event"] == "seed" and e.get("timing")
+               and e["timing"]["units_total"] > 0)
+    assert tmg["speed_secs"] is None and tmg["speed_status"] == "no_rate"
+    assert tmg["secs_delta"] == 0.0           # timing itself is still fully covered
+
+
+# ===========================================================================
+# P10 — sparse timing: unknown is null (never 0); mixed coverage; OFF-identical
+# ===========================================================================
+
+def test_p10_sparse_mixed_coverage(tmp_path, monkeypatch):
+    proj0 = _montage_project(tmp_path)
+    refs = proj0["refs"]
+    st = proj0["sbr"][refs[0]]
+    w0, w1 = float(st[0].t0), float(st[-1].t1)
+    # one real-timed unit + one whose ref is absent from sent_by_ref, same topic so build_clip
+    # merges them into a single clip (mixed coverage). (The `no_refs` status is a defensive branch:
+    # `eligible` rejects an empty-refs unit before it can seed a clip, so no real span reaches it.)
+    units = [
+        {"id": 1, "t0": round(w0 + 0.4, 3), "t1": round(w1 + 0.4, 3), "role": "thesis",
+         "punch": 4, "refs": refs[0], "topic": 1, "standalone": True, "summary": "ok",
+         "voice": {"energy": 50.0, "rate": 2.4}},
+        {"id": 2, "t0": round(w1 + 1.0, 3), "t1": round(w1 + 6.0, 3), "role": "example",
+         "punch": 3, "refs": "99.9", "topic": 1, "standalone": True, "summary": "missing",
+         "voice": {"energy": 50.0, "rate": 2.4}},
     ]
-    _n_e = len(spans)
-    _errs_e = [s[4]["err"] for s in spans if s[4]["err"] is not None]
-    _n_err_e = len(_errs_e)
-    secs_delta = round(sum(_errs_e), 3) if _n_err_e == _n_e else None
-    secs_delta_known = round(sum(_errs_e), 3) if _errs_e else None
+    proj = _montage_project(tmp_path, units=units)
+    rc_off, _, review_off, _ = _run(proj, monkeypatch, trace=False, clips=2)
+    rc, events, review_on, _ = _run(proj, monkeypatch, trace=True, clips=2)
+    assert rc == rc_off == 0
+    assert review_off == review_on                        # trace never alters the draft
+    tmg = next(e["timing"] for e in events if e["event"] == "seed" and e.get("timing")
+               and e["timing"]["units_total"] >= 2)
+    by_id = {s[0]: s[4] for s in tmg["spans"]}
+    assert by_id[1]["status_d0"] == "ok" and by_id[1]["err"] == 0.0
+    assert by_id[2]["status_d0"] == "no_sentence" and by_id[2]["d0"] is None and by_id[2]["err"] is None
+    assert tmg["n_err"] < tmg["units_total"]
+    assert tmg["secs_delta"] is None                      # not full coverage → null, not 0
+    assert tmg["secs_delta_known"] == 0.0                 # the one known unit
+    assert tmg["speed_secs"] is None and tmg["speed_status"] == "no_err_coverage"
 
-    assert secs_delta is None  # not all spans have err
-    assert secs_delta_known == 0.0  # known ones sum to 0.0
-    assert _n_err_e == 1
+
+# ===========================================================================
+# P8 — dep_broken: established support dropped at S5 → [[11,10,"S5"]]; clean → []
+# ===========================================================================
+
+def _fx7l_units():
+    # committed fixture: unit 11 leans on unit 10 (non-standalone, refers=10); adjacent, one topic
+    import pathlib
+    p = pathlib.Path(__file__).parent / "fixtures" / "m231" / "fx7l_units.json"
+    return json.loads(p.read_text(encoding="utf-8"))["units"]
+
+
+def test_p8_dep_broken_when_support_dropped_at_s5(tmp_path, monkeypatch):
+    proj = _montage_project(tmp_path, units=_fx7l_units())
+
+    def drop_ten(clip, *a, **k):
+        kept = [u for u in clip if u["id"] != 10]
+        return (kept or clip), [], ""
+
+    monkeypatch.setattr(ac, "context_start", drop_ten)   # context_start drops the support at S5
+    rc, events, _, _ = _run(proj, monkeypatch, clips=2)
+    assert rc == 0
+    seed11 = [e for e in events if e["event"] == "seed" and e["dep_broken"]]
+    assert seed11, "expected a dep_broken observation"
+    assert seed11[0]["dep_broken"] == [[11, 10, "S5"]]
+
+
+def test_p8_no_dep_broken_when_support_preserved(tmp_path, monkeypatch):
+    proj = _montage_project(tmp_path, units=_fx7l_units())
+    rc, events, _, _ = _run(proj, monkeypatch, clips=2)
+    assert rc == 0
+    assert all(e["dep_broken"] == [] for e in events if e["event"] == "seed")

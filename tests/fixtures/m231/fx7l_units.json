@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "stem": "v",
+  "source_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "units": [
+    {"id": 10, "t0": 40.0, "t1": 55.0, "role": "thesis", "punch": 5, "refs": "1.1",
+     "topic": 1, "standalone": true, "summary": "основа", "voice": {"energy": 50.0, "rate": 2.4}},
+    {"id": 11, "t0": 56.0, "t1": 70.0, "role": "conclusion", "punch": 5, "refs": "1.2",
+     "topic": 1, "standalone": false, "refers": 10, "summary": "вывод", "voice": {"energy": 50.0, "rate": 2.4}}
+  ]
+}

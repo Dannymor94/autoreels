@@ -8823,8 +8823,42 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
                        taste=_taste, start_pause=start_pause, trace=_trace)
         if _trace is not None:
+            from autoreels.cloud.autocut import _speed as _speed_fn
+            _ubid = {u["id"]: u for u in (the_map.get("units") or [])}
             for _ev in _trace:
-                if _ev.get("event") != "seed" or not _ev.get("spans_final"):
+                if _ev.get("event") != "seed":
+                    continue
+                # dep_broken (M231.2): a non-standalone unit whose referent was present in a reached
+                # snapshot but is absent from the final clip; stage = the reached stage where it dropped.
+                # Computed once here (not per-exit in propose) so ordering is deterministic and the stage
+                # is a real label even when optional stages (S2/S4/S5) were skipped (None snapshot).
+                _snap = _ev["snap"]
+                _reached = [(_st, _snap[_st]) for _st in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                            if _snap[_st] is not None]
+                _dep: list = []
+                if _reached:
+                    _final_ids = set(_reached[-1][1])
+                    _pairs: set = set()
+                    for _st_d, _sids_d in _reached:
+                        _sset_d = set(_sids_d)
+                        for _ui_d in _sids_d:
+                            _u_d = _ubid.get(_ui_d)
+                            if (_u_d and not _u_d.get("standalone", True)
+                                    and _u_d.get("refers") in _ubid and _u_d.get("refers") in _sset_d):
+                                _pairs.add((_ui_d, _u_d["refers"]))
+                    for _ui_d, _ti_d in sorted(_pairs):
+                        if _ui_d in _final_ids and _ti_d not in _final_ids:
+                            _stage_d = None
+                            _prev_d = None
+                            for _st_w, _sids_w in _reached:          # first reached stage: present → absent
+                                _here_d = _ti_d in _sids_w
+                                if _prev_d is True and not _here_d:
+                                    _stage_d = _st_w
+                                    break
+                                _prev_d = _here_d
+                            _dep.append([_ui_d, _ti_d, _stage_d])
+                _ev["dep_broken"] = _dep
+                if not _ev.get("spans_final"):
                     continue
                 _spans_e: list = []
                 for _sp in _ev["spans_final"]:
@@ -8860,6 +8894,23 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 _n_d1_e = len(_d1v_e)
                 _n_err_e = sum(1 for s in _spans_e if s[4]["err"] is not None)
                 _errs_e = [s[4]["err"] for s in _spans_e if s[4]["err"] is not None]
+                # speed_secs (M231.3): the @speed that word-span durations (w1−w0) would give, via the
+                # frozen _speed formula; only when every unit has err (both boundaries known) AND a
+                # voice.rate, else null with an explicit reason. Unknown is never coerced to a number.
+                _sp_status = "ok"
+                _sp_clip: list = []
+                for _s in _spans_e:
+                    if _s[4]["err"] is None:
+                        _sp_status = "no_err_coverage"
+                        break
+                    _rate_e = float(((_ubid.get(_s[0]) or {}).get("voice") or {}).get("rate") or 0.0)
+                    if _rate_e <= 0:
+                        _sp_status = "no_rate"
+                        break
+                    _sp_clip.append({"t0": _s[4]["w0"], "t1": _s[4]["w1"], "voice": {"rate": _rate_e}})
+                if _sp_status == "ok" and not _sp_clip:
+                    _sp_status = "no_units"
+                _speed_secs_e = _speed_fn(_sp_clip, prm) if (_sp_status == "ok" and _sp_clip) else None
                 _ev["timing"] = {
                     "spans": _spans_e,
                     "units_total": _n_e, "n_d0": _n_d0_e, "n_d1": _n_d1_e, "n_err": _n_err_e,
@@ -8867,11 +8918,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                     "secs_delta_known": round(sum(_errs_e), 3) if _errs_e else None,
                     "max_abs_d0": round(max(abs(v) for v in _d0v_e), 3) if _d0v_e else None,
                     "max_abs_d1": round(max(abs(v) for v in _d1v_e), 3) if _d1v_e else None,
-                    "speed_secs": None, "speed_status": None,
+                    "speed_secs": round(_speed_secs_e, 3) if _speed_secs_e is not None else None,
+                    "speed_status": _sp_status,
                 }
-            for _si_e, _spr_e in enumerate(pool):
-                _trace.append({"schema": 1, "event": "select",
-                                "index": _si_e, "pieces": _spr_e.pieces, "score": _spr_e.score})
         _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
         if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
             # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
@@ -9104,6 +9153,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                   f"по порядку было бы {len(_greedy)} (сумма {sum(pool[i].score for i in _greedy)})", flush=True)
         _set = set(_pick)
         pool = [pool[i] for i in _pick] + [p_ for i, p_ in enumerate(pool) if i not in _set]
+    if _trace is not None:        # M231.2: select over the EFFECTIVE montage pool — after weak-seed
+        for _si_e, _spr_e in enumerate(pool):   # fill, interviewer filter and the doubt/seam reorder
+            _trace.append({"schema": 1, "event": "select",
+                           "index": _si_e, "pieces": _spr_e.pieces, "score": _spr_e.score})
     not_reached: list = []        # M202: candidates the loop never tried — prm.clips were already taken
     for _k, pr in enumerate(pool):
         if len(accepted) >= prm.clips:
@@ -9236,16 +9289,33 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         print(f"  … {pr.pieces} — не дошла очередь (уже принято {prm.clips})")
     _usage_report(prov)
     if _trace is not None and _trace_path:
+        # fate over the EFFECTIVE montage pool: every pool candidate lands in exactly one bucket, so
+        # Σ fate == len(pool) == Σ select (M231 P3). Short variants are NOT pool candidates (M202) —
+        # emitted as a distinct `variant` event instead of being silently folded into `accepted`.
         for _pr_f in accepted:
-            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "accepted"})
+            if _pr_f.variant_of is None:
+                _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "accepted"})
+            else:
+                _trace.append({"schema": 1, "event": "variant", "pieces": _pr_f.pieces,
+                               "variant_of": _pr_f.variant_of, "fate": "accepted"})
         for _pr_f, _err_f in rejected:
-            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "rejected"})
+            if _pr_f.variant_of is None:
+                _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "rejected"})
+            else:
+                _trace.append({"schema": 1, "event": "variant", "pieces": _pr_f.pieces,
+                               "variant_of": _pr_f.variant_of, "fate": "rejected"})
         for _pr_f, _why_f in close:
             _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "close"})
         for _pr_f in hookless_left:
             _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "hookless"})
         for _pr_f in not_reached:
             _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "not_reached"})
+        _n_fate_f = sum(1 for _e in _trace if _e.get("event") == "fate")
+        _n_sel_f = sum(1 for _e in _trace if _e.get("event") == "select")
+        _n_var_f = sum(1 for _e in _trace if _e.get("event") == "variant")
+        _trace.append({"schema": 1, "event": "pool_accounting", "pool": len(pool),
+                       "fates": _n_fate_f, "select": _n_sel_f, "variants": _n_var_f})
+
         def _rflt(o):
             if isinstance(o, float):
                 return round(o, 3)
@@ -9254,9 +9324,30 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             if isinstance(o, list):
                 return [_rflt(v) for v in o]
             return o
-        with open(_trace_path, "w", encoding="utf-8") as _tf:
-            for _ev_w in _trace:
-                _tf.write(json.dumps(_rflt(_ev_w), sort_keys=True, ensure_ascii=False) + "\n")
+        # fail-closed output boundary (M231 P1.4): never write inside the repository or through a
+        # symlink. O_NOFOLLOW makes the symlink refusal atomic; any OSError is a silent skip so a bad
+        # ARL_AUTOCUT_TRACE path can never crash the run or alter OFF-parity stdout/stderr.
+        _repo_r = _project_root().resolve()
+        _tp_r = Path(_trace_path)
+        _write_ok = True
+        try:
+            _rp_r = _tp_r.resolve()
+            _par_r = _tp_r.parent.resolve()
+            if (_rp_r == _repo_r or _repo_r in _rp_r.parents
+                    or _par_r == _repo_r or _repo_r in _par_r.parents):
+                _write_ok = False
+            elif _tp_r.is_symlink():
+                _write_ok = False
+        except OSError:
+            _write_ok = False
+        if _write_ok:
+            try:
+                _fd_r = os.open(_trace_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+                with os.fdopen(_fd_r, "w", encoding="utf-8") as _tf:
+                    for _ev_w in _trace:
+                        _tf.write(json.dumps(_rflt(_ev_w), sort_keys=True, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0

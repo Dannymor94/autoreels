@@ -1235,23 +1235,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 if trace is not None:
                     _tr["outcome"] = "rhythm_fail"
                     _tr["tail_question"] = clip[-1].get("role") == "question"
-                    _tr["dep_broken"] = [
-                        [_ui, _ti, next(
-                            (_s for _s, _p0, _c0 in zip(
-                                ["S1", "S2", "S3", "S4", "S5", "S6"],
-                                [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                                [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                            ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                        ]
-                        for _ui, _ti in {
-                            (_ui, by_id[_ui]["refers"])
-                            for _sids in _tr["snap"].values() if _sids
-                            for _ui in _sids
-                            if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                            and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                        }
-                        if _ui in {u["id"] for u in clip} and _ti not in {u["id"] for u in clip}
-                    ]
                     trace.append(_tr)
                 continue
             clip = clip_r
@@ -1286,23 +1269,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 if trace is not None:
                     _tr["outcome"] = "start_fail"
                     _tr["tail_question"] = clip[-1].get("role") == "question"
-                    _tr["dep_broken"] = [
-                        [_ui, _ti, next(
-                            (_s for _s, _p0, _c0 in zip(
-                                ["S1", "S2", "S3", "S4", "S5", "S6"],
-                                [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                                [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                            ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                        ]
-                        for _ui, _ti in {
-                            (_ui, by_id[_ui]["refers"])
-                            for _sids in _tr["snap"].values() if _sids
-                            for _ui in _sids
-                            if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                            and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                        }
-                        if _ui in {u["id"] for u in clip} and _ti not in {u["id"] for u in clip}
-                    ]
                     trace.append(_tr)
                 continue
             clip = clip2
@@ -1324,23 +1290,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     _tr["outcome"] = "open_end_fail"
                     _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                     _tr["tail_question"] = clip[-1].get("role") == "question"
-                    _tr["dep_broken"] = [
-                        [_ui, _ti, next(
-                            (_s for _s, _p0, _c0 in zip(
-                                ["S1", "S2", "S3", "S4", "S5", "S6"],
-                                [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                                [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                            ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                        ]
-                        for _ui, _ti in {
-                            (_ui, by_id[_ui]["refers"])
-                            for _sids in _tr["snap"].values() if _sids
-                            for _ui in _sids
-                            if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                            and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                        }
-                        if _ui in {u["id"] for u in clip} and _ti not in {u["id"] for u in clip}
-                    ]
                     trace.append(_tr)
                 continue
             if enote:
@@ -1360,23 +1309,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     _tr["outcome"] = "final_rhythm_fail"
                     _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                     _tr["tail_question"] = clip[-1].get("role") == "question"
-                    _tr["dep_broken"] = [
-                        [_ui, _ti, next(
-                            (_s for _s, _p0, _c0 in zip(
-                                ["S1", "S2", "S3", "S4", "S5", "S6"],
-                                [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                                [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                            ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                        ]
-                        for _ui, _ti in {
-                            (_ui, by_id[_ui]["refers"])
-                            for _sids in _tr["snap"].values() if _sids
-                            for _ui in _sids
-                            if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                            and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                        }
-                        if _ui in {u["id"] for u in clip} and _ti not in {u["id"] for u in clip}
-                    ]
                     trace.append(_tr)
                 continue
         ids = [u["id"] for u in clip]
@@ -1385,23 +1317,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 _tr["outcome"] = "taken_after_context"
                 _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                 _tr["tail_question"] = clip[-1].get("role") == "question"
-                _tr["dep_broken"] = [
-                    [_ui, _ti, next(
-                        (_s for _s, _p0, _c0 in zip(
-                            ["S1", "S2", "S3", "S4", "S5", "S6"],
-                            [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                            [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                        ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                    ]
-                    for _ui, _ti in {
-                        (_ui, by_id[_ui]["refers"])
-                        for _sids in _tr["snap"].values() if _sids
-                        for _ui in _sids
-                        if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                        and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                    }
-                    if _ui in set(ids) and _ti not in set(ids)
-                ]
                 trace.append(_tr)
             continue                      # M119: context added in front reached an earlier clip
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
@@ -1410,23 +1325,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 _tr["outcome"] = "overlap_or_payoff"
                 _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                 _tr["tail_question"] = clip[-1].get("role") == "question"
-                _tr["dep_broken"] = [
-                    [_ui, _ti, next(
-                        (_s for _s, _p0, _c0 in zip(
-                            ["S1", "S2", "S3", "S4", "S5", "S6"],
-                            [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                            [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                        ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                    ]
-                    for _ui, _ti in {
-                        (_ui, by_id[_ui]["refers"])
-                        for _sids in _tr["snap"].values() if _sids
-                        for _ui in _sids
-                        if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                        and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                    }
-                    if _ui in set(ids) and _ti not in set(ids)
-                ]
                 trace.append(_tr)
             continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
         used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
@@ -1480,23 +1378,6 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             _tr["outcome"] = "pooled"
             _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
             _tr["tail_question"] = clip[-1].get("role") == "question"
-            _tr["dep_broken"] = [
-                [_ui, _ti, next(
-                    (_s for _s, _p0, _c0 in zip(
-                        ["S1", "S2", "S3", "S4", "S5", "S6"],
-                        [_tr["snap"][k] for k in ["S0", "S1", "S2", "S3", "S4", "S5"]],
-                        [_tr["snap"][k] for k in ["S1", "S2", "S3", "S4", "S5", "S6"]],
-                    ) if _p0 and _c0 and _ti in _p0 and _ti not in _c0), None)
-                ]
-                for _ui, _ti in {
-                    (_ui, by_id[_ui]["refers"])
-                    for _sids in _tr["snap"].values() if _sids
-                    for _ui in _sids
-                    if by_id.get(_ui) and not by_id[_ui].get("standalone", True)
-                    and by_id[_ui].get("refers") in by_id and by_id[_ui]["refers"] in _sids
-                }
-                if _ui in set(ids) and _ti not in set(ids)
-            ]
             trace.append(_tr)
     out.sort(key=lambda o: -o.score)
     if trace is not None:
