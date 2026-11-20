@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "source_sha": "3c011e94263e16e5780936b4769d3490cd03b682",
+    "generator": "tests/fixtures/m231/compare_off_golden.py",
+    "cli_generator": "tests/fixtures/m231/compare_cli_off_golden.py",
+    "note": "Recomputed on the pinned production SHA during R2; NOT claimed to be captured before M231 code."
+  },
+  "expected": {
+    "callback_counts": {"end_tone": 1, "judge": 1, "sentences": 6, "taste": 1},
+    "callbacks_sha256": "741928e741a809120de66eb85d3e1416e23852d6f5f45bdc5e7e11a7d7fdfdb0",
+    "proposals": 1,
+    "proposals_sha256": "bb90fad3f2e4e54c17b0234479c6fb66b3477047ab13fb20eb99eaa365100854"
+  },
+  "cli_expected": {
+    "returncode": 0,
+    "review_sha256": "f8a644440e86c1883fde1a106b2d3755b44afe18ffcf734cb6c4cd1fd81d83e1",
+    "stderr_sha256": "24bc2345fb9aca367ac93aea68a592795aea4a20e7150e9b00c3aefbd5a2386d",
+    "stdout_sha256": "017b7f75c6f55321c2458c9903ef2fd7dce1e23572692f4bbea3c999c6aa5795"
+  }
+}
