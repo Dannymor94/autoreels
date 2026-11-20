@@ -23,7 +23,7 @@ Definitions: `J` = 1 iff `context_start && context_judge`; `S` = seeds reaching 
 |---|---|
 | frozen main + weak-seed `propose` contextual judge | `J * S * 6 * (2+B+L) * r_j` (previous config-dependent bound retained) |
 | **A3 after M167/M173** | `J * N * 4 * r_j` (both loops: 2+2 candidate shortenings; even if first ref unchanged, following/core can change) |
-| each eligible `_polish(pr)` | `H * r_j + 2*I_rank + I_title + 2*I_keywords`; `H=0` when hook judge disabled; `I_rank=0` when fewer than two hook candidates; `I_keywords=0` without eligible rows or `n>0`. |
+| each eligible `_polish(pr)` | `H * r_j + 2*I_rank + I_title + 2*I_keywords`; `H=0` when hook judge disabled; `I_rank=0` when fewer than two hook candidates; `I_keywords=0` when `n<=0` or there are no eligible rows. |
 | legacy `check_seams` | `2 * I_seam * min(P, 2*C)` (one operation per checked clip, not per seam pair) |
 | M112 late plate rewrite | at most `A` eligible single `headline` calls (configured title/plate mode) |
 | A8 G2 **pure build** | **0**: call `propose(..., judge=None)`, materialize complete refs, interviewer-filter before any variant-model call |
