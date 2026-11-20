@@ -30,7 +30,7 @@
 - [Issue #17](https://github.com/Dannymor94/autoreels/issues/17): contract does not specify semantics for `proxy_q_after` / `proxy_overlong_side`; `build_passage` is outside limited allowlist; architect to define semantics or issue micro-GO, plus explicitly ratify/reject post-hoc frozen-production golden.
 - [Issue #16](https://github.com/Dannymor94/autoreels/issues/16): R1 findings and corrective scope.
 - Sol must independently verify remote tree, direct `propose` events, writer path safety/race constraints, raw non-vacuous provider-log OFF parity if desired, exact baseline failure comparison, and main-vs-branch diff. `mergeable` was false immediately after draft PR creation; inspect fresh after GitHub recomputes.
-- CI on PR #18: **pending verification**, no claims about success.
+- **GitHub Actions offline-smoke PR CI: SUCCESS**, run [44785734171](https://github.com/Dannymor94/autoreels/actions/runs/44785734171) on PR #18. Does not discharge architect decision or independent Sol QA.
 - Strict STOP: no M232, render, models, audio/video processing, owner-source mutation, main merge, or any independent PASS claim.
 
 ## Result
