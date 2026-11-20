@@ -1,128 +1,227 @@
-# M230-ARCH-R1 — Architecture decisions (deterministic, bounded, flag-gated)
+# M230-ARCH-R2 — Architecture decisions (deterministic, bounded, flag-gated)
 
-**Role:** independent architect (Claude Opus), architecture only.
-**Frozen production SHA:** `3c011e94263e16e5780936b4769d3490cd03b682` (`src/` and `config/` are identical to `f92b4d2`, so the M223–M227 line numbers hold).
-**Input M229 SHA:** `74588a219b0d055059f60185f51fd4bcf6efa6b1`. **Handoff base:** `ff155de08305189d918c80d54672ace79e444539`.
+**Revision:** R2. This responds to the five P1 findings of Sol QA R1 (`TASK-M230-ARCH-R2.md`). R1 provenance: `1cdfbfaa1fb138641ef1687f6be06457b79c346c`.
+**Frozen production SHA:** `3c011e94263e16e5780936b4769d3490cd03b682`. At that SHA, `src/` and `config/` are identical to `f92b4d2`, so the M223–M227 line numbers hold.
+**Input M229 SHA:** `74588a219b0d055059f60185f51fd4bcf6efa6b1`.
 **Status:** PROPOSAL. Nothing was executed. `PRODUCTION_DIFF=NONE`, `M231_OBSERVABILITY_GO=NO`, `M232_CODE_GO=NO`.
-**Proof labels:** `ANALYTIC` means derived by reading the frozen source. It is not a run. Accepted evidence levels are those of M228 `FINDINGS.md`. None is render-level.
+**Proof labels:**
+- `ANALYTIC` — derived by reading the frozen source; not a run.
+- `REPORTED` — a synthetic case run by Sol QA R1 that the architect has not re-executed.
+- Accepted evidence levels — those of M228 `FINDINGS.md`. None is render-level.
+
+**OFF parity is a test obligation, not an established fact.** Every "OFF = frozen path" statement below describes design intent. It becomes evidence only through the parity tests in §3.
 
 ---
 
-## 0. Design choice: hybrid, not a rewrite
+## 0. Design choice: hybrid with one final validator
 
-The M230 base task compared (A) generate → finalize → validate → global select against (B) incremental repair. **Selected: B, with A's invariant discipline.** Each check is placed directly after the one transform that can break it, and it writes to the reason channel that transform already uses (`no_start`, `rhythm_out`, `open_end`, which are printed in the draft at `__main__.py:9123–9170`). The order of existing stages does not change.
+The M230 base task offered (A) generate → finalize → validate → global select, or (B) incremental repair.
 
-Why not A: a full reorder changes every clip at once. OFF parity then can no longer be proven per flag, and #4 (selection before checks) is INSTRUMENT_FIRST, not FIX_NOW.
+**Selected: B, plus one FINAL pre-publication validator.**
+- Local guards stay only where they let an existing repair run instead of failing. This applies to the TC5 guard in `context_start` (a) and to the TC2 semantic predicate inside `context_start`.
+- Invariants that a later stage can break are checked **once, after the last structural mutation of `propose`**.
+- For mutations made by the CLI after `propose`, the same invariants are re-checked there (§0.3).
+- The order of existing stages does not change. A full reorder (A) would change every clip at once and make per-flag parity unprovable.
 
-**Shortening and reordering inventory of `propose()` (ANALYTIC).** This is the basis for the claim that each new check closes its invariant on all paths.
+### 0.1 Structural mutation inventory of `propose()` (ANALYTIC; R2 — corrected)
 
-| Operation | min_sec checked? | Can change last unit? | Can remove a unit others lean on? |
-|---|---|---|---|
-| `build_passage` / `build_clip` | yes (`:412`, `:244`) | no question end (`:408`/`:412`, `:246`) | — |
-| loop question prepend `:1188` | lengthens | no (prepends) | no |
-| `add_payoff` `:1193` | lengthens | appends a PAYOFF role only | no |
-| `fit_rhythm` grow `:312–325` | lengthens | **yes — can append a question (TC8a)** | no |
-| `fit_rhythm` remove `:328–334` | yes (`:333`) | last is in `keep` | **yes (TC7)** |
-| `context_start` (a) drop `:713–720` | **no (TC5)** | no | no |
-| `context_start` (b) context | lengthens | no | no |
-| `context_start` (b2) later | yes (`:749`) | no | no |
-| `context_start` (c) drop thought `:762–766` | yes | no | guarded by `needed` |
-| `fix_open_end` `:625–654` | yes (`:641`) | trims sentences; role unchanged | no |
-| `_prune` (montage only) | yes | no | guarded by `needed` |
+R1 claimed "exactly three gaps". **That claim is withdrawn:** it missed the `context_start` (c) drop of a loop question that bypasses `needed` (`autocut.py:762–766`, condition `u["id"] == loop_id`), which can break a dependency **after** any rhythm-local check.
 
-So under the existing `_dur` measure there are exactly three gaps: (a) min_sec (TC5), the fit_rhythm append (TC8a) and the fit_rhythm removal (TC7). Each gets one check.
+| Stage (observation point) | Line | min_sec checked? | Can change the last unit? | Can remove a unit others lean on? |
+|---|---|---|---|---|
+| S0 `build_passage` / `build_clip` | `:1177` | yes (`:412`, `:244`) | never ends on a question (`:408`/`:412`, `:246`) | — |
+| S1 loop question prepend | `:1188` | lengthens | no | no |
+| S2 `add_payoff` | `:1193` | lengthens | appends a PAYOFF role only | no |
+| S3 `_prune` (montage only) | `:1196` | yes | no | guarded by `needed` |
+| S4 `fit_rhythm` (grow + remove, internal loop ≤ 12) | `:1200` | yes on removal (`:333`) | **yes — can append a question (TC8a)** | **yes (TC7)** |
+| S5 `context_start` (a) drop first sentence | `:713–720` | **no (TC5)** | no | no (the unit stays) |
+| S5 `context_start` (b) add context | `:721–742` | lengthens | no | no |
+| S5 `context_start` (b2) later start | `:743–761` | yes (`:749`) | no | no |
+| S5 `context_start` (c) drop opening thought | `:762–766` | yes | no | **yes when `u.id == loop_id` (bypasses `needed`) — P1-1** |
+| S6 `fix_open_end` | `:1239` | yes (`:641`) | trims sentences; unit id and role unchanged | no |
+| final rhythm verdict | `:1249–1256` | — (reject only) | — | — |
 
-**Contract facts used below (ANALYTIC):**
+Intermediate states inside `fit_rhythm`'s loop are **not** observation points. Its result is judged against its input (S3 → S4).
 
-- `Proposal.line()` (`autocut.py:143–157`) carries refs, hook, close, keys and title, **never `t0`/`t1`**. Playback is derived downstream from refs by `_autocut_check` → `_blocks_do_apply`. So the unit `t0`/`t1` inside `propose` drive only duration bookkeeping (min/max/target, rhythm spans, `Proposal.seconds`), not audio. This narrows #6 (see Q8).
-- With production `context_judge: false`, `propose` makes **no** LLM call (`judge=None`). LLM calls happen only in CLI polish (`_polish` → `judge_hooks`, `rank_hooks`, `headline`, `pick_keywords`; `check_seams` on `pool[:clips*2]`), for candidates the selection loop reaches.
-- Pool size in production is `clips × check_pool = max(5, minutes/2) × 3`. For a talk of 20 minutes or more this exceeds `select_global(exact_max=30)`, so "global" there is already greedy by weight (`autocut.py:1378–1383`).
+### 0.2 Contract facts (ANALYTIC unless marked; R2 — #6 corrected)
+
+- **R1 overclaim retracted.** R1 said unit `t0`/`t1` "drive only duration bookkeeping, not audio". That is false at the code level. `_dur` feeds:
+  - `_speed()` (`:1131–1143`), which `Proposal.line()` serializes as `@speed`. Sol REPORTED a synthetic HELPER case where a 0.4 s duration change moved speed 1.05→1.08.
+  - `score` via `over = secs − target_sec` (`:1271–1272`).
+  - `Proposal.seconds`, which sets the rule-keyword count `round(seconds / keywords_every_sec)` (`__main__.py:9028`; production uses `keywords_source: rule`) and the draft header.
+  - min/max/target/rhythm verdicts.
+- **What is known:**
+  - (a) **Proven code-level output influence** (ANALYTIC + REPORTED HELPER): `@speed`, score order, `k:` count, accept/reject verdicts.
+  - (b) **Real-media playback effect: UNKNOWN.** Not reproduced, not rendered. `pieces` (refs) still define which sentences play.
+- With production `context_judge: false`, `propose` makes no LLM call (`judge=None`). LLM calls happen only in CLI polish (`_polish`, `check_seams`) for candidates the selection loop reaches.
+- Pool = `clips × check_pool`. Above `exact_max=30`, `select_global` is greedy by weight (`:1378–1383`).
+
+### 0.3 CLI mutations after `propose` (ANALYTIC; R2 — new)
+
+`_try_accept` can replace a proposal with a sentence-level shortening:
+- `_drop_last_sentence` (M167, `__main__.py:1136`, called at `:8966–8978`);
+- `_drop_sentences` (M173, `:1159`, called at `:8980–8991`).
+
+Both keep `Proposal.units` unchanged while removing refs from `pieces`. So a unit can stop playing, a dependency can lose its target, and the last **played** unit can become a question. These paths are reachable in production (`check=True`).
+
+`short_variant` (`autocut.py:1922`) uses `_prune`, which is guarded by `needed` and keeps the first and last units, so it preserves both invariants. It is off in production (`short_variant: false`).
 
 ---
 
 ## 1. Decision table
 
-Flag names are **PROVISIONAL**. The coordinator fixes final names at the code gate. Each must become an `AutocutConfig` field (`core/config.py`, `extra="forbid"`) and an `AutoParams` field, mapped in `cmd_autocut` at `__main__.py:8609`. Every default is `False`/`off`, and **flag OFF executes the frozen code path unchanged**.
+Flag names are **PROVISIONAL** (ARCH_QUESTION AQ2). Each becomes an `AutocutConfig` field (`extra="forbid"`) and an `AutoParams` field, mapped in `cmd_autocut` (`__main__.py:8609`). The default is OFF. When OFF, the design executes the frozen code path; the parity tests (§3) must prove it.
 
-| TC | Root mechanism (frozen line) | Selected strategy | Invariants preserved | Future touched symbols | Fail-before / pass-after / oracle | Deps · proof level |
+| TC | Root mechanism | Selected strategy | Invariants | Future touched symbols | Fail-before / pass-after / negatives | Deps · proof |
 |---|---|---|---|---|---|---|
-| **TC5** #5 | `context_start` step (a) drops the first sentence without a min_sec test (`autocut.py:713–720`); (b2) and (c) do test | **Guard (a)**: take the drop only if `Σ_dur(clip) − rows[0].sec ≥ min_sec`, otherwise fall through to (b)/(b2)/(c)/soft/reject, as the other steps do. **Post-check** in `propose` right after `context_start` returns: `Σ_dur < min_sec` → `no_start.append((pieces, "короче min_sec после начала: X < Y с"))`; `continue`. Reason code `dur_below_min_sec`. | timing source unchanged (`_dur`); refs untouched; manual path untouched | `AutoParams.fix_context_min_sec`; `context_start` (one condition); `propose` (one check) | FB: FX-5 → clip 25→23 s returned. PA: (a) is not taken; the clip is either repaired by (b) to ≥ 25 or lands in `no_start` with the reason. Oracle: every returned Proposal has `Σ_dur ≥ min_sec`. Neg: a drop that leaves ≥ min_sec still happens. OFF: equal to the golden. | none · accepted M224 CLI_HELPER_BOUNDARY (25→23, **not** 25→15) |
-| **TC7** #7 | `fit_rhythm` removes a piece whose unit is the `refers` target of a kept unit (`:328–331`) | **Post-check after `fit_rhythm` returns** (in `propose`, after `:1200`). Dependency edge = `leans_on(u, by_id, 1)`, i.e. `standalone is False and refers in by_id`, an **integer id, no coercion**, the same predicate the code already uses. Broken = an edge (u→t) with t in the pre-rhythm clip, u kept and t gone. Then `rhythm_out.append((pieces, "опора #t нужна #u — убрана ритмом"))`; `continue`. Fail-closed. | transitive support: if every direct edge is preserved, the closure is preserved; edges that never existed are not judged | `AutoParams.fix_rhythm_integrity`; `propose` (check after `fit_rhythm`) | FB: FX-7 → `[1,3]` with `#3.refers=2`. PA: no proposal, `rhythm_out` holds the reason. Neg: `[1,2,3]` untouched passes; u standalone with `refers` set → no edge → removal allowed. OFF: golden. | none · HELPER_CONFIRMED (M225 A) |
-| **TC8a** #8a | `fit_rhythm` grows the short last piece with the next unit, a question (`:312–325`) | Same post-check: if `clip[-1].role == "question"` → `rhythm_out` reason `"ритм добавил вопрос в конец"`; `continue`. Question **first** is not inspected. Prevention inside `fit_rhythm` is **DEFER** (see §2.4). | question-first loop untouched (`:1183`, `rhythm_why(first_is_question)`); matches the existing "never end on a question" rule (`:246`, `:412`) | same flag and symbol as TC7 | FB: FX-8a → `[1,2,3]` ends on a question. PA: no proposal, reason recorded. Neg: `[q, conclusion]` passes. OFF: golden. | TC7 package · HELPER_CONFIRMED (M225 B) |
-| **TC8b** #8b | `fix_open_end` trims to 2.5 s; the final `rhythm_why` rejects (`:1239`, `:1250`) | **Default = current behaviour**, which is already fail-closed **and logged** in `rhythm_out` (printed at `:9138`). M232-A adds only a **pinning regression test**. Recovery is OWNER Q6 (§2.6). The TC8b contract wording "silent drop" is inaccurate: M225 C proved `rhythm_out` non-empty. | unchanged | tests only | FB = PA: `len(proposals)==0`, `rhythm_out` non-empty, `open_end` empty. | none · HELPER_CONFIRMED trim→reject; recovery NOT_VERIFIED |
-| **TC2** #2 | `context_start` judges the first body sentence with `stands_alone` (back_reference, min_words, judge) only. `strict_start_reason`/`answer_start_reason`/`start_morph` are never called on the montage path (`:707`), and the apply path skips `montage` lines (`__main__.py:6822`). | Extend the start predicate inside `context_start` when the flag is on **and the sentence does not end with "?"**: `why = glued or alone or strict_body_why(text)`, where `strict_body_why` = `strict_start_reason` → (`answer_start`) `answer_start_reason(text, "")` → (`start_morph`) `clipcheck.start_morph(text.split())`, in the exact order of `scenario.py:203–217`. The same predicate is used for candidate starts inside repairs (a)/(b)/(b2). Add the owner-approved **M197 rule** (`scenario.py:219–225`): an answer-word opener drops its first sentence regardless of length when the next one stands and `Σ_dur ≥ min_sec`. Then the existing ladder runs: earlier context (b), (c), else reject into `no_start`. `host_text=""`: interviewer-reply detection is **DEFER** (it needs a callback the montage path lacks). | question-first loop: questions keep the legacy predicate. `start_morph` already skips questions; `answer_start_reason` would not, hence the "?" guard. Hook/teaser order unchanged: `context_start` still runs before `_hook_cands`, which sees the final clip. Not the hook: the target is the first sentence **after** the hook (the `context_start` M74 contract). | `AutoParams.fix_body_start`; new pure helper `_strict_body_why(text, p)` in `autocut.py`; `context_start` (predicate call sites) | FB: FX-2 clip A keeps body `1.1 «Да, конечно.»` under strict flags. PA: starts at `1.2` (or is repaired earlier, or lands in `no_start`). Neg: FX-2 clip B `[q, conclusion]` passes. `require_morph()` raises if pymorphy3 is absent with `start_morph` on: an existing fail-closed rule, keep it. OFF: golden. Note: the M223 witness's first audio was the **hook** `2.1`/`1.2`, not `Да…`. | needs TC5 guard (shared drop path) · CLI_CONFIRMED bounded (M223) |
-| **TC9a** #9a | `build_passage` `break`s when the preferred pick overflows `max_sec` and never tries the other side (`:404`) | **Side closing**: on overflow, close that side (`closed_prv`/`closed_nxt`) and `continue`. A closed side is treated as `None`. Break when both sides are `None`. **Exact, not heuristic:** the neighbour on a side changes only when the run grows on that side, and `total` only grows, so an infeasible side stays infeasible. | output equals legacy whenever no overflow occurs; question-forward and lean-back preferences are applied as before to the remaining side, exactly as legacy does when that side is `None` | `AutoParams.fix_passage_side`; `build_passage` | FB: FX-9a → `None`. PA: `[4,5]` (45 s ≥ 25). Neg: both sides overlong → `None`. **Termination:** each iteration appends one unit (`_dur>0`, ids adjacent and distinct, `total ≤ max_sec`) or closes a side (≤ 2) or breaks ⇒ ≤ `len(units) + 2` iterations, O(n). | none · HELPER_CONFIRMED (M226) |
-| **TC3** #3 | `propose` has no `clauses` parameter, so `_hook_cands` always gets `None` (`:1281`; CLI builds `clauses` at `__main__.py:8705` and does not pass it at `:8818`) | **OWNER Q3.** The mechanism is fixed. Add `propose(..., clauses=None)` as the **last keyword** (backward compatible) and forward `clauses=clauses` **only at the main call `:8818`**. The weak-seed call `:8825` is DEFER (same class as its other missing wiring). Mode flag `hook_clauses_autocut: off \| rescue \| full`. `rescue`: `cands = _hook_cands(..., clauses=None)`; if empty → `_hook_cands(..., clauses=clauses)`. `full` = the scenario path's semantics. `_hook_cands` itself is unchanged. | `hook_clauses=false` ⇒ `clauses` is `None` in the CLI ⇒ identical. `rescue` leaves every clip that already has a hook **byte-identical**. Teaser position: a clause starts ≥ its sentence start ≥ `hook_teaser_pos`·total, so ordering is preserved a fortiori; the "sentence before / clause after the threshold" case stays excluded (NOT_REPRODUCED, DEFER). `hook_judge_top=6` unchanged (#10). | `AutoParams.hook_clauses_autocut`; `propose` signature + hook block; `cmd_autocut` main call | FB: FX-3 → 0 candidates. PA (`rescue`/`full`): ≥ 1 `h:1.1@2-3`. Neg: `hook_clauses=false` → 0; mode `off` → golden. STATIC obligation: the montage line `h:B.N@i-j!` must parse in apply (`hook_words`, `__main__.py:5610`); a synthetic CLI test is required. | owner Q3 · CLI boundary + STATIC + HELPER |
-| **TC9b** #9b | post-loop pop of a trailing question; the answer after it is never visited (`:408–409`) | **OWNER Q7-b**, default **no extension**. If chosen, it is one bounded step: keep the question and append `answer = by_id[q.id+1]` if usable (same `usable()`), within `passage_gap_sec`, the rhythm jump limit holds, `total ≤ max_sec`, the answer is eligible, and (Б1) `role ∈ PAYOFFS`. At most one extension per build; no loop. | question never last; legacy when the condition fails | `AutoParams.passage_answer` (mode); `build_passage` post-loop | FB: FX-9b → `[u1]`. PA (Б1/Б2): `[u1,u2,u3]`. Neg: no answer / overlong / not payoff (Б1) → `[u1]`. | owner Q7-b; after TC9a (same function) · HELPER_CONFIRMED mechanism; media benefit UNPROVEN |
-| **TC1** #1 | a seed inside an earlier candidate is skipped (`:1175`), and `taken` blocks growth into earlier candidates (`:1257`, `:1263`). The only route to a shorter alternative around that seed is closed. | **Bounded complement variants** (§2.1). Pass 1 = legacy, unchanged, with the same truncation `out[:p.clips]`. Pass 2: each seed skipped in pass 1 gets **one** attempt, built and finalized with exclusion set `E = ids(suppressor) − {seed}` instead of global `taken`. At most `seed_alt_max` attempts (default `p.clips`). Variants are appended **after** the legacy list. Conflicts are resolved only at selection. | accepted clips never share a unit in passage mode (union conflict, §2.1); legacy pool ⊆ new pool, same order; greedy-mode decisions on legacy candidates are identical; manual path untouched; no LLM inside `propose` | `AutoParams.seed_alt`, `seed_alt_max`; `propose` (suppressor record + pass 2); `Proposal.alt_of` (defaulted field, not in `line()`); `cmd_autocut` selection block (conflict union, fill trigger, variant-tail ordering) | FB: FX-1 → `u2`-alone absent from the pool. PA: pool holds `{2}` with `alt_of` = the `[1,2]` candidate; the accepted set has no two proposals sharing units (`combinations` assert). OFF: golden + CLI review SHA. | M231 trace (suppression counts) · CLI_CONFIRMED mechanism; late rejection NOT_REPRODUCED |
+| **TC5** #5 *(unchanged from R1)* | S5(a) drops the first sentence without a min_sec test (`:713–720`) | **Guard (a):** take the drop only if `Σ_dur − rows[0].sec ≥ min_sec`, else fall through to (b)/(b2)/(c)/soft/reject. **Post-check** right after `context_start` returns (`Σ_dur < min_sec` → `no_start`, reason `dur_below_min_sec`). After S5, only `fix_open_end` shortens, and it enforces min_sec (`:641`), so the invariant holds at publication. | `_dur` measure unchanged (AQ4); refs untouched | `AutoParams.fix_context_min_sec`; `context_start` (one condition); `propose` (one check) | FB: FX-5 → 25→23 s returned. PA: (a) not taken; repaired to ≥ 25 or `no_start` with reason. Neg: a drop leaving ≥ min_sec still happens. | none · CLI_HELPER_BOUNDARY (25→23) |
+| **TC7 + TC8a** #7/#8a *(R2 — P1-1)* | S4 removes a dependency target (TC7) or appends a question at the end (TC8a). S5(c) drops a loop question that a kept unit leans on (P1-1). | **FINAL validator `_final_integrity`** after the final rhythm verdict (`:1256`) and before the pool checks (`:1257`), §2.1. Dependency = `leans_on(u, by_id, 1)` edge (`standalone is False and refers in by_id`, **integer id, no coercion**). An edge is **established** once both ends are in the clip at any observation point S0…S6. It is **broken** if the dependent is present at publication and the target is not. Also rejects `clip[-1].role == "question"`. The failure channel is set by the stage that removed the target or made the tail (§2.1). The R1 rhythm-local check is **dropped**: stage attribution gives the same diagnostic, and a single guard cannot be bypassed. | question-first loop: only the **last** unit's role is tested, and a valid `[q, …, payoff]` keeps its edges. Never-established edges are not judged (§2.1). | `AutoParams.fix_final_integrity`; `propose` (stage snapshots S0…S6 + final check); `cmd_autocut::_try_accept` (CLI re-check, §2.2) | FB: FX-7 `[1,3]` with `#3.refers=2`; FX-8a ends on a question; **FX-7L (new)**: loop question #10 dropped by S5(c) while kept `#11.refers=10` (REPORTED by Sol at HELPER level). PA: no proposal; reasons in `rhythm_out` / `no_start`. Neg: `[1,2,3]` untouched; `standalone=True` with `refers` set is not an edge; a valid question-first loop with its question kept passes. | none · HELPER_CONFIRMED (M225 A/B); FX-7L REPORTED |
+| **TC8b** *(unchanged)* | `fix_open_end` trims to 2.5 s; the final `rhythm_why` rejects (`:1239`, `:1250`) | Default = current behaviour: already fail-closed **and logged** in `rhythm_out` (printed at `:9138`). Pinning regression test only. Recovery is OWNER Q6. | unchanged | tests only | FB = PA: 0 proposals, `rhythm_out` non-empty, `open_end` empty. | none · HELPER_CONFIRMED; recovery NOT_VERIFIED |
+| **TC2** #2 *(R2 — P1-2)* | `context_start` judges the body opener with `stands_alone` only (`:707`); the apply path skips `montage` lines (`__main__.py:6822`). The M145 soft fallback (`:711`, `:768–772`) caches on `_alone is None` and can return a strict-invalid start. | **One composable start predicate** `_start_why(ref, text, following) → (timing, semantic)` used at **every** decision point: normal acceptance, repair (a), the M197 drop, (b) context candidates, (b2) later candidates, soft capture and soft return. `timing = glued_start(...)`. `semantic = stands_alone(...) or _strict_body_why(text, p)` (§2.3). **Soft may relax timing only:** capture iff `timing and semantic is None`. A soft clip is semantically valid by construction, so soft return can never publish a semantic-invalid start. No valid repair → `(None, notes, semantic reason)` → `no_start`. `require_morph()` is called at `context_start` entry, before any early return, when the flag is on and `start_strict and start_morph` (as in `scenario.py:197–199`). | Question-first exemption: `_strict_body_why` returns `None` for a sentence ending in "?"; the legacy `stands_alone` still applies to it. Hook order unchanged. | `AutoParams.fix_body_start`; new pure helpers `_strict_body_why`, `_start_why`; `context_start` (all predicate call sites) | FB: FX-2 clip A keeps «Да, конечно.». PA: starts at 1.2, or is repaired earlier, or `no_start`. Neg: **FX-2G (new)** glued + strict-invalid + no repair → `no_start`; missing pymorphy3 with `start_morph` → `RuntimeError` before any return; glued but semantically valid with no repair → soft kept (M145) with note; FX-2 clip B question-first passes. | TC5 guard (shared drop path) · CLI_CONFIRMED bounded (M223) |
+| **TC9a** #9a *(R2 — complexity corrected)* | `build_passage` `break`s when the preferred pick overflows (`:404`) | Side closing (R1 design). Exact: the neighbour on a side changes only when the run grows on that side, and `total` is monotone. | equal to legacy when no overflow occurs | `AutoParams.fix_passage_side`; `build_passage` | FB: FX-9a → `None`. PA: `[4,5]`. Neg: both sides overlong → `None`. **Bound:** ≤ `len(units)+2` loop iterations. **Time O(n²) worst case** (R1's "O(n)" withdrawn): each iteration recomputes jumps over `run` and copies `run`. | none · HELPER_CONFIRMED |
+| **TC3** #3 *(unchanged)* | `propose` has no `clauses`; `_hook_cands` always gets `None` (`:1281`, `__main__.py:8818`) | OWNER Q3. Mechanism as in R1: `propose(..., clauses=None)` as the last keyword, forwarded at `:8818` only. `hook_clauses_autocut: off \| rescue \| full`. | `hook_clauses=false` → `clauses is None`; `rescue` keeps hooked clips identical | as R1 | as R1 + apply-parse test of `h:B.N@i-j!` | owner Q3 |
+| **TC9b** #9b *(R2 — P1-5)* | post-loop pop of a trailing question; the following answer is never visited (`:408–409`) | OWNER Q7-b; **default Б0** (no extension, package not opened). If chosen: one bounded step, keep the question and append `a = by_id[q.id+1]` only if `a.role != "question"` (**explicit**, because `eligible()` admits questions), `usable(a)`, gap ≤ `passage_gap_sec`, `total + _dur(a) ≤ max_sec`, `eligible(a)`, rhythm jump limit holds when `p.rhythm`, and (Б1) `a.role ∈ PAYOFFS`. Afterwards, **independently of `p.rhythm`**, the run's last role must not be question; otherwise revert to the legacy pop. | question never last; at most one extension per build | `AutoParams.passage_answer`; `build_passage` post-loop | FB: FX-9b → `[u1]`. PA (Б1/Б2): `[u1,u2,u3]`. Neg: **two consecutive questions** → no extension, legacy result; overlong answer / gap > limit / non-payoff (Б1) → `[u1]`; the extension is applied at most once (counter). | owner Q7-b; after TC9a |
+| **TC1** #1 *(R2 — P1-4)* | a seed inside an earlier candidate is skipped (`:1175`); `taken` blocks growth (`:1257`, `:1263`) | **Complement variants (R1) + two-phase selection** (§2.4). Pass 2 generates at most `seed_alt_max` variants with exclusion set `E = ids(sup) − {s}`. Variants are **held outside the legacy pool**. The CLI runs the **complete legacy lifecycle unchanged** (Phase L). Only then are variants considered for slots still free (Phase V). | Phase L sees only the legacy pool ⇒ legacy decisions identical by construction, in greedy and global modes, at any pool size. Dedup by union conflict against everything accepted. | `AutoParams.seed_alt`, `seed_alt_max`; `propose` (suppressor record, pass 2, return channel §2.4); `Proposal.alt_of`; `cmd_autocut` (Phase V after `:9075`) | FB: FX-1 u2-alone absent. PA: variant `{2}` exists. **Neg FX-1H (new):** `fill_pool` active + `hookless_last=true` + 1 slot, legacy hookless candidate vs conflicting hooked variant → legacy accepted, variant not; identical with the flag on/off, `select: greedy` and `global`. | M231 trace · CLI_CONFIRMED mechanism; benefit unproven |
 
 ---
 
-## 2. Specifications that need more than one row
+## 2. Specifications
 
-### 2.1 TC1 — complement variants (Q1)
+### 2.1 `_final_integrity` (P1-1)
 
-**Why not "independent rebuild with `taken=∅`".** In FX-1, `build_passage(u2, taken=∅)` grows back to `u1` (gap 10.5 s < 30, total 28 < target 55) and returns `[1,2]`, a duplicate. The M223 counterfactual `propose([u2])` worked only because `u1` was absent from the unit list (`CLI_REPRO.py:553`). The viable alternative is "around `u2`, without its suppressor's other units", which is exactly `E`.
+**Snapshots.** `snap[k] = [u["id"] for u in clip]` at S0 (after build), S1, S2, S3, S4, S5 and S6. Ids only; no copies of dicts.
 
-- **Suppressor record (pass 1, observation only):** when pass 1 skips seed `s` at `:1175`, record `sup[s]` = the earliest legacy candidate (including later-truncated ones) whose `ids` contain `s`. That candidate is unique and deterministic.
-- **Visited key:** `(s, frozenset(E))`, attempted once. Variants never spawn variants, so the recursion depth is 1.
-- **Attempt order:** pass-1 seed order (the existing key `(-punch, -energy, t0)`). Pass 2 adds `id` as the final tie-break inside pass 2 only; pass 1 is untouched.
-- **Per-attempt pipeline:** identical to pass 1 (loop question with `in_clips=E`, `add_payoff(taken=E)`, `fit_rhythm(taken=E)`, `context_start`, `fix_open_end`, final rhythm, all M232 checks whose flags are on). Pass-1 pool-level rejects (`:1257` taken, `:1259–1261` overlap/payoff vs `out`) are **not** applied to variants; they become selection conflicts.
-- **Candidate identity:** `(tuple(ids), pieces)`. A variant equal to any pooled candidate is dropped and counted.
-- **Bounds:** attempts ≤ `seed_alt_max` (default `p.clips`), so pooled variants ≤ attempts and pool ≤ 2·`p.clips`. CPU per attempt is O(units). With a context judge configured (off in production), judge calls per attempt are ≤ 6 iterations × (2 + `context_back`) probes, a constant.
-- **Selection (CLI, only when `seed_alt` is on):**
-  - `conflict(a,b) = _close(a,[b]) is not None OR legacy_conflict(a,b)`, where `legacy_conflict` = (passage and `units(a)∩units(b)` non-empty) or (`|shared| > overlap_max·min(len)`) or (same last unit), i.e. the rules of `:1257–1261`. Applied in `_cf` (`:9042`) **and** `_try_accept` (`:8955`). On legacy–legacy pairs `legacy_conflict` is false by construction, so those decisions are unchanged.
-  - **Variant-tail ordering:** every existing pool sort (`:8840`, `:8919`) gets a leading key `is_variant`, which keeps the legacy block's relative order exactly.
-  - **Fill trigger and `fill_pool` `have`** (`:8822`, `:1313`) use the legacy pool only, so weak-seed extras are unchanged.
-- **Monotonicity (ANALYTIC):**
-  - `select: greedy`: legacy candidates are processed first, in the same order, with the same conflicts, so they get the same accept/reject decisions; variants can only fill slots left empty.
-  - `select: global` exact (`n ≤ 30`): the legacy accepted set is still feasible, so the total score is ≥ legacy.
-  - `n > 30` (greedy by weight): **no guarantee**; measure via the M231 trace before enabling.
-- **Scope:** passage/mixed only. `build_clip` (montage) has no exclusion parameter, so montage is **DEFER**.
-- **Replay:** variants that reach polish create new judge prompts. `ARL_LLM_CACHE=replay` then misses (`arl auto` rc 1, by design). A/B needs a `record` pass on free models (M237 scope). Unit and regression tests use `judge=None`.
+**Established edges.**
+```
+EST = ⋃_k { (u, t) : u, t ∈ snap[k], t = leans_on(by_id[u], by_id, 1)[0] }
+```
+An edge counts if it exists at **any** observation point.
 
-### 2.2 TC2 — strict body start helper
+**Broken edges.** `(u, t) ∈ EST` with `u ∈ final ids` and `t ∉ final ids`.
 
-`_strict_body_why(text, p) -> str | None`:
+**Attribution.** `stage(t)` = the first k at which `t` is in `snap[k−1]` but not in `snap[k]`. Only S4 (`fit_rhythm`) and S5 (`context_start` (c)) can remove units.
 
-- returns `None` unless the flag is on and `p.start_strict` is set, or when `text.rstrip()` ends with "?";
-- otherwise returns, in order, `strict_start_reason(text)`, then `answer_start_reason(text, "")` if `p.answer_start`, then `clipcheck.start_morph(text.split())` if `p.start_morph` (after `require_morph()`, as `scenario.py:197–199` does).
+**Question-end.** `final[-1].role == "question"` → attributed to S4, the only stage that can append a non-PAYOFF tail.
 
-The scenario path is **not** refactored to use this helper; the duplication is tracked as DEFER so that path stays byte-identical.
+**Channels.**
 
-### 2.3 TC5/TC2 interaction
-
-The M197 drop and step (a) both go through the TC5 guard. A2 (TC2) is therefore sequenced after A1 (TC5).
-
-### 2.4 DEFER items with their settling observation
-
-| Item | Why deferred | Synthetic observation that would settle it |
+| Stage | Channel | Reason |
 |---|---|---|
-| TC8a prevention (skip a question neighbour when growing at the clip end) | it creates new clips; benefit unproven | M231 trace count of `rhythm_fail` with reason "question end" > 0 on owner-authorized data, plus a fixture where the other side can grow |
-| TC7 cascade removal (drop dependents with their target) | changes payoff/coverage | fixture where the dependent is not in `keep` and the remainder passes rhythm |
-| TC3 "sentence before / clause after threshold" | M223 NOT_REPRODUCED | a clause hook starting ≥ `hook_teaser_pos` inside a sentence that starts before it, judged by the owner |
-| TC2 interviewer-reply (`host_text`) on the montage path | needs a speaker callback | an `_other`-based fixture where the reply follows the interviewer within `answer_gap_sec` |
-| Weak-seed `clauses` / `no_start` / `open_end` / `rhythm_out` wiring; `teaser_misses` alignment | signature changes; Q8 excludes them from M231 | M227 helper mismatch replayed at the CLI with alignment loaded |
-| #4 post-select fallback, #6 duration measure | INSTRUMENT_FIRST | M231 `select` events showing a picked candidate rejected with a feasible unpicked replacement; `secs_delta ≠ 0` changing a min/max/rhythm verdict |
+| S4 | `rhythm_out` | `"финал: опора #t нужна #u — убрана ритмом"` / `"финал: ритм добавил вопрос в конец"` |
+| S5 | `no_start` | `"финал: опора #t нужна #u — убрана при поиске начала"` |
+| unknown (defensive) | `rhythm_out` | prefix `"финал:"` |
 
-### 2.5 Q8 — M231 observability (design only; full contract in IMPLEMENTATION_SEQUENCE §M231)
+Then `continue`. All of this is gated by `fix_final_integrity`.
 
-- **#6 narrowed (ANALYTIC):** the `t0`/`t1` offsets affect `Σ_dur` bookkeeping only (see §0). The metric is `secs_delta = Σ_dur(clip) − Σ sentence seconds of pieces`, per candidate, computable inside `propose` from the existing `sentences` callback. A playback effect is not reachable from `propose`.
-- **#11:** a per-seed terminal event in `propose`. **#4:** pick versus fate at the CLI.
-- **#9a/#9b frequency:** proxy flags computed in `propose` from `by_id` after the build, without touching `build_passage`. They are labelled PROXY.
+**Deliberate asymmetry (documented, AQ7).** An edge that never coexisted in the clip at any observation point is **not** judged. A clip that was built with `u` leaning on an absent `t` is therefore out of TC7 scope; the start rules govern its first unit. A loop question that the clip leans on (it is chosen with weight 3 for leaned questions, `:1104`) establishes its edge at S1. Its later S5(c) removal is therefore broken → reject. So the same final unit list can be accepted when no loop was tried and rejected when a loop was tried and dropped. Fail-closed is chosen on purpose; the coordinator confirms at the A2 code gate.
 
-### 2.6 Q6 / Q7-b / Q3 — owner options
+**Transitive support.** Every direct edge preserved ⇒ the closure is preserved.
 
-These are in `OWNER_DECISION_BRIEF.md`. Architect defaults are Q3 = off until the owner answers (recommend `rescue`), Q6 = fail-closed, Q7-b = no extension.
+### 2.2 CLI re-check after `_drop_last_sentence` / `_drop_sentences` (P1-1, "later mutation")
+
+Under `fix_final_integrity`, inside `_try_accept`, for montage-pool proposals only (`not scenario`; the scenario path stays byte-identical, AQ8):
+1. `played(pr)` = the units having ≥ 1 sentence of their (`unit_refs` or map) refs in `pr.pieces`.
+2. A shortened `_short`/`_less` is taken only if, against the pre-shortening `pr`, no edge `(u,t)` with `u, t ∈ played(pr)` loses `t` while keeping `u`, and the last played unit's role is not question.
+3. Otherwise the shortening is **not taken**. `pr` keeps its original `err` → `rejected`, with the note `"финал: укорочение нарушило опору/концовку — не взято"`.
+
+Bound: each loop already runs at most twice (`:8966`, `:8980`).
+
+### 2.3 `_strict_body_why(text, p)` and `_start_why` (P1-2)
+
+`_strict_body_why` returns `None` if the flag is off, if `not p.start_strict`, or if `text.rstrip().endswith("?")`. Otherwise it returns, in order:
+1. `strict_start_reason(text)`;
+2. if `p.answer_start`: `answer_start_reason(text, "")`;
+3. if `p.start_morph`: `clipcheck.start_morph(text.split())`.
+
+This is the same order as `scenario.py:203–217`; the montage-path `host_text=""` is DEFER.
+
+`_start_why(ref, text, following) = (glued_start(ref, p, start_pause), stands_alone(text, following, p, judge, core) or _strict_body_why(text, p))`.
+
+**Call sites in `context_start`:**
+
+| Call site | Rule |
+|---|---|
+| first-row verdict | `why = timing or semantic` |
+| soft capture | iff `timing and semantic is None` |
+| repair (a) next row | must have `(None, None)` |
+| M197 drop (answer-word first row, any length) | next row `(None, None)` and `Σ_dur ≥ min_sec` (TC5 guard) |
+| (b) context candidate `prow[0]` | `(None, None)` |
+| (b2) later candidate | `(None, None)` |
+
+`scenario.py` is not refactored (DEFER).
+
+### 2.4 TC1 two-phase lifecycle (P1-4)
+
+**Generation (`propose`).**
+- Pass 1 is legacy. `out.sort` and `out[:p.clips]` (`:1309–1310`) are unchanged and return the legacy list.
+- Pass 2 (variants) follows R1 §2.1: suppressor `sup[s]`, visited key `(s, frozenset(E))`, depth 1, attempts ≤ `seed_alt_max`, candidate identity `(tuple(ids), pieces)`, and the full per-candidate pipeline including `_final_integrity`.
+- Variants are **not** in the returned list. They reach the CLI through an additive out-list keyword `variants_out: list | None = None` (default `None` → pass 2 does not run at all). This is a signature change, approved only at the A8 code gate.
+
+**CLI lifecycle (complete; the step order is the frozen order).**
+
+| # | Step | Line | Sees variants? |
+|---|---|---|---|
+| 1 | main `propose` | `:8818` | no (variants go to `variants_out`) |
+| 2 | weak-seed fill trigger + `fill_pool` re-sort | `:8822–8831`, `autocut.py:1325` | no |
+| 3 | interviewer filter | `:8832–8837` | no |
+| 4 | `start_doubt` sort | `:8838–8841` | no |
+| 5 | `check_seams` on `pool[:clips*2]` + sort | `:8915–8921` | no |
+| 6 | global/greedy pick, `pool = picks + rest` | `:9038–9050` | no |
+| 7 | primary loop: `_polish`, `_keys_rule`, `hookless_last` deferral, `_try_accept` | `:9053–9068` | no |
+| 8 | deferred hookless pass | `:9069–9075` | no |
+| 9 | **Phase V (new):** see below | — | **yes** |
+| 10 | plate redo, `short_variant`, draft | `:9076–` | as frozen; variants accepted in step 9 follow the frozen handling of accepted clips |
+
+**Phase V (step 9).** Runs only if `seed_alt` is on and `len(accepted) < prm.clips`.
+- Order variants by `(-score, attempt order)`, deterministic.
+- Drop every variant with `union_conflict(v, a)` for any `a ∈ accepted`, where union conflict = `_close` **or** `legacy_conflict` (passage: any shared unit; else `|shared| > overlap_max·min` or the same last unit).
+- Then run the frozen per-candidate steps (`_polish`, `_keys_rule`, the `hookless_last` deferral **inside Phase V**, `_try_accept` with the union conflict) until `prm.clips` are reached.
+- Every variant left over gets a fate: `variant_close`, `variant_rejected`, `variant_not_reached`.
+
+**Guarantees (ANALYTIC; tests required).**
+1. Phase L is the frozen lifecycle on the frozen pool ⇒ the accepted/rejected/close/not_reached/hookless_left lists for legacy candidates are identical with the flag on or off, in greedy or global mode, and with pool > 30.
+2. Accepted variants only take free slots and never share a unit (in passage mode) with any accepted clip.
+3. **What R1 claimed and R2 withdraws:** variants can **not** displace legacy picks. The R1 "selector may trade" benefit (global sum ≥ legacy with swaps) is withdrawn. A replace/global mode would forfeit guarantee 1 and is **DEFER**: it needs a separate gate and M231 evidence.
+
+**Prerequisite.** M231 `seed` (suppression) and `fate` events must be accepted before A8 opens. Variants help only when legacy under-fills; how often that happens is unknown.
 
 ---
 
 ## 3. Global invariants (each must be a test in every M232 package)
 
-1. **OFF parity:** with the package flag off, `propose()` output equals a golden JSON generated **at `3c011e9`** for every FX fixture and every committed M223/M226/M227 synthetic map. The synthetic `cmd_autocut(llm="none")` review file SHA256 is unchanged. The M226 preflight review `95350aa0…` is a known-deterministic reference.
-2. **Question-first loop:** `[q(question), …, payoff]` is never rejected by a new check.
-3. **No question last; min_sec; preserved deps:** these hold for every returned Proposal when the relevant flag is on. Property assert over all fixtures.
+1. **OFF parity (to be proven, not assumed):**
+   - with the package flag off, `propose()` output equals a golden JSON generated **at `3c011e9`** by a committed script, on every FX fixture and every committed M223/M226/M227 synthetic map;
+   - the synthetic `cmd_autocut(llm="none")` review file SHA256 equals the base value (M226 preflight `95350aa0…` is a known reference);
+   - for A2/A8, `_try_accept` and Phase V produce byte-identical drafts when off.
+2. **Question-first loop:** `[q, …, payoff]` with intact edges is never rejected by a new check.
+3. **With the relevant flag on, every returned Proposal satisfies:** min_sec (A1); no broken established edge and no question tail (A2); a semantic-valid start (A3). This includes after CLI shortening (A2, §2.2).
 4. **Dedup:** no two accepted proposals share a unit in passage mode, and every accepted pair has `_close is None`.
 5. **No new LLM call inside `propose`; no network in tests;** judge spies report equal call counts with flags off.
-6. **Manual path:** no change to the apply stage lists or `selection_source: human` handling (invariant 5 tests stay green).
-7. **Failure set** equals `handoff/m222/baseline-failures.txt` via `compare_failures.py`. The 29 known baseline failures include `test_m202_replay_accounting.py` and `test_m177_repeats.py`, so they cannot serve as oracles.
+6. **Manual path:** no change to the apply stage lists or `selection_source: human` handling.
+7. **Failure set** equals `handoff/m222/baseline-failures.txt` (29 known failures, incl. `test_m202_*`, `test_m177_*`) via `compare_failures.py`.
+
+## 4. DEFER items and their settling observation
+
+| Item | Settling observation |
+|---|---|
+| TC8a prevention in `fit_rhythm` | M231 count of S4 question-tail rejects > 0, plus a fixture where the other side can grow |
+| TC7 cascade removal | a fixture with a dependent outside `keep` whose remainder passes rhythm |
+| TC3 clause after the threshold, sentence before it | an owner-judged synthetic case |
+| TC2 interviewer-reply (`host_text`) on the montage path | an `_other`-based fixture |
+| TC1 replace/global variant mode | M231 `fate` events showing legacy under-fill with a better swap |
+| weak-seed wiring; `teaser_misses` alignment | the M227 mismatch replayed at the CLI with alignment loaded |
+| #4 post-select fallback | M231 `fate`: picked → rejected with a feasible unpicked replacement |
+| #6 measure change | M231 boundary deltas `d0`/`d1` that change a min/max/rhythm verdict or `@speed` |
+
+## 5. R2 change log (what changed and why)
+
+| Location (R1) | R1 statement | R2 | Finding |
+|---|---|---|---|
+| §0 | "exactly three gaps" | withdrawn; inventory with S0…S6 incl. S5(c) loop drop | P1-1 |
+| §1 TC7/TC8a | post-check after `fit_rhythm` | final validator with established edges + stage attribution; CLI re-check | P1-1 |
+| §1 TC2, §2.2 | predicate in normal checks and repairs | one predicate also at soft capture/return; `require_morph` at entry | P1-2 |
+| §0, §2.5 | "#6 affects duration bookkeeping only; playback unreachable" | retracted; code-level output influence (`@speed`, score, `k:`); playback UNKNOWN | P1-3 |
+| §2.1 TC1 selection | variant-tail ordering; global sum ≥ legacy | two-phase lifecycle; swap benefit withdrawn | P1-4 |
+| §1 TC9b | eligible answer | explicit non-question answer; final role check independent of rhythm | P1-5 |
+| §1 TC9a | O(n) | ≤ `len(units)+2` iterations, O(n²) time | complexity |
+| §3.1 | "OFF executes the frozen path" | marked as a test obligation | parity wording |
