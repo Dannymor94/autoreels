@@ -8792,6 +8792,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         else:
             _other = _sp_other({r: (float(st[0].t0), float(st[-1].t1)) for r, st in sent_by_ref.items() if st}, _spm)
             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
+    _trace_path: str | None = None
+    _trace: list | None = None
     if scenario:
         # M204: scenario_llm — the scenarist's own model; `mode` (--llm) then polishes (hooks, plates, k:, seams)
         from autoreels.cloud.chatscenario import ChatScenarioPending
@@ -8815,9 +8817,61 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                   flush=True)
             return 0
     else:
+        _trace_path = os.environ.get("ARL_AUTOCUT_TRACE")
+        _trace = [] if _trace_path else None
         pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
-                       taste=_taste, start_pause=start_pause)
+                       taste=_taste, start_pause=start_pause, trace=_trace)
+        if _trace is not None:
+            for _ev in _trace:
+                if _ev.get("event") != "seed" or not _ev.get("spans_final"):
+                    continue
+                _spans_e: list = []
+                for _sp in _ev["spans_final"]:
+                    _uid_e, _refs_e, _t0_e, _t1_e = _sp
+                    _keys_e: list = []
+                    for _piece_e in (_refs_e or "").split():
+                        _blk_e, _, _rng_e = _piece_e.partition(".")
+                        _a_e, _, _z_e = _rng_e.partition("-")
+                        if _a_e.isdigit() and (_z_e or _a_e).isdigit():
+                            for _k_e in range(int(_a_e), int(_z_e or _a_e) + 1):
+                                _keys_e.append(f"{_blk_e}.{_k_e}")
+                    if not _keys_e:
+                        _spans_e.append([_uid_e, _refs_e, _t0_e, _t1_e,
+                                         {"status_d0": "no_refs", "status_d1": "no_refs",
+                                          "w0": None, "w1": None, "d0": None, "d1": None, "err": None}])
+                        continue
+                    _fst_e = sent_by_ref.get(_keys_e[0])
+                    _lst_e = sent_by_ref.get(_keys_e[-1])
+                    _st0_e = "ok" if _fst_e else ("no_words" if _fst_e is not None else "no_sentence")
+                    _st1_e = "ok" if _lst_e else ("no_words" if _lst_e is not None else "no_sentence")
+                    _w0_e = round(float(_fst_e[0].t0), 3) if _st0_e == "ok" else None
+                    _w1_e = round(float(_lst_e[-1].t1), 3) if _st1_e == "ok" else None
+                    _d0_e = round(_t0_e - _w0_e, 3) if _w0_e is not None else None
+                    _d1_e = round(_t1_e - _w1_e, 3) if _w1_e is not None else None
+                    _err_e = round(_d1_e - _d0_e, 3) if _d0_e is not None and _d1_e is not None else None
+                    _spans_e.append([_uid_e, _refs_e, _t0_e, _t1_e,
+                                     {"status_d0": _st0_e, "status_d1": _st1_e,
+                                      "w0": _w0_e, "w1": _w1_e, "d0": _d0_e, "d1": _d1_e, "err": _err_e}])
+                _n_e = len(_spans_e)
+                _d0v_e = [s[4]["d0"] for s in _spans_e if s[4]["d0"] is not None]
+                _d1v_e = [s[4]["d1"] for s in _spans_e if s[4]["d1"] is not None]
+                _n_d0_e = len(_d0v_e)
+                _n_d1_e = len(_d1v_e)
+                _n_err_e = sum(1 for s in _spans_e if s[4]["err"] is not None)
+                _errs_e = [s[4]["err"] for s in _spans_e if s[4]["err"] is not None]
+                _ev["timing"] = {
+                    "spans": _spans_e,
+                    "units_total": _n_e, "n_d0": _n_d0_e, "n_d1": _n_d1_e, "n_err": _n_err_e,
+                    "secs_delta": round(sum(_errs_e), 3) if _n_err_e == _n_e else None,
+                    "secs_delta_known": round(sum(_errs_e), 3) if _errs_e else None,
+                    "max_abs_d0": round(max(abs(v) for v in _d0v_e), 3) if _d0v_e else None,
+                    "max_abs_d1": round(max(abs(v) for v in _d1v_e), 3) if _d1v_e else None,
+                    "speed_secs": None, "speed_status": None,
+                }
+            for _si_e, _spr_e in enumerate(pool):
+                _trace.append({"schema": 1, "event": "select",
+                                "index": _si_e, "pieces": _spr_e.pieces, "score": _spr_e.score})
         _fsp = int(getattr(ac, "fill_seed_punch", 0) or 0)
         if _fsp and _fsp < prm.seed_punch and len(pool) < prm.clips * ac.check_pool:
             # M140: the pool is smaller than the draft can take — fill it with clips around weaker seeds
@@ -9181,6 +9235,28 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     for pr in not_reached:
         print(f"  … {pr.pieces} — не дошла очередь (уже принято {prm.clips})")
     _usage_report(prov)
+    if _trace is not None and _trace_path:
+        for _pr_f in accepted:
+            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "accepted"})
+        for _pr_f, _err_f in rejected:
+            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "rejected"})
+        for _pr_f, _why_f in close:
+            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "close"})
+        for _pr_f in hookless_left:
+            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "hookless"})
+        for _pr_f in not_reached:
+            _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "not_reached"})
+        def _rflt(o):
+            if isinstance(o, float):
+                return round(o, 3)
+            if isinstance(o, dict):
+                return {k: _rflt(v) for k, v in o.items()}
+            if isinstance(o, list):
+                return [_rflt(v) for v in o]
+            return o
+        with open(_trace_path, "w", encoding="utf-8") as _tf:
+            for _ev_w in _trace:
+                _tf.write(json.dumps(_rflt(_ev_w), sort_keys=True, ensure_ascii=False) + "\n")
     if not accepted:
         print("  (ни одной: нет сильных мыслей с паспортом или все не прошли проверку)")
     return 0
