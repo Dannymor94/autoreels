@@ -38,7 +38,7 @@ Frozen evidence: `src/autoreels/cloud/autocut.py` `rank_hooks:1436–1458`, `pic
 
 ## QA obligations
 
-1. Fake provider returns malformed JSON on the first application attempt and valid JSON on the second for each of `rank_hooks`, `pick_keywords`, `check_seams`; exact count = 2 per eligible operation. An exception is at most one.
+1. Fake provider returns malformed JSON on the first application attempt and valid JSON on the second for each of `rank_hooks`, `pick_keywords`, `check_seams`; exact count = 2 per eligible operation. An exception on the **first** attempt gives exactly 1 application call; malformed response then exception on the **second** gives 2; no retries follow an exception.
 2. Verify baseline main and weak-seed, context-judge-on and -off, hook judge/title/keywords/seams combinations, M112 late redo, and A8 variant-only clean path.
 3. Compare literal provider-request sequence with flags OFF; trace ON vs OFF must add **zero** model calls. For A8 flag ON the legacy request log must be an unmodified prefix of the new full request log.
 4. Explicitly assert rejected interviewer variants produce **zero** variant-attributed model calls (including the contextual judge); positive clean variants may make bounded extra calls **after** Phase L and V1.
