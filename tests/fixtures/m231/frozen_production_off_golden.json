@@ -13,18 +13,18 @@
       1337
     ],
     "blob_shas": {
-      "tests/fixtures/m231/compare_off_golden.py": "c8a75e0921e6adae3b9f5020a4814883f67b4fde",
+      "tests/fixtures/m231/compare_off_golden.py": "df30832409092ba5d0b9b90ff460a67047b2f5a1",
       "tests/fixtures/m231/compare_cli_off_golden.py": "7f18997fb29782991e64f0243e0089e1f88fd4e9",
-      "tests/test_m231_trace.py": "8869c3cd1982a7d59feb367f4c75b229c91da568",
+      "tests/test_m231_trace.py": "786814ec5683b0c9ccdbdfa7bdb18931cb0924dd",
       "tests/test_montage.py": "607d9c0f8a24049805aa391d3de41925672b3d0f",
       "tests/fixtures/m231/fx7l_units.json": "918ef0599223bfd0886dad91dd0a57934f8abf03"
     },
     "commands": {
-      "frozen_proposals": "PYTHONHASHSEED=0 PYTHONPATH=/workspace/scratch/5b9935a8bef7/autoreels-m231-production-base/src:/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3 /workspace/scratch/5b9935a8bef7/arl-m231-py312-venv/bin/python /workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/tests/fixtures/m231/compare_off_golden.py --frozen-only",
-      "frozen_cli": "PYTHONHASHSEED=0 PYTHONPATH=/workspace/scratch/5b9935a8bef7/autoreels-m231-production-base/src:/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3 /workspace/scratch/5b9935a8bef7/arl-m231-py312-venv/bin/python /workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/tests/fixtures/m231/compare_cli_off_golden.py --frozen-only",
-      "candidate_on": "PYTHONHASHSEED=0 PYTHONPATH=/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/src:/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3 /workspace/scratch/5b9935a8bef7/arl-m231-py312-venv/bin/python /workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/tests/fixtures/m231/compare_off_golden.py --trace-on"
+      "frozen_proposals": "cd <clean 3c011e9 worktree> && PYTHONHASHSEED=0 PYTHONPATH=<prod>/src:<r4> python3.12 <r4>/tests/fixtures/m231/compare_off_golden.py --frozen-only",
+      "frozen_cli": "cd <clean 3c011e9 worktree> && PYTHONHASHSEED=0 PYTHONPATH=<prod>/src:<r4> python3.12 <r4>/tests/fixtures/m231/compare_cli_off_golden.py --frozen-only",
+      "candidate_on": "cd <r4 worktree> && PYTHONHASHSEED=0 PYTHONPATH=<r4>/src:<r4> python3.12 <r4>/tests/fixtures/m231/compare_off_golden.py --trace-on"
     },
-    "note": "Recomputed on pinned clean production SHA during R3; NOT claimed to be captured before M231. All 13 coverage cases match frozen production, R3 OFF and R3 ON under hashseeds 0/42/1337."
+    "note": "Recomputed on pinned clean production SHA 3c011e9 during R4; NOT claimed to be captured before M231. R4 (finding P1-R3-1) fixes the loop_question coverage case so it actually reaches the loop prepend: build_clip yields a non-question opener [1], _loop_question prepends the question (id 2, punch 3 < seed_punch so not a seed) giving S0=[1], S1=[2,1], outcome pooled. Only loop_question.proposals_sha256 changes vs R3 (its proposal now carries the loop note); all other coverage rows, the base golden and cli_expected are byte-identical. All 13 coverage cases match frozen production OFF, candidate OFF and candidate ON under hashseeds 0/42/1337."
   },
   "expected": {
     "callback_counts": {
@@ -57,7 +57,7 @@
         "callback_count": 2,
         "callbacks_sha256": "4701c870d7271a56ab18c2581969ff5a916ac544976f4acbecae3b2cd2f12c52",
         "proposals": 1,
-        "proposals_sha256": "2d68b128c817256c0c60109be2af00ec76dbcb4cc3a49bfc86176508457db183"
+        "proposals_sha256": "5c78e3c7cc048d8d59d38dec18da2b1bf54ba6e346dd84fd299a9aba3050f6e0"
       },
       "open_end_fail": {
         "callback_count": 0,

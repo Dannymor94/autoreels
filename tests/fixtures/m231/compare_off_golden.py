@@ -99,10 +99,15 @@ def _coverage_case(name: str):
                            AutoParams(clips=3, generator="passage", rhythm=True,
                                       target_sec=55, max_sec=90, min_sec=25,
                                       context_start=False), {}, None),
-        "loop_question": ([one, {**two, "role": "question"}],
+        # build_clip yields a non-question opener [1] so propose's loop guard
+        # fires; _loop_question returns the question (id 2, punch 3 < seed_punch
+        # so it is not itself a seed) → it is prepended: S0=[1], S1=[2,1], pooled.
+        "loop_question": ([one, {**two, "role": "question", "punch": 3}],
                           AutoParams(clips=2, generator="montage", loop=True,
                                      rhythm=False, prune=False, context_start=False),
-                          {"_loop_question": lambda *a, **kw: {**two, "role": "question"}}, None),
+                          {"build_clip": lambda *a, **kw: [one],
+                           "_loop_question": lambda *a, **kw: {**two, "role": "question", "punch": 3}},
+                          {"pooled"}),
     }
     if name == "fx7l":
         fixture = Path(__file__).with_name("fx7l_units.json")

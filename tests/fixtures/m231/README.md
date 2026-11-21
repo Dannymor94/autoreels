@@ -55,3 +55,21 @@ printing its HEAD and imported package path. On the candidate implementation
 `compare_off_golden.py --trace-on` exercises those same cases, asserts exact
 outcome labels, and verifies byte-for-byte parity with OFF and frozen source.
 These are synthetic offline probes only, never provider calls.
+
+## M231-R4 loop-question coverage fix (Issue #21 finding P1-R3-1)
+
+The R3 `loop_question` coverage case passed `[1, 2(question)]` to the real
+`build_clip`, which returns a question-first clip `[2, 1]`; propose's loop guard
+(`clip[0].role != "question"`) then never fired, so the patched `_loop_question`
+was reached **0 times** and S0==S1==`[2, 1]` — the case proved a question-first
+builder result, not the loop-introduction path the architect asked C to cover.
+
+R4 pins the case on the real prepend: `build_clip` is forced to a non-question
+opener `[1]`, `_loop_question` returns the question (id 2, `punch 3 < seed_punch`
+so it is not itself a seed), so propose prepends it — **S0=`[1]`, S1=`[2, 1]`,
+`_loop_question` reached exactly once, terminal outcome `pooled`**. The committed
+`expected.coverage.loop_question.proposals_sha256` was independently regenerated
+from the clean detached `3c011e9` worktree; it is the only golden row that moved
+(the final clip is unchanged but its proposal now carries the loop note). The
+dedicated `test_loop_question_is_reached_and_prepends` asserts the call count and
+the exact S0→S1 transition, not merely that a question opens the clip.

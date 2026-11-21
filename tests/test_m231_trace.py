@@ -448,6 +448,28 @@ def test_p11_overlap_or_payoff(monkeypatch):
     assert outs[0] == "pooled" and "overlap_or_payoff" in outs
 
 
+def test_loop_question_is_reached_and_prepends(monkeypatch):
+    """R4 (P1-R3-1): the loop-question coverage case must actually reach the
+    prepend. build_clip yields a non-question opener [1] so propose's loop guard
+    fires; _loop_question returns the question (id 2, punch 3 < seed_punch so it
+    is not itself a seed) and it is prepended. Exact transition, call count and
+    terminal outcome are asserted, not the mere existence of a question-first
+    builder result."""
+    one = U(1, 0, 30, "thesis", 5, "1.1")
+    q = U(2, 35, 30, "question", 3, "2.1")
+    calls: list = []
+    monkeypatch.setattr(ac, "build_clip", lambda *a, **k: [one])
+    monkeypatch.setattr(ac, "_loop_question", lambda *a, **k: (calls.append(1), q)[1])
+    tr: list = []
+    propose([one, q], AutoParams(clips=2, generator="montage", loop=True,
+            rhythm=False, prune=False, context_start=False), trace=tr)
+    seeds = _one_outcome(tr)
+    assert len(calls) == 1                       # _loop_question reached exactly once
+    assert seeds[0]["snap"]["S0"] == [1]          # opener before the loop prepend
+    assert seeds[0]["snap"]["S1"] == [2, 1]       # question prepended
+    assert [e["outcome"] for e in seeds] == ["pooled"]
+
+
 # ===========================================================================
 # CLI integration harness
 # ===========================================================================
