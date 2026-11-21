@@ -63,6 +63,7 @@ class AutoParams:
     # M74 (owner: «начала дают мало контекста — "и второй момент, как я уже говорил…"»): the first sentence
     # a viewer hears after the hook must not lean on what was cut. False = the previous proposals.
     context_start: bool = False
+    fix_context_min_sec: bool = False   # M232-A1: never shorten a repaired start below min_sec
     context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
@@ -711,6 +712,8 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
         if _glued and _alone is None and soft is None:
             soft = (clip, list(notes), _glued)       # M145: the start is fine but glued — kept if nothing repairs it
         if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
+                and (not p.fix_context_min_sec
+                     or sum(_dur(c) for c in clip) - float(rows[0][1]) >= p.min_sec)
                 and glued_start(rows[1][0], p, start_pause) is None
                 and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
             refs = _drop_first_ref(u["refs"])
@@ -1319,6 +1322,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                                            f"правила принимают, сборка после чистых"]
                 else:
                     why = why2
+            if p.fix_context_min_sec and clip2 is not None and sum(_dur(u) for u in clip2) < p.min_sec:
+                clip2 = None
+                why = "dur_below_min_sec"
             if clip2 is None:
                 if no_start is not None:
                     no_start.append((" ".join(u["refs"] for u in clip), why))
