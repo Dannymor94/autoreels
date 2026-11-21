@@ -1,104 +1,97 @@
-# M231 — Отчёт реализации
+# M231-R4 — отчёт (исправление находки P1-R3-1)
 
-TASK=M231-OBSERVABILITY-IMPLEMENTATION  
-BRANCH=task/m231-observability  
-BASE_SHA=3c011e94263e16e5780936b4769d3490cd03b682  
-FINAL_SHA=1f3c7a4  
-DATE=2026-11-20
+**TASK** = M231-R4-LOOP-ORACLE-FIX · **ROLE** = IMPLEMENTER
+**BRANCH** = `task/m231-r4` · **PR (draft)** = #22 (база `task/m231-r3-codex`)
+**R3_SHA** = `07b24d30917cc45f5b1be32b9c2647b0835abc1c`
+**R4_SHA** = `9f09cbd823583fe0266164b50ebe03135b8c0f5c`
+**PRODUCTION_SHA (frozen)** = `3c011e94263e16e5780936b4769d3490cd03b682`
+**Issue #21** (Sol R3 QA) · **Issue #17** (архитектурное решение A/B/C)
 
-## Статус
-
-IMPLEMENTED, GATE PENDING — **STOP_FOR_INDEPENDENT_SOL_CODE_QA**
-
-## Diffstat
-
-```
-src/autoreels/__main__.py      |  78 +++++++-
-src/autoreels/cloud/autocut.py | 198 +++++++++++++++++++-
-tests/test_m231_trace.py       | 407 +++++++++++++++++++++++++++++++++++++++++
-3 files changed, 681 insertions(+), 2 deletions(-)
-```
-
-Файлы вне разрешённого списка: **не тронуты**. Изменены только `src/autoreels/cloud/autocut.py`, `src/autoreels/__main__.py`, `tests/test_m231_trace.py`.
-
-## Что реализовано
-
-### autocut.py::propose
-
-- Добавлен trailing параметр `trace: list | None = None`
-- Инициализация `_tr` в начале каждой итерации цикла `for seed in seeds:` — только под `if trace is not None:`
-- Snap-поля S0–S6 заполняются по факту прохождения стадий
-- Девять выходов цикла — каждый под `if trace is not None:` с `trace.append(_tr)` и соответствующим `outcome`:
-  - `skip_used` / `skip_taken` — строка 1175–1176
-  - `build_none` — строка 1178–1179
-  - `rhythm_fail` — строка 1201–1204
-  - `start_fail` — строка 1228–1231
-  - `open_end_fail` — строка 1241–1244
-  - `final_rhythm_fail` — строка 1252–1255
-  - `taken_after_context` — строка 1257–1258
-  - `overlap_or_payoff` — строка 1259–1261
-  - `pooled` — после `out.append` строка 1300
-- Truncate-событие перед `return out[:p.clips]`
-- Поля: `schema`, `event`, `seed`, `outcome`, `sup`, `snap`, `dep_broken`, `tail_question`, `secs`, `spans_final`, `proxy_q_after`, `proxy_overlong_side`
-
-### __main__.py::cmd_autocut
-
-- `ARL_AUTOCUT_TRACE` читается через `os.environ.get()`; при не заданном env — `_trace = None`, никакого кода не выполняется
-- Обогащение timing (M231.3) — из `sent_by_ref` для span-ов с `spans_final`
-- `select` события на каждый элемент пула
-- `fate` события после полного цикла выбора
-- JSONL запись: `json.dumps(..., sort_keys=True, ensure_ascii=False)` с `_rflt()` для округления float до 3 знаков
-
-## Тесты (tests/test_m231_trace.py)
-
-18 тестов, все прошли:
-
-| Тест | Проверяет |
-|---|---|
-| `test_p1_trace_none_vs_empty_equal_proposals` | P1: trace не меняет Proposals |
-| `test_p1_no_start_open_end_rhythm_out_unchanged` | P1: side-lists неизменны |
-| `test_p3_seed_count_and_truncate` | P3: accounting identities |
-| `test_p3_seed_order_matches_seeds` | P3: структура событий |
-| `test_p4_deterministic_trace` | P4: byte-identical повторные прогоны |
-| `test_p5_no_extra_callback_calls` | P5: taste spy равные вызовы |
-| `test_p6_trace_file_in_tmp_path` | P6: файл не в репозитории |
-| `test_p11_pooled` | P11: outcome=pooled |
-| `test_p11_skip_used` | P11: skip_used |
-| `test_p11_build_none_passage` | P11: build_none |
-| `test_p11_start_fail` | P11: start_fail |
-| `test_p11_overlap_or_payoff` | P11: overlap_or_payoff |
-| `test_p11_all_basic_outcomes_present` | P11: S0 snap по типам |
-| `test_p9_timing_deltas` | P9: d0=d1=0.4, err=0 |
-| `test_p10_sparse_timing_no_sentence` | P10: no_sentence → null |
-| `test_p10_sparse_timing_no_refs` | P10: no_refs |
-| `test_p10_sparse_timing_no_words` | P10: no_words |
-| `test_p10_secs_delta_null_when_incomplete` | P10: secs_delta=null при неполных |
-
-## CI / полный прогон
-
-**Baseline (3c011e9, до M231):** 2728 passed, 2 failed (test_snap.py — pydantic_core, pre-existing на 3c011e9)
-
-**После M231 (1f3c7a4):** 2746 passed, 2 failed — те же 2 test_snap.py. Разница +18 — новые M231 тесты.
-
-compare_failures.py выдаёт 2 "new" (test_snap) и 29 "disappeared" — последние были в baseline f92b4d2 (до CI-коммита de127df), на 3c011e9 они уже проходят, M231 их не трогал.
-
-**Ни одного нового провала от M231.**
-
-## OFF parity (ключевые проверки)
-
-- `test_autocut.py` (72 теста) — все прошли до и после M231
-- `test_auto.py` — все прошли
-- `test_m202/m203/m205` — все прошли (эти тесты проверяют review SHA и stdout)
-- Когда `ARL_AUTOCUT_TRACE` не задан: в propose() никаких веток не выполняется, `_trace=None`, stdout/stderr идентичны frozen path
-
-## Стоп-условия (кодекс CODE-GO-M231-LIMITED.md)
-
-- Allowlist: только 3 файла, не тронуто ничего вне списка ✅
-- OFF байт-идентичен: trace None vs [] → равные Proposals ✅
-- Callback-ами trace не пользуется ✅
-- Нет network/paid models/owner media/render ✅
-- Failure set не увеличился ✅
+Статус: **IMPLEMENTED, GATE PENDING — STOP_FOR_INDEPENDENT_SOL_R4_QA.** Не мержить, M232 не трогал.
 
 ---
 
-STOP_FOR_INDEPENDENT_SOL_CODE_QA — Issue #14
+## Что было не так (находка P1-R3-1)
+
+Кейс покрытия `loop_question` в R3 передавал в настоящий `build_clip` юниты
+`[1(тезис), 2(вопрос)]`. Реальный `build_clip` возвращает клип **с вопросом
+впереди — `[2, 1]`**. Защита петли в `propose` (`clip[0].role != "question"`)
+тогда не срабатывает, и пропатченный `_loop_question` **не вызывается ни разу**:
+`S0 == S1 == [2, 1]`, call count = 0, `expected = None`.
+
+Итог: фикстура доказывала «билдер дал вопрос-первым», а не путь **введения
+вопроса-петли**, который требует покрыть раздел C архитектурного решения.
+
+## Исправление (строго: тесты, фикстуры, голден, документация)
+
+Кейс закреплён на реальном prepend:
+
+- `build_clip` → `[1]` (не-вопросный опенер) ⇒ защита петли срабатывает;
+- `_loop_question` → вопрос (id 2, `punch 3 < seed_punch` ⇒ сам он **не** сид) ⇒
+  `propose` его подставляет в начало.
+- Результат: **S0=`[1]`, S1=`[2, 1]`, `_loop_question` вызван ровно один раз,
+  терминальный исход `pooled`.**
+
+Файлы (diff R3 → R4, **4 файла, +54/−9**, `src/` не затронут):
+
+| Файл | Что |
+|---|---|
+| `tests/fixtures/m231/compare_off_golden.py` | кейс `loop_question`: патч `build_clip→[1]` + сохранён `_loop_question`; `expected = {"pooled"}` |
+| `tests/test_m231_trace.py` | новый `test_loop_question_is_reached_and_prepends` — проверяет call count == 1 и точный переход S0→S1 (не-вакуумно) |
+| `tests/fixtures/m231/frozen_production_off_golden.json` | `expected.coverage.loop_question.proposals_sha256` перегенерирован из чистого detached `3c011e9`; обновлены blob-SHA двух изменённых файлов; база голдена и `cli_expected` без изменений |
+| `tests/fixtures/m231/README.md` | описание исправления |
+
+Единственная сдвинувшаяся строка голдена —
+`loop_question.proposals_sha256`: `2d68b128…` → `5c78e3c7…`. Финальный клип тот
+же `[2, 1]`, но его Proposal теперь несёт заметку вопроса-петли.
+
+## Доказательства (локально, офлайн, синтетика; Python 3.12.14, pydantic 2.14.4)
+
+1. **Голден перегенерирован независимо из чистого detached `3c011e9`.**
+   Production OFF = candidate OFF = candidate ON — **байт-в-байт идентичны** под
+   `PYTHONHASHSEED=0/42/1337`, и для proposal-генератора, и для CLI-генератора
+   (9 из 9 прогонов на каждый генератор → один SHA).
+   - `compare_off_golden.py` OFF/ON/frozen × 0/42/1337 → единый SHA `462c25c0…`.
+   - `compare_cli_off_golden.py` × 9 → единый SHA; `cli_expected` не изменился
+     (`review f8a64444…`, `stdout 017b7f75…`, `stderr 24bc2345…`, rc 0).
+   - Preflight `--frozen-only` печатал `HEAD=3c011e9… CLEAN=True`, источник из
+     `prod/src`.
+2. **Фокусные тесты** `tests/test_m231_trace.py`: **46 passed** на каждом
+   hashseed 0/42/1337 (в R3 было 45; +1 — новый loop-тест).
+3. **Offline-smoke** (5 файлов CI): **163 passed**.
+4. **Полный прогон, одна среда, exact failed-node parity** (PATH=/usr/bin:/bin,
+   ключи пусты, прокси на localhost):
+   - R4: **43 failed / 2697 passed / 56 skipped / 9 deselected**.
+   - R3: **43 failed / 2696 passed / 56 skipped / 9 deselected**.
+   - Множества падающих нод **идентичны**, `new=0`, `disappeared=0`; дельта
+     `+1 passed` — это новый loop-тест. Ни одной m231-ноды среди падений.
+   - Это среды́нные baseline-падения (нет ffmpeg/медиа-зависимостей), не
+     all-green; абсолютное число зависит от среды и сравнивается только R4↔R3 в
+     одной среде (Sol воспроизводит против своего baseline).
+5. **OFF-паритет** сохранён структурно: `git diff 07b24d3 -- src/` пуст — runtime
+   не менялся.
+
+Вейвер (дословно, как в README и голдене):
+`EVIDENCE=REPRODUCIBLE_FROZEN_GOLDEN — chronological pre-patch capture was NOT achieved; replaced by independent regeneration from immutable 3c011e9. No retroactive claim.`
+
+## Границы
+
+Изменены только `tests/**` и `tests/fixtures/m231/**` (пункт 3 allowlist) +
+этот отчёт (пункт 4). Production-код, конфиг, схема манифеста, `build_passage`,
+M232, медиа и провайдеры — не тронуты. Merge не делал.
+
+```
+TASK=M231-R4-LOOP-ORACLE-FIX
+R3_SHA=07b24d30917cc45f5b1be32b9c2647b0835abc1c
+R4_SHA=9f09cbd823583fe0266164b50ebe03135b8c0f5c
+PRODUCTION_SHA=3c011e94263e16e5780936b4769d3490cd03b682
+PR=https://github.com/Dannymor94/autoreels/pull/22  (draft, base task/m231-r3-codex)
+DIFFSTAT=4 файла, +54/−9; src/ не затронут
+GOLDEN_DELTA=только loop_question.proposals_sha256: 2d68b128… → 5c78e3c7…
+PARITY=production OFF = candidate OFF = candidate ON, байт-в-байт, seeds 0/42/1337 (proposal и CLI)
+LOOP_ORACLE=S0=[1], S1=[2,1], _loop_question вызван 1 раз, outcome pooled
+TESTS=test_m231_trace 46 passed ×(0/42/1337); offline-smoke 163 passed
+FULL_SUITE=R4 43 failed/2697 passed; R3 43 failed/2696 passed; failed-node set идентичен, new=0
+OFF_PARITY=структурно (src/ без изменений)
+STOP_FOR_INDEPENDENT_SOL_R4_QA
+```
