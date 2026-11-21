@@ -1147,7 +1147,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             no_start: list | None = None, judge: "Judge | None" = None,
             end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
             rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None,
-            start_pause: Callable[[str], "float | None"] | None = None) -> list[Proposal]:
+            start_pause: Callable[[str], "float | None"] | None = None,
+            trace: list | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
@@ -1172,11 +1173,40 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
     used_seeds: set[int] = set()
     taken: set[int] = set()                 # M119 passage: thoughts already in a clip
     for seed in seeds:
+        if trace is not None:
+            _tr: dict = {
+                "schema": 1, "event": "seed", "seed": seed["id"], "outcome": None,
+                "sup": None,
+                "snap": {"S0": None, "S1": None, "S2": None, "S3": None,
+                         "S4": None, "S5": None, "S6": None},
+                "dep_broken": [], "tail_question": None,
+                "secs": {"S0": None, "S1": None, "S2": None, "S3": None,
+                         "S4": None, "S5": None, "S6": None},
+                "spans_final": None, "proxy_q_after": None, "proxy_overlong_side": None,
+            }
         if seed["id"] in used_seeds or seed["id"] in taken:
+            if trace is not None:
+                _tr["outcome"] = "skip_used" if seed["id"] in used_seeds else "skip_taken"
+                _tr["sup"] = next((i for i, o in enumerate(out) if seed["id"] in o.units), None)
+                trace.append(_tr)
             continue
         clip = build_passage(seed, by_id, p, taken) if passage else build_clip(seed, units, by_id, p)
         if clip is None:
+            if trace is not None:
+                _tr["outcome"] = "build_none"
+                trace.append(_tr)
             continue
+        if trace is not None:
+            _tr["snap"]["S0"] = [u["id"] for u in clip]
+            _tr["secs"]["S0"] = sum(_dur(u) for u in clip)
+            if passage:
+                tail = clip[-1]["id"]
+                nq = by_id.get(tail + 1) if isinstance(tail, int) else None
+                if nq is None or nq.get("role") != "question":
+                    _tr["proxy_q_after"] = False
+                else:
+                    answer = by_id.get(nq["id"] + 1)
+                    _tr["proxy_q_after"] = answer is not None and answer.get("role") != "question"
         extra_notes: list[str] = []
         start_doubt = None
         loop_id = None
@@ -1188,22 +1218,86 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 clip = [q] + clip
                 loop_id = q["id"]
                 extra_notes.append(f"вопрос-петля: #{q['id']} «{q.get('summary') or ''}» открывает, ответ — в конце")
+        if trace is not None:
+            _tr["snap"]["S1"] = [u["id"] for u in clip]
+            _tr["secs"]["S1"] = sum(_dur(u) for u in clip)
         if mixed:
             clip, pnote = add_payoff(clip, seed, units, p, taken)
             if pnote:
                 extra_notes.append(pnote)
+            if trace is not None:
+                _tr["snap"]["S2"] = [u["id"] for u in clip]
+                _tr["secs"]["S2"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.prune and not passage:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
                 extra_notes.append("убраны слабые мысли из середины: " + ", ".join(f"#{i}" for i in dropped))
+            if trace is not None:
+                _tr["snap"]["S3"] = [u["id"] for u in clip]
+                _tr["secs"]["S3"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.rhythm:
             clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]}, taken if passage else frozenset())
             if clip_r is None:
                 if rhythm_out is not None:
                     rhythm_out.append((" ".join(u["refs"] for u in clip), rnotes[-1] if rnotes else "ритм"))
+                if trace is not None:
+                    _tr["outcome"] = "rhythm_fail"
+                    _tr["tail_question"] = clip[-1].get("role") == "question"
+                    trace.append(_tr)
                 continue
             clip = clip_r
             extra_notes += rnotes
+            if trace is not None:
+                _tr["snap"]["S4"] = [u["id"] for u in clip]
+                _tr["secs"]["S4"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         unit_refs: dict = {}
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
@@ -1228,6 +1322,10 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             if clip2 is None:
                 if no_start is not None:
                     no_start.append((" ".join(u["refs"] for u in clip), why))
+                if trace is not None:
+                    _tr["outcome"] = "start_fail"
+                    _tr["tail_question"] = clip[-1].get("role") == "question"
+                    trace.append(_tr)
                 continue
             clip = clip2
             extra_notes += cnotes
@@ -1235,29 +1333,87 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             _r0 = list(_sent_rows(sentences, clip[0]["refs"]))
             if _r0:
                 extra_notes.append(f"начало: «{(_r0[0][4] or _r0[0][0])[:80]}»")
+            if trace is not None:
+                _tr["snap"]["S5"] = [u["id"] for u in clip]
+                _tr["secs"]["S5"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.end_tone and end_tone is not None and sentences:
             clip3, enote, ewhy = fix_open_end(clip, sentences, end_tone, p)
             if clip3 is None:
                 gone = (" ".join(u["refs"] for u in clip), ewhy)
                 if open_end is not None and gone not in open_end:     # another seed may build the same clip
                     open_end.append(gone)
+                if trace is not None:
+                    _tr["outcome"] = "open_end_fail"
+                    _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
+                    _tr["tail_question"] = clip[-1].get("role") == "question"
+                    trace.append(_tr)
                 continue
             if enote:
                 clip = clip3
                 extra_notes.append(enote)
                 unit_refs = {**unit_refs, clip[-1]["id"]: clip[-1]["refs"]}
+            if trace is not None:
+                _tr["snap"]["S6"] = [u["id"] for u in clip]
+                _tr["secs"]["S6"] = sum(_dur(u) for u in clip)
+                _tr["dep_broken"] = [
+                    [uid, target, next(
+                        (stage for (_, previous), (stage, current) in zip(reached, reached[1:])
+                         if target in previous and target not in current), None)]
+                    for reached in [[(stage, _tr["snap"][stage])
+                                     for stage in ("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+                                     if _tr["snap"][stage] is not None]]
+                    for uid, target in sorted({
+                        (uid, by_id[uid]["refers"])
+                        for _, ids_at_stage in reached for uid in ids_at_stage
+                        if uid in by_id and by_id[uid].get("standalone") is False
+                        and type(by_id[uid].get("refers")) is int
+                        and by_id[uid]["refers"] in ids_at_stage
+                    })
+                    if uid in reached[-1][1] and target not in reached[-1][1]
+                ]
         if p.rhythm:                      # M120: the final clip (after its start and its end) keeps the rhythm
             rwhy, _k = rhythm_why([(float(u["t0"]), float(u["t1"])) for u in clip], p,
                                   clip[0].get("role") == "question")
             if rwhy:
                 if rhythm_out is not None:
                     rhythm_out.append((" ".join(u["refs"] for u in clip), f"после начала и конца: {rwhy}"))
+                if trace is not None:
+                    _tr["outcome"] = "final_rhythm_fail"
+                    _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
+                    _tr["tail_question"] = clip[-1].get("role") == "question"
+                    trace.append(_tr)
                 continue
         ids = [u["id"] for u in clip]
         if passage and set(ids) & taken:
+            if trace is not None:
+                _tr["outcome"] = "taken_after_context"
+                _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
+                _tr["tail_question"] = clip[-1].get("role") == "question"
+                trace.append(_tr)
             continue                      # M119: context added in front reached an earlier clip
         if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
                or ids[-1] == o.units[-1] for o in out):
+            if trace is not None:
+                _tr["outcome"] = "overlap_or_payoff"
+                _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
+                _tr["tail_question"] = clip[-1].get("role") == "question"
+                trace.append(_tr)
             continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
         used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
         if passage:
@@ -1306,7 +1462,16 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
             opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt))
+        if trace is not None:
+            _tr["outcome"] = "pooled"
+            _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
+            _tr["tail_question"] = clip[-1].get("role") == "question"
+            trace.append(_tr)
     out.sort(key=lambda o: -o.score)
+    if trace is not None:
+        trace.append({"schema": 1, "event": "truncate",
+                      "pooled": len(out), "kept": min(len(out), p.clips),
+                      "dropped": max(0, len(out) - p.clips)})
     return out[:p.clips]
 
 
