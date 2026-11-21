@@ -1199,6 +1199,14 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if trace is not None:
             _tr["snap"]["S0"] = [u["id"] for u in clip]
             _tr["secs"]["S0"] = sum(_dur(u) for u in clip)
+            if passage:
+                tail = clip[-1]["id"]
+                nq = by_id.get(tail + 1) if isinstance(tail, int) else None
+                if nq is None or nq.get("role") != "question":
+                    _tr["proxy_q_after"] = False
+                else:
+                    answer = by_id.get(nq["id"] + 1)
+                    _tr["proxy_q_after"] = answer is not None and answer.get("role") != "question"
         extra_notes: list[str] = []
         start_doubt = None
         loop_id = None

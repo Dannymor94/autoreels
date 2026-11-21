@@ -3,11 +3,117 @@
     "source_sha": "3c011e94263e16e5780936b4769d3490cd03b682",
     "generator": "tests/fixtures/m231/compare_off_golden.py",
     "cli_generator": "tests/fixtures/m231/compare_cli_off_golden.py",
-    "note": "Recomputed on the pinned production SHA during R2; NOT claimed to be captured before M231 code."
+    "generation_date": "2026-11-21",
+    "generation_kind": "POST_HOC",
+    "waiver": "EVIDENCE=REPRODUCIBLE_FROZEN_GOLDEN — chronological pre-patch capture was NOT achieved; replaced by independent regeneration from immutable 3c011e9. No retroactive claim.",
+    "python_version": "3.12.14",
+    "hashseeds": [
+      0,
+      42,
+      1337
+    ],
+    "blob_shas": {
+      "tests/fixtures/m231/compare_off_golden.py": "c8a75e0921e6adae3b9f5020a4814883f67b4fde",
+      "tests/fixtures/m231/compare_cli_off_golden.py": "7f18997fb29782991e64f0243e0089e1f88fd4e9",
+      "tests/test_m231_trace.py": "8869c3cd1982a7d59feb367f4c75b229c91da568",
+      "tests/test_montage.py": "607d9c0f8a24049805aa391d3de41925672b3d0f",
+      "tests/fixtures/m231/fx7l_units.json": "918ef0599223bfd0886dad91dd0a57934f8abf03"
+    },
+    "commands": {
+      "frozen_proposals": "PYTHONHASHSEED=0 PYTHONPATH=/workspace/scratch/5b9935a8bef7/autoreels-m231-production-base/src:/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3 /workspace/scratch/5b9935a8bef7/arl-m231-py312-venv/bin/python /workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/tests/fixtures/m231/compare_off_golden.py --frozen-only",
+      "frozen_cli": "PYTHONHASHSEED=0 PYTHONPATH=/workspace/scratch/5b9935a8bef7/autoreels-m231-production-base/src:/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3 /workspace/scratch/5b9935a8bef7/arl-m231-py312-venv/bin/python /workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/tests/fixtures/m231/compare_cli_off_golden.py --frozen-only",
+      "candidate_on": "PYTHONHASHSEED=0 PYTHONPATH=/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/src:/workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3 /workspace/scratch/5b9935a8bef7/arl-m231-py312-venv/bin/python /workspace/scratch/5b9935a8bef7/autoreels-task-m231-r3/tests/fixtures/m231/compare_off_golden.py --trace-on"
+    },
+    "note": "Recomputed on pinned clean production SHA during R3; NOT claimed to be captured before M231. All 13 coverage cases match frozen production, R3 OFF and R3 ON under hashseeds 0/42/1337."
   },
   "expected": {
-    "callback_counts": {"end_tone": 1, "judge": 1, "sentences": 6, "taste": 1},
+    "callback_counts": {
+      "end_tone": 1,
+      "judge": 1,
+      "sentences": 6,
+      "taste": 1
+    },
     "callbacks_sha256": "741928e741a809120de66eb85d3e1416e23852d6f5f45bdc5e7e11a7d7fdfdb0",
+    "coverage": {
+      "build_none": {
+        "callback_count": 0,
+        "callbacks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "proposals": 0,
+        "proposals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "final_rhythm_fail": {
+        "callback_count": 0,
+        "callbacks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "proposals": 0,
+        "proposals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "fx7l": {
+        "callback_count": 2,
+        "callbacks_sha256": "87a203888f94d9302cf44004ff936a46a73fbd2d02f230f1353589ecb6447e5e",
+        "proposals": 1,
+        "proposals_sha256": "4fe83a38db657b08cbc796a2e7f2d003437c0144ec6d4079d7e25c24daf84d39"
+      },
+      "loop_question": {
+        "callback_count": 2,
+        "callbacks_sha256": "4701c870d7271a56ab18c2581969ff5a916ac544976f4acbecae3b2cd2f12c52",
+        "proposals": 1,
+        "proposals_sha256": "2d68b128c817256c0c60109be2af00ec76dbcb4cc3a49bfc86176508457db183"
+      },
+      "open_end_fail": {
+        "callback_count": 0,
+        "callbacks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "proposals": 0,
+        "proposals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "overlap_or_payoff": {
+        "callback_count": 1,
+        "callbacks_sha256": "156a43111b3335f32c3ba58c868146b2f87281d0da5422c56c542c280652dedf",
+        "proposals": 1,
+        "proposals_sha256": "e9c07e014c787797a905bfc5f51d06930ee6c1abe3971beb2bbc20230ca9fb8d"
+      },
+      "passage_rhythm": {
+        "callback_count": 2,
+        "callbacks_sha256": "32491d210b0c07593bc85514abf7b53ba27b6561d337ab33dd4a3c95c016bef0",
+        "proposals": 1,
+        "proposals_sha256": "1e04fdda492a2673726d2ffb467915d5b76aa6d13c0f81926ce71760762dd1b5"
+      },
+      "pooled": {
+        "callback_count": 1,
+        "callbacks_sha256": "156a43111b3335f32c3ba58c868146b2f87281d0da5422c56c542c280652dedf",
+        "proposals": 1,
+        "proposals_sha256": "e9c07e014c787797a905bfc5f51d06930ee6c1abe3971beb2bbc20230ca9fb8d"
+      },
+      "rhythm_fail": {
+        "callback_count": 0,
+        "callbacks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "proposals": 0,
+        "proposals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "skip_taken": {
+        "callback_count": 2,
+        "callbacks_sha256": "32491d210b0c07593bc85514abf7b53ba27b6561d337ab33dd4a3c95c016bef0",
+        "proposals": 1,
+        "proposals_sha256": "fbc1f84448ee26afeeb209ea4183bee18888ed51d306d5aee575570902a097c7"
+      },
+      "skip_used": {
+        "callback_count": 2,
+        "callbacks_sha256": "32491d210b0c07593bc85514abf7b53ba27b6561d337ab33dd4a3c95c016bef0",
+        "proposals": 1,
+        "proposals_sha256": "42ea4505c4420026e6bb696185e1a92b446f8ad6bb61711cb6df269e5e885725"
+      },
+      "start_fail": {
+        "callback_count": 0,
+        "callbacks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "proposals": 0,
+        "proposals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "taken_after_context": {
+        "callback_count": 3,
+        "callbacks_sha256": "dfc9123d009799d154d3c64fa7b113cc282c08d02841952d8ebba8f3b36e6962",
+        "proposals": 1,
+        "proposals_sha256": "15917a7ef58678a9a5d0ed86fdc3480473635a0bf919b41c2f5b0825aa6856a1"
+      }
+    },
     "proposals": 1,
     "proposals_sha256": "bb90fad3f2e4e54c17b0234479c6fb66b3477047ab13fb20eb99eaa365100854"
   },

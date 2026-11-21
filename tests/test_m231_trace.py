@@ -198,6 +198,23 @@ def test_p7_frozen_production_golden_for_off_proposals_and_callback_logs():
                             env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
                             cwd=str(repo), capture_output=True, text=True, check=True)
     assert spec["provenance"]["source_sha"] == "3c011e94263e16e5780936b4769d3490cd03b682"
+    observed = json.loads(result.stdout)
+    assert observed == spec["expected"]
+    assert len(observed["coverage"]) == 13
+    assert all("callbacks_sha256" in row and "proposals_sha256" in row
+               for row in observed["coverage"].values())
+
+
+def test_p7_frozen_production_golden_for_trace_on_all_coverage_cases():
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    spec = json.loads((repo / "tests" / "fixtures" / "m231" /
+                       "frozen_production_off_golden.json").read_text(encoding="utf-8"))
+    result = subprocess.run([sys.executable, str(repo / "tests" / "fixtures" / "m231" /
+                                                 "compare_off_golden.py"), "--trace-on"],
+                            env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
+                            cwd=str(repo), capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == spec["expected"]
 
 
@@ -212,6 +229,97 @@ def test_p7_frozen_production_golden_for_cli_review_and_console():
                             env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
                             cwd=str(repo), capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == spec["cli_expected"]
+
+
+def test_p7_frozen_production_golden_for_cli_trace_on():
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    spec = json.loads((repo / "tests" / "fixtures" / "m231" /
+                       "frozen_production_off_golden.json").read_text(encoding="utf-8"))
+    result = subprocess.run([sys.executable, str(repo / "tests" / "fixtures" / "m231" /
+                                                 "compare_cli_off_golden.py"), "--trace-on"],
+                            env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
+                            cwd=str(repo), capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == spec["cli_expected"]
+
+
+def test_p7_frozen_golden_provenance_pins_fixture_blob_shas():
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    spec = json.loads((repo / "tests" / "fixtures" / "m231" /
+                       "frozen_production_off_golden.json").read_text(encoding="utf-8"))
+    provenance = spec["provenance"]
+    assert provenance["waiver"] == (
+        "EVIDENCE=REPRODUCIBLE_FROZEN_GOLDEN — chronological pre-patch capture was NOT "
+        "achieved; replaced by independent regeneration from immutable 3c011e9. "
+        "No retroactive claim.")
+    assert provenance["generation_kind"] == "POST_HOC"
+    assert provenance["hashseeds"] == [0, 42, 1337]
+    for path, expected_sha in provenance["blob_shas"].items():
+        raw = (repo / path).read_bytes()
+        actual = hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest()
+        assert actual == expected_sha, path
+
+
+@pytest.mark.parametrize("script", ("compare_off_golden.py", "compare_cli_off_golden.py"))
+def test_p7_frozen_preflight_rejects_candidate_imports(script):
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parent.parent
+    result = subprocess.run([sys.executable, str(repo / "tests" / "fixtures" / "m231" / script),
+                             "--frozen-only"],
+                            env={**os.environ, "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))},
+                            cwd=str(repo), capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "FROZEN_PREFLIGHT HEAD=" in result.stderr
+    assert "requires clean production" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("name", "roles", "expected_s0", "expected"),
+    [
+        ("fx9b", ("thesis", "question", "conclusion"), [1], True),
+        ("next_not_question", ("thesis", "example", "conclusion"), [1, 2], False),
+        ("question_last", ("thesis", "question"), [1], False),
+        ("two_questions", ("thesis", "question", "question"), [1], False),
+    ],
+)
+def test_proxy_q_after_only_raw_passage_s0(name, roles, expected_s0, expected):
+    """Architecture Issue #17: S0 missed-question hint, not final tail status."""
+    starts = (0, 30, 55)
+    ends = (30, 55, 85)
+    units = []
+    for i, role in enumerate(roles):
+        unit = U(i + 1, starts[i], ends[i] - starts[i], role, 5 - i,
+                 f"{i + 1}.1")
+        unit["topic"] = "main"
+        units.append(unit)
+    trace: list = []
+    propose(units, AutoParams(clips=3, generator="passage", rhythm=False,
+                              target_sec=55, max_sec=90, min_sec=25,
+                              context_start=False), trace=trace)
+    event = next(e for e in trace if e["event"] == "seed" and e["seed"] == 1)
+    assert event["snap"]["S0"] == expected_s0, (name, event)
+    assert event["proxy_q_after"] is expected, (name, event)
+    if expected:
+        assert event["tail_question"] is False
+
+
+def test_proxy_q_after_null_for_montage_skip_and_build_none(monkeypatch):
+    unit = U(1, 0, 30, "thesis", 5, "1.1")
+    trace: list = []
+    propose([unit], AutoParams(clips=1, generator="montage", rhythm=False,
+                               prune=False, context_start=False), trace=trace)
+    assert trace[0]["proxy_q_after"] is None
+
+    monkeypatch.setattr(ac, "build_passage", lambda *a, **kw: None)
+    trace = []
+    propose([unit], AutoParams(clips=1, generator="passage"), trace=trace)
+    assert trace[0]["outcome"] == "build_none"
+    assert trace[0]["proxy_q_after"] is None
+    assert all(ev.get("proxy_overlong_side") is None for ev in trace if ev["event"] == "seed")
 
 
 # ===========================================================================
@@ -250,6 +358,7 @@ def test_p11_skip_used(monkeypatch):
     assert seeds[0]["outcome"] == "pooled"
     sk = next(e for e in seeds if e["outcome"] == "skip_used")
     assert sk["sup"] == 0  # the earlier pooled candidate that contains it
+    assert sk["proxy_q_after"] is None
 
 
 def test_p11_skip_taken(monkeypatch):
@@ -262,6 +371,8 @@ def test_p11_skip_taken(monkeypatch):
             context_start=False, overlap_max=1.0, seed_roles=("thesis", "explanation")), trace=tr)
     outs = [e["outcome"] for e in _one_outcome(tr)]
     assert outs[0] == "pooled" and "skip_taken" in outs and "skip_used" not in outs
+    assert all(e["proxy_q_after"] is None for e in _one_outcome(tr)
+               if e["outcome"] == "skip_taken")
 
 
 def test_p11_rhythm_fail(monkeypatch):
