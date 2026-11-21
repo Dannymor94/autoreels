@@ -2,8 +2,121 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from autoreels.cloud.autocut import AutoParams, build_clip, eligible, leans_on, propose
+
+
+def _m232_fx5():
+    """Committed, entirely synthetic 25→23-second M232-A1 regression case."""
+    data = json.loads((Path(__file__).parent / "fixtures/m23x/fx5_context_min.json").read_text(encoding="utf-8"))
+
+    def sentences(refs):
+        if refs == "1.1-2":
+            return [tuple(row) for row in data["sentences"]]
+        return [tuple(row) for row in data["sentences"] if row[0] == refs]
+
+    return data["unit"], sentences, data["min_sec"]
+
+
+def test_m232_a1_fx5_fail_before_25_to_23_and_guard_on():
+    """The old helper publishes 23 seconds; A1 refuses the unsafe drop."""
+    from dataclasses import replace
+    from autoreels.cloud.autocut import context_start
+
+    unit, sentences, minimum = _m232_fx5()
+    p = AutoParams(clips=1, min_sec=minimum, target_sec=40, max_sec=80,
+                   loop=False, prune=False, context_start=True)
+    original, notes, why = context_start([unit], {1: unit}, p, sentences, seed_id=1)
+    assert why is None and original and original[0]["refs"] == "1.2"
+    assert original[0]["t1"] - original[0]["t0"] == 23
+    assert any("убрана фраза" in n for n in notes)
+    assert [(pr.pieces, pr.seconds) for pr in propose([unit], p, sentences)] == [("1.2", 23.0)]
+
+    protected = replace(p, fix_context_min_sec=True)
+    no_start = []
+    assert propose([unit], protected, sentences, no_start=no_start) == []
+    assert len(no_start) == 1 and "второй момент" in no_start[0][1]
+    # The same shortening is still legal when 23 seconds meets the configured minimum.
+    legal = replace(protected, min_sec=23)
+    assert [(pr.pieces, pr.seconds) for pr in propose([unit], legal, sentences)] == [("1.2", 23.0)]
+
+
+def test_m232_a1_final_duration_guard_rejects_short_context_return(monkeypatch):
+    """The S5 post-check also rejects an unexpected short return, even on rank retry."""
+    from autoreels.cloud import autocut as ac
+
+    unit, sentences, minimum = _m232_fx5()
+    attempts = []
+
+    def fake_context(clip, by_id, p, lookup, *, judge=None, **kwargs):
+        attempts.append(judge)
+        if judge is not None:
+            return None, [], "модель против"
+        return [{**clip[0], "refs": "1.2", "t0": 2.0}], [], None
+
+    monkeypatch.setattr(ac, "context_start", fake_context)
+    no_start = []
+    trace = []
+    p = AutoParams(clips=1, min_sec=minimum, target_sec=40, max_sec=80, loop=False,
+                   prune=False, context_start=True, fix_context_min_sec=True, start_judge="rank")
+    assert ac.propose([unit], p, sentences, no_start=no_start,
+                      judge=lambda *_: (False, "нет"), trace=trace) == []
+    assert len(attempts) == 2 and attempts[0] is not None and attempts[1] is None
+    assert no_start == [("1.1-2", "dur_below_min_sec")]
+    assert [event["outcome"] for event in trace if event["event"] == "seed"] == ["start_fail"]
+
+
+def test_m232_a1_blocked_drop_can_still_repair_with_previous_context():
+    """A1 skips only the short drop; original backward-context repair remains available."""
+    from dataclasses import replace
+
+    unit, original_sentences, minimum = _m232_fx5()
+    current = {**unit, "id": 2, "t0": 5.0, "t1": 30.0, "refs": "2.1-2"}
+    prev = {**unit, "id": 1, "t0": 0.0, "t1": 5.0, "refs": "1.1",
+            "role": "aside", "punch": 2, "summary": "Контекст перед тезисом"}
+
+    def sentences(refs):
+        if refs == "1.1":
+            return [("1.1", 5.0, 5, True, "Есть важный урок для родителей.")]
+        return [(ref.replace("1.", "2.", 1), sec, words, complete, text)
+                for ref, sec, words, complete, text in original_sentences(refs.replace("2.", "1.", 1))]
+
+    p = AutoParams(clips=1, min_sec=minimum, target_sec=40, max_sec=80, loop=False,
+                   prune=False, context_start=True)
+    assert [(pr.pieces, pr.seconds) for pr in propose([prev, current], p, sentences)] == [("2.2", 23.0)]
+    rescued = propose([prev, current], replace(p, fix_context_min_sec=True), sentences)
+    assert [(pr.pieces, pr.seconds) for pr in rescued] == [("1.1 2.1-2", 30.0)]
+    assert any("контекст" in n and "#1" in n for n in rescued[0].notes)
+
+
+def test_m232_a1_flag_defaults_off_and_is_exposed_in_config():
+    from autoreels.core.config import AutocutConfig
+
+    assert AutoParams().fix_context_min_sec is False
+    assert AutocutConfig().fix_context_min_sec is False
+    assert AutocutConfig.model_validate({"fix_context_min_sec": True}).fix_context_min_sec is True
+
+
+def test_m232_a1_cli_wires_flag_with_no_provider(tmp_path, monkeypatch):
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as ac_mod
+    from tests.test_m231_trace import _montage_project
+
+    _montage_project(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    raw = cfg.read_text(encoding="utf-8")
+    cfg.write_text(raw.replace("  context_start: ", "  fix_context_min_sec: true\n  context_start: "), encoding="utf-8")
+    original_propose = ac_mod.propose
+    observed = []
+
+    def captured(units, params, *args, **kwargs):
+        observed.append(params.fix_context_min_sec)
+        return original_propose(units, params, *args, **kwargs)
+
+    monkeypatch.setattr(ac_mod, "propose", captured)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, clips=2) == 0
+    assert observed and all(observed)
 
 
 def U(i, t0, dur, role, punch, refs, topic=1, standalone=True, refers=None, energy=50, summary="", similar=(),

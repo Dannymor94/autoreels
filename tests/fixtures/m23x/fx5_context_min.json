@@ -1,0 +1,24 @@
+{
+  "case": "FX-5",
+  "min_sec": 25.0,
+  "unit": {
+    "id": 1,
+    "t0": 0.0,
+    "t1": 25.0,
+    "role": "thesis",
+    "punch": 5,
+    "refs": "1.1-2",
+    "topic": 1,
+    "standalone": true,
+    "refers": null,
+    "voice": {"energy": 50},
+    "summary": "Дети учатся у взрослых",
+    "similar": [],
+    "missing": false,
+    "filtered": ""
+  },
+  "sentences": [
+    ["1.1", 2.0, 3, true, "И второй момент."],
+    ["1.2", 23.0, 6, true, "Дети копируют поведение родителей каждый день."]
+  ]
+}
