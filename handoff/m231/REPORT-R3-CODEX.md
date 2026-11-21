@@ -37,7 +37,7 @@ Waiver verbatim in both fixture README and golden JSON:
 - R2 independent macOS environment reported 39 baseline failures, also zero new vs production in the same macOS environment. Do not conflate the two environment-specific counts.
 - Python3.12 compile and `git diff --check` passed. Ruff unavailable locally (`No module named ruff`); no lint PASS claim.
 - Local isolated R3 worktree clean after commit. Original user worktree unchanged.
-- [R3 CI](https://github.com/Dannymor94/autoreels/actions/runs/44874193683): in progress at handoff creation.
+- [R3 GitHub Actions CI run #44874193683](https://github.com/Dannymor94/autoreels/actions/runs/44874193683): **SUCCESS** on exact remote SHA `07b24d30917cc45f5b1be32b9c2647b0835abc1c`.
 
 ## Mandatory next independent review
 - Audit the six-file R2→R3 diff and source trace guard.
