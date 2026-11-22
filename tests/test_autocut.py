@@ -2235,3 +2235,134 @@ def test_a3_each_context_repair_checks_strict_semantics(repair):
     guarded, _, why = context_start([unit], lookup, replace(base, fix_body_start=True),
                                      sentences, seed_id=2)
     assert guarded is None and why
+
+
+def _a4_fx9a_units():
+    """Synthetic TC9a: the preferred next unit overflows; the previous one fits."""
+    units = [U(4, 0, 25, "thesis", 3, "4.1"),
+             U(5, 25, 20, "explanation", 4, "5.1"),
+             U(6, 45, 35, "conclusion", 5, "6.1")]
+    return {u["id"]: u for u in units}
+
+
+def test_a4_fx9a_retries_other_side_after_preferred_overflow():
+    """The frozen helper loses FX-9a; A4 can publish the 45-second [4,5] passage."""
+    from autoreels.cloud.autocut import build_passage
+
+    by = _a4_fx9a_units()
+    base = AutoParams(min_sec=25, target_sec=48, max_sec=50, passage_gap_sec=30)
+    assert build_passage(by[5], by, base) is None
+    repaired = build_passage(by[5], by, replace(base, fix_passage_side=True))
+    assert repaired is not None and [u["id"] for u in repaired] == [4, 5]
+    assert sum(ac._dur(u) for u in repaired) == 45
+
+
+def test_a4_both_overlong_sides_fail_closed():
+    from autoreels.cloud.autocut import build_passage
+
+    by = _a4_fx9a_units()
+    by[4] = {**by[4], "t0": -10.0}  # previous 35s > the remaining 30s
+    p = AutoParams(min_sec=25, target_sec=48, max_sec=50, fix_passage_side=True)
+    assert build_passage(by[5], by, p) is None
+
+
+def test_a4_overlong_previous_side_can_retry_next():
+    from autoreels.cloud.autocut import build_passage
+
+    by = _a4_fx9a_units()
+    by[4] = {**by[4], "t0": -10.0}  # previous duration is 35s
+    by[5] = {**by[5], "standalone": False, "refers": 4}  # first choose previous
+    by[6] = {**by[6], "t1": 70.0}  # next duration is 25s and fits
+    p = AutoParams(min_sec=25, target_sec=48, max_sec=50)
+    assert build_passage(by[5], by, p) is None
+    repaired = build_passage(by[5], by, replace(p, fix_passage_side=True))
+    assert repaired is not None and [u["id"] for u in repaired] == [5, 6]
+    assert sum(ac._dur(u) for u in repaired) == 45
+
+
+def test_a4_closed_side_never_bypasses_existing_eligibility_rules():
+    from autoreels.cloud.autocut import build_passage
+
+    by = _a4_fx9a_units()
+    p = AutoParams(min_sec=25, target_sec=48, max_sec=50, fix_passage_side=True)
+    assert build_passage(by[5], by, p, taken={4}) is None
+    by[4] = {**by[4], "topic": 99}
+    assert build_passage(by[5], by, p) is None
+
+
+@pytest.mark.parametrize("seed_role,stands,expected", [
+    ("question", True, [5, 6]),
+    ("explanation", False, [4, 5]),
+])
+def test_a4_no_overflow_preserves_original_preference(seed_role, stands, expected):
+    from autoreels.cloud.autocut import build_passage
+
+    units = [U(4, 0, 15, "thesis", 3, "4.1"),
+             U(5, 15, 20, seed_role, 4, "5.1", standalone=stands, refers=4),
+             U(6, 35, 20, "conclusion", 5, "6.1")]
+    by = {u["id"]: u for u in units}
+    p = AutoParams(min_sec=10, target_sec=32, max_sec=65)
+    legacy = build_passage(by[5], by, p)
+    guarded = build_passage(by[5], by, replace(p, fix_passage_side=True))
+    assert [u["id"] for u in legacy] == expected
+    assert [u["id"] for u in guarded] == expected
+
+
+def test_a4_iteration_bound_even_if_both_sides_overflow():
+    """Count actual loop-body entries, not a proxy such as duration calls."""
+    import inspect
+    import sys
+    from autoreels.cloud.autocut import build_passage
+
+    by = _a4_fx9a_units()
+    by[4] = {**by[4], "t0": -10.0}
+    source, first_line = inspect.getsourcelines(build_passage)
+    body_line = first_line + next(i for i, row in enumerate(source) if "prv, nxt =" in row)
+    entries = []
+
+    def count_body(frame, event, arg):
+        if frame.f_code is build_passage.__code__ and event == "line" and frame.f_lineno == body_line:
+            entries.append(1)
+        return count_body
+
+    previous_trace = sys.gettrace()
+    try:
+        sys.settrace(count_body)
+        result = build_passage(by[5], by, AutoParams(min_sec=25, target_sec=48, max_sec=50,
+                                                    fix_passage_side=True))
+    finally:
+        sys.settrace(previous_trace)
+    assert result is None
+    assert len(entries) == 3  # close next, close previous, discover both closed
+    assert len(entries) <= len(by) + 2
+
+
+def test_a4_flag_default_off_and_typed_config():
+    from autoreels.core.config import AutocutConfig
+
+    assert AutoParams().fix_passage_side is False
+    assert AutocutConfig().fix_passage_side is False
+    assert AutocutConfig.model_validate({"fix_passage_side": True}).fix_passage_side is True
+    with pytest.raises(Exception):
+        AutocutConfig.model_validate({"fix_passage_side": "nonboolean"})
+
+
+def test_a4_cli_maps_flag_without_provider(tmp_path, monkeypatch):
+    from autoreels import __main__ as cli
+
+    _montage_project(tmp_path)
+    cfg = tmp_path / "config" / "r0.yaml"
+    content = cfg.read_text(encoding="utf-8")
+    assert "  context_start: " in content
+    cfg.write_text(content.replace("  context_start: ", "  fix_passage_side: true\n  context_start: "),
+                   encoding="utf-8")
+    seen = []
+    original = ac.propose
+
+    def capture(units, params, *args, **kwargs):
+        seen.append(params.fix_passage_side)
+        return original(units, params, *args, **kwargs)
+
+    monkeypatch.setattr(ac, "propose", capture)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"), check=False, clips=2) == 0
+    assert seen and all(seen)

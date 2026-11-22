@@ -8615,6 +8615,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid,
                      context_start=ac.context_start, fix_context_min_sec=ac.fix_context_min_sec,
                      fix_final_integrity=ac.fix_final_integrity, fix_body_start=ac.fix_body_start,
+                     fix_passage_side=ac.fix_passage_side,
                      context_max_sec=ac.context_max_sec,
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
