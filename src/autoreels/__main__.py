@@ -8950,7 +8950,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             return
         try:
             from autoreels.cloud.autocut import rank_hooks
-            from autoreels.cloud.autocut import check_seams, headline, seam_pairs
+            from autoreels.cloud.autocut import headline
             _forms: list = []                       # M73: headline shapes chosen so far in this source
             _byid_h = {u["id"]: u for u in (the_map.get("units") or [])}
             if ac.hook_judge:                       # M81: the cold open must lead into the clip, like its start
@@ -9008,6 +9008,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         _ensure_polish()
         if ac.seam_check and _polish is not None:
             try:
+                from autoreels.cloud.autocut import check_seams, seam_pairs
                 for pr in pool[:prm.clips * 2]:
                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
                 _bad = sum(1 for pr in pool if pr.bad_seams)

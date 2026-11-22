@@ -155,6 +155,57 @@ def test_a8_cli_rejected_legacy_allows_spare_slot(tmp_path, monkeypatch):
     assert len(calls) >= 2
 
 
+@pytest.mark.parametrize("mode", ["greedy", "global"])
+def test_a8_provider_enabled_off_seam_check_keeps_legacy_request_prefix(tmp_path, monkeypatch, mode):
+    """Seam functions must remain callable in the outer legacy scope (QA R1)."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut as mod
+
+    _cli_fx1(tmp_path)
+
+    class Fake:
+        name = "fake"
+
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, messages, temperature=0.0):
+            self.calls.append(messages[0])
+            return "{}"
+
+    def check_seams(pr, pairs, provider, **_kw):
+        provider.complete([{"action": "seams", "pieces": pr.pieces}])
+
+    def rank_hooks(pr, provider, **_kw):
+        provider.complete([{"action": "rank", "pieces": pr.pieces}])
+        return False
+
+    monkeypatch.setattr(mod, "check_seams", check_seams)
+    monkeypatch.setattr(mod, "seam_pairs", lambda *_a: [])
+    monkeypatch.setattr(mod, "rank_hooks", rank_hooks)
+
+    opts = ["generator=passage", "loop=false", "prune=false", "short_variant=false",
+            "target_sec=40", "min_sec=10", "max_sec=60", "seam_check=true",
+            "hook_title=false", "hook_judge=false", f"select={mode}"]
+
+    def run(flag):
+        provider = Fake()
+        out = tmp_path / "reviews" / f"seams_{flag}.txt"
+        args = opts + (["seed_alt=true"] if flag else [])
+        assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                               check=False, clips=2, llm="local", provider=provider,
+                               out=str(out), ac_over=args) == 0
+        return provider.calls, out.read_text(encoding="utf-8")
+
+    off_calls, off_draft = run(False)
+    on_calls, on_draft = run(True)
+    assert off_calls and off_calls[0]["action"] == "seams"
+    assert len([c for c in off_calls if c["action"] == "seams"]) == 1
+    assert on_calls[:len(off_calls)] == off_calls
+    assert [line for line in off_draft.splitlines() if line.startswith("M1 ")] == [
+        line for line in on_draft.splitlines() if line.startswith("M1 ")]
+
+
 @pytest.mark.parametrize("check", [False, True])
 def test_a8_fx1i_interviewer_full_refs_before_variant_provider(tmp_path, monkeypatch, check):
     """The variant with interviewer audio is rejected even after the legacy pool is filtered."""
