@@ -66,6 +66,7 @@ class AutoParams:
     fix_context_min_sec: bool = False   # M232-A1: never shorten a repaired start below min_sec
     fix_final_integrity: bool = False    # M232-A2: reject lost established supports and question tails
     fix_body_start: bool = False         # M232-A3: validate strict body starts, including CLI shortening
+    fix_passage_side: bool = False       # M232-A4: retry the other passage side after an overlong pick
     context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
@@ -429,8 +430,14 @@ def build_passage(seed: dict, by_id: dict, p: AutoParams, taken=frozenset()) -> 
         return None
     run = [seed]
     total = _dur(seed)
+    closed_prv = closed_nxt = False
     while total < p.target_sec:
         prv, nxt = by_id.get(run[0]["id"] - 1), by_id.get(run[-1]["id"] + 1)
+        if p.fix_passage_side:
+            if closed_prv:
+                prv = None
+            if closed_nxt:
+                nxt = None
         if not (usable(prv) and float(run[0]["t0"]) - float(prv["t1"]) <= p.passage_gap_sec):
             prv = None
         if not (usable(nxt) and float(nxt["t0"]) - float(run[-1]["t1"]) <= p.passage_gap_sec):
@@ -450,6 +457,14 @@ def build_passage(seed: dict, by_id: dict, p: AutoParams, taken=frozenset()) -> 
         else:
             pick = nxt if _strength(nxt) >= _strength(prv) else prv
         if total + _dur(pick) > p.max_sec:
+            if p.fix_passage_side:
+                # This neighbour stays infeasible: its boundary does not move
+                # unless this side grows, and total cannot decrease.
+                if pick is prv:
+                    closed_prv = True
+                else:
+                    closed_nxt = True
+                continue
             break
         run = [pick] + run if pick is prv else run + [pick]
         total += _dur(pick)
