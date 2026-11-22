@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
-from autoreels.cloud.autocut import AutoParams, build_clip, eligible, leans_on, propose
+import pytest
+
+from autoreels.cloud import autocut as ac
+from autoreels.cloud.autocut import AutoParams, Proposal, build_clip, eligible, leans_on, propose
+from tests.test_m231_trace import U as _a2_U, _fx7l_units, _montage_project
 
 
 def _m232_fx5():
@@ -1564,3 +1569,268 @@ def test_m120_cmd_autocut_lists_clips_that_could_not_keep_the_rhythm(tmp_path, m
     assert "(скачки, не поправить: 1)" in capsys.readouterr().out
     text = (tmp_path / "reviews" / "v_auto_m56.txt").read_text(encoding="utf-8")
     assert text.count("скачков 3 (можно 2): 2.1 7.1") == 1 and "# --- скачки:" in text
+
+
+# M232-A2: fully synthetic final-integrity and reversible-CLI-shortening tests.
+# Kept in test_autocut.py so the existing offline smoke workflow always runs them.
+
+
+def _params(**kw):
+    return replace(AutoParams(clips=1, min_sec=1, max_sec=90, target_sec=30,
+                              generator="montage", loop=False, prune=False,
+                              context_start=False, rhythm=False), **kw)
+
+
+def test_a2_s4_removed_established_target_rejected_and_attributed(monkeypatch):
+    one = _a2_U(1, 0, 15, "thesis", 5, "1.1")
+    target = _a2_U(2, 16, 15, "example", 3, "2.1")
+    dependent = _a2_U(3, 32, 15, "conclusion", 3, "3.1", standalone=False, refers=2)
+    monkeypatch.setattr(ac, "build_clip", lambda *a, **kw: [one, target, dependent])
+    monkeypatch.setattr(ac, "fit_rhythm", lambda *a, **kw: ([one, dependent], []))
+    monkeypatch.setattr(ac, "rhythm_why", lambda *a, **kw: (None, None))
+    units = [one, target, dependent]
+    assert [p.units for p in propose(units, _params(rhythm=True))] == [[1, 3]]  # FAIL BEFORE
+    rejected = []
+    assert propose(units, _params(rhythm=True, fix_final_integrity=True), rhythm_out=rejected) == []
+    assert len(rejected) == 1 and "#2" in rejected[0][1] and "#3" in rejected[0][1]
+    assert "ритм" in rejected[0][1]
+
+
+def test_a2_s5_fx7l_loop_support_removed_rejected_to_no_start(monkeypatch):
+    units = _fx7l_units()
+    def drop_support(clip, *a, **kw):
+        kept = [u for u in clip if u["id"] != 10]
+        return (kept or clip), [], ""
+    monkeypatch.setattr(ac, "context_start", drop_support)
+    lookup = lambda refs: [("1.1", 5.0, 3, True)]
+    p = _params(context_start=True)
+    assert any(11 in o.units and 10 not in o.units for o in propose(units, p, lookup))  # FAIL BEFORE
+    no_start = []
+    assert propose(units, replace(p, fix_final_integrity=True), lookup, no_start=no_start) == []
+    assert any("#10" in why and "#11" in why for _, why in no_start)
+
+
+def test_a2_aq7_loop_target_introduced_at_s1_then_removed_at_s5(monkeypatch):
+    """AQ7: target absent at S0 but established at S1 is still protected."""
+    question = _a2_U(10, 0, 5, "question", 3, "1.1")
+    dependent = _a2_U(11, 10, 30, "thesis", 5, "1.2", standalone=False, refers=10)
+    monkeypatch.setattr(ac, "build_clip", lambda *a, **kw: [dependent])
+    monkeypatch.setattr(ac, "_loop_question", lambda *a, **kw: question)
+
+    def drop_loop(clip, *a, **kw):
+        return [u for u in clip if u["id"] != 10], [], ""
+
+    monkeypatch.setattr(ac, "context_start", drop_loop)
+    p = _params(loop=True, context_start=True)
+    lookup = lambda refs: [("1.2", 15.0, 5, True)]
+    old_trace = []
+    assert [o.units for o in propose([question, dependent], p, lookup, trace=old_trace)] == [[11]]
+    seed = next(ev for ev in old_trace if ev["event"] == "seed")
+    assert seed["snap"]["S0"] == [11] and seed["snap"]["S1"] == [10, 11]
+    assert seed["snap"]["S5"] == [11] and seed["dep_broken"] == [[11, 10, "S5"]]
+
+    refused = []
+    assert propose([question, dependent], replace(p, fix_final_integrity=True),
+                   lookup, no_start=refused) == []
+    assert len(refused) == 1 and "#10" in refused[0][1] and "#11" in refused[0][1]
+
+
+def test_a2_question_tail_rejected_but_question_first_passes(monkeypatch):
+    one = _a2_U(1, 0, 30, "thesis", 5, "1.1")
+    question = _a2_U(2, 31, 10, "question", 3, "2.1")
+    monkeypatch.setattr(ac, "build_clip", lambda *a, **kw: [one])
+    monkeypatch.setattr(ac, "fit_rhythm", lambda *a, **kw: ([one, question], []))
+    monkeypatch.setattr(ac, "rhythm_why", lambda *a, **kw: (None, None))
+    assert [p.units for p in propose([one, question], _params(rhythm=True))] == [[1, 2]]
+    blocked = []
+    assert propose([one, question], _params(rhythm=True, fix_final_integrity=True), rhythm_out=blocked) == []
+    assert blocked and "вопрос" in blocked[0][1]
+
+    monkeypatch.setattr(ac, "fit_rhythm", lambda clip, *a, **kw: (clip, []))
+    monkeypatch.setattr(ac, "_loop_question", lambda *a, **kw: question)
+    one["standalone"], one["refers"] = False, 2  # established support intact in a question-first loop
+    assert [o.units for o in propose([one, question], _params(rhythm=True, loop=True,
+                                  fix_final_integrity=True))] == [[2, 1]]
+
+
+def test_a2_never_established_edge_not_rejected_and_bool_refers_not_int(monkeypatch):
+    one = _a2_U(1, 0, 15, "thesis", 5, "1.1")
+    absent = _a2_U(2, 16, 15, "example", 3, "2.1")
+    dep = _a2_U(3, 32, 15, "conclusion", 3, "3.1", standalone=False, refers=2)
+    monkeypatch.setattr(ac, "build_clip", lambda *a, **kw: [one, dep])
+    assert [o.units for o in propose([one, absent, dep], _params(fix_final_integrity=True))] == [[1, 3]]
+    dep["refers"] = True  # bool == 1 in Python; a bool is not an exact integer id
+    monkeypatch.setattr(ac, "fit_rhythm", lambda *a, **kw: ([dep], []))
+    monkeypatch.setattr(ac, "rhythm_why", lambda *a, **kw: (None, None))
+    assert [o.units for o in propose([one, dep], _params(rhythm=True,
+                                   fix_final_integrity=True))] == [[3]]
+
+
+def test_a2_flag_defaults_off_and_validates_as_typed_config():
+    from autoreels.core.config import AutocutConfig
+    assert AutoParams().fix_final_integrity is False
+    assert AutocutConfig().fix_final_integrity is False
+    assert AutocutConfig.model_validate({"fix_final_integrity": True}).fix_final_integrity is True
+    with pytest.raises(Exception):
+        AutocutConfig.model_validate({"fix_final_integrity": "invalid"})
+
+
+@pytest.mark.parametrize("shortening", ["m167", "m173"])
+@pytest.mark.parametrize("origin", ["main", "weak"])
+def test_a2_cli_reversible_integrity_for_both_shortenings_and_origins(
+        tmp_path, monkeypatch, shortening, origin):
+    """Main and fill-pool candidates both get pre-adoption checks; OFF keeps legacy bytes."""
+    from autoreels import __main__ as cli
+    proj = _montage_project(tmp_path)
+    r1, r2 = proj["refs"][:2]
+    t0 = float(proj["sbr"][r1][0].t0)
+    units = [_a2_U(1, 40, 15, "thesis", 5, r1, standalone=shortening != "m167",
+               refers=2 if shortening == "m167" else None),
+             _a2_U(2, 56, 15, "conclusion", 4, r2, standalone=shortening == "m167",
+               refers=1 if shortening == "m173" else None)]
+    import json
+    path = tmp_path / "transcripts" / "v.map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["units"] = units
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    created = []
+    def fake_propose(units_arg, p, *a, **kw):
+        if (origin == "weak") != (p.seed_punch < 4):
+            return []
+        new = Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30)
+        created.append(new)
+        return [new]
+    monkeypatch.setattr(ac, "propose", fake_propose)
+    errors = []
+    def fake_check(_head, line, *_a):
+        errors.append(line)
+        if shortening == "m167":
+            return ("no room after last word", "") if r2 in line else (None, "")
+        return (f"short shot whole sentences s1@{t0:.3f}", "") if r1 in line else (None, "")
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    common = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                  check=True, clips=1, llm="none", voice_keys=False)
+    if origin == "weak":
+        common["ac_over"] = ["fill_seed_punch=3", "seed_punch=4"]
+    assert cli.cmd_autocut("v", **common) == 0
+    off = (tmp_path / "reviews/v_auto_m56.txt").read_bytes()
+    assert b"M1" in off and len(errors) == 2
+    errors.clear()
+    on_args = {**common, "ac_over": [*(common.get("ac_over") or []), "fix_final_integrity=true"]}
+    assert cli.cmd_autocut("v", **on_args) == 0
+    on = (tmp_path / "reviews/v_auto_m56.txt").read_text(encoding="utf-8")
+    assert len(errors) == 1  # refused shortening BEFORE re-check
+    assert len(created) == 2
+    assert any("укорочение не взято" in note and "#1" in note and "#2" in note
+               for note in created[-1].notes)
+    assert ("#   причина: no room after last word" if shortening == "m167"
+            else "#   причина: short shot whole sentences") in on  # original check error kept
+    assert "# --- не прошли проверку" in on and "#! M 80" in on
+
+
+@pytest.mark.parametrize("shortening", ["m167", "m173"])
+def test_a2_cli_legal_shortening_kept(tmp_path, monkeypatch, shortening):
+    """A2 is a guard, not a global veto of CLI repairs."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import autocut
+    import json
+
+    proj = _montage_project(tmp_path)
+    r1, r2 = proj["refs"][:2]
+    t0 = float(proj["sbr"][r1][0].t0)
+    mpath = tmp_path / "transcripts/v.map.json"
+    data = json.loads(mpath.read_text(encoding="utf-8"))
+    data["units"] = [_a2_U(1, 40, 15, "thesis", 5, r1), _a2_U(2, 56, 15, "conclusion", 4, r2)]
+    mpath.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(autocut, "propose", lambda *a, **kw: [
+        Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30)])
+    calls = []
+
+    def fake_check(_h, line, *_a):
+        calls.append(line)
+        if shortening == "m167":
+            return ("no room after last word", "") if r2 in line else (None, "")
+        return (f"short shot whole sentences s1@{t0:.3f}", "") if r1 in line else (None, "")
+
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                           check=True, clips=1, llm="none", voice_keys=False,
+                           ac_over=["fix_final_integrity=true"]) == 0
+    body = (tmp_path / "reviews/v_auto_m56.txt").read_text(encoding="utf-8")
+    assert len(calls) == 2 and "# --- M1" in body and "укорочение не взято" not in body
+    assert (f"M1 80 | {r1}" if shortening == "m167" else f"M1 80 | {r2}") in body
+
+
+def test_a2_cli_m167_question_tail_rejected(tmp_path, monkeypatch):
+    from autoreels import __main__ as cli
+    import json
+
+    proj = _montage_project(tmp_path)
+    r1, r2 = proj["refs"][:2]
+    path = tmp_path / "transcripts/v.map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["units"] = [_a2_U(1, 40, 15, "question", 5, r1),
+                     _a2_U(2, 56, 15, "conclusion", 4, r2)]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    created = []
+    def fake_propose(*a, **kw):
+        p = Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30)
+        created.append(p)
+        return [p]
+    monkeypatch.setattr(ac, "propose", fake_propose)
+    calls = []
+    def fake_check(_head, line, *_a):
+        calls.append(line)
+        return "no room after last word", ""
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                           check=True, clips=1, llm="none", voice_keys=False,
+                           ac_over=["fix_final_integrity=true"]) == 0
+    assert len(calls) == 1 and any("последняя звучащая мысль — вопрос" in n for n in created[0].notes)
+
+
+def test_a2_scenario_pool_is_not_rechecked_by_montage_guard(tmp_path, monkeypatch):
+    """The feature applies only to montage-origin pools; scenario bytes stay unchanged."""
+    from autoreels import __main__ as cli
+    import json
+
+    proj = _montage_project(tmp_path)
+    r1, r2 = proj["refs"][:2]
+    path = tmp_path / "transcripts/v.map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["units"] = [_a2_U(1, 40, 15, "thesis", 5, r1),
+                     _a2_U(2, 56, 15, "conclusion", 4, r2, standalone=False, refers=1)]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(cli, "_scenario_pool", lambda *a, **kw: [
+        Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30)])
+    t0 = float(proj["sbr"][r1][0].t0)
+    checks = []
+    def fake_check(_head, line, *_a):
+        checks.append(line)
+        return ((f"short shot whole sentences s1@{t0:.3f}", "") if r1 in line else (None, ""))
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    args = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                check=True, clips=1, llm="none", voice_keys=False, scenario=True)
+    assert cli.cmd_autocut("v", **args) == 0
+    before = (tmp_path / "reviews/v_auto_m56.txt").read_bytes()
+    assert len(checks) == 2 and f"M1 80 | {r2}".encode() in before
+    checks.clear()
+    assert cli.cmd_autocut("v", **args, ac_over=["fix_final_integrity=true"]) == 0
+    after = (tmp_path / "reviews/v_auto_m56.txt").read_bytes()
+    assert after == before and len(checks) == 2
+
+
+def test_a2_tc8b_pin_rhythm_rejects_after_open_end_trimming(monkeypatch):
+    one = _a2_U(1, 0, 30, "thesis", 5, "1.1")
+    monkeypatch.setattr(ac, "fix_open_end", lambda clip, *a, **kw: (
+        [{**clip[0], "t1": 2.5}], "убран открытый хвост", None))
+    def invalid_after_trim(spans, *a, **kw):
+        return ("после конца короче", 0) if spans[-1][1] == 2.5 else (None, None)
+    monkeypatch.setattr(ac, "rhythm_why", invalid_after_trim)
+    for flag in (False, True):
+        rhythm, open_ends = [], []
+        result = propose([one], _params(end_tone=True, rhythm=True, fix_final_integrity=flag),
+                         sentences=lambda refs: [("1.1", 30., 12, True)],
+                         end_tone=lambda r: "open", rhythm_out=rhythm, open_end=open_ends)
+        assert result == [] and len(rhythm) == 1 and not open_ends
