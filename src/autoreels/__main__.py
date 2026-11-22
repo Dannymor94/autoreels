@@ -8614,6 +8614,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      hook_min_sec=ac.hook_min_sec, speed_slow_rate=ac.speed_slow_rate, speed_slow=ac.speed_slow,
                      speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid,
                      context_start=ac.context_start, fix_context_min_sec=ac.fix_context_min_sec,
+                     fix_final_integrity=ac.fix_final_integrity,
                      context_max_sec=ac.context_max_sec,
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
@@ -9035,6 +9036,28 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             accepted.append(pr)
             return
         err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
+
+        def _shortening_integrity(before, candidate) -> str | None:
+            """A2: inspect actually played units, not the stale Proposal.units list."""
+            from autoreels.cloud.autocut import _final_integrity
+            from autoreels.cloud.scenario import expand_refs
+
+            source = {u["id"]: u for u in (the_map.get("units") or [])}
+            if any(uid not in source for uid in before.units):
+                return "неизвестная мысль в карте"
+
+            def _played(proposal) -> list[int]:
+                heard = set(expand_refs(proposal.pieces) or [])
+                return [uid for uid in proposal.units if heard.intersection(
+                    expand_refs(proposal.unit_refs.get(uid) or source[uid].get("refs", "")) or [])]
+
+            initial = _played(before)
+            shortened = _played(candidate)
+            if not shortened:
+                return "после сокращения нет звучащих мыслей"
+            broken = _final_integrity({"S0": initial, "CLI": shortened}, source)
+            return broken[1] if broken else None
+
         # M167 (m167: 10h59 13 → 8 clips): no room after the last word — end one sentence earlier, up to twice, while
         # the clip keeps min_sec (the rule of the ends: a clip lands on a finished sentence the next speech leaves room for)
         for _ in range(2):
@@ -9043,6 +9066,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             _short = _drop_last_sentence(pr, sent_by_ref, prm.min_sec)
             if _short is None:
                 break
+            if prm.fix_final_integrity and not scenario:
+                _unsafe = _shortening_integrity(pr, _short)
+                if _unsafe is not None:
+                    pr.notes.append(f"укорочение не взято: {_unsafe}")
+                    break
             pr.notes.append(f"конец: после последнего слова нет места до следующей речи — клип кончается фразой раньше "
                             f"({pr.pieces} → {_short.pieces})")
             _short.notes = pr.notes
@@ -9058,6 +9086,11 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             _less = _drop_sentences(pr, sent_by_ref, _t0s, prm.min_sec)
             if _less is None:
                 break
+            if prm.fix_final_integrity and not scenario:
+                _unsafe = _shortening_integrity(pr, _less)
+                if _unsafe is not None:
+                    pr.notes.append(f"укорочение не взято: {_unsafe}")
+                    break
             pr.notes.append(f"скачок кадра: короткий план между двумя сменами картинки — фразы этого плана убраны "
                             f"({pr.pieces} → {_less.pieces})")
             _less.notes = pr.notes

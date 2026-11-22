@@ -348,6 +348,7 @@ class AutocutConfig(BaseModel):
     # M74 (owner: «начала дают мало контекста; после крючка резко идёт тело»)
     context_start: bool = False            # the first sentence after the hook must not lean on what was cut
     fix_context_min_sec: bool = False       # M232-A1: keep post-context clip >= min_sec (default OFF)
+    fix_final_integrity: bool = False       # M232-A2: reject broken supports / question tail (default OFF)
     context_max_sec: float = Field(15.0, gt=0)   # … the thought right before may be added as context, this long at most
     context_drop_words: int = Field(5, ge=0)     # … a leaning first sentence this short may be dropped
     plate: str = Field("hook", pattern="^(hook|context)$")   # the model's plate t:: a curiosity headline | what the clip is about

@@ -64,6 +64,7 @@ class AutoParams:
     # a viewer hears after the hook must not lean on what was cut. False = the previous proposals.
     context_start: bool = False
     fix_context_min_sec: bool = False   # M232-A1: never shorten a repaired start below min_sec
+    fix_final_integrity: bool = False    # M232-A2: reject lost established supports and question tails
     context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
@@ -180,6 +181,48 @@ def leans_on(u: dict, by_id: dict, depth: int = 0) -> list[int]:
         seen.add(cur["id"])
         out.append(cur["id"])
     return out
+
+
+def _final_integrity(snapshots: dict[str, list[int]], by_id: dict
+                     ) -> tuple[str, str] | None:
+    """Check only edges *established* at a reached stage, not absent-from-start references.
+
+    Unit ids are exact integers (bool is not an id). The CLI reuses the same
+    predicate with S0=played(original), CLI=played(shortened).
+    """
+    stages = [(stage, set(snapshots[stage])) for stage in
+              ("S0", "S1", "S2", "S3", "S4", "S5", "S6", "CLI") if stage in snapshots]
+    if not stages:
+        return None
+    final = stages[-1][1]
+    established: set[tuple[int, int]] = set()
+    for _, present in stages:
+        for uid in present:
+            u = by_id.get(uid)
+            if u is None or u.get("standalone") is not False or type(u.get("refers")) is not int:
+                continue
+            target = leans_on(u, by_id, 1)
+            if target and target[0] in present:
+                established.add((uid, target[0]))
+    for uid, target in sorted(established):
+        if uid not in final or target in final:
+            continue
+        removal = next((stage for (previous_stage, previous), (stage, current)
+                        in zip(stages, stages[1:]) if target in previous and target not in current), None)
+        if removal == "S5":
+            return "no_start", f"финал: опора #{target} нужна #{uid} — убрана при поиске начала"
+        if removal == "CLI":
+            return "shortening", f"опора #{target} нужна #{uid} — убрана сокращением"
+        if removal == "S4":
+            return "rhythm_out", f"финал: опора #{target} нужна #{uid} — убрана ритмом"
+        return "rhythm_out", f"финал: опора #{target} нужна #{uid} — потеряна ({removal})"
+    if snapshots.get("CLI") is not None:
+        if snapshots["CLI"] and by_id.get(snapshots["CLI"][-1], {}).get("role") == "question":
+            return "shortening", "последняя звучащая мысль — вопрос после сокращения"
+    elif stages[-1][1] and snapshots[stages[-1][0]] and \
+            by_id.get(snapshots[stages[-1][0]][-1], {}).get("role") == "question":
+        return "rhythm_out", "финал: ритм добавил вопрос в конец"
+    return None
 
 
 def _pieces(units: Sequence[dict]) -> int:
@@ -1199,6 +1242,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                 _tr["outcome"] = "build_none"
                 trace.append(_tr)
             continue
+        if p.fix_final_integrity:
+            _snap_integrity = {"S0": [u["id"] for u in clip]}
         if trace is not None:
             _tr["snap"]["S0"] = [u["id"] for u in clip]
             _tr["secs"]["S0"] = sum(_dur(u) for u in clip)
@@ -1224,6 +1269,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if trace is not None:
             _tr["snap"]["S1"] = [u["id"] for u in clip]
             _tr["secs"]["S1"] = sum(_dur(u) for u in clip)
+        if p.fix_final_integrity:
+            _snap_integrity["S1"] = [u["id"] for u in clip]
         if mixed:
             clip, pnote = add_payoff(clip, seed, units, p, taken)
             if pnote:
@@ -1247,6 +1294,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     })
                     if uid in reached[-1][1] and target not in reached[-1][1]
                 ]
+        if p.fix_final_integrity:
+            _snap_integrity["S2"] = [u["id"] for u in clip]
         if p.prune and not passage:
             clip, dropped = _prune(clip, by_id, p)
             if dropped:
@@ -1270,6 +1319,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     })
                     if uid in reached[-1][1] and target not in reached[-1][1]
                 ]
+        if p.fix_final_integrity:
+            _snap_integrity["S3"] = [u["id"] for u in clip]
         if p.rhythm:
             clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]}, taken if passage else frozenset())
             if clip_r is None:
@@ -1301,6 +1352,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     })
                     if uid in reached[-1][1] and target not in reached[-1][1]
                 ]
+        if p.fix_final_integrity:
+            _snap_integrity["S4"] = [u["id"] for u in clip]
         unit_refs: dict = {}
         if p.context_start and sentences:
             clip2, cnotes, why = context_start(clip, by_id, p, sentences, seed_id=seed["id"], loop_id=loop_id,
@@ -1358,6 +1411,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     })
                     if uid in reached[-1][1] and target not in reached[-1][1]
                 ]
+        if p.fix_final_integrity:
+            _snap_integrity["S5"] = [u["id"] for u in clip]
         if p.end_tone and end_tone is not None and sentences:
             clip3, enote, ewhy = fix_open_end(clip, sentences, end_tone, p)
             if clip3 is None:
@@ -1393,6 +1448,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     })
                     if uid in reached[-1][1] and target not in reached[-1][1]
                 ]
+        if p.fix_final_integrity:
+            _snap_integrity["S6"] = [u["id"] for u in clip]
         if p.rhythm:                      # M120: the final clip (after its start and its end) keeps the rhythm
             rwhy, _k = rhythm_why([(float(u["t0"]), float(u["t1"])) for u in clip], p,
                                   clip[0].get("role") == "question")
@@ -1401,6 +1458,19 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     rhythm_out.append((" ".join(u["refs"] for u in clip), f"после начала и конца: {rwhy}"))
                 if trace is not None:
                     _tr["outcome"] = "final_rhythm_fail"
+                    _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
+                    _tr["tail_question"] = clip[-1].get("role") == "question"
+                    trace.append(_tr)
+                continue
+        if p.fix_final_integrity:
+            _broken = _final_integrity(_snap_integrity, by_id)
+            if _broken is not None:
+                _channel, _reason = _broken
+                _destination = no_start if _channel == "no_start" else rhythm_out
+                if _destination is not None:
+                    _destination.append((" ".join(u["refs"] for u in clip), _reason))
+                if trace is not None:
+                    _tr["outcome"] = "start_fail" if _channel == "no_start" else "final_rhythm_fail"
                     _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                     _tr["tail_question"] = clip[-1].get("role") == "question"
                     trace.append(_tr)
