@@ -8616,6 +8616,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      context_start=ac.context_start, fix_context_min_sec=ac.fix_context_min_sec,
                      fix_final_integrity=ac.fix_final_integrity, fix_body_start=ac.fix_body_start,
                      fix_passage_side=ac.fix_passage_side,
+                     seed_alt=ac.seed_alt, seed_alt_max=ac.seed_alt_max,
                      context_max_sec=ac.context_max_sec,
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
@@ -8800,6 +8801,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             print(f"  ведущий: фраз {len(_other)} из {len(sent_by_ref)}, interviewer: {_ivmode}", flush=True)
     _trace_path: str | None = None
     _trace: list | None = None
+    _variant_descs: list = []
     if scenario:
         # M204: scenario_llm — the scenarist's own model; `mode` (--llm) then polishes (hooks, plates, k:, seams)
         from autoreels.cloud.chatscenario import ChatScenarioPending
@@ -8825,9 +8827,13 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     else:
         _trace_path = os.environ.get("ARL_AUTOCUT_TRACE")
         _trace = [] if _trace_path else None
-        pool = propose(the_map.get("units") or [], _dc_replace(prm, clips=prm.clips * ac.check_pool), sentences,
+        _main_params = _dc_replace(prm, clips=prm.clips * ac.check_pool)
+        if prm.seed_alt and prm.seed_alt_max is None:
+            _main_params = _dc_replace(_main_params, seed_alt_max=prm.clips)
+        pool = propose(the_map.get("units") or [], _main_params, sentences,
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
-                       taste=_taste, start_pause=start_pause, trace=_trace)
+                       taste=_taste, start_pause=start_pause, trace=_trace,
+                       variant_descs_out=_variant_descs if prm.seed_alt else None)
         if _trace is not None:
             from autoreels.cloud.autocut import _speed as _speed_fn
             _ubid = {u["id"]: u for u in (the_map.get("units") or [])}
@@ -8930,13 +8936,18 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
     _polish = None
     _plate = None
     _hjudge = None
+    _byid_h = None
 
     def _plate_mode(pr) -> str:
         # M112 (owner: a clip without a cold open opens on its plate — the plate has to pull, not only name the subject)
         hl = getattr(ac, "plate_hookless", "")
         return hl if hl and not pr.hook else ac.plate
     _log = lambda x: print(x, flush=True)  # noqa: E731
-    if prov is not None and pool:
+    def _ensure_polish() -> None:
+        """Initialize provider closures once. A8 variant-only path calls this after V1."""
+        nonlocal _polish, _plate, _hjudge, _byid_h
+        if prov is None or _polish is not None:
+            return
         try:
             from autoreels.cloud.autocut import rank_hooks
             from autoreels.cloud.autocut import check_seams, headline, seam_pairs
@@ -8991,15 +9002,20 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                             pr.notes.append("голос выделяет: " + ", ".join(_vn))
                     pr.keys = pick_keywords(_krows, prov, n=_n, log=_log,     # M203: voice hints only with keywords_voice
                                             voiced=_voiced if getattr(ac, "keywords_voice", False) else None)
-            if ac.seam_check:                       # M70: seams that hold go first (the model only orders)
+        except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
+            print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+    if prov is not None and pool:
+        _ensure_polish()
+        if ac.seam_check and _polish is not None:
+            try:
                 for pr in pool[:prm.clips * 2]:
                     check_seams(pr, seam_pairs(pr, _byid_h, sentences), prov, log=_log)
                 _bad = sum(1 for pr in pool if pr.bad_seams)
-                pool.sort(key=lambda pr: bool(pr.bad_seams) + bool(pr.start_doubt))   # M119: doubts add up
+                pool.sort(key=lambda pr: bool(pr.bad_seams) + bool(pr.start_doubt))
                 if _bad:
                     print(f"  стыки: у {_bad} кандидатов модель нашла рваный стык — они после остальных", flush=True)
-        except Exception as exc:  # noqa: BLE001 — no model: the code's hook order stays
-            print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+            except Exception as exc:  # noqa: BLE001 — no model: code order stays
+                print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
     out_path = Path(out) if out else _root / "reviews" / f"{stem}_auto_m56.txt"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ref = _rel_ref(out_path, _root)
@@ -9031,13 +9047,28 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             return sound_close(pr, others, _secs_of, getattr(ac, "close_share_max", 0.0))
         return too_close(pr, others, ac.max_shared)
 
-    def _try_accept(pr) -> None:
-        why_close = _close(pr, accepted)          # M68: distinct reels, checked for free first; M205: or by sound
+    def _alt_union_why(pr, others) -> str | None:
+        """A8 variants never share passage thoughts, even under lenient close settings."""
+        if prm.generator in ("passage", "mixed"):
+            for old in others:
+                shared = sorted(set(pr.units) & set(old.units))
+                if shared:
+                    return "общие мысли с принятой сборкой: " + ", ".join(f"#{n}" for n in shared)
+        return _close(pr, others) or too_close(pr, others, ac.max_shared)
+
+    def _try_accept(pr, *, acc=None, rej=None, cls=None, conflict=None) -> None:
+        # M232-A8: default destinations are the legacy lists. Variants get separate
+        # lists and a union conflict set; no legacy decision is recomputed.
+        acc = accepted if acc is None else acc
+        rej = rejected if rej is None else rej
+        cls = close if cls is None else cls
+        why_close = (_close(pr, accepted) if conflict is None
+                     else _alt_union_why(pr, conflict))
         if why_close:
-            close.append((pr, why_close))
+            cls.append((pr, why_close))
             return
         if not check:
-            accepted.append(pr)
+            acc.append(pr)
             return
         err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
 
@@ -9139,6 +9170,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             pr.notes.append(f"конец: после последнего слова нет места до следующей речи — клип кончается фразой раньше "
                             f"({pr.pieces} → {_short.pieces})")
             _short.notes = pr.notes
+            if getattr(pr, "alt_of", None) is not None:
+                _short.alt_of, _short._alt_seed = pr.alt_of, pr._alt_seed
             pr = _short
             err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         # M173: a shot under short_shot_sec between two picture changes — drop the sentences heard whole in it (the
@@ -9165,6 +9198,8 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             pr.notes.append(f"скачок кадра: короткий план между двумя сменами картинки — фразы этого плана убраны "
                             f"({pr.pieces} → {_less.pieces})")
             _less.notes = pr.notes
+            if getattr(pr, "alt_of", None) is not None:
+                _less.alt_of, _less._alt_seed = pr.alt_of, pr._alt_seed
             pr = _less
             err, log = _autocut_check(head, pr.line("1"), _root, cache_dir)
         # M61: the plan skipped the hook (its sound runs backwards) — try the next candidate, else none
@@ -9196,9 +9231,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                     pr.notes.append(f"крючок h:{first_hook}: паузы после него нет (+{a0:.2f} с), у других из "
                                     f"первых {ac.hook_pause_top} тоже")
         if err is None:
-            accepted.append(pr)
+            acc.append(pr)
         else:
-            rejected.append((pr, err))
+            rej.append((pr, err))
 
     def _keys_rule(pr) -> None:
         """M203: k: by cloud/autocut.keywords_rule — the last sentence, then the first, then the middle; no model."""
@@ -9287,6 +9322,152 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         _hc = getattr(_hjudge, "cache", {})
         print(f"  крючки: модель оценила {len(_hc)}, отброшено {sum(1 for v in _hc.values() if v and not v[0])}"
               + f", без ответа {sum(1 for v in _hc.values() if v is None)}", flush=True)
+    # M232-A8 Phase V. The entire legacy selection, hookless deferral, late plate
+    # redo, short versions, and hook statistics above have already finished.
+    # G1 was descriptor-only; no alternative or its provider call existed in L.
+    _alt_fates: dict[int, str] = {}
+    _alt_accepted: list = []
+    _alt_rejected: list = []
+    _alt_close: list = []
+    if prm.seed_alt and _variant_descs and not scenario:
+        from autoreels.cloud.autocut import check_seams, seam_pairs
+        from autoreels.cloud.scenario import expand_refs as _alt_expand
+        _remain = max(0, prm.clips - sum(a.variant_of is None for a in accepted))
+        _alt_fates = {sid: "variant_not_reached" for sid, _sup, _excluded in _variant_descs}
+        if _remain:
+            # G2 is purely deterministic: context judgement is explicitly None,
+            # even when the legacy phase had a configured judge.
+            _built = propose(the_map.get("units") or [], prm, sentences,
+                             judge=None, end_tone=end_tone, taste=_taste,
+                             start_pause=start_pause, variant_descs=_variant_descs)
+            _alt_fates = {sid: "built_none" for sid, _sup, _excluded in _variant_descs}
+            _seen_legacy = {(tuple(p_.units), p_.pieces) for p_ in pool}
+            _candidates: list = []
+            for _v in _built:
+                _sid = _v._alt_seed
+                if (tuple(_v.units), _v.pieces) in _seen_legacy:
+                    _alt_fates[_sid] = "duplicate"
+                    continue
+                _seen_legacy.add((tuple(_v.units), _v.pieces))
+                # V1 must precede *all* provider calls: compare expanded played
+                # refs rather than unit IDs, including when check=False.
+                if _other and _ivmode == "off" and set(_alt_expand(_v.pieces) or []) & _other:
+                    _alt_fates[_sid] = "variant_interviewer"
+                    continue
+                _candidates.append(_v)
+            if _candidates and prov is not None:
+                _ensure_polish()  # R4: first clean V1 batch, never when every variant is dirty
+            # V1b: on the completed played refs, evaluate the configured context
+            # judge only once, without a second model-enabled propose or repair.
+            if judge is not None and ac.context_start and ac.context_judge:
+                from autoreels.cloud.autocut import stands_alone
+                _src_by_id = {u["id"]: u for u in (the_map.get("units") or [])}
+                _judged: list = []
+                for _v in _candidates:
+                    _refs = _alt_expand(_v.pieces) or []
+                    _first = sent_by_ref.get(_refs[0]) if _refs else None
+                    _following = sent_by_ref.get(_refs[1]) if len(_refs) > 1 else []
+                    _heard = set(_refs)
+                    _end_ids = [uid for uid in _v.units if uid in _src_by_id
+                                and _heard.intersection(_alt_expand(
+                                    _v.unit_refs.get(uid) or _src_by_id[uid].get("refs", "")) or [])]
+                    _seed_u = _src_by_id.get(_v._alt_seed)
+                    _end_u = _src_by_id.get(_end_ids[-1]) if _end_ids else None
+                    _text0 = " ".join(str(w.word) for w in (_first or []) if getattr(w, "word", "")).strip()
+                    _text1 = " ".join(str(w.word) for w in (_following or []) if getattr(w, "word", "")).strip()
+                    _summary = (str(_seed_u.get("summary") or "").strip() if _seed_u else "",
+                                str(_end_u.get("summary") or "").strip() if _end_u else "")
+                    if not _text0 or (len(_refs) > 1 and not _text1) or not all(_summary):
+                        _alt_fates[_v._alt_seed] = "variant_rejected"  # fail closed even in rank mode
+                        continue
+                    _core = " ".join(dict.fromkeys(_summary))
+                    _rules_why = stands_alone(_text0, _text1, prm, None, _core)
+                    if _rules_why:
+                        _alt_fates[_v._alt_seed] = "variant_rejected"  # rank never overrides rules
+                        continue
+                    _why = stands_alone(_text0, _text1, prm, judge, _core)
+                    if _why and prm.start_judge == "veto":
+                        _alt_fates[_v._alt_seed] = "variant_rejected"
+                        continue
+                    if _why:
+                        _v.start_doubt = _why
+                        _v.notes.append(f"начало: модель против ({_why}) — правила принимают после чистых")
+                    _judged.append(_v)
+                _candidates = _judged
+            # Stable order: clean starts first, highest score, then G1 order.
+            _order_of = {sid: pos for pos, (sid, _, _) in enumerate(_variant_descs)}
+            _candidates.sort(key=lambda v: (bool(v.start_doubt), -v.score, _order_of[v._alt_seed]))
+            if prov is not None and ac.seam_check:
+                for _v in _candidates:
+                    try:
+                        check_seams(_v, seam_pairs(_v, _byid_h, sentences), prov, log=_log)
+                    except Exception as exc:  # noqa: BLE001 — model failure does not change rule acceptance
+                        print(f"  стыки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+                _candidates.sort(key=lambda v: (bool(v.bad_seams) + bool(v.start_doubt),
+                                                bool(v.start_doubt), -v.score, _order_of[v._alt_seed]))
+            _alt_hookless: list = []
+            for _v in _candidates:
+                _sid = _v._alt_seed
+                if len(_alt_accepted) >= _remain:
+                    _alt_fates[_sid] = "variant_not_reached"
+                    continue
+                _union = accepted + _alt_accepted
+                _why = _alt_union_why(_v, _union)
+                if _why:
+                    _alt_close.append((_v, _why))
+                    _alt_fates[_sid] = "variant_close"
+                    continue
+                if _polish is not None:
+                    try:
+                        _polish(_v)
+                    except Exception as exc:  # noqa: BLE001 — use the unpolished variant on model failure
+                        print(f"  крючки: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+                if ac.keywords and _ksrc != "model" and not _v.keys:
+                    _keys_rule(_v)
+                if getattr(ac, "hookless_last", False) and ac.hook_teaser and not _v.hook:
+                    _alt_hookless.append(_v)
+                    continue
+                _n_acc, _n_rej = len(_alt_accepted), len(_alt_rejected)
+                _try_accept(_v, acc=_alt_accepted, rej=_alt_rejected, cls=_alt_close,
+                            conflict=accepted + _alt_accepted)
+                _alt_fates[_sid] = ("variant_accepted" if len(_alt_accepted) > _n_acc else
+                                    "variant_rejected" if len(_alt_rejected) > _n_rej else "variant_close")
+                if len(_alt_accepted) > _n_acc and _other and _ivmode == "off" \
+                        and set(_alt_expand(_alt_accepted[-1].pieces) or []) & _other:
+                    _alt_accepted.pop()
+                    _alt_fates[_sid] = "variant_interviewer"
+            for _v in _alt_hookless:
+                _sid = _v._alt_seed
+                if len(_alt_accepted) >= _remain:
+                    _alt_fates[_sid] = "variant_hookless_left"
+                    continue
+                _v.notes.append("без крючка — взята после вариантов с крючком (M232-A8)")
+                _n_acc, _n_rej = len(_alt_accepted), len(_alt_rejected)
+                _try_accept(_v, acc=_alt_accepted, rej=_alt_rejected, cls=_alt_close,
+                            conflict=accepted + _alt_accepted)
+                _alt_fates[_sid] = ("variant_accepted" if len(_alt_accepted) > _n_acc else
+                                    "variant_rejected" if len(_alt_rejected) > _n_rej else "variant_close")
+                if len(_alt_accepted) > _n_acc and _other and _ivmode == "off" \
+                        and set(_alt_expand(_alt_accepted[-1].pieces) or []) & _other:
+                    _alt_accepted.pop()
+                    _alt_fates[_sid] = "variant_interviewer"
+            if _plate is not None and ac.hook_title and getattr(ac, "plate_hookless", ""):
+                for _v in _alt_accepted:
+                    if _v.plate_mode and _v.plate_mode != _plate_mode(_v):
+                        _v.notes.append(f"крючок снят проверкой — плашка заново ({_plate_mode(_v)})")
+                        try:
+                            _plate(_v)
+                        except Exception as exc:  # noqa: BLE001
+                            print(f"  плашка: без модели ({type(exc).__name__}: {str(exc)[:120]})", flush=True)
+            if _other and _ivmode == "off":
+                # R4 post-mutation policy: no interviewer ref survives late
+                # title/hook processing or any accepted shortening.
+                for _v in list(_alt_accepted):
+                    if set(_alt_expand(_v.pieces) or []) & _other:
+                        _alt_accepted.remove(_v)
+                        _alt_fates[_v._alt_seed] = "variant_interviewer"
+            accepted.extend(_alt_accepted)
+        print(f"  альтернативы: {len(_alt_accepted)} принято из {len(_variant_descs)} подавленных семян", flush=True)
     body: list[str] = []
     for i, pr in enumerate(accepted, 1):
         body.append(f"# --- M{i}: {pr.seconds:.0f} с, мыслей {len(pr.units)}"
@@ -9337,9 +9518,15 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         for pr in not_reached:
             body.append(f"#! {pr.line('')}")
         body.append("")
+    if _alt_fates:
+        body.append("# --- альтернативы (M232-A8): только свободные места после полного обычного отбора:")
+        for sid, sup, _excluded in _variant_descs:
+            body.append(f"#   seed #{sid}, подавлен сборкой {sup}: {_alt_fates[sid]}")
+        body.append("")
     # M202 (m200: «Алгоритм или эмпатия» left as «похожи», seen in the console only as a number): every candidate of
     # the pool is in exactly one place — taken, refused by the checks, too close, hookless left, or not reached
-    _counted = (sum(1 for a in accepted if a.variant_of is None) + len(rejected) - _var_rejected + len(close)
+    _counted = (sum(1 for a in accepted if a.variant_of is None and getattr(a, "alt_of", None) is None)
+                + len(rejected) - _var_rejected + len(close)
                 + len(hookless_left) + len(not_reached))
     if _counted != len(pool):
         print(f"  ⚠ учёт кандидатов: в пуле {len(pool)}, разложено {_counted}", flush=True)
@@ -9368,7 +9555,10 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         # Σ fate == len(pool) == Σ select (M231 P3). Short variants are NOT pool candidates (M202) —
         # emitted as a distinct `variant` event instead of being silently folded into `accepted`.
         for _pr_f in accepted:
-            if _pr_f.variant_of is None:
+            if getattr(_pr_f, "alt_of", None) is not None:
+                _trace.append({"schema": 1, "event": "variant_alt", "pieces": _pr_f.pieces,
+                               "alt_of": _pr_f.alt_of, "fate": "accepted"})
+            elif _pr_f.variant_of is None:
                 _trace.append({"schema": 1, "event": "fate", "pieces": _pr_f.pieces, "fate": "accepted"})
             else:
                 _trace.append({"schema": 1, "event": "variant", "pieces": _pr_f.pieces,

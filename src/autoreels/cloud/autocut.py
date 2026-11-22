@@ -67,6 +67,8 @@ class AutoParams:
     fix_final_integrity: bool = False    # M232-A2: reject lost established supports and question tails
     fix_body_start: bool = False         # M232-A3: validate strict body starts, including CLI shortening
     fix_passage_side: bool = False       # M232-A4: retry the other passage side after an overlong pick
+    seed_alt: bool = False               # M232-A8: complementary seeds, considered only after legacy selection
+    seed_alt_max: int | None = None      # M232-A8: None = clips; nonnegative bounded number of attempts
     context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
@@ -126,6 +128,8 @@ class Proposal:
     # M232-A3: populated only for flagged montage proposals. ClassVar deliberately
     # stays outside dataclasses.asdict()/the frozen M231 serialized OFF golden.
     seed_id: ClassVar[int | None] = None
+    # M232-A8: instance-only metadata; keep the frozen legacy dataclass serialization unchanged.
+    alt_of: ClassVar[int | None] = None
     units: list[int]                  # play order
     pieces: str                       # "13.2-5 14.1 41.3-4"
     hook: str | None
@@ -1263,7 +1267,9 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             end_tone: Callable[[str], "str | None"] | None = None, open_end: list | None = None,
             rhythm_out: list | None = None, taste: Callable[[list[dict]], float] | None = None,
             start_pause: Callable[[str], "float | None"] | None = None,
-            trace: list | None = None) -> list[Proposal]:
+            trace: list | None = None,
+            variant_descs_out: list | None = None,
+            variant_descs: Sequence[tuple[int, int, tuple[int, ...]]] | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
@@ -1287,7 +1293,14 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
     out: list[Proposal] = []
     used_seeds: set[int] = set()
     taken: set[int] = set()                 # M119 passage: thoughts already in a clip
-    for seed in seeds:
+    _variant_build = p.seed_alt and variant_descs is not None
+    _cap = p.clips if p.seed_alt_max is None else max(0, p.seed_alt_max)
+    if _variant_build:
+        _runs = [(by_id[sid], sup, frozenset(excluded)) for sid, sup, excluded in variant_descs[:_cap]
+                 if sid in by_id and sid not in excluded]
+    else:
+        _runs = [(seed, None, frozenset()) for seed in seeds]
+    for seed, _alt_of, _excluded in _runs:
         if trace is not None:
             _tr: dict = {
                 "schema": 1, "event": "seed", "seed": seed["id"], "outcome": None,
@@ -1299,13 +1312,25 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                          "S4": None, "S5": None, "S6": None},
                 "spans_final": None, "proxy_q_after": None, "proxy_overlong_side": None,
             }
-        if seed["id"] in used_seeds or seed["id"] in taken:
+        if not _variant_build and (seed["id"] in used_seeds or seed["id"] in taken):
+            if variant_descs_out is not None and p.seed_alt and len(variant_descs_out) < _cap:
+                _sup = next((i for i, o in enumerate(out) if seed["id"] in o.units), None)
+                if _sup is not None:
+                    variant_descs_out.append((seed["id"], _sup,
+                                              tuple(sorted(set(out[_sup].units) - {seed["id"]}))))
             if trace is not None:
                 _tr["outcome"] = "skip_used" if seed["id"] in used_seeds else "skip_taken"
                 _tr["sup"] = next((i for i, o in enumerate(out) if seed["id"] in o.units), None)
                 trace.append(_tr)
             continue
-        clip = build_passage(seed, by_id, p, taken) if passage else build_clip(seed, units, by_id, p)
+        _taken = _excluded if _variant_build else taken
+        if _variant_build and not passage:
+            _build_units = [u for u in units if u["id"] not in _excluded]
+            _build_by_id = {uid: u for uid, u in by_id.items() if uid not in _excluded}
+        else:
+            _build_units, _build_by_id = units, by_id
+        clip = (build_passage(seed, by_id, p, _taken) if passage
+                else build_clip(seed, _build_units, _build_by_id, p))
         if clip is None:
             if trace is not None:
                 _tr["outcome"] = "build_none"
@@ -1329,7 +1354,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         loop_id = None
         if p.loop and (mixed or not passage) and clip[0].get("role") != "question":
             in_clips = {i for o in out for i in o.units}
-            q = _loop_question(clip, units, by_id, p, in_clips)
+            q = _loop_question(clip, units, by_id, p, _taken if _variant_build else in_clips)
             if q is not None and sum(_dur(u) for u in clip) + _dur(q) <= p.max_sec \
                     and _pieces([q] + clip) <= p.max_pieces + 1:
                 clip = [q] + clip
@@ -1341,7 +1366,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if p.fix_final_integrity:
             _snap_integrity["S1"] = [u["id"] for u in clip]
         if mixed:
-            clip, pnote = add_payoff(clip, seed, units, p, taken)
+            clip, pnote = add_payoff(clip, seed, units, p, _taken)
             if pnote:
                 extra_notes.append(pnote)
             if trace is not None:
@@ -1391,7 +1416,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         if p.fix_final_integrity:
             _snap_integrity["S3"] = [u["id"] for u in clip]
         if p.rhythm:
-            clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]}, taken if passage else frozenset())
+            clip_r, rnotes = fit_rhythm(clip, by_id, p, {seed["id"], clip[-1]["id"]},
+                                        _taken if (passage or _variant_build) else frozenset())
             if clip_r is None:
                 if rhythm_out is not None:
                     rhythm_out.append((" ".join(u["refs"] for u in clip), rnotes[-1] if rnotes else "ритм"))
@@ -1545,24 +1571,25 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                     trace.append(_tr)
                 continue
         ids = [u["id"] for u in clip]
-        if passage and set(ids) & taken:
+        if not _variant_build and passage and set(ids) & taken:
             if trace is not None:
                 _tr["outcome"] = "taken_after_context"
                 _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                 _tr["tail_question"] = clip[-1].get("role") == "question"
                 trace.append(_tr)
             continue                      # M119: context added in front reached an earlier clip
-        if any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
-               or ids[-1] == o.units[-1] for o in out):
+        if not _variant_build and any(len(set(ids) & set(o.units)) > p.overlap_max * min(len(ids), len(o.units))
+                                       or ids[-1] == o.units[-1] for o in out):
             if trace is not None:
                 _tr["outcome"] = "overlap_or_payoff"
                 _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
                 _tr["tail_question"] = clip[-1].get("role") == "question"
                 trace.append(_tr)
             continue                      # M61: nor two clips with the same payoff (IMG_6848 M1/M4)
-        used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
-        if passage:
-            taken.update(ids)
+        if not _variant_build:
+            used_seeds.update(i for i in ids if by_id[i].get("role") in STORY)
+            if passage:
+                taken.update(ids)
         secs = sum(_dur(u) for u in clip)
         roles = [u.get("role") for u in clip]
         punch = sum(int(u.get("punch") or 0) for u in clip) / len(clip)
@@ -1609,6 +1636,11 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt)
         if p.fix_body_start:
             proposal.seed_id = seed["id"]
+        if _variant_build:
+            if set(ids) & _excluded:
+                continue
+            proposal.alt_of = _alt_of
+            proposal._alt_seed = seed["id"]
         out.append(proposal)
         if trace is not None:
             _tr["outcome"] = "pooled"
@@ -1620,7 +1652,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         trace.append({"schema": 1, "event": "truncate",
                       "pooled": len(out), "kept": min(len(out), p.clips),
                       "dropped": max(0, len(out) - p.clips)})
-    return out[:p.clips]
+    return out[:_cap if _variant_build else p.clips]
 
 
 def fill_pool(pool: Sequence["Proposal"], extra: Sequence["Proposal"]) -> list["Proposal"]:

@@ -32,6 +32,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_autocut.py \
+            tests/test_m232_a8.py \
             tests/test_select_validate.py \
             tests/test_config.py \
             tests/test_models.py \
