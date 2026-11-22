@@ -284,6 +284,7 @@ class AutocutConfig(BaseModel):
     max_shared: int = Field(0, ge=0)       # M68: thoughts two accepted clips may share (and never the same opener)
     combined_overlap_max: float = Field(1.0, ge=0.0, le=1.0)   # M177: arl auto drops a label clip sharing more of its seconds with a kept clip (1 = off)
     hook_clauses: bool = False                # M182: a cold open may be a clause of a long sentence (h:B.N@i-j)
+    hook_clauses_autocut: bool = False         # M232-A5: opt-in rescue of hookless autocut clips only
     hook_clause_pause: float = Field(0.12, ge=0.0)   # … silence heard at a clause edge inside the sentence
     start_strict: bool = False                # M182: a reel never opens on a line pointing back / at the interviewer
     start_extend_max: int = Field(2, ge=0)    # … up to this many sentences before are added to reach a start that stands

@@ -121,6 +121,7 @@ class AutoParams:
     answer_gap_sec: float = 3.0       # … the reply starts within this many seconds after the interviewer's sentence
     start_morph: bool = False         # M200: with start_strict, a reel never opens on a sentence with nothing to stand on —
                                       # a verb without a subject («Как было, так и было.») or «он/их…» before any noun
+    hook_clauses_autocut: bool = False  # M232-A5: rescue hookless autocut clips only (independent of scenarist)
 
 
 @dataclass
@@ -1269,7 +1270,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             start_pause: Callable[[str], "float | None"] | None = None,
             trace: list | None = None,
             variant_descs_out: list | None = None,
-            variant_descs: Sequence[tuple[int, int, tuple[int, ...]]] | None = None) -> list[Proposal]:
+            variant_descs: Sequence[tuple[int, int, tuple[int, ...]]] | None = None,
+            clauses: Callable[[str], list] | None = None) -> list[Proposal]:
     """Best `p.clips` proposals. `sentences(refs)` → [(B.k, seconds, words, finished)] of a unit's
     references (for the hook); None = no hook. `no_start` (M74) collects (pieces, why) of clips that found
     no start standing on its own; `judge` (M75) — the model's yes/no on a first sentence (make_judge).
@@ -1607,6 +1609,11 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
         notes = [f"#{u['id']} {u.get('role')}★{u.get('punch')} {u['refs']} — {u.get('summary') or ''}" for u in clip]
         notes += extra_notes
         cands = _hook_cands(clip, sentences, p, start_pause) if sentences else []
+        if not cands and p.hook_clauses_autocut and sentences and clauses is not None:
+            # Q3=O2: never displace an existing whole-sentence hook. A clause is always a
+            # teaser from the second half, even when the legacy hook_teaser option is off.
+            cands = _hook_cands(clip, sentences, replace(p, hook_clauses=True, hook_teaser=True),
+                                start_pause, clauses)
         close: list[str] = []
         if p.close_last and sentences:                  # M91: the payoff in the close shot
             rows = [r for u in clip for r in _sent_rows(sentences, u["refs"])]
@@ -1632,7 +1639,8 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             # M93: the post text d: is the payoff's summary even when the payoff is the opening thought — a clip
             # without it has no <rid>.txt and crosspost refuses a post without text (Pxl 112938952 r02 in m88)
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
-            opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
+            opener=opener["id"], unit_refs=unit_refs,
+            hook_keep=p.hook_teaser or bool(p.hook_clauses_autocut and cands and "@" in cands[0][0]), close=close,
             score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt)
         if p.fix_body_start:
             proposal.seed_id = seed["id"]
