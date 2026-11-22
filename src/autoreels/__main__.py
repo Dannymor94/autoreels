@@ -8632,6 +8632,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      settle_tail=ac.rhythm_tail, taste_weight=getattr(ac, "taste_weight", 0.0),
                      start_pause_min=float(getattr(ac, "start_pause_min", 0.0) or 0.0),
                      hook_clauses=bool(getattr(ac, "hook_clauses", False)),
+                     hook_clauses_autocut=ac.hook_clauses_autocut,
                      hook_clause_pause=float(getattr(ac, "hook_clause_pause", 0.12)),
                      start_strict=bool(getattr(ac, "start_strict", False)),
                      start_extend_max=int(getattr(ac, "start_extend_max", 2)),
@@ -8678,7 +8679,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
 
     start_pause = None                      # M144: the silence heard before a sentence (B.k)
     clauses = None                          # M182: clauses of a sentence that can be a cold open (B.k → spans)
-    if prm.start_pause_min or prm.hook_clauses:
+    if prm.start_pause_min or prm.hook_clauses or prm.hook_clauses_autocut:
         from autoreels.cloud.plan import SpeechTimes as _ST_sp, _speech_before as _sb_sp, load_alignment as _la_sp
         _al_sp = _la_sp(_root / "transcripts" / f"{stem}.align.json", manifest.source_sha256)
         _sm_sp = None
@@ -8705,7 +8706,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 return 9.9 if left is None else max(0.0, onset - left)
             if prm.start_pause_min:
                 start_pause = _start_pause
-            if prm.hook_clauses:
+            if prm.hook_clauses or prm.hook_clauses_autocut:
                 from autoreels.cloud.autocut import clause_spans as _clause_spans
                 from autoreels.cloud.plan import heard_pause as _hp_cl
 
@@ -8833,6 +8834,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
         pool = propose(the_map.get("units") or [], _main_params, sentences,
                        no_start=no_start, judge=judge, end_tone=end_tone, open_end=open_end, rhythm_out=rhythm_out,
                        taste=_taste, start_pause=start_pause, trace=_trace,
+                       **({"clauses": clauses} if prm.hook_clauses_autocut else {}),
                        variant_descs_out=_variant_descs if prm.seed_alt else None)
         if _trace is not None:
             from autoreels.cloud.autocut import _speed as _speed_fn

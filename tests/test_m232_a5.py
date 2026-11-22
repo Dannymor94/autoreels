@@ -80,3 +80,42 @@ def test_propose_q3_no_callback_preserves_off_parity():
     (off,) = propose(units, params, sentences)
     (on,) = propose(units, replace(params, hook_clauses_autocut=True), sentences)
     assert asdict(on) == asdict(off) and calls == []
+
+
+def test_propose_q3_new_hook_uses_unchanged_apply_parser_and_judge():
+    from autoreels.cloud.autocut import judge_hooks
+    from autoreels.cloud.montage import parse_montage
+
+    units, sentences, clauses, _calls, params = _fixture()
+    (on,) = propose(units, replace(params, hook_clauses_autocut=True), sentences, clauses=clauses)
+    parsed, errors = parse_montage(on.line("1") + "\n")
+    assert not errors and len(parsed) == 1
+    assert parsed[0].hook == (1, 2) and parsed[0].hook_words == (3, 9)
+    assert parsed[0].hook_keep
+    judge_hooks(on, lambda *_args: (False, "synthetic veto"), "synthetic", log=lambda _: None)
+    assert on.hook is None and on.hooks == [] and any("synthetic veto" in note for note in on.notes)
+
+
+def test_m232_a5_cli_flag_wiring_keeps_scenarist_flag_independent(tmp_path, monkeypatch):
+    """Real cmd_autocut parsing and wiring, without owner media or a live provider."""
+    from autoreels.cloud import autocut as ac_mod
+    from tests.test_m231_trace import _montage_project
+
+    project = _montage_project(tmp_path)
+    align = tmp_path / "transcripts" / "v.align.json"
+    align.write_text('{"version":1,"words":[],"source_sha256":"' + "f" * 64 + '"}', encoding="utf-8")
+    seen = []
+
+    def spy_propose(_units, params, _sentences, **kwargs):
+        seen.append((params.hook_clauses, params.hook_clauses_autocut,
+                     "clauses" in kwargs, callable(kwargs.get("clauses"))))
+        return []
+
+    monkeypatch.setattr(ac_mod, "propose", spy_propose)
+    call = lambda over=None: project["cli"].cmd_autocut(  # noqa: E731
+        "v", root=tmp_path, cache_dir=tmp_path / "cache", check=False, ac_over=over)
+    assert call() == 0
+    assert call(["hook_clauses_autocut=true"]) == 0
+    # The weak-seed probe is separate and not part of this bounded A5 contract.
+    assert seen == [(True, False, False, False)] * 2 + [
+        (True, True, True, True), (True, True, False, False)]
