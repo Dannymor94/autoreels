@@ -8614,7 +8614,7 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      hook_min_sec=ac.hook_min_sec, speed_slow_rate=ac.speed_slow_rate, speed_slow=ac.speed_slow,
                      speed_mid_rate=ac.speed_mid_rate, speed_mid=ac.speed_mid,
                      context_start=ac.context_start, fix_context_min_sec=ac.fix_context_min_sec,
-                     fix_final_integrity=ac.fix_final_integrity,
+                     fix_final_integrity=ac.fix_final_integrity, fix_body_start=ac.fix_body_start,
                      context_max_sec=ac.context_max_sec,
                      context_drop_words=ac.context_drop_words, context_min_words=ac.context_min_words,
                      context_back=ac.context_back, context_later=ac.context_later,
@@ -8636,6 +8636,9 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                      answer_start=bool(getattr(ac, "answer_start", False)),
                      answer_gap_sec=float(getattr(ac, "answer_gap_sec", 3.0)),
                      start_morph=bool(getattr(ac, "start_morph", False)))
+    if prm.fix_body_start and prm.start_strict and prm.start_morph and not scenario:
+        from autoreels.cloud.clipcheck import require_morph
+        require_morph()  # A3: fail before montage generation / selection, even for an empty pool
     _taste = None
     if prm.taste_weight:
         # M138: the owner's taste orders the proposals (invariant 1: the order only)
@@ -9058,6 +9061,61 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
             broken = _final_integrity({"S0": initial, "CLI": shortened}, source)
             return broken[1] if broken else None
 
+        def _shortening_body(before, candidate) -> str | None:
+            """A3: re-evaluate every prospective M167/M173 shape before adoption.
+
+            Both the following sentence and final played unit may change while
+            the first ref stays fixed. The map, actual pieces and original seed
+            are required; absent/ambiguous evidence is a rejection, never OK.
+            """
+            from autoreels.cloud.autocut import _strict_body_why, stands_alone
+            from autoreels.cloud.scenario import expand_refs
+
+            source = {u["id"]: u for u in (the_map.get("units") or [])}
+            seed_id = getattr(before, "seed_id", None)
+            if type(seed_id) is not int or seed_id not in source:
+                return "неизвестная исходная мысль"
+            try:
+                heard = expand_refs(candidate.pieces) or []
+                if not heard or len(heard) != len(set(heard)):
+                    return "нет однозначного списка звучащих фраз"
+                heard_set = set(heard)
+                owners: dict[str, int] = {}
+                for uid in candidate.units:
+                    if type(uid) is not int or uid not in source:
+                        return "неизвестная мысль в карте"
+                    available = expand_refs(candidate.unit_refs.get(uid) or source[uid].get("refs") or "") or []
+                    for ref in available:
+                        if ref in heard_set:
+                            if ref in owners and owners[ref] != uid:
+                                return "неоднозначная привязка звучащей фразы к мысли"
+                            owners[ref] = uid
+            except (TypeError, ValueError, KeyError, AttributeError):
+                return "некорректные ссылки на звучащие фразы"
+            if len(owners) != len(heard_set):
+                return "не найдена мысль для звучащей фразы"
+
+            def _text(ref: str) -> str | None:
+                words = sent_by_ref.get(ref)
+                if not words:
+                    return None
+                value = " ".join(str(w.word) for w in words if getattr(w, "word", "")).strip()
+                return value or None
+
+            first = _text(heard[0])
+            following = _text(heard[1]) if len(heard) > 1 else ""
+            if first is None or following is None:
+                return "нет текста первой или следующей звучащей фразы"
+            last_id = owners[heard[-1]]
+            summaries = (str(source[seed_id].get("summary") or "").strip(),
+                         str(source[last_id].get("summary") or "").strip())
+            if not all(summaries):
+                return "нет исходной или заключительной темы для проверки начала"
+            core = " ".join(dict.fromkeys(summaries))
+            # No new glue decision: only the semantic component of context_start.
+            return (stands_alone(first, following, prm, judge, core)
+                    or _strict_body_why(first, prm))
+
         # M167 (m167: 10h59 13 → 8 clips): no room after the last word — end one sentence earlier, up to twice, while
         # the clip keeps min_sec (the rule of the ends: a clip lands on a finished sentence the next speech leaves room for)
         for _ in range(2):
@@ -9071,6 +9129,12 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 if _unsafe is not None:
                     pr.notes.append(f"укорочение не взято: {_unsafe}")
                     break
+            if prm.fix_body_start and not scenario:
+                _unsafe = _shortening_body(pr, _short)
+                if _unsafe is not None:
+                    pr.notes.append(f"укорочение не взято: {_unsafe}")
+                    break
+                _short.seed_id = pr.seed_id  # dataclasses.replace omits this nonserialized attribute
             pr.notes.append(f"конец: после последнего слова нет места до следующей речи — клип кончается фразой раньше "
                             f"({pr.pieces} → {_short.pieces})")
             _short.notes = pr.notes
@@ -9091,6 +9155,12 @@ def cmd_autocut(target: str, *, root=None, cache_dir=None, clips: int | None = N
                 if _unsafe is not None:
                     pr.notes.append(f"укорочение не взято: {_unsafe}")
                     break
+            if prm.fix_body_start and not scenario:
+                _unsafe = _shortening_body(pr, _less)
+                if _unsafe is not None:
+                    pr.notes.append(f"укорочение не взято: {_unsafe}")
+                    break
+                _less.seed_id = pr.seed_id
             pr.notes.append(f"скачок кадра: короткий план между двумя сменами картинки — фразы этого плана убраны "
                             f"({pr.pieces} → {_less.pieces})")
             _less.notes = pr.notes

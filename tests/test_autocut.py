@@ -1834,3 +1834,404 @@ def test_a2_tc8b_pin_rhythm_rejects_after_open_end_trimming(monkeypatch):
                          sentences=lambda refs: [("1.1", 30., 12, True)],
                          end_tone=lambda r: "open", rhythm_out=rhythm, open_end=open_ends)
         assert result == [] and len(rhythm) == 1 and not open_ends
+
+
+# M232-A3: synthetic fail-before oracles; no owner media, network, or render.
+def test_a3_fx2g_strict_semantic_start_cannot_use_timing_soft_fallback():
+    from autoreels.cloud.autocut import context_start
+
+    unit = U(1, 0, 25, "thesis", 5, "1.1", summary="Смысл разговора")
+    sentence = lambda _: [("1.1", 25.0, 2, True, "Да, конечно.")]
+    base = AutoParams(context_start=True, min_sec=1, start_strict=True,
+                      answer_start=True, start_pause_min=0.2, loop=False, prune=False)
+    # Fail-before: the old M145 timing-only soft path accepts this answer.
+    old, old_notes, old_why = context_start([unit], {1: unit}, base, sentence,
+                                            seed_id=1, start_pause=lambda _: 0.0)
+    assert old and old_why is None and any("оставлено" in n for n in old_notes)
+    fixed, _notes, why = context_start([unit], {1: unit}, replace(base, fix_body_start=True), sentence,
+                                       seed_id=1, start_pause=lambda _: 0.0)
+    assert fixed is None and why
+
+
+def test_a3_valid_timing_soft_and_question_first_survive():
+    from autoreels.cloud.autocut import context_start
+
+    unit = U(1, 0, 25, "thesis", 5, "1.1", summary="Смысл разговора")
+    base = AutoParams(context_start=True, min_sec=1, start_strict=True, answer_start=True,
+                      fix_body_start=True, start_pause_min=0.2, loop=False, prune=False)
+    for content in ("Человек самостоятельно выбирает своё направление.", "А что помогает человеку выбрать путь?"):
+        result, notes, why = context_start([unit], {1: unit}, base,
+                                           lambda _: [("1.1", 25.0, 6, True, content)],
+                                           seed_id=1, start_pause=lambda _: 0.0)
+        assert result and why is None and any("оставлено" in n for n in notes)
+
+
+def test_a3_strict_morph_is_required_even_on_empty_sentence_lookup(monkeypatch):
+    from autoreels.cloud import clipcheck
+    from autoreels.cloud.autocut import context_start
+
+    unit = U(1, 0, 25, "thesis", 5, "1.1")
+    monkeypatch.setattr(clipcheck, "require_morph", lambda: (_ for _ in ()).throw(RuntimeError("MORPH_MISSING")))
+    p = AutoParams(fix_body_start=True, start_strict=True, start_morph=True)
+    with pytest.raises(RuntimeError, match="MORPH_MISSING"):
+        context_start([unit], {1: unit}, p, lambda _: [], seed_id=1)
+
+
+def _a3_cli_seed(tmp_path, number=3):
+    """Use only committed synthetic transcript words and map in a scratch project."""
+    project = _montage_project(tmp_path)
+    refs = project["refs"][:number]
+    units = [U(i, 40 + i * 15, 14, "thesis" if i == 1 else "conclusion", 5,
+               ref, summary={1: "Исходная тема", 2: "Промежуточный вывод",
+                             3: "Итоговая тема"}.get(i, f"Мысль {i}"))
+             for i, ref in enumerate(refs, 1)]
+    path = tmp_path / "transcripts" / "v.map.json"
+    map_json = json.loads(path.read_text(encoding="utf-8"))
+    map_json["units"] = units
+    path.write_text(json.dumps(map_json), encoding="utf-8")
+    return project, refs
+
+
+@pytest.mark.parametrize("origin", ["main", "weak"])
+def test_a3_following_rechecked_if_first_ref_unchanged(tmp_path, monkeypatch, origin):
+    """A3-FOLLOW: M173 deletes the *second* sentence; old first ref stays put."""
+    from autoreels import __main__ as cli
+
+    project, (r1, r2, r3) = _a3_cli_seed(tmp_path)
+    created, calls, semantic = [], [], []
+    t0 = project["sbr"][r2][0].t0
+    next_text = " ".join(w.word for w in project["sbr"][r3])
+
+    def make_proposal(_units, params, *args, **kwargs):
+        if (origin == "weak") != (params.seed_punch < 4):
+            return []
+        pr = Proposal([1, 2, 3], f"{r1} {r2} {r3}", None, "", "", 80, 30)
+        pr.seed_id = 1
+        created.append(pr)
+        return [pr]
+
+    def fake_check(*args):
+        calls.append(args[1])
+        return (f"short shot whole sentences s1@{t0:.3f}", "") if len(calls) == 1 else (None, "")
+
+    def fake_semantic(first, following, params, judge, core):
+        semantic.append((first, following, core))
+        return "fake judge: following changed" if following == next_text else None
+
+    monkeypatch.setattr(ac, "propose", make_proposal)
+    monkeypatch.setattr(ac, "stands_alone", fake_semantic)
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    args = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), llm="none", clips=1,
+                check=True, voice_keys=False)
+    extra = ["fill_seed_punch=3", "seed_punch=4"] if origin == "weak" else []
+    assert cli.cmd_autocut("v", **args, ac_over=extra) == 0
+    assert len(calls) == 2  # fail-before: old shortening accepted
+    calls.clear()
+    assert cli.cmd_autocut("v", **args, ac_over=extra + ["fix_body_start=true", "start_morph=false"]) == 0
+    assert len(calls) == 1  # never apply or re-check rejected candidate
+    assert len(semantic) == 1 and semantic[0][1] == next_text
+    assert semantic[0][2] == "Исходная тема Итоговая тема"
+    assert sum("укорочение не взято" in n for n in created[-1].notes) == 1
+    review = (tmp_path / "reviews/v_auto_m56.txt").read_text(encoding="utf-8")
+    assert "# --- не прошли проверку" in review
+    assert "short shot whole sentences" in review  # preserved original error
+
+
+def test_a3_one_sentence_following_is_empty_and_core_uses_new_last_unit(tmp_path, monkeypatch):
+    """A3-ONE/CORE: M167 removes the last unit; next text is empty for one sentence."""
+    from autoreels import __main__ as cli
+
+    _project, (r1, r2) = _a3_cli_seed(tmp_path, number=2)
+    pr = Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30)
+    pr.seed_id = 1
+    monkeypatch.setattr(ac, "propose", lambda *args, **kwargs: [pr])
+    calls, semantic = [], []
+
+    def fake_check(*args):
+        calls.append(args[1])
+        return ("no room after last word", "") if len(calls) == 1 else (None, "")
+
+    def fake_semantic(first, following, params, judge, core):
+        semantic.append((first, following, core))
+        return None
+
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    monkeypatch.setattr(ac, "stands_alone", fake_semantic)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                           llm="none", check=True, clips=1, voice_keys=False,
+                           ac_over=["fix_body_start=true", "start_morph=false"]) == 0
+    assert len(calls) == 2 and len(semantic) == 1
+    assert semantic[0][1] == "" and semantic[0][2] == "Исходная тема"
+    assert "# --- M1" in (tmp_path / "reviews/v_auto_m56.txt").read_text(encoding="utf-8")
+
+
+def test_a3_scenario_bytes_unchanged_with_flag_on(tmp_path, monkeypatch):
+    """A3-ORIGIN: scenario shortening is byte-for-byte outside A3."""
+    from autoreels import __main__ as cli
+
+    project, (r1, r2) = _a3_cli_seed(tmp_path, number=2)
+    monkeypatch.setattr(cli, "_scenario_pool", lambda *args, **kwargs: [
+        Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30)])
+    t0 = project["sbr"][r1][0].t0
+    calls = []
+
+    def fake_check(*args):
+        calls.append(args[1])
+        return (f"short shot whole sentences s1@{t0:.3f}", "") if len(calls) % 2 else (None, "")
+
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    args = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), check=True,
+                scenario=True, llm="none", clips=1, voice_keys=False)
+    assert cli.cmd_autocut("v", **args) == 0
+    off = (tmp_path / "reviews/v_auto_m56.txt").read_bytes()
+    calls.clear()
+    assert cli.cmd_autocut("v", **args, ac_over=["fix_body_start=true"]) == 0
+    assert (tmp_path / "reviews/v_auto_m56.txt").read_bytes() == off
+    assert len(calls) == 2
+
+
+def test_a3_cli_requires_morph_before_montage_even_with_empty_pool(tmp_path, monkeypatch):
+    """A3-MORPH: no silent downgrade if required morphology is unavailable."""
+    from autoreels import __main__ as cli
+    from autoreels.cloud import clipcheck
+
+    _a3_cli_seed(tmp_path, number=1)
+    generated, checked = [], []
+    monkeypatch.setattr(ac, "propose", lambda *args, **kwargs: generated.append(True) or [])
+    monkeypatch.setattr(cli, "_autocut_check", lambda *args: checked.append(True) or (None, ""))
+    monkeypatch.setattr(clipcheck, "require_morph", lambda: (_ for _ in ()).throw(RuntimeError("MORPH_MISSING")))
+    with pytest.raises(RuntimeError, match="MORPH_MISSING"):
+        cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                        llm="none", check=True, clips=1, voice_keys=False,
+                        ac_over=["fix_body_start=true", "start_strict=true", "start_morph=true"])
+    assert not generated and not checked
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_a3_four_shortening_semantic_probes_and_fake_budget(tmp_path, monkeypatch, configured):
+    """A3-RATE: 2×M167 + 2×M173, ≤4 probes, ≤8 fake cold judge attempts."""
+    from autoreels import __main__ as cli
+
+    project, refs = _a3_cli_seed(tmp_path, number=5)
+    pr = Proposal([1, 2, 3, 4, 5], " ".join(refs), None, "", "", 80, 40)
+    pr.seed_id = 1
+    monkeypatch.setattr(ac, "propose", lambda *args, **kwargs: [pr])
+    checks, probes, requests = [], [], []
+
+    def fake_check(*args):
+        checks.append(args[1])
+        stage = len(checks)
+        if stage <= 2:
+            return "no room after last word", ""
+        if stage in (3, 4):
+            t0 = float(project["sbr"][refs[stage - 2]][0].t0)
+            return f"short shot whole sentences s1@{t0:.3f}", ""
+        return None, ""
+
+    def semantic(first, following, params, judge, core):
+        probes.append((first, following, core))
+        return judge(first, following, core) if judge is not None else None
+
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    monkeypatch.setattr(ac, "stands_alone", semantic)
+    opts = ["fix_body_start=true", "start_morph=false"]
+    provider = None
+    if configured:
+        class FakeProvider:
+            model_id = "A3_SYNTHETIC"
+
+        provider = FakeProvider()
+
+        def fake_make_judge(*args, **kwargs):
+            def cold(first, following, core):
+                requests.extend([(first, following, core), (first, following, core)])
+                return None  # two failed fake attempts, rules keep the candidate
+            return cold
+
+        monkeypatch.setattr(ac, "make_judge", fake_make_judge)
+        monkeypatch.setattr(ac, "rank_hooks", lambda *args, **kwargs: None)
+        opts += ["context_start=true", "context_judge=true", "hook_judge=false",
+                 "hook_title=false", "seam_check=false", "keywords=0"]
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                           llm="auto" if configured else "none", provider=provider,
+                           check=True, clips=1, voice_keys=False, ac_over=opts) == 0
+    assert len(checks) == 5 and len(probes) == 4
+    assert len(requests) == (8 if configured else 0)
+    assert all(x == probes[i] for i in range(4) for x in requests[i*2:i*2+2]) if configured else not requests
+
+
+def test_a3_fx2s_m173_new_first_sentence_strict_invalid_refused(tmp_path, monkeypatch):
+    """FX-2S: when M173 removes the first sentence, do not publish a strict-invalid successor."""
+    from autoreels import __main__ as cli
+
+    project, (r1, r2, r3) = _a3_cli_seed(tmp_path)
+    created, calls = [], []
+    t0 = project["sbr"][r1][0].t0
+    banned = " ".join(w.word for w in project["sbr"][r2])
+
+    def proposed(*args, **kwargs):
+        pr = Proposal([1, 2, 3], f"{r1} {r2} {r3}", None, "", "", 80, 30)
+        pr.seed_id = 1
+        created.append(pr)
+        return [pr]
+
+    def fake_check(*args):
+        calls.append(args[1])
+        return (f"short shot whole sentences s1@{t0:.3f}", "") if len(calls) == 1 else (None, "")
+
+    monkeypatch.setattr(ac, "propose", proposed)
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    monkeypatch.setattr(ac, "strict_start_reason", lambda text: "strict-invalid" if text == banned else None)
+    args = dict(root=tmp_path, cache_dir=str(tmp_path / "cache"), llm="none", clips=1,
+                check=True, voice_keys=False)
+    assert cli.cmd_autocut("v", **args) == 0
+    assert len(calls) == 2  # legacy accepts shortened first r2
+    calls.clear()
+    assert cli.cmd_autocut("v", **args, ac_over=["fix_body_start=true", "start_morph=false"]) == 0
+    assert len(calls) == 1 and len(created) >= 2
+    assert any("укорочение не взято" in n and "strict-invalid" in n for pr in created for n in pr.notes)
+    review = (tmp_path / "reviews/v_auto_m56.txt").read_text(encoding="utf-8")
+    assert "short shot whole sentences" in review and "#! M 80" in review
+
+
+def test_a3_core_change_with_following_unchanged(tmp_path, monkeypatch):
+    """A3-CORE: only last unit changes; seed is not Proposal.opener."""
+    from autoreels import __main__ as cli
+
+    project, (r1, r2, r3) = _a3_cli_seed(tmp_path)
+    pr = Proposal([1, 2, 3], f"{r1} {r2} {r3}", None, "", "", 80, 30, opener=3)
+    pr.seed_id = 1
+    monkeypatch.setattr(ac, "propose", lambda *args, **kwargs: [pr])
+    calls, probe = [], []
+
+    def fake_check(*args):
+        calls.append(args[1])
+        return ("no room after last word", "") if len(calls) == 1 else (None, "")
+
+    def fake_semantic(first, following, params, judge, core):
+        probe.append((following, core))
+        return None
+
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    monkeypatch.setattr(ac, "stands_alone", fake_semantic)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                           llm="none", check=True, clips=1, voice_keys=False,
+                           ac_over=["fix_body_start=true", "start_morph=false"]) == 0
+    next_text = " ".join(w.word for w in project["sbr"][r2])
+    assert len(calls) == 2 and probe == [(next_text, "Исходная тема Промежуточный вывод")]
+
+
+def test_a3_unresolved_seed_rejects_reversible_shortening(tmp_path, monkeypatch):
+    """Missing original seed is never guessed from opener or first unit."""
+    from autoreels import __main__ as cli
+
+    _project, (r1, r2) = _a3_cli_seed(tmp_path, number=2)
+    created, calls = [], []
+
+    def proposed(*args, **kwargs):
+        pr = Proposal([1, 2], f"{r1} {r2}", None, "", "", 80, 30, opener=1)
+        created.append(pr)  # intentionally no seed_id
+        return [pr]
+
+    monkeypatch.setattr(ac, "propose", proposed)
+
+    def fake_check(*args):
+        calls.append(args[1])
+        return "no room after last word", ""
+
+    monkeypatch.setattr(cli, "_autocut_check", fake_check)
+    assert cli.cmd_autocut("v", root=tmp_path, cache_dir=str(tmp_path / "cache"),
+                           llm="none", check=True, clips=1, voice_keys=False,
+                           ac_over=["fix_body_start=true", "start_morph=false"]) == 0
+    assert len(calls) == 1 and sum("укорочение не взято" in n for n in created[0].notes) == 1
+    assert "неизвестная исходная мысль" in created[0].notes[-1]
+
+
+def test_a3_real_propose_populates_unserialized_original_seed():
+    """Flag OFF keeps dataclasses.asdict golden unchanged; ON keeps seed for CLI."""
+    from dataclasses import asdict
+
+    one = U(1, 0, 30, "thesis", 5, "1.1", summary="Независимая мысль")
+    p = AutoParams(clips=1, min_sec=1, max_sec=80, loop=False, prune=False,
+                   context_start=True, fix_body_start=True, start_strict=True, start_morph=False)
+    sentences = lambda _: [("1.1", 30.0, 4, True, "Человек выбирает собственный путь.")]
+    result = propose([one], p, sentences)
+    assert len(result) == 1 and result[0].seed_id == 1
+    assert "seed_id" not in asdict(result[0])
+    baseline = propose([one], replace(p, fix_body_start=False), sentences)
+    assert asdict(result[0]) == asdict(baseline[0])
+
+
+def test_a3_flag_is_typed_and_defaults_off():
+    from autoreels.core.config import AutocutConfig
+
+    assert AutoParams().fix_body_start is False
+    assert AutocutConfig().fix_body_start is False
+    assert AutocutConfig.model_validate({"fix_body_start": True}).fix_body_start is True
+    with pytest.raises(Exception):
+        AutocutConfig.model_validate({"fix_body_start": "not a boolean"})
+
+
+def test_a3_m197_long_answer_can_drop_only_to_a_valid_remaining_start():
+    """R3 §2.3: M197 removes a long first answer independent of context_drop_words."""
+    from autoreels.cloud.autocut import context_start, _strict_body_why
+
+    unit = U(1, 0, 30, "thesis", 5, "1.1-2")
+    rows = [("1.1", 15.0, 12, True, "Да, конечно, если рассматривать этот путь, многое можно изменить."),
+            ("1.2", 15.0, 6, True, "Человек постепенно учится понимать собственные потребности.")]
+    def sentences(refs):
+        return rows if refs == "1.1-2" else [row for row in rows if row[0] == refs]
+
+    base = AutoParams(context_start=True, min_sec=12, context_drop_words=2,
+                      start_strict=True, answer_start=True)
+    old, _, why = context_start([unit], {1: unit}, base, sentences, seed_id=1)
+    assert why is None and old and old[0]["refs"] == "1.1-2"
+    assert _strict_body_why(rows[0][4], base) is None  # OFF means strict helper is inert
+
+    on = replace(base, fix_body_start=True)
+    fixed, notes, why = context_start([unit], {1: unit}, on, sentences, seed_id=1)
+    assert why is None and fixed and fixed[0]["refs"] == "1.2"
+    assert sum("убрана фраза" in note for note in notes) == 1
+
+    too_short, _, why = context_start([unit], {1: unit}, replace(on, min_sec=20),
+                                       sentences, seed_id=1)
+    assert too_short is None and why and "ответ" in why
+
+    bad_rows = [rows[0], ("1.2", 15.0, 2, True, "Да, конечно.")]
+    no_repair, _, why = context_start([unit], {1: unit}, on,
+                                       lambda refs: bad_rows if refs == "1.1-2" else [r for r in bad_rows if r[0] == refs],
+                                       seed_id=1)
+    assert no_repair is None and why and "ответ" in why
+
+
+@pytest.mark.parametrize("repair", ["short_drop", "back_context", "later_sentence"])
+def test_a3_each_context_repair_checks_strict_semantics(repair):
+    """The old M74/M76 repair points may not substitute a strict-invalid opener."""
+    from autoreels.cloud.autocut import context_start
+
+    first = ("2.1", 10.0, 3, True, "И второй момент.")
+    invalid = ("2.2", 15.0, 2, True, "Да, конечно.")
+    prev = ("1.1", 10.0, 2, True, "Да, конечно.")
+    unit = U(2, 11, 25, "thesis", 5, "2.1-2", summary="Тема начала")
+    predecessor = U(1, 0, 10, "aside", 2, "1.1")
+    lookup = {2: unit, 1: predecessor} if repair == "back_context" else {2: unit}
+
+    def sentences(refs):
+        if refs == "2.1-2":
+            return [first, invalid]
+        return [x for x in (first, invalid, prev) if x[0] == refs]
+
+    base = AutoParams(context_start=True, min_sec=1, start_strict=True, answer_start=True,
+                      context_drop_words=4 if repair == "short_drop" else 0,
+                      context_later=repair == "later_sentence", context_later_min_sec=1,
+                      context_back=1, context_max_sec=15)
+    old, _, old_reason = context_start([unit], lookup, base, sentences, seed_id=2)
+    assert old and old_reason is None
+    if repair == "back_context":
+        assert old[0]["id"] == 1
+    else:
+        assert old[0]["refs"] == "2.2"
+
+    guarded, _, why = context_start([unit], lookup, replace(base, fix_body_start=True),
+                                     sentences, seed_id=2)
+    assert guarded is None and why

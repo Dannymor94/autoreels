@@ -26,7 +26,7 @@ Pure: the map's units and a sentence lookup in, proposals out.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Callable, Sequence
+from typing import Callable, ClassVar, Sequence
 
 from autoreels.cloud.providers import brief_error
 
@@ -65,6 +65,7 @@ class AutoParams:
     context_start: bool = False
     fix_context_min_sec: bool = False   # M232-A1: never shorten a repaired start below min_sec
     fix_final_integrity: bool = False    # M232-A2: reject lost established supports and question tails
+    fix_body_start: bool = False         # M232-A3: validate strict body starts, including CLI shortening
     context_max_sec: float = 15.0     # … the thought right before may be added as context, at most this long
     context_drop_words: int = 5       # … a leaning first sentence of at most this many words may be dropped
     # M75 (M74 report: «Уйти.», «Контролер, да, допустим.», «Из чувства вины…» after its question was dropped):
@@ -121,6 +122,9 @@ class AutoParams:
 
 @dataclass
 class Proposal:
+    # M232-A3: populated only for flagged montage proposals. ClassVar deliberately
+    # stays outside dataclasses.asdict()/the frozen M231 serialized OFF golden.
+    seed_id: ClassVar[int | None] = None
     units: list[int]                  # play order
     pieces: str                       # "13.2-5 14.1 41.3-4"
     hook: str | None
@@ -717,6 +721,41 @@ def stands_alone(text: str, following: str, p: "AutoParams", judge: "Judge | Non
     return None
 
 
+def _strict_body_why(text: str, p: "AutoParams") -> str | None:
+    """A3: the same strict opener policy as the automatic label path.
+
+    The question-first exemption applies only to these extra checks; the
+    existing stands_alone predicate still judges the question itself.
+    """
+    if not p.fix_body_start or not p.start_strict or text.rstrip().endswith("?"):
+        return None
+    if not text or not text.strip():
+        return "нет текста первой фразы"
+    why = strict_start_reason(text)
+    if why:
+        return why
+    if p.answer_start:
+        why = answer_start_reason(text)
+        if why:
+            return why
+    if p.start_morph:
+        from autoreels.cloud.clipcheck import start_morph
+        why = start_morph(text.split())
+        if why:
+            return why
+    return None
+
+
+def _start_why(ref: str, text: str, following: str, p: "AutoParams",
+               judge: "Judge | None" = None, core: str = "",
+               start_pause: Callable[[str], "float | None"] | None = None
+               ) -> tuple[str | None, str | None]:
+    """Return independent (timing, semantic) decisions for the actual opener."""
+    timing = glued_start(ref, p, start_pause)
+    semantic = stands_alone(text, following, p, judge, core) or _strict_body_why(text, p)
+    return timing, semantic
+
+
 def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, seed_id: int | None = None,
                   loop_id: int | None = None, judge: "Judge | None" = None,
                   start_pause: Callable[[str], "float | None"] | None = None
@@ -735,30 +774,47 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
     M144: a start glued to the speech before it (glued_start, p.start_pause_min) is repaired by the same steps.
     M145 (m144: rejecting the clips whose glued start found no repair cut the owner's covered clips 40 → 27): a clip
     whose start stands on its own and is ONLY glued keeps its start when no repair works — noted, not dropped."""
+    if p.fix_body_start and p.start_strict and p.start_morph:
+        from autoreels.cloud.clipcheck import require_morph
+        require_morph()  # before any early return, even when sentence lookup is empty
     notes: list[str] = []
     # M78: what the clip is about (its seed and its payoff) — the model judges whether the start leads into it
     core = " ".join(dict.fromkeys(str(by_id[i].get("summary") or "") for i in (seed_id, clip[-1]["id"])
                                   if i in by_id)).strip()
+
+    def _candidate_ok(ref: str, text: str, following: str) -> bool:
+        if p.fix_body_start:
+            return _start_why(ref, text, following, p, judge, core, start_pause) == (None, None)
+        return (glued_start(ref, p, start_pause) is None
+                and stands_alone(text, following, p, judge, core) is None)
+
     soft = None
     for _ in range(6):
         u = clip[0]
         rows = list(_sent_rows(sentences, u["refs"]))
         if not rows:
+            if p.fix_body_start:
+                return None, notes, "нет текста первой фразы"
             return clip, notes, None
         first = rows[0][4] or rows[0][0]
         nxt = rows[1][4] if len(rows) > 1 else ""
-        _glued = glued_start(rows[0][0], p, start_pause)
-        _alone = stands_alone(rows[0][4], nxt, p, judge, core)
+        if p.fix_body_start:
+            _glued, _alone = _start_why(rows[0][0], rows[0][4], nxt, p, judge, core, start_pause)
+        else:
+            _glued = glued_start(rows[0][0], p, start_pause)
+            _alone = stands_alone(rows[0][4], nxt, p, judge, core)
         why = _glued or _alone
         if not why:
             return clip, notes, None
         if _glued and _alone is None and soft is None:
             soft = (clip, list(notes), _glued)       # M145: the start is fine but glued — kept if nothing repairs it
-        if (len(rows) >= 2 and rows[0][2] <= p.context_drop_words and not first.rstrip().endswith("?")
-                and (not p.fix_context_min_sec
+        _answer_drop = (p.fix_body_start and p.start_strict and p.answer_start
+                        and answer_start_reason(first) is not None)
+        if (len(rows) >= 2 and (rows[0][2] <= p.context_drop_words or _answer_drop)
+                and not first.rstrip().endswith("?")
+                and (not (p.fix_context_min_sec or _answer_drop)
                      or sum(_dur(c) for c in clip) - float(rows[0][1]) >= p.min_sec)
-                and glued_start(rows[1][0], p, start_pause) is None
-                and stands_alone(rows[1][4], rows[2][4] if len(rows) > 2 else "", p, judge, core) is None):
+                and _candidate_ok(rows[1][0], rows[1][4], rows[2][4] if len(rows) > 2 else "")):
             refs = _drop_first_ref(u["refs"])
             if refs:
                 clip = [{**u, "refs": refs, "t0": float(u["t0"]) + float(rows[0][1])}] + clip[1:]
@@ -780,8 +836,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                     break
                 prow = list(_sent_rows(sentences, prev["refs"]))
                 after = prow[1][4] if len(prow) > 1 else (list(_sent_rows(sentences, nxt_u["refs"])) or [("",) * 5])[0][4]
-                if prow and glued_start(prow[0][0], p, start_pause) is None \
-                        and stands_alone(prow[0][4], after, p, judge, core) is None:
+                if prow and _candidate_ok(prow[0][0], prow[0][4], after):
                     notes.append(f"начало: добавлен{'а мысль' if len(ctx) == 1 else 'ы мысли'} "
                                  + ", ".join(f"#{c['id']}" for c in ctx)
                                  + f" «{(prow[0][4] or '')[:50]}» перед «{first[:50]}» ({why}) — контекст")
@@ -794,8 +849,7 @@ def context_start(clip: list[dict], by_id: dict, p: "AutoParams", sentences, *, 
                 left = sum(float(r[1]) for r in rows[k:])
                 if left < p.context_later_min_sec or sum(_dur(c) for c in clip) - (total - left) < p.min_sec:
                     break
-                if glued_start(rows[k][0], p, start_pause) is None \
-                        and stands_alone(rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else "", p, judge, core) is None:
+                if _candidate_ok(rows[k][0], rows[k][4], rows[k + 1][4] if k + 1 < len(rows) else ""):
                     refs = u["refs"]
                     for _ in range(k):
                         refs = _drop_first_ref(refs) or refs
@@ -1529,7 +1583,7 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
                          f"с {TEASER_PROBE_POS:.0%} клипа нашлось бы {probe})")
         if clip[0].get("role") == "question" and clip[0]["t0"] > min(u["t0"] for u in clip):
             notes.append("вопрос из более позднего места открывает клип (вопрос-петля)")
-        out.append(Proposal(
+        proposal = Proposal(
             units=ids, pieces=" ".join(u["refs"] for u in clip),
             hook=cands[0][0] if cands else None, hooks=[r for r, _, _ in cands],
             hook_texts={r: (t, sc) for r, sc, t in cands}, speed=_speed(clip, p),
@@ -1537,7 +1591,10 @@ def propose(units: Sequence[dict], p: AutoParams = AutoParams(),
             # without it has no <rid>.txt and crosspost refuses a post without text (Pxl 112938952 r02 in m88)
             title=_clean(opener.get("summary")), caption=_clean(payoff.get("summary") or opener.get("summary")),
             opener=opener["id"], unit_refs=unit_refs, hook_keep=p.hook_teaser, close=close,
-            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt))
+            score=max(40, min(95, round(score))), seconds=round(secs, 1), notes=notes, start_doubt=start_doubt)
+        if p.fix_body_start:
+            proposal.seed_id = seed["id"]
+        out.append(proposal)
         if trace is not None:
             _tr["outcome"] = "pooled"
             _tr["spans_final"] = [[u["id"], u["refs"], float(u["t0"]), float(u["t1"])] for u in clip]
