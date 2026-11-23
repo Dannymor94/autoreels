@@ -19,7 +19,7 @@ def rating(pid, arm, verdict, i):
 
 
 def experiment(pairs, ratings, **overrides):
-    record = dict(schema_version=1, experiment_id="pilot1", code_sha="a" * 64,
+    record = dict(schema_version=1, experiment_id="pilot1", code_sha="a" * 40,
                   seed="seed", frozen=True, media_go_ref="G0_SYNTHETIC",
                   snapshot_hash=snapshot_hash(pairs, ratings))
     record.update(overrides)
@@ -137,3 +137,32 @@ def test_score_boundaries_and_all_verdicts_reasons():
     for invalid in (True, 1.0, 0, 6, float("nan")):
         with pytest.raises(EvaluationError):
             validate_rating(dict(r, scores={**r["scores"], "hook": invalid}))
+
+
+def test_real_git_sha40_accepted_and_wrong_width_rejected():
+    pairs, ratings = [], []
+    exp = experiment(pairs, ratings, code_sha="ab7ba2238e1127c39ec8da79c74a958edf348515")
+    assert summary(pairs, ratings, exp)["total_pairs"] == 0
+    for bad in ("a" * 64, "a" * 39, "g" * 40, 123, True):
+        with pytest.raises(EvaluationError):
+            summary(pairs, ratings, experiment(pairs, ratings, code_sha=bad))
+
+
+def test_cycle_and_excessive_nesting_are_controlled_failures():
+    for cyclic in ({}, []):
+        if isinstance(cyclic, dict):
+            cyclic["nested"] = cyclic
+        else:
+            cyclic.append(cyclic)
+        with pytest.raises(EvaluationError):
+            canonical_hash({"nested": cyclic})
+    nested = None
+    for _ in range(80):
+        nested = {"next": nested}
+    with pytest.raises(EvaluationError):
+        canonical_hash(nested)
+
+
+def test_shared_acyclic_alias_is_permitted():
+    shared = {"text": [1, 2]}
+    assert canonical_hash({"a": shared, "b": shared}) == canonical_hash({"a": {"text": [1, 2]}, "b": {"text": [1, 2]}})
