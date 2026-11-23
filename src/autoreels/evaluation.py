@@ -18,6 +18,7 @@ REASONS = frozenset({"HOOK_WEAK", "START_DEPENDENT", "THOUGHT_INCOMPLETE", "FACT
 VERDICTS = frozenset({"keep", "fix", "drop"})
 _OPAQUE = re.compile(r"[A-Za-z0-9_-]{1,64}\Z", re.ASCII)
 _HASH = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
+_GIT_SHA = re.compile(r"[0-9a-f]{40}\Z", re.ASCII)
 _PAIR_FIELDS = frozenset({"pair_id", "source_hash", "baseline_hash", "candidate_hash"})
 _RATING_FIELDS = frozenset({"rating_id", "pair_id", "blind_variant", "reviewer_id", "rubric_version", "scores", "verdict", "reasons"})
 _EXPERIMENT_FIELDS = frozenset({"schema_version", "experiment_id", "code_sha", "seed", "frozen", "media_go_ref", "snapshot_hash"})
@@ -36,14 +37,27 @@ def _mapping(value: Any, fields: frozenset[str] | None = None) -> Mapping[str, A
 
 
 def _canonical_json(value: Any) -> bytes:
-    def check(v: Any) -> None:
-        if isinstance(v, Mapping):
-            _mapping(v)
-            for child in v.values():
-                check(child)
-        elif isinstance(v, (list, tuple)):
-            for child in v:
-                check(child)
+    # A recursion stack permits shared aliases but rejects cycles.
+    active: set[int] = set()
+
+    def check(v: Any, depth: int = 0) -> None:
+        if depth > 64:
+            raise EvaluationError("configuration nesting exceeds limit")
+        if isinstance(v, (Mapping, list, tuple)):
+            ident = id(v)
+            if ident in active:
+                raise EvaluationError("cyclic configuration")
+            active.add(ident)
+            try:
+                if isinstance(v, Mapping):
+                    _mapping(v)
+                    children = v.values()
+                else:
+                    children = v
+                for child in children:
+                    check(child, depth + 1)
+            finally:
+                active.remove(ident)
         elif v is None or type(v) in (str, int, bool):
             return
         elif type(v) is float:
@@ -71,6 +85,10 @@ def _opaque(value: Any) -> bool:
 
 def _hash(value: Any) -> bool:
     return type(value) is str and _HASH.fullmatch(value) is not None
+
+
+def _git_sha(value: Any) -> bool:
+    return type(value) is str and _GIT_SHA.fullmatch(value) is not None
 
 
 def blind_order(seed: str, pair_id: str) -> tuple[str, str]:
@@ -147,7 +165,7 @@ def paired_summary(pairs: Sequence[Mapping[str, Any]], ratings: Sequence[Mapping
         raise EvaluationError("experiment digest mismatch")
     if type(exp["schema_version"]) is not int or exp["schema_version"] != 1:
         raise EvaluationError("unknown experiment schema")
-    if not _opaque(exp["experiment_id"]) or not _hash(exp["code_sha"]):
+    if not _opaque(exp["experiment_id"]) or not _git_sha(exp["code_sha"]):
         raise EvaluationError("invalid experiment identity")
     if exp["frozen"] is not True or not _opaque(exp["media_go_ref"]) or not _opaque(exp["seed"]):
         raise EvaluationError("experiment is not frozen and approved")
