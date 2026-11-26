@@ -95,3 +95,14 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .project-status { font-size: 13px; font-weight: 600; color: var(--fg2); }
 .project-status[data-status="ready"] { color: var(--accent); }
 .source-row button:disabled { cursor: default !important; }
+
+.review-panel { margin-top: 16px; max-width: 640px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg2); display: grid; gap: 8px; }
+.review-panel-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.review-panel-heading span { font-size: 13px; color: var(--accent); }
+.review-panel textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+.review-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.review-actions button, .review-refresh { min-height: 44px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); cursor: pointer; font: inherit; }
+.review-actions button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.review-actions button:disabled, .review-refresh:disabled { opacity: .6; cursor: default; }
+.review-history-entry { border-top: 1px solid var(--border); padding-block: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.review-panel summary { cursor: pointer; }

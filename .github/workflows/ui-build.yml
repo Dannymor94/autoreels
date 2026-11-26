@@ -58,4 +58,4 @@ jobs:
         run: |
           python -m autoreels.orchestr.export_openapi > "$RUNNER_TEMP/arl-openapi.json"
           diff -u ui/openapi.json "$RUNNER_TEMP/arl-openapi.json"
-          python -m pytest -q tests/ui/test_projects.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py
+          python -m pytest -q tests/ui/test_projects.py tests/ui/test_reviews.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py

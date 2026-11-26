@@ -2,13 +2,13 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, pipeline_gateway, sourcemeta
+from . import catalog, clipinfo, manifests, pipeline_gateway, reviews, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 
 app = FastAPI(title="Авто-Рилс UI", version="1")
@@ -176,9 +176,26 @@ def clips(stem: str):
     return _list_clips(stem)
 
 
+@app.get("/api/reviews/{stem}/{clip}", response_model=reviews.ReviewState)
+def review_state(stem: str, clip: str, variant: str = Query(default="")):
+    root = _cfg.settings.root
+    path = resolve_media_path(root, stem, clip, variant)
+    return reviews.get_state(root, path, stem, clip, variant)
+
+
+@app.put("/api/reviews/{stem}/{clip}", response_model=reviews.ReviewState)
+def save_review(stem: str, clip: str, body: reviews.ReviewInput, variant: str = Query(default="")):
+    root = _cfg.settings.root
+    path = resolve_media_path(root, stem, clip, variant)
+    return reviews.save(root, path, stem, clip, variant, body)
+
+
 @app.get("/api/media/{stem}/{clip}")
-def media(stem: str, clip: str, variant: str = Query(default="")):
+def media(stem: str, clip: str, request: Request, variant: str = Query(default=""),
+          artifact: str | None = Query(default=None)):
     path = resolve_media_path(_cfg.settings.root, stem, clip, variant)
+    if artifact is not None:
+        return reviews.versioned_media(path, artifact, request)
     return media_response(path)
 
 
