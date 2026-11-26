@@ -27,3 +27,18 @@ jobs:
       - run: node --version && npm --version
       - run: npm ci
       - run: npm run build
+      - name: Install isolated browser test tool
+        run: npm install --prefix "$RUNNER_TEMP/arl-browser" --no-audit --no-fund --save-exact playwright@1.55.0
+      - name: Synthetic browser smoke
+        env:
+          ARL_PLAYWRIGHT: ${{ runner.temp }}/arl-browser/node_modules/playwright
+        run: |
+          npx --no-install vite preview --host 127.0.0.1 --port 4173 --strictPort > "$RUNNER_TEMP/arl-preview.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4173/ >/dev/null
+          node scripts/browser-smoke.cjs
