@@ -91,3 +91,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
   .source-rename { grid-column: 3; grid-row: 1 / span 2; min-width: 44px; }
   .connection-status { font-size: 12px; }
 }
+
+.project-status { font-size: 13px; font-weight: 600; color: var(--fg2); }
+.project-status[data-status="ready"] { color: var(--accent); }
+.source-row button:disabled { cursor: default !important; }

@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function Sources({ onSelect }: Props) {
-  const { data, isLoading, error } = useQuery({ queryKey: ["sources"], queryFn: api.sources });
+  const { data, isLoading, error } = useQuery({ queryKey: ["projects"], queryFn: api.projects });
   const [size, setSize] = useSize();
 
   if (isLoading) return <p style={{ padding: 16 }}>{L.loading}</p>;
@@ -20,7 +20,7 @@ export function Sources({ onSelect }: Props) {
   return (
     <main className="workspace">
       <div className="workspace-heading">
-        <div><h1>Проекты</h1><p className="secondary">Готовые клипы · просмотр и сравнение</p></div>
+        <div><h1>Проекты</h1><p className="secondary">Исходники, черновики и готовые клипы</p></div>
         <div style={{ marginLeft: "auto" }}>
           <SizePicker value={size} onChange={setSize} />
         </div>

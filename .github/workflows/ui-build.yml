@@ -5,11 +5,15 @@ on:
     branches: [main]
     paths:
       - 'ui/**'
+      - 'src/autoreels/orchestr/**'
+      - 'tests/ui/**'
       - '.github/workflows/ui-build.yml'
   push:
     branches: [main]
     paths:
       - 'ui/**'
+      - 'src/autoreels/orchestr/**'
+      - 'tests/ui/**'
       - '.github/workflows/ui-build.yml'
 
 permissions:
@@ -26,6 +30,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - run: node --version && npm --version
       - run: npm ci
+      - name: Check generated client types
+        run: npm run gen:api && git diff --exit-code -- src/api/types.gen.ts
       - run: npm run build
       - name: Install isolated browser test tool
         run: npm install --prefix "$RUNNER_TEMP/arl-browser" --no-audit --no-fund --save-exact playwright@1.55.0
@@ -42,3 +48,14 @@ jobs:
           done
           curl -fsS http://127.0.0.1:4173/ >/dev/null
           node scripts/browser-smoke.cjs
+  catalog-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: python -m pip install -e '.[dev]' -r ui/requirements.txt
+      - name: API contract and catalog regression
+        run: |
+          python -m autoreels.orchestr.export_openapi > "$RUNNER_TEMP/arl-openapi.json"
+          diff -u ui/openapi.json "$RUNNER_TEMP/arl-openapi.json"
+          python -m pytest -q tests/ui/test_projects.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py
