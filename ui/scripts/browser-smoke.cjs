@@ -6,6 +6,8 @@ const base = "http://127.0.0.1:4173";
 const stem = "DEMO";
 const name = "Синтетический проект " + "длинноеНазвание".repeat(7);
 const source = {stem, display_name: name, clip_count: 2, variant_names: ["_gate/variant_b"], poster_clip: "r01", poster_variant: ""};
+const pending = {stem: "PENDING", display_name: "Новый исходник", clip_count: 0, variant_names: [], poster_clip: null, poster_variant: "", status: "unprocessed", detail: "input_present", can_review: false};
+const projects = [{...source, status: "ready", detail: "render_present", can_review: true}, pending];
 const clip = (id, variant = "") => ({clip: id, variant, size_bytes: 100, has_render_json: false, fingerprint: null, duration_s: 30, title: "Заголовок", caption: "Синтетический текст"});
 const clips = [clip("r01"), clip("r01", "_gate/variant_b"), clip("r02")];
 
@@ -18,9 +20,9 @@ async function mock(page, mode = "normal") {
     const path = new URL(route.request().url()).pathname;
     if (route.request().method() !== "GET") throw new Error("Unexpected write: " + path);
     if (path === "/api/health") return route.fulfill({json: {status: "ok", root: "/synthetic", schema_version: 1}});
-    if (path === "/api/sources") {
+    if (path === "/api/sources" || path === "/api/projects") {
       if (mode === "error") return route.fulfill({status: 503, body: "Synthetic failure"});
-      return route.fulfill({json: mode === "empty" ? [] : [source]});
+      return route.fulfill({json: mode === "empty" ? [] : path === "/api/projects" ? projects : [source]});
     }
     if (path === "/api/sources/DEMO/clips") return route.fulfill({json: clips});
     return route.fulfill({status: 404, body: ""}); // media decoding is deliberately not tested
@@ -37,12 +39,14 @@ async function main() {
         page.on("pageerror", e => errors.push(e.message));
         await mock(page);
         await page.goto(base + "/#/");
-        await page.locator(".source-row").waitFor();
+        await page.locator(".source-row").first().waitFor();
         assert.equal(await page.getByRole("button", {name: /Задания/}).isDisabled(), true);
         assert.equal(await page.getByRole("button", {name: /Экспорт/}).isDisabled(), true);
         await page.getByRole("button", {name: "L", exact: true}).click();
         await layout(page, width + " projects");
-        const project = page.locator(".source-name button");
+        assert.equal(await page.getByText("Не обработан", {exact: true}).count(), 1);
+        assert.equal(await page.getByRole("button", {name: "Новый исходник", exact: true}).last().isDisabled(), true);
+        const project = page.locator(".source-name button").first();
         if (width < 701) await project.tap(); else await project.click();
         await page.getByRole("button", {name: "Смотреть по порядку"}).waitFor();
         await layout(page, width + " grid");
@@ -61,7 +65,7 @@ async function main() {
         await page.goBack();
         await page.getByRole("button", {name: "Смотреть по порядку"}).waitFor();
         await page.getByRole("button", {name: "Проекты", exact: true}).click();
-        await page.locator(".source-row").waitFor();
+        await page.locator(".source-row").first().waitFor();
         assert.deepEqual(errors, []);
         console.log("PASS responsive project/overview/review/navigation " + width + "px");
       } finally { await ctx.close(); }

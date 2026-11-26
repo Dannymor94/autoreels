@@ -1,0 +1,7 @@
+# UI-102 — каталог проектов (read-only)
+
+Legacy `/api/sources` remains unchanged; `GET /api/projects` lists input MP4s, validated manifests, local history and output folders. No hashing of owner media, no source path following, no jobs, writes, LLM or render. Existing rendered files are reviewable, not approved. Status is a projection of available evidence, not an authoritative workflow state. Missing MP4 is never treated as proof of error or zero harvest. Multiple local input locations, conflicting known hashes, unmatched historical input path or mismatched manifest identity yield unknown/ambiguous; preview/open and rename disabled from the catalog. For history-only sources, source paths are not returned. Invalid manifest files with no independent locator are not enumerated because sidecars share the extension. Stable source identity and reconciliation across renamed/moved sources remain later work.
+
+UI displays unprocessed, draft, empty, failed, ready and unknown; no fake job action. Catalog does not introduce new writable state. Existing source naming is still available for reviewable entries.
+
+Checks: exact OpenAPI and generated TS parity, focused synthetic catalog/API tests, existing Chrome responsive smoke extended with an unprocessed row. No independent audit requested: reversible read-only projection; no production writes or changes to rendering. Real-device and owner-media acceptance still separate. 

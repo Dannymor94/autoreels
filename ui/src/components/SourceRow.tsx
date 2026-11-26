@@ -1,10 +1,22 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type SourceItem } from "../api/client";
+import { api, type ProjectItem } from "../api/client";
 import { L } from "../labels";
 
+const STATUS_LABELS: Record<ProjectItem["status"], string> = {
+  unprocessed: "Не обработан", draft: "Черновик", empty: "Нет подходящих роликов",
+  failed: "Ошибка обработки", ready: "Есть ролики", unknown: "Статус неясен",
+};
+const DETAIL_LABELS: Record<string, string> = {
+  ambiguous: "Совпадение имён или разные хэши — требуется уточнение",
+  conflicting_evidence: "Результаты разных прогонов",
+  invalid_manifest: "Не удалось прочитать манифест",
+  run_skipped: "Последний запуск пропущен",
+  insufficient_evidence: "Недостаточно данных о состоянии",
+};
+
 interface Props {
-  source: SourceItem;
+  source: ProjectItem;
   thumbH: number; // thumbnail height in px; width follows 9:16
   onOpen: () => void;
 }
@@ -16,7 +28,10 @@ export function SourceRow({ source: s, thumbH, onOpen }: Props) {
   const [draft, setDraft] = useState("");
   const rename = useMutation({
     mutationFn: (name: string | null) => api.renameSource(s.stem, name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
+    onSuccess: () => Promise.all([
+      qc.invalidateQueries({ queryKey: ["sources"] }),
+      qc.invalidateQueries({ queryKey: ["projects"] }),
+    ]),
   });
 
   const start = () => {
@@ -36,7 +51,7 @@ export function SourceRow({ source: s, thumbH, onOpen }: Props) {
         background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius)",
       }}
     >
-      <button className="source-poster" onClick={onOpen} aria-label={s.display_name ?? s.stem} style={{ border: "none", padding: 0, background: "none", cursor: "pointer" }}>
+      <button className="source-poster" disabled={!s.can_review} onClick={onOpen} aria-label={s.display_name ?? s.stem} style={{ border: "none", padding: 0, background: "none", cursor: "pointer" }}>
         <div className="source-poster-image" style={{ width: Math.round((thumbH * 9) / 16), height: thumbH, background: "#000", borderRadius: 4, overflow: "hidden" }}>
           {s.poster_clip && (
             <img
@@ -69,19 +84,22 @@ export function SourceRow({ source: s, thumbH, onOpen }: Props) {
           </>
         ) : (
           <button
+            disabled={!s.can_review}
             onClick={onOpen}
             style={{ textAlign: "left", background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--fg)", fontSize: 16 }}
           >
             {s.display_name ?? s.stem}
           </button>
         )}
+        <span className="project-status" data-status={s.status}>{STATUS_LABELS[s.status]}</span>
+        {DETAIL_LABELS[s.detail] && <span className="secondary">{DETAIL_LABELS[s.detail]}</span>}
         {s.display_name && <span style={{ color: "var(--fg2)", fontSize: 12 }}>{L.folder(s.stem)}</span>}
       </div>
 
       <span className="source-count" style={{ color: "var(--fg2)", fontSize: 13, whiteSpace: "nowrap" }}>
         {L.clipCount(s.clip_count)}{L.variantsCount(s.variant_names.length)}
       </span>
-      {!editing && (
+      {!editing && s.can_review && (
         <button className="source-rename"
           onClick={start}
           title={L.rename}

@@ -2,6 +2,7 @@ import type { components } from "./types.gen";
 
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type SourceItem = components["schemas"]["SourceItem"];
+export type ProjectItem = components["schemas"]["ProjectItem"];
 export type ClipItem = components["schemas"]["ClipItem"];
 export type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
 export type SourceMetaOut = components["schemas"]["SourceMetaOut"];
@@ -21,6 +22,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 export const api = {
   health: () => get<HealthResponse>("/api/health"),
   sources: () => get<SourceItem[]>("/api/sources"),
+  projects: () => get<ProjectItem[]>("/api/projects"),
   renameSource: (stem: string, displayName: string | null) =>
     put<SourceMetaOut>(`/api/sources/${encodeURIComponent(stem)}/meta`, { display_name: displayName }),
   clips: (stem: string) => get<ClipItem[]>(`/api/sources/${encodeURIComponent(stem)}/clips`),

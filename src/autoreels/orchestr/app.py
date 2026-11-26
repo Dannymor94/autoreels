@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -7,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import clipinfo, manifests, pipeline_gateway, sourcemeta
+from . import catalog, clipinfo, manifests, pipeline_gateway, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 
 app = FastAPI(title="Авто-Рилс UI", version="1")
@@ -33,6 +34,12 @@ class SourceItem(BaseModel):
     variant_names: list[str]
     poster_clip: str | None  # first clip — its poster is the source thumbnail
     poster_variant: str
+
+
+class ProjectItem(SourceItem):
+    status: Literal["unprocessed", "draft", "empty", "failed", "ready", "unknown"]
+    detail: str
+    can_review: bool
 
 
 class SourceMetaIn(BaseModel):
@@ -150,6 +157,13 @@ def health():
 @app.get("/api/capabilities", response_model=CapabilitiesResponse)
 def capabilities():
     return pipeline_gateway.capabilities()
+
+
+@app.get("/api/projects", response_model=list[ProjectItem])
+def projects():
+    root = _cfg.settings.root
+    rendered = [] if _reels_dir().is_symlink() else [item.model_dump() for item in _list_sources()]
+    return catalog.list_projects(root, rendered)
 
 
 @app.get("/api/sources", response_model=list[SourceItem])
