@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import stat
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,8 +65,12 @@ def _open_hashed(path: Path):
     """Hash the opened regular file, not just its name or render.json fingerprint."""
     handle = None
     try:
+        if not stat.S_ISREG(path.stat().st_mode):
+            raise HTTPException(404, "not a regular video file")
         handle = path.open("rb")
         before = os.fstat(handle.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise HTTPException(404, "not a regular video file")
         h = hashlib.sha256()
         for block in iter(lambda: handle.read(_CHUNK), b""):
             h.update(block)
@@ -106,7 +111,7 @@ def versioned_media(path: Path, expected: str, request: Request):
                    "ETag": '"' + digest + '"'}
         raw = request.headers.get("range")
         if raw and request.headers.get("if-range", headers["ETag"]) == headers["ETag"]:
-            match = re.fullmatch(r"bytes=(\d*)-(\d*)", raw)
+            match = re.fullmatch(r"bytes=(\d{0,20})-(\d{0,20})", raw)
             if match and size and (match[1] or match[2]):
                 if not match[1]:
                     start = max(0, size - int(match[2]))

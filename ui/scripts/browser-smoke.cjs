@@ -10,15 +10,48 @@ const pending = {stem: "PENDING", display_name: "Новый исходник", c
 const projects = [{...source, status: "ready", detail: "render_present", can_review: true}, pending];
 const clip = (id, variant = "") => ({clip: id, variant, size_bytes: 100, has_render_json: false, fingerprint: null, duration_s: 30, title: "Заголовок", caption: "Синтетический текст"});
 const clips = [clip("r01"), clip("r01", "_gate/variant_b"), clip("r02")];
+// 32x48 black synthetic H.264, two frames; generated with ffmpeg lavfi locally.
+// No owner media and no new runtime asset.
+const fixture = Buffer.from("AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMxbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlx0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAACAAAAAwAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAHUbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABf21pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAT9zdGJsAAAAv3N0c2QAAAAAAAAAAQAAAK9hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAACAAMABIAAAASAAAAAAAAAABFUxhdmM2MS4xOS4xMDEgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAANWF2Y0MBZAAK/+EAGGdkAAqs2UnsBEAAAAMAQAAAAwEDxIllgAEABmjr48siwP34+AAAAAAQcGFzcAAAAAEAAAABAAAAFGJ0cnQAAAAAAAABSAAAAAAAAAAYc3R0cwAAAAAAAAABAAAAAgAAIAAAAAAUc3RzcwAAAAAAAAABAAAAAQAAABxzdHNjAAAAAAAAAAEAAAABAAAAAgAAAAEAAAAcc3RzegAAAAAAAAAAAAAAAgAAABwAAAANAAAAFHN0Y28AAAAAAAAAAQAAA2EAAABhdWR0YQAAAFltZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAACxpbHN0AAAAJKl0b28AAAAcZGF0YQAAAAEAAAAATGF2ZjYxLjcuMTAzAAAACGZyZWUAAAAxbWRhdAAAABhliIQAFP/+98dPwKbq3CLLnEkAf2UdKeEAAAAJQZohbEEv/rVY", "base64");
 
 async function layout(page, label) {
   const size = await page.evaluate(() => ({width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth}));
   assert.ok(size.scroll <= size.width + 1, label + ": page overflow " + JSON.stringify(size));
 }
 async function mock(page, mode = "normal") {
+  const reviews = new Map();
   await page.route("**/api/**", async route => {
-    const path = new URL(route.request().url()).pathname;
-    if (route.request().method() !== "GET") throw new Error("Unexpected write: " + path);
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    const method = route.request().method();
+    if (path.startsWith("/api/reviews/")) {
+      const variant = url.searchParams.get("variant") || "";
+      const artifact_sha256 = (variant ? "b" : "a").repeat(64);
+      const key = path + variant;
+      const state = reviews.get(key) || {artifact_sha256, current: null, history: [], legacy: []};
+      if (method === "PUT") {
+        const input = route.request().postDataJSON();
+        assert.equal(input.artifact_sha256, artifact_sha256);
+        assert.equal(input.base_revision, state.current?.request_id ?? null);
+        const {base_revision, ...event} = input;
+        state.current = {...event, created_at: "2026-11-26T20:00:00Z"};
+        state.history.unshift(state.current);
+        reviews.set(key, state);
+      } else assert.equal(method, "GET");
+      return route.fulfill({json: state});
+    }
+    if (method !== "GET") throw new Error("Unexpected write: " + path);
+    if (path.startsWith("/api/media/")) {
+      const range = route.request().headers().range;
+      const match = range && /^bytes=(\d+)-(\d*)$/.exec(range);
+      if (match) {
+        const start = Number(match[1]);
+        const end = match[2] ? Math.min(Number(match[2]), fixture.length - 1) : fixture.length - 1;
+        if (start > end) return route.fulfill({status:416,headers:{"Content-Range":"bytes */"+fixture.length}});
+        return route.fulfill({status:206,contentType:"video/mp4",body:fixture.subarray(start,end+1),headers:{"Accept-Ranges":"bytes","Content-Range":"bytes "+start+"-"+end+"/"+fixture.length}});
+      }
+      return route.fulfill({status:200,contentType:"video/mp4",body:fixture,headers:{"Accept-Ranges":"bytes"}});
+    }
     if (path === "/api/health") return route.fulfill({json: {status: "ok", root: "/synthetic", schema_version: 1}});
     if (path === "/api/sources" || path === "/api/projects") {
       if (mode === "error") return route.fulfill({status: 503, body: "Synthetic failure"});
@@ -56,9 +89,20 @@ async function main() {
         await page.keyboard.press("Enter");
         await page.locator(".review-video").waitFor();
         await layout(page, width + " player");
+        if (width === 390) {
+          await page.getByLabel("Комментарий (необязательно)").fill("Синтетическая оценка");
+          await page.getByRole("button", {name: "Оставить", exact: true}).click();
+          await page.getByText("Сохранено: Оставить", {exact:true}).waitFor();
+          await page.reload();
+          await page.getByText("Сохранено: Оставить", {exact:true}).waitFor();
+          assert.equal(await page.getByLabel("Комментарий (необязательно)").inputValue(), "Синтетическая оценка");
+          console.log("PASS review save and reload (mock API, synthetic video)");
+        }
         await page.getByRole("button", {name: "variant_b", exact: true}).click();
         await page.waitForURL(/v=_gate%2Fvariant_b/);
+        await page.locator(".review-video").waitFor();
         assert.match(await page.locator(".review-video").getAttribute("src"), /variant=_gate%2Fvariant_b/);
+        if (width === 390) await page.getByText("Не оценён", {exact:true}).waitFor();
         await page.reload();
         await page.locator(".review-video").waitFor();
         assert.match(await page.locator(".review-video").getAttribute("src"), /variant=_gate%2Fvariant_b/);

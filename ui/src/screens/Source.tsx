@@ -89,6 +89,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
       return;
     }
     pending.current = { t: 0, play };
+    setLoadedVersion(null);
     setClip(g.clip);
     setVariant(pickVariant(g, variant));
   }
@@ -97,6 +98,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
     if (next === variant) return;
     const v = video.current;
     pending.current = { t: v?.currentTime ?? 0, play: v ? !v.paused : false };
+    setLoadedVersion(null);
     setVariant(next);
   }
 
