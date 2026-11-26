@@ -1,0 +1,18 @@
+import { navigate, type Route } from "../lib/route";
+
+export function Navigation({ route }: { route: Route }) {
+  const reviewing = route.name === "review";
+  return (
+    <nav className="app-nav" aria-label="Разделы приложения">
+      <button type="button" aria-current={!reviewing ? "page" : undefined}
+        onClick={() => navigate({ name: "sources" })}>Проекты</button>
+      <button type="button" aria-current={reviewing ? "page" : undefined}
+        disabled={!reviewing} title={!reviewing ? "Откройте клип в проекте" : undefined}
+        onClick={() => { if (route.name === "review") navigate(route); }}>Редактор
+        {!reviewing && <small>Выберите клип</small>}
+      </button>
+      <button type="button" disabled title="Будет доступно после подключения заданий">Задания<small>Позже</small></button>
+      <button type="button" disabled title="Будет доступно после подключения экспорта">Экспорт<small>Позже</small></button>
+    </nav>
+  );
+}
