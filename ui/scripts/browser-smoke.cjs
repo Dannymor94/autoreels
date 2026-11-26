@@ -115,6 +115,16 @@ async function main() {
           await page.getByRole("button",{name:"Сравнить варианты",exact:true}).click();
           await page.getByRole("button",{name:"Выбрать Б",exact:true}).waitFor();
           await layout(page, "390 comparison");
+          await page.getByLabel("Звук",{exact:true}).selectOption("b");
+          assert.deepEqual(await page.locator(".comparison-video").evaluateAll(vs=>vs.map(v=>v.muted)), [true,false]);
+          await page.getByLabel("Общая позиция").focus();
+          await page.keyboard.press("Home");
+          await page.keyboard.press("ArrowRight");
+          await page.waitForFunction(()=> {
+            const vs=[...document.querySelectorAll(".comparison-video")];
+            return vs.length===2 && vs.every(v=>Math.abs(v.currentTime-0.05)<0.04);
+          });
+          console.log("PASS common seek and single audio selection");
           await page.getByLabel("Комментарий к выбору").fill("Сравнение");
           await page.getByRole("button",{name:"Выбрать Б",exact:true}).click();
           await page.getByText("Выбран: variant_b",{exact:true}).waitFor();

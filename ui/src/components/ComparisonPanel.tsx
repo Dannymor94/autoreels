@@ -47,6 +47,8 @@ function PairPlayer({ stem, clip, left, right, state, onSaved, onRefresh }: {
   const [durationA, setDurationA] = useState(0), [durationB, setDurationB] = useState(0);
   const [position, setPosition] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const starting = useRef(false);
+  const playEpoch = useRef(0);
   const [audio, setAudio] = useState<"a" | "b">("a");
   const [comment, setComment] = useState(state.current?.comment ?? "");
   const [mediaError, setMediaError] = useState(false);
@@ -61,7 +63,8 @@ function PairPlayer({ stem, clip, left, right, state, onSaved, onRefresh }: {
     onSuccess: next => { retry.current = null; onSaved(next); },
     onSettled: () => { busy.current = false; },
   });
-  function pause() { a.current?.pause(); b.current?.pause(); setPlaying(false); }
+  function pause() { playEpoch.current++; starting.current = false; a.current?.pause(); b.current?.pause(); setPlaying(false); }
+  function waiting() { if (!starting.current) pause(); }
   function seek(t: number) {
     pause();
     const p = Math.max(0, Math.min(t, limit));
@@ -71,15 +74,19 @@ function PairPlayer({ stem, clip, left, right, state, onSaved, onRefresh }: {
   }
   async function toggle() {
     if (!ready || !a.current || !b.current) return;
-    if (playing) { pause(); return; }
+    if (playing || starting.current) { pause(); return; }
+    const epoch = ++playEpoch.current;
+    starting.current = true;
     const p = a.current.currentTime >= limit ? 0 : a.current.currentTime;
-    a.current.currentTime = p;
-    b.current.currentTime = p;
+    if (Math.abs(a.current.currentTime - p) > 0.01) a.current.currentTime = p;
+    if (Math.abs(b.current.currentTime - p) > 0.01) b.current.currentTime = p;
     try {
       await Promise.all([a.current.play(), b.current.play()]);
+      if (epoch !== playEpoch.current) return;
+      starting.current = false;
       if (a.current && b.current && !a.current.paused && !b.current.paused) setPlaying(true);
       else pause();
-    } catch { pause(); }
+    } catch { if (epoch === playEpoch.current) pause(); }
   }
   function tick() {
     const x = a.current, y = b.current;
@@ -105,14 +112,14 @@ function PairPlayer({ stem, clip, left, right, state, onSaved, onRefresh }: {
     <div className="comparison-videos">
       <div><strong>А · {label(left)}</strong><video ref={a} className="comparison-video" src={api.mediaUrl(stem, clip, left, shaA)}
         playsInline preload="auto" muted={audio !== "a"} onLoadedMetadata={e => {setDurationA(e.currentTarget.duration); setReadyA(true);}}
-        onTimeUpdate={tick} onWaiting={pause} onEnded={pause} onError={failed} /></div>
+        onTimeUpdate={tick} onWaiting={waiting} onEnded={pause} onError={failed} /></div>
       <div><strong>Б · {label(right)}</strong><video ref={b} className="comparison-video" src={api.mediaUrl(stem, clip, right, shaB)}
         playsInline preload="auto" muted={audio !== "b"} onLoadedMetadata={e => {setDurationB(e.currentTarget.duration); setReadyB(true);}}
-        onWaiting={pause} onEnded={pause} onError={failed} /></div>
+        onWaiting={waiting} onEnded={pause} onError={failed} /></div>
     </div>
     <div className="comparison-controls">
       <button disabled={!ready} onClick={() => void toggle()}>{playing ? "Пауза обоих" : "Воспроизвести оба"}</button>
-      <label>Звук <select value={audio} onChange={e => setAudio(e.target.value as "a" | "b")}><option value="a">А</option><option value="b">Б</option></select></label>
+      <label>Звук <select aria-label="Звук" value={audio} onChange={e => setAudio(e.target.value as "a" | "b")}><option value="a">А</option><option value="b">Б</option></select></label>
       <span>{formatDuration(position)} / {formatDuration(limit)}</span>
     </div>
     <input aria-label="Общая позиция" type="range" min={0} max={limit || 1} step={0.05} value={Math.min(position, limit)} disabled={!ready} onChange={e => seek(Number(e.target.value))} />
