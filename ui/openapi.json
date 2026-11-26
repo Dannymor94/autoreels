@@ -134,6 +134,84 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "ProjectItem": {
+        "properties": {
+          "can_review": {
+            "title": "Can Review",
+            "type": "boolean"
+          },
+          "clip_count": {
+            "title": "Clip Count",
+            "type": "integer"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "poster_clip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Clip"
+          },
+          "poster_variant": {
+            "title": "Poster Variant",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "unprocessed",
+              "draft",
+              "empty",
+              "failed",
+              "ready",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stem": {
+            "title": "Stem",
+            "type": "string"
+          },
+          "variant_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Variant Names",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stem",
+          "display_name",
+          "clip_count",
+          "variant_names",
+          "poster_clip",
+          "poster_variant",
+          "status",
+          "detail",
+          "can_review"
+        ],
+        "title": "ProjectItem",
+        "type": "object"
+      },
       "SourceItem": {
         "properties": {
           "clip_count": {
@@ -365,6 +443,28 @@
           }
         },
         "summary": "Media"
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "operationId": "projects_api_projects_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectItem"
+                  },
+                  "title": "Response Projects Api Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Projects"
       }
     },
     "/api/sources": {

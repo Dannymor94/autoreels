@@ -24,3 +24,17 @@ def capabilities() -> dict:
         "source": "fallback",
         "verdict_tags": VERDICT_TAGS,
     }
+
+
+def catalog_history(root):
+    """Read the existing local journal; never follow its stored source paths."""
+    from autoreels.core.history import read_runs
+
+    folder = root / "data"
+    path = folder / "history.jsonl"
+    if folder.is_symlink() or path.is_symlink():
+        return []
+    try:
+        return [r for r in read_runs(path) if isinstance(r, dict)]
+    except (OSError, UnicodeError):
+        return []

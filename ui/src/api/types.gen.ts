@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Projects */
+        get: operations["projects_api_projects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sources": {
         parameters: {
             query?: never;
@@ -166,6 +183,30 @@ export interface components {
             schema_version: number;
             /** Status */
             status: string;
+        };
+        /** ProjectItem */
+        ProjectItem: {
+            /** Can Review */
+            can_review: boolean;
+            /** Clip Count */
+            clip_count: number;
+            /** Detail */
+            detail: string;
+            /** Display Name */
+            display_name: string | null;
+            /** Poster Clip */
+            poster_clip: string | null;
+            /** Poster Variant */
+            poster_variant: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "unprocessed" | "draft" | "empty" | "failed" | "ready" | "unknown";
+            /** Stem */
+            stem: string;
+            /** Variant Names */
+            variant_names: string[];
         };
         /** SourceItem */
         SourceItem: {
@@ -282,6 +323,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    projects_api_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectItem"][];
                 };
             };
         };
