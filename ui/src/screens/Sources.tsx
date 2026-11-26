@@ -18,9 +18,9 @@ export function Sources({ onSelect }: Props) {
   if (!data?.length) return <p style={{ padding: 16 }}>{L.noSources}</p>;
 
   return (
-    <main style={{ padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-        <h2>{L.sources}</h2>
+    <main className="workspace">
+      <div className="workspace-heading">
+        <div><h1>Проекты</h1><p className="secondary">Готовые клипы · просмотр и сравнение</p></div>
         <div style={{ marginLeft: "auto" }}>
           <SizePicker value={size} onChange={setSize} />
         </div>

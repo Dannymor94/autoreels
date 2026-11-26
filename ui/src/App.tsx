@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TopBar } from "./components/TopBar";
+import { Navigation } from "./components/Navigation";
 import { Sources } from "./screens/Sources";
 import { Overview } from "./screens/Overview";
 import { Source } from "./screens/Source";
@@ -21,8 +22,10 @@ function Router() {
   useEffect(() => persist.setLastRoute(formatRoute(route)), [route]);
 
   return (
-    <>
+    <div className="app-shell">
       <TopBar />
+      <Navigation route={route} />
+      <div className="app-content">
       {route.name === "sources" && <Sources onSelect={(stem) => navigate({ name: "overview", stem })} />}
       {route.name === "overview" && (
         <Overview
@@ -42,7 +45,8 @@ function Router() {
           onChange={(clip, variant) => navigate({ name: "review", stem: route.stem, clip, variant }, true)}
         />
       )}
-    </>
+      </div>
+    </div>
   );
 }
 

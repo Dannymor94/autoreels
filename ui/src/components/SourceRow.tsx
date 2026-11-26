@@ -30,14 +30,14 @@ export function SourceRow({ source: s, thumbH, onOpen }: Props) {
   };
 
   return (
-    <li
+    <li className="source-row"
       style={{
         display: "flex", alignItems: "center", gap: 14, padding: thumbH > 60 ? 8 : "4px 8px",
         background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: "var(--radius)",
       }}
     >
-      <button onClick={onOpen} aria-label={s.display_name ?? s.stem} style={{ border: "none", padding: 0, background: "none", cursor: "pointer" }}>
-        <div style={{ width: Math.round((thumbH * 9) / 16), height: thumbH, background: "#000", borderRadius: 4, overflow: "hidden" }}>
+      <button className="source-poster" onClick={onOpen} aria-label={s.display_name ?? s.stem} style={{ border: "none", padding: 0, background: "none", cursor: "pointer" }}>
+        <div className="source-poster-image" style={{ width: Math.round((thumbH * 9) / 16), height: thumbH, background: "#000", borderRadius: 4, overflow: "hidden" }}>
           {s.poster_clip && (
             <img
               src={api.thumbUrl(s.stem, s.poster_clip, s.poster_variant)}
@@ -50,7 +50,7 @@ export function SourceRow({ source: s, thumbH, onOpen }: Props) {
         </div>
       </button>
 
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+      <div className="source-name" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
         {editing ? (
           <>
             <input
@@ -78,11 +78,11 @@ export function SourceRow({ source: s, thumbH, onOpen }: Props) {
         {s.display_name && <span style={{ color: "var(--fg2)", fontSize: 12 }}>{L.folder(s.stem)}</span>}
       </div>
 
-      <span style={{ color: "var(--fg2)", fontSize: 13, whiteSpace: "nowrap" }}>
+      <span className="source-count" style={{ color: "var(--fg2)", fontSize: 13, whiteSpace: "nowrap" }}>
         {L.clipCount(s.clip_count)}{L.variantsCount(s.variant_names.length)}
       </span>
       {!editing && (
-        <button
+        <button className="source-rename"
           onClick={start}
           title={L.rename}
           aria-label={L.rename}

@@ -132,8 +132,8 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
   if (!groups.length) return <p style={{ padding: 16 }}>{L.noClips}</p>;
 
   return (
-    <main style={{ padding: 16 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 12 }}>
+    <main className="workspace">
+      <div className="workspace-heading review-heading">
         <button onClick={onBack} style={{ cursor: "pointer", background: "none", border: "none", color: "var(--accent)" }}>
           {L.backToOverview}
         </button>
@@ -141,9 +141,8 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
         <span style={{ marginLeft: "auto", color: "var(--fg2)", fontSize: 13 }}>{L.helpHint}</span>
       </div>
 
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-        <ClipList groups={groups} current={clip} onPick={(c) => openClip(c, true)} />
-        <div style={{ flex: "1 1 auto" }}>
+      <div className="review-layout">
+        <div className="review-player">
           {group ? (
             <>
               <VariantTabs variants={group.variants} current={variant} onPick={switchVariant} />
@@ -154,13 +153,16 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
                 playsInline
                 onLoadedMetadata={onLoaded}
                 onTimeUpdate={onTime}
-                style={{ height: "80vh", aspectRatio: "9/16", background: "#000", borderRadius: "var(--radius)", display: "block" }}
+                className="review-video"
               />
             </>
           ) : (
             <p style={{ color: "var(--fg2)" }}>{L.pickClip}</p>
           )}
         </div>
+        <aside className="review-clips" aria-label="Клипы">
+          <ClipList groups={groups} current={clip} onPick={(c) => openClip(c, true)} />
+        </aside>
       </div>
       {help && <HelpOverlay onClose={() => setHelp(false)} />}
     </main>

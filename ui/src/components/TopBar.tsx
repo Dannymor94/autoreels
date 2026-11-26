@@ -3,23 +3,13 @@ import { api } from "../api/client";
 import { L } from "../labels";
 
 export function TopBar() {
-  const { data } = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const { data, isLoading, error } = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const status = error ? "Нет связи" : isLoading ? "Подключение…" : data?.status === "ok" ? "Локальный сервер" : "Статус неизвестен";
 
   return (
-    <header style={{
-      background: "var(--bg2)",
-      borderBottom: "1px solid var(--border)",
-      padding: "8px 16px",
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-    }}>
+    <header className="app-header">
       <strong>{L.appTitle}</strong>
-      {data && (
-        <span style={{ color: "var(--fg2)", fontSize: 13 }}>
-          {L.root}: {data.root}
-        </span>
-      )}
+      <span className="connection-status" role="status">{status}</span>
     </header>
   );
 }

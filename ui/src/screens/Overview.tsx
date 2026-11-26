@@ -37,7 +37,7 @@ export function Overview({ stem, onBack, onOpen }: Props) {
   });
 
   return (
-    <main style={{ padding: 16 }}>
+    <main className="workspace">
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
         <button onClick={onBack} style={{ cursor: "pointer", background: "none", border: "none", color: "var(--accent)" }}>
           {L.backToSources}
@@ -49,7 +49,7 @@ export function Overview({ stem, onBack, onOpen }: Props) {
           {view === "grid" && <SizePicker value={size} onChange={setSize} />}
           <button style={btn(view === "grid")} onClick={() => setView("grid")}>{L.viewGrid}</button>
           <button style={btn(view === "list")} onClick={() => setView("list")}>{L.viewList}</button>
-          {pos && groups.some((g) => g.clip === pos.clip) && (
+          {pos && groups.some((g) => g.clip === pos.clip && g.variants.includes(pos.variant)) && (
             <button style={btn(false)} onClick={() => onOpen(pos.clip, pos.variant)}>
               {L.continueAt(pos.clip, formatDuration(pos.t))}
             </button>
@@ -57,7 +57,7 @@ export function Overview({ stem, onBack, onOpen }: Props) {
           {groups.length > 0 && (
             <button
               style={{ ...btn(false), background: "var(--accent)", color: "#fff", border: "1px solid var(--accent)" }}
-              onClick={() => onOpen(groups[0].clip, "")}
+              onClick={() => onOpen(groups[0].clip, groups[0].variants[0])}
             >
               {L.watchInOrder}
             </button>
@@ -70,13 +70,13 @@ export function Overview({ stem, onBack, onOpen }: Props) {
       {!isLoading && !error && groups.length === 0 && <p>{L.noClips}</p>}
 
       {view === "grid" ? (
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${SIZES[size].cardMin}px, 1fr))`, gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${SIZES[size].cardMin}px), 1fr))`, gap: 16 }}>
           {groups.map((g) => (
             <ClipCard key={g.clip} stem={stem} group={g} onOpen={() => onOpen(g.clip, g.variants[0])} />
           ))}
         </div>
       ) : (
-        <ClipTable groups={groups} onOpen={(c) => onOpen(c, "")} />
+        <div className="clip-table-scroll" tabIndex={0} role="region" aria-label="Список клипов"><ClipTable groups={groups} onOpen={(c) => onOpen(c, "")} /></div>
       )}
     </main>
   );

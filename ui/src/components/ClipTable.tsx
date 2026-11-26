@@ -23,8 +23,8 @@ export function ClipTable({ groups, onOpen }: Props) {
       </thead>
       <tbody>
         {groups.map((g) => (
-          <tr key={g.clip} onClick={() => onOpen(g.clip)} style={{ cursor: "pointer" }}>
-            <td style={td}><strong>{g.clip}</strong></td>
+          <tr key={g.clip}>
+            <td style={td}><button className="table-open" type="button" onClick={() => onOpen(g.clip)} aria-label={`Открыть ${g.clip}`}>{g.clip}</button></td>
             <td style={td}>
               <div>{g.info.title ?? "—"}</div>
               {g.info.caption && <div style={{ color: "var(--fg2)", fontSize: 12, marginTop: 2 }}>{g.info.caption}</div>}
