@@ -72,6 +72,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reviews/{stem}/{clip}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review State */
+        get: operations["review_state_api_reviews__stem___clip__get"];
+        /** Save Review */
+        put: operations["save_review_api_reviews__stem___clip__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sources": {
         parameters: {
             query?: never;
@@ -184,6 +202,17 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** LegacyReview */
+        LegacyReview: {
+            /** Comment */
+            comment: string;
+            /** Date */
+            date: string;
+            /** Gate */
+            gate: string;
+            /** Verdict */
+            verdict: string;
+        };
         /** ProjectItem */
         ProjectItem: {
             /** Can Review */
@@ -207,6 +236,52 @@ export interface components {
             stem: string;
             /** Variant Names */
             variant_names: string[];
+        };
+        /** ReviewEvent */
+        ReviewEvent: {
+            /** Artifact Sha256 */
+            artifact_sha256: string;
+            /** Comment */
+            comment: string;
+            /** Created At */
+            created_at: string;
+            /** Position S */
+            position_s: number | null;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "keep" | "fix" | "drop";
+        };
+        /** ReviewInput */
+        ReviewInput: {
+            /** Artifact Sha256 */
+            artifact_sha256: string;
+            /** Base Revision */
+            base_revision: string | null;
+            /** Comment */
+            comment: string;
+            /** Position S */
+            position_s: number | null;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "keep" | "fix" | "drop";
+        };
+        /** ReviewState */
+        ReviewState: {
+            /** Artifact Sha256 */
+            artifact_sha256: string;
+            current: components["schemas"]["ReviewEvent"] | null;
+            /** History */
+            history: components["schemas"]["ReviewEvent"][];
+            /** Legacy */
+            legacy: components["schemas"]["LegacyReview"][];
         };
         /** SourceItem */
         SourceItem: {
@@ -297,6 +372,7 @@ export interface operations {
         parameters: {
             query?: {
                 variant?: string;
+                artifact?: string | null;
             };
             header?: never;
             path: {
@@ -343,6 +419,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectItem"][];
+                };
+            };
+        };
+    };
+    review_state_api_reviews__stem___clip__get: {
+        parameters: {
+            query?: {
+                variant?: string;
+            };
+            header?: never;
+            path: {
+                stem: string;
+                clip: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_review_api_reviews__stem___clip__put: {
+        parameters: {
+            query?: {
+                variant?: string;
+            };
+            header?: never;
+            path: {
+                stem: string;
+                clip: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

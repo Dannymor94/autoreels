@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { L } from "../labels";
 import type { Action } from "../keys";
@@ -9,6 +9,7 @@ import { useHotkeys } from "../lib/useHotkeys";
 import { ClipList } from "../components/ClipList";
 import { VariantTabs } from "../components/VariantTabs";
 import { HelpOverlay } from "../components/HelpOverlay";
+import { ReviewPanel } from "../components/ReviewPanel";
 
 interface Props {
   stem: string;
@@ -34,6 +35,8 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
   const video = useRef<HTMLVideoElement>(null);
   const pending = useRef<Pending | null>(null);
   const lastSaved = useRef(0);
+  const [loadedVersion, setLoadedVersion] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   // Open the clip from the address; resume the saved second if it is the same clip and variant.
   useEffect(() => {
@@ -52,6 +55,29 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
   }, [clip, variant]); // onChange deliberately not a dependency: it changes on every render
 
   const group = groups.find((g) => g.clip === clip) ?? null;
+  const reviewKey = ["review", stem, clip, variant];
+  const review = useQuery({
+    queryKey: reviewKey,
+    queryFn: () => api.review(stem, clip!, variant),
+    enabled: group !== null && group.variants.includes(variant),
+    retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false,
+    refetchOnMount: "always",
+  });
+  const state = review.data;
+  const mediaUrl = group && state ? api.mediaUrl(stem, group.clip, variant, state.artifact_sha256) : null;
+
+  function refreshReview() {
+    void review.refetch();
+    setLoadedVersion(null);
+    video.current?.load();
+  }
+
+  function position(): number | null {
+    const v = video.current;
+    if (!v || loadedVersion !== mediaUrl || !Number.isFinite(v.currentTime)) return null;
+    v.pause();
+    return Math.round(v.currentTime * 1000) / 1000;
+  }
 
   function openClip(next: string, play: boolean) {
     const g = groups.find((x) => x.clip === next);
@@ -102,6 +128,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
   useHotkeys(onAction);
 
   function onLoaded() {
+    setLoadedVersion(mediaUrl);
     const v = video.current;
     const p = pending.current;
     pending.current = null;
@@ -146,15 +173,27 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
           {group ? (
             <>
               <VariantTabs variants={group.variants} current={variant} onPick={switchVariant} />
-              <video
-                ref={video}
-                src={api.mediaUrl(stem, group.clip, variant)}
-                controls
-                playsInline
-                onLoadedMetadata={onLoaded}
-                onTimeUpdate={onTime}
-                className="review-video"
-              />
+              {review.isLoading && <p role="status">Проверка версии видео…</p>}
+              {review.isError && <p role="alert">Версия недоступна. <button onClick={refreshReview}>Повторить</button></p>}
+              {state && mediaUrl && (
+                <>
+                  <video key={mediaUrl}
+                    ref={video}
+                    src={mediaUrl}
+                    controls
+                    playsInline
+                    onLoadedMetadata={onLoaded}
+                    onError={() => setLoadedVersion(null)}
+                    onTimeUpdate={onTime}
+                    className="review-video"
+                  />
+                  <ReviewPanel key={mediaUrl + (state.current?.request_id ?? "")}
+                    stem={stem} clip={group.clip} variant={variant} state={state}
+                    ready={loadedVersion === mediaUrl && !review.isFetching && !review.isError}
+                    position={position} onSaved={(next) => qc.setQueryData(reviewKey, next)}
+                    onRefresh={refreshReview} />
+                </>
+              )}
             </>
           ) : (
             <p style={{ color: "var(--fg2)" }}>{L.pickClip}</p>

@@ -3,12 +3,14 @@ import type { components } from "./types.gen";
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type SourceItem = components["schemas"]["SourceItem"];
 export type ProjectItem = components["schemas"]["ProjectItem"];
+export type ReviewState = components["schemas"]["ReviewState"];
+export type ReviewInput = components["schemas"]["ReviewInput"];
 export type ClipItem = components["schemas"]["ClipItem"];
 export type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
 export type SourceMetaOut = components["schemas"]["SourceMetaOut"];
 
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path);
+async function get<T>(path: string, noStore = false): Promise<T> {
+  const r = await fetch(path, noStore ? { cache: "no-store" } : undefined);
   if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${path}`);
   return r.json() as Promise<T>;
 }
@@ -17,6 +19,10 @@ async function put<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`${r.status} ${r.statusText} — ${path}`);
   return r.json() as Promise<T>;
+}
+
+function reviewUrl(stem: string, clip: string, variant: string) {
+  return `/api/reviews/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}?variant=${encodeURIComponent(variant)}`;
 }
 
 export const api = {
@@ -28,6 +34,15 @@ export const api = {
   clips: (stem: string) => get<ClipItem[]>(`/api/sources/${encodeURIComponent(stem)}/clips`),
   thumbUrl: (stem: string, clip: string, variant = "") =>
     `/api/thumb/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}${variant ? `?variant=${encodeURIComponent(variant)}` : ""}`,
-  mediaUrl: (stem: string, clip: string, variant = "") =>
-    `/api/media/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}${variant ? `?variant=${encodeURIComponent(variant)}` : ""}`,
+  review: (stem: string, clip: string, variant: string) =>
+    get<ReviewState>(reviewUrl(stem, clip, variant), true),
+  saveReview: (stem: string, clip: string, variant: string, body: ReviewInput) =>
+    put<ReviewState>(reviewUrl(stem, clip, variant), body),
+  mediaUrl: (stem: string, clip: string, variant = "", artifact?: string) => {
+    const params = new URLSearchParams();
+    if (variant) params.set("variant", variant);
+    if (artifact) params.set("artifact", artifact);
+    const query = params.toString();
+    return `/api/media/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}${query ? "?" + query : ""}`;
+  },
 };

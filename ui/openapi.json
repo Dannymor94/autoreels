@@ -134,6 +134,34 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "LegacyReview": {
+        "properties": {
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "gate": {
+            "title": "Gate",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gate",
+          "verdict",
+          "comment",
+          "date"
+        ],
+        "title": "LegacyReview",
+        "type": "object"
+      },
       "ProjectItem": {
         "properties": {
           "can_review": {
@@ -210,6 +238,158 @@
           "can_review"
         ],
         "title": "ProjectItem",
+        "type": "object"
+      },
+      "ReviewEvent": {
+        "properties": {
+          "artifact_sha256": {
+            "title": "Artifact Sha256",
+            "type": "string"
+          },
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "position_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position S"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "keep",
+              "fix",
+              "drop"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "artifact_sha256",
+          "verdict",
+          "comment",
+          "position_s",
+          "created_at"
+        ],
+        "title": "ReviewEvent",
+        "type": "object"
+      },
+      "ReviewInput": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Sha256",
+            "type": "string"
+          },
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "comment": {
+            "maxLength": 2000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "position_s": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position S"
+          },
+          "request_id": {
+            "pattern": "^[0-9a-f-]{36}$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "keep",
+              "fix",
+              "drop"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "artifact_sha256",
+          "base_revision",
+          "verdict",
+          "comment",
+          "position_s"
+        ],
+        "title": "ReviewInput",
+        "type": "object"
+      },
+      "ReviewState": {
+        "properties": {
+          "artifact_sha256": {
+            "title": "Artifact Sha256",
+            "type": "string"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "legacy": {
+            "items": {
+              "$ref": "#/components/schemas/LegacyReview"
+            },
+            "title": "Legacy",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifact_sha256",
+          "current",
+          "history",
+          "legacy"
+        ],
+        "title": "ReviewState",
         "type": "object"
       },
       "SourceItem": {
@@ -420,6 +600,22 @@
               "title": "Variant",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "artifact",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Artifact"
+            }
           }
         ],
         "responses": {
@@ -465,6 +661,130 @@
           }
         },
         "summary": "Projects"
+      }
+    },
+    "/api/reviews/{stem}/{clip}": {
+      "get": {
+        "operationId": "review_state_api_reviews__stem___clip__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stem",
+            "required": true,
+            "schema": {
+              "title": "Stem",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "clip",
+            "required": true,
+            "schema": {
+              "title": "Clip",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Variant",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review State"
+      },
+      "put": {
+        "operationId": "save_review_api_reviews__stem___clip__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stem",
+            "required": true,
+            "schema": {
+              "title": "Stem",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "clip",
+            "required": true,
+            "schema": {
+              "title": "Clip",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Variant",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Review"
       }
     },
     "/api/sources": {
