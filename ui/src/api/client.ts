@@ -5,6 +5,8 @@ export type SourceItem = components["schemas"]["SourceItem"];
 export type ProjectItem = components["schemas"]["ProjectItem"];
 export type ReviewState = components["schemas"]["ReviewState"];
 export type ReviewInput = components["schemas"]["ReviewInput"];
+export type ComparisonInput = components["schemas"]["ComparisonInput"];
+export type ComparisonState = components["schemas"]["ComparisonState"];
 export type ClipItem = components["schemas"]["ClipItem"];
 export type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
 export type SourceMetaOut = components["schemas"]["SourceMetaOut"];
@@ -25,7 +27,15 @@ function reviewUrl(stem: string, clip: string, variant: string) {
   return `/api/reviews/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}?variant=${encodeURIComponent(variant)}`;
 }
 
+function comparisonUrl(stem: string, clip: string, left: string, right: string) {
+  return `/api/comparisons/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}?${new URLSearchParams({left, right})}`;
+}
+
 export const api = {
+  comparison: (stem: string, clip: string, left: string, right: string) =>
+    get<ComparisonState>(comparisonUrl(stem, clip, left, right), true),
+  saveComparison: (stem: string, clip: string, left: string, right: string, body: ComparisonInput) =>
+    put<ComparisonState>(comparisonUrl(stem, clip, left, right), body),
   health: () => get<HealthResponse>("/api/health"),
   sources: () => get<SourceItem[]>("/api/sources"),
   projects: () => get<ProjectItem[]>("/api/projects"),

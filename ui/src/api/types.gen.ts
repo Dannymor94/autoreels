@@ -21,6 +21,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/comparisons/{stem}/{clip}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Comparison State */
+        get: operations["comparison_state_api_comparisons__stem___clip__get"];
+        /** Save Comparison */
+        put: operations["save_comparison_api_comparisons__stem___clip__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -188,6 +206,54 @@ export interface components {
             /** Variant */
             variant: string;
         };
+        /** ComparisonEvent */
+        ComparisonEvent: {
+            /** Comment */
+            comment: string;
+            /** Created At */
+            created_at: string;
+            /** Left Sha256 */
+            left_sha256: string;
+            /** Left Variant */
+            left_variant: string;
+            /** Request Id */
+            request_id: string;
+            /** Right Sha256 */
+            right_sha256: string;
+            /** Right Variant */
+            right_variant: string;
+            /** Winner */
+            winner: string;
+        };
+        /** ComparisonInput */
+        ComparisonInput: {
+            /** Base Revision */
+            base_revision: string | null;
+            /** Comment */
+            comment: string;
+            /** Left Sha256 */
+            left_sha256: string;
+            /** Request Id */
+            request_id: string;
+            /** Right Sha256 */
+            right_sha256: string;
+            /** Winner */
+            winner: string;
+        };
+        /** ComparisonState */
+        ComparisonState: {
+            current: components["schemas"]["ComparisonEvent"] | null;
+            /** History */
+            history: components["schemas"]["ComparisonEvent"][];
+            /** Left Sha256 */
+            left_sha256: string;
+            /** Left Variant */
+            left_variant: string;
+            /** Right Sha256 */
+            right_sha256: string;
+            /** Right Variant */
+            right_variant: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -344,6 +410,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapabilitiesResponse"];
+                };
+            };
+        };
+    };
+    comparison_state_api_comparisons__stem___clip__get: {
+        parameters: {
+            query: {
+                left: string;
+                right: string;
+            };
+            header?: never;
+            path: {
+                stem: string;
+                clip: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComparisonState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_comparison_api_comparisons__stem___clip__put: {
+        parameters: {
+            query: {
+                left: string;
+                right: string;
+            };
+            header?: never;
+            path: {
+                stem: string;
+                clip: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComparisonInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComparisonState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

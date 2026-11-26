@@ -176,6 +176,16 @@ def clips(stem: str):
     return _list_clips(stem)
 
 
+@app.get("/api/comparisons/{stem}/{clip}", response_model=reviews.ComparisonState)
+def comparison_state(stem: str, clip: str, left: str, right: str):
+    return reviews.compare(_cfg.settings.root, stem, clip, left, right)
+
+
+@app.put("/api/comparisons/{stem}/{clip}", response_model=reviews.ComparisonState)
+def save_comparison(stem: str, clip: str, left: str, right: str, body: reviews.ComparisonInput):
+    return reviews.compare(_cfg.settings.root, stem, clip, left, right, body)
+
+
 @app.get("/api/reviews/{stem}/{clip}", response_model=reviews.ReviewState)
 def review_state(stem: str, clip: str, variant: str = Query(default="")):
     root = _cfg.settings.root

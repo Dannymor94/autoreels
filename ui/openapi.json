@@ -98,6 +98,151 @@
         "title": "ClipItem",
         "type": "object"
       },
+      "ComparisonEvent": {
+        "properties": {
+          "comment": {
+            "title": "Comment",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "left_sha256": {
+            "title": "Left Sha256",
+            "type": "string"
+          },
+          "left_variant": {
+            "title": "Left Variant",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "right_sha256": {
+            "title": "Right Sha256",
+            "type": "string"
+          },
+          "right_variant": {
+            "title": "Right Variant",
+            "type": "string"
+          },
+          "winner": {
+            "title": "Winner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "left_variant",
+          "right_variant",
+          "left_sha256",
+          "right_sha256",
+          "winner",
+          "comment",
+          "created_at"
+        ],
+        "title": "ComparisonEvent",
+        "type": "object"
+      },
+      "ComparisonInput": {
+        "additionalProperties": false,
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "comment": {
+            "maxLength": 2000,
+            "title": "Comment",
+            "type": "string"
+          },
+          "left_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Left Sha256",
+            "type": "string"
+          },
+          "request_id": {
+            "pattern": "^[0-9a-f-]{36}$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "right_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Right Sha256",
+            "type": "string"
+          },
+          "winner": {
+            "title": "Winner",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "left_sha256",
+          "right_sha256",
+          "base_revision",
+          "winner",
+          "comment"
+        ],
+        "title": "ComparisonInput",
+        "type": "object"
+      },
+      "ComparisonState": {
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComparisonEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ComparisonEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "left_sha256": {
+            "title": "Left Sha256",
+            "type": "string"
+          },
+          "left_variant": {
+            "title": "Left Variant",
+            "type": "string"
+          },
+          "right_sha256": {
+            "title": "Right Sha256",
+            "type": "string"
+          },
+          "right_variant": {
+            "title": "Right Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "left_variant",
+          "right_variant",
+          "left_sha256",
+          "right_sha256",
+          "current",
+          "history"
+        ],
+        "title": "ComparisonState",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -549,6 +694,146 @@
           }
         },
         "summary": "Capabilities"
+      }
+    },
+    "/api/comparisons/{stem}/{clip}": {
+      "get": {
+        "operationId": "comparison_state_api_comparisons__stem___clip__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stem",
+            "required": true,
+            "schema": {
+              "title": "Stem",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "clip",
+            "required": true,
+            "schema": {
+              "title": "Clip",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "left",
+            "required": true,
+            "schema": {
+              "title": "Left",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "right",
+            "required": true,
+            "schema": {
+              "title": "Right",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Comparison State"
+      },
+      "put": {
+        "operationId": "save_comparison_api_comparisons__stem___clip__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stem",
+            "required": true,
+            "schema": {
+              "title": "Stem",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "clip",
+            "required": true,
+            "schema": {
+              "title": "Clip",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "left",
+            "required": true,
+            "schema": {
+              "title": "Left",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "right",
+            "required": true,
+            "schema": {
+              "title": "Right",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComparisonInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComparisonState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Comparison"
       }
     },
     "/api/health": {
