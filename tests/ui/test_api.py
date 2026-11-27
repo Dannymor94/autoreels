@@ -473,7 +473,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     restored=result.json()
     assert restored["revision"]==2 and restored["current_removed"]==[]
     assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
-    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"graphic":None,"navigation":None,"candidate_plan_sha256":restored["plan_sha256"]},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
+    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"graphic":None,"navigation":None,"candidate_plan_sha256":restored["plan_sha256"]},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"graphic":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
     assert client.put("/api/synthetic-cut",json=body).json()==restored
     assert client.get("/api/synthetic-cut").json()==restored
     assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"
