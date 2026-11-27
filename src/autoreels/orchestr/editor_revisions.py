@@ -12,7 +12,7 @@ import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,6 +41,7 @@ class Correction(BaseModel):
     word_index: Annotated[int, Field(ge=0)]
     expected_text: Token
     replacement: Token
+    action: Literal["edit", "undo", "redo"] = "edit"
 
 
 @dataclass(frozen=True)
@@ -63,10 +64,12 @@ class Store:
     are rejected, not matched heuristically. The initial UID map persists
     across corrections. No live CLI/manifest file writes or second live head.
     """
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection, *, initialize: bool = True):
         self.conn = conn
         if conn.in_transaction:
             raise ValueError("editor store requires dedicated idle connection")
+        if not initialize:
+            return
         with self._tx():
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS editor_projects_v1 (
@@ -155,7 +158,30 @@ class Store:
                               (project_id, 0, expected_sha256, raw))
             return self._read(project_id)
 
-    def correct(self, op: Correction) -> Revision:
+    def history(self, project_id: str) -> list[Correction]:
+        return [Correction.model_validate_json(row[0]) for row in self.conn.execute(
+            "SELECT op_payload FROM editor_revisions_v1 WHERE project_id=? AND revision>0 ORDER BY revision",
+            (project_id,),
+        )]
+
+    @staticmethod
+    def stacks(history: list[Correction]) -> tuple[list[Correction], list[Correction]]:
+        undo, redo = [], []
+        for op in history:
+            if op.action == "edit":
+                undo.append(op)
+                redo.clear()
+            elif op.action == "undo":
+                if not undo:
+                    raise Conflict("invalid stored undo history")
+                redo.append(undo.pop())
+            else:
+                if not redo:
+                    raise Conflict("invalid stored redo history")
+                undo.append(redo.pop())
+        return undo, redo
+
+    def correct(self, op: Correction, *, max_revision: int | None = None) -> Revision:
         # This is spelling/text only: no insertion/removal of words, no
         # timing edits, no transcript or audio changes. Whitespace/control
         # characters cannot turn one word anchor into multiple words.
@@ -167,12 +193,25 @@ class Store:
             prior = self.conn.execute("SELECT project_id,revision,op_payload FROM editor_revisions_v1 WHERE op_id=?",
                                       (op.op_id,)).fetchone()
             if prior:
-                if prior[0] != op.project_id or prior[2] != payload:
+                if prior[0] != op.project_id or Correction.model_validate_json(prior[2]) != op:
                     raise Conflict("operation ID already bound")
                 return self._read(prior[0], prior[1])
             base = self._read(op.project_id)
             if base.number != op.base_revision or base.plan_sha256 != op.base_plan_sha256:
                 raise Conflict("stale editor revision")
+            if max_revision is not None and base.number >= max_revision:
+                raise Conflict("revision limit reached")
+            if op.action != "edit":
+                undo, redo = self.stacks(self.history(op.project_id))
+                stack = undo if op.action == "undo" else redo
+                if not stack:
+                    raise Conflict("no matching history action")
+                target = stack[-1]
+                before, after = ((target.replacement, target.expected_text)
+                                 if op.action == "undo" else (target.expected_text, target.replacement))
+                if (op.clip_uid, op.word_index, op.expected_text, op.replacement) != (
+                        target.clip_uid, target.word_index, before, after):
+                    raise Conflict("history action target changed")
             aliases = [alias for alias, uid in base.clip_uids if uid == op.clip_uid]
             manifest = base.manifest()
             matches = [i for i, reel in enumerate(manifest.reels) if reel.id in aliases]

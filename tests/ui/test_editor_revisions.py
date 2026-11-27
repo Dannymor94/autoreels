@@ -103,3 +103,28 @@ def test_invalid_correction_never_advances_head(tmp_path):
                 store.correct(operation(base, **kwargs))
             assert store.current("demo") == base
         assert store.correct(operation(base)).number == 1
+
+
+def test_undo_redo_stack_and_branch_invalidation(tmp_path):
+    with closing(sqlite3.connect(tmp_path/"edit.sqlite")) as c:
+        store = e.Store(c)
+        base = initial(store)
+        first = store.correct(operation(base))
+        second = store.correct(operation(first, op_id="two", word_index=1,
+                                        expected_text="мир", replacement="Мир"))
+        with pytest.raises(e.Conflict, match="target changed"):
+            store.correct(operation(second, op_id="wrong", action="undo",
+                                    expected_text="Привет", replacement="Превет"))
+        third = store.correct(operation(second, op_id="undo2", action="undo", word_index=1,
+                                       expected_text="Мир", replacement="мир"))
+        fourth = store.correct(operation(third, op_id="undo1", action="undo",
+                                        expected_text="Привет", replacement="Превет"))
+        assert fourth.manifest() == base.manifest()
+        fifth = store.correct(operation(fourth, op_id="redo1", action="redo"))
+        assert fifth.manifest() == first.manifest()
+        sixth = store.correct(operation(fifth, op_id="branch", expected_text="Привет", replacement="Здравствуй"))
+        assert store.stacks(store.history("demo"))[1] == []
+        with pytest.raises(e.Conflict, match="no matching"):
+            store.correct(operation(sixth, op_id="redo2", action="redo", word_index=1,
+                                    expected_text="мир", replacement="Мир"))
+        assert store.current("demo") == sixth

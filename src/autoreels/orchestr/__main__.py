@@ -12,18 +12,19 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--synthetic-jobs", action="store_true", help="Enable isolated synthetic queue only")
+    parser.add_argument("--synthetic-editor", action="store_true", help="Enable fixed synthetic subtitle editor only")
     parser.add_argument("--private-origin", help="Exact private HTTPS origin, opt-in")
     parser.add_argument("--owner-digest-file", help="Local 0600 file containing SHA-256 of random owner password")
     args = parser.parse_args()
-    if args.synthetic_jobs and (not args.root or not Path(args.root).expanduser().is_dir()):
-        parser.error("--synthetic-jobs requires an explicit existing test root")
+    if (args.synthetic_jobs or args.synthetic_editor) and (not args.root or not Path(args.root).expanduser().is_dir()):
+        parser.error("synthetic modes require an explicit existing test root")
 
     from .settings import Settings
     import autoreels.orchestr.settings as _s
     try:
         _s.settings = Settings.from_env(root_override=args.root, port=args.port, no_browser=args.no_browser,
                                        private_origin=args.private_origin, owner_digest_file=args.owner_digest_file,
-                                       synthetic_jobs=args.synthetic_jobs)
+                                       synthetic_jobs=args.synthetic_jobs, synthetic_editor=args.synthetic_editor)
     except (ValueError, OSError):
         parser.error("invalid private access configuration")
 

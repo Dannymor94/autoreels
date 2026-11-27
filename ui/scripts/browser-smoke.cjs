@@ -22,10 +22,28 @@ async function mock(page, mode = "normal") {
   const reviews = new Map();
   const comparisons = new Map();
   const jobs = new Map();
+  let editor = {enabled:mode==="normal",revision:0,plan_sha256:"a".repeat(64),clip_uid:"b".repeat(64),
+    words:[{index:0,word:"Превет",start:0.1,end:0.8},{index:1,word:"друзья!",start:1,end:2}],
+    history:[],undo:null,redo:null};
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if (path === "/api/synthetic-editor") {
+      if(method==="PUT") {
+        const input=route.request().postDataJSON();
+        assert.equal(input.base_revision,editor.revision);
+        assert.equal(input.base_plan_sha256,editor.plan_sha256);
+        assert.equal(input.expected_text,editor.words[input.word_index].word);
+        const event={revision:editor.revision+1,action:input.action,word_index:input.word_index,before:input.expected_text,after:input.replacement};
+        editor={...editor,revision:event.revision,plan_sha256:String(event.revision).repeat(64),
+          words:editor.words.map(w=>w.index===input.word_index?{...w,word:input.replacement}:w),
+          history:[event,...editor.history],
+          undo:input.action==="undo"?null:input.action==="redo"?editor.redo:event,
+          redo:input.action==="undo"?editor.undo:null};
+      }
+      return route.fulfill({json:editor});
+    }
     if (path === "/api/jobs") return route.fulfill({json:{enabled:true,jobs:[...jobs.values()]}});
     if (path.startsWith("/api/jobs/") && method === "PUT") {
       const job_id=path.split("/").pop(), input=route.request().postDataJSON();
@@ -129,6 +147,21 @@ async function main() {
         assert.equal(await page.getByRole("button", {name: /Задания/}).isDisabled(), false);
         assert.equal(await page.getByRole("button", {name: /Экспорт/}).isDisabled(), false);
         if (width === 390) {
+          const demo=page.getByRole("region",{name:"Демонстрационный текстовый редактор"});
+          await demo.getByRole("button",{name:"Превет",exact:true}).click();
+          await demo.getByLabel("Исправить написание").fill("Привет");
+          await demo.getByRole("button",{name:"Сохранить слово",exact:true}).click();
+          await demo.getByRole("button",{name:"Привет",exact:true}).waitFor();
+          await demo.getByRole("button",{name:"Отменить правку",exact:true}).click();
+          await demo.getByRole("button",{name:"Превет",exact:true}).waitFor();
+          await demo.getByRole("button",{name:"Повторить правку",exact:true}).click();
+          await demo.getByRole("button",{name:"Привет",exact:true}).waitFor();
+          await page.reload();
+          await demo.getByRole("button",{name:"Привет",exact:true}).waitFor();
+          await demo.getByText("История правок (3)",{exact:true}).click();
+          await demo.getByText("#3 · Повтор: Превет → Привет",{exact:true}).waitFor();
+          await layout(page,"390 synthetic editor");
+          console.log("PASS synthetic editor correction, undo/redo, reload and history");
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
           await page.getByRole("button",{name:"Создать тестовое задание",exact:true}).click();

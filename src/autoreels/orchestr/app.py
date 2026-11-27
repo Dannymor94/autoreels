@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta
+from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta, synthetic_editor
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -276,3 +276,15 @@ def set_source_meta(stem: str, body: SourceMetaIn) -> SourceMetaOut:
         raise HTTPException(404, "source unavailable")
     stored = sourcemeta.set_display_name(_cfg.settings.root, stem, body.display_name)
     return SourceMetaOut(stem=stem, display_name=stored)
+
+
+@app.get("/api/synthetic-editor", response_model=synthetic_editor.DemoEditorView)
+def synthetic_editor_view():
+    s = _cfg.settings
+    return synthetic_editor.view(s.root, s.synthetic_editor)
+
+
+@app.put("/api/synthetic-editor", response_model=synthetic_editor.DemoEditorView)
+def synthetic_editor_command(body: synthetic_editor.DemoCommand):
+    s = _cfg.settings
+    return synthetic_editor.command(s.root, s.synthetic_editor, body)
