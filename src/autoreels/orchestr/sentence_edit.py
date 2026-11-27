@@ -29,38 +29,10 @@ def _segments(plan: ManualPlan):
     return [segment for window in plan.body for segment in window.segments()]
 
 
-def remove_sentences(
-    base: Reel,
-    *,
-    sentences: Sequence[Sequence[Word]],
-    words: Sequence[Word],
-    smap: dict,
-    play: tuple[int, ...],
-    selected: tuple[int, ...],
-    params: ManualPlanParams,
-    source_duration: float,
-) -> Proposal:
-    """Preview removal of a contiguous range in a simple existing body plan.
-
-    The caller must supply a frozen exact source/transcript/speech-map and
-    configuration revision. This function checks reproduced baseline, not
-    storage provenance; it neither commits a revision nor accepts media.
-    """
-    if (not base.planned or base.cold_open is not None or base.reordered
-            or base.beat_gap_sec is not None or base.montage or base.fx
-            or base.c_close_ranges or base.subtitle_emph_words or base.speed != 1.0
-            or params.filler_cut or params.filler_word_cut or params.subs_hide_fillers
-            or params.start_preroll_sec or params.max_static_sec or params.emphasis_keys):
-        raise Unavailable("complex plan requires the full manual-edit contract")
-    if (not play or any(type(n) is not int or not 1 <= n <= len(sentences) for n in play)
-            or tuple(sorted(set(play))) != play):
-        raise Unavailable("ambiguous body sentence order")
-    if (not selected or any(type(n) is not int or n not in play for n in selected)
-            or len(selected) >= len(play)):
-        raise Unavailable("select a nonempty proper subset of the body")
-    start = play.index(selected[0])
-    if play[start:start+len(selected)] != selected:
-        raise Unavailable("select one contiguous range")
+def _speech_evidence(
+    sentences: Sequence[Sequence[Word]], words: Sequence[Word],
+    smap: dict, source_duration: float,
+) -> dict[int, tuple[float, float]]:
     if not math.isfinite(source_duration) or source_duration <= 0:
         raise Unavailable("source duration required")
 
@@ -96,6 +68,43 @@ def remove_sentences(
     except (KeyError, TypeError, OverflowError) as exc:
         raise Unavailable("invalid speech evidence") from exc
 
+    return by_key
+
+
+def remove_sentences(
+    base: Reel,
+    *,
+    sentences: Sequence[Sequence[Word]],
+    words: Sequence[Word],
+    smap: dict,
+    play: tuple[int, ...],
+    selected: tuple[int, ...],
+    params: ManualPlanParams,
+    source_duration: float,
+) -> Proposal:
+    """Preview removal of a contiguous range in a simple existing body plan.
+
+    The caller must supply a frozen exact source/transcript/speech-map and
+    configuration revision. This function checks reproduced baseline, not
+    storage provenance; it neither commits a revision nor accepts media.
+    """
+    if (not base.planned or base.cold_open is not None or base.reordered
+            or base.beat_gap_sec is not None or base.montage or base.fx
+            or base.c_close_ranges or base.subtitle_emph_words or base.speed != 1.0
+            or params.filler_cut or params.filler_word_cut or params.subs_hide_fillers
+            or params.start_preroll_sec or params.max_static_sec or params.emphasis_keys):
+        raise Unavailable("complex plan requires the full manual-edit contract")
+    if (not play or any(type(n) is not int or not 1 <= n <= len(sentences) for n in play)
+            or tuple(sorted(set(play))) != play):
+        raise Unavailable("ambiguous body sentence order")
+    if (not selected or any(type(n) is not int or n not in play for n in selected)
+            or len(selected) >= len(play)):
+        raise Unavailable("select a nonempty proper subset of the body")
+    start = play.index(selected[0])
+    if play[start:start+len(selected)] != selected:
+        raise Unavailable("select one contiguous range")
+    by_key = _speech_evidence(sentences, words, smap, source_duration)
+
     def build(order):
         plan = build_manual_plan(sentences, order, words=words, smap=smap,
                                  params=params, source_duration=source_duration)
@@ -127,3 +136,92 @@ def remove_sentences(
     if [w.word for w in proposal.subtitles] != expected_text:
         raise Unavailable("proposed subtitles do not match selected sentences")
     return Proposal(kept, selected, proposal)
+
+
+def reorder_sentences(
+    base: Reel,
+    *,
+    sentences: Sequence[Sequence[Word]],
+    words: Sequence[Word],
+    smap: dict,
+    play: tuple[int, ...],
+    order: tuple[int, ...],
+    params: ManualPlanParams,
+    source_duration: float,
+) -> Reel:
+    """Read-only permutation of an exactly reproducible simple body.
+
+    Uses the existing audio planner and Reel.reordered contract. Source
+    evidence must be frozen by the caller. No persistence or media access.
+    """
+    if (not base.planned or base.cold_open is not None
+            or base.beat_gap_sec is not None or base.montage or base.fx
+            or base.c_close_ranges or base.subtitle_emph_words or base.speed != 1.0
+            or base.zoom_source_t0 is not None or base.head_first_word_start is not None
+            or base.subtitle_gate is not None or base.marks
+            or params.filler_cut or params.filler_word_cut or params.subs_hide_fillers
+            or params.start_preroll_sec or params.max_static_sec or params.emphasis_keys):
+        raise Unavailable("complex plan requires the full manual-edit contract")
+    if (not play or any(type(n) is not int or not 1 <= n <= len(sentences) for n in play)
+            or len(set(play)) != len(play)
+            or any(type(n) is not int for n in order)
+            or len(order) != len(play) or set(order) != set(play)):
+        raise Unavailable("order must be a permutation of the current body")
+    if base.reordered != (tuple(sorted(play)) != play):
+        raise Unavailable("existing reorder flag does not match body")
+    by_key = _speech_evidence(sentences, words, smap, source_duration)
+
+    def build(sequence: tuple[int, ...]) -> ManualPlan:
+        plan = build_manual_plan(sentences, sequence, words=words, smap=smap,
+                                 params=params, source_duration=source_duration)
+        if plan.errors or plan.cold_open is not None:
+            raise Unavailable("manual planner refused the requested body")
+        if tuple(n for window in plan.body for n in window.sentences) != sequence:
+            raise Unavailable("manual planner changed sentence selection")
+        return plan
+
+    baseline = build(play)
+    if (base.start != baseline.start or base.end != baseline.end
+            or base.effective_segments() != _segments(baseline)
+            or base.subtitles != baseline.subtitles
+            or base.tail_last_word_end != baseline.last_audible_end
+            or base.tail_next_word_start != baseline.next_onset):
+        raise Unavailable("existing body cannot be reproduced")
+
+    proposal = build(order)
+    segments = _segments(proposal)
+    expected = [round(w.t0 * 1000) for n in order for w in sentences[n - 1]]
+    # Inspect audible spans, not just planner sentence labels: refuse any
+    # foreign speech, partial word, duplicated word or unexpected play order.
+    # A visual shot change is allowed to split an audible span, so measure
+    # coverage across adjacent source segments in playback order.
+    actual: list[int] = []
+    coverage: dict[int, float] = {}
+    for seg in segments:
+        if not (math.isfinite(seg.start) and math.isfinite(seg.end)
+                and 0 <= seg.start < seg.end <= source_duration):
+            raise Unavailable("invalid proposed segment")
+        overlaps = sorted((max(seg.start, a), key, min(seg.end, b) - max(seg.start, a))
+                          for key, (a, b) in by_key.items()
+                          if min(seg.end, b) - max(seg.start, a) > 1e-6)
+        for _, key, length in overlaps:
+            coverage[key] = coverage.get(key, 0.0) + length
+            if not actual or actual[-1] != key:
+                actual.append(key)
+    if actual != expected or any(
+        abs(coverage.get(key, 0.0) - (by_key[key][1] - by_key[key][0])) > 1e-6
+        for key in expected
+    ):
+        raise Unavailable("proposed playback does not preserve exact speech order")
+    if [w.word for w in proposal.subtitles] != [
+        w.word for n in order for w in sentences[n - 1]
+    ]:
+        raise Unavailable("proposed subtitles do not match playback")
+    reel = base.model_copy(update={
+        "start": proposal.start, "end": proposal.end, "segments": segments,
+        "subtitles": proposal.subtitles, "tail_last_word_end": proposal.last_audible_end,
+        "tail_next_word_start": proposal.next_onset,
+        "reordered": tuple(sorted(order)) != order,
+    })
+    reel.check_segments()
+    return Reel.model_validate_json(reel.model_dump_json())
