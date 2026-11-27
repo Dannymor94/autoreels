@@ -124,6 +124,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/preset-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preset Defaults */
+        get: operations["preset_defaults_api_preset_preview_get"];
+        /** Preview Preset */
+        put: operations["preview_preset_api_preset_preview_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -344,6 +362,18 @@ export interface components {
             /** Right Variant */
             right_variant: string;
         };
+        /** DurationChoice */
+        DurationChoice: {
+            /** Max Sec */
+            max_sec: number;
+            /** Min Sec */
+            min_sec: number;
+            /**
+             * Name
+             * @enum {string}
+             */
+            name: "shorts" | "reels" | "tiktok";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -415,6 +445,74 @@ export interface components {
             render_status: "configured" | "missing" | "invalid" | "blocked";
             /** Schema Version */
             schema_version: number;
+        };
+        /** PresetLayer */
+        PresetLayer: {
+            /** Denoise */
+            denoise?: boolean | null;
+            /** Duration Preset */
+            duration_preset?: ("shorts" | "reels" | "tiktok") | null;
+            /** Filler Word Cut */
+            filler_word_cut?: boolean | null;
+            /** Hook Rescue */
+            hook_rescue?: boolean | null;
+            /** Loudnorm */
+            loudnorm?: boolean | null;
+            /** Two Shot */
+            two_shot?: boolean | null;
+            /** Two Shot Auto */
+            two_shot_auto?: boolean | null;
+            /** Zoom */
+            zoom?: boolean | null;
+        };
+        /** PresetPreview */
+        PresetPreview: {
+            base: components["schemas"]["PresetValues"];
+            /** Base Revision */
+            base_revision: string;
+            /** Changed Fields */
+            changed_fields: string[];
+            effective: components["schemas"]["PresetValues"];
+            /** Execution Enabled */
+            execution_enabled: boolean;
+            /** Invalidates */
+            invalidates: ("selection" | "plan" | "render")[];
+            /** Presets */
+            presets: components["schemas"]["DurationChoice"][];
+            /** Schema Version */
+            schema_version: number;
+            /** Two Shot Auto Active */
+            two_shot_auto_active: boolean;
+        };
+        /** PresetRequest */
+        PresetRequest: {
+            /** Base Revision */
+            base_revision: string;
+            clip_layer: components["schemas"]["PresetLayer"];
+            global_layer: components["schemas"]["PresetLayer"];
+            project_layer: components["schemas"]["PresetLayer"];
+        };
+        /** PresetValues */
+        PresetValues: {
+            /** Denoise */
+            denoise: boolean;
+            /**
+             * Duration Preset
+             * @enum {string}
+             */
+            duration_preset: "shorts" | "reels" | "tiktok";
+            /** Filler Word Cut */
+            filler_word_cut: boolean;
+            /** Hook Rescue */
+            hook_rescue: boolean;
+            /** Loudnorm */
+            loudnorm: boolean;
+            /** Two Shot */
+            two_shot: boolean;
+            /** Two Shot Auto */
+            two_shot_auto: boolean;
+            /** Zoom */
+            zoom: boolean;
         };
         /** ProjectItem */
         ProjectItem: {
@@ -852,6 +950,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preset_defaults_api_preset_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetPreview"];
+                };
+            };
+        };
+    };
+    preview_preset_api_preset_preview_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PresetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresetPreview"];
                 };
             };
             /** @description Validation Error */
