@@ -270,7 +270,8 @@ export interface paths {
         };
         /** Synthetic Cut View */
         get: operations["synthetic_cut_view_api_synthetic_cut_get"];
-        put?: never;
+        /** Synthetic Cut Command */
+        put: operations["synthetic_cut_command_api_synthetic_cut_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -430,12 +431,37 @@ export interface components {
             /** Right Variant */
             right_variant: string;
         };
+        /** CutCommand */
+        CutCommand: {
+            /** Base Plan Sha256 */
+            base_plan_sha256: string;
+            /** Base Revision */
+            base_revision: number;
+            /** Candidate Plan Sha256 */
+            candidate_plan_sha256: string;
+            /** Clip Uid */
+            clip_uid: string;
+            /** Op Id */
+            op_id: string;
+            /** Removed */
+            removed: number[];
+        };
         /** CutDemoView */
         CutDemoView: {
+            /** Clip Uid */
+            clip_uid: string;
+            /** Current Removed */
+            current_removed: number[];
             /** Enabled */
             enabled: boolean;
+            /** History */
+            history: components["schemas"]["CutSelectionEvent"][];
+            /** Plan Sha256 */
+            plan_sha256: string;
             /** Plans */
             plans: components["schemas"]["CutPreview"][];
+            /** Revision */
+            revision: number;
             /** Sentences */
             sentences: components["schemas"]["CutSentence"][];
             /** Source Duration */
@@ -445,10 +471,19 @@ export interface components {
         CutPreview: {
             /** Duration */
             duration: number;
+            /** Plan Sha256 */
+            plan_sha256: string;
             /** Removed */
             removed: number[];
             /** Windows */
             windows: components["schemas"]["CutWindow"][];
+        };
+        /** CutSelectionEvent */
+        CutSelectionEvent: {
+            /** Removed */
+            removed: number[];
+            /** Revision */
+            revision: number;
         };
         /** CutSentence */
         CutSentence: {
@@ -1410,6 +1445,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CutDemoView"];
+                };
+            };
+        };
+    };
+    synthetic_cut_command_api_synthetic_cut_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CutCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CutDemoView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

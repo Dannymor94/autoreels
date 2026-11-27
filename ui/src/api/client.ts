@@ -18,6 +18,7 @@ export type ReviewInput = components["schemas"]["ReviewInput"];
 export type ComparisonInput = components["schemas"]["ComparisonInput"];
 export type ComparisonState = components["schemas"]["ComparisonState"];
 export type CutDemoView = components["schemas"]["CutDemoView"];
+export type CutCommand = components["schemas"]["CutCommand"];
 export type CutPreview = components["schemas"]["CutPreview"];
 export type DemoEditorView = components["schemas"]["DemoEditorView"];
 export type DemoCommand = components["schemas"]["DemoCommand"];
@@ -54,6 +55,7 @@ export const api = {
     put<ComparisonState>(comparisonUrl(stem, clip, left, right), body),
   clipPlan: (stem: string, clip: string) => get<ClipPlanView>(`/api/clip-plan/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}`, true),
   syntheticCut: () => get<CutDemoView>("/api/synthetic-cut",true),
+  saveSyntheticCut: (body:CutCommand) => put<CutDemoView>("/api/synthetic-cut",body),
   syntheticEditor: () => get<DemoEditorView>("/api/synthetic-editor",true),
   editSynthetic: (body: DemoCommand) => put<DemoEditorView>("/api/synthetic-editor",body),
   health: () => get<HealthResponse>("/api/health"),
