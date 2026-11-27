@@ -31,7 +31,7 @@ def _history(root, records):
 
 def _client(root, monkeypatch):
     monkeypatch.setattr(settings, "settings", settings.Settings.from_env(root_override=str(root)))
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
 def test_catalog_states_and_no_mutation(tmp_path, monkeypatch):

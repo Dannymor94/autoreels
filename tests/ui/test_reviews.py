@@ -23,7 +23,7 @@ def review_fixture(tmp_path, monkeypatch):
     draft = root / "reviews" / "DEMO_auto.txt"
     draft.write_text("unchanged")
     monkeypatch.setattr(settings, "settings", settings.Settings.from_env(root_override=str(root)))
-    return root, video, legacy, draft, TestClient(app)
+    return root, video, legacy, draft, TestClient(app, base_url="http://127.0.0.1:8765")
 
 
 URL = "/api/reviews/DEMO/r01"

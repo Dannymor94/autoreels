@@ -46,7 +46,7 @@ def duration_s(path: Path) -> float | None:
 def caption(path: Path) -> str | None:
     """First non-empty line of r05.txt next to r05.mp4 — the publish caption (with hashtags)."""
     txt = path.with_suffix(".txt")
-    if not txt.is_file():
+    if txt.is_symlink() or not txt.is_file():
         return None
     try:
         for line in txt.read_text(encoding="utf-8").splitlines():
@@ -61,6 +61,8 @@ def poster(path: Path, cache_dir: Path) -> Path | None:
     """JPEG poster for a clip, generated once per (path, mtime, size). None if ffmpeg is missing."""
     digest = hashlib.sha1("|".join(map(str, _key(path))).encode()).hexdigest()
     out = cache_dir / f"{digest}.jpg"
+    if out.is_symlink():
+        return None
     if out.is_file():
         return out
     ffmpeg = shutil.which("ffmpeg")
