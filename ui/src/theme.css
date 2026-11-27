@@ -140,3 +140,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 
 .module-setting { border-top: 1px solid var(--border); padding-top: 8px; min-width: 0; }
 .module-setting p { margin: 4px 0; }
+
+.clip-plan-panel { display: grid; gap: 8px; margin-top: 12px; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 12px; overflow-wrap: anywhere; }
+.clip-plan-panel button { min-height: 44px; font: inherit; color: var(--fg); background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.plan-window { display: grid; gap: 4px; border-top: 1px solid var(--border); padding-top: 8px; }
+.plan-window small { color: var(--fg2); }
+.plan-word { white-space: pre-wrap; }

@@ -150,6 +150,55 @@
         "title": "ClipItem",
         "type": "object"
       },
+      "ClipPlanView": {
+        "properties": {
+          "clip_ref": {
+            "title": "Clip Ref",
+            "type": "string"
+          },
+          "planned_duration_s": {
+            "title": "Planned Duration S",
+            "type": "number"
+          },
+          "recorded_source_id": {
+            "title": "Recorded Source Id",
+            "type": "string"
+          },
+          "revision_sha256": {
+            "title": "Revision Sha256",
+            "type": "string"
+          },
+          "speed": {
+            "title": "Speed",
+            "type": "number"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/PlanWindow"
+            },
+            "title": "Windows",
+            "type": "array"
+          },
+          "words": {
+            "items": {
+              "$ref": "#/components/schemas/PlanWord"
+            },
+            "title": "Words",
+            "type": "array"
+          }
+        },
+        "required": [
+          "revision_sha256",
+          "recorded_source_id",
+          "clip_ref",
+          "speed",
+          "planned_duration_s",
+          "windows",
+          "words"
+        ],
+        "title": "ClipPlanView",
+        "type": "object"
+      },
       "ComparisonEvent": {
         "properties": {
           "comment": {
@@ -640,6 +689,87 @@
           "execution_enabled"
         ],
         "title": "PipelineSettings",
+        "type": "object"
+      },
+      "PlanWindow": {
+        "properties": {
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "plan_end": {
+            "title": "Plan End",
+            "type": "number"
+          },
+          "plan_start": {
+            "title": "Plan Start",
+            "type": "number"
+          },
+          "source_end": {
+            "title": "Source End",
+            "type": "number"
+          },
+          "source_start": {
+            "title": "Source Start",
+            "type": "number"
+          }
+        },
+        "required": [
+          "index",
+          "kind",
+          "source_start",
+          "source_end",
+          "plan_start",
+          "plan_end"
+        ],
+        "title": "PlanWindow",
+        "type": "object"
+      },
+      "PlanWord": {
+        "properties": {
+          "occurrence_id": {
+            "title": "Occurrence Id",
+            "type": "string"
+          },
+          "plan_end": {
+            "title": "Plan End",
+            "type": "number"
+          },
+          "plan_start": {
+            "title": "Plan Start",
+            "type": "number"
+          },
+          "source_end": {
+            "title": "Source End",
+            "type": "number"
+          },
+          "source_start": {
+            "title": "Source Start",
+            "type": "number"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "occurrence_id",
+          "window_index",
+          "word",
+          "source_start",
+          "source_end",
+          "plan_start",
+          "plan_end"
+        ],
+        "title": "PlanWord",
         "type": "object"
       },
       "ProjectItem": {
@@ -1290,6 +1420,54 @@
           }
         },
         "summary": "Capabilities"
+      }
+    },
+    "/api/clip-plan/{stem}/{clip}": {
+      "get": {
+        "operationId": "clip_plan_api_clip_plan__stem___clip__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stem",
+            "required": true,
+            "schema": {
+              "title": "Stem",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "clip",
+            "required": true,
+            "schema": {
+              "title": "Clip",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClipPlanView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clip Plan"
       }
     },
     "/api/comparisons/{stem}/{clip}": {
