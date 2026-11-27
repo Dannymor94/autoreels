@@ -148,7 +148,7 @@ def test_symlink_outside_not_listed(client, tmp_root):
 
 
 def test_render_inventory_is_read_only_and_has_no_assumed_worker(client, tmp_root, monkeypatch):
-    from autoreels.orchestrator import render_targets
+    from autoreels.orchestr import render_targets
 
     # Even environment values which look like a hostname or executor
     # configuration cannot invent a registered, authorized worker.
