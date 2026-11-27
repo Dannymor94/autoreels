@@ -12,7 +12,7 @@ class RenderMode(BaseModel):
 
 
 class RenderTarget(BaseModel):
-    """A real registered executor, never a placeholder for a device category."""
+    # A real registered executor, never a placeholder for a device category.
 
     target_id: str
     kind: TargetKind
