@@ -292,3 +292,45 @@ def test_module_settings_fail_closed(client, tmp_root):
     assert client.get("/api/module-settings").json()["status"] == "invalid"
     (config / "render.local.yaml").symlink_to(tmp_root / "missing-secret")
     assert client.get("/api/module-settings").json()["status"] == "blocked"
+
+
+def test_clip_plan_exact_revision_and_repeated_occurrences(client, tmp_root):
+    import hashlib
+    from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Word, make_segment, make_cold_open_segment
+    directory = tmp_root / "manifests"
+    directory.mkdir()
+    path = directory / "DEMO.json"
+    reel = Reel(id="r01", start=4, end=2, reordered=True, speed=2,
+                segments=[make_segment(4, 6), make_segment(0, 2)],
+                cold_open=make_cold_open_segment(4, 6), score=80, hook="h",
+                title="test", description="test",
+                subtitles=[Word(word="Первое", t0=0.5, t1=1.0),
+                           Word(word="Хук", t0=4.5, t1=5.0),
+                           Word(word="Вырезано", t0=3.0, t1=3.5)])
+    manifest = Manifest(source="DEMO.mp4", source_path="/private/never-return",
+        source_sha256="a"*64, source_hash_scheme="partial-p1",
+        duration_preset="shorts", run_key="test",
+        setup=SetupProfile(setup_id="s", crop=Crop(x=0,y=0,w=360,h=640),
+                           frame=[360,640], scale=[360,640]), reels=[reel])
+    path.write_text(manifest.model_dump_json(), encoding="utf-8")
+    before = path.read_bytes()
+    response = client.get("/api/clip-plan/DEMO/r01")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["revision_sha256"] == hashlib.sha256(before).hexdigest()
+    assert view["recorded_source_id"] == "partial-p1:" + "a"*64
+    assert view["planned_duration_s"] == 3
+    assert [w["word"] for w in view["words"]] == ["Хук", "Хук", "Первое"]
+    assert [w["plan_start"] for w in view["words"]] == [0.25, 1.25, 2.25]
+    assert len({w["occurrence_id"] for w in view["words"]}) == 3
+    assert "private" not in response.text and path.read_bytes() == before
+    assert client.get("/api/clip-plan/DEMO/r01").json() == view
+    path.write_text(manifest.model_copy(update={"reels":[reel.model_copy(update={"speed":1.0})]}).model_dump_json())
+    changed = client.get("/api/clip-plan/DEMO/r01").json()
+    assert changed["revision_sha256"] != view["revision_sha256"] and changed["clip_ref"] != view["clip_ref"]
+    path.write_text(manifest.model_copy(update={"reels":[reel,reel]}).model_dump_json())
+    assert client.get("/api/clip-plan/DEMO/r01").status_code == 409
+    path.unlink()
+    path.symlink_to(tmp_root / "missing.json")
+    assert client.get("/api/clip-plan/DEMO/r01").status_code == 404
+    assert client.get("/api/clip-plan/DEMO/%2E%2E").status_code == 404

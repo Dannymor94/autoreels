@@ -11,6 +11,7 @@ import { VariantTabs } from "../components/VariantTabs";
 import { HelpOverlay } from "../components/HelpOverlay";
 import { ReviewPanel } from "../components/ReviewPanel";
 import { ComparisonPanel } from "../components/ComparisonPanel";
+import { ClipPlanPanel } from "../components/ClipPlanPanel";
 
 interface Props {
   stem: string;
@@ -205,6 +206,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
                 </>
               )}
               </div>
+              {!comparing && <ClipPlanPanel key={stem + ':' + group.clip} stem={stem} clip={group.clip} />}
             </>
           ) : (
             <p style={{ color: "var(--fg2)" }}>{L.pickClip}</p>

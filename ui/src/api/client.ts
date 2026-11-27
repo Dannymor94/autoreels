@@ -17,6 +17,7 @@ export type ReviewState = components["schemas"]["ReviewState"];
 export type ReviewInput = components["schemas"]["ReviewInput"];
 export type ComparisonInput = components["schemas"]["ComparisonInput"];
 export type ComparisonState = components["schemas"]["ComparisonState"];
+export type ClipPlanView = components["schemas"]["ClipPlanView"];
 export type ClipItem = components["schemas"]["ClipItem"];
 export type CapabilitiesResponse = components["schemas"]["CapabilitiesResponse"];
 export type SourceMetaOut = components["schemas"]["SourceMetaOut"];
@@ -46,6 +47,7 @@ export const api = {
     get<ComparisonState>(comparisonUrl(stem, clip, left, right), true),
   saveComparison: (stem: string, clip: string, left: string, right: string, body: ComparisonInput) =>
     put<ComparisonState>(comparisonUrl(stem, clip, left, right), body),
+  clipPlan: (stem: string, clip: string) => get<ClipPlanView>(`/api/clip-plan/${encodeURIComponent(stem)}/${encodeURIComponent(clip)}`, true),
   health: () => get<HealthResponse>("/api/health"),
   jobs: () => get<JobInventory>("/api/jobs", true),
   jobCommand: (id: string, command: JobCommand) => put<SyntheticJob>("/api/jobs/" + encodeURIComponent(id), command),

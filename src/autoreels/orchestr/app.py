@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, queue, render_targets, reviews, sourcemeta
+from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -218,6 +218,11 @@ def sources():
 @app.get("/api/sources/{stem}/clips", response_model=list[ClipItem])
 def clips(stem: str):
     return _list_clips(stem)
+
+
+@app.get("/api/clip-plan/{stem}/{clip}", response_model=plan_view.ClipPlanView)
+def clip_plan(stem: str, clip: str):
+    return plan_view.read_plan(_cfg.settings.root, stem, clip)
 
 
 @app.get("/api/comparisons/{stem}/{clip}", response_model=reviews.ComparisonState)

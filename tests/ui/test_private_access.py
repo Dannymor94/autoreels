@@ -42,7 +42,7 @@ def private(tmp_path, monkeypatch):
 def test_private_auth_applies_to_all_reads_and_writes(private):
     root, _, c = private
     paths = ["/", "/docs", "/openapi.json", "/api/health", "/api/projects",
-             "/api/sources", "/api/sources/DEMO/clips", "/api/render-targets", "/api/pipeline-settings", "/api/module-settings", "/api/jobs",
+             "/api/sources", "/api/sources/DEMO/clips", "/api/render-targets", "/api/pipeline-settings", "/api/module-settings", "/api/jobs", "/api/clip-plan/DEMO/r01",
              "/api/reviews/DEMO/r01", "/api/comparisons/DEMO/r01?left=&right=_gate/b",
              "/api/thumb/DEMO/r01", "/api/media/DEMO/r01",
              "/api/media/DEMO/r01?artifact="+"a"*64]
