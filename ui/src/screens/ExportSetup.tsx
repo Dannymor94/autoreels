@@ -14,7 +14,7 @@ export function ExportSetup() {
   });
   const [kind, setKind] = useState<RenderMode["kind"] | null>(null);
   const supported = data?.schema_version === 1 && Array.isArray(data.modes) && Array.isArray(data.targets);
-  const modes = supported ? data.modes.filter(m => Object.hasOwn(descriptions, m.kind)) : [];
+  const modes = supported ? data.modes.filter(m => Object.prototype.hasOwnProperty.call(descriptions, m.kind)) : [];
   const selected = modes.find(m => m.kind === kind);
   const nodes = supported && selected ? data.targets.filter(t => t.kind === selected.kind) : [];
   return <main className="workspace export-setup">
