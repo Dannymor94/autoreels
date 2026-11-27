@@ -415,7 +415,8 @@ export interface components {
         };
         /** DemoCommand */
         DemoCommand: {
-            /** Action
+            /**
+             * Action
              * @enum {string}
              */
             action: "edit" | "undo" | "redo";
@@ -436,7 +437,8 @@ export interface components {
         };
         /** DemoEdit */
         DemoEdit: {
-            /** Action
+            /**
+             * Action
              * @enum {string}
              */
             action: "edit" | "undo" | "redo";
