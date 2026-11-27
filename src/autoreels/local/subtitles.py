@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from autoreels.core.config import SubtitlesConfig
 from autoreels.core.models import Word
+from autoreels.core.playback_timing import build_window_timing
 
 # alignment (нижний ряд numpad ASS): center=2, left=1, right=3.
 _ALIGN = {"center": 2, "left": 1, "right": 3}
@@ -34,7 +35,7 @@ def words_in_window(words: list[Word], start: float, end: float) -> list[Word]:
 
 
 def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
-                    xfade_sec: float = 0.0) -> list[Word]:
+                    xfade_sec: float = 0.0, window_rates=None) -> list[Word]:
     """Remap word times onto the concatenated, speed-adjusted output timeline of a reel.
 
     Each word keeps its offset within its segment plus the accumulated duration of preceding
@@ -47,6 +48,22 @@ def remap_to_output(words: list[Word], segments, speed: float = 1.0, *,
     subsequent segment starts `xfade_sec` earlier in the output timeline. Pass the actual
     (frame-snapped) xfade duration used in the filtergraph so subtitles land on the right frames.
     """
+    if window_rates is not None:
+        # Explicit experimental path only. Existing global speed and seam
+        # semantics remain byte-for-byte unchanged for existing callers.
+        if speed != 1.0 or xfade_sec != 0.0:
+            raise ValueError("per-window rates require hard cuts and no global speed")
+        out = []
+        for window in build_window_timing(segments, window_rates):
+            for word in words:
+                if window.source_start <= word.t0 < window.source_end:
+                    if not word.t0 <= word.t1 <= window.source_end:
+                        raise ValueError("subtitle crosses retimed window")
+                    out.append(word.model_copy(update={
+                        "t0": window.to_output(word.t0),
+                        "t1": window.to_output(word.t1),
+                    }))
+        return out
     out: list[Word] = []
     offset = 0.0
     segs = list(segments)
