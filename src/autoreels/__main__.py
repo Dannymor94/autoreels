@@ -4340,6 +4340,12 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
         payload["planned"] = True
         payload["shots"] = [[w.shot, [[round(a, 4), round(b, 4)] for a, b in w.close_intervals]]
                             for w in reel.playback_windows()]
+    if getattr(reel, "window_rates", None) is not None:
+        payload["window_rates"] = reel.window_rates
+    if getattr(reel, "background_track", None) is not None:
+        # Explicit edit is authoritative, not the legacy global music selection.
+        payload["music"] = None
+        payload["background_track"] = reel.background_track.model_dump(mode="json")
     if getattr(reel, "fx", None):
         # M55: attention effects change the picture/sound; added only when set (old prints stay).
         payload["fx"] = reel.fx
@@ -4704,6 +4710,13 @@ def cmd_render(
                       file=sys.stderr, flush=True)
                 eff_pal = render_cfg.palette
             zoom_on = render_cfg.zoom.enabled if zoom is None else zoom
+            # Explicit layer must be available even when a prior artifact is
+            # eligible for reuse. Never substitute a random or missing track.
+            if any(r.background_track is not None for r in manifest.reels):
+                from autoreels.local.assets import resolve_audio_asset
+                for r in manifest.reels:
+                    if r.background_track is not None:
+                        resolve_audio_asset(Path(root).resolve() / "assets", r.background_track.asset)
 
             # Отпечаток определения рила (окна, скорость, заголовок, cold open, кроп, палитра,
             # профиль…). Клип с несовпавшим отпечатком перерендеривается, даже если файл на месте —
@@ -4790,6 +4803,8 @@ def cmd_render(
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
                 profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
                 subtitles_cfg=subtitles_cfg, background=background, smap=_render_smap,
+                **({"assets_dir": Path(root).resolve() / "assets"}
+                   if any(r.background_track is not None for r in render_manifest.reels) else {}),
             )
             all_outputs.extend(outputs)
             # Record each rendered clip's fingerprint next to it, so a later run re-renders only when

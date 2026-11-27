@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
@@ -135,6 +135,26 @@ class Segment(BaseModel):
     prerolled: bool = False
 
 
+class AudioAsset(BaseModel):
+    """Local content-addressed asset reference; metadata is an owner declaration, not legal verification."""
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    label: str = Field(min_length=1, max_length=120, pattern=r"\S")
+    format: Literal["wav"] = "wav"
+    rights: Literal["synthetic", "owned", "licensed", "public_domain"]
+    rights_note: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+
+class BackgroundTrack(BaseModel):
+    """One optional, full-output-duration looping background audio layer."""
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    asset: AudioAsset
+    volume: float = Field(default=0.13, ge=0.0, le=0.5, allow_inf_nan=False)
+    fade_seconds: float = Field(default=0.5, ge=0.0, le=5.0, allow_inf_nan=False)
+    ducking: bool = True
+    final_normalize: bool = True
+
+
 class Reel(BaseModel):
     """Один кандидат-клип. Без crop/scale — наследует их из `manifest.setup`."""
 
@@ -235,11 +255,15 @@ class Reel(BaseModel):
     # Opt-in, indexed by playback window occurrence; absent on legacy manifests.
     window_rates: list[Annotated[float, Field(strict=True, ge=0.5, le=2.0)]] | None = None
 
+    background_track: BackgroundTrack | None = None
+
     @model_serializer(mode="wrap")
     def _serialize_rates(self, handler):
         data = handler(self)
         if self.window_rates is None:
             data.pop("window_rates", None)
+        if self.background_track is None:
+            data.pop("background_track", None)
         return data
 
     @model_validator(mode="after")

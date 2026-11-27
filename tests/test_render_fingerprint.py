@@ -92,3 +92,18 @@ def test_fingerprint_roundtrip(tmp_path):
     _write_render_fingerprint(tmp_path, "r01", "abc123")
     assert _read_render_fingerprint(tmp_path, "r01") == "abc123"
     assert _read_render_fingerprint(tmp_path, "missing") is None
+
+
+def test_window_rates_and_bound_soundtrack_change_render_fingerprint():
+    from autoreels.core.models import AudioAsset, BackgroundTrack
+    base=_reel(planned=True)
+    rated=base.model_copy(update={"window_rates":[0.5]})
+    assert _fp(rated)!=_fp(base)
+    assert _fp(rated)!=_fp(rated.model_copy(update={"window_rates":[2.0]}))
+    asset=AudioAsset(sha256="a"*64,label="generated",rights="synthetic",rights_note="test tone")
+    track=BackgroundTrack(asset=asset,volume=0.1)
+    layered=base.model_copy(update={"background_track":track})
+    assert _fp(layered)!=_fp(base)
+    assert _fp(layered,music_path="/x/random.mp3")==_fp(layered)
+    assert _fp(layered)!=_fp(layered.model_copy(update={"background_track":track.model_copy(update={"volume":0.2})}))
+    assert "background_track" not in base.model_dump()

@@ -39,6 +39,7 @@ from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
 from autoreels.core.playback_timing import build_window_timing
 from autoreels.local.subtitles import build_ass, remap_to_output
+from autoreels.local.assets import resolve_audio_asset
 from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
 from autoreels.local.fx import timeline as fx_timeline
 from autoreels.local.fx import whoosh_cmd, whoosh_wav_cmd
@@ -2931,6 +2932,7 @@ def _render_segments(
     suffix: str,
     palette_vf: str = "",
     music_path: str | Path | None = None,
+    assets_dir: Path | None = None,
     smap: "dict | None" = None,
     profile: str | None = None,
     progress: Callable[[str], None] | None = None,
@@ -2947,6 +2949,17 @@ def _render_segments(
     # Абсолютные пути обязательны: при cwd=tmp_ass_dir (ass-фильтр) ffmpeg резолвит
     # относительные пути от tmp_ass_dir, а не от рабочей директории autoreels.
     # Do not let a legacy effect consumer silently ignore an independent rate.
+    legacy_music_path = music_path
+    bound_music = {}
+    for reel in manifest.reels:
+        track = reel.background_track
+        if track is not None:
+            if assets_dir is None:
+                raise RenderError("explicit local asset directory required for soundtrack")
+            try:
+                bound_music[reel.id] = resolve_audio_asset(assets_dir, track.asset)
+            except ValueError as exc:
+                raise RenderError(str(exc)) from exc
     rated = [r for r in manifest.reels if r.window_rates is not None]
     for reel in rated:
         try:
@@ -2955,7 +2968,8 @@ def _render_segments(
             raise RenderError(str(exc)) from exc
     if rated:
         ap = render_cfg.audio_processing
-        if (music_path or getattr(ap, "video_xfade_sec", 0)
+        if ((legacy_music_path and any(r.background_track is None for r in rated))
+                or getattr(ap, "video_xfade_sec", 0)
                 or getattr(render_cfg, "two_shot_xfade", False)
                 or getattr(render_cfg, "same_shot_dissolve_frames", 0)
                 or getattr(ap, "dynamic_ending", False)
@@ -2990,7 +3004,7 @@ def _render_segments(
     ap = render_cfg.audio_processing
     if ap.loudnorm_enabled and getattr(ap, "loudnorm_mode", "dynamic") == "source":
         ap = ap.model_copy(update={"static_gain_db": _source_gain(source, ffmpeg_bin, ap)})
-    music = render_cfg.music
+    legacy_music = render_cfg.music
     # Профиль: явный аргумент > env RENDER_PROFILE > активный из конфига. Кодек+битрейт —
     # из профиля; но явный encoder (флаг/env) может переопределить только кодек (Mac-дев:
     # AMF-кодека нет → подменяем на libx26x, битрейт профиля сохраняется).
@@ -3030,6 +3044,11 @@ def _render_segments(
         _vf_base = vf          # M102: a reel may get its own frame (vf, setup) — reset for every reel
         _src_face_cache: dict = {}   # M127: the speaker's place in the whole source, looked for once
         for idx, reel in enumerate(manifest.reels, 1):
+            track = reel.background_track
+            music_path = bound_music[reel.id] if track is not None else legacy_music_path
+            music = (Music(enabled=True, volume=track.volume, fade_seconds=track.fade_seconds,
+                           ducking=track.ducking, final_normalize=track.final_normalize)
+                     if track is not None else legacy_music)
             vf = _vf_base
             _reel_setup = manifest.setup
             _reel_face = None
@@ -3831,6 +3850,13 @@ def _render_segments(
                     f"ffmpeg не смог обработать reel {reel.id} "
                     f"({_ts(reel.start)}→{_ts(reel.end)}, код {returncode}): {stderr}"
                 )
+            if track is not None:
+                try:
+                    if resolve_audio_asset(assets_dir, track.asset) != music_path:
+                        raise ValueError("local soundtrack changed")
+                except ValueError as exc:
+                    tmp_out.unlink(missing_ok=True)
+                    raise RenderError(str(exc)) from exc
             if tmp_out.exists():
                 tmp_out.rename(out)
             # Multi-seg synthetic tail: append tail to already-rendered clip (two-pass).
@@ -4142,6 +4168,7 @@ def render_crop(
     palette: str | None = None,
     zoom: bool | None = None,
     music_path: str | Path | None = None,
+    assets_dir: Path | None = None,
     progress: Callable[[str], None] | None = None,
     subtitles_cfg: SubtitlesConfig | None = None,
     background: bool = False,
@@ -4163,7 +4190,7 @@ def render_crop(
     outputs = _render_segments(
         manifest, inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
         ffmpeg=ffmpeg, encoder=encoder, vf=_crop_vf(manifest.setup), suffix="",
-        palette_vf=palette_vf, music_path=music_path,
+        palette_vf=palette_vf, music_path=music_path, assets_dir=assets_dir,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
         background=background, zoom_cfg=zoom_cfg, smap=smap,
     )
@@ -4176,7 +4203,7 @@ def render_crop(
             manifest.model_copy(update={"reels": [r for r in manifest.reels if r.id in rids]}),
             inputs_dir=inputs_dir, out_dir=out_dir, render_cfg=render_cfg,
             ffmpeg=ffmpeg, encoder=soft, vf=_crop_vf(manifest.setup), suffix="",
-            palette_vf=palette_vf, music_path=music_path,
+            palette_vf=palette_vf, music_path=music_path, assets_dir=assets_dir,
             profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
             background=background, zoom_cfg=zoom_cfg, smap=smap,
         )
@@ -4252,8 +4279,8 @@ def render_preview(
         reel = next((r for r in manifest.reels if r.id == reel_id), None)
         if reel is None:
             raise RenderError(f"клип '{reel_id}' не найден в манифесте")
-    if reel.window_rates is not None:
-        raise RenderError("palette preview does not support independent playback rates yet")
+    if reel.window_rates is not None or reel.background_track is not None:
+        raise RenderError("palette preview does not support independent playback rates or soundtrack layers yet")
     short_end = min(reel.end, reel.start + seconds)
     zoom_cfg = render_cfg.zoom
     if zoom is not None and zoom != zoom_cfg.enabled:
