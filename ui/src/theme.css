@@ -152,3 +152,7 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .synthetic-word-list button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
 .synthetic-word-form { display:grid; gap:8px; min-width:0; }
 .synthetic-editor details p { margin: 6px 0; }
+
+.synthetic-preview { position:relative; margin-inline:auto; width:min(100%,180px); }
+.synthetic-preview-video { display:block; width:100%; aspect-ratio:3/5; background:#000; border-radius:8px; }
+.synthetic-preview-cue { position:absolute; left:4px; right:4px; bottom:54px; text-align:center; color:white; font-weight:600; text-shadow:0 1px 3px black,0 1px 2px black; pointer-events:none; overflow-wrap:anywhere; }

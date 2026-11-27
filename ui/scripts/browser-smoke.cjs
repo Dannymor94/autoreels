@@ -148,10 +148,17 @@ async function main() {
         assert.equal(await page.getByRole("button", {name: /Экспорт/}).isDisabled(), false);
         if (width === 390) {
           const demo=page.getByRole("region",{name:"Демонстрационный текстовый редактор"});
+          await demo.locator("video").waitFor();
+          await page.waitForFunction(()=>document.querySelector(".synthetic-preview-video")?.readyState>=1);
+          await demo.getByRole("button",{name:"друзья!",exact:true}).click();
+          await page.waitForFunction(()=>Math.abs(document.querySelector(".synthetic-preview-video")?.currentTime-1.02)<0.08);
+          await demo.getByLabel("Текущий субтитр демо").getByText("друзья!",{exact:true}).waitFor();
           await demo.getByRole("button",{name:"Превет",exact:true}).click();
+          await page.waitForFunction(()=>Math.abs(document.querySelector(".synthetic-preview-video")?.currentTime-0.12)<0.08);
           await demo.getByLabel("Исправить написание").fill("Привет");
           await demo.getByRole("button",{name:"Сохранить слово",exact:true}).click();
           await demo.getByRole("button",{name:"Привет",exact:true}).waitFor();
+          await demo.getByLabel("Текущий субтитр демо").getByText("Привет",{exact:true}).waitFor();
           await demo.getByRole("button",{name:"Отменить правку",exact:true}).click();
           await demo.getByRole("button",{name:"Превет",exact:true}).waitFor();
           await demo.getByRole("button",{name:"Повторить правку",exact:true}).click();
@@ -161,7 +168,7 @@ async function main() {
           await demo.getByText("История правок (3)",{exact:true}).click();
           await demo.getByText("#3 · Повтор: Превет → Привет",{exact:true}).waitFor();
           await layout(page,"390 synthetic editor");
-          console.log("PASS synthetic editor correction, undo/redo, reload and history");
+          console.log("PASS synthetic editor word seek, corrected cue, undo/redo, reload and history");
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
           await page.getByRole("button",{name:"Создать тестовое задание",exact:true}).click();
