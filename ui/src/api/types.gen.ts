@@ -443,6 +443,8 @@ export interface components {
             clip_uid: string;
             /** Crop */
             crop?: number[] | null;
+            /** Dip Ms */
+            dip_ms?: number | null;
             /** Music */
             music?: number[] | null;
             /** Navigation */
@@ -483,6 +485,8 @@ export interface components {
         CutPreview: {
             /** Crop */
             crop?: number[] | null;
+            /** Dip Ms */
+            dip_ms?: number | null;
             /** Duration */
             duration: number;
             /** Music */
@@ -506,6 +510,8 @@ export interface components {
             candidate_plan_sha256: string;
             /** Crop */
             crop?: number[] | null;
+            /** Dip Ms */
+            dip_ms?: number | null;
             /** Music */
             music?: number[] | null;
             /** Navigation */

@@ -377,6 +377,17 @@
             ],
             "title": "Crop"
           },
+          "dip_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dip Ms"
+          },
           "music": {
             "anyOf": [
               {
@@ -552,6 +563,17 @@
             ],
             "title": "Crop"
           },
+          "dip_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dip Ms"
+          },
           "duration": {
             "title": "Duration",
             "type": "number"
@@ -653,6 +675,17 @@
               }
             ],
             "title": "Crop"
+          },
+          "dip_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dip Ms"
           },
           "music": {
             "anyOf": [

@@ -397,7 +397,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     view = response.json()
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
-    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"] and not p["rates"] and not p["crop"] and not p["music"]}
+    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"] and not p["rates"] and not p["crop"] and not p["music"] and not p["dip_ms"]}
     baseline, cut = plans[()], plans[(2,)]
     assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]
     for removed, plan in plans.items():
@@ -437,7 +437,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     assert response.status_code==200,response.text
     cut=response.json()
     assert cut["revision"]==1 and cut["current_removed"]==[2]
-    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
+    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
     assert client.get("/api/synthetic-cut").json()==cut
     assert client.get("/api/synthetic-editor").json()==spelling
     assert client.put("/api/synthetic-cut",json=body).json()==cut
@@ -455,7 +455,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     restored=result.json()
     assert restored["revision"]==2 and restored["current_removed"]==[]
     assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
-    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"navigation":None,"candidate_plan_sha256":restored["plan_sha256"]},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
+    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":restored["plan_sha256"]},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
     assert client.put("/api/synthetic-cut",json=body).json()==restored
     assert client.get("/api/synthetic-cut").json()==restored
     assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"
@@ -485,7 +485,7 @@ def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
     moved=response.json()
     assert moved["revision"]==2 and moved["current_removed"]==[2]
     assert moved["plan_sha256"]==reordered["plan_sha256"]
-    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None,"rates":None,"crop":None,"music":None,"navigation":None,"candidate_plan_sha256":moved["plan_sha256"]}
+    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":moved["plan_sha256"]}
     assert reordered["windows"][0]["source_start"]>reordered["windows"][-1]["source_start"]
     assert client.get("/api/synthetic-cut").json()==moved
     assert client.put("/api/synthetic-cut",json=op).json()==moved
@@ -653,5 +653,47 @@ def test_synthetic_soundtrack_preserves_edits_and_navigation(client,tmp_root):
     plain=next(p for p in state["plans"] if not p["music"] and p["removed"]==[2]
                and p["order"]==[1,3] and not p["crop"] and not p["rates"] and not p["trim"])
     response=put(state,plain,"music-off")
+    assert response.status_code==200,response.text
+    assert response.json()["plan_sha256"]==plain["plan_sha256"]
+
+
+def test_synthetic_visual_transition_preserves_soundtrack_and_history(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get("/api/synthetic-cut").json()
+    cut=next(p for p in view["plans"] if p["removed"]==[2] and p["order"]==[1,3]
+             and not p["rates"] and not p["trim"] and not p["crop"] and not p["music"])
+    def put(state,target,op_id,**extra):
+        return client.put("/api/synthetic-cut",json=dict(op_id=op_id,base_revision=state["revision"],
+            base_plan_sha256=state["plan_sha256"],clip_uid=state["clip_uid"],
+            candidate_plan_sha256=target["plan_sha256"],removed=target["removed"],
+            crop=target["crop"],rates=target["rates"],trim=target["trim"],music=target["music"],
+            dip_ms=target["dip_ms"],**extra))
+    response=put(view,cut,"dip-cut")
+    assert response.status_code==200,response.text
+    state=response.json()
+    dip=next(p for p in state["plans"] if p["dip_ms"]==200)
+    assert dip["windows"]==cut["windows"] and dip["duration"]==cut["duration"]
+    response=put(state,dip,"dip-on")
+    assert response.status_code==200,response.text
+    state=response.json()
+    assert state["history"][0]["dip_ms"]==200
+    assert client.get("/api/synthetic-cut").json()==state
+    scored=next(p for p in state["plans"] if p["dip_ms"]==200 and p["music"]==[1,20,1,1]
+                and p["removed"]==[2] and not p["trim"] and not p["crop"] and not p["rates"])
+    response=put(state,scored,"dip-music")
+    assert response.status_code==200,response.text
+    state=response.json()
+    assert put(state,{**scored,"dip_ms":50},"bad-dip").status_code==409
+    response=put(state,dip,"undo-dip-music",navigation="undo")
+    assert response.status_code==200,response.text
+    state=response.json()
+    response=put(state,scored,"redo-dip-music",navigation="redo")
+    assert response.status_code==200,response.text
+    state=response.json()
+    plain=next(p for p in state["plans"] if p["dip_ms"] is None and p["music"]==scored["music"]
+               and p["removed"]==[2] and p["order"]==[1,3] and not p["rates"] and not p["crop"] and not p["trim"])
+    response=put(state,plain,"dip-off")
     assert response.status_code==200,response.text
     assert response.json()["plan_sha256"]==plain["plan_sha256"]

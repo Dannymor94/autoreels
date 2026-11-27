@@ -171,3 +171,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 
 .cut-music span { background:#9a78b8; }
 .synthetic-cut audio { width:100%; max-width:100%; }
+
+.cut-dip-overlay { position:absolute; inset:0; background:#000; pointer-events:none; }
+.cut-transition span { background:#c9a56d; }
