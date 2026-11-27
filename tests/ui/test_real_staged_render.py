@@ -3,6 +3,8 @@ import hashlib
 import json
 import shutil
 import sqlite3
+
+import pytest
 import subprocess
 import sys
 import time
@@ -161,7 +163,8 @@ def test_static_synthetic_preview_asset():
     run("-v","error","-xerror","-nostdin","-i",path,"-f","null","-")
 
 
-def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch):
+@pytest.mark.parametrize("reorder", [False, True])
+def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder):
     """Planner-selected audio cut reaches actual decoded FFmpeg output.
 
     Three generated audio tones represent distinct artificial sentences.
@@ -214,8 +217,13 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch):
     assert len(segments)==2 and [w.word for w in cut.subtitles]==["НАЧАЛО.","КОНЕЦ."]
     reel = base.model_copy(update={"start":cut.start,"end":cut.end,
         "segments":segments,"subtitles":cut.subtitles,
-        "tail_last_word_end":cut.last_audible_end,"tail_next_word_start":cut.next_onset,
-        "head_first_word_start":0.2,"subtitle_gate":cut.end})
+        "tail_last_word_end":cut.last_audible_end,"tail_next_word_start":cut.next_onset})
+    if reorder:
+        reel = sentence_edit.reorder_sentences(reel, play=(1,3), order=(3,1), **args)
+        assert [w.word for w in reel.subtitles] == ["КОНЕЦ.","НАЧАЛО."]
+    else:
+        reel = reel.model_copy(update={"head_first_word_start":0.2,"subtitle_gate":cut.end})
+    segments = reel.effective_segments()
     reel.check_segments()
     manifest = Manifest(source=source.name,source_sha256=source_sha,
         duration_preset="shorts",run_key="synthetic-cut",
@@ -265,7 +273,8 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch):
         assert energy[1]<0.001*min(energy[0],energy[2]), energy
         first=peaks(samples[:len(samples)//2])
         last=peaks(samples[len(samples)//2:])
-        assert first[0]>10*first[2] and last[2]>10*last[0], (first,last)
+        a_idx,b_idx=(2,0) if reorder else (0,2)
+        assert first[a_idx]>10*first[b_idx] and last[b_idx]>10*last[a_idx], (first,last)
         assert sha(source)==source_sha and sha(plan)==plan_sha
         assert not (tmp_path/"inputs-archive").exists()
         observed.update(duration=vd,removed_ratio=float(energy[1]/min(energy[0],energy[2])),
@@ -280,6 +289,6 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch):
                           str(tmp_path),"DEMO","r01","ui-ffmpeg"),
             verify=validate,timeout_sec=30)
         assert job.status=="success" and job.artifact_sha256==observed["artifact"]
-    print(f"UI-303E PASS: cut fixture duration={observed['duration']:.3f}s; "
+    print(f"UI-402C/303E PASS: reorder={reorder}; cut fixture duration={observed['duration']:.3f}s; "
           f"removed/kept tone energy={observed['removed_ratio']:.8f}; "
           "kept tones in order; A/V decode and ledger success")

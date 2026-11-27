@@ -443,6 +443,8 @@ export interface components {
             clip_uid: string;
             /** Op Id */
             op_id: string;
+            /** Order */
+            order?: number[] | null;
             /** Removed */
             removed: number[];
         };
@@ -471,6 +473,8 @@ export interface components {
         CutPreview: {
             /** Duration */
             duration: number;
+            /** Order */
+            order: number[];
             /** Plan Sha256 */
             plan_sha256: string;
             /** Removed */
@@ -480,6 +484,8 @@ export interface components {
         };
         /** CutSelectionEvent */
         CutSelectionEvent: {
+            /** Order */
+            order?: number[] | null;
             /** Removed */
             removed: number[];
             /** Revision */

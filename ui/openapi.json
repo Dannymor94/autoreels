@@ -367,6 +367,20 @@
             "title": "Op Id",
             "type": "string"
           },
+          "order": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order"
+          },
           "removed": {
             "items": {
               "type": "integer"
@@ -457,6 +471,13 @@
             "title": "Duration",
             "type": "number"
           },
+          "order": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Order",
+            "type": "array"
+          },
           "plan_sha256": {
             "title": "Plan Sha256",
             "type": "string"
@@ -478,6 +499,7 @@
         },
         "required": [
           "removed",
+          "order",
           "duration",
           "windows",
           "plan_sha256"
@@ -487,6 +509,20 @@
       },
       "CutSelectionEvent": {
         "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order"
+          },
           "removed": {
             "items": {
               "type": "integer"

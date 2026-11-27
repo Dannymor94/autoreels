@@ -4,6 +4,7 @@ No owner project files or media reads. Only the isolated demo revision
 store may be written. The map is generated evidence, not transcription.
 """
 import hashlib
+from itertools import permutations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -36,6 +37,7 @@ class CutWindow(BaseModel):
 
 class CutPreview(BaseModel):
     removed: list[int]
+    order: list[int]
     duration: float
     windows: list[CutWindow]
     plan_sha256: str
@@ -44,6 +46,7 @@ class CutPreview(BaseModel):
 class CutSelectionEvent(BaseModel):
     revision: int
     removed: list[int]
+    order: list[int] | None = None
 
 
 class CutDemoView(BaseModel):
@@ -66,19 +69,24 @@ class CutCommand(BaseModel):
     clip_uid: str
     candidate_plan_sha256: str
     removed: list[int]
+    order: list[int] | None = None
 
 
-def _projection(plan, removed, raw):
+def _key(removed, order):
+    removed, order = tuple(removed), tuple(order)
+    return removed if order == tuple(sorted(order)) else (*removed, 0, *order)
+
+
+def _projection(segments, removed, order, raw):
     windows = []
     offset = 0.0
-    for body in plan.body:
-        for seg in body.segments():
-            end = offset + seg.end - seg.start
-            windows.append(CutWindow(source_start=seg.start, source_end=seg.end,
-                                     output_start=offset, output_end=end))
-            offset = end
-    return CutPreview(removed=list(removed), duration=offset, windows=windows,
-                      plan_sha256=hashlib.sha256(raw).hexdigest())
+    for seg in segments:
+        end = offset + seg.end - seg.start
+        windows.append(CutWindow(source_start=seg.start, source_end=seg.end,
+                                 output_start=offset, output_end=end))
+        offset = end
+    return CutPreview(removed=list(removed), order=list(order), duration=offset,
+                      windows=windows, plan_sha256=hashlib.sha256(raw).hexdigest())
 
 
 def _fixture():
@@ -106,7 +114,7 @@ def _fixture():
                            frame=[96,160],scale=[96,160]),reels=[base])
     initial = manifest.model_dump_json().encode("utf-8")
     choices = {():initial}
-    plans = [_projection(baseline, (), initial)]
+    plans = [_projection(base.effective_segments(), (), order, initial)]
     for first in order:
         for last in range(first, len(order)+1):
             selected = tuple(range(first,last+1))
@@ -125,7 +133,24 @@ def _fixture():
             raw = manifest.model_copy(update={"reels":[reel]}).model_dump_json().encode("utf-8")
             Manifest.model_validate_json(raw)
             choices[selected] = raw
-            plans.append(_projection(cut, selected, raw))
+            plans.append(_projection(reel.effective_segments(), selected, proposal.kept_sentences, raw))
+    # Natural-order choices retain their exact historical Manifest bytes.
+    # The finite demo adds only validated permutations of each kept body.
+    for natural in list(plans):
+        play = tuple(natural.order)
+        raw = choices[tuple(natural.removed)]
+        source = Manifest.model_validate_json(raw)
+        for perm in permutations(play):
+            if perm == play:
+                continue
+            try:
+                reel = sentence_edit.reorder_sentences(source.reels[0], play=play, order=perm, **args)
+            except sentence_edit.Unavailable:
+                continue
+            raw = source.model_copy(update={"reels": [reel]}).model_dump_json().encode("utf-8")
+            Manifest.model_validate_json(raw)
+            choices[_key(natural.removed, perm)] = raw
+            plans.append(_projection(reel.effective_segments(), natural.removed, perm, raw))
     return duration, [CutSentence(number=i+1,text=w.word,start=i+0.2,end=i+0.8)
                       for i,w in enumerate(words)], plans, choices
 
@@ -142,16 +167,17 @@ def _view(store, fixture):
         head = store.current(_PROJECT)
         history = store.selection_history(_PROJECT)
         active = next((p for p in plans if p.plan_sha256==head.plan_sha256),None)
-        if (active is None or head.plan_bytes != choices[tuple(active.removed)]
+        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order)]
                 or len(history)!=head.number or head.number>_MAX_REVISION
-                or (history and (history[-1].removed!=tuple(active.removed)
+                or (history and (history[-1].selection_key!=_key(active.removed, active.order)
                     or history[-1].candidate_plan_sha256!=head.plan_sha256))
-                or (not history and active.removed)):
+                or (not history and _key(active.removed, active.order))):
             raise revisions.Conflict("incompatible synthetic cut revision")
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
             plans=plans,revision=head.number,plan_sha256=head.plan_sha256,
             clip_uid=dict(head.clip_uids)["r01"],current_removed=active.removed,
-            history=[CutSelectionEvent(revision=i,removed=list(op.removed))
+            history=[CutSelectionEvent(revision=i,removed=list(op.removed),
+                                       order=list(op.order) if op.order is not None else None)
                      for i,op in reversed(list(enumerate(history,1)))])
 
 
@@ -180,13 +206,14 @@ def command(root: Path, enabled: bool, body: CutCommand) -> CutDemoView:
         raise HTTPException(409,"synthetic editor disabled")
     try:
         op = revisions.FixtureSelection(action="select-fixture",project_id=_PROJECT,
-              **{**body.model_dump(),"removed":tuple(body.removed)})
+              **{**body.model_dump(),"removed":tuple(body.removed),
+                 "order":tuple(body.order) if body.order is not None else None})
     except ValueError:
         raise HTTPException(422,"invalid synthetic cut selection") from None
     try:
         fixture = _fixture()
         choices = fixture[3]
-        raw = choices.get(op.removed)
+        raw = choices.get(op.selection_key)
         if raw is None or hashlib.sha256(raw).hexdigest()!=op.candidate_plan_sha256:
             raise revisions.Conflict("fixture candidate unavailable")
         path = _path(root)
