@@ -69,6 +69,7 @@ class FixtureSelection(BaseModel):
     crop: tuple[int, int, int, int] | None = None
     navigation: Literal["undo", "redo"] | None = None
     music: tuple[int, int, int, int] | None = None
+    dip_ms: int | None = None
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -103,6 +104,10 @@ class FixtureSelection(BaseModel):
             except ValueError as exc:
                 raise Conflict("invalid fixture soundtrack") from exc
             key = (*key, -4, *self.music)
+        if self.dip_ms is not None:
+            if self.dip_ms not in (100, 200, 300):
+                raise Conflict("invalid fixture transition")
+            key = (*key, -5, self.dip_ms)
         return key
 
 
@@ -362,6 +367,7 @@ class Store:
                 or candidate.reels[0].id != baseline.reels[0].id
                 or candidate.setup != expected_setup
                 or candidate.reels[0].background_track != soundtrack(op.music)
+                or candidate.reels[0].seam_dip_ms != op.dip_ms
                 or candidate.model_copy(update={"reels":baseline.reels, "setup":baseline.setup}) != baseline):
             raise Conflict("fixture candidate outside initial manifest")
         candidate.reels[0].check_segments()
