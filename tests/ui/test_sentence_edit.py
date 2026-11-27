@@ -172,3 +172,38 @@ def test_trim_silence_refuses_speech_expansion_stale_and_invalid_bounds():
     with pytest.raises(edit.Unavailable):
         edit.trim_silence(base.model_copy(update={"end":base.end+0.01}),
                           play=play,segment_index=0,start=0.1,end=old.end,**args)
+
+
+def test_longform_repeat_candidates_are_review_only_and_local():
+    from autoreels.cloud.repeat_candidates import RepeatCandidate, find_repeat_candidates
+
+    texts = [
+        "Мы сегодня обсуждаем внутреннюю силу.",
+        "МЫ сегодня обсуждаем внутреннюю силу!",
+        "Я хочу вам рассказать...",
+        "Я хочу вам рассказать одну историю.",
+        "Я не хочу вам рассказывать одну историю.",
+        "Мы сегодня обсуждаем внутреннюю силу.",
+        "Добрый день.",
+        "Добрый день.",
+    ]
+    # Transcript timing is intentionally not an input to text matching.
+    sentences = [[Word(word=word,t0=0.0,t1=0.0) for word in text.split()] for text in texts]
+    before = [[w.model_dump_json() for w in sentence] for sentence in sentences]
+    expected = (
+        RepeatCandidate(1,2,"exact_text",5),
+        RepeatCandidate(3,4,"possible_restart",4),
+    )
+    assert find_repeat_candidates(sentences) == expected
+    assert find_repeat_candidates(sentences) == expected
+    assert [[w.model_dump_json() for w in sentence] for sentence in sentences] == before
+
+
+def test_longform_completed_prefix_is_not_a_restart():
+    from autoreels.cloud.repeat_candidates import find_repeat_candidates
+
+    texts = ["Мы сегодня обсуждаем внутреннюю силу.",
+             "Мы сегодня обсуждаем внутреннюю силу человека.",
+             "Мы сегодня не обсуждаем внутреннюю силу."]
+    sentences = [[Word(word=word,t0=0.0,t1=0.0) for word in text.split()] for text in texts]
+    assert find_repeat_candidates(sentences) == ()
