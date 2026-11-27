@@ -384,3 +384,33 @@ def test_synthetic_editor_symlink_storage_blocked(client, tmp_root):
     (tmp_root / ".ui-synthetic-editor.sqlite3").symlink_to(target)
     assert client.get("/api/synthetic-editor").status_code == 409
     assert target.read_bytes() == b"untouched"
+
+
+def test_synthetic_cut_preview_read_only(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    before = sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*"))
+    assert client.get("/api/synthetic-cut").json()["enabled"] is False
+    settings.settings = Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    response = client.get("/api/synthetic-cut")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["enabled"] and view["source_duration"] == 3
+    assert len(view["sentences"]) == 3
+    plans = {tuple(p["removed"]):p for p in view["plans"]}
+    baseline, cut = plans[()], plans[(2,)]
+    assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]
+    for removed, plan in plans.items():
+        assert len(removed) < 3 and plan["duration"] > 0
+        offset = 0
+        for window in plan["windows"]:
+            assert 0 <= window["source_start"] < window["source_end"] <= 3
+            assert window["output_start"] == pytest.approx(offset)
+            offset += window["source_end"]-window["source_start"]
+            assert window["output_end"] == pytest.approx(offset)
+            for s in view["sentences"]:
+                if s["number"] in removed:
+                    assert min(s["end"],window["source_end"])-max(s["start"],window["source_start"]) <= 1e-6
+        assert plan["duration"] == pytest.approx(offset)
+    assert client.get("/api/synthetic-cut").json() == view
+    assert sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*")) == before

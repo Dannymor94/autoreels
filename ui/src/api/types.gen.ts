@@ -261,6 +261,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/synthetic-cut": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Synthetic Cut View */
+        get: operations["synthetic_cut_view_api_synthetic_cut_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/synthetic-editor": {
         parameters: {
             query?: never;
@@ -412,6 +429,48 @@ export interface components {
             right_sha256: string;
             /** Right Variant */
             right_variant: string;
+        };
+        /** CutDemoView */
+        CutDemoView: {
+            /** Enabled */
+            enabled: boolean;
+            /** Plans */
+            plans: components["schemas"]["CutPreview"][];
+            /** Sentences */
+            sentences: components["schemas"]["CutSentence"][];
+            /** Source Duration */
+            source_duration: number;
+        };
+        /** CutPreview */
+        CutPreview: {
+            /** Duration */
+            duration: number;
+            /** Removed */
+            removed: number[];
+            /** Windows */
+            windows: components["schemas"]["CutWindow"][];
+        };
+        /** CutSentence */
+        CutSentence: {
+            /** End */
+            end: number;
+            /** Number */
+            number: number;
+            /** Start */
+            start: number;
+            /** Text */
+            text: string;
+        };
+        /** CutWindow */
+        CutWindow: {
+            /** Output End */
+            output_end: number;
+            /** Output Start */
+            output_start: number;
+            /** Source End */
+            source_end: number;
+            /** Source Start */
+            source_start: number;
         };
         /** DemoCommand */
         DemoCommand: {
@@ -1331,6 +1390,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    synthetic_cut_view_api_synthetic_cut_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CutDemoView"];
                 };
             };
         };

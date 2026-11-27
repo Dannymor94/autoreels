@@ -344,6 +344,125 @@
         "title": "ComparisonState",
         "type": "object"
       },
+      "CutDemoView": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/CutPreview"
+            },
+            "title": "Plans",
+            "type": "array"
+          },
+          "sentences": {
+            "items": {
+              "$ref": "#/components/schemas/CutSentence"
+            },
+            "title": "Sentences",
+            "type": "array"
+          },
+          "source_duration": {
+            "title": "Source Duration",
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "source_duration",
+          "sentences",
+          "plans"
+        ],
+        "title": "CutDemoView",
+        "type": "object"
+      },
+      "CutPreview": {
+        "properties": {
+          "duration": {
+            "title": "Duration",
+            "type": "number"
+          },
+          "removed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/CutWindow"
+            },
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "removed",
+          "duration",
+          "windows"
+        ],
+        "title": "CutPreview",
+        "type": "object"
+      },
+      "CutSentence": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "number"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "text",
+          "start",
+          "end"
+        ],
+        "title": "CutSentence",
+        "type": "object"
+      },
+      "CutWindow": {
+        "properties": {
+          "output_end": {
+            "title": "Output End",
+            "type": "number"
+          },
+          "output_start": {
+            "title": "Output Start",
+            "type": "number"
+          },
+          "source_end": {
+            "title": "Source End",
+            "type": "number"
+          },
+          "source_start": {
+            "title": "Source Start",
+            "type": "number"
+          }
+        },
+        "required": [
+          "source_start",
+          "source_end",
+          "output_start",
+          "output_end"
+        ],
+        "title": "CutWindow",
+        "type": "object"
+      },
       "DemoCommand": {
         "additionalProperties": false,
         "properties": {
@@ -2448,6 +2567,24 @@
           }
         },
         "summary": "Set Source Meta"
+      }
+    },
+    "/api/synthetic-cut": {
+      "get": {
+        "operationId": "synthetic_cut_view_api_synthetic_cut_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CutDemoView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Synthetic Cut View"
       }
     },
     "/api/synthetic-editor": {

@@ -4,6 +4,7 @@ import { L } from "../labels";
 import { SourceRow } from "../components/SourceRow";
 import { SizePicker } from "../components/SizePicker";
 import { SyntheticEditor } from "../components/SyntheticEditor";
+import { SyntheticCutPreview } from "../components/SyntheticCutPreview";
 import { SIZES, useSize } from "../lib/size";
 
 interface Props {
@@ -27,6 +28,7 @@ export function Sources({ onSelect }: Props) {
         </div>
       </div>
       <SyntheticEditor />
+      <SyntheticCutPreview />
       {!data?.length && <p>{L.noSources}</p>}
       <ul style={{ listStyle: "none", display: "flex", flexDirection: "column", gap: size === "s" ? 4 : 8 }}>
         {(data ?? []).map((s) => (
