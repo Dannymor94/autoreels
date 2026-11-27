@@ -363,6 +363,35 @@
             "title": "Clip Uid",
             "type": "string"
           },
+          "crop": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crop"
+          },
+          "navigation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "undo",
+                  "redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation"
+          },
           "op_id": {
             "title": "Op Id",
             "type": "string"
@@ -495,6 +524,20 @@
       },
       "CutPreview": {
         "properties": {
+          "crop": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crop"
+          },
           "duration": {
             "title": "Duration",
             "type": "number"
@@ -565,6 +608,39 @@
       },
       "CutSelectionEvent": {
         "properties": {
+          "candidate_plan_sha256": {
+            "title": "Candidate Plan Sha256",
+            "type": "string"
+          },
+          "crop": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crop"
+          },
+          "navigation": {
+            "anyOf": [
+              {
+                "enum": [
+                  "undo",
+                  "redo"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Navigation"
+          },
           "order": {
             "anyOf": [
               {
@@ -621,7 +697,8 @@
         },
         "required": [
           "revision",
-          "removed"
+          "removed",
+          "candidate_plan_sha256"
         ],
         "title": "CutSelectionEvent",
         "type": "object"

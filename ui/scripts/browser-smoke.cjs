@@ -39,18 +39,19 @@ async function mock(page, mode = "normal") {
         windows:[{source_start:0,source_end:2.85,output_start:0,output_end:2.85}]};
       const rated={...baseline,rates:[50],duration:6,plan_sha256:"9".repeat(64),
         windows:[{source_start:0,source_end:3,output_start:0,output_end:6}]};
-      const plans=[baseline,candidate,permutation([1,3,2],"d"),permutation([3,1,2],"e"),trimmed,rated];
+      const framed={...baseline,crop:[18,30,60,100],plan_sha256:"8".repeat(64)};
+      const plans=[baseline,candidate,permutation([1,3,2],"d"),permutation([3,1,2],"e"),trimmed,rated,framed];
       if(method==="PUT"){
         const input=route.request().postDataJSON();
         assert.equal(input.base_revision,cutRevision);
         assert.equal(input.base_plan_sha256,cutSha);
         assert.equal(input.clip_uid,"c".repeat(64));
         const order=input.order??[1,2,3].filter(n=>!input.removed.includes(n));
-        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order)&&JSON.stringify(p.trim??null)===JSON.stringify(input.trim??null)&&JSON.stringify(p.rates??null)===JSON.stringify(input.rates??null));
+        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order)&&JSON.stringify(p.trim??null)===JSON.stringify(input.trim??null)&&JSON.stringify(p.rates??null)===JSON.stringify(input.rates??null)&&JSON.stringify(p.crop??null)===JSON.stringify(input.crop??null));
         assert.ok(target,"mock candidate selection not available");
         assert.equal(input.candidate_plan_sha256,target.plan_sha256);
         cutRemoved=input.removed;cutSha=target.plan_sha256;cutRevision++;
-        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null,trim:input.trim??null,rates:input.rates??null});
+        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null,trim:input.trim??null,rates:input.rates??null,crop:input.crop??null,navigation:input.navigation??null,candidate_plan_sha256:cutSha});
       }
       return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
         current_removed:cutRemoved,history:cutHistory,plan_sha256:cutSha,
@@ -286,6 +287,24 @@ async function main() {
           await page.waitForFunction(()=>document.querySelector(".cut-preview-video")?.playbackRate===1);
           await layout(page,"390 speed controls");
           console.log("PASS synthetic speed control, reload, playbackRate and reset");
+          const framing=cut.getByRole("combobox",{name:"Кадрирование",exact:true});
+          await framing.selectOption("1");
+          await cut.getByText("Ревизия нарезки: 14",{exact:true}).waitFor();
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 14",{exact:true}).waitFor();
+          assert.equal(await framing.inputValue(),"1");
+          await page.waitForFunction(()=>document.querySelector(".cut-preview-video")?.style.width==="160%");
+          await cut.getByRole("button",{name:"Отменить монтаж",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 15",{exact:true}).waitFor();
+          assert.equal(await framing.inputValue(),"0");
+          await cut.getByRole("button",{name:"Повторить монтаж",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 16",{exact:true}).waitFor();
+          assert.equal(await framing.inputValue(),"1");
+          await framing.selectOption("0");
+          await cut.getByText("Ревизия нарезки: 17",{exact:true}).waitFor();
+          assert.equal(await cut.getByRole("button",{name:"Повторить монтаж",exact:true}).isDisabled(),true);
+          await layout(page,"390 framing and history");
+          console.log("PASS synthetic framing preview, reload, undo and redo");
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");

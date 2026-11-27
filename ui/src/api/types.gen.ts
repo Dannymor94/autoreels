@@ -441,6 +441,10 @@ export interface components {
             candidate_plan_sha256: string;
             /** Clip Uid */
             clip_uid: string;
+            /** Crop */
+            crop?: number[] | null;
+            /** Navigation */
+            navigation?: ("undo" | "redo") | null;
             /** Op Id */
             op_id: string;
             /** Order */
@@ -475,6 +479,8 @@ export interface components {
         };
         /** CutPreview */
         CutPreview: {
+            /** Crop */
+            crop?: number[] | null;
             /** Duration */
             duration: number;
             /** Order */
@@ -492,6 +498,12 @@ export interface components {
         };
         /** CutSelectionEvent */
         CutSelectionEvent: {
+            /** Candidate Plan Sha256 */
+            candidate_plan_sha256: string;
+            /** Crop */
+            crop?: number[] | null;
+            /** Navigation */
+            navigation?: ("undo" | "redo") | null;
             /** Order */
             order?: number[] | null;
             /** Rates */

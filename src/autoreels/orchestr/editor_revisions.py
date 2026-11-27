@@ -17,7 +17,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from autoreels.core.models import Manifest
+from autoreels.core.models import Crop, Manifest
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 OpaqueId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -45,6 +45,13 @@ class Correction(BaseModel):
     action: Literal["edit", "undo", "redo"] = "edit"
 
 
+# Fixed source frame and bounded crop presets for the isolated cut fixture.
+# These are source pixels, not browser-dependent percentages.
+FIXTURE_CROPS = ((18, 30, 60, 100), (0, 30, 60, 100),
+                 (36, 30, 60, 100), (18, 0, 60, 100),
+                 (18, 60, 60, 100), (24, 40, 48, 80))
+
+
 class FixtureSelection(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
     action: Literal["select-fixture"]
@@ -58,6 +65,8 @@ class FixtureSelection(BaseModel):
     order: tuple[int, ...] | None = None
     trim: tuple[int, int, int] | None = None  # window index, edge (1/2), source ms
     rates: tuple[int, ...] | None = None  # percent, indexed by playback window
+    crop: tuple[int, int, int, int] | None = None
+    navigation: Literal["undo", "redo"] | None = None
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -82,6 +91,10 @@ class FixtureSelection(BaseModel):
             if not self.rates or any(n not in (50, 100, 200) for n in self.rates) or all(n == 100 for n in self.rates):
                 raise Conflict("invalid fixture rate vector")
             key = (*key, -2, *self.rates)
+        if self.crop is not None:
+            if self.crop not in FIXTURE_CROPS:
+                raise Conflict("invalid fixture crop")
+            key = (*key, -3, *self.crop)
         return key
 
 
@@ -297,6 +310,26 @@ class Store:
             return self._read(op.project_id, number)
 
 
+    @staticmethod
+    def fixture_stacks(history: list[FixtureSelection], initial_sha: str):
+        """Replay the immutable selection log. Legacy operations are ordinary edits."""
+        undo = [((), initial_sha)]
+        redo = []
+        for op in history:
+            target = (op.selection_key, op.candidate_plan_sha256)
+            if op.navigation == "undo":
+                if len(undo) < 2 or undo[-2] != target:
+                    raise Conflict("invalid stored fixture undo")
+                redo.append(undo.pop())
+            elif op.navigation == "redo":
+                if not redo or redo[-1] != target:
+                    raise Conflict("invalid stored fixture redo")
+                undo.append(redo.pop())
+            else:
+                undo.append(target)
+                redo.clear()
+        return undo, redo
+
     def select_fixture(self, op: FixtureSelection, *, choices: dict[tuple[int, ...], bytes],
                        max_revision: int = 100) -> Revision:
         """Commit a server-computed candidate from a fixed synthetic plan set.
@@ -310,9 +343,17 @@ class Store:
             raise Conflict("fixture candidate changed or unavailable")
         candidate = Manifest.model_validate_json(raw)
         baseline = Manifest.model_validate_json(initial)
+        expected_setup = baseline.setup
+        if op.crop is not None:
+            if (baseline.setup is None or baseline.setup.frame != [96, 160]
+                    or baseline.setup.crop.model_dump() != dict(x=0, y=0, w=96, h=160)):
+                raise Conflict("fixture crop outside supported source")
+            expected_setup = baseline.setup.model_copy(update={"crop": Crop(
+                **dict(zip(("x", "y", "w", "h"), op.crop)))})
         if (len(candidate.reels) != 1 or len(baseline.reels) != 1
                 or candidate.reels[0].id != baseline.reels[0].id
-                or candidate.model_copy(update={"reels":baseline.reels}) != baseline):
+                or candidate.setup != expected_setup
+                or candidate.model_copy(update={"reels":baseline.reels, "setup":baseline.setup}) != baseline):
             raise Conflict("fixture candidate outside initial manifest")
         candidate.reels[0].check_segments()
         payload = op.model_dump_json(exclude_none=True)
@@ -332,6 +373,14 @@ class Store:
             history = self.selection_history(op.project_id)
             if len(history) != base.number or base.number >= max_revision:
                 raise Conflict("fixture history unavailable or full")
+            undo, redo = self.fixture_stacks(history, _sha(initial))
+            if undo[-1][1] != base.plan_sha256:
+                raise Conflict("fixture navigation does not match head")
+            target = (op.selection_key, op.candidate_plan_sha256)
+            if op.navigation == "undo" and (len(undo) < 2 or undo[-2] != target):
+                raise Conflict("fixture undo target changed")
+            if op.navigation == "redo" and (not redo or redo[-1] != target):
+                raise Conflict("fixture redo target changed")
             if raw == base.plan_bytes:
                 raise Conflict("fixture selection unchanged")
             number = base.number+1

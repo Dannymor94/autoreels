@@ -361,3 +361,45 @@ def test_variable_speed_ffmpeg_hard_cut_primitive(tmp_path):
     for at,hz,other in [(0.5,880,440),(3.5,880,440),(4.5,440,880)]:
         assert energy(at,hz)>100*max(energy(at,other),1)
     print(f"UI-403A PASS: independent 0.5x/2x hard-cut primitive, video={vd:.3f}s audio={ad:.3f}s; pitch/order preserved")
+
+
+def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
+    """Actual renderer, fixed synthetic regions; verify position as well as output size."""
+    import numpy as np
+    from autoreels.core.config import load_render_config
+    from autoreels.local.render import render_crop
+
+    ffprobe = _stage_config(tmp_path, monkeypatch)
+    source = tmp_path / "inputs" / "FRAME.mp4"
+    run("-hide_banner", "-loglevel", "error", "-nostdin",
+        "-f", "lavfi", "-i", "testsrc2=size=96x160:rate=30:duration=3",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=3",
+        "-vf", "drawbox=x=0:y=0:w=24:h=160:color=red:t=fill,drawbox=x=72:y=0:w=24:h=160:color=blue:t=fill",
+        "-c:v", "libx264", "-threads", "2", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-t", "3", source)
+    original = sha(source)
+    base = Manifest(source=source.name, source_sha256=original,
+        duration_preset="shorts", run_key="frame-fixture",
+        setup=SetupProfile(setup_id="synthetic", crop=Crop(x=0,y=0,w=96,h=160),
+                           frame=[96,160], scale=[360,640]),
+        reels=[Reel(id="r01",start=0,end=3,score=80,hook="",title="",description="")])
+    cfg=load_render_config(tmp_path/"config/render.yaml",local_path=tmp_path/"config/render.local.yaml")
+    for name,x in (("left",0),("right",36)):
+        setup=base.setup.model_copy(update={"crop":Crop(x=x,y=30,w=60,h=100)})
+        manifest=base.model_copy(update={"setup":setup})
+        manifest=Manifest.model_validate_json(manifest.model_dump_json())
+        outputs=render_crop(manifest,inputs_dir=tmp_path/"inputs",out_dir=tmp_path/name,
+                            render_cfg=cfg,encoder="libx264",zoom=False)
+        assert len(outputs)==1
+        path=outputs[0]
+        info=json.loads(run("-v","error","-show_streams","-of","json",path,binary=ffprobe))
+        v=next(s for s in info["streams"] if s["codec_type"]=="video")
+        assert (v["width"],v["height"])==(360,640)
+        raw=run("-v","error","-ss","1","-i",path,"-frames:v","1","-pix_fmt","rgb24",
+                "-threads","1","-f","rawvideo","-")
+        rgb=np.frombuffer(raw,dtype=np.uint8).reshape(640,360,3).astype(float)
+        patch=rgb[80:240,:60] if name=="left" else rgb[80:240,-60:]
+        mean=patch.mean(axis=(0,1))
+        assert (mean[0]-mean[2] if name=="left" else mean[2]-mean[0])>80, mean
+    assert sha(source)==original
+    assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
