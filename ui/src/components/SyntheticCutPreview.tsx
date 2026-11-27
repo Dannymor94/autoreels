@@ -6,10 +6,12 @@ const queryKey = ["synthetic-cut"];
 
 const seconds = (n:number) => n.toFixed(2)+" с";
 const equal = (a:number[],b:number[]) => a.length===b.length && a.every((v,i)=>v===b[i]);
+const chronological = (order:number[]) => equal(order,[...order].sort((a,b)=>a-b));
+const windowIndexAt=(plan:CutPreview,t:number)=>{const i=plan.windows.findIndex(w=>t<w.output_end);return i<0?plan.windows.length-1:i;};
 
 function sourceTime(plan:CutPreview,t:number) {
   const pos=Math.max(0,Math.min(plan.duration,t));
-  const w=plan.windows.find(w=>pos<w.output_end) ?? plan.windows[plan.windows.length-1];
+  const w=plan.windows[windowIndexAt(plan,pos)];
   return w.source_start+Math.max(0,Math.min(w.source_end-w.source_start,pos-w.output_start));
 }
 
@@ -29,15 +31,21 @@ export function SyntheticCutPreview() {
   const [playing,setPlaying]=useState(false);
   const [error,setError]=useState(false);
   const video=useRef<HTMLVideoElement>(null);
+  const activeWindow=useRef(0);
   const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
-  const baseline=q.data?.plans.find(p=>!p.removed.length);
-  const candidate=q.data?.plans.find(p=>equal(p.removed,selected));
+  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order));
+  const kept=(q.data?.sentences??[]).map(s=>s.number).filter(n=>!selected.includes(n));
+  const currentOrder=plan?.order??[];
+  const wantedOrder=chronological(currentOrder)?kept:
+    [...currentOrder.filter(n=>kept.includes(n)),...kept.filter(n=>!currentOrder.includes(n))];
+  const candidate=q.data?.plans.find(p=>equal(p.removed,selected)&&equal(p.order,wantedOrder));
   const locked=busy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
   const usable=!!plan && !!baseline && ready && !error && !q.isError && !busy;
 
   function move(t:number) {
     if(!plan||!video.current||!usable)return;
     const pos=Math.max(0,Math.min(plan.duration,t));
+    activeWindow.current=windowIndexAt(plan,pos);
     video.current.currentTime=sourceTime(plan,pos);
     setPosition(pos);
   }
@@ -54,16 +62,17 @@ export function SyntheticCutPreview() {
   }
   function changePlan(next:CutPreview) {
     const state=q.data;
-    if(!state||locked||pending.current||guard.current)return;
+    if(!state||locked||pending.current||guard.current||next.plan_sha256===state.plan_sha256)return;
     void send({op_id:crypto.randomUUID(),base_revision:state.revision,
       base_plan_sha256:state.plan_sha256,clip_uid:state.clip_uid,
-      candidate_plan_sha256:next.plan_sha256,removed:next.removed});
+      candidate_plan_sha256:next.plan_sha256,removed:next.removed,
+      ...(chronological(next.order)?{}:{order:next.order})});
   }
 
   useEffect(()=>{
     const v=video.current;
     if(!plan||!v||!ready||error)return;
-    v.pause();setPlaying(false);setPosition(0);v.currentTime=sourceTime(plan,0);
+    v.pause();setPlaying(false);setPosition(0);activeWindow.current=0;v.currentTime=sourceTime(plan,0);
   },[plan,ready,error]);
 
   useEffect(()=>{
@@ -74,13 +83,13 @@ export function SyntheticCutPreview() {
       if(!v||v.paused||v.ended)return;
       if(v.seeking) {frame=requestAnimationFrame(update);return;}
       const t=v.currentTime;
-      const w=plan.windows.find(w=>t>=w.source_start-0.002 && t<w.source_end);
-      if(w){
-        setPosition(Math.max(w.output_start,Math.min(w.output_end,w.output_start+t-w.source_start)));
-      }else{
-        const next=plan.windows.find(w=>w.source_start>t);
-        if(next){v.currentTime=next.source_start;setPosition(next.output_start);}
+      const w=plan.windows[activeWindow.current];
+      if(t>=w.source_end){
+        const next=plan.windows[activeWindow.current+1];
+        if(next){activeWindow.current++;v.currentTime=next.source_start;setPosition(next.output_start);}
         else{v.pause();setPosition(plan.duration);return;}
+      }else{
+        setPosition(Math.max(w.output_start,Math.min(w.output_end,w.output_start+t-w.source_start)));
       }
       frame=requestAnimationFrame(update);
     };
@@ -91,6 +100,21 @@ export function SyntheticCutPreview() {
   if(!q.data?.enabled || !plan || !baseline)return null;
   function toggle(n:number) {
     setDraft(prev=>{const current=prev??removed;return current.includes(n)?current.filter(x=>x!==n):[...current,n].sort((a,b)=>a-b);});
+  }
+  function reordered(from:number,to:number) {
+    const order=[...plan!.order];
+    const a=order.indexOf(from), b=order.indexOf(to);
+    if(a<0||b<0||a===b)return;
+    order.splice(a,1);order.splice(b,0,from);
+    const next=q.data?.plans.find(p=>equal(p.removed,removed)&&equal(p.order,order));
+    if(next)changePlan(next);
+  }
+  function canMove(from:number,to:number|undefined) {
+    if(to===undefined)return false;
+    const order=[...plan!.order];
+    const a=order.indexOf(from),b=order.indexOf(to);
+    order.splice(a,1);order.splice(b,0,from);
+    return !!q.data?.plans.some(p=>equal(p.removed,removed)&&equal(p.order,order));
   }
   const at=sourceTime(plan,position);
   const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&s.start<=at&&at<s.end);
@@ -106,7 +130,28 @@ export function SyntheticCutPreview() {
     </div>
     <div className="synthetic-word-list">
       <button disabled={locked||!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
-      <button disabled={locked||!removed.length} onClick={()=>changePlan(baseline)}>Восстановить исходное</button>
+      <button disabled={locked||plan.plan_sha256===baseline.plan_sha256} onClick={()=>changePlan(baseline)}>Восстановить исходное</button>
+    </div>
+    <h3>Порядок фрагментов</h3>
+    <p className="secondary">Перетащи за ручку или используй стрелки. Вырезанные предложения не возвращаются.</p>
+    <div aria-label="Порядок фрагментов" role="list">
+      {plan.order.map((n,i)=>{
+        const previous=plan.order[i-1],next=plan.order[i+1];
+        const text=q.data?.sentences.find(s=>s.number===n)?.text??String(n);
+        return <div key={n} role="listitem" data-reorder-number={n} className="synthetic-word-list">
+          <button type="button" aria-label={"Перетащить "+text} disabled={locked} style={{touchAction:"none"}}
+            onPointerDown={e=>{if(e.isPrimary&&e.button===0)e.currentTarget.setPointerCapture(e.pointerId);}}
+            onPointerUp={e=>{
+              if(!e.currentTarget.hasPointerCapture(e.pointerId))return;
+              e.currentTarget.releasePointerCapture(e.pointerId);
+              const target=document.elementFromPoint(e.clientX,e.clientY)?.closest("[data-reorder-number]");
+              if(target)reordered(n,Number(target.getAttribute("data-reorder-number")));
+            }}>↕</button>
+          <span>{i+1}. {text}</span>
+          <button type="button" aria-label={"Выше: "+text} disabled={locked||!canMove(n,previous)} onClick={()=>reordered(n,previous)}>↑</button>
+          <button type="button" aria-label={"Ниже: "+text} disabled={locked||!canMove(n,next)} onClick={()=>reordered(n,next)}>↓</button>
+        </div>;
+      })}
     </div>
     {!!selected.length&&!candidate&&<p role="status">Выбери один непрерывный диапазон, оставив хотя бы одно предложение.</p>}
     {busy&&<p role="status">Сохранение нарезки…</p>}
@@ -122,7 +167,12 @@ export function SyntheticCutPreview() {
         src="/synthetic-editor-preview.mp4" aria-label="Предпросмотр пробной нарезки"
         onLoadedMetadata={()=>{const v=video.current;if(v&&Math.abs(v.duration-duration)<0.05){v.currentTime=sourceTime(plan,0);setReady(true);}else setError(true);}}
         onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)}
-        onEnded={()=>{setPlaying(false);setPosition(plan.duration);}}
+        onEnded={()=>{
+          const v=video.current,next=plan.windows[activeWindow.current+1];
+          if(v&&next){activeWindow.current++;v.currentTime=next.source_start;setPosition(next.output_start);
+            void v.play().catch(()=>{setError(true);setPlaying(false);});}
+          else{setPlaying(false);setPosition(plan.duration);}
+        }}
         onError={()=>{setError(true);setPlaying(false);}} />
       {!error&&<div className="synthetic-preview-cue">{cue?.text??""}</div>}
     </div>
@@ -148,7 +198,7 @@ export function SyntheticCutPreview() {
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
     <details><summary>История нарезки ({q.data.history.length})</summary>
-      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
+      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
     </details>
   </section>;
 }

@@ -397,7 +397,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     view = response.json()
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
-    plans = {tuple(p["removed"]):p for p in view["plans"]}
+    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"])}
     baseline, cut = plans[()], plans[(2,)]
     assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]
     for removed, plan in plans.items():
@@ -437,7 +437,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     assert response.status_code==200,response.text
     cut=response.json()
     assert cut["revision"]==1 and cut["current_removed"]==[2]
-    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2]}]
+    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None}]
     assert client.get("/api/synthetic-cut").json()==cut
     assert client.get("/api/synthetic-editor").json()==spelling
     assert client.put("/api/synthetic-cut",json=body).json()==cut
@@ -455,7 +455,45 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     restored=result.json()
     assert restored["revision"]==2 and restored["current_removed"]==[]
     assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
-    assert restored["history"]==[{"revision":2,"removed":[]},{"revision":1,"removed":[2]}]
+    assert restored["history"]==[{"revision":2,"removed":[],"order":None},{"revision":1,"removed":[2],"order":None}]
     assert client.put("/api/synthetic-cut",json=body).json()==restored
     assert client.get("/api/synthetic-cut").json()==restored
     assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"
+
+
+def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get("/api/synthetic-cut").json()
+    natural=next(p for p in view["plans"] if p["removed"]==[2] and p["order"]==[1,3])
+    reordered=next(p for p in view["plans"] if p["removed"]==[2] and p["order"]==[3,1])
+    legacy=dict(op_id="old-cut",base_revision=0,base_plan_sha256=view["plan_sha256"],
+                clip_uid=view["clip_uid"],candidate_plan_sha256=natural["plan_sha256"],removed=[2])
+    response=client.put("/api/synthetic-cut",json=legacy)
+    assert response.status_code==200,response.text
+    cut=response.json()
+    op=dict(op_id="reorder",base_revision=1,base_plan_sha256=cut["plan_sha256"],
+            clip_uid=cut["clip_uid"],candidate_plan_sha256=reordered["plan_sha256"],
+            removed=[2],order=[3,1])
+    for bad in ({**op,"order":[1,3]}, {**op,"order":[3,3]},
+                {**op,"order":None,"removed":[2,0,3,1]},
+                {**op,"order":[3,2]}, {**op,"candidate_plan_sha256":natural["plan_sha256"]}):
+        assert client.put("/api/synthetic-cut",json=bad).status_code==409
+    response=client.put("/api/synthetic-cut",json=op)
+    assert response.status_code==200,response.text
+    moved=response.json()
+    assert moved["revision"]==2 and moved["current_removed"]==[2]
+    assert moved["plan_sha256"]==reordered["plan_sha256"]
+    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1]}
+    assert reordered["windows"][0]["source_start"]>reordered["windows"][-1]["source_start"]
+    assert client.get("/api/synthetic-cut").json()==moved
+    assert client.put("/api/synthetic-cut",json=op).json()==moved
+    assert client.put("/api/synthetic-cut",json=legacy).json()==moved
+    assert client.put("/api/synthetic-cut",json={**op,"op_id":"stale-reorder"}).status_code==409
+    restore={**legacy,"op_id":"restore-reordered","base_revision":2,
+             "base_plan_sha256":moved["plan_sha256"],"removed":[],
+             "candidate_plan_sha256":view["plan_sha256"]}
+    response=client.put("/api/synthetic-cut",json=restore)
+    assert response.status_code==200,response.text
+    assert response.json()["plan_sha256"]==view["plan_sha256"]

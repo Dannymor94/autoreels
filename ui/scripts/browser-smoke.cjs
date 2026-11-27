@@ -22,7 +22,7 @@ async function mock(page, mode = "normal") {
   const reviews = new Map();
   const comparisons = new Map();
   const jobs = new Map();
-  let cutRevision=0,cutRemoved=[],cutHistory=[];
+  let cutRevision=0,cutRemoved=[],cutHistory=[],cutSha="a".repeat(64);
   let editor = {enabled:mode==="normal",revision:0,plan_sha256:"a".repeat(64),clip_uid:"b".repeat(64),
     words:[{index:0,word:"Превет",start:0.1,end:0.8},{index:1,word:"друзья!",start:1,end:2}],
     history:[],undo:null,redo:null};
@@ -31,21 +31,28 @@ async function mock(page, mode = "normal") {
     const path = url.pathname;
     const method = route.request().method();
     if(path==="/api/synthetic-cut"){
-      const baseline={removed:[],duration:3,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:3,output_start:0,output_end:3}]};
-      const candidate={removed:[2],duration:1.8,plan_sha256:"b".repeat(64),windows:[{source_start:0,source_end:0.9,output_start:0,output_end:0.9},{source_start:2.1,source_end:3,output_start:0.9,output_end:1.8}]};
+      const baseline={removed:[],order:[1,2,3],duration:3,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:3,output_start:0,output_end:3}]};
+      const candidate={removed:[2],order:[1,3],duration:1.8,plan_sha256:"b".repeat(64),windows:[{source_start:0,source_end:0.9,output_start:0,output_end:0.9},{source_start:2.1,source_end:3,output_start:0.9,output_end:1.8}]};
+      const permutation=(order,hash)=>({removed:[],order,duration:3,plan_sha256:hash.repeat(64),
+        windows:order.map((n,i)=>({source_start:n-1,source_end:n,output_start:i,output_end:i+1}))});
+      const plans=[baseline,candidate,permutation([1,3,2],"d"),permutation([3,1,2],"e")];
       if(method==="PUT"){
         const input=route.request().postDataJSON();
         assert.equal(input.base_revision,cutRevision);
-        assert.equal(input.base_plan_sha256,cutRemoved.length?candidate.plan_sha256:baseline.plan_sha256);
+        assert.equal(input.base_plan_sha256,cutSha);
         assert.equal(input.clip_uid,"c".repeat(64));
-        assert.equal(input.candidate_plan_sha256,input.removed.length?candidate.plan_sha256:baseline.plan_sha256);
-        cutRemoved=input.removed;cutRevision++;
-        cutHistory.unshift({revision:cutRevision,removed:cutRemoved});
+        const order=input.order??[1,2,3].filter(n=>!input.removed.includes(n));
+        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order));
+        assert.ok(target,"mock candidate selection not available");
+        assert.equal(input.candidate_plan_sha256,target.plan_sha256);
+        cutRemoved=input.removed;cutSha=target.plan_sha256;cutRevision++;
+        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null});
       }
       return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
-        current_removed:cutRemoved,history:cutHistory,plan_sha256:cutRemoved.length?candidate.plan_sha256:baseline.plan_sha256,
+        current_removed:cutRemoved,history:cutHistory,plan_sha256:cutSha,
         sentences:[{number:1,text:"Начало.",start:0.2,end:0.8},{number:2,text:"Лишнее.",start:1.2,end:1.8},{number:3,text:"Продолжение.",start:2.2,end:2.8}],
-        plans:[baseline,candidate]}});
+        plans}});
+
     }
     if (path === "/api/synthetic-editor") {
       if(method==="PUT") {
@@ -204,6 +211,52 @@ async function main() {
           await cut.getByText("История нарезки (2)",{exact:true}).click();
           await cut.getByText("#2 · Исходное восстановлено",{exact:true}).waitFor();
           console.log("PASS synthetic sentence cut persistence, playback skip, restore, history and timeline");
+          // A backward jump must follow output order, not source time.
+          await cut.getByRole("button",{name:"Выше: Продолжение.",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 3",{exact:true}).waitFor();
+          await cut.getByText("2. Продолжение.",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Выше: Продолжение.",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 4",{exact:true}).waitFor();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await page.reload();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await page.waitForFunction(()=>{const v=document.querySelector(".cut-preview-video");return v&&v.readyState>=1&&v.currentTime>1.8;});
+          await cut.getByRole("button",{name:"Смотреть нарезку",exact:true}).click();
+          await page.waitForFunction(()=>{const v=document.querySelector(".cut-preview-video");return v&&!v.paused&&v.currentTime<0.7;});
+          await cut.getByRole("button",{name:"Восстановить исходное",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 5",{exact:true}).waitFor();
+          await cut.getByText("1. Начало.",{exact:true}).waitFor();
+          // Drag a sentence using the same pointer handle exposed to touch users.
+          const handle=cut.getByRole("button",{name:"Перетащить Продолжение.",exact:true});
+          const target=cut.locator('[data-reorder-number="1"]');
+          await handle.scrollIntoViewIfNeeded();
+          const hb=await handle.boundingBox(), tb=await target.boundingBox();
+          assert.ok(hb&&tb);
+          await page.mouse.move(hb.x+hb.width/2,hb.y+hb.height/2);
+          await page.mouse.down();
+          await page.mouse.move(tb.x+tb.width/2,tb.y+tb.height/2,{steps:5});
+          await page.mouse.up();
+          await cut.getByText("Ревизия нарезки: 6",{exact:true}).waitFor();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Восстановить исходное",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 7",{exact:true}).waitFor();
+          // Exercise the actual touch pointer path as well as a mouse.
+          await handle.scrollIntoViewIfNeeded();
+          const ht=await handle.boundingBox(), tt=await target.boundingBox();
+          assert.ok(ht&&tt);
+          const cdp=await ctx.newCDPSession(page);
+          try {
+            await cdp.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:ht.x+ht.width/2,y:ht.y+ht.height/2}]});
+            await cdp.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:tt.x+tt.width/2,y:tt.y+tt.height/2}]});
+            await cdp.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+          } finally {await cdp.detach();}
+          await cut.getByText("Ревизия нарезки: 8",{exact:true}).waitFor();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Восстановить исходное",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 9",{exact:true}).waitFor();
+          await layout(page,"390 reorder timeline");
+          console.log("PASS synthetic reorder arrows, mouse and touch drag, persisted order, backward preview and restore");
+
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
           await page.getByRole("button",{name:"Создать тестовое задание",exact:true}).click();
