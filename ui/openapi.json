@@ -432,6 +432,115 @@
         "title": "LegacyReview",
         "type": "object"
       },
+      "ModuleOption": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "automation",
+              "output"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "module": {
+            "enum": [
+              "hook_rescue",
+              "filler_cut",
+              "two_shot",
+              "loudnorm",
+              "denoise",
+              "music"
+            ],
+            "title": "Module",
+            "type": "string"
+          },
+          "proposed": {
+            "title": "Proposed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "module",
+          "kind",
+          "configured",
+          "proposed",
+          "available"
+        ],
+        "title": "ModuleOption",
+        "type": "object"
+      },
+      "ModuleSettingsView": {
+        "additionalProperties": false,
+        "properties": {
+          "apply_enabled": {
+            "title": "Apply Enabled",
+            "type": "boolean"
+          },
+          "base_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Sha256"
+          },
+          "invalidates": {
+            "items": {
+              "enum": [
+                "proposals",
+                "plan",
+                "render"
+              ],
+              "type": "string"
+            },
+            "title": "Invalidates",
+            "type": "array"
+          },
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/ModuleOption"
+            },
+            "title": "Modules",
+            "type": "array"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "configured",
+              "missing",
+              "invalid",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "status",
+          "modules",
+          "invalidates",
+          "base_sha256",
+          "apply_enabled"
+        ],
+        "title": "ModuleSettingsView",
+        "type": "object"
+      },
       "PipelineSettings": {
         "properties": {
           "analysis": {
@@ -1478,6 +1587,156 @@
           }
         },
         "summary": "Media"
+      }
+    },
+    "/api/module-settings": {
+      "get": {
+        "operationId": "configured_modules_api_module_settings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hook_rescue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hook Rescue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filler_cut",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filler Cut"
+            }
+          },
+          {
+            "in": "query",
+            "name": "two_shot",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Two Shot"
+            }
+          },
+          {
+            "in": "query",
+            "name": "loudnorm",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Loudnorm"
+            }
+          },
+          {
+            "in": "query",
+            "name": "denoise",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Denoise"
+            }
+          },
+          {
+            "in": "query",
+            "name": "music",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "on",
+                    "off"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Music"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModuleSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configured Modules"
       }
     },
     "/api/pipeline-settings": {

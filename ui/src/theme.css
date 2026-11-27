@@ -137,3 +137,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 
 .jobs-screen { display: grid; gap: 12px; max-width: 720px; }
 .job-row progress { width: 100%; accent-color: var(--accent); }
+
+.module-setting { border-top: 1px solid var(--border); padding-top: 8px; min-width: 0; }
+.module-setting p { margin: 4px 0; }

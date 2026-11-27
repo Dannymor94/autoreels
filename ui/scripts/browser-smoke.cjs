@@ -79,6 +79,16 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({status:200,contentType:"video/mp4",body:fixture,headers:{"Accept-Ranges":"bytes"}});
     }
+    if (path === "/api/module-settings") {
+      const names=["hook_rescue","filler_cut","two_shot","loudnorm","denoise","music"];
+      const modules=names.map(module=>{
+        const configured=module==="loudnorm", choice=url.searchParams.get(module);
+        return {module,kind:module==="hook_rescue"?"automation":"output",configured,proposed:choice===null?configured:choice==="on",available:false};
+      });
+      const changed=modules.filter(m=>m.proposed!==m.configured).map(m=>m.module);
+      const invalidates=[...(changed.includes("hook_rescue")?["proposals"]:[]),...(changed.includes("filler_cut")?["plan"]:[]),...(changed.some(n=>n!=="hook_rescue")?["render"]:[])];
+      return route.fulfill({json:{schema_version:1,status:"configured",modules,invalidates,base_sha256:"d".repeat(64),apply_enabled:false}});
+    }
     if (path === "/api/pipeline-settings") {
       const clips=url.searchParams.get("clips"), profile=url.searchParams.get("profile");
       return route.fulfill({json:{schema_version:1,analysis_status:"configured",render_status:"configured",
@@ -138,6 +148,14 @@ async function main() {
           assert.equal(previewUrl.searchParams.get("clips"),"7");
           assert.equal(previewUrl.searchParams.get("profile"),"hevc");
           await page.getByText("Пробные параметры допустимы. Ничего не сохранено.",{exact:true}).waitFor();
+          await page.getByLabel("Подбор хуков (резервный поиск)",{exact:true}).selectOption("on");
+          await page.getByLabel("Фоновая музыка",{exact:true}).selectOption("on");
+          await page.getByRole("button",{name:"Показать изменения",exact:true}).click();
+          await page.getByText("Потребуется пересчитать: новые предложения, рендер",{exact:true}).waitFor();
+          await page.getByRole("button",{name:"Сбросить пробные изменения",exact:true}).click();
+          await page.getByLabel("Фоновая музыка",{exact:true}).waitFor();
+          assert.equal(await page.getByLabel("Фоновая музыка",{exact:true}).inputValue(),"");
+          console.log("PASS independent module draft preview and reset");
           await layout(page,"390 render modes/settings");
           console.log("PASS read-only configured settings and typed override preview");
           await page.getByRole("button",{name:"Проекты",exact:true}).click();
