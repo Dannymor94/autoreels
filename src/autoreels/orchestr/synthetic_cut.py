@@ -8,6 +8,7 @@ from itertools import permutations, product
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -44,6 +45,7 @@ class CutPreview(BaseModel):
     plan_sha256: str
     trim: list[int] | None = None
     rates: list[int] | None = None
+    crop: list[int] | None = None
 
 
 class CutSelectionEvent(BaseModel):
@@ -52,6 +54,9 @@ class CutSelectionEvent(BaseModel):
     order: list[int] | None = None
     trim: list[int] | None = None
     rates: list[int] | None = None
+    crop: list[int] | None = None
+    candidate_plan_sha256: str
+    navigation: Literal["undo", "redo"] | None = None
 
 
 class CutDemoView(BaseModel):
@@ -77,14 +82,18 @@ class CutCommand(BaseModel):
     order: list[int] | None = None
     trim: list[int] | None = None
     rates: list[int] | None = None
+    crop: list[int] | None = None
+    navigation: Literal["undo", "redo"] | None = None
 
 
-def _key(removed, order, trim=None, rates=None):
+def _key(removed, order, trim=None, rates=None, crop=None):
     removed, order = tuple(removed), tuple(order)
     key = removed if order == tuple(sorted(order)) else (*removed, 0, *order)
     if trim is not None:
         key = (*key, -1, *trim)
-    return key if rates is None else (*key, -2, *rates)
+    if rates is not None:
+        key = (*key, -2, *rates)
+    return key if crop is None else (*key, -3, *crop)
 
 
 def _projection(segments, removed, order, raw, trim=None, rates=None):
@@ -225,6 +234,42 @@ def _fixture():
                       for i,w in enumerate(words)], plans, choices
 
 
+def _framed(fixture, base, crop):
+    """Materialize only the requested crop, using the existing Manifest setup."""
+    if crop is None:
+        return base
+    crop = tuple(crop)
+    if crop not in revisions.FIXTURE_CROPS or base.crop is not None:
+        raise revisions.Conflict("invalid fixture crop")
+    _, _, plans, choices = fixture
+    key = _key(base.removed, base.order, base.trim, base.rates, crop)
+    if key in choices:
+        digest = hashlib.sha256(choices[key]).hexdigest()
+        return next(p for p in plans if p.plan_sha256 == digest)
+    source = Manifest.model_validate_json(
+        choices[_key(base.removed, base.order, base.trim, base.rates)])
+    setup = source.setup.model_copy(update={"crop": Crop(**dict(zip(("x", "y", "w", "h"), crop)))})
+    raw = source.model_copy(update={"setup":setup}).model_dump_json().encode("utf-8")
+    Manifest.model_validate_json(raw)
+    choices[key] = raw
+    p = base.model_copy(update={"crop":list(crop),"plan_sha256":hashlib.sha256(raw).hexdigest()})
+    plans.append(p)
+    return p
+
+
+def _selection(fixture, op):
+    _, _, plans, choices = fixture
+    # Match the temporal selection without inventing a crop/plan combination.
+    order = op.order or tuple(n for n in (1, 2, 3) if n not in op.removed)
+    base_key = _key(op.removed, order, op.trim, op.rates)
+    raw = choices.get(base_key)
+    if raw is None:
+        raise revisions.Conflict("fixture temporal selection unavailable")
+    digest = hashlib.sha256(raw).hexdigest()
+    base = next(p for p in plans if p.plan_sha256 == digest and p.crop is None)
+    return _framed(fixture, base, op.crop)
+
+
 def _initial(store, choices):
     raw = choices[()]
     return store.import_initial(_PROJECT,raw,expected_sha256=hashlib.sha256(raw).hexdigest())
@@ -232,24 +277,46 @@ def _initial(store, choices):
 
 def _view(store, fixture):
     duration,sentences,plans,choices = fixture
+    # Normalize transient command candidates so GET and PUT project the same catalog.
+    plans[:] = [p for p in plans if p.crop is None]
+    for key in list(choices):
+        if -3 in key:
+            del choices[key]
     with store.conn:
         store.conn.execute("BEGIN")
         head = store.current(_PROJECT)
         history = store.selection_history(_PROJECT)
+        # Keep base catalog and current framing choices only; avoid a Cartesian
+        # product of all historical crop presets and temporal selections.
+        if history:
+            _selection(fixture, history[-1])
         active = next((p for p in plans if p.plan_sha256==head.plan_sha256),None)
-        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim, active.rates)]
+        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim, active.rates, active.crop)]
                 or len(history)!=head.number or head.number>_MAX_REVISION
-                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim, active.rates)
+                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim, active.rates, active.crop)
                     or history[-1].candidate_plan_sha256!=head.plan_sha256))
-                or (not history and _key(active.removed, active.order, active.trim, active.rates))):
+                or (not history and _key(active.removed, active.order, active.trim, active.rates, active.crop))):
             raise revisions.Conflict("incompatible synthetic cut revision")
+        undo, _ = store.fixture_stacks(history, hashlib.sha256(choices[()]).hexdigest())
+        if undo[-1][1] != head.plan_sha256:
+            raise revisions.Conflict("incompatible fixture navigation")
+        base = next(p for p in plans if p.crop is None and
+                    _key(p.removed,p.order,p.trim,p.rates) == _key(active.removed,active.order,active.trim,active.rates))
+        if active.crop is not None:
+            for p in [p for p in plans if p.crop is None]:
+                _framed(fixture,p,active.crop)
+        for crop in revisions.FIXTURE_CROPS:
+            _framed(fixture,base,crop)
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
             plans=plans,revision=head.number,plan_sha256=head.plan_sha256,
             clip_uid=dict(head.clip_uids)["r01"],current_removed=active.removed,
             history=[CutSelectionEvent(revision=i,removed=list(op.removed),
                                        order=list(op.order) if op.order is not None else None,
                                        trim=list(op.trim) if op.trim is not None else None,
-                                       rates=list(op.rates) if op.rates is not None else None)
+                                       rates=list(op.rates) if op.rates is not None else None,
+                                       crop=list(op.crop) if op.crop is not None else None,
+                                       candidate_plan_sha256=op.candidate_plan_sha256,
+                                       navigation=op.navigation)
                      for i,op in reversed(list(enumerate(history,1)))])
 
 
@@ -281,19 +348,25 @@ def command(root: Path, enabled: bool, body: CutCommand) -> CutDemoView:
               **{**body.model_dump(),"removed":tuple(body.removed),
                  "order":tuple(body.order) if body.order is not None else None,
                  "trim":tuple(body.trim) if body.trim is not None else None,
-                 "rates":tuple(body.rates) if body.rates is not None else None})
+                 "rates":tuple(body.rates) if body.rates is not None else None,
+                 "crop":tuple(body.crop) if body.crop is not None else None})
     except ValueError:
         raise HTTPException(422,"invalid synthetic cut selection") from None
     try:
         fixture = _fixture()
         choices = fixture[3]
-        raw = choices.get(op.selection_key)
+        key = op.selection_key
+        _selection(fixture,op)
+        raw = choices.get(key)
         if raw is None or hashlib.sha256(raw).hexdigest()!=op.candidate_plan_sha256:
             raise revisions.Conflict("fixture candidate unavailable")
         path = _path(root)
         with closing(sqlite3.connect(path,timeout=5)) as conn:
             store = revisions.Store(conn)
             _initial(store,choices)
+            history = store.selection_history(_PROJECT)
+            if history:
+                _selection(fixture,history[-1])
             store.select_fixture(op,choices=choices,max_revision=_MAX_REVISION)
             return _view(store,fixture)
     except revisions.Conflict:

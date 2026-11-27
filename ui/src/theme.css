@@ -165,3 +165,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .cut-track span { position:absolute; height:100%; background:#477da6; border-right:2px solid var(--bg); box-sizing:border-box; }
 .cut-output span { background:#498970; }
 .synthetic-cut input[type=range] { width:100%; padding:0; accent-color:var(--accent); }
+
+.framing-preview { aspect-ratio:3/5; overflow:hidden; border-radius:8px; background:#000; }
+.framing-preview .synthetic-preview-video { position:absolute; max-width:none; border-radius:0; }
