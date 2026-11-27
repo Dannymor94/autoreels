@@ -176,7 +176,8 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch):
     # Disable optional seam dissolves for a measurable hard-cut fixture.
     cfg = tmp_path / "config/render.local.yaml"
     overlay = yaml.safe_load(cfg.read_text())
-    overlay.update(same_shot_dissolve_frames=0, video_xfade_sec=0.0, two_shot_xfade=False)
+    overlay.update(same_shot_dissolve_frames=0, two_shot_xfade=False)
+    overlay["audio_processing"]["video_xfade_sec"] = 0.0
     cfg.write_text(yaml.safe_dump(overlay), encoding="utf-8")
     source = tmp_path / "inputs/DEMO.mp4"
     tones = (440, 880, 1320)
