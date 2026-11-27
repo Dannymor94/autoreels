@@ -492,8 +492,7 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
 
 def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
     """Actual editor command -> immutable snapshot -> existing staged renderer."""
-    from autoreels import __main__ as cli
-    from autoreels.orchestr import saved_cut_export, synthetic_cut, editor_revisions
+    from autoreels.orchestr import saved_cut_export, saved_cut_runner, synthetic_cut, editor_revisions
     editor=tmp_path/"editor"
     editor.mkdir()
     stage=tmp_path/"stage"
@@ -552,29 +551,15 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
         saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
             plan_sha256=view.plan_sha256,job_id="duplicate")
 
-    def forbidden(*args,**kwargs):
-        raise AssertionError("unexpected pull/archive")
-    monkeypatch.setattr(cli,"_git_pull",forbidden)
-    monkeypatch.setattr(cli,"_archive_video",forbidden)
-    observed={}
-    def verify(output):
-        info=json.loads(run("-v","error","-show_streams","-of","json",output,binary=ffprobe))
-        v=next(s for s in info["streams"] if s["codec_type"]=="video")
-        a=next(s for s in info["streams"] if s["codec_type"]=="audio")
-        assert v["codec_name"]=="h264" and a["codec_name"]=="aac"
-        vd,ad=float(v["duration"]),float(a["duration"])
-        assert abs(vd-dip.duration)<=0.15 and abs(vd-ad)<=0.08,(vd,ad,dip.duration)
-        run("-v","error","-xerror","-nostdin","-i",output,"-map","0:v:0","-map","0:a:0","-f","null","-")
-        pcm=run("-v","error","-nostdin","-i",output,"-map","0:a:0","-ac","1","-ar","48000","-f","s16le","-")
-        assert any(pcm),"selected background track must be audible"
-        observed["sha"]=sha(output)
-
     with closing(sqlite3.connect(stage/"saved-cut-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)
-        ledger.submit(prepared.bound.request)
-        job=staged_executor.run_bound(ledger,prepared.bound,worker_id="ci-worker",
-            clock_ms=lambda:time.monotonic_ns()//1_000_000,run_render=cli.cmd_render,verify=verify)
-        assert job.status=="success" and job.artifact_sha256==observed["sha"]
+        job=saved_cut_runner.execute_prepared(prepared,ledger,worker_id="ci-worker",ffprobe=ffprobe)
+        output=stage/"reels-out/SYNTHETIC_CUT/_gate/ui-editor-export/r01.mp4"
+        assert job.status=="success" and job.artifact_sha256==sha(output)
+        pcm=run("-v","error","-nostdin","-i",output,"-map","0:a:0","-ac","1","-ar","48000","-f","s16le","-")
+        assert any(pcm),"selected background track must be audible"
+        assert ledger.get("saved-cut-export")==job
+    assert not (stage/"inputs-archive").exists()
     assert sha(db_path)==db_before
     assert synthetic_cut.view(editor,True)==view
     assert sha(plan)==prepared.staged_plan_sha256

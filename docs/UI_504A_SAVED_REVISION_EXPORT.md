@@ -17,3 +17,5 @@ This does not remove existing frame-grid/unsupported-effect renderer checks;
 not all demo rate/trim combinations are renderable yet. The preview has no
 speech: this test is not a test of real speech quality. New HTTP execution
 or owner media requires separate HIGH/MEDIA authorization and independent QA.
+
+R2: the ordinary renderer rejects clips below 2 seconds. Preserve that default; the fixed trusted synthetic export route alone may render a planned short fixture down to 0.5 seconds of source content. No public switch. Fixed foreground child uses the existing process supervisor, ledger and exact stage binding; the parent checks actual H.264/AAC streams, durations and full decode, rechecks media/config/receipt, and records the existing job result. Errors retain the reservation. No generic CLI dispatcher or HTTP route.
