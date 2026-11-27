@@ -15,11 +15,29 @@ export function SyntheticEditor() {
   const [error,setError] = useState(false);
   const pending = useRef<DemoCommand|null>(null);
   const guard = useRef(false);
+  const video = useRef<HTMLVideoElement>(null);
+  const pendingSeek = useRef<number|null>(null);
+  const [time,setTime] = useState(0);
+  const [previewError,setPreviewError] = useState(false);
   const state = q.data;
   if (!state?.enabled) return null;
   const word = state.words.find(w=>w.index===selected);
   const locked = busy || error || q.isFetching || q.isError || state.revision>=100;
 
+  function seek(at:number) {
+    const v=video.current;
+    if (!v || previewError) return;
+    v.pause();
+    if (v.readyState===0) {pendingSeek.current=at;return;}
+    v.currentTime=Math.max(0,Math.min(v.duration,at));
+    setTime(v.currentTime);
+  }
+  function loaded() {
+    const at=pendingSeek.current;
+    pendingSeek.current=null;
+    if(at!==null)seek(at);
+  }
+  const cue=state.words.find(w=>w.start<=time && time<w.end);
   async function send(command: DemoCommand) {
     if (guard.current) return;
     guard.current=true; pending.current=command; setBusy(true);setError(false);
@@ -45,9 +63,19 @@ export function SyntheticEditor() {
     <h2>Демонстрационный текстовый редактор</h2>
     <p className="secondary">Тестовый текст. Изменения сохраняются только в демонстрации; звук и рабочие проекты не меняются.</p>
     <p>Ревизия демо: {state.revision}</p>
+    <div className="synthetic-preview">
+      <video ref={video} className="synthetic-preview-video" controls playsInline muted preload="metadata"
+        src="/synthetic-editor-preview.mp4" aria-label="Искусственное видео для предпросмотра"
+        onLoadedMetadata={loaded} onTimeUpdate={()=>setTime(video.current?.currentTime??0)}
+        onSeeked={()=>setTime(video.current?.currentTime??0)}
+        onError={()=>setPreviewError(true)} />
+      {!previewError && <div className="synthetic-preview-cue" aria-label="Текущий субтитр демо">{cue?.word ?? ""}</div>}
+    </div>
+    <p className="secondary">Приблизительный предпросмотр: искусственный видеоряд без речи, субтитры поверх видео, не финальный рендер.</p>
+    {previewError && <p role="alert">Видео демо недоступно. Редактирование текста продолжает работать.</p>}
     <div className="synthetic-word-list">
       {state.words.map(w=><button type="button" key={w.index} aria-pressed={selected===w.index}
-        disabled={locked} onClick={()=>{setSelected(w.index);setReplacement(w.word);}}>{w.word}</button>)}
+        disabled={locked} onClick={()=>{setSelected(w.index);setReplacement(w.word);seek(w.start+Math.min(0.02,(w.end-w.start)/2));}}>{w.word}</button>)}
     </div>
     {word && <form className="synthetic-word-form" onSubmit={e=>{e.preventDefault();apply("edit",word.index,word.word,replacement);}}>
       <label>Исправить написание<input value={replacement} maxLength={128}

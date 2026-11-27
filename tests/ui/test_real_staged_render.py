@@ -140,3 +140,16 @@ def test_actual_staged_render(tmp_path, monkeypatch):
           f"audio={observed['audio']:.3f}s; full decode; subtitle pixels "
           f"{observed['before']}->{observed['during']}; source/plan/config unchanged; "
           f"artifact_sha256={observed['sha']}; supervised child and ledger success")
+
+
+def test_static_synthetic_preview_asset():
+    # Fixed generated three-second fixture, not user media. Verify the exact
+    # bytes, duration and full decoder acceptance once in the existing job.
+    path = Path(__file__).resolve().parents[2] / "ui/public/synthetic-editor-preview.mp4"
+    assert sha(path) == "c87ea2fffefd6d17905ec71cef3ad94659ff1fbee110fb670aab2ac1e43d3848"
+    info = json.loads(run("-v","error","-show_streams","-of","json",path,binary="ffprobe"))
+    video, = info["streams"]
+    assert video["codec_name"] == "h264"
+    assert (video["width"],video["height"],int(video["nb_frames"])) == (96,160,45)
+    assert float(video["duration"]) == 3.0
+    run("-v","error","-xerror","-nostdin","-i",path,"-f","null","-")
