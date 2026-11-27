@@ -59,6 +59,7 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
         current_removed:cutRemoved,history:cutHistory,plan_sha256:cutSha,
+        longform_review:mode==="normal"?{source_duration_ms:20000,review_sha256:"d".repeat(64),sentences:[{number:1,text:"Сегодня мы поговорим о внимании.",start_ms:200,end_ms:2550},{number:2,text:"Сегодня мы поговорим о внимании!",start_ms:4200,end_ms:6550},{number:3,text:"Я хочу вам рассказать...",start_ms:8200,end_ms:10050},{number:4,text:"Я хочу вам рассказать одну историю.",start_ms:12200,end_ms:15050}],candidates:[{earlier:1,later:2,kind:"exact_text",matched_tokens:5},{earlier:3,later:4,kind:"possible_restart",matched_tokens:4}]}:null,
         soundtracks:mode==="normal"?[{number:1,label:"Tone A",sha256:"bc3958b6f5909418997f946676bb9212c473038d732790540f3f150c8e3113d9",format:"wav",rights:"synthetic",rights_note:"Generated triangle wave, 250 Hz"},{number:2,label:"Tone B",sha256:"2fb760b6b863eb3f0b8a575e72750c99705e1d1143c89308760c6ba8060fee1f",format:"wav",rights:"synthetic",rights_note:"Generated triangle wave, 400 Hz"}]:[],
         sentences:[{number:1,text:"Начало.",start:0.2,end:0.8},{number:2,text:"Лишнее.",start:1.2,end:1.8},{number:3,text:"Продолжение.",start:2.2,end:2.8}],
         plans}});
@@ -206,6 +207,12 @@ async function main() {
           console.log("PASS synthetic editor word seek, corrected cue, undo/redo, reload and history");
           const cut=page.getByRole("region",{name:"Демонстрационная нарезка предложений"});
           await page.waitForFunction(()=>document.querySelector(".cut-preview-video")?.readyState>=1);
+          await cut.getByText("Длинное видео: пример поиска дублей",{exact:true}).click();
+          await cut.getByText("Возможные повторы: 2",{exact:true}).waitFor();
+          await cut.getByText("Повтор текста",{exact:true}).waitFor();
+          await cut.getByText("Возможный повторный дубль",{exact:true}).waitFor();
+          await cut.getByText("Длинное видео: пример поиска дублей",{exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 0",{exact:true}).waitFor();
           await cut.getByRole("button",{name:"Лишнее.",exact:true}).click();
           await cut.getByRole("button",{name:"Убрать выбранное",exact:true}).click();
           await cut.getByText("1.80 с · убрано 1.20 с",{exact:true}).waitFor();
