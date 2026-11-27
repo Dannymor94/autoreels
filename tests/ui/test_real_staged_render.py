@@ -488,3 +488,95 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
     with pytest.raises(ValueError):
         resolve_audio_asset(assets,asset)
     print(f"UI-501/502/503A PASS: dip={dip}; exact soundtrack asset, retained tones, loop, A/V sync, stale and symlink rejection")
+
+
+def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
+    """Actual editor command -> immutable snapshot -> existing staged renderer."""
+    from autoreels import __main__ as cli
+    from autoreels.orchestr import saved_cut_export, synthetic_cut, editor_revisions
+    editor=tmp_path/"editor"
+    editor.mkdir()
+    stage=tmp_path/"stage"
+    stage.mkdir()
+    ffprobe=_stage_config(stage,monkeypatch)
+    cfg=stage/"config/render.local.yaml"
+    overlay=yaml.safe_load(cfg.read_text())
+    overlay.update(same_shot_dissolve_frames=0,two_shot_xfade=False)
+    overlay["audio_processing"]["video_xfade_sec"]=0.0
+    cfg.write_text(yaml.safe_dump(overlay),encoding="utf-8")
+    public=Path(__file__).resolve().parents[2]/"ui/public"
+    assert sha(public/"synthetic-editor-preview.mp4")==saved_cut_export.PREVIEW_SHA256
+
+    def choose(view,target,op_id):
+        return synthetic_cut.command(editor,True,synthetic_cut.CutCommand(
+            op_id=op_id,base_revision=view.revision,base_plan_sha256=view.plan_sha256,
+            clip_uid=view.clip_uid,candidate_plan_sha256=target.plan_sha256,
+            removed=target.removed,order=target.order if target.order!=sorted(target.order) else None,
+            crop=target.crop,trim=target.trim,rates=target.rates,music=target.music,dip_ms=target.dip_ms))
+
+    view=synthetic_cut.view(editor,True)
+    base=next(p for p in view.plans if p.plan_sha256==view.plan_sha256)
+    cut=next(p for p in view.plans if p.removed==[2] and p.order==[3,1]
+             and not p.rates and not p.trim and not p.music and not p.crop)
+    view=choose(view,cut,"export-reorder")
+    framed=next(p for p in view.plans if p.removed==[2] and p.order==[3,1]
+                and p.crop==[18,30,60,100] and not p.rates and not p.trim and not p.music)
+    view=choose(view,framed,"export-frame")
+    music=next(p for p in view.plans if p.removed==[2] and p.order==[3,1]
+               and p.crop==framed.crop and p.music==[1,20,0,0] and not p.rates and not p.trim)
+    view=choose(view,music,"export-music")
+    dip=next(p for p in view.plans if p.dip_ms==200 and p.music==music.music
+             and p.crop==framed.crop and p.order==[3,1] and p.removed==[2]
+             and not p.rates and not p.trim)
+    view=choose(view,dip,"export-transition")
+    db_path=editor/".ui-synthetic-editor.sqlite3"
+    db_before=sha(db_path)
+    with pytest.raises(editor_revisions.Conflict):
+        saved_cut_export.prepare_saved_cut(editor,stage,public,revision=0,
+            plan_sha256=base.plan_sha256,job_id="stale")
+    assert not (stage/"preview-original.mp4").exists()
+    prepared=saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
+        plan_sha256=view.plan_sha256,job_id="saved-cut-export")
+    assert prepared.editor_plan_sha256==view.plan_sha256
+    assert prepared.editor_revision==4
+    assert sha(db_path)==db_before
+    plan=stage/"reviews/SYNTHETIC_CUT.review.json"
+    manifest=Manifest.model_validate_json(plan.read_bytes())
+    assert manifest.source_sha256==prepared.staged_source_sha256
+    assert manifest.setup.crop.model_dump()==dict(x=18,y=30,w=60,h=100)
+    reel=manifest.reels[0]
+    assert [w.word for w in reel.subtitles]==["Продолжение.","Начало."]
+    assert reel.background_track.volume==0.2 and reel.seam_dip_ms==200
+    assert sha(plan)==prepared.staged_plan_sha256
+    with pytest.raises(ValueError):
+        saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
+            plan_sha256=view.plan_sha256,job_id="duplicate")
+
+    def forbidden(*args,**kwargs):
+        raise AssertionError("unexpected pull/archive")
+    monkeypatch.setattr(cli,"_git_pull",forbidden)
+    monkeypatch.setattr(cli,"_archive_video",forbidden)
+    observed={}
+    def verify(output):
+        info=json.loads(run("-v","error","-show_streams","-of","json",output,binary=ffprobe))
+        v=next(s for s in info["streams"] if s["codec_type"]=="video")
+        a=next(s for s in info["streams"] if s["codec_type"]=="audio")
+        assert v["codec_name"]=="h264" and a["codec_name"]=="aac"
+        vd,ad=float(v["duration"]),float(a["duration"])
+        assert abs(vd-dip.duration)<=0.15 and abs(vd-ad)<=0.08,(vd,ad,dip.duration)
+        run("-v","error","-xerror","-nostdin","-i",output,"-map","0:v:0","-map","0:a:0","-f","null","-")
+        pcm=run("-v","error","-nostdin","-i",output,"-map","0:a:0","-ac","1","-ar","48000","-f","s16le","-")
+        assert any(pcm),"selected background track must be audible"
+        observed["sha"]=sha(output)
+
+    with closing(sqlite3.connect(stage/"saved-cut-jobs.sqlite")) as db:
+        ledger=execution.Ledger(db)
+        ledger.submit(prepared.bound.request)
+        job=staged_executor.run_bound(ledger,prepared.bound,worker_id="ci-worker",
+            clock_ms=lambda:time.monotonic_ns()//1_000_000,run_render=cli.cmd_render,verify=verify)
+        assert job.status=="success" and job.artifact_sha256==observed["sha"]
+    assert sha(db_path)==db_before
+    assert synthetic_cut.view(editor,True)==view
+    assert sha(plan)==prepared.staged_plan_sha256
+    assert sha(public/"synthetic-editor-preview.mp4")==prepared.preview_sha256
+    print("UI-504A PASS: saved revision 4, cut+reorder+crop+music+dip -> actual decoded MP4; editor unchanged")
