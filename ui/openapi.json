@@ -385,6 +385,124 @@
         "title": "ProjectItem",
         "type": "object"
       },
+      "RenderInventory": {
+        "properties": {
+          "execution_enabled": {
+            "title": "Execution Enabled",
+            "type": "boolean"
+          },
+          "modes": {
+            "items": {
+              "$ref": "#/components/schemas/RenderMode"
+            },
+            "title": "Modes",
+            "type": "array"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/RenderTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "modes",
+          "targets",
+          "execution_enabled"
+        ],
+        "title": "RenderInventory",
+        "type": "object"
+      },
+      "RenderMode": {
+        "properties": {
+          "integration": {
+            "enum": [
+              "cli_adapter_pending",
+              "device_spike_pending"
+            ],
+            "title": "Integration",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "desktop",
+              "remote",
+              "mobile"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "integration"
+        ],
+        "title": "RenderMode",
+        "type": "object"
+      },
+      "RenderTarget": {
+        "properties": {
+          "adapter_version": {
+            "title": "Adapter Version",
+            "type": "string"
+          },
+          "authorized": {
+            "title": "Authorized",
+            "type": "boolean"
+          },
+          "availability": {
+            "enum": [
+              "unverified",
+              "unavailable",
+              "ready"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "const": "render",
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "desktop",
+              "remote",
+              "mobile"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id",
+          "kind",
+          "platform",
+          "availability",
+          "authorized",
+          "adapter_version",
+          "capabilities"
+        ],
+        "title": "RenderTarget",
+        "type": "object"
+      },
       "ReviewEvent": {
         "properties": {
           "artifact_sha256": {
@@ -946,6 +1064,24 @@
           }
         },
         "summary": "Projects"
+      }
+    },
+    "/api/render-targets": {
+      "get": {
+        "operationId": "render_inventory_api_render_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderInventory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Render Inventory"
       }
     },
     "/api/reviews/{stem}/{clip}": {

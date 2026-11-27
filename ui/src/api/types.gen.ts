@@ -90,6 +90,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/render-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Render Inventory */
+        get: operations["render_inventory_api_render_targets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reviews/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -302,6 +319,53 @@ export interface components {
             stem: string;
             /** Variant Names */
             variant_names: string[];
+        };
+        /** RenderInventory */
+        RenderInventory: {
+            /** Execution Enabled */
+            execution_enabled: boolean;
+            /** Modes */
+            modes: components["schemas"]["RenderMode"][];
+            /** Schema Version */
+            schema_version: number;
+            /** Targets */
+            targets: components["schemas"]["RenderTarget"][];
+        };
+        /** RenderMode */
+        RenderMode: {
+            /**
+             * Integration
+             * @enum {string}
+             */
+            integration: "cli_adapter_pending" | "device_spike_pending";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "desktop" | "remote" | "mobile";
+        };
+        /** RenderTarget */
+        RenderTarget: {
+            /** Adapter Version */
+            adapter_version: string;
+            /** Authorized */
+            authorized: boolean;
+            /**
+             * Availability
+             * @enum {string}
+             */
+            availability: "unverified" | "unavailable" | "ready";
+            /** Capabilities */
+            capabilities: "render"[];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "desktop" | "remote" | "mobile";
+            /** Platform */
+            platform: string;
+            /** Target Id */
+            target_id: string;
         };
         /** ReviewEvent */
         ReviewEvent: {
@@ -559,6 +623,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectItem"][];
+                };
+            };
+        };
+    };
+    render_inventory_api_render_targets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenderInventory"];
                 };
             };
         };

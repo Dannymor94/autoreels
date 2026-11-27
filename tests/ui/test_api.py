@@ -145,3 +145,30 @@ def test_symlink_outside_not_listed(client, tmp_root):
     (tmp_root / "reels-out" / "DEMO" / "r98.mp4").symlink_to(evil)
     clips = [c["clip"] for c in client.get("/api/sources/DEMO/clips").json()]
     assert "r98" not in clips
+
+
+def test_render_inventory_is_read_only_and_has_no_assumed_worker(client, tmp_root, monkeypatch):
+    from autoreels.orchestrator import render_targets
+
+    # Even environment values which look like a hostname or executor
+    # configuration cannot invent a registered, authorized worker.
+    monkeypatch.setenv("AUTOREELS_RENDER_TARGET", "gamebox")
+    before = sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*"))
+    result = client.get("/api/render-targets")
+    assert result.status_code == 200
+    data = result.json()
+    assert data == {
+        "schema_version": 1,
+        "modes": [
+            {"kind": "desktop", "integration": "cli_adapter_pending"},
+            {"kind": "remote", "integration": "cli_adapter_pending"},
+            {"kind": "mobile", "integration": "device_spike_pending"},
+        ],
+        "targets": [],
+        "execution_enabled": False,
+    }
+    assert render_targets.RenderInventory.model_validate(data) == render_targets.inventory()
+    assert client.get("/api/render-targets").json() == data
+    assert client.get("/api/capabilities").json()["source"] == "fallback"
+    assert client.put("/api/render-targets", json={"target_id": "gamebox"}).status_code == 405
+    assert sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*")) == before
