@@ -42,7 +42,7 @@ def private(tmp_path, monkeypatch):
 def test_private_auth_applies_to_all_reads_and_writes(private):
     root, _, c = private
     paths = ["/", "/docs", "/openapi.json", "/api/health", "/api/projects",
-             "/api/sources", "/api/sources/DEMO/clips", "/api/render-targets", "/api/pipeline-settings", "/api/jobs",
+             "/api/sources", "/api/sources/DEMO/clips", "/api/render-targets", "/api/pipeline-settings", "/api/jobs", "/api/preset-preview",
              "/api/reviews/DEMO/r01", "/api/comparisons/DEMO/r01?left=&right=_gate/b",
              "/api/thumb/DEMO/r01", "/api/media/DEMO/r01",
              "/api/media/DEMO/r01?artifact="+"a"*64]
@@ -53,6 +53,8 @@ def test_private_auth_applies_to_all_reads_and_writes(private):
     assert c.get("/api/health", auth=("not-owner", PASSWORD)).status_code == 401
     assert c.get("/api/health", auth=("owner", "wrong")).status_code == 401
     assert c.put("/api/sources/DEMO/meta", json={"display_name":"bad"}).status_code == 401
+    assert c.put("/api/preset-preview", json={}).status_code == 401
+    assert c.put("/api/preset-preview", auth=AUTH, json={}).status_code == 403
     assert c.put("/api/jobs/" + str(uuid4()), json={"action":"create","target_kind":"mobile","outcome":"success"}).status_code == 401
     assert c.put("/api/jobs/" + str(uuid4()), auth=AUTH, json={"action":"create","target_kind":"mobile","outcome":"success"}).status_code == 403
     assert not (root/"reviews").exists()

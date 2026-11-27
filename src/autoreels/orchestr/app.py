@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, pipeline_gateway, pipeline_settings, queue, render_targets, reviews, sourcemeta
+from . import catalog, clipinfo, manifests, pipeline_gateway, pipeline_settings, preset_preview, queue, render_targets, reviews, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -181,6 +181,24 @@ def job_command(job_id: str, body: queue.JobCommand):
 def configured_settings(clips: int | None = Query(default=None, ge=1, le=1000),
                         profile: pipeline_settings.Profile | None = Query(default=None)):
     return pipeline_gateway.pipeline_settings(_cfg.settings.root, clips, profile)
+
+
+@app.get("/api/preset-preview", response_model=preset_preview.PresetPreview)
+def preset_defaults():
+    try:
+        return pipeline_gateway.preset_preview(_cfg.settings.root)
+    except ValueError:
+        raise HTTPException(409, "configured presets unavailable") from None
+
+
+@app.put("/api/preset-preview", response_model=preset_preview.PresetPreview)
+def preview_preset(body: preset_preview.PresetRequest):
+    try:
+        return pipeline_gateway.preset_preview(_cfg.settings.root, body)
+    except preset_preview.StalePreview:
+        raise HTTPException(409, "configured presets changed; reload") from None
+    except ValueError:
+        raise HTTPException(409, "preset preview unavailable") from None
 
 
 @app.get("/api/render-targets", response_model=render_targets.RenderInventory)
