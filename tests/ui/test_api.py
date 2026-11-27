@@ -727,3 +727,28 @@ def test_longform_review_binds_exact_transcript_and_duration():
     assert a.review_sha256 != build_review([[sentence[0].model_copy(update={"t1":0.6})]],1000).review_sha256
     with pytest.raises(ValueError):
         build_review([sentence],400)
+
+def test_synthetic_graphic_layer_history_and_invalid_selection(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get("/api/synthetic-cut").json()
+    base=next(p for p in view["plans"] if p["plan_sha256"]==view["plan_sha256"])
+    graphic=next(p for p in view["plans"] if p["graphic"]==[10,10,20,20,0,500,1])
+    assert graphic["windows"]==base["windows"]
+    def put(state,target,op_id,**extra):
+        return client.put("/api/synthetic-cut",json=dict(op_id=op_id,base_revision=state["revision"],
+            base_plan_sha256=state["plan_sha256"],clip_uid=state["clip_uid"],
+            candidate_plan_sha256=target["plan_sha256"],removed=target["removed"],
+            graphic=target["graphic"],**extra))
+    assert put(view,{**graphic,"graphic":[99,10,20,20,0,500,1]},"bad-graphic").status_code==409
+    response=put(view,graphic,"graphic-on")
+    assert response.status_code==200,response.text
+    state=response.json()
+    assert state["history"][0]["graphic"]==graphic["graphic"]
+    assert client.get("/api/synthetic-cut").json()==state
+    response=put(state,base,"graphic-undo",navigation="undo")
+    assert response.status_code==200,response.text
+    response=put(response.json(),graphic,"graphic-redo",navigation="redo")
+    assert response.status_code==200,response.text
+    assert response.json()["plan_sha256"]==graphic["plan_sha256"]

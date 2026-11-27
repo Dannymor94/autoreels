@@ -531,7 +531,7 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
             op_id=op_id,base_revision=view.revision,base_plan_sha256=view.plan_sha256,
             clip_uid=view.clip_uid,candidate_plan_sha256=target.plan_sha256,
             removed=target.removed,order=target.order if target.order!=sorted(target.order) else None,
-            crop=target.crop,trim=target.trim,rates=target.rates,music=target.music,dip_ms=target.dip_ms))
+            crop=target.crop,trim=target.trim,rates=target.rates,music=target.music,dip_ms=target.dip_ms,graphic=target.graphic))
 
     view=synthetic_cut.view(editor,True)
     base=next(p for p in view.plans if p.plan_sha256==view.plan_sha256)
@@ -548,6 +548,9 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
              and p.crop==framed.crop and p.order==[3,1] and p.removed==[2]
              and not p.rates and not p.trim)
     view=choose(view,dip,"export-transition")
+    graphic=next(p for p in view.plans if p.graphic==[10,10,20,20,0,500,1])
+    view=choose(view,graphic,"export-graphic")
+    assert synthetic_cut.view(editor,True)==view
     db_path=editor/".ui-synthetic-editor.sqlite3"
     db_before=sha(db_path)
     with pytest.raises(editor_revisions.Conflict):
@@ -557,7 +560,7 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
     prepared=saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
         plan_sha256=view.plan_sha256,job_id="saved-cut-export")
     assert prepared.editor_plan_sha256==view.plan_sha256
-    assert prepared.editor_revision==4
+    assert prepared.editor_revision==5
     assert sha(db_path)==db_before
     plan=stage/"reviews/SYNTHETIC_CUT.review.json"
     manifest=Manifest.model_validate_json(plan.read_bytes())
@@ -566,6 +569,7 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
     reel=manifest.reels[0]
     assert [w.word for w in reel.subtitles]==["Продолжение.","Начало."]
     assert reel.background_track.volume==0.2 and reel.seam_dip_ms==200
+    assert reel.graphic_layer.model_dump()==dict(x_pct=10,y_pct=10,width_pct=20,height_pct=20,start_ms=0,end_ms=500,color="white")
     assert sha(plan)==prepared.staged_plan_sha256
     with pytest.raises(ValueError):
         saved_cut_export.prepare_saved_cut(editor,stage,public,revision=view.revision,
@@ -578,10 +582,15 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
         assert job.status=="success" and job.artifact_sha256==sha(output)
         pcm=run("-v","error","-nostdin","-i",output,"-map","0:a:0","-ac","1","-ar","48000","-f","s16le","-")
         assert any(pcm),"selected background track must be audible"
+        import numpy as np
+        frame=run("-v","error","-ss","0.2","-i",output,"-frames:v","1",
+                  "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
+        rgb=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)
+        assert np.all(rgb[72:184,42:102]>230,axis=2).mean()>0.95
         assert ledger.get("saved-cut-export")==job
     assert not (stage/"inputs-archive").exists()
     assert sha(db_path)==db_before
     assert synthetic_cut.view(editor,True)==view
     assert sha(plan)==prepared.staged_plan_sha256
     assert sha(public/"synthetic-editor-preview.mp4")==prepared.preview_sha256
-    print("UI-504A PASS: saved revision 4, cut+reorder+crop+music+dip -> actual decoded MP4; editor unchanged")
+    print("UI-504A PASS: saved revision 5, cut+reorder+crop+music+dip+graphic -> actual decoded MP4; editor unchanged")

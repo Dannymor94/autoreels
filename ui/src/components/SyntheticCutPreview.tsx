@@ -9,7 +9,8 @@ const queryKey = ["synthetic-cut"];
 const seconds = (n:number) => n.toFixed(2)+" с";
 const equal = (a:number[],b:number[]) => a.length===b.length && a.every((v,i)=>v===b[i]);
 const chronological = (order:number[]) => equal(order,[...order].sort((a,b)=>a-b));
-const sameDip=(a:CutPreview,b:CutPreview|undefined)=>(a.dip_ms??null)===(b?.dip_ms??null);
+const sameGraphic=(a:CutPreview,b:CutPreview|undefined)=>equal(a.graphic??[],b?.graphic??[]);
+const sameDip=(a:CutPreview,b:CutPreview|undefined)=>(a.dip_ms??null)===(b?.dip_ms??null)&&sameGraphic(a,b);
 const sameMusic=(a:CutPreview,b:CutPreview|undefined)=>equal(a.music??[],b?.music??[])&&sameDip(a,b);
 const sameCrop=(a:CutPreview,b:CutPreview|undefined)=>equal(a.crop??[],b?.crop??[])&&sameMusic(a,b);
 const frameNames=["Исходный кадр","Приблизить 1,6×","Сместить влево","Сместить вправо","Сместить вверх","Сместить вниз","Приблизить 2×"];
@@ -46,7 +47,7 @@ export function SyntheticCutPreview() {
   const [auditioning,setAuditioning]=useState(false);
   const activeWindow=useRef(0);
   const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
-  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim&&!p.rates&&!p.crop&&!p.music&&!p.dip_ms);
+  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim&&!p.rates&&!p.crop&&!p.music&&!p.dip_ms&&!p.graphic);
   const untrimmed=q.data?.plans.find(p=>!p.trim&&!p.rates&&plan&&sameCrop(p,plan)&&equal(p.removed,plan.removed)&&equal(p.order,plan.order));
   const normalSpeed=q.data?.plans.find(p=>!p.rates&&plan&&sameCrop(p,plan)&&equal(p.removed,plan.removed)&&equal(p.order,plan.order)&&equal(p.trim??[],plan.trim??[]));
   const kept=(q.data?.sentences??[]).map(s=>s.number).filter(n=>!selected.includes(n));
@@ -126,7 +127,8 @@ export function SyntheticCutPreview() {
       ...(next.rates?{rates:next.rates}:{}),
       ...(next.crop?{crop:next.crop}:{}),
       ...(next.music?{music:next.music}:{}),
-      ...(next.dip_ms?{dip_ms:next.dip_ms}:{})});
+      ...(next.dip_ms?{dip_ms:next.dip_ms}:{}),
+      ...(next.graphic?{graphic:next.graphic}:{})});
   }
 
   useEffect(()=>{
@@ -210,7 +212,7 @@ export function SyntheticCutPreview() {
     if(!state||!target||locked||pending.current||guard.current)return;
     void send({op_id:crypto.randomUUID(),base_revision:state.revision,base_plan_sha256:state.plan_sha256,
       clip_uid:state.clip_uid,candidate_plan_sha256:target.candidate_plan_sha256,
-      removed:target.removed,order:target.order,trim:target.trim,rates:target.rates,crop:target.crop,music:target.music,dip_ms:target.dip_ms,navigation:kind});
+      removed:target.removed,order:target.order,trim:target.trim,rates:target.rates,crop:target.crop,music:target.music,dip_ms:target.dip_ms,graphic:target.graphic,navigation:kind});
   }
   const tracks=q.data.plans.filter(p=>sameDip(p,plan)&&equal(p.removed,removed)&&equal(p.order,plan.order)&&
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[]));
@@ -218,12 +220,17 @@ export function SyntheticCutPreview() {
     const next=tracks.find(p=>equal(p.music??[],code));
     if(next)changePlan(next);
   }
-  const transitions=q.data.plans.filter(p=>equal(p.removed,removed)&&equal(p.order,plan.order)&&
+  const transitions=q.data.plans.filter(p=>sameGraphic(p,plan)&&equal(p.removed,removed)&&equal(p.order,plan.order)&&
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[])&&equal(p.music??[],plan.music??[]));
   function changeDip(ms:number){
     const next=transitions.find(p=>(p.dip_ms??0)===ms);
     if(next)changePlan(next);
   }
+  const graphics=q.data.plans.filter(p=>(p.dip_ms??0)===(plan.dip_ms??0)&&equal(p.removed,removed)&&equal(p.order,plan.order)&&
+    equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[])&&equal(p.music??[],plan.music??[]));
+  const graphic=plan.graphic;
+  const graphicNames=(code:number[]|null|undefined)=>!code?"Без графики":
+    (code[6]===1?"Белый":"Синий")+" · "+(code[0]===70?"справа":"слева")+" · "+seconds(code[4]/1000)+" – "+seconds(code[5]/1000);
   const dip=plan.dip_ms??0;
   const opacity=dip?Math.max(0,...plan.windows.slice(0,-1).map(w=>1-Math.abs(position-w.output_end)/(dip/1000))):0;
   const music=plan.music;
@@ -293,6 +300,8 @@ export function SyntheticCutPreview() {
         }}
         onError={()=>{stopMusic();setError(true);setPlaying(false);}} />
       {dip>0&&<div className="cut-dip-overlay" aria-hidden="true" style={{opacity}}/>}
+      {graphic&&position>=graphic[4]/1000&&position<graphic[5]/1000&&<div className="cut-graphic-overlay" aria-hidden="true"
+        style={{position:"absolute",left:graphic[0]+"%",top:graphic[1]+"%",width:graphic[2]+"%",height:graphic[3]+"%",background:graphic[6]===1?"white":"blue",pointerEvents:"none"}}/>}
       {!error&&<div className="synthetic-preview-cue">{cue?.text??""}</div>}
     </div>
     <h3>Кадрирование</h3>
@@ -323,6 +332,17 @@ export function SyntheticCutPreview() {
       {dip>0&&plan.windows.slice(0,-1).map((w,i)=><span key={i} style={{left:((w.output_end-dip/1000)/plan.duration*100)+"%",width:(2*dip/1000/plan.duration*100)+"%"}}/>)}
     </div>
     <p className="secondary">Затемнение не меняет длительность, звук или время субтитров. Для несовместимых коротких фрагментов сначала отключи переход.</p>
+    <h3>Графический слой</h3>
+    <label>Положение, цвет и интервал
+      <select aria-label="Графический слой" value={JSON.stringify(graphic??[])} disabled={locked||graphics.length<2}
+        onChange={e=>{const next=graphics.find(p=>JSON.stringify(p.graphic??[])===e.target.value);if(next)changePlan(next);}}>
+        {graphics.map(p=><option key={p.plan_sha256} value={JSON.stringify(p.graphic??[])}>{graphicNames(p.graphic)}</option>)}
+      </select>
+    </label>
+    <div className="cut-track cut-music" role="img" aria-label="Графический слой на таймлайне">
+      {graphic&&<span style={{left:graphic[4]/1000/plan.duration*100+"%",width:(graphic[5]-graphic[4])/1000/plan.duration*100+"%"}}/>}
+    </div>
+    <p className="secondary">Тестовые варианты. Для других изменений монтажа сначала убери графический слой. Отмена и повтор сохраняют слой.</p>
     <h3>Звуковые дорожки</h3>
     <div className="cut-track-label"><strong>Фоновая дорожка</strong><span>{music?seconds(plan.duration):"Нет"}</span></div>
     <div className="cut-track cut-music" role="img" aria-label="Фоновая дорожка на таймлайне">
@@ -431,7 +451,7 @@ export function SyntheticCutPreview() {
       <p className="secondary">Таймкоды транскрипта, не границы вырезания.</p>
     </details>}
     <details><summary>История нарезки ({q.data.history.length})</summary>
-      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {(h.navigation==="undo"?"Отмена · ":h.navigation==="redo"?"Повтор · ":"")+(h.crop?"Кадрирование · ":"")+(h.music?"Фон "+h.music[0]+" · "+h.music[1]+"% · ":"")+(h.dip_ms?"Переход "+h.dip_ms+" мс · ":"")+(h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено")}</p>)}
+      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {(h.navigation==="undo"?"Отмена · ":h.navigation==="redo"?"Повтор · ":"")+(h.crop?"Кадрирование · ":"")+(h.music?"Фон "+h.music[0]+" · "+h.music[1]+"% · ":"")+(h.dip_ms?"Переход "+h.dip_ms+" мс · ":"")+(h.graphic?"Графический слой · ":"")+(h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено")}</p>)}
     </details>
   </section>;
 }

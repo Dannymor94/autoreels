@@ -50,6 +50,7 @@ class CutPreview(BaseModel):
     crop: list[int] | None = None
     music: list[int] | None = None
     dip_ms: int | None = None
+    graphic: list[int] | None = None
 
 
 class CutSelectionEvent(BaseModel):
@@ -61,6 +62,7 @@ class CutSelectionEvent(BaseModel):
     crop: list[int] | None = None
     music: list[int] | None = None
     dip_ms: int | None = None
+    graphic: list[int] | None = None
     candidate_plan_sha256: str
     navigation: Literal["undo", "redo"] | None = None
 
@@ -107,10 +109,11 @@ class CutCommand(BaseModel):
     crop: list[int] | None = None
     music: list[int] | None = None
     dip_ms: int | None = None
+    graphic: list[int] | None = None
     navigation: Literal["undo", "redo"] | None = None
 
 
-def _key(removed, order, trim=None, rates=None, crop=None, music=None, dip_ms=None):
+def _key(removed, order, trim=None, rates=None, crop=None, music=None, dip_ms=None, graphic=None):
     removed, order = tuple(removed), tuple(order)
     key = removed if order == tuple(sorted(order)) else (*removed, 0, *order)
     if trim is not None:
@@ -121,7 +124,9 @@ def _key(removed, order, trim=None, rates=None, crop=None, music=None, dip_ms=No
         key = (*key, -3, *crop)
     if music is not None:
         key = (*key, -4, *music)
-    return key if dip_ms is None else (*key, -5, dip_ms)
+    if dip_ms is not None:
+        key = (*key, -5, dip_ms)
+    return key if graphic is None else (*key, -6, *graphic)
 
 
 def _projection(segments, removed, order, raw, trim=None, rates=None):
@@ -333,6 +338,33 @@ def _dipped(fixture, base, dip_ms):
     return p
 
 
+def _graphic(fixture, base, code):
+    if code is None:
+        return base
+    if base.graphic is not None:
+        raise revisions.Conflict("duplicate graphic layer")
+    layer = revisions.graphic_for(code)
+    _, _, plans, choices = fixture
+    parent = _key(base.removed, base.order, base.trim, base.rates,
+                  base.crop, base.music, base.dip_ms)
+    key = (*parent, -6, *code)
+    if key in choices:
+        digest = hashlib.sha256(choices[key]).hexdigest()
+        return next(p for p in plans if p.plan_sha256 == digest)
+    source = Manifest.model_validate_json(choices[parent])
+    reel = source.reels[0].model_copy(update={"graphic_layer":layer})
+    try:
+        reel.check_segments()
+    except ValueError as exc:
+        raise revisions.Conflict("graphic incompatible with montage duration") from exc
+    raw = source.model_copy(update={"reels":[reel]}).model_dump_json().encode("utf-8")
+    Manifest.model_validate_json(raw)
+    choices[key] = raw
+    p = base.model_copy(update={"graphic":list(code),"plan_sha256":hashlib.sha256(raw).hexdigest()})
+    plans.append(p)
+    return p
+
+
 def _selection(fixture, op):
     _, _, plans, choices = fixture
     # Match the temporal selection without inventing a crop/plan combination.
@@ -343,7 +375,8 @@ def _selection(fixture, op):
         raise revisions.Conflict("fixture temporal selection unavailable")
     digest = hashlib.sha256(raw).hexdigest()
     base = next(p for p in plans if p.plan_sha256 == digest and p.crop is None)
-    return _dipped(fixture, _scored(fixture, _framed(fixture, base, op.crop), op.music), op.dip_ms)
+    parent = _dipped(fixture, _scored(fixture, _framed(fixture, base, op.crop), op.music), op.dip_ms)
+    return _graphic(fixture, parent, op.graphic)
 
 
 def _initial(store, choices):
@@ -354,9 +387,9 @@ def _initial(store, choices):
 def _view(store, fixture):
     duration,sentences,plans,choices = fixture
     # Normalize transient command candidates so GET and PUT project the same catalog.
-    plans[:] = [p for p in plans if p.crop is None and p.music is None and p.dip_ms is None]
+    plans[:] = [p for p in plans if p.crop is None and p.music is None and p.dip_ms is None and p.graphic is None]
     for key in list(choices):
-        if -3 in key or -4 in key or -5 in key:
+        if -3 in key or -4 in key or -5 in key or -6 in key:
             del choices[key]
     with store.conn:
         store.conn.execute("BEGIN")
@@ -367,32 +400,32 @@ def _view(store, fixture):
         if history:
             _selection(fixture, history[-1])
         active = next((p for p in plans if p.plan_sha256==head.plan_sha256),None)
-        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim, active.rates, active.crop, active.music, active.dip_ms)]
+        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim, active.rates, active.crop, active.music, active.dip_ms, active.graphic)]
                 or len(history)!=head.number or head.number>_MAX_REVISION
-                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim, active.rates, active.crop, active.music, active.dip_ms)
+                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim, active.rates, active.crop, active.music, active.dip_ms, active.graphic)
                     or history[-1].candidate_plan_sha256!=head.plan_sha256))
-                or (not history and _key(active.removed, active.order, active.trim, active.rates, active.crop, active.music, active.dip_ms))):
+                or (not history and _key(active.removed, active.order, active.trim, active.rates, active.crop, active.music, active.dip_ms, active.graphic))):
             raise revisions.Conflict("incompatible synthetic cut revision")
         undo, _ = store.fixture_stacks(history, hashlib.sha256(choices[()]).hexdigest())
         if undo[-1][1] != head.plan_sha256:
             raise revisions.Conflict("incompatible fixture navigation")
-        base = next(p for p in plans if p.crop is None and p.music is None and p.dip_ms is None and
+        base = next(p for p in plans if p.crop is None and p.music is None and p.dip_ms is None and p.graphic is None and
                     _key(p.removed,p.order,p.trim,p.rates) == _key(active.removed,active.order,active.trim,active.rates))
         if active.crop is not None:
-            for p in [p for p in plans if p.crop is None and p.music is None and p.dip_ms is None]:
+            for p in [p for p in plans if p.crop is None and p.music is None and p.dip_ms is None and p.graphic is None]:
                 _framed(fixture,p,active.crop)
         for crop in revisions.FIXTURE_CROPS:
             _framed(fixture,base,crop)
         # Preserve current soundtrack across currently exposed temporal/crop edits.
         # Enumerate settings only on the active temporal/crop plan, not a full product.
         if active.music is not None:
-            for p in [p for p in plans if p.music is None and p.dip_ms is None]:
+            for p in [p for p in plans if p.music is None and p.dip_ms is None and p.graphic is None]:
                 _scored(fixture,p,active.music)
         parent = _framed(fixture,base,active.crop)
         for music in product(range(1, len(TRACKS)+1),(10,20,30),(0,1),(0,1)):
             _scored(fixture,parent,music)
         if active.dip_ms is not None:
-            for p in [p for p in plans if p.dip_ms is None]:
+            for p in [p for p in plans if p.dip_ms is None and p.graphic is None]:
                 try:
                     _dipped(fixture,p,active.dip_ms)
                 except revisions.Conflict:
@@ -403,6 +436,14 @@ def _view(store, fixture):
         for dip_ms in (100,200,300):
             try:
                 _dipped(fixture,parent,dip_ms)
+            except revisions.Conflict:
+                continue
+        # Materialize graphic choices only for the active underlying montage.
+        # Other edits require explicitly removing the graphic first.
+        parent = _dipped(fixture,parent,active.dip_ms)
+        for code in revisions.FIXTURE_GRAPHICS:
+            try:
+                _graphic(fixture,parent,code)
             except revisions.Conflict:
                 continue
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
@@ -416,6 +457,7 @@ def _view(store, fixture):
                                        crop=list(op.crop) if op.crop is not None else None,
                                        music=list(op.music) if op.music is not None else None,
                                        dip_ms=op.dip_ms,
+                                       graphic=list(op.graphic) if op.graphic is not None else None,
                                        candidate_plan_sha256=op.candidate_plan_sha256,
                                        navigation=op.navigation)
                      for i,op in reversed(list(enumerate(history,1)))])
@@ -451,7 +493,8 @@ def command(root: Path, enabled: bool, body: CutCommand) -> CutDemoView:
                  "trim":tuple(body.trim) if body.trim is not None else None,
                  "rates":tuple(body.rates) if body.rates is not None else None,
                  "crop":tuple(body.crop) if body.crop is not None else None,
-                 "music":tuple(body.music) if body.music is not None else None})
+                 "music":tuple(body.music) if body.music is not None else None,
+                 "graphic":tuple(body.graphic) if body.graphic is not None else None})
     except ValueError:
         raise HTTPException(422,"invalid synthetic cut selection") from None
     try:

@@ -388,6 +388,20 @@
             ],
             "title": "Dip Ms"
           },
+          "graphic": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graphic"
+          },
           "music": {
             "anyOf": [
               {
@@ -597,6 +611,20 @@
             "title": "Duration",
             "type": "number"
           },
+          "graphic": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graphic"
+          },
           "music": {
             "anyOf": [
               {
@@ -705,6 +733,20 @@
               }
             ],
             "title": "Dip Ms"
+          },
+          "graphic": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graphic"
           },
           "music": {
             "anyOf": [
