@@ -75,14 +75,14 @@ def test_does_not_claim_cut_when_removed_sound_is_still_played():
         edit.remove_sentences(base, selected=(2,), **args)
 
 
-def reorder_fixture(play=(1, 2, 3)):
+def reorder_fixture(play=(1, 2, 3), params=None):
     words = [Word(word=text, t0=float(i), t1=i + 0.9)
              for i, text in enumerate(("Начало.", "Середина.", "Конец."))]
     args = dict(sentences=[[w] for w in words], words=words,
                 smap={"words": [{"idx": i, "t0": w.t0, "t1": w.t1,
                                  "audible_start": i + 0.2, "audible_end": i + 0.8}
                                 for i, w in enumerate(words)], "boundaries": []},
-                params=ManualPlanParams(), source_duration=3.0)
+                params=params or ManualPlanParams(), source_duration=3.0)
     plan = build_manual_plan(**args, play=play)
     assert not plan.errors
     reel = Reel(id="r01", start=plan.start, end=plan.end, score=80, hook="",
@@ -135,7 +135,9 @@ def test_stale_or_ambiguous_evidence_is_rejected():
 
 @pytest.mark.parametrize("play", [(1,3), (3,1)])
 def test_trim_silence_preserves_cut_and_play_order(play):
-    base,args=reorder_fixture(play)
+    # The default planner leaves only 40 ms at internal seams, already
+    # below the demo's 50 ms trim guard. Use an explicit wider-air fixture.
+    base,args=reorder_fixture(play, ManualPlanParams(seam_pad_sec=0.15))
     before=base.model_dump_json()
     old=base.effective_segments()[0]
     a,b=play[0]-1+0.2,play[0]-1+0.8
