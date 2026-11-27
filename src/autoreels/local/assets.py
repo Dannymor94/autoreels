@@ -36,8 +36,8 @@ def resolve_image_asset(root: Path, asset: ImageAsset) -> Path:
 
 
 def _check_png_header(header: bytes, asset: ImageAsset) -> None:
-    if (len(header) != 33 or header[:8] != b"\\x89PNG\\r\\n\\x1a\\n"
-            or header[8:16] != b"\\x00\\x00\\x00\\x0dIHDR"):
+    if (len(header) != 33 or header[:8] != b"\x89PNG\r\n\x1a\n"
+            or header[8:16] != b"\x00\x00\x00\x0dIHDR"):
         raise ValueError("invalid local image PNG header")
     width, height = struct.unpack(">II", header[16:24])
     crc = struct.unpack(">I", header[29:33])[0]
