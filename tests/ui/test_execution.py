@@ -110,3 +110,25 @@ def test_renewal_bounded_retries_and_existing_artifact():
 def test_claim_requires_worker_identity():
     with pytest.raises(ValueError):
         e.claim(e.Job(request=request()),"mac1",None,0,10)
+
+
+
+def test_abandon_fences_restart_without_clock_or_releasing_reservation(tmp_path):
+    with closing(sqlite3.connect(tmp_path/"ledger.sqlite")) as c:
+        ledger = e.Ledger(c)
+        j = ledger.submit(request())
+        j = ledger.apply("job1", j.revision, e.claim, "mac1", "worker1", 900_000, 60_000)
+        j = ledger.apply("job1", j.revision, e.cancel)
+        recovered = ledger.apply("job1", j.revision, e.abandon)
+        assert recovered.status == "reconcile"
+        assert recovered.expires_ms is None and recovered.cancel_requested
+        assert recovered.fence == j.fence and recovered.worker_id == j.worker_id
+        assert recovered.request == j.request
+        assert ledger.apply("job1", recovered.revision, e.abandon) == recovered
+        with pytest.raises(e.Conflict):
+            ledger.apply("job1", recovered.revision, e.finish,
+                         "worker1", recovered.fence, 1, "cancelled")
+        with pytest.raises(e.Conflict):
+            ledger.submit(request("job2"))
+        with pytest.raises(e.Conflict):
+            ledger.apply("job1", recovered.revision, e.claim, "mac1", "worker2", 1, 10)
