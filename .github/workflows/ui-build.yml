@@ -78,3 +78,27 @@ jobs:
           python -m autoreels.orchestr.export_openapi > "$RUNNER_TEMP/arl-openapi.json"
           diff -u ui/openapi.json "$RUNNER_TEMP/arl-openapi.json"
           python -m pytest -q tests/ui/test_projects.py tests/ui/test_reviews.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py tests/ui/test_private_access.py tests/ui/test_sources_meta.py tests/ui/test_jobs.py tests/ui/test_execution.py tests/ui/test_presets.py tests/ui/test_staged_render.py
+
+  synthetic-ffmpeg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: python -m pip install -e '.[dev]' -r ui/requirements.txt
+      - name: Install synthetic-test system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fontconfig fonts-dejavu-core
+      - name: Verify test tools
+        run: |
+          ffmpeg -version
+          ffprobe -version
+          fc-match 'DejaVu Sans'
+      - name: Actual isolated synthetic render
+        env:
+          GROQ_API_KEY: ''
+          OPENROUTER_API_KEY: ''
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+        run: python -m pytest -q -s tests/ui/test_real_staged_render.py
