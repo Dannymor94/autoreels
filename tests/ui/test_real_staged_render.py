@@ -584,7 +584,7 @@ def test_export_exact_saved_editor_revision(tmp_path, monkeypatch):
         assert any(pcm),"selected background track must be audible"
         import numpy as np
         frame=run("-v","error","-ss","0.2","-i",output,"-frames:v","1",
-                  "-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
+                  "-vf","scale=360:640","-pix_fmt","rgb24","-threads","1","-f","rawvideo","-")
         rgb=np.frombuffer(frame,dtype=np.uint8).reshape(640,360,3)
         assert np.all(rgb[72:184,42:102]>230,axis=2).mean()>0.95
         assert ledger.get("saved-cut-export")==job
