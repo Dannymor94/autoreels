@@ -36,7 +36,7 @@ from autoreels.core.config import (
 )
 from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.calibration import face_close_crop
-from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
+from autoreels.core.models import Crop, GraphicLayer, Manifest, Segment, SetupProfile
 from autoreels.core.playback_timing import build_window_timing
 from autoreels.local.subtitles import build_ass, remap_to_output
 from autoreels.local.assets import resolve_audio_asset
@@ -2940,6 +2940,16 @@ def palette_filter(palette: Palette) -> str:
     return ",".join(parts)
 
 
+def _graphic_layer_filter(layer: GraphicLayer) -> str:
+    """Trusted typed rectangle; no caller-supplied FFmpeg expressions."""
+    return (
+        f"drawbox=x=iw*{layer.x_pct}/100:y=ih*{layer.y_pct}/100:"
+        f"w=iw*{layer.width_pct}/100:h=ih*{layer.height_pct}/100:"
+        f"color={layer.color}:t=fill:"
+        f"enable='gte(t,{layer.start_ms/1000:.3f})*lt(t,{layer.end_ms/1000:.3f})'"
+    )
+
+
 def _render_segments(
     manifest: Manifest,
     *,
@@ -2990,7 +3000,11 @@ def _render_segments(
                 bound_music[reel.id] = resolve_audio_asset(assets_dir, track.asset)
             except ValueError as exc:
                 raise RenderError(str(exc)) from exc
-    special = [r for r in manifest.reels if r.window_rates is not None or r.seam_dip_ms is not None]
+    graphics = [r for r in manifest.reels if r.graphic_layer is not None]
+    if graphics and (vf is None or suffix):
+        raise RenderError("graphic layers require final-frame crop rendering")
+    special = [r for r in manifest.reels if r.window_rates is not None
+               or r.seam_dip_ms is not None or r.graphic_layer is not None]
     for reel in special:
         try:
             reel.check_segments()
@@ -3009,7 +3023,7 @@ def _render_segments(
                 or getattr(render_cfg, "reel_framing", False)
                 or getattr(render_cfg, "close_from_face", False)
                 or (zoom_cfg is not None and zoom_cfg.enabled)):
-            raise RenderError("variable speed or seam dip requires explicit hard-cut settings without automatic effects")
+            raise RenderError("variable speed, seam dip or graphic layer requires explicit hard-cut settings without automatic effects")
     source = resolve_source(manifest, inputs_dir).resolve()
 
     ffmpeg_bin = shutil.which(ffmpeg)
@@ -3317,6 +3331,11 @@ def _render_segments(
             if _reel_speed != 1.0:
                 _pts = f"setpts=PTS/{_reel_speed:.4g}"
                 reel_vf = f"{_pts},{reel_vf}" if reel_vf else _pts
+            if reel.graphic_layer is not None:
+                # The final frame already has the source crop and palette.
+                # Subtitles are composed above the graphic.
+                graphic_vf = _graphic_layer_filter(reel.graphic_layer)
+                reel_vf = f"{reel_vf},{graphic_vf}" if reel_vf else graphic_vf
             ass_cwd: str | None = None
             _title = getattr(reel, "title_overlay", "") or ""
             _fx_ass = None
@@ -3596,6 +3615,11 @@ def _render_segments(
                                                        seam_xfades=_ts_seam_xfades))
             # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
+            if reel.graphic_layer is not None and (
+                    _synth_active or _end_ext or _end_loop or _xfade_actual
+                    or any(_ts_seam_xfades or []) or any(_ts_seam_visual or [])
+                    or reel.graphic_layer.end_ms / 1000 > _out_dur + 1e-9):
+                raise RenderError("graphic layer incompatible with final montage timing")
             # M55e: a sped-up clip is made an exact whole number of frames at the output rate (the
             # setpts timeline has 1.05× the frame rate; the muxer re-timed it to the source rate and
             # the video came out up to 2 frames off the atempo'd audio — Pxl 1129: video 52 ms longer).
@@ -4313,8 +4337,9 @@ def render_preview(
         reel = next((r for r in manifest.reels if r.id == reel_id), None)
         if reel is None:
             raise RenderError(f"клип '{reel_id}' не найден в манифесте")
-    if reel.window_rates is not None or reel.background_track is not None or reel.seam_dip_ms is not None:
-        raise RenderError("palette preview does not support independent playback rates or soundtrack layers yet")
+    if (reel.window_rates is not None or reel.background_track is not None
+            or reel.seam_dip_ms is not None or reel.graphic_layer is not None):
+        raise RenderError("palette preview does not support independent rates or explicit layers yet")
     short_end = min(reel.end, reel.start + seconds)
     zoom_cfg = render_cfg.zoom
     if zoom is not None and zoom != zoom_cfg.enabled:
