@@ -528,6 +528,13 @@
             "title": "Sentences",
             "type": "array"
           },
+          "soundtracks": {
+            "items": {
+              "$ref": "#/components/schemas/CutSoundtrackAsset"
+            },
+            "title": "Soundtracks",
+            "type": "array"
+          },
           "source_duration": {
             "title": "Source Duration",
             "type": "number"
@@ -542,7 +549,8 @@
           "plan_sha256",
           "clip_uid",
           "current_removed",
-          "history"
+          "history",
+          "soundtracks"
         ],
         "title": "CutDemoView",
         "type": "object"
@@ -804,6 +812,44 @@
           "end"
         ],
         "title": "CutSentence",
+        "type": "object"
+      },
+      "CutSoundtrackAsset": {
+        "properties": {
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "rights": {
+            "title": "Rights",
+            "type": "string"
+          },
+          "rights_note": {
+            "title": "Rights Note",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "label",
+          "sha256",
+          "format",
+          "rights",
+          "rights_note"
+        ],
+        "title": "CutSoundtrackAsset",
         "type": "object"
       },
       "CutWindow": {

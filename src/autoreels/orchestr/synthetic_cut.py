@@ -19,7 +19,7 @@ from autoreels.core.playback_timing import build_window_timing
 
 from . import sentence_edit, editor_revisions as revisions
 from .synthetic_editor import _path, _MAX_REVISION
-from .synthetic_soundtrack import soundtrack
+from .synthetic_soundtrack import TRACKS, soundtrack
 
 _PROJECT = "synthetic-cut-v1"
 
@@ -64,6 +64,20 @@ class CutSelectionEvent(BaseModel):
     navigation: Literal["undo", "redo"] | None = None
 
 
+class CutSoundtrackAsset(BaseModel):
+    number: int
+    label: str
+    sha256: str
+    format: str
+    rights: str
+    rights_note: str
+
+
+def _soundtrack_catalog() -> list[CutSoundtrackAsset]:
+    return [CutSoundtrackAsset(number=i, **asset.model_dump())
+            for i, asset in enumerate(TRACKS, 1)]
+
+
 class CutDemoView(BaseModel):
     enabled: bool
     source_duration: float
@@ -74,6 +88,7 @@ class CutDemoView(BaseModel):
     clip_uid: str
     current_removed: list[int]
     history: list[CutSelectionEvent]
+    soundtracks: list[CutSoundtrackAsset]
 
 
 class CutCommand(BaseModel):
@@ -372,7 +387,7 @@ def _view(store, fixture):
             for p in [p for p in plans if p.music is None and p.dip_ms is None]:
                 _scored(fixture,p,active.music)
         parent = _framed(fixture,base,active.crop)
-        for music in product((1,2),(10,20,30),(0,1),(0,1)):
+        for music in product(range(1, len(TRACKS)+1),(10,20,30),(0,1),(0,1)):
             _scored(fixture,parent,music)
         if active.dip_ms is not None:
             for p in [p for p in plans if p.dip_ms is None]:
@@ -391,6 +406,7 @@ def _view(store, fixture):
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
             plans=plans,revision=head.number,plan_sha256=head.plan_sha256,
             clip_uid=dict(head.clip_uids)["r01"],current_removed=active.removed,
+            soundtracks=_soundtrack_catalog(),
             history=[CutSelectionEvent(revision=i,removed=list(op.removed),
                                        order=list(op.order) if op.order is not None else None,
                                        trim=list(op.trim) if op.trim is not None else None,
@@ -406,7 +422,7 @@ def _view(store, fixture):
 def view(root: Path, enabled: bool) -> CutDemoView:
     if not enabled:
         return CutDemoView(enabled=False,source_duration=0,sentences=[],plans=[],
-            revision=0,plan_sha256="",clip_uid="",current_removed=[],history=[])
+            revision=0,plan_sha256="",clip_uid="",current_removed=[],history=[],soundtracks=[])
     try:
         fixture = _fixture()
         path = _path(root)

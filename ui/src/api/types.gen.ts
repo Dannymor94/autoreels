@@ -478,6 +478,8 @@ export interface components {
             revision: number;
             /** Sentences */
             sentences: components["schemas"]["CutSentence"][];
+            /** Soundtracks */
+            soundtracks: components["schemas"]["CutSoundtrackAsset"][];
             /** Source Duration */
             source_duration: number;
         };
@@ -537,6 +539,21 @@ export interface components {
             start: number;
             /** Text */
             text: string;
+        };
+        /** CutSoundtrackAsset */
+        CutSoundtrackAsset: {
+            /** Format */
+            format: string;
+            /** Label */
+            label: string;
+            /** Number */
+            number: number;
+            /** Rights */
+            rights: string;
+            /** Rights Note */
+            rights_note: string;
+            /** Sha256 */
+            sha256: string;
         };
         /** CutWindow */
         CutWindow: {
