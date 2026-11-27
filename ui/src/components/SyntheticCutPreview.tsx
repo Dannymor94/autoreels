@@ -9,7 +9,8 @@ const queryKey = ["synthetic-cut"];
 const seconds = (n:number) => n.toFixed(2)+" с";
 const equal = (a:number[],b:number[]) => a.length===b.length && a.every((v,i)=>v===b[i]);
 const chronological = (order:number[]) => equal(order,[...order].sort((a,b)=>a-b));
-const sameCrop=(a:CutPreview,b:CutPreview|undefined)=>equal(a.crop??[],b?.crop??[]);
+const sameMusic=(a:CutPreview,b:CutPreview|undefined)=>equal(a.music??[],b?.music??[]);
+const sameCrop=(a:CutPreview,b:CutPreview|undefined)=>equal(a.crop??[],b?.crop??[])&&sameMusic(a,b);
 const frameNames=["Исходный кадр","Приблизить 1,6×","Сместить влево","Сместить вправо","Сместить вверх","Сместить вниз","Приблизить 2×"];
 const frameCodes=[[],[18,30,60,100],[0,30,60,100],[36,30,60,100],[18,0,60,100],[18,60,60,100],[24,40,48,80]];
 const rateAt=(plan:CutPreview,i:number)=>(plan.rates?.[i]??100)/100;
@@ -39,7 +40,7 @@ export function SyntheticCutPreview() {
   const video=useRef<HTMLVideoElement>(null);
   const activeWindow=useRef(0);
   const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
-  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim&&!p.rates&&!p.crop);
+  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim&&!p.rates&&!p.crop&&!p.music);
   const untrimmed=q.data?.plans.find(p=>!p.trim&&!p.rates&&plan&&sameCrop(p,plan)&&equal(p.removed,plan.removed)&&equal(p.order,plan.order));
   const normalSpeed=q.data?.plans.find(p=>!p.rates&&plan&&sameCrop(p,plan)&&equal(p.removed,plan.removed)&&equal(p.order,plan.order)&&equal(p.trim??[],plan.trim??[]));
   const kept=(q.data?.sentences??[]).map(s=>s.number).filter(n=>!selected.includes(n));
@@ -78,7 +79,8 @@ export function SyntheticCutPreview() {
       ...(chronological(next.order)?{}:{order:next.order}),
       ...(next.trim?{trim:next.trim}:{}),
       ...(next.rates?{rates:next.rates}:{}),
-      ...(next.crop?{crop:next.crop}:{})});
+      ...(next.crop?{crop:next.crop}:{}),
+      ...(next.music?{music:next.music}:{})});
   }
 
   useEffect(()=>{
@@ -140,7 +142,7 @@ export function SyntheticCutPreview() {
       equal(p.trim??[],plan.trim??[])&&equal(p.rates??p.windows.map(()=>100),rates));
     if(next)changePlan(next);
   }
-  const frames=q.data.plans.filter(p=>equal(p.removed,removed)&&equal(p.order,plan.order)&&
+  const frames=q.data.plans.filter(p=>sameMusic(p,plan)&&equal(p.removed,removed)&&equal(p.order,plan.order)&&
     equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[]));
   const frameIndex=frameCodes.findIndex(c=>equal(c,plan.crop??[]));
   const [cx,cy,cw,ch]=plan.crop??[0,0,96,160];
@@ -158,8 +160,15 @@ export function SyntheticCutPreview() {
     if(!state||!target||locked||pending.current||guard.current)return;
     void send({op_id:crypto.randomUUID(),base_revision:state.revision,base_plan_sha256:state.plan_sha256,
       clip_uid:state.clip_uid,candidate_plan_sha256:target.candidate_plan_sha256,
-      removed:target.removed,order:target.order,trim:target.trim,rates:target.rates,crop:target.crop,navigation:kind});
+      removed:target.removed,order:target.order,trim:target.trim,rates:target.rates,crop:target.crop,music:target.music,navigation:kind});
   }
+  const tracks=q.data.plans.filter(p=>equal(p.removed,removed)&&equal(p.order,plan.order)&&
+    equal(p.trim??[],plan.trim??[])&&equal(p.rates??[],plan.rates??[])&&equal(p.crop??[],plan.crop??[]));
+  function changeMusic(code:number[]){
+    const next=tracks.find(p=>equal(p.music??[],code));
+    if(next)changePlan(next);
+  }
+  const music=plan.music;
   const at=sourceTime(plan,position);
   const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&s.start<=at&&at<s.end);
   const duration=q.data.source_duration;
@@ -241,6 +250,34 @@ export function SyntheticCutPreview() {
     <div className="cut-track cut-output" role="img" aria-label="Последовательность фрагментов после нарезки">
       {plan.windows.map((w,i)=><span key={i} style={{left:(w.output_start/plan.duration*100)+"%",width:((w.output_end-w.output_start)/plan.duration*100)+"%"}}/>)}
     </div>
+    <h3>Звуковые дорожки</h3>
+    <div className="cut-track-label"><strong>Фоновая дорожка</strong><span>{music?seconds(plan.duration):"Нет"}</span></div>
+    <div className="cut-track cut-music" role="img" aria-label="Фоновая дорожка на таймлайне">
+      {music&&<span style={{left:0,width:"100%"}}/>}
+    </div>
+    <label>Фоновый звук
+      <select aria-label="Фоновый звук" value={music?.[0]??0} disabled={locked}
+        onChange={e=>{const n=Number(e.target.value);changeMusic(n?[n,...(music?.slice(1)??[20,1,1])]:[]);}}>
+        <option value={0}>Без фонового звука</option>
+        <option value={1}>Тестовый тон A</option>
+        <option value={2}>Тестовый тон B</option>
+      </select>
+    </label>
+    {music&&<>
+      <label>Громкость фона
+        <select aria-label="Громкость фона" value={music[1]} disabled={locked}
+          onChange={e=>changeMusic([music[0],Number(e.target.value),music[2],music[3]])}>
+          {[10,20,30].map(n=><option key={n} value={n}>{n}%</option>)}
+        </select>
+      </label>
+      <label><input type="checkbox" checked={!!music[2]} disabled={locked}
+        onChange={e=>changeMusic([music[0],music[1],Number(e.target.checked),music[3]])}/> Плавное появление и затухание (0,5 с)</label>
+      <label><input type="checkbox" checked={!!music[3]} disabled={locked}
+        onChange={e=>changeMusic([music[0],music[1],music[2],Number(e.target.checked)])}/> Приглушать фон под голос</label>
+      <audio key={music[0]} controls preload="none" src={"/synthetic-soundtrack-"+music[0]+".wav"}
+        aria-label="Прослушать тестовый звуковой файл"/>
+      <p className="secondary">Прослушивание отдельного тестового файла, не финального микса. Громкость, приглушение и фейды применяет FFmpeg при рендере.</p>
+    </>}
     <h3>Границы фрагментов</h3>
     <p className="secondary">Выбирай безопасные границы по карте речи. Пока можно изменять одну границу за раз; для другой границы, удаления или перестановки сначала сбрось это изменение.</p>
     {plan.windows.map((w,index)=><div key={index} className="synthetic-word-list">
@@ -285,7 +322,7 @@ export function SyntheticCutPreview() {
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
     <details><summary>История нарезки ({q.data.history.length})</summary>
-      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {(h.navigation==="undo"?"Отмена · ":h.navigation==="redo"?"Повтор · ":"")+(h.crop?"Кадрирование · ":"")+(h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено")}</p>)}
+      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {(h.navigation==="undo"?"Отмена · ":h.navigation==="redo"?"Повтор · ":"")+(h.crop?"Кадрирование · ":"")+(h.music?"Фон "+h.music[0]+" · "+h.music[1]+"% · ":"")+(h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено")}</p>)}
     </details>
   </section>;
 }

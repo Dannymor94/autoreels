@@ -19,6 +19,7 @@ from autoreels.core.playback_timing import build_window_timing
 
 from . import sentence_edit, editor_revisions as revisions
 from .synthetic_editor import _path, _MAX_REVISION
+from .synthetic_soundtrack import soundtrack
 
 _PROJECT = "synthetic-cut-v1"
 
@@ -46,6 +47,7 @@ class CutPreview(BaseModel):
     trim: list[int] | None = None
     rates: list[int] | None = None
     crop: list[int] | None = None
+    music: list[int] | None = None
 
 
 class CutSelectionEvent(BaseModel):
@@ -55,6 +57,7 @@ class CutSelectionEvent(BaseModel):
     trim: list[int] | None = None
     rates: list[int] | None = None
     crop: list[int] | None = None
+    music: list[int] | None = None
     candidate_plan_sha256: str
     navigation: Literal["undo", "redo"] | None = None
 
@@ -83,17 +86,20 @@ class CutCommand(BaseModel):
     trim: list[int] | None = None
     rates: list[int] | None = None
     crop: list[int] | None = None
+    music: list[int] | None = None
     navigation: Literal["undo", "redo"] | None = None
 
 
-def _key(removed, order, trim=None, rates=None, crop=None):
+def _key(removed, order, trim=None, rates=None, crop=None, music=None):
     removed, order = tuple(removed), tuple(order)
     key = removed if order == tuple(sorted(order)) else (*removed, 0, *order)
     if trim is not None:
         key = (*key, -1, *trim)
     if rates is not None:
         key = (*key, -2, *rates)
-    return key if crop is None else (*key, -3, *crop)
+    if crop is not None:
+        key = (*key, -3, *crop)
+    return key if music is None else (*key, -4, *music)
 
 
 def _projection(segments, removed, order, raw, trim=None, rates=None):
@@ -257,6 +263,29 @@ def _framed(fixture, base, crop):
     return p
 
 
+def _scored(fixture, base, music):
+    if music is None:
+        return base
+    music = tuple(music)
+    track = soundtrack(music)
+    if base.music is not None:
+        raise revisions.Conflict("duplicate soundtrack layer")
+    _, _, plans, choices = fixture
+    parent = _key(base.removed, base.order, base.trim, base.rates, base.crop)
+    key = (*parent, -4, *music)
+    if key in choices:
+        digest = hashlib.sha256(choices[key]).hexdigest()
+        return next(p for p in plans if p.plan_sha256 == digest)
+    source = Manifest.model_validate_json(choices[parent])
+    reel = source.reels[0].model_copy(update={"background_track":track})
+    raw = source.model_copy(update={"reels":[reel]}).model_dump_json().encode("utf-8")
+    Manifest.model_validate_json(raw)
+    choices[key] = raw
+    p = base.model_copy(update={"music":list(music),"plan_sha256":hashlib.sha256(raw).hexdigest()})
+    plans.append(p)
+    return p
+
+
 def _selection(fixture, op):
     _, _, plans, choices = fixture
     # Match the temporal selection without inventing a crop/plan combination.
@@ -267,7 +296,7 @@ def _selection(fixture, op):
         raise revisions.Conflict("fixture temporal selection unavailable")
     digest = hashlib.sha256(raw).hexdigest()
     base = next(p for p in plans if p.plan_sha256 == digest and p.crop is None)
-    return _framed(fixture, base, op.crop)
+    return _scored(fixture, _framed(fixture, base, op.crop), op.music)
 
 
 def _initial(store, choices):
@@ -278,9 +307,9 @@ def _initial(store, choices):
 def _view(store, fixture):
     duration,sentences,plans,choices = fixture
     # Normalize transient command candidates so GET and PUT project the same catalog.
-    plans[:] = [p for p in plans if p.crop is None]
+    plans[:] = [p for p in plans if p.crop is None and p.music is None]
     for key in list(choices):
-        if -3 in key:
+        if -3 in key or -4 in key:
             del choices[key]
     with store.conn:
         store.conn.execute("BEGIN")
@@ -291,22 +320,30 @@ def _view(store, fixture):
         if history:
             _selection(fixture, history[-1])
         active = next((p for p in plans if p.plan_sha256==head.plan_sha256),None)
-        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim, active.rates, active.crop)]
+        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim, active.rates, active.crop, active.music)]
                 or len(history)!=head.number or head.number>_MAX_REVISION
-                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim, active.rates, active.crop)
+                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim, active.rates, active.crop, active.music)
                     or history[-1].candidate_plan_sha256!=head.plan_sha256))
-                or (not history and _key(active.removed, active.order, active.trim, active.rates, active.crop))):
+                or (not history and _key(active.removed, active.order, active.trim, active.rates, active.crop, active.music))):
             raise revisions.Conflict("incompatible synthetic cut revision")
         undo, _ = store.fixture_stacks(history, hashlib.sha256(choices[()]).hexdigest())
         if undo[-1][1] != head.plan_sha256:
             raise revisions.Conflict("incompatible fixture navigation")
-        base = next(p for p in plans if p.crop is None and
+        base = next(p for p in plans if p.crop is None and p.music is None and
                     _key(p.removed,p.order,p.trim,p.rates) == _key(active.removed,active.order,active.trim,active.rates))
         if active.crop is not None:
-            for p in [p for p in plans if p.crop is None]:
+            for p in [p for p in plans if p.crop is None and p.music is None]:
                 _framed(fixture,p,active.crop)
         for crop in revisions.FIXTURE_CROPS:
             _framed(fixture,base,crop)
+        # Preserve current soundtrack across currently exposed temporal/crop edits.
+        # Enumerate settings only on the active temporal/crop plan, not a full product.
+        if active.music is not None:
+            for p in [p for p in plans if p.music is None]:
+                _scored(fixture,p,active.music)
+        parent = _framed(fixture,base,active.crop)
+        for music in product((1,2),(10,20,30),(0,1),(0,1)):
+            _scored(fixture,parent,music)
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
             plans=plans,revision=head.number,plan_sha256=head.plan_sha256,
             clip_uid=dict(head.clip_uids)["r01"],current_removed=active.removed,
@@ -315,6 +352,7 @@ def _view(store, fixture):
                                        trim=list(op.trim) if op.trim is not None else None,
                                        rates=list(op.rates) if op.rates is not None else None,
                                        crop=list(op.crop) if op.crop is not None else None,
+                                       music=list(op.music) if op.music is not None else None,
                                        candidate_plan_sha256=op.candidate_plan_sha256,
                                        navigation=op.navigation)
                      for i,op in reversed(list(enumerate(history,1)))])
@@ -349,7 +387,8 @@ def command(root: Path, enabled: bool, body: CutCommand) -> CutDemoView:
                  "order":tuple(body.order) if body.order is not None else None,
                  "trim":tuple(body.trim) if body.trim is not None else None,
                  "rates":tuple(body.rates) if body.rates is not None else None,
-                 "crop":tuple(body.crop) if body.crop is not None else None})
+                 "crop":tuple(body.crop) if body.crop is not None else None,
+                 "music":tuple(body.music) if body.music is not None else None})
     except ValueError:
         raise HTTPException(422,"invalid synthetic cut selection") from None
     try:

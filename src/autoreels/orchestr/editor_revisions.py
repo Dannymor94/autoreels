@@ -18,6 +18,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from autoreels.core.models import Crop, Manifest
+from .synthetic_soundtrack import soundtrack
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 OpaqueId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
@@ -67,6 +68,7 @@ class FixtureSelection(BaseModel):
     rates: tuple[int, ...] | None = None  # percent, indexed by playback window
     crop: tuple[int, int, int, int] | None = None
     navigation: Literal["undo", "redo"] | None = None
+    music: tuple[int, int, int, int] | None = None
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -95,6 +97,12 @@ class FixtureSelection(BaseModel):
             if self.crop not in FIXTURE_CROPS:
                 raise Conflict("invalid fixture crop")
             key = (*key, -3, *self.crop)
+        if self.music is not None:
+            try:
+                soundtrack(self.music)
+            except ValueError as exc:
+                raise Conflict("invalid fixture soundtrack") from exc
+            key = (*key, -4, *self.music)
         return key
 
 
@@ -353,6 +361,7 @@ class Store:
         if (len(candidate.reels) != 1 or len(baseline.reels) != 1
                 or candidate.reels[0].id != baseline.reels[0].id
                 or candidate.setup != expected_setup
+                or candidate.reels[0].background_track != soundtrack(op.music)
                 or candidate.model_copy(update={"reels":baseline.reels, "setup":baseline.setup}) != baseline):
             raise Conflict("fixture candidate outside initial manifest")
         candidate.reels[0].check_segments()
