@@ -168,3 +168,23 @@ def test_variable_speed_rejects_ambiguous_or_unsupported_timing():
         remap_to_output([],windows,xfade_sec=0.1,window_rates=(1,2))
     with pytest.raises(ValueError):
         remap_to_output([Word(word="cross",t0=0.9,t1=1.1)],windows,window_rates=(1,2))
+
+
+def test_window_rates_manifest_opt_in_and_legacy_serialization():
+    import pytest
+    from autoreels.core.models import Segment
+    legacy=Reel(id="r01",start=0,end=2,score=80,hook="",title="",description="",
+                planned=True,segments=[Segment(start=0,end=2)])
+    assert "window_rates" not in legacy.model_dump()
+    assert '"window_rates"' not in legacy.model_dump_json()
+    assert Reel.model_validate_json(legacy.model_dump_json()).model_dump_json()==legacy.model_dump_json()
+    rated=Reel.model_validate({**legacy.model_dump(),"window_rates":[0.5]})
+    assert Reel.model_validate_json(rated.model_dump_json()).window_rates==[0.5]
+    assert rated.playback_duration()==2  # legacy source-time contract remains unchanged
+    for changes in ({"window_rates":[]},{"window_rates":[0.49]},{"window_rates":[True]},
+                    {"window_rates":[1,2]},{"speed":1.5,"window_rates":[1]},
+                    {"planned":False,"window_rates":[1]},{"fx":{"push":True},"window_rates":[1]}):
+        with pytest.raises(ValueError):
+            Reel.model_validate({**legacy.model_dump(),**changes})
+    with pytest.raises(ValueError):
+        rated.model_copy(update={"segments":[Segment(start=0,end=1),Segment(start=1,end=2)]}).check_segments()

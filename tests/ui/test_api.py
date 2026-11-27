@@ -397,7 +397,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     view = response.json()
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
-    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"]}
+    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"] and not p["rates"]}
     baseline, cut = plans[()], plans[(2,)]
     assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]
     for removed, plan in plans.items():
@@ -437,7 +437,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     assert response.status_code==200,response.text
     cut=response.json()
     assert cut["revision"]==1 and cut["current_removed"]==[2]
-    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None}]
+    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None}]
     assert client.get("/api/synthetic-cut").json()==cut
     assert client.get("/api/synthetic-editor").json()==spelling
     assert client.put("/api/synthetic-cut",json=body).json()==cut
@@ -455,7 +455,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     restored=result.json()
     assert restored["revision"]==2 and restored["current_removed"]==[]
     assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
-    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None},{"revision":1,"removed":[2],"order":None,"trim":None}]
+    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None}]
     assert client.put("/api/synthetic-cut",json=body).json()==restored
     assert client.get("/api/synthetic-cut").json()==restored
     assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"
@@ -485,7 +485,7 @@ def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
     moved=response.json()
     assert moved["revision"]==2 and moved["current_removed"]==[2]
     assert moved["plan_sha256"]==reordered["plan_sha256"]
-    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None}
+    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None,"rates":None}
     assert reordered["windows"][0]["source_start"]>reordered["windows"][-1]["source_start"]
     assert client.get("/api/synthetic-cut").json()==moved
     assert client.put("/api/synthetic-cut",json=op).json()==moved
@@ -516,7 +516,7 @@ def test_synthetic_trim_persists_and_preserves_cut_and_order(client,tmp_root):
     trim={**op,"op_id":"trim-one","base_revision":1,"base_plan_sha256":moved["plan_sha256"],
           "candidate_plan_sha256":variant["plan_sha256"],"trim":variant["trim"]}
     for bad in ({**trim,"trim":[-1,2,100]}, {**trim,"trim":[0,3,100]},
-                {**trim,"trim":[0,2,100]}, {**trim,"trim":None},
+                {**trim,"trim":[0,2,100]}, {**trim,"trim":None,"rates":None},
                 {**trim,"removed":[2,0,3,1,-1,*variant["trim"]],"order":None}):
         assert client.put("/api/synthetic-cut",json=bad).status_code==409
     response=client.put("/api/synthetic-cut",json=trim)
@@ -534,6 +534,40 @@ def test_synthetic_trim_persists_and_preserves_cut_and_order(client,tmp_root):
     assert client.put("/api/synthetic-cut",json=op).json()==saved
     assert client.put("/api/synthetic-cut",json={**trim,"op_id":"stale-trim"}).status_code==409
     reset={**op,"op_id":"reset-trim","base_revision":2,"base_plan_sha256":saved["plan_sha256"]}
+    response=client.put("/api/synthetic-cut",json=reset)
+    assert response.status_code==200,response.text
+    assert response.json()["plan_sha256"]==parent["plan_sha256"]
+
+
+def test_synthetic_independent_rates_preserve_cut_trim_and_order(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get("/api/synthetic-cut").json()
+    variant=next(p for p in view["plans"] if p["rates"]==[50,200] and p["trim"]
+                 and p["removed"]==[2] and p["order"]==[3,1])
+    parent=next(p for p in view["plans"] if not p["rates"] and p["trim"]==variant["trim"]
+                and p["removed"]==[2] and p["order"]==[3,1])
+    op=dict(op_id="rated-cut",base_revision=0,base_plan_sha256=view["plan_sha256"],
+            clip_uid=view["clip_uid"],candidate_plan_sha256=variant["plan_sha256"],
+            removed=[2],order=[3,1],trim=variant["trim"],rates=[50,200])
+    assert client.put("/api/synthetic-cut",json={**op,"rates":[100,100]}).status_code==409
+    assert client.put("/api/synthetic-cut",json={**op,"rates":[50]}).status_code==409
+    response=client.put("/api/synthetic-cut",json=op)
+    assert response.status_code==200,response.text
+    saved=response.json()
+    assert saved["plan_sha256"]==variant["plan_sha256"] and saved["history"][0]["rates"]==[50,200]
+    assert client.get("/api/synthetic-cut").json()==saved
+    assert client.put("/api/synthetic-cut",json=op).json()==saved
+    offset=0
+    for original,rated,pct in zip(parent["windows"],variant["windows"],[50,200]):
+        assert (original["source_start"],original["source_end"])==(rated["source_start"],rated["source_end"])
+        assert rated["output_start"]==pytest.approx(offset)
+        offset+=(rated["source_end"]-rated["source_start"])*100/pct
+        assert rated["output_end"]==pytest.approx(offset)
+    assert variant["duration"]==pytest.approx(offset)
+    reset={**op,"op_id":"reset-rates","base_revision":1,"base_plan_sha256":saved["plan_sha256"],
+           "candidate_plan_sha256":parent["plan_sha256"],"rates":None}
     response=client.put("/api/synthetic-cut",json=reset)
     assert response.status_code==200,response.text
     assert response.json()["plan_sha256"]==parent["plan_sha256"]

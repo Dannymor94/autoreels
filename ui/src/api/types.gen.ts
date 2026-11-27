@@ -445,6 +445,8 @@ export interface components {
             op_id: string;
             /** Order */
             order?: number[] | null;
+            /** Rates */
+            rates?: number[] | null;
             /** Removed */
             removed: number[];
             /** Trim */
@@ -479,6 +481,8 @@ export interface components {
             order: number[];
             /** Plan Sha256 */
             plan_sha256: string;
+            /** Rates */
+            rates?: number[] | null;
             /** Removed */
             removed: number[];
             /** Trim */
@@ -490,6 +494,8 @@ export interface components {
         CutSelectionEvent: {
             /** Order */
             order?: number[] | null;
+            /** Rates */
+            rates?: number[] | null;
             /** Removed */
             removed: number[];
             /** Revision */

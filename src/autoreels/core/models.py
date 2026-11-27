@@ -17,8 +17,9 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 class ProjectStatus(str, Enum):
@@ -231,6 +232,33 @@ class Reel(BaseModel):
     # M59: the body plays pieces out of source order (a montage line written so) — segments are in
     # play order; start/end are the first played start and the last played end (end may be < start).
     reordered: bool = False
+    # Opt-in, indexed by playback window occurrence; absent on legacy manifests.
+    window_rates: list[Annotated[float, Field(strict=True, ge=0.5, le=2.0)]] | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_rates(self, handler):
+        data = handler(self)
+        if self.window_rates is None:
+            data.pop("window_rates", None)
+        return data
+
+    @model_validator(mode="after")
+    def _validate_rates(self):
+        self.check_window_rates()
+        return self
+
+    def check_window_rates(self) -> None:
+        if self.window_rates is None:
+            return
+        from autoreels.core.playback_timing import build_window_timing
+        if (self.speed != 1.0 or not self.planned or self.cold_open is not None
+                or self.beat_gap_sec is not None or self.montage or self.fx
+                or self.zoom_source_t0 is not None or self.c_close_ranges
+                or self.title_overlay or self.open_thought
+                or any(s.window_cut or s.close_intervals or s.prerolled
+                       for s in self.playback_windows())):
+            raise ValueError("per-window rates require a simple planned hard-cut body")
+        build_window_timing(self.playback_windows(), self.window_rates)
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.
@@ -269,6 +297,7 @@ class Reel(BaseModel):
         non-chronological in source time — monotonicity and bounds checks are skipped; only the
         empty/reversed invariant per segment is enforced.
         """
+        self.check_window_rates()
         if self.cold_open is not None and self.cold_open.end <= self.cold_open.start:
             raise ValueError(f"reel {self.id}: cold_open is empty/reversed "
                              f"[{self.cold_open.start:.3f}, {self.cold_open.end:.3f}]")
