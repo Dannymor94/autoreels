@@ -344,6 +344,192 @@
         "title": "ComparisonState",
         "type": "object"
       },
+      "DemoCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "edit",
+              "undo",
+              "redo"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "base_plan_sha256": {
+            "title": "Base Plan Sha256",
+            "type": "string"
+          },
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "clip_uid": {
+            "title": "Clip Uid",
+            "type": "string"
+          },
+          "expected_text": {
+            "title": "Expected Text",
+            "type": "string"
+          },
+          "op_id": {
+            "title": "Op Id",
+            "type": "string"
+          },
+          "replacement": {
+            "title": "Replacement",
+            "type": "string"
+          },
+          "word_index": {
+            "title": "Word Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action",
+          "op_id",
+          "base_revision",
+          "base_plan_sha256",
+          "clip_uid",
+          "word_index",
+          "expected_text",
+          "replacement"
+        ],
+        "title": "DemoCommand",
+        "type": "object"
+      },
+      "DemoEdit": {
+        "properties": {
+          "action": {
+            "enum": [
+              "edit",
+              "undo",
+              "redo"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "after": {
+            "title": "After",
+            "type": "string"
+          },
+          "before": {
+            "title": "Before",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "word_index": {
+            "title": "Word Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "action",
+          "word_index",
+          "before",
+          "after"
+        ],
+        "title": "DemoEdit",
+        "type": "object"
+      },
+      "DemoEditorView": {
+        "properties": {
+          "clip_uid": {
+            "title": "Clip Uid",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/DemoEdit"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "plan_sha256": {
+            "title": "Plan Sha256",
+            "type": "string"
+          },
+          "redo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemoEdit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "undo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DemoEdit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "words": {
+            "items": {
+              "$ref": "#/components/schemas/DemoWord"
+            },
+            "title": "Words",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "revision",
+          "plan_sha256",
+          "clip_uid",
+          "words",
+          "history",
+          "undo",
+          "redo"
+        ],
+        "title": "DemoEditorView",
+        "type": "object"
+      },
+      "DemoWord": {
+        "properties": {
+          "end": {
+            "title": "End",
+            "type": "number"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "start": {
+            "title": "Start",
+            "type": "number"
+          },
+          "word": {
+            "title": "Word",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "word",
+          "start",
+          "end"
+        ],
+        "title": "DemoWord",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2262,6 +2448,60 @@
           }
         },
         "summary": "Set Source Meta"
+      }
+    },
+    "/api/synthetic-editor": {
+      "get": {
+        "operationId": "synthetic_editor_view_api_synthetic_editor_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoEditorView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Synthetic Editor View"
+      },
+      "put": {
+        "operationId": "synthetic_editor_command_api_synthetic_editor_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoEditorView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Editor Command"
       }
     },
     "/api/thumb/{stem}/{clip}": {

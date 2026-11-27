@@ -261,6 +261,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/synthetic-editor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Synthetic Editor View */
+        get: operations["synthetic_editor_view_api_synthetic_editor_get"];
+        /** Synthetic Editor Command */
+        put: operations["synthetic_editor_command_api_synthetic_editor_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/thumb/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -394,6 +412,70 @@ export interface components {
             right_sha256: string;
             /** Right Variant */
             right_variant: string;
+        };
+        /** DemoCommand */
+        DemoCommand: {
+            /** Action
+             * @enum {string}
+             */
+            action: "edit" | "undo" | "redo";
+            /** Base Plan Sha256 */
+            base_plan_sha256: string;
+            /** Base Revision */
+            base_revision: number;
+            /** Clip Uid */
+            clip_uid: string;
+            /** Expected Text */
+            expected_text: string;
+            /** Op Id */
+            op_id: string;
+            /** Replacement */
+            replacement: string;
+            /** Word Index */
+            word_index: number;
+        };
+        /** DemoEdit */
+        DemoEdit: {
+            /** Action
+             * @enum {string}
+             */
+            action: "edit" | "undo" | "redo";
+            /** After */
+            after: string;
+            /** Before */
+            before: string;
+            /** Revision */
+            revision: number;
+            /** Word Index */
+            word_index: number;
+        };
+        /** DemoEditorView */
+        DemoEditorView: {
+            /** Clip Uid */
+            clip_uid: string;
+            /** Enabled */
+            enabled: boolean;
+            /** History */
+            history: components["schemas"]["DemoEdit"][];
+            /** Plan Sha256 */
+            plan_sha256: string;
+            redo: components["schemas"]["DemoEdit"] | null;
+            /** Revision */
+            revision: number;
+            undo: components["schemas"]["DemoEdit"] | null;
+            /** Words */
+            words: components["schemas"]["DemoWord"][];
+        };
+        /** DemoWord */
+        DemoWord: {
+            /** End */
+            end: number;
+            /** Index */
+            index: number;
+            /** Start */
+            start: number;
+            /** Word */
+            word: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1238,6 +1320,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourceMetaOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    synthetic_editor_view_api_synthetic_editor_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoEditorView"];
+                };
+            };
+        };
+    };
+    synthetic_editor_command_api_synthetic_editor_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoEditorView"];
                 };
             };
             /** @description Validation Error */

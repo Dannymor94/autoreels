@@ -146,3 +146,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .plan-window { display: grid; gap: 4px; border-top: 1px solid var(--border); padding-top: 8px; }
 .plan-window small { color: var(--fg2); }
 .plan-word { white-space: pre-wrap; }
+
+.synthetic-editor { margin-bottom: 12px; overflow-wrap: anywhere; }
+.synthetic-word-list { display:flex; flex-wrap:wrap; gap:8px; }
+.synthetic-word-list button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
+.synthetic-word-form { display:grid; gap:8px; min-width:0; }
+.synthetic-editor details p { margin: 6px 0; }
