@@ -4564,6 +4564,7 @@ def cmd_render(
     reels_filter: str | None = None,
     gate_name: str | None = None,
     transition: str | None = None,
+    _allow_short_synthetic: bool = False,
 ) -> list[Path]:
     """ЛОКАЛЬНЫЙ тир: manifests/*.json → reels-out/ (batch по всем манифестам).
 
@@ -4576,6 +4577,11 @@ def cmd_render(
     Идемпотентность обеспечивается проверкой выходных файлов, а не перемещением манифеста.
     """
     root = Path(root) if root is not None else _project_root()
+    if _allow_short_synthetic and (
+            pull_first or archive_source or fallback or auto_recrop or allow_stale
+            or gate_name != "ui-editor-export" or reels_filter != "r01"
+            or _manifest_paths != [root / "reviews" / "SYNTHETIC_CUT.review.json"]):
+        raise ValueError("short synthetic render requires the exact isolated export route")
     if pull_first:
         _git_pull(root, what="манифесты")       # свежие манифесты с Mac (после run)
     render_cfg = load_render_config(root / "config" / "render.yaml")
@@ -4805,6 +4811,7 @@ def cmd_render(
                 encoder=(enc if explicit_encoder else None),   # префлайт мог сменить профиль
                 profile=prof_name, palette=eff_pal, zoom=zoom, music_path=music_path,
                 subtitles_cfg=subtitles_cfg, background=background, smap=_render_smap,
+                **({"_allow_short_synthetic": True} if _allow_short_synthetic else {}),
                 **({"assets_dir": Path(root).resolve() / "assets"}
                    if any(r.background_track is not None for r in render_manifest.reels) else {}),
             )

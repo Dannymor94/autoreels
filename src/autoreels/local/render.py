@@ -2960,6 +2960,7 @@ def _render_segments(
     subtitles_cfg: SubtitlesConfig | None = None,
     background: bool = False,
     zoom_cfg: "Zoom | None" = None,
+    _allow_short_synthetic: bool = False,
 ) -> list[Path]:
     """Общий цикл резки сегментов. `vf` — видеофильтр (None=рез как есть, R1a),
     `suffix` — хвост имени выхода (`_raw` для горизонтального, `` для вертикального).
@@ -2968,6 +2969,15 @@ def _render_segments(
     `emit_text` — класть рядом с клипом <id>.txt (title/description для публикации)."""
     # Абсолютные пути обязательны: при cwd=tmp_ass_dir (ass-фильтр) ffmpeg резолвит
     # относительные пути от tmp_ass_dir, а не от рабочей директории autoreels.
+    # Narrow internal fixture opt-in only. Ordinary render calls keep the
+    # established 2-second anti-collapse guard.
+    if _allow_short_synthetic and (
+            manifest.run_key != "synthetic-cut-v1" or manifest.source != "SYNTHETIC_CUT.mp4"
+            or manifest.source_path or len(manifest.reels) != 1
+            or manifest.reels[0].id != "r01" or not manifest.reels[0].planned
+            or manifest.setup is None or manifest.setup.frame != [96,160]):
+        raise RenderError("short render override requires the isolated synthetic cut fixture")
+    min_render_sec = 0.5 if _allow_short_synthetic else _MIN_CLIP_RENDER_SEC
     # Do not let a legacy effect consumer silently ignore an independent rate.
     legacy_music_path = music_path
     bound_music = {}
@@ -3258,9 +3268,9 @@ def _render_segments(
                             _z_acc -= _xfade_actual
                 _effective_vf = _crop_vf(_reel_setup, zoom_cfg, _fps(), _z_offset)
 
-            if clip_dur < _MIN_CLIP_RENDER_SEC:
+            if clip_dur < min_render_sec:
                 print(
-                    f"  ⚠ {reel.id}: {clip_dur:.1f}с < {_MIN_CLIP_RENDER_SEC}с — "
+                    f"  ⚠ {reel.id}: {clip_dur:.1f}с < {min_render_sec}с — "
                     f"пропущен (схлопывание границ; манифест стоит пересобрать)",
                     flush=True,
                 )
@@ -4194,6 +4204,7 @@ def render_crop(
     subtitles_cfg: SubtitlesConfig | None = None,
     background: bool = False,
     smap: "dict | None" = None,
+    _allow_short_synthetic: bool = False,
 ) -> list[Path]:
     """R1b+R3: вырезать окно, применить кроп-профиль, цветокор и (опц.) выжечь субтитры → <id>.mp4.
 
@@ -4214,6 +4225,7 @@ def render_crop(
         palette_vf=palette_vf, music_path=music_path, assets_dir=assets_dir,
         profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
         background=background, zoom_cfg=zoom_cfg, smap=smap,
+        **({"_allow_short_synthetic": True} if _allow_short_synthetic else {}),
     )
     retry = _vaapi_dropped_frame(Path(out_dir), manifest) if getattr(render_cfg, "vaapi_soft_retry", False) else {}
     for soft, rids in sorted({v: [r for r, s in retry.items() if s == v] for v in set(retry.values())}.items()):
@@ -4227,6 +4239,7 @@ def render_crop(
             palette_vf=palette_vf, music_path=music_path, assets_dir=assets_dir,
             profile=profile, progress=progress, emit_text=True, subtitles_cfg=subtitles_cfg,
             background=background, zoom_cfg=zoom_cfg, smap=smap,
+        **({"_allow_short_synthetic": True} if _allow_short_synthetic else {}),
         )
         for out in again:
             _note_soft_retry(Path(out_dir), out.stem, soft)
