@@ -55,6 +55,22 @@ class FixtureSelection(BaseModel):
     base_plan_sha256: Digest
     candidate_plan_sha256: Digest
     removed: tuple[int, ...]
+    order: tuple[int, ...] | None = None
+
+    @property
+    def selection_key(self) -> tuple[int, ...]:
+        """Legacy cut key, or a disjoint key for a nonchronological fixture."""
+        if (any(n <= 0 for n in self.removed)
+                or tuple(sorted(set(self.removed))) != self.removed):
+            raise Conflict("invalid fixture removal key")
+        if self.order is None:
+            return self.removed
+        if (not self.order or any(n <= 0 for n in self.order)
+                or len(set(self.order)) != len(self.order)
+                or set(self.order) & set(self.removed)
+                or tuple(sorted(self.order)) == self.order):
+            raise Conflict("invalid fixture permutation key")
+        return (*self.removed, 0, *self.order)
 
 
 @dataclass(frozen=True)
@@ -276,7 +292,7 @@ class Store:
         Internal fixture adapter only; clients cannot supply Manifest bytes.
         This is deliberately not a generic production import/write path.
         """
-        raw = choices.get(op.removed)
+        raw = choices.get(op.selection_key)
         initial = choices.get(())
         if raw is None or initial is None or _sha(raw) != op.candidate_plan_sha256:
             raise Conflict("fixture candidate changed or unavailable")
@@ -287,7 +303,7 @@ class Store:
                 or candidate.model_copy(update={"reels":baseline.reels}) != baseline):
             raise Conflict("fixture candidate outside initial manifest")
         candidate.reels[0].check_segments()
-        payload = op.model_dump_json()
+        payload = op.model_dump_json(exclude_none=True)
         with self._tx():
             prior = self.conn.execute("SELECT project_id,revision,op_payload FROM editor_revisions_v1 WHERE op_id=?",
                                       (op.op_id,)).fetchone()

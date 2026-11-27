@@ -462,8 +462,8 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
 
 
 def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
-    import autoreels.orchestrator.settings as settings
-    from autoreels.orchestrator.settings import Settings
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
     settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
     view=client.get("/api/synthetic-cut").json()
     natural=next(p for p in view["plans"] if p["removed"]==[2] and p["order"]==[1,3])
