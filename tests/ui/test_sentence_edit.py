@@ -75,14 +75,14 @@ def test_does_not_claim_cut_when_removed_sound_is_still_played():
         edit.remove_sentences(base, selected=(2,), **args)
 
 
-def reorder_fixture(play=(1, 2, 3)):
+def reorder_fixture(play=(1, 2, 3), params=None):
     words = [Word(word=text, t0=float(i), t1=i + 0.9)
              for i, text in enumerate(("Начало.", "Середина.", "Конец."))]
     args = dict(sentences=[[w] for w in words], words=words,
                 smap={"words": [{"idx": i, "t0": w.t0, "t1": w.t1,
                                  "audible_start": i + 0.2, "audible_end": i + 0.8}
                                 for i, w in enumerate(words)], "boundaries": []},
-                params=ManualPlanParams(), source_duration=3.0)
+                params=params or ManualPlanParams(), source_duration=3.0)
     plan = build_manual_plan(**args, play=play)
     assert not plan.errors
     reel = Reel(id="r01", start=plan.start, end=plan.end, score=80, hook="",
@@ -131,3 +131,44 @@ def test_stale_or_ambiguous_evidence_is_rejected():
     args["smap"]["words"].pop()
     with pytest.raises(edit.Unavailable):
         edit.reorder_sentences(base, play=(1, 2, 3), order=(3, 1, 2), **args)
+
+
+@pytest.mark.parametrize("play", [(1,3), (3,1)])
+def test_trim_silence_preserves_cut_and_play_order(play):
+    # The default planner leaves only 40 ms at internal seams, already
+    # below the demo's 50 ms trim guard. Use an explicit wider-air fixture.
+    base,args=reorder_fixture(play, ManualPlanParams(seam_pad_sec=0.15))
+    before=base.model_dump_json()
+    old=base.effective_segments()[0]
+    a,b=play[0]-1+0.2,play[0]-1+0.8
+    start=max(old.start,a-0.075)
+    end=min(old.end,b+0.075)
+    assert start>old.start or end<old.end
+    trimmed=edit.trim_silence(base,play=play,segment_index=0,start=start,end=end,**args)
+    assert base.model_dump_json()==before
+    assert trimmed.reordered==base.reordered
+    assert trimmed.start==start and trimmed.end==base.end
+    assert trimmed.effective_segments()[1:]==base.effective_segments()[1:]
+    assert trimmed.playback_duration()==pytest.approx(
+        base.playback_duration()-(start-old.start)-(old.end-end))
+    assert [w.word for w in trimmed.subtitles]==[w.word for w in base.subtitles]
+    assert start<trimmed.subtitles[0].t0<=a and trimmed.subtitles[0].t1<=end
+    assert trimmed.subtitles[1:]==base.subtitles[1:]
+    trimmed.check_segments()
+    assert all(min(s.end,1.8)-max(s.start,1.2)<=1e-6
+               for s in trimmed.effective_segments())
+
+
+def test_trim_silence_refuses_speech_expansion_stale_and_invalid_bounds():
+    play=(1,3)
+    base,args=reorder_fixture(play)
+    old=base.effective_segments()[0]
+    for index,start,end in [(0,0.18,old.end),(0,old.start,0.81),
+                            (0,old.start-0.01,old.end),(0,old.start,old.end),
+                            (0,float("nan"),old.end),(True,0.1,old.end),
+                            (99,0.1,old.end)]:
+        with pytest.raises(edit.Unavailable):
+            edit.trim_silence(base,play=play,segment_index=index,start=start,end=end,**args)
+    with pytest.raises(edit.Unavailable):
+        edit.trim_silence(base.model_copy(update={"end":base.end+0.01}),
+                          play=play,segment_index=0,start=0.1,end=old.end,**args)
