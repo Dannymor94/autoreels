@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 export type Route =
   | { name: "sources" }
   | { name: "export" }
+  | { name: "jobs" }
   | { name: "overview"; stem: string }
   | { name: "review"; stem: string; clip: string; variant: string };
 
@@ -16,6 +17,7 @@ export function parseRoute(hash: string): Route {
   const [path, query = ""] = hash.replace(/^#/, "").split("?");
   const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
   if (parts.length === 1 && parts[0] === "export") return { name: "export" };
+  if (parts.length === 1 && parts[0] === "jobs") return { name: "jobs" };
   if (parts[0] === "s" && parts[1]) {
     if (parts[2]) {
       const v = new URLSearchParams(query).get("v") ?? "";
@@ -29,6 +31,7 @@ export function parseRoute(hash: string): Route {
 export function formatRoute(r: Route): string {
   if (r.name === "sources") return "#/";
   if (r.name === "export") return "#/export";
+  if (r.name === "jobs") return "#/jobs";
   const base = `#/s/${encodeURIComponent(r.stem)}`;
   if (r.name === "overview") return base;
   const q = r.variant ? `?v=${encodeURIComponent(r.variant)}` : "";

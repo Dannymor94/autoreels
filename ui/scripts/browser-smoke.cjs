@@ -21,10 +21,22 @@ async function layout(page, label) {
 async function mock(page, mode = "normal") {
   const reviews = new Map();
   const comparisons = new Map();
+  const jobs = new Map();
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if (path === "/api/jobs") return route.fulfill({json:{enabled:true,jobs:[...jobs.values()]}});
+    if (path.startsWith("/api/jobs/") && method === "PUT") {
+      const job_id=path.split("/").pop(), input=route.request().postDataJSON();
+      if(input.action==="create") {
+        assert.equal(input.target_kind,"mobile");
+        if(!jobs.has(job_id)) jobs.set(job_id,{job_id,target_kind:input.target_kind,outcome:input.outcome,status:"queued",stage:"queued",progress:0,revision:0});
+      } else {
+        const job=jobs.get(job_id); Object.assign(job,{status:"cancelled",stage:"cancelled",revision:job.revision+1});
+      }
+      return route.fulfill({json:jobs.get(job_id)});
+    }
     if (path.startsWith("/api/comparisons/")) {
       const pair = [url.searchParams.get("left"), url.searchParams.get("right")].sort();
       const left_variant = pair[0], right_variant = pair[1];
@@ -99,9 +111,19 @@ async function main() {
         await mock(page);
         await page.goto(base + "/#/");
         await page.locator(".source-row").first().waitFor();
-        assert.equal(await page.getByRole("button", {name: /Задания/}).isDisabled(), true);
+        assert.equal(await page.getByRole("button", {name: /Задания/}).isDisabled(), false);
         assert.equal(await page.getByRole("button", {name: /Экспорт/}).isDisabled(), false);
         if (width === 390) {
+          await page.getByRole("button",{name:"Задания",exact:true}).click();
+          await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
+          await page.getByRole("button",{name:"Создать тестовое задание",exact:true}).click();
+          await page.getByText("Телефон · В очереди",{exact:true}).waitFor();
+          await page.getByRole("button",{name:"Отменить задание",exact:true}).click();
+          await page.getByText("Телефон · Отменено",{exact:true}).waitFor();
+          await page.reload();
+          await page.getByText("Телефон · Отменено",{exact:true}).waitFor();
+          await layout(page,"390 jobs");
+          console.log("PASS synthetic job creation, cancellation and reload");
           await page.getByRole("button",{name:/Экспорт/}).click();
           await page.getByRole("radio",{name:/На телефоне/}).waitFor();
           assert.equal(await page.getByRole("radio",{name:/Мой компьютер/}).isChecked(),false);

@@ -1,6 +1,9 @@
 import type { components } from "./types.gen";
 
 export type HealthResponse = components["schemas"]["HealthResponse"];
+export type JobInventory = components["schemas"]["JobInventory"];
+export type SyntheticJob = components["schemas"]["SyntheticJob"];
+export type JobCommand = components["schemas"]["JobCommand"];
 export type RenderInventory = components["schemas"]["RenderInventory"];
 export type PipelineSettings = components["schemas"]["PipelineSettings"];
 export type RenderProfile = NonNullable<PipelineSettings["draft_profile"]>;
@@ -41,6 +44,8 @@ export const api = {
   saveComparison: (stem: string, clip: string, left: string, right: string, body: ComparisonInput) =>
     put<ComparisonState>(comparisonUrl(stem, clip, left, right), body),
   health: () => get<HealthResponse>("/api/health"),
+  jobs: () => get<JobInventory>("/api/jobs", true),
+  jobCommand: (id: string, command: JobCommand) => put<SyntheticJob>("/api/jobs/" + encodeURIComponent(id), command),
   renderTargets: () => get<RenderInventory>("/api/render-targets", true),
   pipelineSettings: (clips?: number, profile?: RenderProfile) => {
     const q = new URLSearchParams();

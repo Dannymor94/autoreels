@@ -11,7 +11,7 @@ export function Navigation({ route }: { route: Route }) {
         onClick={() => { if (route.name === "review") navigate(route); }}>Редактор
         {!reviewing && <small>Выберите клип</small>}
       </button>
-      <button type="button" disabled title="Будет доступно после подключения заданий">Задания<small>Позже</small></button>
+      <button type="button" aria-current={route.name === "jobs" ? "page" : undefined} onClick={() => navigate({ name: "jobs" })}>Задания</button>
       <button type="button" aria-current={route.name === "export" ? "page" : undefined}
         onClick={() => navigate({ name: "export" })}>Экспорт<small>Подготовка</small></button>
     </nav>

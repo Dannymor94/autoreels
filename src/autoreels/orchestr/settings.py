@@ -11,6 +11,7 @@ class Settings(BaseModel):
     root: Path
     port: int = 8765
     no_browser: bool = False
+    synthetic_jobs: bool = False
     private_origin: str | None = None
     owner_digest: SecretStr | None = None
 
@@ -38,6 +39,7 @@ class Settings(BaseModel):
         no_browser: bool = False,
         private_origin: str | None = None,
         owner_digest_file: str | None = None,
+        synthetic_jobs: bool = False,
     ) -> "Settings":
         root = root_override or os.environ.get("AUTOREELS_ROOT", "~/Documents/autoreels")
         digest = None
@@ -50,7 +52,7 @@ class Settings(BaseModel):
                 raise ValueError("owner digest file must not be accessible to group or others")
             digest = SecretStr(path.read_text(encoding="ascii").strip())
         return cls(root=Path(root).expanduser().resolve(), port=port, no_browser=no_browser,
-                   private_origin=private_origin, owner_digest=digest)
+                   private_origin=private_origin, owner_digest=digest, synthetic_jobs=synthetic_jobs)
 
 
 settings = Settings.from_env()

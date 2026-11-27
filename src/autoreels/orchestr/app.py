@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, pipeline_gateway, pipeline_settings, render_targets, reviews, sourcemeta
+from . import catalog, clipinfo, manifests, pipeline_gateway, pipeline_settings, queue, render_targets, reviews, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -163,6 +163,18 @@ def health():
 @app.get("/api/capabilities", response_model=CapabilitiesResponse)
 def capabilities():
     return pipeline_gateway.capabilities()
+
+
+@app.get("/api/jobs", response_model=queue.JobInventory)
+def jobs():
+    s = _cfg.settings
+    return queue.inventory(s.root, s.synthetic_jobs)
+
+
+@app.put("/api/jobs/{job_id}", response_model=queue.SyntheticJob)
+def job_command(job_id: str, body: queue.JobCommand):
+    s = _cfg.settings
+    return queue.command(s.root, s.synthetic_jobs, job_id, body)
 
 
 @app.get("/api/pipeline-settings", response_model=pipeline_settings.PipelineSettings)

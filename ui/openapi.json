@@ -331,6 +331,79 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "JobCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "cancel"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "enum": [
+                  "success",
+                  "empty",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "target_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "desktop",
+                  "remote",
+                  "mobile"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Kind"
+          }
+        },
+        "required": [
+          "action",
+          "target_kind",
+          "outcome"
+        ],
+        "title": "JobCommand",
+        "type": "object"
+      },
+      "JobInventory": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/SyntheticJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "jobs"
+        ],
+        "title": "JobInventory",
+        "type": "object"
+      },
       "LegacyReview": {
         "properties": {
           "comment": {
@@ -982,6 +1055,75 @@
         "title": "SourceMetaOut",
         "type": "object"
       },
+      "SyntheticJob": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "empty",
+              "failed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "stage": {
+            "enum": [
+              "queued",
+              "prepare",
+              "plan",
+              "simulate_render",
+              "done",
+              "cancelled"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "success",
+              "empty",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "desktop",
+              "remote",
+              "mobile"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "target_kind",
+          "outcome",
+          "status",
+          "stage",
+          "progress",
+          "revision"
+        ],
+        "title": "SyntheticJob",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1197,6 +1339,73 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "operationId": "jobs_api_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobInventory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Jobs"
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "put": {
+        "operationId": "job_command_api_jobs__job_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyntheticJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Command"
       }
     },
     "/api/media/{stem}/{clip}": {
