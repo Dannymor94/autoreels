@@ -233,3 +233,62 @@ def test_pipeline_settings_fail_closed_when_missing_invalid_or_symlink(client, t
     (config / "r0.yaml").unlink()
     (config / "r0.yaml").symlink_to(tmp_root / "missing-secret")
     assert client.get("/api/pipeline-settings").json()["analysis_status"] == "blocked"
+
+
+
+def test_module_settings_preview_is_read_only(client, tmp_root, monkeypatch):
+    import shutil
+    import yaml
+    from autoreels.core.config import load_r0_config, load_render_config
+
+    config = tmp_root / "config"
+    config.mkdir()
+    repo = Path(__file__).resolve().parents[2] / "config"
+    for name in ("r0.yaml", "render.yaml"):
+        shutil.copyfile(repo / name, config / name)
+    (config / "render.local.yaml").write_text(yaml.safe_dump({
+        "ffmpeg": "/private/sentinel", "music": {"enabled": False},
+    }))
+    before = {p.name: p.read_bytes() for p in config.iterdir()}
+    monkeypatch.setenv("GROQ_API_KEY", "secret-sentinel-key")
+    response = client.get("/api/module-settings")
+    assert response.status_code == 200
+    base = response.json()
+    assert base["schema_version"] == 1 and base["status"] == "configured"
+    assert not base["apply_enabled"] and base["invalidates"] == []
+    rows = {r["module"]: r for r in base["modules"]}
+    assert len(rows) == 6 and all(not r["available"] for r in rows.values())
+    r0 = load_r0_config(config / "r0.yaml")
+    render = load_render_config(config / "render.yaml")
+    assert rows["hook_rescue"]["configured"] == r0.autocut.hook_clauses_autocut
+    assert rows["filler_cut"]["configured"] == r0.montage.filler_cut
+    assert rows["music"]["configured"] == render.music.enabled is False
+    assert "sentinel" not in response.text
+    result = client.get("/api/module-settings", params={
+        "hook_rescue": "off" if rows["hook_rescue"]["configured"] else "on",
+        "filler_cut": "off" if rows["filler_cut"]["configured"] else "on",
+        "music": "on",
+    }).json()
+    assert result["invalidates"] == ["proposals", "plan", "render"]
+    assert result["base_sha256"] == base["base_sha256"]
+    assert not result["apply_enabled"]
+    changed = {r["module"]: r for r in result["modules"]}
+    assert changed["music"]["proposed"] is True
+    assert changed["music"]["configured"] is False
+    assert client.get("/api/module-settings").json() == base
+    assert client.get("/api/module-settings?music=true").status_code == 422
+    assert client.put("/api/module-settings", json={"music":"on"}).status_code == 405
+    assert {p.name: p.read_bytes() for p in config.iterdir()} == before
+
+
+def test_module_settings_fail_closed(client, tmp_root):
+    empty = client.get("/api/module-settings?music=on").json()
+    assert empty == {"schema_version":1,"status":"missing","modules":[],
+                     "invalidates":[],"base_sha256":None,"apply_enabled":False}
+    config = tmp_root / "config"
+    config.mkdir()
+    (config / "r0.yaml").write_text("bad: config")
+    (config / "render.yaml").write_text("bad: config")
+    assert client.get("/api/module-settings").json()["status"] == "invalid"
+    (config / "render.local.yaml").symlink_to(tmp_root / "missing-secret")
+    assert client.get("/api/module-settings").json()["status"] == "blocked"

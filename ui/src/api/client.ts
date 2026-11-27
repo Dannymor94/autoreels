@@ -6,6 +6,9 @@ export type SyntheticJob = components["schemas"]["SyntheticJob"];
 export type JobCommand = components["schemas"]["JobCommand"];
 export type RenderInventory = components["schemas"]["RenderInventory"];
 export type PipelineSettings = components["schemas"]["PipelineSettings"];
+export type ModuleSettingsView = components["schemas"]["ModuleSettingsView"];
+export type ModuleOption = components["schemas"]["ModuleOption"];
+export type ModuleDraft = Partial<Record<ModuleOption["module"], "on" | "off">>;
 export type RenderProfile = NonNullable<PipelineSettings["draft_profile"]>;
 export type RenderMode = components["schemas"]["RenderMode"];
 export type SourceItem = components["schemas"]["SourceItem"];
@@ -47,6 +50,11 @@ export const api = {
   jobs: () => get<JobInventory>("/api/jobs", true),
   jobCommand: (id: string, command: JobCommand) => put<SyntheticJob>("/api/jobs/" + encodeURIComponent(id), command),
   renderTargets: () => get<RenderInventory>("/api/render-targets", true),
+  moduleSettings: (draft: ModuleDraft = {}) => {
+    const q = new URLSearchParams();
+    for (const [key, value] of Object.entries(draft)) if (value !== undefined) q.set(key, value);
+    return get<ModuleSettingsView>("/api/module-settings" + (q.size ? "?" + q : ""), true);
+  },
   pipelineSettings: (clips?: number, profile?: RenderProfile) => {
     const q = new URLSearchParams();
     if (clips !== undefined) q.set("clips", String(clips));

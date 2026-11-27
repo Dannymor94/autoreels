@@ -107,6 +107,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/module-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Configured Modules */
+        get: operations["configured_modules_api_module_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline-settings": {
         parameters: {
             query?: never;
@@ -387,6 +404,43 @@ export interface components {
             gate: string;
             /** Verdict */
             verdict: string;
+        };
+        /** ModuleOption */
+        ModuleOption: {
+            /** Available */
+            available: boolean;
+            /** Configured */
+            configured: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "automation" | "output";
+            /**
+             * Module
+             * @enum {string}
+             */
+            module: "hook_rescue" | "filler_cut" | "two_shot" | "loudnorm" | "denoise" | "music";
+            /** Proposed */
+            proposed: boolean;
+        };
+        /** ModuleSettingsView */
+        ModuleSettingsView: {
+            /** Apply Enabled */
+            apply_enabled: boolean;
+            /** Base Sha256 */
+            base_sha256: string | null;
+            /** Invalidates */
+            invalidates: ("proposals" | "plan" | "render")[];
+            /** Modules */
+            modules: components["schemas"]["ModuleOption"][];
+            /** Schema Version */
+            schema_version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "configured" | "missing" | "invalid" | "blocked";
         };
         /** PipelineSettings */
         PipelineSettings: {
@@ -820,6 +874,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configured_modules_api_module_settings_get: {
+        parameters: {
+            query?: {
+                hook_rescue?: ("on" | "off") | null;
+                filler_cut?: ("on" | "off") | null;
+                two_shot?: ("on" | "off") | null;
+                loudnorm?: ("on" | "off") | null;
+                denoise?: ("on" | "off") | null;
+                music?: ("on" | "off") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModuleSettingsView"];
                 };
             };
             /** @description Validation Error */
