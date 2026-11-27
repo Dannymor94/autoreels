@@ -56,6 +56,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Jobs */
+        get: operations["jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Job Command */
+        put: operations["job_command_api_jobs__job_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -324,6 +358,25 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** JobCommand */
+        JobCommand: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "cancel";
+            /** Outcome */
+            outcome: ("success" | "empty" | "failed") | null;
+            /** Target Kind */
+            target_kind: ("desktop" | "remote" | "mobile") | null;
+        };
+        /** JobInventory */
+        JobInventory: {
+            /** Enabled */
+            enabled: boolean;
+            /** Jobs */
+            jobs: components["schemas"]["SyntheticJob"][];
+        };
         /** LegacyReview */
         LegacyReview: {
             /** Comment */
@@ -529,6 +582,35 @@ export interface components {
             /** Stem */
             stem: string;
         };
+        /** SyntheticJob */
+        SyntheticJob: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "success" | "empty" | "failed";
+            /** Progress */
+            progress: number;
+            /** Revision */
+            revision: number;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "queued" | "prepare" | "plan" | "simulate_render" | "done" | "cancelled";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "success" | "empty" | "failed" | "cancelled";
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "desktop" | "remote" | "mobile";
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -657,6 +739,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    jobs_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobInventory"];
+                };
+            };
+        };
+    };
+    job_command_api_jobs__job_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyntheticJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

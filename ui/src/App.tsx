@@ -6,6 +6,7 @@ import { Sources } from "./screens/Sources";
 import { Overview } from "./screens/Overview";
 import { Source } from "./screens/Source";
 import { ExportSetup } from "./screens/ExportSetup";
+import { Jobs } from "./screens/Jobs";
 import { persist } from "./lib/persist";
 import { formatRoute, navigate, useRoute } from "./lib/route";
 import "./theme.css";
@@ -28,6 +29,7 @@ function Router() {
       <Navigation route={route} />
       <div className="app-content">
       {route.name === "export" && <ExportSetup />}
+      {route.name === "jobs" && <Jobs />}
       {route.name === "sources" && <Sources onSelect={(stem) => navigate({ name: "overview", stem })} />}
       {route.name === "overview" && (
         <Overview

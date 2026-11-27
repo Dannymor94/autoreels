@@ -134,3 +134,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .pipeline-settings label { display: grid; gap: 4px; font-size: 14px; }
 .pipeline-settings input, .pipeline-settings select, .pipeline-settings button { min-height: 44px; min-width: 0; max-width: 100%; font: inherit; color: var(--fg); background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
 .pipeline-settings button:disabled { opacity: .6; }
+
+.jobs-screen { display: grid; gap: 12px; max-width: 720px; }
+.job-row progress { width: 100%; accent-color: var(--accent); }
