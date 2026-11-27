@@ -444,7 +444,7 @@ export interface components {
             /** Crop */
             crop?: number[] | null;
             /** Navigation */
-            navigation?: "undo" | "redo" | null;
+            navigation?: ("undo" | "redo") | null;
             /** Op Id */
             op_id: string;
             /** Order */
@@ -503,7 +503,7 @@ export interface components {
             /** Crop */
             crop?: number[] | null;
             /** Navigation */
-            navigation?: "undo" | "redo" | null;
+            navigation?: ("undo" | "redo") | null;
             /** Order */
             order?: number[] | null;
             /** Rates */
