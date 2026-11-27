@@ -455,7 +455,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     assert response.status_code==200,response.text
     cut=response.json()
     assert cut["revision"]==1 and cut["current_removed"]==[2]
-    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
+    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"graphic":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
     assert client.get("/api/synthetic-cut").json()==cut
     assert client.get("/api/synthetic-editor").json()==spelling
     assert client.put("/api/synthetic-cut",json=body).json()==cut
@@ -473,7 +473,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     restored=result.json()
     assert restored["revision"]==2 and restored["current_removed"]==[]
     assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
-    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":restored["plan_sha256"]},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
+    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"graphic":None,"navigation":None,"candidate_plan_sha256":restored["plan_sha256"]},{"revision":1,"removed":[2],"order":None,"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":candidate["plan_sha256"]}]
     assert client.put("/api/synthetic-cut",json=body).json()==restored
     assert client.get("/api/synthetic-cut").json()==restored
     assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"
@@ -503,7 +503,7 @@ def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
     moved=response.json()
     assert moved["revision"]==2 and moved["current_removed"]==[2]
     assert moved["plan_sha256"]==reordered["plan_sha256"]
-    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"navigation":None,"candidate_plan_sha256":moved["plan_sha256"]}
+    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None,"rates":None,"crop":None,"music":None,"dip_ms":None,"graphic":None,"navigation":None,"candidate_plan_sha256":moved["plan_sha256"]}
     assert reordered["windows"][0]["source_start"]>reordered["windows"][-1]["source_start"]
     assert client.get("/api/synthetic-cut").json()==moved
     assert client.put("/api/synthetic-cut",json=op).json()==moved
