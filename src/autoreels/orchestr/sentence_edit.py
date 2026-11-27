@@ -225,3 +225,81 @@ def reorder_sentences(
     })
     reel.check_segments()
     return Reel.model_validate_json(reel.model_dump_json())
+
+
+# Fixed synthetic slice: leave a conservative 50 ms source-time margin
+# around speech when moving a boundary inward. A later renderer-specific
+# contract can derive a margin from its actual frame/sample grid.
+_TRIM_SPEECH_MARGIN = 0.05
+
+
+def trim_silence(
+    base: Reel,
+    *,
+    sentences: Sequence[Sequence[Word]],
+    words: Sequence[Word],
+    smap: dict,
+    play: tuple[int, ...],
+    segment_index: int,
+    start: float,
+    end: float,
+    params: ManualPlanParams,
+    source_duration: float,
+) -> Reel:
+    """Preview one inward trim of an exactly reproducible simple body.
+
+    Index is in playback order, times are source seconds. No speech deletion,
+    extrapolation, persistence, arbitrary effect edits or second planner.
+    The caller binds the exact source, transcript and speech map.
+    """
+    # Reuse the existing planner's exact baseline and audible coverage
+    # verification, including nonchronological bodies and previous cuts.
+    reorder_sentences(base, sentences=sentences, words=words, smap=smap,
+                      play=play, order=play, params=params,
+                      source_duration=source_duration)
+    segments = base.effective_segments()
+    if type(segment_index) is not int or not 0 <= segment_index < len(segments):
+        raise Unavailable("invalid segment index")
+    if (type(start) not in (int, float) or type(end) not in (int, float)
+            or not math.isfinite(start) or not math.isfinite(end)):
+        raise Unavailable("invalid trim bounds")
+    old = segments[segment_index]
+    if not old.start <= start < end <= old.end or (start == old.start and end == old.end):
+        raise Unavailable("trim must shorten one existing window")
+    if old.close_intervals or old.window_cut or old.prerolled:
+        raise Unavailable("complex window requires the full manual-edit contract")
+    evidence = _speech_evidence(sentences, words, smap, source_duration)
+    retained = []
+    for a, b in evidence.values():
+        if min(old.end, b) - max(old.start, a) <= 1e-6:
+            continue
+        if not old.start <= a < b <= old.end:
+            raise Unavailable("speech spans a window boundary")
+        retained.append((a, b))
+        if (start > old.start and start > a - _TRIM_SPEECH_MARGIN + 1e-6
+                or end < old.end and end < b + _TRIM_SPEECH_MARGIN - 1e-6):
+            raise Unavailable("trim would enter speech guard")
+    if not retained:
+        raise Unavailable("window has no verified speech")
+
+    # The planner stores subtitle timestamps in source time; preserve all
+    # tokens and their output order. Only cues in the shortened window can
+    # require clamping. Refuse ambiguous window ownership.
+    subtitles = []
+    for word in base.subtitles:
+        owners = [i for i, seg in enumerate(segments) if seg.start <= word.t0 < seg.end]
+        if len(owners) != 1:
+            raise Unavailable("ambiguous subtitle window")
+        if owners[0] == segment_index:
+            margin = min(_TRIM_SPEECH_MARGIN, (end - start) / 2)
+            t0 = min(max(word.t0, start + margin), end - margin)
+            t1 = min(max(word.t1, t0), end)
+            word = word.model_copy(update={"t0": t0, "t1": t1})
+        subtitles.append(word)
+    segments[segment_index] = old.model_copy(update={"start": start, "end": end})
+    reel = base.model_copy(update={
+        "start": segments[0].start, "end": segments[-1].end,
+        "segments": segments, "subtitles": subtitles,
+    })
+    reel.check_segments()
+    return Reel.model_validate_json(reel.model_dump_json())
