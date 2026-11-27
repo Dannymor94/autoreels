@@ -124,3 +124,47 @@ def test_manifest_json_round_trip():
     )
     restored = Manifest.model_validate_json(m.model_dump_json())
     assert restored == m
+
+
+def test_variable_speed_timing_and_subtitle_occurrences():
+    import pytest
+    from autoreels.core.models import Segment
+    from autoreels.core.playback_timing import build_window_timing
+    from autoreels.local.subtitles import remap_to_output
+
+    windows=[Segment(start=4,end=6),Segment(start=0,end=2),Segment(start=4,end=6)]
+    words=[Word(word="A",t0=0.5,t1=1.0),Word(word="gap",t0=3,t1=3.5),
+           Word(word="B",t0=4.5,t1=5.0)]
+    rates=(0.5,2.0,1.0)
+    timing=build_window_timing(windows,rates)
+    assert [(w.output_start,w.output_end) for w in timing]==[(0,4),(4,5),(5,7)]
+    mapped=remap_to_output(words,windows,window_rates=rates)
+    assert [(w.word,w.t0,w.t1) for w in mapped]==[("B",1,2),("A",4.25,4.5),("B",5.5,6)]
+    for window in timing:
+        middle=(window.source_start+window.source_end)/2
+        assert window.to_source(window.to_output(middle))==pytest.approx(middle)
+        assert window.to_source(window.output_end)==window.source_end
+    assert remap_to_output(words,windows,speed=2)==remap_to_output(words,windows,window_rates=(2,2,2))
+    assert [(w.word,w.t0,w.t1) for w in words]==[("A",0.5,1.0),("gap",3,3.5),("B",4.5,5.0)]
+
+
+def test_variable_speed_rejects_ambiguous_or_unsupported_timing():
+    import pytest
+    from autoreels.core.models import Segment
+    from autoreels.core.playback_timing import build_window_timing
+    from autoreels.local.subtitles import remap_to_output
+
+    windows=[Segment(start=0,end=1),Segment(start=3,end=4)]
+    for rates in ((),(1,), (1,1,1),(True,1),(0,1),(0.49,1),(2.01,1),(float("nan"),1)):
+        with pytest.raises(ValueError):
+            build_window_timing(windows,rates)
+    with pytest.raises(ValueError):
+        build_window_timing([Segment(start=1,end=1)],(1,))
+    with pytest.raises(ValueError):
+        build_window_timing([],())
+    with pytest.raises(ValueError):
+        remap_to_output([],windows,speed=1.5,window_rates=(1,2))
+    with pytest.raises(ValueError):
+        remap_to_output([],windows,xfade_sec=0.1,window_rates=(1,2))
+    with pytest.raises(ValueError):
+        remap_to_output([Word(word="cross",t0=0.9,t1=1.1)],windows,window_rates=(1,2))

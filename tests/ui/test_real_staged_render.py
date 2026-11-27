@@ -300,3 +300,57 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder,
     print(f"UI-402D/402C/303E PASS: reorder={reorder}, trim={trim}; cut fixture duration={observed['duration']:.3f}s; "
           f"removed/kept tone energy={observed['removed_ratio']:.8f}; "
           "kept tones in order; A/V decode and ledger success")
+
+
+def test_variable_speed_ffmpeg_hard_cut_primitive(tmp_path):
+    """Actual FFmpeg experiment, not yet a production-renderer integration."""
+    import numpy as np
+    from autoreels.core.models import Segment
+    from autoreels.core.playback_timing import build_window_timing
+    from autoreels.local.subtitles import remap_to_output
+
+    windows=[Segment(start=2,end=4),Segment(start=0,end=2)]
+    rates=(0.5,2.0)
+    timing=build_window_timing(windows,rates)
+    words=[Word(word="A",t0=0.5,t1=1),Word(word="B",t0=2.5,t1=3)]
+    cues=remap_to_output(words,windows,window_rates=rates)
+    assert [(w.word,w.t0,w.t1) for w in cues]==[("B",1,2),("A",4.25,4.5)]
+    out=tmp_path/"variable-speed.mp4"
+    filters=["[0:v]split=2[v0][v1]",
+             "[1:a][2:a]concat=n=2:v=0:a=1[a]",
+             "[a]asplit=2[a0][a1]"]
+    for w in timing:
+        i=w.index
+        duration=w.output_end-w.output_start
+        filters.extend([
+            f"[v{i}]trim=start={w.source_start}:end={w.source_end},setpts=(PTS-STARTPTS)/{w.rate},"
+            f"fps=30,tpad=stop_mode=clone:stop_duration=0.1,trim=duration={duration},setpts=PTS-STARTPTS[vo{i}]",
+            f"[a{i}]atrim=start={w.source_start}:end={w.source_end},asetpts=PTS-STARTPTS,"
+            f"atempo={w.rate},apad=pad_dur=0.1,atrim=duration={duration},asetpts=PTS-STARTPTS[ao{i}]",
+        ])
+    filters.append("[vo0][ao0][vo1][ao1]concat=n=2:v=1:a=1[vout][aout]")
+    run("-hide_banner","-loglevel","error","-nostdin",
+        "-f","lavfi","-i","testsrc2=size=160x96:rate=30:duration=4",
+        "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=2",
+        "-f","lavfi","-i","sine=frequency=880:sample_rate=48000:duration=2",
+        "-filter_complex",";".join(filters),"-map","[vout]","-map","[aout]",
+        "-c:v","libx264","-threads","2","-pix_fmt","yuv420p","-c:a","aac",out)
+    info=json.loads(run("-v","error","-show_streams","-of","json",out,binary="ffprobe"))
+    v=next(s for s in info["streams"] if s["codec_type"]=="video")
+    a=next(s for s in info["streams"] if s["codec_type"]=="audio")
+    vd,ad=float(v["duration"]),float(a["duration"])
+    assert abs(vd-timing[-1].output_end)<=0.08
+    assert abs(ad-vd)<=0.05
+    run("-v","error","-xerror","-nostdin","-i",out,"-f","null","-")
+    pcm=np.frombuffer(run("-v","error","-nostdin","-i",out,"-map","0:a:0",
+                          "-ac","1","-ar","48000","-f","s16le","-"),dtype="<i2").astype(np.float64)
+    def energy(at,hz):
+        n=4800
+        data=pcm[round(at*48000):round(at*48000)+n]
+        assert len(data)==n
+        fft=np.abs(np.fft.rfft(data*np.hanning(n)))**2
+        k=round(hz*n/48000)
+        return float(fft[k-1:k+2].sum())
+    for at,hz,other in [(0.5,880,440),(3.5,880,440),(4.5,440,880)]:
+        assert energy(at,hz)>100*max(energy(at,other),1)
+    print(f"UI-403A PASS: independent 0.5x/2x hard-cut primitive, video={vd:.3f}s audio={ad:.3f}s; pitch/order preserved")
