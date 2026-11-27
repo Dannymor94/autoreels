@@ -4342,6 +4342,8 @@ def _reel_render_fingerprint(reel, *, setup, palette, profile, zoom_on, music_pa
                             for w in reel.playback_windows()]
     if getattr(reel, "window_rates", None) is not None:
         payload["window_rates"] = reel.window_rates
+    if getattr(reel, "seam_dip_ms", None) is not None:
+        payload["seam_dip_ms"] = reel.seam_dip_ms
     if getattr(reel, "background_track", None) is not None:
         # Explicit edit is authoritative, not the legacy global music selection.
         payload["music"] = None

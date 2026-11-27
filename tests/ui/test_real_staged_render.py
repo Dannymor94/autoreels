@@ -405,7 +405,8 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
 
 
-def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch):
+@pytest.mark.parametrize("dip", [None, 200])
+def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch, dip):
     import numpy as np
     from autoreels.core.models import AudioAsset, BackgroundTrack, Segment
     from autoreels.core.config import load_render_config
@@ -436,7 +437,7 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch):
     track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
     reel=Reel(id="r01",start=0,end=5,score=80,hook="",title="",description="",
               planned=True,segments=[Segment(start=0,end=2),Segment(start=3,end=5)],
-              window_rates=[0.5,2.0],background_track=track)
+              window_rates=[0.5,2.0],background_track=track,seam_dip_ms=dip)
     manifest=Manifest(source=source.name,source_sha256=sha(source),duration_preset="shorts",run_key="music-fixture",
         setup=SetupProfile(setup_id="synthetic",crop=Crop(x=0,y=0,w=96,h=160),
                            frame=[96,160],scale=[360,640]),reels=[reel])
@@ -459,6 +460,14 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch):
             voice=spec[43:46].sum()
             music=spec[87:90].sum()
             assert 0.01 < music/voice < 0.2,(t,voice,music)
+        if dip:
+            def brightness(t):
+                frame=run("-v","error","-ss",str(t),"-i",output,"-frames:v","1",
+                          "-vf","format=gray","-threads","1","-f","rawvideo","-")
+                assert len(frame)==360*640
+                return float(np.frombuffer(frame,dtype=np.uint8).mean())
+            assert brightness(3.5)>35 and brightness(4.5)>35
+            assert brightness(4.0)<25
         observed["sha"]=sha(output)
     with closing(sqlite3.connect(tmp_path/"music-jobs.sqlite")) as db:
         ledger=execution.Ledger(db)
@@ -478,4 +487,4 @@ def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch):
     path.symlink_to(replacement)
     with pytest.raises(ValueError):
         resolve_audio_asset(assets,asset)
-    print("UI-501/502 PASS: exact soundtrack asset, speech retained across 0.5x/2x, looped music, A/V sync, stale and symlink rejection")
+    print(f"UI-501/502/503A PASS: dip={dip}; exact soundtrack asset, retained tones, loop, A/V sync, stale and symlink rejection")

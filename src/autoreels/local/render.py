@@ -1238,6 +1238,7 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            cfr: "tuple[float, list[int]] | None" = None,
                            window_rates: list[float] | None = None,
                            rate_fps: float | None = None,
+                           seam_dip_ms: int | None = None,
                            ) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
@@ -1277,6 +1278,18 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
             frames = (w.output_end - w.output_start) * rate_fps
             if abs(frames - round(frames)) > 1e-5 or round(frames) < 1:
                 raise RenderError("variable speed requires whole output frames")
+    if seam_dip_ms is not None:
+        if (seam_dip_ms not in (100, 200, 300) or n < 2 or len(groups) != n
+                or video_xfade_sec or any(seam_xfades or [])
+                or any(seam_xfade_visual_durations or []) or any(segment_overlays or [])):
+            raise RenderError("seam dip requires independent hard cuts")
+        dip = seam_dip_ms / 1000
+        lengths = [w.output_end - w.output_start for w in timing] if timing is not None else [
+            s.end - s.start for s in segments]
+        if any(length <= 2 * dip for length in lengths):
+            raise RenderError("window too short for seam dip")
+    else:
+        dip, lengths = 0.0, []
     if len(groups) < n:
         return _concat_grouped_graph(segments, groups, f, pre_roll=pre_roll, segment_vfs=segment_vfs,
                                      segment_overlays=segment_overlays, seam_xfades=seam_xfades,
@@ -1310,6 +1323,13 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                 w = timing[i]
                 frames = round((w.output_end - w.output_start) * rate_fps)
                 vchain += f",setpts=PTS/{w.rate:.12g}" + _cfr_chain(rate_fps, frames)
+            if dip:
+                # Visual only, after any per-window rate change. No overlap,
+                # no audio retiming, no change to subtitle time mapping.
+                if i > 0:
+                    vchain += f",fade=t=in:st=0:d={_num(dip)}:color=black"
+                if i < n - 1:
+                    vchain += f",fade=t=out:st={_num(lengths[i]-dip)}:d={_num(dip)}:color=black"
             vchain += ",settb=expr=1/90000"
             parts.append(f"{vchain}[v{i}]")
         if f > 0:
@@ -2960,15 +2980,15 @@ def _render_segments(
                 bound_music[reel.id] = resolve_audio_asset(assets_dir, track.asset)
             except ValueError as exc:
                 raise RenderError(str(exc)) from exc
-    rated = [r for r in manifest.reels if r.window_rates is not None]
-    for reel in rated:
+    special = [r for r in manifest.reels if r.window_rates is not None or r.seam_dip_ms is not None]
+    for reel in special:
         try:
             reel.check_segments()
         except ValueError as exc:
             raise RenderError(str(exc)) from exc
-    if rated:
+    if special:
         ap = render_cfg.audio_processing
-        if ((legacy_music_path and any(r.background_track is None for r in rated))
+        if ((legacy_music_path and any(r.background_track is None for r in special))
                 or getattr(ap, "video_xfade_sec", 0)
                 or getattr(render_cfg, "two_shot_xfade", False)
                 or getattr(render_cfg, "same_shot_dissolve_frames", 0)
@@ -2979,7 +2999,7 @@ def _render_segments(
                 or getattr(render_cfg, "reel_framing", False)
                 or getattr(render_cfg, "close_from_face", False)
                 or (zoom_cfg is not None and zoom_cfg.enabled)):
-            raise RenderError("variable speed requires explicit hard-cut settings without automatic effects")
+            raise RenderError("variable speed or seam dip requires explicit hard-cut settings without automatic effects")
     source = resolve_source(manifest, inputs_dir).resolve()
 
     ffmpeg_bin = shutil.which(ffmpeg)
@@ -3748,7 +3768,8 @@ def _render_segments(
                                                              seam_xfade_visual_durations=_ts_seam_visual,
                                                              segment_overlays=_ts_seg_overlays,
                                                              cfr=_cfr, window_rates=rates,
-                                                             rate_fps=_fps() if rates is not None else None)
+                                                             rate_fps=_fps() if rates is not None else None,
+                                                             seam_dip_ms=reel.seam_dip_ms)
                 # One input per run of filler-cut pieces (REEL_SPEC §1.4), else one per window.
                 windows = [(segs[g[0]].start, segs[g[-1]].end - segs[g[0]].start)
                            for g in _input_groups(segs, _ts_seam_xfades, _xfade_actual)]
@@ -4279,7 +4300,7 @@ def render_preview(
         reel = next((r for r in manifest.reels if r.id == reel_id), None)
         if reel is None:
             raise RenderError(f"клип '{reel_id}' не найден в манифесте")
-    if reel.window_rates is not None or reel.background_track is not None:
+    if reel.window_rates is not None or reel.background_track is not None or reel.seam_dip_ms is not None:
         raise RenderError("palette preview does not support independent playback rates or soundtrack layers yet")
     short_end = min(reel.end, reel.start + seconds)
     zoom_cfg = render_cfg.zoom
