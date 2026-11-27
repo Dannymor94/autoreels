@@ -68,3 +68,6 @@ reviews/
 manifests/*.blocks.json
 # M207: задания и ответы чата-сценариста (текст источника — как transcripts/)
 exchange/
+
+# isolated synthetic editor state, never versioned
+.ui-synthetic-editor.sqlite3*

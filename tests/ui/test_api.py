@@ -334,3 +334,53 @@ def test_clip_plan_exact_revision_and_repeated_occurrences(client, tmp_root):
     path.symlink_to(tmp_root / "missing.json")
     assert client.get("/api/clip-plan/DEMO/r01").status_code == 404
     assert client.get("/api/clip-plan/DEMO/%2E%2E").status_code == 404
+
+
+def test_synthetic_editor_disabled_read_only_and_durable_history(client, tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    path = tmp_root / ".ui-synthetic-editor.sqlite3"
+    baseline = client.get("/api/synthetic-editor").json()
+    assert baseline["enabled"] is False
+    body = dict(action="edit", op_id="first", base_revision=0, base_plan_sha256="a"*64,
+                clip_uid="b"*64, word_index=0, expected_text="Превет", replacement="Привет")
+    assert client.put("/api/synthetic-editor", json=body).status_code == 409
+    assert not path.exists()
+    settings.settings = Settings.from_env(root_override=str(tmp_root), synthetic_editor=True)
+    initial = client.get("/api/synthetic-editor").json()
+    assert initial["enabled"] and initial["revision"] == 0
+    assert not path.exists()
+    body.update(base_plan_sha256=initial["plan_sha256"], clip_uid=initial["clip_uid"])
+    result = client.put("/api/synthetic-editor", json=body)
+    assert result.status_code == 200
+    changed = result.json()
+    assert changed["revision"] == 1 and changed["words"][0]["word"] == "Привет"
+    assert changed["words"][0]["start"] == initial["words"][0]["start"]
+    assert changed["words"][0]["end"] == initial["words"][0]["end"]
+    assert client.put("/api/synthetic-editor", json=body).json() == changed
+    assert client.get("/api/synthetic-editor").json() == changed
+    assert client.put("/api/synthetic-editor", json={**body,"op_id":"stale"}).status_code == 409
+    inverse = {**body,"action":"undo","op_id":"undo","base_revision":1,
+               "base_plan_sha256":changed["plan_sha256"],"expected_text":"Привет","replacement":"Превет"}
+    restored = client.put("/api/synthetic-editor", json=inverse).json()
+    assert restored["revision"] == 2 and restored["words"] == initial["words"]
+    assert restored["redo"] is not None and restored["undo"] is None
+    redo = {**body,"action":"redo","op_id":"redo","base_revision":2,
+            "base_plan_sha256":restored["plan_sha256"]}
+    redone = client.put("/api/synthetic-editor", json=redo).json()
+    assert redone["revision"] == 3 and redone["words"] == changed["words"]
+    assert len(redone["history"]) == 3 and redone["clip_uid"] == initial["clip_uid"]
+    assert client.get("/api/synthetic-editor").json() == redone
+    assert client.put("/api/synthetic-editor", json=body).json() == redone
+    assert path.is_file()
+
+
+def test_synthetic_editor_symlink_storage_blocked(client, tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings = Settings.from_env(root_override=str(tmp_root), synthetic_editor=True)
+    target = tmp_root.parent / "sentinel-editor"
+    target.write_bytes(b"untouched")
+    (tmp_root / ".ui-synthetic-editor.sqlite3").symlink_to(target)
+    assert client.get("/api/synthetic-editor").status_code == 409
+    assert target.read_bytes() == b"untouched"
