@@ -112,3 +112,63 @@ def test_staged_adapter_does_not_accept_missing_or_wrong_result(tmp_path):
 def test_legacy_render_archive_default_unchanged():
     import inspect
     assert inspect.signature(cli.cmd_render).parameters["archive_source"].default is True
+
+
+def test_staged_media_hashing_streams_source_and_result(tmp_path, monkeypatch):
+    source, plan = stage(tmp_path)
+    # The source spans more than two hashing chunks. Do not read any MP4
+    # into a single bytes object in the gateway.
+    source.write_bytes(b"0123456789" * 250_000)
+    expected_source = digest(source.read_bytes())
+    manifest = Manifest.model_validate_json(plan.read_bytes())
+    plan.write_text(manifest.model_copy(update={"source_sha256":expected_source}).model_dump_json())
+    plan_sha = digest(plan.read_bytes())
+    original = Path.read_bytes
+
+    def forbid_media_read(self):
+        if self.suffix == ".mp4":
+            pytest.fail("whole-file media read")
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_media_read)
+
+    def fake(**kwargs):
+        out = tmp_path / "reels-out/DEMO/_gate/ui-stream/r01.mp4"
+        out.parent.mkdir(parents=True)
+        out.write_bytes(b"out" * 800_000)
+        return [out]
+
+    out, sha = gateway.render_staged_clip(tmp_path, stem="DEMO", clip="r01",
+        gate="ui-stream", plan_sha256=plan_sha, run_render=fake)
+    assert sha == digest(b"out" * 800_000)
+    assert gateway._staged_file_identity(tmp_path, source)[0] == expected_source
+    assert out.stat().st_size == 2_400_000
+
+
+def test_staged_input_replacement_and_empty_artifact_rejected(tmp_path):
+    source, plan = stage(tmp_path)
+    plan_sha = digest(plan.read_bytes())
+
+    def replace_same_bytes(**kwargs):
+        data = source.read_bytes()
+        new = source.with_suffix(".tmp")
+        new.write_bytes(data)
+        new.replace(source)
+        out = tmp_path / "reels-out/DEMO/_gate/ui-replaced/r01.mp4"
+        out.parent.mkdir(parents=True)
+        out.write_bytes(b"out")
+        return [out]
+
+    with pytest.raises(RuntimeError, match="staged input changed"):
+        gateway.render_staged_clip(tmp_path, stem="DEMO", clip="r01",
+            gate="ui-replaced", plan_sha256=plan_sha, run_render=replace_same_bytes)
+
+    def empty(**kwargs):
+        out = tmp_path / "reels-out/DEMO/_gate/ui-empty/r01.mp4"
+        out.parent.mkdir(parents=True)
+        out.touch()
+        return [out]
+
+    with pytest.raises(RuntimeError, match="empty bytes"):
+        gateway.render_staged_clip(tmp_path, stem="DEMO", clip="r01",
+            gate="ui-empty", plan_sha256=plan_sha, run_render=empty)

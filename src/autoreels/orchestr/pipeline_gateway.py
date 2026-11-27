@@ -217,6 +217,47 @@ def module_settings(root, choices):
 
 
 
+def _staged_file_identity(root, path):
+    """Streaming full SHA-256 + stat identity; caller owns exclusive staging.
+
+    Detect ordinary mutation/replacement during the read. Not a sandbox
+    against a hostile local filesystem or a substitute for the process lock.
+    """
+    import hashlib
+    import os
+    import stat
+
+    from .pathguard import safe_path
+
+    def signature(st):
+        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+    if not safe_path(root, path) or not path.is_file():
+        raise ValueError("staged file unavailable")
+    try:
+        # Nonblocking open prevents a FIFO substituted between path checks
+        # and open from hanging on POSIX. O_NOFOLLOW rejects final symlinks.
+        flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode):
+                raise ValueError("staged file is not regular")
+            h = hashlib.sha256()
+            count = 0
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                h.update(block)
+                count += len(block)
+            if (count != before.st_size
+                    or signature(before) != signature(os.fstat(handle.fileno()))
+                    or not safe_path(root, path)
+                    or signature(before) != signature(path.stat())):
+                raise ValueError("staged file changed while hashing")
+            return h.hexdigest(), signature(before)
+    except OSError as exc:
+        raise ValueError("staged file unavailable or changed") from exc
+
+
 def render_staged_clip(root, *, stem, clip, gate, plan_sha256, run_render):
     """UI-204A: one staged H.264 clip through the existing render entry point.
 
@@ -258,8 +299,8 @@ def render_staged_clip(root, *, stem, clip, gate, plan_sha256, run_render):
             or sum(r.id == clip for r in manifest.reels) != 1):
         raise ValueError("unsupported staged plan")
     source = root / "inputs" / manifest.source
-    source_bytes = read_bound(source)
-    if hashlib.sha256(source_bytes).hexdigest() != manifest.source_sha256:
+    source_identity = _staged_file_identity(root, source)
+    if source_identity[0] != manifest.source_sha256:
         raise ValueError("source mismatch")
 
     out_dir = root / "reels-out"
@@ -278,9 +319,9 @@ def render_staged_clip(root, *, stem, clip, gate, plan_sha256, run_render):
     expected = destination / (clip + ".mp4")
     if list(outputs) != [expected]:
         raise RuntimeError("staged render did not return the exact clip")
-    if read_bound(manifest_path) != plan_bytes or read_bound(source) != source_bytes:
+    if read_bound(manifest_path) != plan_bytes or _staged_file_identity(root, source) != source_identity:
         raise RuntimeError("staged input changed")
-    result = read_bound(expected)
-    if not result:
+    digest, signature = _staged_file_identity(root, expected)
+    if signature[2] == 0:
         raise RuntimeError("staged render returned empty bytes")
-    return expected, hashlib.sha256(result).hexdigest()
+    return expected, digest
