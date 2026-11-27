@@ -4,7 +4,7 @@ export function Navigation({ route }: { route: Route }) {
   const reviewing = route.name === "review";
   return (
     <nav className="app-nav" aria-label="Разделы приложения">
-      <button type="button" aria-current={!reviewing ? "page" : undefined}
+      <button type="button" aria-current={route.name === "sources" || route.name === "overview" ? "page" : undefined}
         onClick={() => navigate({ name: "sources" })}>Проекты</button>
       <button type="button" aria-current={reviewing ? "page" : undefined}
         disabled={!reviewing} title={!reviewing ? "Откройте клип в проекте" : undefined}
@@ -12,7 +12,8 @@ export function Navigation({ route }: { route: Route }) {
         {!reviewing && <small>Выберите клип</small>}
       </button>
       <button type="button" disabled title="Будет доступно после подключения заданий">Задания<small>Позже</small></button>
-      <button type="button" disabled title="Будет доступно после подключения экспорта">Экспорт<small>Позже</small></button>
+      <button type="button" aria-current={route.name === "export" ? "page" : undefined}
+        onClick={() => navigate({ name: "export" })}>Экспорт<small>Подготовка</small></button>
     </nav>
   );
 }

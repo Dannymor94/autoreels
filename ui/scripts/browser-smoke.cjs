@@ -67,6 +67,10 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({status:200,contentType:"video/mp4",body:fixture,headers:{"Accept-Ranges":"bytes"}});
     }
+    if (path === "/api/render-targets") return route.fulfill({json: {
+      schema_version:1, modes:[{kind:"desktop",integration:"cli_adapter_pending"},{kind:"remote",integration:"cli_adapter_pending"},{kind:"mobile",integration:"device_spike_pending"}],
+      targets:[],execution_enabled:false
+    }});
     if (path === "/api/health") return route.fulfill({json: {status: "ok", root: "/synthetic", schema_version: 1}});
     if (path === "/api/sources" || path === "/api/projects") {
       if (mode === "error") return route.fulfill({status: 503, body: "Synthetic failure"});
@@ -89,7 +93,19 @@ async function main() {
         await page.goto(base + "/#/");
         await page.locator(".source-row").first().waitFor();
         assert.equal(await page.getByRole("button", {name: /Задания/}).isDisabled(), true);
-        assert.equal(await page.getByRole("button", {name: /Экспорт/}).isDisabled(), true);
+        assert.equal(await page.getByRole("button", {name: /Экспорт/}).isDisabled(), false);
+        if (width === 390) {
+          await page.getByRole("button",{name:/Экспорт/}).click();
+          await page.getByRole("radio",{name:/На телефоне/}).waitFor();
+          assert.equal(await page.getByRole("radio",{name:/Мой компьютер/}).isChecked(),false);
+          await page.getByRole("radio",{name:/На телефоне/}).check();
+          await page.getByText("Подключённых исполнителей нет",{exact:true}).waitFor();
+          assert.equal(await page.getByRole("button",{name:"Запустить рендер",exact:true}).isDisabled(),true);
+          await layout(page,"390 render modes");
+          await page.getByRole("button",{name:"Проекты",exact:true}).click();
+          await page.locator(".source-row").first().waitFor();
+          console.log("PASS explicit render mode, no fake ready target or launch");
+        }
         await page.getByRole("button", {name: "L", exact: true}).click();
         await layout(page, width + " projects");
         assert.equal(await page.getByText("Не обработан", {exact: true}).count(), 1);

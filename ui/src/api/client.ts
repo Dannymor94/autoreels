@@ -1,6 +1,8 @@
 import type { components } from "./types.gen";
 
 export type HealthResponse = components["schemas"]["HealthResponse"];
+export type RenderInventory = components["schemas"]["RenderInventory"];
+export type RenderMode = components["schemas"]["RenderMode"];
 export type SourceItem = components["schemas"]["SourceItem"];
 export type ProjectItem = components["schemas"]["ProjectItem"];
 export type ReviewState = components["schemas"]["ReviewState"];
@@ -37,6 +39,7 @@ export const api = {
   saveComparison: (stem: string, clip: string, left: string, right: string, body: ComparisonInput) =>
     put<ComparisonState>(comparisonUrl(stem, clip, left, right), body),
   health: () => get<HealthResponse>("/api/health"),
+  renderTargets: () => get<RenderInventory>("/api/render-targets", true),
   sources: () => get<SourceItem[]>("/api/sources"),
   projects: () => get<ProjectItem[]>("/api/projects"),
   renameSource: (stem: string, displayName: string | null) =>
