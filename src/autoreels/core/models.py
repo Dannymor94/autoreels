@@ -256,6 +256,8 @@ class Reel(BaseModel):
     window_rates: list[Annotated[float, Field(strict=True, ge=0.5, le=2.0)]] | None = None
 
     background_track: BackgroundTrack | None = None
+    # Visual-only dip at internal hard cuts, milliseconds on each side.
+    seam_dip_ms: Literal[100, 200, 300] | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_rates(self, handler):
@@ -264,11 +266,14 @@ class Reel(BaseModel):
             data.pop("window_rates", None)
         if self.background_track is None:
             data.pop("background_track", None)
+        if self.seam_dip_ms is None:
+            data.pop("seam_dip_ms", None)
         return data
 
     @model_validator(mode="after")
     def _validate_rates(self):
         self.check_window_rates()
+        self.check_seam_dip()
         return self
 
     def check_window_rates(self) -> None:
@@ -283,6 +288,23 @@ class Reel(BaseModel):
                        for s in self.playback_windows())):
             raise ValueError("per-window rates require a simple planned hard-cut body")
         build_window_timing(self.playback_windows(), self.window_rates)
+
+    def check_seam_dip(self) -> None:
+        if self.seam_dip_ms is None:
+            return
+        from autoreels.core.playback_timing import build_window_timing
+        windows = self.playback_windows()
+        if (type(self.seam_dip_ms) is not int or self.seam_dip_ms not in (100, 200, 300)
+                or len(windows) < 2 or self.speed != 1.0 or not self.planned
+                or self.cold_open is not None or self.beat_gap_sec is not None
+                or self.montage or self.fx or self.zoom_source_t0 is not None
+                or self.c_close_ranges or self.title_overlay or self.open_thought
+                or any(s.window_cut or s.close_intervals or s.prerolled for s in windows)):
+            raise ValueError("seam dip requires a simple planned hard-cut body")
+        timing = build_window_timing(windows, self.window_rates or [1.0] * len(windows))
+        for w in timing:
+            if w.output_end - w.output_start <= 2 * self.seam_dip_ms / 1000:
+                raise ValueError("window too short for seam dip")
 
     def effective_segments(self) -> list["Segment"]:
         """Playback windows: the explicit `segments`, or the single span [start, end] if none.
@@ -322,6 +344,7 @@ class Reel(BaseModel):
         empty/reversed invariant per segment is enforced.
         """
         self.check_window_rates()
+        self.check_seam_dip()
         if self.cold_open is not None and self.cold_open.end <= self.cold_open.start:
             raise ValueError(f"reel {self.id}: cold_open is empty/reversed "
                              f"[{self.cold_open.start:.3f}, {self.cold_open.end:.3f}]")

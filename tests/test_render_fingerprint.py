@@ -107,3 +107,17 @@ def test_window_rates_and_bound_soundtrack_change_render_fingerprint():
     assert _fp(layered,music_path="/x/random.mp3")==_fp(layered)
     assert _fp(layered)!=_fp(layered.model_copy(update={"background_track":track.model_copy(update={"volume":0.2})}))
     assert "background_track" not in base.model_dump()
+
+
+def test_seam_dip_is_optional_and_changes_fingerprint():
+    base=_reel(planned=True, segments=[Segment(start=10,end=14), Segment(start=16,end=20)])
+    assert "seam_dip_ms" not in base.model_dump()
+    dip=Reel.model_validate({**base.model_dump(),"seam_dip_ms":200})
+    assert _fp(dip)!=_fp(base)
+    assert _fp(dip)!=_fp(dip.model_copy(update={"seam_dip_ms":100}))
+    assert Reel.model_validate_json(dip.model_dump_json())==dip
+    for changes in ({"seam_dip_ms":50},{"seam_dip_ms":200,"speed":1.5},
+                    {"seam_dip_ms":200,"segments":[]},
+                    {"seam_dip_ms":300,"segments":[Segment(start=10,end=10.4),Segment(start=16,end=20)]}):
+        with pytest.raises(ValueError):
+            Reel.model_validate({**base.model_dump(),**changes})
