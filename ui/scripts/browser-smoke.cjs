@@ -319,13 +319,21 @@ async function main() {
           assert.equal(await music.inputValue(),"1");
           assert.equal(await cut.getByRole("combobox",{name:"Громкость фона",exact:true}).inputValue(),"10");
           assert.equal(await cut.locator("audio").getAttribute("src"),"/synthetic-soundtrack-1.wav");
+          await cut.getByRole("button",{name:"Смотреть нарезку",exact:true}).click();
+          await page.waitForFunction(()=>{
+            const a=document.querySelector(".synthetic-cut audio");
+            const v=document.querySelector(".cut-preview-video");
+            return a&&!a.paused&&v&&!v.paused&&a.loop&&a.volume>0.02&&a.volume<=0.1001;
+          });
+          await cut.getByRole("button",{name:"Пауза",exact:true}).click();
+          await page.waitForFunction(()=>document.querySelector(".synthetic-cut audio")?.paused===true);
           await cut.getByRole("button",{name:"Отменить монтаж",exact:true}).click();
           await cut.getByText("Ревизия нарезки: 20",{exact:true}).waitFor();
           assert.equal(await cut.getByRole("combobox",{name:"Громкость фона",exact:true}).inputValue(),"20");
           await music.selectOption("0");
           await cut.getByText("Ревизия нарезки: 21",{exact:true}).waitFor();
           await layout(page,"390 music controls");
-          console.log("PASS synthetic soundtrack selection, volume, reload, undo and removal");
+          console.log("PASS synthetic soundtrack selection, synchronized preview, pause, volume, reload, undo and removal");
           await cut.getByRole("button",{name:"Выше: Продолжение.",exact:true}).click();
           await cut.getByText("Ревизия нарезки: 22",{exact:true}).waitFor();
           const transition=cut.getByRole("combobox",{name:"Переход на стыках",exact:true});
