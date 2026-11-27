@@ -443,6 +443,8 @@ export interface components {
             clip_uid: string;
             /** Crop */
             crop?: number[] | null;
+            /** Music */
+            music?: number[] | null;
             /** Navigation */
             navigation?: ("undo" | "redo") | null;
             /** Op Id */
@@ -483,6 +485,8 @@ export interface components {
             crop?: number[] | null;
             /** Duration */
             duration: number;
+            /** Music */
+            music?: number[] | null;
             /** Order */
             order: number[];
             /** Plan Sha256 */
@@ -502,6 +506,8 @@ export interface components {
             candidate_plan_sha256: string;
             /** Crop */
             crop?: number[] | null;
+            /** Music */
+            music?: number[] | null;
             /** Navigation */
             navigation?: ("undo" | "redo") | null;
             /** Order */

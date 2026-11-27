@@ -168,3 +168,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 
 .framing-preview { aspect-ratio:3/5; overflow:hidden; border-radius:8px; background:#000; }
 .framing-preview .synthetic-preview-video { position:absolute; max-width:none; border-radius:0; }
+
+.cut-music span { background:#9a78b8; }
+.synthetic-cut audio { width:100%; max-width:100%; }

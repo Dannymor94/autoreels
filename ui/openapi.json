@@ -377,6 +377,20 @@
             ],
             "title": "Crop"
           },
+          "music": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music"
+          },
           "navigation": {
             "anyOf": [
               {
@@ -542,6 +556,20 @@
             "title": "Duration",
             "type": "number"
           },
+          "music": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music"
+          },
           "order": {
             "items": {
               "type": "integer"
@@ -625,6 +653,20 @@
               }
             ],
             "title": "Crop"
+          },
+          "music": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Music"
           },
           "navigation": {
             "anyOf": [
