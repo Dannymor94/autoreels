@@ -73,6 +73,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipeline-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Configured Settings */
+        get: operations["configured_settings_api_pipeline_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -197,6 +214,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnalysisDefaults */
+        AnalysisDefaults: {
+            /** Base Clips */
+            base_clips: number;
+            /** Clips Every Min */
+            clips_every_min: number;
+            /**
+             * Configured Mode
+             * @enum {string}
+             */
+            configured_mode: "autocut" | "scenario";
+            /** Label Max Sec */
+            label_max_sec: number;
+            /** Label Min Sec */
+            label_min_sec: number;
+            /** Max Sec */
+            max_sec: number;
+            /** Min Sec */
+            min_sec: number;
+            /** Target Sec */
+            target_sec: number;
+        };
         /** CapabilitiesResponse */
         CapabilitiesResponse: {
             /** Source */
@@ -296,6 +335,34 @@ export interface components {
             /** Verdict */
             verdict: string;
         };
+        /** PipelineSettings */
+        PipelineSettings: {
+            analysis: components["schemas"]["AnalysisDefaults"] | null;
+            /**
+             * Analysis Status
+             * @enum {string}
+             */
+            analysis_status: "configured" | "missing" | "invalid" | "blocked";
+            /** Draft Clips */
+            draft_clips: number | null;
+            /** Draft Profile */
+            draft_profile: ("h264" | "hevc" | "av1") | null;
+            /** Execution Enabled */
+            execution_enabled: boolean;
+            /**
+             * Preview Status
+             * @enum {string}
+             */
+            preview_status: "not_requested" | "valid" | "blocked";
+            render: components["schemas"]["RenderDefaults"] | null;
+            /**
+             * Render Status
+             * @enum {string}
+             */
+            render_status: "configured" | "missing" | "invalid" | "blocked";
+            /** Schema Version */
+            schema_version: number;
+        };
         /** ProjectItem */
         ProjectItem: {
             /** Can Review */
@@ -319,6 +386,28 @@ export interface components {
             stem: string;
             /** Variant Names */
             variant_names: string[];
+        };
+        /** RenderDefaults */
+        RenderDefaults: {
+            /** Denoise Enabled */
+            denoise_enabled: boolean;
+            /** Height */
+            height: number;
+            /** Loudnorm Enabled */
+            loudnorm_enabled: boolean;
+            /** Music Enabled */
+            music_enabled: boolean;
+            /** Profile */
+            profile: ("h264" | "hevc" | "av1") | null;
+            /** Profiles */
+            profiles: ("h264" | "hevc" | "av1")[];
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "analyze" | "render" | "both" | "unknown";
+            /** Width */
+            width: number;
         };
         /** RenderInventory */
         RenderInventory: {
@@ -539,6 +628,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ComparisonState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configured_settings_api_pipeline_settings_get: {
+        parameters: {
+            query?: {
+                clips?: number | null;
+                profile?: ("h264" | "hevc" | "av1") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineSettings"];
                 };
             };
             /** @description Validation Error */

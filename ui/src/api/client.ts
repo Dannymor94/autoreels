@@ -2,6 +2,8 @@ import type { components } from "./types.gen";
 
 export type HealthResponse = components["schemas"]["HealthResponse"];
 export type RenderInventory = components["schemas"]["RenderInventory"];
+export type PipelineSettings = components["schemas"]["PipelineSettings"];
+export type RenderProfile = NonNullable<PipelineSettings["draft_profile"]>;
 export type RenderMode = components["schemas"]["RenderMode"];
 export type SourceItem = components["schemas"]["SourceItem"];
 export type ProjectItem = components["schemas"]["ProjectItem"];
@@ -40,6 +42,12 @@ export const api = {
     put<ComparisonState>(comparisonUrl(stem, clip, left, right), body),
   health: () => get<HealthResponse>("/api/health"),
   renderTargets: () => get<RenderInventory>("/api/render-targets", true),
+  pipelineSettings: (clips?: number, profile?: RenderProfile) => {
+    const q = new URLSearchParams();
+    if (clips !== undefined) q.set("clips", String(clips));
+    if (profile !== undefined) q.set("profile", profile);
+    return get<PipelineSettings>("/api/pipeline-settings" + (q.size ? "?" + q : ""), true);
+  },
   sources: () => get<SourceItem[]>("/api/sources"),
   projects: () => get<ProjectItem[]>("/api/projects"),
   renameSource: (stem: string, displayName: string | null) =>

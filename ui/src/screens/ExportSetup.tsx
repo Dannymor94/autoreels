@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type RenderMode } from "../api/client";
+import { PipelineSettingsPanel } from "../components/PipelineSettingsPanel";
 
 const descriptions = {
   desktop: { name: "Мой компьютер", detail: "Обработка на компьютере владельца, без обязательного сервера." },
@@ -38,6 +39,7 @@ export function ExportSetup() {
       <p role="status">{nodes.length === 0 ? "Подключённых исполнителей нет" : "Зарегистрировано исполнителей: " + nodes.length}</p>
       {nodes.map(t => <p key={t.target_id} className="secondary">{t.platform} · {t.authorized && t.availability === "ready" ? "Готовность подтверждена" : "Недоступен для запуска"}</p>)}
     </section>}
+    <PipelineSettingsPanel />
     <button className="render-start" disabled>Запустить рендер</button>
     <p className="secondary">Запуск ещё не подключён. Автоматического переключения на другой узел нет.</p>
   </main>;

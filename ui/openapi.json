@@ -1,6 +1,58 @@
 {
   "components": {
     "schemas": {
+      "AnalysisDefaults": {
+        "properties": {
+          "base_clips": {
+            "title": "Base Clips",
+            "type": "integer"
+          },
+          "clips_every_min": {
+            "title": "Clips Every Min",
+            "type": "number"
+          },
+          "configured_mode": {
+            "enum": [
+              "autocut",
+              "scenario"
+            ],
+            "title": "Configured Mode",
+            "type": "string"
+          },
+          "label_max_sec": {
+            "title": "Label Max Sec",
+            "type": "integer"
+          },
+          "label_min_sec": {
+            "title": "Label Min Sec",
+            "type": "integer"
+          },
+          "max_sec": {
+            "title": "Max Sec",
+            "type": "number"
+          },
+          "min_sec": {
+            "title": "Min Sec",
+            "type": "number"
+          },
+          "target_sec": {
+            "title": "Target Sec",
+            "type": "number"
+          }
+        },
+        "required": [
+          "base_clips",
+          "clips_every_min",
+          "min_sec",
+          "target_sec",
+          "max_sec",
+          "configured_mode",
+          "label_min_sec",
+          "label_max_sec"
+        ],
+        "title": "AnalysisDefaults",
+        "type": "object"
+      },
       "CapabilitiesResponse": {
         "properties": {
           "source": {
@@ -307,6 +359,107 @@
         "title": "LegacyReview",
         "type": "object"
       },
+      "PipelineSettings": {
+        "properties": {
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "analysis_status": {
+            "enum": [
+              "configured",
+              "missing",
+              "invalid",
+              "blocked"
+            ],
+            "title": "Analysis Status",
+            "type": "string"
+          },
+          "draft_clips": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Clips"
+          },
+          "draft_profile": {
+            "anyOf": [
+              {
+                "enum": [
+                  "h264",
+                  "hevc",
+                  "av1"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Profile"
+          },
+          "execution_enabled": {
+            "title": "Execution Enabled",
+            "type": "boolean"
+          },
+          "preview_status": {
+            "enum": [
+              "not_requested",
+              "valid",
+              "blocked"
+            ],
+            "title": "Preview Status",
+            "type": "string"
+          },
+          "render": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RenderDefaults"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "render_status": {
+            "enum": [
+              "configured",
+              "missing",
+              "invalid",
+              "blocked"
+            ],
+            "title": "Render Status",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schema_version",
+          "analysis_status",
+          "analysis",
+          "render_status",
+          "render",
+          "draft_clips",
+          "draft_profile",
+          "preview_status",
+          "execution_enabled"
+        ],
+        "title": "PipelineSettings",
+        "type": "object"
+      },
       "ProjectItem": {
         "properties": {
           "can_review": {
@@ -383,6 +536,80 @@
           "can_review"
         ],
         "title": "ProjectItem",
+        "type": "object"
+      },
+      "RenderDefaults": {
+        "properties": {
+          "denoise_enabled": {
+            "title": "Denoise Enabled",
+            "type": "boolean"
+          },
+          "height": {
+            "title": "Height",
+            "type": "integer"
+          },
+          "loudnorm_enabled": {
+            "title": "Loudnorm Enabled",
+            "type": "boolean"
+          },
+          "music_enabled": {
+            "title": "Music Enabled",
+            "type": "boolean"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "enum": [
+                  "h264",
+                  "hevc",
+                  "av1"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
+          },
+          "profiles": {
+            "items": {
+              "enum": [
+                "h264",
+                "hevc",
+                "av1"
+              ],
+              "type": "string"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "analyze",
+              "render",
+              "both",
+              "unknown"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "width": {
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "profile",
+          "profiles",
+          "role",
+          "loudnorm_enabled",
+          "denoise_enabled",
+          "music_enabled"
+        ],
+        "title": "RenderDefaults",
         "type": "object"
       },
       "RenderInventory": {
@@ -1042,6 +1269,75 @@
           }
         },
         "summary": "Media"
+      }
+    },
+    "/api/pipeline-settings": {
+      "get": {
+        "operationId": "configured_settings_api_pipeline_settings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "clips",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Clips"
+            }
+          },
+          {
+            "in": "query",
+            "name": "profile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "h264",
+                    "hevc",
+                    "av1"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Configured Settings"
       }
     },
     "/api/projects": {

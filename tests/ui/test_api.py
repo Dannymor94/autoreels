@@ -172,3 +172,64 @@ def test_render_inventory_is_read_only_and_has_no_assumed_worker(client, tmp_roo
     assert client.get("/api/capabilities").json()["source"] == "fallback"
     assert client.put("/api/render-targets", json={"target_id": "gamebox"}).status_code == 405
     assert sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*")) == before
+
+
+
+def test_pipeline_settings_use_validated_cli_config_without_writes(client, tmp_root, monkeypatch):
+    import shutil
+    import yaml
+    from autoreels.core.config import load_r0_config, load_render_config
+
+    config = tmp_root / "config"
+    config.mkdir()
+    repo = Path(__file__).resolve().parents[2] / "config"
+    for name in ("r0.yaml", "render.yaml"):
+        shutil.copyfile(repo / name, config / name)
+    # Machine-local overlay is part of the CLI contract, but its paths aren't public.
+    local = config / "render.local.yaml"
+    local.write_text(yaml.safe_dump({"ffmpeg": "/secret/sentinel-ffmpeg", "role": "analyze",
+                                    "audio_processing": {"denoise_enabled": True}}))
+    r0 = load_r0_config(config / "r0.yaml")
+    render = load_render_config(config / "render.yaml")
+    before = {p.name: p.read_bytes() for p in config.iterdir()}
+    monkeypatch.setenv("GROQ_API_KEY", "secret-sentinel-key")
+    response = client.get("/api/pipeline-settings")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["analysis_status"] == data["render_status"] == "configured"
+    assert data["analysis"]["base_clips"] == r0.autocut.clips
+    assert data["analysis"]["clips_every_min"] == r0.autocut.clips_every_min
+    assert data["analysis"]["target_sec"] == r0.autocut.target_sec
+    assert data["analysis"]["label_min_sec"] == r0.min_duration
+    assert data["render"]["width"] == render.scale[0]
+    assert data["render"]["profile"] == render.encoder.profile
+    assert data["render"]["role"] == "analyze"
+    assert data["render"]["denoise_enabled"] is True
+    assert "secret" not in response.text
+    assert data["preview_status"] == "not_requested" and not data["execution_enabled"]
+    preview = client.get("/api/pipeline-settings", params={"clips": 7, "profile": "h264"}).json()
+    assert preview["preview_status"] == "valid"
+    assert preview["draft_clips"] == 7 and preview["draft_profile"] == "h264"
+    assert preview["analysis"] == data["analysis"] and preview["render"] == data["render"]
+    assert client.get("/api/pipeline-settings?clips=0").status_code == 422
+    assert client.get("/api/pipeline-settings?clips=1.5").status_code == 422
+    assert client.get("/api/pipeline-settings?profile=arbitrary").status_code == 422
+    assert {p.name: p.read_bytes() for p in config.iterdir()} == before
+    assert not (tmp_root / "reviews").exists()
+
+
+def test_pipeline_settings_fail_closed_when_missing_invalid_or_symlink(client, tmp_root):
+    empty = client.get("/api/pipeline-settings?clips=5&profile=h264").json()
+    assert empty["analysis_status"] == empty["render_status"] == "missing"
+    assert empty["analysis"] is None and empty["render"] is None
+    assert empty["preview_status"] == "blocked"
+    assert empty["draft_clips"] is None and empty["draft_profile"] is None
+    config = tmp_root / "config"
+    config.mkdir()
+    (config / "r0.yaml").write_text("bad: config")
+    assert client.get("/api/pipeline-settings").json()["analysis_status"] == "invalid"
+    (config / "render.local.yaml").symlink_to(tmp_root / "missing-secret")
+    assert client.get("/api/pipeline-settings").json()["render_status"] == "blocked"
+    (config / "r0.yaml").unlink()
+    (config / "r0.yaml").symlink_to(tmp_root / "missing-secret")
+    assert client.get("/api/pipeline-settings").json()["analysis_status"] == "blocked"
