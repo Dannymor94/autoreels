@@ -96,6 +96,7 @@ def test_actual_staged_render(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_archive_video", forbidden)
     bound = staged_executor.bind(tmp_path, job_id="fixture-job", target_id="ci-desktop",
                                  stem="DEMO", clip="r01", gate="ui-ffmpeg")
+    assert bound.request.plan_sha256 == plan_sha
     observed = {}
 
     def validate(output):
@@ -104,7 +105,7 @@ def test_actual_staged_render(tmp_path, monkeypatch):
         assert {p.name: sha(p) for p in (tmp_path / "config").iterdir()} == config_before
         assert not (tmp_path / "inputs-archive").exists()
         assert sorted(p.name for p in output.parent.glob("*.mp4")) == ["r01.mp4"]
-    
+
         info = json.loads(run("-v", "error", "-show_streams", "-show_format",
                               "-of", "json", output, binary=ffprobe))
         video = next(s for s in info["streams"] if s["codec_type"] == "video")

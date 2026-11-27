@@ -175,6 +175,7 @@ def test_staged_input_replacement_and_empty_artifact_rejected(tmp_path):
 
 
 def test_bound_executor_rejects_config_drift_before_claim(tmp_path):
+    pytest.importorskip("fcntl")
     import sqlite3
     from contextlib import closing
     from autoreels.orchestr import execution, staged_executor
@@ -193,6 +194,7 @@ def test_bound_executor_rejects_config_drift_before_claim(tmp_path):
 
 
 def test_bound_executor_validation_and_expiry_hold_reservation(tmp_path):
+    pytest.importorskip("fcntl")
     import sqlite3
     from contextlib import closing
     from autoreels.orchestr import execution, staged_executor
@@ -236,3 +238,34 @@ def test_fixture_lock_serializes_cooperating_executor(tmp_path):
                 pytest.fail("second lock acquired")
     with staged_executor.fixture_lock(tmp_path):
         assert (tmp_path / ".ui-staged-executor.lock").is_file()
+
+
+@pytest.mark.parametrize("cancel", [True, False])
+def test_bound_executor_does_not_accept_cancelled_or_expired_result(tmp_path, cancel):
+    pytest.importorskip("fcntl")
+    import sqlite3
+    from contextlib import closing
+    from autoreels.orchestr import execution, staged_executor
+    stage(tmp_path)
+    bound = staged_executor.bind(tmp_path, job_id="j1", target_id="local",
+                                 stem="DEMO", clip="r01", gate="ui-final")
+    now = [0]
+    with closing(sqlite3.connect(tmp_path / "jobs.sqlite")) as c:
+        ledger = execution.Ledger(c)
+        ledger.submit(bound.request)
+        def fake(**kwargs):
+            out = tmp_path / "reels-out/DEMO/_gate/ui-final/r01.mp4"
+            out.parent.mkdir(parents=True)
+            out.write_bytes(b"synthetic-output")
+            return [out]
+        def verify(_):
+            if cancel:
+                current = ledger.get("j1")
+                ledger.apply("j1", current.revision, execution.cancel)
+            else:
+                now[0] = execution.MAX_LEASE_MS
+        j = staged_executor.run_bound(ledger, bound, worker_id="w",
+                    clock_ms=lambda:now[0], run_render=fake, verify=verify)
+        assert j.status == ("cancelled" if cancel else "reconcile")
+        assert j.artifact_sha256 is None
+        assert (tmp_path / "reels-out/DEMO/_gate/ui-final/r01.mp4").is_file()
