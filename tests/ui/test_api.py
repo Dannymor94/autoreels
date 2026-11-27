@@ -397,7 +397,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     view = response.json()
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
-    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"])}
+    plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"]}
     baseline, cut = plans[()], plans[(2,)]
     assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]
     for removed, plan in plans.items():
@@ -437,7 +437,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     assert response.status_code==200,response.text
     cut=response.json()
     assert cut["revision"]==1 and cut["current_removed"]==[2]
-    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None}]
+    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2],"order":None,"trim":None}]
     assert client.get("/api/synthetic-cut").json()==cut
     assert client.get("/api/synthetic-editor").json()==spelling
     assert client.put("/api/synthetic-cut",json=body).json()==cut
@@ -455,7 +455,7 @@ def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
     restored=result.json()
     assert restored["revision"]==2 and restored["current_removed"]==[]
     assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
-    assert restored["history"]==[{"revision":2,"removed":[],"order":None},{"revision":1,"removed":[2],"order":None}]
+    assert restored["history"]==[{"revision":2,"removed":[],"order":None,"trim":None},{"revision":1,"removed":[2],"order":None,"trim":None}]
     assert client.put("/api/synthetic-cut",json=body).json()==restored
     assert client.get("/api/synthetic-cut").json()==restored
     assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"
@@ -485,7 +485,7 @@ def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
     moved=response.json()
     assert moved["revision"]==2 and moved["current_removed"]==[2]
     assert moved["plan_sha256"]==reordered["plan_sha256"]
-    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1]}
+    assert moved["history"][0]=={"revision":2,"removed":[2],"order":[3,1],"trim":None}
     assert reordered["windows"][0]["source_start"]>reordered["windows"][-1]["source_start"]
     assert client.get("/api/synthetic-cut").json()==moved
     assert client.put("/api/synthetic-cut",json=op).json()==moved
@@ -497,3 +497,43 @@ def test_synthetic_reorder_cas_preserves_cut_and_legacy_retry(client,tmp_root):
     response=client.put("/api/synthetic-cut",json=restore)
     assert response.status_code==200,response.text
     assert response.json()["plan_sha256"]==view["plan_sha256"]
+
+
+def test_synthetic_trim_persists_and_preserves_cut_and_order(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    view=client.get("/api/synthetic-cut").json()
+    variants=[p for p in view["plans"] if p["trim"] and p["removed"]==[2] and p["order"]==[3,1]]
+    assert variants, "fixture must expose a speech-safe trim after cut and reorder"
+    variant=variants[0]
+    parent=next(p for p in view["plans"] if not p["trim"] and p["removed"]==[2] and p["order"]==[3,1])
+    op=dict(op_id="parent-reordered",base_revision=0,base_plan_sha256=view["plan_sha256"],
+            clip_uid=view["clip_uid"],candidate_plan_sha256=parent["plan_sha256"],removed=[2],order=[3,1])
+    response=client.put("/api/synthetic-cut",json=op)
+    assert response.status_code==200,response.text
+    moved=response.json()
+    trim={**op,"op_id":"trim-one","base_revision":1,"base_plan_sha256":moved["plan_sha256"],
+          "candidate_plan_sha256":variant["plan_sha256"],"trim":variant["trim"]}
+    for bad in ({**trim,"trim":[-1,2,100]}, {**trim,"trim":[0,3,100]},
+                {**trim,"trim":[0,2,100]}, {**trim,"trim":None},
+                {**trim,"removed":[2,0,3,1,-1,*variant["trim"]],"order":None}):
+        assert client.put("/api/synthetic-cut",json=bad).status_code==409
+    response=client.put("/api/synthetic-cut",json=trim)
+    assert response.status_code==200,response.text
+    saved=response.json()
+    assert saved["revision"]==2 and saved["current_removed"]==[2]
+    assert saved["plan_sha256"]==variant["plan_sha256"]
+    assert saved["history"][0]["trim"]==variant["trim"]
+    assert 0<variant["duration"]<parent["duration"]
+    for s in view["sentences"]:
+        overlap=sum(max(0,min(s["end"],w["source_end"])-max(s["start"],w["source_start"])) for w in variant["windows"])
+        assert overlap==pytest.approx(0 if s["number"]==2 else s["end"]-s["start"])
+    assert client.get("/api/synthetic-cut").json()==saved
+    assert client.put("/api/synthetic-cut",json=trim).json()==saved
+    assert client.put("/api/synthetic-cut",json=op).json()==saved
+    assert client.put("/api/synthetic-cut",json={**trim,"op_id":"stale-trim"}).status_code==409
+    reset={**op,"op_id":"reset-trim","base_revision":2,"base_plan_sha256":saved["plan_sha256"]}
+    response=client.put("/api/synthetic-cut",json=reset)
+    assert response.status_code==200,response.text
+    assert response.json()["plan_sha256"]==parent["plan_sha256"]
