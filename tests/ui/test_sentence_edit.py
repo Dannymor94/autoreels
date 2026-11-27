@@ -131,3 +131,42 @@ def test_stale_or_ambiguous_evidence_is_rejected():
     args["smap"]["words"].pop()
     with pytest.raises(edit.Unavailable):
         edit.reorder_sentences(base, play=(1, 2, 3), order=(3, 1, 2), **args)
+
+
+@pytest.mark.parametrize("play", [(1,3), (3,1)])
+def test_trim_silence_preserves_cut_and_play_order(play):
+    base,args=reorder_fixture(play)
+    before=base.model_dump_json()
+    old=base.effective_segments()[0]
+    a,b=play[0]-1+0.2,play[0]-1+0.8
+    start=max(old.start,a-0.075)
+    end=min(old.end,b+0.075)
+    assert start>old.start or end<old.end
+    trimmed=edit.trim_silence(base,play=play,segment_index=0,start=start,end=end,**args)
+    assert base.model_dump_json()==before
+    assert trimmed.reordered==base.reordered
+    assert trimmed.start==start and trimmed.end==base.end
+    assert trimmed.effective_segments()[1:]==base.effective_segments()[1:]
+    assert trimmed.playback_duration()==pytest.approx(
+        base.playback_duration()-(start-old.start)-(old.end-end))
+    assert [w.word for w in trimmed.subtitles]==[w.word for w in base.subtitles]
+    assert start<trimmed.subtitles[0].t0<=a and trimmed.subtitles[0].t1<=end
+    assert trimmed.subtitles[1:]==base.subtitles[1:]
+    trimmed.check_segments()
+    assert all(min(s.end,1.8)-max(s.start,1.2)<=1e-6
+               for s in trimmed.effective_segments())
+
+
+def test_trim_silence_refuses_speech_expansion_stale_and_invalid_bounds():
+    play=(1,3)
+    base,args=reorder_fixture(play)
+    old=base.effective_segments()[0]
+    for index,start,end in [(0,0.18,old.end),(0,old.start,0.81),
+                            (0,old.start-0.01,old.end),(0,old.start,old.end),
+                            (0,float("nan"),old.end),(True,0.1,old.end),
+                            (99,0.1,old.end)]:
+        with pytest.raises(edit.Unavailable):
+            edit.trim_silence(base,play=play,segment_index=index,start=start,end=end,**args)
+    with pytest.raises(edit.Unavailable):
+        edit.trim_silence(base.model_copy(update={"end":base.end+0.01}),
+                          play=play,segment_index=0,start=0.1,end=old.end,**args)
