@@ -37,18 +37,20 @@ async function mock(page, mode = "normal") {
         windows:order.map((n,i)=>({source_start:n-1,source_end:n,output_start:i,output_end:i+1}))});
       const trimmed={...baseline,trim:[0,2,2850],duration:2.85,plan_sha256:"f".repeat(64),
         windows:[{source_start:0,source_end:2.85,output_start:0,output_end:2.85}]};
-      const plans=[baseline,candidate,permutation([1,3,2],"d"),permutation([3,1,2],"e"),trimmed];
+      const rated={...baseline,rates:[50],duration:6,plan_sha256:"9".repeat(64),
+        windows:[{source_start:0,source_end:3,output_start:0,output_end:6}]};
+      const plans=[baseline,candidate,permutation([1,3,2],"d"),permutation([3,1,2],"e"),trimmed,rated];
       if(method==="PUT"){
         const input=route.request().postDataJSON();
         assert.equal(input.base_revision,cutRevision);
         assert.equal(input.base_plan_sha256,cutSha);
         assert.equal(input.clip_uid,"c".repeat(64));
         const order=input.order??[1,2,3].filter(n=>!input.removed.includes(n));
-        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order)&&JSON.stringify(p.trim??null)===JSON.stringify(input.trim??null));
+        const target=plans.find(p=>JSON.stringify(p.removed)===JSON.stringify(input.removed)&&JSON.stringify(p.order)===JSON.stringify(order)&&JSON.stringify(p.trim??null)===JSON.stringify(input.trim??null)&&JSON.stringify(p.rates??null)===JSON.stringify(input.rates??null));
         assert.ok(target,"mock candidate selection not available");
         assert.equal(input.candidate_plan_sha256,target.plan_sha256);
         cutRemoved=input.removed;cutSha=target.plan_sha256;cutRevision++;
-        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null,trim:input.trim??null});
+        cutHistory.unshift({revision:cutRevision,removed:cutRemoved,order:input.order??null,trim:input.trim??null,rates:input.rates??null});
       }
       return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
         current_removed:cutRemoved,history:cutHistory,plan_sha256:cutSha,
@@ -271,6 +273,19 @@ async function main() {
           await cut.getByText("3.00 с · убрано 0.00 с",{exact:true}).waitFor();
           await layout(page,"390 trim controls");
           console.log("PASS synthetic boundary control, reload, explicit reset and reorder guard");
+          const rate=cut.getByRole("combobox",{name:"Скорость фрагмента 1",exact:true});
+          await rate.selectOption("50");
+          await cut.getByText("Ревизия нарезки: 12",{exact:true}).waitFor();
+          await cut.getByText("6.00 с · скорость изменена",{exact:true}).waitFor();
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 12",{exact:true}).waitFor();
+          assert.equal(await rate.inputValue(),"50");
+          await page.waitForFunction(()=>document.querySelector(".cut-preview-video")?.playbackRate===0.5);
+          await cut.getByRole("button",{name:"Сбросить скорость",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 13",{exact:true}).waitFor();
+          await page.waitForFunction(()=>document.querySelector(".cut-preview-video")?.playbackRate===1);
+          await layout(page,"390 speed controls");
+          console.log("PASS synthetic speed control, reload, playbackRate and reset");
 
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");

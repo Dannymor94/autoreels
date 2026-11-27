@@ -91,6 +91,7 @@ def remove_sentences(
     if (not base.planned or base.cold_open is not None or base.reordered
             or base.beat_gap_sec is not None or base.montage or base.fx
             or base.c_close_ranges or base.subtitle_emph_words or base.speed != 1.0
+            or base.window_rates is not None
             or params.filler_cut or params.filler_word_cut or params.subs_hide_fillers
             or params.start_preroll_sec or params.max_static_sec or params.emphasis_keys):
         raise Unavailable("complex plan requires the full manual-edit contract")
@@ -157,6 +158,7 @@ def reorder_sentences(
     if (not base.planned or base.cold_open is not None
             or base.beat_gap_sec is not None or base.montage or base.fx
             or base.c_close_ranges or base.subtitle_emph_words or base.speed != 1.0
+            or base.window_rates is not None
             or base.zoom_source_t0 is not None or base.head_first_word_start is not None
             or base.subtitle_gate is not None or base.marks
             or params.filler_cut or params.filler_word_cut or params.subs_hide_fillers

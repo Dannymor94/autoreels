@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from autoreels.core.models import Manifest
+from autoreels.core.playback_timing import build_window_timing
 
 from .pathguard import safe_path
 
@@ -91,6 +92,8 @@ def read_plan(root: Path, stem: str, clip: str) -> ClipPlanView:
             raise ValueError("invalid subtitle times")
         revision = hashlib.sha256(raw).hexdigest()
         clip_ref = hashlib.sha256(("plan-v1:" + revision + ":" + clip).encode()).hexdigest()
+        timing = (build_window_timing(segments, reel.window_rates)
+                  if reel.window_rates is not None else None)
         windows, words = [], []
         offset = 0.0
         # Same base mapping as local.subtitles.remap_to_output: select by
@@ -101,21 +104,23 @@ def read_plan(root: Path, stem: str, clip: str) -> ClipPlanView:
                     or seg.start < 0 or seg.end <= seg.start):
                 raise ValueError("invalid window")
             duration = seg.end - seg.start
+            wtime = timing[i] if timing is not None else None
             windows.append(PlanWindow(index=i, kind="hook" if i == 0 and reel.cold_open else "body",
-                source_start=seg.start, source_end=seg.end, plan_start=offset / speed,
-                plan_end=(offset + duration) / speed))
+                source_start=seg.start, source_end=seg.end,
+                plan_start=wtime.output_start if wtime is not None else offset / speed,
+                plan_end=wtime.output_end if wtime is not None else (offset + duration) / speed))
             for j, w in enumerate(reel.subtitles):
                 if seg.start <= w.t0 < seg.end:
                     if len(words) >= MAX_OCCURRENCES:
                         raise ValueError("preview too large")
                     words.append(PlanWord(occurrence_id=f"{clip_ref}:{i}:{j}", window_index=i,
                         word=w.word, source_start=w.t0, source_end=w.t1,
-                        plan_start=(w.t0 - seg.start + offset) / speed,
-                        plan_end=(w.t1 - seg.start + offset) / speed))
+                        plan_start=wtime.to_output(w.t0) if wtime is not None else (w.t0 - seg.start + offset) / speed,
+                        plan_end=wtime.to_output(w.t1) if wtime is not None else (w.t1 - seg.start + offset) / speed))
             offset += duration
         return ClipPlanView(revision_sha256=revision,
             recorded_source_id=f"{manifest.source_hash_scheme}:{manifest.source_sha256}",
-            clip_ref=clip_ref, speed=speed, planned_duration_s=offset / speed,
+            clip_ref=clip_ref, speed=speed, planned_duration_s=timing[-1].output_end if timing is not None else offset / speed,
             windows=windows, words=words)
     except (OSError, ValueError, OverflowError):
         raise HTTPException(409, "plan unavailable or ambiguous") from None

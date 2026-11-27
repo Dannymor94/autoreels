@@ -381,6 +381,20 @@
             ],
             "title": "Order"
           },
+          "rates": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rates"
+          },
           "removed": {
             "items": {
               "type": "integer"
@@ -496,6 +510,20 @@
             "title": "Plan Sha256",
             "type": "string"
           },
+          "rates": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rates"
+          },
           "removed": {
             "items": {
               "type": "integer"
@@ -550,6 +578,20 @@
               }
             ],
             "title": "Order"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rates"
           },
           "removed": {
             "items": {

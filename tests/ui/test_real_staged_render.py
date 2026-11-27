@@ -163,8 +163,8 @@ def test_static_synthetic_preview_asset():
     run("-v","error","-xerror","-nostdin","-i",path,"-f","null","-")
 
 
-@pytest.mark.parametrize("reorder,trim", [(False, False), (True, False), (True, True)])
-def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder, trim):
+@pytest.mark.parametrize("reorder,trim,rated", [(False, False, False), (True, False, False), (True, True, False), (True, False, True)])
+def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder, trim, rated):
     """Planner-selected audio cut reaches actual decoded FFmpeg output.
 
     Three generated audio tones represent distinct artificial sentences.
@@ -231,6 +231,12 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder,
             assert [w.word for w in reel.subtitles] == ["КОНЕЦ.","НАЧАЛО."]
     else:
         reel = reel.model_copy(update={"head_first_word_start":0.2,"subtitle_gate":cut.end})
+    if rated:
+        # Exact source/output frame grid, inside the verified 200 ms silence.
+        segments = [s.model_copy(update={"start":st,"end":en})
+                    for s,(st,en) in zip(reel.effective_segments(),[(4.1,5.9),(0.1,1.9)])]
+        reel = reel.model_copy(update={"start":segments[0].start,"end":segments[-1].end,
+            "segments":segments,"window_rates":[0.5,2.0]})
     segments = reel.effective_segments()
     reel.check_segments()
     manifest = Manifest(source=source.name,source_sha256=source_sha,
@@ -240,7 +246,7 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder,
     plan = tmp_path / "reviews/DEMO.review.json"
     plan.write_text(manifest.model_dump_json(), encoding="utf-8")
     plan_sha = sha(plan)
-    expected = sum(s.end-s.start for s in segments)
+    expected = sum((s.end-s.start)/rate for s,rate in zip(segments,reel.window_rates or [1]*len(segments)))
 
     def decode(path):
         pcm = run("-v","error","-nostdin","-i",path,"-map","0:a:0",
@@ -279,8 +285,9 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder,
         # last half separately as well, so reorder/duplication cannot pass.
         assert energy[0]>0.25*source_energy[0] and energy[2]>0.25*source_energy[2], energy
         assert energy[1]<0.001*min(energy[0],energy[2]), energy
-        first=peaks(samples[:len(samples)//2])
-        last=peaks(samples[len(samples)//2:])
+        split=round((segments[0].end-segments[0].start)/(reel.window_rates[0] if rated else 1)*48000) if rated else len(samples)//2
+        first=peaks(samples[:split])
+        last=peaks(samples[split:])
         a_idx,b_idx=(2,0) if reorder else (0,2)
         assert first[a_idx]>10*first[b_idx] and last[b_idx]>10*last[a_idx], (first,last)
         assert sha(source)==source_sha and sha(plan)==plan_sha
@@ -297,7 +304,7 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder,
                           str(tmp_path),"DEMO","r01","ui-ffmpeg"),
             verify=validate,timeout_sec=30)
         assert job.status=="success" and job.artifact_sha256==observed["artifact"]
-    print(f"UI-402D/402C/303E PASS: reorder={reorder}, trim={trim}; cut fixture duration={observed['duration']:.3f}s; "
+    print(f"UI-402D/402C/303E PASS: reorder={reorder}, trim={trim}, rated={rated}; cut fixture duration={observed['duration']:.3f}s; "
           f"removed/kept tone energy={observed['removed_ratio']:.8f}; "
           "kept tones in order; A/V decode and ledger success")
 

@@ -37,6 +37,7 @@ from autoreels.core.config import (
 from autoreels.core.progress import is_tty, render_bar
 from autoreels.core.calibration import face_close_crop
 from autoreels.core.models import Crop, Manifest, Segment, SetupProfile
+from autoreels.core.playback_timing import build_window_timing
 from autoreels.local.subtitles import build_ass, remap_to_output
 from autoreels.local.fx import output_time as fx_output_time, plate_start, punch_point, punch_times, push_vf
 from autoreels.local.fx import timeline as fx_timeline
@@ -1234,6 +1235,8 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
                            seam_xfade_visual_durations: list[float] | None = None,
                            segment_overlays: "list[tuple[str, str, str] | None] | None" = None,
                            cfr: "tuple[float, list[int]] | None" = None,
+                           window_rates: list[float] | None = None,
+                           rate_fps: float | None = None,
                            ) -> tuple[str, str, str]:
     """Filtergraph prefix that joins N pre-seeked inputs (one per window) in playback order.
 
@@ -1263,6 +1266,16 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
     f = edge_fade_sec
     parts: list[str] = []
     groups = _input_groups(segments, seam_xfades, video_xfade_sec)
+    timing = None
+    if window_rates is not None:
+        if (len(groups) != n or video_xfade_sec or any(seam_xfades or [])
+                or any(segment_overlays or []) or not rate_fps):
+            raise RenderError("variable speed requires independent hard-cut windows")
+        timing = build_window_timing(segments, window_rates)
+        for w in timing:
+            frames = (w.output_end - w.output_start) * rate_fps
+            if abs(frames - round(frames)) > 1e-5 or round(frames) < 1:
+                raise RenderError("variable speed requires whole output frames")
     if len(groups) < n:
         return _concat_grouped_graph(segments, groups, f, pre_roll=pre_roll, segment_vfs=segment_vfs,
                                      segment_overlays=segment_overlays, seam_xfades=seam_xfades,
@@ -1292,11 +1305,20 @@ def _concat_segments_graph(segments, edge_fade_sec: float, *,
             vchain = f"[{i}:v]{vtrim}"
             if svf:
                 vchain += f",{svf}"
+            if timing is not None:
+                w = timing[i]
+                frames = round((w.output_end - w.output_start) * rate_fps)
+                vchain += f",setpts=PTS/{w.rate:.12g}" + _cfr_chain(rate_fps, frames)
             vchain += ",settb=expr=1/90000"
             parts.append(f"{vchain}[v{i}]")
         if f > 0:
             out_st = max(0.0, (s.end - s.start) - f)
             achain += f",afade=t=in:st=0:d={_num(f)},afade=t=out:st={_num(out_st)}:d={_num(f)}"
+        if timing is not None:
+            w = timing[i]
+            length = w.output_end - w.output_start
+            achain += (f",atempo={w.rate:.12g},apad=pad_dur=0.1,"
+                       f"atrim=duration={length:.12g},asetpts=N/SR/TB")
         parts.append(f"{achain}[a{i}]")
     # Video: seam_xfades (per-seam), uniform video_xfade_sec, or plain hard concat.
     # seam_xfades takes precedence when provided; 0.0 = hard cut, >0 = xfade.
@@ -2924,6 +2946,26 @@ def _render_segments(
     `emit_text` — класть рядом с клипом <id>.txt (title/description для публикации)."""
     # Абсолютные пути обязательны: при cwd=tmp_ass_dir (ass-фильтр) ffmpeg резолвит
     # относительные пути от tmp_ass_dir, а не от рабочей директории autoreels.
+    # Do not let a legacy effect consumer silently ignore an independent rate.
+    rated = [r for r in manifest.reels if r.window_rates is not None]
+    for reel in rated:
+        try:
+            reel.check_segments()
+        except ValueError as exc:
+            raise RenderError(str(exc)) from exc
+    if rated:
+        ap = render_cfg.audio_processing
+        if (music_path or getattr(ap, "video_xfade_sec", 0)
+                or getattr(render_cfg, "two_shot_xfade", False)
+                or getattr(render_cfg, "same_shot_dissolve_frames", 0)
+                or getattr(ap, "dynamic_ending", False)
+                or getattr(render_cfg, "end_freeze_sec", 0)
+                or getattr(render_cfg, "end_sting_path", "")
+                or getattr(render_cfg, "ending_loop", False)
+                or getattr(render_cfg, "reel_framing", False)
+                or getattr(render_cfg, "close_from_face", False)
+                or (zoom_cfg is not None and zoom_cfg.enabled)):
+            raise RenderError("variable speed requires explicit hard-cut settings without automatic effects")
     source = resolve_source(manifest, inputs_dir).resolve()
 
     ffmpeg_bin = shutil.which(ffmpeg)
@@ -2996,7 +3038,26 @@ def _render_segments(
             except ValueError as e:
                 raise RenderError(str(e)) from e
             segs = reel.playback_windows()   # cold-open hook (if any) + body windows
-            if len(segs) > 1:
+            rates = reel.window_rates
+            if rates is not None:
+                # The first renderer slice uses exact frame-grid boundaries.
+                # Reject rather than move a hand-edited cut or a cue.
+                fps = _fps()
+                if any(abs(t * fps - round(t * fps)) > 1e-5
+                       for seg in segs for t in (seg.start, seg.end)):
+                    raise RenderError("variable speed requires frame-aligned source boundaries")
+                try:
+                    timing = build_window_timing(segs, rates)
+                    if any(abs((w.output_end-w.output_start)*fps -
+                               round((w.output_end-w.output_start)*fps)) > 1e-5
+                           for w in timing):
+                        raise ValueError("variable speed requires whole output frames")
+                    remap_to_output(reel.subtitles, segs, window_rates=rates)
+                except ValueError as exc:
+                    raise RenderError(str(exc)) from exc
+            else:
+                timing = None
+            if len(segs) > 1 and rates is None:
                 # Frame-align every window so its audio and video have identical length — otherwise
                 # the per-window sub-frame mismatch accumulates into lip-sync drift across the concat
                 # (see _snap_windows_to_frames). Single-window reels keep the byte-identical -ss/-t cut.
@@ -3238,7 +3299,7 @@ def _render_segments(
                 # on top for the first seconds when the reel carries title_overlay.
                 # Pass xfade_actual so each segment's subtitle offset is shifted back by the dissolve.
                 ass_words = remap_to_output(reel.subtitles, segs, speed=_reel_speed,
-                                            xfade_sec=_xfade_actual)
+                                            xfade_sec=_xfade_actual, window_rates=rates)
                 ass_filename = f"{reel.id}.ass"
                 ass_path = tmp_ass_dir / ass_filename
                 # M53: a montage clip highlights its k: words even with subtitle_keywords off
@@ -3481,8 +3542,9 @@ def _render_segments(
             # Audio is plain concat (no crossfade) and is trimmed to this by -shortest. Computed from
             # the final post-snap `segs` by the same helper the invariant checks against, so the
             # expected length always matches what the concat graph emits (no re-derivation drift).
-            clip_duration = _expected_output_duration(segs, xfade_sec=_xfade_actual,
-                                                        seam_xfades=_ts_seam_xfades)
+            clip_duration = (timing[-1].output_end if timing is not None else
+                             _expected_output_duration(segs, xfade_sec=_xfade_actual,
+                                                       seam_xfades=_ts_seam_xfades))
             # Final (post-speed) length: tail fades (audio and video) land on the real clip end.
             _out_dur = clip_duration / _reel_speed if _reel_speed else clip_duration
             # M55e: a sped-up clip is made an exact whole number of frames at the output rate (the
@@ -3599,7 +3661,7 @@ def _render_segments(
                 _synth_active and _synth_params_dict is not None
                 and _synth_room_start is not None and not reel_fc and not _synth_inline
             )
-            if len(segs) == 1:
+            if len(segs) == 1 and rates is None:
                 if _synth_inline:
                     _sp = _synth_params_dict
                     _tail_s = _sp["tail_sec"]
@@ -3666,7 +3728,8 @@ def _render_segments(
                                                              seam_xfades=_ts_seam_xfades,
                                                              seam_xfade_visual_durations=_ts_seam_visual,
                                                              segment_overlays=_ts_seg_overlays,
-                                                             cfr=_cfr)
+                                                             cfr=_cfr, window_rates=rates,
+                                                             rate_fps=_fps() if rates is not None else None)
                 # One input per run of filler-cut pieces (REEL_SPEC §1.4), else one per window.
                 windows = [(segs[g[0]].start, segs[g[-1]].end - segs[g[0]].start)
                            for g in _input_groups(segs, _ts_seam_xfades, _xfade_actual)]
@@ -3751,7 +3814,7 @@ def _render_segments(
                     extra_inputs=_extra_inputs,
                     bf_zero=_synth_inline,
                 )
-            clip_dur_s = clip_duration  # actual output length (xfade-adjusted for multi-window)
+            clip_dur_s = clip_duration  # actual output length (xfade/rate-adjusted)
             returncode, stderr_text = _run_ffmpeg_with_progress(
                 cmd, reel_id=reel.id, idx=idx, total=total,
                 duration_sec=clip_dur_s, cwd=ass_cwd,
@@ -4189,6 +4252,8 @@ def render_preview(
         reel = next((r for r in manifest.reels if r.id == reel_id), None)
         if reel is None:
             raise RenderError(f"клип '{reel_id}' не найден в манифесте")
+    if reel.window_rates is not None:
+        raise RenderError("palette preview does not support independent playback rates yet")
     short_end = min(reel.end, reel.start + seconds)
     zoom_cfg = render_cfg.zoom
     if zoom is not None and zoom != zoom_cfg.enabled:

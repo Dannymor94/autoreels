@@ -57,6 +57,7 @@ class FixtureSelection(BaseModel):
     removed: tuple[int, ...]
     order: tuple[int, ...] | None = None
     trim: tuple[int, int, int] | None = None  # window index, edge (1/2), source ms
+    rates: tuple[int, ...] | None = None  # percent, indexed by playback window
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -77,6 +78,10 @@ class FixtureSelection(BaseModel):
             if index < 0 or edge not in (1, 2) or ms < 0:
                 raise Conflict("invalid fixture trim key")
             key = (*key, -1, index, edge, ms)
+        if self.rates is not None:
+            if not self.rates or any(n not in (50, 100, 200) for n in self.rates) or all(n == 100 for n in self.rates):
+                raise Conflict("invalid fixture rate vector")
+            key = (*key, -2, *self.rates)
         return key
 
 

@@ -7,12 +7,13 @@ const queryKey = ["synthetic-cut"];
 const seconds = (n:number) => n.toFixed(2)+" с";
 const equal = (a:number[],b:number[]) => a.length===b.length && a.every((v,i)=>v===b[i]);
 const chronological = (order:number[]) => equal(order,[...order].sort((a,b)=>a-b));
+const rateAt=(plan:CutPreview,i:number)=>(plan.rates?.[i]??100)/100;
 const windowIndexAt=(plan:CutPreview,t:number)=>{const i=plan.windows.findIndex(w=>t<w.output_end);return i<0?plan.windows.length-1:i;};
 
 function sourceTime(plan:CutPreview,t:number) {
   const pos=Math.max(0,Math.min(plan.duration,t));
-  const w=plan.windows[windowIndexAt(plan,pos)];
-  return w.source_start+Math.max(0,Math.min(w.source_end-w.source_start,pos-w.output_start));
+  const i=windowIndexAt(plan,pos),w=plan.windows[i];
+  return w.source_start+Math.max(0,Math.min(w.source_end-w.source_start,(pos-w.output_start)*rateAt(plan,i)));
 }
 
 export function SyntheticCutPreview() {
@@ -33,13 +34,14 @@ export function SyntheticCutPreview() {
   const video=useRef<HTMLVideoElement>(null);
   const activeWindow=useRef(0);
   const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
-  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim);
-  const untrimmed=q.data?.plans.find(p=>!p.trim&&plan&&equal(p.removed,plan.removed)&&equal(p.order,plan.order));
+  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim&&!p.rates);
+  const untrimmed=q.data?.plans.find(p=>!p.trim&&!p.rates&&plan&&equal(p.removed,plan.removed)&&equal(p.order,plan.order));
+  const normalSpeed=q.data?.plans.find(p=>!p.rates&&plan&&equal(p.removed,plan.removed)&&equal(p.order,plan.order)&&equal(p.trim??[],plan.trim??[]));
   const kept=(q.data?.sentences??[]).map(s=>s.number).filter(n=>!selected.includes(n));
   const currentOrder=plan?.order??[];
   const wantedOrder=chronological(currentOrder)?kept:
     [...currentOrder.filter(n=>kept.includes(n)),...kept.filter(n=>!currentOrder.includes(n))];
-  const candidate=q.data?.plans.find(p=>!p.trim&&equal(p.removed,selected)&&equal(p.order,wantedOrder));
+  const candidate=q.data?.plans.find(p=>!p.trim&&!p.rates&&equal(p.removed,selected)&&equal(p.order,wantedOrder));
   const locked=busy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
   const usable=!!plan && !!baseline && ready && !error && !q.isError && !busy;
 
@@ -47,6 +49,7 @@ export function SyntheticCutPreview() {
     if(!plan||!video.current||!usable)return;
     const pos=Math.max(0,Math.min(plan.duration,t));
     activeWindow.current=windowIndexAt(plan,pos);
+    video.current.playbackRate=rateAt(plan,activeWindow.current);
     video.current.currentTime=sourceTime(plan,pos);
     setPosition(pos);
   }
@@ -68,13 +71,14 @@ export function SyntheticCutPreview() {
       base_plan_sha256:state.plan_sha256,clip_uid:state.clip_uid,
       candidate_plan_sha256:next.plan_sha256,removed:next.removed,
       ...(chronological(next.order)?{}:{order:next.order}),
-      ...(next.trim?{trim:next.trim}:{})});
+      ...(next.trim?{trim:next.trim}:{}),
+      ...(next.rates?{rates:next.rates}:{})});
   }
 
   useEffect(()=>{
     const v=video.current;
     if(!plan||!v||!ready||error)return;
-    v.pause();setPlaying(false);setPosition(0);activeWindow.current=0;v.currentTime=sourceTime(plan,0);
+    v.pause();setPlaying(false);setPosition(0);activeWindow.current=0;v.playbackRate=rateAt(plan,0);v.currentTime=sourceTime(plan,0);
   },[plan,ready,error]);
 
   useEffect(()=>{
@@ -88,10 +92,10 @@ export function SyntheticCutPreview() {
       const w=plan.windows[activeWindow.current];
       if(t>=w.source_end){
         const next=plan.windows[activeWindow.current+1];
-        if(next){activeWindow.current++;v.currentTime=next.source_start;setPosition(next.output_start);}
+        if(next){activeWindow.current++;v.playbackRate=rateAt(plan,activeWindow.current);v.currentTime=next.source_start;setPosition(next.output_start);}
         else{v.pause();setPosition(plan.duration);return;}
       }else{
-        setPosition(Math.max(w.output_start,Math.min(w.output_end,w.output_start+t-w.source_start)));
+        setPosition(Math.max(w.output_start,Math.min(w.output_end,w.output_start+(t-w.source_start)/rateAt(plan,activeWindow.current))));
       }
       frame=requestAnimationFrame(update);
     };
@@ -108,7 +112,7 @@ export function SyntheticCutPreview() {
     const a=order.indexOf(from), b=order.indexOf(to);
     if(a<0||b<0||a===b)return;
     order.splice(a,1);order.splice(b,0,from);
-    const next=q.data?.plans.find(p=>!p.trim&&equal(p.removed,removed)&&equal(p.order,order));
+    const next=q.data?.plans.find(p=>!p.trim&&!p.rates&&equal(p.removed,removed)&&equal(p.order,order));
     if(next)changePlan(next);
   }
   function canMove(from:number,to:number|undefined) {
@@ -116,11 +120,19 @@ export function SyntheticCutPreview() {
     const order=[...plan!.order];
     const a=order.indexOf(from),b=order.indexOf(to);
     order.splice(a,1);order.splice(b,0,from);
-    return !!q.data?.plans.some(p=>!p.trim&&equal(p.removed,removed)&&equal(p.order,order));
+    return !!q.data?.plans.some(p=>!p.trim&&!p.rates&&equal(p.removed,removed)&&equal(p.order,order));
   }
   function edgeOptions(index:number,edge:number) {
-    return q.data?.plans.filter(p=>p.trim&&p.trim[0]===index&&p.trim[1]===edge&&
+    return q.data?.plans.filter(p=>!p.rates&&p.trim&&p.trim[0]===index&&p.trim[1]===edge&&
       equal(p.removed,removed)&&equal(p.order,plan!.order))??[];
+  }
+  function changeRate(index:number,pct:number) {
+    if(!plan)return;
+    const rates=plan.rates?[...plan.rates]:plan.windows.map(()=>100);
+    rates[index]=pct;
+    const next=q.data?.plans.find(p=>equal(p.removed,removed)&&equal(p.order,plan.order)&&
+      equal(p.trim??[],plan.trim??[])&&equal(p.rates??p.windows.map(()=>100),rates));
+    if(next)changePlan(next);
   }
   const at=sourceTime(plan,position);
   const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&s.start<=at&&at<s.end);
@@ -132,10 +144,10 @@ export function SyntheticCutPreview() {
     <div className="synthetic-word-list">
       {q.data.sentences.map(s=><button type="button" key={s.number}
         aria-pressed={selected.includes(s.number)} className={removed.includes(s.number)?"cut-removed":""}
-        disabled={locked||!!plan.trim} onClick={()=>toggle(s.number)}>{s.text}</button>)}
+        disabled={locked||!!plan.rates||!!plan.trim} onClick={()=>toggle(s.number)}>{s.text}</button>)}
     </div>
     <div className="synthetic-word-list">
-      <button disabled={locked||!!plan.trim||!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
+      <button disabled={locked||!!plan.rates||!!plan.trim||!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
       <button disabled={locked||plan.plan_sha256===baseline.plan_sha256} onClick={()=>changePlan(baseline)}>Восстановить исходное</button>
     </div>
     <h3>Порядок фрагментов</h3>
@@ -145,7 +157,7 @@ export function SyntheticCutPreview() {
         const previous=plan.order[i-1],next=plan.order[i+1];
         const text=q.data?.sentences.find(s=>s.number===n)?.text??String(n);
         return <div key={n} role="listitem" data-reorder-number={n} className="synthetic-word-list">
-          <button type="button" aria-label={"Перетащить "+text} disabled={locked||!!plan.trim} style={{touchAction:"none"}}
+          <button type="button" aria-label={"Перетащить "+text} disabled={locked||!!plan.rates||!!plan.trim} style={{touchAction:"none"}}
             onPointerDown={e=>{if(e.isPrimary&&e.button===0)e.currentTarget.setPointerCapture(e.pointerId);}}
             onPointerUp={e=>{
               if(!e.currentTarget.hasPointerCapture(e.pointerId))return;
@@ -154,8 +166,8 @@ export function SyntheticCutPreview() {
               if(target)reordered(n,Number(target.getAttribute("data-reorder-number")));
             }}>↕</button>
           <span>{i+1}. {text}</span>
-          <button type="button" aria-label={"Выше: "+text} disabled={locked||!!plan.trim||!canMove(n,previous)} onClick={()=>reordered(n,previous)}>↑</button>
-          <button type="button" aria-label={"Ниже: "+text} disabled={locked||!!plan.trim||!canMove(n,next)} onClick={()=>reordered(n,next)}>↓</button>
+          <button type="button" aria-label={"Выше: "+text} disabled={locked||!!plan.rates||!!plan.trim||!canMove(n,previous)} onClick={()=>reordered(n,previous)}>↑</button>
+          <button type="button" aria-label={"Ниже: "+text} disabled={locked||!!plan.rates||!!plan.trim||!canMove(n,next)} onClick={()=>reordered(n,next)}>↓</button>
         </div>;
       })}
     </div>
@@ -175,7 +187,7 @@ export function SyntheticCutPreview() {
         onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)}
         onEnded={()=>{
           const v=video.current,next=plan.windows[activeWindow.current+1];
-          if(v&&next){activeWindow.current++;v.currentTime=next.source_start;setPosition(next.output_start);
+          if(v&&next){activeWindow.current++;v.playbackRate=rateAt(plan,activeWindow.current);v.currentTime=next.source_start;setPosition(next.output_start);
             void v.play().catch(()=>{setError(true);setPlaying(false);});}
           else{setPlaying(false);setPosition(plan.duration);}
         }}
@@ -186,7 +198,7 @@ export function SyntheticCutPreview() {
     <div className="cut-track" role="img" aria-label="Сохранённые участки исходного видео">
       {plan.windows.map((w,i)=><span key={i} style={{left:(w.source_start/duration*100)+"%",width:((w.source_end-w.source_start)/duration*100)+"%"}}/>)}
     </div>
-    <div className="cut-track-label"><strong>Монтаж</strong><span>{seconds(plan.duration)} · убрано {seconds(Math.max(0,baseline.duration-plan.duration))}</span></div>
+    <div className="cut-track-label"><strong>Монтаж</strong><span>{seconds(plan.duration)}{plan.rates?" · скорость изменена":" · убрано "+seconds(Math.max(0,baseline.duration-plan.duration))}</span></div>
     <div className="cut-track cut-output" role="img" aria-label="Последовательность фрагментов после нарезки">
       {plan.windows.map((w,i)=><span key={i} style={{left:(w.output_start/plan.duration*100)+"%",width:((w.output_end-w.output_start)/plan.duration*100)+"%"}}/>)}
     </div>
@@ -201,7 +213,7 @@ export function SyntheticCutPreview() {
         const original=untrimmed?.windows[index];
         return <label key={edge}>{label}
           <select aria-label={label} value={active?plan.plan_sha256:untrimmed?.plan_sha256??""}
-            disabled={locked||!untrimmed||!options.length||!!plan.trim&&!active}
+            disabled={locked||!!plan.rates||!untrimmed||!options.length||!!plan.trim&&!active}
             onChange={e=>{const next=[untrimmed,...options].find(p=>p?.plan_sha256===e.target.value);if(next)changePlan(next);}}>
             <option value={untrimmed?.plan_sha256??""}>{seconds((edge===1?original?.source_start:original?.source_end)??(edge===1?w.source_start:w.source_end))} · исходная</option>
             {options.map(p=><option key={p.plan_sha256} value={p.plan_sha256}>{seconds(p.trim![2]/1000)}</option>)}
@@ -209,7 +221,17 @@ export function SyntheticCutPreview() {
         </label>;
       })}
     </div>)}
-    {plan.trim&&<button disabled={locked||!untrimmed} onClick={()=>untrimmed&&changePlan(untrimmed)}>Сбросить изменение границы</button>}
+    {plan.trim&&<button disabled={locked||!!plan.rates||!untrimmed} onClick={()=>untrimmed&&changePlan(untrimmed)}>Сбросить изменение границы</button>}
+    <h3>Скорость фрагментов</h3>
+    <p className="secondary">Скорость сохраняется вместе с монтажом. Для изменения границ, удаления или перестановки сначала сбрось скорость. Предпросмотр приблизительный.</p>
+    {plan.windows.map((_,index)=><label key={index}>Скорость фрагмента {index+1}
+      <select aria-label={"Скорость фрагмента "+(index+1)} value={plan.rates?.[index]??100}
+        disabled={locked||!normalSpeed||!q.data?.plans.some(p=>p.rates&&equal(p.removed,removed)&&equal(p.order,plan.order)&&equal(p.trim??[],plan.trim??[]))}
+        onChange={e=>changeRate(index,Number(e.target.value))}>
+        {[50,100,200].map(n=><option key={n} value={n}>{n/100}×</option>)}
+      </select>
+    </label>)}
+    {plan.rates&&<button disabled={locked||!normalSpeed} onClick={()=>normalSpeed&&changePlan(normalSpeed)}>Сбросить скорость</button>}
     <label>Позиция монтажа
       <input type="range" min={0} max={plan.duration} step={0.01} value={position} disabled={!usable}
         onChange={e=>{video.current?.pause();move(Number(e.target.value));}} />
@@ -224,7 +246,7 @@ export function SyntheticCutPreview() {
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
     <details><summary>История нарезки ({q.data.history.length})</summary>
-      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
+      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.rates?"Скорость: "+h.rates.map(n=>n/100+"×").join(" / "):h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
     </details>
   </section>;
 }
