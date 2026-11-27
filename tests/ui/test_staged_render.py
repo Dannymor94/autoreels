@@ -172,3 +172,67 @@ def test_staged_input_replacement_and_empty_artifact_rejected(tmp_path):
     with pytest.raises(RuntimeError, match="empty bytes"):
         gateway.render_staged_clip(tmp_path, stem="DEMO", clip="r01",
             gate="ui-empty", plan_sha256=plan_sha, run_render=empty)
+
+
+def test_bound_executor_rejects_config_drift_before_claim(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from autoreels.orchestr import execution, staged_executor
+    _, plan = stage(tmp_path)
+    bound = staged_executor.bind(tmp_path, job_id="j1", target_id="local",
+                                 stem="DEMO", clip="r01", gate="ui-bind")
+    assert bound.request.plan_sha256 == digest(plan.read_bytes())
+    with closing(sqlite3.connect(tmp_path / "jobs.sqlite")) as c:
+        ledger = execution.Ledger(c)
+        job = ledger.submit(bound.request)
+        (tmp_path / "config" / "render.local.yaml").write_text("role: both\n")
+        with pytest.raises(execution.Conflict, match="config changed"):
+            staged_executor.run_bound(ledger, bound, worker_id="w", clock_ms=lambda: 0,
+                run_render=lambda **k: pytest.fail("unexpected render"), verify=lambda p: None)
+        assert ledger.get("j1") == job
+
+
+def test_bound_executor_validation_and_expiry_hold_reservation(tmp_path):
+    import sqlite3
+    from contextlib import closing
+    from autoreels.orchestr import execution, staged_executor
+    stage(tmp_path)
+    bound = staged_executor.bind(tmp_path, job_id="j1", target_id="local",
+                                 stem="DEMO", clip="r01", gate="ui-bound")
+    def fake(**kwargs):
+        out = tmp_path / "reels-out/DEMO/_gate/ui-bound/r01.mp4"
+        out.parent.mkdir(parents=True)
+        out.write_bytes(b"synthetic-output")
+        return [out]
+    def fail(_):
+        raise ValueError("not decodable")
+    with closing(sqlite3.connect(tmp_path / "jobs.sqlite")) as c:
+        ledger = execution.Ledger(c)
+        ledger.submit(bound.request)
+        with pytest.raises(ValueError, match="not decodable"):
+            staged_executor.run_bound(ledger, bound, worker_id="w", clock_ms=lambda:0,
+                                      run_render=fake, verify=fail)
+        j = ledger.get("j1")
+        assert j.status == "running" and j.artifact_sha256 is None
+        j = ledger.apply("j1", j.revision, execution.expire, execution.MAX_LEASE_MS)
+        assert j.status == "reconcile"
+        conflicting = staged_executor.bind(tmp_path, job_id="j2", target_id="local",
+                                           stem="DEMO", clip="r02", gate="ui-bound")
+        with pytest.raises(execution.Conflict, match="reserved"):
+            ledger.submit(conflicting.request)
+        with pytest.raises(execution.Conflict):
+            staged_executor.run_bound(ledger, bound, worker_id="w2", clock_ms=lambda:60001,
+                                      run_render=lambda **k: pytest.fail("duplicate"), verify=lambda p:None)
+
+
+def test_fixture_lock_serializes_cooperating_executor(tmp_path):
+    import sys
+    from autoreels.orchestr import execution, staged_executor
+    if sys.platform == "win32":
+        pytest.skip("fixture lock POSIX only")
+    with staged_executor.fixture_lock(tmp_path):
+        with pytest.raises(execution.Conflict, match="busy"):
+            with staged_executor.fixture_lock(tmp_path):
+                pytest.fail("second lock acquired")
+    with staged_executor.fixture_lock(tmp_path):
+        assert (tmp_path / ".ui-staged-executor.lock").is_file()
