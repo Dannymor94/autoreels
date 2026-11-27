@@ -4551,6 +4551,7 @@ def cmd_render(
     _manifest_paths: list | None = None,
     background: bool = False,
     _raise_on_failure: bool = False,
+    archive_source: bool = True,
     manifest_name: str | None = None,
     reels_filter: str | None = None,
     gate_name: str | None = None,
@@ -4799,7 +4800,8 @@ def cmd_render(
                 if r is not None:
                     _write_render_fingerprint(out_dir_final, r.id, _fp(r))
             print(f"готово: {len(outputs)} клипов → {out_dir_final}", flush=True)
-            _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
+            if archive_source:
+                _archive_video(inputs_dir / Path(manifest.source).name, archive_dir)
         except SourceNotFoundError as e:
             print(f"⊘ пропущен {mf.stem}: {e}", flush=True)
             skipped_no_video.append(mf.name)

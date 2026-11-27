@@ -214,3 +214,73 @@ def module_settings(root, choices):
         invalidates=list(diff.invalidates), base_sha256=diff.previous_sha256,
         apply_enabled=False,
     )
+
+
+
+def render_staged_clip(root, *, stem, clip, gate, plan_sha256, run_render):
+    """UI-204A: one staged H.264 clip through the existing render entry point.
+
+    Trusted caller/test workspace only. The runner is injected, not exposed to
+    HTTP or registered in the live job queue. Caller owns exclusive staging,
+    config/assets and runtime isolation; this is not a real worker preflight.
+    A byte digest is not a decoded-media validation or export approval.
+    """
+    import hashlib
+    import re
+    from pathlib import Path
+
+    from autoreels.core.models import Manifest
+    from .pathguard import safe_path
+
+    root = Path(root)
+    if not root.is_absolute() or not root.is_dir() or root.is_symlink():
+        raise ValueError("explicit isolated root required")
+    if not (re.fullmatch(r"[A-Za-z0-9_-]{1,64}", stem)
+            and re.fullmatch(r"r[0-9]{2,6}", clip)
+            and re.fullmatch(r"ui-[a-z0-9-]{1,60}", gate)
+            and re.fullmatch(r"[0-9a-f]{64}", plan_sha256)):
+        raise ValueError("invalid staged render identity")
+
+    def read_bound(path):
+        if not safe_path(root, path) or not path.is_file():
+            raise ValueError("staged file unavailable")
+        return path.read_bytes()
+
+    manifest_path = root / "reviews" / (stem + ".review.json")
+    plan_bytes = read_bound(manifest_path)
+    if hashlib.sha256(plan_bytes).hexdigest() != plan_sha256:
+        raise ValueError("stale plan")
+    manifest = Manifest.model_validate_json(plan_bytes)
+    # First acceptance slice only: simple staged source, full SHA, no external
+    # source_path hint. Legacy/partial manifests require staging reconciliation.
+    if (manifest.source != stem + ".mp4" or manifest.source_path
+            or manifest.source_hash_scheme != "full"
+            or sum(r.id == clip for r in manifest.reels) != 1):
+        raise ValueError("unsupported staged plan")
+    source = root / "inputs" / manifest.source
+    source_bytes = read_bound(source)
+    if hashlib.sha256(source_bytes).hexdigest() != manifest.source_sha256:
+        raise ValueError("source mismatch")
+
+    out_dir = root / "reels-out"
+    destination = out_dir / stem / "_gate" / gate
+    if not safe_path(root, destination) or destination.exists():
+        raise ValueError("staging gate already exists or is blocked")
+
+    # Exact selected manifest and clip; no git pull, archive, encoder fallback,
+    # automatic recrop, remote call, auto/LLM or legacy export.
+    outputs = run_render(
+        root=root, _manifest_paths=[manifest_path], reels_filter=clip,
+        gate_name=gate, profile="h264", encoder="libx264",
+        pull_first=False, archive_source=False, fallback=False,
+        allow_stale=False, auto_recrop=False, _raise_on_failure=True,
+    )
+    expected = destination / (clip + ".mp4")
+    if list(outputs) != [expected]:
+        raise RuntimeError("staged render did not return the exact clip")
+    if read_bound(manifest_path) != plan_bytes or read_bound(source) != source_bytes:
+        raise RuntimeError("staged input changed")
+    result = read_bound(expected)
+    if not result:
+        raise RuntimeError("staged render returned empty bytes")
+    return expected, hashlib.sha256(result).hexdigest()
