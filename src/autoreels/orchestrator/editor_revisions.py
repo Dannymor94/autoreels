@@ -60,7 +60,17 @@ class FixtureSelection(BaseModel):
     @property
     def selection_key(self) -> tuple[int, ...]:
         """Legacy cut key, or a disjoint key for a nonchronological fixture."""
-        return self.removed if self.order is None else (*self.removed, 0, *self.order)
+        if (any(n <= 0 for n in self.removed)
+                or tuple(sorted(set(self.removed))) != self.removed):
+            raise Conflict("invalid fixture removal key")
+        if self.order is None:
+            return self.removed
+        if (not self.order or any(n <= 0 for n in self.order)
+                or len(set(self.order)) != len(self.order)
+                or set(self.order) & set(self.removed)
+                or tuple(sorted(self.order)) == self.order):
+            raise Conflict("invalid fixture permutation key")
+        return (*self.removed, 0, *self.order)
 
 
 @dataclass(frozen=True)
