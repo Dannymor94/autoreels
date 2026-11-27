@@ -2,14 +2,17 @@
 import hashlib
 import json
 import shutil
+import sqlite3
 import subprocess
+import time
+from contextlib import closing
 from pathlib import Path
 
 import yaml
 
 from autoreels import __main__ as cli
 from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Word
-from autoreels.orchestr import pipeline_gateway as gateway
+from autoreels.orchestr import execution, staged_executor
 
 
 def run(*args, binary="ffmpeg"):
@@ -91,37 +94,52 @@ def test_actual_staged_render(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli, "_git_pull", forbidden)
     monkeypatch.setattr(cli, "_archive_video", forbidden)
-    output, output_sha = gateway.render_staged_clip(
-        tmp_path, stem="DEMO", clip="r01", gate="ui-ffmpeg",
-        plan_sha256=plan_sha, run_render=cli.cmd_render,
-    )
-    assert output == tmp_path / "reels-out/DEMO/_gate/ui-ffmpeg/r01.mp4"
-    assert sha(output) == output_sha
-    assert sha(source) == source_sha and sha(plan) == plan_sha
-    assert {p.name: sha(p) for p in (tmp_path / "config").iterdir()} == config_before
-    assert not (tmp_path / "inputs-archive").exists()
-    assert sorted(p.name for p in output.parent.glob("*.mp4")) == ["r01.mp4"]
+    bound = staged_executor.bind(tmp_path, job_id="fixture-job", target_id="ci-desktop",
+                                 stem="DEMO", clip="r01", gate="ui-ffmpeg")
+    assert bound.request.plan_sha256 == plan_sha
+    observed = {}
 
-    info = json.loads(run("-v", "error", "-show_streams", "-show_format",
-                          "-of", "json", output, binary=ffprobe))
-    video = next(s for s in info["streams"] if s["codec_type"] == "video")
-    audio = next(s for s in info["streams"] if s["codec_type"] == "audio")
-    assert video["codec_name"] == "h264" and audio["codec_name"] == "aac"
-    assert (video["width"], video["height"]) == (360, 640)
-    vd, ad = float(video["duration"]), float(audio["duration"])
-    assert abs(vd - 3.0) <= 0.10
-    assert abs(ad - vd) <= 0.05
-    # All video and audio packets must decode, not just container metadata.
-    run("-v", "error", "-xerror", "-nostdin", "-i", output,
-        "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-")
-    def bright_pixels(at):
-        data = run("-v", "error", "-nostdin", "-ss", str(at), "-i", output,
-                   "-frames:v", "1", "-vf", "crop=360:280:0:360,format=gray",
-                   "-threads", "1", "-f", "rawvideo", "-")
-        assert len(data) == 360 * 280
-        return sum(x > 200 for x in data)
-    before, during = bright_pixels(0.1), bright_pixels(1.0)
-    assert during > before + 50, (before, during)
-    print(f"UI-204B PASS: 360x640 H264/AAC; video={vd:.3f}s audio={ad:.3f}s; "
-          f"full decode; subtitle pixels {before}->{during}; source/plan/config unchanged; "
-          f"artifact_sha256={output_sha}")
+    def validate(output):
+        assert output == tmp_path / "reels-out/DEMO/_gate/ui-ffmpeg/r01.mp4"
+        assert sha(source) == source_sha and sha(plan) == plan_sha
+        assert {p.name: sha(p) for p in (tmp_path / "config").iterdir()} == config_before
+        assert not (tmp_path / "inputs-archive").exists()
+        assert sorted(p.name for p in output.parent.glob("*.mp4")) == ["r01.mp4"]
+
+        info = json.loads(run("-v", "error", "-show_streams", "-show_format",
+                              "-of", "json", output, binary=ffprobe))
+        video = next(s for s in info["streams"] if s["codec_type"] == "video")
+        audio = next(s for s in info["streams"] if s["codec_type"] == "audio")
+        assert video["codec_name"] == "h264" and audio["codec_name"] == "aac"
+        assert (video["width"], video["height"]) == (360, 640)
+        vd, ad = float(video["duration"]), float(audio["duration"])
+        assert abs(vd - 3.0) <= 0.10
+        assert abs(ad - vd) <= 0.05
+        # All video and audio packets must decode, not just container metadata.
+        run("-v", "error", "-xerror", "-nostdin", "-i", output,
+            "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-")
+        def bright_pixels(at):
+            data = run("-v", "error", "-nostdin", "-ss", str(at), "-i", output,
+                       "-frames:v", "1", "-vf", "crop=360:280:0:360,format=gray",
+                       "-threads", "1", "-f", "rawvideo", "-")
+            assert len(data) == 360 * 280
+            return sum(x > 200 for x in data)
+        before, during = bright_pixels(0.1), bright_pixels(1.0)
+        assert during > before + 50, (before, during)
+        observed.update(video=vd, audio=ad, before=before, during=during, sha=sha(output))
+
+    with closing(sqlite3.connect(tmp_path / "fixture-jobs.sqlite")) as db:
+        ledger = execution.Ledger(db)
+        queued = ledger.submit(bound.request)
+        assert queued.status == "queued"
+        job = staged_executor.run_bound(
+            ledger, bound, worker_id="ci-worker", clock_ms=lambda: time.monotonic_ns() // 1_000_000,
+            run_render=cli.cmd_render, verify=validate,
+        )
+        assert job.status == "success" and job.artifact_sha256 == observed["sha"]
+        assert ledger.get("fixture-job") == job
+        assert ledger.submit(bound.request) == job
+    print(f"UI-204B PASS: 360x640 H264/AAC; video={observed['video']:.3f}s "
+          f"audio={observed['audio']:.3f}s; full decode; subtitle pixels "
+          f"{observed['before']}->{observed['during']}; source/plan/config unchanged; "
+          f"artifact_sha256={observed['sha']}; ledger success")
