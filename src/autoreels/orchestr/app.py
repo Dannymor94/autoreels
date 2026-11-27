@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, pipeline_gateway, reviews, sourcemeta
+from . import catalog, clipinfo, manifests, pipeline_gateway, render_targets, reviews, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -163,6 +163,11 @@ def health():
 @app.get("/api/capabilities", response_model=CapabilitiesResponse)
 def capabilities():
     return pipeline_gateway.capabilities()
+
+
+@app.get("/api/render-targets", response_model=render_targets.RenderInventory)
+def render_inventory():
+    return pipeline_gateway.render_inventory()
 
 
 @app.get("/api/projects", response_model=list[ProjectItem])

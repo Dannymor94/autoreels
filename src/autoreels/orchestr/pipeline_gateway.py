@@ -1,5 +1,7 @@
 """The ONLY module that will call the pipeline (arl … --json) — nothing else in orchestr imports cloud/local/core internals."""
 
+from . import render_targets
+
 VERDICT_TAGS = [
     "cut_word",
     "foreign_speech_tail",
@@ -24,6 +26,10 @@ def capabilities() -> dict:
         "source": "fallback",
         "verdict_tags": VERDICT_TAGS,
     }
+
+
+def render_inventory() -> render_targets.RenderInventory:
+    return render_targets.inventory()
 
 
 def catalog_history(root):
