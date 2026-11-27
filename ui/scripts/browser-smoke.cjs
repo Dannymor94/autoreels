@@ -20,10 +20,25 @@ async function layout(page, label) {
 }
 async function mock(page, mode = "normal") {
   const reviews = new Map();
+  const comparisons = new Map();
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
+    if (path.startsWith("/api/comparisons/")) {
+      const pair = [url.searchParams.get("left"), url.searchParams.get("right")].sort();
+      const left_variant = pair[0], right_variant = pair[1];
+      const key = path + JSON.stringify(pair);
+      const state = comparisons.get(key) || {left_variant, right_variant, left_sha256: "a".repeat(64), right_sha256: "b".repeat(64), current: null, history: []};
+      if (method === "PUT") {
+        const input = route.request().postDataJSON();
+        const {base_revision, ...event} = input;
+        state.current = {...event,left_variant,right_variant,created_at:"2026-11-26T20:00:00Z"};
+        state.history.unshift(state.current);
+        comparisons.set(key,state);
+      }
+      return route.fulfill({json:state});
+    }
     if (path.startsWith("/api/reviews/")) {
       const variant = url.searchParams.get("variant") || "";
       const artifact_sha256 = (variant ? "b" : "a").repeat(64);
@@ -97,6 +112,27 @@ async function main() {
           await page.getByText("Сохранено: Оставить", {exact:true}).waitFor();
           assert.equal(await page.getByLabel("Комментарий (необязательно)").inputValue(), "Синтетическая оценка");
           console.log("PASS review save and reload (mock API, synthetic video)");
+          await page.getByRole("button",{name:"Сравнить варианты",exact:true}).click();
+          await page.getByRole("button",{name:"Выбрать Б",exact:true}).waitFor();
+          await layout(page, "390 comparison");
+          await page.getByLabel("Звук",{exact:true}).selectOption("b");
+          assert.deepEqual(await page.locator(".comparison-video").evaluateAll(vs=>vs.map(v=>v.muted)), [true,false]);
+          await page.getByLabel("Общая позиция").focus();
+          await page.keyboard.press("Home");
+          await page.keyboard.press("ArrowRight");
+          await page.waitForFunction(()=> {
+            const vs=[...document.querySelectorAll(".comparison-video")];
+            return vs.length===2 && vs.every(v=>Math.abs(v.currentTime-0.05)<0.04);
+          });
+          console.log("PASS common seek and single audio selection");
+          await page.getByLabel("Комментарий к выбору").fill("Сравнение");
+          await page.getByRole("button",{name:"Выбрать Б",exact:true}).click();
+          await page.getByText("Выбран: variant_b",{exact:true}).waitFor();
+          await page.getByRole("button",{name:"Закрыть сравнение",exact:true}).click();
+          await page.getByRole("button",{name:"Сравнить варианты",exact:true}).click();
+          await page.getByText("Выбран: variant_b",{exact:true}).waitFor();
+          await page.getByRole("button",{name:"Закрыть сравнение",exact:true}).click();
+          console.log("PASS comparison choice and reopen (mock API)");
         }
         await page.getByRole("button", {name: "variant_b", exact: true}).click();
         await page.waitForURL(/v=_gate%2Fvariant_b/);

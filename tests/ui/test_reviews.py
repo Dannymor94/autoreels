@@ -82,3 +82,33 @@ def test_replacement_does_not_inherit_review_and_versioned_playback(review_fixtu
     assert client.put(URL, json=_body(state["artifact_sha256"], position_s=-1)).status_code == 422
     assert client.put(URL, json=_body(state["artifact_sha256"], verdict="ok")).status_code == 422
     assert len(client.get(URL).json()["history"]) == 1
+
+
+def test_pair_preference_is_bound_to_both_artifacts(review_fixture):
+    root, video, legacy, draft, client = review_fixture
+    variant = video.parent / "_gate" / "b" / video.name
+    variant.parent.mkdir(parents=True)
+    variant.write_bytes(b"synthetic-other")
+    url = "/api/comparisons/DEMO/r01"
+    params = {"left":"", "right":"_gate/b"}
+    before = legacy.read_bytes(), draft.read_bytes()
+    state = client.get(url, params=params).json()
+    assert state["current"] is None
+    assert not (root/"reviews/ui").exists()
+    body = {"request_id":str(uuid4()), "left_sha256":state["left_sha256"],
+            "right_sha256":state["right_sha256"], "base_revision":None,
+            "winner":"_gate/b", "comment":"better"}
+    saved = client.put(url, params=params, json=body)
+    assert saved.status_code == 200
+    assert saved.json()["current"]["winner"] == "_gate/b"
+    assert client.put(url, params=params, json=body).json() == saved.json()
+    assert client.get(url, params={"left":"_gate/b","right":""}).json() == saved.json()
+    assert client.put(url, params=params, json={**body, "winner":"other"}).status_code == 422
+    assert client.put(url, params=params, json={**body, "request_id":str(uuid4())}).status_code == 409
+    assert client.get(URL).json()["current"] is None
+    variant.write_bytes(b"replacement")
+    stale = client.get(url, params=params).json()
+    assert stale["current"] is None and len(stale["history"]) == 1
+    assert client.put(url, params=params, json=body).status_code == 409
+    assert (legacy.read_bytes(), draft.read_bytes()) == before
+    assert client.get(url, params={"left":"","right":""}).status_code == 422

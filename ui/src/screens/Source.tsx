@@ -10,6 +10,7 @@ import { ClipList } from "../components/ClipList";
 import { VariantTabs } from "../components/VariantTabs";
 import { HelpOverlay } from "../components/HelpOverlay";
 import { ReviewPanel } from "../components/ReviewPanel";
+import { ComparisonPanel } from "../components/ComparisonPanel";
 
 interface Props {
   stem: string;
@@ -32,6 +33,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
   const [clip, setClip] = useState<string | null>(null);
   const [variant, setVariant] = useState("");
   const [help, setHelp] = useState(false);
+  const [comparing, setComparing] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const pending = useRef<Pending | null>(null);
   const lastSaved = useRef(0);
@@ -88,6 +90,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
       if (play) v.play().catch(() => {});
       return;
     }
+    setComparing(false);
     pending.current = { t: 0, play };
     setLoadedVersion(null);
     setClip(g.clip);
@@ -96,6 +99,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
 
   function switchVariant(next: string) {
     if (next === variant) return;
+    setComparing(false);
     const v = video.current;
     pending.current = { t: v?.currentTime ?? 0, play: v ? !v.paused : false };
     setLoadedVersion(null);
@@ -110,6 +114,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
   }
 
   function onAction(a: Action) {
+    if (comparing) { if (a === "escape") setComparing(false); return; }
     const v = video.current;
     switch (a) {
       case "playPause": if (v) { if (v.paused) v.play().catch(() => {}); else v.pause(); } break;
@@ -175,6 +180,9 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
           {group ? (
             <>
               <VariantTabs variants={group.variants} current={variant} onPick={switchVariant} />
+              {group.variants.length > 1 && !comparing && <button className="compare-open" onClick={() => { video.current?.pause(); setComparing(true); }}>Сравнить варианты</button>}
+              {comparing && group.variants.length > 1 && <ComparisonPanel key={group.clip + variant} stem={stem} clip={group.clip} variants={group.variants} active={variant} onClose={() => setComparing(false)} />}
+              <div hidden={comparing}>
               {review.isLoading && <p role="status">Проверка версии видео…</p>}
               {review.isError && <p role="alert">Версия недоступна. <button onClick={refreshReview}>Повторить</button></p>}
               {state && mediaUrl && (
@@ -196,6 +204,7 @@ export function Source({ stem, initialClip, initialVariant, onBack, onChange }: 
                     onRefresh={refreshReview} />
                 </>
               )}
+              </div>
             </>
           ) : (
             <p style={{ color: "var(--fg2)" }}>{L.pickClip}</p>

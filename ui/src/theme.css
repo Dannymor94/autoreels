@@ -106,3 +106,13 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .review-actions button:disabled, .review-refresh:disabled { opacity: .6; cursor: default; }
 .review-history-entry { border-top: 1px solid var(--border); padding-block: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .review-panel summary { cursor: pointer; }
+
+.comparison-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg2); }
+.comparison-heading, .comparison-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.comparison-selects, .comparison-videos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.comparison-selects label, .comparison-videos > div { min-width: 0; display: grid; gap: 4px; }
+.comparison-panel select, .comparison-panel textarea, .comparison-panel button, .compare-open { min-height: 44px; min-width: 0; font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+.comparison-panel textarea { width: 100%; resize: vertical; }
+.comparison-panel button:disabled { opacity: .6; }
+.comparison-video { display: block; width: 100%; aspect-ratio: 9/16; max-height: 65vh; object-fit: contain; background: #000; border-radius: 6px; }
+.compare-open { margin-bottom: 8px; }

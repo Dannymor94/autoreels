@@ -249,3 +249,110 @@ def save(root: Path, path: Path, stem: str, clip: str, variant: str,
         return _state(root, body.artifact_sha256, events, stem, clip)
     except (sqlite3.Error, OSError) as exc:
         raise HTTPException(503, "review storage unavailable") from exc
+
+
+# UI-104: preference is not a verdict or export approval.
+class ComparisonInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(pattern=_ID)
+    left_sha256: str = Field(pattern=_SHA)
+    right_sha256: str = Field(pattern=_SHA)
+    base_revision: str | None
+    winner: str
+    comment: str = Field(max_length=2000)
+
+
+class ComparisonEvent(BaseModel):
+    request_id: str
+    left_variant: str
+    right_variant: str
+    left_sha256: str
+    right_sha256: str
+    winner: str
+    comment: str
+    created_at: str
+
+
+class ComparisonState(BaseModel):
+    left_variant: str
+    right_variant: str
+    left_sha256: str
+    right_sha256: str
+    current: ComparisonEvent | None
+    history: list[ComparisonEvent]
+
+
+def _comparison_rows(conn, stem, clip, a, b):
+    # Existing UI-103 databases have no comparisons table until first choice.
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='comparisons'").fetchone():
+        return []
+    return [ComparisonEvent.model_validate(dict(row)) for row in conn.execute(
+        "SELECT * FROM comparisons WHERE stem=? AND clip=? AND left_variant=? "
+        "AND right_variant=? ORDER BY seq DESC", (stem, clip, a, b),
+    )]
+
+
+def _comparison_state(a, b, sha_a, sha_b, events):
+    return ComparisonState(left_variant=a, right_variant=b, left_sha256=sha_a,
+                           right_sha256=sha_b, history=events,
+                           current=next((e for e in events if
+                               (e.left_sha256, e.right_sha256) == (sha_a, sha_b)), None))
+
+
+def compare(root: Path, stem: str, clip: str, left: str, right: str,
+            body: ComparisonInput | None = None) -> ComparisonState:
+    from .media import resolve_media_path
+
+    if left == right:
+        raise HTTPException(422, "choose two different variants")
+    # Canonical ordering makes switching the UI sides the same comparison.
+    a, b = sorted((left, right))
+    path_a = resolve_media_path(root, stem, clip, a)
+    path_b = resolve_media_path(root, stem, clip, b)
+    sha_a, sha_b = artifact_hash(path_a), artifact_hash(path_b)
+    db = _db_path(root)
+    if body is None and not db.exists():
+        return _comparison_state(a, b, sha_a, sha_b, [])
+    try:
+        if body is None:
+            with closing(_connect(db, write=False)) as conn:
+                return _comparison_state(a, b, sha_a, sha_b, _comparison_rows(conn, stem, clip, a, b))
+        if body.winner not in (a, b):
+            raise HTTPException(422, "winner must be one of the selected variants")
+        expected = (body.left_sha256, body.right_sha256) if left == a else (body.right_sha256, body.left_sha256)
+        if expected != (sha_a, sha_b):
+            raise HTTPException(409, "comparison video changed")
+        payload = (stem, clip, a, b, sha_a, sha_b, body.base_revision, body.winner, body.comment)
+        with closing(_connect(db, write=True)) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            _create(conn)
+            conn.execute("""CREATE TABLE IF NOT EXISTS comparisons (
+                seq INTEGER PRIMARY KEY,
+                request_id TEXT NOT NULL UNIQUE,
+                stem TEXT NOT NULL, clip TEXT NOT NULL,
+                left_variant TEXT NOT NULL, right_variant TEXT NOT NULL,
+                left_sha256 TEXT NOT NULL, right_sha256 TEXT NOT NULL,
+                base_revision TEXT, winner TEXT NOT NULL, comment TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""")
+            prior = conn.execute(
+                "SELECT stem,clip,left_variant,right_variant,left_sha256,right_sha256,"
+                "base_revision,winner,comment FROM comparisons WHERE request_id=?",
+                (body.request_id,),
+            ).fetchone()
+            if prior is not None:
+                if tuple(prior) != payload:
+                    raise HTTPException(409, "request id already used with different data")
+            else:
+                current = _comparison_state(a, b, sha_a, sha_b, _comparison_rows(conn, stem, clip, a, b)).current
+                if (current.request_id if current else None) != body.base_revision:
+                    raise HTTPException(409, "comparison revision changed")
+                conn.execute(
+                    "INSERT INTO comparisons(request_id,stem,clip,left_variant,right_variant,"
+                    "left_sha256,right_sha256,base_revision,winner,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (body.request_id, *payload, datetime.now(timezone.utc).isoformat()),
+                )
+            events = _comparison_rows(conn, stem, clip, a, b)
+        return _comparison_state(a, b, sha_a, sha_b, events)
+    except (sqlite3.Error, OSError) as exc:
+        raise HTTPException(503, "review storage unavailable") from exc
