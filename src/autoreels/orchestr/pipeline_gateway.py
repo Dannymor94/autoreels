@@ -137,3 +137,22 @@ def pipeline_settings(root, clips=None, profile=None):
         preview_status=("valid" if valid else "blocked") if requested else "not_requested",
         execution_enabled=False,
     )
+
+
+
+def configured_module_values(r0, render):
+    """Project validated CLI config objects into the UI-203A module subset.
+
+    Configured values are not proof of target support or actual run-time flags.
+    Per-run overrides, stage prerequisites and manual edits stay separate.
+    """
+    from .presets import ModuleValue, Values
+
+    return Values(
+        hook_rescue=ModuleValue(automation_enabled=r0.autocut.hook_clauses_autocut),
+        filler_cut=ModuleValue(output_enabled=r0.montage.filler_cut),
+        two_shot=ModuleValue(output_enabled=render.two_shot),
+        loudnorm=ModuleValue(output_enabled=render.audio_processing.loudnorm_enabled),
+        denoise=ModuleValue(output_enabled=render.audio_processing.denoise_enabled),
+        music=ModuleValue(output_enabled=render.music.enabled),
+    )
