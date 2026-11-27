@@ -390,13 +390,23 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     import autoreels.orchestr.settings as settings
     from autoreels.orchestr.settings import Settings
     before = sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*"))
-    assert client.get("/api/synthetic-cut").json()["enabled"] is False
+    disabled = client.get("/api/synthetic-cut").json()
+    assert disabled["enabled"] is False and disabled["soundtracks"] == []
     settings.settings = Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
     response = client.get("/api/synthetic-cut")
     assert response.status_code == 200
     view = response.json()
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
+    from hashlib import sha256
+    from autoreels.orchestrator.synthetic_soundtrack import TRACKS
+    public = Path(__file__).resolve().parents[2] / "ui" / "public"
+    assert view["soundtracks"] == [dict(number=i, **asset.model_dump())
+                                   for i, asset in enumerate(TRACKS, 1)]
+    for asset in view["soundtracks"]:
+        bundled = public / f"synthetic-soundtrack-{asset['number']}.wav"
+        assert sha256(bundled.read_bytes()).hexdigest() == asset["sha256"]
+        assert asset["rights"] == "synthetic"
     plans = {tuple(p["removed"]):p for p in view["plans"] if p["order"] == sorted(p["order"]) and not p["trim"] and not p["rates"] and not p["crop"] and not p["music"] and not p["dip_ms"]}
     baseline, cut = plans[()], plans[(2,)]
     assert len(cut["windows"]) == 2 and 0 < cut["duration"] < baseline["duration"]

@@ -59,6 +59,7 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
         current_removed:cutRemoved,history:cutHistory,plan_sha256:cutSha,
+        soundtracks:mode==="normal"?[{number:1,label:"Tone A",sha256:"bc3958b6f5909418997f946676bb9212c473038d732790540f3f150c8e3113d9",format:"wav",rights:"synthetic",rights_note:"Generated triangle wave, 250 Hz"},{number:2,label:"Tone B",sha256:"2fb760b6b863eb3f0b8a575e72750c99705e1d1143c89308760c6ba8060fee1f",format:"wav",rights:"synthetic",rights_note:"Generated triangle wave, 400 Hz"}]:[],
         sentences:[{number:1,text:"Начало.",start:0.2,end:0.8},{number:2,text:"Лишнее.",start:1.2,end:1.8},{number:3,text:"Продолжение.",start:2.2,end:2.8}],
         plans}});
 
@@ -310,6 +311,10 @@ async function main() {
           await layout(page,"390 framing and history");
           console.log("PASS synthetic framing preview, reload, undo and redo");
           const music=cut.getByRole("combobox",{name:"Фоновый звук",exact:true});
+          assert.deepEqual(await music.locator("option").allTextContents(),["Без фонового звука","Tone A","Tone B"]);
+          await cut.getByText("Библиотека звуков (2)",{exact:true}).click();
+          await cut.getByText("Generated triangle wave, 250 Hz",{exact:true}).waitFor();
+          await cut.getByText("Библиотека звуков (2)",{exact:true}).click();
           await music.selectOption("1");
           await cut.getByText("Ревизия нарезки: 18",{exact:true}).waitFor();
           await cut.getByRole("combobox",{name:"Громкость фона",exact:true}).selectOption("10");

@@ -227,6 +227,7 @@ export function SyntheticCutPreview() {
   const dip=plan.dip_ms??0;
   const opacity=dip?Math.max(0,...plan.windows.slice(0,-1).map(w=>1-Math.abs(position-w.output_end)/(dip/1000))):0;
   const music=plan.music;
+  const soundtrack=q.data.soundtracks.find(asset=>asset.number===music?.[0]);
   const at=sourceTime(plan,position);
   const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&s.start<=at&&at<s.end);
   const duration=q.data.source_duration;
@@ -331,11 +332,20 @@ export function SyntheticCutPreview() {
       <select aria-label="Фоновый звук" value={music?.[0]??0} disabled={locked}
         onChange={e=>{const n=Number(e.target.value);changeMusic(n?[n,...(music?.slice(1)??[20,1,1])]:[]);}}>
         <option value={0}>Без фонового звука</option>
-        <option value={1}>Тестовый тон A</option>
-        <option value={2}>Тестовый тон B</option>
+        {q.data.soundtracks.map(asset=><option key={asset.number} value={asset.number}>{asset.label}</option>)}
       </select>
     </label>
-    {music&&<>
+    <details>
+      <summary>Библиотека звуков ({q.data.soundtracks.length})</summary>
+      {q.data.soundtracks.map(asset=><div key={asset.number}>
+        <strong>{asset.label}</strong>
+        <p className="secondary">Формат: {asset.format.toUpperCase()} · {asset.rights==="synthetic"?"Синтетический ассет":asset.rights}</p>
+        <p className="secondary">{asset.rights_note}</p>
+        <p className="secondary">SHA-256: <code style={{overflowWrap:"anywhere"}}>{asset.sha256}</code></p>
+      </div>)}
+      <p className="secondary">Только встроенные тестовые файлы; импорт пользовательских медиа отключён.</p>
+    </details>
+    {music&&soundtrack&&<>
       <label>Громкость фона
         <select aria-label="Громкость фона" value={music[1]} disabled={locked}
           onChange={e=>changeMusic([music[0],Number(e.target.value),music[2],music[3]])}>
