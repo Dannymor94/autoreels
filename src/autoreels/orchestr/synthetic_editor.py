@@ -111,13 +111,15 @@ def view(root: Path, enabled: bool) -> DemoEditorView:
                               words=[], history=[], undo=None, redo=None)
     try:
         path = _path(root)
-        if not path.exists():
-            with closing(sqlite3.connect(":memory:")) as conn:
-                store = revisions.Store(conn)
-                _initial(store)
-                return _view(store)
-        with closing(sqlite3.connect(path.as_uri()+"?mode=ro", uri=True, timeout=5)) as conn:
-            return _view(revisions.Store(conn, initialize=False))
+        if path.exists():
+            with closing(sqlite3.connect(path.as_uri()+"?mode=ro", uri=True, timeout=5)) as conn:
+                store = revisions.Store(conn, initialize=False)
+                if store.has_project(_PROJECT):
+                    return _view(store)
+        with closing(sqlite3.connect(":memory:")) as conn:
+            store = revisions.Store(conn)
+            _initial(store)
+            return _view(store)
     except (sqlite3.Error, OSError, ValueError, revisions.Conflict):
         raise HTTPException(503, "synthetic editor storage unavailable") from None
 

@@ -414,3 +414,48 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
         assert plan["duration"] == pytest.approx(offset)
     assert client.get("/api/synthetic-cut").json() == view
     assert sorted(str(p.relative_to(tmp_root)) for p in tmp_root.rglob("*")) == before
+
+
+def test_synthetic_cut_persists_exact_selection_and_restores(client,tmp_root):
+    import autoreels.orchestr.settings as settings
+    from autoreels.orchestr.settings import Settings
+    path = tmp_root / ".ui-synthetic-editor.sqlite3"
+    body=dict(op_id="cut-first",base_revision=0,base_plan_sha256="a"*64,
+              clip_uid="b"*64,candidate_plan_sha256="c"*64,removed=[2])
+    assert client.put("/api/synthetic-cut",json=body).status_code == 409
+    assert not path.exists()
+    settings.settings=Settings.from_env(root_override=str(tmp_root),synthetic_editor=True)
+    original=client.get("/api/synthetic-cut").json()
+    assert original["revision"]==0 and original["current_removed"]==[] and not path.exists()
+    spelling=client.get("/api/synthetic-editor").json()
+    candidate=next(p for p in original["plans"] if p["removed"]==[2])
+    body.update(base_plan_sha256=original["plan_sha256"],clip_uid=original["clip_uid"],
+                candidate_plan_sha256=candidate["plan_sha256"])
+    assert client.put("/api/synthetic-cut",json={**body,"removed":[1,3]}).status_code==409
+    assert not path.exists()
+    response=client.put("/api/synthetic-cut",json=body)
+    assert response.status_code==200,response.text
+    cut=response.json()
+    assert cut["revision"]==1 and cut["current_removed"]==[2]
+    assert cut["plan_sha256"]==candidate["plan_sha256"] and cut["history"]==[{"revision":1,"removed":[2]}]
+    assert client.get("/api/synthetic-cut").json()==cut
+    assert client.get("/api/synthetic-editor").json()==spelling
+    assert client.put("/api/synthetic-cut",json=body).json()==cut
+    assert client.put("/api/synthetic-cut",json={**body,"op_id":"stale-cut"}).status_code==409
+    edit=dict(action="edit",op_id="spelling-separate",base_revision=spelling["revision"],
+              base_plan_sha256=spelling["plan_sha256"],clip_uid=spelling["clip_uid"],word_index=0,
+              expected_text="Превет",replacement="Привет")
+    result=client.put("/api/synthetic-editor",json=edit)
+    assert result.status_code==200
+    assert client.get("/api/synthetic-cut").json()==cut
+    restore={**body,"op_id":"cut-restore","base_revision":1,"base_plan_sha256":cut["plan_sha256"],
+             "candidate_plan_sha256":original["plan_sha256"],"removed":[]}
+    result=client.put("/api/synthetic-cut",json=restore)
+    assert result.status_code==200,result.text
+    restored=result.json()
+    assert restored["revision"]==2 and restored["current_removed"]==[]
+    assert restored["plan_sha256"]==original["plan_sha256"] and restored["clip_uid"]==original["clip_uid"]
+    assert restored["history"]==[{"revision":2,"removed":[]},{"revision":1,"removed":[2]}]
+    assert client.put("/api/synthetic-cut",json=body).json()==restored
+    assert client.get("/api/synthetic-cut").json()==restored
+    assert client.get("/api/synthetic-editor").json()["words"][0]["word"]=="Привет"

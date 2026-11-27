@@ -2,7 +2,8 @@
 
 The trusted caller supplies a dedicated SQLite connection and exact initial
 manifest bytes. Not registered in the API, legacy CLI or production storage.
-The only write operation is an explicit single-word subtitle correction.
+Supports explicit single-word subtitle correction and trusted precomputed
+synthetic cut selection in separate fixture projects.
 """
 from __future__ import annotations
 
@@ -42,6 +43,18 @@ class Correction(BaseModel):
     expected_text: Token
     replacement: Token
     action: Literal["edit", "undo", "redo"] = "edit"
+
+
+class FixtureSelection(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+    action: Literal["select-fixture"]
+    op_id: OpaqueId
+    project_id: OpaqueId
+    clip_uid: Digest
+    base_revision: Annotated[int, Field(ge=0)]
+    base_plan_sha256: Digest
+    candidate_plan_sha256: Digest
+    removed: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -125,6 +138,9 @@ class Store:
     def current(self, project_id: str) -> Revision:
         return self._read(project_id)
 
+    def has_project(self, project_id: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM editor_projects_v1 WHERE project_id=?",(project_id,)).fetchone() is not None
+
     def import_initial(self, project_id: str, raw: bytes, *, expected_sha256: str) -> Revision:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", project_id):
             raise ValueError("explicit project ID required")
@@ -158,11 +174,23 @@ class Store:
                               (project_id, 0, expected_sha256, raw))
             return self._read(project_id)
 
-    def history(self, project_id: str) -> list[Correction]:
-        return [Correction.model_validate_json(row[0]) for row in self.conn.execute(
+    def _history_payloads(self, project_id: str):
+        return [row[0] for row in self.conn.execute(
             "SELECT op_payload FROM editor_revisions_v1 WHERE project_id=? AND revision>0 ORDER BY revision",
             (project_id,),
         )]
+
+    def history(self, project_id: str) -> list[Correction]:
+        try:
+            return [Correction.model_validate_json(raw) for raw in self._history_payloads(project_id)]
+        except ValueError as exc:
+            raise Conflict("incompatible editor history") from exc
+
+    def selection_history(self, project_id: str) -> list[FixtureSelection]:
+        try:
+            return [FixtureSelection.model_validate_json(raw) for raw in self._history_payloads(project_id)]
+        except ValueError as exc:
+            raise Conflict("incompatible fixture history") from exc
 
     @staticmethod
     def stacks(history: list[Correction]) -> tuple[list[Correction], list[Correction]]:
@@ -201,8 +229,11 @@ class Store:
                 raise Conflict("stale editor revision")
             if max_revision is not None and base.number >= max_revision:
                 raise Conflict("revision limit reached")
+            history = self.history(op.project_id)
+            if len(history) != base.number:
+                raise Conflict("incomplete editor history")
             if op.action != "edit":
-                undo, redo = self.stacks(self.history(op.project_id))
+                undo, redo = self.stacks(history)
                 stack = undo if op.action == "undo" else redo
                 if not stack:
                     raise Conflict("no matching history action")
@@ -236,3 +267,46 @@ class Store:
             self.conn.execute("INSERT INTO editor_revisions_v1 VALUES(?,?,?,?,?,?)",
                               (op.project_id, number, _sha(raw), raw, op.op_id, payload))
             return self._read(op.project_id, number)
+
+
+    def select_fixture(self, op: FixtureSelection, *, choices: dict[tuple[int, ...], bytes],
+                       max_revision: int = 100) -> Revision:
+        """Commit a server-computed candidate from a fixed synthetic plan set.
+
+        Internal fixture adapter only; clients cannot supply Manifest bytes.
+        This is deliberately not a generic production import/write path.
+        """
+        raw = choices.get(op.removed)
+        initial = choices.get(())
+        if raw is None or initial is None or _sha(raw) != op.candidate_plan_sha256:
+            raise Conflict("fixture candidate changed or unavailable")
+        candidate = Manifest.model_validate_json(raw)
+        baseline = Manifest.model_validate_json(initial)
+        if (len(candidate.reels) != 1 or len(baseline.reels) != 1
+                or candidate.reels[0].id != baseline.reels[0].id
+                or candidate.model_copy(update={"reels":baseline.reels}) != baseline):
+            raise Conflict("fixture candidate outside initial manifest")
+        candidate.reels[0].check_segments()
+        payload = op.model_dump_json()
+        with self._tx():
+            prior = self.conn.execute("SELECT project_id,revision,op_payload FROM editor_revisions_v1 WHERE op_id=?",
+                                      (op.op_id,)).fetchone()
+            if prior:
+                if prior[0] != op.project_id or prior[2] != payload:
+                    raise Conflict("operation ID already bound")
+                return self._read(prior[0],prior[1])
+            base = self._read(op.project_id)
+            if (base.number != op.base_revision or base.plan_sha256 != op.base_plan_sha256
+                    or self._read(op.project_id,0).plan_bytes != initial
+                    or base.plan_bytes not in choices.values()
+                    or base.clip_uids != ((baseline.reels[0].id,op.clip_uid),)):
+                raise Conflict("stale or incompatible fixture revision")
+            history = self.selection_history(op.project_id)
+            if len(history) != base.number or base.number >= max_revision:
+                raise Conflict("fixture history unavailable or full")
+            if raw == base.plan_bytes:
+                raise Conflict("fixture selection unchanged")
+            number = base.number+1
+            self.conn.execute("INSERT INTO editor_revisions_v1 VALUES(?,?,?,?,?,?)",
+                              (op.project_id,number,_sha(raw),raw,op.op_id,payload))
+            return self._read(op.project_id,number)
