@@ -50,14 +50,27 @@ def bind(root: Path, *, job_id: str, target_id: str, stem: str, clip: str, gate:
         (name, pipeline_gateway._staged_file_identity(root, config / name)[0])
         for name in _CONFIG_FILES
     ]
+    plan = root / "reviews" / (stem + ".review.json")
+    plan_sha = pipeline_gateway._staged_file_identity(root, plan)[0]
+    from autoreels.core.models import Manifest
+    from autoreels.local.assets import resolve_audio_asset
+    raw = plan.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != plan_sha:
+        raise ValueError("staged plan changed")
+    manifest = Manifest.model_validate_json(raw)
+    # The CLI resolves all explicitly selected tracks; bind all of them.
+    for digest, asset in sorted({r.background_track.asset.sha256:r.background_track.asset
+                                for r in manifest.reels if r.background_track is not None}.items()):
+        path = resolve_audio_asset(root / "assets", asset)
+        if pipeline_gateway._staged_file_identity(root, path)[0] != digest:
+            raise ValueError("staged asset changed")
+        files.append(("asset:" + digest, digest))
     snapshot = json.dumps(
         {"version": "fixture-v1", "profile": "h264", "encoder": "libx264",
          "archive_source": False, "pull_first": False, "fallback": False,
          "auto_recrop": False, "files": files},
         sort_keys=True, separators=(",", ":"), ensure_ascii=True,
     ).encode("ascii")
-    plan = root / "reviews" / (stem + ".review.json")
-    plan_sha = pipeline_gateway._staged_file_identity(root, plan)[0]
     destination = root / "reels-out" / stem / "_gate" / gate
     if not safe_path(root, destination):
         raise ValueError("staged output unavailable")

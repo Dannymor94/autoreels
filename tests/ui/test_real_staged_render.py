@@ -403,3 +403,79 @@ def test_framed_render_uses_saved_source_rectangle(tmp_path, monkeypatch):
         assert (mean[0]-mean[2] if name=="left" else mean[2]-mean[0])>80, mean
     assert sha(source)==original
     assert base.setup.crop.model_dump()==dict(x=0,y=0,w=96,h=160)
+
+
+def test_bound_soundtrack_mixes_with_retimed_speech(tmp_path, monkeypatch):
+    import numpy as np
+    from autoreels.core.models import AudioAsset, BackgroundTrack, Segment
+    from autoreels.core.config import load_render_config
+    from autoreels.local.assets import resolve_audio_asset
+    from autoreels.local.render import render_crop
+
+    ffprobe=_stage_config(tmp_path,monkeypatch)
+    cfg_path=tmp_path/"config/render.local.yaml"
+    overlay=yaml.safe_load(cfg_path.read_text())
+    overlay.update(same_shot_dissolve_frames=0,two_shot_xfade=False)
+    overlay["audio_processing"]["video_xfade_sec"]=0
+    cfg_path.write_text(yaml.safe_dump(overlay))
+    cfg=load_render_config(tmp_path/"config/render.yaml",local_path=cfg_path)
+    source=tmp_path/"inputs/DEMO.mp4"
+    run("-hide_banner","-loglevel","error","-nostdin",
+        "-f","lavfi","-i","testsrc2=size=96x160:rate=30:duration=5",
+        "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=5",
+        "-c:v","libx264","-threads","2","-pix_fmt","yuv420p","-c:a","aac","-t","5",source)
+    assets=tmp_path/"assets"
+    assets.mkdir()
+    wav=assets/"tone.wav"
+    run("-hide_banner","-loglevel","error","-nostdin","-f","lavfi","-i",
+        "sine=frequency=880:sample_rate=48000:duration=1","-c:a","pcm_s16le",wav)
+    asset=AudioAsset(sha256=sha(wav),label="Synthetic tone",rights="synthetic",rights_note="generated in CI")
+    path=assets/(asset.sha256+".wav")
+    wav.rename(path)
+    assert resolve_audio_asset(assets,asset)==path
+    track=BackgroundTrack(asset=asset,volume=0.25,fade_seconds=0.0,ducking=False,final_normalize=False)
+    reel=Reel(id="r01",start=0,end=5,score=80,hook="",title="",description="",
+              planned=True,segments=[Segment(start=0,end=2),Segment(start=3,end=5)],
+              window_rates=[0.5,2.0],background_track=track)
+    manifest=Manifest(source=source.name,source_sha256=sha(source),duration_preset="shorts",run_key="music-fixture",
+        setup=SetupProfile(setup_id="synthetic",crop=Crop(x=0,y=0,w=96,h=160),
+                           frame=[96,160],scale=[360,640]),reels=[reel])
+    plan=tmp_path/"reviews/DEMO.review.json"
+    plan.write_text(manifest.model_dump_json())
+    bound=staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
+    observed={}
+    def verify(output):
+        info=json.loads(run("-v","error","-show_streams","-of","json",output,binary=ffprobe))
+        v=next(s for s in info["streams"] if s["codec_type"]=="video")
+        a=next(s for s in info["streams"] if s["codec_type"]=="audio")
+        assert abs(float(v["duration"])-5.0)<=0.08
+        assert abs(float(a["duration"])-float(v["duration"]))<=0.05
+        pcm=np.frombuffer(run("-v","error","-i",output,"-map","0:a:0","-ac","1","-ar","48000",
+                              "-f","s16le","-"),dtype="<i2").astype(float)
+        for t in (0.5,2.5,4.4):
+            chunk=pcm[round(t*48000):round(t*48000)+4800]
+            assert len(chunk)==4800
+            spec=np.abs(np.fft.rfft(chunk*np.hanning(4800)))**2
+            voice=spec[43:46].sum()
+            music=spec[87:90].sum()
+            assert 0.01 < music/voice < 0.2,(t,voice,music)
+        observed["sha"]=sha(output)
+    with closing(sqlite3.connect(tmp_path/"music-jobs.sqlite")) as db:
+        ledger=execution.Ledger(db)
+        ledger.submit(bound.request)
+        job=staged_executor.run_supervised_bound(ledger,bound,worker_id="ci-worker",
+            clock_ms=lambda:time.monotonic_ns()//1_000_000,
+            fixture_argv=(sys.executable,str(Path(__file__).with_name("staged_fixture_child.py")),
+                          str(tmp_path),"DEMO","r01","ui-ffmpeg"),verify=verify,timeout_sec=30)
+        assert job.status=="success" and job.artifact_sha256==observed["sha"]
+    old=path.read_bytes()
+    path.write_bytes(old+b"changed")
+    with pytest.raises(ValueError):
+        staged_executor.bind(tmp_path,job_id="music",target_id="local",stem="DEMO",clip="r01",gate="ui-ffmpeg")
+    path.unlink()
+    replacement=assets/"replacement.wav"
+    replacement.write_bytes(old)
+    path.symlink_to(replacement)
+    with pytest.raises(ValueError):
+        resolve_audio_asset(assets,asset)
+    print("UI-501/502 PASS: exact soundtrack asset, speech retained across 0.5x/2x, looped music, A/V sync, stale and symlink rejection")
