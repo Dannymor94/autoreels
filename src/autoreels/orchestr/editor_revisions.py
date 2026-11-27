@@ -56,6 +56,7 @@ class FixtureSelection(BaseModel):
     candidate_plan_sha256: Digest
     removed: tuple[int, ...]
     order: tuple[int, ...] | None = None
+    trim: tuple[int, int, int] | None = None  # window index, edge (1/2), source ms
 
     @property
     def selection_key(self) -> tuple[int, ...]:
@@ -63,14 +64,20 @@ class FixtureSelection(BaseModel):
         if (any(n <= 0 for n in self.removed)
                 or tuple(sorted(set(self.removed))) != self.removed):
             raise Conflict("invalid fixture removal key")
-        if self.order is None:
-            return self.removed
-        if (not self.order or any(n <= 0 for n in self.order)
-                or len(set(self.order)) != len(self.order)
-                or set(self.order) & set(self.removed)
-                or tuple(sorted(self.order)) == self.order):
-            raise Conflict("invalid fixture permutation key")
-        return (*self.removed, 0, *self.order)
+        key = self.removed
+        if self.order is not None:
+            if (not self.order or any(n <= 0 for n in self.order)
+                    or len(set(self.order)) != len(self.order)
+                    or set(self.order) & set(self.removed)
+                    or tuple(sorted(self.order)) == self.order):
+                raise Conflict("invalid fixture permutation key")
+            key = (*key, 0, *self.order)
+        if self.trim is not None:
+            index, edge, ms = self.trim
+            if index < 0 or edge not in (1, 2) or ms < 0:
+                raise Conflict("invalid fixture trim key")
+            key = (*key, -1, index, edge, ms)
+        return key
 
 
 @dataclass(frozen=True)

@@ -387,6 +387,20 @@
             },
             "title": "Removed",
             "type": "array"
+          },
+          "trim": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trim"
           }
         },
         "required": [
@@ -489,6 +503,20 @@
             "title": "Removed",
             "type": "array"
           },
+          "trim": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trim"
+          },
           "windows": {
             "items": {
               "$ref": "#/components/schemas/CutWindow"
@@ -533,6 +561,20 @@
           "revision": {
             "title": "Revision",
             "type": "integer"
+          },
+          "trim": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trim"
           }
         },
         "required": [

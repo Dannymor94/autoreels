@@ -33,12 +33,13 @@ export function SyntheticCutPreview() {
   const video=useRef<HTMLVideoElement>(null);
   const activeWindow=useRef(0);
   const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
-  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order));
+  const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim);
+  const untrimmed=q.data?.plans.find(p=>!p.trim&&plan&&equal(p.removed,plan.removed)&&equal(p.order,plan.order));
   const kept=(q.data?.sentences??[]).map(s=>s.number).filter(n=>!selected.includes(n));
   const currentOrder=plan?.order??[];
   const wantedOrder=chronological(currentOrder)?kept:
     [...currentOrder.filter(n=>kept.includes(n)),...kept.filter(n=>!currentOrder.includes(n))];
-  const candidate=q.data?.plans.find(p=>equal(p.removed,selected)&&equal(p.order,wantedOrder));
+  const candidate=q.data?.plans.find(p=>!p.trim&&equal(p.removed,selected)&&equal(p.order,wantedOrder));
   const locked=busy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
   const usable=!!plan && !!baseline && ready && !error && !q.isError && !busy;
 
@@ -66,7 +67,8 @@ export function SyntheticCutPreview() {
     void send({op_id:crypto.randomUUID(),base_revision:state.revision,
       base_plan_sha256:state.plan_sha256,clip_uid:state.clip_uid,
       candidate_plan_sha256:next.plan_sha256,removed:next.removed,
-      ...(chronological(next.order)?{}:{order:next.order})});
+      ...(chronological(next.order)?{}:{order:next.order}),
+      ...(next.trim?{trim:next.trim}:{})});
   }
 
   useEffect(()=>{
@@ -106,7 +108,7 @@ export function SyntheticCutPreview() {
     const a=order.indexOf(from), b=order.indexOf(to);
     if(a<0||b<0||a===b)return;
     order.splice(a,1);order.splice(b,0,from);
-    const next=q.data?.plans.find(p=>equal(p.removed,removed)&&equal(p.order,order));
+    const next=q.data?.plans.find(p=>!p.trim&&equal(p.removed,removed)&&equal(p.order,order));
     if(next)changePlan(next);
   }
   function canMove(from:number,to:number|undefined) {
@@ -114,7 +116,11 @@ export function SyntheticCutPreview() {
     const order=[...plan!.order];
     const a=order.indexOf(from),b=order.indexOf(to);
     order.splice(a,1);order.splice(b,0,from);
-    return !!q.data?.plans.some(p=>equal(p.removed,removed)&&equal(p.order,order));
+    return !!q.data?.plans.some(p=>!p.trim&&equal(p.removed,removed)&&equal(p.order,order));
+  }
+  function edgeOptions(index:number,edge:number) {
+    return q.data?.plans.filter(p=>p.trim&&p.trim[0]===index&&p.trim[1]===edge&&
+      equal(p.removed,removed)&&equal(p.order,plan!.order))??[];
   }
   const at=sourceTime(plan,position);
   const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&s.start<=at&&at<s.end);
@@ -126,10 +132,10 @@ export function SyntheticCutPreview() {
     <div className="synthetic-word-list">
       {q.data.sentences.map(s=><button type="button" key={s.number}
         aria-pressed={selected.includes(s.number)} className={removed.includes(s.number)?"cut-removed":""}
-        disabled={locked} onClick={()=>toggle(s.number)}>{s.text}</button>)}
+        disabled={locked||!!plan.trim} onClick={()=>toggle(s.number)}>{s.text}</button>)}
     </div>
     <div className="synthetic-word-list">
-      <button disabled={locked||!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
+      <button disabled={locked||!!plan.trim||!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
       <button disabled={locked||plan.plan_sha256===baseline.plan_sha256} onClick={()=>changePlan(baseline)}>Восстановить исходное</button>
     </div>
     <h3>Порядок фрагментов</h3>
@@ -139,7 +145,7 @@ export function SyntheticCutPreview() {
         const previous=plan.order[i-1],next=plan.order[i+1];
         const text=q.data?.sentences.find(s=>s.number===n)?.text??String(n);
         return <div key={n} role="listitem" data-reorder-number={n} className="synthetic-word-list">
-          <button type="button" aria-label={"Перетащить "+text} disabled={locked} style={{touchAction:"none"}}
+          <button type="button" aria-label={"Перетащить "+text} disabled={locked||!!plan.trim} style={{touchAction:"none"}}
             onPointerDown={e=>{if(e.isPrimary&&e.button===0)e.currentTarget.setPointerCapture(e.pointerId);}}
             onPointerUp={e=>{
               if(!e.currentTarget.hasPointerCapture(e.pointerId))return;
@@ -148,8 +154,8 @@ export function SyntheticCutPreview() {
               if(target)reordered(n,Number(target.getAttribute("data-reorder-number")));
             }}>↕</button>
           <span>{i+1}. {text}</span>
-          <button type="button" aria-label={"Выше: "+text} disabled={locked||!canMove(n,previous)} onClick={()=>reordered(n,previous)}>↑</button>
-          <button type="button" aria-label={"Ниже: "+text} disabled={locked||!canMove(n,next)} onClick={()=>reordered(n,next)}>↓</button>
+          <button type="button" aria-label={"Выше: "+text} disabled={locked||!!plan.trim||!canMove(n,previous)} onClick={()=>reordered(n,previous)}>↑</button>
+          <button type="button" aria-label={"Ниже: "+text} disabled={locked||!!plan.trim||!canMove(n,next)} onClick={()=>reordered(n,next)}>↓</button>
         </div>;
       })}
     </div>
@@ -184,6 +190,26 @@ export function SyntheticCutPreview() {
     <div className="cut-track cut-output" role="img" aria-label="Последовательность фрагментов после нарезки">
       {plan.windows.map((w,i)=><span key={i} style={{left:(w.output_start/plan.duration*100)+"%",width:((w.output_end-w.output_start)/plan.duration*100)+"%"}}/>)}
     </div>
+    <h3>Границы фрагментов</h3>
+    <p className="secondary">Выбирай безопасные границы по карте речи. Пока можно изменять одну границу за раз; для другой границы, удаления или перестановки сначала сбрось это изменение.</p>
+    {plan.windows.map((w,index)=><div key={index} className="synthetic-word-list">
+      <strong>Фрагмент {index+1}</strong>
+      {[1,2].map(edge=>{
+        const options=edgeOptions(index,edge);
+        const active=plan.trim?.[0]===index&&plan.trim?.[1]===edge;
+        const label=(edge===1?"Начало":"Конец")+" фрагмента "+(index+1);
+        const original=untrimmed?.windows[index];
+        return <label key={edge}>{label}
+          <select aria-label={label} value={active?plan.plan_sha256:untrimmed?.plan_sha256??""}
+            disabled={locked||!untrimmed||!options.length||!!plan.trim&&!active}
+            onChange={e=>{const next=[untrimmed,...options].find(p=>p?.plan_sha256===e.target.value);if(next)changePlan(next);}}>
+            <option value={untrimmed?.plan_sha256??""}>{seconds((edge===1?original?.source_start:original?.source_end)??(edge===1?w.source_start:w.source_end))} · исходная</option>
+            {options.map(p=><option key={p.plan_sha256} value={p.plan_sha256}>{seconds(p.trim![2]/1000)}</option>)}
+          </select>
+        </label>;
+      })}
+    </div>)}
+    {plan.trim&&<button disabled={locked||!untrimmed} onClick={()=>untrimmed&&changePlan(untrimmed)}>Сбросить изменение границы</button>}
     <label>Позиция монтажа
       <input type="range" min={0} max={plan.duration} step={0.01} value={position} disabled={!usable}
         onChange={e=>{video.current?.pause();move(Number(e.target.value));}} />
@@ -198,7 +224,7 @@ export function SyntheticCutPreview() {
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
     <details><summary>История нарезки ({q.data.history.length})</summary>
-      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
+      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.trim?"Граница фрагмента "+(h.trim[0]+1)+" · "+(h.trim[1]===1?"начало":"конец")+" "+seconds(h.trim[2]/1000):h.order?.length?"Порядок: "+h.order.join(" → ")+(h.removed.length?" · убраны "+h.removed.join(", "):""):h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
     </details>
   </section>;
 }

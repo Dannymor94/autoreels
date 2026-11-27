@@ -41,12 +41,14 @@ class CutPreview(BaseModel):
     duration: float
     windows: list[CutWindow]
     plan_sha256: str
+    trim: list[int] | None = None
 
 
 class CutSelectionEvent(BaseModel):
     revision: int
     removed: list[int]
     order: list[int] | None = None
+    trim: list[int] | None = None
 
 
 class CutDemoView(BaseModel):
@@ -70,14 +72,16 @@ class CutCommand(BaseModel):
     candidate_plan_sha256: str
     removed: list[int]
     order: list[int] | None = None
+    trim: list[int] | None = None
 
 
-def _key(removed, order):
+def _key(removed, order, trim=None):
     removed, order = tuple(removed), tuple(order)
-    return removed if order == tuple(sorted(order)) else (*removed, 0, *order)
+    key = removed if order == tuple(sorted(order)) else (*removed, 0, *order)
+    return key if trim is None else (*key, -1, *trim)
 
 
-def _projection(segments, removed, order, raw):
+def _projection(segments, removed, order, raw, trim=None):
     windows = []
     offset = 0.0
     for seg in segments:
@@ -86,7 +90,8 @@ def _projection(segments, removed, order, raw):
                                  output_start=offset, output_end=end))
         offset = end
     return CutPreview(removed=list(removed), order=list(order), duration=offset,
-                      windows=windows, plan_sha256=hashlib.sha256(raw).hexdigest())
+                      windows=windows, plan_sha256=hashlib.sha256(raw).hexdigest(),
+                      trim=list(trim) if trim is not None else None)
 
 
 def _fixture():
@@ -151,6 +156,32 @@ def _fixture():
             Manifest.model_validate_json(raw)
             choices[_key(natural.removed, perm)] = raw
             plans.append(_projection(reel.effective_segments(), natural.removed, perm, raw))
+    # Keep every original candidate byte-for-byte unchanged. Offer a bounded
+    # list of one-edge trim variants on each existing cut/permutation.
+    # Absolute integer milliseconds make keys deterministic and collision-free.
+    for original in list(plans):
+        source = Manifest.model_validate_json(choices[_key(original.removed, original.order)])
+        base_reel = source.reels[0]
+        for index, seg in enumerate(base_reel.effective_segments()):
+            for edge in (1, 2):
+                for delta in (50, 100, 150, 200):
+                    ms = round((seg.start if edge == 1 else seg.end) * 1000) + (delta if edge == 1 else -delta)
+                    start, end = (ms / 1000, seg.end) if edge == 1 else (seg.start, ms / 1000)
+                    try:
+                        reel = sentence_edit.trim_silence(
+                            base_reel, play=tuple(original.order), segment_index=index,
+                            start=start, end=end, **args)
+                    except (sentence_edit.Unavailable, ValueError):
+                        continue
+                    trim = (index, edge, ms)
+                    raw = source.model_copy(update={"reels": [reel]}).model_dump_json().encode("utf-8")
+                    Manifest.model_validate_json(raw)
+                    key = _key(original.removed, original.order, trim)
+                    if key in choices:
+                        raise ValueError("duplicate trim candidate")
+                    choices[key] = raw
+                    plans.append(_projection(reel.effective_segments(), original.removed,
+                                             original.order, raw, trim))
     return duration, [CutSentence(number=i+1,text=w.word,start=i+0.2,end=i+0.8)
                       for i,w in enumerate(words)], plans, choices
 
@@ -167,17 +198,18 @@ def _view(store, fixture):
         head = store.current(_PROJECT)
         history = store.selection_history(_PROJECT)
         active = next((p for p in plans if p.plan_sha256==head.plan_sha256),None)
-        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order)]
+        if (active is None or head.plan_bytes != choices[_key(active.removed, active.order, active.trim)]
                 or len(history)!=head.number or head.number>_MAX_REVISION
-                or (history and (history[-1].selection_key!=_key(active.removed, active.order)
+                or (history and (history[-1].selection_key!=_key(active.removed, active.order, active.trim)
                     or history[-1].candidate_plan_sha256!=head.plan_sha256))
-                or (not history and _key(active.removed, active.order))):
+                or (not history and _key(active.removed, active.order, active.trim))):
             raise revisions.Conflict("incompatible synthetic cut revision")
         return CutDemoView(enabled=True,source_duration=duration,sentences=sentences,
             plans=plans,revision=head.number,plan_sha256=head.plan_sha256,
             clip_uid=dict(head.clip_uids)["r01"],current_removed=active.removed,
             history=[CutSelectionEvent(revision=i,removed=list(op.removed),
-                                       order=list(op.order) if op.order is not None else None)
+                                       order=list(op.order) if op.order is not None else None,
+                                       trim=list(op.trim) if op.trim is not None else None)
                      for i,op in reversed(list(enumerate(history,1)))])
 
 
@@ -207,7 +239,8 @@ def command(root: Path, enabled: bool, body: CutCommand) -> CutDemoView:
     try:
         op = revisions.FixtureSelection(action="select-fixture",project_id=_PROJECT,
               **{**body.model_dump(),"removed":tuple(body.removed),
-                 "order":tuple(body.order) if body.order is not None else None})
+                 "order":tuple(body.order) if body.order is not None else None,
+                 "trim":tuple(body.trim) if body.trim is not None else None})
     except ValueError:
         raise HTTPException(422,"invalid synthetic cut selection") from None
     try:

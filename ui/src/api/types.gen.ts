@@ -447,6 +447,8 @@ export interface components {
             order?: number[] | null;
             /** Removed */
             removed: number[];
+            /** Trim */
+            trim?: number[] | null;
         };
         /** CutDemoView */
         CutDemoView: {
@@ -479,6 +481,8 @@ export interface components {
             plan_sha256: string;
             /** Removed */
             removed: number[];
+            /** Trim */
+            trim?: number[] | null;
             /** Windows */
             windows: components["schemas"]["CutWindow"][];
         };
@@ -490,6 +494,8 @@ export interface components {
             removed: number[];
             /** Revision */
             revision: number;
+            /** Trim */
+            trim?: number[] | null;
         };
         /** CutSentence */
         CutSentence: {
