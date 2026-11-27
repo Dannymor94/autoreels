@@ -641,38 +641,6 @@ export interface operations {
             };
         };
     };
-    configured_settings_api_pipeline_settings_get: {
-        parameters: {
-            query?: {
-                clips?: number | null;
-                profile?: ("h264" | "hevc" | "av1") | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PipelineSettings"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -715,6 +683,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configured_settings_api_pipeline_settings_get: {
+        parameters: {
+            query?: {
+                clips?: number | null;
+                profile?: ("h264" | "hevc" | "av1") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineSettings"];
                 };
             };
             /** @description Validation Error */
