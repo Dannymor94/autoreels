@@ -204,6 +204,38 @@ async function main() {
           await cut.getByText("История нарезки (2)",{exact:true}).click();
           await cut.getByText("#2 · Исходное восстановлено",{exact:true}).waitFor();
           console.log("PASS synthetic sentence cut persistence, playback skip, restore, history and timeline");
+          // A backward jump must follow output order, not source time.
+          await cut.getByRole("button",{name:"Выше: Продолжение.",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 3",{exact:true}).waitFor();
+          await cut.getByText("2. Продолжение.",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Выше: Продолжение.",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 4",{exact:true}).waitFor();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await page.reload();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await page.waitForFunction(()=>{const v=document.querySelector(".cut-preview-video");return v&&v.readyState>=1&&v.currentTime>1.8;});
+          await cut.getByRole("button",{name:"Смотреть нарезку",exact:true}).click();
+          await page.waitForFunction(()=>{const v=document.querySelector(".cut-preview-video");return v&&!v.paused&&v.currentTime<0.7;});
+          await cut.getByRole("button",{name:"Восстановить исходное",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 5",{exact:true}).waitFor();
+          await cut.getByText("1. Начало.",{exact:true}).waitFor();
+          // Drag a sentence using the same pointer handle exposed to touch users.
+          const handle=cut.getByRole("button",{name:"Перетащить Продолжение.",exact:true});
+          const target=cut.locator('[data-reorder-number="1"]');
+          await handle.scrollIntoViewIfNeeded();
+          const hb=await handle.boundingBox(), tb=await target.boundingBox();
+          assert.ok(hb&&tb);
+          await page.mouse.move(hb.x+hb.width/2,hb.y+hb.height/2);
+          await page.mouse.down();
+          await page.mouse.move(tb.x+tb.width/2,tb.y+tb.height/2,{steps:5});
+          await page.mouse.up();
+          await cut.getByText("Ревизия нарезки: 6",{exact:true}).waitFor();
+          await cut.getByText("1. Продолжение.",{exact:true}).waitFor();
+          await cut.getByRole("button",{name:"Восстановить исходное",exact:true}).click();
+          await cut.getByText("Ревизия нарезки: 7",{exact:true}).waitFor();
+          await layout(page,"390 reorder timeline");
+          console.log("PASS synthetic reorder arrows, pointer drag, persisted order, backward preview and restore");
+
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
           await page.getByRole("button",{name:"Создать тестовое задание",exact:true}).click();
