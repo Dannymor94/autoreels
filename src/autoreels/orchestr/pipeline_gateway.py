@@ -156,3 +156,61 @@ def configured_module_values(r0, render):
         denoise=ModuleValue(output_enabled=render.audio_processing.denoise_enabled),
         music=ModuleValue(output_enabled=render.music.enabled),
     )
+
+
+
+def module_settings(root, choices):
+    """Read the guarded CLI config; compare a draft without applying it.
+
+    No real target is connected, so availability is false. No accepted project
+    edits can be assessed without a bound revision. Applying is always disabled.
+    """
+    from autoreels.core.config import ConfigError, load_r0_config, load_render_config
+    from . import module_settings as view, pipeline_settings as config_view, presets
+
+    def unavailable(status):
+        return view.ModuleSettingsView(
+            schema_version=1, status=status, modules=[], invalidates=[],
+            base_sha256=None, apply_enabled=False,
+        )
+
+    directory = root / "config"
+    r0 = directory / "r0.yaml"
+    render_file = directory / "render.yaml"
+    local = directory / "render.local.yaml"
+    required = [config_view._file_status(root, path) for path in (r0, render_file)]
+    local_status = config_view._file_status(root, local)
+    if "blocked" in required or local_status == "blocked":
+        return unavailable("blocked")
+    if "missing" in required:
+        return unavailable("missing")
+    try:
+        baseline = configured_module_values(
+            load_r0_config(r0), load_render_config(render_file, local_path=local)
+        )
+    except (ConfigError, OSError, ValueError):
+        return unavailable("invalid")
+    patches = {}
+    for name in presets.MODULES:
+        choice = choices.get(name)
+        if choice is not None:
+            flag = "automation_enabled" if name == "hook_rescue" else "output_enabled"
+            patches[name] = {flag: choice == "on"}
+    proposed = presets.overlay(baseline, presets.Overrides.model_validate(patches))
+    diff = presets.preview(baseline, proposed, available=frozenset(),
+                           accepted_output_modules=frozenset())
+    rows = []
+    for name in presets.MODULES:
+        automation = name == "hook_rescue"
+        flag = "automation_enabled" if automation else "output_enabled"
+        rows.append(view.ModuleOption(
+            module=name, kind="automation" if automation else "output",
+            configured=getattr(getattr(baseline, name), flag),
+            proposed=getattr(getattr(proposed, name), flag),
+            available=False,
+        ))
+    return view.ModuleSettingsView(
+        schema_version=1, status="configured", modules=rows,
+        invalidates=list(diff.invalidates), base_sha256=diff.previous_sha256,
+        apply_enabled=False,
+    )

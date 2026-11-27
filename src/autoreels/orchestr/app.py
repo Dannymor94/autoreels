@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, pipeline_gateway, pipeline_settings, queue, render_targets, reviews, sourcemeta
+from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, queue, render_targets, reviews, sourcemeta
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -175,6 +175,21 @@ def jobs():
 def job_command(job_id: str, body: queue.JobCommand):
     s = _cfg.settings
     return queue.command(s.root, s.synthetic_jobs, job_id, body)
+
+
+@app.get("/api/module-settings", response_model=module_settings.ModuleSettingsView)
+def configured_modules(
+    hook_rescue: module_settings.Choice | None = Query(default=None),
+    filler_cut: module_settings.Choice | None = Query(default=None),
+    two_shot: module_settings.Choice | None = Query(default=None),
+    loudnorm: module_settings.Choice | None = Query(default=None),
+    denoise: module_settings.Choice | None = Query(default=None),
+    music: module_settings.Choice | None = Query(default=None),
+):
+    return pipeline_gateway.module_settings(_cfg.settings.root, {
+        "hook_rescue": hook_rescue, "filler_cut": filler_cut, "two_shot": two_shot,
+        "loudnorm": loudnorm, "denoise": denoise, "music": music,
+    })
 
 
 @app.get("/api/pipeline-settings", response_model=pipeline_settings.PipelineSettings)
