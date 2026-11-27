@@ -39,6 +39,11 @@ export function SyntheticCutPreview() {
   const [playing,setPlaying]=useState(false);
   const [error,setError]=useState(false);
   const video=useRef<HTMLVideoElement>(null);
+  const audio=useRef<HTMLAudioElement>(null);
+  const audioMode=useRef<"idle"|"montage"|"audition">("idle");
+  const audioEpoch=useRef(0);
+  const [audioError,setAudioError]=useState(false);
+  const [auditioning,setAuditioning]=useState(false);
   const activeWindow=useRef(0);
   const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
   const baseline=q.data?.plans.find(p=>!p.removed.length&&chronological(p.order)&&!p.trim&&!p.rates&&!p.crop&&!p.music&&!p.dip_ms);
@@ -52,6 +57,45 @@ export function SyntheticCutPreview() {
   const locked=busy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
   const usable=!!plan && !!baseline && ready && !error && !q.isError && !busy;
 
+  // The background track lives in output time, not source time. It is
+  // intentionally approximate: the demo has no speech to duck against.
+  function stopMusic(){
+    audioEpoch.current++;
+    audioMode.current="idle";
+    audio.current?.pause();
+    setAuditioning(false);
+  }
+  function syncMusic(p:CutPreview,pos:number,force=false){
+    const a=audio.current;
+    if(!a||!p.music||audioMode.current!=="montage")return;
+    const fade=p.music[2]?Math.max(0,Math.min(1,pos/0.5,(p.duration-pos)/0.5)):1;
+    a.volume=p.music[1]/100*fade;
+    const length=a.duration;
+    if(Number.isFinite(length)&&length>0&&!a.seeking){
+      const target=((pos%length)+length)%length;
+      const diff=Math.abs(a.currentTime-target);
+      if(force||Math.min(diff,Math.abs(length-diff))>0.15)a.currentTime=target;
+    }
+  }
+  function startMusic(p:CutPreview,pos:number,mode:"montage"|"audition"){
+    const a=audio.current;
+    if(!a||!p.music)return;
+    const epoch=++audioEpoch.current;
+    audioMode.current=mode;
+    setAudioError(false);
+    setAuditioning(mode==="audition");
+    a.pause();a.playbackRate=1;a.loop=mode==="montage";
+    a.volume=p.music[1]/100;
+    if(mode==="montage")syncMusic(p,pos,true);
+    else a.currentTime=0;
+    // Invoke from the play click itself, not a delayed effect: mobile
+    // browsers may require a user activation for audible playback.
+    void a.play().catch(()=>{
+      if(audioEpoch.current===epoch&&audio.current===a){
+        audioMode.current="idle";setAuditioning(false);setAudioError(true);
+      }
+    });
+  }
   function move(t:number) {
     if(!plan||!video.current||!usable)return;
     const pos=Math.max(0,Math.min(plan.duration,t));
@@ -63,7 +107,7 @@ export function SyntheticCutPreview() {
   async function send(command:CutCommand) {
     if(guard.current)return;
     guard.current=true;pending.current=command;setBusy(true);setWriteError(false);
-    video.current?.pause();setPlaying(false);
+    video.current?.pause();stopMusic();setPlaying(false);
     try {
       const result=await api.saveSyntheticCut(command);
       qc.setQueryData(queryKey,result);
@@ -87,8 +131,11 @@ export function SyntheticCutPreview() {
 
   useEffect(()=>{
     const v=video.current;
+    stopMusic();setAudioError(false);
     if(!plan||!v||!ready||error)return;
     v.pause();setPlaying(false);setPosition(0);activeWindow.current=0;v.playbackRate=rateAt(plan,0);v.currentTime=sourceTime(plan,0);
+    const a=audio.current;
+    return ()=>{audioEpoch.current++;audioMode.current="idle";a?.pause();};
   },[plan,ready,error]);
 
   useEffect(()=>{
@@ -102,10 +149,11 @@ export function SyntheticCutPreview() {
       const w=plan.windows[activeWindow.current];
       if(t>=w.source_end){
         const next=plan.windows[activeWindow.current+1];
-        if(next){activeWindow.current++;v.playbackRate=rateAt(plan,activeWindow.current);v.currentTime=next.source_start;setPosition(next.output_start);}
-        else{v.pause();setPosition(plan.duration);return;}
+        if(next){activeWindow.current++;v.playbackRate=rateAt(plan,activeWindow.current);v.currentTime=next.source_start;setPosition(next.output_start);syncMusic(plan,next.output_start);}
+        else{v.pause();stopMusic();setPosition(plan.duration);return;}
       }else{
-        setPosition(Math.max(w.output_start,Math.min(w.output_end,w.output_start+(t-w.source_start)/rateAt(plan,activeWindow.current))));
+        const pos=Math.max(w.output_start,Math.min(w.output_end,w.output_start+(t-w.source_start)/rateAt(plan,activeWindow.current)));
+        setPosition(pos);syncMusic(plan,pos);
       }
       frame=requestAnimationFrame(update);
     };
@@ -234,14 +282,15 @@ export function SyntheticCutPreview() {
         style={{width:96/cw*100+"%",height:160/ch*100+"%",left:-cx/cw*100+"%",top:-cy/ch*100+"%"}}
         src="/synthetic-editor-preview.mp4" aria-label="Предпросмотр пробной нарезки"
         onLoadedMetadata={()=>{const v=video.current;if(v&&Math.abs(v.duration-duration)<0.05){v.currentTime=sourceTime(plan,0);setReady(true);}else setError(true);}}
-        onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)}
+        onPlay={()=>setPlaying(true)} onPause={()=>{setPlaying(false);if(audioMode.current==="montage")stopMusic();}}
         onEnded={()=>{
           const v=video.current,next=plan.windows[activeWindow.current+1];
           if(v&&next){activeWindow.current++;v.playbackRate=rateAt(plan,activeWindow.current);v.currentTime=next.source_start;setPosition(next.output_start);
-            void v.play().catch(()=>{setError(true);setPlaying(false);});}
-          else{setPlaying(false);setPosition(plan.duration);}
+            startMusic(plan,next.output_start,"montage");
+            void v.play().catch(()=>{stopMusic();setError(true);setPlaying(false);});}
+          else{stopMusic();setPlaying(false);setPosition(plan.duration);}
         }}
-        onError={()=>{setError(true);setPlaying(false);}} />
+        onError={()=>{stopMusic();setError(true);setPlaying(false);}} />
       {dip>0&&<div className="cut-dip-overlay" aria-hidden="true" style={{opacity}}/>}
       {!error&&<div className="synthetic-preview-cue">{cue?.text??""}</div>}
     </div>
@@ -297,9 +346,15 @@ export function SyntheticCutPreview() {
         onChange={e=>changeMusic([music[0],music[1],Number(e.target.checked),music[3]])}/> Плавное появление и затухание (0,5 с)</label>
       <label><input type="checkbox" checked={!!music[3]} disabled={locked}
         onChange={e=>changeMusic([music[0],music[1],music[2],Number(e.target.checked)])}/> Приглушать фон под голос</label>
-      <audio key={music[0]} controls preload="none" src={"/synthetic-soundtrack-"+music[0]+".wav"}
-        aria-label="Прослушать тестовый звуковой файл"/>
-      <p className="secondary">Прослушивание отдельного тестового файла, не финального микса. Громкость, приглушение и фейды применяет FFmpeg при рендере.</p>
+      <audio key={music[0]} ref={audio} preload="metadata" src={"/synthetic-soundtrack-"+music[0]+".wav"}
+        aria-label="Тестовая звуковая дорожка" onLoadedMetadata={()=>syncMusic(plan,position,true)}
+        onEnded={()=>{if(audioMode.current==="audition")stopMusic();}}
+        onError={()=>{stopMusic();setAudioError(true);}}/>
+      <button disabled={locked||playing} onClick={()=>{
+        if(auditioning)stopMusic();else startMusic(plan,0,"audition");
+      }}>{auditioning?"Остановить фон":"Прослушать фон"}</button>
+      {audioError&&<p role="status">Фон не воспроизводится в этом браузере. Настройки монтажа сохранены.</p>}
+      <p className="secondary">«Смотреть нарезку» воспроизводит видео и фон вместе. Громкость и фейды приблизительные; приглушение под реальную речь и нормализация выполняются при рендере.</p>
     </>}
     <h3>Границы фрагментов</h3>
     <p className="secondary">Выбирай безопасные границы по карте речи. Пока можно изменять одну границу за раз; для другой границы, удаления или перестановки сначала сбрось это изменение.</p>
@@ -338,14 +393,16 @@ export function SyntheticCutPreview() {
     {plan.rates&&<button disabled={locked||!normalSpeed} onClick={()=>normalSpeed&&changePlan(normalSpeed)}>Сбросить скорость</button>}
     <label>Позиция монтажа
       <input type="range" min={0} max={plan.duration} step={0.01} value={position} disabled={!usable}
-        onChange={e=>{video.current?.pause();move(Number(e.target.value));}} />
+        onChange={e=>{video.current?.pause();stopMusic();move(Number(e.target.value));}} />
     </label>
     <p className="secondary">Монтаж: {seconds(position)} / {seconds(plan.duration)}</p>
     <button disabled={!usable} onClick={()=>{
       const v=video.current;if(!v)return;
-      if(!v.paused){v.pause();return;}
-      if(position>=plan.duration-0.01)move(0);
-      void v.play().catch(()=>{setError(true);setPlaying(false);});
+      if(!v.paused){v.pause();stopMusic();return;}
+      const start=position>=plan.duration-0.01?0:position;
+      if(start===0)move(0);
+      startMusic(plan,start,"montage");
+      void v.play().catch(()=>{stopMusic();setError(true);setPlaying(false);});
     }}>{playing?"Пауза":"Смотреть нарезку"}</button>
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
