@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/clip-plan/{stem}/{clip}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Clip Plan */
+        get: operations["clip_plan_api_clip_plan__stem___clip__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/comparisons/{stem}/{clip}": {
         parameters: {
             query?: never;
@@ -313,6 +330,23 @@ export interface components {
             /** Variant */
             variant: string;
         };
+        /** ClipPlanView */
+        ClipPlanView: {
+            /** Clip Ref */
+            clip_ref: string;
+            /** Planned Duration S */
+            planned_duration_s: number;
+            /** Recorded Source Id */
+            recorded_source_id: string;
+            /** Revision Sha256 */
+            revision_sha256: string;
+            /** Speed */
+            speed: number;
+            /** Windows */
+            windows: components["schemas"]["PlanWindow"][];
+            /** Words */
+            words: components["schemas"]["PlanWord"][];
+        };
         /** ComparisonEvent */
         ComparisonEvent: {
             /** Comment */
@@ -469,6 +503,38 @@ export interface components {
             render_status: "configured" | "missing" | "invalid" | "blocked";
             /** Schema Version */
             schema_version: number;
+        };
+        /** PlanWindow */
+        PlanWindow: {
+            /** Index */
+            index: number;
+            /** Kind */
+            kind: string;
+            /** Plan End */
+            plan_end: number;
+            /** Plan Start */
+            plan_start: number;
+            /** Source End */
+            source_end: number;
+            /** Source Start */
+            source_start: number;
+        };
+        /** PlanWord */
+        PlanWord: {
+            /** Occurrence Id */
+            occurrence_id: string;
+            /** Plan End */
+            plan_end: number;
+            /** Plan Start */
+            plan_start: number;
+            /** Source End */
+            source_end: number;
+            /** Source Start */
+            source_start: number;
+            /** Window Index */
+            window_index: number;
+            /** Word */
+            word: string;
         };
         /** ProjectItem */
         ProjectItem: {
@@ -699,6 +765,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapabilitiesResponse"];
+                };
+            };
+        };
+    };
+    clip_plan_api_clip_plan__stem___clip__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stem: string;
+                clip: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipPlanView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

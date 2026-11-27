@@ -79,6 +79,11 @@ async function mock(page, mode = "normal") {
       }
       return route.fulfill({status:200,contentType:"video/mp4",body:fixture,headers:{"Accept-Ranges":"bytes"}});
     }
+    if (path === "/api/clip-plan/DEMO/r01") return route.fulfill({json:{
+      revision_sha256:"d".repeat(64),recorded_source_id:"full:"+"a".repeat(64),clip_ref:"e".repeat(64),speed:1,planned_duration_s:3,
+      windows:[{index:0,kind:"hook",source_start:5,source_end:6,plan_start:0,plan_end:1},{index:1,kind:"body",source_start:5,source_end:7,plan_start:1,plan_end:3}],
+      words:[{occurrence_id:"a",window_index:0,word:"Привет",source_start:5.2,source_end:5.5,plan_start:0.2,plan_end:0.5},{occurrence_id:"b",window_index:1,word:"Привет",source_start:5.2,source_end:5.5,plan_start:1.2,plan_end:1.5}]
+    }});
     if (path === "/api/module-settings") {
       const names=["hook_rescue","filler_cut","two_shot","loudnorm","denoise","music"];
       const modules=names.map(module=>{
@@ -177,6 +182,12 @@ async function main() {
         await page.locator(".review-video").waitFor();
         await layout(page, width + " player");
         if (width === 390) {
+          await page.getByRole("button",{name:"Открыть текст плана",exact:true}).click();
+          await page.getByText("Хук",{exact:true}).waitFor();
+          assert.equal(await page.locator(".plan-word").count(),2);
+          await layout(page,"390 text plan");
+          await page.getByRole("button",{name:"Скрыть текст плана",exact:true}).click();
+          console.log("PASS revision-bound text plan, repeated hook occurrence and mobile layout");
           await page.getByLabel("Комментарий (необязательно)").fill("Синтетическая оценка");
           await page.getByRole("button", {name: "Оставить", exact: true}).click();
           await page.getByText("Сохранено: Оставить", {exact:true}).waitFor();
