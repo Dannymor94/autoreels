@@ -163,8 +163,8 @@ def test_static_synthetic_preview_asset():
     run("-v","error","-xerror","-nostdin","-i",path,"-f","null","-")
 
 
-@pytest.mark.parametrize("reorder", [False, True])
-def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder):
+@pytest.mark.parametrize("reorder,trim", [(False, False), (True, False), (True, True)])
+def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder, trim):
     """Planner-selected audio cut reaches actual decoded FFmpeg output.
 
     Three generated audio tones represent distinct artificial sentences.
@@ -202,7 +202,7 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder)
     sentences = [[w] for w in words]
     smap = {"words":[{"idx":i,"t0":w.t0,"t1":w.t1,"audible_start":i*2.0+0.2,
                       "audible_end":i*2.0+1.8} for i,w in enumerate(words)], "boundaries":[]}
-    params = ManualPlanParams()
+    params = ManualPlanParams(seam_pad_sec=0.15) if trim else ManualPlanParams()
     order = (1,2,3)
     args = dict(sentences=sentences,words=words,smap=smap,params=params,source_duration=6.0)
     baseline = build_manual_plan(**args,play=order)
@@ -221,6 +221,14 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder)
     if reorder:
         reel = sentence_edit.reorder_sentences(reel, play=(1,3), order=(3,1), **args)
         assert [w.word for w in reel.subtitles] == ["КОНЕЦ.","НАЧАЛО."]
+        if trim:
+            before = reel.playback_duration()
+            old = reel.effective_segments()[0]
+            reel = sentence_edit.trim_silence(reel, play=(3,1), segment_index=0,
+                                             start=max(old.start,4.125),
+                                             end=min(old.end,5.875), **args)
+            assert reel.playback_duration() < before - 0.10
+            assert [w.word for w in reel.subtitles] == ["КОНЕЦ.","НАЧАЛО."]
     else:
         reel = reel.model_copy(update={"head_first_word_start":0.2,"subtitle_gate":cut.end})
     segments = reel.effective_segments()
@@ -289,6 +297,6 @@ def test_render_removed_sentence_audio_is_absent(tmp_path, monkeypatch, reorder)
                           str(tmp_path),"DEMO","r01","ui-ffmpeg"),
             verify=validate,timeout_sec=30)
         assert job.status=="success" and job.artifact_sha256==observed["artifact"]
-    print(f"UI-402C/303E PASS: reorder={reorder}; cut fixture duration={observed['duration']:.3f}s; "
+    print(f"UI-402D/402C/303E PASS: reorder={reorder}, trim={trim}; cut fixture duration={observed['duration']:.3f}s; "
           f"removed/kept tone energy={observed['removed_ratio']:.8f}; "
           "kept tones in order; A/V decode and ledger success")
