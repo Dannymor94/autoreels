@@ -10,12 +10,18 @@ import os
 import tempfile
 from pathlib import Path
 
+from fastapi import HTTPException
+from .pathguard import safe_path
+
 SCHEMA_VERSION = 1
 MAX_NAME = 120
 
 
 def _path(root: Path) -> Path:
-    return root / "reviews" / "ui" / "sources.json"
+    p = root / "reviews" / "ui" / "sources.json"
+    if not safe_path(root, p):
+        raise HTTPException(409, "source metadata storage unavailable")
+    return p
 
 
 def load(root: Path) -> dict[str, dict]:

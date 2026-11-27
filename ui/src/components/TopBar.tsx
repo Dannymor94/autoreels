@@ -4,7 +4,7 @@ import { L } from "../labels";
 
 export function TopBar() {
   const { data, isLoading, error } = useQuery({ queryKey: ["health"], queryFn: api.health });
-  const status = error ? "Нет связи" : isLoading ? "Подключение…" : data?.status === "ok" ? "Локальный сервер" : "Статус неизвестен";
+  const status = error ? "Нет связи" : isLoading ? "Подключение…" : data?.status === "ok" ? (data.root === "private" ? "Защищённое подключение" : "Локальный сервер") : "Статус неизвестен";
 
   return (
     <header className="app-header">

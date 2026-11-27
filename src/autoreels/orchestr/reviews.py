@@ -17,6 +17,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from . import pipeline_gateway
+from .pathguard import safe_path
 
 Verdict = Literal["keep", "fix", "drop"]
 _SHA = r"^[0-9a-f]{64}$"
@@ -151,7 +152,10 @@ def _db_path(root: Path) -> Path:
     reviews = root / "reviews"
     folder = reviews / "ui"
     path = folder / "technical_reviews.sqlite3"
-    if any(p.is_symlink() for p in (reviews, folder, path)):
+    if not safe_path(root, path) or any(
+        not safe_path(root, path.with_name(path.name + suffix))
+        for suffix in ("-journal", "-wal", "-shm")
+    ):
         raise HTTPException(409, "review storage cannot be a symlink")
     return path
 

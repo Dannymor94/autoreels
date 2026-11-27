@@ -32,7 +32,7 @@ def client(tmp_root):
     _s.settings = Settings.from_env(root_override=str(tmp_root))
 
     from autoreels.orchestr.app import app
-    return TestClient(app, raise_server_exceptions=True)
+    return TestClient(app, base_url="http://127.0.0.1:8765", raise_server_exceptions=True)
 
 
 def test_health(client, tmp_root):
@@ -122,7 +122,7 @@ def test_each_test_gets_its_own_root(tmp_path):
     for r in roots:
         (r / "reels-out").mkdir(parents=True)
         _s.settings = Settings.from_env(root_override=str(r))
-        assert TestClient(app).get("/api/health").json()["root"] == str(r.resolve())
+        assert TestClient(app, base_url="http://127.0.0.1:8765").get("/api/health").json()["root"] == str(r.resolve())
 
 
 def test_clips_listing_traversal_rejected(client, tmp_root):

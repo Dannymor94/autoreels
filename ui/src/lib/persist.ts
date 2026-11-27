@@ -18,7 +18,8 @@ export type SizeMode = "s" | "m" | "l";
 
 function read<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(key);
+    const store = location.protocol === "https:" ? sessionStorage : localStorage;
+    const raw = store.getItem(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -27,8 +28,9 @@ function read<T>(key: string): T | null {
 
 function write(key: string, value: unknown): void {
   try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
+    const store = location.protocol === "https:" ? sessionStorage : localStorage;
+    if (value === null) store.removeItem(key);
+    else store.setItem(key, JSON.stringify(value));
   } catch {
     /* storage full or disabled — not important */
   }

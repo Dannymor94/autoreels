@@ -48,6 +48,25 @@ jobs:
           done
           curl -fsS http://127.0.0.1:4173/ >/dev/null
           node scripts/browser-smoke.cjs
+      - name: Synthetic authenticated HTTPS smoke
+        env:
+          ARL_PLAYWRIGHT: ${{ runner.temp }}/arl-browser/node_modules/playwright
+        run: |
+          cd ..
+          python -m pip install -e '.[dev]' -r ui/requirements.txt
+          export ARL_PRIVATE_TEST_ROOT="$RUNNER_TEMP/arl-private-root"
+          export ARL_PRIVATE_TEST_CERT="$RUNNER_TEMP/arl-private-cert.pem"
+          export ARL_PRIVATE_TEST_KEY="$RUNNER_TEMP/arl-private-key.pem"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=127.0.0.1' -keyout "$ARL_PRIVATE_TEST_KEY" -out "$ARL_PRIVATE_TEST_CERT" >/dev/null 2>&1
+          python tests/ui/private_browser_server.py > "$RUNNER_TEMP/arl-private.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl -ks -o /dev/null -w '%{http_code}' https://127.0.0.1:8766/api/health | grep -qx 401; then break; fi
+            sleep 1
+          done
+          curl -ks -o /dev/null -w '%{http_code}' https://127.0.0.1:8766/api/health | grep -qx 401
+          node ui/scripts/private-smoke.cjs
   catalog-contract:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -58,4 +77,4 @@ jobs:
         run: |
           python -m autoreels.orchestr.export_openapi > "$RUNNER_TEMP/arl-openapi.json"
           diff -u ui/openapi.json "$RUNNER_TEMP/arl-openapi.json"
-          python -m pytest -q tests/ui/test_projects.py tests/ui/test_reviews.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py
+          python -m pytest -q tests/ui/test_projects.py tests/ui/test_reviews.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py tests/ui/test_private_access.py tests/ui/test_sources_meta.py

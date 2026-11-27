@@ -31,7 +31,7 @@ def client(root):
     from autoreels.orchestr.settings import Settings
     _s.settings = Settings.from_env(root_override=str(root))
     from autoreels.orchestr.app import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1:8765")
 
 
 def test_clip_count_is_distinct_across_variants(client):
