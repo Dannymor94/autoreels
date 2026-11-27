@@ -6,7 +6,7 @@ from contextlib import closing
 import pytest
 
 from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Word, make_cold_open_segment
-from autoreels.orchestrator import editor_revisions as e
+from autoreels.orchestr import editor_revisions as e
 
 
 def fixture():
