@@ -156,3 +156,12 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .synthetic-preview { position:relative; margin-inline:auto; width:min(100%,180px); }
 .synthetic-preview-video { display:block; width:100%; aspect-ratio:3/5; background:#000; border-radius:8px; }
 .synthetic-preview-cue { position:absolute; left:4px; right:4px; bottom:54px; text-align:center; color:white; font-weight:600; text-shadow:0 1px 3px black,0 1px 2px black; pointer-events:none; overflow-wrap:anywhere; }
+
+.synthetic-cut { margin-bottom:12px; overflow-wrap:anywhere; }
+.synthetic-cut .synthetic-preview-cue { bottom:16px; }
+.synthetic-cut .cut-removed { text-decoration:line-through; opacity:.65; }
+.cut-track-label { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px; font-size:14px; }
+.cut-track { position:relative; height:26px; border:1px solid var(--border); background:var(--bg); border-radius:6px; overflow:hidden; }
+.cut-track span { position:absolute; height:100%; background:#477da6; border-right:2px solid var(--bg); box-sizing:border-box; }
+.cut-output span { background:#498970; }
+.synthetic-cut input[type=range] { width:100%; padding:0; accent-color:var(--accent); }

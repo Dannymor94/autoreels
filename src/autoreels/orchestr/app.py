@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from starlette.responses import FileResponse
 
 from .media import media_response, resolve_media_path
-from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta, synthetic_editor
+from . import catalog, clipinfo, manifests, module_settings, pipeline_gateway, pipeline_settings, plan_view, queue, render_targets, reviews, sourcemeta, synthetic_cut, synthetic_editor
 from . import settings as _cfg  # read _cfg.settings at call time (tests swap it)
 from .security import AccessBoundary
 from .pathguard import safe_path
@@ -288,3 +288,8 @@ def synthetic_editor_view():
 def synthetic_editor_command(body: synthetic_editor.DemoCommand):
     s = _cfg.settings
     return synthetic_editor.command(s.root, s.synthetic_editor, body)
+
+
+@app.get("/api/synthetic-cut", response_model=synthetic_cut.CutDemoView)
+def synthetic_cut_view():
+    return synthetic_cut.view(_cfg.settings.synthetic_editor)
