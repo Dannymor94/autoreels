@@ -399,7 +399,7 @@ def test_synthetic_cut_preview_read_only(client,tmp_root):
     assert view["enabled"] and view["source_duration"] == 3
     assert len(view["sentences"]) == 3
     from hashlib import sha256
-    from autoreels.orchestrator.synthetic_soundtrack import TRACKS
+    from autoreels.orchestr.synthetic_soundtrack import TRACKS
     public = Path(__file__).resolve().parents[2] / "ui" / "public"
     assert view["soundtracks"] == [dict(number=i, **asset.model_dump())
                                    for i, asset in enumerate(TRACKS, 1)]
