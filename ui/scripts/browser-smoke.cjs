@@ -22,6 +22,7 @@ async function mock(page, mode = "normal") {
   const reviews = new Map();
   const comparisons = new Map();
   const jobs = new Map();
+  let cutRevision=0,cutRemoved=[],cutHistory=[];
   let editor = {enabled:mode==="normal",revision:0,plan_sha256:"a".repeat(64),clip_uid:"b".repeat(64),
     words:[{index:0,word:"Превет",start:0.1,end:0.8},{index:1,word:"друзья!",start:1,end:2}],
     history:[],undo:null,redo:null};
@@ -29,10 +30,23 @@ async function mock(page, mode = "normal") {
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
-    if(path==="/api/synthetic-cut")return route.fulfill({json:{enabled:mode==="normal",source_duration:3,
-      sentences:[{number:1,text:"Начало.",start:0.2,end:0.8},{number:2,text:"Лишнее.",start:1.2,end:1.8},{number:3,text:"Продолжение.",start:2.2,end:2.8}],
-      plans:[{removed:[],duration:3,windows:[{source_start:0,source_end:3,output_start:0,output_end:3}]},
-        {removed:[2],duration:1.8,windows:[{source_start:0,source_end:0.9,output_start:0,output_end:0.9},{source_start:2.1,source_end:3,output_start:0.9,output_end:1.8}]}]}});
+    if(path==="/api/synthetic-cut"){
+      const baseline={removed:[],duration:3,plan_sha256:"a".repeat(64),windows:[{source_start:0,source_end:3,output_start:0,output_end:3}]};
+      const candidate={removed:[2],duration:1.8,plan_sha256:"b".repeat(64),windows:[{source_start:0,source_end:0.9,output_start:0,output_end:0.9},{source_start:2.1,source_end:3,output_start:0.9,output_end:1.8}]};
+      if(method==="PUT"){
+        const input=route.request().postDataJSON();
+        assert.equal(input.base_revision,cutRevision);
+        assert.equal(input.base_plan_sha256,cutRemoved.length?candidate.plan_sha256:baseline.plan_sha256);
+        assert.equal(input.clip_uid,"c".repeat(64));
+        assert.equal(input.candidate_plan_sha256,input.removed.length?candidate.plan_sha256:baseline.plan_sha256);
+        cutRemoved=input.removed;cutRevision++;
+        cutHistory.unshift({revision:cutRevision,removed:cutRemoved});
+      }
+      return route.fulfill({json:{enabled:mode==="normal",source_duration:3,revision:cutRevision,clip_uid:"c".repeat(64),
+        current_removed:cutRemoved,history:cutHistory,plan_sha256:cutRemoved.length?candidate.plan_sha256:baseline.plan_sha256,
+        sentences:[{number:1,text:"Начало.",start:0.2,end:0.8},{number:2,text:"Лишнее.",start:1.2,end:1.8},{number:3,text:"Продолжение.",start:2.2,end:2.8}],
+        plans:[baseline,candidate]}});
+    }
     if (path === "/api/synthetic-editor") {
       if(method==="PUT") {
         const input=route.request().postDataJSON();
@@ -180,11 +194,16 @@ async function main() {
           await cut.getByText("1.80 с · убрано 1.20 с",{exact:true}).waitFor();
           await cut.getByRole("button",{name:"Смотреть нарезку",exact:true}).click();
           await page.waitForFunction(()=>{const v=document.querySelector(".cut-preview-video");return v && v.currentTime>=2.1 && v.currentTime<2.8;});
+          await page.reload();
+          await cut.getByText("Ревизия нарезки: 1",{exact:true}).waitFor();
+          await cut.getByText("1.80 с · убрано 1.20 с",{exact:true}).waitFor();
           await cut.getByRole("button",{name:"Восстановить исходное",exact:true}).click();
           await cut.getByText("3.00 с · убрано 0.00 с",{exact:true}).waitFor();
           await page.waitForFunction(()=>document.querySelector(".cut-preview-video")?.currentTime<0.08);
           await layout(page,"390 cut timeline");
-          console.log("PASS synthetic sentence cut playback skip, restore and timeline");
+          await cut.getByText("История нарезки (2)",{exact:true}).click();
+          await cut.getByText("#2 · Исходное восстановлено",{exact:true}).waitFor();
+          console.log("PASS synthetic sentence cut persistence, playback skip, restore, history and timeline");
           await page.getByRole("button",{name:"Задания",exact:true}).click();
           await page.getByLabel("Тестовый исполнитель").selectOption("mobile");
           await page.getByRole("button",{name:"Создать тестовое задание",exact:true}).click();

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api, type CutPreview } from "../api/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, type CutPreview, type CutCommand } from "../api/client";
+
+const queryKey = ["synthetic-cut"];
 
 const seconds = (n:number) => n.toFixed(2)+" с";
 const equal = (a:number[],b:number[]) => a.length===b.length && a.every((v,i)=>v===b[i]);
@@ -12,19 +14,26 @@ function sourceTime(plan:CutPreview,t:number) {
 }
 
 export function SyntheticCutPreview() {
-  const q=useQuery({queryKey:["synthetic-cut"],queryFn:api.syntheticCut,retry:false,
+  const qc=useQueryClient();
+  const q=useQuery({queryKey,queryFn:api.syntheticCut,retry:false,
     refetchOnWindowFocus:false,refetchOnReconnect:false});
-  const [selected,setSelected]=useState<number[]>([]);
-  const [removed,setRemoved]=useState<number[]>([]);
+  const [draft,setDraft]=useState<number[]|null>(null);
+  const removed=q.data?.current_removed??[];
+  const selected=draft??removed;
+  const [busy,setBusy]=useState(false);
+  const [writeError,setWriteError]=useState(false);
+  const pending=useRef<CutCommand|null>(null);
+  const guard=useRef(false);
   const [position,setPosition]=useState(0);
   const [ready,setReady]=useState(false);
   const [playing,setPlaying]=useState(false);
   const [error,setError]=useState(false);
   const video=useRef<HTMLVideoElement>(null);
-  const plan=q.data?.plans.find(p=>equal(p.removed,removed));
+  const plan=q.data?.plans.find(p=>equal(p.removed,removed)&&p.plan_sha256===q.data?.plan_sha256);
   const baseline=q.data?.plans.find(p=>!p.removed.length);
   const candidate=q.data?.plans.find(p=>equal(p.removed,selected));
-  const usable=!!plan && !!baseline && ready && !error && !q.isError;
+  const locked=busy||writeError||q.isError||q.isFetching||(q.data?.revision??0)>=100;
+  const usable=!!plan && !!baseline && ready && !error && !q.isError && !busy;
 
   function move(t:number) {
     if(!plan||!video.current||!usable)return;
@@ -32,12 +41,30 @@ export function SyntheticCutPreview() {
     video.current.currentTime=sourceTime(plan,pos);
     setPosition(pos);
   }
-  function changePlan(next:CutPreview) {
-    const v=video.current;
-    v?.pause();
-    setPlaying(false);setRemoved(next.removed);setSelected([]);setPosition(0);
-    if(v && ready && !error)v.currentTime=sourceTime(next,0);
+  async function send(command:CutCommand) {
+    if(guard.current)return;
+    guard.current=true;pending.current=command;setBusy(true);setWriteError(false);
+    video.current?.pause();setPlaying(false);
+    try {
+      const result=await api.saveSyntheticCut(command);
+      qc.setQueryData(queryKey,result);
+      pending.current=null;setDraft(null);
+    } catch {setWriteError(true);}
+    finally {guard.current=false;setBusy(false);}
   }
+  function changePlan(next:CutPreview) {
+    const state=q.data;
+    if(!state||locked||pending.current||guard.current)return;
+    void send({op_id:crypto.randomUUID(),base_revision:state.revision,
+      base_plan_sha256:state.plan_sha256,clip_uid:state.clip_uid,
+      candidate_plan_sha256:next.plan_sha256,removed:next.removed});
+  }
+
+  useEffect(()=>{
+    const v=video.current;
+    if(!plan||!v||!ready||error)return;
+    v.pause();setPlaying(false);setPosition(0);v.currentTime=sourceTime(plan,0);
+  },[plan,ready,error]);
 
   useEffect(()=>{
     if(!playing||!plan||!usable)return;
@@ -63,24 +90,33 @@ export function SyntheticCutPreview() {
 
   if(!q.data?.enabled || !plan || !baseline)return null;
   function toggle(n:number) {
-    setSelected(prev=>prev.includes(n)?prev.filter(x=>x!==n):[...prev,n].sort((a,b)=>a-b));
+    setDraft(prev=>{const current=prev??removed;return current.includes(n)?current.filter(x=>x!==n):[...current,n].sort((a,b)=>a-b);});
   }
-  const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&
-    video.current && s.start<=video.current.currentTime && video.current.currentTime<s.end);
+  const at=sourceTime(plan,position);
+  const cue=q.data.sentences.find(s=>!removed.includes(s.number)&&s.start<=at&&at<s.end);
   const duration=q.data.source_duration;
   return <section className="pipeline-settings synthetic-cut" aria-label="Демонстрационная нарезка предложений">
     <h2>Удаление предложений</h2>
-    <p className="secondary">Отдельное тестовое видео без речи. Выбери соседние предложения и проверь нарезку. Это черновик предпросмотра, не сохранение в проект.</p>
+    <p className="secondary">Отдельное тестовое видео без речи. Выбери соседние предложения. Нарезка сохраняется только в демонстрационном проекте.</p>
+    <p>Ревизия нарезки: {q.data.revision}</p>
     <div className="synthetic-word-list">
       {q.data.sentences.map(s=><button type="button" key={s.number}
         aria-pressed={selected.includes(s.number)} className={removed.includes(s.number)?"cut-removed":""}
-        onClick={()=>toggle(s.number)}>{s.text}</button>)}
+        disabled={locked} onClick={()=>toggle(s.number)}>{s.text}</button>)}
     </div>
     <div className="synthetic-word-list">
-      <button disabled={!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
-      <button disabled={!removed.length} onClick={()=>changePlan(baseline)}>Восстановить исходное</button>
+      <button disabled={locked||!selected.length||!candidate||equal(removed,selected)} onClick={()=>candidate&&changePlan(candidate)}>Убрать выбранное</button>
+      <button disabled={locked||!removed.length} onClick={()=>changePlan(baseline)}>Восстановить исходное</button>
     </div>
     {!!selected.length&&!candidate&&<p role="status">Выбери один непрерывный диапазон, оставив хотя бы одно предложение.</p>}
+    {busy&&<p role="status">Сохранение нарезки…</p>}
+    {writeError&&<div role="alert">
+      <p>Сохранение не подтверждено или ревизия изменилась.</p>
+      <button disabled={busy} onClick={()=>{if(pending.current)void send(pending.current);}}>Повторить нарезку</button>
+      <button disabled={busy} onClick={()=>{pending.current=null;setDraft(null);setWriteError(false);void q.refetch();}}>Обновить нарезку</button>
+    </div>}
+    {q.isError&&<p role="alert">Нарезка недоступна. <button onClick={()=>void q.refetch()}>Обновить нарезку</button></p>}
+    {q.data.revision>=100&&<p>Лимит демонстрационных ревизий достигнут.</p>}
     <div className="synthetic-preview">
       <video ref={video} className="cut-preview-video synthetic-preview-video" playsInline muted preload="metadata"
         src="/synthetic-editor-preview.mp4" aria-label="Предпросмотр пробной нарезки"
@@ -111,5 +147,8 @@ export function SyntheticCutPreview() {
     }}>{playing?"Пауза":"Смотреть нарезку"}</button>
     {error&&<p role="alert">Видео недоступно; план нарезки можно посмотреть без воспроизведения.</p>}
     <p className="secondary">Предпросмотр пропускает вырезанные интервалы на исходном видео. Стыки приблизительные, без финального рендера.</p>
+    <details><summary>История нарезки ({q.data.history.length})</summary>
+      {q.data.history.map(h=><p key={h.revision}>#{h.revision} · {h.removed.length?"Убраны предложения "+h.removed.join(", "):"Исходное восстановлено"}</p>)}
+    </details>
   </section>;
 }

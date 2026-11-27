@@ -344,11 +344,75 @@
         "title": "ComparisonState",
         "type": "object"
       },
+      "CutCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "base_plan_sha256": {
+            "title": "Base Plan Sha256",
+            "type": "string"
+          },
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "candidate_plan_sha256": {
+            "title": "Candidate Plan Sha256",
+            "type": "string"
+          },
+          "clip_uid": {
+            "title": "Clip Uid",
+            "type": "string"
+          },
+          "op_id": {
+            "title": "Op Id",
+            "type": "string"
+          },
+          "removed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Removed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "op_id",
+          "base_revision",
+          "base_plan_sha256",
+          "clip_uid",
+          "candidate_plan_sha256",
+          "removed"
+        ],
+        "title": "CutCommand",
+        "type": "object"
+      },
       "CutDemoView": {
         "properties": {
+          "clip_uid": {
+            "title": "Clip Uid",
+            "type": "string"
+          },
+          "current_removed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Current Removed",
+            "type": "array"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/CutSelectionEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "plan_sha256": {
+            "title": "Plan Sha256",
+            "type": "string"
           },
           "plans": {
             "items": {
@@ -356,6 +420,10 @@
             },
             "title": "Plans",
             "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
           },
           "sentences": {
             "items": {
@@ -373,7 +441,12 @@
           "enabled",
           "source_duration",
           "sentences",
-          "plans"
+          "plans",
+          "revision",
+          "plan_sha256",
+          "clip_uid",
+          "current_removed",
+          "history"
         ],
         "title": "CutDemoView",
         "type": "object"
@@ -383,6 +456,10 @@
           "duration": {
             "title": "Duration",
             "type": "number"
+          },
+          "plan_sha256": {
+            "title": "Plan Sha256",
+            "type": "string"
           },
           "removed": {
             "items": {
@@ -402,9 +479,31 @@
         "required": [
           "removed",
           "duration",
-          "windows"
+          "windows",
+          "plan_sha256"
         ],
         "title": "CutPreview",
+        "type": "object"
+      },
+      "CutSelectionEvent": {
+        "properties": {
+          "removed": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "removed"
+        ],
+        "title": "CutSelectionEvent",
         "type": "object"
       },
       "CutSentence": {
@@ -2585,6 +2684,42 @@
           }
         },
         "summary": "Synthetic Cut View"
+      },
+      "put": {
+        "operationId": "synthetic_cut_command_api_synthetic_cut_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CutCommand"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CutDemoView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Synthetic Cut Command"
       }
     },
     "/api/synthetic-editor": {

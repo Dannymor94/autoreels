@@ -292,4 +292,11 @@ def synthetic_editor_command(body: synthetic_editor.DemoCommand):
 
 @app.get("/api/synthetic-cut", response_model=synthetic_cut.CutDemoView)
 def synthetic_cut_view():
-    return synthetic_cut.view(_cfg.settings.synthetic_editor)
+    s = _cfg.settings
+    return synthetic_cut.view(s.root,s.synthetic_editor)
+
+
+@app.put("/api/synthetic-cut", response_model=synthetic_cut.CutDemoView)
+def synthetic_cut_command(body: synthetic_cut.CutCommand):
+    s = _cfg.settings
+    return synthetic_cut.command(s.root,s.synthetic_editor,body)
