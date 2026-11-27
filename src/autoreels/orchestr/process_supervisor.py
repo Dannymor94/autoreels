@@ -103,7 +103,13 @@ def supervise(
             if _exited(proc):
                 break
             time.sleep(poll_sec)
+    except ChildProcessError:
+        # Ownership no longer provable (unexpected external reaper). Never
+        # signal a potentially reused PID/group in that case.
+        raise
     except BaseException:
+        # Confirm child remains ours before the first cleanup signal.
+        _exited(proc)
         stop_group()
         raise
     if reason is None:

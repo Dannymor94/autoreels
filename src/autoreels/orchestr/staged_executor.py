@@ -178,13 +178,18 @@ def run_supervised_bound(
     uncertain, timed-out or failed run retains its reservation. The outer
     gateway verifies the selected output and source; no output promotion.
     """
+    claimed_fence: int | None = None
+
     def run_child(**_render_args):
+        nonlocal claimed_fence
+        claimed_fence = ledger.get(bound.request.job_id).fence
         # The gateway constructs render kwargs, but the trusted fixture
         # command independently invokes the same fixed adapter contract.
         # This bridge is not a general CLI dispatcher.
         def check():
             current = ledger.get(bound.request.job_id)
             if (current.status not in ("running", "cancelling")
+                    or current.request != bound.request or current.fence != claimed_fence
                     or current.worker_id != worker_id or current.expires_ms is None):
                 raise execution.Conflict("staged worker lost ownership")
             now = clock_ms()
@@ -217,6 +222,7 @@ def run_supervised_bound(
             current = ledger.get(bound.request.job_id)
             now = clock_ms()
             if (current.status != "cancelling" or not current.cancel_requested
+                    or current.request != bound.request or current.fence != claimed_fence
                     or current.worker_id != worker_id or current.expires_ms is None
                     or now >= current.expires_ms):
                 raise
