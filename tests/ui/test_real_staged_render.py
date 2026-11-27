@@ -4,13 +4,13 @@ import json
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from contextlib import closing
 from pathlib import Path
 
 import yaml
 
-from autoreels import __main__ as cli
 from autoreels.core.models import Crop, Manifest, Reel, SetupProfile, Word
 from autoreels.orchestr import execution, staged_executor
 
@@ -89,11 +89,6 @@ def test_actual_staged_render(tmp_path, monkeypatch):
     plan_sha = sha(plan)
     config_before = {p.name: sha(p) for p in (tmp_path / "config").iterdir()}
 
-    def forbidden(*args, **kwargs):
-        raise AssertionError("unexpected git pull or source archive")
-
-    monkeypatch.setattr(cli, "_git_pull", forbidden)
-    monkeypatch.setattr(cli, "_archive_video", forbidden)
     bound = staged_executor.bind(tmp_path, job_id="fixture-job", target_id="ci-desktop",
                                  stem="DEMO", clip="r01", gate="ui-ffmpeg")
     assert bound.request.plan_sha256 == plan_sha
@@ -132,9 +127,11 @@ def test_actual_staged_render(tmp_path, monkeypatch):
         ledger = execution.Ledger(db)
         queued = ledger.submit(bound.request)
         assert queued.status == "queued"
-        job = staged_executor.run_bound(
+        job = staged_executor.run_supervised_bound(
             ledger, bound, worker_id="ci-worker", clock_ms=lambda: time.monotonic_ns() // 1_000_000,
-            run_render=cli.cmd_render, verify=validate,
+            fixture_argv=(sys.executable, str(Path(__file__).with_name("staged_fixture_child.py")),
+                          str(tmp_path), "DEMO", "r01", "ui-ffmpeg"),
+            verify=validate, timeout_sec=30,
         )
         assert job.status == "success" and job.artifact_sha256 == observed["sha"]
         assert ledger.get("fixture-job") == job
@@ -142,4 +139,4 @@ def test_actual_staged_render(tmp_path, monkeypatch):
     print(f"UI-204B PASS: 360x640 H264/AAC; video={observed['video']:.3f}s "
           f"audio={observed['audio']:.3f}s; full decode; subtitle pixels "
           f"{observed['before']}->{observed['during']}; source/plan/config unchanged; "
-          f"artifact_sha256={observed['sha']}; ledger success")
+          f"artifact_sha256={observed['sha']}; supervised child and ledger success")

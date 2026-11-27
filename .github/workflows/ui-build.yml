@@ -77,7 +77,7 @@ jobs:
         run: |
           python -m autoreels.orchestr.export_openapi > "$RUNNER_TEMP/arl-openapi.json"
           diff -u ui/openapi.json "$RUNNER_TEMP/arl-openapi.json"
-          python -m pytest -q tests/ui/test_projects.py tests/ui/test_reviews.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py tests/ui/test_private_access.py tests/ui/test_sources_meta.py tests/ui/test_jobs.py tests/ui/test_execution.py tests/ui/test_presets.py tests/ui/test_staged_render.py
+          python -m pytest -q tests/ui/test_projects.py tests/ui/test_reviews.py tests/ui/test_openapi_snapshot.py tests/ui/test_api.py tests/ui/test_private_access.py tests/ui/test_sources_meta.py tests/ui/test_jobs.py tests/ui/test_execution.py tests/ui/test_presets.py tests/ui/test_staged_render.py tests/ui/test_process_supervisor.py
 
   synthetic-ffmpeg:
     runs-on: ubuntu-latest

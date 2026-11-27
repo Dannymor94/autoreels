@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import execution, pipeline_gateway
+from . import execution, pipeline_gateway, process_supervisor
 from .pathguard import safe_path
 
 _CONFIG_FILES = ("r0.yaml", "render.yaml", "render.local.yaml", "subtitles.yaml")
@@ -157,3 +157,68 @@ def run_bound(
                                 worker_id, fence, now, "cancelled")
         return ledger.apply(current.request.job_id, current.revision, execution.finish,
                             worker_id, fence, now, "success", digest)
+
+
+
+class _Interrupted(RuntimeError):
+    def __init__(self, result: process_supervisor.Result):
+        super().__init__("staged child did not complete successfully")
+        self.result = result
+
+
+def run_supervised_bound(
+    ledger: execution.Ledger, bound: BoundStaged, *, worker_id: str,
+    clock_ms: Callable[[], int], fixture_argv: tuple[str, ...],
+    verify: Callable[[Path], None], timeout_sec: float,
+) -> execution.Job:
+    """Trusted fixture child command only; no client-supplied argv.
+
+    Renew the lease and observe cancellation while the child runs. A
+    confirmed stopped child with cancellation can be acknowledged; any
+    uncertain, timed-out or failed run retains its reservation. The outer
+    gateway verifies the selected output and source; no output promotion.
+    """
+    def run_child(**_render_args):
+        # The gateway constructs render kwargs, but the trusted fixture
+        # command independently invokes the same fixed adapter contract.
+        # This bridge is not a general CLI dispatcher.
+        def check():
+            current = ledger.get(bound.request.job_id)
+            if (current.status not in ("running", "cancelling")
+                    or current.worker_id != worker_id or current.expires_ms is None):
+                raise execution.Conflict("staged worker lost ownership")
+            now = clock_ms()
+            if now >= current.expires_ms:
+                raise execution.Conflict("staged lease expired")
+            if current.cancel_requested:
+                return True
+            if current.expires_ms - now <= 20_000:
+                ledger.apply(current.request.job_id, current.revision, execution.renew,
+                             worker_id, current.fence, now, execution.MAX_LEASE_MS)
+            return False
+
+        result = process_supervisor.supervise(
+            fixture_argv, cwd=bound.root, timeout_sec=timeout_sec, stop_requested=check,
+        )
+        if result.status != "success":
+            raise _Interrupted(result)
+        return [bound.root / "reels-out" / bound.stem / "_gate" / bound.gate / (bound.clip + ".mp4")]
+
+    try:
+        return run_bound(ledger, bound, worker_id=worker_id, clock_ms=clock_ms,
+                         run_render=run_child, verify=verify)
+    except _Interrupted as error:
+        # run_bound released the cooperating lock on unwind. Reacquire it
+        # before acknowledging a confirmed cancellation. No other attempt
+        # can claim the still-active reservation in the interim.
+        if error.result.status != "cancelled":
+            raise
+        with fixture_lock(bound.root):
+            current = ledger.get(bound.request.job_id)
+            now = clock_ms()
+            if (current.status != "cancelling" or not current.cancel_requested
+                    or current.worker_id != worker_id or current.expires_ms is None
+                    or now >= current.expires_ms):
+                raise
+            return ledger.apply(current.request.job_id, current.revision, execution.finish,
+                                worker_id, current.fence, now, "cancelled")
